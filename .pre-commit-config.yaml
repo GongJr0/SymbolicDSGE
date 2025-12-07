@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 25.11.0
+    hooks:
+      - id: black-jupyter
+        name: black-jupyter
+        description:
+          "Black code formatter with Jupyter notebook support"
+        entry: black
+        language: python
+        minimum_pre_commit_version: '2.9.2'
+        require_serial: true
+        types_or: [python, pyi, jupyter]
+        additional_dependencies: [".[jupyter]"]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "c273830"
+    hooks:
+      - id: mypy
+        name: mypy
+        description: 'Static type checker for Python'
+        entry: mypy
+        language: python
+        'types_or': [ python, pyi ]
+        args: [
+            "--config-file=./mypy.ini",
+        ]
+        require_serial: true
+        additional_dependencies: ["pandas-stubs", "scipy-stubs", "matplotlib-stubs", "types-PyYAML"]
+        minimum_pre_commit_version: '2.9.2'
