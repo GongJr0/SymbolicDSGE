@@ -54,23 +54,13 @@ class ModelParser:
     @classmethod
     def validate_calib(cls, conf: ModelConfig) -> None:
         nf_param = []
-        nf_shock = []
+
         for param in conf.calibration.parameters:
             if param not in conf.parameters:
                 nf_param.append(param)
 
-        for shock in conf.calibration.shocks:
-            if shock not in conf.shocks:
-                nf_shock.append(shock)
-
-        if nf_param and nf_shock:
-            raise ValueError(
-                f"Calibration contains unknown parameters and shocks: {nf_param} and {nf_shock}"
-            )
-        elif nf_param:
+        if nf_param:
             raise ValueError(f"Calibration contains unknown parameters: {nf_param}")
-        elif nf_shock:
-            raise ValueError(f"Calibration contains unknown shocks: {nf_shock}")
 
     def from_yaml(self) -> ModelConfig:
         path = self.config_path
@@ -147,12 +137,7 @@ class ModelParser:
             if param_name in data["calibration"]["parameters"]
         }
 
-        shocks_calib: dict[Symbol, Symbol] = {
-            _LOCALS[shock_name]: param_map[shock_val]
-            for shock_name, shock_val in data["calibration"]["shocks"].items()
-            if shock_name in data["calibration"]["shocks"]
-        }
-        calibration = Calib(parameters=parameters, shocks=shocks_calib)
+        calibration = Calib(parameters=parameters)
 
         return ModelConfig(
             name=name,

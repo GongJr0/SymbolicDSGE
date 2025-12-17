@@ -1,19 +1,21 @@
 name: "TEST"
 
-variables: [u, r, Pi, x, r_star]
+variables: [u, v, r, Pi, x, r_star]
 constrained:
     Pi: false
     x: false
     r: true
+    v: false
     r_star: false
     u: false
 
 parameters: [beta, sigma, kappa,
              phi_pi, phi_x, rho_r,
-             rho_u, sig_u, sig_r,
-             rbar, pi_mean, elb_level]
+             rho_u, rho_v, sig_u,
+             sig_v, rbar, pi_mean,
+             elb_level]
 
-shocks: [e_u, e_r]
+shocks: [e_u, e_v]
 observables: [Infl, Rate]
 
 equations:
@@ -30,13 +32,16 @@ equations:
         - x(t) = x(t+1) - sigma*(r(t) - Pi(t+1)) + u(t)
 
         # Placeholder AR(1) demand shock:
-        - u(t+1) = rho_u*u(t) + e_u
+        - u(t+1) = rho_u*u(t)
 
         # Placeholder Taylor-rule target rate:
-        - r_star(t) = rbar + phi_pi*Pi(t) + phi_x*x(t) + e_r
+        - r_star(t) = rbar + phi_pi*Pi(t) + phi_x*x(t) + v(t)
 
         # Placeholder Interest-rate smoothing:
         - r(t+1) = rho_r*r(t) + (1 - rho_r)*r_star(t+1)
+
+        # Placeholder Monetary policy shock:
+        - v(t+1) = rho_v*v(t)
 
     constraint:
         r: r(t)
@@ -66,12 +71,11 @@ calibration:
         # Placeholder Demand shock AR(1):
         rho_u: 0.70
         sig_u: 0.50
-        sig_r: 0.25
 
-        rbar: 4.0
+        # Placeholder Monetary policy shock AR(1):
+        rho_v: 0.50
+        sig_v: 0.25
+
+        rbar: 0.0
         pi_mean: 3.25
         elb_level: 0.0
-
-    shocks:
-        e_u: sig_u
-        e_r: sig_r

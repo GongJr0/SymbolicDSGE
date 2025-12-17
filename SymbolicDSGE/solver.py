@@ -164,8 +164,7 @@ class DSGESolver:
 
         if n_state is None or n_exog is None:
             raise ValueError(
-                "For linearsolve backend you must provide n_state and n_exog explicitly for now. "
-                "Later we can infer them, but explicit is safer for the first iteration."
+                "For linearsolve backend you must provide n_state and n_exog explicitly for now."
             )
 
         return CompiledModel(
@@ -199,7 +198,11 @@ class DSGESolver:
             params = {p: float64(v) for p, v in parameters.items()}
 
         if steady_state is None:
-            ss: ndarray = np.zeros(len(compiled.var_names), dtype=float64)
+            ss = np.zeros(len(compiled.var_names), dtype=float64)
+        elif isinstance(steady_state, dict):
+            ss = np.array(
+                [steady_state.get(vn, 0.0) for vn in compiled.var_names], dtype=float64
+            )
         else:
             ss = asarray(steady_state, dtype=float64)
 
@@ -225,19 +228,17 @@ class DSGESolver:
         # y_t = gx x_t
         # For your purpose you want a single state transition matrix A and shock impact B
         # We'll try a few attribute names.
-        p = mdl.p
-        f = mdl.f
-        l = getattr(mdl, "l", None)
-        n = getattr(mdl, "n", None)
-
-        if l is None or n is None:
-            raise AttributeError(
-                "Expected Klein matrices l and n on model (shock impacts)."
-            )
+        p = np.asarray(mdl.p, dtype=float64)
+        f = np.asarray(mdl.f, dtype=float64)
 
         n_s = compiled.n_state
         n_u = len(compiled.var_names) - n_s
+        n_exo = compiled.n_exog  # number of shocked states (must be <= n_s)
 
+        if n_exo > n_s:
+            raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
+
+        # Build full transition for X_t = [states_t; controls_t]
         A = np.block(
             [
                 [p, np.zeros((n_s, n_u))],
@@ -245,7 +246,19 @@ class DSGESolver:
             ]
         )
 
-        B = np.vstack([l, f @ l + n])
+        # Shocks hit only the first n_exo states with identity.
+        B_state = np.vstack(
+            [
+                np.eye(n_exo, dtype=float64),
+                np.zeros((n_s - n_exo, n_exo), dtype=float64),
+            ]
+        )
+        B = np.vstack(
+            [
+                B_state,
+                f @ B_state,
+            ]
+        )
 
         if getattr(mdl, "stab", 0) != 0:
             raise ValueError(

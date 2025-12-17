@@ -29,7 +29,6 @@ class Equations(Base):
 @dataclass
 class Calib(Base):
     parameters: dict[Symbol, float64]
-    shocks: dict[Symbol, float64]
 
 
 @dataclass
