@@ -151,7 +151,7 @@ class DSGESolver:
         # Convert model to minimization problem
         obj = [sp.simplify(eq.lhs - eq.rhs) for eq in conf.equations.model]
 
-        shifted = [self._offest_lags(o, t) for o in obj]
+        shifted = [self._offset_lags(o, t) for o in obj]
 
         # Deterministic var order
         if not variable_order:
@@ -189,8 +189,8 @@ class DSGESolver:
         subs_map = {}
         for name, f, cur, fwd in zip(var_order, var_funcs, cur_syms, fwd_syms):
 
-            subs_map[f(t)] = cur
-            subs_map[f(t + 1)] = fwd
+            subs_map[f(t)] = cur  # noqa
+            subs_map[f(t + 1)] = fwd  # noqa
 
         if not params_order:
             params_order = [p.name for p in conf.parameters]
@@ -285,12 +285,11 @@ class DSGESolver:
         mdl.set_ss(ss)
         mdl.approximate_and_solve(log_linear=log_linear)
 
-        # Extract solution matrices (linearsolve uses .gx, .hx style in some versions; keep flexible)
+        # Extract solution matrices (linearsolve uses .gx, .hx style in some versions, keep flexible)
         # Common conventions in linear RE solvers:
         # x_{t+1} = hx x_t + eta eps_{t+1}
         # y_t = gx x_t
-        # For your purpose you want a single state transition matrix A and shock impact B
-        # We'll try a few attribute names.
+
         p = np.asarray(mdl.p, dtype=float64)
         f = np.asarray(mdl.f, dtype=float64)
 
@@ -349,7 +348,7 @@ class DSGESolver:
                     offs.append(int(k))
         return min(offs) if offs else 0
 
-    def _offest_lags(self, obj: Expr, t: Symbol) -> Expr:
+    def _offset_lags(self, obj: Expr, t: Symbol) -> Expr:
         min_off = self._min_time_offset(obj, t)
 
         if min_off < 0:
