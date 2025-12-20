@@ -8,8 +8,8 @@ from typing import Union, Literal
 class FRED:
     def __init__(self, key_name: str, key_env: str | Path | None = None) -> None:
         try:
-            import fredapi  # type: ignore
-            from dotenv import load_dotenv, find_dotenv  # type: ignore
+            import fredapi
+            from dotenv import load_dotenv, find_dotenv
 
         except ImportError:
             raise ImportError(

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, asdict
 from typing import Any
-from sympy import Symbol, Function, Eq, Expr  # type: ignore
-from sympy.core.relational import Relational  # type: ignore
+from sympy import Symbol, Function, Eq, Expr
+from sympy.core.relational import Relational
 from numpy import float64
 import pickle
 

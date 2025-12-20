@@ -1,9 +1,9 @@
 from .model_config import ModelConfig, Equations, Calib
 from pathlib import Path
 import yaml
-import sympy as sp  # type: ignore
+import sympy as sp
 from sympy import Symbol, Function, Eq, Expr
-from sympy.core.relational import Relational  # type: ignore
+from sympy.core.relational import Relational
 from numpy import float64
 import pickle
 

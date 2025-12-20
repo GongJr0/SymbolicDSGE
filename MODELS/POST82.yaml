@@ -51,9 +51,9 @@ equations:
 
   observables:
     # If your data is inflation in levels, add steady-state (but be consistent about annualized vs quarterly)
-    Infl: Pi(t) + pi_star
+    Infl: 4*Pi(t) + pi_star
     # If your observed nominal rate is in levels, add steady state nominal rate approx r_star + pi_star
-    Rate: r(t) + r_star + pi_star
+    Rate: 4*r(t) + (r_star + pi_star)
 
 calibration:
   parameters:

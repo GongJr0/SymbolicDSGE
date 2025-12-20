@@ -1,12 +1,12 @@
-import sympy as sp  # type: ignore
+import sympy as sp
 from sympy import Symbol, Function, Eq, Expr
-from sympy.core.relational import Relational  # type: ignore
+from sympy.core.relational import Relational
 
 import numpy as np
 from numpy import float64, complex128, asarray, ndarray
 
 import pandas as pd  # fuck linearsolve
-import linearsolve  # type: ignore
+import linearsolve
 
 from dataclasses import dataclass, asdict
 from typing import Callable, Any, cast
@@ -23,7 +23,6 @@ class CompiledModel:
     idx: dict[str, int]
     objective_eqs: list[Expr]
     objective_funcs: list[Callable]
-
     equations: Callable[[Any, Any, Any], ndarray]
     n_state: int
     n_exog: int
@@ -40,7 +39,11 @@ class SolvedModel:
     B: ndarray
 
     def sim(
-        self, T: int, shocks: ndarray = None, x0: ndarray = None
+        self,
+        T: int,
+        shocks: ndarray = None,
+        x0: ndarray = None,
+        observables: bool = False,
     ) -> dict[str, ndarray]:
         n = self.A.shape[0]
 
@@ -65,9 +68,47 @@ class SolvedModel:
 
         out = {name: X[:, self.compiled.idx[name]] for name in self.compiled.var_names}
         out["_X"] = X  # Include full state matrix for reference
+
+        if observables:
+            conf = self.compiled.config
+            t_sym = sp.Symbol("t", integer=True)
+            calib_subs = {p: float64(v) for p, v in conf.calibration.parameters.items()}
+            # Allowed shifts
+            shifts = (-1, 0, 1)
+
+            for obs_var, expr in conf.equations.observable.items():
+                obs_series = np.zeros((T + 1,), dtype=float64)
+
+                name_to_func = {v.__name__: v for v in conf.variables}
+
+                for t_idx in range(T + 1):
+                    subs = {}
+
+                    for var_name, f in name_to_func.items():
+
+                        for s in shifts:
+                            time = t_idx + s
+                            key = f(t_sym + s)
+
+                            time = min(max(t_idx + s, 0), T)
+                            subs[f(t_sym + s)] = X[time, self.compiled.idx[var_name]]
+
+                    val = expr.subs(subs)
+                    val = val.subs(calib_subs)
+
+                    if val.free_symbols:
+                        raise ValueError(
+                            f"Unsubstituted symbols in observable {obs_var}: {val}"
+                        )
+
+                    obs_series[t_idx] = float(val)
+
+                out[obs_var.name] = obs_series
         return out
 
-    def irf(self, shocks: list[str], T: int, scale: float = 1.0) -> dict[str, ndarray]:
+    def irf(
+        self, shocks: list[str], T: int, scale: float = 1.0, observables: bool = False
+    ) -> dict[str, ndarray]:
         if not shocks:
             raise ValueError("At least one shock must be specified for IRF.")
         if not all(
@@ -88,37 +129,44 @@ class SolvedModel:
         shock_matrix[0, :] = shock_vec
 
         return self.sim(
-            T, shocks=shock_matrix, x0=np.zeros((self.A.shape[0],), dtype=float64)
+            T,
+            shocks=shock_matrix,
+            x0=np.zeros((self.A.shape[0],), dtype=float64),
+            observables=observables,
         )
 
-    def transition_plot(self, T: int, shocks: list[str], scale: float = 1.0) -> None:
-        transitions = self.irf(shocks=shocks, T=T, scale=scale)
+    def transition_plot(
+        self, T: int, shocks: list[str], scale: float = 1.0, observables: bool = False
+    ) -> None:
+        transitions = self.irf(shocks=shocks, T=T, scale=scale, observables=observables)
+        obs_vars = [v.name for v in self.compiled.config.observables]
         transitions.pop("_X", None)
+
         n_vars = len(transitions)
-        fig_square = np.sqrt(n_vars)
-        ncols = np.floor(fig_square)  # Strip decimals (no rounding)
-        nrows = (
-            fig_square if fig_square % 1 == 0 else np.ceil(fig_square)
-        )  # Make room for all plots
+        fig_square = np.ceil(np.sqrt(n_vars))
 
         fig, ax = plt.subplots(
-            int(nrows), int(ncols), figsize=(4 * ncols, 3 * nrows)
+            int(fig_square), int(fig_square), figsize=(4 * fig_square, 3 * fig_square)
         )  # 4:3 aspect ratio
         ax = ax.flatten()
         time = np.arange(T + 1)  # +1 for initial state
 
         # Remove unused axes
         nplots = len(transitions)
-        if nplots < len(ax):
-            for i in range(nplots, len(ax)):
-                fig.delaxes(ax[i])
+        while nplots < len(ax):
+            fig.delaxes(ax[-1])
+            ax = ax[:-1]
 
         for i, (var, series) in enumerate(transitions.items()):
-
-            title_kwargs = {"color": "red", "weight": "bold"} if var in shocks else {}
+            title_kwargs = {}
+            if var in obs_vars:
+                title_kwargs = {"color": "blue", "style": "italic"}
+            elif var in shocks:
+                title_kwargs = (
+                    {"color": "red", "weight": "bold"} if var in shocks else {}
+                )
 
             ax[i].plot(time, series)
-            ax[i].axhline(0, color="orange", linewidth=1, linestyle="--")
             ax[i].set_title(var, **title_kwargs)
             ax[i].set_xlabel("Time")
             ax[i].set_ylabel(rf"{var}")
