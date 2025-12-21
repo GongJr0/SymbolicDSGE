@@ -19,11 +19,18 @@ from .model_config import ModelConfig
 @dataclass(frozen=True)
 class CompiledModel:
     config: ModelConfig
+
     var_names: list[str]
     idx: dict[str, int]
+
     objective_eqs: list[Expr]
     objective_funcs: list[Callable]
     equations: Callable[[Any, Any, Any], ndarray]
+
+    observable_names: list[str]
+    observable_eqs: list[Expr]
+    observable_funcs: list[Callable]
+
     n_state: int
     n_exog: int
 
@@ -70,40 +77,18 @@ class SolvedModel:
         out["_X"] = X  # Include full state matrix for reference
 
         if observables:
-            conf = self.compiled.config
-            t_sym = sp.Symbol("t", integer=True)
-            calib_subs = {p: float64(v) for p, v in conf.calibration.parameters.items()}
-            # Allowed shifts
-            shifts = (-1, 0, 1)
+            Y = np.zeros((T + 1, len(self.compiled.observable_names)), dtype=float64)
+            for i, func in enumerate(self.compiled.observable_funcs):
+                for t in range(T + 1):
+                    cur = X[t, :]
+                    params = [
+                        p for p in self.compiled.config.calibration.parameters.values()
+                    ]
+                    Y[t, i] = func(*cur, *params)
 
-            for obs_var, expr in conf.equations.observable.items():
-                obs_series = np.zeros((T + 1,), dtype=float64)
+            for i, name in enumerate(self.compiled.observable_names):
+                out[name] = Y[:, i]
 
-                name_to_func = {v.__name__: v for v in conf.variables}
-
-                for t_idx in range(T + 1):
-                    subs = {}
-
-                    for var_name, f in name_to_func.items():
-
-                        for s in shifts:
-                            time = t_idx + s
-                            key = f(t_sym + s)
-
-                            time = min(max(t_idx + s, 0), T)
-                            subs[f(t_sym + s)] = X[time, self.compiled.idx[var_name]]
-
-                    val = expr.subs(subs)
-                    val = val.subs(calib_subs)
-
-                    if val.free_symbols:
-                        raise ValueError(
-                            f"Unsubstituted symbols in observable {obs_var}: {val}"
-                        )
-
-                    obs_series[t_idx] = float(val)
-
-                out[obs_var.name] = obs_series
         return out
 
     def irf(
@@ -274,8 +259,17 @@ class DSGESolver:
 
         if n_state is None or n_exog is None:
             raise ValueError(
-                "For linearsolve backend you must provide n_state and n_exog explicitly for now."
+                "For linearsolve backend you must provide n_state and n_exog explicitly."
             )
+
+        shifted_obs = [
+            self._offset_lags(expr, t) for expr in conf.equations.observable.values()
+        ]
+        observable_exprs = [sp.simplify(expr.subs(subs_map)) for expr in shifted_obs]
+        observable_funcs = [
+            sp.lambdify([*cur_syms, *params], expr, modules="numpy")
+            for expr in observable_exprs
+        ]
 
         return CompiledModel(
             config=conf,
@@ -284,6 +278,9 @@ class DSGESolver:
             objective_eqs=compiled,
             objective_funcs=funcs,
             equations=equations,
+            observable_names=[v.name for v in conf.observables],
+            observable_eqs=observable_exprs,
+            observable_funcs=observable_funcs,
             n_state=int(n_state),
             n_exog=int(n_exog),
         )
