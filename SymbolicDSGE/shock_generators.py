@@ -1,6 +1,6 @@
 from scipy.stats import norm, t, uniform
 from scipy.stats._distn_infrastructure import rv_generic
-from numpy import asarray, ndarray, float64, random
+from numpy import asarray, ndarray, float64, random, zeros
 
 
 def abstract_shock_array(
@@ -76,3 +76,31 @@ def uniform_shock_array(
     np.ndarray: An array of uniformly distributed shocks of length T.
     """
     return abstract_shock_array(T, seed, uniform, loc=low, scale=high - low)
+
+
+def shock_placement(
+    T: int, shock_spec: dict[int, list[float]], shock_arr: ndarray = None
+) -> ndarray:
+    """
+    Place shocks in a time series array based on a shock specification.
+
+    Parameters:
+    T (int): The number of time periods.
+    shock_spec (dict): A dictionary where keys are time indices (0-based) and
+                       values are shock scales (shock = scale * var_sigma at simulation time).
+
+    Returns:
+    np.ndarray: An array of shocks of length T with specified shocks placed.
+    """
+
+    if shock_arr is not None:
+        shocks = shock_arr
+    else:
+        rdim = T
+        cdim = len(list(shock_spec.values())[0])
+        shocks = zeros((rdim, cdim), dtype=float64)
+
+    for i, shock in shock_spec.items():
+        shocks[i, :] = asarray(shock, dtype=float64)
+
+    return shocks
