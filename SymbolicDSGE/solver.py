@@ -432,8 +432,8 @@ class DSGESolver:
         # x_{t+1} = hx x_t + eta eps_{t+1}
         # y_t = gx x_t
 
-        p = np.asarray(mdl.p, dtype=float64)
-        f = np.asarray(mdl.f, dtype=float64)
+        p = np.asarray(mdl.p, dtype=complex128)
+        f = np.asarray(mdl.f, dtype=complex128)
 
         n_s = compiled.n_state
         n_u = len(compiled.var_names) - n_s
@@ -472,8 +472,8 @@ class DSGESolver:
         return SolvedModel(
             compiled=compiled,
             policy=mdl,
-            A=asarray(A, dtype=float64),
-            B=asarray(B, dtype=float64),
+            A=asarray(A, dtype=complex128),
+            B=asarray(B, dtype=complex128),
         )
 
     @staticmethod
