@@ -38,3 +38,13 @@ dev = [
     "pandas-stubs>=2.3.3.251201",
     "matplotlib-stubs>=0.3.11",
 ]
+
+[build-system]
+requires = ["setuptools>=65.5.1", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+SymbolicDSGE = {path = "SymbolicDSGE"}
+
+[tool.setuptools.packages.find]
+where = ["SymbolicDSGE"]
