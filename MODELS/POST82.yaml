@@ -31,14 +31,13 @@ observables: [Infl, Rate]
 
 equations:
   model:
-    # NK Phillips curve:  Pi_t = beta E_t Pi_{t+1} + kappa x_t + z_t
+    # NKPC
     - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
 
-    # IS / Euler: x_t = E_t x_{t+1} - tau_inv*( r_t - E_t Pi_{t+1} ) + g_t
+    # IS / Euler
     - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
     # Taylor rule in deviations around steady state (keep steady states in observables)
-    # r_t = rho_r r_{t-1} + (1-rho_r)*( psi_pi*Pi_t + psi_x*x_t ) + e_R,t
     - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_R
 
     # Demand shock: g_t = rho_g g_{t-1} + e_g,t
@@ -50,14 +49,13 @@ equations:
   constraint: {}
 
   observables:
-    # If your data is inflation in levels, add steady-state (but be consistent about annualized vs quarterly)
-    Infl: 4*Pi(t) + pi_star
-    # If your observed nominal rate is in levels, add steady state nominal rate approx r_star + pi_star
-    Rate: 4*r(t) + (r_star + pi_star)
+    Infl: 4*Pi(t) + pi_star # model gap deviation + steady-state
+
+    Rate: 4*r(t) + (r_star + pi_star) # model rate gap deviation + steady-state nominal rate
 
 calibration:
   parameters:
-    # beta is not in Table 3; pick a standard quarterly value unless your chosen paper gives it.
+    # beta is not in Table 3.
     beta: 0.99
 
     # Post-1982 posterior means (Table 3)
