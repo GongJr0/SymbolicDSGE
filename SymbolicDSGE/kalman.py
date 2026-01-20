@@ -15,7 +15,6 @@ from numpy.typing import NDArray
 
 from typing import Tuple
 
-
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
 

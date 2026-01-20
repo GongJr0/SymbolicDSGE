@@ -1,16 +1,15 @@
 import sympy as sp
-from sympy import Symbol, Function, Eq, Expr
-from sympy.core.relational import Relational
+from sympy import Symbol, Function, Expr
 
 import numpy as np
-from numpy import float64, complex128, asarray, ndarray
+from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
 
 import pandas as pd  # fuck linearsolve
 import linearsolve
 
 from dataclasses import dataclass, asdict
-from typing import Callable, Any, Union, Tuple, TypedDict
+from typing import Callable, Any, Union, Tuple, TypedDict, Iterable
 
 import matplotlib.pyplot as plt
 
@@ -57,7 +56,9 @@ class SolvedModel:
     def sim(
         self,
         T: int,
-        shocks: dict[str, Union[Callable[[float], NDF], NDF]] = None,
+        shocks: dict[
+            str, Union[Callable[[float | list[list[float]]], NDF], NDF]
+        ] = None,
         shock_scale: float = 1.0,
         x0: ndarray = None,
         observables: bool = False,
@@ -100,30 +101,13 @@ class SolvedModel:
         )  # Deterministic if no shocks
 
         if shocks is not None:
-            for name, series in shocks.items():
-                if name not in self.compiled.var_names[: self.compiled.n_exog]:
+            shock_list = self._shock_unpack(shocks)
+            for idx, shock_vals in shock_list:
+                if shock_vals.shape[0] != T:
                     raise ValueError(
-                        f"Shock variable {name} not found in exogenous model variables."
+                        f"Shock array for variable index {idx} must have length {T}."
                     )
-                idx = self.compiled.idx[name]
-                if isinstance(series, Callable):  # type: ignore
-                    sig = conf.calibration.parameters.get(Symbol(f"sig_{name}"), 1.0)
-                    shock_vals = series(sig)  # type: ignore
-                    if shock_vals.shape[0] != T:
-                        raise ValueError(
-                            f"Shock series for {name} has length {shock_vals.shape[0]}, expected {T}."
-                        )
-                elif isinstance(series, ndarray):
-                    shock_vals = asarray(series, dtype=float64)
-                    if shock_vals.shape[0] != T:
-                        raise ValueError(
-                            f"Shock series for {name} has length {shock_vals.shape[0]}, expected {T}."
-                        )
-                else:
-                    raise TypeError(
-                        f"Shock for {name} must be a callable or ndarray, got {type(series)}."
-                    )
-                shock_mat[:, idx] = shock_vals * shock_scale
+                shock_mat[:, idx] = shock_scale * shock_vals
 
         X = np.zeros((T + 1, n), dtype=float64)
         X[0, :] = x0
@@ -268,6 +252,102 @@ class SolvedModel:
             A dictionary representation of the SolvedModel.
         """
         return asdict(self)
+
+    def _build_cov(self, vars: Iterable[str]) -> NDF:
+        sig = np.array([self._get_param(f"sig_{v}", 1.0) for v in vars])
+        rho = np.array(
+            [[self._get_param(f"rho_{v1}{v2}", 0.0) for v2 in vars] for v1 in vars]
+        )
+        cov = rho * np.outer(sig, sig)
+        return cov
+
+    def _shock_unpack(
+        self, shocks: dict[str, NDF | Callable[[float | list[list[float]]], NDF]]
+    ) -> list[Tuple[int, NDF]]:
+        for name, shock in shocks.items():
+            if "," in name:
+                # Multi-Var
+                multi_names = [n.strip() for n in name.split(",")]
+                # All names must be exogenous and grouped names must not be re-allocated as univariate shocks
+                assert all(
+                    (n in self.compiled.var_names[: self.compiled.n_exog])
+                    and (n not in shocks)
+                    for n in multi_names
+                )
+                indices = [self.compiled.idx[n] for n in multi_names]
+
+                if isinstance(shock, ndarray):
+                    assert shock.shape[1] == len(
+                        multi_names
+                    ), f"Shock array for {name} must have shape (T, {len(multi_names)})"
+                    return list(
+                        zip(indices, [shock[:, i] for i in range(shock.shape[1])])
+                    )
+
+                elif callable(shock):
+                    sigs = [self._get_param(f"sig_{n}", 1.0) for n in multi_names]
+                    rhos = [
+                        self._get_rho(n1, n2, 0.0)
+                        for n1 in multi_names
+                        for n2 in multi_names
+                    ]
+                    corr = np.array(rhos).reshape((len(multi_names), len(multi_names)))
+                    cov = corr * np.outer(sigs, sigs)
+                    mv_mat = shock(cov)
+                    return list(
+                        zip(indices, [mv_mat[:, i] for i in range(mv_mat.shape[1])])
+                    )
+                else:
+                    raise TypeError(
+                        f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
+                    )
+            else:
+                # Uni-Var
+                if name not in self.compiled.var_names[: self.compiled.n_exog]:
+                    raise ValueError(
+                        f"Shock variable {name} not found in exogenous model variables."
+                    )
+                idx = self.compiled.idx[name]
+                if callable(shock):
+                    sig = self._get_param(f"sig_{name}", 1.0)
+                    shock_vals = shock(sig)
+                    return [(idx, shock_vals)]
+                elif isinstance(shock, ndarray):
+                    shock_vals = asarray(shock, dtype=float64)
+                    return [(idx, shock_vals)]
+                else:
+                    raise TypeError(
+                        f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
+                    )
+        raise ValueError("No shocks provided.")
+
+    def _get_rho(self, var1: str, var2: str, default: float = 0.0) -> float:
+        """
+        Retrieve the correlation coefficient between two variables from the calibration parameters.
+        Parameters
+        ----------
+        var1 : str
+            The name of the first variable.
+        var2 : str
+            The name of the second variable.
+        default : float, optional
+            The default value to return if the correlation parameter is not found.
+        Returns
+        -------
+        float
+            The correlation coefficient between var1 and var2.
+        """
+        params = self.compiled.config.calibration.parameters
+        if var1 == var2:
+            return 1.0
+
+        sym = Symbol(f"rho_{var1}{var2}")
+        if sym in params:
+            return float64(params[sym])
+        sym_rev = Symbol(f"rho_{var2}{var1}")
+        if sym_rev in params:
+            return float64(params[sym_rev])
+        return float64(default)
 
     def _get_param(self, name: str, default: float = None) -> float:
         """
@@ -503,11 +583,13 @@ class DSGESolver:
             raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
 
         # Build full transition for X_t = [states_t; controls_t]
-        A = np.block(
-            [
-                [p, np.zeros((n_s, n_u))],
-                [f @ p, np.zeros((n_u, n_u))],
-            ]
+        A = real_if_close(
+            np.block(
+                [
+                    [p, np.zeros((n_s, n_u))],
+                    [f @ p, np.zeros((n_u, n_u))],
+                ]
+            )
         )
 
         # Shocks hit only the first n_exo states with identity.
@@ -517,11 +599,13 @@ class DSGESolver:
                 np.zeros((n_s - n_exo, n_exo), dtype=float64),
             ]
         )
-        B = np.vstack(
-            [
-                B_state,
-                f @ B_state,
-            ]
+        B = real_if_close(
+            np.vstack(
+                [
+                    B_state,
+                    f @ B_state,
+                ]
+            )
         )
 
         if getattr(mdl, "stab", 0) != 0:
@@ -532,8 +616,8 @@ class DSGESolver:
         return SolvedModel(
             compiled=compiled,
             policy=mdl,
-            A=asarray(A, dtype=complex128),
-            B=asarray(B, dtype=complex128),
+            A=A,
+            B=B,
         )
 
     @staticmethod

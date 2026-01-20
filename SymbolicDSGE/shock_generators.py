@@ -9,7 +9,7 @@ from scipy.stats._distn_infrastructure import rv_generic
 from scipy.stats._multivariate import multi_rv_generic
 from numpy import asarray, ndarray, float64, random, zeros
 
-from typing import Literal, Callable, cast
+from typing import Literal, Callable
 
 
 def abstract_shock_array(
@@ -39,8 +39,8 @@ def abstract_shock_array(
 def normal_shock_array(
     T: int,
     seed: int,
-    mu: float = 0.0,
-    sigma: float = 1.0,
+    mu: float | float64 = 0.0,
+    sigma: float | float64 = 1.0,
 ) -> ndarray:
     """
     Generate an array of normally distributed shocks.
@@ -48,9 +48,8 @@ def normal_shock_array(
     Parameters:
     T (int): The number of time periods.
     seed (int): Seed for the random number generator.
-    mu (float): Mean of the normal distribution.
-    sigma (float): Standard deviation of the normal distribution.
-
+    mu (float | float64): Mean of the normal distribution.
+    sigma (float | float64): Standard deviation of the normal distribution.
     Returns:
     np.ndarray: An array of normally distributed shocks of length T.
     """
@@ -61,8 +60,7 @@ def normal_multivariate_shock_array(
     T: int,
     seed: int,
     mus: list[float | float64],
-    sigmas: list[float | float64],
-    rhos: list[list[float | float64]],
+    cov_mat: list[list[float | float64]],
 ) -> ndarray:
     """
     Generate an array of multivariate normally distributed shocks.
@@ -71,21 +69,23 @@ def normal_multivariate_shock_array(
     T (int): The number of time periods.
     k (int): The number of variables (dimensions).
     seed (int): Seed for the random number generator.
-    mu (float): Mean of the normal distribution.
-    sigma (float): Standard deviation of the normal distribution.
+    mu (float | float64): Mean of the normal distribution.
+    sigma (float | float64): Standard deviation of the normal distribution.
 
     Returns:
     np.ndarray: An array of shape (T, k) of multivariate normally distributed shocks.
     """
-    cov_matrix = (
-        asarray(sigmas).reshape(-1, 1) * asarray(sigmas).reshape(1, -1) * asarray(rhos)
-    )
-    shocks = abstract_shock_array(T, seed, mnorm, mean=asarray(mus), cov=cov_matrix)
+
+    shocks = abstract_shock_array(T, seed, mnorm, mean=asarray(mus), cov=cov_mat)
     return asarray(shocks, dtype=float64)
 
 
 def t_shock_array(
-    T: int, seed: int | None, df: float, loc: float = 0.0, scale: float = 1.0
+    T: int,
+    seed: int | None,
+    df: float,
+    loc: float | float64 = 0.0,
+    scale: float | float64 = 1.0,
 ) -> ndarray:
     """
     Generate an array of t-distributed shocks.
@@ -94,8 +94,8 @@ def t_shock_array(
     T (int): The number of time periods.
     seed (int): Seed for the random number generator.
     df (float): Degrees of freedom for the t-distribution.
-    loc (float): Location parameter of the t-distribution.
-    scale (float): Scale parameter of the t-distribution.
+    loc (float | float64): Location parameter of the t-distribution.
+    scale (float | float64): Scale parameter of the t-distribution.
 
     Returns:
     np.ndarray: An array of t-distributed shocks of length T.
@@ -107,9 +107,8 @@ def t_multivariate_shock_array(
     T: int,
     seed: int | None,
     df: float,
-    locs: list[float],
-    scales: list[float],
-    rhos: list[list[float]],
+    locs: list[float | float64],
+    cov_mat: list[list[float | float64]],
 ) -> ndarray:
     """
     Generate an array of multivariate t-distributed shocks.
@@ -119,20 +118,17 @@ def t_multivariate_shock_array(
     k (int): The number of variables (dimensions).
     seed (int): Seed for the random number generator.
     df (float): Degrees of freedom for the t-distribution.
-    loc (float): Location parameter of the t-distribution.
-    scale (float): Scale parameter of the t-distribution.
+    loc (float | float64): Location parameter of the t-distribution.
+    scale (float | float64): Scale parameter of the t-distribution.
 
     Returns:
     np.ndarray: An array of shape (T, k) of multivariate t-distributed shocks.
     """
-    cov_matrix = (
-        asarray(scales).reshape(-1, 1) * asarray(scales).reshape(1, -1) * asarray(rhos)
-    )
-    return abstract_shock_array(T, seed, mt, df=df, loc=asarray(locs), shape=cov_matrix)
+    return abstract_shock_array(T, seed, mt, df=df, loc=asarray(locs), shape=cov_mat)
 
 
 def uniform_shock_array(
-    T: int, seed: int | None, loc: float = 0.0, scale: float = 1.0
+    T: int, seed: int | None, loc: float | float64 = 0.0, scale: float | float64 = 1.0
 ) -> ndarray:
     """
     Generate an array of uniformly distributed shocks.
@@ -150,20 +146,25 @@ def uniform_shock_array(
 
 
 def uniform_multivariate_shock_array(
-    T: int, k: int, seed: int | None, loc: float = 0.0, scale: float = 1.0
+    T: int,
+    k: int,
+    seed: int | None,
+    locs: list[float | float64],
+    cov_mat: list[list[float | float64]],
 ) -> ndarray:
     """
     [NOT IMPLEMENTED]
 
     Generate an array of multivariate uniformly distributed shocks.
+    Rectangular uniform distributions implicitly indicate cov_ij = 0 for i != j.
+
 
     Parameters:
     T (int): The number of time periods.
     k (int): The number of variables (dimensions).
     seed (int): Seed for the random number generator.
-    low (float): Lower bound of the uniform distribution.
-    high (float): Upper bound of the uniform distribution.
-
+    locs (list[float | float64]): List of means for each dimension.
+    cov_mat (list[list[float | float64]]): Covariance matrix for the distribution.
     Returns:
     np.ndarray: An array of shape (T, k) of multivariate uniformly distributed shocks.
     """
@@ -204,7 +205,8 @@ class Shock:
     def __init__(
         self,
         T: int,
-        dist: Literal["norm", "t", "uni"] | rv_generic | None = None,
+        dist: Literal["norm", "t", "uni"] | rv_generic | multi_rv_generic | None = None,
+        multivar: bool = False,
         seed: int | None = 0,
         dist_args: tuple = (),
         dist_kwargs: dict = {},
@@ -213,6 +215,7 @@ class Shock:
 
         self.T = T
         self.dist = dist
+        self.multivar = multivar
         self.seed = seed
         self.dist_args = dist_args
         self.dist_kwargs = dist_kwargs
@@ -220,7 +223,7 @@ class Shock:
 
     # TODO: Pass through array if provided else generate based on dist
 
-    def shock_generator(self) -> Callable[[float], ndarray]:
+    def _assert_generator(self) -> None:
         assert self.dist is not None, "Distribution must be specified."
         assert (
             self.shock_arr is None
@@ -230,13 +233,16 @@ class Shock:
             " Please adjust `sig_` variables in the config to change the distribution scale."
             " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
         )
+
+    def shock_generator(self) -> Callable[[float], ndarray]:
+        self._assert_generator()
         kwargs = self.dist_kwargs.copy()
-        fun = lambda sigma: abstract_shock_array(
+        fun = lambda s: abstract_shock_array(
             self.T,
             self.seed,
             self._get_dist(),
             *self.dist_args,
-            **{**kwargs, "scale": sigma},
+            **{**kwargs, "scale" if not self.multivar else "cov": s},
         )
 
         return fun
@@ -247,17 +253,25 @@ class Shock:
 
         return shock_placement(self.T, shock_spec, self.shock_arr)
 
-    def _get_dist(self) -> rv_generic:
+    def _get_dist(self) -> rv_generic | multi_rv_generic:
         dist = self.dist
 
-        if dist == "norm":
+        if dist == "norm" and not self.multivar:
             return norm
-        elif dist == "t":
+        elif dist == "norm" and self.multivar:
+            return mnorm
+        elif dist == "t" and not self.multivar:
             return t
-        elif dist == "uni":
+        elif dist == "t" and self.multivar:
+            return mt
+        elif dist == "uni" and not self.multivar:
             return uniform
+        elif dist == "uni" and self.multivar:
+            raise NotImplementedError(
+                "Multivariate uniform distribution is not implemented."
+            )
         else:
             assert isinstance(
-                dist, rv_generic
+                dist, rv_generic | multi_rv_generic
             ), "dist must be a valid scipy.stats distribution or a string identifier."
             return dist

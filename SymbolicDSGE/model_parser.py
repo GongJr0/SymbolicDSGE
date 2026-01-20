@@ -1,4 +1,4 @@
-from .model_config import ModelConfig, Equations, Calib
+from .model_config import ModelConfig, Equations, Calib, SymbolGetterDict
 from pathlib import Path
 import yaml
 import sympy as sp
@@ -128,15 +128,20 @@ class ModelParser:
         }
 
         equations = Equations(
-            model=model, constraint=constraint, observable=observables_eq
+            model=model,
+            constraint=SymbolGetterDict(constraint),
+            observable=SymbolGetterDict(observables_eq),
         )
 
-        parameters: dict[Symbol, float64] = {
-            _LOCALS[param_name]: float64(data["calibration"]["parameters"][param_name])
-            for param_name in data["parameters"]
-            if param_name in data["calibration"]["parameters"]
-        }
-
+        parameters: SymbolGetterDict[Symbol, float64] = SymbolGetterDict(
+            {
+                _LOCALS[param_name]: float64(
+                    data["calibration"]["parameters"][param_name]
+                )
+                for param_name in data["parameters"]
+                if param_name in data["calibration"]["parameters"]
+            }
+        )
         calibration = Calib(parameters=parameters)
 
         return ModelConfig(

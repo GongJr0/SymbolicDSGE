@@ -1,9 +1,22 @@
 from dataclasses import dataclass, asdict
-from typing import Any
+from typing import Any, TypeVar, Dict
 from sympy import Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
 from numpy import float64
 import pickle
+
+K = TypeVar("K", bound=Symbol)
+V = TypeVar("V")
+
+
+class SymbolGetterDict(Dict[K, V]):
+    def __init__(self, inp: Any) -> None:
+        super().__init__(inp)
+
+    def __getitem__(self, key: str | Symbol) -> Any:
+        if isinstance(key, str):
+            key = Symbol(key)
+        return super().__getitem__(key)
 
 
 @dataclass
@@ -22,13 +35,13 @@ class Base:
 @dataclass
 class Equations(Base):
     model: list[Eq]
-    constraint: dict[Symbol, Relational]
-    observable: dict[Symbol, Expr]
+    constraint: SymbolGetterDict[Symbol, Relational]
+    observable: SymbolGetterDict[Symbol, Expr]
 
 
 @dataclass
 class Calib(Base):
-    parameters: dict[Symbol, float64]
+    parameters: SymbolGetterDict[Symbol, float64]
 
 
 @dataclass
