@@ -264,6 +264,8 @@ class SolvedModel:
     def _shock_unpack(
         self, shocks: dict[str, NDF | Callable[[float | list[list[float]]], NDF]]
     ) -> list[Tuple[int, NDF]]:
+        out: list[Tuple[int, NDF]] = []
+
         for name, shock in shocks.items():
             if "," in name:
                 # Multi-Var
@@ -280,7 +282,7 @@ class SolvedModel:
                     assert shock.shape[1] == len(
                         multi_names
                     ), f"Shock array for {name} must have shape (T, {len(multi_names)})"
-                    return list(
+                    out.extend(
                         zip(indices, [shock[:, i] for i in range(shock.shape[1])])
                     )
 
@@ -294,7 +296,7 @@ class SolvedModel:
                     corr = np.array(rhos).reshape((len(multi_names), len(multi_names)))
                     cov = corr * np.outer(sigs, sigs)
                     mv_mat = shock(cov)
-                    return list(
+                    out.extend(
                         zip(indices, [mv_mat[:, i] for i in range(mv_mat.shape[1])])
                     )
                 else:
@@ -311,15 +313,15 @@ class SolvedModel:
                 if callable(shock):
                     sig = self._get_param(f"sig_{name}", 1.0)
                     shock_vals = shock(sig)
-                    return [(idx, shock_vals)]
+                    out.append((idx, shock_vals))
                 elif isinstance(shock, ndarray):
                     shock_vals = asarray(shock, dtype=float64)
-                    return [(idx, shock_vals)]
+                    out.append((idx, shock_vals))
                 else:
                     raise TypeError(
                         f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
                     )
-        raise ValueError("No shocks provided.")
+        return out
 
     def _get_rho(self, var1: str, var2: str, default: float = 0.0) -> float:
         """
