@@ -1,7 +1,7 @@
 [project]
 name = "SymbolicDSGE"
-version = "0.1.6"
-description = "A diagnostic symbolic adjustment layer for simple DSGE models. Features a built-in linearized DSGE engine constructed from symbolic expressions. Though in currently in development, the library will provide symbolic regression based measurement correction capabilities. In addition, a heavily constrained symbolic search for model equation-augmentation is being planned, but may never come to life."
+version = "0.1.7"
+description = "A diagnostic symbolic adjustment layer for simple DSGE models. Features a built-in linearized DSGE engine constructed from symbolic expressions. Though currently in development, the library will provide symbolic regression based measurement correction capabilities. In addition, a heavily constrained symbolic search for model equation-augmentation is being planned, but may never come to life."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -37,6 +37,8 @@ dev = [
     "scipy-stubs>=1.16.3.2",
     "pandas-stubs>=2.3.3.251201",
     "matplotlib-stubs>=0.3.11",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.1",
 ]
 
 [build-system]
