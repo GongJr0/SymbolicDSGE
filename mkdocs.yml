@@ -64,6 +64,8 @@ extra:
     doc: doc
   version:
     provider: mike
+    default: latest
+    alias: true
 
 plugins:
   - privacy

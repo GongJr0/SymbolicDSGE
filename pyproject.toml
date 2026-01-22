@@ -19,6 +19,10 @@ dependencies = [
     "sympy>=1.14.0",
 ]
 
+[project.urls]
+Documentation = "https://gongjr0.github.io/SymbolicDSGE/"
+Repository = "https://github.com/GongJr0/SymbolicDSGE"
+
 [project.optional-dependencies]
 notebook = [
     "ipython>=9.8.0",
