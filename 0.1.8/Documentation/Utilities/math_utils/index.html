@@ -1107,7 +1107,7 @@ Detrend a time series by removing its linear trend.</p>
 <p>This process subtracts the "Line of Best Fit" (LoBF) from the data.
 LoBF is computed as the slope and intercept that satisfy:
 $$
-\underset{m,b}{\operatorname{argmin}}\,\ y - (mx+b)
+\underset{m,b}{\operatorname{argmin}}\,\ \sum_{i=0}^n  (y_i - (mx_i+b))^2
 $$</p>
 </details>
 <p><strong>Parameters:</strong></p>
