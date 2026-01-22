@@ -49,7 +49,13 @@ theme:
       doc: material/file-document
 
 extra_css:
+  - https://unpkg.com/katex@0/dist/katex.min.css
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/katex.js
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
 
 extra:
   tags:
@@ -63,6 +69,9 @@ plugins:
   - tags
 
 markdown_extensions:
+  - pymdownx.arithmatex:
+        generic: true
+
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -70,3 +79,21 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Guides:
+      - Configuration Guide: Guides/config_guide.md
+      - Quick Start: Guides/quickstart.md
+  - Documentation:
+      - ModelConfig: Documentation/ModelConfig.md
+      - ModelParser: Documentation/ModelParser.md
+      - DSGESolver: Documentation/DSGESolver.md
+      - CompiledModel: Documentation/CompiledModel.md
+      - SolvedModel: Documentation/SolvedModel.md
+      - Shock: Documentation/Shock.md
+      - Utilities:
+          - FRED: Documentation/Utilities/FRED.md
+          - KalmanFilter: Documentation/Utilities/KalmanFilter.md
+          - math_utils: Documentation/Utilities/math_utils.md

@@ -43,6 +43,7 @@ constrained:
 
 Parameters are "constants" that appear in the model equations in some capacity.
 Common examples of parameters are:
+
 - Shock persistence terms
 - Shock variances/covariances
 - Steady state values
