@@ -921,7 +921,105 @@
 
 
 <h1 id="fred">FRED</h1>
-<p><strong>[TO BE PUBLISHED]</strong></p>
+<details class="info" open="open">
+<summary>FRED Dependencies</summary>
+<p><code class="language-python highlight"><span class="n">FRED</span></code> relies on the optional dependency <code class="language-python highlight"><span class="n">fredapi</span></code>. If you did not opt-in for optional dependencies, you can run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>SymbolicDSGE<span class="o">[</span>fred<span class="o">]</span>
+</span></code></pre></div>
+<p>to get the required packages.</p>
+</details>
+<details class="warning" open="open">
+<summary>API Key Required</summary>
+<p>An API key from the "St. Louis FED" is required for the <code class="language-python highlight"><span class="n">FRED</span></code> class to operate. If you don't have an API key, you can generate one for free by making an account on FRED.</p>
+<p><a class="md-button" href="//fred.stlouisfed.org" target="_blank" rel="noopener">FRED</a></p>
+</details>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">FRED</span><span class="p">(</span><span class="n">key_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key_env</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code class="language-python highlight"><span class="n">FRED</span></code> allows easy retrieval of time series stored in the FRED database. The class can identify the given <code class="language-python highlight"><span class="n">key_name</span></code> if placed in the <code>.env</code> file anywhere in the discoverable file tree of the project. Alternatively, you can specify an <code>env</code> file that contains <code>key_name</code> in it.</p>
+<details class="info">
+<summary>.env File Discovery</summary>
+<p><code>find_dotenv</code> is used for discovery. It will walk up the directory tree towards the project root until it encounters a file named <code>".env"</code>.</p>
+</details>
+<p><strong>Methods:</strong></p>
+<p><div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">FRED</span><span class="o">.</span><span class="n">get_series</span><span class="p">(</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">series_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">date_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="n">pd</span><span class="o">.</span><span class="n">DatetimeIndex</span> <span class="o">|</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span>
+</span></code></pre></div>
+Returns the requested FRED series.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Argument</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">series_id</td>
+<td style="text-align: right;">The FRED ID of the requested series.</td>
+</tr>
+<tr>
+<td style="text-align: left;">date_range</td>
+<td style="text-align: right;">Date range in either a <code>YYYY-MM-DD</code> format string pair, a <code>DatetimeIndex</code>, or a string literal <code class="language-python highlight"><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span></code>. <code class="language-python highlight"><span class="kc">None</span></code> defaults to <code class="language-python highlight"><span class="s1">&#39;max&#39;</span></code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;"><strong>Type:</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><code class="language-python highlight"><span class="n">pd</span><span class="o">.</span><span class="n">Series</span></code></td>
+<td style="text-align: right;">The requested time series in a formatted <code>pandas</code> object.</td>
+</tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">FRED</span><span class="o">.</span><span class="n">get_frame</span><span class="p">(</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">series_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">date_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="n">pd</span><span class="o">.</span><span class="n">DatetimeIndex</span> <span class="o">|</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>
+</span></code></pre></div>
+<p>Returns multiple requested series in a <code>DataFrame</code>.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Argument</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">series_ids</td>
+<td style="text-align: right;">The FRED IDs of the requested series.</td>
+</tr>
+<tr>
+<td style="text-align: left;">date_range</td>
+<td style="text-align: right;">Date range in either a <code>YYYY-MM-DD</code> format string pair, a <code>DatetimeIndex</code>, or a string literal <code class="language-python highlight"><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span></code>. <code class="language-python highlight"><span class="kc">None</span></code> defaults to <code class="language-python highlight"><span class="s1">&#39;max&#39;</span></code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;"><strong>Type:</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><code class="language-python highlight"><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></code></td>
+<td style="text-align: right;">The requested time series in a formatted <code>pandas</code> object.</td>
+</tr>
+</tbody>
+</table>
 
 
 
