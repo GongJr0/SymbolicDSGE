@@ -4,7 +4,8 @@ tags:
 ---
 
 # Quick Start Guide
-__TL;DR__ You can find a demonstration notebook [here](https://github.com/GongJr0/SymbolicDSGE/blob/main/empirical_comparison.ipynb).
+???+ tip "__TL;DR__"
+    You can find a demonstration notebook [here](https://github.com/GongJr0/SymbolicDSGE/blob/main/empirical_comparison.ipynb).
 
 This guide will follow the steps necessary to get from model parsing to simulation.
 We will use a pre-defined config file (accessible in the [repository](https://github.com/GongJr0/SymbolicDSGE/)) `"MODELS/POST82.yaml"`.
@@ -78,7 +79,8 @@ Equations as passed to the solver:
  <function DSGESolver.compile.<locals>.equations at 0x0000012D16AB5B20>
 ```
 
-__IMPORTANT:__ The solver relies on the exogenous variables being placed in the first indices. You should ensure the first `n_exog` entries of the order correctly map to the exogenous variables. (either through the config or via the ordering) 
+???+ warning "Variable Placement"
+    The solver relies on the exogenous variables being placed in the first indices. You should ensure the first `n_exog` entries of the order correctly map to the exogenous variables. (either through the config or via the ordering) 
 
 ## Solution
 The solution step takes steady-state values and optionally parameter calibrations to provide a `#!python SolvedModel`.

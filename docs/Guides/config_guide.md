@@ -5,7 +5,8 @@ tags:
 
 # Configuration Guide
 
-__TL;DR__ You can see an example config [here](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/test.yaml).
+???+ tip "__TL;DR__"
+    You can see an example config [here](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/test.yaml).
 
 `SymbolicDSGE` models are configured through a YAML-file. Similar to many familiar DSGE engines, the configuration contains:
 
@@ -60,10 +61,13 @@ parameters: [beta, kappa, tau_inv,
              rho_gz]
 ```
 
-Importantly, the current config expects all shock sigmas to be defined as `f"sig_{varname}"` and covariance terms as `f"rho_{var1}{var2}"`. The mapping layer will be updated to accept any variable name in future iterations, but the current config falls back to defaults if shocks terms are not accompanied by a `sig_` and/or `rho_` parameter.
+???+ warning "Parameter Naming"
 
-__NOTE:__ `SymbolicDSGE` currently expects each parameter to have known values.
-estimation/inference will be implemented but are not accessible as of now.
+    The current config expects all shock sigmas to be defined as `f"sig_{varname}"` and covariance terms as `f"rho_{var1}{var2}"`. The mapping layer will be updated to accept any variable name in future iterations, but the current config falls back to defaults if shocks terms are not accompanied by a `sig_` and/or `rho_` parameter.
+
+???+ note "Calibration Values"
+    `SymbolicDSGE` currently expects each parameter to have known values.
+    estimation/inference will be implemented but are not accessible as of now.
 
 ## Shocks
 

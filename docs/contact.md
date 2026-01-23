@@ -1,3 +1,10 @@
+---
+tags:
+    - info
+hide:
+    - footer
+---
+
 # Contact
 
 <div class="grid cards" markdown>

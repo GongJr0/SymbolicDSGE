@@ -1,3 +1,7 @@
+---
+tags:
+    - doc
+---
 # CompiledModel
 
 ```python
@@ -10,7 +14,7 @@ class CompiledModel()
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
-|:--------:|:--------:|:---------------:|
+|:---------|:--------:|----------------:|
 | config | `#!python ModelConfig` | Model config that was compiled. |
 | var_names | `#!python list[str]` | Variables as strings. |
 | objective_eqs | `#!python list[sp.Expr]` | Solver targets in symbolic representation. (not used in the solver) | 
@@ -27,6 +31,6 @@ __Fields:__
 __Methods:__
 
 | __Signature__ | __Return Type__ | __Description__ |
-|:-------------:|:---------------:|:---------------:|
+|:--------------|:---------------:|----------------:|
 | `#!python .to_dict()` | `#!python dict` | `CompiledModel` in dictionary form. |
 

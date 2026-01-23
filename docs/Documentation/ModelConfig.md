@@ -1,3 +1,7 @@
+---
+tags:
+    - doc
+---
 # ModelConfig
 
 ```python
@@ -10,7 +14,7 @@ class ModelConfig()
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
-|:--------:|:--------:|:---------------:|
+|:---------|:--------:|----------------:|
 | name | `#!python str` | Model name. |
 | variables | `#!python list[sp.Function]` | Variables as functions of time. |
 | constrained | `#!python dict[Function, bool]` | Dictionary mapping functions to constraint status. |

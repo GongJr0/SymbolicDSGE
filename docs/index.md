@@ -1,6 +1,8 @@
 ---
 tags:
     - info
+hide:
+    - footer
 ---
 
 # Introduction
