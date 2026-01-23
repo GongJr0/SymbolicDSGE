@@ -1,0 +1,83 @@
+name: "TEST"
+
+variables: [u, v, r, Pi, x, r_star]
+constrained:
+    Pi: false
+    x: false
+    r: true
+    v: false
+    r_star: false
+    u: false
+
+parameters: [beta, sigma, kappa,
+             phi_pi, phi_x, rho_r,
+             rho_u, rho_v, sig_u,
+             sig_v, rbar, pi_mean,
+             elb_level]
+
+shocks: [e_u, e_v]
+observables: [Infl, Rate]
+
+equations:
+    # Solver Compatibility Issue:
+    #    Shift all equations such that no lags appear. [Handled in Model Compiler]
+    #    i.e., u(t) = rho_u*u(t-1) + e_u  -->  u(t+1) = rho_u*u(t) + e_u
+
+    #    Time shifts are limited to +-1 period. Shifts of |n| > 1 will result in an error.
+
+
+    model:
+        # Placeholder Phillips Curve:
+        - Pi(t) = beta*Pi(t+1) + kappa*x(t)
+
+        # Placeholder IS / Euler equation:
+        - x(t) = x(t+1) - sigma*(r(t) - Pi(t+1)) + u(t)
+
+        # Placeholder AR(1) demand shock:
+        - u(t+1) = rho_u*u(t)
+
+        # Placeholder Taylor-rule target rate:
+        - r_star(t) = rbar + phi_pi*Pi(t) + phi_x*x(t) + v(t)
+
+        # Placeholder Interest-rate smoothing:
+        - r(t+1) = rho_r*r(t) + (1 - rho_r)*r_star(t+1)
+
+        # Placeholder Monetary policy shock:
+        - v(t+1) = rho_v*v(t)
+
+    constraint:
+        r: r(t)
+
+    observables:
+        # Observed inflation level:
+        Infl: Pi(t) + pi_mean
+        # Observed policy rate:
+        Rate: r(t)
+
+calibration:
+    parameters:
+        # Placeholder Discount factor:
+        beta: 0.99
+
+        # Placeholder Intertemporal elasticity inverse:
+        sigma: 1.0
+
+        # Placeholder NKPC slope kappa:
+        kappa: 0.024
+
+        # Placeholder policy parameters:
+        phi_pi: 2.15
+        phi_x: 0.93
+        rho_r: 0.79
+
+        # Placeholder Demand shock AR(1):
+        rho_u: 0.70
+        sig_u: 0.50
+
+        # Placeholder Monetary policy shock AR(1):
+        rho_v: 0.50
+        sig_v: 0.25
+
+        rbar: 0.0
+        pi_mean: 3.25
+        elb_level: 0.0

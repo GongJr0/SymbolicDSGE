@@ -78,7 +78,7 @@ Shock.place_shocks(
 Modifies the specified indices of a given shock array to the corresponding values. (Returns a modified zero vector if `shock_arr` isn't specified in the class instance)
 
 ???+ warning "Multivariate Implementation"
-    `#!python place_shocks` does not support multivariate adjustments as of now. This is a planned feature for version 0.1.9 of the alpha release cycle.
+    `#!python place_shocks` does not support multivariate adjustments as of now. This is a planned feature for version 0.2.0 of the alpha release cycle.
 
 __Inputs:__
 

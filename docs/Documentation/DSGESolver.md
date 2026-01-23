@@ -51,6 +51,7 @@ Produces a `#!python CompiledModel` object respecting the given orders. `#!pytho
  &nbsp;
 
 __Returns:__
+
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python CompiledModel` | Numerically compiled model components returned as an object. |
@@ -81,6 +82,7 @@ Solves the given compiled model and returns a `#!python SolvedModel` object.
  &nbsp;
 
 __Returns:__
+
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python SolvedModel` | Solved model object with relevant methods attached. |

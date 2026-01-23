@@ -6,9 +6,9 @@ tags:
 # Configuration Guide
 
 ???+ tip "__TL;DR__"
-    You can see an example config [here](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/test.yaml).
+    You can see an example config [here](../assets/test.yaml).
 
-`SymbolicDSGE` models are configured through a YAML-file. Similar to many familiar DSGE engines, the configuration contains:
+`SymbolicDSGE` models are configured through a YAML file. Similar to many familiar DSGE engines, the configuration contains:
 
 - Parameter declarations
 - Constraint definitions
@@ -18,7 +18,7 @@ tags:
 - Shock symbol declarations
 
 This guide contains detailed information about config sections, how they are parsed, and the conventions users are expected to follow for correct parsing.
-Ordering of fields do not matter for the parser, however ordering of the components can change the model behavior. We will start with an empty config and build components to create a valid model in this guide.
+The ordering of fields does not matter for the parser, however ordering of the components can change the model behavior. We will start with an empty config and build components to create a valid model in this guide.
 
 To start with, the configuration accepts a `name` field to specify the model's alias. This name is accessible in the parsed model but never used; it remains in the model object as a reference for users.
 
@@ -46,9 +46,9 @@ Parameters are "constants" that appear in the model equations in some capacity.
 Common examples of parameters are:
 
 - Shock persistence terms
-- Shock variances/covariances
+- Shock (co)variances
 - Steady state values
-- model parameters such as the discount factor (often $\beta$)
+- Model parameters such as the discount factor (often $\beta$)
 
 Ordering of the parameters does not matter in the configuration file.
 The `parameters` field is again declared as a list.
@@ -57,13 +57,13 @@ parameters: [beta, kappa, tau_inv,
              psi_pi, psi_x, rho_r,
              rho_g, rho_z,
              pi_star, r_star,
-             sig_R, sig_g, sig_z,
+             sig_r, sig_g, sig_z,
              rho_gz]
 ```
 
 ???+ warning "Parameter Naming"
 
-    The current config expects all shock sigmas to be defined as `f"sig_{varname}"` and covariance terms as `f"rho_{var1}{var2}"`. The mapping layer will be updated to accept any variable name in future iterations, but the current config falls back to defaults if shocks terms are not accompanied by a `sig_` and/or `rho_` parameter.
+    The current config expects all shock sigmas to be defined as `f"sig_{varname}"` and covariance terms as f"rho_{var1}{var2}", where either order is accepted (`rho_gz` or `rho_zg`). The mapping layer will be updated to accept any variable name in future iterations, but the current config falls back to defaults (`sig_* => 1.0` and `rho_* => 0.0`) if shocks terms are not accompanied by a `sig_` and/or `rho_` parameter.
 
 ???+ note "Calibration Values"
     `SymbolicDSGE` currently expects each parameter to have known values.
@@ -72,10 +72,10 @@ parameters: [beta, kappa, tau_inv,
 ## Shocks
 
 Shocks are the symbols that represent the stochastic components of the model.
-A shock symbol is separate from its variance/covariance and is used to indicate where a respective innovation should be applied in the model equations.
+A shock symbol is separate from its (co)variance and is used to indicate where a respective innovation should be applied in the model equations.
 
 ```yaml
-shocks: [e_g, e_z, e_R]
+shocks: [e_g, e_z, e_r]
 ```
 
 Shock realizations are only injected when the user selects them at simulation time. Therefore, declaring extra variables here and including them in the model equations can be used to test multiple shock configurations from a single model config.
@@ -108,7 +108,7 @@ equations:
     
         - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t) # (2)!
 
-        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_R # (3)!
+        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r # (3)!
 
         - g(t) = rho_g*g(t-1) + e_g # (4)!
 
@@ -117,7 +117,7 @@ equations:
     observables: ...
 ```
 
-1. New Keynesian Philips Curve (NKPC)
+1. New Keynesian Phillips Curve (NKPC)
 2. IS/Euler Equation
 3. Taylor Rule
 4. Demand Shock
@@ -126,7 +126,8 @@ equations:
 Here, we use these variables and parameters that we defined to create the namespace.
 
 ### Constraints
-The constraints field is available and parsed in `SymbolicDSGE`. However, the constraints are currently not supported in the solver and therefore are not enforced. The `constraint` field takes a `{variable: equation, ...}` style dictionary. For correctness, we will leave the field empty in the example config.
+The constraints field is available and parsed in `SymbolicDSGE`. However, the constraints are currently not supported in the solver and therefore are not enforced. The `constraint` field takes a `{variable: equation, ...}` style dictionary. The behavior is similar for the `constrained` toggle; it will be parsed and cross-checked with the given equations. However, the solver will not act on the given equations. For correctness, we will leave the field empty in the example config.
+
 ```yaml
 equations:
     model:
@@ -134,7 +135,7 @@ equations:
     
         - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
-        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_R
+        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
 
         - g(t) = rho_g*g(t-1) + e_g
 
@@ -144,7 +145,8 @@ equations:
 ```
 
 ### Observables
-This field contains the mappings of model variables to real-life observed variables. In our example, we defined two observables in the namespace; and we will define the equations to construct them here. As a note, observable equations are expected to correspond to current time. All past observables will be known at time `t`, and the future values are not supported as "observables" by definition.
+This field contains the mappings of model variables to real-life observed variables. In our example, we defined two observables in the namespace; and we will define the equations to construct them here. Observable equations can be constructed from any parameter/variable combinations. If a constant is required as a scaling factor or an offset, it should be declared as a parameter (to ensure `#! SymPy` parses correctly). As a note, observable equations are expected to correspond to current time. Observable equations must be functions of current state variables. (no `t+1` terms)
+
 ```yaml
 equations:
     model:
@@ -152,7 +154,7 @@ equations:
     
         - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
-        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_R
+        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
 
         - g(t) = rho_g*g(t-1) + e_g
 
@@ -199,7 +201,7 @@ calibration:
         rho_z: 0.85
         rho_gz: 0.36
 
-        sig_R: 0.18
+        sig_r: 0.18
         sig_g: 0.18
         sig_z: 0.64
     shocks: ...
@@ -207,6 +209,10 @@ calibration:
 
 ### Shocks
 The shocks section maps shock variances to the corresponding terms in model equations. All terms defined in the shock namespace must have a value here.
+
+???+ info "Shock Selection at Simulations"
+    At simulation time, shocks are specified by the exogenous state variable names (e.g., `g`, `z`) or by grouped keys (`#!python "g,z"`), not by the innovation symbols (`e_g`)
+
 ```yaml
 calibration:
     parameters:
@@ -226,15 +232,15 @@ calibration:
         rho_z: 0.85
         rho_gz: 0.36
 
-        sig_R: 0.18
+        sig_r: 0.18
         sig_g: 0.18
         sig_z: 0.64
     shocks:
         e_g: sig_g
         e_z: sig_z
-        e_R: sig_R
+        e_r: sig_r
 ```
 
 ## Conclusion
 With all components defined, the configuration file now fully specifies a solvable symbolic DSGE model. The parser will construct the symbolic state-space representation, apply calibration, and prepare the model for solution and simulation.
-For future reference or a read-made boilerplate, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/test.yaml) link to see a test configuration in the `SymbolicDSGE` repository.
+For future reference or a ready-made boilerplate, you can visit [this](../assets/test.yaml) link to see a test configuration in the `SymbolicDSGE` repository.

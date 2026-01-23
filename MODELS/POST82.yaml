@@ -22,10 +22,10 @@ parameters: [beta, kappa, tau_inv,
              psi_pi, psi_x, rho_r,
              rho_g, rho_z,
              pi_star, r_star,
-             sig_R, sig_g, sig_z,
+             sig_r, sig_g, sig_z,
              rho_gz]
 
-shocks: [e_R, e_g, e_z]
+shocks: [e_r, e_g, e_z]
 
 observables: [Infl, Rate]
 
@@ -38,7 +38,7 @@ equations:
     - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
     # Taylor rule in deviations around steady state (keep steady states in observables)
-    - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_R
+    - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
 
     # Demand shock: g_t = rho_g g_{t-1} + e_g,t
     - g(t) = rho_g*g(t-1) + e_g
@@ -73,11 +73,11 @@ calibration:
     rho_z: 0.85
     rho_gz: 0.36
 
-    sig_R: 0.18
+    sig_r: 0.18
     sig_g: 0.18
     sig_z: 0.64
 
   shocks:
-    e_R: sig_R
+    e_r: sig_r
     e_g: sig_g
     e_z: sig_z

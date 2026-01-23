@@ -5,7 +5,7 @@ tags:
 
 # Quick Start Guide
 ???+ tip "__TL;DR__"
-    You can find a demonstration notebook [here](https://github.com/GongJr0/SymbolicDSGE/blob/main/empirical_comparison.ipynb).
+    You can find a demonstration notebook [here](../assets/empirical_comparison.ipynb).
 
 This guide will follow the steps necessary to get from model parsing to simulation.
 We will use a pre-defined config file (accessible in the [repository](https://github.com/GongJr0/SymbolicDSGE/)) `"MODELS/POST82.yaml"`.
@@ -29,7 +29,7 @@ with catch_warnings(): # (1)!
 mat
 ```
 
-1. Equations in a `sp.Matrix` are deprecated, this is only used as a pretty print function.
+1. Wrapping equations in a `#!python sp.Matrix` is deprecated and used here solely for pretty-printing.
 
 We've read the config and displayed the equations in a matrix:
 
@@ -41,7 +41,7 @@ We can see that all variables are converted to `#!python SymPy` objects (symbols
 
 ## Compilation
 
-In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time dependent variable are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolver` is exposed to a single function representing all model equations.
+In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time-dependent variables are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolver` is exposed to a single function representing all model equations.
 
 ```python
 from SymbolicDSGE import DSGESolver
@@ -94,7 +94,7 @@ sol = solver.solve(
     steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
     log_linear=False,
 )
-print("Is stable: ", not sol.policy.stab)  # (2)! 
+print("Is stable: ", sol.policy.stab == 0)  # (2)! 
 print("Eigenvalues: ", sol.policy.eig)
 ```
 
@@ -152,7 +152,7 @@ The method simulates `T` steps given an initial state array and a shock specific
 
 Shock specifications can take two basic forms.
 
-- A callable returning the complete shock array: `#!python Callable[[float | list[float]], ndarray[float64]]`
+- A callable returning the complete shock array: `#!python Callable[[float | ndarray], ndarray]`
 - A `#!python np.ndarray` of innovations
 
 Either specification is delivered to `.sim` in a dictionary corresponding to the variable the innovations are meant to effect.
@@ -180,13 +180,13 @@ sim_shocks = {
 
 ```
 
-1. Notice the seed argument to the class being parametrized through a lambda. This step is not necessary for functionality. It saves the code of declaring two instances with different seeds if two shocks share variances.
+1. Notice the seed argument to the class being parametrized through a lambda. This step is not necessary for functionality. It saves the code of declaring two instances with different seeds if two shocks share distributions.
 2. Seed is passed through here, the code below would operate the same if we used `seed=1` instead of using a lambda.
 3. The `kwargs` specified here are passed to the distribution object in the backend (to `SciPy`'s rvs methods in this case)
 4. `shock_generator` produces the `Callable` object from the parameters given at class initialization. The methods either accept a float `sig_` or a covariance matrix `cov` created inside the `.sim` method.
-5. The value in this pair is a standalone function that does not depend on model parameters. Once created it can be used with any arbitrary `sig_` or `cov` to produce shock arrays as necessary.
+5. The value in this pair is a standalone function that does not depend on model parameters. Once created it can be reused across simulations; the appropriate sig_ or cov is constructed internally from model parameters at simulation time.
 
-`shock_gen()` returns a callable that `.sim` uses in the simulation loop to produce shocks. With the shocks produced, we can use simulate non-deterministic paths as follows:
+`shock_gen()` returns a callable that `.sim` uses in the simulation loop to produce shocks. With the shocks produced, we can simulate stochastic paths as follows:
 
 ```python
 import pandas as pd
@@ -206,7 +206,7 @@ pd.DataFrame(sim_data).head(10)
 2. `"_X"` is a `ndarray` of all non-observable states for each time t. It is deleted here for code brevity in producing a `DataFrame`.
 
 |    |  __g__  | __z__  | __r__  |  __Pi__ |  __x__  |__Infl__ |__Rate__|
-|:----:|:---------:|:--------:|:--------:|:---------:|:---------:|:---------:|:--------:|
+|:--:|:-------:|:------:|:------:|:-------:|:-------:|:-------:|:------:|
 |  0 |  0      | 0      | 0      |  0      |  0      |  3.43   | 6.44   |
 |  1 |  0.0113 | 1.0502 | 0      |  2.0097 |  0.4527 | 11.469  | 6.44   |
 |  2 | -0.2055 | 0.5741 | 0.205  | -0.4441 | -1.6807 |  1.6538 | 7.2601 |
@@ -244,4 +244,9 @@ plt.tight_layout()
 
 ## Further Steps
 
-This guide covers the basic capabilities and usage of `SymbolicDSGE`. Further tools include `SymbolicDSGE.FRED` for easy U.S. macro data retrieval, `SymbolicDSGE.math_utils` for basic detrending, HP filters, etc. and `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed) If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/empirical_comparison.ipynb) link to the file.
+This guide covers the basic capabilities and usage of `SymbolicDSGE`. Further tools include:
+- `SymbolicDSGE.FRED` for easy U.S. macro data retrieval 
+- `SymbolicDSGE.math_utils` for basic detrending, HP filters, etc. 
+- `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed) 
+  
+If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](../assets/empirical_comparison.ipynb) link to the file.

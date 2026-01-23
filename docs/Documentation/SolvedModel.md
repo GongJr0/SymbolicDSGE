@@ -25,14 +25,14 @@ __Fields:__
 __Methods:__
 
 ```python
- SolvedModel.sim(
+SolvedModel.sim(
     T: int, 
     shocks: dict[str, Callable | np.ndarray], # (1)!
     shock_scale: float = 1.0, # (2)!
     x0: np.ndarray | None = None, 
     observables: bool = False
-    ) -> dict[str, np.ndarray[float]]
- ``` 
+) -> dict[str, np.ndarray[float]]
+``` 
 
  1. The dictionary keys can be populated by:
    - An array of shocks `(T, 1) | (T,)` when shocks are for a single variable and `(T, K)` when drawing correlated shocks simultaneously.
