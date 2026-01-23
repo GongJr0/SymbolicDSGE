@@ -9,8 +9,8 @@ def HP_two_sided(
     Apply the Hodrick-Prescott filter to a time series to separate the trend and cyclical components.
 
     Parameters:
-    series (pd.Series | np.ndarray): The input time series data.
-    lambL (float): The smoothing parameter. Default is 1600, commonly used for quarterly data.
+    s (pd.Series | np.ndarray): The input time series data.
+    lamb (float): The smoothing parameter. Default is 1600, commonly used for quarterly data.
 
     Returns:
     trend (pd.Series | np.ndarray): The trend component of the series.
@@ -121,7 +121,7 @@ def annualized_log_percent(
     return annualized_log_percent_change
 
 
-def demean(series: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
+def demean(s: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
     """
     Demean a time series by subtracting its mean.
 
@@ -131,12 +131,12 @@ def demean(series: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
     Returns:
     pd.Series | np.ndarray: The demeaned series.
     """
-    if isinstance(series, pd.Series):
-        mean_value = series.mean()
-        demeaned_series = series - mean_value
+    if isinstance(s, pd.Series):
+        mean_value = s.mean()
+        demeaned_series = s - mean_value
     else:
-        mean_value = np.mean(series)
-        demeaned_series = series - mean_value
+        mean_value = np.mean(s)
+        demeaned_series = s - mean_value
 
     return demeaned_series
 
@@ -146,7 +146,7 @@ def detrend(s: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
     Detrend a time series by removing its linear trend.
 
     Parameters:
-    series (pd.Series | np.ndarray): The input time series data.
+    s (pd.Series | np.ndarray): The input time series data.
 
     Returns:
     pd.Series | np.ndarray: The detrended series.

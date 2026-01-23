@@ -209,7 +209,7 @@ class Shock:
         multivar: bool = False,
         seed: int | None = 0,
         dist_args: tuple = (),
-        dist_kwargs: dict = {},
+        dist_kwargs: dict | None = None,
         shock_arr: ndarray | None = None,
     ) -> None:
 
@@ -218,7 +218,7 @@ class Shock:
         self.multivar = multivar
         self.seed = seed
         self.dist_args = dist_args
-        self.dist_kwargs = dist_kwargs
+        self.dist_kwargs = dist_kwargs if dist_kwargs is not None else {}
         self.shock_arr = shock_arr
 
     # TODO: Pass through array if provided else generate based on dist
@@ -234,7 +234,7 @@ class Shock:
             " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
         )
 
-    def shock_generator(self) -> Callable[[float], ndarray]:
+    def shock_generator(self) -> Callable[[float | ndarray], ndarray]:
         self._assert_generator()
         kwargs = self.dist_kwargs.copy()
         fun = lambda s: abstract_shock_array(

@@ -270,6 +270,7 @@ class SolvedModel:
             if "," in name:
                 # Multi-Var
                 multi_names = [n.strip() for n in name.split(",")]
+
                 # All names must be exogenous and grouped names must not be re-allocated as univariate shocks
                 assert all(
                     (n in self.compiled.var_names[: self.compiled.n_exog])
@@ -277,27 +278,45 @@ class SolvedModel:
                     for n in multi_names
                 )
                 indices = [self.compiled.idx[n] for n in multi_names]
+                perm = np.argsort(indices)
+                multi_names_sorted = [multi_names[i] for i in perm]
+                indices_sorted = [indices[i] for i in perm]
 
                 if isinstance(shock, ndarray):
                     assert shock.shape[1] == len(
                         multi_names
                     ), f"Shock array for {name} must have shape (T, {len(multi_names)})"
+                    shock_sorted = shock[:, perm]
                     out.extend(
-                        zip(indices, [shock[:, i] for i in range(shock.shape[1])])
+                        zip(
+                            indices_sorted,
+                            [shock_sorted[:, i] for i in range(shock_sorted.shape[1])],
+                        )
                     )
 
                 elif callable(shock):
-                    sigs = [self._get_param(f"sig_{n}", 1.0) for n in multi_names]
+                    sigs = [
+                        self._get_param(f"sig_{n}", 1.0) for n in multi_names_sorted
+                    ]
                     rhos = [
                         self._get_rho(n1, n2, 0.0)
-                        for n1 in multi_names
-                        for n2 in multi_names
+                        for n1 in multi_names_sorted
+                        for n2 in multi_names_sorted
                     ]
-                    corr = np.array(rhos).reshape((len(multi_names), len(multi_names)))
+                    corr = np.array(rhos).reshape(
+                        (len(multi_names_sorted), len(multi_names_sorted))
+                    )
                     cov = corr * np.outer(sigs, sigs)
                     mv_mat = shock(cov)
+                    if mv_mat.shape[1] != len(multi_names):
+                        raise ValueError(
+                            f"Shock callable for {name} must return array with shape (T, {len(multi_names)})"
+                        )
                     out.extend(
-                        zip(indices, [mv_mat[:, i] for i in range(mv_mat.shape[1])])
+                        zip(
+                            indices_sorted,
+                            [mv_mat[:, i] for i in range(mv_mat.shape[1])],
+                        )
                     )
                 else:
                     raise TypeError(
