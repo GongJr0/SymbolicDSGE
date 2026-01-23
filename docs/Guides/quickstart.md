@@ -5,7 +5,7 @@ tags:
 
 # Quick Start Guide
 ???+ tip "__TL;DR__"
-    You can find a demonstration notebook [here](../assets/empirical_comparison.ipynb).
+    You can find a demonstration notebook [here](../assets/guide_notebook.ipynb).
 
 This guide will follow the steps necessary to get from model parsing to simulation.
 We will use a pre-defined config file (accessible in the [repository](https://github.com/GongJr0/SymbolicDSGE/)) `"MODELS/POST82.yaml"`.
@@ -158,7 +158,7 @@ Shock specifications can take two basic forms.
 Either specification is delivered to `.sim` in a dictionary corresponding to the variable the innovations are meant to effect.
 In case of multiple shocks with correlation the key for the dictionary uses `"g,z"` syntax. In correlated cases, the `Callable` option input should take a covariance matrix while the array option must be of shape `(T, n_correlated_shocks)`. (order should match the dictionary key)
 
-`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can produce `Callable` generators for both univariate and multivariate shocks. The class has support for all `SciPy` distributions from the `rv_generic` and `multi_rv_generic` hierarchies. Alongside `SciPy` support, a custom distribution implementing the `.rvs` method are supported through the pass-through of distribution args/kwargs.
+`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can produce `Callable` generators for both univariate and multivariate shocks. The class has support for all `SciPy` distributions from the `rv_generic` and `multi_rv_generic` hierarchies. Alongside `SciPy` support, custom distributions implementing the `.rvs` method are supported through the pass-through of distribution `args`/`kwargs`.
 
 ```python
 from SymbolicDSGE import Shock
@@ -245,8 +245,12 @@ plt.tight_layout()
 ## Further Steps
 
 This guide covers the basic capabilities and usage of `SymbolicDSGE`. Further tools include:
+
 - `SymbolicDSGE.FRED` for easy U.S. macro data retrieval 
 - `SymbolicDSGE.math_utils` for basic detrending, HP filters, etc. 
 - `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed) 
   
-If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](../assets/empirical_comparison.ipynb) link to the file.
+If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](../assets/guide_notebook.ipynb) link to the file.
+
+
+[Download Guide Notebook](../assets/guide_notebook.ipynb){ .md-button download="" }
