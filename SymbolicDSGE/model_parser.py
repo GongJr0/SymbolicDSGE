@@ -85,7 +85,6 @@ class ModelParser:
         shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
             {sp.Symbol(k): sp.Symbol(v) for k, v in data["shock_map"].items()}
         )
-        param_map = dict(zip(data["parameters"], params))
         shocks_ls = list(data["shock_map"].keys())
 
         _LOCALS = {
