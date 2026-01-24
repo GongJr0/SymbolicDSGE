@@ -9,7 +9,9 @@ from scipy.stats._distn_infrastructure import rv_generic
 from scipy.stats._multivariate import multi_rv_generic
 from numpy import asarray, ndarray, float64, random, zeros
 
-from typing import Literal, Callable
+from typing import Literal, Callable, cast, overload
+
+import warnings
 
 
 def abstract_shock_array(
@@ -201,6 +203,10 @@ def shock_placement(
     return shocks
 
 
+ShockSpecUni = dict[int, float]
+ShockSpecMulti = dict[tuple[int, int], float]
+
+
 class Shock:
     def __init__(
         self,
@@ -247,11 +253,60 @@ class Shock:
 
         return fun
 
-    def place_shocks(self, shock_spec: dict[int, float]) -> ndarray:
+    @overload
+    def place_shocks(self, shock_spec: ShockSpecUni) -> ndarray: ...
+    @overload
+    def place_shocks(self, shock_spec: ShockSpecMulti) -> ndarray: ...
+
+    def place_shocks(
+        self,
+        shock_spec: ShockSpecUni | ShockSpecMulti,
+    ) -> ndarray:
         if self.shock_arr is not None:
             assert self.shock_arr.shape[0] == self.T, "shock_arr length must match T."
 
-        return shock_placement(self.T, shock_spec, self.shock_arr)
+        if not shock_spec:
+            if self.shock_arr is not None:
+                return self.shock_arr
+            return (
+                zeros((self.T,), dtype=float64)
+                if not self.multivar
+                else zeros((self.T, 0), dtype=float64)
+            )
+
+        if not self.multivar:
+            # Narrow for mypy
+            shock_spec_u = cast(ShockSpecUni, shock_spec)
+
+            for k in shock_spec_u.keys():
+                if k < 0 or k >= self.T:
+                    raise IndexError(f"Time index {k} out of bounds for T={self.T}.")
+            return shock_placement(self.T, shock_spec_u, self.shock_arr)
+
+        # multivar
+        shock_spec_m = cast(ShockSpecMulti, shock_spec)
+
+        for t, k in shock_spec_m.keys():
+            if t < 0 or t >= self.T:
+                raise IndexError(f"Time index {t} out of bounds for T={self.T}.")
+            if k < 0:
+                raise IndexError(f"Shock dimension index {k} must be non-negative.")
+
+        if self.shock_arr is not None:
+            shocks = self.shock_arr
+            K = shocks.shape[1]
+        else:
+            K = max(k for (_, k) in shock_spec_m.keys()) + 1
+            shocks = zeros((self.T, K), dtype=float64)
+
+        for (t, k), val in shock_spec_m.items():
+            if k >= shocks.shape[1]:
+                raise IndexError(
+                    f"Shock dimension index {k} out of bounds for K={shocks.shape[1]}."
+                )
+            shocks[t, k] = float64(val)
+
+        return shocks
 
     def _get_dist(self) -> rv_generic | multi_rv_generic:
         dist = self.dist

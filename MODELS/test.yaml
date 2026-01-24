@@ -4,7 +4,7 @@ variables: [u, v, r, Pi, x, r_star]
 constrained:
     Pi: false
     x: false
-    r: true
+    r: false
     v: false
     r_star: false
     u: false
@@ -15,7 +15,10 @@ parameters: [beta, sigma, kappa,
              sig_v, rbar, pi_mean,
              elb_level]
 
-shocks: [e_u, e_v]
+shock_map:
+    e_u: u
+    e_v: v
+
 observables: [Infl, Rate]
 
 equations:
@@ -34,7 +37,7 @@ equations:
         - x(t) = x(t+1) - sigma*(r(t) - Pi(t+1)) + u(t)
 
         # Placeholder AR(1) demand shock:
-        - u(t+1) = rho_u*u(t)
+        - u(t+1) = rho_u*u(t) + e_u
 
         # Placeholder Taylor-rule target rate:
         - r_star(t) = rbar + phi_pi*Pi(t) + phi_x*x(t) + v(t)
@@ -43,10 +46,9 @@ equations:
         - r(t+1) = rho_r*r(t) + (1 - rho_r)*r_star(t+1)
 
         # Placeholder Monetary policy shock:
-        - v(t+1) = rho_v*v(t)
+        - v(t+1) = rho_v*v(t) + e_v
 
-    constraint:
-        r: r(t)
+    constraint: {}
 
     observables:
         # Observed inflation level:
@@ -81,3 +83,9 @@ calibration:
         rbar: 0.0
         pi_mean: 3.25
         elb_level: 0.0
+    
+    shocks:
+        std:
+            e_u: sig_u
+            e_v: sig_v
+        corr: {}

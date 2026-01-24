@@ -19,6 +19,21 @@ class SymbolGetterDict(Dict[K, V]):
         return super().__getitem__(key)
 
 
+class PairGetterDict(Dict[frozenset[Symbol], V]):
+    def __init__(self, inp: Any) -> None:
+        super().__init__(inp)
+
+    def __getitem__(
+        self, key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str]
+    ) -> Any:
+
+        if isinstance(key, tuple):
+            fmt_key = frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
+        else:
+            fmt_key = key
+        return super().__getitem__(fmt_key)
+
+
 @dataclass
 class Base:
     def __getitem__(self, key: str) -> Any:
@@ -42,6 +57,8 @@ class Equations(Base):
 @dataclass
 class Calib(Base):
     parameters: SymbolGetterDict[Symbol, float64]
+    shock_std: SymbolGetterDict[Symbol, Symbol]
+    shock_corr: PairGetterDict[Symbol]
 
 
 @dataclass
@@ -50,7 +67,7 @@ class ModelConfig(Base):
     variables: list[Function]
     constrained: dict[Function, bool]
     parameters: list[Symbol]
-    shocks: list[Symbol]
+    shock_map: dict[Symbol, Symbol]
     observables: list[Symbol]
     equations: Equations
     calibration: Calib

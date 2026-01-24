@@ -25,7 +25,10 @@ parameters: [beta, kappa, tau_inv,
              sig_r, sig_g, sig_z,
              rho_gz]
 
-shocks: [e_r, e_g, e_z]
+shock_map: 
+  e_r: r
+  e_g: g
+  e_z: z
 
 observables: [Infl, Rate]
 
@@ -76,8 +79,12 @@ calibration:
     sig_r: 0.18
     sig_g: 0.18
     sig_z: 0.64
+  
 
   shocks:
-    e_r: sig_r
-    e_g: sig_g
-    e_z: sig_z
+    std:
+      e_r: sig_r
+      e_g: sig_g
+      e_z: sig_z
+    corr:
+      e_g, e_z: rho_gz

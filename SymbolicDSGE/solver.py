@@ -13,7 +13,7 @@ from typing import Callable, Any, Union, Tuple, TypedDict, Iterable
 
 import matplotlib.pyplot as plt
 
-from .model_config import ModelConfig
+from .model_config import ModelConfig, SymbolGetterDict, PairGetterDict
 
 NDF = NDArray[float64]
 ND = NDArray
@@ -266,6 +266,12 @@ class SolvedModel:
     ) -> list[Tuple[int, NDF]]:
         out: list[Tuple[int, NDF]] = []
 
+        conf = self.compiled.config
+        reverse_shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
+            {v: k for k, v in conf.shock_map.items()}
+        )
+        shock_stds = conf.calibration.shock_std
+
         for name, shock in shocks.items():
             if "," in name:
                 # Multi-Var
@@ -295,13 +301,13 @@ class SolvedModel:
                     )
 
                 elif callable(shock):
-                    sigs = [
-                        self._get_param(f"sig_{n}", 1.0) for n in multi_names_sorted
-                    ]
+                    shock_syms = [reverse_shock_map[n] for n in multi_names_sorted]
+                    sig_params = [shock_stds[sym] for sym in shock_syms]
+                    sigs = [self._get_param(sig, 1.0) for sig in sig_params]
                     rhos = [
                         self._get_rho(n1, n2, 0.0)
-                        for n1 in multi_names_sorted
-                        for n2 in multi_names_sorted
+                        for n1 in shock_syms
+                        for n2 in shock_syms
                     ]
                     corr = np.array(rhos).reshape(
                         (len(multi_names_sorted), len(multi_names_sorted))
@@ -342,14 +348,16 @@ class SolvedModel:
                     )
         return out
 
-    def _get_rho(self, var1: str, var2: str, default: float = 0.0) -> float:
+    def _get_rho(
+        self, var1: str | Symbol, var2: str | Symbol, default: float = 0.0
+    ) -> float:
         """
         Retrieve the correlation coefficient between two variables from the calibration parameters.
         Parameters
         ----------
-        var1 : str
+        var1 : str | Symbol
             The name of the first variable.
-        var2 : str
+        var2 : str | Symbol
             The name of the second variable.
         default : float, optional
             The default value to return if the correlation parameter is not found.
@@ -358,24 +366,24 @@ class SolvedModel:
         float
             The correlation coefficient between var1 and var2.
         """
-        params = self.compiled.config.calibration.parameters
         if var1 == var2:
             return 1.0
 
-        sym = Symbol(f"rho_{var1}{var2}")
-        if sym in params:
-            return float64(params[sym])
-        sym_rev = Symbol(f"rho_{var2}{var1}")
-        if sym_rev in params:
-            return float64(params[sym_rev])
+        conf = self.compiled.config.calibration
+        corrs = conf.shock_corr
+
+        corr = corrs[var1, var2]  # Overloaded __getitem__
+        if corr is not None:
+            return self._get_param(corr, default=default)
+
         return float64(default)
 
-    def _get_param(self, name: str, default: float = None) -> float:
+    def _get_param(self, name: str | Symbol, default: float = None) -> float:
         """
         Retrieve a parameter value by name from the calibration parameters.
         Parameters
         ----------
-        name : str
+        name : str | Symbol
             The name of the parameter to retrieve.
         default : float, optional
             The default value to return if the parameter is not found.
@@ -385,7 +393,7 @@ class SolvedModel:
             The value of the parameter.
         """
         params = self.compiled.config.calibration.parameters
-        sym = Symbol(name)
+        sym = Symbol(name) if isinstance(name, str) else name
         if sym in params:
             return float64(params[sym])
         elif default is not None:

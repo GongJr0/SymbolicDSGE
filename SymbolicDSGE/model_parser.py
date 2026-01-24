@@ -1,4 +1,10 @@
-from .model_config import ModelConfig, Equations, Calib, SymbolGetterDict
+from .model_config import (
+    ModelConfig,
+    Equations,
+    Calib,
+    SymbolGetterDict,
+    PairGetterDict,
+)
 from pathlib import Path
 import yaml
 import sympy as sp
@@ -75,16 +81,18 @@ class ModelParser:
             zip(variables, [data["constrained"][var] for var in data["variables"]])
         )
         params: list[Symbol] = list(sp.symbols(data["parameters"]))
-        shocks: list[Symbol] = list(sp.symbols(data["shocks"]))
         observables: list[Symbol] = list(sp.symbols(data["observables"]))
-
+        shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
+            {sp.Symbol(k): sp.Symbol(v) for k, v in data["shock_map"].items()}
+        )
         param_map = dict(zip(data["parameters"], params))
+        shocks_ls = list(data["shock_map"].keys())
 
         _LOCALS = {
             "t": t,
             **{var.name: var for var in variables},
             **{param.name: param for param in params},
-            **{shock.name: shock for shock in shocks},
+            **{shock.name: shock for shock in shock_map.keys()},
             **{obs.name: obs for obs in observables},
         }
 
@@ -142,14 +150,48 @@ class ModelParser:
                 if param_name in data["calibration"]["parameters"]
             }
         )
-        calibration = Calib(parameters=parameters)
+
+        shock_std: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
+            {
+                _LOCALS[shock_name]: (
+                    sp.Symbol(data["calibration"]["shocks"]["std"][shock_name])
+                    if shock_name in data["calibration"]["shocks"]["std"]
+                    else None
+                )
+                for shock_name in shocks_ls
+            }
+        )
+
+        unique_pairs = {
+            frozenset((i, j)) for i in shocks_ls for j in shocks_ls if i != j
+        }
+        shock_corr: dict[frozenset[Symbol], Symbol | None] = {}
+        for pair in data["calibration"]["shocks"]["corr"]:
+            shocks_in_pair = [s.strip() for s in pair.split(",")]
+            if len(shocks_in_pair) != 2:
+                raise ValueError(
+                    f"Correlation pair must contain exactly two shocks: {pair}"
+                )
+            shock1, shock2 = shocks_in_pair
+            key = frozenset((_LOCALS[shock1], _LOCALS[shock2]))
+            shock_corr[key] = sp.Symbol(data["calibration"]["shocks"]["corr"][pair])
+        for pair in unique_pairs:
+            pair_sym = frozenset((_LOCALS[list(pair)[0]], _LOCALS[list(pair)[1]]))
+            if pair_sym not in shock_corr:
+                shock_corr[pair_sym] = None
+
+        calibration = Calib(
+            parameters=parameters,
+            shock_std=shock_std,
+            shock_corr=PairGetterDict(shock_corr),
+        )
 
         return ModelConfig(
             name=name,
             variables=variables,
             constrained=constrained,
             parameters=params,
-            shocks=shocks,
+            shock_map=shock_map,
             observables=observables,
             equations=equations,
             calibration=calibration,
