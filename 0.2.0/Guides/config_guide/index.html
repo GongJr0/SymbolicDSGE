@@ -1311,7 +1311,7 @@ estimation/inference will be implemented but are not accessible as of now.</p>
 </details>
 <p>Shocks are the symbols that represent the stochastic components of the model.
 A shock symbol is separate from its (co)variance and is used to indicate where a respective innovation should be applied in the model equations.</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">shocks_map</span><span class="p">:</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">shock_map</span><span class="p">:</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="nt">e_r</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">r</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">e_g</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">g</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">e_z</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">z</span>
@@ -1426,7 +1426,11 @@ All parameters defined in the namespace must (for now) have a value entry here.
 </span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="w">    </span><span class="nt">shocks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">...</span>
 </span></code></pre></div></p>
 <h3 id="shocks_1">Shocks</h3>
-<p>The shocks section maps shock (co)variances to the corresponding terms in model equations. All terms defined in the shock namespace must have a value here.</p>
+<p>The shocks section maps shock (co)variances to the corresponding terms in model equations. Shock terms that are defined but not included in this field will use default values.</p>
+<ul>
+<li>Innovations without a specified standard deviation will assume <code>1.0</code></li>
+<li>Correlation between excluded pairs will assume <code>0.0</code> </li>
+</ul>
 <details class="warning" open="open">
 <summary>Shock Parameter Convention</summary>
 <p>To align with <code>SciPy</code> distributions' signatures, the standard deviations of stochastic terms are used instead of the variance.</p>
