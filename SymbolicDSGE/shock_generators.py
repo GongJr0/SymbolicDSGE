@@ -291,7 +291,6 @@ class Shock:
 
         if self.shock_arr is not None:
             shocks = self.shock_arr
-            K = shocks.shape[1]
         else:
             K = max(k for (_, k) in shock_spec_m.keys()) + 1
             shocks = zeros((self.T, K), dtype=float64)
