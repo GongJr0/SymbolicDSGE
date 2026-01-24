@@ -11,9 +11,6 @@ from numpy import asarray, ndarray, float64, random, zeros
 
 from typing import Literal, Callable, cast, overload
 
-import warnings
-
-
 def abstract_shock_array(
     T: int,
     seed: int | None,
