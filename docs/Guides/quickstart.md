@@ -67,7 +67,7 @@ print("Equations as passed to the solver: \n", compiled.equations)
 
 At compilation, the equations are transformed as shown in the code output:
 ```
-Equations with symbols removed: 
+Equations with symbols removed:
  -beta*fwd_Pi + cur_Pi - cur_x*kappa - cur_z
 -cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
 -cur_r*rho_r - e_R + fwd_r + (rho_r - 1)*(fwd_Pi*psi_pi + fwd_x*psi_x)
@@ -75,12 +75,12 @@ Equations with symbols removed:
 -cur_z*rho_z - e_z + fwd_z
 
 
-Equations as passed to the solver: 
+Equations as passed to the solver:
  <function DSGESolver.compile.<locals>.equations at 0x0000012D16AB5B20>
 ```
 
 ???+ warning "Variable Placement"
-    The solver relies on the exogenous variables being placed in the first indices. You should ensure the first `n_exog` entries of the order correctly map to the exogenous variables. (either through the config or via the ordering) 
+    The solver relies on the exogenous variables being placed in the first indices. You should ensure the first `n_exog` entries of the order correctly map to the exogenous variables. (either through the config or via the ordering)
 
 ## Solution
 The solution step takes steady-state values and optionally parameter calibrations to provide a `#!python SolvedModel`.
@@ -94,7 +94,7 @@ sol = solver.solve(
     steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
     log_linear=False,
 )
-print("Is stable: ", sol.policy.stab == 0)  # (2)! 
+print("Is stable: ", sol.policy.stab == 0)  # (2)!
 print("Eigenvalues: ", sol.policy.eig)
 ```
 
@@ -246,10 +246,10 @@ plt.tight_layout()
 
 This guide covers the basic capabilities and usage of `SymbolicDSGE`. Further tools include:
 
-- `SymbolicDSGE.FRED` for easy U.S. macro data retrieval 
-- `SymbolicDSGE.math_utils` for basic detrending, HP filters, etc. 
-- `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed) 
-  
+- `SymbolicDSGE.FRED` for easy U.S. macro data retrieval
+- `SymbolicDSGE.math_utils` for basic detrending, HP filters, etc.
+- `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed)
+
 If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](../assets/guide_notebook.ipynb) link to the file.
 
 

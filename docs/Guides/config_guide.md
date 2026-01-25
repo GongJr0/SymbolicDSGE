@@ -68,7 +68,7 @@ parameters: [beta, kappa, tau_inv,
 ## Shocks
 
 ???+ note "Wording Convention"
-    This guide uses the term "(co)variance" to refer to a shock term's variance/covariance parameters for brevity. It's important to note that `SymbolicDSGE` expects __standard deviations__ and __correlation coefficients__ in the configuration. 
+    This guide uses the term "(co)variance" to refer to a shock term's variance/covariance parameters for brevity. It's important to note that `SymbolicDSGE` expects __standard deviations__ and __correlation coefficients__ in the configuration.
 
 Shocks are the symbols that represent the stochastic components of the model.
 A shock symbol is separate from its (co)variance and is used to indicate where a respective innovation should be applied in the model equations.
@@ -107,7 +107,7 @@ This field contains the state-space definition. Multiple equations are supplied 
 equations:
     model:
         - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t) # (1)!
-    
+
         - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t) # (2)!
 
         - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r # (3)!
@@ -134,7 +134,7 @@ The constraints field is available and parsed in `SymbolicDSGE`. However, the co
 equations:
     model:
         - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
-    
+
         - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
         - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
@@ -153,7 +153,7 @@ This field contains the mappings of model variables to real-life observed variab
 equations:
     model:
         - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
-    
+
         - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
         - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
@@ -169,7 +169,7 @@ equations:
 ```
 
 1. Annualized inflation from quarterly gap
-2. Annualized nominal rate from quarterly gap. 
+2. Annualized nominal rate from quarterly gap.
 
 
 ## Calibration
@@ -182,7 +182,7 @@ calibration:
 ```
 
 ### Parameters
-This section is used to define the known values of model parameters. 
+This section is used to define the known values of model parameters.
 All parameters defined in the namespace must (for now) have a value entry here.
 ```yaml
 calibration:
@@ -213,8 +213,8 @@ calibration:
 The shocks section maps shock (co)variances to the corresponding terms in model equations. Shock terms that are defined but not included in this field will use default values.
 
 - Innovations without a specified standard deviation will assume `1.0`
-- Correlation between excluded pairs will assume `0.0` 
-  
+- Correlation between excluded pairs will assume `0.0`
+
 ???+ warning "Shock Parameter Convention"
     To align with `SciPy` distributions' signatures, the standard deviations of stochastic terms are used instead of the variance.
 

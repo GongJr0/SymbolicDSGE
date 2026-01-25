@@ -83,7 +83,7 @@ calibration:
         rbar: 0.0
         pi_mean: 3.25
         elb_level: 0.0
-    
+
     shocks:
         std:
             e_u: sig_u

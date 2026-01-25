@@ -10,7 +10,7 @@ tags:
     ```bash
     pip install SymbolicDSGE[fred]
     ```
-    
+
     to get the required packages.
 
 ???+ warning "API Key Required"

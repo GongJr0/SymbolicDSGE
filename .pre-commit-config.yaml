@@ -39,3 +39,17 @@ repos:
         require_serial: true
         always_run: true
         pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+
+      - id: end-of-file-fixer
+        name: EoF Fixer
+        description: "Ensure files end with a newline"
+        entry: end-of-file-fixer
+
+      - id: trailing-whitespace
+        name: Trailing Whitespace Remover
+        description: "Remove trailing whitespace"
+        entry: trailing-whitespace-fixer

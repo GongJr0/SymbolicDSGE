@@ -5,7 +5,7 @@ tags:
 # KalmanFilter
 ??? info "Kalman Filter Wiki Page"
     You can refer to the Wikipedia page for derivations and the underlying process. The documentation only includes the user-facing interface.
-    
+
     [Kalman Filter | Wikipedia](https://en.wikipedia.org/wiki/Kalman_filter){ .md-button }
 
 ```python

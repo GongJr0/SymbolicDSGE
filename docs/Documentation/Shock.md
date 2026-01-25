@@ -6,7 +6,7 @@ tags:
 
 ```python
 class Shock(
-    T: int, 
+    T: int,
     dist: Literal['norm', 't', 'uni'] | rv_generic | multi_rv_generic | None = None,
     multivar: bool = False,
     seed: int | None = 0, # (1)!
@@ -23,7 +23,7 @@ class Shock(
 ???+ warning "Multivariate Uniform Distribution Support"
     Multivariate uniforms are not identifiable even with known bounds and covariances. A specific support function must be supplied to determine an exact shape; with the exceptions of rectangular (no covariance) and ellipsoid (assumed shape) cases.
 
-    Support functions, and derivation techniques for multivariate uniform distributions will not be implemented unless explicitly requested. 
+    Support functions, and derivation techniques for multivariate uniform distributions will not be implemented unless explicitly requested.
 
 ??? info "Custom Distributions"
     The underlying generators are written to accept any class implementing a `#!python .rvs` method (abstract method from `#!python SciPy`). Writing a subclass of either `#!python SciPy` abstraction and implementing said method allows the creation of random values in any desired way.
@@ -86,8 +86,8 @@ Modifies the specified indices of a given shock array to the corresponding value
 `#!python place_shocks` supports univariate and multivariate array manipulations via overloading.
 
 ???+ warning "Array Shape Inference"
-    In univariate cases, the array shape can be inferred accurately using `#!python Shock.T`. 
-    
+    In univariate cases, the array shape can be inferred accurately using `#!python Shock.T`.
+
     In multivariate cases, the number of columns cannot be inferred uniquely from T alone. If `shock_arr` is not provided, `SymbolicDSGE` infers K from `shock_spec` as `#!python K = max_col_idx + 1` where `#!python max_col_idx = max(col_idx for (t, col_idx) in shock_spec)`.
 
 ???+ note "Index Bound Enforcement"
@@ -110,7 +110,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python np.ndarray[float]` | Array with specified indices modified as per the specification. | 
+| `#!python np.ndarray[float]` | Array with specified indices modified as per the specification. |
 
 __Examples:__
 
@@ -135,4 +135,4 @@ Shock(T=10, multivar=True).place_shocks(
 1. Sets `output[0] = 1.0` and `output[3] = -0.5`.
 2. Returns shape `(10,)`
 3. Sets `output[0, 0] = 1.0` and `output[0, 1] = 2.0`.
-4. Returns shape `(10, 2)` 
+4. Returns shape `(10, 2)`

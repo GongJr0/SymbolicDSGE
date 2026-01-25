@@ -22,4 +22,4 @@ __Fields:__
 | shocks | `#!python list[sp.Symbol]` | Shock variables as symbols. |
 | observables | `#!python list[sp.Symbol]` | Observable variables as symbols. |
 | equations | `#!python Equations` | `dataclass` containing model, constraint, and observable equations.
-| calibration | `#!python Calib` | `dataclass` of parameter calibrations and shock-to-sigma mappings. | 
+| calibration | `#!python Calib` | `dataclass` of parameter calibrations and shock-to-sigma mappings. |

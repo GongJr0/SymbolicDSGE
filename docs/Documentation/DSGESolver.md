@@ -21,24 +21,24 @@ __Methods:__
 
 ```python
 DSGESolver.compile(
-    variable_order: list[sp.Function], 
-    n_state: int = None, 
-    n_exog: int = None, 
+    variable_order: list[sp.Function],
+    n_state: int = None,
+    n_exog: int = None,
     params_order: list[str] = None
-    ) -> CompiledModel 
+    ) -> CompiledModel
 ```
 
 ???+ warning "Variable Ordering Convention"
     The model expects the first `#!python n_exog` variables to be the exogenous components. Before solving the model either;
-    
+
     - Ensure the variable ordering in the config file follows this convention.
-    - Supply an order specification at compile time. 
+    - Supply an order specification at compile time.
 
 ??? info "Planned Changes"
-    Current input constraints will be eliminated as `#! SymbolicDSGE` moves towards the beta releases. `n_exog` and `n_state` will be inferred through flags in the config; and variable ordering will be managed internally. 
+    Current input constraints will be eliminated as `#! SymbolicDSGE` moves towards the beta releases. `n_exog` and `n_state` will be inferred through flags in the config; and variable ordering will be managed internally.
 
 Produces a `#!python CompiledModel` object respecting the given orders. `#!python n_exog` and `#!python n_state` must be supplied.
- 
+
  __Inputs:__
 
 | __Name__ | __Description__ |
@@ -61,12 +61,12 @@ __Returns:__
 
 ```python
 SolvedModel.solve(
-    compiled: CompiledModel, 
-    parameters: dict[str, float] = None, 
-    steady_state: ndarray[float] | dict[str, float] = None, 
+    compiled: CompiledModel,
+    parameters: dict[str, float] = None,
+    steady_state: ndarray[float] | dict[str, float] = None,
     log_linear: bool = False
     ) -> SolvedModel
-``` 
+```
 
 Solves the given compiled model and returns a `#!python SolvedModel` object.
 
