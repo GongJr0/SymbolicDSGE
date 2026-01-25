@@ -23,7 +23,7 @@ parameters: [beta, kappa, tau_inv,
              rho_g, rho_z,
              pi_star, r_star,
              sig_r, sig_g, sig_z,
-             rho_gz]
+             rho_gz, meas_infl, meas_rate, meas_rho_ir]
 
 shock_map:
   e_r: r
@@ -80,6 +80,10 @@ calibration:
     sig_g: 0.18
     sig_z: 0.64
 
+    meas_infl: 0.20
+    meas_rate: 0.10
+    meas_rho_ir: 0.0
+
 
   shocks:
     std:
@@ -88,3 +92,26 @@ calibration:
       e_z: sig_z
     corr:
       e_g, e_z: rho_gz
+
+kalman:
+  y: [Infl, Rate]
+
+  R:
+    std:
+      Infl: meas_infl
+      Rate: meas_rate
+    corr:
+      Infl, Rate: meas_rho_ir
+
+  P0:
+    mode: "diag" # "diag" | "scaled_I" | "user"
+    scale: 100.0
+    diag:
+      g: 1.0
+      z: 1.0
+      r: 1.0
+      Pi: 1.0
+      x: 1.0
+
+  jitter: 1e-10
+  symmetrize: true
