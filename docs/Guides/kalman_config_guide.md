@@ -104,7 +104,7 @@ kalman:
 ```
 
 1. The number specified is added to covariance matrices if their Cholesky decomposition fails.
-2. Covariance matrices are symmetrized if this field is `#!yaml true`. Symmetrization is applied as $(M \times M^\top)/2$.
+2. Covariance matrices are symmetrized if this field is `#!yaml true`. Symmetrization is applied as $(M + M^\top)/2$.
 
 # Conclusion
 
