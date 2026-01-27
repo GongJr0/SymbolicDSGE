@@ -28,7 +28,7 @@ y: ["Infl", "Rate"] # (1)!
 
 1. The listed names are observable names defined in the model configuration
 
-To ensure matrix alignment, names given here will be reordered to match their ordering in the model configuration. You can check the order via `ModelConfig.observables` or `CompiledModel.observation_names` to confirm the positions to expect the output arrays in.
+To ensure matrix alignment, names given here will be reordered to match their ordering in the model configuration. You can check the order via `ModelConfig.observables` or `CompiledModel.observable_names` to confirm the positions to expect the output arrays in.
 
 ???+ example "Alignment Demonstration"
     Assume we have three observables and use two of them. In the model config, we defined `#!yaml observables: [obs1, obs2, obs3]` and for the KF configuration, we used `#!yaml y: [obs3, obs1]`.
