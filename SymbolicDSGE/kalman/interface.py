@@ -241,7 +241,7 @@ class KalmanInterface(KalmanFilter):
         canon_idx = self._obs_idx
 
         if obs is None:
-            if (obs_ls := getattr(self.kalman_config, "y", None)) is not None:
+            if (obs_ls := getattr(self.kalman_config, "y_names", None)) is not None:
                 obs_given = list(obs_ls)
             else:
                 obs_given = list(canon)  # default: all observables in canonical order
