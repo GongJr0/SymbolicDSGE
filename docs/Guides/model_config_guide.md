@@ -3,7 +3,7 @@ tags:
     - guide
 ---
 
-# Configuration Guide
+# Model Configuration Guide
 
 ???+ tip "__TL;DR__"
     You can see an example config [here](../assets/test.yaml).
@@ -257,6 +257,6 @@ Innovation terms are paired with the relevant (co)variance parameters through th
 ## Conclusion
 With all components defined, the configuration file now fully specifies a solvable symbolic DSGE model. The parser will construct the symbolic state-space representation, apply calibration, and prepare the model for solution and simulation.
 
-For future reference or a ready-made boilerplate, you can visit [this](../assets/test.yaml) link to see a test configuration in the `SymbolicDSGE` repository.
+For future reference or a ready-made boilerplate, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/POST82.yaml) link to see a test configuration in the `SymbolicDSGE` repository.
 
 [Download Test Config](../assets/test.yaml){ .md-button download="" }

@@ -22,6 +22,14 @@ __Fields:__
 
 &nbsp;
 
+__Properties:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| config | `#!python ModelConfig` | Parsed model configuration object. |
+| kalman_config | `#!python KalmanConfig` | Parsed Kalman Filter configuration object. |
+
+
 __Methods:__
 
 ```python
@@ -153,6 +161,55 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python None` | Displays a plot of the paths created by a given config. |
+
+&nbsp;
+
+```python
+SolvedModel.kalman(
+    y: ndarray | DataFrame,
+    *,
+    observables: list[str] | None = None, # (1)!
+    x0: ndarray | None = None, # (2)!
+    p0_mode: Literal['diag', 'eye'] | None = None, # (3)!
+    p0_scale: float | None = None, # (4)!
+    jitter: float | None = None, # (5)!
+    symmetrize: bool | None = None, # (6)!
+    return_shocks: bool = False,
+    _debug: bool = False
+) -> FilterResult
+```
+
+1. `None`: Use `y_names` from `KalmanConfig`. If is not specified, use all observables.
+2. `None`: Use a zero vector.
+3. `None`: Use `P0.mode` from `KalmanConfig`. If `P0.mode` is not specified, use 'eye'.
+4. `None`: Use `P0.scale` from `KalmanConfig`. If `P0.scale` is not specified, use '1.0'.
+5. `None`: Use `jitter` from `KalmanConfig`. If `jitter` is not specified, use '0.0'.
+6. `None`: Use `symmetrize` from `KalmanConfig`. If `symmetrize` is not specified, use 'False'.
+
+Run a Kalman Filter application on the observables specified.
+
+???+ info "`y` Array Alignment"
+    When a DataFrame is used as `y`, column names will be used to align and order observables' names and position. However, for `ndarray` inputs, the method assumes names in `observables` and columns of `y` are position-aligned.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| y | observations to filter. |
+| observables | Name of corresponding model measurements. |
+| x0 | Initial state vector. |
+| p0_mode | Generation strategy for $P_0$. `diag` uses values given in the config (`#!python diag_mat * scale`) and `eye` uses (`#!python np.eye(n) * scale`) |
+| p0_scale | Scaling factor for the $P_0$ matrix. |
+| jitter | Jitter term added to matrices when Cholesky fails. |
+| symmetrize | Symmetrize covariances at each filter pass if `True`. |
+| return_shocks | Include the estimated shocks in the return object if `True`. |
+| _debug | Print debug information about filter inputs if `True`. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python FilterResult | `dataclass` containing information on filter state, y, diagnostics, etc. |
 
 &nbsp;
 

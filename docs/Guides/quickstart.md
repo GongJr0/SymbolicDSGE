@@ -4,7 +4,7 @@ tags:
 ---
 
 # Quick Start Guide
-???+ tip "__TL;DR__"
+??? tip "__TL;DR__"
     You can find a demonstration notebook [here](../assets/guide_notebook.ipynb).
 
 This guide will follow the steps necessary to get from model parsing to simulation.

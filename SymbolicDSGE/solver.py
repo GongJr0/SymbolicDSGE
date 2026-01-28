@@ -9,11 +9,14 @@ import pandas as pd  # fuck linearsolve
 import linearsolve
 
 from dataclasses import dataclass, asdict
-from typing import Callable, Any, Union, Tuple, TypedDict, Iterable
+from typing import Callable, Any, Union, Tuple, TypedDict, Literal
 
 import matplotlib.pyplot as plt
 
 from .model_config import ModelConfig, SymbolGetterDict
+from .kalman.config import KalmanConfig
+from .kalman.interface import KalmanInterface
+from .kalman.filter import FilterResult
 
 NDF = NDArray[float64]
 ND = NDArray
@@ -27,6 +30,9 @@ class MeasurementSpec(TypedDict):
 @dataclass(frozen=True)
 class CompiledModel:
     config: ModelConfig
+    kalman: KalmanConfig | None
+
+    cur_syms: list[Symbol]
 
     var_names: list[str]
     idx: dict[str, int]
@@ -52,6 +58,14 @@ class SolvedModel:
     policy: Any
     A: ndarray
     B: ndarray
+
+    @property
+    def config(self) -> ModelConfig:
+        return self.compiled.config
+
+    @property
+    def kalman_config(self) -> KalmanConfig | None:
+        return self.compiled.kalman
 
     def sim(
         self,
@@ -88,13 +102,13 @@ class SolvedModel:
         dict[str, ndarray]
             A dictionary mapping variable names to their simulated time series.
         """
-
-        conf = self.compiled.config
         n = self.A.shape[0]
 
         if x0 is None:
             x0 = np.zeros((n,))
         x0 = asarray(x0, dtype=float64)
+        n_state = self.compiled.n_state
+        x0[n_state:] = x0[:n_state] @ np.real_if_close(self.policy.f.T)
 
         shock_mat = np.zeros(
             (T, self.B.shape[1]), dtype=float
@@ -119,15 +133,8 @@ class SolvedModel:
         out["_X"] = X  # Include full state matrix for reference
 
         if observables:
-            Y = np.zeros((T + 1, len(self.compiled.observable_names)), dtype=float64)
-            for i, func in enumerate(self.compiled.observable_funcs):
-                for t in range(T + 1):
-                    cur = X[t, :]
-                    params = [
-                        p for p in self.compiled.config.calibration.parameters.values()
-                    ]
-                    Y[t, i] = func(*cur, *params)
-
+            C, d = self._build_C_d_from_obs(self.compiled.observable_names)
+            Y = X @ C.T + d
             for i, name in enumerate(self.compiled.observable_names):
                 out[name] = Y[:, i]
 
@@ -167,9 +174,14 @@ class SolvedModel:
         conf = self.compiled.config
 
         shock_spec = {}
+        rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
+            {v: k for k, v in self.config.shock_map.items()}
+        )  # variable -> innovation
+        sig_map = conf.calibration.shock_std
         for s in shocks:
-            sym = Symbol(f"sig_{s}")
-            sig = conf.calibration.parameters.get(sym, 1.0)
+            sym = rev[s]
+            sig_sym = sig_map.get(sym)
+            sig = conf.calibration.parameters.get(sig_sym, 1.0)
             arr = np.zeros((T,), dtype=float64)
             arr[0] = sig
             shock_spec[s] = arr
@@ -253,14 +265,6 @@ class SolvedModel:
         """
         return asdict(self)
 
-    def _build_cov(self, vars: Iterable[str]) -> NDF:
-        sig = np.array([self._get_param(f"sig_{v}", 1.0) for v in vars])
-        rho = np.array(
-            [[self._get_param(f"rho_{v1}{v2}", 0.0) for v2 in vars] for v1 in vars]
-        )
-        cov = rho * np.outer(sig, sig)
-        return cov
-
     def _shock_unpack(
         self, shocks: dict[str, NDF | Callable[[float | list[list[float]]], NDF]]
     ) -> list[Tuple[int, NDF]]:
@@ -313,6 +317,7 @@ class SolvedModel:
                         (len(multi_names_sorted), len(multi_names_sorted))
                     )
                     cov = corr * np.outer(sigs, sigs)
+
                     mv_mat = shock(cov)
                     if mv_mat.shape[1] != len(multi_names):
                         raise ValueError(
@@ -336,7 +341,10 @@ class SolvedModel:
                     )
                 idx = self.compiled.idx[name]
                 if callable(shock):
-                    sig = self._get_param(f"sig_{name}", 1.0)
+                    sym = reverse_shock_map[name]
+                    sig_param = shock_stds[sym]
+                    sig = self._get_param(sig_param, 1.0)
+
                     shock_vals = shock(sig)
                     out.append((idx, shock_vals))
                 elif isinstance(shock, ndarray):
@@ -429,10 +437,78 @@ class SolvedModel:
                     d[i] += float64(c)
         return C, d, obs_names
 
+    def _build_C_d_from_obs(
+        self,
+        y_names: list[str],
+    ) -> Tuple[NDF, NDF]:
+
+        obs_expr = dict(
+            zip(self.compiled.observable_names, self.compiled.observable_eqs)
+        )
+        param_subs = {
+            p: float64(v)
+            for p, v in self.compiled.config.calibration.parameters.items()
+        }
+
+        m = len(y_names)
+        n = self.A.shape[0]
+
+        C = np.zeros((m, n), dtype=float64)
+        d = np.zeros((m,), dtype=float64)
+
+        zero_subs = {s: 0.0 for s in self.compiled.cur_syms}
+
+        for i, y in enumerate(y_names):
+            expr = obs_expr[y]
+
+            # Constants
+            d_i = expr.subs(zero_subs).subs(param_subs)
+            d[i] = float64(d_i)
+
+            # Linear Coefficients
+            for j, sym in enumerate(self.compiled.cur_syms):
+                a = expr.coeff(sym)
+                if a != 0:
+                    a = a.subs(param_subs)
+                    C[i, j] = float64(a)
+
+        return C, d
+
+    def kalman(
+        self,
+        y: NDF | pd.DataFrame,
+        *,
+        observables: list[str] | None = None,
+        x0: NDF | None = None,
+        p0_mode: Literal["diag", "eye"] | None = None,
+        p0_scale: float | float64 | None = None,
+        jitter: float | float64 | None = None,
+        symmetrize: bool | None = None,
+        return_shocks: bool = False,
+        _debug: bool = False,
+    ) -> FilterResult:
+
+        ki = KalmanInterface(
+            model=self,
+            observables=observables,
+            y=y,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+            return_shocks=return_shocks,
+        )
+
+        run = ki.filter(x0=x0, _debug=_debug)
+        if _debug:
+            print(ki._debug_info)
+        return run
+
 
 class DSGESolver:
-    def __init__(self, model_config: ModelConfig):
+    def __init__(self, model_config: ModelConfig, kalman_config: KalmanConfig) -> None:
         self.model_config = model_config
+        self.kalman_config = kalman_config
         self.t = sp.Symbol("t", integer=True)
 
     def compile(
@@ -445,6 +521,7 @@ class DSGESolver:
     ) -> CompiledModel:
 
         conf = self.model_config
+        kalman_conf = self.kalman_config
         t = self.t
 
         # Convert model to minimization problem
@@ -539,6 +616,8 @@ class DSGESolver:
 
         return CompiledModel(
             config=conf,
+            kalman=kalman_conf,
+            cur_syms=cur_syms,
             var_names=var_order,
             idx=idx,
             objective_eqs=compiled,

@@ -45,8 +45,10 @@ class FilterResult:
     P_pred: NDF
     P_filt: NDF
 
-    y_pred: NDF
-    innov: NDF
+    y_pred: NDF  # y_{t|t-1} = C x_pred + d
+    y_filt: NDF  # y_{t|t}   = C x_filt + d
+
+    innov: NDF  # pre-update
     S: NDF
 
     eps_hat: NDF | None = None
@@ -198,6 +200,7 @@ class KalmanFilter:
         P_filt = zeros((T, n, n), dtype=float64)
 
         y_pred = zeros((T, m), dtype=float64)
+        y_filt = zeros((T, m), dtype=float64)
 
         v = zeros((T, m), dtype=float64)  # innovations
         S = zeros((T, m, m), dtype=float64)  # innovation cov
@@ -234,6 +237,7 @@ class KalmanFilter:
 
             # Update outputs
             x_t_filt = x_t_pred + K_t @ v_t
+            y_t_filt = C @ x_t_filt + d
 
             KC = K_t @ C
             P_t_filt = (In - KC) @ P_t_pred @ (In - KC).T + K_t @ R @ K_t.T
@@ -256,6 +260,7 @@ class KalmanFilter:
             P_filt[t] = P_t_filt
 
             y_pred[t] = y_t_pred
+            y_filt[t] = y_t_filt
 
             v[t] = v_t
             S[t] = S_t
@@ -270,6 +275,7 @@ class KalmanFilter:
             P_pred=P_pred,
             P_filt=P_filt,
             y_pred=y_pred,
+            y_filt=y_filt,
             innov=v,
             S=S,
             eps_hat=eps_hat,

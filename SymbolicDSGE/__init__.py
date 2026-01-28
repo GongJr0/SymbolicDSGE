@@ -3,7 +3,7 @@ from .model_parser import ModelParser
 from .solver import DSGESolver
 from .fred import FRED
 from .shock_generators import Shock
-from .kalman import KalmanFilter
+from .kalman.filter import KalmanFilter
 from . import math_utils
 
 __all__ = [

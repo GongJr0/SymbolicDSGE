@@ -1,91 +1,107 @@
 name: "TEST"
 
-variables: [u, v, r, Pi, x, r_star]
+variables: [g, z, r, x, Pi]
 constrained:
-    Pi: false
-    x: false
-    r: false
-    v: false
-    r_star: false
-    u: false
+  Pi: false
+  x: false
+  r: false
+  g: false
+  z: false
 
-parameters: [beta, sigma, kappa,
-             phi_pi, phi_x, rho_r,
-             rho_u, rho_v, sig_u,
-             sig_v, rbar, pi_mean,
-             elb_level]
+parameters: [beta, kappa, tau_inv,
+             psi_pi, psi_x, rho_r,
+             rho_g, rho_z,
+             pi_star, r_star,
+             sig_r, sig_g, sig_z,
+             rho_gz,
+             meas_infl, meas_rate, meas_out,
+             meas_rho_ir, meas_rho_or, meas_rho_io]
 
 shock_map:
-    e_u: u
-    e_v: v
+  e_g: g
+  e_z: z
+  e_r: r
 
-observables: [Infl, Rate]
+observables: [Infl, Rate, Out_HP]
 
 equations:
-    # Solver Compatibility Issue:
-    #    Shift all equations such that no lags appear. [Handled in Model Compiler]
-    #    i.e., u(t) = rho_u*u(t-1) + e_u  -->  u(t+1) = rho_u*u(t) + e_u
+  model:
+    - Pi(t) = beta*Pi(t+1) + kappa*(x(t) - z(t))
 
-    #    Time shifts are limited to +-1 period. Shifts of |n| > 1 will result in an error.
+    - x(t) = x(t+1) - (1/tau_inv)*(r(t) - Pi(t+1)) + g(t)
 
+    - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*(x(t) - z(t))) + e_r
 
-    model:
-        # Placeholder Phillips Curve:
-        - Pi(t) = beta*Pi(t+1) + kappa*x(t)
+    - g(t) = rho_g*g(t-1) + e_g
 
-        # Placeholder IS / Euler equation:
-        - x(t) = x(t+1) - sigma*(r(t) - Pi(t+1)) + u(t)
+    - z(t) = rho_z*z(t-1) + e_z
 
-        # Placeholder AR(1) demand shock:
-        - u(t+1) = rho_u*u(t) + e_u
+  constraint: {}
 
-        # Placeholder Taylor-rule target rate:
-        - r_star(t) = rbar + phi_pi*Pi(t) + phi_x*x(t) + v(t)
+  observables:
+    Infl: 4*Pi(t) + pi_star
 
-        # Placeholder Interest-rate smoothing:
-        - r(t+1) = rho_r*r(t) + (1 - rho_r)*r_star(t+1)
-
-        # Placeholder Monetary policy shock:
-        - v(t+1) = rho_v*v(t) + e_v
-
-    constraint: {}
-
-    observables:
-        # Observed inflation level:
-        Infl: Pi(t) + pi_mean
-        # Observed policy rate:
-        Rate: r(t)
+    Rate: 4*r(t) + (r_star + pi_star)
 
 calibration:
-    parameters:
-        # Placeholder Discount factor:
-        beta: 0.99
+  parameters:
 
-        # Placeholder Intertemporal elasticity inverse:
-        sigma: 1.0
+    beta: 0.99
 
-        # Placeholder NKPC slope kappa:
-        kappa: 0.024
+    psi_pi: 2.19
+    psi_x: 0.30
+    rho_r: 0.84
 
-        # Placeholder policy parameters:
-        phi_pi: 2.15
-        phi_x: 0.93
-        rho_r: 0.79
+    pi_star: 3.43
+    r_star: 3.01
 
-        # Placeholder Demand shock AR(1):
-        rho_u: 0.70
-        sig_u: 0.50
+    kappa: 0.58
+    tau_inv: 1.86
 
-        # Placeholder Monetary policy shock AR(1):
-        rho_v: 0.50
-        sig_v: 0.25
+    rho_g: 0.83
+    rho_z: 0.85
+    rho_gz: 0.36
 
-        rbar: 0.0
-        pi_mean: 3.25
-        elb_level: 0.0
+    sig_r: 0.18
+    sig_g: 0.18
+    sig_z: 0.64
 
-    shocks:
-        std:
-            e_u: sig_u
-            e_v: sig_v
-        corr: {}
+    meas_infl: 0.2
+    meas_rate: 0.1
+    meas_out: 0.2
+    meas_rho_ir: 0.05
+    meas_rho_or: 0.0
+    meas_rho_io: 0.0
+
+  shocks:
+    std:
+      e_g: sig_g
+      e_z: sig_z
+      e_r: sig_r
+    corr:
+      e_g, e_z: rho_gz
+
+kalman:
+  y: [Infl, Rate, Out_HP]
+
+  R:
+    std:
+      Infl: meas_infl
+      Rate: meas_rate
+      Out_HP: meas_out
+    corr:
+      Infl, Rate: meas_rho_ir
+      Infl, Out_HP: meas_rho_io
+      Rate, Out_HP: meas_rho_or
+  P0:
+    mode: diag
+    scale: 10.0
+    diag:
+      g: 1.0
+      z: 1.0
+      r: 1.0
+      Pi: 1.0
+      x: 1.0
+
+  jitter: 1e-10
+  symmetrize: true

@@ -130,8 +130,9 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Guides:
-      - Configuration Guide: Guides/config_guide.md
+      - Model Configuration Guide: Guides/model_config_guide.md
       - Quick Start: Guides/quickstart.md
+      - Kalman Filter Configuration Guide: Guides/kalman_config_guide.md
   - Documentation:
       - ModelConfig: Documentation/ModelConfig.md
       - ModelParser: Documentation/ModelParser.md
@@ -139,6 +140,7 @@ nav:
       - CompiledModel: Documentation/CompiledModel.md
       - SolvedModel: Documentation/SolvedModel.md
       - Shock: Documentation/Shock.md
+      - KalmanConfig: Documentation/KalmanConfig.md
       - Utilities:
           - FRED: Documentation/Utilities/FRED.md
           - KalmanFilter: Documentation/Utilities/KalmanFilter.md
