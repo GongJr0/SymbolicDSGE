@@ -316,9 +316,14 @@ class ModelParser:
             return None
 
         y_order = [_LOCALS[o] for o in data["observables"]]
+        y_cfg = kalman_data.get("y", [])
+        if y_cfg:
+            y_str = [o.name for o in y_order]
+        else:
+            y_str = y_cfg
 
-        jit = kalman_data.get("jitter", 1e-8)
-        symm = kalman_data.get("symmetrize", True)
+        jit = kalman_data.get("jitter", None)
+        symm = kalman_data.get("symmetrize", None)
 
         P0 = kalman_data.get("P0", {}) or {}
         P0_mode = P0.get("mode", "diag")
@@ -358,7 +363,7 @@ class ModelParser:
         )
 
         return KalmanConfig(
-            y_names=[obs.name for obs in observables],
+            y_names=y_str,
             R=R,
             jitter=jit,
             symmetrize=symm,

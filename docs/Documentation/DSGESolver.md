@@ -15,6 +15,7 @@ __Attributes:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | model_config | `#!python ModelConfig` | Configuration object to be compiled/solved. |
+| kalman_config | `#!python KalmanConfig | None` | Kalman Filter configuration. |
 | t | `#!python sp.Symbol` | Time symbol used in model components. |
 
 __Methods:__

@@ -23,6 +23,10 @@ __Methods:__
 
 | __Signature__ | __Return Type__ | __Description__ |
 |:--------------|:---------------:|----------------:|
-| `#!python .from_yaml()` | `#!python ModelConfig` | Reads the file and populates `#!python ModelParser.config`. Runs at `#!python __init__`. |
+| `#!python .from_yaml()` | `#!python ParsedConfig` | Reads the file and populates `#!python ModelParser.parsed`. Runs at `#!python __init__`. |
 | `#!python .get()` | `#!python ModelConfig` | Returns the currently parsed model config. |
+| `#!python .get_all()` | `#!python ParsedConfig` | Returns the currently parsed model/kalman config pair. |
 | `#!python .to_pickle(filepath: str | pathlib.Path)` | `#!python None` | Serializes the current `#!python ModelConfig` and saves to `#!python filepath`.|
+
+???+ note "ParsedConfig"
+    `ParsedConfig` is an unpack-able `dataclass` holding `#!python ParsedConfig.model: ModelConfig` and `#!python ParsedConfig.kalman: KalmanConfig`

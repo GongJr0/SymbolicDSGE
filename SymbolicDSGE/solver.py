@@ -11,15 +11,12 @@ import linearsolve
 from dataclasses import dataclass, asdict
 from typing import Callable, Any, Union, Tuple, TypedDict, Literal
 
-import warnings
-
 import matplotlib.pyplot as plt
 
 from .model_config import ModelConfig, SymbolGetterDict
 from .kalman.config import KalmanConfig
 from .kalman.interface import KalmanInterface
 from .kalman.filter import FilterResult
-from .kalman.validator import _KalmanDebugInfo
 
 NDF = NDArray[float64]
 ND = NDArray
@@ -67,7 +64,7 @@ class SolvedModel:
         return self.compiled.config
 
     @property
-    def kalman_config(self) -> KalmanConfig:
+    def kalman_config(self) -> KalmanConfig | None:
         return self.compiled.kalman
 
     def sim(

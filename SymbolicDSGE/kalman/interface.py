@@ -304,4 +304,9 @@ class KalmanInterface(KalmanFilter):
 
     @cached_property
     def kalman_config(self) -> KalmanConfig:
-        return self.model.kalman_config
+        config = self.model.kalman_config
+        if config is None:
+            raise ValueError(
+                "Kalman Filter configuration with the R matrix is required."
+            )
+        return config
