@@ -8,7 +8,7 @@ tags:
 class ModelParser(config_path: str | pathlib.Path)
 ```
 
-`#!python ModelParser` reads a given YAML configuration file (see [configuration guide](../Guides/config_guide.md)) and parses the contents into a [`ModelConfig`](../Documentation/ModelConfig.md) object.
+`#!python ModelParser` reads a given YAML configuration file (see [configuration guide](../Guides/model_config_guide.md)) and parses the contents into a [`ModelConfig`](../Documentation/ModelConfig.md) object.
 
 __Parameters:__
 

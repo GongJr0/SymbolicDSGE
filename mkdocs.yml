@@ -141,6 +141,7 @@ nav:
       - SolvedModel: Documentation/SolvedModel.md
       - Shock: Documentation/Shock.md
       - KalmanConfig: Documentation/KalmanConfig.md
+      - FilterResult: Documentation/FilterResult.md
       - Utilities:
           - FRED: Documentation/Utilities/FRED.md
           - KalmanFilter: Documentation/Utilities/KalmanFilter.md
