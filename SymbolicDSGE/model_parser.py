@@ -6,8 +6,9 @@ from typing import Any, Callable, Iterable
 
 import yaml
 import sympy as sp
-from sympy import Symbol, Function, Eq, Expr
+from sympy import Matrix, Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
+from sympy.parsing.sympy_parser import parse_expr, standard_transformations, convert_xor
 from numpy import float64
 
 from .model_config import (
@@ -18,6 +19,8 @@ from .model_config import (
     PairGetterDict,
 )
 from .kalman.config import KalmanConfig, make_R, P0Config
+
+_GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
 
 @dataclass(frozen=True)
@@ -191,13 +194,23 @@ class ModelParser:
         Callable[[str], Eq],
     ]:
         def _get_expr(expr: str) -> Expr:
-            out = sp.parse_expr(expr, local_dict=_LOCALS, evaluate=False)
+            out = sp.parse_expr(
+                expr,
+                local_dict=_LOCALS,
+                evaluate=False,
+                transformations=_GLOBAL_TRANSFORMATIONS,
+            )
             if not isinstance(out, Expr):
                 raise TypeError(f"Expression is not a valid SymPy Expr: {expr!r}")
             return out
 
         def _get_relational(expr: str) -> Relational:
-            out = sp.parse_expr(expr, local_dict=_LOCALS, evaluate=False)
+            out = sp.parse_expr(
+                expr,
+                local_dict=_LOCALS,
+                evaluate=False,
+                transformations=_GLOBAL_TRANSFORMATIONS,
+            )
             if not isinstance(out, Relational):
                 raise TypeError(f"Constraint is not a valid SymPy Relational: {expr!r}")
             return out
@@ -206,8 +219,18 @@ class ModelParser:
             parts = [p.strip() for p in expr.split("=", maxsplit=2)]
             if len(parts) != 2:
                 raise ValueError(f"Equation must contain exactly one '=': {expr!r}")
-            lhs = sp.parse_expr(parts[0], local_dict=_LOCALS, evaluate=False)
-            rhs = sp.parse_expr(parts[1], local_dict=_LOCALS, evaluate=False)
+            lhs = sp.parse_expr(
+                parts[0],
+                local_dict=_LOCALS,
+                evaluate=False,
+                transformations=_GLOBAL_TRANSFORMATIONS,
+            )
+            rhs = sp.parse_expr(
+                parts[1],
+                local_dict=_LOCALS,
+                evaluate=False,
+                transformations=_GLOBAL_TRANSFORMATIONS,
+            )
             out = sp.Eq(lhs, rhs)
             if not isinstance(out, Eq):
                 raise TypeError(f"Not a valid equality: {expr!r}")
@@ -243,10 +266,38 @@ class ModelParser:
             if obs_name in observables_raw
         }
 
+        t = _LOCALS["t"]
+
+        state_funcs = [
+            _LOCALS[var_name] for var_name in data["variables"]
+        ]  # each is sympy.Function
+        state_atoms = [sf(t) for sf in state_funcs]  # x(t), k(t), ...
+
+        state_sym_subs = {
+            atom: Symbol(name) for atom, name in zip(state_atoms, data["variables"])
+        }
+        state_syms = list(state_sym_subs.values())
+        state_set = set(state_syms)
+
+        is_affine = {obs: False for obs in observables_eq}
+        jacobian_entries: list[Expr] = []
+
+        for obs, expr in observables_eq.items():
+            expr_symbolized = expr.xreplace(
+                state_sym_subs
+            )  # xreplace is often safer than subs here
+
+            grads = [expr_symbolized.diff(s) for s in state_syms]
+            jacobian_entries.append(grads)
+            if all((g.free_symbols & state_set) == set() for g in grads):
+                is_affine[obs] = True
+
         return Equations(
             model=model,
             constraint=SymbolGetterDict(constraint),
             observable=SymbolGetterDict(observables_eq),
+            obs_is_affine=SymbolGetterDict(is_affine),
+            obs_jacobian=Matrix(jacobian_entries),
         )
 
     @staticmethod
