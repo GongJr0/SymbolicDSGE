@@ -1,6 +1,6 @@
 from dataclasses import dataclass, asdict
 from typing import Any, TypeVar, Dict
-from sympy import Symbol, Function, Eq, Expr
+from sympy import Symbol, Function, Eq, Expr, Matrix
 from sympy.core.relational import Relational
 from numpy import float64
 import pickle
@@ -52,6 +52,8 @@ class Equations(Base):
     model: list[Eq]
     constraint: SymbolGetterDict[Symbol, Relational]
     observable: SymbolGetterDict[Symbol, Expr]
+    obs_is_affine: SymbolGetterDict[Symbol, bool]
+    obs_jacobian: Matrix
 
 
 @dataclass
