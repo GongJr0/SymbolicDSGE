@@ -280,7 +280,7 @@ class ModelParser:
         state_set = set(state_syms)
 
         is_affine = {obs: False for obs in observables_eq}
-        jacobian_entries: list[Expr] = []
+        jacobian_entries: list[list[Expr]] = []
 
         for obs, expr in observables_eq.items():
             expr_symbolized = expr.xreplace(
