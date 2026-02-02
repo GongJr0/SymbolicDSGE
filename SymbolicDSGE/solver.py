@@ -5,7 +5,7 @@ import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
 
-from numba import njit, jit
+from numba import njit
 import textwrap
 
 import pandas as pd  # fuck linearsolve
