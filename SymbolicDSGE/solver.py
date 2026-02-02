@@ -5,6 +5,8 @@ import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
 
+from numba import jit
+
 import pandas as pd  # fuck linearsolve
 import linearsolve
 
@@ -133,10 +135,16 @@ class SolvedModel:
         out["_X"] = X  # Include full state matrix for reference
 
         if observables:
-            C, d = self._build_C_d_from_obs(self.compiled.observable_names)
-            Y = X @ C.T + d
-            for i, name in enumerate(self.compiled.observable_names):
-                out[name] = Y[:, i]
+            is_affine = self.config.equations.obs_is_affine
+            if all(is_affine.values()):
+                C, d = self._build_C_d_from_obs(self.compiled.observable_names)
+                Y = X @ C.T + d
+                for i, name in enumerate(self.compiled.observable_names):
+                    out[name] = Y[:, i]
+            else:
+                Y = self._non_affine_measurement(self.compiled.observable_names, X)
+                for i, name in enumerate(self.compiled.observable_names):
+                    out[name] = Y[:, i]
 
         return out
 
@@ -474,6 +482,57 @@ class SolvedModel:
 
         return C, d
 
+    def _non_affine_measurement(
+        self,
+        y_names: list[str],
+        state: NDF,
+    ) -> NDF:
+        obs_funcs = self.compiled.observable_funcs
+
+        def make_jit_measurement(K: int):  # type: ignore # (Types getting misinterpreted with no static known arg count)
+
+            # build source code with explicit call func(r[0],...,r[K-1])
+            args = ", ".join([f"r[{j}]" for j in range(K)])
+            src = f"""
+        def _jit_measurement(func, args_mat):
+            n_obs = args_mat.shape[0]
+            out = np.empty(n_obs, dtype=np.float64)
+            for i in range(n_obs):
+                r = args_mat[i]
+                out[i] = func({args})
+            return out
+        """
+            ns = {"np": np}
+            exec(src, ns)
+            return jit(ns["_jit_measurement"], nopython=True)
+
+        # Arguments in form [*cur_vars, *params]
+        params = self.compiled.config.calibration.parameters
+        param_vals = [
+            float64(params[p]) for p in self.config.calibration.parameters
+        ]  # Ensure dtype + order
+
+        # Assume state is in cannonical order of cur_syms (Checked at compile time)
+        n_obs = len(y_names)
+        T = state.shape[0]
+        args_mat = np.empty(
+            (T, len(self.compiled.cur_syms) + len(param_vals)), dtype=float64
+        )
+        param_block = np.ones((T, len(param_vals)), dtype=float64) * np.array(
+            param_vals, dtype=float64
+        )
+        args_mat[:, : state.shape[1]] = state
+        args_mat[:, state.shape[1] :] = param_block
+
+        K = args_mat.shape[1]
+        _jit_measurement = make_jit_measurement(K)
+
+        out = np.empty((T, n_obs), dtype=float64)
+        for i, y in enumerate(y_names):
+            func = obs_funcs[self.compiled.observable_names.index(y)]
+            out[:, i] = _jit_measurement(func, args_mat)
+        return out
+
     def kalman(
         self,
         y: NDF | pd.DataFrame,
@@ -610,7 +669,9 @@ class DSGESolver:
         ]
         observable_exprs = [sp.simplify(expr.subs(subs_map)) for expr in shifted_obs]
         observable_funcs = [
-            sp.lambdify([*cur_syms, *params], expr, modules="numpy")
+            jit(
+                sp.lambdify([*cur_syms, *params], expr, modules="numpy"), nopython=True
+            )  #
             for expr in observable_exprs
         ]
 
@@ -759,7 +820,7 @@ class DSGESolver:
                 call.func not in [vf.func for vf in var_funcs]
                 and call.func not in var_funcs
             ):
-                pass
+                continue
 
             if not call.args:
                 continue

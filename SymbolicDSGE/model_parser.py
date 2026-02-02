@@ -368,7 +368,7 @@ class ModelParser:
 
         y_order = [_LOCALS[o] for o in data["observables"]]
         y_cfg = kalman_data.get("y", [])
-        if y_cfg:
+        if not y_cfg:
             y_str = [o.name for o in y_order]
         else:
             y_str = y_cfg

@@ -54,7 +54,7 @@ equations:
   constraint: {}
 
   observables:
-    Infl: 4*Pi(t) + pi_star # model gap deviation + steady-state
+    Infl:  4*Pi(t) + pi_star # model gap deviation + steady-state
 
     Rate: 4*r(t) + (r_star + pi_star) # model rate gap deviation + steady-state nominal rate
 
