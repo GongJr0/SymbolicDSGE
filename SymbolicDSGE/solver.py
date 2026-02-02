@@ -5,7 +5,8 @@ import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
 
-from numba import jit
+from numba import njit, jit
+import textwrap
 
 import pandas as pd  # fuck linearsolve
 import linearsolve
@@ -22,6 +23,8 @@ from .kalman.filter import FilterResult
 
 NDF = NDArray[float64]
 ND = NDArray
+
+_JIT_CACHE: dict[int, Callable] = {}
 
 
 class MeasurementSpec(TypedDict):
@@ -482,18 +485,15 @@ class SolvedModel:
 
         return C, d
 
-    def _non_affine_measurement(
-        self,
-        y_names: list[str],
-        state: NDF,
-    ) -> NDF:
-        obs_funcs = self.compiled.observable_funcs
+    @staticmethod
+    def _make_jit_measurement(K: int):  # type: ignore # (Types getting misinterpreted with no static known arg count)
+        f = _JIT_CACHE.get(K)
+        if f is not None:
+            return f
 
-        def make_jit_measurement(K: int):  # type: ignore # (Types getting misinterpreted with no static known arg count)
-
-            # build source code with explicit call func(r[0],...,r[K-1])
-            args = ", ".join([f"r[{j}]" for j in range(K)])
-            src = f"""
+        # build source code with explicit call func(r[0],...,r[K-1])
+        args = ", ".join([f"r[{j}]" for j in range(K)])
+        src = f"""
         def _jit_measurement(func, args_mat):
             n_obs = args_mat.shape[0]
             out = np.empty(n_obs, dtype=np.float64)
@@ -502,9 +502,19 @@ class SolvedModel:
                 out[i] = func({args})
             return out
         """
-            ns = {"np": np}
-            exec(src, ns)
-            return jit(ns["_jit_measurement"], nopython=True)
+        src = textwrap.dedent(src)
+        ns = {"np": np}
+        exec(src, ns)
+        f = njit(ns["_jit_measurement"])
+        _JIT_CACHE[K] = f
+        return f
+
+    def _non_affine_measurement(
+        self,
+        y_names: list[str],
+        state: NDF,
+    ) -> NDF:
+        obs_funcs = self.compiled.observable_funcs
 
         # Arguments in form [*cur_vars, *params]
         params = self.compiled.config.calibration.parameters
@@ -525,7 +535,7 @@ class SolvedModel:
         args_mat[:, state.shape[1] :] = param_block
 
         K = args_mat.shape[1]
-        _jit_measurement = make_jit_measurement(K)
+        _jit_measurement = self._make_jit_measurement(K)
 
         out = np.empty((T, n_obs), dtype=float64)
         for i, y in enumerate(y_names):
@@ -669,9 +679,7 @@ class DSGESolver:
         ]
         observable_exprs = [sp.simplify(expr.subs(subs_map)) for expr in shifted_obs]
         observable_funcs = [
-            jit(
-                sp.lambdify([*cur_syms, *params], expr, modules="numpy"), nopython=True
-            )  #
+            njit(sp.lambdify([*cur_syms, *params], expr, modules="numpy"))
             for expr in observable_exprs
         ]
 
