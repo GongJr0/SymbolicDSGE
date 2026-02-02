@@ -522,7 +522,7 @@ class SolvedModel:
             float64(params[p]) for p in self.config.calibration.parameters
         ]  # Ensure dtype + order
 
-        # Assume state is in cannonical order of cur_syms (Checked at compile time)
+        # Assume state is in canonical order of cur_syms (Checked at compile time)
         n_obs = len(y_names)
         T = state.shape[0]
         args_mat = np.empty(
