@@ -4,6 +4,7 @@ tags:
 ---
 
 # Quick Start Guide
+
 ??? tip "__TL;DR__"
     You can find a demonstration notebook [here](../assets/guide_notebook.ipynb).
 
