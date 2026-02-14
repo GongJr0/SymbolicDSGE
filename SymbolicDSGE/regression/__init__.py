@@ -1,6 +1,7 @@
 from .BaseModelParametrizer import BaseModelParametrizer
 from .model_defaults import make_operator_general, CustomOp, PySRParams
 from .config import TemplateConfig
+from .SymbolicRegressor import SymbolicRegressor
 
 __all__ = [
     "BaseModelParametrizer",
@@ -8,4 +9,5 @@ __all__ = [
     "CustomOp",
     "PySRParams",
     "TemplateConfig",
+    "SymbolicRegressor",
 ]

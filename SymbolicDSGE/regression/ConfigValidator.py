@@ -22,7 +22,7 @@ class ConfigValidator:
         :rtype: TemplateConfig
         """
         ConfigValidator._validate_var_space(config)
-        ConfigValidator._validate_poly_interaction_order(config)
+        # ConfigValidator._validate_poly_interaction_order(config)
         ConfigValidator._validate_hessian_restriction(config)
         ConfigValidator._validate_parameter_complexity_bound(config)
         ConfigValidator._validate_interactions(config)
@@ -104,12 +104,12 @@ class ConfigValidator:
                 ),
                 RestrictedBehaviorWarning,
             )
-        elif int_policy and config.poly_interaction_order == 1:
-            raise ValueError(
-                (
-                    f"{config.interaction_only=} with requires poly_interaction_order>1 as combinations of order 1 will produce variables themselves,"
-                )
-            )
+        # elif int_policy and config.poly_interaction_order == 1:
+        #     raise ValueError(
+        #         (
+        #             f"{config.interaction_only=} with requires poly_interaction_order>1 as combinations of order 1 will produce variables themselves,"
+        #         )
+        #     )
 
         # Interaction Format Block
         if config.interaction_form not in ("func", "prod"):

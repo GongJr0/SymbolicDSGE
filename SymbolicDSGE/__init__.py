@@ -1,17 +1,19 @@
-from .core import (
-    DSGESolver,
-    ModelConfig,
-    ModelParser,
-    Shock,
-)
-from .kalman import KalmanFilter
-from . import utils
+from .model_config import ModelConfig
+from .model_parser import ModelParser
+from .solver import DSGESolver
+from .fred import FRED
+from .shock_generators import Shock
+from .kalman.filter import KalmanFilter
+from .kalman.config import KalmanConfig
+from . import math_utils
 
 __all__ = [
     "ModelConfig",
+    "KalmanConfig",
     "ModelParser",
     "DSGESolver",
+    "FRED",
     "KalmanFilter",
+    "math_utils",
     "Shock",
-    "utils",
 ]

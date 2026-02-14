@@ -17,10 +17,8 @@ def _spec_ready_expr(expr: sp.Expr, t: sp.Symbol) -> str:
     :rtype: str
     """
     subs_dict = {
-        f(
-            t
-        ): sp.Symbol(  # pyright: ignore # LSP looks for __call__; SymPy apparently "doesn't implement it" on symbolic functions.
-            f.__name__
+        f: sp.Symbol(  # pyright: ignore # LSP looks for __call__; SymPy apparently "doesn't implement it" on symbolic functions.
+            f.func.__name__
         )
         for f in expr.atoms(sp.Function)
         if t in f.free_symbols

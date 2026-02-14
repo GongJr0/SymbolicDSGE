@@ -48,26 +48,21 @@ class CustomOp:
 
 
 # Buil-in Custom Operators:
-def get_pow(upper: int, lower: int, prec: int) -> CustomOp:
-    if lower < 0:
+def get_pow(p: int, prec: int) -> CustomOp:
+    if p < 0:
         raise ValueError("Negative powers are not supported.")
 
-    def pow(x: float, p: float) -> float:
-        if (p > upper) or (p < lower):
-            return float("inf")  # Maximize loss on bound violation
+    def pow(x: float) -> float:
         return float(x**p)
 
-    name = "bpow"
-    jl_str = f"{name}(x, p) = p<{lower} || p>{upper} ? Float{prec}(Inf): x^p"  # prec \in {16, 32, 64} (pre-validated)
+    name = f"pow{p}"
+    jl_str = f"{name}(x) = Float{prec}(x^{p})"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,
-        type=OpType.BINARY,
+        type=OpType.UNARY,
         lamb=pow,
         jl_str=jl_str,
-        complexity_bound=(
-            -1,
-            0,
-        ),  # Complexity of p is 0 (constant), [default] complexity of x is unrestricted
+        complexity_bound=-1,
     )
 
 
@@ -78,7 +73,7 @@ def get_sqrt(prec: int, eps: float = 1e-8) -> CustomOp:
         )  # sqrt approximation function robust to negative and 0 inputs.
 
     name = "ssqrt"
-    jl_str = f"{name}(x) = Float{prec}((x^2 + {eps})^(1/4))"  # prec \in {16, 32, 64} (pre-validated)
+    jl_str = f"{name}(x) = Float{prec}((x*x + Float{prec}({eps}))^(Float{prec}(1/4)))"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,
         type=OpType.UNARY,
@@ -88,12 +83,12 @@ def get_sqrt(prec: int, eps: float = 1e-8) -> CustomOp:
     )
 
 
-def get_asinh() -> CustomOp:
+def get_asinh(prec: int) -> CustomOp:
     return CustomOp(
-        name="asinh",
+        name=f"asinh{prec}",
         type=OpType.UNARY,
         lamb=lambda x: float(sp.asinh(x)),
-        jl_str="asinh",  # asinh is part of the julia standard library
+        jl_str=f"asinh{prec}(x) = Float{prec}(asinh(x))",  # asinh is part of the julia standard library
         complexity_bound=-1,  # [default] Complexity of x is unrestricted
     )
 
@@ -271,8 +266,8 @@ class PySRParams:
 
     # Environment Parameters:
     temp_equation_file: bool = True
-    temp_dir: str | None = None
-    delete_temp_files: bool = True
+    tempdir: str | None = None
+    delete_tempfiles: bool = True
     update: bool = False
 
     # Exporting Parameters:
@@ -367,10 +362,10 @@ class PySRParams:
         return asdict(self)
 
     def __post_init__(self) -> None:
-        if self.binary_operators == None:
+        if self.binary_operators is None:
             self.binary_operators = self._default_binary_ops()
 
-        if self.unary_operators == None:
+        if self.unary_operators is None:
             self.unary_operators = self._default_unary_ops()
 
         if self.nested_constraints is None:
@@ -381,6 +376,9 @@ class PySRParams:
 
     def __getitem__(self, key: str) -> object:
         return asdict(self)[key]
+
+    def keys(self) -> list[str]:
+        return list(asdict(self).keys())
 
 
 class ParameterCompatibilityError(Exception):
@@ -398,14 +396,14 @@ def validate_breaking_settings(params: PySRParams) -> PySRParams:
     :return: The validated PySRParams object.
     :rtype: PySRParams
     """
-    if params.complexity_of_constants != 0:
-        raise ParameterCompatibilityError(
-            (
-                "Non-zero complexity of constants allows the constant terms to be at-or-above the complexity of variables. "
-                "Functions that use complexity limits to disallow variable arguments will not work as intended. "
-                "As of now, non-zero constant complexity is not supported but may be implemented in future versions.  "
-            )
-        )
+    # if params.complexity_of_constants != 0:
+    #     raise ParameterCompatibilityError(
+    #         (
+    #             "Non-zero complexity of constants allows the constant terms to be at-or-above the complexity of variables. "
+    #             "Functions that use complexity limits to disallow variable arguments will not work as intended. "
+    #             "As of now, non-zero constant complexity is not supported but may be implemented in future versions.  "
+    #         )
+    #     )
     _MUST_BE_FALSE = {
         params.extra_torch_mappings,  # Expects None
         params.output_torch_format,  # Expects False

@@ -8,13 +8,15 @@ class BuiltInOpContainer:
     """
 
     @staticmethod
-    def pow(config: TemplateConfig, params: PySRParams) -> CustomOp:
-        upper = config.power_law_upper_bound or int(1e6)
+    def pows(config: TemplateConfig, params: PySRParams) -> dict[str, CustomOp]:
+        upper = config.power_law_upper_bound or 10
 
         lower = config.power_law_lower_bound or 1
         prec = params.precision
-
-        return get_pow(upper, lower, prec)
+        out = {}
+        for p in range(lower, upper + 1):
+            out[f"pow{p}"] = get_pow(p, prec)
+        return out
 
     @staticmethod
     def sqrt(params: PySRParams) -> CustomOp:
@@ -22,6 +24,7 @@ class BuiltInOpContainer:
         return get_sqrt(prec)
 
     @staticmethod
-    def asinh() -> CustomOp:
+    def asinh(params: PySRParams) -> CustomOp:
         # built-in julia function inherits precision from the mdoel parameter. No need to set here.
-        return get_asinh()
+        prec = params.precision
+        return get_asinh(prec)

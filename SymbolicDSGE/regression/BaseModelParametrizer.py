@@ -13,7 +13,7 @@ import sympy as sp
 
 from pysr import TemplateExpressionSpec
 
-from typing import Callable, Literal, Sequence
+from typing import Callable, Sequence
 
 
 def _normalize_variables(
@@ -26,7 +26,7 @@ def _normalize_variables(
         elif isinstance(var, sp.Symbol):
             out.append(var.name)
         elif isinstance(var, (sp.Function, sp.core.function.UndefinedFunction)):
-            out.append(var.func.__name__)
+            out.append(var.name)
         else:
             raise ValueError(
                 f"Invalid variable name '{var}'. Variable names must be strings, sympy Symbols, or sympy Functions."
@@ -45,9 +45,9 @@ class BaseModelParametrizer:
         self._params = validate_breaking_settings(params)
         self._config = ConfigValidator._validate_config(config)
         self._built_in_ops = {
-            "pow": bop.pow(self.config, self.params),
             "sqrt": bop.sqrt(self.params),
-            "asinh": bop.asinh(),
+            "asinh": bop.asinh(self.params),
+            **bop.pows(self.config, self.params),
         }
 
     @staticmethod

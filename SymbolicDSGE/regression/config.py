@@ -45,7 +45,7 @@ class TemplateConfig:
     # Model defaults only allow x^2 by blocking general power laws and exposing a square(x) function.
     # Default: 2
     power_law_upper_bound: int | None = 2
-    power_law_lower_bound: int | None = 1
+    power_law_lower_bound: int | None = 2
 
     # Interaction  Only:
     # - True: Do not allow univariate linear components (\beta_i * x_i) in the expression.
