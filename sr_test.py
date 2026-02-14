@@ -40,7 +40,7 @@ template_conf = TemplateConfig(
     interaction_form="func",
 )
 params = PySRParams(
-    precision=64,
+    precision=32,
     maxsize=12,
     niterations=100,
     complexity_of_constants=3,
@@ -76,6 +76,7 @@ X = np.asarray(X, dtype=np.float32)
 
 y = sol["Infl"]
 var_names = conf.variables[2:]
-parametrizer.built_in_ops
+sr.model.expression_spec.combine
+# parametrizer.built_in_ops
 expr = sr.fit(X, y, variable_names=var_names)
 expr

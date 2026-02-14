@@ -49,6 +49,7 @@ class BaseModelParametrizer:
             "asinh": bop.asinh(self.params),
             **bop.pows(self.config, self.params),
         }
+        self.clean_expr: str | None = None
 
     @staticmethod
     def make_operator(
@@ -101,9 +102,12 @@ class BaseModelParametrizer:
 
         config = self.config
         variable_names = self.variable_names
+        prec = self.params.precision
 
         factory = BaseTemplateFactory(config, variable_names, expr, t)
-        return factory.get_template()
+        clean_expr, template = factory.get_template(prec)
+        self.clean_expr = clean_expr
+        return template
 
     def add_template(self, template: TemplateExpressionSpec) -> None:
         """

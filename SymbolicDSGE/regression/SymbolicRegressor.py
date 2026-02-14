@@ -69,6 +69,7 @@ class SymbolicRegressor:
         # PySR template output format maps f1(x, y) -> f1(#1, #2) making direct substitution difficult.
         # Moreover, there's no equation output in templates. Instead you get a ";" delimited list of functions.
         # The "combine" expression must be referred to map positional pysr output to actual variables per function.
+        clean_expr = self.parametrizer.clean_expr
         template = self.parametrizer.params.expression_spec
         if template is None:
             raise ValueError("No template found in parametrizer params.")
@@ -77,6 +78,20 @@ class SymbolicRegressor:
             return expr_block  # already in sympy format
 
         combine = template.combine  # pyright: ignore
+        if clean_expr is not None:
+            comb_split = list(map(str.strip, combine.split("+")))
+
+            # First index before a function is encountered is the end of the base expression we want to replace with the clean version.
+            cutoff_idx = len(comb_split)  # default to end if no functions found
+            for i, part in enumerate(comb_split):
+                if re.search(
+                    r"f_\d+\(", part
+                ):  # f_\d+ by convention denotes a function in the template
+                    cutoff_idx = i
+                    break
+            functions = comb_split[cutoff_idx:]
+            combine_components = [clean_expr, *functions]
+            combine = " + ".join(combine_components)
 
         # Parse calls in `combine` like: f_1(x, y), f_2(y, z), ...
         # This is where we learn each function's *intended* argument names.

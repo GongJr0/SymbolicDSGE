@@ -53,9 +53,10 @@ def get_pow(p: int, prec: int) -> CustomOp:
         raise ValueError("Negative powers are not supported.")
 
     def pow(x: float) -> float:
-        return float(x**p)
+        out: float = x**p
+        return out
 
-    name = f"pow{p}"
+    name = f"pow{prec}_{p}"
     jl_str = f"{name}(x) = Float{prec}(x^{p})"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,
@@ -68,12 +69,13 @@ def get_pow(p: int, prec: int) -> CustomOp:
 
 def get_sqrt(prec: int, eps: float = 1e-8) -> CustomOp:
     def ssqrt(x: float) -> float:
-        return float(
-            (x**2 + eps) ** (1 / 4)
+        out: float = (x**2 + eps) ** (
+            0.25
         )  # sqrt approximation function robust to negative and 0 inputs.
+        return out
 
-    name = "ssqrt"
-    jl_str = f"{name}(x) = Float{prec}((x*x + Float{prec}({eps}))^(Float{prec}(1/4)))"  # prec \in {16, 32, 64} (pre-validated)
+    name = "ssqrt{prec}"
+    jl_str = f"{name}(x) = Float{prec}((x*x + Float{prec}({eps}))^(0.25f0))"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,
         type=OpType.UNARY,
@@ -84,10 +86,14 @@ def get_sqrt(prec: int, eps: float = 1e-8) -> CustomOp:
 
 
 def get_asinh(prec: int) -> CustomOp:
+    def asinh(x: float) -> float:
+        out: float = sp.asinh(x).evalf()  # pyright: ignore
+        return out
+
     return CustomOp(
         name=f"asinh{prec}",
         type=OpType.UNARY,
-        lamb=lambda x: float(sp.asinh(x)),
+        lamb=asinh,
         jl_str=f"asinh{prec}(x) = Float{prec}(asinh(x))",  # asinh is part of the julia standard library
         complexity_bound=-1,  # [default] Complexity of x is unrestricted
     )
@@ -321,7 +327,7 @@ class PySRParams:
 
             if self.constraints is None:
                 self.constraints = {}
-            self.constraints[operator.jl_str] = operator._get_bound()
+            self.constraints[operator.name] = operator._get_bound()
 
     def add_template(self, template_spec: TemplateExpressionSpec) -> None:
         self.expression_spec = template_spec
@@ -358,6 +364,9 @@ class PySRParams:
     def _default_unary_ops(self) -> list[str]:
         return ["asinh"]
 
+    def _default_elementwise_loss(self) -> str:
+        return "L2DistLoss()"
+
     def astict(self) -> dict[str, object]:
         return asdict(self)
 
@@ -370,6 +379,9 @@ class PySRParams:
 
         if self.nested_constraints is None:
             self.nested_constraints = self._nesting_disable()
+
+        if self.elementwise_loss is None:
+            self.elementwise_loss = self._default_elementwise_loss()
 
     def __iter__(self) -> Iterator:
         return asdict(self).__iter__()
