@@ -4,11 +4,11 @@ from .model_defaults import (
     validate_breaking_settings,
     make_operator_general,
 )
-from .BuiltInOpContainer import BuiltInOpContainer as bop
+from .built_in_op_container import BuiltInOpContainer as bop
 
-from .BaseTemplateFactory import BaseTemplateFactory
+from .base_template_factory import BaseTemplateFactory
 from .config import TemplateConfig
-from .ConfigValidator import ConfigValidator
+from .config_validator import ConfigValidator
 import sympy as sp
 
 from pysr import TemplateExpressionSpec

@@ -1,4 +1,4 @@
-from SymbolicDSGE.regression.config import TemplateConfig
+from .config import TemplateConfig
 from .model_defaults import CustomOp, PySRParams, get_asinh, get_pow, get_sqrt
 
 

@@ -4,7 +4,6 @@ from SymbolicDSGE import ModelParser, DSGESolver, Shock
 import sympy as sp
 from warnings import catch_warnings, simplefilter
 import numpy as np
-from typing import cast
 
 from SymbolicDSGE.regression import (
     BaseModelParametrizer,

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import re  # :(
 
-from .BaseModelParametrizer import BaseModelParametrizer, _normalize_variables
+from .base_model_parametrizer import BaseModelParametrizer, _normalize_variables
 
 
 class SymbolicRegressor:

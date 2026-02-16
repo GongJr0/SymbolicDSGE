@@ -3,8 +3,8 @@ import sympy as sp
 from sympy.printing.str import StrPrinter
 
 from .config import TemplateConfig
-from .ConfigValidator import ConfigValidator
-from .InteractionGenerator import InteractionGenerator
+from .config_validator import ConfigValidator
+from .interaction_generator import InteractionGenerator
 from .expr_to_string import get_expr
 
 from typing import Sequence, Any
