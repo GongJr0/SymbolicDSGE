@@ -17,9 +17,9 @@ from typing import Callable, Any, Union, Tuple, TypedDict, Literal
 import matplotlib.pyplot as plt
 
 from .model_config import ModelConfig, SymbolGetterDict
-from .kalman.config import KalmanConfig
-from .kalman.interface import KalmanInterface
-from .kalman.filter import FilterResult
+from ..kalman.config import KalmanConfig
+from ..kalman.interface import KalmanInterface
+from ..kalman.filter import FilterResult
 
 NDF = NDArray[float64]
 ND = NDArray

@@ -18,7 +18,7 @@ from .model_config import (
     SymbolGetterDict,
     PairGetterDict,
 )
-from .kalman.config import KalmanConfig, make_R, P0Config
+from ..kalman.config import KalmanConfig, make_R, P0Config
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
