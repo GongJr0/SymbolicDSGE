@@ -11,7 +11,7 @@ from sympy.core.relational import Relational
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, convert_xor
 from numpy import float64
 
-from .model_config import (
+from .config import (
     ModelConfig,
     Equations,
     Calib,

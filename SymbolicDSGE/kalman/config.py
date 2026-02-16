@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from sympy import Symbol
 from numpy import float64, array, eye, outer
 
-from ..core.model_config import PairGetterDict, SymbolGetterDict
+from ..core.config import PairGetterDict, SymbolGetterDict
 
 
 @dataclass(frozen=True)
