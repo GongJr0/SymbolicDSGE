@@ -11,14 +11,14 @@ from sympy.core.relational import Relational
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, convert_xor
 from numpy import float64
 
-from .model_config import (
+from .config import (
     ModelConfig,
     Equations,
     Calib,
     SymbolGetterDict,
     PairGetterDict,
 )
-from .kalman.config import KalmanConfig, make_R, P0Config
+from ..kalman.config import KalmanConfig, make_R, P0Config
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 

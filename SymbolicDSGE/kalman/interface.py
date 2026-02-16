@@ -4,9 +4,9 @@ from .validator import validate_kf_inputs, _KalmanDebugInfo
 from typing import TYPE_CHECKING, Tuple, Literal
 
 if TYPE_CHECKING:
-    from ..solver import SolvedModel
+    from ..core.solved_model import SolvedModel
 
-from ..model_config import ModelConfig, SymbolGetterDict
+from ..core.config import ModelConfig, SymbolGetterDict
 
 
 from functools import cached_property
