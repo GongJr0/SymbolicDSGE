@@ -61,9 +61,14 @@ class SymbolicRegressor:
         model.set_params(**param_overrides)
         variable_names = self._validate_and_normalize_varnames(variable_names)
         model.fit(X, y, variable_names=variable_names)
+        model.equations_ = self._convert_equations_to_sympy(
+            model.equations_
+        )  # pyright: ignore
         self.model = model
-        best_expr: pd.Series = model.get_best()  # pyright: ignore
-        return self._get_sp_from_template(best_expr)
+
+        best: pd.Series = model.get_best()  # pyright: ignore
+
+        return best
 
     def _get_sp_from_template(self, expr_block: pd.Series) -> pd.Series:
         # PySR template output format maps f1(x, y) -> f1(#1, #2) making direct substitution difficult.
@@ -175,3 +180,8 @@ class SymbolicRegressor:
                     f"Variable names {varnames} do not match the parametrizer's variable names {self.parametrizer.variable_names}"
                 )
         return varnames
+
+    def _convert_equations_to_sympy(self, equations: pd.DataFrame) -> pd.DataFrame:
+        equations["sympy_format"] = None  # Create column for .apply
+        converted = equations.apply(lambda row: self._get_sp_from_template(row), axis=1)
+        return converted

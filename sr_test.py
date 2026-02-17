@@ -44,8 +44,8 @@ params = PySRParams(
     maxsize=12,
     niterations=100,
     complexity_of_constants=3,
-    should_optimize_constants=False,
-    should_simplify=False,
+    should_optimize_constants=True,
+    should_simplify=True,
 )
 parametrizer = BaseModelParametrizer(
     variable_names=conf.variables[comp.n_exog :], params=params, config=template_conf
@@ -73,8 +73,13 @@ sol = solved.sim(T, sim_shocks, observables=True)
 X = np.column_stack([sol[var] for var in comp.var_names[comp.n_exog :]])
 X = np.asarray(X, dtype=np.float32)
 
-y = sol["Infl"]
+y = sol["Infl"] + np.random.normal(0, 2 * np.std(sol["Infl"]), size=sol["Infl"].shape)
+y = np.asarray(y, dtype=np.float32)
+
 var_names = conf.variables[2:]
 sr.model.expression_spec.combine
 expr = sr.fit(X, y, variable_names=var_names)
-expr
+print("Best: \n", expr, "\n")
+
+print("Model Equations: \n")
+sr.model.equations_
