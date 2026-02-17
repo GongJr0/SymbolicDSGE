@@ -18,12 +18,11 @@ class JuliaTypedPrinter(StrPrinter):
     def _print_JFloat(self, expr: sp.Expr) -> str:
         # expr.args[0] is the numeric literal
         inner = expr.args[0]
-        # Print the literal in a Julia-friendly way
+
         if isinstance(inner, sp.Float):
             # Use full precision string SymPy provides
             lit = sp.sstr(inner)
         elif isinstance(inner, sp.Rational):
-            # Prefer decimal? Either is fine.
             # Emit as "p//q" to avoid Julia parsing as Float64.
             lit = f"{inner.p}//{inner.q}"
         else:
@@ -110,6 +109,6 @@ def get_expr(expr: sp.Expr, t: sp.Symbol, prec: int) -> tuple[str, str]:
     :rtype: tuple[str, str]
     """
     clean_expr = _spec_ready_expr(expr, t)
-    template_ready_str = JuliaTypedPrinter(prec=prec).doprint(clean_expr)
+    template_ready_str = sympy_to_julia_typed(clean_expr, prec)
     clean_str = str(clean_expr)
     return clean_str, template_ready_str

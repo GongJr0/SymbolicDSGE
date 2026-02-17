@@ -103,9 +103,10 @@ class BaseModelParametrizer:
         config = self.config
         variable_names = self.variable_names
         prec = self.params.precision
+        hessian_mode = config.hessian_restriction
 
         factory = BaseTemplateFactory(config, variable_names, expr, t)
-        clean_expr, template = factory.get_template(prec)
+        clean_expr, template = factory.get_template(hessian_mode, prec)
         self.clean_expr = clean_expr
         return template
 

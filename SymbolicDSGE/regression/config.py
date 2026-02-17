@@ -1,6 +1,25 @@
 from dataclasses import dataclass
 from typing import Literal
 import sympy as sp
+from enum import StrEnum
+
+
+class HessianMode(StrEnum):
+    DIAG = "diag"
+    FULL = "full"
+    FREE = "free"
+
+
+class InteractionForm(StrEnum):
+    FUNC = "func"
+    PROD = "prod"
+
+
+class ConstantFiltering(StrEnum):
+    KEEP = "keep"
+    DISQUALIFY = "disqualify"
+    STRIP = "strip"
+    PARAMETRIZE = "parametrize"
 
 
 @dataclass(frozen=True)
@@ -21,8 +40,9 @@ class TemplateConfig:
     # Hessian Restriction modes:
     # - Diag: Only enforce that the given (w.r.t) variable is linear in the expression.
     # - Full: Enfore completely affine expressions regardless of the (w.r.t.) variable.
-    # Default: 'diag
-    hessian_restriction: Literal["diag", "full"] | None = "diag"
+    # - Free: Do not enforce any hessian restrictions.
+    # Default: 'diag'
+    hessian_restriction: Literal["diag", "full", "free"] = "diag"
 
     # Linearity Enforcement:
     # - True: Confirm a given template is linear in parameters (is expressable as a linear combination of parameters).
@@ -80,6 +100,6 @@ class TemplateConfig:
     # - 'parametrize': Replace constants with parameters to be estimated.
     # - None: Do not apply any constant filtering.
     # Default: 'parametrize'
-    constant_filtering: Literal["disqualify", "strip", "parametrize"] | None = (
-        "parametrize"
+    constant_filtering: Literal["keep", "disqualify", "strip", "parametrize"] | None = (
+        "keep"
     )

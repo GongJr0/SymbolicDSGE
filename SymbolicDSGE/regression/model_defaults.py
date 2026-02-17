@@ -1,6 +1,6 @@
 from dataclasses import dataclass, asdict
 from typing import Callable, Literal, Iterator
-from enum import Enum
+from enum import StrEnum
 
 import warnings
 
@@ -8,7 +8,7 @@ from pysr import ExpressionSpec, TemplateExpressionSpec, TensorBoardLoggerSpec
 import sympy as sp
 
 
-class OpType(Enum):
+class OpType(StrEnum):
     BINARY = "binary"
     UNARY = "unary"
 
@@ -28,7 +28,7 @@ class CustomOp:
     """
 
     name: str
-    type: OpType
+    type: OpType | Literal["binary", "unary"]
     lamb: Callable[..., float]
     jl_str: str
     complexity_bound: int | tuple[int, int] | None = None
@@ -74,7 +74,7 @@ def get_sqrt(prec: int, eps: float = 1e-8) -> CustomOp:
         )  # sqrt approximation function robust to negative and 0 inputs.
         return out
 
-    name = "ssqrt{prec}"
+    name = f"ssqrt{prec}"
     jl_str = f"{name}(x) = Float{prec}((x*x + Float{prec}({eps}))^(0.25f0))"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,

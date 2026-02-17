@@ -1,4 +1,4 @@
-from .config import TemplateConfig
+from .config import TemplateConfig, HessianMode, InteractionForm, ConstantFiltering
 import sympy as sp
 import warnings
 
@@ -51,9 +51,9 @@ class ConfigValidator:
 
     @staticmethod
     def _validate_hessian_restriction(config: TemplateConfig) -> None:
-        if (hessian := config.hessian_restriction) not in (None, "diag", "full"):
+        if (hessian := config.hessian_restriction) not in HessianMode:
             raise ValueError(
-                "hessian_restriction must be one of None, 'diag', or 'full'."
+                "hessian_restriction must be one of 'free', 'diag', or 'full'."
             )
         elif hessian == "full" and config.poly_interaction_order > 1:
             raise ValueError(
@@ -104,28 +104,23 @@ class ConfigValidator:
                 ),
                 RestrictedBehaviorWarning,
             )
-        # elif int_policy and config.poly_interaction_order == 1:
-        #     raise ValueError(
-        #         (
-        #             f"{config.interaction_only=} with requires poly_interaction_order>1 as combinations of order 1 will produce variables themselves,"
-        #         )
-        #     )
+        elif int_policy and config.poly_interaction_order == 1:
+            raise ValueError(
+                (
+                    f"{config.interaction_only=} requires poly_interaction_order>1 as combinations of order 1 will produce variables themselves,"
+                )
+            )
 
         # Interaction Format Block
-        if config.interaction_form not in ("func", "prod"):
+        if config.interaction_form not in InteractionForm:
             raise ValueError("interaction_form must be either 'func' or 'prod'.")
 
     @staticmethod
     def _validate_constant_handling(config: TemplateConfig) -> None:
-        if (const_strategy := config.constant_filtering) not in (
-            None,
-            "disqualify",
-            "strip",
-            "parametrize",
-        ):
+        if (const_strategy := config.constant_filtering) not in ConstantFiltering:
             raise ValueError(
                 (
-                    f"constant_filtering={const_strategy} is not a valid constant filtering strategy. "
+                    f"constant_filtering= is not a valid constant filtering strategy. "
                     "Please set constant_filtering to one of None, 'disqualify', 'strip', or 'parametrize'."
                 )
             )
@@ -147,7 +142,7 @@ class ConfigValidator:
             if config.power_law_upper_bound < config.power_law_lower_bound:
                 raise ValueError(
                     (
-                        f"power_law_upper_bound={config.power_law_upper_bound} cannot be less than power_law_lower_bound={config.power_law_lower_bound}. "
+                        f"power_law_upper_bound= cannot be less than power_law_lower_bound={config.power_law_lower_bound}. "
                         "Please ensure power_law_upper_bound >= power_law_lower_bound."
                     )
                 )
