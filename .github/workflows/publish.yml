@@ -10,12 +10,17 @@ permissions:
   id-token: write     # PyPI Trusted Publishing
 
 jobs:
-
   publish:
     runs-on: ubuntu-latest
     environment: pypi
+    with:
+      python-version: "3.13"
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure tag matches package version
+        run: python hook_scripts/check_version_match.py
 
       - uses: astral-sh/setup-uv@v7
 
