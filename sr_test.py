@@ -38,7 +38,9 @@ template_conf = TemplateConfig(
     poly_interaction_order=2,
     interaction_form="func",
     hessian_restriction="free",
+    constant_filtering="parametrize",
 )
+
 params = PySRParams(
     precision=32,
     maxsize=12,

@@ -100,6 +100,4 @@ class TemplateConfig:
     # - 'parametrize': Replace constants with parameters to be estimated.
     # - None: Do not apply any constant filtering.
     # Default: 'parametrize'
-    constant_filtering: Literal["keep", "disqualify", "strip", "parametrize"] | None = (
-        "keep"
-    )
+    constant_filtering: Literal["keep", "disqualify", "strip", "parametrize"] = "keep"

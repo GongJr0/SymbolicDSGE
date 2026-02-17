@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Callable, Literal, Iterator
+from typing import Callable, Literal, Iterator, cast
 from enum import StrEnum
 
 import warnings
@@ -328,11 +328,21 @@ class PySRParams:
             if self.constraints is None:
                 self.constraints = {}
             self.constraints[operator.name] = operator._get_bound()
+            ops = cast(list, self.binary_operators) + cast(list, self.unary_operators)
+            for op2 in ops:
+                self.set_nesting_constraint(operator.name, op2, 0)
+                self.set_nesting_constraint(op2, operator.name, 0)
 
     def add_template(self, template_spec: TemplateExpressionSpec) -> None:
         self.expression_spec = template_spec
 
     def set_nesting_constraint(self, op1: str, op2: str, max_nesting: int) -> None:
+        cleaned_ops = [
+            op.split("=")[0].strip().split("(")[0].strip() if "=" in op else op
+            for op in [op1, op2]
+        ]  # must contain "=" if func def
+        op1, op2 = cleaned_ops
+
         if self.nested_constraints is None:
             self.nested_constraints = {}
         if op1 not in self.nested_constraints:
@@ -341,15 +351,17 @@ class PySRParams:
 
     def _nesting_disable(self) -> dict[str, dict[str, int]]:
         if self.binary_operators is None:
-            raise ValueError(
-                "Detected `self.binary_operators==None`. If you didn't manually set this please report it in the SymbolicDSGE GitHub."
+            warnings.warn(
+                "Detected `self.binary_operators==None`. If you didn't manually set this please report it in the SymbolicDSGE GitHub.",
+                UserWarning,
             )
         if self.unary_operators is None:
-            raise ValueError(
-                "Detected `self.unary_operators==None`. If you didn't manually set this please report it in the SymbolicDSGE GitHub."
+            warnings.warn(
+                "Detected `self.unary_operators==None`. If you didn't manually set this please report it in the SymbolicDSGE GitHub.",
+                UserWarning,
             )
 
-        ops = self.binary_operators + self.unary_operators
+        ops = cast(list, self.binary_operators) + cast(list, self.unary_operators)
 
         # Clean function definitions from julia ops
         cleaned_ops = [
@@ -362,7 +374,7 @@ class PySRParams:
         return ["+", "-", "*", "/"]
 
     def _default_unary_ops(self) -> list[str]:
-        return ["asinh"]
+        return []
 
     def _default_elementwise_loss(self) -> str:
         return "L2DistLoss()"

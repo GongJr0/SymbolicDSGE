@@ -2,13 +2,14 @@ import sympy as sp
 
 from .model_defaults import PySRParams
 from pysr import ExpressionSpec, PySRRegressor
-from typing import Sequence
+from typing import Sequence, cast
 import warnings
 import numpy as np
 import pandas as pd
 import re  # :(
 
 from .base_model_parametrizer import BaseModelParametrizer, _normalize_variables
+from .constant_handler import ConstantHandler
 
 
 class SymbolicRegressor:
@@ -61,8 +62,8 @@ class SymbolicRegressor:
         model.set_params(**param_overrides)
         variable_names = self._validate_and_normalize_varnames(variable_names)
         model.fit(X, y, variable_names=variable_names)
-        model.equations_ = self._convert_equations_to_sympy(
-            model.equations_
+        model.equations_ = self._convert_and_handle_constants(
+            cast(pd.DataFrame, model.equations_)
         )  # pyright: ignore
         self.model = model
 
@@ -181,7 +182,17 @@ class SymbolicRegressor:
                 )
         return varnames
 
-    def _convert_equations_to_sympy(self, equations: pd.DataFrame) -> pd.DataFrame:
+    def _convert_and_handle_constants(self, equations: pd.DataFrame) -> pd.DataFrame:
         equations["sympy_format"] = None  # Create column for .apply
         converted = equations.apply(lambda row: self._get_sp_from_template(row), axis=1)
+        converted["initial_expr"] = converted[
+            "sympy_format"
+        ]  # Store initial expression before constant handling for reference
+
+        handler = ConstantHandler(self.parametrizer.config)
+        exprs = converted["sympy_format"].tolist()
+        handled = handler.get_handled_exprs(exprs)
+        converted["sympy_format"] = list(handled)
+        converted["equation"] = converted["sympy_format"].apply(str)
+
         return converted
