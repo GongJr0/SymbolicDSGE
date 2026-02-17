@@ -10,9 +10,10 @@ permissions:
   id-token: write     # PyPI Trusted Publishing
 
 jobs:
+
   publish:
     runs-on: ubuntu-latest
-
+    environment: pypi
     steps:
       - uses: actions/checkout@v4
 
