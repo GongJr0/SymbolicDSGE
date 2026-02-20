@@ -5,7 +5,7 @@ tags:
 
 # Model Configuration Guide
 
-???+ tip "__TL;DR__"
+??? tip "__TL;DR__"
     You can see an example config [here](../assets/test.yaml).
 
 `SymbolicDSGE` models are configured through a YAML file. Similar to many familiar DSGE engines, the configuration contains:

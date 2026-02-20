@@ -130,20 +130,20 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Guides:
-      - Model Configuration Guide: Guides/model_config_guide.md
-      - Quick Start: Guides/quickstart.md
-      - Kalman Filter Configuration Guide: Guides/kalman_config_guide.md
+      - Model Configuration Guide: guides/model_config_guide.md
+      - Quick Start: guides/quickstart.md
+      - Kalman Filter Configuration Guide: guides/kalman_config_guide.md
   - Documentation:
-      - ModelConfig: Documentation/ModelConfig.md
-      - ModelParser: Documentation/ModelParser.md
-      - DSGESolver: Documentation/DSGESolver.md
-      - CompiledModel: Documentation/CompiledModel.md
-      - SolvedModel: Documentation/SolvedModel.md
-      - Shock: Documentation/Shock.md
-      - KalmanConfig: Documentation/KalmanConfig.md
-      - FilterResult: Documentation/FilterResult.md
+      - ModelConfig: documentation/ModelConfig.md
+      - ModelParser: documentation/ModelParser.md
+      - DSGESolver: documentation/DSGESolver.md
+      - CompiledModel: documentation/CompiledModel.md
+      - SolvedModel: documentation/SolvedModel.md
+      - Shock: documentation/Shock.md
+      - KalmanConfig: documentation/KalmanConfig.md
+      - FilterResult: documentation/FilterResult.md
       - Utilities:
-          - FRED: Documentation/Utilities/FRED.md
-          - KalmanFilter: Documentation/Utilities/KalmanFilter.md
-          - math_utils: Documentation/Utilities/math_utils.md
+          - FRED: documentation/utilities/FRED.md
+          - KalmanFilter: documentation/utilities/KalmanFilter.md
+          - math_utils: documentation/utilities/math_utils.md
   - Contact: contact.md
