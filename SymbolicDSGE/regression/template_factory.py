@@ -21,7 +21,7 @@ class MissingExpressionError(Exception):
         )
 
 
-class BaseTemplateFactory:
+class TemplateFactory:
     def __init__(
         self,
         config: TemplateConfig,

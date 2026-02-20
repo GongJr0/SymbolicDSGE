@@ -28,23 +28,30 @@ class CustomOp:
     """
 
     name: str
-    type: OpType | Literal["binary", "unary"]
+    arity: OpType | Literal["binary", "unary"]
     lamb: Callable[..., float]
     jl_str: str
+    primitive_operation: Callable[
+        ..., sp.Expr
+    ]  # Opetaror to substitute with callables to enable derivation of custom operators.
     complexity_bound: int | tuple[int, int] | None = None
 
     def _get_bound(self) -> int | tuple[int, int]:
         if self.complexity_bound is not None:
             return self.complexity_bound
         else:
-            if self.type == OpType.BINARY:
+            if self.arity == OpType.BINARY:
                 return (-1, -1)
-            elif self.type == OpType.UNARY:
+            elif self.arity == OpType.UNARY:
                 return -1
             else:
                 raise ValueError(
                     "Complexity bound must be a tuple of complexities or an integer, depending on operator type."
                 )
+
+    def _normalize_arity(self) -> None:
+        if isinstance(self.arity, str):
+            self.__setattr__("arity", OpType(self.arity))
 
 
 # Buil-in Custom Operators:
@@ -56,13 +63,17 @@ def get_pow(p: int, prec: int) -> CustomOp:
         out: float = x**p
         return out
 
+    def pow_primitive(x: sp.Expr) -> sp.Expr:
+        return sp.Pow(x, p, evaluate=False)
+
     name = f"pow{prec}_{p}"
     jl_str = f"{name}(x) = Float{prec}(x^{p})"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,
-        type=OpType.UNARY,
+        arity=OpType.UNARY,
         lamb=pow,
         jl_str=jl_str,
+        primitive_operation=pow_primitive,
         complexity_bound=-1,
     )
 
@@ -74,13 +85,17 @@ def get_sqrt(prec: int, eps: float = 1e-8) -> CustomOp:
         )  # sqrt approximation function robust to negative and 0 inputs.
         return out
 
+    def ssqrt_primitive(x: sp.Expr) -> sp.Expr:
+        return sp.sqrt(x, evaluate=False)
+
     name = f"ssqrt{prec}"
     jl_str = f"{name}(x) = Float{prec}((x*x + Float{prec}({eps}))^(0.25f0))"  # prec \in {16, 32, 64} (pre-validated)
     return CustomOp(
         name=name,
-        type=OpType.UNARY,
+        arity=OpType.UNARY,
         lamb=ssqrt,
         jl_str=jl_str,
+        primitive_operation=ssqrt_primitive,
         complexity_bound=-1,  # [default] Complexity of x is unrestricted
     )
 
@@ -90,11 +105,15 @@ def get_asinh(prec: int) -> CustomOp:
         out: float = sp.asinh(x).evalf()  # pyright: ignore
         return out
 
+    def asinh_primitive(x: sp.Expr) -> sp.Expr:
+        return sp.asinh(x, evaluate=False)
+
     return CustomOp(
         name=f"asinh{prec}",
-        type=OpType.UNARY,
+        arity=OpType.UNARY,
         lamb=asinh,
         jl_str=f"asinh{prec}(x) = Float{prec}(asinh(x))",  # asinh is part of the julia standard library
+        primitive_operation=asinh_primitive,
         complexity_bound=-1,  # [default] Complexity of x is unrestricted
     )
 
@@ -102,6 +121,7 @@ def get_asinh(prec: int) -> CustomOp:
 def make_operator_general(
     lamb: Callable[..., float],
     jl_str: str,
+    primitive_operation: Callable[..., sp.Expr],
     complexity_bound: tuple[int, int] | int | None = None,
 ) -> CustomOp:
     """
@@ -110,6 +130,12 @@ def make_operator_general(
     :type lamb: Callable[..., float]
     :param jl_str: A string defining the operator in Julia syntax for PySR.
     :type jl_str: str
+    :param primitive_operation: A sympy expression that defines the operator for use in sympy mapping and derivation.
+    :type primitive_operation: Callable[..., sp.Expr]
+    :param complexity_bound: An optional complexity bound for the operator.
+    :type complexity_bound: tuple[int, int] | int | Non
+    :return: A CustomOp object representing the operator.
+    :rtype: CustomOp
     """
     # Parse name and arg count
     fun, _ = jl_str.split("=", maxsplit=1)
@@ -143,9 +169,10 @@ def make_operator_general(
 
     return CustomOp(
         name=name,
+        arity=op_type,
         lamb=lamb,
         jl_str=jl_str,
-        type=op_type,
+        primitive_operation=primitive_operation,
         complexity_bound=complexity_bound,
     )
 
@@ -285,7 +312,7 @@ class PySRParams:
     extra_torch_mappings: None = None  # Not supported
 
     def add_operator(self, operator: CustomOp) -> None:
-        if operator.type == OpType.BINARY:
+        if operator.arity == OpType.BINARY:
             if self.binary_operators is None:
                 raise ValueError(
                     "Detected `self.binary_operators==None`. If you didn't manually set this please report it in the SymbolicDSGE GitHub."
@@ -301,7 +328,7 @@ class PySRParams:
                     self.constraints = {}
                 self.constraints[operator.name] = operator.complexity_bound
 
-        elif operator.type == OpType.UNARY:
+        elif operator.arity == OpType.UNARY:
             if self.unary_operators is None:
                 raise ValueError(
                     "Detected `self.unary_operators==None`. If you didn't manually set this please report it in the SymbolicDSGE GitHub."
@@ -328,7 +355,7 @@ class PySRParams:
             if self.constraints is None:
                 self.constraints = {}
             self.constraints[operator.name] = operator._get_bound()
-            ops = cast(list, self.binary_operators) + cast(list, self.unary_operators)
+            ops = cast(list, self.unary_operators)
             for op2 in ops:
                 self.set_nesting_constraint(operator.name, op2, 0)
                 self.set_nesting_constraint(op2, operator.name, 0)
@@ -361,7 +388,7 @@ class PySRParams:
                 UserWarning,
             )
 
-        ops = cast(list, self.binary_operators) + cast(list, self.unary_operators)
+        ops = cast(list, self.unary_operators)
 
         # Clean function definitions from julia ops
         cleaned_ops = [

@@ -6,7 +6,7 @@ from .model_defaults import (
 )
 from .built_in_op_container import BuiltInOpContainer as bop
 
-from .base_template_factory import BaseTemplateFactory
+from .template_factory import TemplateFactory
 from .config import TemplateConfig
 from .config_validator import ConfigValidator
 import sympy as sp
@@ -25,7 +25,13 @@ def _normalize_variables(
             out.append(var)
         elif isinstance(var, sp.Symbol):
             out.append(var.name)
-        elif isinstance(var, (sp.Function, sp.core.function.UndefinedFunction)):
+        elif isinstance(
+            var,
+            (
+                sp.core.function.AppliedUndef,
+                sp.core.function.UndefinedFunction,
+            ),  # Applied Undef -> f(x), Undefined -> f  (both have .name == 'f')
+        ):
             out.append(var.name)
         else:
             raise ValueError(
@@ -34,7 +40,7 @@ def _normalize_variables(
     return out
 
 
-class BaseModelParametrizer:
+class ModelParametrizer:
     def __init__(
         self,
         variable_names: Sequence[str | sp.Symbol | sp.Function],
@@ -49,15 +55,21 @@ class BaseModelParametrizer:
             "asinh": bop.asinh(self.params),
             **bop.pows(self.config, self.params),
         }
+
+        self._primitive_ops: dict[str, Callable[..., sp.Expr]] = {}
+
         self.clean_expr: str | None = None
 
     @staticmethod
     def make_operator(
         lamb: Callable[..., float],
         jl_str: str,
+        primitive_operation: Callable[..., sp.Expr],
         complexity_bound: tuple[int, int] | int | None = None,
     ) -> CustomOp:
-        return make_operator_general(lamb, jl_str, complexity_bound)
+        return make_operator_general(
+            lamb, jl_str, primitive_operation, complexity_bound
+        )
 
     def add_operator(self, op: CustomOp) -> None:
         """
@@ -66,11 +78,13 @@ class BaseModelParametrizer:
         :type op: CustomOp
         """
         self._params.add_operator(op)
+        self._primitive_ops[op.name] = op.primitive_operation
 
     def make_and_add_operator(
         self,
         lamb: Callable[..., float],
         jl_str: str,
+        primitive_operation: Callable[..., sp.Expr],
         complexity_bound: tuple[int, int] | int | None = None,
     ) -> None:
         """
@@ -80,7 +94,7 @@ class BaseModelParametrizer:
         :param jl_str: A string defining the operator in Julia syntax for PySR.
         :type jl_str: str
         """
-        op = self.make_operator(lamb, jl_str, complexity_bound)
+        op = self.make_operator(lamb, jl_str, primitive_operation, complexity_bound)
         self.add_operator(op)
 
     def make_template(
@@ -105,7 +119,7 @@ class BaseModelParametrizer:
         prec = self.params.precision
         hessian_mode = config.hessian_restriction
 
-        factory = BaseTemplateFactory(config, variable_names, expr, t)
+        factory = TemplateFactory(config, variable_names, expr, t)
         clean_expr, template = factory.get_template(hessian_mode, prec)
         self.clean_expr = clean_expr
         return template
@@ -148,7 +162,8 @@ class BaseModelParametrizer:
                 raise ValueError(
                     f"Invalid operator name '{op_name}'. Valid options are: {list(self._built_in_ops.keys())}"
                 )
-            self.add_operator(self._built_in_ops[op_name])
+            op = self._built_in_ops[op_name]
+            self.add_operator(op)
 
     @property
     def variable_names(self) -> list[str]:
@@ -165,3 +180,7 @@ class BaseModelParametrizer:
     @property
     def built_in_ops(self) -> dict[str, CustomOp]:
         return self._built_in_ops
+
+    @property
+    def primitive_ops(self) -> dict[str, Callable[..., sp.Expr]]:
+        return self._primitive_ops

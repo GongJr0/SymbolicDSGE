@@ -1,10 +1,10 @@
-from .base_model_parametrizer import BaseModelParametrizer
+from .model_parametrizer import ModelParametrizer
 from .model_defaults import make_operator_general, CustomOp, PySRParams
 from .config import TemplateConfig
 from .symbolic_regression import SymbolicRegressor
 
 __all__ = [
-    "BaseModelParametrizer",
+    "ModelParametrizer",
     "make_operator_general",
     "CustomOp",
     "PySRParams",
