@@ -10,8 +10,6 @@ from numba import njit
 import pandas as pd  # fuck linearsolve
 import linearsolve
 
-from typing import TypedDict
-
 
 from .config import ModelConfig
 from .compiled_model import CompiledModel
@@ -42,7 +40,10 @@ class DSGESolver:
         t = self.t
 
         # Convert model to minimization problem
-        obj = [sp.simplify(eq.lhs - eq.rhs) for eq in conf.equations.model]
+        obj = [
+            sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
+            for eq in conf.equations.model
+        ]
 
         shifted = [self._offset_lags(o, t) for o in obj]
 
@@ -54,7 +55,7 @@ class DSGESolver:
             ]
             var_order = [v.__name__ for v in conf.variables]
         else:
-            var_order = [
+            var_order = [  # pyright: ignore
                 v.__name__ if hasattr(v, "func") else v for v in variable_order
             ]
 
@@ -82,8 +83,8 @@ class DSGESolver:
         subs_map = {}
         for name, f, cur, fwd in zip(var_order, var_funcs, cur_syms, fwd_syms):
 
-            subs_map[f(t)] = cur  # noqa
-            subs_map[f(t + 1)] = fwd  # noqa
+            subs_map[f(t)] = cur  # pyright: ignore
+            subs_map[f(t + 1)] = fwd  # pyright: ignore
 
         if not params_order:
             params_order = [p.name for p in conf.parameters]
@@ -131,11 +132,22 @@ class DSGESolver:
             for expr in observable_exprs
         ]
 
+        symbolic_jacobian: sp.Matrix = conf.equations.obs_jacobian
+        # Recompile measurement functions with params substituted (No param passthrough to downstream EKF)
+        variables = [conf.variables[idx[name]] for name in var_order]
+
+        jac_lambda = sp.lambdify(
+            [*variables, *params],
+            symbolic_jacobian,
+            modules="numpy",
+        )
+
         return CompiledModel(
             config=conf,
             kalman=kalman_conf,
             cur_syms=cur_syms,
             var_names=var_order,
+            calib_params=params,
             idx=idx,
             objective_eqs=compiled,
             objective_funcs=funcs,
@@ -143,6 +155,7 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_funcs=observable_funcs,
+            observable_jacobian=njit(jac_lambda),
             n_state=int(n_state),
             n_exog=int(n_exog),
         )
@@ -192,6 +205,8 @@ class DSGESolver:
         mdl.set_ss(ss)
         mdl.approximate_and_solve(log_linear=log_linear)
 
+        print(f"Model solved with state order: {compiled.var_names}")
+
         # Extract solution matrices (linearsolve uses .gx, .hx style in some versions, keep flexible)
         # Common conventions in linear RE solvers:
         # x_{t+1} = hx x_t + eta eps_{t+1}
@@ -216,7 +231,7 @@ class DSGESolver:
                 ]
             )
         )
-
+        print(f"Transition matrix A {A}")
         # Shocks hit only the first n_exo states with identity.
         B_state = np.vstack(
             [

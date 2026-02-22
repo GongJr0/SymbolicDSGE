@@ -288,7 +288,7 @@ class ModelParser:
             )  # xreplace is often safer than subs here
 
             grads = [expr_symbolized.diff(s) for s in state_syms]
-            jacobian_entries.append(grads)
+            jacobian_entries.append(grads)  # pyright: ignore
             if all((g.free_symbols & state_set) == set() for g in grads):
                 is_affine[obs] = True
 
@@ -421,7 +421,6 @@ class ModelParser:
             P0=P0_cfg,
         )
 
-    # --- your strict contract kept (minor tidy only) ---
     @staticmethod
     def _require_calibrated_params(data: dict[str, Any]) -> None:
         declared = set(data.get("parameters", []))

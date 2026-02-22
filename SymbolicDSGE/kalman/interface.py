@@ -1,7 +1,9 @@
+from logging import warning
+import warnings
 from .filter import KalmanFilter, FilterResult
 from .config import KalmanConfig
-from .validator import validate_kf_inputs, _KalmanDebugInfo
-from typing import TYPE_CHECKING, Tuple, Literal
+from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
+from typing import TYPE_CHECKING, Tuple, Literal, Callable
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -10,6 +12,7 @@ from ..core.config import ModelConfig, SymbolGetterDict
 
 
 from functools import cached_property
+from enum import StrEnum
 
 import numpy as np
 from numpy import asarray, float64, int64
@@ -29,17 +32,26 @@ class KalmanInterface(KalmanFilter):
         model: "SolvedModel",
         observables: list[str] | None,
         y: NDF | pd.DataFrame,
+        filter_mode: Literal["linear", "extended"] = "linear",
         *,
+        h_func: Callable[..., NDF] | None = None,
+        H_jac: Callable[..., NDF] | None = None,
+        calib_params: NDF | None = None,
         p0_mode: Literal["diag", "eye"] | None = None,
         p0_scale: Float64Like | None = None,
         jitter: Float64Like | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
     ) -> None:
+
         self.model = model
+        self.mode = FilterMode(filter_mode)
 
         obs, y = self._reorder_obs(observables, y)
-        self.observables = obs
+        if obs is None:
+            raise ValueError("Reordering of observables failed.")
+
+        self.observables = obs  # reorder to canonical order
         self.y = y
 
         self.A, self.B = model.A, model.B
@@ -47,6 +59,12 @@ class KalmanInterface(KalmanFilter):
         self.Q = self._build_Q()
         self.P0 = self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale)
         self.R = self._build_constant_R()
+
+        self.h_func = h_func
+        self.H_jac = H_jac
+        self.calib_params = calib_params
+
+        self._validate_mode_and_inputs()
 
         self.jitter = self._get_jitter(jitter)
         self.symmetrize = self._get_symmetrize(symmetrize)
@@ -59,7 +77,7 @@ class KalmanInterface(KalmanFilter):
         if x0 is None:
             x0 = np.zeros((self.A.shape[0],), dtype=float64)
 
-        validated_args = {
+        linear_validated_args = {
             # State Space Definition
             "A": self.A,
             "B": self.B,
@@ -73,23 +91,55 @@ class KalmanInterface(KalmanFilter):
             # Data
             "y": self.y,
         }
+
+        extended_validated_args = {
+            # State Space Definition
+            "A": self.A,
+            "B": self.B,
+            "h": self.h_func,
+            "H_jac": self.H_jac,
+            "calib_params": self.calib_params,
+            "Q": self.Q,
+            "R": self.R,
+            "P0": self.P0,
+            # Initial State
+            "x0": x0,
+            # Data
+            "y": self.y,
+        }
+        validated_args = linear_validated_args | extended_validated_args
         validate_kf_inputs(
-            **validated_args, check_nonneg_diag=True, check_symmetry=True  # type: ignore
+            **validated_args, filter_mode=self.mode, check_nonneg_diag=True, check_symmetry=True, probe_measurement=(self.mode == FilterMode.EXTENDED), probe_state=("x0" if x0 is not None else "zeros")  # type: ignore
         )
 
-        run = self.run(
-            **validated_args,
-            # Options
-            jitter=self.jitter,
-            symmetrize=self.symmetrize,
-            return_shocks=self.return_shocks,
-        )
+        if self.mode == FilterMode.LINEAR:
+
+            run = self.run(
+                **linear_validated_args,
+                # Options
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                return_shocks=self.return_shocks,
+            )
+        elif self.mode == FilterMode.EXTENDED:
+            run = self.run_extended(
+                **extended_validated_args,  # type: ignore
+                # Options
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                return_shocks=self.return_shocks,
+            )
+        else:
+            raise ValueError(f"Unrecognized filter mode: {self.mode}")
+
         if _debug:
             self._debug_info = _KalmanDebugInfo(
                 A=self.A,
                 B=self.B,
                 C=self.C,
                 d=self.d,
+                h_func=self.h_func,
+                H_jac=self.H_jac,
                 Q=self.Q,
                 R=self.R,
                 y=self.y,
@@ -227,7 +277,7 @@ class KalmanInterface(KalmanFilter):
         return self.model._build_C_d_from_obs(self.observables)
 
     def _reorder_obs(
-        self, obs: list[str] | None, y: NDF | pd.DataFrame
+        self, obs: list[str] | None, y: NDF | pd.DataFrame | None
     ) -> Tuple[list[str], NDF]:
         """
         Return (obs_canonical, y_reordered)
@@ -293,6 +343,29 @@ class KalmanInterface(KalmanFilter):
             raise ValueError("Observation data contains NaN values.")
 
         return obs_canonical, y_reordered
+
+    def _validate_mode_and_inputs(self) -> None:
+        if self.mode == FilterMode.LINEAR:
+            if (self.C is None) or self.d is None:
+                raise ValueError(
+                    "C and d matrices are required for linear Kalman Filter."
+                )
+            # if (self.h_func is not None) or (self.H_jac is not None):
+            #     warnings.warn(
+            #         "h_func and H_jac are ignored in linear filter mode.",
+            #         UserWarning,
+            #     )
+
+        elif self.mode == FilterMode.EXTENDED:
+            if (self.h_func is None) or (self.H_jac is None):
+                raise ValueError(
+                    "h_func and H_jac are required for extended Kalman Filter."
+                )
+            # if (self.C is not None) or (self.d is not None):
+            #     warnings.warn(
+            #         "C and d matrices are ignored in extended filter mode.",
+            #         UserWarning,
+            #     )
 
     @cached_property
     def _obs_idx(self) -> dict[str, int]:
