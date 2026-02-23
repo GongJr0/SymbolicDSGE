@@ -205,8 +205,6 @@ class DSGESolver:
         mdl.set_ss(ss)
         mdl.approximate_and_solve(log_linear=log_linear)
 
-        print(f"Model solved with state order: {compiled.var_names}")
-
         # Extract solution matrices (linearsolve uses .gx, .hx style in some versions, keep flexible)
         # Common conventions in linear RE solvers:
         # x_{t+1} = hx x_t + eta eps_{t+1}
@@ -231,7 +229,6 @@ class DSGESolver:
                 ]
             )
         )
-        print(f"Transition matrix A {A}")
         # Shocks hit only the first n_exo states with identity.
         B_state = np.vstack(
             [
