@@ -518,6 +518,7 @@ class SolvedModel:
     def kalman(
         self,
         y: NDF | pd.DataFrame,
+        filter_mode: Literal["linear", "extended"] = "linear",
         *,
         observables: list[str] | None = None,
         x0: NDF | None = None,
@@ -526,19 +527,39 @@ class SolvedModel:
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
+        estimate_R_diag: bool = False,
+        R_scale: float = 1.0,
         _debug: bool = False,
     ) -> FilterResult:
 
+        params = asarray(
+            [self.config.calibration.parameters[p] for p in self.compiled.calib_params],
+            dtype=float64,
+        )
+
+        h_func: Callable[..., NDF] | None = None
+        H_jac: Callable[..., NDF] | None = None
+
+        if filter_mode == "extended":
+            h_func = self.compiled.construct_measurement_vector_func()
+            H_jac = self.compiled.observable_jacobian
+
         ki = KalmanInterface(
             model=self,
+            filter_mode=filter_mode,
             observables=observables,
             y=y,
+            h_func=h_func,
+            H_jac=H_jac,
+            calib_params=params,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
             jitter=jitter,
             symmetrize=symmetrize,
             return_shocks=return_shocks,
         )
+        if estimate_R_diag:
+            ki._ML_estimate_R_diag(scale_factor=R_scale)
 
         run = ki.filter(x0=x0, _debug=_debug)
         if _debug:

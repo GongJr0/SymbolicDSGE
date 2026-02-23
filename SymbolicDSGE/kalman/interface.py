@@ -1,7 +1,8 @@
 from .filter import KalmanFilter, FilterResult
 from .config import KalmanConfig
-from .validator import validate_kf_inputs, _KalmanDebugInfo
-from typing import TYPE_CHECKING, Tuple, Literal
+from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
+from typing import TYPE_CHECKING, Any, Tuple, Literal, Callable
+import warnings
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -14,6 +15,7 @@ from functools import cached_property
 import numpy as np
 from numpy import asarray, float64, int64
 from numpy.typing import NDArray
+from scipy import optimize
 
 from sympy import Symbol
 
@@ -29,24 +31,40 @@ class KalmanInterface(KalmanFilter):
         model: "SolvedModel",
         observables: list[str] | None,
         y: NDF | pd.DataFrame,
+        filter_mode: Literal["linear", "extended"] = "linear",
         *,
+        h_func: Callable[..., NDF] | None = None,
+        H_jac: Callable[..., NDF] | None = None,
+        calib_params: NDF | None = None,
+        R: NDF | None = None,
         p0_mode: Literal["diag", "eye"] | None = None,
         p0_scale: Float64Like | None = None,
         jitter: Float64Like | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
     ) -> None:
+
         self.model = model
+        self.mode = FilterMode(filter_mode)
 
         obs, y = self._reorder_obs(observables, y)
-        self.observables = obs
+        if obs is None:
+            raise ValueError("Reordering of observables failed.")
+
+        self.observables = obs  # reorder to canonical order
         self.y = y
 
         self.A, self.B = model.A, model.B
         self.C, self.d = self._get_C_d()
         self.Q = self._build_Q()
         self.P0 = self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale)
-        self.R = self._build_constant_R()
+        self.R = self._build_constant_R(R)
+
+        self.h_func = h_func
+        self.H_jac = H_jac
+        self.calib_params = calib_params
+
+        self._validate_mode_and_inputs()
 
         self.jitter = self._get_jitter(jitter)
         self.symmetrize = self._get_symmetrize(symmetrize)
@@ -54,42 +72,59 @@ class KalmanInterface(KalmanFilter):
 
         self._debug_info: _KalmanDebugInfo | None = None
 
-    def filter(self, x0: NDF | None = None, _debug: bool = False) -> FilterResult:
+    def filter(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> FilterResult:
+        if _arg_overrides is None:
+            _arg_overrides = {}
 
         if x0 is None:
             x0 = np.zeros((self.A.shape[0],), dtype=float64)
 
-        validated_args = {
-            # State Space Definition
-            "A": self.A,
-            "B": self.B,
-            "C": self.C,
-            "d": self.d,
-            "Q": self.Q,
-            "R": self.R,
-            "P0": self.P0,
-            # Initial State
-            "x0": x0,
-            # Data
-            "y": self.y,
-        }
+        validated_args = (
+            self._linear_validated_args | self._extended_validated_args | _arg_overrides
+        )
         validate_kf_inputs(
-            **validated_args, check_nonneg_diag=True, check_symmetry=True  # type: ignore
+            **validated_args,
+            x0=x0,
+            filter_mode=self.mode,
+            check_nonneg_diag=True,
+            check_symmetry=True,
+            probe_measurement=(self.mode == FilterMode.EXTENDED),
+            probe_state=("x0" if x0 is not None else "zeros"),
         )
 
-        run = self.run(
-            **validated_args,
-            # Options
-            jitter=self.jitter,
-            symmetrize=self.symmetrize,
-            return_shocks=self.return_shocks,
-        )
+        if self.mode == FilterMode.LINEAR:
+
+            run = self.run(
+                **self._linear_validated_args | _arg_overrides,
+                # Options
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                return_shocks=self.return_shocks,
+            )
+        elif self.mode == FilterMode.EXTENDED:
+            run = self.run_extended(
+                **self._extended_validated_args | _arg_overrides,
+                # Options
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                return_shocks=self.return_shocks,
+            )
+        else:
+            raise ValueError(f"Unrecognized filter mode: {self.mode}")
+
         if _debug:
             self._debug_info = _KalmanDebugInfo(
                 A=self.A,
                 B=self.B,
                 C=self.C,
                 d=self.d,
+                h_func=self.h_func,
+                H_jac=self.H_jac,
                 Q=self.Q,
                 R=self.R,
                 y=self.y,
@@ -117,7 +152,24 @@ class KalmanInterface(KalmanFilter):
 
         return float64(0.0)
 
-    def _build_constant_R(self) -> NDF:
+    def _validate_user_R(self, R: NDF | None) -> NDF | None:
+        if R is None:
+            return None
+
+        given_shape = R.shape
+        implied_shape = (len(self.observables), len(self.observables))
+        if given_shape != implied_shape:
+            raise ValueError(
+                f"Provided R matrix has shape {given_shape} but expected {implied_shape} based on number of observables."
+            )
+
+        return R
+
+    def _build_constant_R(self, R: NDF | None) -> NDF:
+        validated_R = self._validate_user_R(R)
+        if validated_R is not None:
+            return validated_R
+
         conf = self.kalman_config
         R = getattr(conf, "R", None)
         if R is None:
@@ -128,6 +180,50 @@ class KalmanInterface(KalmanFilter):
         mat_idx = [obs_idx[name] for name in self.observables]
         R_subset: NDF = R[np.ix_(mat_idx, mat_idx)]
         return R_subset
+
+    def _ML_estimate_R_diag(
+        self,
+        scale_factor: float = 1.0,
+    ) -> None:
+        n = len(self.observables)
+        eps = 1e-6
+        eta_0: NDF = np.log(
+            np.asarray(
+                [np.maximum(0.1 * np.var(self.y[:, i]), eps) for i in range(n)],
+                dtype=float64,
+            )
+        )
+        bounds = [(-30, 10)] * n  # e^(-30) ~ 9e-14, e^(10) ~ 22026
+
+        def obj(eta: NDF) -> float64:
+            R_diag = np.exp(eta)
+            R = np.diag(R_diag)
+            result: FilterResult = self.filter(
+                x0=np.zeros((self.A.shape[0],), dtype=float64),
+                _debug=False,
+                _arg_overrides={"R": R},
+            )
+
+            return np.float64(-1.0 * result.loglik)
+
+        opt = optimize.minimize(
+            obj,
+            x0=eta_0,
+            bounds=bounds,
+            method="L-BFGS-B",
+        )
+        if not opt.success:
+            warnings.warn(
+                f"R estimation optimization did not converge: {opt.message}",
+                UserWarning,
+            )
+            print(f"Using Config R matrix:\n {self.R}")
+            self.R = self._build_constant_R(None) * scale_factor
+
+        print(
+            f"R estimation optimization successful.\nUsing estimated R matrix:\n {np.diag(np.exp(opt.x))}\nLog-likelihood: {-opt.fun}"
+        )
+        self.R = np.diag(np.exp(opt.x)) * scale_factor
 
     def _build_P0(
         self,
@@ -227,7 +323,7 @@ class KalmanInterface(KalmanFilter):
         return self.model._build_C_d_from_obs(self.observables)
 
     def _reorder_obs(
-        self, obs: list[str] | None, y: NDF | pd.DataFrame
+        self, obs: list[str] | None, y: NDF | pd.DataFrame | None
     ) -> Tuple[list[str], NDF]:
         """
         Return (obs_canonical, y_reordered)
@@ -294,6 +390,29 @@ class KalmanInterface(KalmanFilter):
 
         return obs_canonical, y_reordered
 
+    def _validate_mode_and_inputs(self) -> None:
+        if self.mode == FilterMode.LINEAR:
+            if (self.C is None) or self.d is None:
+                raise ValueError(
+                    "C and d matrices are required for linear Kalman Filter."
+                )
+            # if (self.h_func is not None) or (self.H_jac is not None):
+            #     warnings.warn(
+            #         "h_func and H_jac are ignored in linear filter mode.",
+            #         UserWarning,
+            #     )
+
+        elif self.mode == FilterMode.EXTENDED:
+            if (self.h_func is None) or (self.H_jac is None):
+                raise ValueError(
+                    "h_func and H_jac are required for extended Kalman Filter."
+                )
+            # if (self.C is not None) or (self.d is not None):
+            #     warnings.warn(
+            #         "C and d matrices are ignored in extended filter mode.",
+            #         UserWarning,
+            #     )
+
     @cached_property
     def _obs_idx(self) -> dict[str, int]:
         return {name: i for i, name in enumerate(self.model.compiled.observable_names)}
@@ -310,3 +429,38 @@ class KalmanInterface(KalmanFilter):
                 "Kalman Filter configuration with the R matrix is required."
             )
         return config
+
+    @cached_property
+    def _linear_validated_args(self) -> dict:
+        return {
+            # State Space Definition
+            "A": self.A,
+            "B": self.B,
+            "C": self.C,
+            "d": self.d,
+            "Q": self.Q,
+            "R": self.R,
+            "P0": self.P0,
+            # Initial State
+            # "x0": x0,  # provided at filter() call time
+            # Data
+            "y": self.y,
+        }
+
+    @cached_property
+    def _extended_validated_args(self) -> dict:
+        return {
+            # State Space Definition
+            "A": self.A,
+            "B": self.B,
+            "h": self.h_func,
+            "H_jac": self.H_jac,
+            "calib_params": self.calib_params,
+            "Q": self.Q,
+            "R": self.R,
+            "P0": self.P0,
+            # Initial State
+            # "x0": x0,  # provided at filter() call time
+            # Data
+            "y": self.y,
+        }

@@ -16,7 +16,7 @@ class SymbolGetterDict(Dict[K, V]):
     def __getitem__(self, key: str | Symbol) -> Any:
         if isinstance(key, str):
             key = Symbol(key)
-        return super().__getitem__(key)
+        return super().__getitem__(key)  # pyright: ignore
 
 
 class PairGetterDict(Dict[frozenset[Symbol], V]):
