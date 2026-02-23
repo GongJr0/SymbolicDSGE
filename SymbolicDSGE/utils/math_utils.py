@@ -110,8 +110,8 @@ def annualized_log_percent(
 
     log_diff = np.diff(np.log(series))
     annualized_log_percent_change: np.ndarray | pd.Series = (
-        log_diff * periods_per_year * 100
-    )
+        np.exp(log_diff * periods_per_year) - 1
+    ) * 100
 
     if isinstance(s, pd.Series):
         annualized_log_percent_change = pd.Series(

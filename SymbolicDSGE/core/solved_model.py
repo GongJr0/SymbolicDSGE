@@ -527,6 +527,8 @@ class SolvedModel:
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
+        estimate_R_diag: bool = False,
+        R_scale: float = 1.0,
         _debug: bool = False,
     ) -> FilterResult:
 
@@ -556,6 +558,8 @@ class SolvedModel:
             symmetrize=symmetrize,
             return_shocks=return_shocks,
         )
+        if estimate_R_diag:
+            ki._ML_estimate_R_diag(scale_factor=R_scale)
 
         run = ki.filter(x0=x0, _debug=_debug)
         if _debug:

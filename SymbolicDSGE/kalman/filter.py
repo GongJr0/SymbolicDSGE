@@ -50,8 +50,8 @@ class FilterResult:
     innov: NDF  # pre-update
     S: NDF
 
+    loglik: float64
     eps_hat: NDF | None = None
-    loglik: float64 | None = None
 
 
 # Static & Parametrized Kalman Filter (written to act with SolvedModel object attributes)

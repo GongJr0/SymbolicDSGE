@@ -54,14 +54,14 @@ equations:
   constraint: {}
 
   observables:
-    Infl: 4*Pi(t) + pi_star # model gap deviation + steady-state
+    Infl: 4*Pi(t) + pi_star  # model gap deviation + steady-state
 
-    Rate: 4*r(t) + (r_star + pi_star) # model rate gap deviation + steady-state nominal rate
+    Rate: 4*r(t) + (r_star + pi_star)  # model rate gap deviation + steady-state nominal rate
 
 calibration:
   parameters:
     # beta is not in Table 3.
-    beta: 0.99
+    beta: 0.971
 
     # Post-1982 posterior means (Table 3)
     psi_pi: 2.19
