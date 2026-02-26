@@ -15,9 +15,9 @@ TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
     TransformMethod.SOFTPLUS: SoftplusTransform,
     TransformMethod.LOGIT: LogitTransform,
     TransformMethod.PROBIT: ProbitTransform,
-    TransformMethod.AFFINE_LOGIT: AffineLogitTransform,  # type: ignore # Not implemented (mypy wants concrete class)
-    TransformMethod.AFFINE_PROBIT: AffineProbitTransform,  # type: ignore # Not implemented (mypy wants concrete class)
-    TransformMethod.LOWER_BOUNDED: LowerBoundedTransform,  # type: ignore # Not implemented (mypy wants concrete class)
+    TransformMethod.AFFINE_LOGIT: AffineLogitTransform,
+    TransformMethod.AFFINE_PROBIT: AffineProbitTransform,
+    TransformMethod.LOWER_BOUNDED: LowerBoundedTransform,
     TransformMethod.UPPER_BOUNDED: UpperBoundedTransform,
 }
 

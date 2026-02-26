@@ -22,8 +22,6 @@ class TransformMethod(StrEnum):
     LOWER_BOUNDED = "lower_bounded"  # (a, inf)  via x=a+exp(y)   (or a+softplus(y))
     UPPER_BOUNDED = "upper_bounded"  # (-inf, b) via x=b-exp(y)   (or b-softplus(y))
 
-    ORDERED = "ordered"  # x1 < x2 < ... (thresholds / regime cutoffs)
-
     SIMPLEX = (
         "simplex"  # weights on simplex (sum=1, each>0) via softmax / stick-breaking
     )
