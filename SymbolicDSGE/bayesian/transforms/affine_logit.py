@@ -1,6 +1,6 @@
-from .transform import Transform, OutOfSupportError
+from .transform import Transform
 from ._affine_helpers import affine_to_unit, unit_to_affine
-from ..support import Support
+from ..support import Support, OutOfSupportError
 from typing import overload
 
 import numpy as np

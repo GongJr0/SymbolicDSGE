@@ -99,9 +99,3 @@ class Transform(ABC):
     @property
     def eps(self) -> float64:
         return float64(1e-8)
-
-
-class OutOfSupportError(ValueError):
-    def __init__(self, value: float64 | NDArray[float64], support: Support):
-        message = f"Value(s) {value} out of support {support} for this transform."
-        super().__init__(message)

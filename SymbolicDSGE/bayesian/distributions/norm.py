@@ -1,9 +1,9 @@
 from .distribution import Distribution, RandomState, Size, VecF64
-from ..support import Support
+from ..support import Support, bounded
 
 import numpy as np
 from numpy import float64
-from typing import TypedDict, Any, overload, cast
+from typing import TypedDict, overload, cast
 
 from scipy.stats import norm
 
@@ -11,8 +11,6 @@ from scipy.stats import norm
 class NormalParameters(TypedDict):
     mean: float
     std: float
-    transform: str
-    transform_kwargs: dict[str, Any]
     random_state: RandomState
 
 
@@ -30,6 +28,7 @@ class Normal(Distribution[float64, VecF64]):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
+    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
         return float64(self.dist.logpdf(x))
 
@@ -38,6 +37,7 @@ class Normal(Distribution[float64, VecF64]):
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
+    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
         grad_logpdf = -(x - self.mean) / self.var
         return float64(grad_logpdf)
@@ -73,7 +73,10 @@ class Normal(Distribution[float64, VecF64]):
     @property
     def support(self) -> Support:
         return Support(
-            float64(-np.inf), float64(np.inf), low_inclusive=False, high_inclusive=False
+            float64(-np.inf),
+            float64(np.inf),
+            low_inclusive=False,
+            high_inclusive=False,
         )
 
     @property

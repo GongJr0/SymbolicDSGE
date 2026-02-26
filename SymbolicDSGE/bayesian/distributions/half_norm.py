@@ -1,5 +1,5 @@
 from .distribution import Distribution, Size, RandomState, VecF64
-from ..support import Support
+from ..support import Support, bounded
 from typing import TypedDict, Any, overload, cast
 
 import numpy as np
@@ -32,6 +32,7 @@ class HalfNormal(Distribution[float64, VecF64]):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
+    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
         return float64(self.dist.logpdf(x))
 
@@ -40,6 +41,7 @@ class HalfNormal(Distribution[float64, VecF64]):
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
+    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
         return float64(-(x - self.loc) / self.scale**2)
 
@@ -59,9 +61,12 @@ class HalfNormal(Distribution[float64, VecF64]):
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
         return float64(self.dist.ppf(q))
 
-    def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
-        rng = self.rng if random_state is None else self._rng(random_state)
-        return cast(VecF64, self.dist.rvs(size=size, random_state=rng))
+    def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
+        rng = self._rng(random_state)
+        if isinstance(size, int):
+            size = (size,)
+        samples = self.dist.rvs(size=size, random_state=rng)
+        return cast(VecF64, float64(samples))
 
     @property
     def rng(self) -> np.random.Generator:
@@ -70,7 +75,10 @@ class HalfNormal(Distribution[float64, VecF64]):
     @property
     def support(self) -> Support:
         return Support(
-            float64(0), float64(np.inf), low_inclusive=True, high_inclusive=False
+            float64(0),
+            float64(np.inf),
+            low_inclusive=True,
+            high_inclusive=False,
         )
 
     @property

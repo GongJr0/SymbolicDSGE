@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-from typing import Union, Literal
+from typing import Union, Literal, Callable, cast
 from numpy import float64
 from numpy.typing import NDArray
 import numpy as np
+from functools import wraps
 
 FLOAT_VEC_SCA = Union[float64, NDArray[float64]]
 
@@ -47,3 +48,28 @@ class Support:
             and (self.high_inclusive or not other.high_inclusive)
         )
         return bool(low_check and high_check)
+
+
+class OutOfSupportError(ValueError):
+    def __init__(self, value: float64 | NDArray[float64], support: Support) -> None:
+        message = f"Value(s) {value} out of support {support} for this transform."
+        super().__init__(message)
+
+
+class UnsetSupportError(ValueError):
+    def __init__(self) -> None:
+        msg = "A bounded operation was defined on a object without a support function. Please make a bug report if you encounter this error."
+        super().__init__(msg)
+
+
+def bounded(func: Callable) -> Callable:
+    @wraps(func)
+    def wrapper(self: object, x: FLOAT_VEC_SCA) -> FLOAT_VEC_SCA:
+        support = getattr(self, "support", None)
+        if support is None:
+            raise UnsetSupportError()
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
+        return cast(FLOAT_VEC_SCA, func(self, x))
+
+    return wrapper
