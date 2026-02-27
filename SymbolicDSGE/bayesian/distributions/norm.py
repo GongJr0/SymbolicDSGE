@@ -59,7 +59,7 @@ class Normal(Distribution[float64, VecF64]):
         return float64(self.dist.ppf(q))
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state)
+        rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
 

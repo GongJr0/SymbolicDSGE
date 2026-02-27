@@ -12,14 +12,18 @@ class BetaParams(TypedDict):
     scale: float
     a: float
     b: float
+    random_state: RandomState
 
 
 class Beta(Distribution[float64, VecF64]):
-    def __init__(self, loc: float, scale: float, a: float, b: float) -> None:
+    def __init__(
+        self, a: float, b: float, loc: float, scale: float, random_state: RandomState
+    ) -> None:
         self._loc = float64(loc)
         self._scale = float64(scale)
         self._a = float64(a)
         self._b = float64(b)
+        self._random_state = random_state
 
         self.dist = beta(loc=loc, scale=scale, a=a, b=b)
 
@@ -61,7 +65,7 @@ class Beta(Distribution[float64, VecF64]):
         return float64(self.dist.ppf(q))
 
     def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state)
+        rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
         sample = cast(VecF64, self.dist.rvs(size=size, random_state=rng))

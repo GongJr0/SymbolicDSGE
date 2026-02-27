@@ -14,10 +14,12 @@ class LogNormalParams(TypedDict):
 
 
 class LogNormal(Distribution[float64, VecF64]):
-    def __init__(self, s: float, loc: float, scale: float):
+    def __init__(self, s: float, loc: float, scale: float, random_state: RandomState):
         self._s = float64(s)
         self._loc = float64(loc)
         self._scale = float64(scale)
+        self._random_state = random_state
+
         self.dist = lognorm(s=self._s, loc=self._loc, scale=self._scale)
 
     @overload
@@ -55,7 +57,7 @@ class LogNormal(Distribution[float64, VecF64]):
         return float64(self.dist.ppf(q))
 
     def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state)
+        rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
         samples = self.dist.rvs(size=size, random_state=rng)

@@ -11,15 +11,20 @@ class TruncNormParams(TypedDict):
     scale: float
     a: float  # Scalar lower bound (scipy expects standard deviations)
     b: float  # Scalar upper bound (scipy expects standard deviations)
+    random_state: RandomState
 
 
 class TruncNormal(Distribution[float64, VecF64]):
-    def __init__(self, loc: float, scale: float, a: float, b: float):
+    def __init__(
+        self, a: float, b: float, loc: float, scale: float, random_state: RandomState
+    ):
         self._loc = float64(loc)
         self._scale = float64(scale)
         self._a_trunc = float64(a)
         self._b_trunc = float64(b)
         self._a, self._b = self._scalar_to_std(loc, scale, a, b)
+        self._random_state = random_state
+
         self.dist = truncnorm(a=self._a, b=self._b, loc=self._loc, scale=self._scale)
 
     @overload
@@ -59,7 +64,7 @@ class TruncNormal(Distribution[float64, VecF64]):
         return float64(self.dist.ppf(q))
 
     def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state)
+        rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
         samples = self.dist.rvs(size=size, random_state=rng)

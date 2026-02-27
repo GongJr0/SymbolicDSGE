@@ -11,10 +11,10 @@ NDF = NDArray[float64]
 VecF64: TypeAlias = NDArray[np.float64]
 MatF64: TypeAlias = NDArray[np.float64]
 
-EventT = TypeVar("EventT", float64, VecF64)
+EventT = TypeVar("EventT", float64, VecF64, MatF64)
 BatchT = TypeVar("BatchT", VecF64, MatF64)
 
-Size = Union[int, Tuple[int, ...], None]
+Size = Union[int, Tuple[int, ...]]
 RandomState = Union[None, int, np.random.Generator, np.random.RandomState]
 T = TypeVar("T", float64, NDArray[float64])
 
@@ -53,7 +53,7 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def logpdf(self, x: EventT | BatchT) -> float64 | VecF64: ...
 
     @overload
-    def grad_logpdf(self, x: EventT) -> float64: ...
+    def grad_logpdf(self, x: EventT) -> float64 | MatF64: ...
     @overload
     def grad_logpdf(self, x: BatchT) -> VecF64: ...
 
@@ -77,7 +77,7 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def ppf(self, q: EventT | BatchT) -> float64 | VecF64: ...
 
     @abstractmethod
-    def rvs(self, size: Size = None, random_state: RandomState = None) -> BatchT: ...
+    def rvs(self, size: Size, random_state: RandomState = None) -> BatchT: ...
 
     @property
     @abstractmethod

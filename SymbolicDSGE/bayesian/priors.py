@@ -16,7 +16,7 @@ class PriorFamily(StrEnum):
     BETA = "beta"
     GAMMA = "gamma"
     INV_GAMMA = "invgamma"
-    LKJ = "lkj"
+    LKJ_CHOL = "lkj_chol"
     UNIFORM = "uniform"  # Bounded max entropy fallback
 
 
