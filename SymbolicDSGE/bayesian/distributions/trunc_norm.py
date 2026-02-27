@@ -45,7 +45,7 @@ class TruncNormal(Distribution[float64, VecF64]):
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
         # Assume gradient at bounds is approaching from the defined region (+ for lower bound, - for upper bound).
         # This avoids non-finite gradients at bounds but isn't mathematically exact.
-        return -(x - self.mean) / self.var
+        return -(x - self._loc) / self._scale**2
 
     @overload
     def cdf(self, x: float64) -> float64: ...

@@ -160,6 +160,24 @@ class LKJChol(Distribution[MatF64, MatF64]):
             G[k, k] = exp / L[k, k]
         return G
 
+    def cdf(self, x: MatF64) -> MatF64:
+        raise NotImplementedError("CDF is not defined for LKJChol.")
+
+    def ppf(self, q: MatF64) -> MatF64:
+        raise NotImplementedError("PPF is not defined for LKJChol.")
+
+    @property
+    def mean(self) -> MatF64:
+        raise NotImplementedError("Mean is not defined for LKJChol.")
+
+    @property
+    def var(self) -> MatF64:
+        raise NotImplementedError("Variance is not defined for LKJChol.")
+
+    @property
+    def mode(self) -> MatF64:
+        raise NotImplementedError("Mode is not defined for LKJChol.")
+
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> MatF64:
         rng = self._rng(random_state or self._random_state)
         eta = self._eta

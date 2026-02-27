@@ -77,7 +77,7 @@ class ProbitTransform(Transform):
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
         if self.maps_to.contains(y):
-            return np.log(norm.pdf(norm.ppf(y)))
+            return np.log(norm.pdf(y))
         else:
             raise OutOfSupportError(y, self.maps_to)
 

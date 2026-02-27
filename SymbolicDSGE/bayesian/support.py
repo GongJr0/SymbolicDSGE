@@ -34,10 +34,10 @@ class Support:
         x_arr = np.asarray(x)
 
         if bound == "low":
-            return bool(np.any(x_arr == self.low))
+            return bool(np.any(np.isclose(x_arr, self.low, atol=1e-6)))
 
         else:
-            return bool(np.any(x_arr == self.high))
+            return bool(np.any(np.isclose(x_arr, self.high, atol=1e-6)))
 
     def contains_support(self, other: "Support") -> bool:
         low_check = self.low < other.low or (

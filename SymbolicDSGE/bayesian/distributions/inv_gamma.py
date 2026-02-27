@@ -42,7 +42,8 @@ class InvGamma(Distribution[float64, VecF64]):
 
     @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64((1 + x * (-self._a - 1)) / x**2) / self._scale
+        z = x - self._loc
+        return self._scale / (z * z) - (self._a + 1.0) / z
 
     @overload
     def cdf(self, x: float64) -> float64: ...

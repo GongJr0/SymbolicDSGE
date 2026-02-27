@@ -30,7 +30,9 @@ def _coerce_rng(random_state: RandomState) -> np.random.Generator:
     # Legacy RandomState support: wrap by seeding a new Generator from it
     if isinstance(random_state, np.random.RandomState):
         # draw a seed from RandomState deterministically
-        seed = int(random_state.randint(0, 2**32 - 1))
+        # RandomState.randint uses platform-dependent C-long bounds; on Windows
+        # this is typically int32, so keep the upper bound int32-safe.
+        seed = int(random_state.randint(0, np.iinfo(np.int32).max))
         return np.random.default_rng(seed)
     raise TypeError(f"Unsupported random_state type: {type(random_state)}")
 
@@ -61,7 +63,7 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def grad_logpdf(self, x: EventT | BatchT) -> float64 | VecF64: ...
 
     @overload
-    def cdf(self, x: EventT) -> float64: ...
+    def cdf(self, x: EventT) -> float64 | MatF64: ...
     @overload
     def cdf(self, x: BatchT) -> VecF64: ...
 
@@ -69,7 +71,7 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def cdf(self, x: EventT | BatchT) -> float64 | VecF64: ...
 
     @overload
-    def ppf(self, q: EventT) -> float64: ...
+    def ppf(self, q: EventT) -> float64 | MatF64: ...
     @overload
     def ppf(self, q: BatchT) -> VecF64: ...
 

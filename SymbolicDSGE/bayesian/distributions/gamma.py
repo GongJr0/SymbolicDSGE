@@ -42,7 +42,7 @@ class Gamma(Distribution[float64, VecF64]):
 
     @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64((self._a - x - 1) / x) * self._scale + self._loc
+        return float64((self._a - 1) / (x - self._loc) - (1 / self._scale))
 
     @overload
     def cdf(self, x: float64) -> float64: ...

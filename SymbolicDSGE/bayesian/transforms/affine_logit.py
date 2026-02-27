@@ -93,7 +93,7 @@ class AffineLogitTransform(Transform):
         # log|dx/dy| = log(b-a) + log(sigmoid(y)(1-sigmoid(y)))
         #            = log(b-a) - y - 2*log(1 + exp(-y))
         if self.maps_to.contains(y):
-            return float64(np.log(self._span) - y - 2.0 * np.log(1.0) + np.exp(-y))
+            return float64(np.log(self._span) - y - 2.0 * np.log1p(np.exp(-y)))
         else:
             raise OutOfSupportError(y, self.maps_to)
 

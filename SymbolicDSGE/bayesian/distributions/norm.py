@@ -15,12 +15,12 @@ class NormalParameters(TypedDict):
 
 
 class Normal(Distribution[float64, VecF64]):
-    def __init__(self, parameters: NormalParameters):
-        self._mean = float64(parameters["mean"])
-        self._var = float64(parameters["std"] ** 2)
-        self._random_state = parameters["random_state"]
+    def __init__(self, mean: float, std: float, random_state: RandomState = None):
+        self._mean = float64(mean)
+        self._var = float64(std**2)
+        self._random_state = random_state
 
-        std = float64(parameters["std"])
+        std = float64(std)
         self.dist = norm(loc=self._mean, scale=std)
 
     @overload

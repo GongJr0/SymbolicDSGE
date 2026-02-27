@@ -92,7 +92,7 @@ class LogTransform(Transform):
         return Support(
             float64(0),
             float64(np.inf),
-            low_inclusive=True,
+            low_inclusive=False,
             high_inclusive=False,
         )
 
