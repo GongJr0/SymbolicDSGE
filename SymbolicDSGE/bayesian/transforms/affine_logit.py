@@ -1,3 +1,4 @@
+from scipy.special import expit
 from .transform import Transform
 from ._affine_helpers import affine_to_unit, unit_to_affine
 from ..support import Support, OutOfSupportError
@@ -94,6 +95,21 @@ class AffineLogitTransform(Transform):
         #            = log(b-a) - y - 2*log(1 + exp(-y))
         if self.maps_to.contains(y):
             return float64(np.log(self._span) - y - 2.0 * np.log1p(np.exp(-y)))
+        else:
+            raise OutOfSupportError(y, self.maps_to)
+
+    @overload
+    def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
+    @overload
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: float64 | NDArray[float64]
+    ) -> float64 | NDArray[float64]:
+        if self.maps_to.contains(y):
+            return float64(1 - 2 * expit(y))
         else:
             raise OutOfSupportError(y, self.maps_to)
 

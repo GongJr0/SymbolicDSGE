@@ -14,6 +14,15 @@ class TruncNormParams(TypedDict):
     random_state: RandomState
 
 
+TRUNCNORM_DEFAULTS = TruncNormParams(
+    loc=0.0,
+    scale=1.0,
+    a=-6.0,  # Effectively unbounded
+    b=6.0,
+    random_state=None,
+)
+
+
 class TruncNormal(Distribution[float64, VecF64]):
     def __init__(
         self, a: float, b: float, loc: float, scale: float, random_state: RandomState

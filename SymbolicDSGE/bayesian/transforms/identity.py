@@ -79,6 +79,21 @@ class Identity(Transform):
         else:
             raise OutOfSupportError(y, self.maps_to)
 
+    @overload
+    def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
+    @overload
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: float64 | NDArray[float64]
+    ) -> float64 | NDArray[float64]:
+        if self.maps_to.contains(y):
+            return float64(np.zeros_like(y))
+        else:
+            raise OutOfSupportError(y, self.maps_to)
+
     @property
     def support(self) -> Support:
         return Support(

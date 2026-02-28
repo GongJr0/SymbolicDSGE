@@ -15,6 +15,14 @@ class GammaParams(TypedDict):
     random_state: RandomState
 
 
+GAMMA_DEFAULTS = GammaParams(
+    a=1.0,
+    loc=0.0,
+    scale=1.0,
+    random_state=None,
+)
+
+
 class Gamma(Distribution[float64, VecF64]):
     def __init__(
         self, a: float, loc: float, scale: float, random_state: RandomState

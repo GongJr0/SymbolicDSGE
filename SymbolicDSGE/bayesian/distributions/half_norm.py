@@ -1,6 +1,6 @@
 from .distribution import Distribution, Size, RandomState, VecF64
 from ..support import Support, bounded
-from typing import TypedDict, Any, overload, cast
+from typing import TypedDict, overload, cast
 
 import numpy as np
 from numpy import float64
@@ -11,9 +11,14 @@ from scipy.stats import halfnorm
 class HalfNormalParameters(TypedDict):
     loc: float  # != mean; used like loc + HN(0, 1) * scale
     scale: float  # != std;
-    transform: str
-    transform_kwargs: dict[str, Any]
     random_state: RandomState
+
+
+HALFNORM_DEFAULTS = HalfNormalParameters(
+    loc=0.0,
+    scale=1.0,
+    random_state=None,
+)
 
 
 class HalfNormal(Distribution[float64, VecF64]):

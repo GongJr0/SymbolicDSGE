@@ -6,6 +6,8 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
+from scipy.special import expit
+
 
 class LogitTransform(Transform):
 
@@ -83,6 +85,21 @@ class LogitTransform(Transform):
     ) -> float64 | NDArray[float64]:
         if self.maps_to.contains(y):
             return float64(-y - 2 * np.log(1 + np.exp(-y)))
+        else:
+            raise OutOfSupportError(y, self.maps_to)
+
+    @overload
+    def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
+    @overload
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: float64 | NDArray[float64]
+    ) -> float64 | NDArray[float64]:
+        if self.maps_to.contains(y):
+            return float64(1 - 2 * expit(y))
         else:
             raise OutOfSupportError(y, self.maps_to)
 

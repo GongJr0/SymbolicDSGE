@@ -49,6 +49,22 @@ class Support:
         )
         return bool(low_check and high_check)
 
+    @property
+    def is_finite(self) -> bool:
+        return bool(np.isfinite(self.low) and np.isfinite(self.high))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Support):
+            raise NotImplementedError(
+                "Equality is only implemented between Support instances."
+            )
+        return (
+            self.low == other.low
+            and self.high == other.high
+            and self.low_inclusive == other.low_inclusive
+            and self.high_inclusive == other.high_inclusive
+        )
+
 
 class OutOfSupportError(ValueError):
     def __init__(self, value: float64 | NDArray[float64], support: Support) -> None:

@@ -15,6 +15,14 @@ class InvGammaParams(TypedDict):
     random_state: RandomState
 
 
+INVGAMMA_DEFAULTS = InvGammaParams(
+    a=1.0,
+    loc=0.0,
+    scale=1.0,
+    random_state=None,
+)
+
+
 class InvGamma(Distribution[float64, VecF64]):
     def __init__(
         self, a: float, loc: float, scale: float, random_state: RandomState

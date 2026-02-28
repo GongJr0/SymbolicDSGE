@@ -2,6 +2,7 @@ from ..support import Support
 
 from abc import ABC, abstractmethod
 from typing import Tuple, Union, TypeVar, TypeAlias, Generic, overload
+from enum import StrEnum
 
 import numpy as np
 from numpy import float64
@@ -17,6 +18,19 @@ BatchT = TypeVar("BatchT", VecF64, MatF64)
 Size = Union[int, Tuple[int, ...]]
 RandomState = Union[None, int, np.random.Generator, np.random.RandomState]
 T = TypeVar("T", float64, NDArray[float64])
+
+
+class DistributionFamily(StrEnum):
+    NORMAL = "normal"
+    LOGNORMAL = "log_normal"
+    HALFNORMAL = "half_normal"
+    TRUNCNORMAL = "trunc_normal"
+    HALFCAUCHY = "half_cauchy"
+    BETA = "beta"
+    GAMMA = "gamma"
+    INVGAMMA = "inv_gamma"
+    UNIFORM = "uniform"
+    LKJCHOL = "lkj_chol"
 
 
 def _coerce_rng(random_state: RandomState) -> np.random.Generator:

@@ -100,6 +100,22 @@ class AffineProbitTransform(Transform):
         else:
             raise OutOfSupportError(y, self.maps_to)
 
+    @overload
+    def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
+    @overload
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: float64 | NDArray[float64]
+    ) -> float64 | NDArray[float64]:
+        # d/dy log|dx/dy| = d/dy log(phi(y)) = -y
+        if self.maps_to.contains(y):
+            return float64(-y)
+        else:
+            raise OutOfSupportError(y, self.maps_to)
+
     @property
     def _span(self) -> float64:
         return float64(self.high - self.low)

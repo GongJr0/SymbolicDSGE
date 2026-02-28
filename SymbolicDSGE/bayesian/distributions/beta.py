@@ -15,6 +15,15 @@ class BetaParams(TypedDict):
     random_state: RandomState
 
 
+BETA_DEFAULTS = BetaParams(
+    loc=0.0,
+    scale=1.0,
+    a=1.0,
+    b=1.0,
+    random_state=None,
+)
+
+
 class Beta(Distribution[float64, VecF64]):
     def __init__(
         self, a: float, b: float, loc: float, scale: float, random_state: RandomState

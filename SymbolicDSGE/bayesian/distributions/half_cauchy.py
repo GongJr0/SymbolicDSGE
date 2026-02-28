@@ -14,6 +14,13 @@ class HalfCauchyParams(TypedDict):
     random_state: RandomState
 
 
+HALF_CAUCHY_DEFAULTS = HalfCauchyParams(
+    loc=0.0,
+    scale=1.0,
+    random_state=None,
+)
+
+
 class HalfCauchy(Distribution):
     def __init__(self, loc: float, scale: float, random_state: RandomState) -> None:
         self._loc = float64(loc)

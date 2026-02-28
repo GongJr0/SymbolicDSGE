@@ -86,6 +86,17 @@ class Transform(ABC):
     def log_det_abs_jacobian_inverse(self, y: T) -> T:
         pass
 
+    @overload
+    def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
+    @overload
+    def grad_log_det_abs_jacobian_inverse(
+        self, y: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    @abstractmethod
+    def grad_log_det_abs_jacobian_inverse(self, y: T) -> T:
+        pass
+
     @property
     @abstractmethod
     def support(self) -> Support:

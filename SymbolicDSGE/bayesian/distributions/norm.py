@@ -14,6 +14,13 @@ class NormalParameters(TypedDict):
     random_state: RandomState
 
 
+NORM_DEFAULTS = NormalParameters(
+    mean=0.0,
+    std=1.0,
+    random_state=None,
+)
+
+
 class Normal(Distribution[float64, VecF64]):
     def __init__(self, mean: float, std: float, random_state: RandomState = None):
         self._mean = float64(mean)

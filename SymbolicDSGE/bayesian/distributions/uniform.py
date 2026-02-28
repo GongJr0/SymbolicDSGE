@@ -1,7 +1,6 @@
 from .distribution import Distribution, Size, RandomState, VecF64
 from ..support import Support, bounded
 
-import numpy as np
 from numpy import float64
 from scipy.stats import uniform
 
@@ -12,6 +11,13 @@ class UniformParams(TypedDict):
     a: float
     b: float
     random_state: RandomState
+
+
+UNIFORM_DEFAULTS = UniformParams(
+    a=0.0,
+    b=1.0,
+    random_state=None,
+)
 
 
 class Uniform(Distribution[float64, VecF64]):
@@ -82,7 +88,7 @@ class Uniform(Distribution[float64, VecF64]):
         return float64(self.dist.mean())
 
     @property
-    def variance(self) -> float64:
+    def var(self) -> float64:
         return float64(self.dist.var())
 
     @property

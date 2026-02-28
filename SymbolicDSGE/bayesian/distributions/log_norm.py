@@ -13,6 +13,13 @@ class LogNormalParams(TypedDict):
     scale: float  # Scale parameter (exp(mean) of the underlying normal distribution)
 
 
+LOGNORM_DEFAULTS = LogNormalParams(
+    s=1.0,
+    loc=0.0,
+    scale=1.0,
+)
+
+
 class LogNormal(Distribution[float64, VecF64]):
     def __init__(self, s: float, loc: float, scale: float, random_state: RandomState):
         self._s = float64(s)
@@ -56,7 +63,7 @@ class LogNormal(Distribution[float64, VecF64]):
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
         return float64(self.dist.ppf(q))
 
-    def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
+    def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
         rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
@@ -79,3 +86,7 @@ class LogNormal(Distribution[float64, VecF64]):
     @property
     def var(self) -> float64:
         return float64(self.dist.var())
+
+    @property
+    def mode(self) -> float64:
+        return float64(np.exp(self._loc - self._s**2))

@@ -16,6 +16,13 @@ class LKJParams(TypedDict):
     random_state: RandomState
 
 
+LKJ_DEFAULTS = LKJParams(
+    eta=1.0,
+    K=-1,  # Will raise if not provided
+    random_state=None,
+)
+
+
 def _is_symmetric(x: MatF64, atol: float = 1e-10) -> bool:
     return bool(np.allclose(x, x.T, atol=atol, rtol=0.0))
 
