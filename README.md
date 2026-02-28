@@ -10,6 +10,7 @@
             <tr>
                 <th border-collapse="collapse" border-style="hidden"><a href="https://gongjr0.github.io/SymbolicDSGE/">Documentation</a></th>
                 <th><a href="https://pypi.org/project/SymbolicDSGE/">PyPI</a></th>
+                <th><a href="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE?style=for-the-badge"><img src="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE.svg?style=for-the-badge" alt="wakatime"></a></th>
             </tr>
         </thead>
     </table>
