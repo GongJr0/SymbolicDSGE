@@ -93,9 +93,21 @@ def _central_diff_grad_logpdf(dist, x: float64, h: float64 = float64(1e-6)) -> f
     return float64((dist.logpdf(x + h) - dist.logpdf(x - h)) / (2.0 * h))
 
 
-def test_expected_abstract_distribution_classes():
-    assert bool(LogNormal.__abstractmethods__)
-    assert bool(Uniform.__abstractmethods__)
+def test_expected_concrete_distribution_classes():
+    distribution_classes = [
+        Normal,
+        LogNormal,
+        HalfNormal,
+        TruncNormal,
+        HalfCauchy,
+        Beta,
+        Gamma,
+        InvGamma,
+        Uniform,
+        LKJChol,
+    ]
+    for cls in distribution_classes:
+        assert not bool(cls.__abstractmethods__), f"{cls.__name__} is still abstract"
 
 
 def test_lkj_chol_is_concrete():
