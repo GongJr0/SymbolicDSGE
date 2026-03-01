@@ -1,0 +1,118 @@
+name: tests-and-badges
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Run tests with coverage
+        # warnings are OK: default pytest behavior is NOT to fail on warnings
+        run: |
+          uv run pytest -q ./tests --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
+
+      - name: Compute coverage percent
+        id: cov
+        shell: bash
+        run: |
+          python - << 'PY'
+          import xml.etree.ElementTree as ET
+          tree = ET.parse("coverage/coverage.xml")
+          root = tree.getroot()
+          rate = float(root.attrib["line-rate"]) * 100.0
+          print(f"coverage={rate:.2f}")
+          PY
+
+          COV=$(python - << 'PY'
+          import xml.etree.ElementTree as ET
+          tree = ET.parse("coverage/coverage.xml")
+          root = tree.getroot()
+          rate = float(root.attrib["line-rate"]) * 100.0
+          print(f"{rate:.0f}")
+          PY
+          )
+          echo "percent=$COV" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure coverage dir exists
+        run: mkdir -p coverage
+
+      - name: Make coverage badge (svg)
+        # Produces: coverage/coverage-badge.svg
+        uses: emibcn/badge-action@v2
+        with:
+          label: coverage
+          status: ${{ steps.cov.outputs.percent }}%
+          color: green
+          path: coverage/coverage-badge.svg
+
+      - name: Make tests badge (svg)
+        # Produces: coverage/tests-badge.svg
+        uses: emibcn/badge-action@v2
+        with:
+          label: tests
+          status: passing
+          color: green
+          path: coverage/tests-badge.svg
+
+      - name: Commit updated badges (only on push, not PR)
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage/*.svg coverage/coverage.xml || true
+          if git diff --cached --quiet; then
+            echo "No badge changes to commit."
+            exit 0
+          fi
+          git commit -m "ci: update coverage/test badges"
+          git push
+
+  # If tests fail, this second job never runs; so we generate a failing badge too.
+  test_failed_badge:
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: ${{ failure() }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure coverage dir exists
+        run: mkdir -p coverage
+
+      - name: Make tests badge (svg) - failing
+        uses: emibcn/badge-action@v2
+        with:
+          label: tests
+          status: failing
+          color: red
+          path: coverage/tests-badge.svg
+
+      - name: Commit failing badge (only on push, not PR)
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage/tests-badge.svg
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "ci: update failing tests badge"
+          git push
