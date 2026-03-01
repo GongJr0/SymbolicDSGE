@@ -18,6 +18,7 @@
     </table>
 </div>
 <br></br>
+<br></br>
 
 ```bash
 pip install SytmbolicDSGE
