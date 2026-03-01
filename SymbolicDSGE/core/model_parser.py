@@ -9,7 +9,7 @@ import sympy as sp
 from sympy import Matrix, Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, convert_xor
-from numpy import float64
+from numpy import float64, array, ndarray
 
 from .config import (
     ModelConfig,
@@ -18,7 +18,7 @@ from .config import (
     SymbolGetterDict,
     PairGetterDict,
 )
-from ..kalman.config import KalmanConfig, make_R, P0Config
+from ..kalman.config import KalmanConfig, P0Config
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
@@ -381,18 +381,23 @@ class ModelParser:
         P0_scale = float64(P0.get("scale", 1.0))
         P0_diag = P0.get("diag", None)
 
+        R_symbolic: Matrix | None
+        r_param_symbols: list[Symbol] | None
+        R_param_names: list[str] | None
+        _R_builder: Callable[..., ndarray] | None
+
         R_data = kalman_data.get("R")
         if R_data:
             std_map = R_data.get("std", {}) or {}
-            obs_sig: SymbolGetterDict[Symbol, float64] = SymbolGetterDict(
+            corr_map = R_data.get("corr", {}) or {}
+
+            obs_sig_sym: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
                 {
-                    _LOCALS[obs_name]: parameters[_LOCALS[param_name]]
+                    _LOCALS[obs_name]: _LOCALS[param_name]
                     for obs_name, param_name in std_map.items()
                 }
             )
-
-            corr_map = R_data.get("corr", {}) or {}
-            obs_corr: dict[frozenset[Symbol], float64] = {}
+            obs_corr_sym_dict: dict[frozenset[Symbol], Symbol] = {}
             for pair_str, param_name in corr_map.items():
                 names = [x.strip() for x in pair_str.split(",")]
                 if len(names) != 2:
@@ -401,11 +406,53 @@ class ModelParser:
                     )
                 a = _LOCALS[names[0]]
                 b = _LOCALS[names[1]]
-                obs_corr[frozenset((a, b))] = parameters[_LOCALS[param_name]]
+                obs_corr_sym_dict[frozenset((a, b))] = _LOCALS[param_name]
+            obs_corr_sym: PairGetterDict[Symbol] = PairGetterDict(obs_corr_sym_dict)
 
-            R = make_R(y_order, obs_sig, PairGetterDict(obs_corr))
+            n_obs = len(y_order)
+            R_symbolic = Matrix.zeros(n_obs, n_obs)
+            for i in range(n_obs):
+                yi = y_order[i]
+                sig_i = obs_sig_sym[yi]
+                for j in range(n_obs):
+                    yj = y_order[j]
+                    sig_j = obs_sig_sym[yj]
+                    if i == j:
+                        rho_ij = sp.Integer(1)
+                    else:
+                        rho_ij = obs_corr_sym.get(frozenset((yi, yj)), sp.Integer(0))
+                    R_symbolic[i, j] = sp.simplify(sig_i * sig_j * rho_ij)
+
+            r_param_symbols_local: list[Symbol] = []
+            seen: set[Symbol] = set()
+            for param_name in std_map.values():
+                sym = _LOCALS[param_name]
+                if sym not in seen:
+                    seen.add(sym)
+                    r_param_symbols_local.append(sym)
+            for param_name in corr_map.values():
+                sym = _LOCALS[param_name]
+                if sym not in seen:
+                    seen.add(sym)
+                    r_param_symbols_local.append(sym)
+
+            r_param_symbols = r_param_symbols_local
+
+            raw_builder = sp.lambdify(r_param_symbols, R_symbolic, modules="numpy")
+
+            def _R_builder_impl(*vals: Any) -> ndarray:
+                return array(raw_builder(*vals), dtype=float64)
+
+            _R_builder = _R_builder_impl
+            r_param_values = [parameters[sym] for sym in r_param_symbols]
+            R = _R_builder(*r_param_values)
+            R_param_names = [sym.name for sym in r_param_symbols]
         else:
             R = None
+            R_symbolic = None
+            r_param_symbols = None
+            R_param_names = None
+            _R_builder = None
 
         P0_cfg = P0Config(
             mode=P0_mode,
@@ -419,6 +466,10 @@ class ModelParser:
             jitter=jit,
             symmetrize=symm,
             P0=P0_cfg,
+            R_symbolic=R_symbolic,
+            R_param_symbols=r_param_symbols,
+            R_param_names=R_param_names,
+            R_builder=_R_builder,
         )
 
     @staticmethod

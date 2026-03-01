@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Any, Callable, Tuple, Union, Literal, TypedDict
+from typing import Any, Callable, Tuple, Union, Literal, TypedDict, Mapping
 import textwrap
 
 
@@ -47,9 +47,7 @@ class SolvedModel:
     def sim(
         self,
         T: int,
-        shocks: (
-            dict[str, Union[Callable[[float | list[list[float]]], NDF], NDF]] | None
-        ) = None,
+        shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None = None,
         shock_scale: float = 1.0,
         x0: ndarray | None = None,
         observables: bool = False,
@@ -171,7 +169,7 @@ class SolvedModel:
 
         return self.sim(
             T,
-            shocks=shock_spec,  # type: ignore
+            shocks=shock_spec,
             shock_scale=scale,
             x0=np.zeros((self.A.shape[0],), dtype=float64),
             observables=observables,
@@ -249,7 +247,7 @@ class SolvedModel:
         return asdict(self)
 
     def _shock_unpack(
-        self, shocks: dict[str, NDF | Callable[[float | list[list[float]]], NDF]]
+        self, shocks: Mapping[str, NDF | Callable[[float | NDF], NDF]]
     ) -> list[Tuple[int, NDF]]:
         out: list[Tuple[int, NDF]] = []
 

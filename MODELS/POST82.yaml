@@ -76,8 +76,8 @@ calibration:
 
     rho_g: 0.83
     rho_z: 0.85
-    rho_gz: 0.36
 
+    rho_gz: 0.36
     sig_r: 0.18
     sig_g: 0.18
     sig_z: 0.64

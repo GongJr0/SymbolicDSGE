@@ -5,6 +5,7 @@ from .core import (
     Shock,
 )
 from .kalman import KalmanFilter
+from .estimation import Estimator
 from . import utils
 
 __all__ = [
@@ -12,6 +13,7 @@ __all__ = [
     "ModelParser",
     "DSGESolver",
     "KalmanFilter",
+    "Estimator",
     "Shock",
     "utils",
 ]
