@@ -55,23 +55,17 @@ jobs:
       - name: Ensure coverage dir exists
         run: mkdir -p coverage
 
-      - name: Make coverage badge (svg)
-        # Produces: coverage/coverage-badge.svg
-        uses: emibcn/badge-action@v2
-        with:
-          label: coverage
-          status: ${{ steps.cov.outputs.percent }}%
-          color: green
-          path: coverage/coverage-badge.svg
+      - name: Generate coverage badge
+        run: |
+          mkdir -p coverage
+          curl -o coverage/coverage-badge.svg \
+          "https://img.shields.io/badge/coverage-${{ steps.cov.outputs.percent }}%25-2e7d32?style=flat&labelColor=333333"
 
-      - name: Make tests badge (svg)
-        # Produces: coverage/tests-badge.svg
-        uses: emibcn/badge-action@v2
-        with:
-          label: tests
-          status: passing
-          color: green
-          path: coverage/tests-badge.svg
+      - name: Generate tests badge
+        run: |
+          mkdir -p coverage
+          curl -o coverage/tests-badge.svg \
+          "https://img.shields.io/badge/tests-passing-2e7d32?style=flat&labelColor=333333"
 
       - name: Commit updated badges (only on push, not PR)
         if: ${{ github.event_name == 'push' }}
