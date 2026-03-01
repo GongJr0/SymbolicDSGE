@@ -78,14 +78,23 @@ class UnsetSupportError(ValueError):
         super().__init__(msg)
 
 
-def bounded(func: Callable) -> Callable:
-    @wraps(func)
-    def wrapper(self: object, x: FLOAT_VEC_SCA) -> FLOAT_VEC_SCA:
-        support = getattr(self, "support", None)
-        if support is None:
-            raise UnsetSupportError()
-        if not support.contains(x):
-            raise OutOfSupportError(x, support)
-        return cast(FLOAT_VEC_SCA, func(self, x))
+def bounded(
+    func: Callable | None = None,
+    *,
+    domain: Literal["support", "maps_to"] = "support",
+) -> Callable:
+    def _decorate(fn: Callable) -> Callable:
+        @wraps(fn)
+        def wrapper(self: object, x: FLOAT_VEC_SCA) -> FLOAT_VEC_SCA:
+            target = getattr(self, domain, None)
+            if target is None:
+                raise UnsetSupportError()
+            if not target.contains(x):
+                raise OutOfSupportError(x, target)
+            return cast(FLOAT_VEC_SCA, fn(self, x))
 
-    return wrapper
+        return wrapper
+
+    if func is None:
+        return _decorate
+    return _decorate(func)

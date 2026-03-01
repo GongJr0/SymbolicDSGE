@@ -18,6 +18,9 @@ class AffineLogitTransform(Transform):
         self.low = low
         self.high = high
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @overload
     def forward(self, x: float64) -> float64: ...
     @overload

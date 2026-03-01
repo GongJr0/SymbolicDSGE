@@ -12,6 +12,9 @@ class UpperBoundedTransform(Transform):
     def __init__(self, upper: float64):
         self.upper = float64(upper)
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     # ---- private helper ----
     def _b_minus_x(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         return self.upper - x

@@ -79,6 +79,9 @@ class TruncNormal(Distribution[float64, VecF64]):
         samples = self.dist.rvs(size=size, random_state=rng)
         return cast(VecF64, float64(samples))
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @staticmethod
     def _scalar_to_std(
         loc: float, scale: float, a: float, b: float

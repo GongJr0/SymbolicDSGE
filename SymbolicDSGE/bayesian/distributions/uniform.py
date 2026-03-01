@@ -74,6 +74,9 @@ class Uniform(Distribution[float64, VecF64]):
         sample = self.dist.rvs(size=size, random_state=rng)
         return cast(VecF64, sample)
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @property
     def support(self) -> Support:
         return Support(

@@ -17,6 +17,9 @@ class SoftplusTransform(Transform):
     inverse:  x = softplus(y)     = log(1 + exp(y))
     """
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     # ---- private numerics helpers ----
     def _softplus(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         # softplus(y) = log(1 + exp(y))

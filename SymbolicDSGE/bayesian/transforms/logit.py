@@ -10,6 +10,8 @@ from scipy.special import expit
 
 
 class LogitTransform(Transform):
+    def __repr__(self) -> str:
+        return self.__class__.__name__
 
     @overload
     def forward(self, x: float64) -> float64: ...

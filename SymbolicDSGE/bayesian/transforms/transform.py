@@ -31,6 +31,8 @@ class TransformMethod(StrEnum):
 
 
 class Transform(ABC):
+    @abstractmethod
+    def __repr__(self) -> str: ...
 
     @overload
     def forward(self, x: float64) -> float64: ...

@@ -22,15 +22,15 @@ HALFNORM_DEFAULTS = HalfNormalParameters(
 
 
 class HalfNormal(Distribution[float64, VecF64]):
-    def __init__(self, parameters: HalfNormalParameters):
-        self.dist = halfnorm(loc=parameters["loc"], scale=parameters["scale"])
+    def __init__(self, loc: float, scale: float, random_state: RandomState = None):
+        self.dist = halfnorm(loc=loc, scale=scale)
 
         self._mean = float64(self.dist.mean())
         self._var = float64(self.dist.var())
-        self._mode = float64(parameters["loc"])
-        self._loc = float64(parameters["loc"])
-        self._scale = float64(parameters["scale"])
-        self._random_state = parameters["random_state"]
+        self._mode = float64(loc)
+        self._loc = float64(loc)
+        self._scale = float64(scale)
+        self._random_state = random_state
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
@@ -72,6 +72,9 @@ class HalfNormal(Distribution[float64, VecF64]):
             size = (size,)
         samples = self.dist.rvs(size=size, random_state=rng)
         return cast(VecF64, float64(samples))
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__
 
     @property
     def rng(self) -> np.random.Generator:

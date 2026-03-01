@@ -206,6 +206,20 @@ def test_prior_bounded_methods_raise_outside_distribution_support():
         prior.grad_logpdf(bad_x)
 
 
+def test_prior_logit_prior_accepts_unconstrained_input_domain():
+    prior = make_prior(
+        distribution="beta",
+        parameters={"a": 2.0, "b": 3.0, "loc": 0.0, "scale": 1.0},
+        transform="logit",
+    )
+
+    z = float64(2.0)
+    val = prior.logpdf(z)
+    grad = prior.grad_logpdf(z)
+    assert np.isfinite(val)
+    assert np.isfinite(grad)
+
+
 def test_prior_rvs_seed_reproducibility_and_size_shape():
     prior = make_prior(
         distribution="normal",
@@ -231,7 +245,7 @@ def test_prior_support_and_maps_to_proxy_underlying_components():
     assert prior.maps_to == prior.transform.maps_to
 
 
-def test_prior_logpdf_uses_forward_and_adds_inverse_logdet_term():
+def test_prior_logpdf_uses_inverse_and_adds_inverse_logdet_term():
     dist = _TrackingDist()
     transform = _TrackingTransform()
     prior = Prior(
@@ -242,17 +256,17 @@ def test_prior_logpdf_uses_forward_and_adds_inverse_logdet_term():
     z = float64(2.0)
     out = prior.logpdf(z)
 
-    # Expected: dist.logpdf(forward(z)) + log|dx/dz|
-    expected = float64(2.0 * (z + 1.0) + 5.0)
+    # Expected: dist.logpdf(inverse(z)) + log|dx/dz|
+    expected = float64(2.0 * (z - 1.0) + 5.0)
     assert np.allclose(out, expected)
 
-    assert transform.forward_calls == 1
+    assert transform.forward_calls == 0
     assert transform.logdet_inv_calls == 1
-    assert transform.inverse_calls == 0
-    assert transform.forward_arg == z
+    assert transform.inverse_calls == 1
+    assert transform.inverse_arg == z
     assert transform.logdet_inv_arg == z
     assert dist.logpdf_calls == 1
-    assert np.allclose(dist.logged_x, z + 1.0)
+    assert np.allclose(dist.logged_x, z - 1.0)
 
 
 def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():

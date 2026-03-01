@@ -1,5 +1,6 @@
 import sympy as sp
 from sympy import Symbol, Function, Expr
+from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
@@ -14,6 +15,9 @@ import linearsolve
 from .config import ModelConfig
 from .compiled_model import CompiledModel
 from .solved_model import SolvedModel
+
+if TYPE_CHECKING:
+    from ..estimation.estimator import Estimator
 from ..kalman.config import KalmanConfig
 
 NDF = NDArray[float64]
@@ -256,6 +260,279 @@ class DSGESolver:
             A=A,
             B=B,
         )
+
+    @staticmethod
+    def _validate_prior_initial_guess(
+        *,
+        priors: Mapping[str, Any] | None,
+        initial_params: Mapping[str, float64],
+    ) -> None:
+        if priors is None:
+            return
+
+        invalid: list[str] = []
+        for name, prior in priors.items():
+            if name not in initial_params:
+                continue
+            val = float64(initial_params[name])
+            try:
+                if hasattr(prior, "transform"):
+                    z = float64(getattr(prior, "transform").forward(val))
+                else:
+                    z = val
+                prior.logpdf(z)
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - exact exception type is prior-dependent
+                invalid.append(f"{name}={val} ({type(exc).__name__}: {exc})")
+
+        if invalid:
+            msg = (
+                "Initial calibration values are incompatible with the provided priors "
+                "or their transforms: " + ", ".join(invalid)
+            )
+            raise ValueError(msg)
+
+    @staticmethod
+    def _theta0_to_array(
+        est: "Estimator", theta0: NDArray | Mapping[str, float] | None
+    ) -> NDArray:
+        if theta0 is None:
+            return est.theta0()
+
+        if isinstance(theta0, Mapping):
+            missing = [name for name in est.param_names if name not in theta0]
+            if missing:
+                raise ValueError(
+                    f"theta0 dictionary is missing estimated parameters: {missing}"
+                )
+            unknown = [k for k in theta0.keys() if k not in est.param_names]
+            if unknown:
+                raise ValueError(f"theta0 dictionary has unknown parameters: {unknown}")
+            return est.params_to_theta(
+                {name: float64(theta0[name]) for name in est.param_names}
+            )
+
+        return asarray(theta0, dtype=float64)
+
+    def _estimator(
+        self,
+        *,
+        compiled: CompiledModel,
+        y: NDArray | pd.DataFrame,
+        observables: list[str] | None = None,
+        estimated_params: list[str] | None = None,
+        priors: Mapping[str, Any] | None = None,
+        steady_state: NDArray | dict[str, float] | None = None,
+        log_linear: bool = False,
+        x0: NDArray | None = None,
+        p0_mode: str | None = None,
+        p0_scale: float | float64 | None = None,
+        jitter: float | float64 | None = None,
+        symmetrize: bool | None = None,
+        R: NDArray | None = None,
+    ) -> "Estimator":
+        # Lazy import prevents a solver->estimation->solver import cycle.
+        from ..estimation import Estimator
+
+        return Estimator(
+            solver=self,
+            compiled=compiled,
+            y=y,
+            observables=observables,
+            estimated_params=estimated_params,
+            priors=priors,
+            steady_state=steady_state,
+            log_linear=log_linear,
+            x0=x0,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+            R=R,
+        )
+
+    @staticmethod
+    def _sync_calibration_with_params(
+        compiled: CompiledModel, params: Mapping[str, float64]
+    ) -> None:
+        calib = compiled.config.calibration.parameters
+        for key in list(calib.keys()):
+            name = key if isinstance(key, str) else getattr(key, "name", None)
+            if name is not None and name in params:
+                calib[key] = float64(params[name])
+
+    def estimate(
+        self,
+        *,
+        compiled: CompiledModel,
+        y: NDArray | pd.DataFrame,
+        method: str = "mle",
+        theta0: NDArray | Mapping[str, float] | None = None,
+        observables: list[str] | None = None,
+        estimated_params: list[str] | None = None,
+        priors: Mapping[str, Any] | None = None,
+        steady_state: NDArray | dict[str, float] | None = None,
+        log_linear: bool = False,
+        x0: NDArray | None = None,
+        p0_mode: str | None = None,
+        p0_scale: float | float64 | None = None,
+        jitter: float | float64 | None = None,
+        symmetrize: bool | None = None,
+        R: NDArray | None = None,
+        **method_kwargs: Any,
+    ) -> Any:
+        est = self._estimator(
+            compiled=compiled,
+            y=y,
+            observables=observables,
+            estimated_params=estimated_params,
+            priors=priors,
+            steady_state=steady_state,
+            log_linear=log_linear,
+            x0=x0,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+            R=R,
+        )
+
+        init = self._theta0_to_array(est, theta0)
+        self._validate_prior_initial_guess(
+            priors=priors,
+            initial_params=est.theta_to_params(init),
+        )
+        if (
+            R is None
+            and hasattr(compiled, "var_names")
+            and hasattr(compiled, "observable_names")
+            and hasattr(compiled, "kalman")
+        ):
+            from ..estimation import backend as est_backend
+
+            est.R = est_backend.estimate_R(
+                solver=self,
+                compiled=compiled,
+                y=y,
+                params=est.theta_to_params(init),
+                observables=observables,
+                steady_state=steady_state,
+                log_linear=log_linear,
+                x0=x0,
+                p0_mode=p0_mode,
+                p0_scale=p0_scale,
+                jitter=jitter,
+                symmetrize=symmetrize,
+            )
+
+        method_norm = method.lower()
+        if method_norm == "mle":
+            return est.mle(theta0=init, **method_kwargs)
+        if method_norm == "map":
+            return est.map(theta0=init, **method_kwargs)
+        if method_norm == "mcmc":
+            return est.mcmc(theta0=init, **method_kwargs)
+        raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
+
+    def estimate_and_solve(
+        self,
+        *,
+        compiled: CompiledModel,
+        y: NDArray | pd.DataFrame,
+        method: str = "mle",
+        theta0: NDArray | Mapping[str, float] | None = None,
+        posterior_point: str = "mean",
+        observables: list[str] | None = None,
+        estimated_params: list[str] | None = None,
+        priors: Mapping[str, Any] | None = None,
+        steady_state: NDArray | dict[str, float] | None = None,
+        log_linear: bool = False,
+        x0: NDArray | None = None,
+        p0_mode: str | None = None,
+        p0_scale: float | float64 | None = None,
+        jitter: float | float64 | None = None,
+        symmetrize: bool | None = None,
+        R: NDArray | None = None,
+        **method_kwargs: Any,
+    ) -> tuple[Any, SolvedModel]:
+        est = self._estimator(
+            compiled=compiled,
+            y=y,
+            observables=observables,
+            estimated_params=estimated_params,
+            priors=priors,
+            steady_state=steady_state,
+            log_linear=log_linear,
+            x0=x0,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+            R=R,
+        )
+
+        init = self._theta0_to_array(est, theta0)
+        self._validate_prior_initial_guess(
+            priors=priors,
+            initial_params=est.theta_to_params(init),
+        )
+        if (
+            R is None
+            and hasattr(compiled, "var_names")
+            and hasattr(compiled, "observable_names")
+            and hasattr(compiled, "kalman")
+        ):
+            from ..estimation import backend as est_backend
+
+            est.R = est_backend.estimate_R(
+                solver=self,
+                compiled=compiled,
+                y=y,
+                params=est.theta_to_params(init),
+                observables=observables,
+                steady_state=steady_state,
+                log_linear=log_linear,
+                x0=x0,
+                p0_mode=p0_mode,
+                p0_scale=p0_scale,
+                jitter=jitter,
+                symmetrize=symmetrize,
+            )
+
+        method_norm = method.lower()
+        result: Any
+        if method_norm == "mle":
+            result = est.mle(theta0=init, **method_kwargs)
+            solve_params = result.theta
+        elif method_norm == "map":
+            result = est.map(theta0=init, **method_kwargs)
+            solve_params = result.theta
+        elif method_norm == "mcmc":
+            result = est.mcmc(theta0=init, **method_kwargs)
+            if posterior_point == "mean":
+                theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
+            elif posterior_point == "last":
+                theta_star = asarray(result.samples[-1], dtype=float64)
+            elif posterior_point == "map":
+                idx = int(np.argmax(result.logpost_trace))
+                theta_star = asarray(result.samples[idx], dtype=float64)
+            else:
+                raise ValueError(
+                    "posterior_point must be one of {'mean', 'last', 'map'}."
+                )
+            solve_params = est.theta_to_params(est.params_to_theta(theta_star))
+        else:
+            raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
+
+        self._sync_calibration_with_params(compiled, solve_params)
+        solved = self.solve(
+            compiled=compiled,
+            parameters={k: float(v) for k, v in solve_params.items()},
+            steady_state=steady_state,
+            log_linear=log_linear,
+        )
+        return result, solved
 
     @staticmethod
     def _min_time_offset(expr: Expr, t: Symbol) -> int:

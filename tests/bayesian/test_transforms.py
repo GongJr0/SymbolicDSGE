@@ -186,3 +186,8 @@ def test_transform_dispatch_for_all_registered_methods():
 def test_transform_dispatch_rejects_unknown_method():
     with pytest.raises(ValueError):
         get_transform("unknown")
+
+
+def test_transform_repr_returns_class_name(transform_case):
+    _, transform, _, _, _ = transform_case
+    assert repr(transform) == transform.__class__.__name__

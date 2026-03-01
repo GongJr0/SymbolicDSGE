@@ -11,12 +11,14 @@ class LogNormalParams(TypedDict):
     s: float  # Shape parameter (standard deviation of the underlying normal distribution)
     loc: float  # Location parameter (mean of the underlying normal distribution)
     scale: float  # Scale parameter (exp(mean) of the underlying normal distribution)
+    random_state: RandomState
 
 
 LOGNORM_DEFAULTS = LogNormalParams(
     s=1.0,
     loc=0.0,
     scale=1.0,
+    random_state=None,
 )
 
 
@@ -69,6 +71,9 @@ class LogNormal(Distribution[float64, VecF64]):
             size = (size,)
         samples = self.dist.rvs(size=size, random_state=rng)
         return cast(VecF64, float64(samples))
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__
 
     @property
     def support(self) -> Support:

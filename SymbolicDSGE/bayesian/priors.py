@@ -36,9 +36,9 @@ class Prior:
     @overload
     def logpdf(self, z: NDArray[float64]) -> NDArray[float64]: ...
 
-    @bounded
+    @bounded(domain="maps_to")
     def logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        x = self.transform.forward(z)
+        x = self.transform.inverse(z)
         return self.dist.logpdf(x) + self.transform.log_det_abs_jacobian_inverse(z)
 
     @overload
@@ -46,7 +46,7 @@ class Prior:
     @overload
     def grad_logpdf(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
-    @bounded
+    @bounded(domain="maps_to")
     def grad_logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         x = self.transform.inverse(z)
         gx = self.dist.grad_logpdf(x)

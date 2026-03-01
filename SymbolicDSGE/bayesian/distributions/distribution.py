@@ -52,6 +52,9 @@ def _coerce_rng(random_state: RandomState) -> np.random.Generator:
 
 
 class Distribution(ABC, Generic[EventT, BatchT]):
+    @abstractmethod
+    def __repr__(self) -> str: ...
+
     @overload
     def pdf(self, x: EventT) -> float64: ...
     @overload

@@ -8,7 +8,7 @@ from scipy.stats import (
 from scipy.stats._distn_infrastructure import rv_generic
 from scipy.stats._multivariate import multi_rv_generic
 from numpy import asarray, ndarray, float64, random, zeros
-
+from numpy.typing import NDArray
 from typing import Literal, Callable, cast, overload
 
 
@@ -238,7 +238,7 @@ class Shock:
             " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
         )
 
-    def shock_generator(self) -> Callable[[float | ndarray], ndarray]:
+    def shock_generator(self) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
         self._assert_generator()
         kwargs = self.dist_kwargs.copy()
         fun = lambda s: abstract_shock_array(

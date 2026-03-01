@@ -69,6 +69,9 @@ class HalfCauchy(Distribution):
             size = (size,)
         return cast(VecF64, self.dist.rvs(size=size, random_state=rng))
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @property
     def support(self) -> Support:
         return Support(

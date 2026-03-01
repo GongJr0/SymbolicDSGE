@@ -73,6 +73,9 @@ class Normal(Distribution[float64, VecF64]):
         samples = self.dist.rvs(size=size, random_state=rng)
         return cast(VecF64, samples)
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @property
     def rng(self) -> np.random.Generator:
         return self._rng(self._random_state)

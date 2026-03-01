@@ -80,6 +80,9 @@ class Beta(Distribution[float64, VecF64]):
         sample = cast(VecF64, self.dist.rvs(size=size, random_state=rng))
         return sample
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @property
     def support(self) -> Support:
         return Support(self._loc, self._loc + self._scale)

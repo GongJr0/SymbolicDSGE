@@ -111,6 +111,9 @@ class LKJChol(Distribution[MatF64, MatF64]):
         self._K = K
         self._random_state = random_state
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     @corr_chol
     def logpdf(self, L: MatF64) -> float64:
         """

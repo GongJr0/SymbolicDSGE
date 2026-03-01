@@ -12,6 +12,9 @@ class LowerBoundedTransform(Transform):
     def __init__(self, lower: float64):
         self.lower = float64(lower)
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     def _x_minus_a(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         return x - self.lower
 

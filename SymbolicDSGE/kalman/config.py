@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from numpy.typing import NDArray
 
-from sympy import Symbol
+from sympy import Symbol, Matrix
 from numpy import float64, array, eye, outer
+from typing import Callable
 
 from ..core.config import PairGetterDict, SymbolGetterDict
 
@@ -21,6 +22,10 @@ class KalmanConfig:
     jitter: float
     symmetrize: bool
     P0: P0Config
+    R_symbolic: Matrix | None = None
+    R_param_symbols: list[Symbol] | None = None
+    R_param_names: list[str] | None = None
+    R_builder: Callable[..., NDArray] | None = None
 
 
 def make_R(

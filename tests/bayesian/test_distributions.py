@@ -60,15 +60,7 @@ from SymbolicDSGE.bayesian.support import OutOfSupportError
         ),
         (
             "half_normal",
-            lambda: HalfNormal(
-                {
-                    "loc": 0.0,
-                    "scale": 1.0,
-                    "transform": "identity",
-                    "transform_kwargs": {},
-                    "random_state": 123,
-                }
-            ),
+            lambda: HalfNormal(0.0, 1.0, 123),
             float64(0.8),
             float64(-0.1),
             False,
@@ -211,6 +203,12 @@ def test_distribution_logpdf_raises_outside_support(distribution_case):
 
     with pytest.raises(OutOfSupportError):
         dist.logpdf(x_invalid)
+
+
+def test_distribution_repr_returns_class_name(distribution_case):
+    _, ctor, _, _, _ = distribution_case
+    dist = ctor()
+    assert repr(dist) == dist.__class__.__name__
 
 
 def test_coerce_rng_accepts_supported_inputs():
