@@ -153,6 +153,8 @@ def detrend(s: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
     """
     if isinstance(s, pd.Series):
         series = s.values
+    else:
+        series = s
 
     x = np.arange(len(series))
     coefs = np.polyfit(x, series, 1)  # type: ignore
