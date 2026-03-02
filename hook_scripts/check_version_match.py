@@ -13,12 +13,12 @@ def read_version() -> str:
 
 
 def main() -> None:
-    tag = os.environ.get("GITHUB_REF_NAME", "")
+    tag = os.environ.get("TAG_NAME", "") or os.environ.get("GITHUB_REF_NAME", "")
     if not tag.startswith("v"):
         print(f"Not a v* tag: {tag!r}")
         sys.exit(1)
 
-    tag_ver = tag[1:].split("-")[0]
+    tag_ver = tag[1:].split("-", maxsplit=1)[0]
     pkg_ver = read_version()
 
     print(f"Tag version: {tag_ver}")
