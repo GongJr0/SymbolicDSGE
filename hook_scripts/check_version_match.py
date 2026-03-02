@@ -18,7 +18,7 @@ def main() -> None:
         print(f"Not a v* tag: {tag!r}")
         sys.exit(1)
 
-    tag_ver = tag[1:]
+    tag_ver = tag[1:].split("-")[0]
     pkg_ver = read_version()
 
     print(f"Tag version: {tag_ver}")
