@@ -45,14 +45,14 @@ Accepted `distribution` values in `make_prior(...)`:
 | __Enum Member__ | __String__ | __Parameter Keys__ | __Defaults__ |
 |:----------------|:----------:|-------------------:|-------------:|
 | `NORMAL` | `"normal"` | `mean`, `std`, `random_state` | `0.0`, `1.0`, `None` |
-| `LOGNORMAL` | `"log_normal"` | `s`, `loc`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
-| `HALFNORMAL` | `"half_normal"` | `loc`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
-| `TRUNCNORMAL` | `"trunc_normal"` | `a`, `b`, `loc`, `scale`, `random_state` | `-6.0`, `6.0`, `0.0`, `1.0`, `None` |
-| `HALFCAUCHY` | `"half_cauchy"` | `loc`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
+| `LOGNORMAL` | `"log_normal"` | `s`, `low`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
+| `HALFNORMAL` | `"half_normal"` | `low`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
+| `TRUNCNORMAL` | `"trunc_normal"` | `low`, `high`, `loc`, `scale`, `random_state` | `-6.0`, `6.0`, `0.0`, `1.0`, `None` |
+| `HALFCAUCHY` | `"half_cauchy"` | `low`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
 | `BETA` | `"beta"` | `a`, `b`, `loc`, `scale`, `random_state` | `1.0`, `1.0`, `0.0`, `1.0`, `None` |
 | `GAMMA` | `"gamma"` | `a`, `loc`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
 | `INVGAMMA` | `"inv_gamma"` | `a`, `loc`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
-| `UNIFORM` | `"uniform"` | `a`, `b`, `random_state` | `0.0`, `1.0`, `None` |
+| `UNIFORM` | `"uniform"` | `low`, `high`, `random_state` | `0.0`, `1.0`, `None` |
 | `LKJCHOL` | `"lkj_chol"` | `eta`, `K`, `random_state` | `1.0`, `-1`, `None` |
 
 ???+ note "LKJ Parameter"
@@ -70,8 +70,8 @@ Dispatched `transform` values accepted by `make_prior(...)`:
 | `PROBIT` | `"probit"` | none |
 | `AFFINE_LOGIT` | `"affine_logit"` | `low`, `high` |
 | `AFFINE_PROBIT` | `"affine_probit"` | `low`, `high` |
-| `LOWER_BOUNDED` | `"lower_bounded"` | `lower` |
-| `UPPER_BOUNDED` | `"upper_bounded"` | `upper` |
+| `LOWER_BOUNDED` | `"lower_bounded"` | `low` |
+| `UPPER_BOUNDED` | `"upper_bounded"` | `high` |
 
 Additional `TransformMethod` enum members currently not dispatched by `make_prior(...)`:
 

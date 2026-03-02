@@ -9,26 +9,26 @@ from scipy.stats import halfnorm
 
 
 class HalfNormalParameters(TypedDict):
-    loc: float  # != mean; used like loc + HN(0, 1) * scale
+    low: float  # lower bound of support
     scale: float  # != std;
     random_state: RandomState
 
 
 HALFNORM_DEFAULTS = HalfNormalParameters(
-    loc=0.0,
+    low=0.0,
     scale=1.0,
     random_state=None,
 )
 
 
 class HalfNormal(Distribution[float64, VecF64]):
-    def __init__(self, loc: float, scale: float, random_state: RandomState = None):
-        self.dist = halfnorm(loc=loc, scale=scale)
+    def __init__(self, low: float, scale: float, random_state: RandomState = None):
+        self.dist = halfnorm(loc=low, scale=scale)
 
         self._mean = float64(self.dist.mean())
         self._var = float64(self.dist.var())
-        self._mode = float64(loc)
-        self._loc = float64(loc)
+        self._mode = float64(low)
+        self._low = float64(low)
         self._scale = float64(scale)
         self._random_state = random_state
 
@@ -48,7 +48,7 @@ class HalfNormal(Distribution[float64, VecF64]):
 
     @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(-(x - self.loc) / self.scale**2)
+        return float64(-(x - self.low) / self.scale**2)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -83,7 +83,7 @@ class HalfNormal(Distribution[float64, VecF64]):
     @property
     def support(self) -> Support:
         return Support(
-            float64(0),
+            self._low,
             float64(np.inf),
             low_inclusive=True,
             high_inclusive=False,
@@ -102,8 +102,8 @@ class HalfNormal(Distribution[float64, VecF64]):
         return self._mode
 
     @property
-    def loc(self) -> float64:
-        return self._loc
+    def low(self) -> float64:
+        return self._low
 
     @property
     def scale(self) -> float64:

@@ -9,29 +9,34 @@ from typing import TypedDict, Tuple, overload, cast
 class TruncNormParams(TypedDict):
     loc: float
     scale: float
-    a: float  # Scalar lower bound (scipy expects standard deviations)
-    b: float  # Scalar upper bound (scipy expects standard deviations)
+    low: float  # Scalar lower bound (scipy expects standard deviations)
+    high: float  # Scalar upper bound (scipy expects standard deviations)
     random_state: RandomState
 
 
 TRUNCNORM_DEFAULTS = TruncNormParams(
     loc=0.0,
     scale=1.0,
-    a=-6.0,  # Effectively unbounded
-    b=6.0,
+    low=-6.0,  # Effectively unbounded
+    high=6.0,
     random_state=None,
 )
 
 
 class TruncNormal(Distribution[float64, VecF64]):
     def __init__(
-        self, a: float, b: float, loc: float, scale: float, random_state: RandomState
+        self,
+        low: float,
+        high: float,
+        loc: float,
+        scale: float,
+        random_state: RandomState,
     ):
         self._loc = float64(loc)
         self._scale = float64(scale)
-        self._a_trunc = float64(a)
-        self._b_trunc = float64(b)
-        self._a, self._b = self._scalar_to_std(loc, scale, a, b)
+        self._low_trunc = float64(low)
+        self._high_trunc = float64(high)
+        self._a, self._b = self._scalar_to_std(loc, scale, low, high)
         self._random_state = random_state
 
         self.dist = truncnorm(a=self._a, b=self._b, loc=self._loc, scale=self._scale)
@@ -84,19 +89,19 @@ class TruncNormal(Distribution[float64, VecF64]):
 
     @staticmethod
     def _scalar_to_std(
-        loc: float, scale: float, a: float, b: float
+        loc: float, scale: float, low: float, high: float
     ) -> Tuple[float, float]:
         # Z-transform to get unit std
         return (
-            (a - loc) / scale,
-            (b - loc) / scale,
+            (low - loc) / scale,
+            (high - loc) / scale,
         )
 
     @property
     def support(self) -> Support:
         return Support(
-            float64(self._a_trunc),
-            float64(self._b_trunc),
+            float64(self._low_trunc),
+            float64(self._high_trunc),
             low_inclusive=True,
             high_inclusive=True,
         )

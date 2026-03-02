@@ -16,11 +16,13 @@ class TransformMethod(StrEnum):
     LOGIT = "logit"  # (0, 1)    via y=log(x/(1-x))
     PROBIT = "probit"  # (0, 1)    via y=Phi^{-1}(x)
 
-    AFFINE_LOGIT = "affine_logit"  # (a, b)    via x=a+(b-a)*sigmoid(y)
-    AFFINE_PROBIT = "affine_probit"  # (a, b)    via x=a+(b-a)*Phi(y)
+    AFFINE_LOGIT = "affine_logit"  # (low, high) via x=low+(high-low)*sigmoid(y)
+    AFFINE_PROBIT = "affine_probit"  # (low, high) via x=low+(high-low)*Phi(y)
 
-    LOWER_BOUNDED = "lower_bounded"  # (a, inf)  via x=a+exp(y)   (or a+softplus(y))
-    UPPER_BOUNDED = "upper_bounded"  # (-inf, b) via x=b-exp(y)   (or b-softplus(y))
+    LOWER_BOUNDED = "lower_bounded"  # (low, inf) via x=low+exp(y) (or low+softplus(y))
+    UPPER_BOUNDED = (
+        "upper_bounded"  # (-inf, high) via x=high-exp(y) (or high-softplus(y))
+    )
 
     SIMPLEX = (
         "simplex"  # weights on simplex (sum=1, each>0) via softmax / stick-breaking

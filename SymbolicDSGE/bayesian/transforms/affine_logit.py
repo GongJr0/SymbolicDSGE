@@ -51,7 +51,7 @@ class AffineLogitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = 1 / ((b-a) * z * (1 - z)), with z = (x-a)/(b-a)
+        # dy/dx = 1 / ((high-low) * z * (1 - z)), with z = (x-low)/(high-low)
         if self.support.contains(x):
             z = affine_to_unit(x, self.low, self.high)
             return float64(1.0) / (self._span * z * (1 - z))
@@ -64,7 +64,7 @@ class AffineLogitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dx/dy = (b-a) * sigmoid(y) * (1 - sigmoid(y))
+        # dx/dy = (high-low) * sigmoid(y) * (1 - sigmoid(y))
         if self.maps_to.contains(y):
             z = float64(1.0) / (float64(1.0) + np.exp(-y))
             return self._span * z * (1 - z)
@@ -79,7 +79,7 @@ class AffineLogitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(b-a) - log(z) - log(1-z)
+        # log|dy/dx| = -log(high-low) - log(z) - log(1-z)
         if self.support.contains(x):
             z = affine_to_unit(x, self.low, self.high)
             return float64(-np.log(self._span) - np.log(z) - np.log(1 - z))
@@ -94,8 +94,8 @@ class AffineLogitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dx/dy| = log(b-a) + log(sigmoid(y)(1-sigmoid(y)))
-        #            = log(b-a) - y - 2*log(1 + exp(-y))
+        # log|dx/dy| = log(high-low) + log(sigmoid(y)(1-sigmoid(y)))
+        #            = log(high-low) - y - 2*log(1 + exp(-y))
         if self.maps_to.contains(y):
             return float64(np.log(self._span) - y - 2.0 * np.log1p(np.exp(-y)))
         else:

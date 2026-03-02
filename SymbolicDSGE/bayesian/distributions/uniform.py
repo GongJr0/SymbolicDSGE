@@ -8,23 +8,23 @@ from typing import TypedDict, Tuple, overload, cast
 
 
 class UniformParams(TypedDict):
-    a: float
-    b: float
+    low: float
+    high: float
     random_state: RandomState
 
 
 UNIFORM_DEFAULTS = UniformParams(
-    a=0.0,
-    b=1.0,
+    low=0.0,
+    high=1.0,
     random_state=None,
 )
 
 
 class Uniform(Distribution[float64, VecF64]):
-    def __init__(self, a: float, b: float, random_state: RandomState) -> None:
-        self._a = float64(a)
-        self._b = float64(b)
-        self._loc, self._scale = self._a_b_to_loc_scale(a, b)
+    def __init__(self, low: float, high: float, random_state: RandomState) -> None:
+        self._low = float64(low)
+        self._high = float64(high)
+        self._loc, self._scale = self._low_high_to_loc_scale(low, high)
         self._random_state = random_state
 
         self.dist = uniform(loc=self._loc, scale=self._scale)
@@ -80,8 +80,8 @@ class Uniform(Distribution[float64, VecF64]):
     @property
     def support(self) -> Support:
         return Support(
-            self._a,
-            self._b,
+            self._low,
+            self._high,
             low_inclusive=True,
             high_inclusive=True,
         )
@@ -99,7 +99,7 @@ class Uniform(Distribution[float64, VecF64]):
         raise ValueError("Uniform distribution does not have a unique mode.")
 
     @staticmethod
-    def _a_b_to_loc_scale(a: float, b: float) -> Tuple[float64, float64]:
-        loc = float64(a)
-        scale = float64(b - a)
+    def _low_high_to_loc_scale(low: float, high: float) -> Tuple[float64, float64]:
+        loc = float64(low)
+        scale = float64(high - low)
         return loc, scale

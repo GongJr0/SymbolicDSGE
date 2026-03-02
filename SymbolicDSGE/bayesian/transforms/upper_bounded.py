@@ -9,15 +9,17 @@ from numpy.typing import NDArray
 
 class UpperBoundedTransform(Transform):
 
-    def __init__(self, upper: float64):
-        self.upper = float64(upper)
+    def __init__(self, high: float64):
+        self.high = float64(high)
 
     def __repr__(self) -> str:
         return self.__class__.__name__
 
     # ---- private helper ----
-    def _b_minus_x(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return self.upper - x
+    def _high_minus_x(
+        self, x: float64 | NDArray[float64]
+    ) -> float64 | NDArray[float64]:
+        return self.high - x
 
     @overload
     def forward(self, x: float64) -> float64: ...
@@ -26,7 +28,7 @@ class UpperBoundedTransform(Transform):
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         if self.support.contains(x):
-            return np.log(self._b_minus_x(x))
+            return np.log(self._high_minus_x(x))
         else:
             raise OutOfSupportError(x, self.support)
 
@@ -37,7 +39,7 @@ class UpperBoundedTransform(Transform):
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         if self.maps_to.contains(y):
-            return self.upper - np.exp(y)
+            return self.high - np.exp(y)
         else:
             raise OutOfSupportError(y, self.maps_to)
 
@@ -47,9 +49,9 @@ class UpperBoundedTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = -1 / (b - x)
+        # dy/dx = -1 / (high - x)
         if self.support.contains(x):
-            return -float64(1.0) / self._b_minus_x(x)
+            return -float64(1.0) / self._high_minus_x(x)
         else:
             raise OutOfSupportError(x, self.support)
 
@@ -73,9 +75,9 @@ class UpperBoundedTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(b - x)
+        # log|dy/dx| = -log(high - x)
         if self.support.contains(x):
-            return -np.log(self._b_minus_x(x))
+            return -np.log(self._high_minus_x(x))
         else:
             raise OutOfSupportError(x, self.support)
 
@@ -113,7 +115,7 @@ class UpperBoundedTransform(Transform):
     def support(self) -> Support:
         return Support(
             float64(-np.inf),
-            self.upper,
+            self.high,
             low_inclusive=False,
             high_inclusive=False,
         )

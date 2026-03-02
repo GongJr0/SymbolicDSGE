@@ -9,14 +9,14 @@ from numpy.typing import NDArray
 
 class LowerBoundedTransform(Transform):
 
-    def __init__(self, lower: float64):
-        self.lower = float64(lower)
+    def __init__(self, low: float64):
+        self.low = float64(low)
 
     def __repr__(self) -> str:
         return self.__class__.__name__
 
-    def _x_minus_a(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return x - self.lower
+    def _x_minus_low(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        return x - self.low
 
     @overload
     def forward(self, x: float64) -> float64: ...
@@ -25,7 +25,7 @@ class LowerBoundedTransform(Transform):
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         if self.support.contains(x):
-            return np.log(self._x_minus_a(x))
+            return np.log(self._x_minus_low(x))
         else:
             raise OutOfSupportError(x, self.support)
 
@@ -36,7 +36,7 @@ class LowerBoundedTransform(Transform):
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         if self.maps_to.contains(y):
-            return self.lower + np.exp(y)
+            return self.low + np.exp(y)
         else:
             raise OutOfSupportError(y, self.maps_to)
 
@@ -46,9 +46,9 @@ class LowerBoundedTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = 1 / (x - a)
+        # dy/dx = 1 / (x - low)
         if self.support.contains(x):
-            return float64(1.0) / self._x_minus_a(x)
+            return float64(1.0) / self._x_minus_low(x)
         else:
             raise OutOfSupportError(x, self.support)
 
@@ -72,9 +72,9 @@ class LowerBoundedTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(x - a)
+        # log|dy/dx| = -log(x - low)
         if self.support.contains(x):
-            return -np.log(self._x_minus_a(x))
+            return -np.log(self._x_minus_low(x))
         else:
             raise OutOfSupportError(x, self.support)
 
@@ -111,7 +111,7 @@ class LowerBoundedTransform(Transform):
     @property
     def support(self) -> Support:
         return Support(
-            self.lower,
+            self.low,
             float64(np.inf),
             low_inclusive=False,
             high_inclusive=False,
