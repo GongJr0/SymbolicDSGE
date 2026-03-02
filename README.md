@@ -1,5 +1,12 @@
 <a href="https://gongjr0.github.io/SymbolicDSGE/">
-<img src="docs/assets/logo_w.svg"></img>
+  <picture>
+    <!-- Dark mode -->
+    <source srcset="docs/assets/logo_w.svg" media="(prefers-color-scheme: dark)">
+    <!-- Light mode -->
+    <source srcset="docs/assets/logo_b.svg" media="(prefers-color-scheme: light)">
+    <!-- Fallback -->
+    <img src="docs/assets/logo_b.svg" alt="SymbolicDSGE logo">
+  </picture>
 </a>
 <h4 align="right">by Güney Kıymaç</h4>
 <hr> </hr>
