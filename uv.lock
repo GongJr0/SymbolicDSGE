@@ -1838,7 +1838,7 @@ wheels = [
 
 [[package]]
 name = "symbolicdsge"
-version = "0.2.2"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "linearsolve" },
