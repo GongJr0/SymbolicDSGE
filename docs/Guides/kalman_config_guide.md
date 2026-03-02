@@ -68,6 +68,9 @@ kalman:
 ???+ info "No Defaults"
     `SymbolicDSGE` does not fall back to defaults when constructing $R$. As of now, heuristics to infer $R$ are not implemented and any "default" is practically guaranteed to be inaccurate. There are future plans to implement robust $R$ inference pipelines; but the no-default behavior will not change until said implementations are in place.
 
+???+ note "Runtime Diagonal `R` Estimation"
+    `SolvedModel.kalman(...)` also exposes `estimate_R_diag=True` (with optional `R_scale`) to estimate a diagonal `R` by likelihood before filtering. This is a runtime option and does not mutate the configuration.
+
 
 ## State Covariance
 

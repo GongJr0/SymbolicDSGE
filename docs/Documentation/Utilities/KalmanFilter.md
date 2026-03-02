@@ -13,7 +13,7 @@ tags:
 class FilterResult()
 ```
 
-`#!python dataclass` storing the results of a **Kalman Filter** application.
+`#!python dataclass` storing the results of a Kalman Filter run.
 
 __Fields:__
 
@@ -21,13 +21,14 @@ __Fields:__
 |:---------|:---------:|-----------------:|
 | x_pred | `#!python np.ndarray` | State prediction before observing $y_t$. |
 | x_filt | `#!python np.ndarray` | State estimate after observing $y_t$. |
-| P_pred | `#!python np.ndarray` | Predicted state covariance $P_{t\mid t-1}$
+| P_pred | `#!python np.ndarray` | Predicted state covariance $P_{t\mid t-1}$. |
 | P_filt | `#!python np.ndarray` | Filtered state covariance $P_{t\mid t}$. |
-| y_pred | `#!python np.ndarray` | Predicted observation. Shape `(T, m)`|
-| innov | `#!python np.ndarray` | Innovations (measurement residuals). Shape `(T, m)`.|
-| S | `#!python np.ndarray` | Innovation covariance. Shape `(T, m, m)`.
-| eps_hat | `#!python np.ndarray`, optional | Estimated shocks. |
-| loglik | `#!python float`, optional | Total log-likelihood of the observed data under the filter. |
+| y_pred | `#!python np.ndarray` | Predicted observation. Shape `(T, m)`. |
+| y_filt | `#!python np.ndarray` | Filtered observation. Shape `(T, m)`. |
+| innov | `#!python np.ndarray` | Innovations (measurement residuals). Shape `(T, m)`. |
+| S | `#!python np.ndarray` | Innovation covariance. Shape `(T, m, m)`. |
+| loglik | `#!python float` | Total log-likelihood of observed data under the filter. |
+| eps_hat | `#!python np.ndarray | None` | Estimated shocks (`None` unless `return_shocks=True`). |
 
 &nbsp;
 
@@ -54,7 +55,8 @@ KalmanFilter.run(
     jitter: float = 0.0,
 ) -> FilterResult
 ```
-Apply a Kalman Filter using the given inputs and return a `#!python FilterResult` object.
+
+Apply a linear Kalman Filter and return `#!python FilterResult`.
 
 __Inputs:__
 
@@ -65,13 +67,36 @@ __Inputs:__
 | C | Observation matrix. |
 | d | Observation intercept. |
 | Q | Shock covariance matrix. |
-| R | Observation noise covariance matrix. |
+| R | Observation-noise covariance matrix. |
 | y | Observed data over time. |
-| x0 (optional) | Initial state mean. Defaults to zero vector. |
-| P0 (optional) | Initial state covariance. Defaults to large diagonal. |
-| return_shocks | If `#!python True`, compute and return estimated shocks.
-| symmetrize | Symmetrize the covariance matrices at each step if `#!python True` |
-| jitter | Jitter term added to $S_t$ if **Cholesky** solution fails. |
+| x0 | Initial state mean. Defaults to zero vector. |
+| P0 | Initial state covariance. Defaults to large diagonal. |
+| return_shocks | If `#!python True`, compute and return estimated shocks. |
+| symmetrize | Symmetrize covariance matrices each step if `#!python True`. |
+| jitter | Jitter term added to $S_t$ when Cholesky factorization fails. |
+
+&nbsp;
+
+```python
+KalmanFilter.run_extended(
+    A: np.ndarray[float64 | complex128],
+    B: np.ndarray[float64 | complex128],
+    h: Callable[..., np.ndarray],
+    H_jac: Callable[..., np.ndarray],
+    calib_params: np.ndarray[float64],
+    Q: np.ndarray[float64 | complex128],
+    R: np.ndarray[float64 | complex128],
+    y: np.ndarray[float64 | complex128],
+    x0: np.ndarray[float64] | None = None,
+    P0: np.ndarray[float64] | None = None,
+    return_shocks: bool = False,
+    symmetrize: bool = True,
+    jitter: float = 0.0,
+    compute_y_filt: bool = True,
+) -> FilterResult
+```
+
+Apply an extended Kalman Filter with linear transition and nonlinear measurement function. `#!python h` and `#!python H_jac` are evaluated at each predicted state and receive unpacked state values plus `#!python calib_params`.
 
 ???+ note "Jitter"
     Though its default is 0.0, running the method with a small jitter is strongly recommended. Using 1e-8 (or similar) can prevent fallback to matrix inversion when Cholesky fails. (Inversion much slower in comparison)
@@ -80,4 +105,4 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python FilterResult` | `#!python dataclass` containing results of the Kalman Filter run. |
+| `#!python FilterResult` | `#!python dataclass` containing outputs and diagnostics of the filter run. |

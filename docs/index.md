@@ -15,6 +15,8 @@ hide:
 - IRF path/plot generation
 - Simulation
 - Shock generation interface with support for all `SciPy` distributions
+- Bayesian prior API (`Prior`, `make_prior`) with transforms + distribution dispatch
+- Estimation workflows (`MLE`, `MAP`, adaptive Metropolis `MCMC`)
 - Data retrieval helper for FRED API
 - Data transformation functions (HP filters, detrending, etc.)
 - Kalman Filter implementation
