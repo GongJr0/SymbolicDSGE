@@ -28,7 +28,7 @@ class CompiledModel:
     objective_funcs: list[Callable]
     equations: Callable[[Any, Any, Any], ND]
 
-    calib_params: list[str]
+    calib_params: list[Symbol]
 
     observable_names: list[str]
     observable_eqs: list[Expr]

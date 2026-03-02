@@ -446,7 +446,7 @@ class DSGESolver:
         observables: list[str] | None = None,
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: NDArray | dict[str, float] | None = None,
+        steady_state: list[float] | NDArray | dict[str, float] | None = None,
         log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
@@ -456,6 +456,12 @@ class DSGESolver:
         R: NDArray | None = None,
         **method_kwargs: Any,
     ) -> tuple[Any, SolvedModel]:
+
+        steady_state = (
+            np.asarray(steady_state, dtype=float64)
+            if steady_state is not None
+            else None
+        )
         est = self._estimator(
             compiled=compiled,
             y=y,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterator
 
 import yaml
 import sympy as sp
@@ -28,7 +28,7 @@ class ParsedConfig:
     model: ModelConfig
     kalman: KalmanConfig | None
 
-    def __iter__(self) -> Iterable[Any]:
+    def __iter__(self) -> Iterator[Any]:
         yield from (self.model, self.kalman)
 
 

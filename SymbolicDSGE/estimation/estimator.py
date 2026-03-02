@@ -529,7 +529,7 @@ class Estimator:
                 kept_params[i, j] = float64(p[name])
 
         print(
-            f"MCMC sampling concluded in {elapsed:.2f} seconds with {float64(total_steps / elapsed):.2f} iterations per second."
+            f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
 
         out = MCMCResult(
