@@ -176,7 +176,7 @@ def test_estimation_reports_warning_count_once(monkeypatch, capsys):
     lines = [
         ln
         for ln in capsys.readouterr().out.splitlines()
-        if "warning signals encountered" in ln
+        if "BK stability warnings encountered" in ln
     ]
     assert len(lines) == 1
 
