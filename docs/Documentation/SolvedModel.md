@@ -27,7 +27,7 @@ __Properties:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | config | `#!python ModelConfig` | Parsed model configuration object. |
-| kalman_config | `#!python KalmanConfig` | Parsed Kalman Filter configuration object. |
+| kalman_config | `#!python KalmanConfig \| None` | Parsed Kalman Filter configuration object. |
 
 
 __Methods:__
@@ -167,6 +167,7 @@ __Returns:__
 ```python
 SolvedModel.kalman(
     y: ndarray | DataFrame,
+    filter_mode: Literal['linear', 'extended'] = 'linear',
     *,
     observables: list[str] | None = None, # (1)!
     x0: ndarray | None = None, # (2)!
@@ -175,13 +176,15 @@ SolvedModel.kalman(
     jitter: float | None = None, # (5)!
     symmetrize: bool | None = None, # (6)!
     return_shocks: bool = False,
+    estimate_R_diag: bool = False,
+    R_scale: float = 1.0,
     _debug: bool = False
 ) -> FilterResult
 ```
 
 1. `None`: Use `y_names` from `KalmanConfig`. If is not specified, use all observables.
 2. `None`: Use a zero vector.
-3. `None`: Use `P0.mode` from `KalmanConfig`. If `P0.mode` is not specified, use 'eye'.
+3. `None`: Use `P0.mode` from `KalmanConfig`. If this resolves to `'diag'`, `P0.diag` must be present.
 4. `None`: Use `P0.scale` from `KalmanConfig`. If `P0.scale` is not specified, use '1.0'.
 5. `None`: Use `jitter` from `KalmanConfig`. If `jitter` is not specified, use '0.0'.
 6. `None`: Use `symmetrize` from `KalmanConfig`. If `symmetrize` is not specified, use 'False'.
@@ -196,6 +199,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | y | observations to filter. |
+| filter_mode | `"linear"` for affine measurements, `"extended"` for nonlinear measurements. |
 | observables | Name of corresponding model measurements. |
 | x0 | Initial state vector. |
 | p0_mode | Generation strategy for $P_0$. `diag` uses values given in the config (`#!python diag_mat * scale`) and `eye` uses (`#!python np.eye(n) * scale`) |
@@ -203,13 +207,15 @@ __Inputs:__
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
+| estimate_R_diag | If `True`, estimate a diagonal `R` by MLE before running the filter. |
+| R_scale | Post-estimation multiplicative scaling applied to `R` when `estimate_R_diag=True`. |
 | _debug | Print debug information about filter inputs if `True`. |
 
 __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python FilterResult | `dataclass` containing information on filter state, y, diagnostics, etc. |
+| `#!python FilterResult` | `dataclass` containing information on filter state, measurements, and diagnostics. |
 
 &nbsp;
 

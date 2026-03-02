@@ -265,7 +265,7 @@ class Estimator:
 
     def _report_search_warning_count(self, kind: str) -> None:
         print(
-            f"[Estimator:{kind}] warning signals encountered during search: {self._warning_signal_count}"
+            f"[Estimator:{kind}] BK stability warnings encountered during search: {self._warning_signal_count}"
         )
 
     def _safe_loglik(self, theta: NDF) -> float64:
@@ -529,7 +529,7 @@ class Estimator:
                 kept_params[i, j] = float64(p[name])
 
         print(
-            f"MCMC sampling concluded in {elapsed:.2f} seconds with {float64(total_steps / elapsed):<10.2f} iterations per second."
+            f"MCMC sampling concluded in {elapsed:.2f} seconds with {float64(total_steps / elapsed):.2f} iterations per second."
         )
 
         out = MCMCResult(

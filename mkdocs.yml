@@ -133,10 +133,13 @@ nav:
       - Model Configuration Guide: guides/model_config_guide.md
       - Quick Start: guides/quickstart.md
       - Kalman Filter Configuration Guide: guides/kalman_config_guide.md
+      - Estimation Guide: guides/estimation_guide.md
   - Documentation:
       - ModelConfig: documentation/ModelConfig.md
       - ModelParser: documentation/ModelParser.md
       - DSGESolver: documentation/DSGESolver.md
+      - Estimator: documentation/Estimator.md
+      - Prior: documentation/Prior.md
       - CompiledModel: documentation/CompiledModel.md
       - SolvedModel: documentation/SolvedModel.md
       - Shock: documentation/Shock.md

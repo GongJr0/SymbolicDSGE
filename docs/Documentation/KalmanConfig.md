@@ -16,10 +16,17 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | y_names | `#!python list[str]` | Names of the included observables. |
-| R | `#!python NDArray | None` | Covariance matrix of observation noise. R is generated as a matrix from parsing the config and should not be overridden in the config object.|
-| jitter | `#!python float` | Jitter term to be added to covariance matrices if Cholesky fails. |
-| symmetrize | `#!python bool` | Symmetrize the covariance matrices per iteration if `True`. |
+| R | `#!python NDArray \| None` | Numeric observation-noise covariance matrix (full matrix) built from config parameters. |
+| jitter | `#!python float \| None` | Jitter term for Cholesky-failure fallback (`None` defers to runtime defaults). |
+| symmetrize | `#!python bool \| None` | Symmetrization option (`None` defers to runtime defaults). |
 | P0 | `#!python P0Config` | `dataclass` storing the mode and values of the initial $P$ state. |
+| R_symbolic | `#!python sympy.Matrix \| None` | Symbolic expression of the configured full `R` matrix. |
+| R_param_symbols | `#!python list[sympy.Symbol] \| None` | Symbols required to build `R_symbolic`. |
+| R_param_names | `#!python list[str] \| None` | Parameter names (ordered) passed to `R_builder`. |
+| R_builder | `#!python Callable[..., NDArray] \| None` | Lambdified builder that reconstructs full `R` from `R_param_names`. |
+
+??? info "Symbolic `R` Metadata"
+    `R_symbolic`/`R_builder` are used by estimation pipelines (e.g. iterative MCMC updates) to rebuild `R` from the current parameter draw when needed.
 
 
 ```python
@@ -38,4 +45,4 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | mode | `#!python str` | P0 creation mode. `diag` uses given diagonal values, `eye` uses an identity matrix of the appropriate shape. |
 | scale | `#!python float` | Scaling factor of the P0 matrix. (`#!python P0 = P0 * scale`)  |
-| diag | `#!python dict[str, float]` | Variable names and their diagonals (variances, not standard deviation) in the $P$ matrix. |
+| diag | `#!python dict[str, float] \| None` | Variable names and their diagonals (variances, not standard deviation) in the $P$ matrix. |

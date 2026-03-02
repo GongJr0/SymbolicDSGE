@@ -63,7 +63,7 @@ parameters: [beta, kappa, tau_inv,
 
 ???+ note "Calibration Values"
     `SymbolicDSGE` currently expects each parameter to have known values.
-    estimation/inference will be implemented but are not accessible as of now.
+    These calibration values are used as defaults and as initial guesses for estimation workflows (`mle`, `map`, `mcmc`) when no explicit `theta0` is supplied.
 
 ## Shocks
 

@@ -15,14 +15,15 @@ We will use a pre-defined config file (accessible in the [repository](https://gi
 ## Reading Model Configuration
 
 The configuration files are parsed by the `#!python SymbolicDSGE.ModelParser` class.
-The class provides a `#!python .get()` method to return a `#!python ModelConfig` object.
+The class provides `#!python .get()` (model only) and `#!python .get_all()` (model + kalman config).
 
 ```python
 from SymbolicDSGE import ModelParser
 from sympy import Matrix
 from warnings import simplefilter, catch_warnings
 
-model = ModelParser("MODELS/POST82.yaml").get()
+parsed = ModelParser("MODELS/POST82.yaml").get_all()
+model, kalman = parsed
 
 with catch_warnings(): # (1)!
     simplefilter(action="ignore")
@@ -42,12 +43,12 @@ We can see that all variables are converted to `#!python SymPy` objects (symbols
 
 ## Compilation
 
-In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time-dependent variables are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolver` is exposed to a single function representing all model equations.
+In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time-dependent variables are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolve` is exposed to a single function representing all model equations.
 
 ```python
 from SymbolicDSGE import DSGESolver
 
-solver = DSGESolver(model)
+solver = DSGESolver(model, kalman)
 compiled = solver.compile(
     variable_order=None, # (1)!
     params_order=None, # (2)!
