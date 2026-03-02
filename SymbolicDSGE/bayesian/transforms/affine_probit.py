@@ -53,7 +53,7 @@ class AffineProbitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = 1 / ((b-a) * phi(y)), where y = Phi^{-1}(z) and z = (x-a)/(b-a)
+        # dy/dx = 1 / ((high-low) * phi(y)), where y = Phi^{-1}(z) and z = (x-low)/(high-low)
         if self.support.contains(x):
             z = affine_to_unit(x, self.low, self.high)
             y = float64(norm.ppf(z))
@@ -67,7 +67,7 @@ class AffineProbitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dx/dy = (b-a) * phi(y)
+        # dx/dy = (high-low) * phi(y)
         if self.maps_to.contains(y):
             return float64(self._span * norm.pdf(y))
         else:
@@ -81,7 +81,7 @@ class AffineProbitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(b-a) - log(phi(y))
+        # log|dy/dx| = -log(high-low) - log(phi(y))
         if self.support.contains(x):
             z = affine_to_unit(x, self.low, self.high)
             y = norm.ppf(z)
@@ -97,7 +97,7 @@ class AffineProbitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dx/dy| = log(b-a) + log(phi(y))
+        # log|dx/dy| = log(high-low) + log(phi(y))
         if self.maps_to.contains(y):
             return float64(np.log(self._span) + float64(norm.logpdf(y)))
         else:

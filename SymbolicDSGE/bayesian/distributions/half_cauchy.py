@@ -9,25 +9,25 @@ from typing import TypedDict, overload, cast
 
 
 class HalfCauchyParams(TypedDict):
-    loc: float
+    low: float
     scale: float
     random_state: RandomState
 
 
 HALF_CAUCHY_DEFAULTS = HalfCauchyParams(
-    loc=0.0,
+    low=0.0,
     scale=1.0,
     random_state=None,
 )
 
 
 class HalfCauchy(Distribution):
-    def __init__(self, loc: float, scale: float, random_state: RandomState) -> None:
-        self._loc = float64(loc)
+    def __init__(self, low: float, scale: float, random_state: RandomState) -> None:
+        self._low = float64(low)
         self._scale = float64(scale)
         self._random_state = random_state
 
-        self.dist = halfcauchy(loc=self._loc, scale=self._scale)
+        self.dist = halfcauchy(loc=self._low, scale=self._scale)
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
@@ -75,7 +75,7 @@ class HalfCauchy(Distribution):
     @property
     def support(self) -> Support:
         return Support(
-            float64(self._loc),
+            float64(self._low),
             float64(np.inf),
             low_inclusive=True,
             high_inclusive=False,
@@ -91,4 +91,4 @@ class HalfCauchy(Distribution):
 
     @property
     def mode(self) -> float64:
-        return float64(self._loc)
+        return float64(self._low)

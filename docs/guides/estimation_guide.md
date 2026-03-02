@@ -235,7 +235,7 @@ More detailed information regarding estimation can be found via the references. 
 ???+ note "References"
     This guide focuses on solver-facing estimation flow. For API-level references, use:
     - [`Estimator`](../documentation/Estimator.md)
-    - [`Prior`](../documentation/Prior.md)
+    - [`Prior`](../documentation/prior_spec/Prior.md)
     - [`DSGESolver`](../documentation/DSGESolver.md)
 
 [Download Guide Notebook](../assets/guide_notebook.ipynb){ .md-button download="" }

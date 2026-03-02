@@ -9,27 +9,27 @@ from typing import TypedDict, overload, cast
 
 class LogNormalParams(TypedDict):
     s: float  # Shape parameter (standard deviation of the underlying normal distribution)
-    loc: float  # Location parameter (mean of the underlying normal distribution)
+    low: float  # Lower bound / location shift
     scale: float  # Scale parameter (exp(mean) of the underlying normal distribution)
     random_state: RandomState
 
 
 LOGNORM_DEFAULTS = LogNormalParams(
     s=1.0,
-    loc=0.0,
+    low=0.0,
     scale=1.0,
     random_state=None,
 )
 
 
 class LogNormal(Distribution[float64, VecF64]):
-    def __init__(self, s: float, loc: float, scale: float, random_state: RandomState):
+    def __init__(self, s: float, low: float, scale: float, random_state: RandomState):
         self._s = float64(s)
-        self._loc = float64(loc)
+        self._low = float64(low)
         self._scale = float64(scale)
         self._random_state = random_state
 
-        self.dist = lognorm(s=self._s, loc=self._loc, scale=self._scale)
+        self.dist = lognorm(s=self._s, loc=self._low, scale=self._scale)
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
@@ -78,7 +78,7 @@ class LogNormal(Distribution[float64, VecF64]):
     @property
     def support(self) -> Support:
         return Support(
-            low=float64(0.0),
+            low=self._low,
             high=float64(np.inf),
             low_inclusive=False,
             high_inclusive=False,
@@ -94,4 +94,4 @@ class LogNormal(Distribution[float64, VecF64]):
 
     @property
     def mode(self) -> float64:
-        return float64(np.exp(self._loc - self._s**2))
+        return float64(np.exp(self._low - self._s**2))

@@ -139,12 +139,34 @@ nav:
       - ModelParser: documentation/ModelParser.md
       - DSGESolver: documentation/DSGESolver.md
       - Estimator: documentation/Estimator.md
-      - Prior: documentation/Prior.md
       - CompiledModel: documentation/CompiledModel.md
       - SolvedModel: documentation/SolvedModel.md
       - Shock: documentation/Shock.md
       - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
+      - Prior Specification:
+        - Prior: documentation/prior_spec/Prior.md
+        - Distributions:
+            - Normal: documentation/prior_spec/distributions/normal.md
+            - LogNormal: documentation/prior_spec/distributions/log_normal.md
+            - HalfNormal: documentation/prior_spec/distributions/half_normal.md
+            - TruncNormal: documentation/prior_spec/distributions/trunc_normal.md
+            - HalfCauchy: documentation/prior_spec/distributions/half_cauchy.md
+            - Beta: documentation/prior_spec/distributions/beta.md
+            - Gamma: documentation/prior_spec/distributions/gamma.md
+            - InvGamma: documentation/prior_spec/distributions/inv_gamma.md
+            - Uniform: documentation/prior_spec/distributions/uniform.md
+            - LKJChol: documentation/prior_spec/distributions/lkj_chol.md
+        - Transformations:
+            - Identity: documentation/prior_spec/transforms/identity.md
+            - Log: documentation/prior_spec/transforms/log.md
+            - Softplus: documentation/prior_spec/transforms/softplus.md
+            - Logit: documentation/prior_spec/transforms/logit.md
+            - Probit: documentation/prior_spec/transforms/probit.md
+            - AffineLogit: documentation/prior_spec/transforms/affine_logit.md
+            - AffineProbit: documentation/prior_spec/transforms/affine_probit.md
+            - LowerBounded: documentation/prior_spec/transforms/lower_bounded.md
+            - UpperBounded: documentation/prior_spec/transforms/upper_bounded.md
       - Utilities:
           - FRED: documentation/utilities/FRED.md
           - KalmanFilter: documentation/utilities/KalmanFilter.md

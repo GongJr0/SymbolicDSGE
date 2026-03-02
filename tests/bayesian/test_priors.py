@@ -136,7 +136,7 @@ def test_make_prior_builds_instances_and_applies_defaults():
 def test_make_prior_passes_transform_kwargs():
     prior = make_prior(
         distribution="uniform",
-        parameters={"a": -2.0, "b": 3.0},
+        parameters={"low": -2.0, "high": 3.0},
         transform="affine_logit",
         transform_kwargs={"low": -2.0, "high": 3.0},
     )
