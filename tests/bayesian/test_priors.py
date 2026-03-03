@@ -295,23 +295,23 @@ def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
     assert np.allclose(dist.grad_x, z - 1.0)
 
 
-def test_confirm_bound_match_raises_on_dist_support_vs_transform_maps_to_mismatch():
+def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch_gamma_identity():
     prior = make_prior(
         distribution="gamma",
         parameters={"a": 2.0, "loc": 0.0, "scale": 1.0},
         transform="identity",
     )
-    with pytest.raises(ValueError, match="does not match transform maps_to"):
+    with pytest.raises(ValueError, match="does not match transform support"):
         prior._confirm_bound_match()
 
 
-def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch():
+def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch_normal_log():
     prior = make_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="log",
     )
-    with pytest.raises(ValueError, match="transform's support function must match"):
+    with pytest.raises(ValueError, match="does not match transform support"):
         prior._confirm_bound_match()
 
 

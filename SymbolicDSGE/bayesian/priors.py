@@ -58,25 +58,18 @@ class Prior:
 
     def _confirm_bound_match(self) -> None:
         _sup = self.dist.support
-        _map = self.transform.maps_to
         _trans_sup = self.transform.support
-        if _sup != _map:
-            raise ValueError(
-                f"Distribution support {self.dist.support} does not match transform maps_to {self.transform.maps_to}"
-            )
-
         if _sup != _trans_sup:
             raise ValueError(
-                "The transform's support function must match the distribution's support when using a ConstrainedPrior. "
-                "ConstrainedPrior assumes the distribution is already constrained to the desired support; "
-                "Transformations will not use jacobian corrections. "
+                "Distribution support does not match transform support. "
+                "When priors are defined in parameter space, transform.support must match dist.support. "
             )
 
         if not self.dist.support.is_finite:
             warnings.warn(
-                "ConstrainedPrior created with non-finite support. "
-                "This class assumes a pre-constrained distribution and the transformation will not be applied with jacobian correction. "
-                "If this is intentional, you can ignore this warning. Otherwise, consider using an unconstrained distribution with a transformation that maps to the desired support."
+                "Prior created with non-finite support. "
+                "This can be valid (e.g., Normal + Identity), but verify that the transform is appropriate "
+                "for optimization/sampling in unconstrained space."
             )
 
     @property
