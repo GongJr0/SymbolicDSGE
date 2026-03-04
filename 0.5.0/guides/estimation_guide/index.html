@@ -1985,15 +1985,18 @@
 <h1 id="estimation-guide">Estimation Guide</h1>
 <details class="tip">
 <summary>TL;DR</summary>
-<p>Refer to <a href="../../assets/guide_notebook.ipynb">this</a> notebook for an example parameter estimation workflow.</p>
+<p>Refer to <a href="../../assets/param_estimation.ipynb">this</a> notebook for an example parameter estimation workflow.</p>
 </details>
-<p>This guide walks through practical estimation using <code>SymbolicDSGE</code> with a style similar to the quick-start: code-first, output-aware, and progressively constructed objects.</p>
+<details class="warning">
+<summary>Read the Quickstart Guide</summary>
+<p>This guide only handles the estimation process and is written assuming the reader have some familiarity for the core DSGE API (i.e. <code>DSGESolver</code>, <code>SolvedModel</code> etc.). It is strongly recommended to at least have read the <a href="../quickstart/">Quickstart Guide</a> before working with parameter estimation.</p>
+</details>
+<p>This guide walks through the parameter estimation workflow of <code>SymbolicDSGE</code> using an example setup and a MCMC sampling based Bayesian Estimation setup.</p>
 <p>We will cover:</p>
 <ul>
 <li>How priors are built (and why transforms matter)</li>
 <li>How to run MCMC through <code>DSGESolver.estimate_and_solve(...)</code></li>
 <li>What outputs to expect from the process</li>
-<li>How to compare calibrated and estimated values</li>
 <li>How static-<code>R</code> vs dynamic-<code>R</code> updates change fit diagnostics</li>
 </ul>
 <h2 id="parse-configs-and-compile">Parse Configs and Compile</h2>
@@ -2022,21 +2025,21 @@ In theory, <span class="arithmatex">\(\beta\)</span> can be any number such that
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.bayesian</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_prior</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">beta_prior</span> <span class="o">=</span> <span class="n">make_prior</span><span class="p">(</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">distribution</span><span class="o">=</span><span class="s2">&quot;normal&quot;</span><span class="p">,</span> <span class="c1"># (1)!</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mf">3.511</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.15</span><span class="p">},</span> <span class="c1"># (2)!</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">distribution</span><span class="o">=</span><span class="s2">&quot;beta&quot;</span><span class="p">,</span> <span class="c1"># (1)!</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="mi">200</span> <span class="o">*</span> <span class="mf">0.971</span><span class="p">,</span> <span class="s2">&quot;b&quot;</span><span class="p">:</span> <span class="mi">200</span> <span class="o">*</span> <span class="mf">0.029</span><span class="p">},</span> <span class="c1"># (2)!</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;logit&quot;</span><span class="p">,</span> <span class="c1"># (3)!</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">transform_kwargs</span><span class="o">=</span><span class="p">{}</span> <span class="c1"># (4)!</span>
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">)</span>
 </span></code></pre></div>
 <ol>
-<li>Distribution in optimizer space. (More on this below)</li>
-<li>Parameters of the distribution, specified in optimizer units.</li>
-<li>Transform function mapping the optimizer output to the parameter support <code>(0,1)</code>.</li>
+<li>Distribution in parameter space.</li>
+<li>Parameters of the distribution. This yields a Beta distribution with heavily concentrated probability mass around the mean of 0.971.</li>
+<li>Transform function mapping the parameter space to the unconstrained optimizer space. Here, <code>logit</code> maps <code>(0, 1) -&gt; (-inf, inf)</code>.</li>
 <li>Parameters of the transform function are passed here if necessary.</li>
 </ol>
-<p>The prior specification defines <code>Distribution</code>s such that the optimizer can directly interact with the distribution object.
-For example, in order to optimize in an unbounded search space <span class="arithmatex">\(\R = (-\infty, \infty)\)</span> we would use a distribution whose support is <span class="arithmatex">\(\R\)</span>,
-such as a normal distribution <span class="arithmatex">\(Z \sim N(\mu, \sigma^2)\)</span>. We then rely on the <code>Transform</code> objects to re-map (or invert) the unbounded search output into the parameter space we wish to search over. To give a concrete example, a logit transform for example would map <span class="arithmatex">\((0,1) \mapsto\R\)</span> in the forward direction. In this scenario the inverse logit would precisely do the opposite $ inv(Z) \to X, \, X \in (0,1) $.</p>
+<p>The prior specification defines <code>Distribution</code>s such that the optimizer can interact with the distribution object on the unconstrained space.
+For example, in order to optimize in an unbounded search space <span class="arithmatex">\(\R = (-\infty, \infty)\)</span> we can use any distribution of our choosing regardless of the bounds,
+as long as we specify a <code>Transform</code> that maps the distribution support <span class="arithmatex">\((a, b) \mapsto \R\)</span>. We then rely on the <code>Transform</code> objects to apply a "Change of Variables" to produce the unbounded search input. The <code>Transform</code> will also be responsible for inverting the optimizer output into the parameter space (<span class="arithmatex">\(\R \mapsto (a,b)\)</span>) we wish to search over. To give a concrete example, a logit transform for example would map <span class="arithmatex">\((0,1) \mapsto\R\)</span> in the forward direction. In this scenario the inverse logit would precisely do the opposite $ inv(Z) \to X, \, X \in (0,1) $.</p>
 <details class="info">
 <summary>Change of Variables Details</summary>
 <p>All transformations except <code>Identity</code> (which returns the input itself as output) are examples of the procedute defined in calculus as <a href="https://en.wikipedia.org/wiki/Change_of_variables" target="_blank" rel="noopener">Change of Variables</a>. We deal with a specific <a href="https://en.wikipedia.org/wiki/Probability_density_function#Function_of_random_variables_and_change_of_variables_in_the_probability_density_function" target="_blank" rel="noopener">subset</a> of this procedure relating to probability density functions (PDFs). Below we will show how applying/inverting a transform function blindly results in inaccurate conversions and try to outline an intuition for the process. We will try to make it as easy to reason about as possible and some details can get skipped.</p>
@@ -2049,35 +2052,35 @@ f_z(Z) = f_z(X) \times \left|\frac{d}{dx}g_z\left(X\right)\right| \Longleftright
 <p>Using <code>make_prior</code> we can define individual priors for each parameter we wish to estimate:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">prior_spec</span> <span class="o">=</span> <span class="p">{</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="s2">&quot;beta&quot;</span><span class="p">:</span> <span class="n">make_prior</span><span class="p">(</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        <span class="s2">&quot;normal&quot;</span><span class="p">,</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mf">3.511</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.15</span><span class="p">},</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        <span class="s2">&quot;beta&quot;</span><span class="p">,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mi">200</span><span class="o">*</span><span class="mf">0.971</span><span class="p">,</span> <span class="s2">&quot;b&quot;</span><span class="p">:</span> <span class="mi">200</span><span class="o">*</span><span class="mf">0.029</span><span class="p">},</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>        <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;logit&quot;</span><span class="p">,</span> <span class="c1"># (1)!</span>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="p">),</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="s2">&quot;kappa&quot;</span><span class="p">:</span> <span class="n">make_prior</span><span class="p">(</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="s2">&quot;normal&quot;</span><span class="p">,</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mf">0.545</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.40</span><span class="p">},</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;affine_logit&quot;</span><span class="p">,</span> <span class="c1"># (2)!</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>        <span class="n">transform_kwargs</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;low&quot;</span><span class="p">:</span> <span class="mf">0.33</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">},</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="p">),</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="o">...</span><span class="p">,</span>
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
-</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="s2">&quot;tau_inv&quot;</span><span class="p">:</span> <span class="n">make_prior</span><span class="p">(</span>
-</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="s2">&quot;normal&quot;</span><span class="p">,</span>
-</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mf">0.621</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.35</span><span class="p">},</span>
-</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>        <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;log&quot;</span><span class="p">,</span> <span class="c1"># (3)!</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="s2">&quot;gamma&quot;</span><span class="p">,</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mf">0.58</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">},</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;log&quot;</span><span class="p">,</span> <span class="c1"># (2)!</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="p">),</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="o">...</span><span class="p">,</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="s2">&quot;rho_gz&quot;</span><span class="p">:</span> <span class="n">make_prior</span><span class="p">(</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        <span class="s2">&quot;normal&quot;</span><span class="p">,</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">},</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;affine_logit&quot;</span><span class="p">,</span> <span class="c1"># (3)!</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>        <span class="n">transform_kwargs</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;low&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">}</span>
 </span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="p">),</span>
 </span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="s2">&quot;sig_r&quot;</span><span class="p">:</span> <span class="n">make_prior</span><span class="p">(</span>
-</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>        <span class="s2">&quot;normal&quot;</span><span class="p">,</span>
-</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mf">1.715</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.50</span><span class="p">},</span>
+</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>        <span class="s2">&quot;gamma&quot;</span><span class="p">,</span>
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>        <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="mf">0.18</span><span class="p">,</span> <span class="s2">&quot;std&quot;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">},</span>
 </span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>        <span class="n">transform</span><span class="o">=</span><span class="s2">&quot;log&quot;</span><span class="p">,</span>
 </span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="p">),</span>
 </span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="p">}</span>
 </span></code></pre></div>
 <ol>
 <li><code>logit</code> does not require parameters and (inverse) transforms to (0, 1)</li>
-<li><code>affine_logit</code> takes a low (<span class="arithmatex">\(a\)</span>) and high (<span class="arithmatex">\(b\)</span>) bound to map (a, b)</li>
 <li><code>log</code> maps real numbers to non-negative reals without requiring parameters.</li>
+<li><code>affine_logit</code> takes a low (<span class="arithmatex">\(a\)</span>) and high (<span class="arithmatex">\(b\)</span>) bound to map (a, b)</li>
 </ol>
 <h2 id="running-the-estimation">Running the Estimation</h2>
 <p>The estimation process is carried out by <code>DSGESolver.estimate()</code> and <code>DSGESolver.estimate_and_solve</code>. The former returns the estimation results, but does not provide a <code>SolvedModel</code> using said estimation output. Conversely, the latter provides both the results, and an immediately usable <code>SolvedModel</code> object derived from the results.</p>
@@ -2098,14 +2101,14 @@ f_z(Z) = f_z(X) \times \left|\frac{d}{dx}g_z\left(X\right)\right| \Longleftright
 <ol>
 <li>Observed data we want to calibrate against</li>
 <li>Chosen from <code>{'mle', 'map', 'mcmc'}</code>.</li>
-<li>Which point from the posterior distribution to use as parameters. Chosen from <code>{'mean', 'map', 'last'}</code>.</li>
+<li>Which point from the posterior distribution to use as parameters. Chosen from <code>{'mean', 'mode' == 'map', 'last'}</code>.</li>
 <li>Retained draws.</li>
 <li>Burn-in iterations.</li>
 <li>Keeps every <code>thin</code>-th draw. Specifying a <code>thin</code> &gt; 1 discards some samples and is commonly used to prevent autocorrelation.</li>
 <li>If parameters of R are being estimated, setting this to <code>True</code> will re-compute the R matrix using the current sample's parameters.
    Otherwise, R will be estimated once before the run begins and will be kept static throughout the run.</li>
 </ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>MCMC sampling concluded in 32.28 seconds with 46.47 iterations per second.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>MCMC sampling concluded in 34.93 seconds with 42.95 iterations per second.
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>[Estimator:mcmc] BK stability warnings encountered during search: 0
 </span></code></pre></div>
 <h2 id="inspecting-the-results">Inspecting the Results</h2>
@@ -2135,23 +2138,23 @@ f_z(Z) = f_z(X) \times \left|\frac{d}{dx}g_z\left(X\right)\right| \Longleftright
 <li>We used <code>posterior_point='mean'</code>, therefore we're computing the mean of all sample draws to accurately recreate the parameters being used inside the model.</li>
 <li>Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)</li>
 </ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>beta              0.973705
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>rho_r             0.792911
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>rho_g             0.513813
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>rho_z             0.871142
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>psi_pi            1.387276
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>psi_x             0.126220
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>kappa             0.465436
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>tau_inv           0.050912
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>rho_gz            0.777813
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>sig_r             0.150977
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>sig_g             0.294470
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>sig_z             0.190326
-</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>meas_infl         1.278487
-</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>meas_rate         0.642888
-</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>meas_rho_ir      -0.703442
-</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>loglik         -401.814512
-</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>accept_rate       0.320000
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>beta              0.971773
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>rho_r             0.840123
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>rho_g             0.860232
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>rho_z             0.873493
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>psi_pi            2.736531
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>psi_x             0.339134
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>kappa             0.366632
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>tau_inv           0.569496
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>rho_gz            0.149944
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>meas_rho_ir       0.230454
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>sig_r             0.143704
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>sig_g             0.150102
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>sig_z             0.685228
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>meas_infl         0.574781
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>meas_rate         0.934977
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>loglik         -300.602336
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>accept_rate       0.328667
 </span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>n_draws        1000.000000
 </span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>burn_in         500.000000
 </span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>thin              1.000000
@@ -2189,7 +2192,7 @@ Afterwards, a simulation using identical shock arrays for static and dynamic est
 - <a href="../../documentation/prior_spec/Prior/"><code>Prior</code></a>
 - <a href="../../documentation/DSGESolver/"><code>DSGESolver</code></a></p>
 </details>
-<p><a class="md-button" download="" href="../../assets/guide_notebook.ipynb">Download Guide Notebook</a></p>
+<p><a class="md-button" download="" href="../../assets/param_estimation.ipynb">Download Guide Notebook</a></p>
 
 
 

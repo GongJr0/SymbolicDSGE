@@ -1899,7 +1899,7 @@
 
 
 <h1 id="gamma">Gamma</h1>
-<p>Positive prior family with shape-scale parameterization.</p>
+<p>Positive prior family parameterized by mean and standard deviation.</p>
 <h3 id="parameters">Parameters</h3>
 <table>
 <thead>
@@ -1912,21 +1912,15 @@
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><code>a</code></td>
-<td style="text-align: left;"><span class="arithmatex">\(k\)</span></td>
-<td style="text-align: left;">Shape</td>
+<td style="text-align: left;"><code>mean</code></td>
+<td style="text-align: left;"><span class="arithmatex">\(\mu\)</span></td>
+<td style="text-align: left;">Mean of the gamma random variable</td>
 <td style="text-align: center;"><code>1.0</code></td>
 </tr>
 <tr>
-<td style="text-align: left;"><code>loc</code></td>
-<td style="text-align: left;">-</td>
-<td style="text-align: left;">Location shift used by implementation</td>
-<td style="text-align: center;"><code>0.0</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>scale</code></td>
-<td style="text-align: left;"><span class="arithmatex">\(\theta\)</span></td>
-<td style="text-align: left;">Scale</td>
+<td style="text-align: left;"><code>std</code></td>
+<td style="text-align: left;"><span class="arithmatex">\(\sigma\)</span></td>
+<td style="text-align: left;">Standard deviation of the gamma random variable</td>
 <td style="text-align: center;"><code>1.0</code></td>
 </tr>
 <tr>
@@ -1939,7 +1933,12 @@
 </table>
 <details class="note" open="open">
 <summary>Implementation Parameterization</summary>
-<p>The implementation follows <code>scipy.stats.gamma(a, loc=loc, scale=scale)</code>.</p>
+<p>The implementation converts <code>(mean, std)</code> into shape-scale form:</p>
+<div class="arithmatex">\[
+k=\left(\frac{\mu}{\sigma}\right)^2,\quad
+\theta=\frac{\sigma^2}{\mu}
+\]</div>
+<p>and dispatches to <code>scipy.stats.gamma(a=k, loc=0, scale=\theta)</code>.</p>
 </details>
 <h3 id="pdf">PDF</h3>
 <div class="arithmatex">\[
@@ -1949,7 +1948,7 @@ x^{k-1}e^{-x/\theta}
 \]</div>
 <h3 id="region">Region</h3>
 <div class="arithmatex">\[
-x \in (0,\infty)
+x \in [0,\infty)
 \]</div>
 
 
