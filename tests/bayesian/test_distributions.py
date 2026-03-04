@@ -46,7 +46,7 @@ from SymbolicDSGE.bayesian.support import OutOfSupportError
         ),
         (
             "gamma",
-            lambda: Gamma(3.0, 0.0, 2.0, 123),
+            lambda: Gamma(6.0, np.sqrt(12.0), 123),
             float64(1.4),
             float64(-0.1),
             False,

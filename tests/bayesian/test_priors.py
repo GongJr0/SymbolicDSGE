@@ -196,7 +196,7 @@ def test_prior_grad_logpdf_identity_matches_distribution():
 def test_prior_bounded_methods_raise_outside_distribution_support():
     prior = make_prior(
         distribution="gamma",
-        parameters={"a": 3.0, "loc": 0.0, "scale": 2.0},
+        parameters={"mean": 6.0, "std": np.sqrt(12.0)},
         transform="identity",
     )
     bad_x = float64(-0.1)
@@ -298,7 +298,7 @@ def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
 def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch_gamma_identity():
     prior = make_prior(
         distribution="gamma",
-        parameters={"a": 2.0, "loc": 0.0, "scale": 1.0},
+        parameters={"mean": 2.0, "std": np.sqrt(2.0)},
         transform="identity",
     )
     with pytest.raises(ValueError, match="does not match transform support"):
