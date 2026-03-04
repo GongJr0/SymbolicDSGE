@@ -9,30 +9,35 @@ from typing import TypedDict, overload, cast
 
 
 class GammaParams(TypedDict):
-    a: float
-    loc: float
-    scale: float
+    mean: float
+    std: float
     random_state: RandomState
 
 
 GAMMA_DEFAULTS = GammaParams(
-    a=1.0,
-    loc=0.0,
-    scale=1.0,
+    mean=1.0,
+    std=1.0,
     random_state=None,
 )
 
 
 class Gamma(Distribution[float64, VecF64]):
-    def __init__(
-        self, a: float, loc: float, scale: float, random_state: RandomState
-    ) -> None:
-        self._a = float64(a)
-        self._loc = float64(loc)
-        self._scale = float64(scale)
+    def __init__(self, mean: float, std: float, random_state: RandomState) -> None:
+        self._a = self.to_shape(mean, std)
+        self._scale = self.to_scale(mean, std)
+
+        self._loc = float64(0.0)
         self._random_state = random_state
 
         self.dist = gamma(a=self._a, loc=self._loc, scale=self._scale)
+
+    @staticmethod
+    def to_shape(mean: float, std: float) -> float64:
+        return float64(mean / std) ** 2
+
+    @staticmethod
+    def to_scale(mean: float, std: float) -> float64:
+        return float64(std**2 / mean)
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
