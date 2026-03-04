@@ -4,18 +4,24 @@ tags:
 ---
 # Gamma
 
-Positive prior family with shape-scale parameterization.
+Positive prior family parameterized by mean and standard deviation.
 
 ### Parameters
 | __Argument__ | __Symbol__ | __Meaning__ | __Default__ |
 |:-------------|:-----------|:------------|:-----------:|
-| `a` | $k$ | Shape | `1.0` |
-| `loc` | - | Location shift used by implementation | `0.0` |
-| `scale` | $\theta$ | Scale | `1.0` |
+| `mean` | $\mu$ | Mean of the gamma random variable | `1.0` |
+| `std` | $\sigma$ | Standard deviation of the gamma random variable | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
-    The implementation follows `scipy.stats.gamma(a, loc=loc, scale=scale)`.
+    The implementation converts `(mean, std)` into shape-scale form:
+
+    $$
+    k=\left(\frac{\mu}{\sigma}\right)^2,\quad
+    \theta=\frac{\sigma^2}{\mu}
+    $$
+
+    and dispatches to `scipy.stats.gamma(a=k, loc=0, scale=\theta)`.
 
 ### PDF
 $$
@@ -26,5 +32,5 @@ $$
 
 ### Region
 $$
-x \in (0,\infty)
+x \in [0,\infty)
 $$

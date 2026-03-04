@@ -50,7 +50,7 @@ Accepted `distribution` values in `make_prior(...)`:
 | `TRUNCNORMAL` | `"trunc_normal"` | `low`, `high`, `loc`, `scale`, `random_state` | `-6.0`, `6.0`, `0.0`, `1.0`, `None` |
 | `HALFCAUCHY` | `"half_cauchy"` | `low`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
 | `BETA` | `"beta"` | `a`, `b`, `loc`, `scale`, `random_state` | `1.0`, `1.0`, `0.0`, `1.0`, `None` |
-| `GAMMA` | `"gamma"` | `a`, `loc`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
+| `GAMMA` | `"gamma"` | `mean`, `std`, `random_state` | `1.0`, `1.0`, `None` |
 | `INVGAMMA` | `"inv_gamma"` | `a`, `loc`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
 | `UNIFORM` | `"uniform"` | `low`, `high`, `random_state` | `0.0`, `1.0`, `None` |
 | `LKJCHOL` | `"lkj_chol"` | `eta`, `K`, `random_state` | `1.0`, `-1`, `None` |

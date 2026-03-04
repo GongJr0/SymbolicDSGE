@@ -157,3 +157,4 @@ For `#!python method="mcmc"`, `#!python posterior_point` selects the parameter p
 - `#!python "mean"`: posterior sample mean
 - `#!python "last"`: last retained sample
 - `#!python "map"`: sample with the highest posterior likelihood
+- `#!python "mode"`: equivalent to `"map"` by definition

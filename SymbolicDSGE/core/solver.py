@@ -520,12 +520,12 @@ class DSGESolver:
                 theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
             elif posterior_point == "last":
                 theta_star = asarray(result.samples[-1], dtype=float64)
-            elif posterior_point == "map":
+            elif (posterior_point == "map") or (posterior_point == "mode"):
                 idx = int(np.argmax(result.logpost_trace))
                 theta_star = asarray(result.samples[idx], dtype=float64)
             else:
                 raise ValueError(
-                    "posterior_point must be one of {'mean', 'last', 'map'}."
+                    "posterior_point must be one of {'mean', 'last', 'map', 'mode'}."
                 )
             solve_params = est.theta_to_params(est.params_to_theta(theta_star))
         else:

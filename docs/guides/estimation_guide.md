@@ -6,16 +6,18 @@ tags:
 # Estimation Guide
 
 ??? tip "TL;DR"
-    Refer to [this](../assets/guide_notebook.ipynb) notebook for an example parameter estimation workflow.
+    Refer to [this](../assets/param_estimation.ipynb) notebook for an example parameter estimation workflow.
 
-This guide walks through practical estimation using `SymbolicDSGE` with a style similar to the quick-start: code-first, output-aware, and progressively constructed objects.
+??? warning "Read the Quickstart Guide"
+    This guide only handles the estimation process and is written assuming the reader have some familiarity for the core DSGE API (i.e. `DSGESolver`, `SolvedModel` etc.). It is strongly recommended to at least have read the [Quickstart Guide](./quickstart.md) before working with parameter estimation.
+
+This guide walks through the parameter estimation workflow of `SymbolicDSGE` using an example setup and a MCMC sampling based Bayesian Estimation setup.
 
 We will cover:
 
 - How priors are built (and why transforms matter)
 - How to run MCMC through `DSGESolver.estimate_and_solve(...)`
 - What outputs to expect from the process
-- How to compare calibrated and estimated values
 - How static-`R` vs dynamic-`R` updates change fit diagnostics
 
 ## Parse Configs and Compile
@@ -48,21 +50,21 @@ In theory, $\beta$ can be any number such that $\beta \in (0,1)$. However, we kn
 from SymbolicDSGE.bayesian import make_prior
 
 beta_prior = make_prior(
-    distribution="normal", # (1)!
-    parameters={"mean": 3.511, "std": 0.15}, # (2)!
+    distribution="beta", # (1)!
+    parameters={"a": 200 * 0.971, "b": 200 * 0.029}, # (2)!
     transform="logit", # (3)!
     transform_kwargs={} # (4)!
 )
 ```
 
-1. Distribution in optimizer space. (More on this below)
-2. Parameters of the distribution, specified in optimizer units.
-3. Transform function mapping the optimizer output to the parameter support `(0,1)`.
+1. Distribution in parameter space.
+2. Parameters of the distribution. This yields a Beta distribution with heavily concentrated probability mass around the mean of 0.971.
+3. Transform function mapping the parameter space to the unconstrained optimizer space. Here, `logit` maps `(0, 1) -> (-inf, inf)`.
 4. Parameters of the transform function are passed here if necessary.
 
-The prior specification defines `Distribution`s such that the optimizer can directly interact with the distribution object.
-For example, in order to optimize in an unbounded search space $\R = (-\infty, \infty)$ we would use a distribution whose support is $\R$,
-such as a normal distribution $Z \sim N(\mu, \sigma^2)$. We then rely on the `Transform` objects to re-map (or invert) the unbounded search output into the parameter space we wish to search over. To give a concrete example, a logit transform for example would map $(0,1) \mapsto\R$ in the forward direction. In this scenario the inverse logit would precisely do the opposite $ inv(Z) \to X, \, X \in (0,1) $.
+The prior specification defines `Distribution`s such that the optimizer can interact with the distribution object on the unconstrained space.
+For example, in order to optimize in an unbounded search space $\R = (-\infty, \infty)$ we can use any distribution of our choosing regardless of the bounds,
+as long as we specify a `Transform` that maps the distribution support $(a, b) \mapsto \R$. We then rely on the `Transform` objects to apply a "Change of Variables" to produce the unbounded search input. The `Transform` will also be responsible for inverting the optimizer output into the parameter space ($\R \mapsto (a,b)$) we wish to search over. To give a concrete example, a logit transform for example would map $(0,1) \mapsto\R$ in the forward direction. In this scenario the inverse logit would precisely do the opposite $ inv(Z) \to X, \, X \in (0,1) $.
 
 ??? info "Change of Variables Details"
     All transformations except `Identity` (which returns the input itself as output) are examples of the procedute defined in calculus as [Change of Variables](https://en.wikipedia.org/wiki/Change_of_variables). We deal with a specific [subset](https://en.wikipedia.org/wiki/Probability_density_function#Function_of_random_variables_and_change_of_variables_in_the_probability_density_function) of this procedure relating to probability density functions (PDFs). Below we will show how applying/inverting a transform function blindly results in inaccurate conversions and try to outline an intuition for the process. We will try to make it as easy to reason about as possible and some details can get skipped.
@@ -80,35 +82,35 @@ Using `make_prior` we can define individual priors for each parameter we wish to
 ```python
 prior_spec = {
     "beta": make_prior(
-        "normal",
-        parameters={"mean": 3.511, "std": 0.15},
+        "beta",
+        parameters={"mean": 200*0.971, "b": 200*0.029},
         transform="logit", # (1)!
     ),
     "kappa": make_prior(
-        "normal",
-        parameters={"mean": -0.545, "std": 0.40},
-        transform="affine_logit", # (2)!
-        transform_kwargs={"low": 0.33, "high": 1.0},
+        "gamma",
+        parameters={"mean": 0.58, "std": 0.1},
+        transform="log", # (2)!
     ),
 
     ...,
 
-    "tau_inv": make_prior(
+    "rho_gz": make_prior(
         "normal",
-        parameters={"mean": 0.621, "std": 0.35},
-        transform="log", # (3)!
+        parameters={"mean": 0.0, "std": 0.2},
+        transform="affine_logit", # (3)!
+        transform_kwargs={"low": -1.0, "high": 1.0}
     ),
     "sig_r": make_prior(
-        "normal",
-        parameters={"mean": -1.715, "std": 0.50},
+        "gamma",
+        parameters={"mean": 0.18, "std": 0.1},
         transform="log",
     ),
 }
 ```
 
 1. `logit` does not require parameters and (inverse) transforms to (0, 1)
-2. `affine_logit` takes a low ($a$) and high ($b$) bound to map (a, b)
-3. `log` maps real numbers to non-negative reals without requiring parameters.
+2. `log` maps real numbers to non-negative reals without requiring parameters.
+3. `affine_logit` takes a low ($a$) and high ($b$) bound to map (a, b)
 
 ## Running the Estimation
 
@@ -132,7 +134,7 @@ res, sol = solver.estimate_and_solve(
 
 1. Observed data we want to calibrate against
 2. Chosen from `{'mle', 'map', 'mcmc'}`.
-3. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'map', 'last'}`.
+3. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
 4. Retained draws.
 5. Burn-in iterations.
 6. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
@@ -140,7 +142,7 @@ res, sol = solver.estimate_and_solve(
    Otherwise, R will be estimated once before the run begins and will be kept static throughout the run.
 
 ```text
-MCMC sampling concluded in 32.28 seconds with 46.47 iterations per second.
+MCMC sampling concluded in 34.93 seconds with 42.95 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 
@@ -176,23 +178,23 @@ pd.Series(
 2. Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)
 
 ```text
-beta              0.973705
-rho_r             0.792911
-rho_g             0.513813
-rho_z             0.871142
-psi_pi            1.387276
-psi_x             0.126220
-kappa             0.465436
-tau_inv           0.050912
-rho_gz            0.777813
-sig_r             0.150977
-sig_g             0.294470
-sig_z             0.190326
-meas_infl         1.278487
-meas_rate         0.642888
-meas_rho_ir      -0.703442
-loglik         -401.814512
-accept_rate       0.320000
+beta              0.971773
+rho_r             0.840123
+rho_g             0.860232
+rho_z             0.873493
+psi_pi            2.736531
+psi_x             0.339134
+kappa             0.366632
+tau_inv           0.569496
+rho_gz            0.149944
+meas_rho_ir       0.230454
+sig_r             0.143704
+sig_g             0.150102
+sig_z             0.685228
+meas_infl         0.574781
+meas_rate         0.934977
+loglik         -300.602336
+accept_rate       0.328667
 n_draws        1000.000000
 burn_in         500.000000
 thin              1.000000
@@ -234,8 +236,9 @@ More detailed information regarding estimation can be found via the references. 
 
 ???+ note "References"
     This guide focuses on solver-facing estimation flow. For API-level references, use:
+
     - [`Estimator`](../documentation/Estimator.md)
     - [`Prior`](../documentation/prior_spec/Prior.md)
     - [`DSGESolver`](../documentation/DSGESolver.md)
 
-[Download Guide Notebook](../assets/guide_notebook.ipynb){ .md-button download="" }
+[Download Guide Notebook](../assets/param_estimation.ipynb){ .md-button download="" }
