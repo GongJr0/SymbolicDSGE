@@ -22,8 +22,9 @@ repos:
         entry: mypy
         language: python
         'types_or': [ python, pyi ]
+        pass_filenames: false
         args: [
-            "--config-file=./mypy.ini",
+            "--config-file=./mypy.ini", "."
         ]
         require_serial: true
         additional_dependencies: ["numpy>=2.0", "pandas-stubs", "scipy-stubs", "matplotlib-stubs", "types-PyYAML"]

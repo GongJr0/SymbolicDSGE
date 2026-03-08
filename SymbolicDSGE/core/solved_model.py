@@ -13,11 +13,18 @@ from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
+
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
 from ..kalman.config import KalmanConfig
 from ..kalman.interface import KalmanInterface
 from ..kalman.filter import FilterResult
+
+
+from ..regression.sr_interface import SRInterface
+from ..regression.config import TemplateConfig
+from ..regression.model_defaults import PySRParams
+from ..regression.fit_result import FitResult
 
 _JIT_CACHE: dict[int, Callable] = {}
 ND = NDArray
@@ -563,3 +570,22 @@ class SolvedModel:
         if _debug:
             print(ki._debug_info)
         return run
+
+    def fit_kf(
+        self,
+        y: NDF | pd.DataFrame,
+        observable: str,
+        template_config: TemplateConfig,
+        sr_params: PySRParams,
+        variables: list[str] | None = None,
+    ) -> FitResult:
+
+        interface = SRInterface(
+            model=self,
+            variable_names=variables,
+            obs_name=observable,
+            config=template_config,
+            params=sr_params,
+        )
+
+        return interface.fit_to_kf(y)

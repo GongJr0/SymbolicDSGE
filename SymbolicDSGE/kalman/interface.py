@@ -171,6 +171,39 @@ class KalmanInterface(KalmanFilter):
             return validated_R
 
         conf = self.kalman_config
+        if conf is None:
+            raise ValueError(
+                "Kalman Filter configuration with the R matrix is required."
+            )
+
+        builder = getattr(conf, "R_builder", None)
+        arg_names = getattr(conf, "R_param_names", None)
+        if builder is not None and arg_names is not None:
+            calib = self.model.config.calibration.parameters
+            params_by_name = {
+                (k if isinstance(k, str) else k.name): float64(v)
+                for k, v in calib.items()
+            }
+
+            vals = []
+            for name in arg_names:
+                if name not in params_by_name:
+                    raise KeyError(
+                        f"Missing R-builder parameter '{name}' in calibration."
+                    )
+                vals.append(params_by_name[name])
+
+            R_full = asarray(builder(*vals), dtype=float64)
+            n_all = len(self.model.compiled.observable_names)
+            if R_full.shape != (n_all, n_all):
+                raise ValueError(
+                    f"R builder returned shape {R_full.shape}, expected ({n_all}, {n_all})."
+                )
+
+            obs_idx = self._obs_idx
+            mat_idx = [obs_idx[name] for name in self.observables]
+            return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
+
         R = getattr(conf, "R", None)
         if R is None:
             raise ValueError("Constant R matrix not specified in configuration.")
@@ -178,7 +211,7 @@ class KalmanInterface(KalmanFilter):
         # Get included observables
         obs_idx = self._obs_idx
         mat_idx = [obs_idx[name] for name in self.observables]
-        R_subset: NDF = R[np.ix_(mat_idx, mat_idx)]
+        R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
         return R_subset
 
     def _ML_estimate_R_diag(
