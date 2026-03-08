@@ -140,11 +140,28 @@ class DSGESolver:
         # Recompile measurement functions with params substituted (No param passthrough to downstream EKF)
         variables = [conf.variables[idx[name]] for name in var_order]
 
-        jac_lambda = sp.lambdify(
-            [*variables, *params],
-            symbolic_jacobian,
-            modules="numpy",
-        )
+        #       jac_lambda = sp.lambdify(
+        #            [*variables, *params],
+        #            symbolic_jacobian,
+        #            modules="numpy",
+        #        )
+
+        jac_scalars = list(symbolic_jacobian)
+        jac_scalar_funcs = [
+            njit(sp.lambdify([*variables, *params], scalar, modules="numpy"))
+            for scalar in jac_scalars
+        ]
+
+        n_obs, n_vars = symbolic_jacobian.shape
+
+        def jacobian_func(*args: Any) -> NDF:
+            J = np.empty((n_obs, n_vars), dtype=float64)
+            k = 0
+            for i in range(n_obs):
+                for j in range(n_vars):
+                    J[i, j] = jac_scalar_funcs[k](*args)
+                    k += 1
+            return J
 
         return CompiledModel(
             config=conf,
@@ -159,7 +176,7 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_funcs=observable_funcs,
-            observable_jacobian=njit(jac_lambda),
+            observable_jacobian=jacobian_func,  # TODO: Fix njit
             n_state=int(n_state),
             n_exog=int(n_exog),
         )

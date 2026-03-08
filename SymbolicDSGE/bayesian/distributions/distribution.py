@@ -36,7 +36,7 @@ class DistributionFamily(StrEnum):
 def _coerce_rng(random_state: RandomState) -> np.random.Generator:
     """Accepts None | int seed | Generator | RandomState and returns a Generator."""
     if random_state is None:
-        return np.random.default_rng()
+        return np.random.default_rng(0)
     if isinstance(random_state, np.random.Generator):
         return random_state
     if isinstance(random_state, (int, np.integer)):

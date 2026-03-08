@@ -1,12 +1,9 @@
 from .sr_backend import SymbolicRegressorBackend
 from .model_parametrizer import ModelParametrizer
-from .config import TemplateConfig, HessianMode
 from .discovery_result import DiscoveryResult
 from .hessian_validator import HessianValidator
 from .candidate_ranking import CandidateRanking
 
-import sympy as sp
-import numpy as np
 import pandas as pd
 
 

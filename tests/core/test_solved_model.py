@@ -4,6 +4,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from sympy import Symbol
+
+from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE.kalman.interface import KalmanInterface
 
 
 def test_solved_model_sim_shapes_and_keys(solved_test):
@@ -106,6 +110,34 @@ def test_solved_model_kalman_smoke(solved_post82):
 
     out = solved_post82.kalman(y)
     assert out is not None
+
+
+def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration():
+    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile(n_state=3, n_exog=3)
+
+    compiled.config.calibration.parameters[Symbol("meas_infl")] = 2.0
+    compiled.config.calibration.parameters[Symbol("meas_rate")] = 3.0
+    compiled.config.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
+
+    solved = solver.solve(compiled)
+    y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})
+    ki = KalmanInterface(
+        model=solved,
+        filter_mode="linear",
+        observables=["Infl", "Rate"],
+        y=y,
+    )
+
+    assert np.allclose(
+        ki.R,
+        np.array([[4.0, 0.6], [0.6, 9.0]], dtype=np.float64),
+    )
+    assert np.allclose(
+        solved.kalman_config.R,
+        np.array([[1.0, 0.5], [0.5, 1.0]], dtype=np.float64),
+    )
 
 
 def test_solved_model_to_dict_contains_main_fields(solved_test):
