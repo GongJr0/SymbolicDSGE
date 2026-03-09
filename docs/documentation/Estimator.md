@@ -150,3 +150,54 @@ Estimator.mcmc(
 | n_draws | `#!python int` | Retained draw count |
 | burn_in | `#!python int` | Burn-in iterations |
 | thin | `#!python int` | Thinning interval |
+
+__Methods:__
+
+```python
+MCMCResult.hpd_intervals(
+    alpha: float = 0.05, # (1)!
+) -> dict[str, tuple[float, float]]
+```
+
+1. Significance level. Must satisfy `#!python 0 <= alpha < 1`; each interval covers approximately `#!python 1 - alpha` of the retained marginal draws.
+
+Compute marginal highest-posterior-density (HPD) intervals for each parameter column.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| alpha | Significance level used to determine the empirical HPD coverage. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python dict[str, tuple[float, float]]` | Mapping from parameter name to the shortest empirical marginal interval containing approximately `#!python 1 - alpha` of the retained posterior draws. |
+
+&nbsp;
+
+```python
+MCMCResult.joint_hpd_set(
+    alpha: float = 0.05, # (1)!
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]
+```
+
+1. Significance level. Must satisfy `#!python 0 <= alpha < 1`; the returned set covers at least `#!python 1 - alpha` of the retained joint draws.
+
+Compute an empirical joint HPD set for the full parameter vector.
+
+???+ note "Finite-Sample Joint HPD Approximation"
+    Retained draws are ranked by `#!python logpost_trace` and all draws at or above the cutoff are included in the set. If multiple draws are tied at the boundary log-posterior, they are all retained, so the realized coverage can be slightly larger than `#!python 1 - alpha`.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| alpha | Significance level used to determine the empirical HPD coverage. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python tuple[np.ndarray, np.ndarray, float, np.ndarray]` | Tuple `#!python (samples, logpost, threshold, indices)` where `samples` are the retained parameter vectors in the joint HPD set, `logpost` are their posterior values, `threshold` is the cutoff log-posterior, and `indices` are positions of the retained draws in the original stored chain. |

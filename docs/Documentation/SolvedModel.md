@@ -220,6 +220,41 @@ __Returns:__
 &nbsp;
 
 ```python
+SolvedModel.fit_kf(
+    y: ndarray | DataFrame,
+    observable: str,
+    template_config: TemplateConfig,
+    sr_params: PySRParams,
+    variables: list[str] | None = None, # (1)!
+) -> FitResult
+```
+
+1. `None`: Use all compiled model variables as symbolic-regression inputs.
+
+Fit a symbolic regression model to Kalman Filter output for a selected observable.
+
+???+ note "Regression Target"
+    Internally, the method first runs `#!python SolvedModel.kalman(...)` using the model's observable set. If `#!python template_config.include_expression=True`, the regression target is the predicted measurement for `observable`; otherwise the target is the observable's Kalman innovation.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| y | Observation data passed through the Kalman filter stage before symbolic regression. |
+| observable | Observable name whose filter output should be fit. |
+| template_config | Template-expression configuration used to build the symbolic-regression search space. |
+| sr_params | Symbolic-regression backend hyperparameters. |
+| variables | Optional subset of model variables to expose as regression inputs. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python FitResult` | Regression fit output containing all candidate expressions and the best-ranked symbolic approximation. |
+
+&nbsp;
+
+```python
 SolvedModel.to_dict() -> dict[str, Any]
 ```
 Dictionary representation of the class instance.
