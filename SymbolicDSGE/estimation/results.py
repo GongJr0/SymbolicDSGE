@@ -114,3 +114,58 @@ class MCMCResult:
             threshold,
             idx,
         )
+
+    def posterior_kde_plot(self) -> None:
+        from scipy.stats import gaussian_kde
+        import matplotlib.pyplot as plt
+
+        fig_sq = np.ceil(np.sqrt(len(self.param_names)))
+        fig, axes = plt.subplots(
+            int(fig_sq), int(fig_sq), figsize=(4 * fig_sq, 3 * fig_sq)
+        )
+
+        ax = axes.flatten()
+        while len(ax) > len(self.param_names):
+            fig.delaxes(ax[-1])
+            ax = ax[:-1]
+
+        for i, name in enumerate(self.param_names):
+            col = np.asarray(self.samples[:, i], dtype=float64)
+            kde = gaussian_kde(col)
+            x_min, x_max = col.min(), col.max()
+            x_grid = np.linspace(x_min, x_max, 1000)
+            ax[i].plot(x_grid, kde(x_grid))
+            ax[i].set_title(name)
+        plt.tight_layout()
+        plt.show()
+
+    def posterior_traces(self) -> None:
+        import matplotlib.pyplot as plt
+
+        fig_sq = np.ceil(np.sqrt(len(self.param_names)))
+        fig, axes = plt.subplots(
+            int(fig_sq), int(fig_sq), figsize=(4 * fig_sq, 3 * fig_sq)
+        )
+
+        ax = axes.flatten()
+        while len(ax) > len(self.param_names):
+            fig.delaxes(ax[-1])
+            ax = ax[:-1]
+
+        for i, name in enumerate(self.param_names):
+            col = np.asarray(self.samples[:, i], dtype=float64)
+            ax[i].plot(col)
+            ax[i].set_title(name)
+        plt.tight_layout()
+        plt.show()
+
+    def logpost_trace_plot(self) -> None:
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(self.logpost_trace)
+        plt.title("Log-Posterior Trace")
+        plt.xlabel("Iteration")
+        plt.ylabel("Log-Posterior")
+        plt.tight_layout()
+        plt.show()
