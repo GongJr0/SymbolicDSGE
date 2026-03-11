@@ -10,6 +10,7 @@ import yaml
 from numpy import float64
 import pytest
 
+from SymbolicDSGE import _linearsolve as linearsolve
 from SymbolicDSGE.core import DSGESolver, ModelParser
 
 
@@ -70,6 +71,11 @@ def test_construct_measurement_vector_func_is_cached(compiled_test):
     assert (
         c.construct_measurement_vector_func() is c.construct_measurement_vector_func()
     )
+
+
+def test_klein_helpers_use_numba_function_cache():
+    assert type(linearsolve._to_complex._cache).__name__ == "FunctionCache"
+    assert type(linearsolve._klein_postprocess._cache).__name__ == "FunctionCache"
 
 
 def test_compile_rejects_unknown_variable_order(parsed_test):

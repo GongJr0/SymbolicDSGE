@@ -8,7 +8,6 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "linearsolve>=3.6.3",
     "matplotlib>=3.10.7",
     "numba>=0.62.1",
     "numpy>=2.3.5",
