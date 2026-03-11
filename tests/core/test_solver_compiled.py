@@ -64,6 +64,14 @@ def test_construct_measurement_vector_func_returns_expected_length(compiled_test
     assert out.shape == (len(c.observable_names),)
 
 
+def test_construct_measurement_vector_func_is_cached(compiled_test):
+    c = compiled_test
+
+    assert (
+        c.construct_measurement_vector_func() is c.construct_measurement_vector_func()
+    )
+
+
 def test_compile_rejects_unknown_variable_order(parsed_test):
     model, kalman = parsed_test
     solver = DSGESolver(model, kalman)

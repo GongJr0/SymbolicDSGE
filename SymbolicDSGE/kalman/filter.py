@@ -1,5 +1,12 @@
+from .errors import (
+    ErrorCode,
+    ComplexMatrixError,
+    MatrixConditionError,
+    ShapeMismatchError,
+    get_error_constructor,
+)
 from dataclasses import dataclass
-
+from numba import njit
 import numpy as np
 from numpy import (
     asarray,
@@ -16,24 +23,6 @@ from typing import Tuple, Callable
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
-
-
-class ComplexMatrixError(Exception):
-    def __init__(self, name: str, max_imag: float64) -> None:
-        message = f"Matrix '{name}' has significant imaginary parts (max abs imag: {max_imag})."
-        super().__init__(message)
-
-
-class ShapeMismatchError(Exception):
-    def __init__(self, name: str, exp_shape: str, cur_shape: str) -> None:
-        message = f"Matrix '{name}' has incompatible shape. Expected: {exp_shape}, got: {cur_shape}."
-        super().__init__(message)
-
-
-class MatrixConditionError(Exception):
-    def __init__(self, cond: float64) -> None:
-        message = f"Matrix is ill-conditioned with condition number: {float(cond)}."
-        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -54,95 +43,426 @@ class FilterResult:
     eps_hat: NDF | None = None
 
 
+def _get_real(mat: NDC | NDF, name: str, tol: float = 1e8) -> NDF:
+    """
+    Convert a complex matrix to a real matrix if the imaginary parts are negligible.
+    """
+    res = real_if_close(mat, tol=tol)
+    if np.iscomplexobj(res):
+        max_i = np.max(np.abs(res.imag))  # pyright: ignore
+        raise ComplexMatrixError(name, max_i)
+    return np.ascontiguousarray(res, dtype=float64)
+
+
+def _shape_validate(
+    A: NDF,
+    B: NDF,
+    Q: NDF,
+    R: NDF,
+    C: NDF | None,
+    d: NDF | None,
+    nmk: Tuple[int, int, int],
+) -> None:
+    n, m, k = nmk
+    if A.shape != (n, n):
+        raise ShapeMismatchError("A", f"({n}, {n})", str(A.shape))
+    if B.shape != (n, k):
+        raise ShapeMismatchError("B", f"({n}, {k})", str(B.shape))
+    if Q.shape != (k, k):
+        raise ShapeMismatchError("Q", f"({k}, {k})", str(Q.shape))
+    if R.shape != (m, m):
+        raise ShapeMismatchError("R", f"({m}, {m})", str(R.shape))
+
+    if C is not None:
+        if C.shape != (m, n):
+            raise ShapeMismatchError("C", f"({m}, {n})", str(C.shape))
+    if d is not None:
+        if d.shape != (m,):
+            raise ShapeMismatchError("d", f"({m},)", str(d.shape))
+
+
+OK = 0
+ERR_COND = -3
+ERR_LINALG = -4
+
+
+@njit
+def _sym(P: NDF) -> NDF:
+    return 0.5 * (P + P.T)
+
+
+@njit
+def _chol_shifted(S: NDF, jit: float = 0.0) -> NDF:
+    n = S.shape[0]
+    if jit > 0.0:
+        return linalg.cholesky(S + jit * eye(n, dtype=float64)).astype(float64)
+    return linalg.cholesky(S).astype(float64)
+
+
+@njit
+def _forward_subst_vec(L: NDF, b: NDF) -> NDF:
+    """
+    Solve L x = b for x, where L is lower triangular (n,n), b is (n,).
+    """
+    n = L.shape[0]
+    x = np.empty(n, dtype=float64)
+
+    for i in range(n):
+        s = 0.0
+        for j in range(i):
+            s += L[i, j] * x[j]
+        x[i] = (b[i] - s) / L[i, i]
+
+    return x.astype(float64)
+
+
+@njit
+def _backward_subst_vec(U: NDF, b: NDF) -> NDF:
+    """
+    Solve U x = b for x, where U is upper triangular (n,n), b is (n,).
+    """
+    n = U.shape[0]
+    x = np.empty(n, dtype=float64)
+
+    for i in range(n - 1, -1, -1):
+        s = 0.0
+        for j in range(i + 1, n):
+            s += U[i, j] * x[j]
+        x[i] = (b[i] - s) / U[i, i]
+
+    return x.astype(float64)
+
+
+@njit
+def _chol_solve_vec(L: NDF, b: NDF) -> NDF:
+    """
+    Solve (L L.T) x = b for x, where b is (n,).
+    """
+    y: NDF = _forward_subst_vec(L, b)
+    LT: NDF = np.ascontiguousarray(L.T)
+    x: NDF = _backward_subst_vec(LT, y)
+    return x.astype(float64)
+
+
+@njit
+def _chol_solve_mat(L: NDF, B: NDF) -> NDF:
+    """
+    Solve (L L.T) X = B for X, where B is (n, k).
+    """
+    n, k = B.shape
+    X = np.empty((n, k), dtype=float64)
+
+    for col in range(k):
+        y = _forward_subst_vec(L, B[:, col])
+        x = _backward_subst_vec(L.T, y)
+        X[:, col] = x
+
+    return X
+
+
+@njit
+def _logdet_from_chol(L: NDF) -> float64:
+    s = float64(0.0)
+    n = L.shape[0]
+    for i in range(n):
+        s += np.log(L[i, i])
+    return float64(2.0) * s
+
+
+@njit
+def _kalman_hot_loop(
+    T: int,
+    nmk: Tuple[int, int, int],
+    A: NDF,
+    B: NDF,
+    C: NDF,
+    d: NDF,
+    Q: NDF,
+    R: NDF,
+    y: NDF,
+    x_0: NDF,
+    P_0: NDF,
+    symmetrize: bool,
+    jitter: float,
+) -> tuple[
+    int,
+    tuple[float64, float64, float64],
+    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+]:
+    n, m, k = nmk
+
+    x_prev = x_0
+    P_prev = P_0
+
+    x_pred = zeros((T, n), dtype=float64)
+    x_filt = zeros((T, n), dtype=float64)
+
+    P_pred = zeros((T, n, n), dtype=float64)
+    P_filt = zeros((T, n, n), dtype=float64)
+
+    y_pred = zeros((T, m), dtype=float64)
+    y_filt = zeros((T, m), dtype=float64)
+
+    v = zeros((T, m), dtype=float64)
+    S_hist = zeros((T, m, m), dtype=float64)
+
+    eps_hat = zeros((T, k), dtype=float64)
+
+    loglik = float64(0.0)
+    const = m * np.log(2.0 * np.pi)
+
+    BT = np.ascontiguousarray(B.T)
+    CT = np.ascontiguousarray(C.T)
+    AT = np.ascontiguousarray(A.T)
+
+    BQBT = _sym(B @ Q @ BT)
+    In = eye(n, dtype=float64)
+    M = Q @ (BT @ CT)
+
+    for t in range(T):
+        x_t_pred = A @ x_prev
+        P_t_pred = A @ P_prev @ AT + BQBT
+
+        if symmetrize:
+            P_t_pred = _sym(P_t_pred)
+
+        y_t_pred = C @ x_t_pred + d
+        v_t = y[t] - y_t_pred
+        S_t = C @ P_t_pred @ CT + R
+
+        if symmetrize:
+            S_t = _sym(S_t)
+
+        L = _chol_shifted(S_t, jitter)
+
+        S_inv_v = _chol_solve_vec(L, v_t)
+
+        PCt = P_t_pred @ CT  # (n, m)
+        PCtT = np.ascontiguousarray(PCt.T)
+        K_t = _chol_solve_mat(L, PCtT).T
+        K_tT = np.ascontiguousarray(K_t.T)
+
+        x_t_filt = x_t_pred + K_t @ v_t
+        y_t_filt = C @ x_t_filt + d
+
+        KC = K_t @ C
+        P_t_filt = (In - KC) @ P_t_pred @ (In - KC).T + K_t @ R @ K_tT
+
+        if symmetrize:
+            P_t_filt = _sym(P_t_filt)
+
+        ldS = _logdet_from_chol(L)
+        quad = float64(v_t @ S_inv_v)
+        loglik += -0.5 * (const + ldS + quad)
+
+        eps_hat[t] = M @ S_inv_v
+
+        x_pred[t] = x_t_pred
+        x_filt[t] = x_t_filt
+
+        P_pred[t] = P_t_pred
+        P_filt[t] = P_t_filt
+
+        y_pred[t] = y_t_pred
+        y_filt[t] = y_t_filt
+
+        v[t] = v_t
+        S_hist[t] = S_t
+
+        x_prev = x_t_filt
+        P_prev = P_t_filt
+
+    return (
+        OK,
+        (float64(0.0), float64(0.0), float64(0.0)),
+        (
+            x_pred,
+            x_filt,
+            P_pred,
+            P_filt,
+            y_pred,
+            y_filt,
+            v,
+            S_hist,
+            eps_hat,
+            loglik,
+        ),
+    )
+
+
+def _ekf_hot_loop(
+    T: int,
+    nmk: Tuple[int, int, int],
+    A: NDF,
+    B: NDF,
+    h: Callable[[NDF], NDF],
+    H_jac: Callable[[NDF], NDF],
+    calib_params: NDF,
+    Q: NDF,
+    R: NDF,
+    y: NDF,
+    x_0: NDF,
+    P_0: NDF,
+    symmetrize: bool,
+    jitter: float,
+    compute_y_filt: bool,
+) -> tuple[
+    int,
+    tuple[float64, float64, float64],
+    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+]:
+
+    n, m, k = nmk
+    x_prev = x_0
+    P_prev = P_0
+
+    # Outputs
+    x_pred = zeros((T, n), dtype=float64)
+    x_filt = zeros((T, n), dtype=float64)
+
+    P_pred = zeros((T, n, n), dtype=float64)
+    P_filt = zeros((T, n, n), dtype=float64)
+
+    y_pred = zeros((T, m), dtype=float64)
+    y_filt = zeros((T, m), dtype=float64)
+
+    v = zeros((T, m), dtype=float64)
+    S = zeros((T, m, m), dtype=float64)
+
+    eps_hat = zeros((T, k), dtype=float64)
+
+    loglik = float64(0.0)
+    const = m * np.log(2 * np.pi)
+
+    BT = np.ascontiguousarray(B.T)
+    AT = np.ascontiguousarray(A.T)
+
+    In = eye(n, dtype=float64)
+    BQBT = _sym(B @ Q @ BT)
+
+    for t in range(T):
+        # --- Linear predict ---
+        x_t_pred = A @ x_prev
+        P_t_pred = A @ P_prev @ AT + BQBT
+
+        if symmetrize:
+            P_t_pred = _sym(P_t_pred)
+
+        # --- Nonlinear measurement predict + Jacobian ---
+        y_t_pred = asarray(h(*x_t_pred, *calib_params), dtype=float64).reshape(m)
+        H_t = asarray(H_jac(*x_t_pred, *calib_params), dtype=float64).reshape(m, n)
+        H_tT = np.ascontiguousarray(H_t.T)
+
+        v_t = y[t] - y_t_pred
+        S_t = H_t @ P_t_pred @ H_tT + R
+
+        if symmetrize:
+            S_t = _sym(S_t)
+
+        # --- Gain/update (swap C -> H_t) ---
+        L = _chol_shifted(S_t, jitter)
+
+        v_col = v_t.reshape(m, 1)
+        S_inv_v = _chol_solve_mat(L, v_col).reshape(m)
+
+        PHt = P_t_pred @ H_tT  # (n, m)
+        PHtT = np.ascontiguousarray(PHt.T)
+        K_t = _chol_solve_mat(L, PHtT).T  # (n, m)
+        K_tT = np.ascontiguousarray(K_t.T)
+
+        x_t_filt = x_t_pred + K_t @ v_t
+
+        KH = K_t @ H_t
+        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_tT
+        if symmetrize:
+            P_t_filt = _sym(P_t_filt)
+
+        # Log-likelihood
+        ldS = _logdet_from_chol(L)
+        quad = float64(v_t @ S_inv_v)
+        loglik += -0.5 * (const + ldS + quad)
+
+        # Optional y_filt
+        if compute_y_filt:
+            y_t_filt = asarray(h(*x_t_filt, *calib_params), dtype=float64).reshape(m)
+        else:
+            y_t_filt = y_t_pred
+
+        # Optional "shock estimate" (same form as linear KF)
+        M = Q @ (B.T @ H_t.T)  # mirrors linear case with C -> H_t
+        eps_hat[t] = M @ S_inv_v
+
+        # Store
+        x_pred[t] = x_t_pred
+        x_filt[t] = x_t_filt
+        P_pred[t] = P_t_pred
+        P_filt[t] = P_t_filt
+        y_pred[t] = y_t_pred
+        y_filt[t] = y_t_filt
+        v[t] = v_t
+        S[t] = S_t
+
+        x_prev = x_t_filt
+        P_prev = P_t_filt
+
+    return (
+        OK,
+        (float64(0.0), float64(0.0), float64(0.0)),
+        (
+            x_pred,
+            x_filt,
+            P_pred,
+            P_filt,
+            y_pred,
+            y_filt,
+            v,
+            S,
+            eps_hat,
+            loglik,
+        ),
+    )
+
+
 # Static & Parametrized Kalman Filter (written to act with SolvedModel object attributes)
 class KalmanFilter:
-
-    @staticmethod
-    def _get_real(mat: NDC | NDF, name: str, tol: float = 1e8) -> NDF:
-        """
-        Convert a complex matrix to a real matrix if the imaginary parts are negligible.
-        """
-        res = real_if_close(mat, tol=tol)
-        if np.iscomplexobj(res):
-            max_i = np.max(np.abs(res.imag))  # pyright: ignore
-            raise ComplexMatrixError(name, max_i)
-        return asarray(res, dtype=float64)
-
-    @staticmethod
-    def _shape_validate(
-        A: NDF,
-        B: NDF,
-        Q: NDF,
-        R: NDF,
-        C: NDF | None,
-        d: NDF | None,
-        nmk: Tuple[int, int, int],
-    ) -> None:
-        n, m, k = nmk
-        if A.shape != (n, n):
-            raise ShapeMismatchError("A", f"({n}, {n})", str(A.shape))
-        if B.shape != (n, k):
-            raise ShapeMismatchError("B", f"({n}, {k})", str(B.shape))
-        if Q.shape != (k, k):
-            raise ShapeMismatchError("Q", f"({k}, {k})", str(Q.shape))
-        if R.shape != (m, m):
-            raise ShapeMismatchError("R", f"({m}, {m})", str(R.shape))
-
-        if C is not None:
-            if C.shape != (m, n):
-                raise ShapeMismatchError("C", f"({m}, {n})", str(C.shape))
-        if d is not None:
-            if d.shape != (m,):
-                raise ShapeMismatchError("d", f"({m},)", str(d.shape))
-
-    @staticmethod
-    def _sym(P: NDF) -> NDF:
-        return (P + P.T) / 2
+    _get_real = staticmethod(_get_real)
+    _shape_validate = staticmethod(_shape_validate)
+    _sym = staticmethod(_sym)
 
     @staticmethod
     def _chol(S: NDF, jit: float = 0.0) -> NDF | None:
-        """Attempt Cholesky, add jitter if fails."""
         try:
-            return linalg.cholesky(S).astype(float64)
-
+            out: NDF = _chol_shifted(np.ascontiguousarray(S, dtype=float64), jit)
+            return out
         except linalg.LinAlgError:
-            try:
-                if jit == 0.0:
-                    raise  # Skip adding jitter if not specified
-
-                # Add jitter and try again
-                jitter = jit * np.eye(S.shape[0], dtype=float64)
-                return linalg.cholesky(S + jitter).astype(float64)
-
-            except linalg.LinAlgError:
-                return None
+            return None
 
     @staticmethod
-    def _chol_solve(L: NDArray[float64] | None, S: NDF, B: NDF) -> NDF:
-        """Solve Sx = B using Cholesky if possible, else standard solve."""
+    def _chol_solve(L: NDF | None, S: NDF, B: NDF) -> NDF:
         if L is not None:
-            # Use Cholesky factors to solve
-            y = linalg.solve(L, B)
-            return linalg.solve(L.T, y).astype(float64)
-        else:
-            # Fall back to standard solve
-            c = linalg.cond(S)
-            if c > 1e12:
-                raise MatrixConditionError(c)
+            B_arr = np.ascontiguousarray(B, dtype=float64)
+            if B_arr.ndim == 1:
+                out: NDF = _chol_solve_vec(L, B_arr)
+                return out
+            out = _chol_solve_mat(L, B_arr)
+            return out
+        c = linalg.cond(S)
+        if c > 1e12:
+            raise MatrixConditionError(c)
 
-            return linalg.solve(S, B).astype(float64)
+        return linalg.solve(S, B).astype(float64)
 
     @staticmethod
     def _logdet(L: NDF | None, S: NDF) -> float64:
-        """Attempt Log Determinant via Cholesky, else use slogdet."""
         if L is not None:
-            ldS = 2.0 * np.sum(np.log(np.diag(L)))
-        else:
-            sign, ldS = linalg.slogdet(S)
-            if sign <= 0:
-                raise linalg.LinAlgError(
-                    "Innovation covariance S is not positive definite."
-                )  # Only S uses slogdet
+            out: float64 = _logdet_from_chol(L)
+            return out
+
+        sign, ldS = linalg.slogdet(S)
+        if sign <= 0:
+            raise linalg.LinAlgError(
+                "Innovation covariance S is not positive definite."
+            )
         return float64(ldS)
 
     @staticmethod
@@ -162,21 +482,21 @@ class KalmanFilter:
     ) -> FilterResult:
 
         # Get reals if needed
-        A = KalmanFilter._get_real(A, "A")
-        B = KalmanFilter._get_real(B, "B")
-        C = KalmanFilter._get_real(C, "C")
+        A = _get_real(A, "A")
+        B = _get_real(B, "B")
+        C = _get_real(C, "C")
 
-        d = KalmanFilter._get_real(d, "d").reshape(-1)
-        Q = KalmanFilter._get_real(Q, "Q")
-        R = KalmanFilter._get_real(R, "R")
+        d = _get_real(d, "d").reshape(-1)
+        Q = _get_real(Q, "Q")
+        R = _get_real(R, "R")
 
-        y = KalmanFilter._get_real(y, "y")
+        y = _get_real(y, "y")
 
         T, m = y.shape  # T: time steps, m: obs dim
         n = A.shape[0]  # n: state dim
         k = B.shape[1]  # k: shock dim
 
-        KalmanFilter._shape_validate(
+        _shape_validate(
             A,
             B,
             Q,
@@ -187,95 +507,52 @@ class KalmanFilter:
         )
 
         x_prev = (
-            KalmanFilter._get_real(x0, "x0").reshape(n)
+            _get_real(x0, "x0").reshape(n)
             if x0 is not None
             else np.zeros((n,), dtype=float64)
         )
         P_prev = (
-            KalmanFilter._get_real(P0, "P0").reshape(n, n)
+            _get_real(P0, "P0").reshape(n, n)
             if P0 is not None
             else eye(n, dtype=float64) * 1e2
         )
 
         if symmetrize:
-            P_prev = KalmanFilter._sym(P_prev)
+            P_prev = _sym(P_prev)
 
-        # Out Arrays
-        x_pred = zeros((T, n), dtype=float64)
-        x_filt = zeros((T, n), dtype=float64)
-
-        P_pred = zeros((T, n, n), dtype=float64)
-        P_filt = zeros((T, n, n), dtype=float64)
-
-        y_pred = zeros((T, m), dtype=float64)
-        y_filt = zeros((T, m), dtype=float64)
-
-        v = zeros((T, m), dtype=float64)  # innovations
-        S = zeros((T, m, m), dtype=float64)  # innovation cov
-
-        eps_hat = zeros((T, k), dtype=float64) if return_shocks else None
-
-        loglik = float64(0.0)
-        const = m * np.log(2 * np.pi)
-
-        BQBT = KalmanFilter._sym(B @ Q @ B.T)  # (n, n)
-        In = eye(n, dtype=float64)
-
-        for t in range(T):
-            x_t_pred = A @ x_prev
-            P_t_pred = A @ P_prev @ A.T + BQBT
-
-            if symmetrize:
-                P_t_pred = KalmanFilter._sym(P_t_pred)
-            y_t_pred = C @ x_t_pred + d
-            v_t = y[t] - y_t_pred
-            S_t = C @ P_t_pred @ C.T + R
-
-            if symmetrize:
-                S_t = KalmanFilter._sym(S_t)
-
-            # GAIN: K = P * C' * S^-1
-
-            L = KalmanFilter._chol(S_t, jitter)
-            v_col = v_t.reshape(m, 1)
-            S_inv_v = KalmanFilter._chol_solve(L, S_t, v_col).reshape(m)
-
-            PCt = P_t_pred @ C.T
-            K_t = KalmanFilter._chol_solve(L, S_t, PCt.T).T  # (n, m)
-
-            # Update outputs
-            x_t_filt = x_t_pred + K_t @ v_t
-            y_t_filt = C @ x_t_filt + d
-
-            KC = K_t @ C
-            P_t_filt = (In - KC) @ P_t_pred @ (In - KC).T + K_t @ R @ K_t.T
-            if symmetrize:
-                P_t_filt = KalmanFilter._sym(P_t_filt)
-
-            ldS = KalmanFilter._logdet(L, S_t)
-            quad = float64(v_t @ S_inv_v)
-            loglik += -0.5 * (const + ldS + quad)
-
-            if return_shocks and eps_hat is not None:
-                M = Q @ (B.T @ C.T)
-                eps_hat[t] = M @ S_inv_v
-
-            # Store results
-            x_pred[t] = x_t_pred
-            x_filt[t] = x_t_filt
-
-            P_pred[t] = P_t_pred
-            P_filt[t] = P_t_filt
-
-            y_pred[t] = y_t_pred
-            y_filt[t] = y_t_filt
-
-            v[t] = v_t
-            S[t] = S_t
-
-            # Prepare next iteration
-            x_prev = x_t_filt
-            P_prev = P_t_filt
+        try:
+            err, err_info, out = _kalman_hot_loop(
+                T,
+                (n, m, k),
+                A,
+                B,
+                C,
+                d,
+                Q,
+                R,
+                y,
+                x_prev,
+                P_prev,
+                symmetrize,
+                jitter,
+            )
+        except linalg.LinAlgError as exc:
+            raise MatrixConditionError(float("inf")) from exc
+        if err != 0:
+            ErrorConstructor = get_error_constructor(ErrorCode(err))
+            raise ErrorConstructor(*err_info)
+        (
+            x_pred,
+            x_filt,
+            P_pred,
+            P_filt,
+            y_pred,
+            y_filt,
+            v,
+            S,
+            eps_hat,
+            loglik,
+        ) = out
 
         return FilterResult(
             x_pred=x_pred,
@@ -286,7 +563,7 @@ class KalmanFilter:
             y_filt=y_filt,
             innov=v,
             S=S,
-            eps_hat=eps_hat,
+            eps_hat=eps_hat if return_shocks else None,
             loglik=loglik,
         )
 
@@ -365,18 +642,18 @@ class KalmanFilter:
         """
 
         # Real-ify numeric inputs
-        A = KalmanFilter._get_real(A, "A")
-        B = KalmanFilter._get_real(B, "B")
-        Q = KalmanFilter._get_real(Q, "Q")
-        R = KalmanFilter._get_real(R, "R")
-        y = KalmanFilter._get_real(y, "y")
+        A = _get_real(A, "A")
+        B = _get_real(B, "B")
+        Q = _get_real(Q, "Q")
+        R = _get_real(R, "R")
+        y = _get_real(y, "y")
 
         T, m = y.shape
         n = A.shape[0]
         k = B.shape[1]
 
         # Shapes (reuse existing helper; C/d not used here)
-        KalmanFilter._shape_validate(
+        _shape_validate(
             A,
             B,
             Q,
@@ -387,103 +664,53 @@ class KalmanFilter:
         )
 
         x_prev = (
-            KalmanFilter._get_real(x0, "x0").reshape(n)
+            _get_real(x0, "x0").reshape(n)
             if x0 is not None
             else zeros((n,), dtype=float64)
         )
         P_prev = (
-            KalmanFilter._get_real(P0, "P0").reshape(n, n)
+            _get_real(P0, "P0").reshape(n, n)
             if P0 is not None
             else eye(n, dtype=float64) * 1e2
         )
         if symmetrize:
-            P_prev = KalmanFilter._sym(P_prev)
+            P_prev = _sym(P_prev)
 
-        # Outputs
-        x_pred = zeros((T, n), dtype=float64)
-        x_filt = zeros((T, n), dtype=float64)
-
-        P_pred = zeros((T, n, n), dtype=float64)
-        P_filt = zeros((T, n, n), dtype=float64)
-
-        y_pred = zeros((T, m), dtype=float64)
-        y_filt = zeros((T, m), dtype=float64)
-
-        v = zeros((T, m), dtype=float64)
-        S = zeros((T, m, m), dtype=float64)
-
-        eps_hat = zeros((T, k), dtype=float64) if return_shocks else None
-
-        loglik = float64(0.0)
-        const = m * np.log(2 * np.pi)
-
-        In = eye(n, dtype=float64)
-        BQBT = KalmanFilter._sym(B @ Q @ B.T)
-
-        for t in range(T):
-            # --- Linear predict ---
-            x_t_pred = A @ x_prev
-            P_t_pred = A @ P_prev @ A.T + BQBT
-
-            if symmetrize:
-                P_t_pred = KalmanFilter._sym(P_t_pred)
-
-            # --- Nonlinear measurement predict + Jacobian ---
-            y_t_pred = asarray(h(*x_t_pred, *calib_params), dtype=float64).reshape(m)
-            H_t = asarray(H_jac(*x_t_pred, *calib_params), dtype=float64).reshape(m, n)
-
-            v_t = y[t] - y_t_pred
-            S_t = H_t @ P_t_pred @ H_t.T + R
-
-            if symmetrize:
-                S_t = KalmanFilter._sym(S_t)
-
-            # --- Gain/update (swap C -> H_t) ---
-            L = KalmanFilter._chol(S_t, jitter)
-
-            v_col = v_t.reshape(m, 1)
-            S_inv_v = KalmanFilter._chol_solve(L, S_t, v_col).reshape(m)
-
-            PHt = P_t_pred @ H_t.T  # (n, m)
-            K_t = KalmanFilter._chol_solve(L, S_t, PHt.T).T  # (n, m)
-
-            x_t_filt = x_t_pred + K_t @ v_t
-
-            KH = K_t @ H_t
-            P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_t.T
-            if symmetrize:
-                P_t_filt = KalmanFilter._sym(P_t_filt)
-
-            # Log-likelihood
-            ldS = KalmanFilter._logdet(L, S_t)
-            quad = float64(v_t @ S_inv_v)
-            loglik += -0.5 * (const + ldS + quad)
-
-            # Optional y_filt
-            if compute_y_filt:
-                y_t_filt = asarray(h(*x_t_filt, *calib_params), dtype=float64).reshape(
-                    m
-                )
-            else:
-                y_t_filt = y_t_pred
-
-            # Optional "shock estimate" (same form as linear KF)
-            if return_shocks and eps_hat is not None:
-                M = Q @ (B.T @ H_t.T)  # mirrors linear case with C -> H_t
-                eps_hat[t] = M @ S_inv_v
-
-            # Store
-            x_pred[t] = x_t_pred
-            x_filt[t] = x_t_filt
-            P_pred[t] = P_t_pred
-            P_filt[t] = P_t_filt
-            y_pred[t] = y_t_pred
-            y_filt[t] = y_t_filt
-            v[t] = v_t
-            S[t] = S_t
-
-            x_prev = x_t_filt
-            P_prev = P_t_filt
+        try:
+            err, err_info, out = _ekf_hot_loop(
+                T,
+                (n, m, k),
+                A,
+                B,
+                h,
+                H_jac,
+                calib_params,
+                Q,
+                R,
+                y,
+                x_prev,
+                P_prev,
+                symmetrize,
+                jitter,
+                compute_y_filt,
+            )
+        except linalg.LinAlgError as exc:
+            raise MatrixConditionError(float("inf")) from exc
+        if err != 0:
+            ErrorConstructor = get_error_constructor(ErrorCode(err))
+            raise ErrorConstructor(*err_info)
+        (
+            x_pred,
+            x_filt,
+            P_pred,
+            P_filt,
+            y_pred,
+            y_filt,
+            v,
+            S,
+            eps_hat,
+            loglik,
+        ) = out
 
         return FilterResult(
             x_pred=x_pred,
@@ -494,6 +721,6 @@ class KalmanFilter:
             y_filt=y_filt,
             innov=v,
             S=S,
-            eps_hat=eps_hat,
+            eps_hat=eps_hat if return_shocks else None,
             loglik=loglik,
         )

@@ -1,11 +1,16 @@
+import warnings
+import numba
 from sympy import Symbol, Expr
 
-from numpy import float64, zeros
+import numpy as np
+from numpy import float64
 from numpy.typing import NDArray
 from numba import njit
 
 from dataclasses import dataclass, asdict
-from typing import Callable, Any
+from functools import cached_property
+from typing import Callable, Any, cast
+from textwrap import dedent
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
@@ -38,18 +43,44 @@ class CompiledModel:
     n_state: int
     n_exog: int
 
+    @cached_property
+    def _measurement_vector_func(self) -> Callable[..., ND]:
+        params = list(map(str, [*self.var_names, *self.calib_params]))
+        params_typed = ", ".join(f"{p}: float64" for p in params)
+        arg_names = ", ".join(params)
+
+        lines = [
+            f"out[{i}] = func_{i}({arg_names})"
+            for i in range(len(self.observable_funcs))
+        ]
+        body = "\n    ".join(lines)
+
+        func_str = f"""
+def vectorized_measurements({params_typed}):
+    out = np.zeros(({len(self.observable_funcs)},), dtype=np.float64)
+    {body}
+    return out
+"""
+
+        ns = {"np": np, "float64": float64}
+        for i, fn in enumerate(self.observable_funcs):
+            ns[f"func_{i}"] = fn
+
+        exec(dedent(func_str), ns)
+        f = njit(ns["vectorized_measurements"])
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+            )
+            f.compile(tuple(numba.float64 for _ in params))
+        return cast(Callable, f)
+
     def construct_measurement_vector_func(self) -> Callable[..., ND]:
-        # TODO: Make njit-compatible (eliminate *args -> produce str source code with arg-patching -> exec -> njit)
-
-        funcs = [*self.observable_funcs]  # Redefine to get rid of the "self" reference
-
-        def vectorized_measurements(*args: Any) -> ND:
-            out = zeros((len(funcs),), dtype=float64)
-            for i, func in enumerate(funcs):
-                out[i] = func(*args)
-            return out
-
-        return vectorized_measurements
+        # Building the vectorized measurement function triggers Numba compilation.
+        # Cache the dispatcher so extended-mode likelihood evaluation does not
+        # rebuild and recompile it on every call.
+        return self._measurement_vector_func
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
