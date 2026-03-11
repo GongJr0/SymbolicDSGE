@@ -13,9 +13,8 @@ import numba
 from numba import njit
 
 import pandas as pd  # fuck linearsolve
-import linearsolve
 
-
+from .. import _linearsolve as linearsolve
 from .config import ModelConfig
 from .compiled_model import CompiledModel
 from .solved_model import SolvedModel
