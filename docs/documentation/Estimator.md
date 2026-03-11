@@ -201,3 +201,69 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python tuple[np.ndarray, np.ndarray, float, np.ndarray]` | Tuple `#!python (samples, logpost, threshold, indices)` where `samples` are the retained parameter vectors in the joint HPD set, `logpost` are their posterior values, `threshold` is the cutoff log-posterior, and `indices` are positions of the retained draws in the original stored chain. |
+
+&nbsp;
+
+```python
+MCMCResult.posterior_kde_plot() -> None
+```
+
+Plot marginal posterior kernel-density estimates for each retained parameter column.
+
+This is a quick visual diagnostic for posterior shape. It is useful for checking skewness, heavy tails, and obvious multimodality in the retained draws. A separate subplot is produced for each parameter and displayed immediately with `#!python matplotlib.pyplot.show()`.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| None | This method uses the retained samples already stored on the result object. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python None` | Displays a Matplotlib figure of marginal KDE curves and returns nothing. |
+
+&nbsp;
+
+```python
+MCMCResult.posterior_traces() -> None
+```
+
+Plot retained posterior draws for each parameter as trace diagnostics.
+
+Trace plots are useful for checking whether the retained chain appears to mix well, whether it still shows drift, and whether particular parameters exhibit unusually persistent autocorrelation or regime changes. A separate subplot is produced for each parameter and displayed immediately with `#!python matplotlib.pyplot.show()`.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| None | This method uses the retained samples already stored on the result object. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python None` | Displays a Matplotlib figure of per-parameter trace plots and returns nothing. |
+
+&nbsp;
+
+```python
+MCMCResult.logpost_trace_plot() -> None
+```
+
+Plot the retained log-posterior sequence across MCMC iterations.
+
+This diagnostic helps identify abrupt changes in posterior fit, long stretches of poor exploration, or chains that remain unstable even after burn-in and thinning have been applied. The plot is generated from `#!python MCMCResult.logpost_trace`, which stores one log-posterior value per retained draw, and is displayed immediately with `#!python matplotlib.pyplot.show()`.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| None | This method uses the retained log-posterior trace already stored on the result object. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python None` | Displays a Matplotlib figure of the retained log-posterior trace and returns nothing. |
