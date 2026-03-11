@@ -2214,7 +2214,7 @@
 </tr>
 <tr>
 <td style="text-align: left;">nit</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="nb">int</span> \<span class="o">|</span> <span class="kc">None</span></code></td>
+<td style="text-align: center;"><code class="language-python highlight"><span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span></code></td>
 <td style="text-align: right;">Iterations</td>
 </tr>
 <tr>
@@ -2350,6 +2350,111 @@
 <tr>
 <td style="text-align: left;"><code class="language-python highlight"><span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span></code></td>
 <td style="text-align: right;">Tuple <code class="language-python highlight"><span class="p">(</span><span class="n">samples</span><span class="p">,</span> <span class="n">logpost</span><span class="p">,</span> <span class="n">threshold</span><span class="p">,</span> <span class="n">indices</span><span class="p">)</span></code> where <code>samples</code> are the retained parameter vectors in the joint HPD set, <code>logpost</code> are their posterior values, <code>threshold</code> is the cutoff log-posterior, and <code>indices</code> are positions of the retained draws in the original stored chain.</td>
+</tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">MCMCResult</span><span class="o">.</span><span class="n">posterior_kde_plot</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+<p>Plot marginal posterior kernel-density estimates for each retained parameter column.</p>
+<p>This is a quick visual diagnostic for posterior shape. It is useful for checking skewness, heavy tails, and obvious multimodality in the retained draws. A separate subplot is produced for each parameter and displayed immediately with <code class="language-python highlight"><span class="n">matplotlib</span><span class="o">.</span><span class="n">pyplot</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></code>.</p>
+<p><strong>Inputs:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Name</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">None</td>
+<td style="text-align: right;">This method uses the retained samples already stored on the result object.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Type</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code class="language-python highlight"><span class="kc">None</span></code></td>
+<td style="text-align: right;">Displays a Matplotlib figure of marginal KDE curves and returns nothing.</td>
+</tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">MCMCResult</span><span class="o">.</span><span class="n">posterior_traces</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+<p>Plot retained posterior draws for each parameter as trace diagnostics.</p>
+<p>Trace plots are useful for checking whether the retained chain appears to mix well, whether it still shows drift, and whether particular parameters exhibit unusually persistent autocorrelation or regime changes. A separate subplot is produced for each parameter and displayed immediately with <code class="language-python highlight"><span class="n">matplotlib</span><span class="o">.</span><span class="n">pyplot</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></code>.</p>
+<p><strong>Inputs:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Name</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">None</td>
+<td style="text-align: right;">This method uses the retained samples already stored on the result object.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Type</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code class="language-python highlight"><span class="kc">None</span></code></td>
+<td style="text-align: right;">Displays a Matplotlib figure of per-parameter trace plots and returns nothing.</td>
+</tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">MCMCResult</span><span class="o">.</span><span class="n">logpost_trace_plot</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+<p>Plot the retained log-posterior sequence across MCMC iterations.</p>
+<p>This diagnostic helps identify abrupt changes in posterior fit, long stretches of poor exploration, or chains that remain unstable even after burn-in and thinning have been applied. The plot is generated from <code class="language-python highlight"><span class="n">MCMCResult</span><span class="o">.</span><span class="n">logpost_trace</span></code>, which stores one log-posterior value per retained draw, and is displayed immediately with <code class="language-python highlight"><span class="n">matplotlib</span><span class="o">.</span><span class="n">pyplot</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></code>.</p>
+<p><strong>Inputs:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Name</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">None</td>
+<td style="text-align: right;">This method uses the retained log-posterior trace already stored on the result object.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Type</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code class="language-python highlight"><span class="kc">None</span></code></td>
+<td style="text-align: right;">Displays a Matplotlib figure of the retained log-posterior trace and returns nothing.</td>
 </tr>
 </tbody>
 </table>
