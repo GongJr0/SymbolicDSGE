@@ -137,7 +137,7 @@ Estimator.mcmc(
 | logprior | `#!python float` | Log-prior at optimum |
 | logpost | `#!python float` | Log-posterior at optimum |
 | nfev | `#!python int` | Objective evaluations |
-| nit | `#!python int \| None` | Iterations |
+| nit | `#!python int | None` | Iterations |
 | raw | `#!python scipy.optimize.OptimizeResult` | Raw scipy output |
 
 ### MCMCResult
