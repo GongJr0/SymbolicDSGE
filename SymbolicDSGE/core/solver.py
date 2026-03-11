@@ -1,11 +1,15 @@
+from logging import warning
+import warnings
 import sympy as sp
 from sympy import Symbol, Function, Expr
 from typing import TYPE_CHECKING, Any, Mapping
+from textwrap import dedent
 
 import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
 
+import numba
 from numba import njit
 
 import pandas as pd  # fuck linearsolve
@@ -137,31 +141,57 @@ class DSGESolver:
         ]
 
         symbolic_jacobian: sp.Matrix = conf.equations.obs_jacobian
-        # Recompile measurement functions with params substituted (No param passthrough to downstream EKF)
         variables = [conf.variables[idx[name]] for name in var_order]
 
-        #       jac_lambda = sp.lambdify(
-        #            [*variables, *params],
-        #            symbolic_jacobian,
-        #            modules="numpy",
-        #        )
-
         jac_scalars = list(symbolic_jacobian)
-        jac_scalar_funcs = [
+        jac_scalar_funcs = tuple(
             njit(sp.lambdify([*variables, *params], scalar, modules="numpy"))
             for scalar in jac_scalars
-        ]
+        )
 
         n_obs, n_vars = symbolic_jacobian.shape
 
-        def jacobian_func(*args: Any) -> NDF:
-            J = np.empty((n_obs, n_vars), dtype=float64)
-            k = 0
-            for i in range(n_obs):
-                for j in range(n_vars):
-                    J[i, j] = jac_scalar_funcs[k](*args)
-                    k += 1
-            return J
+        arg_names = [f"var{i}" for i in range(len(variables))] + [
+            f"param{i}" for i in range(len(params))
+        ]
+        args_str = ", ".join(f"{name}: float64" for name in arg_names)
+        call_args_str = ", ".join(arg_names)
+
+        func_bindings = "\n".join(
+            f"    f{k} = jac_scalar_funcs[{k}]" for k in range(len(jac_scalar_funcs))
+        )
+
+        body_lines = []
+        k = 0
+        for i in range(n_obs):
+            for j in range(n_vars):
+                body_lines.append(f"    J[{i}, {j}] = f{k}({call_args_str})")
+                k += 1
+
+        jac_str = dedent(
+            f"""
+def jacobian_func({args_str}) -> NDF:
+    J = np.empty(({n_obs}, {n_vars}), dtype=float64)
+{func_bindings}
+{chr(10).join(body_lines)}
+    return J
+"""
+        )
+
+        ns: dict[str, Any] = {
+            "jac_scalar_funcs": jac_scalar_funcs,
+            "np": np,
+            "float64": float64,
+            "NDF": NDF,
+        }
+        exec(jac_str, ns)
+        jacobian_func = njit(ns["jacobian_func"])
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(
+                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+            )
+            jacobian_func.compile(tuple(numba.float64 for _ in arg_names))
 
         return CompiledModel(
             config=conf,
@@ -176,7 +206,7 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_funcs=observable_funcs,
-            observable_jacobian=jacobian_func,  # TODO: Fix njit
+            observable_jacobian=jacobian_func,
             n_state=int(n_state),
             n_exog=int(n_exog),
         )
