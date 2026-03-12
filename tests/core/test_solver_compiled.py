@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import copy
 import random
+import textwrap
 
 import numpy as np
+import pandas as pd
 import sympy as sp
 import yaml
 from numpy import float64
@@ -71,6 +73,45 @@ def test_construct_measurement_vector_func_is_cached(compiled_test):
     assert (
         c.construct_measurement_vector_func() is c.construct_measurement_vector_func()
     )
+
+
+def test_construct_objective_vector_func_is_cached(compiled_test):
+    c = compiled_test
+
+    assert c.construct_objective_vector_func() is c.construct_objective_vector_func()
+
+
+def test_objective_vector_func_matches_compiled_equations(compiled_test):
+    c = compiled_test
+    objective = c.construct_objective_vector_func()
+    n = len(c.var_names)
+    fwd = np.linspace(0.1, 0.1 * n, n, dtype=np.complex128)
+    cur = np.linspace(-0.05, 0.05, n, dtype=np.complex128)
+    params = np.array(
+        [float64(c.config.calibration.parameters[p]) for p in c.calib_params],
+        dtype=np.complex128,
+    )
+
+    expected = c.equations(fwd, cur, params)
+    actual = objective(
+        np.ascontiguousarray(fwd),
+        np.ascontiguousarray(cur),
+        np.ascontiguousarray(params),
+    )
+    assert np.allclose(actual, expected)
+
+    fwd_step = fwd.copy()
+    cur_step = cur.copy()
+    fwd_step[0] += 1e-30j
+    cur_step[-1] -= 2e-30j
+
+    expected_step = c.equations(fwd_step, cur_step, params)
+    actual_step = objective(
+        np.ascontiguousarray(fwd_step),
+        np.ascontiguousarray(cur_step),
+        np.ascontiguousarray(params),
+    )
+    assert np.allclose(actual_step, expected_step)
 
 
 def test_klein_helpers_use_numba_function_cache():
@@ -141,3 +182,73 @@ def test_post82_randomized_calibration_still_solves(tmp_path):
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0
+
+
+def test_solver_log_linear_solves_positive_steady_model(tmp_path):
+    config = textwrap.dedent(
+        """
+        name: "POSITIVE_TEST"
+        variables: [a, k]
+        constrained:
+          a: false
+          k: false
+        parameters: [rho_a, rho_k, sig_a]
+        shock_map:
+          e_a: a
+        observables: [AObs, KObs]
+        equations:
+          model:
+            - a(t+1) = rho_a*a(t) + (1-rho_a) + e_a
+            - k(t+1) = rho_k*k(t) + (1-rho_k)*a(t)
+          constraint: {}
+          observables:
+            AObs: a(t)
+            KObs: k(t)
+        calibration:
+          parameters:
+            rho_a: 0.8
+            rho_k: 0.5
+            sig_a: 0.1
+          shocks:
+            std:
+              e_a: sig_a
+            corr: {}
+        """
+    )
+    path = tmp_path / "positive_loglinear.yaml"
+    path.write_text(config, encoding="utf-8")
+
+    model, kalman = ModelParser(path).get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile(n_state=2, n_exog=1)
+    solved = solver.solve(
+        compiled,
+        steady_state=np.ones((2,), dtype=np.float64),
+        log_linear=True,
+    )
+
+    assert solved.policy.stab == 0
+    assert solved.A.shape == (2, 2)
+    assert solved.B.shape == (2, 1)
+
+
+def test_linearsolve_falls_back_without_numeric_dispatcher():
+    params = pd.Series({"rho": 0.9}, dtype=float)
+
+    def equations(fwd, cur, par):
+        return np.array([fwd["x"] - par["rho"] * cur["x"]], dtype=complex)
+
+    mdl = linearsolve.model(
+        equations=equations,
+        variables=["x"],
+        parameters=params,
+        n_states=1,
+        n_exo_states=0,
+    )
+    mdl.set_ss(pd.Series({"x": 1.0}, dtype=float))
+    mdl.linear_approximation()
+
+    assert mdl.a.shape == (1, 1)
+    assert mdl.b.shape == (1, 1)
+    assert mdl.a[0, 0] == pytest.approx(1.0)
+    assert mdl.b[0, 0] == pytest.approx(0.9)

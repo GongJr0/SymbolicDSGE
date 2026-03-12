@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -8,6 +8,7 @@ from numpy import asarray, float64
 from numpy.typing import NDArray
 from scipy import optimize
 from sympy import Symbol
+from numba import njit
 
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
@@ -477,20 +478,14 @@ def estimate_R_diag(
     return np.diag(np.exp(opt.x))
 
 
-def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
-    """Map unconstrained z in R^(K(K-1)/2) -> valid corr Cholesky factor."""
-    expected = (K * (K - 1)) // 2
-    if z.shape[0] != expected:
-        raise ValueError(
-            f"Expected {expected} unconstrained CPC elements, got {z.shape[0]}."
-        )
-
-    cpc = np.tanh(z)
-    L = np.zeros((K, K), dtype=float64)
+@njit(cache=True)
+def _corr_chol_from_unconstrained_backend(z: NDF, K: int) -> NDF:
+    cpc: NDF = np.tanh(z)
+    L: NDF = np.zeros((K, K), dtype=float64)
     L[0, 0] = 1.0
-    idx = 0
+    idx: int = 0
     for k in range(1, K):
-        rem = float64(1.0)
+        rem: float64 = float64(1.0)
         for j in range(k):
             v = float64(np.sqrt(max(rem, 1e-14)))
             L[k, j] = float64(cpc[idx] * v)
@@ -500,19 +495,36 @@ def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
     return L
 
 
+def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
+    """Map unconstrained z in R^(K(K-1)/2) -> valid corr Cholesky factor."""
+    expected = (K * (K - 1)) // 2
+    if z.shape[0] != expected:
+        raise ValueError(
+            f"Expected {expected} unconstrained CPC elements, got {z.shape[0]}."
+        )
+    return cast(NDF, _corr_chol_from_unconstrained_backend(z, K))
+
+
+@njit(cache=True)
+def _R_from_unconstrained_backend(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
+    log_std = u[:K]
+    z = u[K:]
+    std = np.exp(log_std).astype(float64)
+    Lcorr: NDF = _corr_chol_from_unconstrained_backend(z.astype(float64), K)
+    LcorrT: NDF = np.ascontiguousarray(Lcorr.T)
+    corr: NDF = Lcorr @ LcorrT
+    std_col = std.reshape((K, 1))
+    std_row = std.reshape((1, K))
+    R = corr * std_col * std_row
+    return (R.astype(float64), std, Lcorr)
+
+
 def _R_from_unconstrained(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
     """u = [log stds (K), unconstrained CPC values] -> (R, stds, Lcorr)."""
     n_cpc = (K * (K - 1)) // 2
     if u.shape[0] != K + n_cpc:
         raise ValueError(f"Expected length {K + n_cpc}, got {u.shape[0]}.")
-    log_std = u[:K]
-    z = u[K:]
-    std = np.exp(log_std).astype(float64, copy=False)
-    Lcorr = _corr_chol_from_unconstrained(z.astype(float64, copy=False), K)
-    corr = Lcorr @ Lcorr.T
-    D = np.diag(std)
-    R = D @ corr @ D
-    return (R.astype(float64, copy=False), std, Lcorr)
+    return cast(tuple[NDF, NDF, NDF], _R_from_unconstrained_backend(u, K))
 
 
 def estimate_R(

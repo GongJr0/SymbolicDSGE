@@ -635,6 +635,109 @@ class model:
 
         self.irs = irs_dict
 
+    def _resolve_steady_state_for_approximation(self, steady_state=None):
+        if steady_state is None:
+
+            try:
+                steady_state = self.ss
+            except:
+                raise ValueError(
+                    "You must specify a steady state for the model before attempting to linearize."
+                )
+
+        return steady_state
+
+    def _linear_approximation_python(self, steady_state):
+        def equilibrium(vars_fwd, vars_cur):
+
+            vars_fwd = pd.Series(vars_fwd, index=self.names["variables"])
+            vars_cur = pd.Series(vars_cur, index=self.names["variables"])
+
+            equilibrium_left = self.equations(vars_fwd, vars_cur, self.parameters)
+            equilibrium_right = np.ones(len(self.names["variables"]))
+
+            return equilibrium_left - equilibrium_right
+
+        equilibrium_fwd = lambda fwd: equilibrium(fwd, steady_state)
+        equilibrium_cur = lambda cur: equilibrium(steady_state, cur)
+
+        if not np.iscomplexobj(self.parameters):
+
+            self.a = approx_fprime_cs(steady_state.to_numpy(), equilibrium_fwd)
+            self.b = -approx_fprime_cs(steady_state.to_numpy(), equilibrium_cur)
+
+        else:
+
+            self.a = approx_fprime(steady_state.to_numpy(), equilibrium_fwd)
+            self.b = -approx_fprime(steady_state.to_numpy(), equilibrium_cur)
+
+    def _log_linear_approximation_python(self, steady_state):
+        def log_equilibrium(log_vars_fwd, log_vars_cur):
+
+            log_vars_fwd = pd.Series(log_vars_fwd, index=self.names["variables"])
+            log_vars_cur = pd.Series(log_vars_cur, index=self.names["variables"])
+
+            equilibrium_left = (
+                self.equations(
+                    np.exp(log_vars_fwd), np.exp(log_vars_cur), self.parameters
+                )
+                + 1
+            )
+            equilibrium_right = np.ones(len(self.names["variables"]))
+
+            return np.log(equilibrium_left) - np.log(equilibrium_right)
+
+        log_equilibrium_fwd = lambda log_fwd: log_equilibrium(log_fwd, np.log(self.ss))
+        log_equilibrium_cur = lambda log_cur: log_equilibrium(np.log(self.ss), log_cur)
+
+        if not np.iscomplexobj(self.parameters):
+
+            self.a = approx_fprime_cs(np.log(self.ss).ravel(), log_equilibrium_fwd)
+            self.b = -approx_fprime_cs(np.log(self.ss).ravel(), log_equilibrium_cur)
+
+        else:
+
+            self.a = approx_fprime(
+                np.log(self.ss).ravel(), log_equilibrium_fwd, centered=True
+            )
+            self.b = -approx_fprime(
+                np.log(self.ss).ravel(), log_equilibrium_cur, centered=True
+            )
+
+    def _numeric_approximation(self, steady_state, log_linear):
+        equations_numeric = getattr(self, "_equations_numeric", None)
+        parameter_array = getattr(self, "_parameter_array", None)
+        if equations_numeric is None or parameter_array is None:
+            return None
+
+        steady_state_array = _as_1d_array(steady_state)
+        parameter_array = _as_1d_array(parameter_array)
+
+        if np.iscomplexobj(steady_state_array) and not np.all(
+            np.isclose(np.imag(steady_state_array), 0.0)
+        ):
+            return None
+
+        if np.iscomplexobj(parameter_array) and not np.all(
+            np.isclose(np.imag(parameter_array), 0.0)
+        ):
+            return None
+
+        steady_state_real = np.ascontiguousarray(
+            np.real(steady_state_array).astype(float64)
+        )
+        parameter_real = np.ascontiguousarray(np.real(parameter_array).astype(float64))
+
+        if log_linear and np.any(steady_state_real <= 0.0):
+            return None
+
+        return _approximate_system_numeric(
+            equations_numeric,
+            steady_state_real,
+            parameter_real,
+            log_linear,
+        )
+
     def linear_approximation(self, steady_state=None):
         """Given a nonlinear rational expectations model in the form:
 
@@ -662,41 +765,13 @@ class model:
         # Set log_linear attribute
         self.log_linear = False
 
-        # Warn if steady state attribute ss has not been assigned
-        if steady_state is None:
+        steady_state = self._resolve_steady_state_for_approximation(steady_state)
+        approx = self._numeric_approximation(steady_state, log_linear=False)
+        if approx is not None:
+            self.a, self.b = approx
+            return
 
-            try:
-                steady_state = self.ss
-            except:
-                raise ValueError(
-                    "You must specify a steady state for the model before attempting to linearize."
-                )
-
-        # Compute approximation
-        def equilibrium(vars_fwd, vars_cur):
-
-            vars_fwd = pd.Series(vars_fwd, index=self.names["variables"])
-            vars_cur = pd.Series(vars_cur, index=self.names["variables"])
-
-            equilibrium_left = self.equations(vars_fwd, vars_cur, self.parameters)
-            equilibrium_right = np.ones(len(self.names["variables"]))
-
-            return equilibrium_left - equilibrium_right
-
-        equilibrium_fwd = lambda fwd: equilibrium(fwd, steady_state)
-        equilibrium_cur = lambda cur: equilibrium(steady_state, cur)
-
-        if not np.iscomplexobj(self.parameters):
-
-            # Assign attributes
-            self.a = approx_fprime_cs(steady_state.to_numpy(), equilibrium_fwd)
-            self.b = -approx_fprime_cs(steady_state.to_numpy(), equilibrium_cur)
-
-        else:
-
-            # Assign attributes
-            self.a = approx_fprime(steady_state.to_numpy(), equilibrium_fwd)
-            self.b = -approx_fprime(steady_state.to_numpy(), equilibrium_cur)
+        self._linear_approximation_python(steady_state)
 
     def log_linear_approximation(self, steady_state=None):
         """Given a nonlinear rational expectations model in the form:
@@ -725,50 +800,13 @@ class model:
         # Set log_linear attribute
         self.log_linear = True
 
-        # Warn if steady state attribute ss has not been assigned
-        if steady_state is None:
+        steady_state = self._resolve_steady_state_for_approximation(steady_state)
+        approx = self._numeric_approximation(steady_state, log_linear=True)
+        if approx is not None:
+            self.a, self.b = approx
+            return
 
-            try:
-                steady_state = self.ss
-            except:
-                raise ValueError(
-                    "You must specify a steady state for the model before attempting to linearize."
-                )
-
-        # Compute approximation
-        def log_equilibrium(log_vars_fwd, log_vars_cur):
-
-            log_vars_fwd = pd.Series(log_vars_fwd, index=self.names["variables"])
-            log_vars_cur = pd.Series(log_vars_cur, index=self.names["variables"])
-
-            equilibrium_left = (
-                self.equations(
-                    np.exp(log_vars_fwd), np.exp(log_vars_cur), self.parameters
-                )
-                + 1
-            )
-            equilibrium_right = np.ones(len(self.names["variables"]))
-
-            return np.log(equilibrium_left) - np.log(equilibrium_right)
-
-        log_equilibrium_fwd = lambda log_fwd: log_equilibrium(log_fwd, np.log(self.ss))
-        log_equilibrium_cur = lambda log_cur: log_equilibrium(np.log(self.ss), log_cur)
-
-        if not np.iscomplexobj(self.parameters):
-
-            # Assign attributes
-            self.a = approx_fprime_cs(np.log(self.ss).ravel(), log_equilibrium_fwd)
-            self.b = -approx_fprime_cs(np.log(self.ss).ravel(), log_equilibrium_cur)
-
-        else:
-
-            # Assign attributes
-            self.a = approx_fprime(
-                np.log(self.ss).ravel(), log_equilibrium_fwd, centered=True
-            )
-            self.b = -approx_fprime(
-                np.log(self.ss).ravel(), log_equilibrium_cur, centered=True
-            )
+        self._log_linear_approximation_python(steady_state)
 
     def set_ss(self, steady_state):
         """Directly set the steady state of the model.
@@ -1142,6 +1180,77 @@ def ir(f, p, eps, s0=None):
     s = s[1:]
 
     return np.concatenate((s.T, u.T))
+
+
+def _as_1d_array(values):
+    if hasattr(values, "to_numpy"):
+        values = values.to_numpy()
+
+    return np.asarray(values).reshape(-1)
+
+
+@njit(cache=True)
+def _evaluate_equilibrium_numeric(eq_func, fwd, cur, params, log_linear):
+    if log_linear:
+        return np.log(eq_func(np.exp(fwd), np.exp(cur), params) + 1.0)
+
+    return eq_func(fwd, cur, params)
+
+
+@njit(cache=True)
+def _complex_step_jacobian(eq_func, base_point, params, log_linear, differentiate_fwd):
+    step = float64(1e-30)
+    complex_step = complex128(1j * step)
+    base_complex = np.ascontiguousarray(base_point.astype(complex128))
+    params_complex = np.ascontiguousarray(params.astype(complex128))
+    base_residual = _evaluate_equilibrium_numeric(
+        eq_func,
+        base_complex,
+        base_complex,
+        params_complex,
+        log_linear,
+    )
+    jac = np.empty((base_residual.shape[0], base_point.shape[0]), dtype=float64)
+
+    for j in range(base_point.shape[0]):
+        fwd = base_complex.copy()
+        cur = base_complex.copy()
+
+        if differentiate_fwd:
+            fwd[j] = fwd[j] + complex_step
+        else:
+            cur[j] = cur[j] + complex_step
+
+        residual = _evaluate_equilibrium_numeric(
+            eq_func,
+            fwd,
+            cur,
+            params_complex,
+            log_linear,
+        )
+        jac[:, j] = np.imag(residual) / step
+
+    return jac
+
+
+@njit(cache=True)
+def _approximate_system_numeric(eq_func, steady_state, params, log_linear):
+    base_point = np.ascontiguousarray(steady_state.astype(float64))
+    parameter_vector = np.ascontiguousarray(params.astype(float64))
+
+    if log_linear:
+        base_point = np.ascontiguousarray(np.log(base_point))
+
+    a = _complex_step_jacobian(eq_func, base_point, parameter_vector, log_linear, True)
+    b = -_complex_step_jacobian(
+        eq_func,
+        base_point,
+        parameter_vector,
+        log_linear,
+        False,
+    )
+
+    return a, b
 
 
 @njit(cache=True)
