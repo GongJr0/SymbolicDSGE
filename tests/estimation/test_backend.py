@@ -176,6 +176,27 @@ def test_build_C_d_matches_solved_model_helper(post82_bundle):
     assert np.allclose(d1, d2)
 
 
+def test_build_C_d_matches_affine_measurement_function(post82_bundle):
+    compiled = post82_bundle["compiled"]
+    params = backend.extract_base_params(compiled)
+    param_vec = backend.build_calib_param_vector(compiled, params)
+    h_func = compiled.construct_measurement_vector_func()
+
+    obs = ["Infl", "Rate"]
+    C, d = backend.build_C_d(compiled, params, obs)
+    state = np.linspace(
+        0.05,
+        0.05 * len(compiled.cur_syms),
+        num=len(compiled.cur_syms),
+        dtype=np.float64,
+    )
+
+    y_func = np.asarray(h_func(*state, *param_vec), dtype=np.float64)
+    obs_idx = [compiled.observable_names.index(name) for name in obs]
+
+    assert np.allclose(C @ state + d, y_func[obs_idx])
+
+
 def test_build_P0_branches():
     compiled = SimpleNamespace(var_names=["g", "z"])
 

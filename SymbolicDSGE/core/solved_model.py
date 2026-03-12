@@ -429,38 +429,10 @@ class SolvedModel:
         self,
         y_names: list[str],
     ) -> Tuple[NDF, NDF]:
-
-        obs_expr = dict(
-            zip(self.compiled.observable_names, self.compiled.observable_eqs)
+        return self.compiled.build_affine_measurement_matrices(
+            self.compiled.config.calibration.parameters,
+            y_names,
         )
-        param_subs = {
-            p: float64(v)
-            for p, v in self.compiled.config.calibration.parameters.items()
-        }
-
-        m = len(y_names)
-        n = self.A.shape[0]
-
-        C = np.zeros((m, n), dtype=float64)
-        d = np.zeros((m,), dtype=float64)
-
-        zero_subs = {s: 0.0 for s in self.compiled.cur_syms}
-
-        for i, y in enumerate(y_names):
-            expr = obs_expr[y]
-
-            # Constants
-            d_i = expr.subs(zero_subs).subs(param_subs)  # pyright: ignore
-            d[i] = float64(d_i)
-
-            # Linear Coefficients
-            for j, sym in enumerate(self.compiled.cur_syms):
-                a = expr.coeff(sym)
-                if a != 0:
-                    a = a.subs(param_subs)  # pyright: ignore
-                    C[i, j] = float64(a)
-
-        return C, d
 
     @staticmethod
     def _make_jit_measurement(K: int):  # type: ignore # (Types getting misinterpreted with no static known arg count)

@@ -160,30 +160,7 @@ def build_C_d(
     params: Mapping[str, float64],
     observables: list[str],
 ) -> tuple[NDF, NDF]:
-    obs_expr = dict(zip(compiled.observable_names, compiled.observable_eqs))
-
-    param_subs: dict[Symbol, float64] = {
-        p: float64(params[p.name]) for p in compiled.config.parameters
-    }
-    zero_subs = {s: 0.0 for s in compiled.cur_syms}
-
-    m = len(observables)
-    n = len(compiled.cur_syms)
-    C = np.zeros((m, n), dtype=float64)
-    d = np.zeros((m,), dtype=float64)
-
-    for i, y in enumerate(observables):
-        expr = obs_expr[y]
-        d_i = expr.subs(zero_subs).subs(param_subs)  # pyright: ignore
-        d[i] = float64(d_i)
-
-        for j, sym in enumerate(compiled.cur_syms):
-            a = expr.coeff(sym)
-            if a != 0:
-                a = a.subs(param_subs)  # pyright: ignore
-                C[i, j] = float64(a)
-
-    return C, d
+    return compiled.build_affine_measurement_matrices(params, observables)
 
 
 def build_P0(

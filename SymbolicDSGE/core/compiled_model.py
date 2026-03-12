@@ -84,6 +84,25 @@ def vectorized_objective(fwd, cur, params):
         # Cache the dispatcher so solve/approximation can reuse the same kernel.
         return self._objective_vector_func
 
+    def _coerce_param_vector(
+        self,
+        par: Mapping[Any, Any] | Any,
+        *,
+        dtype: Any,
+    ) -> ND:
+        if isinstance(par, Mapping):
+            vals = []
+            for p in self.calib_params:
+                if p in par:
+                    vals.append(par[p])
+                elif p.name in par:
+                    vals.append(par[p.name])
+                else:
+                    raise KeyError(f"Missing parameter '{p.name}'.")
+            return np.ascontiguousarray(np.asarray(vals, dtype=dtype).reshape(-1))
+
+        return np.ascontiguousarray(np.asarray(par, dtype=dtype).reshape(-1))
+
     def equations(
         self,
         fwd: Any,
@@ -92,22 +111,41 @@ def vectorized_objective(fwd, cur, params):
     ) -> ND:
         fwd_arr = np.ascontiguousarray(np.asarray(fwd, dtype=complex128).reshape(-1))
         cur_arr = np.ascontiguousarray(np.asarray(cur, dtype=complex128).reshape(-1))
-
-        if isinstance(par, Mapping):
-            par_vec = np.array(
-                [par[p.name] for p in self.calib_params],
-                dtype=complex128,
+        par_vec = self._coerce_param_vector(par, dtype=complex128)
+        if par_vec.shape[0] != len(self.calib_params):
+            raise ValueError(
+                f"Parameter vector length {par_vec.shape[0]} != {len(self.calib_params)}"
             )
-        else:
-            par_vec = np.ascontiguousarray(
-                np.asarray(par, dtype=complex128).reshape(-1)
-            )
-            if par_vec.shape[0] != len(self.calib_params):
-                raise ValueError(
-                    f"Parameter vector length {par_vec.shape[0]} != {len(self.calib_params)}"
-                )
 
         return self.construct_objective_vector_func()(fwd_arr, cur_arr, par_vec)
+
+    def build_affine_measurement_matrices(
+        self,
+        params: Mapping[Any, Any] | Any,
+        observables: list[str],
+    ) -> tuple[NDF, NDF]:
+        param_vec = self._coerce_param_vector(params, dtype=float64)
+        if param_vec.shape[0] != len(self.calib_params):
+            raise ValueError(
+                f"Parameter vector length {param_vec.shape[0]} != {len(self.calib_params)}"
+            )
+
+        zero_state = np.zeros((len(self.cur_syms),), dtype=float64)
+        d_full = np.asarray(
+            self.construct_measurement_vector_func()(*zero_state, *param_vec),
+            dtype=float64,
+        ).reshape(-1)
+        C_full = np.asarray(
+            self.observable_jacobian(*zero_state, *param_vec),
+            dtype=float64,
+        )
+
+        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
+        rows = [obs_idx[name] for name in observables]
+        return (
+            np.ascontiguousarray(C_full[rows, :], dtype=float64),
+            np.ascontiguousarray(d_full[rows], dtype=float64),
+        )
 
     @cached_property
     def _measurement_vector_func(self) -> Callable[..., ND]:

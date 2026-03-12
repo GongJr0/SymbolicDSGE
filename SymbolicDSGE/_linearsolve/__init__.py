@@ -1189,7 +1189,7 @@ def _as_1d_array(values):
     return np.asarray(values).reshape(-1)
 
 
-@njit(cache=True)
+@njit
 def _evaluate_equilibrium_numeric(eq_func, fwd, cur, params, log_linear):
     if log_linear:
         return np.log(eq_func(np.exp(fwd), np.exp(cur), params) + 1.0)
@@ -1197,7 +1197,7 @@ def _evaluate_equilibrium_numeric(eq_func, fwd, cur, params, log_linear):
     return eq_func(fwd, cur, params)
 
 
-@njit(cache=True)
+@njit
 def _complex_step_jacobian(eq_func, base_point, params, log_linear, differentiate_fwd):
     step = float64(1e-30)
     complex_step = complex128(1j * step)
@@ -1233,7 +1233,7 @@ def _complex_step_jacobian(eq_func, base_point, params, log_linear, differentiat
     return jac
 
 
-@njit(cache=True)
+@njit
 def _approximate_system_numeric(eq_func, steady_state, params, log_linear):
     base_point = np.ascontiguousarray(steady_state.astype(float64))
     parameter_vector = np.ascontiguousarray(params.astype(float64))
