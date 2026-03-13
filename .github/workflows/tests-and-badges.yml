@@ -3,33 +3,40 @@ name: tests-and-badges
 on:
   push:
     branches: ["**"]
+    paths-ignore:
+      - "coverage/*.svg"
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13.9"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
           enable-cache: true
+          prune-cache: false
 
       - name: Sync dependencies
         run: uv sync --frozen --all-extras
 
       - name: Run tests with coverage
-
-        run: |
-          uv run pytest -q ./tests --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
+        run: uv run pytest -q ./tests --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
 
       - name: Compute coverage percent
         id: cov
@@ -40,59 +47,50 @@ jobs:
           tree = ET.parse("coverage/coverage.xml")
           root = tree.getroot()
           rate = float(root.attrib["line-rate"]) * 100.0
-          print(f"coverage={rate:.2f}")
+          rounded = round(rate)
+          print(f"Coverage: {rate:.2f}%")
+          with open("${GITHUB_OUTPUT}", "a", encoding="utf-8") as fh:
+              fh.write(f"percent={rounded}\n")
           PY
-
-          COV=$(python - << 'PY'
-          import xml.etree.ElementTree as ET
-          tree = ET.parse("coverage/coverage.xml")
-          root = tree.getroot()
-          rate = float(root.attrib["line-rate"]) * 100.0
-          print(f"{rate:.0f}")
-          PY
-          )
-          echo "percent=$COV" >> "$GITHUB_OUTPUT"
-
-      - name: Ensure coverage dir exists
-        run: mkdir -p coverage
 
       - name: Generate coverage badge
-        run: |
-          mkdir -p coverage
-          curl -o coverage/coverage-badge.svg \
+        run: >
+          curl -fsSL -o coverage/coverage-badge.svg
           "https://img.shields.io/badge/coverage-${{ steps.cov.outputs.percent }}%25-2e7d32?style=flat&labelColor=333333"
 
       - name: Generate tests badge
-        run: |
-          mkdir -p coverage
-          curl -o coverage/tests-badge.svg \
+        run: >
+          curl -fsSL -o coverage/tests-badge.svg
           "https://img.shields.io/badge/tests-passing-2e7d32?style=flat&labelColor=333333"
 
-      - name: Commit updated badges (only on push, not PR)
+      - name: Commit updated badges
         if: ${{ github.event_name == 'push' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add coverage/*.svg coverage/coverage.xml || true
+
+          git add coverage/*.svg
+
           if git diff --cached --quiet; then
             echo "No badge changes to commit."
             exit 0
           fi
-          git commit -m "ci: update coverage/test badges"
+
+          git commit -m "ci: update badges"
           git push
 
-  # If tests fail, this second job never runs; so we generate a failing badge too.
   test_failed_badge:
     runs-on: ubuntu-latest
     needs: [test]
-    if: ${{ failure() }}
+    if: ${{ always() && needs.test.result == 'failure' && github.event_name == 'push' }}
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - name: Ensure coverage dir exists
-        run: mkdir -p coverage
-
-      - name: Make tests badge (svg) - failing
+      - name: Generate failing tests badge
         uses: emibcn/badge-action@v2
         with:
           label: tests
@@ -100,14 +98,17 @@ jobs:
           color: red
           path: coverage/tests-badge.svg
 
-      - name: Commit failing badge (only on push, not PR)
-        if: ${{ github.event_name == 'push' }}
+      - name: Commit failing badge
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add coverage/tests-badge.svg
+
           if git diff --cached --quiet; then
+            echo "No badge changes to commit."
             exit 0
           fi
-          git commit -m "ci: update failing tests badge"
+
+          git commit -m "ci: update failing badge"
           git push
