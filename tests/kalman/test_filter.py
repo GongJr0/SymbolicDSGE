@@ -194,6 +194,18 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
     A, B, _, _, Q, R = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
     calib = np.array([], dtype=float64)
+    out_true = KalmanFilter.run_extended(
+        A,
+        B,
+        h=lambda x: np.array([x], dtype=float64),
+        H_jac=lambda x: np.array([[1.0]], dtype=float64),
+        calib_params=calib,
+        Q=Q,
+        R=R,
+        y=y,
+        compute_y_filt=True,
+        return_shocks=True,
+    )
 
     out = KalmanFilter.run_extended(
         A,
@@ -208,6 +220,7 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
         return_shocks=True,
     )
 
-    assert np.array_equal(out.y_filt, out.y_pred)
+    assert np.array_equal(out.y_filt, np.zeros_like(out.y_filt))
+    assert np.allclose(out.loglik, out_true.loglik)
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)

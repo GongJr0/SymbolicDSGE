@@ -1,5 +1,5 @@
 from .distribution import Distribution, RandomState, Size, VecF64
-from ..support import Support, bounded
+from ..support import OutOfSupportError, Support
 
 from numpy import float64
 from scipy.stats import truncnorm
@@ -46,8 +46,10 @@ class TruncNormal(Distribution[float64, VecF64]):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
         return float64(self.dist.logpdf(x))
 
     @overload
@@ -55,8 +57,10 @@ class TruncNormal(Distribution[float64, VecF64]):
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
         # Assume gradient at bounds is approaching from the defined region (+ for lower bound, - for upper bound).
         # This avoids non-finite gradients at bounds but isn't mathematically exact.
         return -(x - self._loc) / self._scale**2

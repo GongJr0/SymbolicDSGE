@@ -1,5 +1,5 @@
-from .distribution import Distribution, Size, RandomState, VecF64
-from ..support import Support, bounded
+from .distribution import Distribution, Size, RandomState, VecF64, _scalar_or_array
+from ..support import OutOfSupportError, Support
 from typing import TypedDict, overload, cast
 
 import numpy as np
@@ -37,17 +37,27 @@ class HalfNormal(Distribution[float64, VecF64]):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.logpdf(x))
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
+        x_arr = np.asarray(x, dtype=float64)
+        log_density = (
+            0.5 * np.log(2.0 / np.pi)
+            - np.log(self._scale)
+            - 0.5 * ((x_arr - self._low) / self._scale) ** 2
+        )
+        return _scalar_or_array(log_density)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
         return float64(-(x - self.low) / self.scale**2)
 
     @overload

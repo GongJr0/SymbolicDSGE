@@ -1,6 +1,7 @@
-from .distribution import Distribution, Size, RandomState, VecF64
-from ..support import Support, bounded
+from .distribution import Distribution, Size, RandomState, VecF64, _scalar_or_array
+from ..support import OutOfSupportError, Support
 
+import numpy as np
 from numpy import float64
 from scipy.stats import uniform
 
@@ -34,19 +35,23 @@ class Uniform(Distribution[float64, VecF64]):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(
-            self.dist.logpdf(x)
-        )  # PDF is invariant in terms of x, this function acts like a bounds checker only
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
+        x_arr = np.asarray(x, dtype=float64)
+        log_density = np.zeros_like(x_arr, dtype=float64) - np.log(self._scale)
+        return _scalar_or_array(log_density)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
         return float64(
             0.0
         )  # PDF is invariant in terms of x, this function acts like a bounds checker only

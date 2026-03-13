@@ -1,0 +1,27 @@
+
+name: "NONLINEAR_OBS_TEST"
+variables: [a, k]
+constrained:
+  a: false
+  k: false
+parameters: [rho_a, rho_k, sig_a]
+shock_map:
+  e_a: a
+observables: [AObs, KCurve]
+equations:
+  model:
+    - a(t+1) = rho_a*a(t) + e_a
+    - k(t+1) = rho_k*k(t) + a(t)
+  constraint: {}
+  observables:
+    AObs: a(t)
+    KCurve: k(t)**2 + a(t)
+calibration:
+  parameters:
+    rho_a: 0.8
+    rho_k: 0.5
+    sig_a: 0.1
+  shocks:
+    std:
+      e_a: sig_a
+    corr: {}

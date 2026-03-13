@@ -22,6 +22,7 @@ class model:
         endo_states: Any = ...,
         shock_names: Any = ...,
         parameters: Any = ...,
+        parameter_names: list[str] | None = ...,
         shock_prefix: Any = ...,
         n_states: int | None = ...,
         n_exo_states: int | None = ...,

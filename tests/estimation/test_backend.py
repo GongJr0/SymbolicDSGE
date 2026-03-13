@@ -7,8 +7,10 @@ import pytest
 from sympy import Symbol
 
 from SymbolicDSGE import ModelParser, DSGESolver
+from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.config import KalmanConfig, P0Config
+from SymbolicDSGE.kalman.filter import KalmanFilter
 
 
 class _ConstPrior:
@@ -20,8 +22,8 @@ class _ConstPrior:
 
 
 @pytest.fixture(scope="module")
-def post82_bundle():
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def post82_bundle(post82_test_model_path):
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile(n_state=3, n_exog=3)
 
@@ -48,6 +50,7 @@ def post82_bundle():
     )
     y = pd.DataFrame(
         {
+            "OutGap": sim["OutGap"][1:],
             "Infl": sim["Infl"][1:],
             "Rate": sim["Rate"][1:],
         }
@@ -176,6 +179,99 @@ def test_build_C_d_matches_solved_model_helper(post82_bundle):
     assert np.allclose(d1, d2)
 
 
+def test_build_C_d_matches_affine_measurement_function(post82_bundle):
+    compiled = post82_bundle["compiled"]
+    params = backend.extract_base_params(compiled)
+    param_vec = backend.build_calib_param_vector(compiled, params)
+    h_func = compiled.construct_measurement_vector_func()
+
+    obs = ["Infl", "Rate"]
+    C, d = backend.build_C_d(compiled, params, obs)
+    state = np.zeros((len(compiled.cur_syms),), dtype=np.float64)
+
+    y_func = np.asarray(h_func(*state, *param_vec), dtype=np.float64)
+    obs_idx = [compiled.observable_names.index(name) for name in obs]
+
+    assert np.allclose(C @ state + d, y_func[obs_idx])
+
+
+def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
+    post82_bundle, monkeypatch
+):
+    compiled = post82_bundle["compiled"]
+    compiled_type = type(compiled)
+    est = Estimator(
+        solver=post82_bundle["solver"],
+        compiled=compiled,
+        y=post82_bundle["y"],
+        observables=["Infl", "Rate"],
+        steady_state=post82_bundle["steady"],
+        log_linear=False,
+    )
+
+    monkeypatch.setattr(
+        compiled_type,
+        "construct_measurement_array_func",
+        lambda self, obs: (_ for _ in ()).throw(
+            AssertionError("measurement constructor called in hot path")
+        ),
+    )
+    monkeypatch.setattr(
+        compiled_type,
+        "construct_observable_jacobian_array_func",
+        lambda self, obs: (_ for _ in ()).throw(
+            AssertionError("jacobian constructor called in hot path")
+        ),
+    )
+
+    ll = est.loglik(est.theta0())
+    assert np.isfinite(ll)
+
+
+def test_run_extended_array_dispatch_matches_scalar_dispatch(post82_bundle):
+    compiled = post82_bundle["compiled"]
+    solved = post82_bundle["solved"]
+    params = backend.extract_base_params(compiled)
+    obs, y_reordered = backend.reorder_observables(
+        compiled, compiled.kalman, list(compiled.observable_names), post82_bundle["y"]
+    )
+    calib_params = backend.build_calib_param_vector(compiled, params)
+    Q = backend.build_Q(compiled, params)
+    R = backend.resolve_R(compiled, compiled.kalman, obs, None)
+
+    scalar = KalmanFilter.run_extended(
+        A=solved.A,
+        B=solved.B,
+        h=compiled.construct_measurement_vector_func(),
+        H_jac=compiled.observable_jacobian,
+        calib_params=calib_params,
+        Q=Q,
+        R=R,
+        y=y_reordered,
+        compute_y_filt=True,
+    )
+
+    h_array = compiled.construct_measurement_array_func(obs)
+    H_array = compiled.construct_observable_jacobian_array_func(obs)
+    array = KalmanFilter.run_extended(
+        A=solved.A,
+        B=solved.B,
+        h=h_array,
+        H_jac=H_array,
+        calib_params=calib_params,
+        Q=Q,
+        R=R,
+        y=y_reordered,
+        compute_y_filt=True,
+    )
+
+    assert getattr(h_array, "_symbolicdsge_array_dispatch", False)
+    assert getattr(H_array, "_symbolicdsge_array_dispatch", False)
+    assert np.allclose(array.loglik, scalar.loglik)
+    assert np.allclose(array.x_filt, scalar.x_filt)
+    assert np.allclose(array.y_pred, scalar.y_pred)
+
+
 def test_build_P0_branches():
     compiled = SimpleNamespace(var_names=["g", "z"])
 
@@ -262,7 +358,14 @@ def test_kalman_symbolic_R_builder_matches_numeric_config_R(post82_bundle):
     assert kalman is not None
     assert kalman.R_symbolic is not None
     assert kalman.R_builder is not None
-    assert kalman.R_param_names == ["meas_infl", "meas_rate", "meas_rho_ir"]
+    assert kalman.R_param_names == [
+        "meas_outgap",
+        "meas_infl",
+        "meas_rate",
+        "meas_rho_ir",
+        "meas_rho_gi",
+        "meas_rho_gr",
+    ]
 
     params = backend.extract_base_params(compiled)
     R_from_builder = backend.build_R_from_config_params(

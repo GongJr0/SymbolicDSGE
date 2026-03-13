@@ -108,12 +108,14 @@ def test_solved_model_kalman_smoke(solved_post82):
     sim = solved_post82.sim(20, observables=True)
     y = pd.DataFrame({"Infl": sim["Infl"][1:], "Rate": sim["Rate"][1:]})
 
-    out = solved_post82.kalman(y)
+    out = solved_post82.kalman(y, observables=["Infl", "Rate"])
     assert out is not None
 
 
-def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration():
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration(
+    post82_test_model_path,
+):
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile(n_state=3, n_exog=3)
 
@@ -136,7 +138,7 @@ def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration():
     )
     assert np.allclose(
         solved.kalman_config.R,
-        np.array([[1.0, 0.5], [0.5, 1.0]], dtype=np.float64),
+        np.eye(3, dtype=np.float64),
     )
 
 

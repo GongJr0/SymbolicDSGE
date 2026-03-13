@@ -82,6 +82,22 @@ class Estimator:
         self.jitter = jitter
         self.symmetrize = symmetrize
         self.R = R
+        self._prepared_filter = None
+        if all(
+            hasattr(compiled, attr)
+            for attr in ("observable_names", "cur_syms", "calib_params")
+        ):
+            self._prepared_filter = backend.prepare_filter_run(
+                compiled=compiled,
+                y=y,
+                observables=observables,
+                filter_mode=self.filter_mode,
+                p0_mode=p0_mode,
+                p0_scale=p0_scale,
+                jitter=jitter,
+                symmetrize=symmetrize,
+            )
+            self.filter_mode = self._prepared_filter.mode
 
         self._base_params = backend.extract_base_params(compiled)
         if estimated_params is None:
@@ -171,20 +187,27 @@ class Estimator:
             jitter=self.jitter,
             symmetrize=self.symmetrize,
             R=(self.R if R_override is None else R_override),
+            prepared=self._prepared_filter,
         )
 
     def _effective_observables(self) -> list[str]:
         canon = list(self.compiled.observable_names)
         canon_idx = {name: i for i, name in enumerate(canon)}
         kalman = self.compiled.kalman
+        prepared = self._prepared_filter
 
         if self.observables is None:
-            if kalman is not None and getattr(kalman, "y_names", None):
+            if prepared is not None:
+                obs_given = list(prepared.observables)
+            elif kalman is not None and getattr(kalman, "y_names", None):
                 obs_given = list(kalman.y_names)
             else:
                 obs_given = list(canon)
         else:
-            obs_given = list(self.observables)
+            if prepared is not None:
+                obs_given = list(prepared.observables)
+            else:
+                obs_given = list(self.observables)
 
         missing = [n for n in obs_given if n not in canon_idx]
         if missing:

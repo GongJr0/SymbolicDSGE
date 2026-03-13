@@ -37,6 +37,20 @@ class KFValidationContext:
     T: int
 
 
+def _is_numba_array_dispatch(func: Callable[..., Any]) -> bool:
+    return bool(getattr(func, "_symbolicdsge_array_dispatch", False))
+
+
+def _call_extended_probe(
+    func: Callable[..., Any],
+    state: NDF,
+    calib_params: NDF,
+) -> Any:
+    if _is_numba_array_dispatch(func):
+        return func(state, calib_params)
+    return func(*state, *calib_params)
+
+
 def validate_kf_inputs(
     *,
     filter_mode: "FilterMode",
@@ -167,8 +181,8 @@ def validate_kf_inputs(
                     "calib_params must be provided for probing in extended mode."
                 )
 
-            y_hat = h(*x_probe, *calib_params)
-            H_hat = H_jac(*x_probe, *calib_params)
+            y_hat = _call_extended_probe(h, x_probe, calib_params)
+            H_hat = _call_extended_probe(H_jac, x_probe, calib_params)
 
             y_hat_arr = np.asarray(y_hat)
             H_hat_arr = np.asarray(H_hat)

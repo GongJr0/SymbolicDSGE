@@ -103,27 +103,15 @@ class DSGESolver:
         params = [name_to_param[name] for name in params_order]
 
         compiled: list[Expr] = [sp.simplify(o.subs(subs_map)) for o in shifted]
+        shock_zero_subs = {shock: 0.0 for shock in conf.shock_map.keys()}
+        compiled_numeric: list[Expr] = [
+            sp.simplify(expr.subs(shock_zero_subs)) for expr in compiled
+        ]
 
         lambda_args = [*fwd_syms, *cur_syms, *params]
-        funcs = [sp.lambdify(lambda_args, c, modules="numpy") for c in compiled]
-
-        def equations(
-            fwd: ndarray, cur: ndarray, par: dict[str, float] | ndarray
-        ) -> ndarray:
-            fwd = np.asarray(fwd, dtype=complex128)
-            cur = np.asarray(cur, dtype=complex128)
-
-            if isinstance(par, dict):
-                par_vec = np.array([par[p.name] for p in params], dtype=complex128)
-            else:
-                par_vec = np.asarray(par, dtype=complex128)
-                if par_vec.shape[0] != len(params):
-                    raise ValueError(
-                        f"Parameter vector length {par_vec.shape[0]} != {len(params)}"
-                    )
-
-            vals = [f(*fwd, *cur, *par_vec) for f in funcs]
-            return np.asarray(vals)
+        objective_scalar_funcs = [
+            njit(sp.lambdify(lambda_args, c, modules="numpy")) for c in compiled_numeric
+        ]
 
         if n_state is None or n_exog is None:
             raise ValueError(
@@ -199,13 +187,13 @@ def jacobian_func({args_str}) -> NDF:
             var_names=var_order,
             calib_params=params,
             idx=idx,
-            objective_eqs=compiled,
-            objective_funcs=funcs,
-            equations=equations,
+            objective_eqs=compiled_numeric,
+            objective_funcs=objective_scalar_funcs,
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_funcs=observable_funcs,
             observable_jacobian=jacobian_func,
+            observable_jacobian_funcs=jac_scalar_funcs,
             n_state=int(n_state),
             n_exog=int(n_exog),
         )
@@ -239,17 +227,25 @@ def jacobian_func({args_str}) -> NDF:
         else:
             ss = asarray(steady_state, dtype=float64)
 
-        def _eqs(
-            fwd: ndarray, cur: ndarray, par: dict[str, float] | ndarray
-        ) -> ndarray:
-            return compiled.equations(fwd, cur, par)
-
         mdl = linearsolve.model(
-            equations=_eqs,
+            equations=compiled.equations,
             variables=compiled.var_names,
-            parameters=pd.Series(params, dtype=complex128),
+            parameters=np.ascontiguousarray(
+                np.array(
+                    [params[p.name] for p in compiled.calib_params], dtype=complex128
+                )
+            ),
+            parameter_names=[p.name for p in compiled.calib_params],
             n_states=compiled.n_state,
             n_exo_states=compiled.n_exog,
+        )
+        setattr(mdl, "_equations_numeric", compiled.construct_objective_vector_func())
+        setattr(
+            mdl,
+            "_parameter_array",
+            np.ascontiguousarray(
+                np.array([params[p.name] for p in compiled.calib_params], dtype=float64)
+            ),
         )
 
         mdl.set_ss(ss)

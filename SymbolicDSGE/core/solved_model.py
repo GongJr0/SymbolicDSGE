@@ -429,38 +429,10 @@ class SolvedModel:
         self,
         y_names: list[str],
     ) -> Tuple[NDF, NDF]:
-
-        obs_expr = dict(
-            zip(self.compiled.observable_names, self.compiled.observable_eqs)
+        return self.compiled.build_affine_measurement_matrices(
+            self.compiled.config.calibration.parameters,
+            y_names,
         )
-        param_subs = {
-            p: float64(v)
-            for p, v in self.compiled.config.calibration.parameters.items()
-        }
-
-        m = len(y_names)
-        n = self.A.shape[0]
-
-        C = np.zeros((m, n), dtype=float64)
-        d = np.zeros((m,), dtype=float64)
-
-        zero_subs = {s: 0.0 for s in self.compiled.cur_syms}
-
-        for i, y in enumerate(y_names):
-            expr = obs_expr[y]
-
-            # Constants
-            d_i = expr.subs(zero_subs).subs(param_subs)  # pyright: ignore
-            d[i] = float64(d_i)
-
-            # Linear Coefficients
-            for j, sym in enumerate(self.compiled.cur_syms):
-                a = expr.coeff(sym)
-                if a != 0:
-                    a = a.subs(param_subs)  # pyright: ignore
-                    C[i, j] = float64(a)
-
-        return C, d
 
     @staticmethod
     def _make_jit_measurement(K: int):  # type: ignore # (Types getting misinterpreted with no static known arg count)
@@ -546,8 +518,18 @@ class SolvedModel:
         H_jac: Callable[..., NDF] | None = None
 
         if filter_mode == "extended":
-            h_func = self.compiled.construct_measurement_vector_func()
-            H_jac = self.compiled.observable_jacobian
+            obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
+            if observables is None:
+                if self.kalman_config is not None and self.kalman_config.y_names:
+                    selected_obs = list(self.kalman_config.y_names)
+                else:
+                    selected_obs = list(self.compiled.observable_names)
+            else:
+                selected_obs = list(observables)
+            selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])
+
+            h_func = self.compiled.construct_measurement_array_func(selected_obs)
+            H_jac = self.compiled.construct_observable_jacobian_array_func(selected_obs)
 
         ki = KalmanInterface(
             model=self,
