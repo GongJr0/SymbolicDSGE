@@ -290,13 +290,37 @@ def _kalman_hot_loop(
     )
 
 
-def _ekf_hot_loop(
+def _is_numba_array_dispatch(func: Callable[..., object]) -> bool:
+    return bool(getattr(func, "_symbolicdsge_array_dispatch", False))
+
+
+def _call_extended_measurement(
+    func: Callable[..., NDF],
+    state: NDF,
+    calib_params: NDF,
+) -> NDF:
+    if _is_numba_array_dispatch(func):
+        return asarray(func(state, calib_params), dtype=float64)
+    return asarray(func(*state, *calib_params), dtype=float64)
+
+
+def _call_extended_jacobian(
+    func: Callable[..., NDF],
+    state: NDF,
+    calib_params: NDF,
+) -> NDF:
+    if _is_numba_array_dispatch(func):
+        return asarray(func(state, calib_params), dtype=float64)
+    return asarray(func(*state, *calib_params), dtype=float64)
+
+
+def _ekf_hot_loop_python(
     T: int,
     nmk: Tuple[int, int, int],
     A: NDF,
     B: NDF,
-    h: Callable[[NDF], NDF],
-    H_jac: Callable[[NDF], NDF],
+    h: Callable[..., NDF],
+    H_jac: Callable[..., NDF],
     calib_params: NDF,
     Q: NDF,
     R: NDF,
@@ -349,8 +373,8 @@ def _ekf_hot_loop(
             P_t_pred = _sym(P_t_pred)
 
         # --- Nonlinear measurement predict + Jacobian ---
-        y_t_pred = asarray(h(*x_t_pred, *calib_params), dtype=float64).reshape(m)
-        H_t = asarray(H_jac(*x_t_pred, *calib_params), dtype=float64).reshape(m, n)
+        y_t_pred = _call_extended_measurement(h, x_t_pred, calib_params).reshape(m)
+        H_t = _call_extended_jacobian(H_jac, x_t_pred, calib_params).reshape(m, n)
         H_tT = np.ascontiguousarray(H_t.T)
 
         v_t = y[t] - y_t_pred
@@ -382,14 +406,11 @@ def _ekf_hot_loop(
         quad = float64(v_t @ S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
-        # Optional y_filt
         if compute_y_filt:
-            y_t_filt = asarray(h(*x_t_filt, *calib_params), dtype=float64).reshape(m)
-        else:
-            y_t_filt = y_t_pred
+            y_filt[t] = _call_extended_measurement(h, x_t_filt, calib_params).reshape(m)
 
         # Optional "shock estimate" (same form as linear KF)
-        M = Q @ (B.T @ H_t.T)  # mirrors linear case with C -> H_t
+        M = Q @ (BT @ H_tT)  # mirrors linear case with C -> H_t
         eps_hat[t] = M @ S_inv_v
 
         # Store
@@ -398,7 +419,129 @@ def _ekf_hot_loop(
         P_pred[t] = P_t_pred
         P_filt[t] = P_t_filt
         y_pred[t] = y_t_pred
-        y_filt[t] = y_t_filt
+        v[t] = v_t
+        S[t] = S_t
+
+        x_prev = x_t_filt
+        P_prev = P_t_filt
+
+    return (
+        OK,
+        (float64(0.0), float64(0.0), float64(0.0)),
+        (
+            x_pred,
+            x_filt,
+            P_pred,
+            P_filt,
+            y_pred,
+            y_filt,
+            v,
+            S,
+            eps_hat,
+            loglik,
+        ),
+    )
+
+
+@njit
+def _ekf_hot_loop_numba(
+    T: int,
+    nmk: Tuple[int, int, int],
+    A: NDF,
+    B: NDF,
+    h: Callable[[NDF, NDF], NDF],
+    H_jac: Callable[[NDF, NDF], NDF],
+    calib_params: NDF,
+    Q: NDF,
+    R: NDF,
+    y: NDF,
+    x_0: NDF,
+    P_0: NDF,
+    symmetrize: bool,
+    jitter: float,
+    compute_y_filt: bool,
+) -> tuple[
+    int,
+    tuple[float64, float64, float64],
+    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+]:
+
+    n, m, k = nmk
+    x_prev = x_0
+    P_prev = P_0
+
+    x_pred = zeros((T, n), dtype=float64)
+    x_filt = zeros((T, n), dtype=float64)
+
+    P_pred = zeros((T, n, n), dtype=float64)
+    P_filt = zeros((T, n, n), dtype=float64)
+
+    y_pred = zeros((T, m), dtype=float64)
+    y_filt = zeros((T, m), dtype=float64)
+
+    v = zeros((T, m), dtype=float64)
+    S = zeros((T, m, m), dtype=float64)
+
+    eps_hat = zeros((T, k), dtype=float64)
+
+    loglik = float64(0.0)
+    const = m * np.log(2 * np.pi)
+
+    BT = np.ascontiguousarray(B.T)
+    AT = np.ascontiguousarray(A.T)
+
+    In = eye(n, dtype=float64)
+    BQBT = _sym(B @ Q @ BT)
+
+    for t in range(T):
+        x_t_pred = A @ x_prev
+        P_t_pred = A @ P_prev @ AT + BQBT
+
+        if symmetrize:
+            P_t_pred = _sym(P_t_pred)
+
+        y_t_pred = h(x_t_pred, calib_params).reshape(m)
+        H_t = H_jac(x_t_pred, calib_params).reshape(m, n)
+        H_tT = np.ascontiguousarray(H_t.T)
+
+        v_t = y[t] - y_t_pred
+        S_t = H_t @ P_t_pred @ H_tT + R
+
+        if symmetrize:
+            S_t = _sym(S_t)
+
+        L = _chol_shifted(S_t, jitter)
+
+        v_col = v_t.reshape(m, 1)
+        S_inv_v = _chol_solve_mat(L, v_col).reshape(m)
+
+        PHt = P_t_pred @ H_tT
+        PHtT = np.ascontiguousarray(PHt.T)
+        K_t = _chol_solve_mat(L, PHtT).T
+        K_tT = np.ascontiguousarray(K_t.T)
+
+        x_t_filt = x_t_pred + K_t @ v_t
+
+        KH = K_t @ H_t
+        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_tT
+        if symmetrize:
+            P_t_filt = _sym(P_t_filt)
+
+        ldS = _logdet_from_chol(L)
+        quad = float64(v_t @ S_inv_v)
+        loglik += -0.5 * (const + ldS + quad)
+
+        if compute_y_filt:
+            y_filt[t] = h(x_t_filt, calib_params).reshape(m)
+
+        M = Q @ (BT @ H_tT)
+        eps_hat[t] = M @ S_inv_v
+
+        x_pred[t] = x_t_pred
+        x_filt[t] = x_t_filt
+        P_pred[t] = P_t_pred
+        P_filt[t] = P_t_filt
+        y_pred[t] = y_t_pred
         v[t] = v_t
         S[t] = S_t
 
@@ -571,8 +714,8 @@ class KalmanFilter:
     def run_extended(
         A: NDF | NDC,
         B: NDF | NDC,
-        h: Callable[[NDF], NDF],
-        H_jac: Callable[[NDF], NDF],
+        h: Callable[..., NDF],
+        H_jac: Callable[..., NDF],
         calib_params: NDF,
         Q: NDF | NDC,
         R: NDF | NDC,
@@ -637,7 +780,7 @@ class KalmanFilter:
         :param jitter: Diagonal jitter added to S_t only if Cholesky factorization fails. Set to 0.0 to disable.
         :type jitter: float
 
-        :param compute_y_filt: If True, compute y_filt[t] = h(x_filt[t], t). If False, set y_filt[t] = y_pred[t].
+        :param compute_y_filt: If True, compute y_filt[t] = h(x_filt[t], t). If False, leave y_filt as zeros with shape (T, m).
         :type compute_y_filt: bool
         """
 
@@ -676,24 +819,45 @@ class KalmanFilter:
         if symmetrize:
             P_prev = _sym(P_prev)
 
+        use_numba_path = _is_numba_array_dispatch(h) and _is_numba_array_dispatch(H_jac)
+
         try:
-            err, err_info, out = _ekf_hot_loop(
-                T,
-                (n, m, k),
-                A,
-                B,
-                h,
-                H_jac,
-                calib_params,
-                Q,
-                R,
-                y,
-                x_prev,
-                P_prev,
-                symmetrize,
-                jitter,
-                compute_y_filt,
-            )
+            if use_numba_path:
+                err, err_info, out = _ekf_hot_loop_numba(
+                    T,
+                    (n, m, k),
+                    A,
+                    B,
+                    h,
+                    H_jac,
+                    calib_params,
+                    Q,
+                    R,
+                    y,
+                    x_prev,
+                    P_prev,
+                    symmetrize,
+                    jitter,
+                    compute_y_filt,
+                )
+            else:
+                err, err_info, out = _ekf_hot_loop_python(
+                    T,
+                    (n, m, k),
+                    A,
+                    B,
+                    h,
+                    H_jac,
+                    calib_params,
+                    Q,
+                    R,
+                    y,
+                    x_prev,
+                    P_prev,
+                    symmetrize,
+                    jitter,
+                    compute_y_filt,
+                )
         except linalg.LinAlgError as exc:
             raise MatrixConditionError(float("inf")) from exc
         if err != 0:

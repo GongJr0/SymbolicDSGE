@@ -39,6 +39,7 @@ class CompiledModel:
     observable_eqs: list[Expr]
     observable_funcs: list[Callable]
     observable_jacobian: Callable[..., ND]
+    observable_jacobian_funcs: tuple[Callable, ...]
 
     n_state: int
     n_exog: int
@@ -132,19 +133,18 @@ def vectorized_objective(fwd, cur, params):
 
         zero_state = np.zeros((len(self.cur_syms),), dtype=float64)
         d_full = np.asarray(
-            self.construct_measurement_vector_func()(*zero_state, *param_vec),
+            self.construct_measurement_array_func(observables)(zero_state, param_vec),
             dtype=float64,
         ).reshape(-1)
         C_full = np.asarray(
-            self.observable_jacobian(*zero_state, *param_vec),
+            self.construct_observable_jacobian_array_func(observables)(
+                zero_state, param_vec
+            ),
             dtype=float64,
         )
-
-        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
-        rows = [obs_idx[name] for name in observables]
         return (
-            np.ascontiguousarray(C_full[rows, :], dtype=float64),
-            np.ascontiguousarray(d_full[rows], dtype=float64),
+            np.ascontiguousarray(C_full, dtype=float64),
+            np.ascontiguousarray(d_full, dtype=float64),
         )
 
     @cached_property
@@ -185,6 +185,130 @@ def vectorized_measurements({params_typed}):
         # Cache the dispatcher so extended-mode likelihood evaluation does not
         # rebuild and recompile it on every call.
         return self._measurement_vector_func
+
+    def _normalize_observables(
+        self,
+        observables: list[str] | tuple[str, ...] | None,
+    ) -> tuple[str, ...]:
+        if observables is None:
+            return tuple(self.observable_names)
+
+        obs = tuple(observables)
+        if len(set(obs)) != len(obs):
+            raise ValueError("Observable list contains duplicates.")
+
+        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
+        missing = [name for name in obs if name not in obs_idx]
+        if missing:
+            raise KeyError(f"Unknown observables not in compiled model: {missing}")
+
+        return tuple(sorted(obs, key=lambda name: obs_idx[name]))
+
+    @cached_property
+    def _measurement_array_func_cache(self) -> dict[tuple[str, ...], Callable[..., ND]]:
+        return {}
+
+    def construct_measurement_array_func(
+        self,
+        observables: list[str] | tuple[str, ...] | None = None,
+    ) -> Callable[..., ND]:
+        obs = self._normalize_observables(observables)
+        cache = self._measurement_array_func_cache
+        if obs in cache:
+            return cache[obs]
+
+        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
+        selected_funcs = [self.observable_funcs[obs_idx[name]] for name in obs]
+        call_args = ", ".join(
+            [
+                *(f"state[{i}]" for i in range(len(self.cur_syms))),
+                *(f"params[{i}]" for i in range(len(self.calib_params))),
+            ]
+        )
+        body = "\n    ".join(
+            f"out[{i}] = func_{i}({call_args})" for i in range(len(selected_funcs))
+        )
+
+        func_str = f"""
+def measurement_array(state, params):
+    out = np.empty(({len(selected_funcs)},), dtype=np.float64)
+    {body}
+    return out
+"""
+
+        ns: dict[str, Any] = {"np": np}
+        for i, fn in enumerate(selected_funcs):
+            ns[f"func_{i}"] = fn
+
+        exec(dedent(func_str), ns)
+        f = njit(ns["measurement_array"])
+        float_vector = numba.types.Array(numba.float64, 1, "C")
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+            )
+            f.compile((float_vector, float_vector))
+
+        setattr(f, "_symbolicdsge_array_dispatch", True)
+        cache[obs] = cast(Callable, f)
+        return cache[obs]
+
+    @cached_property
+    def _observable_jacobian_array_func_cache(
+        self,
+    ) -> dict[tuple[str, ...], Callable[..., ND]]:
+        return {}
+
+    def construct_observable_jacobian_array_func(
+        self,
+        observables: list[str] | tuple[str, ...] | None = None,
+    ) -> Callable[..., ND]:
+        obs = self._normalize_observables(observables)
+        cache = self._observable_jacobian_array_func_cache
+        if obs in cache:
+            return cache[obs]
+
+        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
+        n_vars = len(self.cur_syms)
+        call_args = ", ".join(
+            [
+                *(f"state[{i}]" for i in range(n_vars)),
+                *(f"params[{i}]" for i in range(len(self.calib_params))),
+            ]
+        )
+
+        ns: dict[str, Any] = {"np": np, "float64": float64}
+        body_lines: list[str] = []
+        func_k = 0
+        for i, name in enumerate(obs):
+            row = obs_idx[name]
+            for j in range(n_vars):
+                scalar_idx = row * n_vars + j
+                ns[f"jac_func_{func_k}"] = self.observable_jacobian_funcs[scalar_idx]
+                body_lines.append(f"    J[{i}, {j}] = jac_func_{func_k}({call_args})")
+                func_k += 1
+
+        func_str = f"""
+def jacobian_array(state, params):
+    J = np.empty(({len(obs)}, {n_vars}), dtype=float64)
+{chr(10).join(body_lines)}
+    return J
+"""
+
+        exec(dedent(func_str), ns)
+        f = njit(ns["jacobian_array"])
+        float_vector = numba.types.Array(numba.float64, 1, "C")
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+            )
+            f.compile((float_vector, float_vector))
+
+        setattr(f, "_symbolicdsge_array_dispatch", True)
+        cache[obs] = cast(Callable, f)
+        return cache[obs]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

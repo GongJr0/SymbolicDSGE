@@ -1,5 +1,5 @@
-from .distribution import Distribution, Size, RandomState, VecF64
-from ..support import Support, bounded
+from .distribution import Distribution, Size, RandomState, VecF64, _scalar_or_array
+from ..support import OutOfSupportError, Support
 
 import numpy as np
 from numpy import float64
@@ -34,17 +34,24 @@ class HalfCauchy(Distribution):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.logpdf(x))
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
+        x_arr = np.asarray(x, dtype=float64)
+        centered = (x_arr - self._low) / self._scale
+        log_density = np.log(2.0 / np.pi) - np.log(self._scale) - np.log1p(centered**2)
+        return _scalar_or_array(log_density)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
         return float64((-2 * x) / (self._scale**2 + x**2))
 
     @overload

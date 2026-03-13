@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Mapping, Sequence, cast
+from dataclasses import dataclass
+from typing import Callable, Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,19 @@ from ..kalman.config import KalmanConfig
 from ..kalman.filter import KalmanFilter
 
 NDF = NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class PreparedFilterRun:
+    observables: list[str]
+    y_reordered: NDF
+    mode: str
+    measurement_func: Callable[[NDF, NDF], NDF]
+    measurement_jac: Callable[[NDF, NDF], NDF]
+    zero_state: NDF
+    P0: NDF | None
+    kf_jitter: float64
+    kf_sym: bool
 
 
 def _name_of(p: str | Symbol) -> str:
@@ -163,6 +177,22 @@ def build_C_d(
     return compiled.build_affine_measurement_matrices(params, observables)
 
 
+def build_C_d_from_dispatchers(
+    measurement_func: Callable[[NDF, NDF], NDF],
+    measurement_jac: Callable[[NDF, NDF], NDF],
+    zero_state: NDF,
+    calib_params: NDF,
+) -> tuple[NDF, NDF]:
+    d = np.asarray(measurement_func(zero_state, calib_params), dtype=float64).reshape(
+        -1
+    )
+    C = np.asarray(measurement_jac(zero_state, calib_params), dtype=float64)
+    return (
+        np.ascontiguousarray(C, dtype=float64),
+        np.ascontiguousarray(d, dtype=float64),
+    )
+
+
 def build_P0(
     compiled: CompiledModel,
     kalman: KalmanConfig | None,
@@ -198,6 +228,30 @@ def build_P0(
     raise ValueError(f"Unrecognized p0_mode: {mode}")
 
 
+def resolve_filter_options(
+    kalman: KalmanConfig | None,
+    jitter: float | float64 | None,
+    symmetrize: bool | None,
+) -> tuple[float64, bool]:
+    if jitter is None:
+        if kalman is not None and getattr(kalman, "jitter", None) is not None:
+            kf_jitter = float64(kalman.jitter)
+        else:
+            kf_jitter = float64(0.0)
+    else:
+        kf_jitter = float64(jitter)
+
+    if symmetrize is None:
+        if kalman is not None and getattr(kalman, "symmetrize", None) is not None:
+            kf_sym = bool(kalman.symmetrize)
+        else:
+            kf_sym = False
+    else:
+        kf_sym = bool(symmetrize)
+
+    return kf_jitter, kf_sym
+
+
 def resolve_R(
     compiled: CompiledModel,
     kalman: KalmanConfig | None,
@@ -216,6 +270,36 @@ def resolve_R(
     obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
     mat_idx = [obs_idx[name] for name in observables]
     return asarray(kalman.R[np.ix_(mat_idx, mat_idx)], dtype=float64)
+
+
+def prepare_filter_run(
+    *,
+    compiled: CompiledModel,
+    y: NDF | pd.DataFrame,
+    observables: list[str] | None,
+    filter_mode: str | None,
+    p0_mode: str | None,
+    p0_scale: float | float64 | None,
+    jitter: float | float64 | None,
+    symmetrize: bool | None,
+) -> PreparedFilterRun:
+    kalman = compiled.kalman
+    obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
+    mode = infer_filter_mode(compiled, obs) if filter_mode is None else filter_mode
+    P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
+    kf_jitter, kf_sym = resolve_filter_options(kalman, jitter, symmetrize)
+
+    return PreparedFilterRun(
+        observables=obs,
+        y_reordered=y_reordered,
+        mode=mode,
+        measurement_func=compiled.construct_measurement_array_func(obs),
+        measurement_jac=compiled.construct_observable_jacobian_array_func(obs),
+        zero_state=np.zeros((len(compiled.cur_syms),), dtype=float64),
+        P0=P0,
+        kf_jitter=kf_jitter,
+        kf_sym=kf_sym,
+    )
 
 
 def build_R_from_config_params(
@@ -266,39 +350,39 @@ def evaluate_loglik(
     jitter: float | float64 | None,
     symmetrize: bool | None,
     R: NDF | None,
+    prepared: PreparedFilterRun | None = None,
 ) -> float64:
+    prepared_run = (
+        prepared
+        if prepared is not None
+        else prepare_filter_run(
+            compiled=compiled,
+            y=y,
+            observables=observables,
+            filter_mode=filter_mode,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+        )
+    )
     sol = solver.solve(
         compiled=compiled,
         parameters={k: float(v) for k, v in params.items()},
         steady_state=steady_state,
         log_linear=log_linear,
     )
-    kalman = compiled.kalman
-    obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
-    mode = infer_filter_mode(compiled, obs) if filter_mode is None else filter_mode
-
     Q = build_Q(compiled, params)
-    P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
-    R_mat = resolve_R(compiled, kalman, obs, R)
+    R_mat = resolve_R(compiled, compiled.kalman, prepared_run.observables, R)
+    calib_params = build_calib_param_vector(compiled, params)
 
-    if jitter is None:
-        if kalman is not None and getattr(kalman, "jitter", None) is not None:
-            kf_jitter = float64(kalman.jitter)
-        else:
-            kf_jitter = float64(0.0)
-    else:
-        kf_jitter = float64(jitter)
-
-    if symmetrize is None:
-        if kalman is not None and getattr(kalman, "symmetrize", None) is not None:
-            kf_sym = bool(kalman.symmetrize)
-        else:
-            kf_sym = False
-    else:
-        kf_sym = bool(symmetrize)
-
-    if mode == "linear":
-        C, d = build_C_d(compiled, params, obs)
+    if prepared_run.mode == "linear":
+        C, d = build_C_d_from_dispatchers(
+            prepared_run.measurement_func,
+            prepared_run.measurement_jac,
+            prepared_run.zero_state,
+            calib_params,
+        )
         result = KalmanFilter.run(
             A=sol.A,
             B=sol.B,
@@ -306,38 +390,35 @@ def evaluate_loglik(
             d=d,
             Q=Q,
             R=R_mat,
-            y=y_reordered,
+            y=prepared_run.y_reordered,
             x0=x0,
-            P0=P0,
-            jitter=float(kf_jitter),
-            symmetrize=kf_sym,
+            P0=prepared_run.P0,
+            jitter=float(prepared_run.kf_jitter),
+            symmetrize=prepared_run.kf_sym,
             return_shocks=False,
         )
         return float64(result.loglik)
 
-    if mode == "extended":
-        h_func = compiled.construct_measurement_vector_func()
-        H_jac = compiled.observable_jacobian
-        calib_params = build_calib_param_vector(compiled, params)
+    if prepared_run.mode == "extended":
         result = KalmanFilter.run_extended(
             A=sol.A,
             B=sol.B,
-            h=h_func,
-            H_jac=H_jac,
+            h=prepared_run.measurement_func,
+            H_jac=prepared_run.measurement_jac,
             calib_params=calib_params,
             Q=Q,
             R=R_mat,
-            y=y_reordered,
+            y=prepared_run.y_reordered,
             x0=x0,
-            P0=P0,
-            jitter=float(kf_jitter),
-            symmetrize=kf_sym,
+            P0=prepared_run.P0,
+            jitter=float(prepared_run.kf_jitter),
+            symmetrize=prepared_run.kf_sym,
             return_shocks=False,
-            compute_y_filt=True,
+            compute_y_filt=False,
         )
         return float64(result.loglik)
 
-    raise ValueError(f"Unrecognized filter_mode: {mode}")
+    raise ValueError(f"Unrecognized filter_mode: {prepared_run.mode}")
 
 
 def estimate_R_diag(
@@ -355,13 +436,21 @@ def estimate_R_diag(
     jitter: float | float64 | None,
     symmetrize: bool | None,
 ) -> NDF:
-    kalman = compiled.kalman
-    obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
-    m = y_reordered.shape[1]
+    prepared = prepare_filter_run(
+        compiled=compiled,
+        y=y,
+        observables=observables,
+        filter_mode=None,
+        p0_mode=p0_mode,
+        p0_scale=p0_scale,
+        jitter=jitter,
+        symmetrize=symmetrize,
+    )
+    m = prepared.y_reordered.shape[1]
     eps = float64(1e-9)
     eta0 = np.log(
         np.asarray(
-            [max(0.1 * np.var(y_reordered[:, i]), eps) for i in range(m)],
+            [max(0.1 * np.var(prepared.y_reordered[:, i]), eps) for i in range(m)],
             dtype=float64,
         )
     )
@@ -375,30 +464,17 @@ def estimate_R_diag(
     except BaseException:
         return np.diag(np.exp(eta0))
 
-    mode = infer_filter_mode(compiled, obs)
     Q = build_Q(compiled, params)
-    P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
-
-    if jitter is None:
-        if kalman is not None and getattr(kalman, "jitter", None) is not None:
-            kf_jitter = float64(kalman.jitter)
-        else:
-            kf_jitter = float64(0.0)
-    else:
-        kf_jitter = float64(jitter)
-
-    if symmetrize is None:
-        if kalman is not None and getattr(kalman, "symmetrize", None) is not None:
-            kf_sym = bool(kalman.symmetrize)
-        else:
-            kf_sym = False
-    else:
-        kf_sym = bool(symmetrize)
-
     bounds = [(-30.0, 10.0)] * m
+    calib_params = build_calib_param_vector(compiled, params)
 
-    if mode == "linear":
-        C, d = build_C_d(compiled, params, obs)
+    if prepared.mode == "linear":
+        C, d = build_C_d_from_dispatchers(
+            prepared.measurement_func,
+            prepared.measurement_jac,
+            prepared.zero_state,
+            calib_params,
+        )
 
         def obj(eta: NDF) -> float64:
             R = np.diag(np.exp(eta))
@@ -409,37 +485,34 @@ def estimate_R_diag(
                 d=d,
                 Q=Q,
                 R=R,
-                y=y_reordered,
+                y=prepared.y_reordered,
                 x0=x0,
-                P0=P0,
-                jitter=float(kf_jitter),
-                symmetrize=kf_sym,
+                P0=prepared.P0,
+                jitter=float(prepared.kf_jitter),
+                symmetrize=prepared.kf_sym,
                 return_shocks=False,
             )
             return float64(-run.loglik)
 
     else:
-        h_func = compiled.construct_measurement_vector_func()
-        H_jac = compiled.observable_jacobian
-        calib_params = build_calib_param_vector(compiled, params)
 
         def obj(eta: NDF) -> float64:
             R = np.diag(np.exp(eta))
             run = KalmanFilter.run_extended(
                 A=sol.A,
                 B=sol.B,
-                h=h_func,
-                H_jac=H_jac,
+                h=prepared.measurement_func,
+                H_jac=prepared.measurement_jac,
                 calib_params=calib_params,
                 Q=Q,
                 R=R,
-                y=y_reordered,
+                y=prepared.y_reordered,
                 x0=x0,
-                P0=P0,
-                jitter=float(kf_jitter),
-                symmetrize=kf_sym,
+                P0=prepared.P0,
+                jitter=float(prepared.kf_jitter),
+                symmetrize=prepared.kf_sym,
                 return_shocks=False,
-                compute_y_filt=True,
+                compute_y_filt=False,
             )
             return float64(-run.loglik)
 
@@ -524,15 +597,23 @@ def estimate_R(
     Estimate full measurement covariance R with MAP first (LKJ prior on correlation),
     then fallback to plain MLE if MAP optimization fails.
     """
-    kalman = compiled.kalman
-    obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
-    m = y_reordered.shape[1]
+    prepared = prepare_filter_run(
+        compiled=compiled,
+        y=y,
+        observables=observables,
+        filter_mode=None,
+        p0_mode=p0_mode,
+        p0_scale=p0_scale,
+        jitter=jitter,
+        symmetrize=symmetrize,
+    )
+    m = prepared.y_reordered.shape[1]
     n_cpc = (m * (m - 1)) // 2
 
     eps = float64(1e-9)
     log_std0 = np.log(
         np.asarray(
-            [max(0.1 * np.var(y_reordered[:, i]), eps) for i in range(m)],
+            [max(0.1 * np.var(prepared.y_reordered[:, i]), eps) for i in range(m)],
             dtype=float64,
         )
     )
@@ -547,32 +628,21 @@ def estimate_R(
     except BaseException:
         return np.diag(np.exp(log_std0))
 
-    mode = infer_filter_mode(compiled, obs)
     Q = build_Q(compiled, params)
-    P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
-
-    if jitter is None:
-        if kalman is not None and getattr(kalman, "jitter", None) is not None:
-            kf_jitter = float64(kalman.jitter)
-        else:
-            kf_jitter = float64(0.0)
-    else:
-        kf_jitter = float64(jitter)
-
-    if symmetrize is None:
-        if kalman is not None and getattr(kalman, "symmetrize", None) is not None:
-            kf_sym = bool(kalman.symmetrize)
-        else:
-            kf_sym = False
-    else:
-        kf_sym = bool(symmetrize)
-
     bounds: list[tuple[float, float]] = [(-30.0, 10.0)] * m + [(-5.0, 5.0)] * n_cpc
     lkj = LKJChol(eta=float(lkj_eta), K=m, random_state=None)
+    calib_params = build_calib_param_vector(compiled, params)
+
+    if prepared.mode == "linear":
+        C, d = build_C_d_from_dispatchers(
+            prepared.measurement_func,
+            prepared.measurement_jac,
+            prepared.zero_state,
+            calib_params,
+        )
 
     def loglik_for_R(R: NDF) -> float64:
-        if mode == "linear":
-            C, d = build_C_d(compiled, params, obs)
+        if prepared.mode == "linear":
             run = KalmanFilter.run(
                 A=sol.A,
                 B=sol.B,
@@ -580,33 +650,30 @@ def estimate_R(
                 d=d,
                 Q=Q,
                 R=R,
-                y=y_reordered,
+                y=prepared.y_reordered,
                 x0=x0,
-                P0=P0,
-                jitter=float(kf_jitter),
-                symmetrize=kf_sym,
+                P0=prepared.P0,
+                jitter=float(prepared.kf_jitter),
+                symmetrize=prepared.kf_sym,
                 return_shocks=False,
             )
             return float64(run.loglik)
 
-        h_func = compiled.construct_measurement_vector_func()
-        H_jac = compiled.observable_jacobian
-        calib_params = build_calib_param_vector(compiled, params)
         run = KalmanFilter.run_extended(
             A=sol.A,
             B=sol.B,
-            h=h_func,
-            H_jac=H_jac,
+            h=prepared.measurement_func,
+            H_jac=prepared.measurement_jac,
             calib_params=calib_params,
             Q=Q,
             R=R,
-            y=y_reordered,
+            y=prepared.y_reordered,
             x0=x0,
-            P0=P0,
-            jitter=float(kf_jitter),
-            symmetrize=kf_sym,
+            P0=prepared.P0,
+            jitter=float(prepared.kf_jitter),
+            symmetrize=prepared.kf_sym,
             return_shocks=False,
-            compute_y_filt=True,
+            compute_y_filt=False,
         )
         return float64(run.loglik)
 

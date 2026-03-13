@@ -15,8 +15,8 @@ def parsed_test() -> ParsedConfig:
 
 
 @pytest.fixture(scope="module")
-def parsed_post82() -> ParsedConfig:
-    return ModelParser("MODELS/POST82.yaml").get_all()
+def parsed_post82(post82_test_model_path) -> ParsedConfig:
+    return ModelParser(post82_test_model_path).get_all()
 
 
 @pytest.fixture(scope="module")

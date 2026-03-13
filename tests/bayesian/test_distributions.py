@@ -112,6 +112,73 @@ def test_distribution_pdf_is_exp_logpdf(distribution_case):
     assert np.allclose(dist.pdf(x_valid), np.exp(dist.logpdf(x_valid)))
 
 
+@pytest.mark.parametrize(
+    ("ctor", "x_scalar", "x_vector"),
+    [
+        (
+            lambda: Normal(1.25, 0.7, 123),
+            float64(0.9),
+            np.array([-0.2, 0.9, 1.7], dtype=np.float64),
+        ),
+        (
+            lambda: LogNormal(0.45, 0.3, 1.8, 123),
+            float64(1.4),
+            np.array([0.8, 1.4, 3.2], dtype=np.float64),
+        ),
+        (
+            lambda: HalfNormal(0.5, 1.4, 123),
+            float64(0.9),
+            np.array([0.6, 0.9, 2.5], dtype=np.float64),
+        ),
+        (
+            lambda: HalfCauchy(0.25, 1.1, 123),
+            float64(0.7),
+            np.array([0.3, 0.7, 2.0], dtype=np.float64),
+        ),
+        (
+            lambda: Uniform(-2.0, 3.5, 123),
+            float64(0.4),
+            np.array([-1.5, 0.4, 2.2], dtype=np.float64),
+        ),
+        (
+            lambda: Beta(2.5, 4.0, -1.0, 2.5, 123),
+            float64(-0.1),
+            np.array([-0.7, -0.1, 0.9], dtype=np.float64),
+        ),
+        (
+            lambda: Gamma(4.5, 1.3, 123),
+            float64(2.1),
+            np.array([0.4, 2.1, 6.0], dtype=np.float64),
+        ),
+        (
+            lambda: InvGamma(3.2, 0.4, 1.8, 123),
+            float64(1.1),
+            np.array([0.7, 1.1, 3.0], dtype=np.float64),
+        ),
+    ],
+    ids=[
+        "normal",
+        "lognormal",
+        "halfnormal",
+        "halfcauchy",
+        "uniform",
+        "beta",
+        "gamma",
+        "invgamma",
+    ],
+)
+def test_distribution_logpdf_matches_scipy_counterpart(ctor, x_scalar, x_vector):
+    dist = ctor()
+
+    scalar_out = dist.logpdf(x_scalar)
+    scalar_expected = float64(dist.dist.logpdf(x_scalar))
+    assert np.allclose(scalar_out, scalar_expected, rtol=1e-12, atol=1e-12)
+
+    vector_out = np.asarray(dist.logpdf(x_vector), dtype=np.float64)
+    vector_expected = np.asarray(dist.dist.logpdf(x_vector), dtype=np.float64)
+    assert np.allclose(vector_out, vector_expected, rtol=1e-12, atol=1e-12)
+
+
 def test_distribution_cdf_ppf_roundtrip(distribution_case):
     _, ctor, x_valid, _, _ = distribution_case
     dist = ctor()

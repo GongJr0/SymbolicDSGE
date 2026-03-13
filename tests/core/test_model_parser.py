@@ -30,7 +30,7 @@ def test_parsed_config_is_iterable(parsed_post82):
 
     assert model.name == "NK_LS_POST82"
     assert kalman is not None
-    assert kalman.y_names == ["Infl", "Rate"]
+    assert kalman.y_names == ["OutGap", "Infl", "Rate"]
 
 
 def test_validate_constraints_errors_when_marked_constrained_without_equation(

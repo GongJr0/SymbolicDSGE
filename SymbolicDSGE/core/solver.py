@@ -193,6 +193,7 @@ def jacobian_func({args_str}) -> NDF:
             observable_eqs=observable_exprs,
             observable_funcs=observable_funcs,
             observable_jacobian=jacobian_func,
+            observable_jacobian_funcs=jac_scalar_funcs,
             n_state=int(n_state),
             n_exog=int(n_exog),
         )
@@ -229,7 +230,12 @@ def jacobian_func({args_str}) -> NDF:
         mdl = linearsolve.model(
             equations=compiled.equations,
             variables=compiled.var_names,
-            parameters=pd.Series(params, dtype=complex128),
+            parameters=np.ascontiguousarray(
+                np.array(
+                    [params[p.name] for p in compiled.calib_params], dtype=complex128
+                )
+            ),
+            parameter_names=[p.name for p in compiled.calib_params],
             n_states=compiled.n_state,
             n_exo_states=compiled.n_exog,
         )

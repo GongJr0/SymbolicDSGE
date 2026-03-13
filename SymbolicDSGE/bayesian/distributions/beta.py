@@ -1,8 +1,10 @@
-from .distribution import Distribution, Size, RandomState, VecF64
-from ..support import Support, bounded
+from .distribution import Distribution, Size, RandomState, VecF64, _scalar_or_array
+from ..support import OutOfSupportError, Support
 
+import numpy as np
 from numpy import float64
 from scipy.stats import beta
+from scipy.special import betaln, xlogy, xlog1py
 
 from typing import TypedDict, overload, cast
 
@@ -41,17 +43,29 @@ class Beta(Distribution[float64, VecF64]):
     @overload
     def logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.logpdf(x))
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
+        x_arr = np.asarray(x, dtype=float64)
+        y = (x_arr - self._loc) / self._scale
+        log_density = (
+            xlogy(self._a - 1.0, y)
+            + xlog1py(self._b - 1.0, -y)
+            - betaln(self._a, self._b)
+            - np.log(self._scale)
+        )
+        return _scalar_or_array(log_density)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
     @overload
     def grad_logpdf(self, x: VecF64) -> VecF64: ...
 
-    @bounded
     def grad_logpdf(self, x: float64 | VecF64) -> float64 | VecF64:
+        support = self.support
+        if not support.contains(x):
+            raise OutOfSupportError(x, support)
         return float64(
             (self._a - 1) / (x - self._loc)
             - (self._b - 1) / (self._loc + self._scale - x)

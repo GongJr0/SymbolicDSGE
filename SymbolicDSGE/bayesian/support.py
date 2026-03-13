@@ -17,18 +17,32 @@ class Support:
     high_inclusive: bool = True
 
     def contains(self, x: FLOAT_VEC_SCA) -> bool:
+        if np.isscalar(x):
+            x_scalar = cast(float64, x)
+            if self.low_inclusive:
+                low_check = x_scalar >= self.low
+            else:
+                low_check = x_scalar > self.low
+
+            if self.high_inclusive:
+                high_check = x_scalar <= self.high
+            else:
+                high_check = x_scalar < self.high
+
+            return bool(low_check and high_check)
+
         x_arr = np.asarray(x)
         if self.low_inclusive:
-            low_check = x_arr >= self.low
+            low_check_arr = x_arr >= self.low
         else:
-            low_check = x_arr > self.low
+            low_check_arr = x_arr > self.low
 
         if self.high_inclusive:
-            high_check = x_arr <= self.high
+            high_check_arr = x_arr <= self.high
         else:
-            high_check = x_arr < self.high
+            high_check_arr = x_arr < self.high
 
-        return bool(np.all(low_check) and np.all(high_check))
+        return bool(np.all(low_check_arr) and np.all(high_check_arr))
 
     def at_boundary(self, x: FLOAT_VEC_SCA, bound: Literal["high", "low"]) -> bool:
         x_arr = np.asarray(x)

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import sympy as sp
 import yaml
+from numba import njit
 from numpy import float64
 import pytest
 
@@ -75,6 +76,18 @@ def test_construct_measurement_vector_func_is_cached(compiled_test):
     )
 
 
+def test_construct_measurement_array_dispatchers_are_cached(compiled_test):
+    c = compiled_test
+    obs = list(c.observable_names)
+
+    assert c.construct_measurement_array_func(
+        obs
+    ) is c.construct_measurement_array_func(obs)
+    assert c.construct_observable_jacobian_array_func(
+        obs
+    ) is c.construct_observable_jacobian_array_func(obs)
+
+
 def test_construct_objective_vector_func_is_cached(compiled_test):
     c = compiled_test
 
@@ -112,6 +125,30 @@ def test_objective_vector_func_matches_compiled_equations(compiled_test):
         np.ascontiguousarray(params),
     )
     assert np.allclose(actual_step, expected_step)
+
+
+def test_measurement_array_dispatchers_match_scalar_dispatchers(compiled_test):
+    c = compiled_test
+    state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
+    params = np.array(
+        [float64(c.config.calibration.parameters[p]) for p in c.calib_params],
+        dtype=float64,
+    )
+
+    scalar_measure = np.asarray(
+        c.construct_measurement_vector_func()(*state, *params), dtype=float64
+    )
+    array_measure_func = c.construct_measurement_array_func(c.observable_names)
+    array_measure = array_measure_func(state, params)
+
+    scalar_jac = np.asarray(c.observable_jacobian(*state, *params), dtype=float64)
+    array_jac_func = c.construct_observable_jacobian_array_func(c.observable_names)
+    array_jac = array_jac_func(state, params)
+
+    assert getattr(array_measure_func, "_symbolicdsge_array_dispatch", False)
+    assert getattr(array_jac_func, "_symbolicdsge_array_dispatch", False)
+    assert np.allclose(array_measure, scalar_measure)
+    assert np.allclose(array_jac, scalar_jac)
 
 
 def test_klein_helpers_use_numba_function_cache():
@@ -164,9 +201,9 @@ def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
         solver.compile(n_state=3, n_exog=2)
 
 
-def test_post82_randomized_calibration_still_solves(tmp_path):
+def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_path):
     rng = random.Random(42)
-    base = yaml.safe_load(open("MODELS/POST82.yaml", "r", encoding="utf-8"))
+    base = yaml.safe_load(post82_test_model_path.read_text(encoding="utf-8"))
     for k, v in list(base["calibration"]["parameters"].items()):
         if isinstance(v, (int, float)):
             base["calibration"]["parameters"][k] = float(v) * (
@@ -232,7 +269,39 @@ def test_solver_log_linear_solves_positive_steady_model(tmp_path):
     assert solved.B.shape == (2, 1)
 
 
-def test_linearsolve_falls_back_without_numeric_dispatcher():
+def test_linearsolve_accepts_array_parameters_on_numeric_path():
+    params = np.array([0.9], dtype=np.complex128)
+
+    def equations(fwd, cur, par):
+        return np.array([fwd[0] - par[0] * cur[0]], dtype=np.complex128)
+
+    @njit
+    def equations_numeric(fwd, cur, par):
+        return np.array([fwd[0] - par[0] * cur[0]], dtype=np.complex128)
+
+    mdl = linearsolve.model(
+        equations=equations,
+        variables=["x"],
+        parameters=params,
+        parameter_names=["rho"],
+        n_states=1,
+        n_exo_states=0,
+    )
+    mdl.set_ss(np.array([1.0], dtype=float))
+    setattr(mdl, "_equations_numeric", equations_numeric)
+    setattr(mdl, "_parameter_array", np.array([0.9], dtype=float))
+    mdl.linear_approximation()
+
+    assert mdl.names["param"] == ["rho"]
+    assert isinstance(mdl.parameters, np.ndarray)
+    assert isinstance(mdl.ss, np.ndarray)
+    assert mdl.a.shape == (1, 1)
+    assert mdl.b.shape == (1, 1)
+    assert mdl.a[0, 0] == pytest.approx(1.0)
+    assert mdl.b[0, 0] == pytest.approx(0.9)
+
+
+def test_linearsolve_legacy_fallback_without_numeric_dispatcher():
     params = pd.Series({"rho": 0.9}, dtype=float)
 
     def equations(fwd, cur, par):
@@ -248,6 +317,7 @@ def test_linearsolve_falls_back_without_numeric_dispatcher():
     mdl.set_ss(pd.Series({"x": 1.0}, dtype=float))
     mdl.linear_approximation()
 
+    assert isinstance(mdl.ss, np.ndarray)
     assert mdl.a.shape == (1, 1)
     assert mdl.b.shape == (1, 1)
     assert mdl.a[0, 0] == pytest.approx(1.0)

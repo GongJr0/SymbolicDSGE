@@ -8,7 +8,7 @@ from .distributions.distribution import Distribution, RandomState, Size, VecF64
 from .distributions.distribution_dispatch import get_distribution
 from .distributions.param_builder import get_dist_params
 
-from .support import Support, bounded
+from .support import OutOfSupportError, Support
 
 from typing import TypedDict, Any, cast
 from numpy import float64
@@ -36,18 +36,22 @@ class Prior:
     @overload
     def logpdf(self, z: NDArray[float64]) -> NDArray[float64]: ...
 
-    @bounded(domain="maps_to")
     def logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        maps_to = self.transform.maps_to
+        if not maps_to.contains(z):
+            raise OutOfSupportError(z, maps_to)
         x = self.transform.inverse(z)
         return self.dist.logpdf(x) + self.transform.log_det_abs_jacobian_inverse(z)
 
     @overload
-    def grad_logpdf(self, x: float64) -> float64: ...
+    def grad_logpdf(self, z: float64) -> float64: ...
     @overload
-    def grad_logpdf(self, x: NDArray[float64]) -> NDArray[float64]: ...
+    def grad_logpdf(self, z: NDArray[float64]) -> NDArray[float64]: ...
 
-    @bounded(domain="maps_to")
     def grad_logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        maps_to = self.transform.maps_to
+        if not maps_to.contains(z):
+            raise OutOfSupportError(z, maps_to)
         x = self.transform.inverse(z)
         gx = self.dist.grad_logpdf(x)
         dx_dz = self.transform.grad_inverse(z)

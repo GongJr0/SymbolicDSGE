@@ -51,6 +51,13 @@ def _coerce_rng(random_state: RandomState) -> np.random.Generator:
     raise TypeError(f"Unsupported random_state type: {type(random_state)}")
 
 
+def _scalar_or_array(value: object) -> float64 | VecF64:
+    arr = np.asarray(value, dtype=float64)
+    if arr.ndim == 0:
+        return float64(arr)
+    return arr
+
+
 class Distribution(ABC, Generic[EventT, BatchT]):
     @abstractmethod
     def __repr__(self) -> str: ...

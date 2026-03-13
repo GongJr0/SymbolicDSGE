@@ -518,8 +518,18 @@ class SolvedModel:
         H_jac: Callable[..., NDF] | None = None
 
         if filter_mode == "extended":
-            h_func = self.compiled.construct_measurement_vector_func()
-            H_jac = self.compiled.observable_jacobian
+            obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
+            if observables is None:
+                if self.kalman_config is not None and self.kalman_config.y_names:
+                    selected_obs = list(self.kalman_config.y_names)
+                else:
+                    selected_obs = list(self.compiled.observable_names)
+            else:
+                selected_obs = list(observables)
+            selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])
+
+            h_func = self.compiled.construct_measurement_array_func(selected_obs)
+            H_jac = self.compiled.construct_observable_jacobian_array_func(selected_obs)
 
         ki = KalmanInterface(
             model=self,

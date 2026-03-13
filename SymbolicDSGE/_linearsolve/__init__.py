@@ -7,17 +7,128 @@ import scipy.linalg as la
 from statsmodels.tools.numdiff import approx_fprime_cs, approx_fprime
 from scipy.optimize import root, fsolve, broyden1, broyden2
 import warnings
-import pandas as pd
 
 
 from numpy import complex128, float64
 from numpy.typing import NDArray
 from numba import njit
 
-from typing import TypeAlias, Tuple
+from collections.abc import Mapping
+from typing import Any, TypeAlias, Tuple
 
 NDF: TypeAlias = NDArray[float64]
 NDC: TypeAlias = NDArray[complex128]
+
+_PANDAS = None
+
+
+def _require_pandas():
+    global _PANDAS
+    if _PANDAS is None:
+        import pandas as _pd
+
+        _PANDAS = _pd
+
+    return _PANDAS
+
+
+def _stringify_names(names):
+    return [
+        name if isinstance(name, str) else getattr(name, "name", str(name))
+        for name in names
+    ]
+
+
+def _is_labeled_vector(values):
+    index = getattr(values, "index", None)
+    return index is not None and not callable(index) and not hasattr(values, "columns")
+
+
+def _value_dtype(values):
+    if isinstance(values, Mapping):
+        if len(values) == 0:
+            return np.dtype(float64)
+        return np.asarray(list(values.values())).dtype
+
+    if hasattr(values, "to_numpy"):
+        return np.asarray(values.to_numpy()).dtype
+
+    return np.asarray(values).dtype
+
+
+def _normalize_parameter_input(parameters, parameter_names=None):
+    if parameters is None:
+        names = [] if parameter_names is None else list(parameter_names)
+        return np.empty((0,), dtype=float64), names
+
+    if isinstance(parameters, Mapping):
+        inferred_names = _stringify_names(parameters.keys())
+        names = inferred_names if parameter_names is None else list(parameter_names)
+        if len(names) != len(inferred_names):
+            raise ValueError("parameter_names length must match parameters length.")
+        return parameters, names
+
+    if _is_labeled_vector(parameters):
+        inferred_names = _stringify_names(getattr(parameters, "index"))
+        names = inferred_names if parameter_names is None else list(parameter_names)
+        if len(names) != len(inferred_names):
+            raise ValueError("parameter_names length must match parameters length.")
+        return parameters, names
+
+    array = np.ascontiguousarray(np.asarray(parameters).reshape(-1))
+    if parameter_names is None:
+        raise ValueError("parameter_names is required when parameters are array-like.")
+
+    names = list(parameter_names)
+    if array.shape[0] != len(names):
+        raise ValueError("parameter_names length must match parameters length.")
+
+    return array, names
+
+
+def _normalize_named_vector(values, names, dtype=None):
+    if isinstance(values, Mapping):
+        try:
+            ordered = [values[name] for name in names]
+        except KeyError as exc:
+            raise KeyError(f"Missing named value '{exc.args[0]}'.") from exc
+        array = np.asarray(ordered, dtype=dtype)
+    elif _is_labeled_vector(values):
+        if hasattr(values, "loc"):
+            selected = values.loc[list(names)]
+        else:
+            selected = values[list(names)]
+
+        if hasattr(selected, "to_numpy"):
+            array = selected.to_numpy(dtype=dtype)
+        else:
+            array = np.asarray(selected, dtype=dtype)
+    else:
+        array = np.asarray(values, dtype=dtype)
+
+    vector = np.ascontiguousarray(array).reshape(-1)
+    if vector.shape[0] != len(names):
+        raise ValueError(
+            f"Expected vector of length {len(names)}, received {vector.shape[0]}."
+        )
+
+    return vector
+
+
+def _cast_parameter_values(parameters, dtype):
+    if isinstance(parameters, Mapping):
+        return {
+            key: np.asarray(value, dtype=dtype).reshape(()).item()
+            for key, value in parameters.items()
+        }
+
+    if hasattr(parameters, "astype"):
+        casted = parameters.astype(dtype)
+        if isinstance(casted, np.ndarray):
+            return np.ascontiguousarray(casted.reshape(-1))
+        return casted
+
+    return np.ascontiguousarray(np.asarray(parameters, dtype=dtype).reshape(-1))
 
 
 class model:
@@ -34,6 +145,7 @@ class model:
         endo_states=None,
         shock_names=None,
         parameters=None,
+        parameter_names=None,
         shock_prefix=None,
         n_states=None,
         n_exo_states=None,
@@ -66,7 +178,8 @@ class model:
             n_states:           (int) The number of state variables in the model.
             n_exo_states:       (int) The number of state variables with exogenous shocks. If None, then it's assumed
                                     that all state variables have exogenous shocks. Default: None
-            parameters:         (Pandas Series) Pandas Series object with parameter name strings as the index.
+            parameters:         Parameter values. May be a mapping, labeled vector, or array-like.
+            parameter_names:    (list) Parameter names corresponding to array-like `parameters`.
             shock_prefix:       (str) By default shocks are named 'e_[var1]', 'e_[var2]', etc. Change the prefix 'e_'
                                     with this parameter or set the shock_names parameter to avoid prefixes altogether.
 
@@ -82,8 +195,7 @@ class model:
             n_costates:             (int) The number of costate or control variables in the model.
             names:                  (dict) A dictionary with keys 'variables', 'shocks', and 'param' that
                                         stores the names of the model's variables, shocks, and parameters.
-            parameters:             (Pandas Series) A Pandas Series with parameter name strings as the
-                                        index.
+            parameters:             Parameter values supplied at construction.
         """
 
         if variables is None:
@@ -239,7 +351,10 @@ class model:
                 costates = variables[~np.isin(variables, states)]
 
         self.equations = equations
-        self.parameters = parameters
+        self.parameters, parameter_names = _normalize_parameter_input(
+            parameters,
+            parameter_names=parameter_names,
+        )
 
         names = {}
 
@@ -262,7 +377,7 @@ class model:
                 "Length of shock_names doesn't match number of exogenous states"
             )
 
-        names["param"] = parameters.index.values
+        names["param"] = list(parameter_names)
 
         self.names = names
 
@@ -434,8 +549,15 @@ class model:
 
         try:
             print(np.isclose(self.equations(self.ss, self.ss, self.parameters), 0))
-        except:
-            print("Set the steady state first.")
+        except Exception:
+            try:
+                pd = _require_pandas()
+                ss_named = pd.Series(self.ss, index=self.names["variables"])
+                print(
+                    np.isclose(self.equations(ss_named, ss_named, self.parameters), 0)
+                )
+            except Exception:
+                print("Set the steady state first.")
 
     def compute_ss(self, guess=None, method="fsolve", options={}):
         """Attempts to solve for the steady state of the model.
@@ -465,14 +587,14 @@ class model:
         if guess is None:
             guess = np.ones(self.n_vars)
         else:
-            if isinstance(guess, pd.Series):
-                guess = guess.loc[self.names["variables"]]
-
-            elif isinstance(guess, list):
+            if isinstance(guess, list):
                 guess = np.array(guess)
+            elif isinstance(guess, Mapping) or _is_labeled_vector(guess):
+                guess = _normalize_named_vector(guess, self.names["variables"])
 
         # Create function for nonlinear solver
         def ss_fun(variables):
+            pd = _require_pandas()
 
             variables = pd.Series(variables, index=self.names["variables"])
 
@@ -535,8 +657,7 @@ class model:
                 )
             ]
 
-        # Add ss attribute
-        self.ss = pd.Series(steady_state, index=self.names["variables"])
+        self.set_ss(steady_state)
 
     def impulse(self, T=51, t0=1, shocks=None, center=True, normalize=True):
         """Computes impulse responses for shocks to each state variable.
@@ -571,9 +692,10 @@ class model:
 
         # Initialize dictionary
         irs_dict = {}
+        pd = _require_pandas()
 
         # Manage shocks
-        if isinstance(shocks, pd.Series) or isinstance(shocks, dict):
+        if _is_labeled_vector(shocks) or isinstance(shocks, dict):
 
             if isinstance(shocks, dict):
                 shocks = pd.Series(shocks)
@@ -645,9 +767,12 @@ class model:
                     "You must specify a steady state for the model before attempting to linearize."
                 )
 
-        return steady_state
+        return _normalize_named_vector(steady_state, self.names["variables"])
 
     def _linear_approximation_python(self, steady_state):
+        steady_state_array = _as_1d_array(steady_state)
+        pd = _require_pandas()
+
         def equilibrium(vars_fwd, vars_cur):
 
             vars_fwd = pd.Series(vars_fwd, index=self.names["variables"])
@@ -663,15 +788,19 @@ class model:
 
         if not np.iscomplexobj(self.parameters):
 
-            self.a = approx_fprime_cs(steady_state.to_numpy(), equilibrium_fwd)
-            self.b = -approx_fprime_cs(steady_state.to_numpy(), equilibrium_cur)
+            self.a = approx_fprime_cs(steady_state_array, equilibrium_fwd)
+            self.b = -approx_fprime_cs(steady_state_array, equilibrium_cur)
 
         else:
 
-            self.a = approx_fprime(steady_state.to_numpy(), equilibrium_fwd)
-            self.b = -approx_fprime(steady_state.to_numpy(), equilibrium_cur)
+            self.a = approx_fprime(steady_state_array, equilibrium_fwd)
+            self.b = -approx_fprime(steady_state_array, equilibrium_cur)
 
     def _log_linear_approximation_python(self, steady_state):
+        steady_state_array = _as_1d_array(steady_state)
+        log_steady_state = np.log(steady_state_array)
+        pd = _require_pandas()
+
         def log_equilibrium(log_vars_fwd, log_vars_cur):
 
             log_vars_fwd = pd.Series(log_vars_fwd, index=self.names["variables"])
@@ -687,21 +816,21 @@ class model:
 
             return np.log(equilibrium_left) - np.log(equilibrium_right)
 
-        log_equilibrium_fwd = lambda log_fwd: log_equilibrium(log_fwd, np.log(self.ss))
-        log_equilibrium_cur = lambda log_cur: log_equilibrium(np.log(self.ss), log_cur)
+        log_equilibrium_fwd = lambda log_fwd: log_equilibrium(log_fwd, log_steady_state)
+        log_equilibrium_cur = lambda log_cur: log_equilibrium(log_steady_state, log_cur)
 
         if not np.iscomplexobj(self.parameters):
 
-            self.a = approx_fprime_cs(np.log(self.ss).ravel(), log_equilibrium_fwd)
-            self.b = -approx_fprime_cs(np.log(self.ss).ravel(), log_equilibrium_cur)
+            self.a = approx_fprime_cs(log_steady_state.ravel(), log_equilibrium_fwd)
+            self.b = -approx_fprime_cs(log_steady_state.ravel(), log_equilibrium_cur)
 
         else:
 
             self.a = approx_fprime(
-                np.log(self.ss).ravel(), log_equilibrium_fwd, centered=True
+                log_steady_state.ravel(), log_equilibrium_fwd, centered=True
             )
             self.b = -approx_fprime(
-                np.log(self.ss).ravel(), log_equilibrium_cur, centered=True
+                log_steady_state.ravel(), log_equilibrium_cur, centered=True
             )
 
     def _numeric_approximation(self, steady_state, log_linear):
@@ -822,28 +951,21 @@ class model:
 
         """
 
-        try:
-            self.ss = steady_state[self.names["variables"]]
-            self.ss = self.ss.astype(
-                np.promote_types(
-                    float, np.promote_types(self.parameters.dtype, steady_state.dtype)
-                )
-            )
+        parameter_dtype = _value_dtype(self.parameters)
+        steady_state_dtype = _value_dtype(steady_state)
+        promoted_dtype = np.promote_types(
+            float,
+            np.promote_types(parameter_dtype, steady_state_dtype),
+        )
+        self.ss = _normalize_named_vector(
+            steady_state,
+            self.names["variables"],
+            dtype=promoted_dtype,
+        )
 
-        except:
-            self.ss = pd.Series(
-                steady_state,
-                index=self.names["variables"],
-                dtype=np.promote_types(
-                    float,
-                    np.promote_types(
-                        self.parameters.dtype, np.array(steady_state).dtype
-                    ),
-                ),
-            )
-
-        self.parameters = self.parameters.astype(
-            np.promote_types(self.ss.dtype, self.parameters.dtype)
+        self.parameters = _cast_parameter_values(
+            self.parameters,
+            np.promote_types(self.ss.dtype, parameter_dtype),
         )
 
     def solve_klein(self, a=None, b=None, eigenvalue_warnings=True):
@@ -1103,6 +1225,7 @@ class model:
         x = ir(self.f, self.p, eps, s0)
 
         # Construct DataFrame
+        pd = _require_pandas()
         if center:
             simulated_data = pd.DataFrame(
                 x.T[drop_first:], columns=self.names["variables"]
@@ -1183,10 +1306,12 @@ def ir(f, p, eps, s0=None):
 
 
 def _as_1d_array(values):
-    if hasattr(values, "to_numpy"):
+    if isinstance(values, Mapping):
+        values = list(values.values())
+    elif hasattr(values, "to_numpy"):
         values = values.to_numpy()
 
-    return np.asarray(values).reshape(-1)
+    return np.ascontiguousarray(np.asarray(values).reshape(-1))
 
 
 @njit
