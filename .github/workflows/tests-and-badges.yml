@@ -20,14 +20,14 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.13"
+          python-version: "3.13.9"
           enable-cache: true
 
       - name: Sync dependencies
         run: uv sync --frozen --all-extras
 
       - name: Run tests with coverage
-        # warnings are OK: default pytest behavior is NOT to fail on warnings
+
         run: |
           uv run pytest -q ./tests --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
 
