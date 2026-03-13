@@ -1,6 +1,6 @@
 [project]
 name = "SymbolicDSGE"
-version = "0.5.2"
+version = "0.5.3"
 description = "A diagnostic symbolic adjustment layer for simple DSGE models. Features a built-in linearized DSGE engine constructed from symbolic expressions. Functionality is included to regress on measurement equations with symbolic function discovery using Kalman Filter innovations. The library is designed to be a diagnostic tool to provide isight into potential model misspecifications through said mesaurement regressions."
 authors = [
     {name = "Ege Güney Kıymaç", email = "guneykiymac@gmail.com"}
@@ -24,10 +24,6 @@ Documentation = "https://gongjr0.github.io/SymbolicDSGE/"
 Repository = "https://github.com/GongJr0/SymbolicDSGE"
 
 [project.optional-dependencies]
-notebook = [
-    "ipykernel>=7.1.0",
-    "ipython>=9.8.0",
-]
 fred = [
     "fredapi>=0.5.2",
     "python-dotenv>=1.2.1",
