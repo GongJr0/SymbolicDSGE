@@ -10,9 +10,48 @@ from SymbolicDSGE.bayesian.support import OutOfSupportError, Support
 from SymbolicDSGE.bayesian.transforms import AffineLogitTransform, Identity
 
 
+def _make_warned_prior(
+    *, distribution: str, parameters: dict, transform: str, transform_kwargs=None
+):
+    with pytest.warns(UserWarning, match="non-finite support"):
+        return make_prior(
+            distribution=distribution,
+            parameters=parameters,
+            transform=transform,
+            transform_kwargs=transform_kwargs,
+        )
+
+
+def _make_warned_custom_prior(*, dist, transform):
+    with pytest.warns(UserWarning, match="non-finite support"):
+        return Prior(
+            dist=dist,  # type: ignore[arg-type]
+            transform=transform,  # type: ignore[arg-type]
+        )
+
+
 class _DummyDist:
     def __init__(self, support: Support):
         self._support = support
+
+    @property
+    def support(self) -> Support:
+        return self._support
+
+
+class _BoundedLogpdfDist:
+    def __init__(self, support: Support):
+        self._support = support
+
+    def logpdf(self, x):
+        if not self._support.contains(x):
+            raise OutOfSupportError(x, self._support)
+        return float64(0.0)
+
+    def grad_logpdf(self, x):
+        if not self._support.contains(x):
+            raise OutOfSupportError(x, self._support)
+        return float64(0.0)
 
     @property
     def support(self) -> Support:
@@ -121,7 +160,7 @@ class _TrackingTransform:
 
 
 def test_make_prior_builds_instances_and_applies_defaults():
-    prior = make_prior(
+    prior = _make_warned_prior(
         distribution="normal",
         parameters={"mean": 2.5},
         transform="identity",
@@ -134,16 +173,17 @@ def test_make_prior_builds_instances_and_applies_defaults():
 
 
 def test_make_prior_passes_transform_kwargs():
-    prior = make_prior(
-        distribution="uniform",
-        parameters={"low": -2.0, "high": 3.0},
-        transform="affine_logit",
-        transform_kwargs={"low": -2.0, "high": 3.0},
+    prior = _make_warned_prior(
+        distribution="log_normal",
+        parameters={"s": 1.0, "low": -2.0, "scale": 1.0},
+        transform="lower_bounded",
+        transform_kwargs={"low": -2.0},
     )
 
-    assert isinstance(prior.transform, AffineLogitTransform)
+    from SymbolicDSGE.bayesian.transforms import LowerBoundedTransform
+
+    assert isinstance(prior.transform, LowerBoundedTransform)
     assert np.allclose(prior.transform.low, -2.0)
-    assert np.allclose(prior.transform.high, 3.0)
 
 
 def test_make_prior_rejects_unrecognized_distribution_parameter():
@@ -174,7 +214,7 @@ def test_make_prior_rejects_unknown_transform():
 
 
 def test_prior_logpdf_identity_matches_distribution():
-    prior = make_prior(
+    prior = _make_warned_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
@@ -184,7 +224,7 @@ def test_prior_logpdf_identity_matches_distribution():
 
 
 def test_prior_grad_logpdf_identity_matches_distribution():
-    prior = make_prior(
+    prior = _make_warned_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
@@ -194,10 +234,13 @@ def test_prior_grad_logpdf_identity_matches_distribution():
 
 
 def test_prior_bounded_methods_raise_outside_distribution_support():
-    prior = make_prior(
-        distribution="gamma",
-        parameters={"mean": 6.0, "std": np.sqrt(12.0)},
-        transform="identity",
+    finite_support = Support(float64(0.0), float64(1.0))
+    prior = Prior(
+        dist=_BoundedLogpdfDist(support=finite_support),  # type: ignore[arg-type]
+        transform=_DummyTransform(  # type: ignore[arg-type]
+            support=finite_support,
+            maps_to=finite_support,
+        ),
     )
     bad_x = float64(-0.1)
     with pytest.raises(OutOfSupportError):
@@ -206,11 +249,11 @@ def test_prior_bounded_methods_raise_outside_distribution_support():
         prior.grad_logpdf(bad_x)
 
 
-def test_prior_logit_prior_accepts_unconstrained_input_domain():
-    prior = make_prior(
-        distribution="beta",
-        parameters={"a": 2.0, "b": 3.0, "loc": 0.0, "scale": 1.0},
-        transform="logit",
+def test_transformed_prior_accepts_unconstrained_input_domain():
+    prior = _make_warned_prior(
+        distribution="log_normal",
+        parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
+        transform="log",
     )
 
     z = float64(2.0)
@@ -221,7 +264,7 @@ def test_prior_logit_prior_accepts_unconstrained_input_domain():
 
 
 def test_prior_rvs_seed_reproducibility_and_size_shape():
-    prior = make_prior(
+    prior = _make_warned_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
@@ -236,7 +279,7 @@ def test_prior_rvs_seed_reproducibility_and_size_shape():
 
 
 def test_prior_support_and_maps_to_proxy_underlying_components():
-    prior = make_prior(
+    prior = _make_warned_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
@@ -248,10 +291,7 @@ def test_prior_support_and_maps_to_proxy_underlying_components():
 def test_prior_logpdf_uses_inverse_and_adds_inverse_logdet_term():
     dist = _TrackingDist()
     transform = _TrackingTransform()
-    prior = Prior(
-        dist=dist,  # type: ignore[arg-type]
-        transform=transform,  # type: ignore[arg-type]
-    )
+    prior = _make_warned_custom_prior(dist=dist, transform=transform)
 
     z = float64(2.0)
     out = prior.logpdf(z)
@@ -272,10 +312,7 @@ def test_prior_logpdf_uses_inverse_and_adds_inverse_logdet_term():
 def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
     dist = _TrackingDist()
     transform = _TrackingTransform()
-    prior = Prior(
-        dist=dist,  # type: ignore[arg-type]
-        transform=transform,  # type: ignore[arg-type]
-    )
+    prior = _make_warned_custom_prior(dist=dist, transform=transform)
 
     z = float64(4.0)
     out = prior.grad_logpdf(z)
@@ -296,33 +333,30 @@ def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
 
 
 def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch_gamma_identity():
-    prior = make_prior(
-        distribution="gamma",
-        parameters={"mean": 2.0, "std": np.sqrt(2.0)},
-        transform="identity",
-    )
     with pytest.raises(ValueError, match="does not match transform support"):
-        prior._confirm_bound_match()
+        make_prior(
+            distribution="gamma",
+            parameters={"mean": 2.0, "std": np.sqrt(2.0)},
+            transform="identity",
+        )
 
 
 def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch_normal_log():
-    prior = make_prior(
-        distribution="normal",
-        parameters={"mean": 0.0, "std": 1.0},
-        transform="log",
-    )
     with pytest.raises(ValueError, match="does not match transform support"):
-        prior._confirm_bound_match()
+        make_prior(
+            distribution="normal",
+            parameters={"mean": 0.0, "std": 1.0},
+            transform="log",
+        )
 
 
 def test_confirm_bound_match_warns_for_non_finite_matching_support():
-    prior = make_prior(
-        distribution="normal",
-        parameters={"mean": 0.0, "std": 1.0},
-        transform="identity",
-    )
     with pytest.warns(UserWarning, match="non-finite support"):
-        prior._confirm_bound_match()
+        make_prior(
+            distribution="normal",
+            parameters={"mean": 0.0, "std": 1.0},
+            transform="identity",
+        )
 
 
 def test_confirm_bound_match_allows_finite_matching_support_without_warning():

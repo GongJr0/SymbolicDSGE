@@ -31,6 +31,9 @@ class Prior:
     dist: Distribution
     transform: Transform
 
+    def __post_init__(self) -> None:
+        self._confirm_bound_match()
+
     @overload
     def logpdf(self, z: float64) -> float64: ...
     @overload
@@ -102,5 +105,5 @@ def make_prior(
     params_override = param_dict | parameters
     dist_inst = dist(**params_override)
     transform_inst = _transform(**(transform_kwargs or {}))
-
-    return Prior(dist=dist_inst, transform=transform_inst)
+    prior = Prior(dist=dist_inst, transform=transform_inst)
+    return prior

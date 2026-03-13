@@ -156,11 +156,12 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
     compiled = _make_compiled(1.0)
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
-    prior = Estimator.make_prior(
-        distribution="normal",
-        parameters={"mean": 0.0, "std": 1.0},
-        transform="log",
-    )
+    with pytest.warns(UserWarning, match="non-finite support"):
+        prior = Estimator.make_prior(
+            distribution="log_normal",
+            parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
+            transform="log",
+        )
     out = solver.estimate(
         compiled=compiled,
         y=np.zeros((4, 1), dtype=np.float64),
