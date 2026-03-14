@@ -66,17 +66,10 @@ class Prior:
     def _confirm_bound_match(self) -> None:
         _sup = self.dist.support
         _trans_sup = self.transform.support
-        if _sup != _trans_sup:
+        if not _trans_sup << _sup:
             raise ValueError(
                 "Distribution support does not match transform support. "
                 "When priors are defined in parameter space, transform.support must match dist.support. "
-            )
-
-        if not self.dist.support.is_finite:
-            warnings.warn(
-                "Prior created with non-finite support. "
-                "This can be valid (e.g., Normal + Identity), but verify that the transform is appropriate "
-                "for optimization/sampling in unconstrained space."
             )
 
     @property

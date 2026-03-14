@@ -54,13 +54,9 @@ class Support:
             return bool(np.any(np.isclose(x_arr, self.high, atol=1e-6)))
 
     def contains_support(self, other: "Support") -> bool:
-        low_check = self.low < other.low or (
-            self.low == other.low and (self.low_inclusive or not other.low_inclusive)
-        )
-        high_check = self.high > other.high or (
-            self.high == other.high
-            and (self.high_inclusive or not other.high_inclusive)
-        )
+        # Ignore inclusivity, eps injection should handle boundary cases
+        high_check = self.high >= other.high
+        low_check = self.low <= other.low
         return bool(low_check and high_check)
 
     @property
@@ -78,6 +74,12 @@ class Support:
             and self.low_inclusive == other.low_inclusive
             and self.high_inclusive == other.high_inclusive
         )
+
+    def __lshift__(self, other: "Support") -> bool:
+        return self.contains_support(other)
+
+    def __rlshift__(self, other: "Support") -> bool:
+        return other.contains_support(self)
 
 
 class OutOfSupportError(ValueError):
