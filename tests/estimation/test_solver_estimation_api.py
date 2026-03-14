@@ -158,7 +158,7 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
 
     prior = Estimator.make_prior(
         distribution="log_normal",
-        parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
+        parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
     out = solver.estimate(

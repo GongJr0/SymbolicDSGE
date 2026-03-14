@@ -1,11 +1,11 @@
-from .distribution import Distribution, RandomState, Size, VecF64, _scalar_or_array
+from .distribution import Distribution, RandomState, Size, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
 from numpy import float64
 from typing import TypedDict, overload, cast
-
-from scipy.stats import norm
+from scipy.special import ndtr, ndtri
+from numba import njit
 
 
 class NormalParameters(TypedDict):
@@ -21,14 +21,43 @@ NORM_DEFAULTS = NormalParameters(
 )
 
 
+@njit(cache=True)
+def _logpdf_scalar(mean: float64, var: float64, x: float64) -> float64:
+    return float64(
+        -0.5 * np.log(2.0 * np.pi * var) - 0.5 * ((x - mean) ** 2) / var,
+    )
+
+
+@njit(cache=True)
+def _logpdf_vectorized(mean: float64, var: float64, x: VecF64) -> VecF64:
+    return (  # type: ignore
+        -0.5 * np.log(2.0 * np.pi * var) - 0.5 * ((x - mean) ** 2) / var
+    ).astype(float64)
+
+
+@njit(cache=True)
+def _grad_logpdf_scalar(mean: float64, var: float64, x: float64) -> float64:
+    return float64(-(x - mean) / var)
+
+
+@njit(cache=True)
+def _grad_logpdf_vectorized(mean: float64, var: float64, x: VecF64) -> VecF64:
+    return (-(x - mean) / var).astype(float64)
+
+
+@njit(cache=True)
+def _rvs(
+    mean: float64, std: float64, size: tuple[int, ...], rng: np.random.Generator
+) -> VecF64:
+    return rng.normal(loc=mean, scale=std, size=size).astype(float64)
+
+
 class Normal(Distribution[float64, VecF64]):
     def __init__(self, mean: float, std: float, random_state: RandomState = None):
         self._mean = float64(mean)
+        self._std = float64(std)
         self._var = float64(std**2)
         self._random_state = random_state
-
-        std = float64(std)
-        self.dist = norm(loc=self._mean, scale=std)
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
@@ -39,12 +68,9 @@ class Normal(Distribution[float64, VecF64]):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        x_arr = np.asarray(x, dtype=float64)
-        log_density = (
-            -0.5 * np.log(2.0 * np.pi * self._var)
-            - 0.5 * ((x_arr - self._mean) ** 2) / self._var
-        )
-        return _scalar_or_array(log_density)
+        if isinstance(x, float64):
+            return cast(float64, _logpdf_scalar(self._mean, self._var, x))
+        return cast(VecF64, _logpdf_vectorized(self._mean, self._var, x))
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -55,8 +81,9 @@ class Normal(Distribution[float64, VecF64]):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        grad_logpdf = -(x - self.mean) / self.var
-        return float64(grad_logpdf)
+        if isinstance(x, float64):
+            return cast(float64, _grad_logpdf_scalar(self._mean, self._var, x))
+        return cast(VecF64, _grad_logpdf_vectorized(self._mean, self._var, x))
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -64,7 +91,7 @@ class Normal(Distribution[float64, VecF64]):
     def cdf(self, x: VecF64) -> VecF64: ...
 
     def cdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.cdf(x))
+        return float64(ndtr((x - self._mean) / self._std))
 
     @overload
     def ppf(self, q: float64) -> float64: ...
@@ -72,15 +99,13 @@ class Normal(Distribution[float64, VecF64]):
     def ppf(self, q: VecF64) -> VecF64: ...
 
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.ppf(q))
+        return float64(self._mean + self._std * ndtri(q))
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
         rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
-
-        samples = self.dist.rvs(size=size, random_state=rng)
-        return cast(VecF64, samples)
+        return cast(VecF64, _rvs(self._mean, self._std, size, rng))
 
     def __repr__(self) -> str:
         return self.__class__.__name__

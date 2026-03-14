@@ -11,8 +11,8 @@ Normal prior truncated to a finite interval.
 |:-------------|:-----------|:------------|:-----------:|
 | `low` | $\ell$ | Lower truncation bound | `-6.0` |
 | `high` | $h$ | Upper truncation bound | `6.0` |
-| `loc` | $\mu$ | Location | `0.0` |
-| `scale` | $\sigma$ | Scale | `1.0` |
+| `mean` | $\mu$ | Mean of the underlying normal distribution | `0.0` |
+| `std` | $\sigma$ | Standard deviation of the underlying normal distribution | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
 
 ### PDF

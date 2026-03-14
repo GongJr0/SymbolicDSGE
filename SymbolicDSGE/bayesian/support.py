@@ -4,8 +4,41 @@ from numpy import float64
 from numpy.typing import NDArray
 import numpy as np
 from functools import wraps
+from numba import njit
 
 FLOAT_VEC_SCA = Union[float64, NDArray[float64]]
+
+
+@njit(cache=True)
+def _contains_scalar(
+    low: float64, high: float64, low_inclusive: bool, high_inclusive: bool, x: float64
+) -> bool:
+    if low_inclusive and high_inclusive:
+        return bool(low <= x <= high)
+    elif low_inclusive and not high_inclusive:
+        return bool(low <= x < high)
+    elif not low_inclusive and high_inclusive:
+        return bool(low < x <= high)
+    else:
+        return bool(low < x < high)
+
+
+@njit(cache=True)
+def _contains_vectorized(
+    low: float64,
+    high: float64,
+    low_inclusive: bool,
+    high_inclusive: bool,
+    x: NDArray[float64],
+) -> bool:
+    if low_inclusive and high_inclusive:
+        return bool(np.all((low <= x) & (x <= high)))
+    elif low_inclusive and not high_inclusive:
+        return bool(np.all((low <= x) & (x < high)))
+    elif not low_inclusive and high_inclusive:
+        return bool(np.all((low < x) & (x <= high)))
+    else:
+        return bool(np.all((low < x) & (x < high)))
 
 
 @dataclass(frozen=True)
@@ -17,32 +50,21 @@ class Support:
     high_inclusive: bool = True
 
     def contains(self, x: FLOAT_VEC_SCA) -> bool:
-        if np.isscalar(x):
-            x_scalar = cast(float64, x)
-            if self.low_inclusive:
-                low_check = x_scalar >= self.low
-            else:
-                low_check = x_scalar > self.low
-
-            if self.high_inclusive:
-                high_check = x_scalar <= self.high
-            else:
-                high_check = x_scalar < self.high
-
-            return bool(low_check and high_check)
-
-        x_arr = np.asarray(x)
-        if self.low_inclusive:
-            low_check_arr = x_arr >= self.low
-        else:
-            low_check_arr = x_arr > self.low
-
-        if self.high_inclusive:
-            high_check_arr = x_arr <= self.high
-        else:
-            high_check_arr = x_arr < self.high
-
-        return bool(np.all(low_check_arr) and np.all(high_check_arr))
+        if isinstance(x, (float64, float)):
+            x = float64(x)
+            return cast(
+                bool,
+                _contains_scalar(
+                    self.low, self.high, self.low_inclusive, self.high_inclusive, x
+                ),
+            )
+        x = x.astype(float64)
+        return cast(
+            bool,
+            _contains_vectorized(
+                self.low, self.high, self.low_inclusive, self.high_inclusive, x
+            ),
+        )
 
     def at_boundary(self, x: FLOAT_VEC_SCA, bound: Literal["high", "low"]) -> bool:
         x_arr = np.asarray(x)

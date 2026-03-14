@@ -180,16 +180,17 @@ def test_make_prior_builds_instances_and_applies_defaults():
 
 def test_make_prior_passes_transform_kwargs():
     prior = _make_prior(
-        distribution="log_normal",
-        parameters={"s": 1.0, "low": -2.0, "scale": 1.0},
-        transform="lower_bounded",
-        transform_kwargs={"low": -2.0},
+        distribution="uniform",
+        parameters={"low": -2.0, "high": 3.0},
+        transform="affine_logit",
+        transform_kwargs={"low": -2.0, "high": 3.0},
     )
 
-    from SymbolicDSGE.bayesian.transforms import LowerBoundedTransform
+    from SymbolicDSGE.bayesian.transforms import AffineLogitTransform
 
-    assert isinstance(prior.transform, LowerBoundedTransform)
+    assert isinstance(prior.transform, AffineLogitTransform)
     assert np.allclose(prior.transform.low, -2.0)
+    assert np.allclose(prior.transform.high, 3.0)
 
 
 def test_make_prior_rejects_unrecognized_distribution_parameter():
@@ -260,7 +261,7 @@ def test_prior_bounded_methods_raise_outside_distribution_support():
 def test_transformed_prior_accepts_unconstrained_input_domain():
     prior = _make_prior(
         distribution="log_normal",
-        parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
+        parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
 

@@ -2,6 +2,17 @@
 import numpy as np
 import pytest
 from numpy import float64
+from scipy.stats import (
+    beta as scipy_beta,
+    gamma as scipy_gamma,
+    halfcauchy as scipy_halfcauchy,
+    halfnorm as scipy_halfnorm,
+    invgamma as scipy_invgamma,
+    lognorm as scipy_lognorm,
+    norm as scipy_norm,
+    truncnorm as scipy_truncnorm,
+    uniform as scipy_uniform,
+)
 
 import SymbolicDSGE.bayesian.distributions.lkj_chol as lkj_chol_module
 from SymbolicDSGE.bayesian.distributions import (
@@ -39,7 +50,7 @@ from SymbolicDSGE.bayesian.support import OutOfSupportError
         ),
         (
             "beta",
-            lambda: Beta(2.0, 3.0, 0.0, 1.0, 123),
+            lambda: Beta(2.0, 3.0, 123),
             float64(0.4),
             float64(-0.1),
             False,
@@ -53,21 +64,21 @@ from SymbolicDSGE.bayesian.support import OutOfSupportError
         ),
         (
             "inv_gamma",
-            lambda: InvGamma(4.0, 0.0, 2.0, 123),
+            lambda: InvGamma(2.0, 1.0, 123),
             float64(1.4),
             float64(0.0),
             False,
         ),
         (
             "half_normal",
-            lambda: HalfNormal(0.0, 1.0, 123),
+            lambda: HalfNormal(1.0, 123),
             float64(0.8),
             float64(-0.1),
             False,
         ),
         (
             "half_cauchy",
-            lambda: HalfCauchy(0.0, 1.0, 123),
+            lambda: HalfCauchy(1.0, 123),
             float64(0.8),
             float64(-0.1),
             True,
@@ -83,6 +94,14 @@ def distribution_case(request):
 # f'(x) ~= (f(x+h) - f(x-h)) / (2h)
 def _central_diff_grad_logpdf(dist, x: float64, h: float64 = float64(1e-6)) -> float64:
     return float64((dist.logpdf(x + h) - dist.logpdf(x - h)) / (2.0 * h))
+
+
+def _affine_scipy_logpdf(base_logpdf, x, *, shift: float, stretch: float):
+    return base_logpdf((x - shift) / stretch) - np.log(stretch)
+
+
+def _scaled_scipy_logpdf(base_logpdf, x, *, stretch: float):
+    return base_logpdf(x / stretch) - np.log(stretch)
 
 
 def test_expected_concrete_distribution_classes():
@@ -113,45 +132,94 @@ def test_distribution_pdf_is_exp_logpdf(distribution_case):
 
 
 @pytest.mark.parametrize(
-    ("ctor", "x_scalar", "x_vector"),
+    ("ctor", "scipy_logpdf", "x_scalar", "x_vector"),
     [
         (
             lambda: Normal(1.25, 0.7, 123),
+            lambda x: _affine_scipy_logpdf(
+                lambda z: scipy_norm.logpdf(z),
+                x,
+                shift=1.25,
+                stretch=0.7,
+            ),
             float64(0.9),
             np.array([-0.2, 0.9, 1.7], dtype=np.float64),
         ),
         (
-            lambda: LogNormal(0.45, 0.3, 1.8, 123),
+            lambda: LogNormal(np.log(1.8), 0.45, 123),
+            lambda x: scipy_lognorm.logpdf(
+                x,
+                s=0.45,
+                scale=np.exp(np.log(1.8)),
+            ),
             float64(1.4),
-            np.array([0.8, 1.4, 3.2], dtype=np.float64),
+            np.array([0.4, 1.4, 3.2], dtype=np.float64),
         ),
         (
-            lambda: HalfNormal(0.5, 1.4, 123),
+            lambda: HalfNormal(1.4, 123),
+            lambda x: _scaled_scipy_logpdf(
+                lambda z: scipy_halfnorm.logpdf(z),
+                x,
+                stretch=1.4,
+            ),
             float64(0.9),
-            np.array([0.6, 0.9, 2.5], dtype=np.float64),
+            np.array([0.2, 0.9, 2.5], dtype=np.float64),
         ),
         (
-            lambda: HalfCauchy(0.25, 1.1, 123),
+            lambda: HalfCauchy(1.1, 123),
+            lambda x: _scaled_scipy_logpdf(
+                lambda z: scipy_halfcauchy.logpdf(z),
+                x,
+                stretch=1.1,
+            ),
             float64(0.7),
-            np.array([0.3, 0.7, 2.0], dtype=np.float64),
+            np.array([0.1, 0.7, 2.0], dtype=np.float64),
+        ),
+        (
+            lambda: TruncNormal(-1.0, 1.0, 0.0, 1.0, 123),
+            lambda x: _affine_scipy_logpdf(
+                lambda z: scipy_truncnorm.logpdf(z, a=-1.0, b=1.0),
+                x,
+                shift=0.0,
+                stretch=1.0,
+            ),
+            float64(0.2),
+            np.array([-0.4, 0.2, 0.9], dtype=np.float64),
         ),
         (
             lambda: Uniform(-2.0, 3.5, 123),
+            lambda x: _affine_scipy_logpdf(
+                lambda z: scipy_uniform.logpdf(z),
+                x,
+                shift=-2.0,
+                stretch=5.5,
+            ),
             float64(0.4),
             np.array([-1.5, 0.4, 2.2], dtype=np.float64),
         ),
         (
-            lambda: Beta(2.5, 4.0, -1.0, 2.5, 123),
-            float64(-0.1),
-            np.array([-0.7, -0.1, 0.9], dtype=np.float64),
+            lambda: Beta(2.5, 4.0, 123),
+            lambda x: scipy_beta.logpdf(x, a=2.5, b=4.0),
+            float64(0.3),
+            np.array([0.1, 0.3, 0.9], dtype=np.float64),
         ),
         (
             lambda: Gamma(4.5, 1.3, 123),
+            lambda x: scipy_gamma.logpdf(
+                x / Gamma.to_scale(4.5, 1.3),
+                a=Gamma.to_shape(4.5, 1.3),
+            )
+            - np.log(Gamma.to_scale(4.5, 1.3)),
             float64(2.1),
             np.array([0.4, 2.1, 6.0], dtype=np.float64),
         ),
         (
-            lambda: InvGamma(3.2, 0.4, 1.8, 123),
+            lambda: InvGamma(3.2, 1.8, 123),
+            lambda x: scipy_invgamma.logpdf(
+                x / InvGamma.to_scale(3.2, 1.8),
+                a=InvGamma.to_shape(3.2, 1.8),
+            )
+            - np.log(InvGamma.to_scale(3.2, 1.8)),
             float64(1.1),
             np.array([0.7, 1.1, 3.0], dtype=np.float64),
         ),
@@ -161,22 +229,36 @@ def test_distribution_pdf_is_exp_logpdf(distribution_case):
         "lognormal",
         "halfnormal",
         "halfcauchy",
+        "truncnormal",
         "uniform",
         "beta",
         "gamma",
         "invgamma",
     ],
 )
-def test_distribution_logpdf_matches_scipy_counterpart(ctor, x_scalar, x_vector):
+def test_distribution_logpdf_matches_scipy_counterpart(
+    ctor, scipy_logpdf, x_scalar, x_vector
+):
     dist = ctor()
 
     scalar_out = dist.logpdf(x_scalar)
-    scalar_expected = float64(dist.dist.logpdf(x_scalar))
+    scalar_expected = float64(scipy_logpdf(x_scalar))
     assert np.allclose(scalar_out, scalar_expected, rtol=1e-12, atol=1e-12)
 
     vector_out = np.asarray(dist.logpdf(x_vector), dtype=np.float64)
-    vector_expected = np.asarray(dist.dist.logpdf(x_vector), dtype=np.float64)
+    vector_expected = np.asarray(scipy_logpdf(x_vector), dtype=np.float64)
     assert np.allclose(vector_out, vector_expected, rtol=1e-12, atol=1e-12)
+
+
+def test_invgamma_mean_std_parameterization_matches_derived_scipy_moments():
+    dist = InvGamma(3.2, 1.8, 123)
+    a = InvGamma.to_shape(3.2, 1.8)
+    beta = InvGamma.to_scale(3.2, 1.8)
+
+    assert np.allclose(dist.mean, 3.2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(dist.var, 1.8**2, rtol=1e-12, atol=1e-12)
+    assert np.allclose(dist.mean, beta * scipy_invgamma.mean(a=a))
+    assert np.allclose(dist.var, (beta**2) * scipy_invgamma.var(a=a))
 
 
 def test_distribution_cdf_ppf_roundtrip(distribution_case):

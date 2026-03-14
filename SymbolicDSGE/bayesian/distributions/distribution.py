@@ -1,12 +1,15 @@
 from ..support import Support
 
 from abc import ABC, abstractmethod
-from typing import Tuple, Union, TypeVar, TypeAlias, Generic, overload
+from typing import Tuple, Union, TypeVar, TypeAlias, Generic, overload, cast
 from enum import StrEnum
+import math
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
+
+from numba import njit
 
 NDF = NDArray[float64]
 VecF64: TypeAlias = NDArray[np.float64]
@@ -56,6 +59,46 @@ def _scalar_or_array(value: object) -> float64 | VecF64:
     if arr.ndim == 0:
         return float64(arr)
     return arr
+
+
+@njit
+def x_logy_scalar(coeff: float64, x: float64) -> float64:
+    if coeff == 0.0:
+        return float64(0.0)
+    return float64(coeff * np.log(x))
+
+
+@njit
+def x_logy_vectorized(coeff: float64, x: VecF64) -> VecF64:
+    if coeff == 0.0:
+        return np.zeros_like(x, dtype=float64)
+    return (coeff * np.log(x)).astype(float64)
+
+
+@njit
+def xlog1py_scalar(coeff: float64, y: float64) -> float64:
+    if coeff == 0.0:
+        return float64(0.0)
+    return float64(coeff * np.log1p(y))
+
+
+@njit
+def xlog1py_vectorized(coeff: float64, y: VecF64) -> VecF64:
+    if coeff == 0.0:
+        return np.zeros_like(y, dtype=float64)
+    return (coeff * np.log1p(y)).astype(float64)
+
+
+@njit
+def log_beta(a: float64, b: float64) -> float64:
+    return float64(
+        math.lgamma(float(a)) + math.lgamma(float(b)) - math.lgamma(float(a + b))
+    )
+
+
+@njit
+def _std_norm_cdf_scalar(x: float64) -> float64:
+    return float64(0.5 * (1.0 + math.erf(float(x) / math.sqrt(2.0))))
 
 
 class Distribution(ABC, Generic[EventT, BatchT]):
