@@ -41,6 +41,7 @@ class Prior:
 
     def logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         maps_to = self.transform.maps_to
+        z += self.transform.eps
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
         x = self.transform.inverse(z)
@@ -53,6 +54,7 @@ class Prior:
 
     def grad_logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         maps_to = self.transform.maps_to
+        z += self.transform.eps
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
         x = self.transform.inverse(z)
