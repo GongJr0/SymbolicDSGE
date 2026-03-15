@@ -19,14 +19,7 @@ class LogitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(np.log(x / (1 - x)))
-        elif self.support.at_boundary(x, "low"):
-            return float64(np.log(self.eps / (1 - self.eps)))
-        elif self.support.at_boundary(x, "high"):
-            return float64(np.log((1 - self.eps) / self.eps))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(np.log(x / (1 - x)))
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -42,14 +35,7 @@ class LogitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(1 / (x * (1 - x)))
-        elif self.support.at_boundary(x, "low"):
-            return float64(1 / (self.eps * (1 - self.eps)))
-        elif self.support.at_boundary(x, "high"):
-            return float64(1 / ((1 - self.eps) * self.eps))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(1 / (x * (1 - x)))
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -68,14 +54,7 @@ class LogitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(-np.log(x) - np.log(1 - x))
-        elif self.support.at_boundary(x, "low"):
-            return float64(-np.log(self.eps) - np.log(1 - self.eps))
-        elif self.support.at_boundary(x, "high"):
-            return float64(-np.log(1 - self.eps) - np.log(self.eps))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(-np.log(x) - np.log(1 - x))
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -85,10 +64,7 @@ class LogitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(-y - 2 * np.log(1 + np.exp(-y)))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(-y - 2 * np.log(1 + np.exp(-y)))
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -100,10 +76,7 @@ class LogitTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(1 - 2 * expit(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(1 - 2 * expit(y))
 
     @property
     def support(self) -> Support:

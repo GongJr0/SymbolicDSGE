@@ -27,11 +27,8 @@ class AffineLogitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            z = affine_to_unit(x, self.low, self.high)
-            return np.log(z / (1 - z))
-        else:
-            raise OutOfSupportError(x, self.support)
+        z = affine_to_unit(x, self.low, self.high)
+        return np.log(z / (1 - z))
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -39,11 +36,8 @@ class AffineLogitTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            z = float64(1.0) / (float64(1.0) + np.exp(-y))
-            return unit_to_affine(z, self.low, self.high)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        z = float64(1.0) / (float64(1.0) + np.exp(-y))
+        return unit_to_affine(z, self.low, self.high)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -52,11 +46,8 @@ class AffineLogitTransform(Transform):
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         # dy/dx = 1 / ((high-low) * z * (1 - z)), with z = (x-low)/(high-low)
-        if self.support.contains(x):
-            z = affine_to_unit(x, self.low, self.high)
-            return float64(1.0) / (self._span * z * (1 - z))
-        else:
-            raise OutOfSupportError(x, self.support)
+        z = affine_to_unit(x, self.low, self.high)
+        return float64(1.0) / (self._span * z * (1 - z))
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -65,11 +56,8 @@ class AffineLogitTransform(Transform):
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         # dx/dy = (high-low) * sigmoid(y) * (1 - sigmoid(y))
-        if self.maps_to.contains(y):
-            z = float64(1.0) / (float64(1.0) + np.exp(-y))
-            return self._span * z * (1 - z)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        z = float64(1.0) / (float64(1.0) + np.exp(-y))
+        return self._span * z * (1 - z)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -80,11 +68,8 @@ class AffineLogitTransform(Transform):
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
         # log|dy/dx| = -log(high-low) - log(z) - log(1-z)
-        if self.support.contains(x):
-            z = affine_to_unit(x, self.low, self.high)
-            return float64(-np.log(self._span) - np.log(z) - np.log(1 - z))
-        else:
-            raise OutOfSupportError(x, self.support)
+        z = affine_to_unit(x, self.low, self.high)
+        return float64(-np.log(self._span) - np.log(z) - np.log(1 - z))
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...

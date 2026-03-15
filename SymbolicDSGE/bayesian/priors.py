@@ -41,7 +41,7 @@ class Prior:
 
     def logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         maps_to = self.transform.maps_to
-        z += self.transform.eps
+        z = self.get_adjusted(z)
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
         x = self.transform.inverse(z)
@@ -54,7 +54,7 @@ class Prior:
 
     def grad_logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         maps_to = self.transform.maps_to
-        z += self.transform.eps
+        z = self.get_adjusted(z)
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
         x = self.transform.inverse(z)
@@ -73,6 +73,16 @@ class Prior:
                 "Distribution support does not match transform support. "
                 "When priors are defined in parameter space, transform.support must match dist.support. "
             )
+
+    def get_adjusted(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        maps_to = self.transform.maps_to
+        if not maps_to.contains(z):
+            raise OutOfSupportError(z, maps_to)
+        if maps_to.at_boundary(z, "low"):
+            return z + self.transform.eps
+        elif maps_to.at_boundary(z, "high"):
+            return z - self.transform.eps
+        return z
 
     @property
     def support(self) -> Support:

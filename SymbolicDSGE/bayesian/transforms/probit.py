@@ -19,10 +19,7 @@ class ProbitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(norm.ppf(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(norm.ppf(x))
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -30,10 +27,7 @@ class ProbitTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(norm.cdf(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(norm.cdf(y))
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -41,10 +35,7 @@ class ProbitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(1.0 / norm.pdf(norm.ppf(x)))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(1.0 / norm.pdf(norm.ppf(x)))
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -52,10 +43,7 @@ class ProbitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(norm.pdf(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(norm.pdf(y))
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -65,10 +53,7 @@ class ProbitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return -np.log(norm.pdf(norm.ppf(x)))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return -np.log(norm.pdf(norm.ppf(x)))
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -78,10 +63,7 @@ class ProbitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return np.log(norm.pdf(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return np.log(norm.pdf(y))
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -93,10 +75,7 @@ class ProbitTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(-y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(-y)
 
     @property
     def support(self) -> Support:

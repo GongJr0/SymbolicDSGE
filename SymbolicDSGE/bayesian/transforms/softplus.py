@@ -42,12 +42,7 @@ class SoftplusTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return self._inv_softplus(x)
-        elif self.support.at_boundary(x, "low"):
-            return self._inv_softplus(self.eps)
-        else:
-            raise OutOfSupportError(x, self.support)
+        return self._inv_softplus(x)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -55,10 +50,7 @@ class SoftplusTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return self._softplus(y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return self._softplus(y)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -66,14 +58,8 @@ class SoftplusTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            exm1 = np.expm1(x)  # exp(x)-1, stable near 0
-            return float64(1.0 + 1.0 / exm1)
-        elif self.support.at_boundary(x, "low"):
-            exm1 = np.expm1(self.eps)
-            return float64(1.0 + 1.0 / exm1)
-        else:
-            raise OutOfSupportError(x, self.support)
+        exm1 = np.expm1(x)  # exp(x)-1, stable near 0
+        return float64(1.0 + 1.0 / exm1)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -81,10 +67,7 @@ class SoftplusTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return self._sigmoid(y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return self._sigmoid(y)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -94,12 +77,7 @@ class SoftplusTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(x - np.log(np.expm1(x)))
-        elif self.support.at_boundary(x, "low"):
-            return float64(self.eps - np.log(np.expm1(self.eps)))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(x - np.log(np.expm1(x)))
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -109,10 +87,7 @@ class SoftplusTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return -np.logaddexp(float64(0.0), -y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return -np.logaddexp(float64(0.0), -y)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -124,12 +99,7 @@ class SoftplusTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(1 - expit(y))
-        elif self.maps_to.at_boundary(y, "low"):
-            return float64(1 - expit(self.eps))
-        else:
-            raise OutOfSupportError(y, self.support)
+        return float64(1 - expit(y))
 
     @property
     def support(self) -> Support:
