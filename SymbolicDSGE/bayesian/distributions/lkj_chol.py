@@ -1,12 +1,12 @@
 from .distribution import Distribution, Size, RandomState, MatF64
 from ..support import Support
 
+import math
 import numpy as np
 from numpy import float64, linalg
 from numba import njit
 
 from typing import TypedDict, Callable, cast
-from scipy.special import gammaln
 from functools import lru_cache, wraps
 
 
@@ -74,7 +74,9 @@ def corr_chol(func: Callable) -> Callable:
 
 
 def _log_beta(a: float64, b: float64) -> float64:
-    return float64(gammaln(a) + gammaln(b) - gammaln(a + b))
+    return float64(
+        math.lgamma(float(a)) + math.lgamma(float(b)) - math.lgamma(float(a + b))
+    )
 
 
 @lru_cache(maxsize=None)
@@ -100,6 +102,36 @@ def _log_lkj_normalizer_C(K: int, eta: float) -> float64:
         log_p += float64(K - k) * _log_beta(a, a)
 
     return float64(s * np.log(2.0) + log_p)
+
+
+@njit(cache=True)
+def _one(eta: float64, K: int, rng: np.random.Generator) -> MatF64:
+    n_cpc = (K * (K - 1)) // 2
+    CPC = np.empty(n_cpc, dtype=float64)
+
+    alpha = float64(eta + 0.5 * (K - 1))
+    idx = 0
+    for k in range(K - 1):
+        alpha = float64(alpha - 0.5)
+        for _ in range(k + 1, K):
+            CPC[idx] = float64(2 * rng.beta(alpha, alpha) - 1.0)
+            idx += 1
+
+    L = np.zeros((K, K), dtype=float64)
+    L[0, 0] = 1.0
+
+    idx = 0
+    for k in range(1, K):
+        rem = float64(1.0)
+        for j in range(k):
+            z = CPC[idx]
+            v = float64(np.sqrt(rem))
+            L[k, j] = float64(z * v)
+
+            rem = float64(rem - L[k, j] * L[k, j])
+            idx += 1
+        L[k, k] = float64(np.sqrt(rem))
+    return L
 
 
 class LKJChol(Distribution[MatF64, MatF64]):
@@ -196,39 +228,10 @@ class LKJChol(Distribution[MatF64, MatF64]):
         if isinstance(size, int):
             size = (size,)
 
-        @njit
-        def _one(eta: float64, K: int) -> MatF64:
-            n_cpc = (K * (K - 1)) // 2
-            CPC = np.empty(n_cpc, dtype=float64)
-
-            alpha = float64(eta + 0.5 * (K - 1))
-            idx = 0
-            for k in range(K - 1):
-                alpha = float64(alpha - 0.5)
-                for _ in range(k + 1, K):
-                    CPC[idx] = float64(2 * rng.beta(alpha, alpha) - 1.0)
-                    idx += 1
-
-            L = np.zeros((K, K), dtype=float64)
-            L[0, 0] = 1.0
-
-            idx = 0
-            for k in range(1, K):
-                rem = float64(1.0)
-                for j in range(k):
-                    z = CPC[idx]
-                    v = float64(np.sqrt(rem))
-                    L[k, j] = float64(z * v)
-
-                    rem = float64(rem - L[k, j] * L[k, j])
-                    idx += 1
-                L[k, k] = float64(np.sqrt(rem))
-            return L
-
         out = np.empty((size + (self._K, self._K)), dtype=float64)
         it = np.nditer(np.empty(size, dtype=np.int8), flags=["multi_index"])
         for _ in it:
-            out[it.multi_index] = _one(eta, K)
+            out[it.multi_index] = _one(eta, K, rng)
         return out
 
     @property

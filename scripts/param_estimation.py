@@ -38,7 +38,7 @@ import matplotlib as mpl
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
 # %%
-model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+model, kalman = ModelParser("../MODELS/POST82.yaml").get_all()
 
 with catch_warnings():
     # Equations in a sp.Matrix are deprecated, this is only used as a pretty print function

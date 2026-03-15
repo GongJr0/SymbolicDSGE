@@ -1,35 +1,65 @@
-from .distribution import Distribution, Size, RandomState, VecF64, _scalar_or_array
+from .distribution import Distribution, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
-from typing import TypedDict, overload, cast
+from typing import TypedDict, cast, overload
 
 import numpy as np
 from numpy import float64
-
-from scipy.stats import halfnorm
+from scipy.special import erf, erfinv
+from numba import njit
 
 
 class HalfNormalParameters(TypedDict):
-    low: float  # lower bound of support
-    scale: float  # != std;
+    std: float
     random_state: RandomState
 
 
 HALFNORM_DEFAULTS = HalfNormalParameters(
-    low=0.0,
-    scale=1.0,
+    std=1.0,
     random_state=None,
 )
 
 
-class HalfNormal(Distribution[float64, VecF64]):
-    def __init__(self, low: float, scale: float, random_state: RandomState = None):
-        self.dist = halfnorm(loc=low, scale=scale)
+@njit(cache=True)
+def _logpdf_scalar(x: float64, std: float64) -> float64:
+    if x < 0.0:
+        return float64(-np.inf)
+    return float64(0.5 * np.log(2.0 / np.pi) - np.log(std) - 0.5 * (x / std) ** 2)
 
-        self._mean = float64(self.dist.mean())
-        self._var = float64(self.dist.var())
-        self._mode = float64(low)
-        self._low = float64(low)
-        self._scale = float64(scale)
+
+@njit(cache=True)
+def _logpdf_vectorized(x: VecF64, std: float64) -> VecF64:
+    return np.where(
+        x < 0.0,
+        float64(-np.inf),
+        (0.5 * np.log(2.0 / np.pi) - np.log(std) - 0.5 * (x / std) ** 2).astype(
+            float64
+        ),
+    )
+
+
+@njit(cache=True)
+def _grad_logpdf_scalar(x: float64, std: float64) -> float64:
+    if x < 0.0:
+        return float64(0.0)
+    return float64(-x / std**2)
+
+
+@njit(cache=True)
+def _grad_logpdf_vectorized(x: VecF64, std: float64) -> VecF64:
+    return np.where(x < 0.0, float64(0.0), float64(-x / std**2)).astype(float64)
+
+
+@njit(cache=True)
+def _rvs(std: float64, size: tuple[int, ...], rng: np.random.Generator) -> VecF64:
+    return np.abs(rng.normal(loc=0.0, scale=std, size=size)).astype(float64)
+
+
+class HalfNormal(Distribution[float64, VecF64]):
+    def __init__(self, std: float, random_state: RandomState = None):
+        self._std = float64(std)
+        self._mean = float64(self._std * np.sqrt(2.0 / np.pi))
+        self._var = float64(self._std**2 * (1.0 - 2.0 / np.pi))
+        self._mode = float64(0.0)
         self._random_state = random_state
 
     @overload
@@ -41,13 +71,9 @@ class HalfNormal(Distribution[float64, VecF64]):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        x_arr = np.asarray(x, dtype=float64)
-        log_density = (
-            0.5 * np.log(2.0 / np.pi)
-            - np.log(self._scale)
-            - 0.5 * ((x_arr - self._low) / self._scale) ** 2
-        )
-        return _scalar_or_array(log_density)
+        if isinstance(x, float64):
+            return cast(float64, _logpdf_scalar(x, self._std))
+        return cast(VecF64, _logpdf_vectorized(x, self._std))
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -58,7 +84,9 @@ class HalfNormal(Distribution[float64, VecF64]):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        return float64(-(x - self.low) / self.scale**2)
+        if isinstance(x, float64):
+            return cast(float64, _grad_logpdf_scalar(x, self._std))
+        return cast(VecF64, _grad_logpdf_vectorized(x, self._std))
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -66,7 +94,11 @@ class HalfNormal(Distribution[float64, VecF64]):
     def cdf(self, x: VecF64) -> VecF64: ...
 
     def cdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.cdf(x))
+        if isinstance(x, float64):
+            if x < 0.0:
+                return float64(0.0)
+            return float64(erf(x / (self._std * np.sqrt(2.0))))
+        return float64(np.where(x < 0.0, 0.0, erf(x / (self._std * np.sqrt(2.0)))))
 
     @overload
     def ppf(self, q: float64) -> float64: ...
@@ -74,14 +106,13 @@ class HalfNormal(Distribution[float64, VecF64]):
     def ppf(self, q: VecF64) -> VecF64: ...
 
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.ppf(q))
+        return float64(self._std * np.sqrt(2.0) * erfinv(q))
 
     def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
         rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
-        samples = self.dist.rvs(size=size, random_state=rng)
-        return cast(VecF64, float64(samples))
+        return cast(VecF64, _rvs(self._std, size, rng))
 
     def __repr__(self) -> str:
         return self.__class__.__name__
@@ -93,7 +124,7 @@ class HalfNormal(Distribution[float64, VecF64]):
     @property
     def support(self) -> Support:
         return Support(
-            self._low,
+            float64(0.0),
             float64(np.inf),
             low_inclusive=True,
             high_inclusive=False,
@@ -112,9 +143,5 @@ class HalfNormal(Distribution[float64, VecF64]):
         return self._mode
 
     @property
-    def low(self) -> float64:
-        return self._low
-
-    @property
-    def scale(self) -> float64:
-        return self._scale
+    def std(self) -> float64:
+        return self._std

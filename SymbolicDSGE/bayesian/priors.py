@@ -43,6 +43,9 @@ class Prior:
         maps_to = self.transform.maps_to
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
+        z = self.transform._get_adjusted_inverse(
+            z
+        )  # Bound check here, don't use safe methods below
         x = self.transform.inverse(z)
         return self.dist.logpdf(x) + self.transform.log_det_abs_jacobian_inverse(z)
 
@@ -55,6 +58,9 @@ class Prior:
         maps_to = self.transform.maps_to
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
+        z = self.transform._get_adjusted_inverse(
+            z
+        )  # Bound check here, don't use safe methods below
         x = self.transform.inverse(z)
         gx = self.dist.grad_logpdf(x)
         dx_dz = self.transform.grad_inverse(z)
@@ -66,17 +72,10 @@ class Prior:
     def _confirm_bound_match(self) -> None:
         _sup = self.dist.support
         _trans_sup = self.transform.support
-        if _sup != _trans_sup:
+        if not _trans_sup << _sup:
             raise ValueError(
                 "Distribution support does not match transform support. "
                 "When priors are defined in parameter space, transform.support must match dist.support. "
-            )
-
-        if not self.dist.support.is_finite:
-            warnings.warn(
-                "Prior created with non-finite support. "
-                "This can be valid (e.g., Normal + Identity), but verify that the transform is appropriate "
-                "for optimization/sampling in unconstrained space."
             )
 
     @property

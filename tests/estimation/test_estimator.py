@@ -123,12 +123,11 @@ def test_mcmc_returns_expected_shapes_and_stats(monkeypatch):
 
 
 def test_estimator_make_prior_utility():
-    with pytest.warns(UserWarning, match="non-finite support"):
-        prior = Estimator.make_prior(
-            distribution="normal",
-            parameters={"mean": 0.0, "std": 1.0},
-            transform="identity",
-        )
+    prior = Estimator.make_prior(
+        distribution="normal",
+        parameters={"mean": 0.0, "std": 1.0},
+        transform="identity",
+    )
     assert isinstance(prior, Prior)
 
 
@@ -183,12 +182,11 @@ def test_estimation_reports_warning_count_once(monkeypatch, capsys):
 
 
 def test_theta_to_params_uses_prior_inverse_transform():
-    with pytest.warns(UserWarning, match="non-finite support"):
-        prior = Estimator.make_prior(
-            distribution="log_normal",
-            parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
-            transform="log",
-        )
+    prior = Estimator.make_prior(
+        distribution="log_normal",
+        parameters={"mean": 0.0, "std": 0.5},
+        transform="log",
+    )
     est = Estimator(
         solver=SimpleNamespace(),
         compiled=_stub_compiled(),
@@ -201,12 +199,11 @@ def test_theta_to_params_uses_prior_inverse_transform():
 
 
 def test_params_to_theta_applies_forward_transform_for_mapping():
-    with pytest.warns(UserWarning, match="non-finite support"):
-        prior = Estimator.make_prior(
-            distribution="log_normal",
-            parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
-            transform="log",
-        )
+    prior = Estimator.make_prior(
+        distribution="log_normal",
+        parameters={"mean": 0.0, "std": 0.5},
+        transform="log",
+    )
     est = Estimator(
         solver=SimpleNamespace(),
         compiled=_stub_compiled(),
@@ -221,12 +218,11 @@ def test_params_to_theta_applies_forward_transform_for_mapping():
 def test_mcmc_reports_samples_in_constrained_space_for_log_transform(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
-    with pytest.warns(UserWarning, match="non-finite support"):
-        prior = Estimator.make_prior(
-            distribution="log_normal",
-            parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
-            transform="log",
-        )
+    prior = Estimator.make_prior(
+        distribution="log_normal",
+        parameters={"mean": 0.0, "std": 0.5},
+        transform="log",
+    )
     est = Estimator(
         solver=SimpleNamespace(),
         compiled=_stub_compiled(),
@@ -253,12 +249,11 @@ def test_loglik_overrides_parameters_per_candidate(monkeypatch):
         return float64(0.0)
 
     monkeypatch.setattr(est_backend, "evaluate_loglik", _capture)
-    with pytest.warns(UserWarning, match="non-finite support"):
-        prior = Estimator.make_prior(
-            distribution="log_normal",
-            parameters={"s": 0.5, "low": 0.0, "scale": 1.0},
-            transform="log",
-        )
+    prior = Estimator.make_prior(
+        distribution="log_normal",
+        parameters={"mean": 0.0, "std": 0.5},
+        transform="log",
+    )
     est = Estimator(
         solver=SimpleNamespace(),
         compiled=_stub_compiled(),

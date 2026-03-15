@@ -14,14 +14,15 @@ Positive prior family parameterized by mean and standard deviation.
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
-    The implementation converts `(mean, std)` into shape-scale form:
+    The implementation converts `(mean, std)` into the gamma parameters `k` and `\theta`:
 
     $$
     k=\left(\frac{\mu}{\sigma}\right)^2,\quad
     \theta=\frac{\sigma^2}{\mu}
     $$
 
-    and dispatches to `scipy.stats.gamma(a=k, loc=0, scale=\theta)`.
+    These parameters are then used directly in the density and sampler.
+    The public API does not expose separate `loc` / `scale` wrapper parameters.
 
 ### PDF
 $$

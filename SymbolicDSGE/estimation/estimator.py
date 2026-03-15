@@ -151,7 +151,9 @@ class Estimator:
                 )
         out = np.empty_like(vals, dtype=float64)
         for i, name in enumerate(self.param_names):
-            out[i] = float64(self._param_transforms[name].forward(float64(vals[i])))
+            out[i] = float64(
+                self._param_transforms[name].safe_forward(float64(vals[i]))
+            )
         return out
 
     def theta_to_params(self, theta: NDF) -> dict[str, float64]:
@@ -165,7 +167,7 @@ class Estimator:
         full = dict(self._base_params)
         for i, name in enumerate(self.param_names):
             full[name] = float64(
-                self._param_transforms[name].inverse(float64(theta[i]))
+                self._param_transforms[name].safe_inverse(float64(theta[i]))
             )
         return full
 
@@ -236,7 +238,7 @@ class Estimator:
                 x0 = float64(self._base_params[name])
                 if hasattr(prior, "transform"):
                     z = float64(
-                        cast(Transform, getattr(prior, "transform")).forward(x0)
+                        cast(Transform, getattr(prior, "transform")).safe_forward(x0)
                     )
                 else:
                     z = x0

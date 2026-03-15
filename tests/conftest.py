@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 TESTS_DIR = Path(__file__).resolve().parent
 POST82_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "POST82.yaml"
 

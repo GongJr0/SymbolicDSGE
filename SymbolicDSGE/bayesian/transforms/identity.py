@@ -17,10 +17,7 @@ class Identity(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return x
-        else:
-            raise OutOfSupportError(x, self.support)
+        return x
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -28,10 +25,7 @@ class Identity(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return y
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return y
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -39,10 +33,7 @@ class Identity(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(np.ones_like(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(np.ones_like(x))
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -50,10 +41,7 @@ class Identity(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(np.ones_like(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(np.ones_like(y))
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -63,10 +51,7 @@ class Identity(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return float64(np.zeros_like(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return float64(np.zeros_like(x))
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -76,10 +61,7 @@ class Identity(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(np.zeros_like(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(np.zeros_like(y))
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -91,10 +73,7 @@ class Identity(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(np.zeros_like(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return float64(np.zeros_like(y))
 
     @property
     def support(self) -> Support:

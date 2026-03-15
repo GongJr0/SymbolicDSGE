@@ -83,7 +83,7 @@ Using `make_prior` we can define individual priors for each parameter we wish to
 prior_spec = {
     "beta": make_prior(
         "beta",
-        parameters={"mean": 200*0.971, "b": 200*0.029},
+        parameters={"a": 200*0.971, "b": 200*0.029},
         transform="logit", # (1)!
     ),
     "kappa": make_prior(

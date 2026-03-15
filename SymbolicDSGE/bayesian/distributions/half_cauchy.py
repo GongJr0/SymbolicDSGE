@@ -1,33 +1,55 @@
-from .distribution import Distribution, Size, RandomState, VecF64, _scalar_or_array
+from .distribution import Distribution, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
 from numpy import float64
-from scipy.stats import halfcauchy
+from numba import njit
 
-from typing import TypedDict, overload, cast
+from typing import TypedDict, cast, overload
 
 
 class HalfCauchyParams(TypedDict):
-    low: float
-    scale: float
+    gamma: float
     random_state: RandomState
 
 
 HALF_CAUCHY_DEFAULTS = HalfCauchyParams(
-    low=0.0,
-    scale=1.0,
+    gamma=1.0,
     random_state=None,
 )
 
 
-class HalfCauchy(Distribution):
-    def __init__(self, low: float, scale: float, random_state: RandomState) -> None:
-        self._low = float64(low)
-        self._scale = float64(scale)
-        self._random_state = random_state
+@njit(cache=True)
+def _logpdf_scalar(x: float64, gamma: float64) -> float64:
+    centered = x / gamma
+    return float64(np.log(2.0 / np.pi) - np.log(gamma) - np.log1p(centered**2))
 
-        self.dist = halfcauchy(loc=self._low, scale=self._scale)
+
+@njit(cache=True)
+def _logpdf_vectorized(x: VecF64, gamma: float64) -> VecF64:
+    centered = x / gamma
+    return (np.log(2.0 / np.pi) - np.log(gamma) - np.log1p(centered**2)).astype(float64)  # type: ignore
+
+
+@njit(cache=True)
+def _grad_logpdf_scalar(x: float64, gamma: float64) -> float64:
+    return float64((-2.0 * x) / (gamma**2.0 + x**2.0))
+
+
+@njit(cache=True)
+def _grad_logpdf_vectorized(x: VecF64, gamma: float64) -> VecF64:
+    return ((-2.0 * x) / (gamma**2.0 + x**2.0)).astype(float64)
+
+
+@njit(cache=True)
+def _rvs(gamma: float64, size: tuple[int, ...], rng: np.random.Generator) -> VecF64:
+    return np.abs(gamma * rng.standard_cauchy(size=size)).astype(float64)
+
+
+class HalfCauchy(Distribution):
+    def __init__(self, gamma: float, random_state: RandomState = None) -> None:
+        self._gamma = float64(gamma)
+        self._random_state = random_state
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
@@ -38,10 +60,9 @@ class HalfCauchy(Distribution):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        x_arr = np.asarray(x, dtype=float64)
-        centered = (x_arr - self._low) / self._scale
-        log_density = np.log(2.0 / np.pi) - np.log(self._scale) - np.log1p(centered**2)
-        return _scalar_or_array(log_density)
+        if isinstance(x, float64):
+            return cast(float64, _logpdf_scalar(x, self._gamma))
+        return cast(VecF64, _logpdf_vectorized(x, self._gamma))
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -52,7 +73,9 @@ class HalfCauchy(Distribution):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        return float64((-2 * x) / (self._scale**2 + x**2))
+        if isinstance(x, float64):
+            return cast(float64, _grad_logpdf_scalar(x, self._gamma))
+        return cast(VecF64, _grad_logpdf_vectorized(x, self._gamma))
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -60,7 +83,11 @@ class HalfCauchy(Distribution):
     def cdf(self, x: VecF64) -> VecF64: ...
 
     def cdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.cdf(x))
+        if isinstance(x, float64):
+            if x < 0.0:
+                return float64(0.0)
+            return float64((2.0 / np.pi) * np.arctan(x / self._gamma))
+        return np.where(x < 0.0, 0.0, (2.0 / np.pi) * np.arctan(x / self._gamma))
 
     @overload
     def ppf(self, q: float64) -> float64: ...
@@ -68,13 +95,13 @@ class HalfCauchy(Distribution):
     def ppf(self, q: VecF64) -> VecF64: ...
 
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.ppf(q))
+        return self._gamma * np.tan(0.5 * np.pi * q)
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
         rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, self.dist.rvs(size=size, random_state=rng))
+        return cast(VecF64, _rvs(self._gamma, size, rng))
 
     def __repr__(self) -> str:
         return self.__class__.__name__
@@ -82,7 +109,7 @@ class HalfCauchy(Distribution):
     @property
     def support(self) -> Support:
         return Support(
-            float64(self._low),
+            float64(0.0),
             float64(np.inf),
             low_inclusive=True,
             high_inclusive=False,
@@ -98,4 +125,4 @@ class HalfCauchy(Distribution):
 
     @property
     def mode(self) -> float64:
-        return float64(self._low)
+        return float64(0.0)

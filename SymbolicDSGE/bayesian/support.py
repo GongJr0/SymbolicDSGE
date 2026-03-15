@@ -4,8 +4,77 @@ from numpy import float64
 from numpy.typing import NDArray
 import numpy as np
 from functools import wraps
+from numba import njit
 
 FLOAT_VEC_SCA = Union[float64, NDArray[float64]]
+
+
+@njit(cache=True)
+def _contains_scalar(
+    low: float64, high: float64, low_inclusive: bool, high_inclusive: bool, x: float64
+) -> bool:
+    if low_inclusive:
+        if x < low:
+            return False
+    else:
+        if x <= low:
+            return False
+
+    if high_inclusive:
+        if x > high:
+            return False
+    else:
+        if x >= high:
+            return False
+
+    return True
+
+
+@njit(cache=True)
+def _contains_vectorized(
+    low: float64,
+    high: float64,
+    low_inclusive: bool,
+    high_inclusive: bool,
+    x: NDArray[float64],
+) -> bool:
+    flat = x.ravel()
+    for i in range(flat.size):
+        xi = flat[i]
+
+        if low_inclusive:
+            if xi < low:
+                return False
+        else:
+            if xi <= low:
+                return False
+
+        if high_inclusive:
+            if xi > high:
+                return False
+        else:
+            if xi >= high:
+                return False
+
+    return True
+
+
+@njit(cache=True)
+def _at_boundary_scalar(
+    x: float64, bound: str, lim: float64, atol: float64 = float64(1e-6)
+) -> bool:
+    if bound == "low":
+        return bool(np.isclose(x, lim, atol=atol))
+    return bool(np.isclose(x, lim, atol=atol))
+
+
+@njit(cache=True)
+def _at_boundary_vectorized(
+    x: NDArray[float64], bound: str, lim: float64, atol: float64 = float64(1e-6)
+) -> bool:
+    if bound == "low":
+        return bool(np.any(np.isclose(x, lim, atol=atol)))
+    return bool(np.any(np.isclose(x, lim, atol=atol)))
 
 
 @dataclass(frozen=True)
@@ -17,50 +86,34 @@ class Support:
     high_inclusive: bool = True
 
     def contains(self, x: FLOAT_VEC_SCA) -> bool:
-        if np.isscalar(x):
-            x_scalar = cast(float64, x)
-            if self.low_inclusive:
-                low_check = x_scalar >= self.low
-            else:
-                low_check = x_scalar > self.low
-
-            if self.high_inclusive:
-                high_check = x_scalar <= self.high
-            else:
-                high_check = x_scalar < self.high
-
-            return bool(low_check and high_check)
-
-        x_arr = np.asarray(x)
-        if self.low_inclusive:
-            low_check_arr = x_arr >= self.low
-        else:
-            low_check_arr = x_arr > self.low
-
-        if self.high_inclusive:
-            high_check_arr = x_arr <= self.high
-        else:
-            high_check_arr = x_arr < self.high
-
-        return bool(np.all(low_check_arr) and np.all(high_check_arr))
+        if isinstance(x, (float64, float)):
+            x = float64(x)
+            return cast(
+                bool,
+                _contains_scalar(
+                    self.low, self.high, self.low_inclusive, self.high_inclusive, x
+                ),
+            )
+        x = x.astype(float64)
+        return cast(
+            bool,
+            _contains_vectorized(
+                self.low, self.high, self.low_inclusive, self.high_inclusive, x
+            ),
+        )
 
     def at_boundary(self, x: FLOAT_VEC_SCA, bound: Literal["high", "low"]) -> bool:
-        x_arr = np.asarray(x)
-
-        if bound == "low":
-            return bool(np.any(np.isclose(x_arr, self.low, atol=1e-6)))
-
-        else:
-            return bool(np.any(np.isclose(x_arr, self.high, atol=1e-6)))
+        lim = self.low if bound == "low" else self.high
+        if isinstance(x, (float64, float)):
+            x = float64(x)
+            return cast(bool, _at_boundary_scalar(x, bound, lim))
+        x = x.astype(float64)
+        return cast(bool, _at_boundary_vectorized(x, bound, lim))
 
     def contains_support(self, other: "Support") -> bool:
-        low_check = self.low < other.low or (
-            self.low == other.low and (self.low_inclusive or not other.low_inclusive)
-        )
-        high_check = self.high > other.high or (
-            self.high == other.high
-            and (self.high_inclusive or not other.high_inclusive)
-        )
+        # Ignore inclusivity, eps injection should handle boundary cases
+        high_check = self.high >= other.high
+        low_check = self.low <= other.low
         return bool(low_check and high_check)
 
     @property
@@ -78,6 +131,12 @@ class Support:
             and self.low_inclusive == other.low_inclusive
             and self.high_inclusive == other.high_inclusive
         )
+
+    def __lshift__(self, other: "Support") -> bool:
+        return self.contains_support(other)
+
+    def __rlshift__(self, other: "Support") -> bool:
+        return other.contains_support(self)
 
 
 class OutOfSupportError(ValueError):

@@ -9,13 +9,15 @@ Inverse-gamma prior family.
 ### Parameters
 | __Argument__ | __Symbol__ | __Meaning__ | __Default__ |
 |:-------------|:-----------|:------------|:-----------:|
-| `a` | $\alpha$ | Shape | `1.0` |
-| `loc` | - | Location shift used by implementation | `0.0` |
-| `scale` | $\beta$ | Scale | `1.0` |
+| `mean` | $\mu$ | Mean of the inverse-gamma prior | `1.0` |
+| `std` | $\sigma$ | Standard deviation of the inverse-gamma prior | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
-    The implementation follows `scipy.stats.invgamma(a, loc=loc, scale=scale)`.
+    The implementation derives the canonical inverse-gamma parameters `\alpha` and `\beta` from `mean` and `std`:
+    `#!python alpha = 2 + (mean / std) ** 2` and
+    `#!python beta = mean * (alpha - 1)`.
+    The public API does not expose separate `loc` / `scale` wrapper parameters.
 
 ### PDF
 $$

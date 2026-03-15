@@ -11,12 +11,12 @@ Bounded prior family on the unit interval in its standard form.
 |:-------------|:-----------|:------------|:-----------:|
 | `a` | $\alpha$ | First shape parameter | `1.0` |
 | `b` | $\beta$ | Second shape parameter | `1.0` |
-| `loc` | - | Lower shift used by implementation | `0.0` |
-| `scale` | - | Width scale used by implementation | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
-    The implementation follows `scipy.stats.beta(a, b, loc=loc, scale=scale)`, i.e. an affine-transformed beta distribution.
+    The implementation uses the canonical beta family on `[0, 1]`.
+    The API only accepts the two shape parameters `a` and `b`;
+    arbitrary `low` / `high` interval scaling is not part of this distribution class.
 
 ### PDF
 $$
@@ -27,5 +27,5 @@ $$
 
 ### Region
 $$
-x \in (0,1)
+x \in [0,1]
 $$

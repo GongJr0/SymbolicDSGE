@@ -139,8 +139,7 @@ def _chol_solve_vec(L: NDF, b: NDF) -> NDF:
     Solve (L L.T) x = b for x, where b is (n,).
     """
     y: NDF = _forward_subst_vec(L, b)
-    LT: NDF = np.ascontiguousarray(L.T)
-    x: NDF = _backward_subst_vec(LT, y)
+    x: NDF = _backward_subst_vec(L.T, y)
     return x.astype(float64)
 
 
@@ -151,7 +150,6 @@ def _chol_solve_mat(L: NDF, B: NDF) -> NDF:
     """
     n, k = B.shape
     X = np.empty((n, k), dtype=float64)
-
     for col in range(k):
         y = _forward_subst_vec(L, B[:, col])
         x = _backward_subst_vec(L.T, y)
@@ -184,6 +182,7 @@ def _kalman_hot_loop(
     P_0: NDF,
     symmetrize: bool,
     jitter: float,
+    return_shocks: bool = False,
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
@@ -238,9 +237,8 @@ def _kalman_hot_loop(
         S_inv_v = _chol_solve_vec(L, v_t)
 
         PCt = P_t_pred @ CT  # (n, m)
-        PCtT = np.ascontiguousarray(PCt.T)
-        K_t = _chol_solve_mat(L, PCtT).T
-        K_tT = np.ascontiguousarray(K_t.T)
+        K_tT = _chol_solve_mat(L, PCt.T)
+        K_t = np.ascontiguousarray(K_tT.T)
 
         x_t_filt = x_t_pred + K_t @ v_t
         y_t_filt = C @ x_t_filt + d
@@ -255,7 +253,8 @@ def _kalman_hot_loop(
         quad = float64(v_t @ S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
-        eps_hat[t] = M @ S_inv_v
+        if return_shocks:
+            eps_hat[t] = M @ S_inv_v
 
         x_pred[t] = x_t_pred
         x_filt[t] = x_t_filt
@@ -330,6 +329,7 @@ def _ekf_hot_loop_python(
     symmetrize: bool,
     jitter: float,
     compute_y_filt: bool,
+    return_shocks: bool = False,
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
@@ -390,14 +390,12 @@ def _ekf_hot_loop_python(
         S_inv_v = _chol_solve_mat(L, v_col).reshape(m)
 
         PHt = P_t_pred @ H_tT  # (n, m)
-        PHtT = np.ascontiguousarray(PHt.T)
-        K_t = _chol_solve_mat(L, PHtT).T  # (n, m)
-        K_tT = np.ascontiguousarray(K_t.T)
+        K_t = _chol_solve_mat(L, PHt.T).T  # (n, m)
 
         x_t_filt = x_t_pred + K_t @ v_t
 
         KH = K_t @ H_t
-        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_tT
+        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_t.T
         if symmetrize:
             P_t_filt = _sym(P_t_filt)
 
@@ -410,8 +408,9 @@ def _ekf_hot_loop_python(
             y_filt[t] = _call_extended_measurement(h, x_t_filt, calib_params).reshape(m)
 
         # Optional "shock estimate" (same form as linear KF)
-        M = Q @ (BT @ H_tT)  # mirrors linear case with C -> H_t
-        eps_hat[t] = M @ S_inv_v
+        if return_shocks:
+            M = Q @ (BT @ H_tT)  # mirrors linear case with C -> H_t
+            eps_hat[t] = M @ S_inv_v
 
         # Store
         x_pred[t] = x_t_pred
@@ -460,6 +459,7 @@ def _ekf_hot_loop_numba(
     symmetrize: bool,
     jitter: float,
     compute_y_filt: bool,
+    return_shocks: bool = False,
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
@@ -516,14 +516,12 @@ def _ekf_hot_loop_numba(
         S_inv_v = _chol_solve_mat(L, v_col).reshape(m)
 
         PHt = P_t_pred @ H_tT
-        PHtT = np.ascontiguousarray(PHt.T)
-        K_t = _chol_solve_mat(L, PHtT).T
-        K_tT = np.ascontiguousarray(K_t.T)
+        K_t = _chol_solve_mat(L, PHt.T).T
 
         x_t_filt = x_t_pred + K_t @ v_t
 
         KH = K_t @ H_t
-        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_tT
+        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_t.T
         if symmetrize:
             P_t_filt = _sym(P_t_filt)
 
@@ -533,9 +531,9 @@ def _ekf_hot_loop_numba(
 
         if compute_y_filt:
             y_filt[t] = h(x_t_filt, calib_params).reshape(m)
-
-        M = Q @ (BT @ H_tT)
-        eps_hat[t] = M @ S_inv_v
+        if return_shocks:
+            M = Q @ (BT @ H_tT)
+            eps_hat[t] = M @ S_inv_v
 
         x_pred[t] = x_t_pred
         x_filt[t] = x_t_filt

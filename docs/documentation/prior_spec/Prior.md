@@ -45,15 +45,20 @@ Accepted `distribution` values in `make_prior(...)`:
 | __Enum Member__ | __String__ | __Parameter Keys__ | __Defaults__ |
 |:----------------|:----------:|-------------------:|-------------:|
 | `NORMAL` | `"normal"` | `mean`, `std`, `random_state` | `0.0`, `1.0`, `None` |
-| `LOGNORMAL` | `"log_normal"` | `s`, `low`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
-| `HALFNORMAL` | `"half_normal"` | `low`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
-| `TRUNCNORMAL` | `"trunc_normal"` | `low`, `high`, `loc`, `scale`, `random_state` | `-6.0`, `6.0`, `0.0`, `1.0`, `None` |
-| `HALFCAUCHY` | `"half_cauchy"` | `low`, `scale`, `random_state` | `0.0`, `1.0`, `None` |
-| `BETA` | `"beta"` | `a`, `b`, `loc`, `scale`, `random_state` | `1.0`, `1.0`, `0.0`, `1.0`, `None` |
+| `LOGNORMAL` | `"log_normal"` | `mean`, `std`, `random_state` | `0.0`, `1.0`, `None` |
+| `HALFNORMAL` | `"half_normal"` | `std`, `random_state` | `1.0`, `None` |
+| `TRUNCNORMAL` | `"trunc_normal"` | `low`, `high`, `mean`, `std`, `random_state` | `-6.0`, `6.0`, `0.0`, `1.0`, `None` |
+| `HALFCAUCHY` | `"half_cauchy"` | `gamma`, `random_state` | `1.0`, `None` |
+| `BETA` | `"beta"` | `a`, `b`, `random_state` | `1.0`, `1.0`, `None` |
 | `GAMMA` | `"gamma"` | `mean`, `std`, `random_state` | `1.0`, `1.0`, `None` |
-| `INVGAMMA` | `"inv_gamma"` | `a`, `loc`, `scale`, `random_state` | `1.0`, `0.0`, `1.0`, `None` |
+| `INVGAMMA` | `"inv_gamma"` | `mean`, `std`, `random_state` | `1.0`, `1.0`, `None` |
 | `UNIFORM` | `"uniform"` | `low`, `high`, `random_state` | `0.0`, `1.0`, `None` |
 | `LKJCHOL` | `"lkj_chol"` | `eta`, `K`, `random_state` | `1.0`, `-1`, `None` |
+
+???+ note "Parameterization Convention"
+    Distribution constructors use the current library API directly.
+    Canonical families stay canonical, and no SciPy-style `loc` / `scale` wrapper parameters are exposed in `make_prior(...)`.
+    The only bounded normal family is `trunc_normal`, which takes explicit `low` and `high` truncation bounds.
 
 ???+ note "LKJ Parameter"
     `LKJCHOL` requires `K` to be set meaningfully by the user; the default `K=-1` is only a placeholder and is not a valid runtime shape.
@@ -88,7 +93,7 @@ from SymbolicDSGE.bayesian import make_prior
 priors = {
     "beta": make_prior(
         distribution="beta", # (1)!
-        parameters={"a": 100.0, "b": 5.0, "loc": 0.0, "scale": 1.0},
+        parameters={"a": 100.0, "b": 5.0},
         transform="logit", # (2)!
     ),
     "psi_pi": make_prior(

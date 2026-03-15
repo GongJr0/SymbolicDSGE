@@ -1,26 +1,78 @@
-from .distribution import Distribution, RandomState, Size, VecF64
+from .distribution import Distribution, RandomState, Size, VecF64, _std_norm_cdf_scalar
+from ._as241 import ndtri_as241
 from ..support import OutOfSupportError, Support
 
+import math
+import numpy as np
 from numpy import float64
+from numba import njit
 from scipy.stats import truncnorm
 from typing import TypedDict, Tuple, overload, cast
 
 
 class TruncNormParams(TypedDict):
-    loc: float
-    scale: float
-    low: float  # Scalar lower bound (scipy expects standard deviations)
-    high: float  # Scalar upper bound (scipy expects standard deviations)
+    low: float
+    high: float
+    mean: float
+    std: float
     random_state: RandomState
 
 
 TRUNCNORM_DEFAULTS = TruncNormParams(
-    loc=0.0,
-    scale=1.0,
     low=-6.0,  # Effectively unbounded
     high=6.0,
+    mean=0.0,
+    std=1.0,
     random_state=None,
 )
+
+
+@njit(cache=True)
+def _logpdf_scalar(
+    x: float64, mean: float64, std: float64, log_norm: float64
+) -> float64:
+    z = (x - mean) / std
+    return float64(-0.5 * z * z - log_norm)
+
+
+@njit(cache=True)
+def _logpdf_vectorized(
+    x: VecF64, mean: float64, std: float64, log_norm: float64
+) -> VecF64:
+    z = (x - mean) / std
+    return (-0.5 * z * z - log_norm).astype(float64)
+
+
+@njit(cache=True)
+def _grad_logpdf_scalar(x: float64, mean: float64, std: float64) -> float64:
+    return float64(-(x - mean) / std**2)
+
+
+@njit(cache=True)
+def _grad_logpdf_vectorized(x: VecF64, mean: float64, std: float64) -> VecF64:
+    return (-(x - mean) / std**2).astype(float64)
+
+
+@njit(cache=True)
+def _rvs(
+    mean: float64,
+    std: float64,
+    a: float64,
+    b: float64,
+    size: tuple[int, ...],
+    rng: np.random.Generator,
+) -> VecF64:
+    u = rng.uniform(size=size).astype(float64)
+    u_flat = u.ravel()
+    size_flat = u_flat.shape[0]
+    Fa = _std_norm_cdf_scalar(a)
+    Fb = _std_norm_cdf_scalar(b)
+
+    z = np.empty((size_flat,), dtype=float64)
+    for i in range(size_flat):
+        z[i] = ndtri_as241(Fa + u_flat[i] * (Fb - Fa))
+
+    return (mean + std * z).reshape(size)
 
 
 class TruncNormal(Distribution[float64, VecF64]):
@@ -28,18 +80,24 @@ class TruncNormal(Distribution[float64, VecF64]):
         self,
         low: float,
         high: float,
-        loc: float,
-        scale: float,
+        mean: float,
+        std: float,
         random_state: RandomState,
     ):
-        self._loc = float64(loc)
-        self._scale = float64(scale)
+        self._mean = float64(mean)
+        self._std = float64(std)
         self._low_trunc = float64(low)
         self._high_trunc = float64(high)
-        self._a, self._b = self._scalar_to_std(loc, scale, low, high)
+        self._a, self._b = self._scalar_to_std(mean, std, low, high)
+        z = _std_norm_cdf_scalar(float64(self._b)) - _std_norm_cdf_scalar(
+            float64(self._a)
+        )
+        self._log_norm = float64(
+            math.log(float(self._std))
+            + 0.5 * math.log(2.0 * math.pi)
+            + math.log(float(z))
+        )
         self._random_state = random_state
-
-        self.dist = truncnorm(a=self._a, b=self._b, loc=self._loc, scale=self._scale)
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
@@ -50,7 +108,13 @@ class TruncNormal(Distribution[float64, VecF64]):
         support = self.support
         if not support.contains(x):
             raise OutOfSupportError(x, support)
-        return float64(self.dist.logpdf(x))
+        if isinstance(x, float64):
+            return cast(
+                float64, _logpdf_scalar(x, self._mean, self._std, self._log_norm)
+            )
+        return cast(
+            VecF64, _logpdf_vectorized(x, self._mean, self._std, self._log_norm)
+        )
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -63,7 +127,9 @@ class TruncNormal(Distribution[float64, VecF64]):
             raise OutOfSupportError(x, support)
         # Assume gradient at bounds is approaching from the defined region (+ for lower bound, - for upper bound).
         # This avoids non-finite gradients at bounds but isn't mathematically exact.
-        return -(x - self._loc) / self._scale**2
+        if isinstance(x, float64):
+            return cast(float64, _grad_logpdf_scalar(x, self._mean, self._std))
+        return cast(VecF64, _grad_logpdf_vectorized(x, self._mean, self._std))
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -71,7 +137,11 @@ class TruncNormal(Distribution[float64, VecF64]):
     def cdf(self, x: VecF64) -> VecF64: ...
 
     def cdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.cdf(x))
+        z = (x - self._mean) / self._std
+        out = truncnorm.cdf(z, a=self._a, b=self._b)
+        if isinstance(x, float64):
+            return float64(out)
+        return np.asarray(out, dtype=float64)
 
     @overload
     def ppf(self, q: float64) -> float64: ...
@@ -79,26 +149,28 @@ class TruncNormal(Distribution[float64, VecF64]):
     def ppf(self, q: VecF64) -> VecF64: ...
 
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
-        return float64(self.dist.ppf(q))
+        out = self._mean + self._std * truncnorm.ppf(q, a=self._a, b=self._b)
+        if isinstance(q, float64):
+            return float64(out)
+        return np.asarray(out, dtype=float64)
 
-    def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state or self._random_state)
+    def rvs(self, size: Size = (1,), random_state: RandomState = None) -> VecF64:
+        rng = self._rng(self._random_state if random_state is None else random_state)
         if isinstance(size, int):
             size = (size,)
-        samples = self.dist.rvs(size=size, random_state=rng)
-        return cast(VecF64, float64(samples))
+        return cast(VecF64, _rvs(self._mean, self._std, self._a, self._b, size, rng))
 
     def __repr__(self) -> str:
         return self.__class__.__name__
 
     @staticmethod
     def _scalar_to_std(
-        loc: float, scale: float, low: float, high: float
-    ) -> Tuple[float, float]:
+        mean: float, std: float, low: float, high: float
+    ) -> Tuple[float64, float64]:
         # Z-transform to get unit std
         return (
-            (low - loc) / scale,
-            (high - loc) / scale,
+            float64((low - mean) / std),
+            float64((high - mean) / std),
         )
 
     @property
@@ -112,15 +184,15 @@ class TruncNormal(Distribution[float64, VecF64]):
 
     @property
     def mean(self) -> float64:
-        return float64(self.dist.mean())
+        return float64(self._mean + self._std * truncnorm.mean(a=self._a, b=self._b))
 
     @property
     def var(self) -> float64:
-        return float64(self.dist.var())
+        return float64((self._std**2) * truncnorm.var(a=self._a, b=self._b))
 
     @property
     def mode(self) -> float64:
-        mu = self.mean
+        mu = self._mean
         hi = self.support.high
         lo = self.support.low
 
