@@ -15,6 +15,8 @@ Bounded prior family on the unit interval in its standard form.
 
 ???+ note "Implementation Parameterization"
     The implementation uses the canonical beta family on `[0, 1]`.
+    The API only accepts the two shape parameters `a` and `b`;
+    arbitrary `low` / `high` interval scaling is not part of this distribution class.
 
 ### PDF
 $$

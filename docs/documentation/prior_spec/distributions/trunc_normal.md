@@ -4,7 +4,7 @@ tags:
 ---
 # TruncNormal
 
-Normal prior truncated to a finite interval.
+Continuous normal prior truncated to a finite interval.
 
 ### Parameters
 | __Argument__ | __Symbol__ | __Meaning__ | __Default__ |
@@ -14,6 +14,11 @@ Normal prior truncated to a finite interval.
 | `mean` | $\mu$ | Mean of the underlying normal distribution | `0.0` |
 | `std` | $\sigma$ | Standard deviation of the underlying normal distribution | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
+
+???+ note "Implementation Parameterization"
+    This is a true truncated normal on the closed interval `[low, high]`.
+    The density is the underlying normal renormalized over that interval;
+    the implementation does not use clipped or censored point masses at the bounds.
 
 ### PDF
 $$

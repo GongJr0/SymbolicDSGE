@@ -4,16 +4,17 @@ tags:
 ---
 # HalfNormal
 
-Non-negative prior family obtained by folding a normal distribution at zero.
+Canonical half-normal prior family on non-negative support.
 
 ### Parameters
 | __Argument__ | __Symbol__ | __Meaning__ | __Default__ |
 |:-------------|:-----------|:------------|:-----------:|
-| `std` | $\sigma$ | Standard deviation of the folded underlying normal | `1.0` |
+| `std` | $\sigma$ | Half-normal scale parameter | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
     The implementation uses the canonical half-normal family on `[0, \infty)`.
+    No shift parameter is exposed.
 
 ### PDF
 $$

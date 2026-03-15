@@ -55,6 +55,11 @@ Accepted `distribution` values in `make_prior(...)`:
 | `UNIFORM` | `"uniform"` | `low`, `high`, `random_state` | `0.0`, `1.0`, `None` |
 | `LKJCHOL` | `"lkj_chol"` | `eta`, `K`, `random_state` | `1.0`, `-1`, `None` |
 
+???+ note "Parameterization Convention"
+    Distribution constructors use the current library API directly.
+    Canonical families stay canonical, and no SciPy-style `loc` / `scale` wrapper parameters are exposed in `make_prior(...)`.
+    The only bounded normal family is `trunc_normal`, which takes explicit `low` and `high` truncation bounds.
+
 ???+ note "LKJ Parameter"
     `LKJCHOL` requires `K` to be set meaningfully by the user; the default `K=-1` is only a placeholder and is not a valid runtime shape.
 

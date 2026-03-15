@@ -22,6 +22,7 @@ Positive prior family parameterized by mean and standard deviation.
     $$
 
     These parameters are then used directly in the density and sampler.
+    The public API does not expose separate `loc` / `scale` wrapper parameters.
 
 ### PDF
 $$

@@ -9,11 +9,12 @@ Heavy-tailed positive prior family.
 ### Parameters
 | __Argument__ | __Symbol__ | __Meaning__ | __Default__ |
 |:-------------|:-----------|:------------|:-----------:|
-| `gamma` | $\gamma$ | Cauchy width parameter | `1.0` |
+| `gamma` | $\gamma$ | Half-Cauchy scale parameter | `1.0` |
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
     The implementation uses the canonical half-Cauchy family on `[0, \infty)`.
+    No shift parameter is exposed.
 
 ### PDF
 $$

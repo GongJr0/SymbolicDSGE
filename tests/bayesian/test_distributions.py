@@ -104,6 +104,82 @@ def _scaled_scipy_logpdf(base_logpdf, x, *, stretch: float):
     return base_logpdf(x / stretch) - np.log(stretch)
 
 
+RVS_REFERENCE_SAMPLE_SIZE = 100_000
+RVS_QUANTILES = np.array([0.1, 0.5, 0.9], dtype=np.float64)
+RVS_MEAN_SIGMAS = 5.0
+RVS_VAR_SIGMAS = 6.0
+RVS_QUANTILE_SIGMAS = 6.0
+
+
+@pytest.fixture(
+    params=[
+        (
+            "normal",
+            lambda: Normal(1.25, 0.7, 123),
+            scipy_norm(loc=1.25, scale=0.7),
+            True,
+        ),
+        (
+            "lognormal",
+            lambda: LogNormal(np.log(1.8), 0.45, 123),
+            scipy_lognorm(s=0.45, scale=1.8),
+            True,
+        ),
+        (
+            "halfnormal",
+            lambda: HalfNormal(1.4, 123),
+            scipy_halfnorm(scale=1.4),
+            True,
+        ),
+        (
+            "halfcauchy",
+            lambda: HalfCauchy(1.1, 123),
+            scipy_halfcauchy(scale=1.1),
+            False,
+        ),
+        (
+            "truncnormal",
+            lambda: TruncNormal(-1.0, 1.0, 0.0, 1.0, 123),
+            scipy_truncnorm(a=-1.0, b=1.0, loc=0.0, scale=1.0),
+            True,
+        ),
+        (
+            "uniform",
+            lambda: Uniform(-2.0, 3.5, 123),
+            scipy_uniform(loc=-2.0, scale=5.5),
+            True,
+        ),
+        (
+            "beta",
+            lambda: Beta(2.5, 4.0, 123),
+            scipy_beta(a=2.5, b=4.0),
+            True,
+        ),
+        (
+            "gamma",
+            lambda: Gamma(4.5, 1.3, 123),
+            scipy_gamma(
+                a=Gamma.to_shape(4.5, 1.3),
+                scale=Gamma.to_scale(4.5, 1.3),
+            ),
+            True,
+        ),
+        (
+            "invgamma",
+            lambda: InvGamma(3.2, 1.8, 123),
+            scipy_invgamma(
+                a=InvGamma.to_shape(3.2, 1.8),
+                scale=InvGamma.to_scale(3.2, 1.8),
+            ),
+            True,
+        ),
+    ],
+    ids=lambda case: case[0],
+)
+def sampler_reference_case(request):
+    return request.param
+
+
 def test_expected_concrete_distribution_classes():
     distribution_classes = [
         Normal,
@@ -321,6 +397,62 @@ def test_distribution_rvs_size_parameterization(distribution_case):
     assert isinstance(sample_2d, np.ndarray)
     assert sample_1d.shape == (5,)
     assert sample_2d.shape == (2, 3)
+
+
+def test_distribution_rvs_empirical_mean_matches_scipy(sampler_reference_case):
+    _, ctor, scipy_dist, has_finite_variance = sampler_reference_case
+    if not has_finite_variance:
+        pytest.skip("Mean-based sampler check requires finite variance.")
+
+    samples = np.asarray(
+        ctor().rvs(size=RVS_REFERENCE_SAMPLE_SIZE, random_state=2026),
+        dtype=np.float64,
+    )
+    expected_mean = float64(scipy_dist.mean())
+    expected_var = float64(scipy_dist.var())
+    mean_se = float64(np.sqrt(expected_var / RVS_REFERENCE_SAMPLE_SIZE))
+
+    assert np.abs(samples.mean() - expected_mean) <= (RVS_MEAN_SIGMAS * mean_se + 1e-12)
+
+
+def test_distribution_rvs_empirical_variance_matches_scipy(sampler_reference_case):
+    _, ctor, scipy_dist, has_finite_variance = sampler_reference_case
+    if not has_finite_variance:
+        pytest.skip("Variance-based sampler check requires finite fourth moment.")
+
+    samples = np.asarray(
+        ctor().rvs(size=RVS_REFERENCE_SAMPLE_SIZE, random_state=2026),
+        dtype=np.float64,
+    )
+    expected_var = float64(scipy_dist.var())
+    excess_kurtosis = float64(scipy_dist.stats(moments="k"))
+    var_se = float64(
+        expected_var
+        * np.sqrt((excess_kurtosis + 2.0) / (RVS_REFERENCE_SAMPLE_SIZE - 1))
+    )
+
+    assert np.abs(samples.var(ddof=1) - expected_var) <= (
+        RVS_VAR_SIGMAS * var_se + 1e-12
+    )
+
+
+def test_distribution_rvs_empirical_quantiles_match_scipy(sampler_reference_case):
+    _, ctor, scipy_dist, _ = sampler_reference_case
+
+    samples = np.asarray(
+        ctor().rvs(size=RVS_REFERENCE_SAMPLE_SIZE, random_state=2026),
+        dtype=np.float64,
+    )
+    empirical = np.quantile(samples, RVS_QUANTILES)
+    expected = np.asarray(scipy_dist.ppf(RVS_QUANTILES), dtype=np.float64)
+    density = np.asarray(scipy_dist.pdf(expected), dtype=np.float64)
+    quantile_se = np.sqrt(
+        RVS_QUANTILES * (1.0 - RVS_QUANTILES) / (RVS_REFERENCE_SAMPLE_SIZE * density**2)
+    )
+
+    assert np.all(
+        np.abs(empirical - expected) <= RVS_QUANTILE_SIGMAS * quantile_se + 1e-12
+    )
 
 
 def test_distribution_support_and_validity(distribution_case):

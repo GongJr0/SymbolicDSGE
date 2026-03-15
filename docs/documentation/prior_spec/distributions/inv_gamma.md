@@ -17,6 +17,7 @@ Inverse-gamma prior family.
     The implementation derives the canonical inverse-gamma parameters `\alpha` and `\beta` from `mean` and `std`:
     `#!python alpha = 2 + (mean / std) ** 2` and
     `#!python beta = mean * (alpha - 1)`.
+    The public API does not expose separate `loc` / `scale` wrapper parameters.
 
 ### PDF
 $$

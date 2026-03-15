@@ -4,7 +4,7 @@ tags:
 ---
 # LogNormal
 
-Positive-support prior family based on exponentiated normals.
+Canonical lognormal prior family on positive support.
 
 ### Parameters
 | __Argument__ | __Symbol__ | __Meaning__ | __Default__ |
@@ -14,8 +14,9 @@ Positive-support prior family based on exponentiated normals.
 | `random_state` | - | RNG seed / generator | `None` |
 
 ???+ note "Implementation Parameterization"
-    The implementation uses the underlying normal parameters directly:
-    `#!python X = exp(N(mean, std^2))`.
+    The API takes the underlying normal parameters directly:
+    `#!python X = exp(N(mean, std**2))`.
+    No additional shift or scale wrapper parameters are exposed.
 
 ### PDF
 $$
