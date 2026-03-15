@@ -4,7 +4,9 @@ from numpy import float64
 from numpy.typing import NDArray
 from typing import TypeVar, overload
 
-from ..support import Support
+import numpy as np
+
+from ..support import Support, OutOfSupportError
 
 T = TypeVar("T", float64, NDArray[float64])
 
@@ -100,6 +102,134 @@ class Transform(ABC):
     @abstractmethod
     def grad_log_det_abs_jacobian_inverse(self, y: T) -> T:
         pass
+
+    @overload
+    def _get_adjusted_forward(self, x: float64) -> float64: ...
+    @overload
+    def _get_adjusted_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
+
+    def _get_adjusted_forward(self, x: T) -> T:
+        sup = self.support
+        if isinstance(x, (float64, float)):
+            x = float64(x)
+            if np.isfinite(sup.low) and sup.at_boundary(x, "low"):
+                return x + self.eps
+            if np.isfinite(sup.high) and sup.at_boundary(x, "high"):
+                return x - self.eps
+            if not sup.contains(x):
+                raise OutOfSupportError(x, sup)
+            return x
+
+        arr = x.astype(float64, copy=False)
+        low_mask = (
+            np.isclose(arr, sup.low, atol=float64(1e-6))
+            if np.isfinite(sup.low)
+            else False
+        )
+        high_mask = (
+            np.isclose(arr, sup.high, atol=float64(1e-6))
+            if np.isfinite(sup.high)
+            else False
+        )
+        adjusted = np.where(
+            low_mask, arr + self.eps, np.where(high_mask, arr - self.eps, arr)
+        )
+        if not sup.contains(adjusted):
+            raise OutOfSupportError(arr, sup)
+        return adjusted
+
+    @overload
+    def _get_adjusted_inverse(self, z: float64) -> float64: ...
+    @overload
+    def _get_adjusted_inverse(self, z: NDArray[float64]) -> NDArray[float64]: ...
+
+    def _get_adjusted_inverse(self, z: T) -> T:
+        maps_to = self.maps_to
+        if isinstance(z, (float64, float)):
+            z = float64(z)
+            if np.isfinite(maps_to.low) and maps_to.at_boundary(z, "low"):
+                return z + self.eps
+            if np.isfinite(maps_to.high) and maps_to.at_boundary(z, "high"):
+                return z - self.eps
+            if not maps_to.contains(z):
+                raise OutOfSupportError(z, maps_to)
+            return z
+
+        arr = z.astype(float64, copy=False)
+        low_mask = (
+            np.isclose(arr, maps_to.low, atol=float64(1e-6))
+            if np.isfinite(maps_to.low)
+            else False
+        )
+        high_mask = (
+            np.isclose(arr, maps_to.high, atol=float64(1e-6))
+            if np.isfinite(maps_to.high)
+            else False
+        )
+        adjusted = np.where(
+            low_mask, arr + self.eps, np.where(high_mask, arr - self.eps, arr)
+        )
+        if not maps_to.contains(adjusted):
+            raise OutOfSupportError(arr, maps_to)
+        return adjusted
+
+    @overload
+    def safe_forward(self, x: float64) -> float64: ...
+    @overload
+    def safe_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
+
+    def safe_forward(self, x: T) -> T:
+        x = self._get_adjusted_forward(x)
+        return self.forward(x)
+
+    @overload
+    def safe_inverse(self, y: float64) -> float64: ...
+    @overload
+    def safe_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
+
+    def safe_inverse(self, y: T) -> T:
+        y = self._get_adjusted_inverse(y)
+        return self.inverse(y)
+
+    @overload
+    def safe_grad_forward(self, x: float64) -> float64: ...
+    @overload
+    def safe_grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
+
+    def safe_grad_forward(self, x: T) -> T:
+        x = self._get_adjusted_forward(x)
+        return self.grad_forward(x)
+
+    @overload
+    def safe_grad_inverse(self, y: float64) -> float64: ...
+    @overload
+    def safe_grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
+
+    def safe_grad_inverse(self, y: T) -> T:
+        y = self._get_adjusted_inverse(y)
+        return self.grad_inverse(y)
+
+    @overload
+    def safe_log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
+    @overload
+    def safe_log_det_abs_jacobian_forward(
+        self, x: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    def safe_log_det_abs_jacobian_forward(self, x: T) -> T:
+        x = self._get_adjusted_forward(x)
+        return self.log_det_abs_jacobian_forward(x)
+
+    @overload
+    def safe_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
+    @overload
+    def safe_log_det_abs_jacobian_inverse(
+        self, y: NDArray[float64]
+    ) -> NDArray[float64]: ...
+
+    def safe_log_det_abs_jacobian_inverse(self, y: T) -> T:
+        y = self._get_adjusted_inverse(y)
+        return self.log_det_abs_jacobian_inverse(y)
 
     @property
     @abstractmethod

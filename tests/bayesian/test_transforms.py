@@ -49,28 +49,28 @@ from SymbolicDSGE.bayesian.transforms.transform import TransformMethod
             AffineLogitTransform(float64(-2.0), float64(3.0)),
             float64(0.4),
             np.array([-1.0, 0.4, 2.2]),
-            float64(3.0),
+            float64(3.1),
         ),
         (
             "affine_probit",
             AffineProbitTransform(float64(-2.0), float64(3.0)),
             float64(0.4),
             np.array([-1.0, 0.4, 2.2]),
-            float64(3.0),
+            float64(3.1),
         ),
         (
             "lower_bounded",
             LowerBoundedTransform(float64(-1.0)),
             float64(0.4),
             np.array([-0.3, 0.4, 2.2]),
-            float64(-1.0),
+            float64(-1.1),
         ),
         (
             "upper_bounded",
             UpperBoundedTransform(float64(2.0)),
             float64(0.4),
             np.array([-0.3, 0.4, 1.2]),
-            float64(2.0),
+            float64(2.1),
         ),
     ],
     ids=lambda case: case[0],
@@ -82,11 +82,11 @@ def transform_case(request):
 def test_transform_roundtrip_scalar_and_vector(transform_case):
     _, transform, x_scalar, x_vec, _ = transform_case
 
-    y_scalar = transform.forward(x_scalar)
-    y_vec = transform.forward(x_vec)
+    y_scalar = transform.safe_forward(x_scalar)
+    y_vec = transform.safe_forward(x_vec)
 
-    x_scalar_back = transform.inverse(y_scalar)
-    x_vec_back = transform.inverse(y_vec)
+    x_scalar_back = transform.safe_inverse(y_scalar)
+    x_vec_back = transform.safe_inverse(y_vec)
 
     assert np.isfinite(y_scalar)
     assert np.all(np.isfinite(y_vec))
@@ -97,9 +97,9 @@ def test_transform_roundtrip_scalar_and_vector(transform_case):
 def test_transform_gradients_are_inverse_pairs(transform_case):
     _, transform, x_scalar, _, _ = transform_case
 
-    y = transform.forward(x_scalar)
-    grad_f = transform.grad_forward(x_scalar)
-    grad_i = transform.grad_inverse(y)
+    y = transform.safe_forward(x_scalar)
+    grad_f = transform.safe_grad_forward(x_scalar)
+    grad_i = transform.safe_grad_inverse(y)
 
     assert np.isfinite(grad_f)
     assert np.isfinite(grad_i)
@@ -109,9 +109,9 @@ def test_transform_gradients_are_inverse_pairs(transform_case):
 def test_transform_logdet_forward_inverse_consistency(transform_case):
     _, transform, x_scalar, _, _ = transform_case
 
-    y = transform.forward(x_scalar)
-    logdet_f = transform.log_det_abs_jacobian_forward(x_scalar)
-    logdet_i = transform.log_det_abs_jacobian_inverse(y)
+    y = transform.safe_forward(x_scalar)
+    logdet_f = transform.safe_log_det_abs_jacobian_forward(x_scalar)
+    logdet_i = transform.safe_log_det_abs_jacobian_inverse(y)
 
     assert np.isfinite(logdet_f)
     assert np.isfinite(logdet_i)
@@ -121,8 +121,8 @@ def test_transform_logdet_forward_inverse_consistency(transform_case):
 def test_transform_support_mapping_membership(transform_case):
     _, transform, x_scalar, x_vec, _ = transform_case
 
-    y_scalar = transform.forward(x_scalar)
-    y_vec = transform.forward(x_vec)
+    y_scalar = transform.safe_forward(x_scalar)
+    y_vec = transform.safe_forward(x_vec)
 
     assert transform.support.contains(x_scalar)
     assert transform.support.contains(x_vec)
@@ -134,7 +134,7 @@ def test_transform_forward_raises_out_of_support(transform_case):
     _, transform, _, _, x_invalid = transform_case
 
     with pytest.raises(OutOfSupportError):
-        transform.forward(x_invalid)
+        transform.safe_forward(x_invalid)
 
 
 @pytest.mark.parametrize(
@@ -148,9 +148,9 @@ def test_transform_forward_raises_out_of_support(transform_case):
     ids=["log@low", "softplus@low", "logit@low", "logit@high"],
 )
 def test_transform_boundary_behavior(transform, boundary, expect_finite):
-    y = transform.forward(boundary)
-    g = transform.grad_forward(boundary)
-    j = transform.log_det_abs_jacobian_forward(boundary)
+    y = transform.safe_forward(boundary)
+    g = transform.safe_grad_forward(boundary)
+    j = transform.safe_log_det_abs_jacobian_forward(boundary)
 
     if expect_finite:
         assert np.isfinite(y)
@@ -165,6 +165,18 @@ def test_transform_boundary_behavior(transform, boundary, expect_finite):
 def test_transform_eps_default_is_small_positive():
     transform = Identity()
     assert transform.eps == float64(1e-8)
+
+
+def test_safe_forward_vector_adjusts_only_boundary_entries():
+    transform = LogitTransform()
+    x = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+
+    y = transform.safe_forward(x)
+
+    assert np.all(np.isfinite(y))
+    assert np.allclose(y[1], 0.0, atol=1e-12)
+    assert y[0] < 0.0
+    assert y[2] > 0.0
 
 
 def test_transform_dispatch_for_all_registered_methods():

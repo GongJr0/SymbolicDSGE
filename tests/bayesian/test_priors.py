@@ -8,6 +8,7 @@ from numpy import float64
 from SymbolicDSGE.bayesian.priors import Prior, make_prior
 from SymbolicDSGE.bayesian.support import OutOfSupportError, Support
 from SymbolicDSGE.bayesian.transforms import Identity
+from SymbolicDSGE.bayesian.transforms.transform import Transform
 
 
 def _make_prior(
@@ -56,10 +57,34 @@ class _BoundedLogpdfDist:
         return self._support
 
 
-class _DummyTransform:
+class _DummyTransform(Transform):
     def __init__(self, support: Support, maps_to: Support):
         self._support = support
         self._maps_to = maps_to
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
+    def forward(self, x):
+        raise NotImplementedError
+
+    def inverse(self, y):
+        raise NotImplementedError
+
+    def grad_forward(self, x):
+        raise NotImplementedError
+
+    def grad_inverse(self, y):
+        raise NotImplementedError
+
+    def log_det_abs_jacobian_forward(self, x):
+        raise NotImplementedError
+
+    def log_det_abs_jacobian_inverse(self, y):
+        raise NotImplementedError
+
+    def grad_log_det_abs_jacobian_inverse(self, y):
+        raise NotImplementedError
 
     @property
     def support(self) -> Support:
@@ -104,7 +129,7 @@ class _TrackingDist:
         )
 
 
-class _TrackingTransform:
+class _TrackingTransform(Transform):
     def __init__(self):
         self.forward_arg = None
         self.inverse_arg = None
@@ -117,6 +142,9 @@ class _TrackingTransform:
         self.grad_inv_calls = 0
         self.grad_logdet_inv_calls = 0
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
     def forward(self, x):
         self.forward_calls += 1
         self.forward_arg = x
@@ -126,6 +154,12 @@ class _TrackingTransform:
         self.inverse_calls += 1
         self.inverse_arg = y
         return float64(y - 1.0)
+
+    def grad_forward(self, x):
+        raise NotImplementedError
+
+    def log_det_abs_jacobian_forward(self, x):
+        raise NotImplementedError
 
     def grad_inverse(self, y):
         self.grad_inv_calls += 1
@@ -227,7 +261,7 @@ def test_prior_logpdf_identity_matches_distribution():
         transform="identity",
     )
     x = float64(0.2)
-    assert np.allclose(prior.logpdf(x), prior.dist.logpdf(x + prior.transform.eps))
+    assert np.allclose(prior.logpdf(x), prior.dist.logpdf(x))
 
 
 def test_prior_grad_logpdf_identity_matches_distribution():
@@ -237,9 +271,7 @@ def test_prior_grad_logpdf_identity_matches_distribution():
         transform="identity",
     )
     x = float64(-0.4)
-    assert np.allclose(
-        prior.grad_logpdf(x), prior.dist.grad_logpdf(x + prior.transform.eps)
-    )
+    assert np.allclose(prior.grad_logpdf(x), prior.dist.grad_logpdf(x))
 
 
 def test_prior_bounded_methods_raise_outside_distribution_support():
@@ -304,19 +336,19 @@ def test_prior_logpdf_uses_inverse_and_adds_inverse_logdet_term():
 
     z = float64(2.0)
     out = prior.logpdf(z)
-    shifted_z = z + transform.eps
+    adjusted_z = z
 
     # Expected: dist.logpdf(inverse(z)) + log|dx/dz|
-    expected = float64(2.0 * (shifted_z - 1.0) + 5.0)
+    expected = float64(2.0 * (adjusted_z - 1.0) + 5.0)
     assert np.allclose(out, expected)
 
     assert transform.forward_calls == 0
     assert transform.logdet_inv_calls == 1
     assert transform.inverse_calls == 1
-    assert transform.inverse_arg == shifted_z
-    assert transform.logdet_inv_arg == shifted_z
+    assert transform.inverse_arg == adjusted_z
+    assert transform.logdet_inv_arg == adjusted_z
     assert dist.logpdf_calls == 1
-    assert np.allclose(dist.logged_x, shifted_z - 1.0)
+    assert np.allclose(dist.logged_x, adjusted_z - 1.0)
 
 
 def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
@@ -326,21 +358,21 @@ def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
 
     z = float64(4.0)
     out = prior.grad_logpdf(z)
-    shifted_z = z + transform.eps
+    adjusted_z = z
 
     # Expected: grad_inverse(z) * dist.grad_logpdf(inverse(z)) + grad log|dx/dz|
-    expected = float64(3.0 * (11.0 * (shifted_z - 1.0)) + 7.0)
+    expected = float64(3.0 * (11.0 * (adjusted_z - 1.0)) + 7.0)
     assert np.allclose(out, expected)
 
     assert transform.inverse_calls == 1
     assert transform.grad_inv_calls == 1
     assert transform.grad_logdet_inv_calls == 1
     assert transform.forward_calls == 0
-    assert transform.inverse_arg == shifted_z
-    assert transform.grad_inv_arg == shifted_z
-    assert transform.grad_logdet_inv_arg == shifted_z
+    assert transform.inverse_arg == adjusted_z
+    assert transform.grad_inv_arg == adjusted_z
+    assert transform.grad_logdet_inv_arg == adjusted_z
     assert dist.grad_calls == 1
-    assert np.allclose(dist.grad_x, shifted_z - 1.0)
+    assert np.allclose(dist.grad_x, adjusted_z - 1.0)
 
 
 def test_confirm_bound_match_allows_transform_support_that_contains_distribution_support():

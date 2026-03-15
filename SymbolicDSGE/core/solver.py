@@ -319,7 +319,7 @@ def jacobian_func({args_str}) -> NDF:
             val = float64(initial_params[name])
             try:
                 if hasattr(prior, "transform"):
-                    z = float64(getattr(prior, "transform").forward(val))
+                    z = float64(getattr(prior, "transform").safe_forward(val))
                 else:
                     z = val
                 prior.logpdf(z)
