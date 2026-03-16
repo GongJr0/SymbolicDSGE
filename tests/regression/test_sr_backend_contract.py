@@ -165,7 +165,7 @@ def test_get_sp_from_template_raises_when_function_missing_from_combine():
 
 
 def test_convert_and_handle_constants_applies_strategy():
-    cfg = TemplateConfig(constant_filtering="parametrize")
+    cfg = TemplateConfig(constant_filtering="parametrize_additive")
     p = _make_parametrizer(
         config=cfg, combine="f_1(x)", expressions=["f_1"], varnames=["x"]
     )
@@ -175,3 +175,17 @@ def test_convert_and_handle_constants_applies_strategy():
     sym_expr = converted.iloc[0]["sympy_format"]
     assert len(sym_expr.atoms(sp.Dummy)) == 1
     assert "initial_expr" in converted.columns
+
+
+def test_convert_and_handle_constants_parametrize_all_replaces_coefficients():
+    cfg = TemplateConfig(constant_filtering="parametrize_all")
+    p = _make_parametrizer(
+        config=cfg, combine="f_1(x)", expressions=["f_1"], varnames=["x"]
+    )
+    b = _FakeBackend(p, _eq_df("f_1 = #1 * 2"))
+
+    converted = b._convert_and_handle_constants(_eq_df("f_1 = #1 * 2"))
+    sym_expr = converted.iloc[0]["sympy_format"]
+    assert len(sym_expr.atoms(sp.Dummy)) == 1
+    assert sp.Symbol("x") in sym_expr.free_symbols
+    assert str(converted.iloc[0]["initial_expr"]) == "2*x"
