@@ -121,7 +121,8 @@ class ConfigValidator:
             raise ValueError(
                 (
                     f"constant_filtering= is not a valid constant filtering strategy. "
-                    "Please set constant_filtering to one of None, 'disqualify', 'strip', or 'parametrize'."
+                    "Please set constant_filtering to one of 'keep', 'disqualify', 'strip', "
+                    "'parametrize_additive', or 'parametrize_all'."
                 )
             )
         elif const_strategy == "strip":
@@ -129,7 +130,8 @@ class ConfigValidator:
                 (
                     "constant_filtering='strip' will remove constants from the model discovered expressions. "
                     "This is strongly discouraged and strategies such as 'disqualify' can restrict the model to avoid constants. "
-                    "If you want to allow constants in discovery as parameters, you can use 'parametrize' and later estimate the constants yourself."
+                    "If you want to allow constants in discovery as parameters, you can use "
+                    "'parametrize_additive' or 'parametrize_all' and later estimate the constants yourself."
                 ),
                 RestrictedBehaviorWarning,
             )

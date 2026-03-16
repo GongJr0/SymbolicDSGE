@@ -19,7 +19,8 @@ class ConstantFiltering(StrEnum):
     KEEP = "keep"
     DISQUALIFY = "disqualify"
     STRIP = "strip"
-    PARAMETRIZE = "parametrize"
+    PARAMETRIZE_ADDITIVE = "parametrize_additive"
+    PARAMETRIZE_ALL = "parametrize_all"
 
 
 @dataclass(frozen=True)
@@ -95,9 +96,16 @@ class TemplateConfig:
     interaction_form: Literal["func", "prod"] = "func"
 
     # Constant Filtering Strategy:
+    # - 'keep': Preserve discovered constants as-is.
     # - 'disqualify': Disqualify expressions with constants.
     # - 'strip': Remove discovered constants.
-    # - 'parametrize': Replace constants with parameters to be estimated.
-    # - None: Do not apply any constant filtering.
-    # Default: 'parametrize'
-    constant_filtering: Literal["keep", "disqualify", "strip", "parametrize"] = "keep"
+    # - 'parametrize_additive': Replace top-level additive free constants with parameters.
+    # - 'parametrize_all': Replace every discovered scalar constant occurrence with a parameter.
+    # Default: 'keep'
+    constant_filtering: Literal[
+        "keep",
+        "disqualify",
+        "strip",
+        "parametrize_additive",
+        "parametrize_all",
+    ] = "keep"

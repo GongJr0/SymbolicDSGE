@@ -26,10 +26,10 @@ def test_disqualify_strategy_keeps_expression_without_constants():
     assert out == expr
 
 
-def test_parametrize_strategy_replaces_constants_with_dummy_parameters():
+def test_parametrize_additive_strategy_replaces_additive_constants_with_dummy_parameters():
     x, y = sp.Symbol("x"), sp.Symbol("y")
     expr = x + y + sp.Integer(2) + sp.sqrt(2)
-    handler = ConstantHandler(TemplateConfig(constant_filtering="parametrize"))
+    handler = ConstantHandler(TemplateConfig(constant_filtering="parametrize_additive"))
     out = handler.get_handled_exprs([expr])[0]
 
     dummies = out.atoms(sp.Dummy)
@@ -37,6 +37,28 @@ def test_parametrize_strategy_replaces_constants_with_dummy_parameters():
     assert any(d.name == "C_1" for d in dummies)
     assert any(d.name == "C_2" for d in dummies)
     assert x in out.free_symbols and y in out.free_symbols
+
+
+def test_parametrize_all_strategy_replaces_nonadditive_constants_per_occurrence():
+    x, y = sp.Symbol("x"), sp.Symbol("y")
+    expr = 2 * x + 2 * y + sp.sin(y + 3)
+    handler = ConstantHandler(TemplateConfig(constant_filtering="parametrize_all"))
+    out = handler.get_handled_exprs([expr])[0]
+
+    dummies = out.atoms(sp.Dummy)
+    assert len(dummies) == 3
+    assert x in out.free_symbols and y in out.free_symbols
+
+
+def test_parametrize_all_strategy_preserves_reciprocal_structure():
+    x, y = sp.Symbol("x"), sp.Symbol("y")
+    expr = x / (y + 1)
+    handler = ConstantHandler(TemplateConfig(constant_filtering="parametrize_all"))
+    out = handler.get_handled_exprs([expr])[0]
+
+    dummies = tuple(out.atoms(sp.Dummy))
+    assert len(dummies) == 1
+    assert sp.simplify(out.subs({dummies[0]: 1}) - expr) == 0
 
 
 def test_strip_strategy_removes_free_constant_terms():

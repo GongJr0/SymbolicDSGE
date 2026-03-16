@@ -87,6 +87,15 @@ def test_validate_constant_filtering_strip_warns():
         ConfigValidator._validate_constant_handling(cfg)
 
 
+@pytest.mark.parametrize(
+    "strategy",
+    ["parametrize_additive", "parametrize_all"],
+)
+def test_validate_constant_filtering_accepts_new_parametrize_modes(strategy):
+    cfg = TemplateConfig(constant_filtering=strategy)  # type: ignore[arg-type]
+    ConfigValidator._validate_constant_handling(cfg)
+
+
 def test_validate_power_bounds_rejects_upper_lower_ordering():
     cfg = TemplateConfig(power_law_upper_bound=1, power_law_lower_bound=2)
     with pytest.raises(ValueError, match="cannot be less than"):
