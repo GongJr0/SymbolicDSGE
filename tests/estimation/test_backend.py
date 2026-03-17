@@ -645,6 +645,10 @@ def test_corr_chol_and_R_unconstrained_parameterization():
     corr = L @ L.T
     assert np.allclose(np.diag(corr), np.ones(3), atol=1e-10)
     assert np.all(np.linalg.eigvalsh(corr) > 0.0)
+    z_from_L = backend._unconstrained_from_corr_chol(L)
+    z_from_corr = backend._unconstrained_from_corr(corr)
+    assert np.allclose(z_from_L, z, atol=1e-10, rtol=0.0)
+    assert np.allclose(z_from_corr, z, atol=1e-10, rtol=0.0)
 
     u = np.array([np.log(0.4), np.log(0.8), 0.1], dtype=np.float64)
     R, std, _ = backend._R_from_unconstrained(u, K=2)

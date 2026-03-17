@@ -4,11 +4,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from numpy import float64
-from sympy import Symbol
+from sympy import Matrix, Symbol
 
 import SymbolicDSGE.estimation.backend as est_backend
+from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bayesian.priors import Prior
+from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
 
 
 class _QuadraticPrior:
@@ -24,7 +26,13 @@ def _stub_compiled():
     a = Symbol("a")
     calibration = SimpleNamespace(parameters={a: float64(0.0)})
     config = SimpleNamespace(calibration=calibration)
-    return SimpleNamespace(config=config, calib_params=[a])
+    kalman = SimpleNamespace(y_names=["y"])
+    return SimpleNamespace(
+        config=config,
+        calib_params=[a],
+        kalman=kalman,
+        observable_names=["y"],
+    )
 
 
 def _stub_compiled_with_r():
@@ -42,6 +50,76 @@ def _stub_compiled_with_r():
         calib_params=[a, meas],
         kalman=kalman,
         observable_names=["y"],
+    )
+
+
+def _stub_compiled_with_dense_r_block():
+    meas_a = Symbol("meas_a")
+    meas_b = Symbol("meas_b")
+    meas_rho_ab = Symbol("meas_rho_ab")
+    calibration = SimpleNamespace(
+        parameters={
+            meas_a: float64(1.0),
+            meas_b: float64(1.0),
+            meas_rho_ab: float64(0.0),
+        }
+    )
+    config = SimpleNamespace(calibration=calibration)
+    kalman = SimpleNamespace(
+        R_symbolic=Matrix(
+            [
+                [meas_a**2, meas_a * meas_b * meas_rho_ab],
+                [meas_a * meas_b * meas_rho_ab, meas_b**2],
+            ]
+        ),
+        y_names=["A", "B"],
+    )
+    return SimpleNamespace(
+        config=config,
+        calib_params=[meas_a, meas_b, meas_rho_ab],
+        kalman=kalman,
+        observable_names=["A", "B"],
+    )
+
+
+def _stub_compiled_with_sparse_q_block():
+    e1 = Symbol("e1")
+    e2 = Symbol("e2")
+    e3 = Symbol("e3")
+    x1 = Symbol("x1")
+    x2 = Symbol("x2")
+    x3 = Symbol("x3")
+    sig1 = Symbol("sig1")
+    sig2 = Symbol("sig2")
+    sig3 = Symbol("sig3")
+    rho12 = Symbol("rho12")
+    calibration = SimpleNamespace(
+        parameters={
+            sig1: float64(1.0),
+            sig2: float64(1.0),
+            sig3: float64(1.0),
+            rho12: float64(0.0),
+        },
+        shock_std=SymbolGetterDict({e1: sig1, e2: sig2, e3: sig3}),
+        shock_corr=PairGetterDict(
+            {
+                frozenset((e1, e2)): rho12,
+                frozenset((e1, e3)): None,
+                frozenset((e2, e3)): None,
+            }
+        ),
+    )
+    config = SimpleNamespace(
+        calibration=calibration,
+        shock_map={e1: x1, e2: x2, e3: x3},
+    )
+    return SimpleNamespace(
+        config=config,
+        calib_params=[sig1, sig2, sig3, rho12],
+        kalman=SimpleNamespace(y_names=["y"]),
+        observable_names=["y"],
+        var_names=[x1, x2, x3],
+        n_exog=3,
     )
 
 
@@ -213,6 +291,68 @@ def test_params_to_theta_applies_forward_transform_for_mapping():
     )
     theta = est.params_to_theta({"a": np.e})
     assert np.allclose(theta[0], 1.0)
+
+
+def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block():
+    prior = LKJChol(eta=2.0, K=2, random_state=None)
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled_with_dense_r_block(),
+        y=np.zeros((4, 2), dtype=np.float64),
+        estimated_params=["meas_rho_ab"],
+        priors={"R": prior},
+    )
+
+    theta = est.params_to_theta({"meas_rho_ab": 0.3})
+    assert np.allclose(theta[0], np.arctanh(0.3))
+
+    params = est.theta_to_params(theta)
+    assert params["meas_rho_ab"] == pytest.approx(0.3)
+    assert params["meas_a"] == pytest.approx(1.0)
+    assert params["meas_b"] == pytest.approx(1.0)
+
+    Lcorr = est_backend._corr_chol_from_unconstrained(theta, K=2)
+    assert est.logprior(theta) == pytest.approx(prior.logpdf(Lcorr))
+
+
+def test_matrix_prior_on_R_keeps_mcmc_samples_in_valid_correlation_support(monkeypatch):
+    monkeypatch.setattr(est_backend, "evaluate_loglik", lambda **kwargs: float64(0.0))
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled_with_dense_r_block(),
+        y=np.zeros((4, 2), dtype=np.float64),
+        estimated_params=["meas_rho_ab"],
+        priors={"R": LKJChol(eta=2.0, K=2, random_state=None)},
+    )
+
+    out = est.mcmc(
+        n_draws=12,
+        burn_in=8,
+        thin=1,
+        theta0=np.array([0.0], dtype=np.float64),
+        random_state=123,
+        adapt=False,
+    )
+
+    assert np.all(np.abs(out.samples[:, 0]) < 1.0)
+
+
+def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
+    with pytest.raises(ValueError, match="dense correlation block") as excinfo:
+        Estimator(
+            solver=SimpleNamespace(),
+            compiled=_stub_compiled_with_sparse_q_block(),
+            y=np.zeros((4, 1), dtype=np.float64),
+            estimated_params=["rho12"],
+            priors={"Q": LKJChol(eta=2.0, K=3, random_state=None)},
+        )
+
+    msg = str(excinfo.value)
+    assert "sparse" in msg
+    assert "fall back to their defaults" in msg
+    assert "config DSL" in msg
+    assert "placeholder default value" in msg
 
 
 def test_mcmc_reports_samples_in_constrained_space_for_log_transform(monkeypatch):
