@@ -96,7 +96,9 @@ class LogNormal(Distribution[float64, VecF64]):
     def cdf(self, x: VecF64) -> VecF64: ...
 
     def cdf(self, x: float64 | VecF64) -> float64 | VecF64:
-        return float64(ndtr((np.log(x) - self._meanlog) / self._stdlog))
+        if isinstance(x, float64):
+            return float64(ndtr((np.log(x) - self._meanlog) / self._stdlog))
+        return ndtr((np.log(x) - self._meanlog) / self._stdlog).astype(float64)
 
     @overload
     def ppf(self, q: float64) -> float64: ...
@@ -104,7 +106,9 @@ class LogNormal(Distribution[float64, VecF64]):
     def ppf(self, q: VecF64) -> VecF64: ...
 
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
-        return float64(np.exp(self._meanlog + self._stdlog * ndtri(q)))
+        if isinstance(q, float64):
+            return float64(np.exp(self._meanlog + self._stdlog * ndtri(q)))
+        return np.exp(self._meanlog + self._stdlog * ndtri(q)).astype(float64)
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
         rng = self._rng(random_state or self._random_state)

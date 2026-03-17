@@ -5,9 +5,10 @@ import numpy as np
 import pytest
 from numpy import float64
 
+from SymbolicDSGE.bayesian.distributions import LKJChol
 from SymbolicDSGE.bayesian.priors import Prior, make_prior
 from SymbolicDSGE.bayesian.support import OutOfSupportError, Support
-from SymbolicDSGE.bayesian.transforms import Identity
+from SymbolicDSGE.bayesian.transforms import CholeskyCorrTransform, Identity
 from SymbolicDSGE.bayesian.transforms.transform import Transform
 
 
@@ -227,6 +228,28 @@ def test_make_prior_passes_transform_kwargs():
     assert np.allclose(prior.transform.high, 3.0)
 
 
+def test_make_prior_builds_lkj_prior_with_matching_cholesky_corr_transform():
+    prior = _make_prior(
+        distribution="lkj_chol",
+        parameters={"eta": 2.0, "K": 3},
+        transform="cholesky_corr",
+    )
+
+    assert isinstance(prior.dist, LKJChol)
+    assert isinstance(prior.transform, CholeskyCorrTransform)
+    assert prior.transform.K == 3
+
+
+def test_make_prior_rejects_mismatched_lkj_and_cholesky_corr_dimensions():
+    with pytest.raises(ValueError, match="same K"):
+        make_prior(
+            distribution="lkj_chol",
+            parameters={"eta": 2.0, "K": 3},
+            transform="cholesky_corr",
+            transform_kwargs={"K": 2},
+        )
+
+
 def test_make_prior_rejects_unrecognized_distribution_parameter():
     with pytest.raises(ValueError, match="Unrecognized parameters"):
         make_prior(
@@ -262,6 +285,19 @@ def test_prior_logpdf_identity_matches_distribution():
     )
     x = float64(0.2)
     assert np.allclose(prior.logpdf(x), prior.dist.logpdf(x))
+
+
+def test_lkj_prior_logpdf_adds_transform_jacobian_term():
+    prior = _make_prior(
+        distribution="lkj_chol",
+        parameters={"eta": 2.0, "K": 2},
+        transform="cholesky_corr",
+    )
+    z = np.array([np.arctanh(0.3)], dtype=np.float64)
+    L = prior.transform.inverse(z)
+
+    expected = prior.dist.logpdf(L) + prior.transform.log_det_abs_jacobian_inverse(z)
+    assert np.allclose(prior.logpdf(z), expected)
 
 
 def test_prior_grad_logpdf_identity_matches_distribution():

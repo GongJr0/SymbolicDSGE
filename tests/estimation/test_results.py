@@ -108,3 +108,93 @@ def test_hpd_methods_validate_alpha(alpha):
         res.hpd_intervals(alpha=alpha)
     with pytest.raises(ValueError, match="0 <= alpha < 1"):
         res.joint_hpd_set(alpha=alpha)
+
+
+def test_hpd_validation_and_window_full_draws_branches():
+    res = _result(
+        samples=np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64),
+        logpost=np.array([0.0, 1.0], dtype=np.float64),
+    )
+
+    assert MCMCResult._validate_hpd_alpha(0.5) == pytest.approx(0.5)
+    assert MCMCResult._hpd_window_size(5, np.float64(0.0)) == 5
+    assert res.hpd_intervals(alpha=0.0) == {
+        "a": pytest.approx((0.0, 2.0)),
+        "b": pytest.approx((1.0, 3.0)),
+    }
+
+
+@pytest.mark.parametrize(
+    ("samples", "param_names", "match"),
+    [
+        (np.array([1.0, 2.0], dtype=np.float64), ["a", "b"], "2D array"),
+        (np.empty((0, 2), dtype=np.float64), ["a", "b"], "empty"),
+        (np.ones((2, 2), dtype=np.float64), ["a"], "does not match"),
+    ],
+)
+def test_validate_samples_error_branches(samples, param_names, match):
+    res = MCMCResult(
+        param_names=param_names,
+        samples=samples,
+        logpost_trace=np.array([0.0, 1.0], dtype=np.float64),
+        accept_rate=np.float64(0.5),
+        n_draws=2,
+        burn_in=0,
+        thin=1,
+    )
+    with pytest.raises(ValueError, match=match):
+        res._validate_samples()
+
+
+def test_joint_hpd_set_validates_logpost_trace_shape():
+    res = MCMCResult(
+        param_names=["a", "b"],
+        samples=np.ones((2, 2), dtype=np.float64),
+        logpost_trace=np.ones((2, 1), dtype=np.float64),
+        accept_rate=np.float64(0.5),
+        n_draws=2,
+        burn_in=0,
+        thin=1,
+    )
+    with pytest.raises(ValueError, match="1D array"):
+        res.joint_hpd_set()
+
+
+def test_result_plot_methods_execute_without_gui(monkeypatch):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import scipy.stats
+
+    calls: list[str] = []
+
+    class _FakeKDE:
+        def __call__(self, x):
+            return np.ones_like(x, dtype=np.float64)
+
+    monkeypatch.setattr(plt, "show", lambda: calls.append("show"))
+    monkeypatch.setattr(scipy.stats, "gaussian_kde", lambda col: _FakeKDE())
+
+    res = MCMCResult(
+        param_names=["a", "b", "c"],
+        samples=np.array(
+            [
+                [0.0, 1.0, 2.0],
+                [0.5, 1.5, 2.5],
+                [1.0, 2.0, 3.0],
+            ],
+            dtype=np.float64,
+        ),
+        logpost_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
+        accept_rate=np.float64(0.5),
+        n_draws=3,
+        burn_in=0,
+        thin=1,
+    )
+
+    res.posterior_kde_plot()
+    res.posterior_traces()
+    res.logpost_trace_plot()
+
+    assert calls == ["show", "show", "show"]

@@ -8,6 +8,7 @@ from .affine_logit import AffineLogitTransform
 from .affine_probit import AffineProbitTransform
 from .lower_bounded import LowerBoundedTransform
 from .upper_bounded import UpperBoundedTransform
+from .cholesky_corr import CholeskyCorrTransform
 
 TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
     TransformMethod.IDENTITY: Identity,
@@ -19,6 +20,7 @@ TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
     TransformMethod.AFFINE_PROBIT: AffineProbitTransform,
     TransformMethod.LOWER_BOUNDED: LowerBoundedTransform,
     TransformMethod.UPPER_BOUNDED: UpperBoundedTransform,
+    TransformMethod.CHOLESKY_CORR: CholeskyCorrTransform,
 }
 
 

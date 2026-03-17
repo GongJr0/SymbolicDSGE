@@ -442,7 +442,7 @@ def jacobian_func({args_str}) -> NDF:
 
         init = self._theta0_to_array(est, theta0)
         self._validate_prior_initial_guess(
-            priors=priors,
+            priors=est.priors,
             initial_params=est.theta_to_params(init),
         )
         if (
@@ -522,7 +522,7 @@ def jacobian_func({args_str}) -> NDF:
 
         init = self._theta0_to_array(est, theta0)
         self._validate_prior_initial_guess(
-            priors=priors,
+            priors=est.priors,
             initial_params=est.theta_to_params(init),
         )
         if (

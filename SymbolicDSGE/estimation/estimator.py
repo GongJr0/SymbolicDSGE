@@ -5,7 +5,7 @@ import warnings
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Callable, Mapping, Sequence, cast
+from typing import Any, Callable, Literal, Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ from scipy import optimize
 
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
+from ..bayesian.transforms.cholesky_corr import CholeskyCorrTransform
 from ..bayesian.transforms.identity import Identity
 from ..bayesian.transforms.transform import Transform
 from ..core.compiled_model import CompiledModel
@@ -26,27 +27,33 @@ NDF = NDArray[np.float64]
 
 
 @dataclass(frozen=True)
+class _MatrixParamTag:
+    matrix_name: Literal["R", "Q"]
+    idx: int | tuple[int, int]
+
+
+@dataclass(frozen=True)
 class _MatrixPriorResolution:
-    key: str
+    key: Literal["R", "Q"]
     dim: int
     labels: list[str]
+    std_names: list[str]
     member_names: list[str]
     pair_positions: list[tuple[int, int]]
-    pair_labels: list[tuple[str, str]]
-    index_map: dict[str, int]
     missing_pairs: list[tuple[str, str]]
+    param_tags: dict[str, _MatrixParamTag]
 
 
 @dataclass(frozen=True)
 class _MatrixPriorBlock:
-    key: str
+    key: Literal["R", "Q"]
     dim: int
     labels: list[str]
     member_names: list[str]
     pair_positions: list[tuple[int, int]]
-    pair_labels: list[tuple[str, str]]
     theta_indices: NDArray[np.int64]
-    prior: LKJChol
+    prior: Prior
+    param_tags: dict[str, _MatrixParamTag]
 
 
 class MissingConfigError(Exception):
@@ -79,6 +86,10 @@ class Estimator:
             transform_kwargs=transform_kwargs,
         )
 
+    @staticmethod
+    def _reserved_matrix_keys() -> tuple[Literal["R", "Q"], Literal["R", "Q"]]:
+        return ("R", "Q")
+
     def __init__(
         self,
         *,
@@ -106,7 +117,7 @@ class Estimator:
         self.observables = observables
         self.filter_mode = backend.infer_filter_mode(compiled, observables)
 
-        self.priors = dict(priors) if priors is not None else None
+        self._input_priors = dict(priors) if priors is not None else None
 
         self.steady_state = steady_state
         self.log_linear = bool(log_linear)
@@ -134,18 +145,17 @@ class Estimator:
             self.filter_mode = self._prepared_filter.mode
 
         self._base_params = backend.extract_base_params(compiled)
-        if estimated_params is None:
-            default_names = [backend._name_of(p) for p in compiled.calib_params]
-            self.param_names = list(default_names)
-        else:
-            self.param_names = list(estimated_params)
-
-        unknown = [p for p in self.param_names if p not in self._base_params]
+        default_params = list(self._base_params.keys())
+        requested_names_raw = self._requested_param_keys(estimated_params)
+        allowed_names = set(default_params).union(self._reserved_matrix_keys())
+        unknown = [p for p in requested_names_raw if p not in allowed_names]
         if unknown:
             raise ValueError(
                 f"Unknown estimated parameters {unknown}. "
-                f"Known calibration parameters: {list(self._base_params.keys())}"
+                f"Known calibration parameters: {default_params}"
             )
+        self.priors = self._select_active_priors(requested_names_raw)
+        self.param_names = self._expand_requested_params(requested_names_raw)
         self._param_index = {name: i for i, name in enumerate(self.param_names)}
         self._matrix_blocks = self._build_matrix_prior_blocks()
         self._matrix_member_names = {
@@ -168,18 +178,72 @@ class Estimator:
             self._param_transforms[name] = tr
         self._warning_signal_count = 0
 
+    def _requested_param_keys(
+        self,
+        estimated_params: Sequence[str] | None,
+    ) -> list[str]:
+        if estimated_params is None:
+            if self._input_priors is not None:
+                return list(self._input_priors.keys())
+            return [backend._name_of(p) for p in self.compiled.calib_params]
+        return list(estimated_params)
+
+    def _select_active_priors(
+        self,
+        requested_names_raw: Sequence[str],
+    ) -> dict[str, Any] | None:
+        if self._input_priors is None:
+            return None
+        requested = set(requested_names_raw)
+        active = {
+            name: prior
+            for name, prior in self._input_priors.items()
+            if name in requested
+        }
+        return active or None
+
+    def _expand_requested_params(
+        self,
+        requested_names_raw: Sequence[str],
+    ) -> list[str]:
+        expanded: list[str] = []
+        owner: dict[str, str] = {}
+        for name in requested_names_raw:
+            if name in self._reserved_matrix_keys():
+                resolution = self._resolve_R() if name == "R" else self._resolve_Q()
+                members = resolution.member_names
+            else:
+                members = [name]
+
+            for member in members:
+                if member in owner:
+                    raise ValueError(
+                        f"Estimated parameter '{member}' is specified more than once via "
+                        f"'{owner[member]}' and '{name}'."
+                    )
+                owner[member] = name
+                expanded.append(member)
+        return expanded
+
     @staticmethod
-    def _unwrap_lkj_prior(name: str, prior_obj: Any) -> LKJChol:
+    def _coerce_lkj_prior(name: str, prior_obj: Any) -> Prior:
         if isinstance(prior_obj, LKJChol):
-            return prior_obj
+            return Prior(
+                dist=prior_obj,
+                transform=CholeskyCorrTransform(K=int(getattr(prior_obj, "_K", -1))),
+            )
         if isinstance(prior_obj, Prior) and isinstance(prior_obj.dist, LKJChol):
-            if not isinstance(prior_obj.transform, Identity):
+            if not isinstance(prior_obj.transform, CholeskyCorrTransform):
                 raise TypeError(
-                    f"Prior '{name}' must use LKJChol directly or a Prior wrapping LKJChol with the identity transform."
+                    f"Prior '{name}' must use LKJChol directly or a Prior wrapping LKJChol with CholeskyCorrTransform."
                 )
-            return prior_obj.dist
+            if int(getattr(prior_obj.dist, "_K", -1)) != prior_obj.transform.K:
+                raise TypeError(
+                    f"Prior '{name}' must use matching K values between LKJChol and CholeskyCorrTransform."
+                )
+            return prior_obj
         raise TypeError(
-            f"Prior '{name}' must be an LKJChol distribution or a Prior wrapping LKJChol with the identity transform."
+            f"Prior '{name}' must be an LKJChol distribution or a Prior wrapping LKJChol with CholeskyCorrTransform."
         )
 
     @staticmethod
@@ -200,65 +264,80 @@ class Estimator:
         )
 
     @staticmethod
-    def _diag_symbol_name(expr: Any, key: str, label: str) -> str:
-        free_syms = sorted(getattr(expr, "free_symbols", set()), key=lambda s: s.name)
-        if len(free_syms) != 1:
-            raise ValueError(
-                f"Could not resolve the diagonal scale parameter for {key}[{label}, {label}]."
-            )
-        return cast(str, free_syms[0].name)
+    def _cov_to_corr(cov: NDF, key: str) -> tuple[NDF, NDF]:
+        cov = np.asarray(cov, dtype=float64)
+        if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+            raise ValueError(f"{key} must resolve to a square covariance matrix.")
+        if not np.allclose(cov, cov.T, atol=1e-10, rtol=0.0):
+            raise ValueError(f"{key} must resolve to a symmetric covariance matrix.")
+        variances = np.diag(cov).astype(float64, copy=False)
+        if np.any(variances <= 0.0):
+            raise ValueError(f"{key} must have strictly positive diagonal variances.")
 
-    def _extract_corr_resolution(
+        std = np.sqrt(variances).astype(float64, copy=False)
+        corr = cov / np.outer(std, std)
+        corr = np.asarray(corr, dtype=float64)
+        np.fill_diagonal(corr, 1.0)
+        return std, corr
+
+    def _build_matrix_resolution(
         self,
         *,
-        key: str,
-        matrix_sym: Any,
+        key: Literal["R", "Q"],
         labels: list[str],
+        std_param_map: Mapping[str, str | None],
+        corr_param_map: Mapping[frozenset[str], str | None],
     ) -> _MatrixPriorResolution:
         dim = len(labels)
-        diag_names = [
-            self._diag_symbol_name(matrix_sym[i][i], key, labels[i]) for i in range(dim)
-        ]
+        std_names: list[str] = []
         member_names: list[str] = []
         pair_positions: list[tuple[int, int]] = []
-        pair_labels: list[tuple[str, str]] = []
         missing_pairs: list[tuple[str, str]] = []
-        index_map: dict[str, int] = {}
+        param_tags: dict[str, _MatrixParamTag] = {}
 
-        for k in range(1, dim):
-            for j in range(k):
-                pair = (labels[k], labels[j])
-                expr = matrix_sym[k][j]
-                free_names = {sym.name for sym in getattr(expr, "free_symbols", set())}
-                corr_names = free_names - {diag_names[k], diag_names[j]}
-                if len(corr_names) == 0:
+        for idx, label in enumerate(labels):
+            std_name = std_param_map.get(label)
+            if std_name is None:
+                raise ValueError(
+                    f"LKJChol prior on {key} requires a named variance parameter for "
+                    f"{key}[{label}, {label}]."
+                )
+            if std_name in param_tags:
+                raise ValueError(
+                    f"LKJChol prior on {key} requires a unique named variance parameter per "
+                    f"diagonal entry. Parameter '{std_name}' is reused."
+                )
+            std_names.append(std_name)
+            param_tags[std_name] = _MatrixParamTag(matrix_name=key, idx=idx)
+
+        for row in range(1, dim):
+            for col in range(row):
+                pair = (labels[row], labels[col])
+                corr_name = corr_param_map.get(frozenset(pair))
+                if corr_name is None:
                     missing_pairs.append(pair)
                     continue
-                if len(corr_names) != 1:
-                    raise ValueError(
-                        f"Could not resolve a unique correlation parameter for {key}{pair}. "
-                        f"Expected exactly one named correlation parameter, found {sorted(corr_names)}."
-                    )
-                name = next(iter(corr_names))
-                if name in index_map:
+                if corr_name in param_tags:
                     raise ValueError(
                         f"LKJChol prior on {key} requires a unique named parameter per correlation pair. "
-                        f"Parameter '{name}' is reused for multiple pairs."
+                        f"Parameter '{corr_name}' is reused."
                     )
-                index_map[name] = len(member_names)
-                member_names.append(name)
-                pair_positions.append((k, j))
-                pair_labels.append(pair)
+                param_tags[corr_name] = _MatrixParamTag(
+                    matrix_name=key,
+                    idx=(row, col),
+                )
+                member_names.append(corr_name)
+                pair_positions.append((row, col))
 
         return _MatrixPriorResolution(
             key=key,
             dim=dim,
             labels=list(labels),
+            std_names=std_names,
             member_names=member_names,
             pair_positions=pair_positions,
-            pair_labels=pair_labels,
-            index_map=index_map,
             missing_pairs=missing_pairs,
+            param_tags=param_tags,
         )
 
     def _resolve_R(
@@ -270,21 +349,32 @@ class Estimator:
                 "Outside estimation, measurement correlations may fall back to their defaults, "
                 "but estimation needs a named parameterized R specification in the config DSL."
             )
-        R_sym = getattr(self.kalman, "R_symbolic", None)
-        if R_sym is None:
-            raise ValueError("LKJChol prior on R requires KalmanConfig.R_symbolic.")
         labels = self._effective_observables()
-        all_obs = list(self.compiled.observable_names)
-        obs_idx = {name: i for i, name in enumerate(all_obs)}
-        mat_idx = [obs_idx[name] for name in labels]
-        R_sub = [[R_sym[i, j] for j in mat_idx] for i in mat_idx]
-        return self._extract_corr_resolution(key="R", matrix_sym=R_sub, labels=labels)
+        R_cov = backend.resolve_R(self.compiled, self.kalman, labels, None)
+        self._cov_to_corr(R_cov, "R")
+
+        std_param_map = getattr(self.kalman, "R_std_param_map", None)
+        corr_param_map = getattr(self.kalman, "R_corr_param_map", None)
+        if std_param_map is None or corr_param_map is None:
+            raise ValueError(
+                "LKJChol prior on R requires parser-generated R std/correlation metadata."
+            )
+        return self._build_matrix_resolution(
+            key="R",
+            labels=labels,
+            std_param_map=std_param_map,
+            corr_param_map=corr_param_map,
+        )
 
     def _resolve_Q(
         self, params: Mapping[str, float] | None = None
     ) -> _MatrixPriorResolution:
-        Q_sym = backend.build_Q_symbolic(compiled=self.compiled)
+        Q_cov = backend.build_Q(self.compiled, self._base_params)
+        self._cov_to_corr(Q_cov, "Q")
+
         shock_map = self.compiled.config.shock_map
+        shock_std = self.compiled.config.calibration.shock_std
+        shock_corr = self.compiled.config.calibration.shock_corr
         exogs = [
             backend._name_of(v) for v in self.compiled.var_names[: self.compiled.n_exog]
         ]
@@ -293,10 +383,27 @@ class Estimator:
             for shock, exo in shock_map.items()
         }
         labels = [rev[exo] for exo in exogs]
-        Q_rows = [
-            [Q_sym[i, j] for j in range(Q_sym.shape[1])] for i in range(Q_sym.shape[0])
-        ]
-        return self._extract_corr_resolution(key="Q", matrix_sym=Q_rows, labels=labels)
+        std_param_map: dict[str, str | None] = {}
+        corr_param_map: dict[frozenset[str], str | None] = {}
+
+        for label in labels:
+            sym = shock_std[label]
+            std_param_map[label] = None if sym is None else sym.name
+        for row in range(1, len(labels)):
+            for col in range(row):
+                pair = (labels[row], labels[col])
+                try:
+                    sym = shock_corr[pair]
+                except KeyError:
+                    sym = None
+                corr_param_map[frozenset(pair)] = None if sym is None else sym.name
+
+        return self._build_matrix_resolution(
+            key="Q",
+            labels=labels,
+            std_param_map=std_param_map,
+            corr_param_map=corr_param_map,
+        )
 
     def _build_matrix_prior_blocks(self) -> dict[str, _MatrixPriorBlock]:
         if self.priors is None:
@@ -308,7 +415,7 @@ class Estimator:
             if key not in self.priors:
                 continue
 
-            lkj = self._unwrap_lkj_prior(key, self.priors[key])
+            lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
             resolution = self._resolve_R() if key == "R" else self._resolve_Q()
             if resolution.dim < 2:
                 raise ValueError(
@@ -321,7 +428,12 @@ class Estimator:
 
             expected = (resolution.dim * (resolution.dim - 1)) // 2
             if len(resolution.member_names) != expected:
-                raise ValueError(self._dense_matrix_error(key, resolution.pair_labels))
+                expected_pairs = [
+                    (resolution.labels[row], resolution.labels[col])
+                    for row in range(1, resolution.dim)
+                    for col in range(row)
+                ]
+                raise ValueError(self._dense_matrix_error(key, expected_pairs))
 
             missing_estimated = [
                 name
@@ -337,7 +449,9 @@ class Estimator:
             scalar_conflicts = [
                 name
                 for name in resolution.member_names
-                if name in self.priors and name not in {"R", "Q"}
+                if self._input_priors is not None
+                and name in self._input_priors
+                and name not in self._reserved_matrix_keys()
             ]
             if scalar_conflicts:
                 raise ValueError(
@@ -351,7 +465,7 @@ class Estimator:
                     f"Matrix priors on R and Q cannot share member parameters. Overlap: {overlap}."
                 )
 
-            prior_dim = int(getattr(lkj, "_K", -1))
+            prior_dim = int(getattr(lkj_prior.dist, "_K", -1))
             if prior_dim != resolution.dim:
                 raise ValueError(
                     f"LKJChol prior on {key} has K={prior_dim}, but the resolved {key} "
@@ -368,9 +482,9 @@ class Estimator:
                 labels=resolution.labels,
                 member_names=resolution.member_names,
                 pair_positions=resolution.pair_positions,
-                pair_labels=resolution.pair_labels,
                 theta_indices=theta_indices,
-                prior=lkj,
+                prior=lkj_prior,
+                param_tags=resolution.param_tags,
             )
             claimed_names.update(resolution.member_names)
 
@@ -379,7 +493,8 @@ class Estimator:
     @staticmethod
     def _corr_from_member_values(block: _MatrixPriorBlock, values: NDF) -> NDF:
         corr = np.eye(block.dim, dtype=float64)
-        for idx, (row, col) in enumerate(block.pair_positions):
+        for idx, name in enumerate(block.member_names):
+            row, col = cast(tuple[int, int], block.param_tags[name].idx)
             corr_ij = float64(values[idx])
             corr[row, col] = corr_ij
             corr[col, row] = corr_ij
@@ -457,8 +572,8 @@ class Estimator:
         for block in self._matrix_blocks.values():
             theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
             corr, _ = self._block_corr_from_theta(block, theta_block)
-            for local_idx, name in enumerate(block.member_names):
-                row, col = block.pair_positions[local_idx]
+            for name in block.member_names:
+                row, col = cast(tuple[int, int], block.param_tags[name].idx)
                 full[name] = float64(corr[row, col])
             handled[block.theta_indices] = True
 
@@ -532,8 +647,7 @@ class Estimator:
         lp = float64(0.0)
         for block in self._matrix_blocks.values():
             theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
-            _, Lcorr = self._block_corr_from_theta(block, theta_block)
-            lp += float64(block.prior.logpdf(Lcorr))
+            lp += float64(block.prior.logpdf(theta_block))
 
         for name, prior in self.priors.items():
             if name in self._matrix_blocks or name in self._matrix_member_names:

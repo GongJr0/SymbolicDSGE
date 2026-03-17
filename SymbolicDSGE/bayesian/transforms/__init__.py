@@ -1,5 +1,6 @@
 from .affine_logit import AffineLogitTransform
 from .affine_probit import AffineProbitTransform
+from .cholesky_corr import CholeskyCorrTransform
 from .identity import Identity
 from .log import LogTransform
 from .logit import LogitTransform
@@ -12,6 +13,7 @@ from .transform_dispatch import get_transform
 __all__ = [
     "AffineLogitTransform",
     "AffineProbitTransform",
+    "CholeskyCorrTransform",
     "Identity",
     "LogTransform",
     "LogitTransform",
