@@ -221,3 +221,6 @@ papers/
 
 # To-Do Plugin
 dooing.json
+
+# MacOS
+.DS_Store

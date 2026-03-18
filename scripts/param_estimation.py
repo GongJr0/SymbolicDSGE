@@ -230,7 +230,7 @@ estim = lambda: solver.estimate_and_solve(
     update_R_in_iterations=True,
 )
 res, sol = estim()
-#cProfile.run("res, sol = estim()", sort="cumtime")
+# cProfile.run("res, sol = estim()", sort="cumtime")
 
 # %%
 param_names = res.param_names
@@ -376,11 +376,12 @@ template = TemplateConfig(
     power_law_upper_bound=2,
     powers_in_interactions=False,
     constant_filtering="parametrize_all",
+    model_complexity_bound=20,
 )
 
 params = PySRParams(
-    niterations=200,
-    maxsize=12,
+    niterations=500,
+    maxsize=20,
     complexity_of_constants=3,
     complexity_of_variables=1,
     deterministic=True,
@@ -388,13 +389,17 @@ params = PySRParams(
     parallelism="serial",
 )
 
-res = sol.fit_kf(
+sr_discovery = lambda obs: sol.fit_kf(
     template_config=template,
     sr_params=params,
     y=observed.loc[observed.index >= "1984-01-01", :],
     variables=["r", "Pi", "x"],
-    observable="Rate",
+    observable=obs,
 ).expressions
+
+r_sr = sr_discovery("Rate")
+x_sr = sr_discovery("OutGap")
+# pi_sr = sr_discovery("Infl")  # Only running sr for observables with innovation autocorrelation.
 
 
 # %%
@@ -421,9 +426,11 @@ def walk_round(x, n=3):
     return x
 
 
-res["initial_expr"] = res["initial_expr"].apply(lambda x: walk_round(x, n=3))
-res[["initial_expr", "sympy_format", "loss", "complexity"]]
-
+r_sr["initial_expr"] = res["initial_expr"].apply(lambda x: walk_round(x, n=3))
+r_sr[["initial_expr", "sympy_format", "loss", "complexity"]]
+# %%
+x_sr["initial_expr"] = res["initial_expr"].apply(lambda x: walk_round(x, n=3))
+x_sr[["initial_expr", "sympy_format", "loss", "complexity"]]
 # %%
 
 # Augmented Model
@@ -467,7 +474,7 @@ ax[1].legend()
 
 ax[2].plot(idx, kf_aug.y_pred[:, 2], label="Predicted")
 ax[2].plot(idx, kf_aug.y_filt[:, 2], label="Filtered")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
 ax[2].set_title("Policy Rate")
 ax[2].legend()
 
@@ -487,13 +494,13 @@ ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
 ax[0].set_title("OutGap")
 ax[0].legend()
 
-ax[1].plot(idx, sim_aug["Inflation"], label="Simulated")
+ax[1].plot(idx, sim_aug["Infl"], label="Simulated")
 ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
 ax[1].set_title("Inflation")
 ax[1].legend()
 
 ax[2].plot(idx, sim_aug["Rate"], label="Simulated")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
 ax[2].set_title("Policy Rate")
 ax[2].legend()
 
@@ -548,17 +555,27 @@ sum_moments(pd.Series(sim_aug["Infl"]))
 
 # %%
 # Augmented + Re-estimated model
+aug_priors = {
+    **prior_spec,
+    **{
+        "pi_const": make_prior(
+            "normal",
+            parameters={"mean": -0.282, "std": 0.1},
+            transform="identity",
+        ),
+    },
+}
 
 res_aug, sol_aug = solver_aug.estimate_and_solve(
     compiled=comp_aug,
     y=observed.loc[observed.index >= "1984-01-01", :],
-    priors=prior_spec,
+    priors=aug_priors,
     method="mcmc",
     posterior_point="mean",
     steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
-    estimated_params=list(prior_spec.keys()),
-    n_draws=1000,
-    burn_in=500,
+    estimated_params=list(aug_priors.keys()),
+    n_draws=25_000,
+    burn_in=10_000,
     thin=1,
 )
 # %%
@@ -610,7 +627,7 @@ ax[1].legend()
 
 ax[2].plot(idx, kf_aug_reest.y_pred[:, 2], label="Predicted")
 ax[2].plot(idx, kf_aug_reest.y_filt[:, 2], label="Filtered")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
 ax[2].set_title("Policy Rate")
 ax[2].legend()
 
@@ -636,7 +653,7 @@ ax[1].set_title("Inflation")
 ax[1].legend()
 
 ax[2].plot(idx, sim_aug_reest["Rate"], label="Simulated")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
 ax[2].set_title("Policy Rate")
 ax[2].legend()
 
@@ -658,7 +675,7 @@ plot_acf(
     title="Inflation Innovationsc ACF",
 )
 plot_acf(
-    kf_aug_reest.innov[:, 0],
+    kf_aug_reest.innov[:, 2],
     ax=ax[2, 0],
     lags=20,
     title="Policy Rate Innovations ACF",
@@ -676,7 +693,7 @@ plot_pacf(
     title="Inflation Innovations PACF",
 )
 plot_pacf(
-    kf_aug_reest.innov[:, 0],
+    kf_aug_reest.innov[:, 2],
     ax=ax[2, 1],
     lags=20,
     title="Policy Rate Innovations PACF",
