@@ -24,17 +24,20 @@ from . import backend
 from .results import MCMCResult, OptimizationResult
 
 NDF = NDArray[np.float64]
+_MatrixName = Literal["R", "Q"]
+_MatrixPriorKey = Literal["R_corr", "Q_corr"]
 
 
 @dataclass(frozen=True)
 class _MatrixParamTag:
-    matrix_name: Literal["R", "Q"]
+    matrix_name: _MatrixName
     idx: int | tuple[int, int]
 
 
 @dataclass(frozen=True)
 class _MatrixPriorResolution:
-    key: Literal["R", "Q"]
+    key: _MatrixPriorKey
+    matrix_name: _MatrixName
     dim: int
     labels: list[str]
     std_names: list[str]
@@ -46,7 +49,8 @@ class _MatrixPriorResolution:
 
 @dataclass(frozen=True)
 class _MatrixPriorBlock:
-    key: Literal["R", "Q"]
+    key: _MatrixPriorKey
+    matrix_name: _MatrixName
     dim: int
     labels: list[str]
     member_names: list[str]
@@ -87,8 +91,16 @@ class Estimator:
         )
 
     @staticmethod
-    def _reserved_matrix_keys() -> tuple[Literal["R", "Q"], Literal["R", "Q"]]:
-        return ("R", "Q")
+    def _reserved_matrix_keys() -> tuple[_MatrixPriorKey, _MatrixPriorKey]:
+        return ("R_corr", "Q_corr")
+
+    @staticmethod
+    def _matrix_name_for_reserved_key(name: str) -> _MatrixName:
+        if name == "R_corr":
+            return "R"
+        if name == "Q_corr":
+            return "Q"
+        raise KeyError(f"Unknown reserved matrix key '{name}'.")
 
     def __init__(
         self,
@@ -210,7 +222,12 @@ class Estimator:
         owner: dict[str, str] = {}
         for name in requested_names_raw:
             if name in self._reserved_matrix_keys():
-                resolution = self._resolve_R() if name == "R" else self._resolve_Q()
+                matrix_name = self._matrix_name_for_reserved_key(name)
+                resolution = (
+                    self._resolve_R()
+                    if matrix_name == "R"
+                    else self._resolve_Q()
+                )
                 members = resolution.member_names
             else:
                 members = [name]
@@ -251,16 +268,19 @@ class Estimator:
         return ", ".join(f"({a}, {b})" for a, b in pairs)
 
     def _dense_matrix_error(
-        self, key: str, missing_pairs: Sequence[tuple[str, str]]
+        self,
+        key: _MatrixPriorKey,
+        matrix_name: _MatrixName,
+        missing_pairs: Sequence[tuple[str, str]],
     ) -> str:
         pair_text = self._format_pairs(missing_pairs)
         return (
             f"LKJChol prior on {key} requires a dense correlation block for estimation, "
-            f"but the configured {key} matrix is sparse. Missing named correlation parameters for pairs: "
+            f"but the configured {matrix_name} matrix is sparse. Missing named correlation parameters for pairs: "
             f"{pair_text}. Outside estimation, unnamed correlations fall back to their defaults "
             "(typically zero). For estimation with LKJChol, declare a named parameter for each missing "
             "pair in the config DSL and give it a placeholder default value (for example 0.0) so the "
-            f"estimator can reparameterize the full {key} correlation matrix."
+            f"estimator can reparameterize the full {matrix_name} correlation matrix."
         )
 
     @staticmethod
@@ -283,7 +303,8 @@ class Estimator:
     def _build_matrix_resolution(
         self,
         *,
-        key: Literal["R", "Q"],
+        key: _MatrixPriorKey,
+        matrix_name: _MatrixName,
         labels: list[str],
         std_param_map: Mapping[str, str | None],
         corr_param_map: Mapping[frozenset[str], str | None],
@@ -308,7 +329,7 @@ class Estimator:
                     f"diagonal entry. Parameter '{std_name}' is reused."
                 )
             std_names.append(std_name)
-            param_tags[std_name] = _MatrixParamTag(matrix_name=key, idx=idx)
+            param_tags[std_name] = _MatrixParamTag(matrix_name=matrix_name, idx=idx)
 
         for row in range(1, dim):
             for col in range(row):
@@ -323,7 +344,7 @@ class Estimator:
                         f"Parameter '{corr_name}' is reused."
                     )
                 param_tags[corr_name] = _MatrixParamTag(
-                    matrix_name=key,
+                    matrix_name=matrix_name,
                     idx=(row, col),
                 )
                 member_names.append(corr_name)
@@ -331,6 +352,7 @@ class Estimator:
 
         return _MatrixPriorResolution(
             key=key,
+            matrix_name=matrix_name,
             dim=dim,
             labels=list(labels),
             std_names=std_names,
@@ -345,7 +367,7 @@ class Estimator:
     ) -> _MatrixPriorResolution:
         if self.kalman is None:
             raise MissingConfigError(
-                "LKJChol prior on R requires a Kalman configuration with symbolic R metadata. "
+                "LKJChol prior on R_corr requires a Kalman configuration with symbolic R metadata. "
                 "Outside estimation, measurement correlations may fall back to their defaults, "
                 "but estimation needs a named parameterized R specification in the config DSL."
             )
@@ -357,10 +379,11 @@ class Estimator:
         corr_param_map = getattr(self.kalman, "R_corr_param_map", None)
         if std_param_map is None or corr_param_map is None:
             raise ValueError(
-                "LKJChol prior on R requires parser-generated R std/correlation metadata."
+                "LKJChol prior on R_corr requires parser-generated R std/correlation metadata."
             )
         return self._build_matrix_resolution(
-            key="R",
+            key="R_corr",
+            matrix_name="R",
             labels=labels,
             std_param_map=std_param_map,
             corr_param_map=corr_param_map,
@@ -399,7 +422,8 @@ class Estimator:
                 corr_param_map[frozenset(pair)] = None if sym is None else sym.name
 
         return self._build_matrix_resolution(
-            key="Q",
+            key="Q_corr",
+            matrix_name="Q",
             labels=labels,
             std_param_map=std_param_map,
             corr_param_map=corr_param_map,
@@ -411,19 +435,24 @@ class Estimator:
 
         blocks: dict[str, _MatrixPriorBlock] = {}
         claimed_names: set[str] = set()
-        for key in ("R", "Q"):
+        for key in self._reserved_matrix_keys():
             if key not in self.priors:
                 continue
 
             lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
-            resolution = self._resolve_R() if key == "R" else self._resolve_Q()
+            matrix_name = self._matrix_name_for_reserved_key(key)
+            resolution = (
+                self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+            )
             if resolution.dim < 2:
                 raise ValueError(
                     f"LKJChol prior on {key} requires a matrix of dimension at least 2."
                 )
             if resolution.missing_pairs:
                 raise ValueError(
-                    self._dense_matrix_error(key, resolution.missing_pairs)
+                    self._dense_matrix_error(
+                        key, resolution.matrix_name, resolution.missing_pairs
+                    )
                 )
 
             expected = (resolution.dim * (resolution.dim - 1)) // 2
@@ -433,7 +462,11 @@ class Estimator:
                     for row in range(1, resolution.dim)
                     for col in range(row)
                 ]
-                raise ValueError(self._dense_matrix_error(key, expected_pairs))
+                raise ValueError(
+                    self._dense_matrix_error(
+                        key, resolution.matrix_name, expected_pairs
+                    )
+                )
 
             missing_estimated = [
                 name
@@ -478,6 +511,7 @@ class Estimator:
             )
             blocks[key] = _MatrixPriorBlock(
                 key=key,
+                matrix_name=resolution.matrix_name,
                 dim=resolution.dim,
                 labels=resolution.labels,
                 member_names=resolution.member_names,

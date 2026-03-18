@@ -128,7 +128,7 @@ def _notebook_like_prior_spec() -> dict[str, object]:
             parameters={"mean": 0.64, "std": 0.1},
             transform="log",
         ),
-        "R": make_prior(
+        "R_corr": make_prior(
             "lkj_chol",
             parameters={"eta": 1.0, "K": 3},
             transform="cholesky_corr",
@@ -186,7 +186,7 @@ def _run_dynamic_r_adaptive_chain(est: Estimator, *, steps: int, seed: int):
 
 
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
-    prior_spec = {"R": LKJChol(eta=2.0, K=3, random_state=None)}
+    prior_spec = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     est = Estimator(
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
@@ -228,7 +228,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
 
 
 def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
-    prior_spec = {"Q": LKJChol(eta=2.0, K=3, random_state=None)}
+    prior_spec = {"Q_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     est = Estimator(
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
@@ -293,7 +293,7 @@ def test_adaptive_r_block_stays_well_conditioned_under_dynamic_updates(
     runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
     assert not runtime_warnings
 
-    r_idx = est._matrix_blocks["R"].theta_indices
+    r_idx = est._matrix_blocks["R_corr"].theta_indices
     max_abs_r = np.max(np.abs(history[:, r_idx]), axis=0)
     min_eig = np.min(np.linalg.eigvalsh(0.5 * (cov + cov.T)))
 

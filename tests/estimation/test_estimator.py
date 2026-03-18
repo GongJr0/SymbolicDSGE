@@ -318,8 +318,8 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block():
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
-        priors={"R": prior},
+        estimated_params=["R_corr"],
+        priors={"R_corr": prior},
     )
 
     theta = est.params_to_theta({"meas_rho_ab": 0.3})
@@ -345,8 +345,8 @@ def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
-        priors={"R": prior},
+        estimated_params=["R_corr"],
+        priors={"R_corr": prior},
     )
 
     theta = np.array([0.25], dtype=np.float64)
@@ -363,12 +363,12 @@ def test_matrix_key_in_estimated_params_expands_to_member_names():
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
-        priors={"R": LKJChol(eta=2.0, K=2, random_state=None)},
+        estimated_params=["R_corr"],
+        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
     )
 
     assert est.param_names == ["meas_rho_ab"]
-    assert list(est.priors.keys()) == ["R"]
+    assert list(est.priors.keys()) == ["R_corr"]
 
 
 def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
@@ -378,13 +378,13 @@ def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
         y=np.zeros((4, 2), dtype=np.float64),
         estimated_params=None,
         priors={
-            "R": LKJChol(eta=2.0, K=2, random_state=None),
+            "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
             "meas_a": _QuadraticPrior(mean=1.0, weight=1.0),
         },
     )
 
     assert est.param_names == ["meas_rho_ab", "meas_a"]
-    assert list(est.priors.keys()) == ["R", "meas_a"]
+    assert list(est.priors.keys()) == ["R_corr", "meas_a"]
 
 
 def test_extra_priors_outside_estimated_params_are_ignored():
@@ -392,15 +392,15 @@ def test_extra_priors_outside_estimated_params_are_ignored():
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
+        estimated_params=["R_corr"],
         priors={
-            "R": LKJChol(eta=2.0, K=2, random_state=None),
+            "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
             "meas_a": _QuadraticPrior(mean=1.0, weight=1.0),
         },
     )
 
     assert est.param_names == ["meas_rho_ab"]
-    assert list(est.priors.keys()) == ["R"]
+    assert list(est.priors.keys()) == ["R_corr"]
 
 
 def test_matrix_prior_overlap_with_scalar_component_prior_raises():
@@ -409,9 +409,9 @@ def test_matrix_prior_overlap_with_scalar_component_prior_raises():
             solver=SimpleNamespace(),
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R"],
+            estimated_params=["R_corr"],
             priors={
-                "R": LKJChol(eta=2.0, K=2, random_state=None),
+                "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
                 "meas_rho_ab": _QuadraticPrior(mean=0.0, weight=1.0),
             },
         )
@@ -424,8 +424,8 @@ def test_matrix_prior_on_R_keeps_mcmc_samples_in_valid_correlation_support(monke
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
-        priors={"R": LKJChol(eta=2.0, K=2, random_state=None)},
+        estimated_params=["R_corr"],
+        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
     )
 
     out = est.mcmc(
@@ -446,8 +446,8 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
             solver=SimpleNamespace(),
             compiled=_stub_compiled_with_sparse_q_block(),
             y=np.zeros((4, 1), dtype=np.float64),
-            estimated_params=["Q"],
-            priors={"Q": LKJChol(eta=2.0, K=3, random_state=None)},
+            estimated_params=["Q_corr"],
+            priors={"Q_corr": LKJChol(eta=2.0, K=3, random_state=None)},
         )
 
     msg = str(excinfo.value)
@@ -622,8 +622,8 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             solver=SimpleNamespace(),
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R", "meas_rho_ab"],
-            priors={"R": LKJChol(eta=2.0, K=2, random_state=None)},
+            estimated_params=["R_corr", "meas_rho_ab"],
+            priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
         )
 
     with pytest.raises(TypeError, match="CholeskyCorrTransform"):
@@ -631,9 +631,9 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             solver=SimpleNamespace(),
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R"],
+            estimated_params=["R_corr"],
             priors={
-                "R": Prior(
+                "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=Identity(),
                 )
@@ -645,9 +645,9 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             solver=SimpleNamespace(),
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R"],
+            estimated_params=["R_corr"],
             priors={
-                "R": Prior(
+                "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=CholeskyCorrTransform(K=3),
                 )
@@ -659,8 +659,8 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             solver=SimpleNamespace(),
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R"],
-            priors={"R": _QuadraticPrior(mean=0.0, weight=1.0)},
+            estimated_params=["R_corr"],
+            priors={"R_corr": _QuadraticPrior(mean=0.0, weight=1.0)},
         )
 
 
@@ -685,7 +685,8 @@ def test_cov_to_corr_and_matrix_resolution_error_branches():
 
     with pytest.raises(ValueError, match="named variance parameter"):
         est._build_matrix_resolution(
-            key="R",
+            key="R_corr",
+            matrix_name="R",
             labels=["a"],
             std_param_map={},
             corr_param_map={},
@@ -693,7 +694,8 @@ def test_cov_to_corr_and_matrix_resolution_error_branches():
 
     with pytest.raises(ValueError, match="unique named variance parameter"):
         est._build_matrix_resolution(
-            key="R",
+            key="R_corr",
+            matrix_name="R",
             labels=["a", "b"],
             std_param_map={"a": "sig", "b": "sig"},
             corr_param_map={frozenset(("b", "a")): "rho_ab"},
@@ -701,7 +703,8 @@ def test_cov_to_corr_and_matrix_resolution_error_branches():
 
     with pytest.raises(ValueError, match="unique named parameter per correlation pair"):
         est._build_matrix_resolution(
-            key="R",
+            key="R_corr",
+            matrix_name="R",
             labels=["a", "b", "c"],
             std_param_map={"a": "sig_a", "b": "sig_b", "c": "sig_c"},
             corr_param_map={
@@ -894,7 +897,8 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     )
 
     res_dim1 = _MatrixPriorResolution(
-        key="R",
+        key="R_corr",
+        matrix_name="R",
         dim=1,
         labels=["A"],
         std_names=["sig_a"],
@@ -903,14 +907,15 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         missing_pairs=[],
         param_tags={
             "sig_a": est_base._build_matrix_resolution(
-                key="R",
+                key="R_corr",
+                matrix_name="R",
                 labels=["A"],
                 std_param_map={"A": "sig_a"},
                 corr_param_map={},
             ).param_tags["sig_a"]
         },
     )
-    est_base.priors = {"R": object()}
+    est_base.priors = {"R_corr": object()}
     monkeypatch.setattr(
         est_base,
         "_coerce_lkj_prior",
@@ -923,7 +928,8 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         est_base._build_matrix_prior_blocks()
 
     res_short = _MatrixPriorResolution(
-        key="R",
+        key="R_corr",
+        matrix_name="R",
         dim=3,
         labels=["A", "B", "C"],
         std_names=["sig_a", "sig_b", "sig_c"],
@@ -932,7 +938,8 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         missing_pairs=[],
         param_tags={
             "sig_a": est_base._build_matrix_resolution(
-                key="R",
+                key="R_corr",
+                matrix_name="R",
                 labels=["A", "B", "C"],
                 std_param_map={"A": "sig_a", "B": "sig_b", "C": "sig_c"},
                 corr_param_map={
@@ -943,18 +950,19 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
             ).param_tags["sig_a"],
         },
     )
-    est_base.priors = {"R": LKJChol(eta=2.0, K=3, random_state=None)}
+    est_base.priors = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     monkeypatch.setattr(est_base, "_resolve_R", lambda params=None: res_short)
     with pytest.raises(ValueError, match="dense correlation block"):
         est_base._build_matrix_prior_blocks()
 
     res_missing = est_base._build_matrix_resolution(
-        key="R",
+        key="R_corr",
+        matrix_name="R",
         labels=["A", "B"],
         std_param_map={"A": "sig_a", "B": "sig_b"},
         corr_param_map={frozenset(("B", "A")): "rho_ba"},
     )
-    est_base.priors = {"R": LKJChol(eta=2.0, K=2, random_state=None)}
+    est_base.priors = {"R_corr": LKJChol(eta=2.0, K=2, random_state=None)}
     monkeypatch.setattr(est_base, "_resolve_R", lambda params=None: res_missing)
     with pytest.raises(ValueError, match="Missing from estimated_params"):
         est_base._build_matrix_prior_blocks()
@@ -968,13 +976,15 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         estimated_params=["meas_rho_ab"],
     )
     r_resolution = est._build_matrix_resolution(
-        key="R",
+        key="R_corr",
+        matrix_name="R",
         labels=["A", "B"],
         std_param_map={"A": "meas_a", "B": "meas_b"},
         corr_param_map={frozenset(("B", "A")): "meas_rho_ab"},
     )
     q_resolution = _MatrixPriorResolution(
-        key="Q",
+        key="Q_corr",
+        matrix_name="Q",
         dim=2,
         labels=["u", "v"],
         std_names=["sig_u", "sig_v"],
@@ -984,8 +994,8 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         param_tags={"meas_rho_ab": r_resolution.param_tags["meas_rho_ab"]},
     )
     est.priors = {
-        "R": LKJChol(eta=2.0, K=2, random_state=None),
-        "Q": LKJChol(eta=2.0, K=2, random_state=None),
+        "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
+        "Q_corr": LKJChol(eta=2.0, K=2, random_state=None),
     }
     monkeypatch.setattr(est, "_resolve_R", lambda params=None: r_resolution)
     monkeypatch.setattr(est, "_resolve_Q", lambda params=None: q_resolution)
@@ -996,9 +1006,9 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
+        estimated_params=["R_corr"],
     )
-    est_k.priors = {"R": LKJChol(eta=2.0, K=3, random_state=None)}
+    est_k.priors = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     monkeypatch.setattr(est_k, "_resolve_R", lambda params=None: r_resolution)
     with pytest.raises(ValueError, match="has K=3"):
         est_k._build_matrix_prior_blocks()
@@ -1012,10 +1022,10 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
-        priors={"R": LKJChol(eta=2.0, K=2, random_state=None)},
+        estimated_params=["R_corr"],
+        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
     )
-    good_block = good_est._matrix_blocks["R"]
+    good_block = good_est._matrix_blocks["R_corr"]
     bad_corr = np.array([[1.0, 1.2], [1.2, 1.0]], dtype=np.float64)
     with pytest.raises(ValueError, match="do not form a valid"):
         good_est._block_cpc_from_corr(good_block, bad_corr)
@@ -1056,8 +1066,8 @@ def test_effective_observables_logprior_base_branch_and_logpost(monkeypatch):
         solver=SimpleNamespace(),
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R"],
-        priors={"R": LKJChol(eta=2.0, K=2, random_state=None)},
+        estimated_params=["R_corr"],
+        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
     )
     est_base_prior.priors = {"meas_a": prior}
     est_base_prior._matrix_blocks = {}
