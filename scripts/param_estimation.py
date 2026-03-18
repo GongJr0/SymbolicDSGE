@@ -53,7 +53,7 @@ fred = FRED(
 )
 df = fred.get_frame(
     series_ids=[
-        "GDPC1",  # Real GDP
+        "A939RX0Q048SBEA",  # Real GDP per Cap.
         "CPIAUCSL",  # Consumer Price Index for All Urban Consumers: All Items
         "FEDFUNDS",  # Effective Federal Funds Rate
     ],
@@ -63,7 +63,7 @@ df = fred.get_frame(
     ),  # Date range for the data ("YYYY-MM-DD" format or a pd.DatetimeIndex object)
 )
 
-gdp_q = df["GDPC1"]  # already quarterly in most pulls; verify freq
+gdp_q = df["A939RX0Q048SBEA"]  # already quarterly in most pulls; verify freq
 
 cpi_q = df["CPIAUCSL"].resample("QS").mean()  # quarterly avg CPI
 ffr_q = df["FEDFUNDS"].resample("QS").mean()  # quarterly avg policy rate
@@ -73,7 +73,7 @@ idx_range = pd.date_range(start="1984-01-01", end="2007-01-01", freq="QS")
 
 df = pd.DataFrame(
     {
-        "GDPC1": gdp_q.reindex(idx_range),
+        "A939RX0Q048SBEA": gdp_q.reindex(idx_range),
         "CPIAUCSL": cpi_q.reindex(idx_range),
         "FEDFUNDS": ffr_q.reindex(idx_range),
     }
@@ -82,8 +82,12 @@ df = pd.DataFrame(
 df
 
 # %%
-x_trend = HP_two_sided(log(df["GDPC1"]), lamb=1600)[0]  # returns (trend, cycle)
-x = (log(df["GDPC1"]) - x_trend) * 100  # HP detrended quarterly log output gap
+x_trend = HP_two_sided(log(df["A939RX0Q048SBEA"]), lamb=1600)[
+    0
+]  # returns (trend, cycle)
+x = (
+    log(df["A939RX0Q048SBEA"]) - x_trend
+) * 100  # HP detrended quarterly log output gap
 
 
 inf_lvl = annualized_log_percent(df["CPIAUCSL"], periods_per_year=4)
@@ -105,6 +109,7 @@ df_model_units = pd.DataFrame(
 
 observed = pd.DataFrame(
     {
+        "OutGap": df_model_units["x"],
         "Infl": inf_lvl[df_model_units.index],
         "Rate": rate_lvl[df_model_units.index],
     }
@@ -116,22 +121,22 @@ prior_spec = {
     # (0, 1)
     "beta": make_prior(
         "beta",
-        parameters={"a": 200 * 0.99, "b": 200 * 0.001},
+        parameters={"a": 100 * 0.99, "b": 100 * 0.001},
         transform="logit",
     ),
     "rho_r": make_prior(
         "beta",
-        parameters={"a": 200 * 0.84, "b": 200 * 0.16},
+        parameters={"a": 100 * 0.84, "b": 100 * 0.16},
         transform="logit",
     ),
     "rho_g": make_prior(
         "beta",
-        parameters={"a": 200 * 0.83, "b": 200 * 0.17},
+        parameters={"a": 100 * 0.83, "b": 100 * 0.17},
         transform="logit",
     ),
     "rho_z": make_prior(
         "beta",
-        parameters={"a": 200 * 0.85, "b": 200 * 0.15},
+        parameters={"a": 100 * 0.85, "b": 100 * 0.15},
         transform="logit",
     ),
     # (0, +inf)
@@ -157,19 +162,13 @@ prior_spec = {
     ),
     # Correlation (-1,1)
     "rho_gz": make_prior(
-        "normal",
-        parameters={"mean": 0.0, "std": 0.20},
+        "trunc_normal",
+        parameters={"mean": 0.0, "std": 0.20, "low": -1.0, "high": 1.0},
         transform="affine_logit",
         transform_kwargs={
             "low": -1.0,
             "high": 1.0,
         },
-    ),
-    "meas_rho_ir": make_prior(
-        "normal",
-        parameters={"mean": 0.0, "std": 0.4},
-        transform="affine_logit",
-        transform_kwargs={"low": -1.0, "high": 1.0},
     ),
     # Shock std devs (0, +inf)
     "sig_r": make_prior(
@@ -187,15 +186,10 @@ prior_spec = {
         parameters={"mean": 0.64, "std": 0.1},
         transform="log",
     ),
-    "meas_infl": make_prior(
-        "normal",
-        parameters={"mean": 0.0, "std": 0.4},
-        transform="log",
-    ),
-    "meas_rate": make_prior(
-        "normal",
-        parameters={"mean": 0.0, "std": 0.4},
-        transform="log",
+    "R": make_prior(
+        "lkj_chol",
+        parameters={"eta": 1.0, "K": 3},
+        transform="cholesky_corr",
     ),
 }
 
@@ -212,8 +206,8 @@ estim = lambda r: solver.estimate_and_solve(
     posterior_point="mean",
     steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
     estimated_params=list(prior_spec.keys()),
-    n_draws=1000,
-    burn_in=500,
+    n_draws=25_000,
+    burn_in=10_000,
     thin=1,
     update_R_in_iterations=r,
 )
@@ -288,58 +282,77 @@ kf_1 = sol1.kalman(
 obs = observed.loc[observed.index >= "1984-01-01", :]
 idx = obs.index
 
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("[Static R] Filtered, Predicted vs Actual Measurements")
 
-ax[0].plot(idx, kf_0.y_pred[:, 0], label="Predicted")
-ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
-ax[0].legend()
+ax[0, 0].plot(idx, kf_0.y_pred[:, 0], label="Predicted")
+ax[0, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 0].set_title("Output Gap")
+ax[0, 0].legend()
 
-ax[1].plot(idx, kf_0.y_pred[:, 1], label="Predicted")
-ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
-ax[1].legend()
+ax[1, 0].plot(idx, kf_0.y_pred[:, 1], label="Predicted")
+ax[1, 0].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 0].set_title("Inflation")
+ax[1, 0].legend()
 
-ax[2].plot(idx, kf_0.y_filt[:, 0], label="Filtered")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[2].set_title("Inflation (Filtered)")
-ax[2].legend()
+ax[2, 0].plot(idx, kf_0.y_pred[:, 2], label="Predicted")
+ax[2, 0].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 0].set_title("Policy Rate")
+ax[2, 0].legend()
 
-ax[3].plot(idx, kf_0.y_filt[:, 1], label="Filtered")
-ax[3].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[3].set_title("Policy Rate (Filtered)")
-ax[3].legend()
+ax[0, 1].plot(idx, kf_0.y_filt[:, 0], label="Filtered")
+ax[0, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 1].set_title("Output Gap (Filtered)")
+ax[0, 1].legend()
+
+ax[1, 1].plot(idx, kf_0.y_filt[:, 1], label="Filtered")
+ax[1, 1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 1].set_title("Inflation (Filtered)")
+ax[1, 1].legend()
+
+ax[2, 1].plot(idx, kf_0.y_filt[:, 2], label="Filtered")
+ax[2, 1].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 1].set_title("Policy Rate (Filtered)")
+ax[2, 1].legend()
 
 plt.tight_layout()
 
 # %%
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("[Dynamic R] Filtered, Predicted vs Actual Measurements")
 
-ax[0].plot(idx, kf_1.y_pred[:, 0], label="Predicted")
-ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
-ax[0].legend()
+ax[0, 0].plot(idx, kf_1.y_pred[:, 0], label="Predicted")
+ax[0, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 0].set_title("Output Gap")
+ax[0, 0].legend()
 
-ax[1].plot(idx, kf_1.y_pred[:, 1], label="Predicted")
-ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
-ax[1].legend()
+ax[1, 0].plot(idx, kf_1.y_pred[:, 1], label="Predicted")
+ax[1, 0].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 0].set_title("Inflation")
+ax[1, 0].legend()
 
-ax[2].plot(idx, kf_1.y_filt[:, 0], label="Filtered")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[2].set_title("Inflation (Filtered)")
-ax[2].legend()
 
-ax[3].plot(idx, kf_1.y_filt[:, 1], label="Filtered")
-ax[3].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[3].set_title("Policy Rate (Filtered)")
-ax[3].legend()
+ax[2, 0].plot(idx, kf_1.y_pred[:, 2], label="Predicted")
+ax[2, 0].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 0].set_title("Policy Rate")
+ax[2, 0].legend()
+
+ax[0, 1].plot(idx, kf_1.y_filt[:, 0], label="Filtered")
+ax[0, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 1].set_title("Output Gap (Filtered)")
+ax[0, 1].legend()
+
+ax[1, 1].plot(idx, kf_1.y_filt[:, 1], label="Filtered")
+ax[1, 1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 1].set_title("Inflation (Filtered)")
+ax[1, 1].legend()
+
+ax[2, 1].plot(idx, kf_1.y_filt[:, 2], label="Filtered")
+ax[2, 1].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 1].set_title("Policy Rate (Filtered)")
+ax[2, 1].legend()
 
 plt.tight_layout()
 
@@ -359,63 +372,127 @@ sim1 = sol1.sim(
 )
 
 # %%
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("Stochastic Simulation vs Actual")
 
-ax[0].plot(idx, sim0["Infl"], label="Simulated (Static R)")
-ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
-ax[0].legend()
+ax[0, 0].plot(idx, sim0["OutGap"], label="Simulated (Static R)")
+ax[0, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 0].set_title("Output Gap")
+ax[0, 0].legend()
 
-ax[1].plot(idx, sim0["Rate"], label="Simulated (Static R)")
-ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
-ax[1].legend()
+ax[1, 0].plot(idx, sim0["Infl"], label="Simulated (Static R)")
+ax[1, 0].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 0].set_title("Inflation")
+ax[1, 0].legend()
 
-ax[2].plot(idx, sim1["Infl"], label="Simulated (Dynamic R)")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[2].set_title("Inflation")
-ax[2].legend()
+ax[2, 0].plot(idx, sim0["Rate"], label="Simulated (Static R)")
+ax[2, 0].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 0].set_title("Policy Rate")
+ax[2, 0].legend()
 
-ax[3].plot(idx, sim1["Rate"], label="Simulated (Dynamic R)")
-ax[3].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[3].set_title("Policy Rate")
-ax[3].legend()
+ax[0, 1].plot(idx, sim1["OutGap"], label="Simulated (Dynamic R)")
+ax[0, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 1].set_title("Output Gap")
+ax[0, 1].legend()
+
+ax[1, 1].plot(idx, sim1["Infl"], label="Simulated (Dynamic R)")
+ax[1, 1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 1].set_title("Inflation")
+ax[1, 1].legend()
+
+ax[2, 1].plot(idx, sim1["Rate"], label="Simulated (Dynamic R)")
+ax[2, 1].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 1].set_title("Policy Rate")
+ax[2, 1].legend()
 
 plt.tight_layout()
 
 # %%
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("Innovation AutoCorr")
-plot_acf(kf_0.innov[:, 0], ax=ax[0], lags=20, title="Inflation Innovations (Static R)")
 plot_acf(
-    kf_0.innov[:, 1], ax=ax[1], lags=20, title="Policy Rate Innovations (Static R)"
+    kf_0.innov[:, 0],
+    ax=ax[0, 0],
+    lags=20,
+    title="Output Gap Innovations (Static R)",
 )
-plot_acf(kf_1.innov[:, 0], ax=ax[2], lags=20, title="Inflation Innovations (Dynamic R)")
 plot_acf(
-    kf_1.innov[:, 1], ax=ax[3], lags=20, title="Policy Rate Innovations (Dynamic R)"
+    kf_0.innov[:, 1],
+    ax=ax[1, 0],
+    lags=20,
+    title="Inflation Innovations (Static R)",
 )
+plot_acf(
+    kf_0.innov[:, 2],
+    ax=ax[2, 0],
+    lags=20,
+    title="Policy Rate Innovations (Dynamic R)",
+)
+plot_acf(
+    kf_1.innov[:, 0],
+    ax=ax[0, 1],
+    lags=20,
+    title="Output Gap Innovations (Dynamic R)",
+)
+plot_acf(
+    kf_1.innov[:, 1],
+    ax=ax[1, 1],
+    lags=20,
+    title="Inflation Innovations (Dynamic R)",
+)
+plot_acf(
+    kf_1.innov[:, 2],
+    ax=ax[2, 1],
+    lags=20,
+    title="Policy Rate Innovations (Dynamic R)",
+)
+
 plt.tight_layout()
 
 # %%
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("Innovation Partial AutoCorr")
-plot_pacf(kf_0.innov[:, 0], ax=ax[0], lags=20, title="Inflation Innovations (Static R)")
+
 plot_pacf(
-    kf_0.innov[:, 1], ax=ax[1], lags=20, title="Policy Rate Innovations (Static R)"
+    kf_0.innov[:, 0],
+    ax=ax[0, 0],
+    lags=20,
+    title="Output Gap Innovations (Static R)",
 )
 plot_pacf(
-    kf_1.innov[:, 0], ax=ax[2], lags=20, title="Inflation Innovations (Dynamic R)"
+    kf_0.innov[:, 1],
+    ax=ax[1, 0],
+    lags=20,
+    title="Inflation Innovations (Static R)",
 )
 plot_pacf(
-    kf_1.innov[:, 1], ax=ax[3], lags=20, title="Policy Rate Innovations (Dynamic R)"
+    kf_0.innov[:, 2],
+    ax=ax[2, 0],
+    lags=20,
+    title="Policy Rate Innovations (Dynamic R)",
 )
+plot_pacf(
+    kf_1.innov[:, 0],
+    ax=ax[0, 1],
+    lags=20,
+    title="Output Gap Innovations (Dynamic R)",
+)
+plot_pacf(
+    kf_1.innov[:, 1],
+    ax=ax[1, 1],
+    lags=20,
+    title="Inflation Innovations (Dynamic R)",
+)
+plot_pacf(
+    kf_1.innov[:, 2],
+    ax=ax[2, 1],
+    lags=20,
+    title="Policy Rate Innovations (Dynamic R)",
+)
+
 plt.tight_layout()
 
 # %%
@@ -426,6 +503,7 @@ template = TemplateConfig(
     power_law_lower_bound=2,
     power_law_upper_bound=2,
     powers_in_interactions=False,
+    constant_filtering="parametrize_all",
 )
 
 params = PySRParams(
@@ -463,7 +541,7 @@ def sum_moments(series):
 sum_moments(pd.Series(kf_0.y_filt[:, 1]))
 
 # %%
-print(res[["sympy_format", "loss", "complexity"]].to_latex())
+res[["sympy_format", "loss", "complexity"]]
 
 # %%
 
@@ -488,30 +566,39 @@ kf_aug = aug.kalman(
 obs = observed.loc[observed.index >= "1984-01-01", :]
 idx = obs.index
 
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("Augmented Model: Filtered, Predicted vs Actual Measurements")
 
-ax[0].plot(idx, kf_aug.y_pred[:, 0], label="Predicted")
-ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
-ax[0].legend()
+ax[0, 0].plot(idx, kf_aug.y_pred[:, 0], label="Predicted")
+ax[0, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 0].set_title("Output Gap")
+ax[0, 0].legend()
 
-ax[1].plot(idx, kf_aug.y_pred[:, 1], label="Predicted")
-ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
-ax[1].legend()
+ax[1, 0].plot(idx, kf_aug.y_pred[:, 1], label="Predicted")
+ax[1, 0].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 0].set_title("Inflation")
+ax[1, 0].legend()
 
-ax[2].plot(idx, kf_aug.y_filt[:, 0], label="Filtered")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[2].set_title("Inflation (Filtered)")
-ax[2].legend()
+ax[2, 0].plot(idx, kf_aug.y_pred[:, 2], label="Predicted")
+ax[2, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 0].set_title("Policy Rate")
+ax[2, 0].legend()
 
-ax[3].plot(idx, kf_aug.y_filt[:, 1], label="Filtered")
-ax[3].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[3].set_title("Policy Rate (Filtered)")
-ax[3].legend()
+ax[0, 1].plot(idx, kf_aug.y_filt[:, 0], label="Filtered")
+ax[0, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 1].set_title("Output Gap (Filtered)")
+ax[0, 1].legend()
+
+ax[1, 1].plot(idx, kf_aug.y_filt[:, 1], label="Filtered")
+ax[1, 1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 1].set_title("Inflation (Filtered)")
+ax[1, 1].legend()
+
+ax[2, 1].plot(idx, kf_aug.y_filt[:, 2], label="Filtered")
+ax[2, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 1].set_title("Policy Rate (Filtered)")
+ax[2, 1].legend()
 
 plt.tight_layout()
 # %%
@@ -520,32 +607,69 @@ sim_aug = aug.sim(
     shocks={"g,z": gz, "r": r},
     observables=True,
 )
-fig, ax = plt.subplots(2, 1, figsize=(12, 6))
+fig, ax = plt.subplots(3, 1, figsize=(12, 6))
 
 plt.suptitle("Augmented Model: Stochastic Simulation vs Actual")
 
-ax[0].plot(idx, sim_aug["Infl"], label="Simulated")
+ax[0].plot(idx, sim_aug["OutGap"], label="Simulated")
 ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
+ax[0].set_title("OutGap")
 ax[0].legend()
 
-ax[1].plot(idx, sim_aug["Rate"], label="Simulated")
+ax[1].plot(idx, sim_aug["Inflation"], label="Simulated")
 ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
+ax[1].set_title("Inflation")
 ax[1].legend()
+
+ax[2].plot(idx, sim_aug["Rate"], label="Simulated")
+ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2].set_title("Policy Rate")
+ax[2].legend()
 
 plt.tight_layout()
 
 # %%
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("Augmented Model: Innovation AutoCorr")
-plot_acf(kf_aug.innov[:, 0], ax=ax[0], lags=20, title="Inflation Innovations ACF")
-plot_acf(kf_aug.innov[:, 1], ax=ax[1], lags=20, title="Policy Rate Innovationsc ACF")
 
-plot_pacf(kf_aug.innov[:, 0], ax=ax[2], lags=20, title="Inflation Innovations PACF")
-plot_pacf(kf_aug.innov[:, 1], ax=ax[3], lags=20, title="Policy Rate Innovations PACF")
+plot_acf(
+    kf_aug.innov[:, 0],
+    ax=ax[0, 0],
+    lags=20,
+    title="Output Gap Innovations ACF",
+)
+plot_acf(
+    kf_aug.innov[:, 1],
+    ax=ax[1, 0],
+    lags=20,
+    title="Inflation Innovations ACF",
+)
+plot_acf(
+    kf_aug.innov[:, 2],
+    ax=ax[2, 0],
+    lags=20,
+    title="Policy Rate Innovations ACF",
+)
+plot_pacf(
+    kf_aug.innov[:, 0],
+    ax=ax[0, 1],
+    lags=20,
+    title="Output Gap Innovations PACF",
+)
+plot_pacf(
+    kf_aug.innov[:, 1],
+    ax=ax[1, 1],
+    lags=20,
+    title="Inflation Innovations PACF",
+)
+plot_pacf(
+    kf_aug.innov[:, 2],
+    ax=ax[2, 1],
+    lags=20,
+    title="Policy Rate Innovations PACF",
+)
+
 plt.tight_layout()
 # %%
 
@@ -595,32 +719,41 @@ kf_aug_reest = sol_aug.kalman(
 obs = observed.loc[observed.index >= "1984-01-01", :]
 idx = obs.index
 
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle(
     "Augmented + Re-estimated Model: Filtered, Predicted vs Actual Measurements"
 )
 
-ax[0].plot(idx, kf_aug_reest.y_pred[:, 0], label="Predicted")
-ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
-ax[0].legend()
+ax[0, 0].plot(idx, kf_aug_reest.y_pred[:, 0], label="Predicted")
+ax[0, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 0].set_title("Output Gap")
+ax[0, 0].legend()
 
-ax[1].plot(idx, kf_aug_reest.y_pred[:, 1], label="Predicted")
-ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
-ax[1].legend()
+ax[1, 0].plot(idx, kf_aug_reest.y_pred[:, 1], label="Predicted")
+ax[1, 0].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 0].set_title("Inflation")
+ax[1, 0].legend()
 
-ax[2].plot(idx, kf_aug_reest.y_filt[:, 0], label="Filtered")
-ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[2].set_title("Inflation (Filtered)")
-ax[2].legend()
+ax[2, 0].plot(idx, kf_aug_reest.y_pred[:, 2], label="Predicted")
+ax[2, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 0].set_title("Policy Rate")
+ax[2, 0].legend()
 
-ax[3].plot(idx, kf_aug_reest.y_filt[:, 1], label="Filtered")
-ax[3].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[3].set_title("Policy Rate (Filtered)")
-ax[3].legend()
+ax[0, 1].plot(idx, kf_aug_reest.y_filt[:, 0], label="Filtered")
+ax[0, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[0, 1].set_title("Output Gap (Filtered)")
+ax[0, 1].legend()
+
+ax[1, 1].plot(idx, kf_aug_reest.y_filt[:, 1], label="Filtered")
+ax[1, 1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
+ax[1, 1].set_title("Inflation (Filtered)")
+ax[1, 1].legend()
+
+ax[2, 1].plot(idx, kf_aug_reest.y_filt[:, 2], label="Filtered")
+ax[2, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 1].set_title("Policy Rate (Filtered)")
+ax[2, 1].legend()
 
 plt.tight_layout()
 # %%
@@ -629,36 +762,67 @@ sim_aug_reest = sol_aug.sim(
     shocks={"g,z": gz, "r": r},
     observables=True,
 )
-fig, ax = plt.subplots(2, 1, figsize=(12, 6))
+fig, ax = plt.subplots(3, 1, figsize=(12, 6))
 
 plt.suptitle("Augmented + Re-estimated Model: Stochastic Simulation vs Actual")
 
-ax[0].plot(idx, sim_aug_reest["Infl"], label="Simulated")
+ax[0].plot(idx, sim_aug_reest["OutGap"], label="Simulated")
 ax[0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
-ax[0].set_title("Inflation")
+ax[0].set_title("OutGap")
 ax[0].legend()
 
-ax[1].plot(idx, sim_aug_reest["Rate"], label="Simulated")
+ax[1].plot(idx, sim_aug_reest["Infl"], label="Simulated")
 ax[1].plot(idx, obs.iloc[:, 1], label="Actual", linestyle="--", alpha=0.7)
-ax[1].set_title("Policy Rate")
+ax[1].set_title("Inflation")
 ax[1].legend()
+
+ax[2].plot(idx, sim_aug_reest["Rate"], label="Simulated")
+ax[2].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2].set_title("Policy Rate")
+ax[2].legend()
 
 plt.tight_layout()
 # %%
-fig, ax = plt.subplots(2, 2, figsize=(12, 6))
-ax = ax.flatten()
+fig, ax = plt.subplots(3, 2, figsize=(12, 6))
 
 plt.suptitle("Augmented + Re-estimated Model: Innovation AutoCorr")
-plot_acf(kf_aug_reest.innov[:, 0], ax=ax[0], lags=20, title="Inflation Innovations ACF")
 plot_acf(
-    kf_aug_reest.innov[:, 1], ax=ax[1], lags=20, title="Policy Rate Innovationsc ACF"
+    kf_aug_reest.innov[:, 0],
+    ax=ax[0, 0],
+    lags=20,
+    title="Output Gap Innovations ACF",
+)
+plot_acf(
+    kf_aug_reest.innov[:, 1],
+    ax=ax[1, 0],
+    lags=20,
+    title="Inflation Innovationsc ACF",
+)
+plot_acf(
+    kf_aug_reest.innov[:, 0],
+    ax=ax[2, 0],
+    lags=20,
+    title="Policy Rate Innovations ACF",
 )
 plot_pacf(
-    kf_aug_reest.innov[:, 0], ax=ax[2], lags=20, title="Inflation Innovations PACF"
+    kf_aug_reest.innov[:, 0],
+    ax=ax[0, 1],
+    lags=20,
+    title="Output Gap Innovations PACF",
 )
 plot_pacf(
-    kf_aug_reest.innov[:, 1], ax=ax[3], lags=20, title="Policy Rate Innovations PACF"
+    kf_aug_reest.innov[:, 1],
+    ax=ax[1, 1],
+    lags=20,
+    title="Inflation Innovations PACF",
 )
+plot_pacf(
+    kf_aug_reest.innov[:, 0],
+    ax=ax[2, 1],
+    lags=20,
+    title="Policy Rate Innovations PACF",
+)
+
 plt.tight_layout()
 # %%
 res_aug.hpd_intervals()

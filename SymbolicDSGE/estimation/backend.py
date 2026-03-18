@@ -5,6 +5,7 @@ from typing import Callable, Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
+import sympy as sp
 from numpy import asarray, float64
 from numpy.typing import NDArray
 from scipy import optimize
@@ -167,6 +168,31 @@ def build_Q(compiled: CompiledModel, params: Mapping[str, float64]) -> NDF:
             corr[i, j] = corr_ij
             corr[j, i] = corr_ij
     return np.outer(stds, stds) * corr
+
+
+def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
+    shock_map = compiled.config.shock_map
+    shock_std = compiled.config.calibration.shock_std
+    shock_corr = compiled.config.calibration.shock_corr
+
+    exogs = compiled.var_names[: compiled.n_exog]
+    rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
+        {exo: shock for shock, exo in shock_map.items()}
+    )
+    shocks = [rev[exo] for exo in exogs]
+
+    stds = sp.Matrix([shock_std[s] for s in shocks])
+    corr = sp.eye(len(exogs))
+
+    n = len(stds)
+    for i in range(n):
+        for j in range(i + 1, n):
+            pair = frozenset({shocks[i], shocks[j]})
+            corr_sym = shock_corr.get(pair, None)
+            corr_ij = corr_sym if corr_sym is not None else 0.0
+            corr[i, j] = corr_ij
+            corr[j, i] = corr_ij
+    return (stds * stds.T).multiply_elementwise(corr)
 
 
 def build_C_d(
@@ -553,6 +579,59 @@ def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
             f"Expected {expected} unconstrained CPC elements, got {z.shape[0]}."
         )
     return cast(NDF, _corr_chol_from_unconstrained_backend(z, K))
+
+
+@njit(cache=True)
+def _unconstrained_from_corr_chol_backend(L: NDF) -> NDF:
+    K = L.shape[0]
+    n_cpc = (K * (K - 1)) // 2
+    z = np.empty((n_cpc,), dtype=float64)
+    idx = 0
+    for k in range(1, K):
+        rem = float64(1.0)
+        for j in range(k):
+            v = float64(np.sqrt(max(rem, 1e-14)))
+            cpc = float64(L[k, j] / v) if v > 0.0 else float64(0.0)
+            if cpc < (-1.0 + 1e-14):
+                cpc = float64(-1.0 + 1e-14)
+            elif cpc > (1.0 - 1e-14):
+                cpc = float64(1.0 - 1e-14)
+            z[idx] = float64(np.arctanh(cpc))
+            rem = float64(rem - L[k, j] * L[k, j])
+            idx += 1
+    return z
+
+
+def _unconstrained_from_corr_chol(L: NDF) -> NDF:
+    L = asarray(L, dtype=float64)
+    if L.ndim != 2 or L.shape[0] != L.shape[1]:
+        raise ValueError("Input must be a square lower-triangular correlation factor.")
+    if not np.allclose(L, np.tril(L), atol=1e-12, rtol=0.0):
+        raise ValueError("Input must be lower triangular.")
+    if np.any(np.diag(L) <= 0.0):
+        raise ValueError("Diagonal of a correlation Cholesky factor must be positive.")
+    for i in range(L.shape[0]):
+        row = L[i, : i + 1]
+        if not np.allclose(np.dot(row, row), 1.0, atol=1e-10, rtol=0.0):
+            raise ValueError(
+                "Each row of a correlation Cholesky factor must have unit norm."
+            )
+    return cast(NDF, _unconstrained_from_corr_chol_backend(L))
+
+
+def _unconstrained_from_corr(corr: NDF) -> NDF:
+    corr = asarray(corr, dtype=float64)
+    if corr.ndim != 2 or corr.shape[0] != corr.shape[1]:
+        raise ValueError("Correlation matrix must be square.")
+    if not np.allclose(corr, corr.T, atol=1e-10, rtol=0.0):
+        raise ValueError("Correlation matrix must be symmetric.")
+    if not np.allclose(np.diag(corr), np.ones(corr.shape[0]), atol=1e-10, rtol=0.0):
+        raise ValueError("Correlation matrix must have unit diagonal.")
+    try:
+        L = np.linalg.cholesky(corr).astype(float64)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Correlation matrix must be positive definite.") from exc
+    return _unconstrained_from_corr_chol(L)
 
 
 @njit(cache=True)

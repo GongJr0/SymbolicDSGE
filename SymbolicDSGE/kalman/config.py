@@ -26,6 +26,8 @@ class KalmanConfig:
     R_param_symbols: list[Symbol] | None = None
     R_param_names: list[str] | None = None
     R_builder: Callable[..., NDArray] | None = None
+    R_std_param_map: dict[str, str] | None = None
+    R_corr_param_map: dict[frozenset[str], str | None] | None = None
 
 
 def make_R(

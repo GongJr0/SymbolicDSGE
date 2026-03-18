@@ -1,6 +1,6 @@
 from .distribution import Distribution, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
-from typing import TypedDict, cast, overload
+from typing import TypedDict, cast, overload, Callable
 
 import numpy as np
 from numpy import float64
@@ -98,7 +98,9 @@ class HalfNormal(Distribution[float64, VecF64]):
             if x < 0.0:
                 return float64(0.0)
             return float64(erf(x / (self._std * np.sqrt(2.0))))
-        return float64(np.where(x < 0.0, 0.0, erf(x / (self._std * np.sqrt(2.0)))))
+        return np.where(
+            x < 0.0, float64(0.0), erf(x / (self._std * np.sqrt(2.0)))
+        ).astype(float64)
 
     @overload
     def ppf(self, q: float64) -> float64: ...
@@ -106,9 +108,11 @@ class HalfNormal(Distribution[float64, VecF64]):
     def ppf(self, q: VecF64) -> VecF64: ...
 
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
-        return float64(self._std * np.sqrt(2.0) * erfinv(q))
+        if isinstance(q, float64):
+            return float64(self._std * np.sqrt(2.0) * erfinv(q))
+        return cast(VecF64, self._std * np.sqrt(2.0) * erfinv(q)).astype(float64)
 
-    def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
+    def rvs(self, size: Size = (1,), random_state: RandomState = None) -> VecF64:
         rng = self._rng(random_state or self._random_state)
         if isinstance(size, int):
             size = (size,)

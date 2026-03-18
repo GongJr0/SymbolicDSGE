@@ -390,7 +390,10 @@ class ModelParser:
         if R_data:
             std_map = R_data.get("std", {}) or {}
             corr_map = R_data.get("corr", {}) or {}
-
+            R_std_param_map = {
+                obs_name: param_name for obs_name, param_name in std_map.items()
+            }
+            R_corr_param_map: dict[frozenset[str], str | None] = {}
             obs_sig_sym: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
                 {
                     _LOCALS[obs_name]: _LOCALS[param_name]
@@ -407,7 +410,13 @@ class ModelParser:
                 a = _LOCALS[names[0]]
                 b = _LOCALS[names[1]]
                 obs_corr_sym_dict[frozenset((a, b))] = _LOCALS[param_name]
+                R_corr_param_map[frozenset((names[0], names[1]))] = param_name
             obs_corr_sym: PairGetterDict[Symbol] = PairGetterDict(obs_corr_sym_dict)
+
+            for i in range(len(y_str)):
+                for j in range(i + 1, len(y_str)):
+                    pair = frozenset((y_str[i], y_str[j]))
+                    R_corr_param_map.setdefault(pair, None)
 
             n_obs = len(y_order)
             R_symbolic = Matrix.zeros(n_obs, n_obs)
@@ -452,6 +461,8 @@ class ModelParser:
             R_symbolic = None
             r_param_symbols = None
             R_param_names = None
+            R_std_param_map = None
+            R_corr_param_map = {}
             _R_builder = None
 
         P0_cfg = P0Config(
@@ -470,6 +481,8 @@ class ModelParser:
             R_param_symbols=r_param_symbols,
             R_param_names=R_param_names,
             R_builder=_R_builder,
+            R_std_param_map=R_std_param_map,
+            R_corr_param_map=R_corr_param_map,
         )
 
     @staticmethod

@@ -103,6 +103,21 @@ def make_prior(
         )
     params_override = param_dict | parameters
     dist_inst = dist(**params_override)
-    transform_inst = _transform(**(transform_kwargs or {}))
+    transform_config = dict(transform_kwargs or {})
+    if (
+        distribution == "lkj_chol"
+        and transform == "cholesky_corr"
+        and "K" not in transform_config
+    ):
+        transform_config["K"] = params_override["K"]
+    if (
+        distribution == "lkj_chol"
+        and transform == "cholesky_corr"
+        and transform_config.get("K") != params_override["K"]
+    ):
+        raise ValueError(
+            "CholeskyCorrTransform must use the same K as the LKJChol distribution."
+        )
+    transform_inst = _transform(**transform_config)
     prior = Prior(dist=dist_inst, transform=transform_inst)
     return prior

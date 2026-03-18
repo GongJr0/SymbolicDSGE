@@ -6,8 +6,14 @@ import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
 POST82_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "POST82.yaml"
+DENSE_LKJ_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "LKJ_DENSE.yaml"
 
 
 @pytest.fixture(scope="session")
 def post82_test_model_path() -> Path:
     return POST82_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def dense_lkj_test_model_path() -> Path:
+    return DENSE_LKJ_TEST_MODEL_PATH
