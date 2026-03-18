@@ -53,7 +53,7 @@ fred = FRED(
 )
 df = fred.get_frame(
     series_ids=[
-        "GDPC1",  # Real GDP
+        "A939RX0Q048SBEA",  # Real GDP per Cap.
         "CPIAUCSL",  # Consumer Price Index for All Urban Consumers: All Items
         "FEDFUNDS",  # Effective Federal Funds Rate
     ],
@@ -63,7 +63,7 @@ df = fred.get_frame(
     ),  # Date range for the data ("YYYY-MM-DD" format or a pd.DatetimeIndex object)
 )
 
-gdp_q = df["GDPC1"]  # already quarterly in most pulls; verify freq
+gdp_q = df["A939RX0Q048SBEA"]  # already quarterly in most pulls; verify freq
 
 cpi_q = df["CPIAUCSL"].resample("QS").mean()  # quarterly avg CPI
 ffr_q = df["FEDFUNDS"].resample("QS").mean()  # quarterly avg policy rate
@@ -73,7 +73,7 @@ idx_range = pd.date_range(start="1984-01-01", end="2007-01-01", freq="QS")
 
 df = pd.DataFrame(
     {
-        "GDPC1": gdp_q.reindex(idx_range),
+        "A939RX0Q048SBEA": gdp_q.reindex(idx_range),
         "CPIAUCSL": cpi_q.reindex(idx_range),
         "FEDFUNDS": ffr_q.reindex(idx_range),
     }
@@ -82,8 +82,12 @@ df = pd.DataFrame(
 df
 
 # %%
-x_trend = HP_two_sided(log(df["GDPC1"]), lamb=1600)[0]  # returns (trend, cycle)
-x = (log(df["GDPC1"]) - x_trend) * 100  # HP detrended quarterly log output gap
+x_trend = HP_two_sided(log(df["A939RX0Q048SBEA"]), lamb=1600)[
+    0
+]  # returns (trend, cycle)
+x = (
+    log(df["A939RX0Q048SBEA"]) - x_trend
+) * 100  # HP detrended quarterly log output gap
 
 
 inf_lvl = annualized_log_percent(df["CPIAUCSL"], periods_per_year=4)
@@ -117,22 +121,22 @@ prior_spec = {
     # (0, 1)
     "beta": make_prior(
         "beta",
-        parameters={"a": 200 * 0.99, "b": 200 * 0.001},
+        parameters={"a": 100 * 0.99, "b": 100 * 0.001},
         transform="logit",
     ),
     "rho_r": make_prior(
         "beta",
-        parameters={"a": 200 * 0.84, "b": 200 * 0.16},
+        parameters={"a": 100 * 0.84, "b": 100 * 0.16},
         transform="logit",
     ),
     "rho_g": make_prior(
         "beta",
-        parameters={"a": 200 * 0.83, "b": 200 * 0.17},
+        parameters={"a": 100 * 0.83, "b": 100 * 0.17},
         transform="logit",
     ),
     "rho_z": make_prior(
         "beta",
-        parameters={"a": 200 * 0.85, "b": 200 * 0.15},
+        parameters={"a": 100 * 0.85, "b": 100 * 0.15},
         transform="logit",
     ),
     # (0, +inf)
@@ -202,8 +206,8 @@ estim = lambda r: solver.estimate_and_solve(
     posterior_point="mean",
     steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
     estimated_params=list(prior_spec.keys()),
-    n_draws=250_000,
-    burn_in=100_000,
+    n_draws=25_000,
+    burn_in=10_000,
     thin=1,
     update_R_in_iterations=r,
 )
@@ -383,7 +387,7 @@ ax[1, 0].set_title("Inflation")
 ax[1, 0].legend()
 
 ax[2, 0].plot(idx, sim0["Rate"], label="Simulated (Static R)")
-ax[2, 0].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 0].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
 ax[2, 0].set_title("Policy Rate")
 ax[2, 0].legend()
 
@@ -398,7 +402,7 @@ ax[1, 1].set_title("Inflation")
 ax[1, 1].legend()
 
 ax[2, 1].plot(idx, sim1["Rate"], label="Simulated (Dynamic R)")
-ax[2, 1].plot(idx, obs.iloc[:, 0], label="Actual", linestyle="--", alpha=0.7)
+ax[2, 1].plot(idx, obs.iloc[:, 2], label="Actual", linestyle="--", alpha=0.7)
 ax[2, 1].set_title("Policy Rate")
 ax[2, 1].legend()
 
@@ -421,7 +425,7 @@ plot_acf(
     title="Inflation Innovations (Static R)",
 )
 plot_acf(
-    kf_0.innov[:, 0],
+    kf_0.innov[:, 2],
     ax=ax[2, 0],
     lags=20,
     title="Policy Rate Innovations (Dynamic R)",
@@ -439,7 +443,7 @@ plot_acf(
     title="Inflation Innovations (Dynamic R)",
 )
 plot_acf(
-    kf_1.innov[:, 0],
+    kf_1.innov[:, 2],
     ax=ax[2, 1],
     lags=20,
     title="Policy Rate Innovations (Dynamic R)",
@@ -465,7 +469,7 @@ plot_pacf(
     title="Inflation Innovations (Static R)",
 )
 plot_pacf(
-    kf_0.innov[:, 0],
+    kf_0.innov[:, 2],
     ax=ax[2, 0],
     lags=20,
     title="Policy Rate Innovations (Dynamic R)",
@@ -483,7 +487,7 @@ plot_pacf(
     title="Inflation Innovations (Dynamic R)",
 )
 plot_pacf(
-    kf_1.innov[:, 0],
+    kf_1.innov[:, 2],
     ax=ax[2, 1],
     lags=20,
     title="Policy Rate Innovations (Dynamic R)",
@@ -499,6 +503,7 @@ template = TemplateConfig(
     power_law_lower_bound=2,
     power_law_upper_bound=2,
     powers_in_interactions=False,
+    constant_filtering="parametrize_all",
 )
 
 params = PySRParams(
@@ -536,7 +541,7 @@ def sum_moments(series):
 sum_moments(pd.Series(kf_0.y_filt[:, 1]))
 
 # %%
-print(res[["sympy_format", "loss", "complexity"]].to_latex())
+res[["sympy_format", "loss", "complexity"]]
 
 # %%
 
