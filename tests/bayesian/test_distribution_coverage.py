@@ -154,15 +154,11 @@ def test_distribution_helper_functions_cover_scalar_vector_and_rng_branches():
         2.0 * np.log(4.0)
     )
     assert np.allclose(
-        x_logy_vectorized.py_func(
-            float64(2.0), np.array([1.0, 4.0], dtype=np.float64)
-        ),
+        x_logy_vectorized.py_func(float64(2.0), np.array([1.0, 4.0], dtype=np.float64)),
         np.array([0.0, 2.0 * np.log(4.0)], dtype=np.float64),
     )
     assert np.allclose(
-        x_logy_vectorized.py_func(
-            float64(0.0), np.array([1.0, 4.0], dtype=np.float64)
-        ),
+        x_logy_vectorized.py_func(float64(0.0), np.array([1.0, 4.0], dtype=np.float64)),
         np.zeros(2, dtype=np.float64),
     )
 
@@ -202,7 +198,9 @@ def test_as241_helpers_cover_all_branches():
     assert np.isneginf(ndtri_as241.py_func(float64(0.0)))
     assert np.isposinf(ndtri_as241.py_func(float64(1.0)))
     assert ndtri_as241.py_func(float64(0.5)) == pytest.approx(0.0, abs=1e-12)
-    assert ndtri_as241.py_func(float64(0.9)) == pytest.approx(float(ndtri(0.9)), rel=1e-6)
+    assert ndtri_as241.py_func(float64(0.9)) == pytest.approx(
+        float(ndtri(0.9)), rel=1e-6
+    )
     assert ndtri_as241.py_func(float64(1e-8)) == pytest.approx(
         float(ndtri(1e-8)), rel=1e-5
     )
@@ -238,9 +236,7 @@ def test_uniform_distribution_helper_and_property_branches():
         float64(-2.0), float64(3.5), float64(0.0)
     ) == pytest.approx(0.0)
     assert np.isneginf(
-        uniform_grad_logpdf_scalar.py_func(
-            float64(-2.0), float64(3.5), float64(4.0)
-        )
+        uniform_grad_logpdf_scalar.py_func(float64(-2.0), float64(3.5), float64(4.0))
     )
     assert np.allclose(
         uniform_grad_logpdf_vectorized.py_func(
@@ -336,9 +332,9 @@ def test_halfnormal_and_lognormal_property_and_vector_branches():
         ),
         np.array([-np.inf, float(half.logpdf(float64(0.4)))], dtype=np.float64),
     )
-    assert halfnorm_grad_logpdf_scalar.py_func(float64(-0.1), float64(1.4)) == pytest.approx(
-        0.0
-    )
+    assert halfnorm_grad_logpdf_scalar.py_func(
+        float64(-0.1), float64(1.4)
+    ) == pytest.approx(0.0)
     assert np.allclose(
         halfnorm_grad_logpdf_vectorized.py_func(
             np.array([-0.1, 0.4], dtype=np.float64), float64(1.4)
@@ -352,7 +348,9 @@ def test_halfnormal_and_lognormal_property_and_vector_branches():
     assert half.ppf(np.array([0.5], dtype=np.float64)) == pytest.approx(
         float(half.ppf(float64(0.5)))
     )
-    assert halfnorm_rvs.py_func(float64(1.4), (3,), np.random.default_rng(1)).shape == (3,)
+    assert halfnorm_rvs.py_func(float64(1.4), (3,), np.random.default_rng(1)).shape == (
+        3,
+    )
     assert isinstance(half.rng, np.random.Generator)
     assert half.mean > 0.0
     assert half.var > 0.0
@@ -360,9 +358,9 @@ def test_halfnormal_and_lognormal_property_and_vector_branches():
     assert half.std == pytest.approx(1.4)
 
     logn = LogNormal(np.log(1.8), 0.45, 123)
-    assert lognorm_logpdf_scalar.py_func(float64(np.log(1.8)), float64(0.45), float64(1.4)) == pytest.approx(
-        float(logn.logpdf(float64(1.4)))
-    )
+    assert lognorm_logpdf_scalar.py_func(
+        float64(np.log(1.8)), float64(0.45), float64(1.4)
+    ) == pytest.approx(float(logn.logpdf(float64(1.4))))
     assert np.allclose(
         lognorm_logpdf_vectorized.py_func(
             float64(np.log(1.8)),
@@ -455,9 +453,13 @@ def test_lkj_helper_validation_and_not_implemented_branches():
     assert _is_symmetric(corr)
     assert not _is_symmetric(np.array([[1.0, 2.0], [0.0, 1.0]], dtype=np.float64))
     assert _is_positive_definite(corr)
-    assert not _is_positive_definite(np.array([[1.0, 2.0], [2.0, 1.0]], dtype=np.float64))
+    assert not _is_positive_definite(
+        np.array([[1.0, 2.0], [2.0, 1.0]], dtype=np.float64)
+    )
     assert _is_correlation_matrix(corr)
-    assert not _is_correlation_matrix(np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.float64))
+    assert not _is_correlation_matrix(
+        np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.float64)
+    )
     assert _is_lower_triangular(L)
     assert not _is_lower_triangular(corr)
     assert _has_unit_row_norms(L)

@@ -54,7 +54,9 @@ def _validate_corr_chol(L: NDF, K: int) -> NDF:
 class CholeskyCorrTransform(Transform):
     def __init__(self, K: int) -> None:
         if K < 2:
-            raise ValueError("K must be at least 2 for a correlation Cholesky transform.")
+            raise ValueError(
+                "K must be at least 2 for a correlation Cholesky transform."
+            )
         self._K = int(K)
 
     def __repr__(self) -> str:

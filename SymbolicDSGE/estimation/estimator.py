@@ -224,9 +224,7 @@ class Estimator:
             if name in self._reserved_matrix_keys():
                 matrix_name = self._matrix_name_for_reserved_key(name)
                 resolution = (
-                    self._resolve_R()
-                    if matrix_name == "R"
-                    else self._resolve_Q()
+                    self._resolve_R() if matrix_name == "R" else self._resolve_Q()
                 )
                 members = resolution.member_names
             else:
@@ -441,9 +439,7 @@ class Estimator:
 
             lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
             matrix_name = self._matrix_name_for_reserved_key(key)
-            resolution = (
-                self._resolve_R() if matrix_name == "R" else self._resolve_Q()
-            )
+            resolution = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
             if resolution.dim < 2:
                 raise ValueError(
                     f"LKJChol prior on {key} requires a matrix of dimension at least 2."

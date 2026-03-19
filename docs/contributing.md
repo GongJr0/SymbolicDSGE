@@ -21,7 +21,7 @@ On this page, we will outline the contribution process and go through what a con
 
 ## Reporting a bug
 
-Bug report submissions end up as issues in the [GitHub repository](https://github.com/GongJr0/SymbolicDSGE). 
+Bug report submissions end up as issues in the [GitHub repository](https://github.com/GongJr0/SymbolicDSGE).
 You can use the "Bug Report" issue template within the repository, or use the bug report card in the ["Contact"](./contact.md) to redirect you to the issue template.
 Even if you're unsure whether you found a bug in the project, it's always better to report it so we can investigate.
 Familiarity with the project code is not essential to filling an informative bug report, but at the very least it's very helpful to include the exact method call that produced the error in a reproducible way, and the error message that was produced.
@@ -29,10 +29,10 @@ Familiarity with the project code is not essential to filling an informative bug
 ## Feature Requests
 
 Similar to bug reports, feature requests also end up as issues in the repository and templates are available both directly in the repository and through the "Contact" page.
-Feature requests are a very broad category and can include a simple method that you think is useful to an entirely new module. 
+Feature requests are a very broad category and can include a simple method that you think is useful to an entirely new module.
 It's generally preferable to fill out a feature request form as soon as you have a concrete idea of the feature; we can then discuss, improve, and adapt the feature to the project's structure and direction.
 
-Of course, you can also make a fresh branch and submit your feature as a pull request, however, we can't guarantee that the feature will be merged. 
+Of course, you can also make a fresh branch and submit your feature as a pull request, however, we can't guarantee that the feature will be merged.
 Therefore a discussion upfront is always recommended even if you want to handle the implementation completely on your own.
 
 
@@ -40,12 +40,12 @@ Therefore a discussion upfront is always recommended even if you want to handle 
 
 Code contributions are also welcome, especially compared to what you might see in larger OSS projects.
 However, contributing code does mean that some conventions of the repository should be followed.
-First and foremost, all code contributions should be made through pull requests. 
+First and foremost, all code contributions should be made through pull requests.
 The `main` branch is the base branch for contributions and should be used as the starting point for your branch.
 
 ???+ note "Code Style"
     We do not follow a strict repository-wide style guideline but we do use `black` to format our code and `mypy` to type check it.
-    The only "requirement" that isn't automatically applied is the use of type hints. 
+    The only "requirement" that isn't automatically applied is the use of type hints.
     SymbolicDSGE makes extensive use of type hints and generally favors explicitness over highly dynamic Python patterns.
 
     If you're contributing to an existing module, you can follow the style of the surrounding code. Otherwise, you can follow your style as long as the code remains readable in context.
@@ -132,5 +132,3 @@ If you're contributing to a hot path, you should inspect the surrounding code to
 As a general rule of thumb, sticking to `numpy` types and avoiding Python objects in compiled functions will ensure your code can compile (but doesn't ensure it will be fast).
 However, if you're not confident in your knowledge of `numba` and its many quirks, you can write the logic and ask for help and/or someone to refactor it into compilable code.
 The above suggestion also applies to new features. You are welcome to implement a feature in plain Python and we can iterate on it together to make it suit the current codebase before merging the PR.
-
-

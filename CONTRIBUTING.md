@@ -141,4 +141,3 @@ As a general rule of thumb, sticking to `numpy` types and avoiding Python object
 
 However, if you're not confident in your knowledge of `numba` and its many quirks, you can write the logic and ask for help and/or someone to refactor it into compilable code.
 The above suggestion also applies to new features. You are welcome to implement a feature in plain Python and we can iterate on it together to make it suit the current codebase before merging the PR.
-
