@@ -8,31 +8,31 @@
       
       
       
-        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/1.0.0/installation/">
+        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/1.0.0/guides/kalman_config_guide/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../quickstart/">
       
       
-        <link rel="next" href="../guides/model_config_guide/">
+        <link rel="next" href="../estimation_guide/">
       
       
         
       
       
-      <link rel="icon" href="../assets/favicon.svg">
+      <link rel="icon" href="../../assets/favicon.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
-        <title>Installation - SymbolicDSGE Documentation</title>
+        <title>Kalman Filter Configuration Guide - SymbolicDSGE Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -75,16 +75,16 @@
         
         
         
-        <link rel="stylesheet" href="../assets/external/fonts.googleapis.com/css.fcef3dfb.css">
+        <link rel="stylesheet" href="../../assets/external/fonts.googleapis.com/css.fcef3dfb.css">
         <style>:root{--md-text-font:"Roboto";--md-code-font:"Fira Code"}</style>
       
     
     
-      <link rel="stylesheet" href="../assets/external/unpkg.com/katex@0/dist/katex.min.css">
+      <link rel="stylesheet" href="../../assets/external/unpkg.com/katex@0/dist/katex.min.css">
     
-      <link rel="stylesheet" href="../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -109,7 +109,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#installation" class="md-skip">
+        <a href="#kalman-filter-configuration-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -129,9 +129,9 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="SymbolicDSGE Documentation" class="md-header__button md-logo" aria-label="SymbolicDSGE Documentation" data-md-component="logo">
+    <a href="../.." title="SymbolicDSGE Documentation" class="md-header__button md-logo" aria-label="SymbolicDSGE Documentation" data-md-component="logo">
       
-  <img src="../assets/logo_w.svg" alt="logo">
+  <img src="../../assets/logo_w.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -148,7 +148,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Installation
+              Kalman Filter Configuration Guide
             
           </span>
         </div>
@@ -272,8 +272,6 @@
           
             
               
-                
-              
               <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
@@ -283,9 +281,9 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="SymbolicDSGE Documentation" class="md-nav__button md-logo" aria-label="SymbolicDSGE Documentation" data-md-component="logo">
+    <a href="../.." title="SymbolicDSGE Documentation" class="md-nav__button md-logo" aria-label="SymbolicDSGE Documentation" data-md-component="logo">
       
-  <img src="../assets/logo_w.svg" alt="logo">
+  <img src="../../assets/logo_w.svg" alt="logo">
 
     </a>
     SymbolicDSGE Documentation
@@ -312,7 +310,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -336,19 +334,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
         
   
   
@@ -364,7 +353,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -373,18 +361,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -405,7 +395,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -423,7 +413,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/model_config_guide/" class="md-nav__link">
+      <a href="../model_config_guide/" class="md-nav__link">
         
   
   
@@ -451,7 +441,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/quickstart/" class="md-nav__link">
+      <a href="../quickstart/" class="md-nav__link">
         
   
   
@@ -476,10 +466,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../guides/kalman_config_guide/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kalman Filter Configuration Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -495,6 +512,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#observables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measurement-covariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measurement Covariance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-covariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Covariance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filter Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -507,7 +588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/estimation_guide/" class="md-nav__link">
+      <a href="../estimation_guide/" class="md-nav__link">
         
   
   
@@ -589,7 +670,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/ModelConfig/" class="md-nav__link">
+      <a href="../../documentation/ModelConfig/" class="md-nav__link">
         
   
   
@@ -617,7 +698,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/ModelParser/" class="md-nav__link">
+      <a href="../../documentation/ModelParser/" class="md-nav__link">
         
   
   
@@ -645,7 +726,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/DSGESolver/" class="md-nav__link">
+      <a href="../../documentation/DSGESolver/" class="md-nav__link">
         
   
   
@@ -673,7 +754,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/Estimator/" class="md-nav__link">
+      <a href="../../documentation/Estimator/" class="md-nav__link">
         
   
   
@@ -701,7 +782,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/CompiledModel/" class="md-nav__link">
+      <a href="../../documentation/CompiledModel/" class="md-nav__link">
         
   
   
@@ -729,7 +810,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/SolvedModel/" class="md-nav__link">
+      <a href="../../documentation/SolvedModel/" class="md-nav__link">
         
   
   
@@ -757,7 +838,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/Shock/" class="md-nav__link">
+      <a href="../../documentation/Shock/" class="md-nav__link">
         
   
   
@@ -785,7 +866,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/KalmanConfig/" class="md-nav__link">
+      <a href="../../documentation/KalmanConfig/" class="md-nav__link">
         
   
   
@@ -813,7 +894,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/FilterResult/" class="md-nav__link">
+      <a href="../../documentation/FilterResult/" class="md-nav__link">
         
   
   
@@ -888,7 +969,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/Prior/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/Prior/" class="md-nav__link">
         
   
   
@@ -963,7 +1044,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/normal/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/normal/" class="md-nav__link">
         
   
   
@@ -991,7 +1072,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/log_normal/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/log_normal/" class="md-nav__link">
         
   
   
@@ -1019,7 +1100,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/half_normal/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/half_normal/" class="md-nav__link">
         
   
   
@@ -1047,7 +1128,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/trunc_normal/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/trunc_normal/" class="md-nav__link">
         
   
   
@@ -1075,7 +1156,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/half_cauchy/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/half_cauchy/" class="md-nav__link">
         
   
   
@@ -1103,7 +1184,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/beta/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/beta/" class="md-nav__link">
         
   
   
@@ -1131,7 +1212,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/gamma/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/gamma/" class="md-nav__link">
         
   
   
@@ -1159,7 +1240,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/inv_gamma/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/inv_gamma/" class="md-nav__link">
         
   
   
@@ -1187,7 +1268,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/uniform/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/uniform/" class="md-nav__link">
         
   
   
@@ -1215,7 +1296,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/distributions/lkj_chol/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/distributions/lkj_chol/" class="md-nav__link">
         
   
   
@@ -1298,7 +1379,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/identity/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/identity/" class="md-nav__link">
         
   
   
@@ -1326,7 +1407,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/log/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/log/" class="md-nav__link">
         
   
   
@@ -1354,7 +1435,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/softplus/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/softplus/" class="md-nav__link">
         
   
   
@@ -1382,7 +1463,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/logit/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/logit/" class="md-nav__link">
         
   
   
@@ -1410,7 +1491,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/probit/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/probit/" class="md-nav__link">
         
   
   
@@ -1438,7 +1519,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/affine_logit/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/affine_logit/" class="md-nav__link">
         
   
   
@@ -1466,7 +1547,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/affine_probit/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/affine_probit/" class="md-nav__link">
         
   
   
@@ -1494,7 +1575,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/lower_bounded/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/lower_bounded/" class="md-nav__link">
         
   
   
@@ -1522,7 +1603,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/prior_spec/transforms/upper_bounded/" class="md-nav__link">
+      <a href="../../documentation/prior_spec/transforms/upper_bounded/" class="md-nav__link">
         
   
   
@@ -1613,7 +1694,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/utilities/FRED.md" class="md-nav__link">
+      <a href="../../documentation/utilities/FRED.md" class="md-nav__link">
         
   
   
@@ -1641,7 +1722,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/utilities/KalmanFilter.md" class="md-nav__link">
+      <a href="../../documentation/utilities/KalmanFilter.md" class="md-nav__link">
         
   
   
@@ -1669,7 +1750,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../documentation/utilities/math_utils.md" class="md-nav__link">
+      <a href="../../documentation/utilities/math_utils.md" class="md-nav__link">
         
   
   
@@ -1712,7 +1793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../contact/" class="md-nav__link">
+      <a href="../../contact/" class="md-nav__link">
         
   
   
@@ -1739,7 +1820,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../contributing/" class="md-nav__link">
+      <a href="../../contributing/" class="md-nav__link">
         
   
   
@@ -1767,8 +1848,6 @@
             
             
               
-                
-              
               <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
@@ -1780,6 +1859,58 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#observables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measurement-covariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measurement Covariance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-covariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Covariance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filter Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1793,8 +1924,6 @@
               <article class="md-content__inner md-typeset">
                 
                   
-  
-
 
   <nav class="md-tags" >
     
@@ -1807,18 +1936,107 @@
         
       
       
-        <span class="md-tag md-tag-icon md-tag--info">info</span>
+        <span class="md-tag md-tag-icon md-tag--guide">guide</span>
       
     
   </nav>
 
 
 
-<h1 id="installation">Installation</h1>
-<p><code>SymbolicDSGE</code> can be installed via PyPI using the following command for use in a python environment.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>SymbolicDSGE
+<h1 id="kalman-filter-configuration-guide">Kalman Filter Configuration Guide</h1>
+<details class="tip">
+<summary><strong>TL;DR</strong></summary>
+<p>You can see an example config <a href="../../assets/test.yaml">here</a>.</p>
+</details>
+<details class="warning" open="open">
+<summary>Read Model Configuration Guide</summary>
+<p>This guide refers to fields used in model configuration and some parameters relevant to Kalman Filters are part of the model parameter family. Please make sure you've read the <a href="../model_config_guide/">model configuration guide</a> before reading this one.</p>
+</details>
+<p><code>SymbolicDSGE</code> uses a single configuration file and appends the Kalman Filter (KF) configuration to the same YAML that carries model information. Although Kalman Filtering can be done in a completely model-detached fashion, there's integration infrastructure provided in the model objects and configurations.</p>
+<p>All KF related configuration entries live under the parent field <code>kalman:</code> and are parsed into a <code>KalmanConfig</code> object at parse time.</p>
+<details class="note" open="open">
+<summary>Config Overrides</summary>
+<p>All configuration fields (except <code>R:</code>) can be overridden through function parameters when calling the filter.</p>
+</details>
+<h2 id="observables">Observables</h2>
+<p>The config uses a tag <code>y</code> to define the list of model measurement equations to include in the Kalman Filter.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;Infl&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;Rate&quot;</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># (1)!</span>
 </span></code></pre></div>
-<p>For people that want to modify or contribute to the project, forking the <a href="https://github.com/GongJr0/SymbolicDSGE" target="_blank" rel="noopener">repository</a> is advisable compared to a <code>pip install</code>. In the repository, you will find a <code>uv.lock</code> file. To interact with all components of the project using <code>uv sync --all-extras</code> is the quickest and easiest route. This will replicate the environment used at development and will include the <code>dev</code> dependency group for linting, auto formatting, etc.</p>
+<ol>
+<li>The listed names are observable names defined in the model configuration</li>
+</ol>
+<p>To ensure matrix alignment, names given here will be reordered to match their ordering in the model configuration. You can check the order via <code>ModelConfig.observables</code> or <code>CompiledModel.observable_names</code> to confirm the positions to expect the output arrays in.</p>
+<details class="example" open="open">
+<summary>Alignment Demonstration</summary>
+<p>Assume we have three observables and use two of them. In the model config, we defined <code class="language-yaml highlight"><span class="nt">observables</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">obs1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">obs2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">obs3</span><span class="p p-Indicator">]</span></code> and for the KF configuration, we used <code class="language-yaml highlight"><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">obs3</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">obs1</span><span class="p p-Indicator">]</span></code>.</p>
+<p>The alignment occurs on the positional index of observables as given in the model config. So we re-order to <code>y: [obs1, obs3]</code> internally.</p>
+<p>This will reflect in all <code>ndarray</code>s outputted from a KF run and it is generally advisable to check alignment or confirm the updated positions of observable arrays to avoid future confusion.</p>
+</details>
+<h2 id="measurement-covariance">Measurement Covariance</h2>
+<p>Measurement Covariance (<span class="arithmatex">\(R\)</span>) is constructed through parameters defined in the model configuration. We use the parent <code>R:</code> and populate it as such:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">kalman</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="nt">R</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">        </span><span class="l l-Scalar l-Scalar-Plain">std:...</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">        </span><span class="l l-Scalar l-Scalar-Plain">corr:...</span>
+</span></code></pre></div>
+<p>Then we populate each sub-field with respective parameter names:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">kalman</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="nt">R</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">        </span><span class="nt">std</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">            </span><span class="nt">Infl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">meas_infl</span><span class="w"> </span><span class="c1"># (1)!</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">            </span><span class="nt">Rate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">meas_rate</span><span class="w"> </span><span class="c1"># (2)!</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">        </span><span class="nt">corr</span><span class="p">:</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">            </span><span class="l l-Scalar l-Scalar-Plain">Infl, Rate</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">meas_rho_ir</span><span class="w"> </span><span class="c1"># (3)!</span>
+</span></code></pre></div>
+<ol>
+<li>Defined as a parameter and given calibration value in model config.</li>
+<li>Defined as a parameter and given calibration value in model config.</li>
+<li>Defined as a parameter and given calibration value in model config.</li>
+</ol>
+<details class="info" open="open">
+<summary>No Defaults</summary>
+<p><code>SymbolicDSGE</code> does not fall back to defaults when constructing <span class="arithmatex">\(R\)</span>. As of now, heuristics to infer <span class="arithmatex">\(R\)</span> are not implemented and any "default" is practically guaranteed to be inaccurate. There are future plans to implement robust <span class="arithmatex">\(R\)</span> inference pipelines; but the no-default behavior will not change until said implementations are in place.</p>
+</details>
+<details class="note" open="open">
+<summary>Runtime Diagonal <code>R</code> Estimation</summary>
+<p><code>SolvedModel.kalman(...)</code> also exposes <code>estimate_R_diag=True</code> (with optional <code>R_scale</code>) to estimate a diagonal <code>R</code> by likelihood before filtering. This is a runtime option and does not mutate the configuration.</p>
+</details>
+<h2 id="state-covariance">State Covariance</h2>
+<p>State Covariance (<span class="arithmatex">\(P\)</span>) defines the inter-state variation through a covariance matrix. <span class="arithmatex">\(P\)</span> is an inferred parameter in Kalman Filters; but an initial guess <span class="arithmatex">\(P_0\)</span> is provided through the configuration. As of now, the configuration only allows the creation of diagonally-defined matrices (assumes no correlation) but a full <span class="arithmatex">\(P_0\)</span> construction will be implemented. Initial guesses are not relevant beyond an (often short) burn-in period; but a well-specified <span class="arithmatex">\(P_0\)</span> guess can help convergence speeds. In the config we define a parent <code>P0:</code> and populate the following fields:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">kalman</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="nt">P0</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">        </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diag</span><span class="w"> </span><span class="c1"># (1)!</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">        </span><span class="nt">scale</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span><span class="w"> </span><span class="c1"># (2)!</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">        </span><span class="nt">diag</span><span class="p">:</span><span class="w"> </span><span class="c1"># (3)!</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">            </span><span class="nt">g</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">            </span><span class="nt">z</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">            </span><span class="nt">r</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">            </span><span class="nt">Pi</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">            </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+</span></code></pre></div>
+<ol>
+<li><code>P0</code> construction mode. <code class="language-python highlight"><span class="s2">&quot;eye&quot;</span></code> uses <span class="arithmatex">\(I_n \times \operatorname{scale}\)</span> while <code class="language-python highlight"><span class="s2">&quot;diag&quot;</span></code> constructs the matrix from below defined diagonal values before scaling by <code>scale</code>.</li>
+<li>Scaling factor of P0.</li>
+<li>Diagonal entries of the covariance matrix.</li>
+</ol>
+<details class="note" open="open">
+<summary>Diagonal Values</summary>
+<p>The <code>diag</code> field is directly used as the pre-scaling matrix values. Therefore, entries in the <code>diag</code> field correspond to variances instead of standard deviations.</p>
+</details>
+<h2 id="filter-options">Filter Options</h2>
+<p><code>SymbolicDSGE</code> defines two KF options that can be adjusted through the configuration file. These options do not belong to a parent tag and are defined as follows:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">kalman</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="nt">jitter</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-10</span><span class="w"> </span><span class="c1"># (1)!</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">symmetrize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w"> </span><span class="c1"># (2)!</span>
+</span></code></pre></div>
+<ol>
+<li>The number specified is added to covariance matrices if their Cholesky decomposition fails.</li>
+<li>Covariance matrices are symmetrized if this field is <code class="language-yaml highlight"><span class="l l-Scalar l-Scalar-Plain">true</span></code>. Symmetrization is applied as <span class="arithmatex">\((M + M^\top)/2\)</span>.</li>
+</ol>
+<h1 id="conclusion">Conclusion</h1>
+<p>The configuration fields above provide all KF necessary information that can't (or shouldn't) be inferred from the model state. This config field is only relevant to <code class="language-python highlight"><span class="n">SolvedModel</span><span class="o">.</span><span class="n">kalman</span></code>. If you've read to this point and want to check a complete configuration file including <code>kalman</code> and model configurations, you can visit <a href="https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/POST82.yaml" target="_blank" rel="noopener">this</a> link.</p>
+<p><a class="md-button" download="" href="../../assets/test.yaml">Download Test Config</a></p>
 
 
 
@@ -1831,8 +2049,6 @@
 
 
 
-
-  
 
 
 
@@ -1850,12 +2066,10 @@
   
     
       
-        
-      
-      <nav class="md-footer__inner md-grid" aria-label="Footer" hidden>
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href=".." class="md-footer__link md-footer__link--prev" aria-label="Previous: Home">
+          <a href="../quickstart/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Quick Start">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1865,20 +2079,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Home
+                Quick Start
               </div>
             </div>
           </a>
         
         
           
-          <a href="../guides/model_config_guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Model Configuration Guide">
+          <a href="../estimation_guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Estimation Guide">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Model Configuration Guide
+                Estimation Guide
               </div>
             </div>
             <div class="md-footer__button md-icon">
@@ -1948,16 +2162,16 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.select", "content.code.annotate", "navigation.footer", "content.link-preview"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": {"doc": "doc", "guide": "guide", "info": "info"}, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.select", "content.code.annotate", "navigation.footer", "content.link-preview"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": {"doc": "doc", "guide": "guide", "info": "info"}, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
-        <script src="../javascripts/katex.js"></script>
+        <script src="../../javascripts/katex.js"></script>
       
-        <script src="../assets/external/unpkg.com/katex@0/dist/katex.min.js"></script>
+        <script src="../../assets/external/unpkg.com/katex@0/dist/katex.min.js"></script>
       
-        <script src="../assets/external/unpkg.com/katex@0/dist/contrib/auto-render.min.js"></script>
+        <script src="../../assets/external/unpkg.com/katex@0/dist/contrib/auto-render.min.js"></script>
       
     
   </body>
