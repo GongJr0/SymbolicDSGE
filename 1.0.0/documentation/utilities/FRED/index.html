@@ -8,9 +8,13 @@
       
       
       
-        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/Utilities/KalmanFilter/">
+        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/utilities/FRED/">
       
       
+        <link rel="prev" href="../../prior_spec/transforms/upper_bounded/">
+      
+      
+        <link rel="next" href="../KalmanFilter/">
       
       
         
@@ -21,7 +25,7 @@
     
     
       
-        <title>KalmanFilter - SymbolicDSGE Documentation</title>
+        <title>FRED - SymbolicDSGE Documentation</title>
       
     
     
@@ -105,7 +109,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#kalmanfilter" class="md-skip">
+        <a href="#fred" class="md-skip">
           Skip to content
         </a>
       
@@ -144,7 +148,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              KalmanFilter
+              FRED
             
           </span>
         </div>
@@ -523,18 +527,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
@@ -555,7 +561,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1547,18 +1553,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_11" checked>
         
           
           <label class="md-nav__link" for="__nav_4_11" id="__nav_4_11_label" tabindex="0">
@@ -1579,7 +1587,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_11_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_11_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4_11">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1594,10 +1602,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../utilities/FRED.md" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1613,6 +1630,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -1625,7 +1643,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utilities/KalmanFilter.md" class="md-nav__link">
+      <a href="../KalmanFilter/" class="md-nav__link">
         
   
   
@@ -1653,7 +1671,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utilities/math_utils.md" class="md-nav__link">
+      <a href="../math_utils/" class="md-nav__link">
         
   
   
@@ -1794,193 +1812,103 @@
 
 
 
-<h1 id="kalmanfilter">KalmanFilter</h1>
+<h1 id="fred">FRED</h1>
+<details class="info" open="open">
+<summary>FRED Dependencies</summary>
+<p><code class="language-python highlight"><span class="n">FRED</span></code> relies on the optional dependency <code class="language-python highlight"><span class="n">fredapi</span></code>. If you did not opt-in for optional dependencies, you can run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>SymbolicDSGE<span class="o">[</span>fred<span class="o">]</span>
+</span></code></pre></div>
+<p>to get the required packages.</p>
+</details>
+<details class="warning" open="open">
+<summary>API Key Required</summary>
+<p>An API key from the "St. Louis FED" is required for the <code class="language-python highlight"><span class="n">FRED</span></code> class to operate. If you don't have an API key, you can generate one for free by making an account on FRED.</p>
+<p><a class="md-button" href="//fred.stlouisfed.org" target="_blank" rel="noopener">FRED</a></p>
+</details>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">FRED</span><span class="p">(</span><span class="n">key_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key_env</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code class="language-python highlight"><span class="n">FRED</span></code> allows easy retrieval of time series stored in the FRED database. The class can identify the given <code class="language-python highlight"><span class="n">key_name</span></code> if placed in the <code>.env</code> file anywhere in the discoverable file tree of the project. Alternatively, you can specify an <code>env</code> file that contains <code>key_name</code> in it.</p>
 <details class="info">
-<summary>Kalman Filter Wiki Page</summary>
-<p>You can refer to the Wikipedia page for derivations and the underlying process. The documentation only includes the user-facing interface.</p>
-<p><a class="md-button" href="https://en.wikipedia.org/wiki/Kalman_filter" target="_blank" rel="noopener">Kalman Filter | Wikipedia</a></p>
+<summary>.env File Discovery</summary>
+<p><code>find_dotenv</code> is used for discovery. It will walk up the directory tree towards the project root until it encounters a file named <code>".env"</code>.</p>
 </details>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">FilterResult</span><span class="p">()</span>
-</span></code></pre></div>
-<p><code class="language-python highlight"><span class="n">dataclass</span></code> storing the results of a Kalman Filter run.</p>
-<p><strong>Fields:</strong></p>
-<table>
-<thead>
-<tr>
-<th style="text-align: left;"><strong>Name</strong></th>
-<th style="text-align: center;"><strong>Type</strong></th>
-<th style="text-align: right;"><strong>Description</strong></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align: left;">x_pred</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">State prediction before observing <span class="arithmatex">\(y_t\)</span>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">x_filt</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">State estimate after observing <span class="arithmatex">\(y_t\)</span>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">P_pred</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">Predicted state covariance <span class="arithmatex">\(P_{t\mid t-1}\)</span>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">P_filt</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">Filtered state covariance <span class="arithmatex">\(P_{t\mid t}\)</span>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">y_pred</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">Predicted observation. Shape <code>(T, m)</code>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">y_filt</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">Filtered observation. Shape <code>(T, m)</code>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">innov</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">Innovations (measurement residuals). Shape <code>(T, m)</code>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">S</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></code></td>
-<td style="text-align: right;">Innovation covariance. Shape <code>(T, m, m)</code>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">loglik</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="nb">float</span></code></td>
-<td style="text-align: right;">Total log-likelihood of observed data under the filter.</td>
-</tr>
-<tr>
-<td style="text-align: left;">eps_hat</td>
-<td style="text-align: center;"><code class="language-python highlight"><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span></code></td>
-<td style="text-align: right;">Estimated shocks (<code>None</code> unless <code>return_shocks=True</code>).</td>
-</tr>
-</tbody>
-</table>
-<p>&nbsp;</p>
-<p><div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">KalmanFilter</span><span class="p">()</span>
-</span></code></pre></div>
-Static class containing methods necessary for filter application.</p>
 <p><strong>Methods:</strong></p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">KalmanFilter</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">A</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">B</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">C</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">d</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">Q</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">R</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">x0</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">P0</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="n">return_shocks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">symmetrize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="n">jitter</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">FilterResult</span>
+<p><div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">FRED</span><span class="o">.</span><span class="n">get_series</span><span class="p">(</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">series_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">date_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="n">pd</span><span class="o">.</span><span class="n">DatetimeIndex</span> <span class="o">|</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span>
 </span></code></pre></div>
-<p>Apply a linear Kalman Filter and return <code class="language-python highlight"><span class="n">FilterResult</span></code>.</p>
-<p><strong>Inputs:</strong></p>
+Returns the requested FRED series.</p>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;"><strong>Name</strong></th>
+<th style="text-align: left;"><strong>Argument</strong></th>
 <th style="text-align: right;"><strong>Description</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;">A</td>
-<td style="text-align: right;">State transition matrix.</td>
+<td style="text-align: left;">series_id</td>
+<td style="text-align: right;">The FRED ID of the requested series.</td>
 </tr>
 <tr>
-<td style="text-align: left;">B</td>
-<td style="text-align: right;">Shock loading matrix.</td>
-</tr>
-<tr>
-<td style="text-align: left;">C</td>
-<td style="text-align: right;">Observation matrix.</td>
-</tr>
-<tr>
-<td style="text-align: left;">d</td>
-<td style="text-align: right;">Observation intercept.</td>
-</tr>
-<tr>
-<td style="text-align: left;">Q</td>
-<td style="text-align: right;">Shock covariance matrix.</td>
-</tr>
-<tr>
-<td style="text-align: left;">R</td>
-<td style="text-align: right;">Observation-noise covariance matrix.</td>
-</tr>
-<tr>
-<td style="text-align: left;">y</td>
-<td style="text-align: right;">Observed data over time.</td>
-</tr>
-<tr>
-<td style="text-align: left;">x0</td>
-<td style="text-align: right;">Initial state mean. Defaults to zero vector.</td>
-</tr>
-<tr>
-<td style="text-align: left;">P0</td>
-<td style="text-align: right;">Initial state covariance. Defaults to large diagonal.</td>
-</tr>
-<tr>
-<td style="text-align: left;">return_shocks</td>
-<td style="text-align: right;">If <code class="language-python highlight"><span class="kc">True</span></code>, compute and return estimated shocks.</td>
-</tr>
-<tr>
-<td style="text-align: left;">symmetrize</td>
-<td style="text-align: right;">Symmetrize covariance matrices each step if <code class="language-python highlight"><span class="kc">True</span></code>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">jitter</td>
-<td style="text-align: right;">Jitter term added to <span class="arithmatex">\(S_t\)</span> when Cholesky factorization fails.</td>
+<td style="text-align: left;">date_range</td>
+<td style="text-align: right;">Date range in either a <code>YYYY-MM-DD</code> format string pair, a <code>DatetimeIndex</code>, or a string literal <code class="language-python highlight"><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span></code>. <code class="language-python highlight"><span class="kc">None</span></code> defaults to <code class="language-python highlight"><span class="s1">&#39;max&#39;</span></code>.</td>
 </tr>
 </tbody>
 </table>
-<p>&nbsp;</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">KalmanFilter</span><span class="o">.</span><span class="n">run_extended</span><span class="p">(</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">A</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">B</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">h</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">H_jac</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">calib_params</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span><span class="p">],</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">Q</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">R</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span> <span class="o">|</span> <span class="n">complex128</span><span class="p">],</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">x0</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">P0</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">[</span><span class="n">float64</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">return_shocks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">symmetrize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">jitter</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="n">compute_y_filt</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">FilterResult</span>
-</span></code></pre></div>
-<p>Apply an extended Kalman Filter with linear transition and nonlinear measurement function. <code class="language-python highlight"><span class="n">h</span></code> and <code class="language-python highlight"><span class="n">H_jac</span></code> are evaluated at each predicted state and receive unpacked state values plus <code class="language-python highlight"><span class="n">calib_params</span></code>.</p>
-<details class="note" open="open">
-<summary>Jitter</summary>
-<p>Though its default is 0.0, running the method with a small jitter is strongly recommended. Using 1e-8 (or similar) can prevent fallback to matrix inversion when Cholesky fails. (Inversion much slower in comparison)</p>
-</details>
 <p><strong>Returns:</strong></p>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;"><strong>Type</strong></th>
+<th style="text-align: center;"><strong>Type:</strong></th>
 <th style="text-align: right;"><strong>Description</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><code class="language-python highlight"><span class="n">FilterResult</span></code></td>
-<td style="text-align: right;"><code class="language-python highlight"><span class="n">dataclass</span></code> containing outputs and diagnostics of the filter run.</td>
+<td style="text-align: center;"><code class="language-python highlight"><span class="n">pd</span><span class="o">.</span><span class="n">Series</span></code></td>
+<td style="text-align: right;">The requested time series in a formatted <code>pandas</code> object.</td>
+</tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">FRED</span><span class="o">.</span><span class="n">get_frame</span><span class="p">(</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">series_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">date_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="n">pd</span><span class="o">.</span><span class="n">DatetimeIndex</span> <span class="o">|</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>
+</span></code></pre></div>
+<p>Returns multiple requested series in a <code>DataFrame</code>.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Argument</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">series_ids</td>
+<td style="text-align: right;">The FRED IDs of the requested series.</td>
+</tr>
+<tr>
+<td style="text-align: left;">date_range</td>
+<td style="text-align: right;">Date range in either a <code>YYYY-MM-DD</code> format string pair, a <code>DatetimeIndex</code>, or a string literal <code class="language-python highlight"><span class="s1">&#39;max&#39;</span><span class="p">,</span> <span class="s1">&#39;ytd&#39;</span></code>. <code class="language-python highlight"><span class="kc">None</span></code> defaults to <code class="language-python highlight"><span class="s1">&#39;max&#39;</span></code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;"><strong>Type:</strong></th>
+<th style="text-align: right;"><strong>Description</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code class="language-python highlight"><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></code></td>
+<td style="text-align: right;">The requested time series in a formatted <code>pandas</code> object.</td>
 </tr>
 </tbody>
 </table>
@@ -2011,6 +1939,44 @@ Static class containing methods necessary for filter application.</p>
       
         <footer class="md-footer">
   
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../prior_spec/transforms/upper_bounded/" class="md-footer__link md-footer__link--prev" aria-label="Previous: UpperBounded">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                UpperBounded
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../KalmanFilter/" class="md-footer__link md-footer__link--next" aria-label="Next: KalmanFilter">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                KalmanFilter
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
     
   
   <div class="md-footer-meta md-typeset">

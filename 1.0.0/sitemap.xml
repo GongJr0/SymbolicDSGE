@@ -53,18 +53,6 @@
          <lastmod>2026-03-19</lastmod>
     </url>
     <url>
-         <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/Utilities/FRED/</loc>
-         <lastmod>2026-03-19</lastmod>
-    </url>
-    <url>
-         <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/Utilities/KalmanFilter/</loc>
-         <lastmod>2026-03-19</lastmod>
-    </url>
-    <url>
-         <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/Utilities/math_utils/</loc>
-         <lastmod>2026-03-19</lastmod>
-    </url>
-    <url>
          <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/prior_spec/Prior/</loc>
          <lastmod>2026-03-19</lastmod>
     </url>
@@ -142,6 +130,18 @@
     </url>
     <url>
          <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/prior_spec/transforms/upper_bounded/</loc>
+         <lastmod>2026-03-19</lastmod>
+    </url>
+    <url>
+         <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/utilities/FRED/</loc>
+         <lastmod>2026-03-19</lastmod>
+    </url>
+    <url>
+         <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/utilities/KalmanFilter/</loc>
+         <lastmod>2026-03-19</lastmod>
+    </url>
+    <url>
+         <loc>https://gongjr0.github.io/SymbolicDSGE/1.0.0/documentation/utilities/math_utils/</loc>
          <lastmod>2026-03-19</lastmod>
     </url>
     <url>
