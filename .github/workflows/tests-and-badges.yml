@@ -1,4 +1,4 @@
-name: Tests & badges
+name: Tests & Badges
 
 on:
   push:
