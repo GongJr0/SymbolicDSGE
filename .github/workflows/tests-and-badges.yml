@@ -1,4 +1,4 @@
-name: tests-and-badges
+name: Tests & badges
 
 on:
   push:
@@ -34,6 +34,9 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --frozen --all-extras
+
+      - name: Run Pre-Commit Checks
+        uses: pre-commit/action@v3.0.1
 
       - name: Run tests with coverage
         run: uv run pytest -q ./tests --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
