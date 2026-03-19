@@ -172,3 +172,4 @@ nav:
           - KalmanFilter: documentation/utilities/KalmanFilter.md
           - math_utils: documentation/utilities/math_utils.md
   - Contact: contact.md
+  - Contributing: contributing.md
