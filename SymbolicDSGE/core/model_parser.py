@@ -84,10 +84,9 @@ class ModelParser:
         if nf_param:
             raise ValueError(f"Calibration contains unknown parameters: {nf_param}")
 
-    # --- refactored from_yaml ---
     def from_yaml(self) -> ParsedConfig:
         data = self._load_yaml(self.config_path)
-        self._require_calibrated_params(data)  # your strict contract
+        self._require_calibrated_params(data)
 
         ns = self._build_namespace(data)
         (
