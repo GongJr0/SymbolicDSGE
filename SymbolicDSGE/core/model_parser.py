@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -23,6 +24,14 @@ from ..kalman.config import KalmanConfig, P0Config
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
 
+def _list_representer(dumper: yaml.Dumper, data: list[Any]) -> yaml.Node:
+    return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=True)
+
+
+class InlineList(list):
+    pass
+
+
 @dataclass(frozen=True)
 class ParsedConfig:
     model: ModelConfig
@@ -35,7 +44,7 @@ class ParsedConfig:
 class ModelParser:
     def __init__(self, config_path: str | Path) -> None:
         self.config_path = Path(config_path)
-        self.parsed: ParsedConfig = self.from_yaml()
+        self.raw_data, self.parsed = self.from_yaml()
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -84,7 +93,7 @@ class ModelParser:
         if nf_param:
             raise ValueError(f"Calibration contains unknown parameters: {nf_param}")
 
-    def from_yaml(self) -> ParsedConfig:
+    def from_yaml(self) -> tuple[dict, ParsedConfig]:
         data = self._load_yaml(self.config_path)
         self._require_calibrated_params(data)
 
@@ -128,7 +137,46 @@ class ModelParser:
         kalman_cfg = self._parse_kalman_if_present(
             data, _LOCALS, parameters, observables
         )
-        return ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
+        return data, ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
+
+    def update_calibration_parameters(
+        self,
+        new_config: ModelConfig,
+        digits: int = 3,
+        output_path: str | Path | None = None,
+    ) -> StringIO:
+        new_params = new_config.calibration.parameters
+        data_out = self.raw_data.copy()
+
+        normalized_params = {
+            str(k): round(float(v), digits) for k, v in new_params.items()
+        }
+        param_names = list(normalized_params.keys())
+        param_names = InlineList(param_names)
+        data_out["parameters"] = param_names
+
+        data_out.setdefault("calibration", {})["parameters"] = normalized_params
+        vars = InlineList(data_out.get("variables", []))
+        data_out["variables"] = vars
+
+        obs = data_out.get("observables", [])
+        data_out["observables"] = InlineList(obs)
+
+        kalman = data_out.get("kalman", None)
+        if kalman:
+            y = kalman.get("y", [])
+            kalman["y"] = InlineList(y)
+
+        buffer = StringIO()
+
+        yaml.add_representer(InlineList, _list_representer)
+        yaml.dump(data_out, buffer, sort_keys=False)
+        buffer.seek(0)
+
+        if output_path:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(buffer.getvalue())
+        return buffer
 
     # ---------------- helpers ----------------
 
