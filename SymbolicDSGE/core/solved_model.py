@@ -24,6 +24,7 @@ from ..kalman.filter import FilterResult
 from ..regression.sr_interface import SRInterface
 from ..regression.config import TemplateConfig
 from ..regression.model_defaults import PySRParams
+from ..regression.model_parametrizer import ModelParametrizer
 from ..regression.fit_result import FitResult
 
 _JIT_CACHE: dict[int, Callable] = {}
@@ -557,17 +558,32 @@ class SolvedModel:
         self,
         y: NDF | pd.DataFrame,
         observable: str,
-        template_config: TemplateConfig,
-        sr_params: PySRParams,
+        template_config: TemplateConfig | None = None,
+        sr_params: PySRParams | None = None,
         variables: list[str] | None = None,
+        parametrizer: ModelParametrizer | None = None,
     ) -> FitResult:
+        if parametrizer is None:
+            if template_config is None or sr_params is None:
+                raise ValueError(
+                    "Provide either a pre-built parametrizer or both template_config and sr_params."
+                )
+            parametrizer = ModelParametrizer(
+                variables or self.compiled.var_names,
+                sr_params,
+                template_config,
+            )
+        elif variables is not None and set(variables) != set(
+            parametrizer.variable_names
+        ):
+            raise ValueError(
+                "Provided variables do not match the parametrizer's variable names."
+            )
 
         interface = SRInterface(
             model=self,
-            variable_names=variables,
             obs_name=observable,
-            config=template_config,
-            params=sr_params,
+            parametrizer=parametrizer,
         )
 
         return interface.fit_to_kf(y)
