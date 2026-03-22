@@ -49,8 +49,10 @@ repos:
         name: EoF Fixer
         description: "Ensure files end with a newline"
         entry: end-of-file-fixer
+        exclude: ^(docs|scripts|coverage|MODELS)/
 
       - id: trailing-whitespace
         name: Trailing Whitespace Remover
         description: "Remove trailing whitespace"
         entry: trailing-whitespace-fixer
+        exclude: ^(docs|scripts|coverage|MODELS)/

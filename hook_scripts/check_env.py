@@ -21,6 +21,7 @@ def find_all_env_files() -> list[Path]:
     if result.returncode != 0:
         return []
     tracked = result.stdout.strip().splitlines()
+    print(f"Found tracked .env files: {tracked}")
     return [Path(f) for f in tracked]
 
 
