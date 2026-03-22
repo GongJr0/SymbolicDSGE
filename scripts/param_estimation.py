@@ -41,14 +41,14 @@ import cProfile
 _FIGSIZE_1D = (10, 6)
 _FIGSIZE_2D = (12, 6)
 # %%
-model, kalman = ModelParser("../MODELS/POST82.yaml").get_all()
+parser = ModelParser("../MODELS/POST82.yaml")
+model, kalman = parser.get_all()
 
 with catch_warnings():
     # Equations in a sp.Matrix are deprecated, this is only used as a pretty print function
     simplefilter(action="ignore")
     mat = Matrix(model.equations.model)
 mat
-
 # %%
 fred = FRED(
     key_env=None,  # None => look for the ".env" file. If you have a custom env file, provide its path here.
