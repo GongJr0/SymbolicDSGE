@@ -1,7 +1,5 @@
 from sympy import Expr
 from .symbolic_regression import SymbolicRegressor
-from .config import TemplateConfig
-from .model_defaults import PySRParams
 from .model_parametrizer import ModelParametrizer
 from .fit_result import FitResult
 
@@ -25,20 +23,12 @@ class SRInterface:
     def __init__(
         self,
         model: "SolvedModel",
-        variable_names: list[str] | None,
         obs_name: str,
-        config: TemplateConfig,
-        params: PySRParams,
+        parametrizer: ModelParametrizer,
     ):
         self._model = model
 
-        self._variable_names = variable_names or model.compiled.var_names
-
-        parametrizer = ModelParametrizer(
-            self._variable_names,
-            params,
-            config,
-        )
+        self._variable_names = parametrizer.variable_names
         expr = self._get_equation(obs_name)
         parametrizer.make_and_add_template(expr)
         self._obs_name = obs_name

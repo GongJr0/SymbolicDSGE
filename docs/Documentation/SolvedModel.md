@@ -223,15 +223,20 @@ __Returns:__
 SolvedModel.fit_kf(
     y: ndarray | DataFrame,
     observable: str,
-    template_config: TemplateConfig,
-    sr_params: PySRParams,
+    template_config: TemplateConfig | None = None,
+    sr_params: PySRParams | None = None,
     variables: list[str] | None = None, # (1)!
+    parametrizer: ModelParametrizer | None = None, # (2)!
 ) -> FitResult
 ```
 
 1. `None`: Use all compiled model variables as symbolic-regression inputs.
+2. `None`: Build a default `ModelParametrizer` from `template_config`, `sr_params`, and `variables`.
 
 Fit a symbolic regression model to Kalman Filter output for a selected observable.
+
+???+ note "Parametrizer Injection"
+    Pass a pre-built `#!python ModelParametrizer` when you need to customize the symbolic-regression setup before the Kalman/SR integration adds the template, for example by calling `#!python add_built_in_ops(...)`. If `#!python parametrizer` is omitted, both `#!python template_config` and `#!python sr_params` must be provided and the method will construct the default parametrizer internally.
 
 ???+ note "Regression Target"
     Internally, the method first runs `#!python SolvedModel.kalman(...)` using the model's observable set. If `#!python template_config.include_expression=True`, the regression target is the predicted measurement for `observable`; otherwise the target is the observable's Kalman innovation.
@@ -242,9 +247,10 @@ __Inputs:__
 |:---------|----------------:|
 | y | Observation data passed through the Kalman filter stage before symbolic regression. |
 | observable | Observable name whose filter output should be fit. |
-| template_config | Template-expression configuration used to build the symbolic-regression search space. |
-| sr_params | Symbolic-regression backend hyperparameters. |
+| template_config | Template-expression configuration used to build the default symbolic-regression parametrizer. |
+| sr_params | Symbolic-regression backend hyperparameters used by the default parametrizer path. |
 | variables | Optional subset of model variables to expose as regression inputs. |
+| parametrizer | Optional pre-built `#!python ModelParametrizer` used instead of constructing one inside `#!python fit_kf`. |
 
 __Returns:__
 
