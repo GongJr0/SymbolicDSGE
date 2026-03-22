@@ -16,19 +16,14 @@
 # %%
 from SymbolicDSGE import ModelParser, DSGESolver, Shock
 from SymbolicDSGE.utils import FRED
-from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent, detrend
+from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
-from SymbolicDSGE.regression import (
-    SymbolicRegressor,
-    TemplateConfig,
-    PySRParams,
-    ModelParametrizer,
-)
+from SymbolicDSGE.regression import TemplateConfig, PySRParams
 
 from sympy import Matrix, Float, preorder_traversal
 from warnings import catch_warnings, simplefilter
 
-from numpy import array, float64, ceil, sqrt, log, std, random, isclose
+from numpy import log
 import numpy as np
 
 import pandas as pd
@@ -41,7 +36,7 @@ import cProfile
 _FIGSIZE_1D = (10, 6)
 _FIGSIZE_2D = (12, 6)
 # %%
-parser = ModelParser("../MODELS/POST82.yaml")
+parser = ModelParser("../MODELS/classes/reference.yaml")
 model, kalman = parser.get_all()
 
 with catch_warnings():
@@ -120,53 +115,103 @@ observed = pd.DataFrame(
 observed.index = df_model_units.index
 
 # %%
+
+
+def seed_increment():
+    """Counter for random seeds"""
+    n = -1
+    while True:
+        n += 1
+        yield n
+
+
+seed = seed_increment()
+
 prior_spec = {
     # (0, 1)
     "beta": make_prior(
         "beta",
-        parameters={"a": 100 * 0.99, "b": 100 * 0.001},
+        parameters={
+            "a": 100 * 0.99,
+            "b": 100 * 0.001,
+            "random_state": next(seed),
+        },
         transform="logit",
     ),
     "rho_r": make_prior(
         "beta",
-        parameters={"a": 100 * 0.84, "b": 100 * 0.16},
+        parameters={
+            "a": 100 * 0.84,
+            "b": 100 * 0.16,
+            "random_state": next(seed),
+        },
         transform="logit",
     ),
     "rho_g": make_prior(
         "beta",
-        parameters={"a": 100 * 0.83, "b": 100 * 0.17},
+        parameters={
+            "a": 100 * 0.83,
+            "b": 100 * 0.17,
+            "random_state": next(seed),
+        },
         transform="logit",
     ),
     "rho_z": make_prior(
         "beta",
-        parameters={"a": 100 * 0.85, "b": 100 * 0.15},
+        parameters={
+            "a": 100 * 0.85,
+            "b": 100 * 0.15,
+            "random_state": next(seed),
+        },
         transform="logit",
     ),
     # (0, +inf)
     "psi_pi": make_prior(
         "gamma",
-        parameters={"mean": 2.19, "std": 0.5},
+        parameters={
+            "mean": 2.19,
+            "std": 0.5,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "psi_x": make_prior(
         "gamma",
-        parameters={"mean": 0.30, "std": 0.1},
+        parameters={
+            "mean": 0.30,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "kappa": make_prior(
         "gamma",
-        parameters={"mean": 0.58, "std": 0.1},
+        parameters={
+            "mean": 0.58,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "tau_inv": make_prior(
         "gamma",
-        parameters={"mean": 1.86, "std": 0.5},
+        parameters={
+            "mean": 1.86,
+            "std": 0.5,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     # Correlation (-1,1)
     "rho_gz": make_prior(
         "trunc_normal",
-        parameters={"mean": 0.0, "std": 0.20, "low": -1.0, "high": 1.0},
+        parameters={
+            "mean": 0.0,
+            "std": 0.20,
+            "low": -1.0,
+            "high": 1.0,
+            "random_state": next(seed),
+        },
         transform="affine_logit",
         transform_kwargs={
             "low": -1.0,
@@ -176,37 +221,65 @@ prior_spec = {
     # Shock std devs (0, +inf)
     "sig_r": make_prior(
         "gamma",
-        parameters={"mean": 0.18, "std": 0.1},
+        parameters={
+            "mean": 0.18,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "sig_g": make_prior(
         "gamma",
-        parameters={"mean": 0.18, "std": 0.1},
+        parameters={
+            "mean": 0.18,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "sig_z": make_prior(
         "gamma",
-        parameters={"mean": 0.64, "std": 0.1},
+        parameters={
+            "mean": 0.64,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "meas_outgap": make_prior(
         "gamma",
-        parameters={"mean": 0.5, "std": 0.1},
+        parameters={
+            "mean": 0.5,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "meas_infl": make_prior(
         "gamma",
-        parameters={"mean": 0.5, "std": 0.1},
+        parameters={
+            "mean": 0.5,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "meas_rate": make_prior(
         "gamma",
-        parameters={"mean": 0.5, "std": 0.1},
+        parameters={
+            "mean": 0.5,
+            "std": 0.1,
+            "random_state": next(seed),
+        },
         transform="log",
     ),
     "R_corr": make_prior(
         "lkj_chol",
-        parameters={"eta": 1.0, "K": 3},
+        parameters={
+            "eta": 1.0,
+            "K": 3,
+            "random_state": next(seed),
+        },
         transform="cholesky_corr",
     ),
 }
@@ -230,6 +303,17 @@ estim = lambda: solver.estimate_and_solve(
     update_R_in_iterations=True,
 )
 res, sol = estim()
+parser.update_calibration_parameters(
+    sol.config,
+    digits=3,
+    output_path="../MODELS/classes/base.yaml",
+)  # Make config file with new parameters
+parser.update_calibration_parameters(
+    sol.config,
+    digits=3,
+    output_path="../MODELS/classes/augmented.yaml",
+)  # Duplicate parameters for augmented model
+
 # cProfile.run("res, sol = estim()", sort="cumtime")
 
 # %%
@@ -260,9 +344,6 @@ pd.Series(
 
 # %%
 sol.transition_plot(shocks=["g"], T=25, scale=1, observables=True)
-# %%
-sol.config.calibration.parameters
-
 # %%
 kf = sol.kalman(
     observed.loc[observed.index >= "1984-01-01", :],
@@ -370,7 +451,7 @@ plt.tight_layout()
 # %%
 template = TemplateConfig(
     include_expression=False,
-    interaction_form="func",
+    interaction_form="prod",
     hessian_restriction="free",
     power_law_lower_bound=2,
     power_law_upper_bound=2,
@@ -397,9 +478,10 @@ sr_discovery = lambda obs: sol.fit_kf(
     observable=obs,
 ).expressions
 
-r_sr = sr_discovery("Rate")
+# Only run sr for observalbes with innovation autocorrelation.
 x_sr = sr_discovery("OutGap")
-# pi_sr = sr_discovery("Infl")  # Only running sr for observables with innovation autocorrelation.
+# r_sr = sr_discovery("Rate")
+# pi_sr = sr_discovery("Infl")
 
 
 # %%
@@ -426,22 +508,22 @@ def walk_round(x, n=3):
     return x
 
 
-r_sr["initial_expr"] = res["initial_expr"].apply(lambda x: walk_round(x, n=3))
-r_sr[["initial_expr", "sympy_format", "loss", "complexity"]]
-# %%
-x_sr["initial_expr"] = res["initial_expr"].apply(lambda x: walk_round(x, n=3))
+x_sr["initial_expr"] = x_sr["initial_expr"].apply(lambda x: walk_round(x, n=3))
 x_sr[["initial_expr", "sympy_format", "loss", "complexity"]]
 # %%
-
 # Augmented Model
-conf_aug, kalman_aug = ModelParser(
-    "../sdsge-papers/progress/report1/Augmented.yaml"
-).get_all()
+parser_aug = ModelParser("../MODELS/augmented.yaml")
+conf_aug, kalman_aug = parser_aug.get_all()
+
 solver_aug = DSGESolver(conf_aug, kalman_aug)
 comp_aug = solver_aug.compile(n_exog=3, n_state=3)
 
 aug = solver_aug.solve(compiled=comp_aug)  # Solve without re-estimation
-
+parser_aug.update_calibration_parameters(
+    aug.config,
+    digits=3,
+    output_path="../MODELS/classes/augmented.yaml",
+)  # Update augmented config to reflect current parameters (same as base for now, since we haven't re-estimated yet)
 # %%
 aug.transition_plot(shocks=["g"], T=25, scale=1, observables=True)
 
@@ -578,6 +660,11 @@ res_aug, sol_aug = solver_aug.estimate_and_solve(
     burn_in=10_000,
     thin=1,
 )
+parser_aug.update_calibration_parameters(
+    sol_aug.config,
+    digits=3,
+    output_path="../MODELS/classes/augmented_reestimated.yaml",
+)  # Store re-estimation results in a new config file
 # %%
 # Summarize results
 param_names_aug = res_aug.param_names
