@@ -119,7 +119,7 @@ class Uniform(Distribution[float64, VecF64]):
         return np.where((0.0 <= q) & (q <= 1.0), self._low + q * self._width, np.nan)
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state or self._random_state)
+        rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
         return cast(VecF64, _rvs(self._low, self._high, size, rng))

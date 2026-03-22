@@ -155,7 +155,7 @@ class TruncNormal(Distribution[float64, VecF64]):
         return np.asarray(out, dtype=float64)
 
     def rvs(self, size: Size = (1,), random_state: RandomState = None) -> VecF64:
-        rng = self._rng(self._random_state if random_state is None else random_state)
+        rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
         return cast(VecF64, _rvs(self._mean, self._std, self._a, self._b, size, rng))

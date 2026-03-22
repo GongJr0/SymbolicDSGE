@@ -219,6 +219,62 @@ def test_mcmc_returns_expected_shapes_and_stats(monkeypatch):
     assert 0.0 <= out.accept_rate <= 1.0
 
 
+def test_mcmc_seed_zero_is_exactly_reproducible(monkeypatch):
+    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["a"],
+        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
+    )
+
+    kwargs = dict(
+        n_draws=30,
+        burn_in=30,
+        thin=1,
+        theta0=np.array([0.0], dtype=np.float64),
+        random_state=0,
+        adapt=True,
+    )
+    out1 = est.mcmc(**kwargs)
+    out2 = est.mcmc(**kwargs)
+
+    assert np.array_equal(out1.samples, out2.samples)
+    assert np.array_equal(out1.logpost_trace, out2.logpost_trace)
+    assert out1.accept_rate == pytest.approx(out2.accept_rate)
+
+
+def test_mcmc_clones_generator_input_state(monkeypatch):
+    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["a"],
+        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
+    )
+
+    shared_rng = np.random.default_rng(123)
+    kwargs = dict(
+        n_draws=30,
+        burn_in=30,
+        thin=1,
+        theta0=np.array([0.0], dtype=np.float64),
+        random_state=shared_rng,
+        adapt=True,
+    )
+    out1 = est.mcmc(**kwargs)
+    out2 = est.mcmc(**kwargs)
+
+    assert np.array_equal(out1.samples, out2.samples)
+    assert np.array_equal(out1.logpost_trace, out2.logpost_trace)
+    assert out1.accept_rate == pytest.approx(out2.accept_rate)
+    assert shared_rng.random() == pytest.approx(np.random.default_rng(123).random())
+
+
 def test_estimator_make_prior_utility():
     prior = Estimator.make_prior(
         distribution="normal",

@@ -169,3 +169,10 @@ class Distribution(ABC, Generic[EventT, BatchT]):
 
     def _rng(self, random_state: RandomState) -> np.random.Generator:
         return _coerce_rng(random_state)
+
+    def _rng_with_fallback(
+        self,
+        random_state: RandomState,
+        fallback: RandomState,
+    ) -> np.random.Generator:
+        return _coerce_rng(fallback if random_state is None else random_state)

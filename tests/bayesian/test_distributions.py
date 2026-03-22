@@ -386,6 +386,40 @@ def test_distribution_rvs_seed_reproducibility(distribution_case):
     assert np.array_equal(c1, c2)
 
 
+@pytest.mark.parametrize(
+    ("name", "ctor"),
+    [
+        ("normal", lambda: Normal(0.0, 1.0, 123)),
+        ("lognormal", lambda: LogNormal(np.log(1.8), 0.45, 123)),
+        ("halfnormal", lambda: HalfNormal(1.4, 123)),
+        ("halfcauchy", lambda: HalfCauchy(1.1, 123)),
+        ("truncnormal", lambda: TruncNormal(-1.0, 1.0, 0.0, 1.0, 123)),
+        ("uniform", lambda: Uniform(-2.0, 3.5, 123)),
+        ("beta", lambda: Beta(2.5, 4.0, 123)),
+        ("gamma", lambda: Gamma(4.5, 1.3, 123)),
+        ("invgamma", lambda: InvGamma(3.2, 1.8, 123)),
+    ],
+    ids=[
+        "normal",
+        "lognormal",
+        "halfnormal",
+        "halfcauchy",
+        "truncnormal",
+        "uniform",
+        "beta",
+        "gamma",
+        "invgamma",
+    ],
+)
+def test_distribution_rvs_seed_zero_overrides_stored_seed(name, ctor):
+    seed0 = np.asarray(ctor().rvs(size=8, random_state=0))
+    seed0_again = np.asarray(ctor().rvs(size=8, random_state=0))
+    stored = np.asarray(ctor().rvs(size=8))
+
+    assert np.array_equal(seed0, seed0_again)
+    assert not np.array_equal(seed0, stored)
+
+
 def test_distribution_rvs_size_parameterization(distribution_case):
     _, ctor, _, _, _ = distribution_case
     dist = ctor()
@@ -615,11 +649,16 @@ def test_lkj_chol_rvs_shape_and_reproducibility(monkeypatch):
     s1 = d.rvs(size=2, random_state=2026)
     s2 = d.rvs(size=2, random_state=2026)
     s3 = d.rvs(size=(2, 1), random_state=2026)
+    s0 = d.rvs(size=2, random_state=0)
+    s0_again = d.rvs(size=2, random_state=0)
+    stored = d.rvs(size=2)
 
     assert isinstance(s1, np.ndarray)
     assert s1.shape == (2, 3, 3)
     assert s3.shape == (2, 1, 3, 3)
     assert np.array_equal(s1, s2)
+    assert np.array_equal(s0, s0_again)
+    assert not np.array_equal(s0, stored)
 
     for sample in s1:
         assert np.allclose(sample, np.tril(sample), atol=1e-12, rtol=0.0)

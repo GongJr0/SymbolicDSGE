@@ -113,7 +113,7 @@ class HalfNormal(Distribution[float64, VecF64]):
         return cast(VecF64, self._std * np.sqrt(2.0) * erfinv(q)).astype(float64)
 
     def rvs(self, size: Size = (1,), random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state or self._random_state)
+        rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
         return cast(VecF64, _rvs(self._std, size, rng))

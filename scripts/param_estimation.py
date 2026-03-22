@@ -301,6 +301,7 @@ estim = lambda: solver.estimate_and_solve(
     burn_in=10_000,
     thin=1,
     update_R_in_iterations=True,
+    random_state=0,
 )
 res, sol = estim()
 parser.update_calibration_parameters(
@@ -451,7 +452,7 @@ plt.tight_layout()
 # %%
 template = TemplateConfig(
     include_expression=False,
-    interaction_form="prod",
+    interaction_form="func",
     hessian_restriction="free",
     power_law_lower_bound=2,
     power_law_upper_bound=2,
@@ -463,7 +464,7 @@ template = TemplateConfig(
 params = PySRParams(
     niterations=500,
     maxsize=20,
-    complexity_of_constants=3,
+    complexity_of_constants=7,
     complexity_of_variables=1,
     deterministic=True,
     random_state=0,
@@ -646,7 +647,7 @@ aug_priors = {
     **{
         "pi_const": make_prior(
             "normal",
-            parameters={"mean": -0.282, "std": 0.1},
+            parameters={"mean": -0.282, "std": 0.1, "random_state": next(seed)},
             transform="identity",
         ),
     },

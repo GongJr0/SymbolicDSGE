@@ -221,7 +221,7 @@ class LKJChol(Distribution[MatF64, MatF64]):
         raise NotImplementedError("Mode is not defined for LKJChol.")
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> MatF64:
-        rng = self._rng(random_state or self._random_state)
+        rng = self._rng_with_fallback(random_state, self._random_state)
         eta = self._eta
         K = self._K
 

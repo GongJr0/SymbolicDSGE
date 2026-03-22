@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import io
 import warnings
 from contextlib import redirect_stdout
@@ -743,6 +744,14 @@ class Estimator:
             f"[Estimator:{kind}] BK stability warnings encountered during search: {self._warning_signal_count}"
         )
 
+    @staticmethod
+    def _clone_generator(rng: np.random.Generator) -> np.random.Generator:
+        # Snapshot the caller-provided generator so repeated runs can reuse the
+        # same fixed seed/state without inheriting previous sampler consumption.
+        bitgen = type(rng.bit_generator)()
+        bitgen.state = deepcopy(rng.bit_generator.state)
+        return np.random.Generator(bitgen)
+
     def _safe_loglik(self, theta: NDF) -> float64:
         try:
             ll, n_signals = self._eval_with_warning_capture(self.loglik, theta)
@@ -896,7 +905,7 @@ class Estimator:
         self._reset_search_warning_count()
 
         rng = (
-            random_state
+            self._clone_generator(random_state)
             if isinstance(random_state, np.random.Generator)
             else np.random.default_rng(random_state)
         )

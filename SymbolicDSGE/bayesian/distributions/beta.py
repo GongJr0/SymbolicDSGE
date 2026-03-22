@@ -120,7 +120,7 @@ class Beta(Distribution[float64, VecF64]):
         return float64(betaincinv(self._a, self._b, q))
 
     def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
-        rng = self._rng(random_state or self._random_state)
+        rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
         return cast(VecF64, _rvs(self._a, self._b, size, rng))
