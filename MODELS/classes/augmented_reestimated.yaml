@@ -8,7 +8,7 @@ constrained:
   z: false
 parameters: [beta, kappa, tau_inv, psi_pi, psi_x, rho_r, rho_g, rho_z, pi_star, r_star,
   sig_r, sig_g, sig_z, rho_gz, meas_infl, meas_rate, meas_outgap, meas_rho_ir, meas_rho_gi,
-  meas_rho_gr]
+  meas_rho_gr, x_const, r_const]
 shock_map:
   e_g: g
   e_z: z
@@ -23,31 +23,33 @@ equations:
   - z(t) = rho_z*z(t-1) + e_z
   constraint: {}
   observables:
-    OutGap: x(t)
+    OutGap: x(t) + r_const*r(t) + x_const*x(t)
     Infl: 4*Pi(t) + pi_star
     Rate: 4*r(t) + (r_star + pi_star)
 calibration:
   parameters:
-    beta: 0.998
-    kappa: 0.299
-    tau_inv: 0.205
-    psi_pi: 4.788
-    psi_x: 0.377
-    rho_r: 0.747
-    rho_g: 0.885
-    rho_z: 0.885
+    beta: 0.999
+    kappa: 0.295
+    tau_inv: 0.23
+    psi_pi: 4.746
+    psi_x: 0.428
+    rho_r: 0.751
+    rho_g: 0.883
+    rho_z: 0.879
     pi_star: 3.43
     r_star: 3.01
-    sig_r: 0.014
-    sig_g: 0.073
-    sig_z: 0.404
-    rho_gz: 0.667
-    meas_infl: 1.361
-    meas_rate: 0.124
-    meas_outgap: 0.154
-    meas_rho_ir: 0.319
-    meas_rho_gi: -0.066
-    meas_rho_gr: 0.434
+    sig_r: 0.012
+    sig_g: 0.077
+    sig_z: 0.434
+    rho_gz: 0.536
+    meas_infl: 0.498
+    meas_rate: 0.506
+    meas_outgap: 0.503
+    meas_rho_ir: -0.052
+    meas_rho_gi: 0.04
+    meas_rho_gr: 0.103
+    x_const: 0.091
+    r_const: 0.679
   shocks:
     std:
       e_g: sig_g

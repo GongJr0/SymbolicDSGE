@@ -132,6 +132,30 @@ def test_interface_init_reorders_obs_and_builds_state_space():
     assert ki.return_shocks is True
 
 
+def test_interface_init_extended_skips_linear_measurement_builder():
+    model = _make_stub_model()
+
+    def bomb(obs_names):
+        raise AssertionError(
+            "_build_C_d_from_obs should not be called in extended mode"
+        )
+
+    model._build_C_d_from_obs = bomb
+
+    ki = KalmanInterface(
+        model=model,
+        observables=["ObsA"],
+        y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        filter_mode="extended",
+        h_func=lambda u, v, x, alpha: np.array([x + alpha], dtype=FLOAT),
+        H_jac=lambda u, v, x, alpha: np.array([[0.0, 0.0, 1.0]], dtype=FLOAT),
+        calib_params=np.array([0.5], dtype=FLOAT),
+    )
+
+    assert ki.C is None
+    assert ki.d is None
+
+
 def test_interface_init_raises_if_reordering_fails(monkeypatch):
     monkeypatch.setattr(
         KalmanInterface,
@@ -493,6 +517,8 @@ def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch
     assert captured["validate"]["filter_mode"] == FilterMode.EXTENDED
     assert captured["validate"]["probe_measurement"] is True
     assert np.array_equal(captured["validate"]["x0"], np.ones((3,), dtype=FLOAT))
+    assert captured["validate"]["C"] is None
+    assert captured["validate"]["d"] is None
     assert captured["run_extended"]["h"] is ki.h_func
     assert captured["run_extended"]["H_jac"] is ki.H_jac
     assert np.array_equal(

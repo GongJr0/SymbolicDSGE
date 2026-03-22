@@ -132,8 +132,8 @@ prior_spec = {
     "beta": make_prior(
         "beta",
         parameters={
-            "a": 100 * 0.99,
-            "b": 100 * 0.001,
+            "a": 50 * 0.99,
+            "b": 50 * 0.001,
             "random_state": next(seed),
         },
         transform="logit",
@@ -141,8 +141,8 @@ prior_spec = {
     "rho_r": make_prior(
         "beta",
         parameters={
-            "a": 100 * 0.84,
-            "b": 100 * 0.16,
+            "a": 50 * 0.84,
+            "b": 50 * 0.16,
             "random_state": next(seed),
         },
         transform="logit",
@@ -150,8 +150,8 @@ prior_spec = {
     "rho_g": make_prior(
         "beta",
         parameters={
-            "a": 100 * 0.83,
-            "b": 100 * 0.17,
+            "a": 50 * 0.83,
+            "b": 50 * 0.17,
             "random_state": next(seed),
         },
         transform="logit",
@@ -159,8 +159,8 @@ prior_spec = {
     "rho_z": make_prior(
         "beta",
         parameters={
-            "a": 100 * 0.85,
-            "b": 100 * 0.15,
+            "a": 50 * 0.85,
+            "b": 50 * 0.15,
             "random_state": next(seed),
         },
         transform="logit",
@@ -170,7 +170,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 2.19,
-            "std": 0.5,
+            "std": 1.0,
             "random_state": next(seed),
         },
         transform="log",
@@ -179,7 +179,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.30,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -188,7 +188,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.58,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -197,7 +197,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 1.86,
-            "std": 0.5,
+            "std": 1.0,
             "random_state": next(seed),
         },
         transform="log",
@@ -207,7 +207,7 @@ prior_spec = {
         "trunc_normal",
         parameters={
             "mean": 0.0,
-            "std": 0.20,
+            "std": 0.40,
             "low": -1.0,
             "high": 1.0,
             "random_state": next(seed),
@@ -223,7 +223,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.18,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -232,7 +232,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.18,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -241,7 +241,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.64,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -250,7 +250,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.5,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -259,7 +259,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.5,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -268,7 +268,7 @@ prior_spec = {
         "gamma",
         parameters={
             "mean": 0.5,
-            "std": 0.1,
+            "std": 0.2,
             "random_state": next(seed),
         },
         transform="log",
@@ -469,6 +469,7 @@ params = PySRParams(
     deterministic=True,
     random_state=0,
     parallelism="serial",
+    binary_operators=["+", "-", "*"],  # Avoid Div/0
 )
 
 parametrizer = ModelParametrizer(
@@ -485,26 +486,10 @@ sr_discovery = lambda obs: sol.fit_kf(
 
 # Only run sr for observalbes with innovation autocorrelation.
 x_sr = sr_discovery("OutGap")
+
+
 # r_sr = sr_discovery("Rate")
 # pi_sr = sr_discovery("Infl")
-
-
-# %%
-def sum_moments(series):
-    out = pd.Series()
-
-    out["mean"] = series.mean()
-    out["var"] = series.var()
-    out["Q1"] = series.quantile(0.25)
-    out["Median"] = series.median()
-    out["Q3"] = series.quantile(0.75)
-    out["IQR"] = out["Q3"] - out["Q1"]
-    return out.round(2)
-
-
-sum_moments(pd.Series(kf.y_filt[:, 1]))
-
-
 # %%
 def walk_round(x, n=3):
     for atom in preorder_traversal(x):
@@ -517,7 +502,7 @@ x_sr["initial_expr"] = x_sr["initial_expr"].apply(lambda x: walk_round(x, n=3))
 x_sr[["initial_expr", "sympy_format", "loss", "complexity"]]
 # %%
 # Augmented Model
-parser_aug = ModelParser("../MODELS/augmented.yaml")
+parser_aug = ModelParser("../MODELS/classes/augmented.yaml")
 conf_aug, kalman_aug = parser_aug.get_all()
 
 solver_aug = DSGESolver(conf_aug, kalman_aug)
@@ -531,7 +516,8 @@ parser_aug.update_calibration_parameters(
 )  # Update augmented config to reflect current parameters (same as base for now, since we haven't re-estimated yet)
 # %%
 aug.transition_plot(shocks=["g"], T=25, scale=1, observables=True)
-
+# %%
+aug.config.equations.obs_is_affine
 # %%
 kf_aug = aug.kalman(
     observed.loc[observed.index >= "1984-01-01", :],
@@ -637,17 +623,18 @@ plot_pacf(
 
 plt.tight_layout()
 # %%
-
-sum_moments(pd.Series(sim_aug["Infl"]))
-
-# %%
 # Augmented + Re-estimated model
 aug_priors = {
     **prior_spec,
     **{
-        "pi_const": make_prior(
+        "x_const": make_prior(
             "normal",
-            parameters={"mean": -0.282, "std": 0.1, "random_state": next(seed)},
+            parameters={"mean": 2.0, "std": 1.0, "random_state": next(seed)},
+            transform="identity",
+        ),
+        "r_const": make_prior(
+            "normal",
+            parameters={"mean": -0.316, "std": 0.5, "random_state": next(seed)},
             transform="identity",
         ),
     },

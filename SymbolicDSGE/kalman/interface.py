@@ -55,7 +55,11 @@ class KalmanInterface(KalmanFilter):
         self.y = y
 
         self.A, self.B = model.A, model.B
-        self.C, self.d = self._get_C_d()
+        if self.mode == FilterMode.LINEAR:
+            self.C, self.d = self._get_C_d()
+        else:
+            self.C, self.d = None, None  # type: ignore[assignment]
+
         self.Q = self._build_Q()
         self.P0 = self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale)
         self.R = self._build_constant_R(R)
