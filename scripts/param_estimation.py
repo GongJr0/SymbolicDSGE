@@ -18,7 +18,7 @@ from SymbolicDSGE import ModelParser, DSGESolver, Shock
 from SymbolicDSGE.utils import FRED
 from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
-from SymbolicDSGE.regression import TemplateConfig, PySRParams
+from SymbolicDSGE.regression import TemplateConfig, PySRParams, ModelParametrizer
 
 from sympy import Matrix, Float, preorder_traversal
 from warnings import catch_warnings, simplefilter
@@ -470,9 +470,13 @@ params = PySRParams(
     parallelism="serial",
 )
 
+parametrizer = ModelParametrizer(
+    variable_names=["r", "Pi", "x"], params=params, config=template
+)
+parametrizer.add_built_in_ops()
+
 sr_discovery = lambda obs: sol.fit_kf(
-    template_config=template,
-    sr_params=params,
+    parametrizer=parametrizer,
     y=observed.loc[observed.index >= "1984-01-01", :],
     variables=["r", "Pi", "x"],
     observable=obs,

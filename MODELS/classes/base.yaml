@@ -29,25 +29,25 @@ equations:
 calibration:
   parameters:
     beta: 0.999
-    kappa: 0.362
-    tau_inv: 0.531
-    psi_pi: 4.039
-    psi_x: 0.38
-    rho_r: 0.732
+    kappa: 0.369
+    tau_inv: 0.513
+    psi_pi: 4.028
+    psi_x: 0.331
+    rho_r: 0.738
     rho_g: 0.9
-    rho_z: 0.88
+    rho_z: 0.872
     pi_star: 3.43
     r_star: 3.01
-    sig_r: 0.031
-    sig_g: 0.105
-    sig_z: 0.442
+    sig_r: 0.035
+    sig_g: 0.104
+    sig_z: 0.438
     rho_gz: 0.4
-    meas_infl: 1.218
-    meas_rate: 0.214
-    meas_outgap: 0.252
-    meas_rho_ir: 0.311
-    meas_rho_gi: -0.097
-    meas_rho_gr: 0.24
+    meas_infl: 1.206
+    meas_rate: 0.222
+    meas_outgap: 0.246
+    meas_rho_ir: 0.309
+    meas_rho_gi: -0.114
+    meas_rho_gr: 0.258
   shocks:
     std:
       e_g: sig_g
