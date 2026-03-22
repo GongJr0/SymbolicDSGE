@@ -71,3 +71,57 @@ def test_fit_kf_rejects_mismatched_variables_for_prebuilt_parametrizer():
             variables=["z"],
             parametrizer=parametrizer,
         )
+
+
+def test_fit_kf_requires_template_inputs_when_parametrizer_is_missing():
+    solved = _make_solved_model()
+
+    with pytest.raises(ValueError, match="Provide either a pre-built parametrizer"):
+        solved.fit_kf(
+            y=np.zeros((2, 1), dtype=np.float64),
+            observable="obs",
+        )
+
+
+def test_fit_kf_builds_parametrizer_when_not_provided(monkeypatch):
+    captured = {}
+
+    class _FakeParametrizer:
+        def __init__(self, variable_names, params, config):
+            captured["variable_names"] = variable_names
+            captured["params"] = params
+            captured["config"] = config
+            self.variable_names = list(variable_names)
+
+    class _FakeSRInterface:
+        def __init__(self, *, model, obs_name, parametrizer):
+            captured["model"] = model
+            captured["obs_name"] = obs_name
+            captured["parametrizer"] = parametrizer
+
+        def fit_to_kf(self, y):
+            captured["y"] = y
+            return "fit-result"
+
+    monkeypatch.setattr(solved_model_module, "ModelParametrizer", _FakeParametrizer)
+    monkeypatch.setattr(solved_model_module, "SRInterface", _FakeSRInterface)
+
+    solved = _make_solved_model()
+    template_config = TemplateConfig()
+    sr_params = PySRParams(precision=32)
+    y = np.zeros((3, 1), dtype=np.float64)
+
+    out = solved.fit_kf(
+        y=y,
+        observable="obs",
+        template_config=template_config,
+        sr_params=sr_params,
+    )
+
+    assert out == "fit-result"
+    assert captured["variable_names"] == ["x"]
+    assert captured["params"] is sr_params
+    assert captured["config"] is template_config
+    assert captured["model"] is solved
+    assert captured["obs_name"] == "obs"
+    assert captured["y"] is y
