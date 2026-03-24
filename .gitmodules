@@ -1,6 +1,6 @@
 [submodule "sdsge-papers"]
 	path = sdsge-papers
-	url = git@github.com:GongJr0/sdsge-papers.git
+	url = git@github.com:GongJr0/sdsge-papers
 [submodule "sdsge-scripts"]
 	path = sdsge-scripts
 	url = git@github.com:GongJr0/sdsge-scripts
