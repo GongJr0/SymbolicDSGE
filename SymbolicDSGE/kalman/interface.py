@@ -42,10 +42,12 @@ class KalmanInterface(KalmanFilter):
         jitter: Float64Like | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
+        estimate_R_diag: bool = False,
     ) -> None:
 
         self.model = model
         self.mode = FilterMode(filter_mode)
+        self.estimate_R_diag = bool(estimate_R_diag)
 
         obs, y = self._reorder_obs(observables, y)
         if obs is None:
@@ -62,7 +64,12 @@ class KalmanInterface(KalmanFilter):
 
         self.Q = self._build_Q()
         self.P0 = self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale)
-        self.R = self._build_constant_R(R)
+        if R is not None:
+            self.R = self._build_constant_R(R)
+        elif self.estimate_R_diag:
+            self.R = self._initial_R_diag_guess()
+        else:
+            self.R = self._build_constant_R(None)
 
         self.h_func = h_func
         self.H_jac = H_jac
@@ -88,9 +95,14 @@ class KalmanInterface(KalmanFilter):
         if x0 is None:
             x0 = np.zeros((self.A.shape[0],), dtype=float64)
 
-        validated_args = (
-            self._linear_validated_args | self._extended_validated_args | _arg_overrides
-        )
+        if self.mode == FilterMode.LINEAR:
+            base_args = self._linear_validated_args
+        elif self.mode == FilterMode.EXTENDED:
+            base_args = self._extended_validated_args
+        else:
+            raise ValueError(f"Unrecognized filter mode: {self.mode}")
+
+        validated_args = base_args | _arg_overrides
         validate_kf_inputs(
             **validated_args,
             x0=x0,
@@ -104,7 +116,7 @@ class KalmanInterface(KalmanFilter):
         if self.mode == FilterMode.LINEAR:
 
             run = self.run(
-                **self._linear_validated_args | _arg_overrides,
+                **base_args | _arg_overrides,
                 # Options
                 jitter=self.jitter,
                 symmetrize=self.symmetrize,
@@ -112,14 +124,12 @@ class KalmanInterface(KalmanFilter):
             )
         elif self.mode == FilterMode.EXTENDED:
             run = self.run_extended(
-                **self._extended_validated_args | _arg_overrides,
+                **base_args | _arg_overrides,
                 # Options
                 jitter=self.jitter,
                 symmetrize=self.symmetrize,
                 return_shocks=self.return_shocks,
             )
-        else:
-            raise ValueError(f"Unrecognized filter mode: {self.mode}")
 
         if _debug:
             self._debug_info = _KalmanDebugInfo(
@@ -218,18 +228,23 @@ class KalmanInterface(KalmanFilter):
         R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
         return R_subset
 
+    def _initial_R_diag_guess(self, eps: float64 = float64(1e-6)) -> NDF:
+        diag = np.asarray(
+            [
+                np.maximum(0.1 * np.var(self.y[:, i]), eps)
+                for i in range(self.y.shape[1])
+            ],
+            dtype=float64,
+        )
+        return np.diag(diag).astype(float64)
+
     def _ML_estimate_R_diag(
         self,
         scale_factor: float = 1.0,
     ) -> None:
         n = len(self.observables)
-        eps = 1e-6
-        eta_0: NDF = np.log(
-            np.asarray(
-                [np.maximum(0.1 * np.var(self.y[:, i]), eps) for i in range(n)],
-                dtype=float64,
-            )
-        )
+        R_0 = self._initial_R_diag_guess()
+        eta_0: NDF = np.log(np.diag(R_0))
         bounds = [(-30, 10)] * n  # e^(-30) ~ 9e-14, e^(10) ~ 22026
 
         def obj(eta: NDF) -> float64:
@@ -254,13 +269,15 @@ class KalmanInterface(KalmanFilter):
                 f"R estimation optimization did not converge: {opt.message}",
                 UserWarning,
             )
-            print(f"Using Config R matrix:\n {self.R}")
-            self.R = self._build_constant_R(None) * scale_factor
+            self.R = R_0 * scale_factor
+            print(f"Using initial diagonal R guess:\n {self.R}")
+            return
 
+        estimated_R = np.diag(np.exp(opt.x)) * scale_factor
         print(
-            f"R estimation optimization successful.\nUsing estimated R matrix:\n {np.diag(np.exp(opt.x))}\nLog-likelihood: {-opt.fun}"
+            f"R estimation optimization successful.\nUsing estimated R matrix:\n {estimated_R}\nLog-likelihood: {-opt.fun}"
         )
-        self.R = np.diag(np.exp(opt.x)) * scale_factor
+        self.R = estimated_R
 
     def _build_P0(
         self,
@@ -467,7 +484,7 @@ class KalmanInterface(KalmanFilter):
             )
         return config
 
-    @cached_property
+    @property
     def _linear_validated_args(self) -> dict:
         return {
             # State Space Definition
@@ -484,7 +501,7 @@ class KalmanInterface(KalmanFilter):
             "y": self.y,
         }
 
-    @cached_property
+    @property
     def _extended_validated_args(self) -> dict:
         return {
             # State Space Definition

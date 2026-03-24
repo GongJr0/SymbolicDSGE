@@ -545,6 +545,7 @@ class SolvedModel:
             jitter=jitter,
             symmetrize=symmetrize,
             return_shocks=return_shocks,
+            estimate_R_diag=estimate_R_diag,
         )
         if estimate_R_diag:
             ki._ML_estimate_R_diag(scale_factor=R_scale)

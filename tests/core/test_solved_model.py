@@ -290,6 +290,7 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
     assert captured["init"]["h_func"] == ("h", ("ObsA", "ObsB"))
     assert captured["init"]["H_jac"] == ("H", ("ObsA", "ObsB"))
     assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
+    assert captured["init"]["estimate_R_diag"] is True
     assert captured["scale_factor"] == pytest.approx(2.5)
     assert captured["filter"] == {"x0": None, "_debug": True}
     assert printed == [({"debug": True},)]

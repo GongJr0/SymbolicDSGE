@@ -156,6 +156,31 @@ def test_interface_init_extended_skips_linear_measurement_builder():
     assert ki.d is None
 
 
+def test_interface_init_estimate_r_diag_uses_data_variance_not_config():
+    y = np.array([[10.0, 1.0], [20.0, 2.0]], dtype=FLOAT)
+    ki = KalmanInterface(
+        model=_make_stub_model(
+            kalman_config=SimpleNamespace(
+                y_names=["ObsB", "ObsA"],
+                R=None,
+                jitter=0.0,
+                symmetrize=False,
+                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
+                R_builder=None,
+                R_param_names=None,
+            )
+        ),
+        observables=["ObsB", "ObsA"],
+        y=y,
+        estimate_R_diag=True,
+    )
+
+    assert np.array_equal(
+        ki.R,
+        np.diag([0.025, 2.5]).astype(FLOAT),
+    )
+
+
 def test_interface_init_raises_if_reordering_fails(monkeypatch):
     monkeypatch.setattr(
         KalmanInterface,
@@ -517,8 +542,8 @@ def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch
     assert captured["validate"]["filter_mode"] == FilterMode.EXTENDED
     assert captured["validate"]["probe_measurement"] is True
     assert np.array_equal(captured["validate"]["x0"], np.ones((3,), dtype=FLOAT))
-    assert captured["validate"]["C"] is None
-    assert captured["validate"]["d"] is None
+    assert "C" not in captured["validate"]
+    assert "d" not in captured["validate"]
     assert captured["run_extended"]["h"] is ki.h_func
     assert captured["run_extended"]["H_jac"] is ki.H_jac
     assert np.array_equal(
@@ -620,7 +645,29 @@ def test_ml_estimate_r_diag_warning_path(monkeypatch):
     with pytest.warns(UserWarning, match="did not converge"):
         ki._ML_estimate_R_diag(scale_factor=2.0)
 
-    assert np.allclose(ki.R, np.diag([8.0, 18.0]).astype(FLOAT))
-    assert len(printed) == 2
-    assert "Using Config R matrix" in printed[0][0]
-    assert "optimization successful" in printed[1][0]
+    expected = np.diag([0.05, 5.0]).astype(FLOAT)
+    assert np.allclose(ki.R, expected)
+    assert len(printed) == 1
+    assert "Using initial diagonal R guess" in printed[0][0]
+
+
+def test_filter_uses_current_self_r_after_validated_args_access(monkeypatch):
+    ki = KalmanInterface(
+        model=_make_stub_model(),
+        observables=["ObsA", "ObsB"],
+        y=np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT),
+    )
+    _ = ki._linear_validated_args
+    ki.R = np.diag([0.3, 0.7]).astype(FLOAT)
+
+    captured = {}
+
+    def fake_run(*, R, **kwargs):
+        captured["R"] = R.copy()
+        return SimpleNamespace(loglik=np.float64(0.0))
+
+    monkeypatch.setattr(KalmanInterface, "run", staticmethod(fake_run))
+
+    ki.filter(x0=np.zeros((3,), dtype=FLOAT))
+
+    assert np.array_equal(captured["R"], np.diag([0.3, 0.7]).astype(FLOAT))
