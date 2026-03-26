@@ -219,7 +219,7 @@ class DenHaanMarcet:
         include_constant: bool = True,
         burn_in: int = 0,
         alpha: float = 0.05,
-        use_conditional_expectation: bool = False,
+        use_conditional_expectation: bool = True,
     ) -> DenHaanMarcetResult:
         if T <= 0:
             raise ValueError("T must be positive.")
@@ -255,7 +255,7 @@ class DenHaanMarcet:
         include_constant: bool = True,
         burn_in: int = 0,
         alpha: float = 0.05,
-        use_conditional_expectation: bool = False,
+        use_conditional_expectation: bool = True,
     ) -> DenHaanMarcetResult:
         state_path = self._prepare_state_matrix(states)
         return self._evaluate_state_path(
@@ -286,7 +286,7 @@ class DenHaanMarcet:
         include_constant: bool = True,
         burn_in: int = 0,
         alpha: float = 0.05,
-        use_conditional_expectation: bool = False,
+        use_conditional_expectation: bool = True,
     ) -> DenHaanMarcetMonteCarloResult:
         if n_rep <= 0:
             raise ValueError("n_rep must be positive.")
