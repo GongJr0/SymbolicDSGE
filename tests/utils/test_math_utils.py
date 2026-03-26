@@ -1,7 +1,8 @@
 # type: ignore
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
-
 from SymbolicDSGE.utils import math_utils
 
 
