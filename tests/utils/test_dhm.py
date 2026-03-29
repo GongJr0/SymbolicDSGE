@@ -49,7 +49,7 @@ def test_den_haan_marcet_one_sample_matches_sim_state_path(solved_test):
         use_conditional_expectation=False,
     )
 
-    assert np.allclose(out.states, expected)
+    assert np.allclose(out.states, expected[1:])
     assert np.allclose(
         out.shock_matrix[:, solved_test.compiled.idx["u"]],
         np.full((T,), 0.50, dtype=np.float64),
@@ -109,7 +109,7 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
     )
 
     assert np.allclose(captured["cov"], expected_cov)
-    assert np.allclose(out.states, expected)
+    assert np.allclose(out.states, expected[1:])
     assert np.allclose(
         out.shock_matrix[:, solved_post82.compiled.idx["g"]],
         expected_cov[0, 0],
@@ -166,6 +166,294 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
     assert np.allclose(out.residuals, manual)
     assert np.allclose(out.raw_residuals, manual)
     assert not np.allclose(out.residuals, realized.residuals)
+
+
+def test_measurement_moment_test_single_observable_matches_manual_construction(
+    solved_test,
+):
+    T = 10
+    burn_in = 1
+    shocks = {
+        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+    }
+    dhm = DenHaanMarcet(solved_test)
+    obs_name = solved_test.compiled.observable_names[0]
+    sim = solved_test.sim(T, shocks=shocks, observables=True)
+    aligned_states = sim["_X"][1:]
+    predicted_full = sim[obs_name][1:]
+    offset = np.linspace(0.10, -0.05, T, dtype=np.float64)
+    y = predicted_full + offset
+
+    out = dhm.measurement_moment_test(
+        y,
+        obs_name,
+        shocks=shocks,
+        instrument_idx=["u"],
+        include_constant=True,
+        burn_in=burn_in,
+        alpha=0.10,
+        n_estimated_params=1,
+    )
+
+    idx_u = solved_test.compiled.idx["u"]
+    expected_predicted = predicted_full[burn_in:]
+    expected_errors = y[burn_in:] - expected_predicted
+    expected_instruments = np.column_stack(
+        [
+            np.ones((T - burn_in,), dtype=np.float64),
+            aligned_states[burn_in:, idx_u],
+        ]
+    )
+    expected_moments = expected_instruments * expected_errors.reshape(-1, 1)
+    manual_summary = dhm._moment_summary(
+        expected_moments,
+        0.10,
+        df_override=1,
+        test_name="Measurement moment test",
+    )
+
+    assert out.observables == [obs_name]
+    assert out.lagged_instruments is False
+    assert np.allclose(out.states, aligned_states)
+    assert np.allclose(out.predicted_measurements, expected_predicted)
+    assert np.allclose(out.measurement_errors, expected_errors)
+    assert np.allclose(out.instruments, expected_instruments)
+    assert np.allclose(out.moments, expected_moments)
+    assert out.df == 1
+    assert out.n_estimated_params == 1
+    assert out.statistic == pytest.approx(manual_summary[0])
+    assert out.p_value == pytest.approx(manual_summary[2])
+    assert out.critical_value == pytest.approx(manual_summary[3])
+
+
+def test_measurement_moment_test_list_returns_canonical_results(solved_test):
+    T = 8
+    shocks = {
+        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+    }
+    dhm = DenHaanMarcet(solved_test)
+    requested = list(reversed(solved_test.compiled.observable_names))
+    sim = solved_test.sim(T, shocks=shocks, observables=True)
+    offsets = {
+        name: np.linspace(
+            0.05 * (idx + 1),
+            0.05 * (idx + 2),
+            T,
+            dtype=np.float64,
+        )
+        for idx, name in enumerate(requested)
+    }
+    y = np.column_stack([sim[name][1:] + offsets[name] for name in requested])
+
+    out = dhm.measurement_moment_test(
+        y,
+        requested,
+        shocks=shocks,
+        instrument_idx=["u"],
+        include_constant=False,
+        burn_in=0,
+        n_estimated_params=0,
+    )
+
+    assert isinstance(out, list)
+    assert [
+        result.observables[0] for result in out
+    ] == solved_test.compiled.observable_names
+    assert all(result.df == 1 for result in out)
+    for result in out:
+        obs_name = result.observables[0]
+        assert np.allclose(
+            result.observed,
+            sim[obs_name][1:] + offsets[obs_name],
+        )
+
+
+def test_joint_measurement_moment_test_stacks_moments_and_uses_all_observables(
+    solved_test,
+):
+    T = 9
+    burn_in = 1
+    shocks = {
+        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+    }
+    dhm = DenHaanMarcet(solved_test)
+    sim = solved_test.sim(T, shocks=shocks, observables=True)
+    y = {
+        obs: sim[obs][1:] + np.linspace(0.02 * (idx + 1), -0.01, T, dtype=np.float64)
+        for idx, obs in enumerate(solved_test.compiled.observable_names)
+    }
+
+    out = dhm.joint_measurement_moment_test(
+        y,
+        observables=None,
+        shocks=shocks,
+        instrument_idx=["u"],
+        include_constant=True,
+        burn_in=burn_in,
+        n_estimated_params=1,
+    )
+
+    n_inst = 2
+    expected_df = len(solved_test.compiled.observable_names) * n_inst - 1
+    expected_moments = np.column_stack(
+        [
+            out.instruments * out.measurement_errors[:, idx : idx + 1]
+            for idx in range(out.measurement_errors.shape[1])
+        ]
+    )
+
+    assert out.observables == solved_test.compiled.observable_names
+    assert out.df == expected_df
+    assert out.observables is not None
+    assert out.moments.shape == (T - burn_in, len(out.observables) * n_inst)
+    assert np.allclose(out.moments, expected_moments)
+
+
+def test_measurement_moment_test_from_state_path_matches_simulation_path(
+    solved_test,
+):
+    T = 9
+    shocks = {
+        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+    }
+    dhm = DenHaanMarcet(solved_test)
+    obs_name = solved_test.compiled.observable_names[0]
+    sim = solved_test.sim(T, shocks=shocks, observables=True)
+    y = sim[obs_name][1:] + np.linspace(0.03, -0.02, T, dtype=np.float64)
+
+    sim_out = dhm.measurement_moment_test(
+        y,
+        obs_name,
+        shocks=shocks,
+        instrument_idx=["u"],
+        include_constant=True,
+        burn_in=1,
+        n_estimated_params=1,
+    )
+    path_out = dhm.measurement_moment_test_from_state_path(
+        sim["_X"],
+        y,
+        obs_name,
+        instrument_idx=["u"],
+        include_constant=True,
+        burn_in=1,
+        n_estimated_params=1,
+    )
+
+    assert np.allclose(path_out.states, sim_out.states)
+    assert np.allclose(path_out.predicted_measurements, sim_out.predicted_measurements)
+    assert np.allclose(path_out.measurement_errors, sim_out.measurement_errors)
+    assert np.allclose(path_out.instruments, sim_out.instruments)
+    assert np.allclose(path_out.moments, sim_out.moments)
+    assert path_out.shock_matrix is None
+    assert path_out.statistic == pytest.approx(sim_out.statistic)
+    assert path_out.p_value == pytest.approx(sim_out.p_value)
+
+
+def test_measurement_moment_test_supports_lagged_instruments(solved_test):
+    T = 9
+    shocks = {
+        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+    }
+    dhm = DenHaanMarcet(solved_test)
+    obs_name = solved_test.compiled.observable_names[0]
+    sim = solved_test.sim(T, shocks=shocks, observables=True)
+    aligned_states = sim["_X"][1:]
+    predicted = sim[obs_name][1:]
+    y = predicted + np.linspace(0.01, 0.09, T, dtype=np.float64)
+
+    out = dhm.measurement_moment_test_from_state_path(
+        aligned_states,
+        y,
+        obs_name,
+        instrument_idx=["u"],
+        include_constant=True,
+        lagged_instruments=True,
+        burn_in=0,
+        n_estimated_params=1,
+    )
+
+    idx_u = solved_test.compiled.idx["u"]
+    expected_instruments = np.column_stack(
+        [
+            np.ones((T - 1,), dtype=np.float64),
+            aligned_states[:-1, idx_u],
+        ]
+    )
+
+    assert out.observables == [obs_name]
+    assert out.lagged_instruments is True
+    assert np.allclose(out.predicted_measurements, predicted[1:])
+    assert np.allclose(out.measurement_errors, y[1:] - predicted[1:])
+    assert np.allclose(out.instruments, expected_instruments)
+    assert out.moments.shape == (T - 1, 2)
+
+
+def test_measurement_moment_test_allows_measurement_override(solved_test):
+    T = 7
+    dhm = DenHaanMarcet(solved_test)
+    obs_name = solved_test.compiled.observable_names[0]
+    sim = solved_test.sim(T)
+    aligned_states = sim["_X"][1:]
+    idx_pi = solved_test.compiled.idx["Pi"]
+    beta = float(
+        solved_test.compiled.config.calibration.parameters[
+            solved_test.compiled.calib_params[0]
+        ]
+    )
+
+    def measurement_fn(state, _params):
+        return np.array([state[idx_pi] + beta], dtype=np.float64)
+
+    predicted = np.array(
+        [measurement_fn(state, np.empty((0,)))[0] for state in aligned_states]
+    )
+    y = predicted + np.linspace(-0.02, 0.03, T, dtype=np.float64)
+
+    out = dhm.measurement_moment_test_from_state_path(
+        aligned_states,
+        y,
+        obs_name,
+        instrument_idx=["u"],
+        include_constant=False,
+        n_estimated_params=0,
+        measurement_fn=measurement_fn,
+    )
+
+    assert np.allclose(out.predicted_measurements, predicted)
+    assert np.allclose(out.measurement_errors, y - predicted)
+
+
+def test_measurement_moment_test_raises_when_adjusted_df_is_not_positive(
+    solved_test,
+):
+    T = 6
+    dhm = DenHaanMarcet(solved_test)
+    obs_name = solved_test.compiled.observable_names[0]
+    sim = solved_test.sim(T, observables=True)
+    y = sim[obs_name][1:]
+
+    with pytest.raises(ValueError, match="requires more moment conditions"):
+        dhm.measurement_moment_test(
+            y,
+            obs_name,
+            instrument_idx=["u"],
+            include_constant=False,
+            n_estimated_params=1,
+        )
+
+    with pytest.raises(ValueError, match="requires more moment conditions"):
+        dhm.joint_measurement_moment_test(
+            {obs: sim[obs][1:] for obs in solved_test.compiled.observable_names},
+            instrument_idx=["u"],
+            include_constant=False,
+            n_estimated_params=len(solved_test.compiled.observable_names),
+        )
 
 
 def test_den_haan_marcet_monte_carlo_rejects_non_shock_inputs(solved_test):

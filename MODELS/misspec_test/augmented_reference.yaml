@@ -26,7 +26,7 @@ parameters: [beta, kappa, tau_inv,
              rho_gz,
              meas_infl, meas_rate, meas_outgap,
              meas_rho_ir, meas_rho_gi, meas_rho_gr,
-             r_const]
+             Pi_coef]
 
 shock_map:
   e_g: g
@@ -56,11 +56,11 @@ equations:
 
   observables:
     # With SR augmentations:
-    OutGap: x(t) + r_const*r(t)  # output gap deviation
+    OutGap: x(t) + Pi_coef*Pi(t)  # output gap deviation
 
-    Infl: 4*Pi(t) + pi_star + r(t)*(-Pi(t) + r(t))  # model gap deviation + steady-state
+    Infl: 4*Pi(t) + pi_star  # model gap deviation + steady-state
 
-    Rate: 4*r(t) + (r_star + pi_star) + x(t)^2  # model rate gap deviation + steady-state nominal rate
+    Rate: 4*r(t) + (r_star + pi_star)  # model rate gap deviation + steady-state nominal rate
 
 calibration:
   parameters:
@@ -94,7 +94,7 @@ calibration:
     meas_rho_gi: 0.0
     meas_rho_gr: 0.0
 
-    r_const: 4.442
+    Pi_coef: 0.0
 
   shocks:
     std:

@@ -123,8 +123,7 @@ class MCMCResult:
         fig, axes = plt.subplots(
             int(fig_sq), int(fig_sq), figsize=(4 * fig_sq, 3 * fig_sq)
         )
-
-        ax = axes.flatten()
+        ax = np.atleast_1d(axes).ravel()
         while len(ax) > len(self.param_names):
             fig.delaxes(ax[-1])
             ax = ax[:-1]

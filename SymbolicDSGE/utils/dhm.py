@@ -79,6 +79,43 @@ class DenHaanMarcetMonteCarloResult:
     foc_expressions: tuple[str, ...] | None = None
 
 
+@dataclass(frozen=True)
+class MeasurementMomentResult:
+    statistic: float
+    df: int
+    p_value: float
+    critical_value: float
+    rejects_null: bool
+    mean_moments: np.ndarray
+    covariance: np.ndarray
+    moments: np.ndarray
+    observed: np.ndarray
+    predicted_measurements: np.ndarray
+    measurement_errors: np.ndarray
+    instruments: np.ndarray
+    states: np.ndarray
+    shock_matrix: np.ndarray | None
+    variables: list[str]
+    observables: list[str]
+    instrument_idx: np.ndarray
+    include_constant: bool
+    lagged_instruments: bool
+    burn_in: int
+    n_estimated_params: int
+
+
+@dataclass(frozen=True)
+class _PreparedMeasurementMoments:
+    observed: np.ndarray
+    predicted_measurements: np.ndarray
+    measurement_errors: np.ndarray
+    instruments: np.ndarray
+    states: np.ndarray
+    shock_matrix: np.ndarray | None
+    observables: tuple[str, ...]
+    instrument_idx: np.ndarray
+
+
 @njit(cache=True)
 def _simulate_linear_states(
     A: np.ndarray,
@@ -356,6 +393,359 @@ class DenHaanMarcet:
             foc_expressions=foc_expressions,
         )
 
+    def measurement_moment_test(
+        self,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        observable: str | Sequence[str],
+        *,
+        shocks: (
+            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
+        ) = None,
+        shock_scale: float = 1.0,
+        x0: np.ndarray | None = None,
+        instrument_idx: Sequence[int | str] | None = None,
+        include_constant: bool = True,
+        lagged_instruments: bool = False,
+        burn_in: int = 0,
+        alpha: float = 0.05,
+        n_estimated_params: int,
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
+    ) -> MeasurementMomentResult | list[MeasurementMomentResult]:
+        """Run a GMM-style measurement residual orthogonality test.
+
+        This is not a DHM Euler orthogonality test. By default it tests
+        E[z_t * e_t] = 0; with `lagged_instruments=True` it tests
+        E[z_{t-1} * e_t] = 0.
+
+        The chi-square degrees-of-freedom adjustment `m - p` assumes the same
+        free parameters were estimated from the same moment conditions.
+        Otherwise, treating `n_estimated_params` as a df correction is heuristic.
+        """
+        state0 = self._prepare_initial_state(x0)
+        prepared = self._prepare_measurement_moments_from_simulation(
+            y,
+            (observable,) if isinstance(observable, str) else tuple(observable),
+            shocks=shocks,
+            shock_scale=shock_scale,
+            state0=state0,
+            instrument_idx=instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            alpha=alpha,
+            measurement_fn=measurement_fn,
+        )
+        n_est, df = self._resolve_adjusted_df(
+            prepared.instruments.shape[1],
+            n_estimated_params,
+            "Measurement moment test",
+        )
+        results: list[MeasurementMomentResult] = []
+
+        for col, obs_name in enumerate(prepared.observables):
+            observed = np.ascontiguousarray(prepared.observed[:, col], dtype=np.float64)
+            predicted = np.ascontiguousarray(
+                prepared.predicted_measurements[:, col], dtype=np.float64
+            )
+            errors = np.ascontiguousarray(
+                prepared.measurement_errors[:, col], dtype=np.float64
+            )
+            moments = np.ascontiguousarray(
+                prepared.instruments * errors.reshape(-1, 1),
+                dtype=np.float64,
+            )
+            (
+                statistic,
+                _df,
+                p_value,
+                critical_value,
+                rejects_null,
+                mean_moments,
+                covariance,
+            ) = self._moment_summary(
+                moments,
+                alpha,
+                df_override=df,
+                test_name="Measurement moment test",
+            )
+            results.append(
+                MeasurementMomentResult(
+                    statistic=statistic,
+                    df=_df,
+                    p_value=p_value,
+                    critical_value=critical_value,
+                    rejects_null=rejects_null,
+                    mean_moments=mean_moments,
+                    covariance=covariance,
+                    moments=moments,
+                    observed=observed,
+                    predicted_measurements=predicted,
+                    measurement_errors=errors,
+                    instruments=prepared.instruments,
+                    states=prepared.states,
+                    shock_matrix=prepared.shock_matrix,
+                    variables=list(self.solved.compiled.var_names),
+                    observables=[obs_name],
+                    instrument_idx=prepared.instrument_idx,
+                    include_constant=include_constant,
+                    lagged_instruments=lagged_instruments,
+                    burn_in=burn_in,
+                    n_estimated_params=n_est,
+                )
+            )
+
+        if isinstance(observable, str):
+            return results[0]
+        return results
+
+    def measurement_moment_test_from_state_path(
+        self,
+        states: np.ndarray,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        observable: str | Sequence[str],
+        *,
+        instrument_idx: Sequence[int | str] | None = None,
+        include_constant: bool = True,
+        lagged_instruments: bool = False,
+        burn_in: int = 0,
+        alpha: float = 0.05,
+        n_estimated_params: int,
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
+    ) -> MeasurementMomentResult | list[MeasurementMomentResult]:
+        """Run the measurement residual orthogonality test on provided states.
+
+        `states` may be either an already aligned `(T, n)` state matrix or a
+        simulation-style `(T+1, n)` path including an initial condition row.
+        """
+        prepared = self._prepare_measurement_moments_from_state_path(
+            states,
+            y,
+            (observable,) if isinstance(observable, str) else tuple(observable),
+            instrument_idx=instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            alpha=alpha,
+            measurement_fn=measurement_fn,
+            shock_matrix=None,
+        )
+        n_est, df = self._resolve_adjusted_df(
+            prepared.instruments.shape[1],
+            n_estimated_params,
+            "Measurement moment test",
+        )
+        results: list[MeasurementMomentResult] = []
+
+        for col, obs_name in enumerate(prepared.observables):
+            observed = np.ascontiguousarray(prepared.observed[:, col], dtype=np.float64)
+            predicted = np.ascontiguousarray(
+                prepared.predicted_measurements[:, col], dtype=np.float64
+            )
+            errors = np.ascontiguousarray(
+                prepared.measurement_errors[:, col], dtype=np.float64
+            )
+            moments = np.ascontiguousarray(
+                prepared.instruments * errors.reshape(-1, 1),
+                dtype=np.float64,
+            )
+            (
+                statistic,
+                _df,
+                p_value,
+                critical_value,
+                rejects_null,
+                mean_moments,
+                covariance,
+            ) = self._moment_summary(
+                moments,
+                alpha,
+                df_override=df,
+                test_name="Measurement moment test",
+            )
+            results.append(
+                MeasurementMomentResult(
+                    statistic=statistic,
+                    df=_df,
+                    p_value=p_value,
+                    critical_value=critical_value,
+                    rejects_null=rejects_null,
+                    mean_moments=mean_moments,
+                    covariance=covariance,
+                    moments=moments,
+                    observed=observed,
+                    predicted_measurements=predicted,
+                    measurement_errors=errors,
+                    instruments=prepared.instruments,
+                    states=prepared.states,
+                    shock_matrix=None,
+                    variables=list(self.solved.compiled.var_names),
+                    observables=[obs_name],
+                    instrument_idx=prepared.instrument_idx,
+                    include_constant=include_constant,
+                    lagged_instruments=lagged_instruments,
+                    burn_in=burn_in,
+                    n_estimated_params=n_est,
+                )
+            )
+
+        if isinstance(observable, str):
+            return results[0]
+        return results
+
+    def joint_measurement_moment_test(
+        self,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        observables: Sequence[str] | None = None,
+        *,
+        shocks: (
+            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
+        ) = None,
+        shock_scale: float = 1.0,
+        x0: np.ndarray | None = None,
+        instrument_idx: Sequence[int | str] | None = None,
+        include_constant: bool = True,
+        lagged_instruments: bool = False,
+        burn_in: int = 0,
+        alpha: float = 0.05,
+        n_estimated_params: int,
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
+    ) -> MeasurementMomentResult:
+        """Run the stacked joint GMM-style measurement residual test."""
+        state0 = self._prepare_initial_state(x0)
+        prepared = self._prepare_measurement_moments_from_simulation(
+            y,
+            observables,
+            shocks=shocks,
+            shock_scale=shock_scale,
+            state0=state0,
+            instrument_idx=instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            alpha=alpha,
+            measurement_fn=measurement_fn,
+        )
+        n_est, df = self._resolve_adjusted_df(
+            prepared.instruments.shape[1] * len(prepared.observables),
+            n_estimated_params,
+            "Joint measurement moment test",
+        )
+        moments = self._stack_measurement_moments(
+            prepared.instruments,
+            prepared.measurement_errors,
+        )
+        (
+            statistic,
+            _df,
+            p_value,
+            critical_value,
+            rejects_null,
+            mean_moments,
+            covariance,
+        ) = self._moment_summary(
+            moments,
+            alpha,
+            df_override=df,
+            test_name="Joint measurement moment test",
+        )
+        return MeasurementMomentResult(
+            statistic=statistic,
+            df=_df,
+            p_value=p_value,
+            critical_value=critical_value,
+            rejects_null=rejects_null,
+            mean_moments=mean_moments,
+            covariance=covariance,
+            moments=moments,
+            observed=prepared.observed,
+            predicted_measurements=prepared.predicted_measurements,
+            measurement_errors=prepared.measurement_errors,
+            instruments=prepared.instruments,
+            states=prepared.states,
+            shock_matrix=prepared.shock_matrix,
+            variables=list(self.solved.compiled.var_names),
+            observables=list(prepared.observables),
+            instrument_idx=prepared.instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            n_estimated_params=n_est,
+        )
+
+    def joint_measurement_moment_test_from_state_path(
+        self,
+        states: np.ndarray,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        observables: Sequence[str] | None = None,
+        *,
+        instrument_idx: Sequence[int | str] | None = None,
+        include_constant: bool = True,
+        lagged_instruments: bool = False,
+        burn_in: int = 0,
+        alpha: float = 0.05,
+        n_estimated_params: int,
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
+    ) -> MeasurementMomentResult:
+        """Run the stacked joint measurement residual test on provided states."""
+        prepared = self._prepare_measurement_moments_from_state_path(
+            states,
+            y,
+            observables,
+            instrument_idx=instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            alpha=alpha,
+            measurement_fn=measurement_fn,
+            shock_matrix=None,
+        )
+        n_est, df = self._resolve_adjusted_df(
+            prepared.instruments.shape[1] * len(prepared.observables),
+            n_estimated_params,
+            "Joint measurement moment test",
+        )
+        moments = self._stack_measurement_moments(
+            prepared.instruments,
+            prepared.measurement_errors,
+        )
+        (
+            statistic,
+            _df,
+            p_value,
+            critical_value,
+            rejects_null,
+            mean_moments,
+            covariance,
+        ) = self._moment_summary(
+            moments,
+            alpha,
+            df_override=df,
+            test_name="Joint measurement moment test",
+        )
+        return MeasurementMomentResult(
+            statistic=statistic,
+            df=_df,
+            p_value=p_value,
+            critical_value=critical_value,
+            rejects_null=rejects_null,
+            mean_moments=mean_moments,
+            covariance=covariance,
+            moments=moments,
+            observed=prepared.observed,
+            predicted_measurements=prepared.predicted_measurements,
+            measurement_errors=prepared.measurement_errors,
+            instruments=prepared.instruments,
+            states=prepared.states,
+            shock_matrix=None,
+            variables=list(self.solved.compiled.var_names),
+            observables=list(prepared.observables),
+            instrument_idx=prepared.instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            n_estimated_params=n_est,
+        )
+
     def _resolve_focs(self, focs: Sequence[str] | None) -> tuple[str, ...] | None:
         if focs is not None:
             return tuple(focs)
@@ -459,12 +849,7 @@ class DenHaanMarcet:
             states, use_conditional_expectation
         )
         n_steps = current_states.shape[0]
-        if burn_in < 0 or burn_in >= n_steps:
-            raise ValueError(
-                f"burn_in must satisfy 0 <= burn_in < {n_steps}; got burn_in={burn_in}."
-            )
-        if not 0.0 < alpha < 1.0:
-            raise ValueError("alpha must lie strictly between 0 and 1.")
+        self._validate_moment_controls(n_steps, burn_in, alpha)
 
         inst_idx = self._resolve_instrument_idx(instrument_idx, include_constant)
         foc_source = self._resolve_focs(focs)
@@ -524,7 +909,7 @@ class DenHaanMarcet:
             residuals=residuals,
             raw_residuals=residuals,
             instruments=instruments,
-            states=states,
+            states=self._aligned_testing_states(states),
             shock_matrix=shock_matrix,
             variables=list(self.solved.compiled.var_names),
             equation_idx=eq_idx,
@@ -532,6 +917,107 @@ class DenHaanMarcet:
             include_constant=include_constant,
             burn_in=burn_in,
             foc_expressions=foc_expressions,
+        )
+
+    def _prepare_measurement_moments_from_simulation(
+        self,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        observables: Sequence[str] | None,
+        *,
+        shocks: (
+            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
+        ),
+        shock_scale: float,
+        state0: np.ndarray,
+        instrument_idx: Sequence[int | str] | None,
+        include_constant: bool,
+        lagged_instruments: bool,
+        burn_in: int,
+        alpha: float,
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None,
+    ) -> _PreparedMeasurementMoments:
+        requested = self._requested_observable_names(observables)
+        resolved = self._resolve_observable_names(observables)
+        observed = self._prepare_measurement_observed(y, requested, resolved)
+        if observed.shape[0] <= 0:
+            raise ValueError("y must contain at least one observation.")
+
+        shock_mat = self._prepare_shock_matrix(observed.shape[0], shocks, shock_scale)
+        states = _simulate_linear_states(
+            self._A_float,
+            np.ascontiguousarray(self.solved.B, dtype=np.float64),
+            state0,
+            shock_mat,
+        )
+        return self._prepare_measurement_moments_from_state_path(
+            states,
+            observed,
+            resolved,
+            instrument_idx=instrument_idx,
+            include_constant=include_constant,
+            lagged_instruments=lagged_instruments,
+            burn_in=burn_in,
+            alpha=alpha,
+            measurement_fn=measurement_fn,
+            shock_matrix=shock_mat,
+        )
+
+    def _prepare_measurement_moments_from_state_path(
+        self,
+        states: np.ndarray,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        observables: Sequence[str] | None,
+        *,
+        instrument_idx: Sequence[int | str] | None,
+        include_constant: bool,
+        lagged_instruments: bool,
+        burn_in: int,
+        alpha: float,
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None,
+        shock_matrix: np.ndarray | None,
+    ) -> _PreparedMeasurementMoments:
+        requested = self._requested_observable_names(observables)
+        resolved = self._resolve_observable_names(observables)
+        observed = self._prepare_measurement_observed(y, requested, resolved)
+        if observed.shape[0] <= 0:
+            raise ValueError("y must contain at least one observation.")
+
+        self._validate_measurement_controls(
+            observed.shape[0],
+            burn_in,
+            alpha,
+            lagged_instruments,
+        )
+        inst_idx = self._resolve_instrument_idx(instrument_idx, include_constant)
+        aligned_states = self._prepare_measurement_state_matrix(
+            states, observed.shape[0]
+        )
+        predicted = self._evaluate_measurement_array(
+            aligned_states,
+            resolved,
+            measurement_fn,
+        )
+        observed_eff, predicted_eff, instruments = self._slice_measurement_samples(
+            aligned_states,
+            observed,
+            predicted,
+            inst_idx,
+            include_constant,
+            burn_in,
+            lagged_instruments,
+        )
+        measurement_errors = np.ascontiguousarray(
+            observed_eff - predicted_eff, dtype=np.float64
+        )
+        return _PreparedMeasurementMoments(
+            observed=observed_eff,
+            predicted_measurements=predicted_eff,
+            measurement_errors=measurement_errors,
+            instruments=instruments,
+            states=aligned_states,
+            shock_matrix=shock_matrix,
+            observables=resolved,
+            instrument_idx=inst_idx,
         )
 
     def _resolve_equation_idx(self, equation_idx: Sequence[int] | None) -> np.ndarray:
@@ -578,6 +1064,250 @@ class DenHaanMarcet:
             raise ValueError("Instrument indices must be unique.")
         return np.ascontiguousarray(out, dtype=np.int64)
 
+    def _requested_observable_names(
+        self,
+        observables: Sequence[str] | None,
+    ) -> tuple[str, ...]:
+        if observables is None:
+            return tuple(self.solved.compiled.observable_names)
+
+        requested = tuple(observables)
+        if not requested:
+            raise ValueError("At least one observable must be selected.")
+        return requested
+
+    def _resolve_observable_names(
+        self,
+        observables: Sequence[str] | None,
+    ) -> tuple[str, ...]:
+        requested = self._requested_observable_names(observables)
+        if len(set(requested)) != len(requested):
+            raise ValueError("Observable list contains duplicates.")
+
+        obs_idx = {
+            name: idx for idx, name in enumerate(self.solved.compiled.observable_names)
+        }
+        missing = [name for name in requested if name not in obs_idx]
+        if missing:
+            raise KeyError(f"Unknown observables not in compiled model: {missing}")
+
+        return tuple(sorted(requested, key=lambda name: obs_idx[name]))
+
+    def _prepare_measurement_observed(
+        self,
+        y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+        requested_observables: tuple[str, ...],
+        resolved_observables: tuple[str, ...],
+    ) -> np.ndarray:
+        if isinstance(y, Mapping):
+            missing = [name for name in resolved_observables if name not in y]
+            if missing:
+                raise KeyError(f"Observed data is missing observables: {missing}")
+
+            cols = [
+                np.asarray(y[name], dtype=np.float64).reshape(-1)
+                for name in resolved_observables
+            ]
+            lengths = {col.shape[0] for col in cols}
+            if len(lengths) != 1:
+                raise ValueError(
+                    "All observed measurement series must share the same length."
+                )
+            return np.ascontiguousarray(np.column_stack(cols), dtype=np.float64)
+
+        arr = np.asarray(y, dtype=np.float64)
+        if arr.ndim == 1:
+            if len(requested_observables) != 1:
+                raise ValueError(
+                    "y must be a 2D array or mapping when testing multiple observables."
+                )
+            return np.ascontiguousarray(arr.reshape(-1, 1), dtype=np.float64)
+        if arr.ndim != 2:
+            raise ValueError("y must be a 1D/2D array or mapping keyed by observable.")
+        if arr.shape[1] != len(requested_observables):
+            raise ValueError(
+                f"y has {arr.shape[1]} columns, but {len(requested_observables)} "
+                "observable series were requested."
+            )
+
+        requested_idx = {name: idx for idx, name in enumerate(requested_observables)}
+        perm = [requested_idx[name] for name in resolved_observables]
+        return np.ascontiguousarray(arr[:, perm], dtype=np.float64)
+
+    def _evaluate_measurement_array(
+        self,
+        states: np.ndarray,
+        observables: Sequence[str],
+        measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None,
+    ) -> np.ndarray:
+        fn = measurement_fn
+        if fn is None:
+            fn = self.solved.compiled.construct_measurement_array_func(
+                list(observables)
+            )
+        params = self._param_vector_float()
+        out = np.empty((states.shape[0], len(observables)), dtype=np.float64)
+
+        for row in range(states.shape[0]):
+            measurement = np.asarray(fn(states[row], params), dtype=np.float64).reshape(
+                -1
+            )
+            if measurement.shape[0] != len(observables):
+                raise ValueError(
+                    "measurement_fn must return one value per requested observable "
+                    f"({len(observables)}), got {measurement.shape[0]}."
+                )
+            out[row] = measurement
+
+        return np.ascontiguousarray(out, dtype=np.float64)
+
+    def _prepare_measurement_state_matrix(
+        self,
+        states: np.ndarray,
+        n_obs: int,
+    ) -> np.ndarray:
+        state_path = np.asarray(states, dtype=np.float64)
+        if state_path.ndim != 2:
+            raise ValueError("states must be a 2D array of state vectors.")
+
+        n_var = len(self.solved.compiled.var_names)
+        if state_path.shape[1] != n_var:
+            raise ValueError(
+                f"states must have {n_var} columns in compiled variable order; "
+                f"got {state_path.shape[1]}."
+            )
+        if state_path.shape[0] == n_obs + 1:
+            # For simulated paths, dropping the initial condition aligns
+            # states[t] with shock_matrix[t].
+            return self._aligned_testing_states(state_path)
+        if state_path.shape[0] == n_obs:
+            return np.ascontiguousarray(state_path, dtype=np.float64)
+
+        raise ValueError(
+            "states must contain either T aligned rows or T+1 rows including "
+            "an initial condition."
+        )
+
+    def _slice_measurement_samples(
+        self,
+        states: np.ndarray,
+        observed: np.ndarray,
+        predicted: np.ndarray,
+        instrument_idx: np.ndarray,
+        include_constant: bool,
+        burn_in: int,
+        lagged_instruments: bool,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if lagged_instruments:
+            instrument_states = np.ascontiguousarray(
+                states[burn_in:-1], dtype=np.float64
+            )
+            observed_eff = np.ascontiguousarray(
+                observed[burn_in + 1 :], dtype=np.float64
+            )
+            predicted_eff = np.ascontiguousarray(
+                predicted[burn_in + 1 :], dtype=np.float64
+            )
+        else:
+            instrument_states = np.ascontiguousarray(states[burn_in:], dtype=np.float64)
+            observed_eff = np.ascontiguousarray(observed[burn_in:], dtype=np.float64)
+            predicted_eff = np.ascontiguousarray(predicted[burn_in:], dtype=np.float64)
+
+        instruments = self._build_instrument_matrix(
+            instrument_states,
+            instrument_idx,
+            include_constant,
+        )
+        return observed_eff, predicted_eff, instruments
+
+    def _build_instrument_matrix(
+        self,
+        states: np.ndarray,
+        instrument_idx: np.ndarray,
+        include_constant: bool,
+    ) -> np.ndarray:
+        effective_states = np.ascontiguousarray(states, dtype=np.float64)
+        n_obs = effective_states.shape[0]
+        n_inst = instrument_idx.shape[0] + (1 if include_constant else 0)
+        instruments = np.empty((n_obs, n_inst), dtype=np.float64)
+        col = 0
+
+        if include_constant:
+            instruments[:, 0] = 1.0
+            col = 1
+
+        if instrument_idx.size:
+            instruments[:, col:] = effective_states[:, instrument_idx]
+
+        return np.ascontiguousarray(instruments, dtype=np.float64)
+
+    def _stack_measurement_moments(
+        self,
+        instruments: np.ndarray,
+        measurement_errors: np.ndarray,
+    ) -> np.ndarray:
+        n_obs = instruments.shape[0]
+        n_inst = instruments.shape[1]
+        n_meas = measurement_errors.shape[1]
+        moments = np.empty((n_obs, n_inst * n_meas), dtype=np.float64)
+
+        col = 0
+        for meas_idx in range(n_meas):
+            block = instruments * measurement_errors[:, meas_idx : meas_idx + 1]
+            moments[:, col : col + n_inst] = block
+            col += n_inst
+
+        return np.ascontiguousarray(moments, dtype=np.float64)
+
+    def _aligned_testing_states(self, states: np.ndarray) -> np.ndarray:
+        return np.ascontiguousarray(states[1:], dtype=np.float64)
+
+    def _validate_moment_controls(
+        self,
+        n_steps: int,
+        burn_in: int,
+        alpha: float,
+    ) -> None:
+        if burn_in < 0 or burn_in >= n_steps:
+            raise ValueError(
+                f"burn_in must satisfy 0 <= burn_in < {n_steps}; got burn_in={burn_in}."
+            )
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must lie strictly between 0 and 1.")
+
+    def _validate_measurement_controls(
+        self,
+        n_steps: int,
+        burn_in: int,
+        alpha: float,
+        lagged_instruments: bool,
+    ) -> None:
+        max_burn_in = n_steps - (2 if lagged_instruments else 1)
+        if burn_in < 0 or burn_in > max_burn_in:
+            qualifier = " with lagged instruments" if lagged_instruments else ""
+            raise ValueError(
+                f"burn_in must satisfy 0 <= burn_in <= {max_burn_in} for {n_steps} "
+                f"observations{qualifier}; got burn_in={burn_in}."
+            )
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must lie strictly between 0 and 1.")
+
+    def _resolve_adjusted_df(
+        self,
+        n_moments: int,
+        n_estimated_params: int,
+        test_name: str,
+    ) -> tuple[int, int]:
+        n_est = int(n_estimated_params)
+        if n_est < 0:
+            raise ValueError("n_estimated_params must be non-negative.")
+        if n_moments <= n_est:
+            raise ValueError(
+                f"{test_name} requires more moment conditions ({n_moments}) than "
+                f"estimated parameters ({n_estimated_params})."
+            )
+        return n_est, n_moments - n_est
+
     def _param_vector_complex(self) -> np.ndarray:
         params = np.array(
             [
@@ -602,18 +1332,34 @@ class DenHaanMarcet:
         self,
         moments: np.ndarray,
         alpha: float,
+        *,
+        df_override: int | None = None,
+        test_name: str = "DHM",
     ) -> tuple[float, int, float, float, bool, np.ndarray, np.ndarray]:
         n_obs = moments.shape[0]
         if n_obs <= 1:
             raise ValueError(
-                "DHM requires at least two effective observations after burn-in."
+                f"{test_name} requires at least two effective observations after burn-in."
             )
 
         mean_moments = moments.mean(axis=0)
         centered = moments - mean_moments
         covariance = centered.T @ centered / n_obs
-        stat = float(n_obs * mean_moments @ np.linalg.pinv(covariance) @ mean_moments)
-        df = moments.shape[1]
+
+        # Ridge regularize covariance with an absolute floor so the stabilizer
+        # stays effective even when the empirical covariance is nearly zero.
+        cov_trace = np.trace(covariance)
+        m = moments.shape[1]
+        base = cov_trace / m
+        lam = max(1e-8 * base, 1e-10)
+        covariance += lam * np.eye(m)
+
+        stat = float(n_obs * mean_moments @ np.linalg.solve(covariance, mean_moments))
+        df = moments.shape[1] if df_override is None else int(df_override)
+        if df <= 0:
+            raise ValueError(
+                f"{test_name} requires strictly positive degrees of freedom."
+            )
         critical_value = float(chi2.ppf(1.0 - alpha, df))
         p_value = float(chi2.sf(stat, df))
         return (
