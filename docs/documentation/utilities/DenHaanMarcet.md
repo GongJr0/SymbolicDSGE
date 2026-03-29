@@ -63,6 +63,43 @@ __Fields:__
 &nbsp;
 
 ```python
+@dataclass(frozen=True)
+class MeasurementMomentResult()
+```
+
+`#!python dataclass` storing the output of a measurement residual orthogonality test.
+
+This return type is used by both the per-observable and joint measurement-moment interfaces. For the per-observable methods, the measurement arrays are one-dimensional. For the joint methods, they are stacked across observables.
+
+__Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| statistic | `#!python float` | Realized chi-square test statistic. |
+| df | `#!python int` | Degrees of freedom of the chi-square reference distribution after the requested df adjustment. |
+| p_value | `#!python float` | Chi-square tail probability associated with `statistic`. |
+| critical_value | `#!python float` | Chi-square critical value implied by the requested `alpha`. |
+| rejects_null | `#!python bool` | Whether the test rejects the null at the requested significance level. |
+| mean_moments | `#!python np.ndarray` | Sample mean of the measurement moment vector. |
+| covariance | `#!python np.ndarray` | Estimated covariance matrix of the measurement moment vector. |
+| moments | `#!python np.ndarray` | Realized moment matrix. Shape `(n_obs, n_inst)` for per-observable tests and `(n_obs, n_inst * n_meas)` for joint tests. |
+| observed | `#!python np.ndarray` | Observed measurement series used in the test after burn-in and lag alignment. |
+| predicted_measurements | `#!python np.ndarray` | Model-implied measurement series aligned to `observed`. |
+| measurement_errors | `#!python np.ndarray` | Difference `observed - predicted_measurements`. |
+| instruments | `#!python np.ndarray` | Realized instrument matrix. Shape `(n_obs, n_inst)`. |
+| states | `#!python np.ndarray` | Aligned state matrix used to construct measurements and instruments. Shape `(T, n)` after dropping any initial-condition row. |
+| shock_matrix | `#!python np.ndarray \| None` | Realized shock matrix used by simulation-driven measurement tests. `#!python None` for the `#!python *_from_state_path` routes. |
+| variables | `#!python list[str]` | Ordering of state columns in `states`. Matches compiled variable order. |
+| observables | `#!python list[str]` | Observable names represented in the result. Length 1 for per-observable tests and length `n_meas` for joint tests. |
+| instrument_idx | `#!python np.ndarray` | Instrument indices resolved against compiled variable order. |
+| include_constant | `#!python bool` | Whether a constant instrument was included. |
+| lagged_instruments | `#!python bool` | Whether instruments were taken from `t-1` instead of `t`. |
+| burn_in | `#!python int` | Number of leading aligned observations excluded before constructing moments. |
+| n_estimated_params | `#!python int` | Number of estimated parameters subtracted from the raw moment count when forming the reported degrees of freedom. |
+
+&nbsp;
+
+```python
 class DenHaanMarcet(
     solved: SolvedModel,
     focs: Sequence[str] | None = None,
@@ -239,3 +276,224 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python DenHaanMarcetMonteCarloResult` | Monte Carlo summary containing per-replication statistics, rejection flags, and stacked raw residual matrices. |
+
+&nbsp;
+
+```python
+DenHaanMarcet.measurement_moment_test(
+    y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+    observable: str | Sequence[str],
+    *,
+    shocks: dict[str, Callable | np.ndarray] | None = None, # (1)!
+    shock_scale: float = 1.0,
+    x0: np.ndarray | None = None,
+    instrument_idx: Sequence[int | str] | None = None, # (2)!
+    include_constant: bool = True,
+    lagged_instruments: bool = False, # (3)!
+    burn_in: int = 0,
+    alpha: float = 0.05,
+    n_estimated_params: int, # (4)!
+    measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None, # (5)!
+) -> MeasurementMomentResult | list[MeasurementMomentResult]
+```
+
+ 1. Shock specification follows the same conventions as `#!python SolvedModel.sim`, including comma-separated keys for correlated multivariate shocks.
+ 2. Accepts either integer indices or variable names resolved against compiled variable order.
+ 3. If `#!python True`, the test uses `#!python z_{t-1}` against current measurement errors instead of contemporaneous instruments.
+ 4. The reported degrees of freedom are adjusted as `#!python m - n_estimated_params`, where `#!python m` is the number of moment conditions.
+ 5. If omitted, the class uses the compiled model measurement equations for the requested observables.
+
+Simulate a state path and run a GMM-style measurement residual orthogonality test.
+
+This is not a Den Haan-Marcet Euler orthogonality test. The default null is `#!python E[z_t * e_t] = 0`, where `#!python e_t` is the measurement residual. With `#!python lagged_instruments=True`, the null becomes `#!python E[z_{t-1} * e_t] = 0`.
+
+???+ warning "Degrees-of-Freedom Adjustment"
+    The adjustment `#!python m - p` assumes the same free parameters were estimated from the same moment conditions. If that is not true, treating `#!python n_estimated_params` as a df correction is heuristic.
+
+???+ note "Observable Ordering and `y` Shapes"
+    `#!python observable` may be a single observable name or a sequence. `#!python y` may be:
+
+    - a mapping keyed by observable name
+    - a 1D array when exactly one observable is requested
+    - a 2D array whose columns correspond to the requested observable order
+
+    When multiple observables are requested, the returned results are ordered by the compiled observable order.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| y | Observed measurement series used to form measurement residuals. |
+| observable | Observable name or sequence of observable names to test individually. |
+| shocks | Shock specification used to generate the simulated state path. |
+| shock_scale | Multiplicative scaling applied to realized shocks. |
+| x0 | Initial state vector. `#!python None` defaults to zeros with controls backfilled from the policy rule. |
+| instrument_idx | Optional subset of instruments taken from compiled variable order. |
+| include_constant | Include a constant term in the instrument vector if `#!python True`. |
+| lagged_instruments | Use lagged state instruments instead of contemporaneous ones. |
+| burn_in | Number of leading aligned observations excluded from the test. |
+| alpha | Significance level used for `critical_value` and `rejects_null`. |
+| n_estimated_params | Number of estimated parameters subtracted from the raw moment count when forming the chi-square reference df. |
+| measurement_fn | Optional override for the measurement mapping. It must return one value per requested observable. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python MeasurementMomentResult \| list[MeasurementMomentResult]` | Returns a single result when `#!python observable` is a string, or one result per requested observable when a sequence is supplied. |
+
+&nbsp;
+
+```python
+DenHaanMarcet.measurement_moment_test_from_state_path(
+    states: np.ndarray,
+    y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+    observable: str | Sequence[str],
+    *,
+    instrument_idx: Sequence[int | str] | None = None,
+    include_constant: bool = True,
+    lagged_instruments: bool = False,
+    burn_in: int = 0,
+    alpha: float = 0.05,
+    n_estimated_params: int,
+    measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None
+) -> MeasurementMomentResult | list[MeasurementMomentResult]
+```
+
+Run the per-observable measurement residual orthogonality test on a user-supplied state path.
+
+???+ note "State Path Convention"
+    `states` may be either:
+
+    - an already aligned `(T, n)` matrix of state vectors, or
+    - a simulation-style `(T+1, n)` path including an initial condition row
+
+    In the second case, the initial row is dropped so measurements align with the observation sample.
+
+???+ note "Observable Ordering and `y` Shapes"
+    The same observable ordering and `#!python y` conventions used by `#!python measurement_moment_test` apply here.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| states | Aligned `(T, n)` state matrix or simulation-style `(T+1, n)` path in compiled variable order. |
+| y | Observed measurement series used to form measurement residuals. |
+| observable | Observable name or sequence of observable names to test individually. |
+| instrument_idx | Optional subset of instruments taken from compiled variable order. |
+| include_constant | Include a constant term in the instrument vector if `#!python True`. |
+| lagged_instruments | Use lagged state instruments instead of contemporaneous ones. |
+| burn_in | Number of leading aligned observations excluded from the test. |
+| alpha | Significance level used for `critical_value` and `rejects_null`. |
+| n_estimated_params | Number of estimated parameters subtracted from the raw moment count when forming the chi-square reference df. |
+| measurement_fn | Optional override for the measurement mapping. It must return one value per requested observable. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python MeasurementMomentResult \| list[MeasurementMomentResult]` | Returns a single result when `#!python observable` is a string, or one result per requested observable when a sequence is supplied. `#!python shock_matrix` is `#!python None` in this route. |
+
+&nbsp;
+
+```python
+DenHaanMarcet.joint_measurement_moment_test(
+    y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+    observables: Sequence[str] | None = None,
+    *,
+    shocks: dict[str, Callable | np.ndarray] | None = None,
+    shock_scale: float = 1.0,
+    x0: np.ndarray | None = None,
+    instrument_idx: Sequence[int | str] | None = None,
+    include_constant: bool = True,
+    lagged_instruments: bool = False,
+    burn_in: int = 0,
+    alpha: float = 0.05,
+    n_estimated_params: int,
+    measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None
+) -> MeasurementMomentResult
+```
+
+Run a joint measurement residual orthogonality test by stacking all requested observable-error blocks into a single moment vector.
+
+???+ note "Joint Test Construction"
+    The joint test uses the same instrument matrix for every requested observable and horizontally stacks the per-observable blocks `#!python z_t * e_{j,t}` into one moment matrix before computing the chi-square statistic.
+
+???+ note "Observable Selection"
+    If `#!python observables=None`, the method uses all compiled observables in compiled order.
+
+???+ note "Observable Ordering and `y` Shapes"
+    The same `#!python y` conventions used by `#!python measurement_moment_test` apply here. Requested observables are resolved into compiled observable order before the joint moment matrix is constructed.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| y | Observed measurement series used to form measurement residuals. |
+| observables | Optional subset of observable names to include jointly. `#!python None` selects all compiled observables. |
+| shocks | Shock specification used to generate the simulated state path. |
+| shock_scale | Multiplicative scaling applied to realized shocks. |
+| x0 | Initial state vector. `#!python None` defaults to zeros with controls backfilled from the policy rule. |
+| instrument_idx | Optional subset of instruments taken from compiled variable order. |
+| include_constant | Include a constant term in the instrument vector if `#!python True`. |
+| lagged_instruments | Use lagged state instruments instead of contemporaneous ones. |
+| burn_in | Number of leading aligned observations excluded from the test. |
+| alpha | Significance level used for `critical_value` and `rejects_null`. |
+| n_estimated_params | Number of estimated parameters subtracted from the stacked moment count when forming the chi-square reference df. |
+| measurement_fn | Optional override for the measurement mapping. It must return one value per requested observable. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python MeasurementMomentResult` | Joint result whose `#!python observables`, `#!python measurement_errors`, and `#!python moments` are stacked across all requested observables. |
+
+&nbsp;
+
+```python
+DenHaanMarcet.joint_measurement_moment_test_from_state_path(
+    states: np.ndarray,
+    y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
+    observables: Sequence[str] | None = None,
+    *,
+    instrument_idx: Sequence[int | str] | None = None,
+    include_constant: bool = True,
+    lagged_instruments: bool = False,
+    burn_in: int = 0,
+    alpha: float = 0.05,
+    n_estimated_params: int,
+    measurement_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None
+) -> MeasurementMomentResult
+```
+
+Run the stacked joint measurement residual test on a user-supplied state path.
+
+???+ note "State Path Convention"
+    `states` follows the same `(T, n)` or `(T+1, n)` conventions as `#!python measurement_moment_test_from_state_path`.
+
+???+ note "Observable Selection"
+    If `#!python observables=None`, the method uses all compiled observables in compiled order.
+
+???+ note "Observable Ordering and `y` Shapes"
+    The same `#!python y` conventions used by `#!python measurement_moment_test_from_state_path` apply here. Requested observables are resolved into compiled observable order before the joint moment matrix is constructed.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| states | Aligned `(T, n)` state matrix or simulation-style `(T+1, n)` path in compiled variable order. |
+| y | Observed measurement series used to form measurement residuals. |
+| observables | Optional subset of observable names to include jointly. `#!python None` selects all compiled observables. |
+| instrument_idx | Optional subset of instruments taken from compiled variable order. |
+| include_constant | Include a constant term in the instrument vector if `#!python True`. |
+| lagged_instruments | Use lagged state instruments instead of contemporaneous ones. |
+| burn_in | Number of leading aligned observations excluded from the test. |
+| alpha | Significance level used for `critical_value` and `rejects_null`. |
+| n_estimated_params | Number of estimated parameters subtracted from the stacked moment count when forming the chi-square reference df. |
+| measurement_fn | Optional override for the measurement mapping. It must return one value per requested observable. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python MeasurementMomentResult` | Joint result built from the provided state path. `#!python shock_matrix` is `#!python None` in this route. |
