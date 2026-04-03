@@ -4,3 +4,6 @@
 [submodule "sdsge-scripts"]
 	path = sdsge-scripts
 	url = git@github.com:GongJr0/sdsge-scripts
+[submodule "sdsge-ls"]
+	path = sdsge-ls
+	url = git@github.com:GongJr0/sdsge-ls
