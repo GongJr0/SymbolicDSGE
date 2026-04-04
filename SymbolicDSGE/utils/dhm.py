@@ -1468,7 +1468,7 @@ class DenHaanMarcet:
         dict[str, _FocLocalDef],
     ]:
         conf = self.solved.config
-        var_funcs = {v.__name__: v for v in conf.variables}
+        var_funcs = {v.__name__: v for v in conf.variables.variables}
         param_syms = {p.name: p for p in conf.parameters}
         shock_syms = {s.name: s for s in conf.shock_map.keys()}
         local_dict: dict[str, Any] = {
@@ -1739,7 +1739,7 @@ class DenHaanMarcet:
         cur_syms = [Symbol(f"cur_{name}") for name in var_order]
         lag_syms = [Symbol(f"lag_{name}") for name in var_order]
         param_syms = list(self.solved.compiled.calib_params)
-        var_funcs = {v.__name__: v for v in self.solved.config.variables}
+        var_funcs = {v.__name__: v for v in self.solved.config.variables.variables}
 
         subs_map: dict[Expr, Expr] = {}
         for name, cur_sym, lag_sym in zip(var_order, cur_syms, lag_syms):
