@@ -5,7 +5,10 @@ from sympy.core.relational import Relational
 from numpy import float64
 import pickle
 
+from ..linearization.linearizer import LinearizationMethod
+
 K = TypeVar("K", bound=Symbol)
+F = TypeVar("F", bound=Function)
 V = TypeVar("V")
 
 
@@ -32,6 +35,25 @@ class PairGetterDict(Dict[frozenset[Symbol], V]):
         else:
             fmt_key = key
         return super().__getitem__(fmt_key)
+
+
+class FunctionGetterDict(Dict[F, V]):
+    def __init__(self, inp: Any) -> None:
+        super().__init__(inp)
+
+    def __getitem__(self, key: str | F) -> Any:
+        if isinstance(key, str):
+            fmt_key = Function(key)
+        else:
+            fmt_key = key
+        return super().__getitem__(fmt_key)  # pyright: ignore
+
+    def get(self, key: str | F, default: Any = None) -> Any:
+        if isinstance(key, str):
+            fmt_key = Function(key)
+        else:
+            fmt_key = key
+        return super().get(fmt_key, default)  # pyright: ignore
 
 
 @dataclass
@@ -64,9 +86,16 @@ class Calib(Base):
 
 
 @dataclass
+class Variables(Base):
+    variables: list[Function]
+    steady_state: FunctionGetterDict[Function, Expr | None]
+    linearization: FunctionGetterDict[Function, LinearizationMethod]
+
+
+@dataclass
 class ModelConfig(Base):
     name: str
-    variables: list[Function]
+    variables: Variables
     constrained: dict[Function, bool]
     parameters: list[Symbol]
     shock_map: dict[Symbol, Symbol]

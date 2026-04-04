@@ -45,6 +45,7 @@ class DSGESolver:
         conf = self.model_config
         kalman_conf = self.kalman_config
         t = self.t
+        ordered_variables = conf.variables.variables
 
         # Convert model to minimization problem
         obj = [
@@ -58,15 +59,15 @@ class DSGESolver:
         if not variable_order:
             var_order: list[str] = [
                 v.func.__name__ if hasattr(v, "func") else v.__name__
-                for v in conf.variables
+                for v in ordered_variables
             ]
-            var_order = [v.__name__ for v in conf.variables]
+            var_order = [v.__name__ for v in ordered_variables]
         else:
             var_order = [  # pyright: ignore
                 v.__name__ if hasattr(v, "func") else v for v in variable_order
             ]
 
-        name_to_func = {v.__name__: v for v in conf.variables}
+        name_to_func = {v.__name__: v for v in ordered_variables}
         missing = [v for v in var_order if v not in name_to_func]
         if missing:
             raise ValueError(
@@ -128,7 +129,7 @@ class DSGESolver:
         ]
 
         symbolic_jacobian: sp.Matrix = conf.equations.obs_jacobian
-        variables = [conf.variables[idx[name]] for name in var_order]
+        variables = [ordered_variables[idx[name]] for name in var_order]
 
         jac_scalars = list(symbolic_jacobian)
         jac_scalar_funcs = tuple(

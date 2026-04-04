@@ -19,7 +19,7 @@ from SymbolicDSGE.core import DSGESolver, ModelParser
 
 def test_compile_builds_expected_structures(compiled_test):
     c = compiled_test
-    n_vars = len(c.config.variables)
+    n_vars = len(c.config.variables.variables)
 
     assert c.n_state == 3
     assert c.n_exog == 2
@@ -162,7 +162,7 @@ def test_compile_rejects_unknown_variable_order(parsed_test):
 
     with pytest.raises(ValueError, match="do not exist"):
         solver.compile(
-            variable_order=[*model.variables, sp.Function("ghost")],
+            variable_order=[*model.variables.variables, sp.Function("ghost")],
             n_state=3,
             n_exog=2,
         )
@@ -192,7 +192,7 @@ def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
     model, kalman = parsed_test
     bad = copy.deepcopy(model)
     t = sp.Symbol("t", integer=True)
-    u = bad.variables[0]
+    u = bad.variables.variables[0]
     e_u = next(iter(bad.shock_map.keys()))
     bad.equations.model[0] = sp.Eq(u(t + 2), bad.parameters[0] * u(t) + e_u)
 
