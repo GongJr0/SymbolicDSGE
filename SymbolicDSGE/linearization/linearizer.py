@@ -38,10 +38,10 @@ class VariableTransformSpec:
             )
 
         if self.method == LinearizationMethod.LOG:
-            return sp.simplify(self.steady_state * sp.exp(transformed_call))
+            return self.steady_state * sp.exp(transformed_call)
 
         if self.method == LinearizationMethod.TAYLOR:
-            return sp.simplify(self.steady_state + transformed_call)
+            return self.steady_state + transformed_call
 
         raise ValueError(f"Unsupported linearization method '{self.method}'.")
 
@@ -107,8 +107,8 @@ class Linearizer:
         }
         self._equations = equations
         self._residuals: list[Expr] = [
-            sp.simplify(eq.lhs - eq.rhs) for eq in equations  # pyright: ignore
-        ]
+            eq.lhs - eq.rhs for eq in equations
+        ]  # pyright: ignore
         self._time_symbol = (
             time_symbol if time_symbol is not None else Symbol("t", integer=True)
         )
@@ -192,13 +192,13 @@ class Linearizer:
                 )
 
     def _transform_expr(self, expr: Expr) -> Expr:
-        return sp.simplify(expr.xreplace(self.context.timed_call_substitutions(expr)))
+        return expr.xreplace(self.context.timed_call_substitutions(expr))
 
     def _expr_zero_point(self, expr: Expr) -> Expr:
-        return sp.simplify(expr.xreplace(self.context.zero_point_substitutions(expr)))
+        return expr.xreplace(self.context.zero_point_substitutions(expr))
 
     def _rename_public_variables(self, expr: Expr) -> Expr:
-        return sp.simplify(expr.xreplace(self.context.public_name_substitutions(expr)))
+        return expr.xreplace(self.context.public_name_substitutions(expr))
 
     def _first_order_terms(
         self,
@@ -210,10 +210,10 @@ class Linearizer:
         eval_subs = dict(zero_subs)
         eval_subs.update(self._shock_zero_substitutions())
         for call in transformed_calls:
-            coeff = sp.simplify(sp.diff(expr, call).subs(eval_subs))
+            coeff = sp.diff(expr, call).subs(eval_subs)
             if coeff == 0:
                 continue
-            terms.append(sp.simplify(coeff * call))
+            terms.append(coeff * call)
         return terms
 
     def _shock_zero_substitutions(self) -> dict[Symbol, Expr]:
@@ -231,7 +231,7 @@ class Linearizer:
         transformed_calls = self.context.collect_transformed_calls(transformed_expr)
         zero_subs = {call: sp.Integer(0) for call in transformed_calls}
 
-        residual_at_zero = sp.simplify(transformed_expr.xreplace(zero_subs))
+        residual_at_zero = transformed_expr.xreplace(zero_subs)
         residual_at_expansion_point = sp.simplify(
             residual_at_zero.subs(self._shock_zero_substitutions())
         )
@@ -248,7 +248,7 @@ class Linearizer:
             transformed_calls,
             zero_subs,
         )
-        linear_expr = sp.simplify(residual_at_zero + sp.Add(*linear_terms))
+        linear_expr = residual_at_zero + sp.Add(*linear_terms)
         return self._rename_public_variables(linear_expr), residual_at_zero
 
     def linearize_equations(self) -> list[Eq]:
@@ -259,7 +259,7 @@ class Linearizer:
                 require_zero_at_expansion_point=True,
                 equation_index=idx,
             )
-            out.append(sp.Eq(linear_residual, 0))
+            out.append(sp.Eq(sp.simplify(linear_residual), 0))
         return out
 
     @staticmethod

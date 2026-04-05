@@ -59,6 +59,121 @@ def _nonlinear_model_yaml() -> str:
     )
 
 
+def _mixed_methods_nonlinear_yaml() -> str:
+    return textwrap.dedent(
+        """
+        name: "NONLINEAR_EQUIVALENCE_TEST"
+        variables:
+          a:
+            linearization: log
+            steady_state: a_ss
+          k:
+            linearization: taylor
+            steady_state: k_ss
+          z: {}
+        constrained:
+          a: false
+          k: false
+          z: false
+        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z, meas_z]
+        shock_map:
+          e_a: a
+          e_z: z
+        observables: [ZObs]
+        equations:
+          model:
+            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a
+            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)
+            - z(t+1) = rho_z*z(t) + e_z
+          constraint: {}
+          observables:
+            ZObs: z(t)
+        calibration:
+          parameters:
+            rho_a: 0.8
+            rho_k: 0.5
+            rho_z: 0.3
+            gamma: 0.2
+            a_ss: 2.0
+            k_ss: 1.0
+            sig_a: 0.1
+            sig_z: 0.05
+            meas_z: 1.0
+          shocks:
+            std:
+              e_a: sig_a
+              e_z: sig_z
+            corr: {}
+        kalman:
+          y: [ZObs]
+          R:
+            std:
+              ZObs: meas_z
+            corr: {}
+          P0:
+            mode: eye
+            scale: 1.0
+            diag: {}
+          jitter: 1e-10
+          symmetrize: true
+        """
+    )
+
+
+def _mixed_methods_hand_linearized_yaml() -> str:
+    return textwrap.dedent(
+        """
+        name: "HAND_LINEARIZED_EQUIVALENCE_TEST"
+        variables: [a, k, z]
+        constrained:
+          a: false
+          k: false
+          z: false
+        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z, meas_z]
+        shock_map:
+          e_a: a
+          e_z: z
+        observables: [ZObs]
+        equations:
+          model:
+            - a_ss*a(t+1) = rho_a*a_ss*a(t) + gamma*z(t) + e_a
+            - k(t+1) = rho_k*k(t) + z(t)
+            - z(t+1) = rho_z*z(t) + e_z
+          constraint: {}
+          observables:
+            ZObs: z(t)
+        calibration:
+          parameters:
+            rho_a: 0.8
+            rho_k: 0.5
+            rho_z: 0.3
+            gamma: 0.2
+            a_ss: 2.0
+            k_ss: 1.0
+            sig_a: 0.1
+            sig_z: 0.05
+            meas_z: 1.0
+          shocks:
+            std:
+              e_a: sig_a
+              e_z: sig_z
+            corr: {}
+        kalman:
+          y: [ZObs]
+          R:
+            std:
+              ZObs: meas_z
+            corr: {}
+          P0:
+            mode: eye
+            scale: 1.0
+            diag: {}
+          jitter: 1e-10
+          symmetrize: true
+        """
+    )
+
+
 def test_linearizer_taylor_linearizes_quadratic_equation():
     t = sp.Symbol("t", integer=True)
     x = sp.Function("x")
@@ -222,6 +337,46 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
     )
 
     assert np.isfinite(loglik)
+
+
+def test_linearizer_matches_hand_linearized_solution_matrices(tmp_path):
+    nonlinear_path = _write_yaml(
+        tmp_path / "mixed_methods_nonlinear.yaml",
+        _mixed_methods_nonlinear_yaml(),
+    )
+    hand_linearized_path = _write_yaml(
+        tmp_path / "mixed_methods_hand_linearized.yaml",
+        _mixed_methods_hand_linearized_yaml(),
+    )
+
+    nonlinear_model, nonlinear_kalman = ModelParser(nonlinear_path).get_all()
+    hand_model, hand_kalman = ModelParser(hand_linearized_path).get_all()
+
+    auto_linearized = linearize_model(nonlinear_model)
+
+    nonlinear_solver = DSGESolver(auto_linearized, nonlinear_kalman)
+    hand_solver = DSGESolver(hand_model, hand_kalman)
+
+    nonlinear_compiled = nonlinear_solver.compile(n_state=3, n_exog=2)
+    hand_compiled = hand_solver.compile(n_state=3, n_exog=2)
+
+    nonlinear_solved = nonlinear_solver.solve(nonlinear_compiled)
+    hand_solved = hand_solver.solve(hand_compiled)
+
+    assert nonlinear_solved.policy.stab == 0
+    assert hand_solved.policy.stab == 0
+    assert np.allclose(
+        nonlinear_solved.A,
+        hand_solved.A,
+        rtol=1e-10,
+        atol=1e-10,
+    )
+    assert np.allclose(
+        nonlinear_solved.B,
+        hand_solved.B,
+        rtol=1e-10,
+        atol=1e-10,
+    )
 
 
 def test_linearize_model_rejects_double_linearization(tmp_path):
