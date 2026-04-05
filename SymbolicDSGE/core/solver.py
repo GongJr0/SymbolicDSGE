@@ -17,6 +17,7 @@ import pandas as pd  # fuck linearsolve
 from .. import _linearsolve as linearsolve
 from .config import ModelConfig
 from .compiled_model import CompiledModel
+from .linearization import linearize_model
 from .solved_model import SolvedModel
 
 if TYPE_CHECKING:
@@ -40,9 +41,12 @@ class DSGESolver:
         n_state: int | None = None,
         n_exog: int | None = None,
         params_order: list[str] | None = None,
+        linearize: bool = False,
     ) -> CompiledModel:
 
         conf = self.model_config
+        if linearize and not conf.symbolically_linearized:
+            conf = linearize_model(conf)
         kalman_conf = self.kalman_config
         t = self.t
         ordered_variables = conf.variables.variables

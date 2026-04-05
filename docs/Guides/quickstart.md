@@ -45,7 +45,7 @@ We can see that all variables are converted to `#!python SymPy` objects (symbols
 
 In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time-dependent variables are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolve` is exposed to a single function representing all model equations.
 
-If your model is written in nonlinear levels, run `#!python SymbolicDSGE.linearization.linearize_model(...)` before compilation. The example below uses a model that is already written in linearized gap form.
+If your model is written in nonlinear levels, pass `#!python linearize=True` to `#!python DSGESolver.compile(...)`. If you need the transformed symbolic equations directly, you can also call `#!python SymbolicDSGE.core.linearize_model(...)` yourself before compilation. The example below uses a model that is already written in linearized gap form.
 
 ```python
 from SymbolicDSGE import DSGESolver
@@ -56,6 +56,7 @@ compiled = solver.compile(
     params_order=None, # (2)!
     n_state=3, # (3)!
     n_exog=2, # (4)!
+    linearize=False, # (5)!
 )
 
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)))
@@ -68,6 +69,7 @@ print("Equations as passed to the solver: \n", compiled.equations)
 2. `#!python None | list[str]`. `#!python None` uses the order in the config file.
 3. Number of state variables (must be supplied)
 4. Number of exogenous variables (must be supplied)
+5. Set to `#!python True` to symbolically linearize the model config before compiling it
 
 At compilation, the equations are transformed as shown in the code output:
 ```

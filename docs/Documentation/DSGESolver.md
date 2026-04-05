@@ -26,7 +26,8 @@ DSGESolver.compile(
     variable_order: list[sp.Function] | None = None,
     n_state: int = None,
     n_exog: int = None,
-    params_order: list[str] | None = None
+    params_order: list[str] | None = None,
+    linearize: bool = False,
 ) -> CompiledModel
 ```
 
@@ -49,6 +50,7 @@ Produces a `#!python CompiledModel` object respecting the given orders. `#!pytho
 | n_state | Number of state variables. |
 | n_exog | Number of exogenous variables. |
 | params_order | Custom ordering of model parameters if desired. |
+| linearize | Apply symbolic linearization to a copied model config before compilation. |
 
  &nbsp;
 
@@ -90,7 +92,7 @@ __Returns:__
 &nbsp;
 
 ???+ note "Linearized Inputs"
-    `DSGESolver.solve(...)` expects a compiled linearized model. If your original model is nonlinear, apply `#!python SymbolicDSGE.linearization.linearize_model(...)` before compilation.
+    `DSGESolver.solve(...)` expects a compiled linearized model. If your original model is nonlinear, pass `#!python linearize=True` to `#!python DSGESolver.compile(...)` or apply `#!python SymbolicDSGE.core.linearize_model(...)` before compilation.
 
 ```python
 DSGESolver.estimate(

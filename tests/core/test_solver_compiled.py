@@ -14,7 +14,54 @@ from numpy import float64
 import pytest
 
 from SymbolicDSGE import _linearsolve as linearsolve
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
+
+
+def _nonlinear_compile_yaml() -> str:
+    return textwrap.dedent(
+        """
+        name: "NONLINEAR_COMPILE_LINEARIZE_TEST"
+        variables:
+          a:
+            linearization: log
+            steady_state: a_ss
+          k:
+            linearization: taylor
+            steady_state: k_ss
+          z: {}
+        constrained:
+          a: false
+          k: false
+          z: false
+        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z]
+        shock_map:
+          e_a: a
+          e_z: z
+        observables: []
+        equations:
+          model:
+            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a
+            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)
+            - z(t+1) = rho_z*z(t) + e_z
+          constraint: {}
+          observables: {}
+        calibration:
+          parameters:
+            rho_a: 0.8
+            rho_k: 0.5
+            rho_z: 0.3
+            gamma: 0.2
+            a_ss: 2.0
+            k_ss: 1.0
+            sig_a: 0.1
+            sig_z: 0.05
+          shocks:
+            std:
+              e_a: sig_a
+              e_z: sig_z
+            corr: {}
+        """
+    )
 
 
 def test_compile_builds_expected_structures(compiled_test):
@@ -199,6 +246,41 @@ def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
     solver = DSGESolver(bad, kalman)
     with pytest.raises(ValueError, match="bad time offsets"):
         solver.compile(n_state=3, n_exog=2)
+
+
+def test_compile_can_linearize_model_on_the_fly(tmp_path):
+    path = tmp_path / "nonlinear_compile_linearize.yaml"
+    path.write_text(_nonlinear_compile_yaml(), encoding="utf-8")
+
+    model, kalman = ModelParser(path).get_all()
+    solver = DSGESolver(model, kalman)
+
+    compiled_from_flag = solver.compile(n_state=3, n_exog=2, linearize=True)
+    compiled_explicit = DSGESolver(
+        linearize_model(model),
+        kalman,
+    ).compile(n_state=3, n_exog=2)
+
+    assert model.symbolically_linearized is False
+    assert compiled_from_flag.config is not model
+    assert compiled_from_flag.config.symbolically_linearized is True
+    assert [
+        sp.simplify(a - b)
+        for a, b in zip(
+            compiled_from_flag.objective_eqs, compiled_explicit.objective_eqs
+        )
+    ] == [0, 0, 0]
+
+    solved_from_flag = solver.solve(compiled_from_flag)
+    solved_explicit = DSGESolver(
+        compiled_explicit.config,
+        kalman,
+    ).solve(compiled_explicit)
+
+    assert solved_from_flag.policy.stab == 0
+    assert solved_explicit.policy.stab == 0
+    assert np.allclose(solved_from_flag.A, solved_explicit.A)
+    assert np.allclose(solved_from_flag.B, solved_explicit.B)
 
 
 def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_path):
