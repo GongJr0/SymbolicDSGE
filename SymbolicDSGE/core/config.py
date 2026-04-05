@@ -102,3 +102,4 @@ class ModelConfig(Base):
     observables: list[Symbol]
     equations: Equations
     calibration: Calib
+    symbolically_linearized: bool = False

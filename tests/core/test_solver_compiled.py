@@ -221,54 +221,6 @@ def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_
     assert solved.policy.stab == 0
 
 
-def test_solver_log_linear_solves_positive_steady_model(tmp_path):
-    config = textwrap.dedent(
-        """
-        name: "POSITIVE_TEST"
-        variables: [a, k]
-        constrained:
-          a: false
-          k: false
-        parameters: [rho_a, rho_k, sig_a]
-        shock_map:
-          e_a: a
-        observables: [AObs, KObs]
-        equations:
-          model:
-            - a(t+1) = rho_a*a(t) + (1-rho_a) + e_a
-            - k(t+1) = rho_k*k(t) + (1-rho_k)*a(t)
-          constraint: {}
-          observables:
-            AObs: a(t)
-            KObs: k(t)
-        calibration:
-          parameters:
-            rho_a: 0.8
-            rho_k: 0.5
-            sig_a: 0.1
-          shocks:
-            std:
-              e_a: sig_a
-            corr: {}
-        """
-    )
-    path = tmp_path / "positive_loglinear.yaml"
-    path.write_text(config, encoding="utf-8")
-
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile(n_state=2, n_exog=1)
-    solved = solver.solve(
-        compiled,
-        steady_state=np.ones((2,), dtype=np.float64),
-        log_linear=True,
-    )
-
-    assert solved.policy.stab == 0
-    assert solved.A.shape == (2, 2)
-    assert solved.B.shape == (2, 1)
-
-
 def test_linearsolve_accepts_array_parameters_on_numeric_path():
     params = np.array([0.9], dtype=np.complex128)
 

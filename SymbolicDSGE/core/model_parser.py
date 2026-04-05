@@ -140,6 +140,7 @@ class ModelParser:
             observables=observables,
             equations=equations,
             calibration=calibration,
+            symbolically_linearized=False,
         )
 
         kalman_cfg = self._parse_kalman_if_present(
@@ -257,10 +258,17 @@ class ModelParser:
 
         ordered_var_names = list(raw_variables.keys())
         variable_data: dict[str, dict[str, Any]] = {}
+        allowed_keys = {"steady_state", "linearization"}
         for name, spec in raw_variables.items():
             if spec is None:
                 variable_data[name] = {}
             elif isinstance(spec, dict):
+                unknown_keys = sorted(set(spec).difference(allowed_keys))
+                if unknown_keys:
+                    raise ValueError(
+                        f"Variable '{name}' has unsupported metadata keys: {unknown_keys}. "
+                        f"Supported keys are: {sorted(allowed_keys)}."
+                    )
                 variable_data[name] = spec
             else:
                 raise TypeError(
@@ -349,10 +357,31 @@ class ModelParser:
             if obs_name in observables_raw
         }
 
+        is_affine, obs_jacobian = ModelParser._derive_observable_structure(
+            observables_eq=observables_eq,
+            ordered_var_names=ordered_var_names,
+            _LOCALS=_LOCALS,
+        )
+
+        return Equations(
+            model=model,
+            constraint=SymbolGetterDict(constraint),
+            observable=SymbolGetterDict(observables_eq),
+            obs_is_affine=SymbolGetterDict(is_affine),
+            obs_jacobian=obs_jacobian,
+        )
+
+    @staticmethod
+    def _derive_observable_structure(
+        *,
+        observables_eq: dict[Symbol, Expr],
+        ordered_var_names: list[str],
+        _LOCALS: dict[str, Any],
+    ) -> tuple[dict[Symbol, bool], Matrix]:
         t = _LOCALS["t"]
 
         state_funcs = [_LOCALS[var_name] for var_name in ordered_var_names]
-        state_atoms = [sf(t) for sf in state_funcs]  # x(t), k(t), ...
+        state_atoms = [sf(t) for sf in state_funcs]
 
         state_sym_subs = {
             atom: Symbol(name) for atom, name in zip(state_atoms, ordered_var_names)
@@ -364,22 +393,13 @@ class ModelParser:
         jacobian_entries: list[list[Expr]] = []
 
         for obs, expr in observables_eq.items():
-            expr_symbolized = expr.xreplace(
-                state_sym_subs
-            )  # xreplace is often safer than subs here
-
+            expr_symbolized = expr.xreplace(state_sym_subs)
             grads = [expr_symbolized.diff(s) for s in state_syms]
             jacobian_entries.append(grads)  # pyright: ignore
             if all((g.free_symbols & state_set) == set() for g in grads):
                 is_affine[obs] = True
 
-        return Equations(
-            model=model,
-            constraint=SymbolGetterDict(constraint),
-            observable=SymbolGetterDict(observables_eq),
-            obs_is_affine=SymbolGetterDict(is_affine),
-            obs_jacobian=Matrix(jacobian_entries),
-        )
+        return is_affine, Matrix(jacobian_entries)
 
     @staticmethod
     def _parse_variables(
@@ -390,35 +410,20 @@ class ModelParser:
         _get_expr: Callable[[str], Expr],
     ) -> Variables:
         _, variable_data = ModelParser._coerce_variable_data(data)
-        legacy_steady_state = data.get("calibration", {}).get("stead_state", {}) or {}
-        linearization_data = data.get("linearization", None)
-        if linearization_data is None:
-            linearization_data = (data.get("constrained", {}) or {}).get(
-                "linearization", {}
-            )
-        linearization_data = linearization_data or {}
 
         steady_state: dict[Function, Expr | None] = {}
         linearization: dict[Function, LinearizationMethod] = {}
 
-        missing = object()
         for var_name, var_func in zip(ordered_var_names, variable_funcs):
             spec = variable_data[var_name]
 
-            ss_raw = spec.get("steady_state", spec.get("stead_state", missing))
-            if ss_raw is missing:
-                ss_raw = legacy_steady_state.get(var_name, missing)
-
-            if ss_raw is missing or ss_raw is None:
+            ss_raw = spec.get("steady_state", None)
+            if ss_raw is None:
                 steady_state[var_func] = None
             else:
                 steady_state[var_func] = _get_expr(str(ss_raw))
 
-            method_raw = spec.get("linearization", missing)
-            if method_raw is missing:
-                method_raw = linearization_data.get(
-                    var_name, LinearizationMethod.NONE.value
-                )
+            method_raw = spec.get("linearization", LinearizationMethod.NONE.value)
             if isinstance(method_raw, str):
                 method_raw = method_raw.strip().lower()
             try:

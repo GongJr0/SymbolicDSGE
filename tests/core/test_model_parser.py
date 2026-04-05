@@ -105,6 +105,7 @@ def test_parser_rejects_model_equation_without_single_equals(tmp_path):
 def test_legacy_variable_list_defaults_linearization_and_steady_state(parsed_test):
     conf = parsed_test.model
 
+    assert conf.symbolically_linearized is False
     assert [v.__name__ for v in conf.variables.variables] == [
         "u",
         "v",
@@ -125,7 +126,7 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     data["variables"] = {
         "u": {"linearization": "taylor"},
         "v": {},
-        "r": {"linearization": "log", "stead_state": "rbar"},
+        "r": {"linearization": "log", "steady_state": "rbar"},
         "Pi": {"steady_state": "pi_mean"},
         "x": {"steady_state": None},
         "r_star": {"linearization": "none"},
@@ -148,3 +149,35 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     assert conf.variables.steady_state["r"] == sp.Symbol("rbar")
     assert conf.variables.steady_state["Pi"] == sp.Symbol("pi_mean")
     assert conf.variables.steady_state["x"] is None
+
+
+def test_parser_rejects_legacy_steady_state_typo_key(tmp_path):
+    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+    data["variables"] = {
+        "u": {"stead_state": "ubar"},
+        "v": {},
+        "r": {},
+        "Pi": {},
+        "x": {},
+        "r_star": {},
+    }
+    bad = _write_yaml(tmp_path / "bad_steady_state_key.yaml", data)
+
+    with pytest.raises(ValueError, match="unsupported metadata keys"):
+        ModelParser(bad)
+
+
+def test_parser_rejects_unknown_variable_metadata_keys(tmp_path):
+    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+    data["variables"] = {
+        "u": {"linearization": "taylor", "foo": 1},
+        "v": {},
+        "r": {},
+        "Pi": {},
+        "x": {},
+        "r_star": {},
+    }
+    bad = _write_yaml(tmp_path / "bad_variable_metadata.yaml", data)
+
+    with pytest.raises(ValueError, match="unsupported metadata keys"):
+        ModelParser(bad)

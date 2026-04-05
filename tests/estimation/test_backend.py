@@ -28,7 +28,7 @@ def post82_bundle(post82_test_model_path):
     compiled = solver.compile(n_state=3, n_exog=3)
 
     steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, steady_state=steady, log_linear=False)
+    solved = solver.solve(compiled=compiled, steady_state=steady)
 
     params = model.calibration.parameters
     std_map = model.calibration.shock_std
@@ -223,7 +223,6 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
         y=post82_bundle["y"],
         observables=["Infl", "Rate"],
         steady_state=post82_bundle["steady"],
-        log_linear=False,
     )
 
     monkeypatch.setattr(
@@ -432,7 +431,6 @@ def test_evaluate_loglik_linear_and_extended_match_model_kalman(post82_bundle):
         filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -455,7 +453,6 @@ def test_evaluate_loglik_linear_and_extended_match_model_kalman(post82_bundle):
         filter_mode="extended",
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -487,7 +484,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
             filter_mode="bad_mode",
             observables=["Infl", "Rate"],
             steady_state=steady,
-            log_linear=False,
             x0=None,
             p0_mode=None,
             p0_scale=None,
@@ -506,7 +502,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -522,7 +517,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -547,7 +541,6 @@ def test_estimate_R_diag_returns_positive_diagonal(post82_bundle):
         params=params,
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -582,7 +575,6 @@ def test_estimate_R_tries_map_then_falls_back_to_mle(post82_bundle, monkeypatch)
         params=params,
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -616,7 +608,6 @@ def test_estimate_R_stops_after_successful_map(post82_bundle, monkeypatch):
         params=params,
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -644,7 +635,6 @@ def test_estimate_R_falls_back_to_diag_when_solve_raises(post82_bundle, monkeypa
         params=params,
         observables=["Infl", "Rate"],
         steady_state=steady,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -841,7 +831,6 @@ def test_estimate_R_diag_falls_back_when_solver_raises(monkeypatch):
         params={},
         observables=["a", "b"],
         steady_state=None,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -905,7 +894,6 @@ def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch)
         params={},
         observables=["a", "b"],
         steady_state=None,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -970,7 +958,6 @@ def test_estimate_R_extended_branch_and_final_diag_fallback(monkeypatch):
         params={},
         observables=["a", "b"],
         steady_state=None,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -1029,7 +1016,6 @@ def test_estimate_R_linear_branch_uses_kalman_run(monkeypatch):
         params={},
         observables=["a", "b"],
         steady_state=None,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,
@@ -1086,7 +1072,6 @@ def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
         params={},
         observables=["a", "b"],
         steady_state=None,
-        log_linear=False,
         x0=None,
         p0_mode=None,
         p0_scale=None,

@@ -5,11 +5,11 @@ variables:
   z: {}
   r:
     linearization: log
-    stead_state: r_star
+    steady_state: r_star
   x: {}
   Pi:
     linearization: log
-    stead_state: pi_star
+    steady_state: pi_star
 constrained:
   Pi: false
   x: false

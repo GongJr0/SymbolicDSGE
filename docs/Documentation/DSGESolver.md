@@ -65,8 +65,7 @@ __Returns:__
 DSGESolver.solve(
     compiled: CompiledModel,
     parameters: dict[str, float] = None,
-    steady_state: ndarray[float] | dict[str, float] = None,
-    log_linear: bool = False
+    steady_state: ndarray[float] | dict[str, float] = None
 ) -> SolvedModel
 ```
 
@@ -79,7 +78,6 @@ Solves the given compiled model and returns a `#!python SolvedModel` object.
 | compiled | The `#!python CompiledModel` to solve. |
 | parameters | parameter values as dict to override the calibration config. |
 | steady_state | model variables' steady state. Defaults to zeroes. (often used in gap models) |
-| log_linear | Indicates the model is in log-linear specification to the solver. |
 
  &nbsp;
 
@@ -90,6 +88,9 @@ __Returns:__
 | `#!python SolvedModel` | Solved model object with relevant methods attached. |
 
 &nbsp;
+
+???+ note "Linearized Inputs"
+    `DSGESolver.solve(...)` expects a compiled linearized model. If your original model is nonlinear, apply `#!python SymbolicDSGE.linearization.linearize_model(...)` before compilation.
 
 ```python
 DSGESolver.estimate(
@@ -102,7 +103,6 @@ DSGESolver.estimate(
     estimated_params: list[str] | None = None,
     priors: Mapping[str, Any] | None = None,
     steady_state: np.ndarray | dict[str, float] | None = None,
-    log_linear: bool = False,
     x0: np.ndarray | None = None,
     p0_mode: str | None = None,
     p0_scale: float | None = None,
@@ -139,7 +139,6 @@ DSGESolver.estimate_and_solve(
     estimated_params: list[str] | None = None,
     priors: Mapping[str, Any] | None = None,
     steady_state: np.ndarray | dict[str, float] | None = None,
-    log_linear: bool = False,
     x0: np.ndarray | None = None,
     p0_mode: str | None = None,
     p0_scale: float | None = None,

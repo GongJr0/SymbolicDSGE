@@ -205,9 +205,7 @@ def jacobian_func({args_str}) -> NDF:
         *,
         parameters: dict[str, float] | None = None,
         steady_state: ndarray | dict[str, float] | None = None,
-        log_linear: bool = False,
     ) -> SolvedModel:
-
         conf = self.model_config
 
         if parameters is None:
@@ -250,7 +248,7 @@ def jacobian_func({args_str}) -> NDF:
         )
 
         mdl.set_ss(ss)
-        mdl.approximate_and_solve(log_linear=log_linear)
+        mdl.approximate_and_solve()
 
         # Extract solution matrices (linearsolve uses .gx, .hx style in some versions, keep flexible)
         # Common conventions in linear RE solvers:
@@ -367,7 +365,6 @@ def jacobian_func({args_str}) -> NDF:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: NDArray | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -386,7 +383,6 @@ def jacobian_func({args_str}) -> NDF:
             estimated_params=estimated_params,
             priors=priors,
             steady_state=steady_state,
-            log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
@@ -416,7 +412,6 @@ def jacobian_func({args_str}) -> NDF:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: NDArray | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -432,7 +427,6 @@ def jacobian_func({args_str}) -> NDF:
             estimated_params=estimated_params,
             priors=priors,
             steady_state=steady_state,
-            log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
@@ -461,7 +455,6 @@ def jacobian_func({args_str}) -> NDF:
                 params=est.theta_to_params(init),
                 observables=observables,
                 steady_state=steady_state,
-                log_linear=log_linear,
                 x0=x0,
                 p0_mode=p0_mode,
                 p0_scale=p0_scale,
@@ -490,7 +483,6 @@ def jacobian_func({args_str}) -> NDF:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -512,7 +504,6 @@ def jacobian_func({args_str}) -> NDF:
             estimated_params=estimated_params,
             priors=priors,
             steady_state=steady_state,
-            log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
@@ -541,7 +532,6 @@ def jacobian_func({args_str}) -> NDF:
                 params=est.theta_to_params(init),
                 observables=observables,
                 steady_state=steady_state,
-                log_linear=log_linear,
                 x0=x0,
                 p0_mode=p0_mode,
                 p0_scale=p0_scale,
@@ -579,7 +569,6 @@ def jacobian_func({args_str}) -> NDF:
             compiled=compiled,
             parameters={k: float(v) for k, v in solve_params.items()},
             steady_state=steady_state,
-            log_linear=log_linear,
         )
         return result, solved
 

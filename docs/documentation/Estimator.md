@@ -24,7 +24,6 @@ Estimator(
     estimated_params: Sequence[str] | None = None,
     priors: Mapping[str, Prior] | None = None, # (4)!
     steady_state: np.ndarray | dict[str, float] | None = None,
-    log_linear: bool = False,
     x0: np.ndarray | None = None,
     p0_mode: str | None = None,
     p0_scale: float | None = None,

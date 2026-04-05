@@ -45,6 +45,8 @@ We can see that all variables are converted to `#!python SymPy` objects (symbols
 
 In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time-dependent variables are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolve` is exposed to a single function representing all model equations.
 
+If your model is written in nonlinear levels, run `#!python SymbolicDSGE.linearization.linearize_model(...)` before compilation. The example below uses a model that is already written in linearized gap form.
+
 ```python
 from SymbolicDSGE import DSGESolver
 
@@ -94,7 +96,6 @@ sol = solver.solve(
     compiled,
     parameters=None, # (1)!
     steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
-    log_linear=False,
 )
 print("Is stable: ", sol.policy.stab == 0)  # (2)!
 print("Eigenvalues: ", sol.policy.eig)

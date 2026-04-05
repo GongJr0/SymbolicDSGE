@@ -20,7 +20,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     compiled = solver.compile(n_state=3, n_exog=3)
 
     steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, steady_state=steady, log_linear=False)
+    solved = solver.solve(compiled=compiled, steady_state=steady)
 
     params = model.calibration.parameters
     std_map = model.calibration.shock_std
@@ -192,7 +192,6 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         steady_state=dense_lkj_bundle["steady"],
-        log_linear=False,
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )
@@ -234,7 +233,6 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         steady_state=dense_lkj_bundle["steady"],
-        log_linear=False,
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )
@@ -277,7 +275,6 @@ def test_adaptive_r_block_stays_well_conditioned_under_dynamic_updates(
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         steady_state=dense_lkj_bundle["steady"],
-        log_linear=False,
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )
