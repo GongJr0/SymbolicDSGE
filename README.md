@@ -28,7 +28,7 @@
 <br></br>
 
 ```bash
-pip install SytmbolicDSGE
+pip install SymbolicDSGE
 ```
 
 SymbolicDSGE is a linear DSGE Engine with a fully symbolic and adjustable model configuration. The library is currently in early-development and Symbolic Regression based equation augmentation features are being developed and will be included in the in this package.
