@@ -5,7 +5,7 @@ from sympy.core.relational import Relational
 from numpy import float64
 import pickle
 
-from ..linearization.linearizer import LinearizationMethod
+from .linearization import LinearizationMethod
 
 K = TypeVar("K", bound=Symbol)
 F = TypeVar("F", bound=Function)

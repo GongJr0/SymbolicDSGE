@@ -22,7 +22,7 @@ from .config import (
     FunctionGetterDict,
 )
 from ..kalman.config import KalmanConfig, P0Config
-from ..linearization.linearizer import LinearizationMethod
+from .linearization import LinearizationMethod
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 

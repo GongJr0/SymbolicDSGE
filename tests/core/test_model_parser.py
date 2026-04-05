@@ -9,7 +9,7 @@ import sympy as sp
 import yaml
 
 from SymbolicDSGE.core.model_parser import ModelParser
-from SymbolicDSGE.linearization.linearizer import LinearizationMethod
+from SymbolicDSGE.core.linearization import LinearizationMethod
 
 
 def _write_yaml(path: Path, data: dict) -> Path:

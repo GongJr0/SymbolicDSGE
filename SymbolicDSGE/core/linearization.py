@@ -10,7 +10,7 @@ from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef, FunctionClass, UndefinedFunction
 
 if TYPE_CHECKING:
-    from ..core.config import ModelConfig
+    from .config import ModelConfig
 
 _VAR_FUNC: TypeAlias = FunctionClass | UndefinedFunction
 
@@ -92,14 +92,35 @@ class LinearizationContext:
 class Linearizer:
     def __init__(
         self,
-        method_dict: dict[_VAR_FUNC, str | LinearizationMethod],
-        steady_state: dict[_VAR_FUNC, Expr | float | None],
-        equations: list[Eq],
+        conf: ModelConfig | None = None,
         *,
+        method_dict: dict[_VAR_FUNC, str | LinearizationMethod] | None = None,
+        steady_state: dict[_VAR_FUNC, Expr | float | None] | None = None,
+        equations: list[Eq] | None = None,
         time_symbol: Symbol | None = None,
         variable_order: list[_VAR_FUNC] | None = None,
         shock_symbols: list[Symbol] | None = None,
     ) -> None:
+        if conf is not None:
+            if conf.symbolically_linearized:
+                raise ValueError("ModelConfig is already symbolically linearized.")
+
+            variable_order = list(conf.variables.variables)
+            method_dict = {
+                var: conf.variables.linearization[var] for var in variable_order
+            }
+            steady_state = {
+                var: conf.variables.steady_state[var] for var in variable_order
+            }
+            equations = list(conf.equations.model)
+            time_symbol = Symbol("t", integer=True)
+            shock_symbols = list(conf.shock_map.keys())
+
+        if method_dict is None or steady_state is None or equations is None:
+            raise TypeError(
+                "Linearizer requires either a ModelConfig or explicit method_dict, steady_state, and equations."
+            )
+
         self._method_dict = self._parse_methods(method_dict)
         self._steady_state = {
             varname: None if val is None else sp.sympify(val)
@@ -123,22 +144,7 @@ class Linearizer:
 
     @classmethod
     def from_config(cls, conf: ModelConfig) -> "Linearizer":
-        if conf.symbolically_linearized:
-            raise ValueError("ModelConfig is already symbolically linearized.")
-
-        variable_order = list(conf.variables.variables)
-        return cls(
-            method_dict={
-                var: conf.variables.linearization[var] for var in variable_order
-            },
-            steady_state={
-                var: conf.variables.steady_state[var] for var in variable_order
-            },
-            equations=list(conf.equations.model),
-            time_symbol=Symbol("t", integer=True),
-            variable_order=variable_order,
-            shock_symbols=list(conf.shock_map.keys()),
-        )
+        return cls(conf)
 
     def _build_context(
         self,
@@ -253,13 +259,31 @@ class Linearizer:
 
     def linearize_equations(self) -> list[Eq]:
         out: list[Eq] = []
-        for idx, residual in enumerate(self.residuals):
-            linear_residual, _ = self.linearize_expr(
-                residual,
-                require_zero_at_expansion_point=True,
-                equation_index=idx,
+        shock_zero_subs = self._shock_zero_substitutions()
+        for idx, eq in enumerate(self.equations):
+            linear_lhs, lhs_at_zero = self.linearize_expr(
+                eq.lhs
+            )  # pyright: ignore[arg-type]
+            linear_rhs, rhs_at_zero = self.linearize_expr(
+                eq.rhs
+            )  # pyright: ignore[arg-type]
+
+            lhs_expansion_point = sp.simplify(lhs_at_zero.subs(shock_zero_subs))
+            rhs_expansion_point = sp.simplify(rhs_at_zero.subs(shock_zero_subs))
+            residual_at_expansion_point = sp.simplify(
+                lhs_expansion_point - rhs_expansion_point
             )
-            out.append(sp.Eq(sp.simplify(linear_residual), 0))
+            if residual_at_expansion_point != 0:
+                raise ValueError(
+                    f"Equation {idx} does not vanish at the supplied steady state: {residual_at_expansion_point}"
+                )
+
+            out.append(
+                sp.Eq(
+                    sp.simplify(linear_lhs - lhs_expansion_point),
+                    sp.simplify(linear_rhs - rhs_expansion_point),
+                )
+            )
         return out
 
     @staticmethod
@@ -314,7 +338,7 @@ def linearize_model(conf: ModelConfig) -> ModelConfig:
     if conf.symbolically_linearized:
         raise ValueError("ModelConfig is already symbolically linearized.")
 
-    linearizer = Linearizer.from_config(conf)
+    linearizer = Linearizer(conf)
     linearized = deepcopy(conf)
     linearized.equations.model = linearizer.linearize_equations()
     linearized.symbolically_linearized = True

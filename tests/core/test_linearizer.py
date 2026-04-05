@@ -9,8 +9,8 @@ import pytest
 import sympy as sp
 
 import SymbolicDSGE.estimation.backend as est_backend
-from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.linearization import Linearizer, linearize_model
+from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
+from SymbolicDSGE.core.linearization import Linearizer
 
 
 def _write_yaml(path: Path, text: str) -> Path:
@@ -187,10 +187,9 @@ def test_linearizer_taylor_linearizes_quadratic_equation():
     )
 
     eq = linearizer.linearize_equations()[0]
-    expected = x(t + 1) - 2 * x(t)
+    expected = sp.Eq(x(t + 1), 2 * x(t))
 
-    assert sp.simplify(eq.lhs - expected) == 0
-    assert eq.rhs == 0
+    assert sp.simplify((eq.lhs - eq.rhs) - (expected.lhs - expected.rhs)) == 0
 
 
 def test_linearizer_log_linearizes_power_equation():
@@ -207,10 +206,9 @@ def test_linearizer_log_linearizes_power_equation():
     )
 
     eq = linearizer.linearize_equations()[0]
-    expected = k_ss * (k(t + 1) - alpha * k(t))
+    expected = sp.Eq(k_ss * k(t + 1), alpha * k_ss * k(t))
 
-    assert sp.simplify(eq.lhs - expected) == 0
-    assert eq.rhs == 0
+    assert sp.simplify((eq.lhs - eq.rhs) - (expected.lhs - expected.rhs)) == 0
 
 
 def test_linearizer_mixed_methods_handle_lagged_and_leaded_calls():
@@ -229,10 +227,9 @@ def test_linearizer_mixed_methods_handle_lagged_and_leaded_calls():
     )
 
     eq = linearizer.linearize_equations()[0]
-    expected = x(t + 1) - beta * x(t) - gamma * k_ss * k(t) - z(t - 1)
+    expected = sp.Eq(x(t + 1), beta * x(t) + gamma * k_ss * k(t) + z(t - 1))
 
-    assert sp.simplify(eq.lhs - expected) == 0
-    assert eq.rhs == 0
+    assert sp.simplify((eq.lhs - eq.rhs) - (expected.lhs - expected.rhs)) == 0
 
 
 def test_linearizer_tracks_missing_steady_states_before_linearization():
@@ -337,6 +334,19 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
     )
 
     assert np.isfinite(loglik)
+
+
+def test_linearizer_accepts_model_config_directly(tmp_path):
+    path = _write_yaml(
+        tmp_path / "linearizer_from_config.yaml", _nonlinear_model_yaml()
+    )
+
+    model = ModelParser(path).get()
+    linearizer = Linearizer(model)
+
+    assert [spec.original.__name__ for spec in linearizer.context.specs] == ["a", "k"]
+    assert linearizer.method_dict[model.variables.variables[0]].value == "log"
+    assert linearizer.method_dict[model.variables.variables[1]].value == "taylor"
 
 
 def test_linearizer_matches_hand_linearized_solution_matrices(tmp_path):
