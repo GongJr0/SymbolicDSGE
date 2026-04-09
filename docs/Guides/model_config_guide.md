@@ -28,11 +28,20 @@ name: "Test Model"
 
 ## Variables
 
-The `variables` field contains the names for all primary model variables. (no time indices or parameters) It is declared as a list and the ordering of variables will be respected in the solver unless explicitly given a separate ordering. In addition to variable names, each variable requires an explicit boolean entry in the `constrained` field. Having this toggle allows the constraint equations to be predefined in the config but only used when explicitly enabled.
+The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping and the ordering of variables will be respected in the solver unless explicitly given a separate ordering. In addition to variable names, each variable requires an explicit boolean entry in the `constrained` field. Having this toggle allows the constraint equations to be predefined in the config but only used when explicitly enabled.
+
+When using a mapping instead of a list, the preferred linearization method and the parameter corresponding to a variable's steady-state level can be specified. This additional information is only used when linearizing a non-linear model.
 
 Variables are declared as follows:
 ```yaml
-variables: [g, z, r, Pi, x]
+variables: [g, z, r, Pi, x]  # as list
+variables: # as mapping
+    g: # (1)!
+    z:
+    r:
+        linearization: log  # (2)!
+        steady_state: r_star # (3)!
+    ...
 constrained:
     g: false
     z: false
@@ -40,6 +49,10 @@ constrained:
     x: false
     Pi: false
 ```
+1. Exongenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
+2. Can be one of `log`, `taylor`, or `none`.
+3. Name of the parameter contining the stead-state level. 
+
 ## Parameters
 
 Parameters are "constants" that appear in the model equations in some capacity.
@@ -231,7 +244,7 @@ calibration:
         rho_r: 0.84
 
         pi_star: 3.43
-        r_star: 3.01
+        r_star: 3.01 # (1)!
 
         kappa: 0.58
         tau_inv: 1.86
@@ -251,6 +264,7 @@ calibration:
         corr:
             e_g, e_z: rho_gz
 ```
+1. This parameter will be used for linearization as declared, but it is not reserved for that purpose.
 
 Innovation terms are paired with the relevant (co)variance parameters through the `std` and `corr` fields of the configuration.
 

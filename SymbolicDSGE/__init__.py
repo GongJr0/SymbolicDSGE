@@ -3,6 +3,7 @@ from .core import (
     ModelConfig,
     ModelParser,
     Shock,
+    linearize_model,
 )
 from .kalman import KalmanFilter
 from .estimation import Estimator
@@ -16,4 +17,5 @@ __all__ = [
     "Estimator",
     "Shock",
     "utils",
+    "linearize_model",
 ]

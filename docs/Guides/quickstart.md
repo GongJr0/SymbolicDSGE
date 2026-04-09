@@ -88,6 +88,10 @@ Equations as passed to the solver:
 ???+ warning "Variable Placement"
     The solver relies on the exogenous variables being placed in the first indices. You should ensure the first `n_exog` entries of the order correctly map to the exogenous variables. (either through the config or via the ordering)
 
+???+ note "Linearization"
+    When passing the linearization flag, the parsed `ModelConfig` must have the linearization parameters defined. (refer to the [Config Guide](./model_config_guide.md))
+    Alternatively, you can import `SymbolicDSGE.linearize_model` to use the syntax `lin_config = linearize_model(my_config)`. 
+
 ## Solution
 The solution step takes steady-state values and optionally parameter calibrations to provide a `#!python SolvedModel`.
 
