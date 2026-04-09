@@ -17,6 +17,7 @@ import pandas as pd  # fuck linearsolve
 from .. import _linearsolve as linearsolve
 from .config import ModelConfig
 from .compiled_model import CompiledModel
+from .linearization import linearize_model
 from .solved_model import SolvedModel
 
 if TYPE_CHECKING:
@@ -40,11 +41,15 @@ class DSGESolver:
         n_state: int | None = None,
         n_exog: int | None = None,
         params_order: list[str] | None = None,
+        linearize: bool = False,
     ) -> CompiledModel:
 
         conf = self.model_config
+        if linearize and not conf.symbolically_linearized:
+            conf = linearize_model(conf)
         kalman_conf = self.kalman_config
         t = self.t
+        ordered_variables = conf.variables.variables
 
         # Convert model to minimization problem
         obj = [
@@ -58,15 +63,15 @@ class DSGESolver:
         if not variable_order:
             var_order: list[str] = [
                 v.func.__name__ if hasattr(v, "func") else v.__name__
-                for v in conf.variables
+                for v in ordered_variables
             ]
-            var_order = [v.__name__ for v in conf.variables]
+            var_order = [v.__name__ for v in ordered_variables]
         else:
             var_order = [  # pyright: ignore
                 v.__name__ if hasattr(v, "func") else v for v in variable_order
             ]
 
-        name_to_func = {v.__name__: v for v in conf.variables}
+        name_to_func = {v.__name__: v for v in ordered_variables}
         missing = [v for v in var_order if v not in name_to_func]
         if missing:
             raise ValueError(
@@ -128,7 +133,7 @@ class DSGESolver:
         ]
 
         symbolic_jacobian: sp.Matrix = conf.equations.obs_jacobian
-        variables = [conf.variables[idx[name]] for name in var_order]
+        variables = [ordered_variables[idx[name]] for name in var_order]
 
         jac_scalars = list(symbolic_jacobian)
         jac_scalar_funcs = tuple(
@@ -206,7 +211,6 @@ def jacobian_func({args_str}) -> NDF:
         steady_state: list[float] | ndarray | dict[str, float] | None = None,
         log_linear: bool = False,
     ) -> SolvedModel:
-
         conf = self.model_config
 
         if parameters is None:
@@ -249,7 +253,7 @@ def jacobian_func({args_str}) -> NDF:
         )
 
         mdl.set_ss(ss)
-        mdl.approximate_and_solve(log_linear=log_linear)
+        mdl.approximate_and_solve()
 
         # Extract solution matrices (linearsolve uses .gx, .hx style in some versions, keep flexible)
         # Common conventions in linear RE solvers:
@@ -501,7 +505,6 @@ def jacobian_func({args_str}) -> NDF:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -523,7 +526,6 @@ def jacobian_func({args_str}) -> NDF:
             estimated_params=estimated_params,
             priors=priors,
             steady_state=steady_state,
-            log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
@@ -552,7 +554,6 @@ def jacobian_func({args_str}) -> NDF:
                 params=est.theta_to_params(init),
                 observables=observables,
                 steady_state=steady_state,
-                log_linear=log_linear,
                 x0=x0,
                 p0_mode=p0_mode,
                 p0_scale=p0_scale,
@@ -590,7 +591,6 @@ def jacobian_func({args_str}) -> NDF:
             compiled=compiled,
             parameters={k: float(v) for k, v in solve_params.items()},
             steady_state=steady_state,
-            log_linear=log_linear,
         )
         return result, solved
 

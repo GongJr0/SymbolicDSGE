@@ -369,7 +369,6 @@ def evaluate_loglik(
     filter_mode: str | None,
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
-    log_linear: bool,
     x0: NDF | None,
     p0_mode: str | None,
     p0_scale: float | float64 | None,
@@ -396,7 +395,6 @@ def evaluate_loglik(
         compiled=compiled,
         parameters={k: float(v) for k, v in params.items()},
         steady_state=steady_state,
-        log_linear=log_linear,
     )
     Q = build_Q(compiled, params)
     R_mat = resolve_R(compiled, compiled.kalman, prepared_run.observables, R)
@@ -455,7 +453,6 @@ def estimate_R_diag(
     params: Mapping[str, float64],
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
-    log_linear: bool,
     x0: NDF | None,
     p0_mode: str | None,
     p0_scale: float | float64 | None,
@@ -485,7 +482,6 @@ def estimate_R_diag(
             compiled=compiled,
             parameters={k: float(v) for k, v in params.items()},
             steady_state=steady_state,
-            log_linear=log_linear,
         )
     except BaseException:
         return np.diag(np.exp(eta0))
@@ -664,7 +660,6 @@ def estimate_R(
     params: Mapping[str, float64],
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
-    log_linear: bool,
     x0: NDF | None,
     p0_mode: str | None,
     p0_scale: float | float64 | None,
@@ -702,7 +697,6 @@ def estimate_R(
             compiled=compiled,
             parameters={k: float(v) for k, v in params.items()},
             steady_state=steady_state,
-            log_linear=log_linear,
         )
     except BaseException:
         return np.diag(np.exp(log_std0))

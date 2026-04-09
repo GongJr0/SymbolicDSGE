@@ -113,7 +113,6 @@ class Estimator:
         estimated_params: Sequence[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: NDF | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDF | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -133,7 +132,6 @@ class Estimator:
         self._input_priors = dict(priors) if priors is not None else None
 
         self.steady_state = steady_state
-        self.log_linear = bool(log_linear)
         self.x0 = x0
         self.p0_mode = p0_mode
         self.p0_scale = p0_scale
@@ -627,7 +625,6 @@ class Estimator:
             filter_mode=self.filter_mode,
             observables=self.observables,
             steady_state=self.steady_state,
-            log_linear=self.log_linear,
             x0=self.x0,
             p0_mode=self.p0_mode,
             p0_scale=self.p0_scale,

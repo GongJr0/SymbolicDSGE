@@ -9,17 +9,20 @@ import yaml
 import sympy as sp
 from sympy import Matrix, Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
-from sympy.parsing.sympy_parser import parse_expr, standard_transformations, convert_xor
+from sympy.parsing.sympy_parser import standard_transformations, convert_xor
 from numpy import float64, array, ndarray
 
 from .config import (
     ModelConfig,
     Equations,
     Calib,
+    Variables,
     SymbolGetterDict,
     PairGetterDict,
+    FunctionGetterDict,
 )
 from ..kalman.config import KalmanConfig, P0Config
+from .linearization import LinearizationMethod
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
@@ -62,10 +65,11 @@ class ModelParser:
     @classmethod
     def validate_constraints(cls, conf: ModelConfig) -> None:
         is_constrained = conf.constrained
+        variables = conf.variables.variables
         doesnt_exist = []
         no_constraint = []
         for var, constrained in is_constrained.items():
-            if var not in conf.variables:
+            if var not in variables:
                 doesnt_exist.append(var)
             if constrained and var not in conf.equations.constraint:
                 no_constraint.append(var)
@@ -100,7 +104,8 @@ class ModelParser:
         ns = self._build_namespace(data)
         (
             _LOCALS,
-            variables,
+            ordered_var_names,
+            variable_funcs,
             constrained,
             params,
             observables,
@@ -111,8 +116,11 @@ class ModelParser:
         # SymPy parsing helpers bound to this namespace
         _get_expr, _get_relational, _get_eq = self._sympy_parsers(_LOCALS)
 
+        variables = self._parse_variables(
+            data, _LOCALS, ordered_var_names, variable_funcs, _get_expr
+        )
         equations = self._parse_equations(
-            data, _LOCALS, _get_eq, _get_relational, _get_expr
+            data, _LOCALS, ordered_var_names, _get_eq, _get_relational, _get_expr
         )
         parameters = self._parse_parameters(data, _LOCALS)
 
@@ -132,6 +140,7 @@ class ModelParser:
             observables=observables,
             equations=equations,
             calibration=calibration,
+            symbolically_linearized=False,
         )
 
         kalman_cfg = self._parse_kalman_if_present(
@@ -156,8 +165,9 @@ class ModelParser:
         data_out["parameters"] = param_names
 
         data_out.setdefault("calibration", {})["parameters"] = normalized_params
-        vars = InlineList(data_out.get("variables", []))
-        data_out["variables"] = vars
+        raw_variables = data_out.get("variables", [])
+        if isinstance(raw_variables, list):
+            data_out["variables"] = InlineList(raw_variables)
 
         obs = data_out.get("observables", [])
         data_out["observables"] = InlineList(obs)
@@ -193,6 +203,7 @@ class ModelParser:
         data: dict[str, Any],
     ) -> tuple[
         dict[str, Any],
+        list[str],
         list[Function],
         dict[Function, bool],
         list[Symbol],
@@ -200,11 +211,12 @@ class ModelParser:
         SymbolGetterDict[Symbol, Symbol],
         list[Symbol],
     ]:
+        ordered_var_names, _ = ModelParser._coerce_variable_data(data)
         t = sp.symbols("t", integer=True)
 
-        variables: list[Function] = list(map(Function, data["variables"]))
+        variables: list[Function] = list(map(Function, ordered_var_names))
         constrained: dict[Function, bool] = dict(
-            zip(variables, [data["constrained"][var] for var in data["variables"]])
+            zip(variables, [data["constrained"][var] for var in ordered_var_names])
         )
 
         params: list[Symbol] = list(sp.symbols(data["parameters"]))
@@ -224,6 +236,7 @@ class ModelParser:
         }
         return (
             _LOCALS,
+            ordered_var_names,
             variables,
             constrained,
             params,
@@ -231,6 +244,37 @@ class ModelParser:
             shock_map,
             shock_syms,
         )
+
+    @staticmethod
+    def _coerce_variable_data(
+        data: dict[str, Any],
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        raw_variables = data["variables"]
+        if isinstance(raw_variables, list):
+            ordered_var_names = list(raw_variables)
+            return ordered_var_names, {name: {} for name in ordered_var_names}
+        if not isinstance(raw_variables, dict):
+            raise TypeError("`variables` must be either a list or a mapping.")
+
+        ordered_var_names = list(raw_variables.keys())
+        variable_data: dict[str, dict[str, Any]] = {}
+        allowed_keys = {"steady_state", "linearization"}
+        for name, spec in raw_variables.items():
+            if spec is None:
+                variable_data[name] = {}
+            elif isinstance(spec, dict):
+                unknown_keys = sorted(set(spec).difference(allowed_keys))
+                if unknown_keys:
+                    raise ValueError(
+                        f"Variable '{name}' has unsupported metadata keys: {unknown_keys}. "
+                        f"Supported keys are: {sorted(allowed_keys)}."
+                    )
+                variable_data[name] = spec
+            else:
+                raise TypeError(
+                    "Each variable entry must be a mapping or null when `variables` is a mapping."
+                )
+        return ordered_var_names, variable_data
 
     @staticmethod
     def _sympy_parsers(
@@ -289,6 +333,7 @@ class ModelParser:
     def _parse_equations(
         data: dict[str, Any],
         _LOCALS: dict[str, Any],
+        ordered_var_names: list[str],
         _get_eq: Callable[[str], Eq],
         _get_relational: Callable[[str], Relational],
         _get_expr: Callable[[str], Expr],
@@ -298,7 +343,6 @@ class ModelParser:
         model: list[Eq] = [_get_eq(eq) for eq in eq_data["model"]]
 
         # preserve variable order
-        ordered_var_names: list[str] = list(data["variables"])
         constraint_raw = eq_data.get("constraint", {}) or {}
         constraint: dict[Symbol, Relational] = {
             _LOCALS[var_name]: _get_relational(constraint_raw[var_name])
@@ -313,15 +357,34 @@ class ModelParser:
             if obs_name in observables_raw
         }
 
+        is_affine, obs_jacobian = ModelParser._derive_observable_structure(
+            observables_eq=observables_eq,
+            ordered_var_names=ordered_var_names,
+            _LOCALS=_LOCALS,
+        )
+
+        return Equations(
+            model=model,
+            constraint=SymbolGetterDict(constraint),
+            observable=SymbolGetterDict(observables_eq),
+            obs_is_affine=SymbolGetterDict(is_affine),
+            obs_jacobian=obs_jacobian,
+        )
+
+    @staticmethod
+    def _derive_observable_structure(
+        *,
+        observables_eq: dict[Symbol, Expr],
+        ordered_var_names: list[str],
+        _LOCALS: dict[str, Any],
+    ) -> tuple[dict[Symbol, bool], Matrix]:
         t = _LOCALS["t"]
 
-        state_funcs = [
-            _LOCALS[var_name] for var_name in data["variables"]
-        ]  # each is sympy.Function
-        state_atoms = [sf(t) for sf in state_funcs]  # x(t), k(t), ...
+        state_funcs = [_LOCALS[var_name] for var_name in ordered_var_names]
+        state_atoms = [sf(t) for sf in state_funcs]
 
         state_sym_subs = {
-            atom: Symbol(name) for atom, name in zip(state_atoms, data["variables"])
+            atom: Symbol(name) for atom, name in zip(state_atoms, ordered_var_names)
         }
         state_syms = list(state_sym_subs.values())
         state_set = set(state_syms)
@@ -330,21 +393,50 @@ class ModelParser:
         jacobian_entries: list[list[Expr]] = []
 
         for obs, expr in observables_eq.items():
-            expr_symbolized = expr.xreplace(
-                state_sym_subs
-            )  # xreplace is often safer than subs here
-
+            expr_symbolized = expr.xreplace(state_sym_subs)
             grads = [expr_symbolized.diff(s) for s in state_syms]
             jacobian_entries.append(grads)  # pyright: ignore
             if all((g.free_symbols & state_set) == set() for g in grads):
                 is_affine[obs] = True
 
-        return Equations(
-            model=model,
-            constraint=SymbolGetterDict(constraint),
-            observable=SymbolGetterDict(observables_eq),
-            obs_is_affine=SymbolGetterDict(is_affine),
-            obs_jacobian=Matrix(jacobian_entries),
+        return is_affine, Matrix(jacobian_entries)
+
+    @staticmethod
+    def _parse_variables(
+        data: dict[str, Any],
+        _LOCALS: dict[str, Any],
+        ordered_var_names: list[str],
+        variable_funcs: list[Function],
+        _get_expr: Callable[[str], Expr],
+    ) -> Variables:
+        _, variable_data = ModelParser._coerce_variable_data(data)
+
+        steady_state: dict[Function, Expr | None] = {}
+        linearization: dict[Function, LinearizationMethod] = {}
+
+        for var_name, var_func in zip(ordered_var_names, variable_funcs):
+            spec = variable_data[var_name]
+
+            ss_raw = spec.get("steady_state", None)
+            if ss_raw is None:
+                steady_state[var_func] = None
+            else:
+                steady_state[var_func] = _get_expr(str(ss_raw))
+
+            method_raw = spec.get("linearization", LinearizationMethod.NONE.value)
+            if isinstance(method_raw, str):
+                method_raw = method_raw.strip().lower()
+            try:
+                linearization[var_func] = LinearizationMethod(method_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid linearization method '{method_raw}' for variable '{var_name}'."
+                ) from exc
+
+        return Variables(
+            variables=variable_funcs,
+            steady_state=FunctionGetterDict(steady_state),
+            linearization=FunctionGetterDict(linearization),
         )
 
     @staticmethod
