@@ -209,7 +209,6 @@ def jacobian_func({args_str}) -> NDF:
         *,
         parameters: dict[str, float] | None = None,
         steady_state: list[float] | ndarray | dict[str, float] | None = None,
-        log_linear: bool = False,
     ) -> SolvedModel:
         conf = self.model_config
 
@@ -370,7 +369,6 @@ def jacobian_func({args_str}) -> NDF:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -393,7 +391,6 @@ def jacobian_func({args_str}) -> NDF:
                 if isinstance(steady_state, list)
                 else steady_state
             ),
-            log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
@@ -423,7 +420,6 @@ def jacobian_func({args_str}) -> NDF:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
-        log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
         p0_scale: float | float64 | None = None,
@@ -443,7 +439,6 @@ def jacobian_func({args_str}) -> NDF:
                 if isinstance(steady_state, list)
                 else steady_state
             ),
-            log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
@@ -476,7 +471,6 @@ def jacobian_func({args_str}) -> NDF:
                     if isinstance(steady_state, list)
                     else steady_state
                 ),
-                log_linear=log_linear,
                 x0=x0,
                 p0_mode=p0_mode,
                 p0_scale=p0_scale,
