@@ -20,6 +20,7 @@
                 <th><a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/tests-badge.svg" alt="tests"></a></th>
                 <th><a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/coverage-badge.svg" alt="coverage"></a></th>
                 <th><a href="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE"><img src="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE.svg" alt="wakatime"></a></th>
+                <th><a href="https://pepy.tech/projects/symbolicdsge"><img src="https://static.pepy.tech/personalized-badge/symbolicdsge?period=total&units=INTERNATIONAL_SYSTEM&left_color=GREY&right_color=ORANGE&left_text=downloads" alt="PyPI Downloads"></a></th>
             </tr>
         </thead>
     </table>
@@ -28,7 +29,7 @@
 <br></br>
 
 ```bash
-pip install SytmbolicDSGE
+pip install SymbolicDSGE
 ```
 
 SymbolicDSGE is a linear DSGE Engine with a fully symbolic and adjustable model configuration. The library is currently in early-development and Symbolic Regression based equation augmentation features are being developed and will be included in the in this package.

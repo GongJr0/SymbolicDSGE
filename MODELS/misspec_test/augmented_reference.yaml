@@ -18,15 +18,30 @@ constrained:
 # sig_R, sig_g, sig_z: std devs of innovations
 # rho_gz: corr(ε_g, ε_z)
 
-parameters: [beta, kappa, tau_inv,
-             psi_pi, psi_x, rho_r,
-             rho_g, rho_z,
-             pi_star, r_star,
-             sig_r, sig_g, sig_z,
-             rho_gz,
-             meas_infl, meas_rate, meas_outgap,
-             meas_rho_ir, meas_rho_gi, meas_rho_gr,
-             Pi_coef]
+parameters:
+  [
+    beta,
+    kappa,
+    tau_inv,
+    psi_pi,
+    psi_x,
+    rho_r,
+    rho_g,
+    rho_z,
+    pi_star,
+    r_star,
+    sig_r,
+    sig_g,
+    sig_z,
+    rho_gz,
+    meas_infl,
+    meas_rate,
+    meas_outgap,
+    meas_rho_ir,
+    meas_rho_gi,
+    meas_rho_gr,
+    r_coef,
+  ]
 
 shock_map:
   e_g: g
@@ -56,11 +71,11 @@ equations:
 
   observables:
     # With SR augmentations:
-    OutGap: x(t) + Pi_coef*Pi(t)  # output gap deviation
+    OutGap: x(t) # output gap deviation
 
-    Infl: 4*Pi(t) + pi_star  # model gap deviation + steady-state
+    Infl: 4*Pi(t) + pi_star # model gap deviation + steady-state
 
-    Rate: 4*r(t) + (r_star + pi_star)  # model rate gap deviation + steady-state nominal rate
+    Rate: 4*r(t) + (r_star + pi_star) + r_coef*r(t) # model rate gap deviation + steady-state nominal rate
 
 calibration:
   parameters:
@@ -94,7 +109,7 @@ calibration:
     meas_rho_gi: 0.0
     meas_rho_gr: 0.0
 
-    Pi_coef: 0.0
+    r_coef: 0.0
 
   shocks:
     std:
@@ -120,7 +135,7 @@ kalman:
     mode: diag # "diag" | "eye"
     scale: 1.0
     diag:
-    # = 'eye' if all = 1.0
+      # = 'eye' if all = 1.0
       g: 1.0
       z: 1.0
       r: 1.0
