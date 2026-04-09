@@ -203,7 +203,7 @@ def jacobian_func({args_str}) -> NDF:
         compiled: CompiledModel,
         *,
         parameters: dict[str, float] | None = None,
-        steady_state: ndarray | dict[str, float] | None = None,
+        steady_state: list[float] | ndarray | dict[str, float] | None = None,
         log_linear: bool = False,
     ) -> SolvedModel:
 
@@ -365,7 +365,7 @@ def jacobian_func({args_str}) -> NDF:
         observables: list[str] | None = None,
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: NDArray | dict[str, float] | None = None,
+        steady_state: list[float] | NDArray | dict[str, float] | None = None,
         log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
@@ -384,7 +384,11 @@ def jacobian_func({args_str}) -> NDF:
             observables=observables,
             estimated_params=estimated_params,
             priors=priors,
-            steady_state=steady_state,
+            steady_state=(
+                asarray(steady_state, dtype=float64)
+                if isinstance(steady_state, list)
+                else steady_state
+            ),
             log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
@@ -414,7 +418,7 @@ def jacobian_func({args_str}) -> NDF:
         observables: list[str] | None = None,
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: NDArray | dict[str, float] | None = None,
+        steady_state: list[float] | NDArray | dict[str, float] | None = None,
         log_linear: bool = False,
         x0: NDArray | None = None,
         p0_mode: str | None = None,
@@ -430,7 +434,11 @@ def jacobian_func({args_str}) -> NDF:
             observables=observables,
             estimated_params=estimated_params,
             priors=priors,
-            steady_state=steady_state,
+            steady_state=(
+                asarray(steady_state, dtype=float64)
+                if isinstance(steady_state, list)
+                else steady_state
+            ),
             log_linear=log_linear,
             x0=x0,
             p0_mode=p0_mode,
@@ -459,7 +467,11 @@ def jacobian_func({args_str}) -> NDF:
                 y=y,
                 params=est.theta_to_params(init),
                 observables=observables,
-                steady_state=steady_state,
+                steady_state=(
+                    asarray(steady_state, dtype=float64)
+                    if isinstance(steady_state, list)
+                    else steady_state
+                ),
                 log_linear=log_linear,
                 x0=x0,
                 p0_mode=p0_mode,
@@ -501,8 +513,8 @@ def jacobian_func({args_str}) -> NDF:
 
         steady_state = (
             np.asarray(steady_state, dtype=float64)
-            if steady_state is not None
-            else None
+            if isinstance(steady_state, list)
+            else steady_state
         )
         est = self._estimator(
             compiled=compiled,
