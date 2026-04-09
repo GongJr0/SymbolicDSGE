@@ -49,6 +49,7 @@ constrained:
     x: false
     Pi: false
 ```
+
 1. Exongenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
 2. Can be one of `log`, `taylor`, or `none`.
 3. Name of the parameter contining the stead-state level. 
