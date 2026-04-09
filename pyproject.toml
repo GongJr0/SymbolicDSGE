@@ -1,6 +1,6 @@
 [project]
 name = "SymbolicDSGE"
-version = "1.2.0dev0"
+version = "1.2.0dev1"
 description = "A diagnostic symbolic adjustment layer for simple DSGE models. Features a built-in linearized DSGE engine constructed from symbolic expressions. Functionality is included to regress on measurement equations with symbolic function discovery using Kalman Filter innovations. The library is designed to be a diagnostic tool to provide isight into potential model misspecifications through said mesaurement regressions."
 authors = [
     {name = "Ege Güney Kıymaç", email = "guneykiymac@gmail.com"}
