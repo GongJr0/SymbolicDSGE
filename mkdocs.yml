@@ -82,10 +82,15 @@ extra:
     info: info
     guide: guide
     doc: doc
+
   version:
     provider: mike
     default: latest
     alias: true
+
+  analytics:
+    provider: google
+    property: G-RWHRWMBT9P
 
 plugins:
   - privacy:
