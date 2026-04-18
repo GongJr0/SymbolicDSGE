@@ -54,7 +54,6 @@ theme:
       - material
       - octicons
 
-
 extra_css:
   - https://unpkg.com/katex@0/dist/katex.min.css
   - stylesheets/extra.css
@@ -65,6 +64,7 @@ extra_javascript:
   - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
 
 extra:
+  scope: /SymbolicDSGE/
   social:
     - icon: fontawesome/brands/github
       link: https://www.github.com/GongJr0/
@@ -92,16 +92,33 @@ extra:
     provider: google
     property: G-RWHRWMBT9P
 
+  consent:
+    title: Cookie Consent
+    description: >-
+      We use cookies to collect anonimized analytics data to analyze which sections of the documentation are most visited.
+      This information is used to identify parts of SymbolicDSGE where users see a need to consult the documentation for.
+      We do not use cookies for any other purpose and do not share any data with third parties.
+      You can manage your cookie preferences below.
+
+    actions:
+      - accept
+      - manage
+      - reject
+    cookies:
+      analytics:
+        name: Google Analytics
+        checked: true
+
 plugins:
   - privacy:
       links_attr_map:
-            target: _blank
+        target: _blank
   - search
   - tags
   - mike:
       alias_type: symlink
       redirect_template: null
-      deploy_prefix: ''
+      deploy_prefix: ""
       canonical_version: null
       version_selector: true
       css_dir: stylesheets
@@ -118,13 +135,12 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
   - pymdownx.arithmatex:
-        generic: true
+      generic: true
 
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
-
 
   - pymdownx.inlinehilite
   - pymdownx.snippets
@@ -150,28 +166,28 @@ nav:
       - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
       - Prior Specification:
-        - Prior: documentation/prior_spec/Prior.md
-        - Distributions:
-            - Normal: documentation/prior_spec/distributions/normal.md
-            - LogNormal: documentation/prior_spec/distributions/log_normal.md
-            - HalfNormal: documentation/prior_spec/distributions/half_normal.md
-            - TruncNormal: documentation/prior_spec/distributions/trunc_normal.md
-            - HalfCauchy: documentation/prior_spec/distributions/half_cauchy.md
-            - Beta: documentation/prior_spec/distributions/beta.md
-            - Gamma: documentation/prior_spec/distributions/gamma.md
-            - InvGamma: documentation/prior_spec/distributions/inv_gamma.md
-            - Uniform: documentation/prior_spec/distributions/uniform.md
-            - LKJChol: documentation/prior_spec/distributions/lkj_chol.md
-        - Transformations:
-            - Identity: documentation/prior_spec/transforms/identity.md
-            - Log: documentation/prior_spec/transforms/log.md
-            - Softplus: documentation/prior_spec/transforms/softplus.md
-            - Logit: documentation/prior_spec/transforms/logit.md
-            - Probit: documentation/prior_spec/transforms/probit.md
-            - AffineLogit: documentation/prior_spec/transforms/affine_logit.md
-            - AffineProbit: documentation/prior_spec/transforms/affine_probit.md
-            - LowerBounded: documentation/prior_spec/transforms/lower_bounded.md
-            - UpperBounded: documentation/prior_spec/transforms/upper_bounded.md
+          - Prior: documentation/prior_spec/Prior.md
+          - Distributions:
+              - Normal: documentation/prior_spec/distributions/normal.md
+              - LogNormal: documentation/prior_spec/distributions/log_normal.md
+              - HalfNormal: documentation/prior_spec/distributions/half_normal.md
+              - TruncNormal: documentation/prior_spec/distributions/trunc_normal.md
+              - HalfCauchy: documentation/prior_spec/distributions/half_cauchy.md
+              - Beta: documentation/prior_spec/distributions/beta.md
+              - Gamma: documentation/prior_spec/distributions/gamma.md
+              - InvGamma: documentation/prior_spec/distributions/inv_gamma.md
+              - Uniform: documentation/prior_spec/distributions/uniform.md
+              - LKJChol: documentation/prior_spec/distributions/lkj_chol.md
+          - Transformations:
+              - Identity: documentation/prior_spec/transforms/identity.md
+              - Log: documentation/prior_spec/transforms/log.md
+              - Softplus: documentation/prior_spec/transforms/softplus.md
+              - Logit: documentation/prior_spec/transforms/logit.md
+              - Probit: documentation/prior_spec/transforms/probit.md
+              - AffineLogit: documentation/prior_spec/transforms/affine_logit.md
+              - AffineProbit: documentation/prior_spec/transforms/affine_probit.md
+              - LowerBounded: documentation/prior_spec/transforms/lower_bounded.md
+              - UpperBounded: documentation/prior_spec/transforms/upper_bounded.md
       - Utilities:
           - FRED: documentation/utilities/FRED.md
           - KalmanFilter: documentation/utilities/KalmanFilter.md
