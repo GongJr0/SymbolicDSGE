@@ -37,6 +37,7 @@ class FilterResult:
     y_filt: NDF  # y_{t|t}   = C x_filt + d
 
     innov: NDF  # pre-update
+    std_innov: NDF  # scaled by S
     S: NDF
 
     loglik: float64
@@ -186,7 +187,7 @@ def _kalman_hot_loop(
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
-    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
 ]:
     n, m, k = nmk
 
@@ -203,6 +204,7 @@ def _kalman_hot_loop(
     y_filt = zeros((T, m), dtype=float64)
 
     v = zeros((T, m), dtype=float64)
+    u = zeros((T, m), dtype=float64)
     S_hist = zeros((T, m, m), dtype=float64)
 
     eps_hat = zeros((T, k), dtype=float64)
@@ -233,8 +235,8 @@ def _kalman_hot_loop(
             S_t = _sym(S_t)
 
         L = _chol_shifted(S_t, jitter)
-
-        S_inv_v = _chol_solve_vec(L, v_t)
+        u_t = _forward_subst_vec(L, v_t)
+        S_inv_v = _backward_subst_vec(L.T, u_t)
 
         PCt = P_t_pred @ CT  # (n, m)
         K_tT = _chol_solve_mat(L, PCt.T)
@@ -266,6 +268,8 @@ def _kalman_hot_loop(
         y_filt[t] = y_t_filt
 
         v[t] = v_t
+        u[t] = u_t
+
         S_hist[t] = S_t
 
         x_prev = x_t_filt
@@ -282,6 +286,7 @@ def _kalman_hot_loop(
             y_pred,
             y_filt,
             v,
+            u,
             S_hist,
             eps_hat,
             loglik,
@@ -333,7 +338,7 @@ def _ekf_hot_loop_python(
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
-    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
 ]:
 
     n, m, k = nmk
@@ -351,6 +356,7 @@ def _ekf_hot_loop_python(
     y_filt = zeros((T, m), dtype=float64)
 
     v = zeros((T, m), dtype=float64)
+    u = zeros((T, m), dtype=float64)
     S = zeros((T, m, m), dtype=float64)
 
     eps_hat = zeros((T, k), dtype=float64)
@@ -385,9 +391,8 @@ def _ekf_hot_loop_python(
 
         # --- Gain/update (swap C -> H_t) ---
         L = _chol_shifted(S_t, jitter)
-
-        v_col = v_t.reshape(m, 1)
-        S_inv_v = _chol_solve_mat(L, v_col).reshape(m)
+        u_t = _forward_subst_vec(L, v_t)
+        S_inv_v = _backward_subst_vec(L.T, u_t)
 
         PHt = P_t_pred @ H_tT  # (n, m)
         K_t = _chol_solve_mat(L, PHt.T).T  # (n, m)
@@ -419,6 +424,7 @@ def _ekf_hot_loop_python(
         P_filt[t] = P_t_filt
         y_pred[t] = y_t_pred
         v[t] = v_t
+        u[t] = u_t
         S[t] = S_t
 
         x_prev = x_t_filt
@@ -435,6 +441,7 @@ def _ekf_hot_loop_python(
             y_pred,
             y_filt,
             v,
+            u,
             S,
             eps_hat,
             loglik,
@@ -463,7 +470,7 @@ def _ekf_hot_loop_numba(
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
-    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+    tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
 ]:
 
     n, m, k = nmk
@@ -480,6 +487,7 @@ def _ekf_hot_loop_numba(
     y_filt = zeros((T, m), dtype=float64)
 
     v = zeros((T, m), dtype=float64)
+    u = zeros((T, m), dtype=float64)
     S = zeros((T, m, m), dtype=float64)
 
     eps_hat = zeros((T, k), dtype=float64)
@@ -511,9 +519,8 @@ def _ekf_hot_loop_numba(
             S_t = _sym(S_t)
 
         L = _chol_shifted(S_t, jitter)
-
-        v_col = v_t.reshape(m, 1)
-        S_inv_v = _chol_solve_mat(L, v_col).reshape(m)
+        u_t = _forward_subst_vec(L, v_t)
+        S_inv_v = _backward_subst_vec(L.T, u_t)
 
         PHt = P_t_pred @ H_tT
         K_t = _chol_solve_mat(L, PHt.T).T
@@ -541,6 +548,7 @@ def _ekf_hot_loop_numba(
         P_filt[t] = P_t_filt
         y_pred[t] = y_t_pred
         v[t] = v_t
+        u[t] = u_t
         S[t] = S_t
 
         x_prev = x_t_filt
@@ -557,6 +565,7 @@ def _ekf_hot_loop_numba(
             y_pred,
             y_filt,
             v,
+            u,
             S,
             eps_hat,
             loglik,
@@ -676,6 +685,7 @@ class KalmanFilter:
                 P_prev,
                 symmetrize,
                 jitter,
+                return_shocks,
             )
         except linalg.LinAlgError as exc:
             raise MatrixConditionError(float("inf")) from exc
@@ -690,6 +700,7 @@ class KalmanFilter:
             y_pred,
             y_filt,
             v,
+            u,
             S,
             eps_hat,
             loglik,
@@ -703,6 +714,7 @@ class KalmanFilter:
             y_pred=y_pred,
             y_filt=y_filt,
             innov=v,
+            std_innov=u,
             S=S,
             eps_hat=eps_hat if return_shocks else None,
             loglik=loglik,
@@ -837,6 +849,7 @@ class KalmanFilter:
                     symmetrize,
                     jitter,
                     compute_y_filt,
+                    return_shocks,
                 )
             else:
                 err, err_info, out = _ekf_hot_loop_python(
@@ -855,6 +868,7 @@ class KalmanFilter:
                     symmetrize,
                     jitter,
                     compute_y_filt,
+                    return_shocks,
                 )
         except linalg.LinAlgError as exc:
             raise MatrixConditionError(float("inf")) from exc
@@ -869,6 +883,7 @@ class KalmanFilter:
             y_pred,
             y_filt,
             v,
+            u,
             S,
             eps_hat,
             loglik,
@@ -882,6 +897,7 @@ class KalmanFilter:
             y_pred=y_pred,
             y_filt=y_filt,
             innov=v,
+            std_innov=u,
             S=S,
             eps_hat=eps_hat if return_shocks else None,
             loglik=loglik,

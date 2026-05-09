@@ -34,6 +34,7 @@ def _make_filter_result() -> FilterResult:
         y_pred=y_pred,
         y_filt=y_pred.copy(),
         innov=innov,
+        std_innov=innov.copy(),
         S=zeros_state.copy(),
         loglik=np.float64(0.0),
     )
