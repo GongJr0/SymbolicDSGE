@@ -92,7 +92,19 @@ def test_direct_kalman_hot_loop_covers_return_shocks_branch():
         True,
     )
     assert err == filter_module.OK
-    x_pred, x_filt, P_pred, P_filt, y_pred, y_filt, innov, S_hist, eps_hat, loglik = out
+    (
+        x_pred,
+        x_filt,
+        P_pred,
+        P_filt,
+        y_pred,
+        y_filt,
+        innov,
+        std_innov,
+        S_hist,
+        eps_hat,
+        loglik,
+    ) = out
     assert x_pred.shape == (4, 1)
     assert x_filt.shape == (4, 1)
     assert P_pred.shape == (4, 1, 1)
@@ -100,10 +112,19 @@ def test_direct_kalman_hot_loop_covers_return_shocks_branch():
     assert y_pred.shape == (4, 1)
     assert y_filt.shape == (4, 1)
     assert innov.shape == (4, 1)
+    assert std_innov.shape == (4, 1)
     assert S_hist.shape == (4, 1, 1)
     assert eps_hat.shape == (4, 1)
     assert np.any(np.abs(eps_hat) > 0.0)
     assert np.isfinite(loglik)
+
+    L0 = np.linalg.cholesky(S_hist[0])
+    expected_std0 = np.linalg.solve(L0, innov[0])
+    assert np.allclose(std_innov[0], expected_std0)
+    assert np.allclose(
+        std_innov[0] @ std_innov[0],
+        innov[0] @ np.linalg.solve(S_hist[0], innov[0]),
+    )
 
 
 def test_direct_extended_hot_loops_cover_python_and_numba_paths():
@@ -139,8 +160,19 @@ def test_direct_extended_hot_loops_cover_python_and_numba_paths():
     )
     assert err_py == filter_module.OK
     assert out_py[5].shape == (3, 1)
-    assert out_py[8].shape == (3, 1)
-    assert np.any(np.abs(out_py[8]) > 0.0)
+    assert out_py[7].shape == (3, 1)
+    assert out_py[9].shape == (3, 1)
+    assert np.any(np.abs(out_py[9]) > 0.0)
+
+    innov_py = out_py[6]
+    std_innov_py = out_py[7]
+    S_py = out_py[8]
+    L_py0 = np.linalg.cholesky(S_py[0])
+    assert np.allclose(std_innov_py[0], np.linalg.solve(L_py0, innov_py[0]))
+    assert np.allclose(
+        std_innov_py[0] @ std_innov_py[0],
+        innov_py[0] @ np.linalg.solve(S_py[0], innov_py[0]),
+    )
 
     @njit
     def h_array(x, params):
@@ -170,8 +202,19 @@ def test_direct_extended_hot_loops_cover_python_and_numba_paths():
     )
     assert err_nb == filter_module.OK
     assert np.array_equal(out_nb[5], np.zeros((3, 1), dtype=float64))
-    assert out_nb[8].shape == (3, 1)
-    assert np.any(np.abs(out_nb[8]) > 0.0)
+    assert out_nb[7].shape == (3, 1)
+    assert out_nb[9].shape == (3, 1)
+    assert np.any(np.abs(out_nb[9]) > 0.0)
+
+    innov_nb = out_nb[6]
+    std_innov_nb = out_nb[7]
+    S_nb = out_nb[8]
+    L_nb0 = np.linalg.cholesky(S_nb[0])
+    assert np.allclose(std_innov_nb[0], np.linalg.solve(L_nb0, innov_nb[0]))
+    assert np.allclose(
+        std_innov_nb[0] @ std_innov_nb[0],
+        innov_nb[0] @ np.linalg.solve(S_nb[0], innov_nb[0]),
+    )
 
 
 def test_run_converts_internal_linalg_and_error_codes(monkeypatch):
