@@ -60,6 +60,15 @@ class MCResult:
         if statistic_trace.shape != pval_trace.shape:
             raise ValueError("statistic_trace and pval_trace must have the same shape")
 
+        n = int(self.statistic_trace.size)
+        if n == 0:
+            raise ValueError("statistic_trace and pval_trace must be non-empty")
+
+        object.__setattr__(
+            self,
+            "n",
+            n,
+        )
         object.__setattr__(
             self,
             "statistic_trace",
