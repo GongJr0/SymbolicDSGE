@@ -23,10 +23,10 @@ class TestResult:
 class MCResult:
     test_name: str
     alpha: float64
-    n: int
     statistic_trace: NDArray[float64]
     pval_trace: NDArray[float64]
 
+    n: int = field(init=False)
     mean_statistic: float64 = field(init=False)
     mean_pval: float64 = field(init=False)
     rejection_rate: float64 = field(init=False)
@@ -37,6 +37,15 @@ class MCResult:
         if self.statistic_trace.shape != self.pval_trace.shape:
             raise ValueError("statistic_trace and pval_trace must have the same shape")
 
+        n = int(self.statistic_trace.size)
+        if n == 0:
+            raise ValueError("statistic_trace and pval_trace must be non-empty")
+
+        object.__setattr__(
+            self,
+            "n",
+            n,
+        )
         object.__setattr__(
             self,
             "mean_statistic",
