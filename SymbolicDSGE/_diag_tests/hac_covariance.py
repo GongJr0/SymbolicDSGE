@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 
 from numba import njit
 
-from typing import Literal, Callable, cast
+from typing import Literal, Callable
 
 # Andrews (1991) bandwidth constants for different kernels
 _C_BARTLETT = 1.1447
