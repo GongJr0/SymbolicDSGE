@@ -5,7 +5,42 @@ import pytest
 from scipy.stats import chi2
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
-from SymbolicDSGE._diag_tests.result import MCResult
+from SymbolicDSGE._diag_tests.result import MCResult, TestResult as DiagTestResult
+
+
+def test_test_result_computes_p_value_from_reference_distribution() -> None:
+    out = DiagTestResult(
+        test_name="wald",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.05),
+        statistic=np.float64(10.0),
+    )
+
+    assert out.pval == pytest.approx(chi2(df=2).sf(10.0))
+    assert out.is_significant()
+
+
+def test_test_result_to_dict_excludes_frozen_distribution() -> None:
+    out = DiagTestResult(
+        test_name="wald",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.05),
+        statistic=np.float64(10.0),
+    )
+
+    assert out.to_dict() == {
+        "test_name": "wald",
+        "dist": "chi2",
+        "df": np.float64(2.0),
+        "pval_method": "sf",
+        "alpha": np.float64(0.05),
+        "statistic": np.float64(10.0),
+        "pval": out.pval,
+    }
 
 
 def test_mc_result_derives_n_from_trace_length() -> None:
