@@ -1,0 +1,34 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: SymbolicDSGE
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Ege Güney
+    family-names: Kıymaç
+    email: guneykiymac@gmail.com
+    affiliation: University of Warsaw
+    orcid: 'https://orcid.org/0009-0000-4715-1226'
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20115402
+    description: Version 1.2.1 of SymbolicDSGE
+repository-code: 'https://github.com/GongJr0/SymbolicDSGE'
+url: 'https://gongjr0.github.io/SymbolicDSGE/'
+abstract: >-
+  A linear DSGE engine with a fully symbolic and modifiable
+  model backend. Includes symbolic regression-based equation
+  augmentation capabilities.
+keywords:
+  - DSGE
+  - dynamic programming
+  - symbolic computation
+  - rational expectations equilibrium
+license: MIT
+commit: 20531472d0b8df7f840b0d41c00cab096ad26bc2
+version: 1.2.1
+date-released: '2026-05-11'
