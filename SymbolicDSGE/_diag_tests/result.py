@@ -1,6 +1,10 @@
 from dataclasses import dataclass, asdict, field
+
+import numpy as np
 from numpy import float64, sqrt
 from numpy.typing import NDArray
+
+from .distributions import FrozenDistribution, PvalMethod, ReferenceDistribution
 
 
 @dataclass(frozen=True)
@@ -22,10 +26,14 @@ class TestResult:
 @dataclass(frozen=True)
 class MCResult:
     test_name: str
+    dist: ReferenceDistribution
+    df: float64
+    pval_method: PvalMethod
     alpha: float64
     statistic_trace: NDArray[float64]
-    pval_trace: NDArray[float64]
 
+    frozen_dist: FrozenDistribution = field(init=False, repr=False)
+    pval_trace: NDArray[float64] = field(init=False)
     n: int = field(init=False)
     mean_statistic: float64 = field(init=False)
     mean_pval: float64 = field(init=False)
@@ -34,12 +42,39 @@ class MCResult:
     statistic_se: float64 = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.statistic_trace.shape != self.pval_trace.shape:
+        statistic_trace = np.asarray(self.statistic_trace, dtype=np.float64)
+        if statistic_trace.ndim != 1:
+            raise ValueError("statistic_trace must be a 1D array")
+
+        n = int(statistic_trace.size)
+        if n == 0:
+            raise ValueError("statistic_trace must be non-empty")
+
+        if not isinstance(self.dist, ReferenceDistribution):
+            raise ValueError(f"Unsupported reference distribution: {self.dist}")
+
+        frozen_dist = self.dist.freeze(self.df)
+        pval_trace = np.asarray(
+            self.pval_method(frozen_dist, statistic_trace), dtype=np.float64
+        )
+        if statistic_trace.shape != pval_trace.shape:
             raise ValueError("statistic_trace and pval_trace must have the same shape")
 
-        n = int(self.statistic_trace.size)
-        if n == 0:
-            raise ValueError("statistic_trace and pval_trace must be non-empty")
+        object.__setattr__(
+            self,
+            "statistic_trace",
+            statistic_trace,
+        )
+        object.__setattr__(
+            self,
+            "frozen_dist",
+            frozen_dist,
+        )
+        object.__setattr__(
+            self,
+            "pval_trace",
+            pval_trace,
+        )
 
         object.__setattr__(
             self,
@@ -51,6 +86,7 @@ class MCResult:
             "mean_statistic",
             self.statistic_trace.mean(),
         )
+
         object.__setattr__(
             self,
             "mean_pval",
