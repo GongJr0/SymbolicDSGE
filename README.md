@@ -17,7 +17,7 @@
             <tr>
                 <th border-collapse="collapse" border-style="hidden"><a href="https://gongjr0.github.io/SymbolicDSGE/">Documentation</a></th>
                 <th><a href="https://pypi.org/project/SymbolicDSGE/">PyPI</a></th>
-                <th><a href="https://doi.org/10.5281/zenodo.20115401"><img src="https://zenodo.org/badge/1111411649.svg" alt="DOI"></a></th>
+                <th><a href="https://doi.org/10.5281/zenodo.20115401"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.20115401.svg" alt="DOI"></a></th>
                 <th><a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/tests-badge.svg" alt="tests"></a></th>
                 <th><a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/coverage-badge.svg" alt="coverage"></a></th>
                 <th><a href="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE"><img src="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE.svg" alt="wakatime"></a></th>
