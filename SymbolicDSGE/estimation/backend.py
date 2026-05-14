@@ -420,6 +420,7 @@ def evaluate_loglik(
             jitter=float(prepared_run.kf_jitter),
             symmetrize=prepared_run.kf_sym,
             return_shocks=False,
+            _store_history=False,
         )
         return float64(result.loglik)
 
@@ -439,6 +440,7 @@ def evaluate_loglik(
             symmetrize=prepared_run.kf_sym,
             return_shocks=False,
             compute_y_filt=False,
+            _store_history=False,
         )
         return float64(result.loglik)
 
@@ -513,6 +515,7 @@ def estimate_R_diag(
                 jitter=float(prepared.kf_jitter),
                 symmetrize=prepared.kf_sym,
                 return_shocks=False,
+                _store_history=False,
             )
             return float64(-run.loglik)
 
@@ -535,6 +538,7 @@ def estimate_R_diag(
                 symmetrize=prepared.kf_sym,
                 return_shocks=False,
                 compute_y_filt=False,
+                _store_history=False,
             )
             return float64(-run.loglik)
 
@@ -729,6 +733,7 @@ def estimate_R(
                 jitter=float(prepared.kf_jitter),
                 symmetrize=prepared.kf_sym,
                 return_shocks=False,
+                _store_history=False,
             )
             return float64(run.loglik)
 
@@ -747,6 +752,7 @@ def estimate_R(
             symmetrize=prepared.kf_sym,
             return_shocks=False,
             compute_y_filt=False,
+            _store_history=False,
         )
         return float64(run.loglik)
 
