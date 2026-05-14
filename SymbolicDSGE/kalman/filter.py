@@ -184,6 +184,7 @@ def _kalman_hot_loop(
     symmetrize: bool,
     jitter: float,
     return_shocks: bool = False,
+    _store_history: bool = True,
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
@@ -194,20 +195,23 @@ def _kalman_hot_loop(
     x_prev = x_0
     P_prev = P_0
 
-    x_pred = zeros((T, n), dtype=float64)
-    x_filt = zeros((T, n), dtype=float64)
+    history_T = T if _store_history else 0
+    shock_history_T = T if (return_shocks and _store_history) else 0
 
-    P_pred = zeros((T, n, n), dtype=float64)
-    P_filt = zeros((T, n, n), dtype=float64)
+    x_pred = zeros((history_T, n), dtype=float64)
+    x_filt = zeros((history_T, n), dtype=float64)
 
-    y_pred = zeros((T, m), dtype=float64)
-    y_filt = zeros((T, m), dtype=float64)
+    P_pred = zeros((history_T, n, n), dtype=float64)
+    P_filt = zeros((history_T, n, n), dtype=float64)
 
-    v = zeros((T, m), dtype=float64)
-    u = zeros((T, m), dtype=float64)
-    S_hist = zeros((T, m, m), dtype=float64)
+    y_pred = zeros((history_T, m), dtype=float64)
+    y_filt = zeros((history_T, m), dtype=float64)
 
-    eps_hat = zeros((T, k), dtype=float64)
+    v = zeros((history_T, m), dtype=float64)
+    u = zeros((history_T, m), dtype=float64)
+    S_hist = zeros((history_T, m, m), dtype=float64)
+
+    eps_hat = zeros((shock_history_T, k), dtype=float64)
 
     loglik = float64(0.0)
     const = m * np.log(2.0 * np.pi)
@@ -218,7 +222,9 @@ def _kalman_hot_loop(
 
     BQBT = _sym(B @ Q @ BT)
     In = eye(n, dtype=float64)
-    M = Q @ (BT @ CT)
+    M = zeros((k, m), dtype=float64)
+    if return_shocks and _store_history:
+        M = Q @ (BT @ CT)
 
     for t in range(T):
         x_t_pred = A @ x_prev
@@ -243,7 +249,6 @@ def _kalman_hot_loop(
         K_t = np.ascontiguousarray(K_tT.T)
 
         x_t_filt = x_t_pred + K_t @ v_t
-        y_t_filt = C @ x_t_filt + d
 
         KC = K_t @ C
         P_t_filt = (In - KC) @ P_t_pred @ (In - KC).T + K_t @ R @ K_tT
@@ -255,22 +260,25 @@ def _kalman_hot_loop(
         quad = float64(v_t @ S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
-        if return_shocks:
+        if return_shocks and _store_history:
             eps_hat[t] = M @ S_inv_v
 
-        x_pred[t] = x_t_pred
-        x_filt[t] = x_t_filt
+        if _store_history:
+            y_t_filt = C @ x_t_filt + d
 
-        P_pred[t] = P_t_pred
-        P_filt[t] = P_t_filt
+            x_pred[t] = x_t_pred
+            x_filt[t] = x_t_filt
 
-        y_pred[t] = y_t_pred
-        y_filt[t] = y_t_filt
+            P_pred[t] = P_t_pred
+            P_filt[t] = P_t_filt
 
-        v[t] = v_t
-        u[t] = u_t
+            y_pred[t] = y_t_pred
+            y_filt[t] = y_t_filt
 
-        S_hist[t] = S_t
+            v[t] = v_t
+            u[t] = u_t
+
+            S_hist[t] = S_t
 
         x_prev = x_t_filt
         P_prev = P_t_filt
@@ -335,6 +343,7 @@ def _ekf_hot_loop_python(
     jitter: float,
     compute_y_filt: bool,
     return_shocks: bool = False,
+    _store_history: bool = True,
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
@@ -346,20 +355,23 @@ def _ekf_hot_loop_python(
     P_prev = P_0
 
     # Outputs
-    x_pred = zeros((T, n), dtype=float64)
-    x_filt = zeros((T, n), dtype=float64)
+    history_T = T if _store_history else 0
+    shock_history_T = T if (return_shocks and _store_history) else 0
 
-    P_pred = zeros((T, n, n), dtype=float64)
-    P_filt = zeros((T, n, n), dtype=float64)
+    x_pred = zeros((history_T, n), dtype=float64)
+    x_filt = zeros((history_T, n), dtype=float64)
 
-    y_pred = zeros((T, m), dtype=float64)
-    y_filt = zeros((T, m), dtype=float64)
+    P_pred = zeros((history_T, n, n), dtype=float64)
+    P_filt = zeros((history_T, n, n), dtype=float64)
 
-    v = zeros((T, m), dtype=float64)
-    u = zeros((T, m), dtype=float64)
-    S = zeros((T, m, m), dtype=float64)
+    y_pred = zeros((history_T, m), dtype=float64)
+    y_filt = zeros((history_T, m), dtype=float64)
 
-    eps_hat = zeros((T, k), dtype=float64)
+    v = zeros((history_T, m), dtype=float64)
+    u = zeros((history_T, m), dtype=float64)
+    S = zeros((history_T, m, m), dtype=float64)
+
+    eps_hat = zeros((shock_history_T, k), dtype=float64)
 
     loglik = float64(0.0)
     const = m * np.log(2 * np.pi)
@@ -409,23 +421,24 @@ def _ekf_hot_loop_python(
         quad = float64(v_t @ S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
-        if compute_y_filt:
+        if compute_y_filt and _store_history:
             y_filt[t] = _call_extended_measurement(h, x_t_filt, calib_params).reshape(m)
 
         # Optional "shock estimate" (same form as linear KF)
-        if return_shocks:
+        if return_shocks and _store_history:
             M = Q @ (BT @ H_tT)  # mirrors linear case with C -> H_t
             eps_hat[t] = M @ S_inv_v
 
         # Store
-        x_pred[t] = x_t_pred
-        x_filt[t] = x_t_filt
-        P_pred[t] = P_t_pred
-        P_filt[t] = P_t_filt
-        y_pred[t] = y_t_pred
-        v[t] = v_t
-        u[t] = u_t
-        S[t] = S_t
+        if _store_history:
+            x_pred[t] = x_t_pred
+            x_filt[t] = x_t_filt
+            P_pred[t] = P_t_pred
+            P_filt[t] = P_t_filt
+            y_pred[t] = y_t_pred
+            v[t] = v_t
+            u[t] = u_t
+            S[t] = S_t
 
         x_prev = x_t_filt
         P_prev = P_t_filt
@@ -467,6 +480,7 @@ def _ekf_hot_loop_numba(
     jitter: float,
     compute_y_filt: bool,
     return_shocks: bool = False,
+    _store_history: bool = True,
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
@@ -477,20 +491,23 @@ def _ekf_hot_loop_numba(
     x_prev = x_0
     P_prev = P_0
 
-    x_pred = zeros((T, n), dtype=float64)
-    x_filt = zeros((T, n), dtype=float64)
+    history_T = T if _store_history else 0
+    shock_history_T = T if (return_shocks and _store_history) else 0
 
-    P_pred = zeros((T, n, n), dtype=float64)
-    P_filt = zeros((T, n, n), dtype=float64)
+    x_pred = zeros((history_T, n), dtype=float64)
+    x_filt = zeros((history_T, n), dtype=float64)
 
-    y_pred = zeros((T, m), dtype=float64)
-    y_filt = zeros((T, m), dtype=float64)
+    P_pred = zeros((history_T, n, n), dtype=float64)
+    P_filt = zeros((history_T, n, n), dtype=float64)
 
-    v = zeros((T, m), dtype=float64)
-    u = zeros((T, m), dtype=float64)
-    S = zeros((T, m, m), dtype=float64)
+    y_pred = zeros((history_T, m), dtype=float64)
+    y_filt = zeros((history_T, m), dtype=float64)
 
-    eps_hat = zeros((T, k), dtype=float64)
+    v = zeros((history_T, m), dtype=float64)
+    u = zeros((history_T, m), dtype=float64)
+    S = zeros((history_T, m, m), dtype=float64)
+
+    eps_hat = zeros((shock_history_T, k), dtype=float64)
 
     loglik = float64(0.0)
     const = m * np.log(2 * np.pi)
@@ -536,20 +553,21 @@ def _ekf_hot_loop_numba(
         quad = float64(v_t @ S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
-        if compute_y_filt:
+        if compute_y_filt and _store_history:
             y_filt[t] = h(x_t_filt, calib_params).reshape(m)
-        if return_shocks:
+        if return_shocks and _store_history:
             M = Q @ (BT @ H_tT)
             eps_hat[t] = M @ S_inv_v
 
-        x_pred[t] = x_t_pred
-        x_filt[t] = x_t_filt
-        P_pred[t] = P_t_pred
-        P_filt[t] = P_t_filt
-        y_pred[t] = y_t_pred
-        v[t] = v_t
-        u[t] = u_t
-        S[t] = S_t
+        if _store_history:
+            x_pred[t] = x_t_pred
+            x_filt[t] = x_t_filt
+            P_pred[t] = P_t_pred
+            P_filt[t] = P_t_filt
+            y_pred[t] = y_t_pred
+            v[t] = v_t
+            u[t] = u_t
+            S[t] = S_t
 
         x_prev = x_t_filt
         P_prev = P_t_filt
@@ -629,6 +647,7 @@ class KalmanFilter:
         return_shocks: bool = False,
         symmetrize: bool = True,
         jitter: float = 0.0,
+        _store_history: bool = True,
     ) -> FilterResult:
 
         # Get reals if needed
@@ -686,6 +705,7 @@ class KalmanFilter:
                 symmetrize,
                 jitter,
                 return_shocks,
+                _store_history,
             )
         except linalg.LinAlgError as exc:
             raise MatrixConditionError(float("inf")) from exc
@@ -716,7 +736,7 @@ class KalmanFilter:
             innov=v,
             std_innov=u,
             S=S,
-            eps_hat=eps_hat if return_shocks else None,
+            eps_hat=eps_hat if (return_shocks and _store_history) else None,
             loglik=loglik,
         )
 
@@ -736,6 +756,7 @@ class KalmanFilter:
         symmetrize: bool = True,
         jitter: float = 0.0,
         compute_y_filt: bool = True,
+        _store_history: bool = True,
     ) -> "FilterResult":
         """
         Extended Kalman Filter with a linear transition and nonlinear measurement:
@@ -850,6 +871,7 @@ class KalmanFilter:
                     jitter,
                     compute_y_filt,
                     return_shocks,
+                    _store_history,
                 )
             else:
                 err, err_info, out = _ekf_hot_loop_python(
@@ -869,6 +891,7 @@ class KalmanFilter:
                     jitter,
                     compute_y_filt,
                     return_shocks,
+                    _store_history,
                 )
         except linalg.LinAlgError as exc:
             raise MatrixConditionError(float("inf")) from exc
@@ -899,6 +922,6 @@ class KalmanFilter:
             innov=v,
             std_innov=u,
             S=S,
-            eps_hat=eps_hat if return_shocks else None,
+            eps_hat=eps_hat if (return_shocks and _store_history) else None,
             loglik=loglik,
         )

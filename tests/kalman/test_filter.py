@@ -130,6 +130,39 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     assert np.allclose(out.P_filt, np.transpose(out.P_filt, (0, 2, 1)))
 
 
+def test_run_linear_can_skip_history_storage_for_loglik_only_path():
+    A, B, C, d, Q, R = _linear_system_1d()
+    y = np.zeros((5, 1), dtype=float64)
+    x0 = np.array([2.0], dtype=float64)
+    P0 = np.array([[1.0]], dtype=float64)
+
+    full = KalmanFilter.run(A, B, C, d, Q, R, y, x0=x0, P0=P0)
+    minimal = KalmanFilter.run(
+        A,
+        B,
+        C,
+        d,
+        Q,
+        R,
+        y,
+        x0=x0,
+        P0=P0,
+        _store_history=False,
+    )
+
+    assert np.allclose(minimal.loglik, full.loglik)
+    assert minimal.x_pred.shape == (0, 1)
+    assert minimal.x_filt.shape == (0, 1)
+    assert minimal.P_pred.shape == (0, 1, 1)
+    assert minimal.P_filt.shape == (0, 1, 1)
+    assert minimal.y_pred.shape == (0, 1)
+    assert minimal.y_filt.shape == (0, 1)
+    assert minimal.innov.shape == (0, 1)
+    assert minimal.std_innov.shape == (0, 1)
+    assert minimal.S.shape == (0, 1, 1)
+    assert minimal.eps_hat is None
+
+
 def test_run_linear_return_shocks_and_complex_inputs():
     A, B, C, d, Q, R = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
@@ -188,6 +221,38 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
     assert np.allclose(extended.y_pred, linear.y_pred)
     assert np.allclose(extended.P_filt, linear.P_filt)
     assert np.allclose(extended.loglik, linear.loglik)
+
+
+def test_run_extended_can_skip_history_storage_for_loglik_only_path():
+    A, B, _, _, Q, R = _linear_system_1d()
+    y = np.zeros((5, 1), dtype=float64)
+    calib = np.array([], dtype=float64)
+
+    kwargs = dict(
+        A=A,
+        B=B,
+        h=lambda x: np.array([x], dtype=float64),
+        H_jac=lambda x: np.array([[1.0]], dtype=float64),
+        calib_params=calib,
+        Q=Q,
+        R=R,
+        y=y,
+        compute_y_filt=False,
+    )
+    full = KalmanFilter.run_extended(**kwargs)
+    minimal = KalmanFilter.run_extended(**kwargs, _store_history=False)
+
+    assert np.allclose(minimal.loglik, full.loglik)
+    assert minimal.x_pred.shape == (0, 1)
+    assert minimal.x_filt.shape == (0, 1)
+    assert minimal.P_pred.shape == (0, 1, 1)
+    assert minimal.P_filt.shape == (0, 1, 1)
+    assert minimal.y_pred.shape == (0, 1)
+    assert minimal.y_filt.shape == (0, 1)
+    assert minimal.innov.shape == (0, 1)
+    assert minimal.std_innov.shape == (0, 1)
+    assert minimal.S.shape == (0, 1, 1)
+    assert minimal.eps_hat is None
 
 
 def test_run_extended_compute_y_filt_false_and_return_shocks():

@@ -22,6 +22,7 @@ from ..bayesian.transforms.transform import Transform
 from ..core.compiled_model import CompiledModel
 from ..core.solver import DSGESolver
 from . import backend
+from .prior_program import PackedLogPrior, build_packed_logprior
 from .results import MCMCResult, OptimizationResult
 
 NDF = NDArray[np.float64]
@@ -187,6 +188,12 @@ class Estimator:
                 if hasattr(prior_obj, "transform"):
                     tr = cast(Transform, getattr(prior_obj, "transform"))
             self._param_transforms[name] = tr
+        self._packed_logprior: PackedLogPrior | None = build_packed_logprior(
+            priors=self.priors,
+            param_index=self._param_index,
+            matrix_blocks=self._matrix_blocks,
+            matrix_member_names=self._matrix_member_names,
+        )
         self._warning_signal_count = 0
 
     def _requested_param_keys(
@@ -662,16 +669,9 @@ class Estimator:
         params = self.theta_to_params(theta)
         return self._loglik_from_params(params)
 
-    def logprior(self, theta: NDF) -> float64:
+    def _logprior_python(self, theta: NDF) -> float64:
         if self.priors is None:
             return float64(0.0)
-        theta = asarray(theta, dtype=float64)
-        if theta.ndim != 1:
-            raise ValueError("theta must be a 1D array.")
-        if theta.shape[0] != len(self.param_names):
-            raise ValueError(
-                f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
-            )
         lp = float64(0.0)
         for block in self._matrix_blocks.values():
             theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
@@ -694,6 +694,23 @@ class Estimator:
                 raise KeyError(f"Prior specified for unknown parameter '{name}'.")
             lp += float64(prior.logpdf(z))
         return lp
+
+    def logprior(self, theta: NDF) -> float64:
+        if self.priors is None:
+            return float64(0.0)
+        theta = asarray(theta, dtype=float64)
+        if theta.ndim != 1:
+            raise ValueError("theta must be a 1D array.")
+        if theta.shape[0] != len(self.param_names):
+            raise ValueError(
+                f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
+            )
+        packed = self._packed_logprior
+        if packed is not None and packed.matches(self.priors):
+            lp_fast = float64(packed.logpdf(theta))
+            if not np.isnan(lp_fast):
+                return lp_fast
+        return self._logprior_python(theta)
 
     def logpost(self, theta: NDF) -> float64:
         return float64(self.loglik(theta) + self.logprior(theta))
