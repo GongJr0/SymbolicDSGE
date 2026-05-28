@@ -1,17 +1,5 @@
-from .mc_constructs import (
-    ContextOp,
-    DataGenOp,
-    DataGenReturn,
-    FilterOp,
-    MCContext,
-    MCData,
-    MCFailure,
-    MCPipeline,
-    MCPipelineResult,
+from .config import (
     MCReferenceConstruct,
-    MCStep,
-    OpType,
-    TestOp,
     raw_data_datagen,
     raw_data_step,
     reference_filter_step,
@@ -21,6 +9,20 @@ from .mc_constructs import (
     simulation_step,
     transform_step,
     wald_test_step,
+)
+from .core import MCPipeline
+from .mc_constructs import (
+    ContextOp,
+    DataGenOp,
+    DataGenReturn,
+    FilterOp,
+    MCContext,
+    MCData,
+    MCFailure,
+    MCPipelineResult,
+    MCStep,
+    OpType,
+    TestOp,
 )
 
 __all__ = [
