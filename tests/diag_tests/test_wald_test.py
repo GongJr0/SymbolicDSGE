@@ -165,7 +165,7 @@ def test_wald_covariance_hac_matches_manual_vech_statistic() -> None:
     assert out.test_name == "wald_covariance_hac"
     assert out.pval_method is PvalMethod.SF
     assert out.df == 3
-    assert out.statistic == np.float64(manual_stat)
+    np.testing.assert_allclose(out.statistic, manual_stat, rtol=1e-14, atol=1e-14)
 
 
 def test_wald_second_moment_hac_matches_manual_vech_statistic() -> None:
@@ -183,7 +183,7 @@ def test_wald_second_moment_hac_matches_manual_vech_statistic() -> None:
     assert out.test_name == "wald_second_moment_hac"
     assert out.pval_method is PvalMethod.SF
     assert out.df == 3
-    assert out.statistic == np.float64(manual_stat)
+    np.testing.assert_allclose(out.statistic, manual_stat, rtol=1e-14, atol=1e-14)
 
 
 def test_wald_quadratic_hac_rejects_non_symmetric_targets() -> None:
