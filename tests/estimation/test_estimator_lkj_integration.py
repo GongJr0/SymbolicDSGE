@@ -185,6 +185,171 @@ def _run_dynamic_r_adaptive_chain(est: Estimator, *, steps: int, seed: int):
     return current, history, cov
 
 
+def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden(
+    dense_lkj_bundle,
+):
+    prior_spec = _notebook_like_prior_spec()
+    est = Estimator(
+        solver=dense_lkj_bundle["solver"],
+        compiled=dense_lkj_bundle["compiled"],
+        y=dense_lkj_bundle["y"],
+        steady_state=dense_lkj_bundle["steady"],
+        estimated_params=list(prior_spec.keys()),
+        priors=prior_spec,
+    )
+    theta0 = est.theta0()
+    theta = theta0 + np.random.default_rng(20260513).normal(
+        loc=0.0,
+        scale=0.15,
+        size=theta0.shape[0],
+    )
+
+    expected_logprior = -3.677756133346315
+    expected_loglik = -89.36502293810241
+    expected_logpost = -93.04277907144873
+
+    assert est._packed_logprior is not None
+    assert float(est._logprior_python(theta)) == pytest.approx(
+        expected_logprior, rel=1e-13, abs=1e-13
+    )
+    assert float(est._packed_logprior.logpdf(theta)) == pytest.approx(
+        expected_logprior, rel=1e-13, abs=1e-13
+    )
+    assert float(est.logprior(theta)) == pytest.approx(
+        expected_logprior, rel=1e-13, abs=1e-13
+    )
+    assert float(est.loglik(theta)) == pytest.approx(
+        expected_loglik, rel=1e-13, abs=1e-13
+    )
+    assert float(est.logpost(theta)) == pytest.approx(
+        expected_logpost, rel=1e-13, abs=1e-13
+    )
+
+
+def test_seeded_mcmc_output_is_unchanged_by_packed_logprior(dense_lkj_bundle):
+    prior_spec = _notebook_like_prior_spec()
+    estimator_kwargs = {
+        "solver": dense_lkj_bundle["solver"],
+        "compiled": dense_lkj_bundle["compiled"],
+        "y": dense_lkj_bundle["y"],
+        "steady_state": dense_lkj_bundle["steady"],
+        "estimated_params": list(prior_spec.keys()),
+        "priors": prior_spec,
+    }
+    py_est = Estimator(**estimator_kwargs)
+    fast_est = Estimator(**estimator_kwargs)
+    py_est._packed_logprior = None
+
+    mcmc_kwargs = {
+        "n_draws": 4,
+        "burn_in": 3,
+        "thin": 1,
+        "random_state": 20260514,
+        "adapt": False,
+        "proposal_scale": 0.03,
+        "update_R_in_iterations": True,
+    }
+    py_out = py_est.mcmc(**mcmc_kwargs)
+    fast_out = fast_est.mcmc(**mcmc_kwargs)
+
+    expected_samples = np.asarray(
+        [
+            [
+                0.9722788490944664,
+                0.8385181297289465,
+                0.8326100862288526,
+                0.8598170308065666,
+                1.8517072756747124,
+                0.26936606575372635,
+                0.5661907724543085,
+                1.7787251193982609,
+                0.2386719271508857,
+                0.17505842082271406,
+                0.17876050420656922,
+                0.6789734114069728,
+                -0.0004710042864448793,
+                -0.0014058872143055178,
+                0.08751338729542235,
+            ],
+            [
+                0.9723940904867348,
+                0.8323050546877759,
+                0.8300687154618204,
+                0.8606827345325954,
+                1.807972943982433,
+                0.256805941791019,
+                0.5661734018326098,
+                1.7070842554964387,
+                0.23236807567820428,
+                0.16801195362701535,
+                0.1818855913012291,
+                0.6936644013044216,
+                0.006538316562136784,
+                0.03655168248699781,
+                0.12274007888660263,
+            ],
+            [
+                0.9719231902434429,
+                0.8337738358666533,
+                0.8333052437168955,
+                0.8610069205371012,
+                1.8606881878280164,
+                0.2619928822327988,
+                0.5486651185647973,
+                1.7419756612342272,
+                0.2546777303992511,
+                0.17717921407193218,
+                0.17614663838311484,
+                0.6756188960870789,
+                -0.012557728176324509,
+                0.024686247648120802,
+                0.11548964952702162,
+            ],
+            [
+                0.9720244529291886,
+                0.8329297034604359,
+                0.8294118045806201,
+                0.8606168798037788,
+                1.8701427668950312,
+                0.24573616885655347,
+                0.5554386108553453,
+                1.765071341820583,
+                0.24289569753039042,
+                0.1732404134364854,
+                0.1764071901730661,
+                0.6797729999463173,
+                -0.009886294940591785,
+                0.008945837745324613,
+                0.10588893108287337,
+            ],
+        ],
+        dtype=np.float64,
+    )
+    expected_logpost = np.asarray(
+        [
+            -89.11289967919815,
+            -89.56901008861455,
+            -89.61414761191483,
+            -89.43170424868838,
+        ],
+        dtype=np.float64,
+    )
+
+    np.testing.assert_allclose(py_out.samples, expected_samples, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(fast_out.samples, expected_samples, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(
+        py_out.logpost_trace, expected_logpost, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        fast_out.logpost_trace,
+        expected_logpost,
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert fast_out.accept_rate == pytest.approx(py_out.accept_rate)
+    assert fast_out.accept_rate == pytest.approx(0.8571428571428571)
+
+
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
     prior_spec = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     est = Estimator(
