@@ -110,6 +110,25 @@ def jit_wald_hac_stat(
     return out
 
 
+@njit(cache=True)
+def jit_symmetric_outer_prod_2dim(x: NDF, out: NDF) -> int64:
+    n = x.shape[0]
+    p = x.shape[1]
+    q = p * (p + 1) // 2
+
+    if out.shape[0] != n or out.shape[1] != q:
+        return ERR_BAD_SHAPE
+
+    for t in range(n):
+        k = 0
+        for i in range(p):
+            x_i = x[t, i]
+            for j in range(i, p):
+                out[t, k] = x_i * x[t, j]
+                k += 1
+    return OK
+
+
 # ---- Preconfigured Mean and Covariance Tests ---
 
 
@@ -119,6 +138,7 @@ def wald_mean_hac(
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
     bandwidth: int | Literal["andrews", "wooldridge", "auto"] | None = "auto",
     alpha: float = 0.05,
+    _auto_pval: bool = True,
 ) -> TestResult:
     """
     HAC-robust Wald test for H0: E[g_t] = target.
@@ -171,6 +191,7 @@ def wald_mean_hac(
         statistic=stat,
         pval_method=PvalMethod.SF,
         alpha=float64(alpha),
+        _auto_pval=_auto_pval,
     )
     return res
 
@@ -181,6 +202,7 @@ def wald_covariance_hac(
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
     bandwidth: int | Literal["andrews", "wooldridge", "auto"] | None = "auto",
     alpha: float = 0.05,
+    _auto_pval: bool = True,
 ) -> TestResult:
     """
     HAC-robust Wald test for H0: Cov[g_t] = target.
@@ -217,8 +239,11 @@ def wald_covariance_hac(
     jit_fill_centered(g, mean, centered)
 
     g_cov = np.empty((n, q), dtype=float64)
-    for i in range(n):
-        g_cov[i] = np.outer(centered[i], centered[i])[vech_idx]
+    err = jit_symmetric_outer_prod_2dim(centered, g_cov)
+    if err != OK:
+        raise ValueError(
+            f"Failed to compute symmetric outer product with error code {err}"
+        )
 
     g_cov_mean = np.empty(q, dtype=float64)
     jit_fill_mean_ax0(g_cov, g_cov_mean)
@@ -248,6 +273,7 @@ def wald_covariance_hac(
         statistic=stat,
         pval_method=PvalMethod.SF,
         alpha=float64(alpha),
+        _auto_pval=_auto_pval,
     )
     return res
 
@@ -258,6 +284,7 @@ def wald_second_moment_hac(
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
     bandwidth: int | Literal["andrews", "wooldridge", "auto"] | None = "auto",
     alpha: float = 0.05,
+    _auto_pval: bool = True,
 ) -> TestResult:
     """
     HAC-robust Wald test for H0: E[g_t g_t'] = target.
@@ -289,8 +316,11 @@ def wald_second_moment_hac(
     q = target_vec.shape[0]
 
     g_second_moment = np.empty((n, q), dtype=float64)
-    for i in range(n):
-        g_second_moment[i] = np.outer(g[i], g[i])[vech_idx]
+    err = jit_symmetric_outer_prod_2dim(g, g_second_moment)
+    if err != OK:
+        raise ValueError(
+            f"Failed to compute symmetric outer product with error code {err}"
+        )
 
     g_second_moment_mean = np.empty(q, dtype=float64)
     jit_fill_mean_ax0(g_second_moment, g_second_moment_mean)
@@ -320,5 +350,6 @@ def wald_second_moment_hac(
         statistic=stat,
         pval_method=PvalMethod.SF,
         alpha=float64(alpha),
+        _auto_pval=_auto_pval,
     )
     return res
