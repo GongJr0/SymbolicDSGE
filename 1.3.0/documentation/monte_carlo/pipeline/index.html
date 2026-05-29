@@ -2049,7 +2049,7 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">MCPipeline</span><span class="p">(</span><span class="n">steps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">MCStep</span><span class="p">])</span>
 </span></code></pre></div>
 <p><code>MCPipeline</code> stores the ordered operations executed inside each Monte Carlo replication.</p>
-<p><strong>Rules:</strong></p>
+<p><strong>Contract:</strong></p>
 <table>
 <thead>
 <tr>
@@ -2060,15 +2060,11 @@
 <tbody>
 <tr>
 <td style="text-align: left;">One data-generation step</td>
-<td style="text-align: right;">The first step must have <code>op_type=OpType.DATAGEN</code>.</td>
-</tr>
-<tr>
-<td style="text-align: left;">No later data-generation steps</td>
-<td style="text-align: right;">Only one <code>DATAGEN</code> step is supported.</td>
+<td style="text-align: right;">The first step must have <code>op_type=OpType.DATAGEN</code>. Later steps cannot generate data once <code>DATAGEN</code> is performed.</td>
 </tr>
 <tr>
 <td style="text-align: left;">Unique step names</td>
-<td style="text-align: right;">Each step name must be unique because names are used as payload and result keys.</td>
+<td style="text-align: right;">Names are used as payload and result keys.</td>
 </tr>
 <tr>
 <td style="text-align: left;">Per-replication payloads</td>
