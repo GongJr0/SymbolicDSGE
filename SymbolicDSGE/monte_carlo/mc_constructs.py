@@ -1,125 +1,176 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any, Callable, Literal, Mapping, Protocol, Union
+
+import numpy as np
+from numpy import float64
+from numpy.typing import NDArray
+
+from .._diag_tests.result import MCResult, TestResult
+from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
 
-import numpy as np
-from numpy import float64, ndarray
-from numpy.typing import NDArray
-
-from typing import TypedDict, Unpack, Mapping, Union, Callable
-from dataclasses import dataclass, asdict
-
 NDF = NDArray[float64]
+NDB = NDArray[np.bool_]
+ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
+ShockMapping = Mapping[str, ShockValue]
+SeedIncrement = Union[int, Literal["auto"]]
 
 
-class SimSpec(TypedDict):
-    shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None
-    shock_scale: float | float64
-    x0: ndarray | None
-    observables: bool
+class OpType(StrEnum):
+    DATAGEN = "datagen"
+    TRANSFORM = "transform"
+    FILTER = "filter"
+    TEST = "test"
+    POSTPROC = "postproc"
 
 
-class SimKwargs(TypedDict):
-    T: int
-    shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None
-    shock_scale: float | float64
-    x0: ndarray | None
-    observables: bool
+@dataclass(frozen=True)
+class MCData:
+    """Standard data payload generated for one Monte Carlo replication."""
+
+    states: NDF | None = None
+    observables: NDF | None = None
+    n_exog: int = -1
+    raw: Mapping[str, NDF] = field(default_factory=dict)
+    observable_names: tuple[str, ...] = ()
 
 
-_DEFAULT_SIM_SPEC: SimSpec = {
-    "shocks": None,
-    "shock_scale": 1.0,
-    "x0": None,
-    "observables": True,
-}
+@dataclass(frozen=True)
+class DataGenReturn:
+    """Legacy simulation-data container kept for compatibility."""
+
+    state_mat: NDF | None
+    obs_mat: NDF | None
+    n_exog: int
 
 
 @dataclass
-class DataGenReturn:
-    """Data return type compatible with both simulated data and Kalman filter output."""
+class MCContext:
+    rep_idx: int
+    reference: SolvedModel
+    dgp: SolvedModel | None
+    data: MCData | None = None
+    payloads: dict[str, Any] = field(default_factory=dict)
+    results: dict[str, TestResult] = field(default_factory=dict)
 
-    state_mat: NDF
-    obs_mat: NDF | None
-    n_exog: int  # [:n_exog] to get exogenous shocks by convention.
-
-
-class MCReferenceConstruct:
-    """
-    Construct container for Monte Carlo reference data generation via simulation of a solved model.
-    """
-
-    def __init__(self, model: SolvedModel, T: int, N: int) -> None:
-        self._model = model
-        self._T = T
-        self._N = N
-
-    def _data_from_sim(self, **spec: Unpack[SimSpec]) -> DataGenReturn:
-        _spec = _DEFAULT_SIM_SPEC | spec
-        _kwargs: SimKwargs = {
-            "T": self.T,
-            **_spec,
-        }
-        sim_data = self.model.sim(**_kwargs)
-
-        # Collect states
-        states = sim_data["_X"]
-
-        # Get observables
-        obs_names = self.model.compiled.observable_names  # list[str] in canonical order
-        obs_mat = np.zeros((self.T, len(obs_names))) if _spec["observables"] else None
-        if obs_mat is not None:
-            for i, obs in enumerate(obs_names):
-                obs_mat[:, i] = sim_data[obs]
-
-        n_exog = self.model.compiled.n_exog
-        return DataGenReturn(
-            state_mat=states,
-            obs_mat=obs_mat,
-            n_exog=n_exog,
-        )
-
-    @property
-    def model(self) -> SolvedModel:
-        return self._model
-
-    @property
-    def T(self) -> int:
-        return self._T
-
-    @property
-    def N(self) -> int:
-        return self._N
-
-    class DataGeneratingCallable:
-        """Simple Callable wrapper for a function accepting"""
-
-        def __init__(
-            self, func: Callable[[int], tuple[NDF, NDF | None]], T: int, N: int
-        ) -> None:
-            self._func = func
-            self._T = T
-            self._N = N
-
-        def __call__(self) -> DataGenReturn:
-            state_mat, obs_mat = self.func(self.T)
-            n_exog = (
-                -1
-            )  # n_exog is not applicable when a general process instead of a model is being called.
-
-            return DataGenReturn(
-                state_mat=state_mat,
-                obs_mat=obs_mat,
-                n_exog=n_exog,
+    def require_data(self) -> MCData:
+        if self.data is None:
+            raise ValueError(
+                "MC context has no generated data. Add a DATAGEN step first."
             )
+        return self.data
 
-        @property
-        def func(self) -> Callable[[int], tuple[NDF, NDF | None]]:
-            return self._func
+    def require_payload(self, key: str) -> Any:
+        if key not in self.payloads:
+            raise KeyError(f"MC context payload '{key}' is not available.")
+        return self.payloads[key]
 
-        @property
-        def T(self) -> int:
-            return self._T
 
-        @property
-        def N(self) -> int:
-            return self._N
+class DataGenOp(Protocol):
+    def __call__(
+        self,
+        *,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        rep_idx: int,
+        **kwargs: Any,
+    ) -> MCData: ...
+
+
+class ContextOp(Protocol):
+    def __call__(
+        self,
+        *,
+        context: MCContext,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        rep_idx: int,
+        **kwargs: Any,
+    ) -> Any: ...
+
+
+class FilterOp(Protocol):
+    def __call__(
+        self,
+        *,
+        context: MCContext,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        rep_idx: int,
+        **kwargs: Any,
+    ) -> FilterResult: ...
+
+
+class TestOp(Protocol):
+    def __call__(
+        self,
+        *,
+        context: MCContext,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        rep_idx: int,
+        **kwargs: Any,
+    ) -> TestResult: ...
+
+
+@dataclass(frozen=True)
+class MCStep:
+    name: str
+    op_type: OpType
+    func: Callable[..., Any]
+    kwargs: Mapping[str, Any] = field(default_factory=dict)
+    store_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("MCStep name must be non-empty.")
+        object.__setattr__(self, "op_type", OpType(self.op_type))
+        object.__setattr__(self, "kwargs", dict(self.kwargs))
+
+    @property
+    def output_key(self) -> str:
+        return self.store_key if self.store_key is not None else self.name
+
+
+@dataclass(frozen=True)
+class MCFailure:
+    rep_idx: int
+    step_name: str
+    error_type: str
+    message: str
+
+
+@dataclass(frozen=True)
+class MCPipelineResult:
+    n_rep: int
+    n_successful: int
+    summaries: Mapping[str, MCResult]
+    test_results: Mapping[str, tuple[TestResult, ...]] | None
+    payloads: tuple[Mapping[str, Any], ...] | None
+    contexts: tuple[MCContext, ...] | None
+    failures: tuple[MCFailure, ...] = ()
+
+    @property
+    def succeeded(self) -> bool:
+        return len(self.failures) == 0
+
+    @property
+    def statistic_traces(self) -> Mapping[str, NDF]:
+        return {
+            name: summary.statistic_trace for name, summary in self.summaries.items()
+        }
+
+    @property
+    def pval_traces(self) -> Mapping[str, NDF]:
+        return {name: summary.pval_trace for name, summary in self.summaries.items()}
+
+    @property
+    def rejection_traces(self) -> Mapping[str, NDB]:
+        return {
+            name: np.asarray(summary.pval_trace < summary.alpha, dtype=bool)
+            for name, summary in self.summaries.items()
+        }

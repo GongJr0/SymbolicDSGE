@@ -34,36 +34,60 @@ class TestResult:
     pval_method: PvalMethod
     alpha: float64
     statistic: float64
+    _auto_pval: bool = field(default=True, repr=False, compare=False)
 
-    frozen_dist: FrozenDistribution = field(init=False, repr=False)
-    pval: float64 = field(init=False)
+    _frozen_dist: FrozenDistribution | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
+    _pval: float64 | None = field(init=False, default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         statistic = float64(self.statistic)
+        object.__setattr__(self, "statistic", statistic)
+
+        if self._auto_pval:
+            self.compute_pval()
+
+    @property
+    def frozen_dist(self) -> FrozenDistribution:
+        if self._frozen_dist is None:
+            self.compute_pval()
+        frozen_dist = self._frozen_dist
+        if frozen_dist is None:
+            raise RuntimeError("p-value computation failed to freeze distribution")
+        return frozen_dist
+
+    @property
+    def pval(self) -> float64:
+        if self._pval is None:
+            return self.compute_pval()
+        return self._pval
+
+    def compute_pval(self) -> float64:
+        if self._pval is not None:
+            return self._pval
+
         frozen_dist, pval = _compute_pvalues(
             self.dist,
             self.df,
             self.pval_method,
-            statistic,
+            self.statistic,
         )
         if pval.shape != ():
             raise ValueError("scalar statistic must produce a scalar p-value")
 
         object.__setattr__(
             self,
-            "statistic",
-            statistic,
-        )
-        object.__setattr__(
-            self,
-            "frozen_dist",
+            "_frozen_dist",
             frozen_dist,
         )
+        pval_scalar = float64(pval.item())
         object.__setattr__(
             self,
-            "pval",
-            float64(pval.item()),
+            "_pval",
+            pval_scalar,
         )
+        return pval_scalar
 
     def is_significant(self, threshold: float | float64 | None = None) -> bool:
         if threshold is None:

@@ -22,6 +22,26 @@ def test_test_result_computes_p_value_from_reference_distribution() -> None:
     assert out.is_significant()
 
 
+def test_test_result_can_defer_p_value_until_requested() -> None:
+    out = DiagTestResult(
+        test_name="wald",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.05),
+        statistic=np.float64(10.0),
+        _auto_pval=False,
+    )
+
+    assert out._pval is None
+    assert out._frozen_dist is None
+
+    assert out.compute_pval() == pytest.approx(chi2(df=2).sf(10.0))
+    assert out._pval == pytest.approx(chi2(df=2).sf(10.0))
+    assert out._frozen_dist is not None
+    assert out.pval == pytest.approx(chi2(df=2).sf(10.0))
+
+
 def test_test_result_to_dict_excludes_frozen_distribution() -> None:
     out = DiagTestResult(
         test_name="wald",
