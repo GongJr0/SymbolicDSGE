@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import sympy as sp
 
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.hessian_validator import HessianValidator
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.hessian_validator import HessianValidator
 
 
 def _validator(mode: str) -> HessianValidator:

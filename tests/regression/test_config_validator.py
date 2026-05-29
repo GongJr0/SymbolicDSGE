@@ -2,8 +2,8 @@
 import sympy as sp
 import pytest
 
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.config_validator import (
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.config_validator import (
     ConfigValidator,
     RestrictedBehaviorWarning,
 )

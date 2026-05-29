@@ -3,7 +3,7 @@ from .symbolic_regression import SymbolicRegressor
 from .model_parametrizer import ModelParametrizer
 from .fit_result import FitResult
 
-from ..kalman.filter import FilterResult
+from ...kalman.filter import FilterResult
 
 from numpy.typing import NDArray
 from numpy import float64
@@ -14,7 +14,7 @@ from pandas import DataFrame
 from typing import TYPE_CHECKING, TypeAlias, Literal, cast
 
 if TYPE_CHECKING:
-    from ..core.solved_model import SolvedModel
+    from ...core.solved_model import SolvedModel
 
 NDF: TypeAlias = NDArray[float64]
 

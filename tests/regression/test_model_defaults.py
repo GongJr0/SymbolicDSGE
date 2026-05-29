@@ -2,9 +2,9 @@
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.regression.built_in_op_container import BuiltInOpContainer
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.model_defaults import (
+from SymbolicDSGE.regression.sr.built_in_op_container import BuiltInOpContainer
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.model_defaults import (
     CustomOp,
     OpType,
     ParameterCompatibilityError,

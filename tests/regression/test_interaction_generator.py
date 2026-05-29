@@ -2,8 +2,8 @@
 import sympy as sp
 import pytest
 
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.interaction_generator import InteractionGenerator
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.interaction_generator import InteractionGenerator
 
 
 def test_normalize_names_accepts_strings_symbols_and_functions():

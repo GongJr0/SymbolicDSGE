@@ -7,12 +7,12 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE.kalman.filter import FilterResult
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.model_defaults import PySRParams
-from SymbolicDSGE.regression.model_parametrizer import ModelParametrizer
-from SymbolicDSGE.regression.fit_result import FitResult
-from SymbolicDSGE.regression.sr_interface import SRInterface
-from SymbolicDSGE.regression.symbolic_regression import SymbolicRegressor
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.model_defaults import PySRParams
+from SymbolicDSGE.regression.sr.model_parametrizer import ModelParametrizer
+from SymbolicDSGE.regression.sr.fit_result import FitResult
+from SymbolicDSGE.regression.sr.sr_interface import SRInterface
+from SymbolicDSGE.regression.sr.symbolic_regression import SymbolicRegressor
 
 
 class _BuiltinParametrizer(ModelParametrizer):

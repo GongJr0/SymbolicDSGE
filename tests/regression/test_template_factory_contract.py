@@ -2,8 +2,8 @@
 import sympy as sp
 import pytest
 
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.template_factory import (
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.template_factory import (
     MissingExpressionError,
     TemplateFactory,
 )

@@ -1,8 +1,8 @@
 # type: ignore
 import sympy as sp
 
-from SymbolicDSGE.regression.config import ConstantFiltering, TemplateConfig
-from SymbolicDSGE.regression.constant_handler import ConstantHandler
+from SymbolicDSGE.regression.sr.config import ConstantFiltering, TemplateConfig
+from SymbolicDSGE.regression.sr.constant_handler import ConstantHandler
 
 
 def test_keep_strategy_returns_original_expression():

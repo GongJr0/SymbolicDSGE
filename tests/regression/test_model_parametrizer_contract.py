@@ -2,9 +2,9 @@
 import sympy as sp
 import pytest
 
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.model_defaults import PySRParams
-from SymbolicDSGE.regression.model_parametrizer import (
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.model_defaults import PySRParams
+from SymbolicDSGE.regression.sr.model_parametrizer import (
     ModelParametrizer,
     _normalize_variables,
 )
