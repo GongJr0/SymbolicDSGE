@@ -6,7 +6,7 @@ tags:
 # Monte Carlo Pipeline Guide
 
 ??? tip "__TL;DR__"
-    You can find a demonstration notebook [here](../assets/monte_carlo_guide.ipynb).
+    You can find a demonstration notebook [here](../assets/monte_carlo.ipynb).
 
 ???+ warning "Read the Quickstart and Kalman Guides"
     This guide assumes familiarity with `SolvedModel.sim(...)`, `Shock`, and `SolvedModel.kalman(...)`.
