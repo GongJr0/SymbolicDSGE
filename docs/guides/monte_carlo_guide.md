@@ -47,8 +47,8 @@ reference = solver.solve(compiled, steady_state=steady_state)
 # Change parameters and re-compile to get the DGP model
 dgp_params = {str(k): v for k, v in model.calibration.parameters.items()} # (3)!
 
-dgp_params["rho_g"] = 0.90 # AR(1) persistence param
-dgp_params["rho_z"] = 0.75 # AR(1) persistence param
+dgp_params["rho_g"] = 0.90 # AR persistence param
+dgp_params["rho_z"] = 0.75 # AR persistence param
 
 dgp = solver.solve(
     compiled,
