@@ -1,11 +1,13 @@
 [project]
 name = "SymbolicDSGE"
-version = "1.2.1"
+version = "1.3.0"
 description = "A diagnostic symbolic adjustment layer for simple DSGE models. Features a built-in linearized DSGE engine constructed from symbolic expressions. Functionality is included to regress on measurement equations with symbolic function discovery using Kalman Filter innovations. The library is designed to be a diagnostic tool to provide isight into potential model misspecifications through said mesaurement regressions."
 authors = [
     {name = "Ege Güney Kıymaç", email = "guneykiymac@gmail.com"}
 ]
 readme = "README.md"
+license = "MIT"
+keywords = ["DSGE", "symbolic", "measurement augmentation", "model diagnostics", "Kalman Filter", "function discovery"]
 requires-python = ">=3.13"
 dependencies = [
     "matplotlib>=3.10.9",
@@ -50,6 +52,7 @@ dev = [
     "jupyter>=1.1.1",
     "jupytext>=1.19.1",
     "pip>=26.0.1",
+    "jupyterlab-execute-time>=3.3.0",
 ]
 
 [build-system]
