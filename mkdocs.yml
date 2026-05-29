@@ -165,6 +165,12 @@ nav:
       - Shock: documentation/Shock.md
       - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
+      - Monte Carlo:
+          - Overview: documentation/monte_carlo/index.md
+          - MCPipeline: documentation/monte_carlo/pipeline.md
+          - Core Containers: documentation/monte_carlo/core_containers.md
+          - Built-In Steps: documentation/monte_carlo/built_in_steps.md
+          - Result Access: documentation/monte_carlo/result_access.md
       - Prior Specification:
           - Prior: documentation/prior_spec/Prior.md
           - Distributions:
