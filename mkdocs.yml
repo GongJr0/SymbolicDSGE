@@ -155,6 +155,7 @@ nav:
       - Quick Start: guides/quickstart.md
       - Kalman Filter Configuration Guide: guides/kalman_config_guide.md
       - Estimation Guide: guides/estimation_guide.md
+      - Monte Carlo Guide: guides/monte_carlo_guide.md
   - Documentation:
       - ModelConfig: documentation/ModelConfig.md
       - ModelParser: documentation/ModelParser.md
