@@ -10,13 +10,12 @@ class MCPipeline(steps: Sequence[MCStep])
 
 `MCPipeline` stores the ordered operations executed inside each Monte Carlo replication.
 
-__Rules:__
+__Contract:__
 
 | __Rule__ | __Description__ |
 |:---------|----------------:|
-| One data-generation step | The first step must have `op_type=OpType.DATAGEN`. |
-| No later data-generation steps | Only one `DATAGEN` step is supported. |
-| Unique step names | Each step name must be unique because names are used as payload and result keys. |
+| One data-generation step | The first step must have `op_type=OpType.DATAGEN`. Later steps cannot generate data once `DATAGEN` is performed.|
+| Unique step names | Names are used as payload and result keys. |
 | Per-replication payloads | Steps may pass results through `MCContext.payloads` inside the same replication. Aggregate summaries are created after all successful replications finish. |
 
 __Methods:__
