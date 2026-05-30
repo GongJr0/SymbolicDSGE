@@ -43,10 +43,22 @@ class PvalMethod(Enum):
 
 class ReferenceDistribution(Enum):
     CHI2 = "chi2"
+    F = "f"
+    t = "t"
 
-    def freeze(self, df: FloatScalar) -> FrozenDistribution:
-        from scipy.stats import chi2
+    def freeze(self, *df: FloatScalar) -> FrozenDistribution:
+        match self:
+            case ReferenceDistribution.CHI2:
+                from scipy.stats import chi2
 
-        if self is ReferenceDistribution.CHI2:
-            return chi2(df=df)
-        raise ValueError(f"Unsupported reference distribution: {self}")
+                return chi2(*df)
+            case ReferenceDistribution.F:
+                from scipy.stats import f
+
+                return f(*df)
+            case ReferenceDistribution.t:
+                from scipy.stats import t
+
+                return t(*df)
+            case _:
+                raise ValueError(f"Unsupported reference distribution: {self}")
