@@ -15,10 +15,12 @@ from SymbolicDSGE.monte_carlo import (
     OpType,
     raw_data_step,
     reference_filter_step,
+    regression_step,
     simulation_step,
     transform_step,
     wald_test_step,
 )
+from SymbolicDSGE.regression.ols import OLSResult
 
 
 class _FakeSolvedModel:
@@ -332,6 +334,102 @@ def test_transform_step_returning_mcdata_updates_downstream_data() -> None:
     np.testing.assert_allclose(out.contexts[0].data.observables, observables[0] + 1.0)
     assert out.payloads is not None
     assert isinstance(out.payloads[0]["add_noise"], MCData)
+
+
+def test_regression_step_runs_ols_and_stores_result_payload() -> None:
+    reference = _FakeSolvedModel()
+    x = np.arange(1.0, 7.0, dtype=np.float64)
+    y = 2.5 * x
+    observables = np.column_stack([y, x])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables, observable_names=("y", "x")),
+            regression_step(
+                "ols",
+                y_source="observables",
+                X_source="observables",
+                y_columns=[0],
+                x_columns=[1],
+                variables=["x"],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=1)
+
+    assert out.payloads is not None
+    result = out.payloads[0]["ols"]
+    assert isinstance(result, OLSResult)
+    assert result.variables == ["x"]
+    np.testing.assert_allclose(result.coefficients, np.array([2.5]))
+    np.testing.assert_allclose(result.y, y)
+    np.testing.assert_allclose(result.x, x.reshape(-1, 1))
+    assert out.summaries == {}
+
+
+def test_regression_step_requires_single_response_column() -> None:
+    reference = _FakeSolvedModel()
+    observables = np.column_stack(
+        [
+            np.arange(1.0, 6.0, dtype=np.float64),
+            np.arange(2.0, 7.0, dtype=np.float64),
+            np.arange(3.0, 8.0, dtype=np.float64),
+        ]
+    )
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            regression_step(
+                "ols",
+                y_source="observables",
+                X_source="observables",
+                y_columns=slice(0, 2),
+                x_columns=[2],
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="exactly one column"):
+        pipeline.run(reference=reference, n_rep=1)
+
+
+def test_regression_step_requires_matching_row_counts() -> None:
+    reference = _FakeSolvedModel()
+    states = np.arange(10.0, dtype=np.float64).reshape(5, 2)
+    observables = np.arange(4.0, dtype=np.float64).reshape(4, 1)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(states=states, observables=observables),
+            regression_step(
+                "ols",
+                y_source="observables",
+                X_source="states",
+                y_columns=[0],
+                x_columns=[0],
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="same number of rows"):
+        pipeline.run(reference=reference, n_rep=1)
+
+
+def test_regression_step_validates_result_type() -> None:
+    reference = _FakeSolvedModel()
+    states = _batched_states()
+    pipeline = MCPipeline(
+        [
+            raw_data_step(states=states, n_exog=0),
+            MCStep(
+                name="bad_regression",
+                op_type=OpType.REGRESSION,
+                func=lambda **_: np.zeros(1, dtype=np.float64),
+            ),
+        ]
+    )
+
+    with pytest.raises(TypeError, match="REGRESSION steps must return OLSResult"):
+        pipeline.run(reference=reference, n_rep=1)
 
 
 def test_pipeline_validates_step_order_and_unique_names() -> None:

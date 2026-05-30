@@ -12,6 +12,7 @@ from .._diag_tests.result import MCResult, TestResult
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
+from ..regression.ols import OLSResult
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
@@ -25,6 +26,7 @@ class OpType(StrEnum):
     TRANSFORM = "transform"
     FILTER = "filter"
     TEST = "test"
+    REGRESSION = "regression"
     POSTPROC = "postproc"
 
 
@@ -115,6 +117,18 @@ class TestOp(Protocol):
         rep_idx: int,
         **kwargs: Any,
     ) -> TestResult: ...
+
+
+class RegressionOp(Protocol):
+    def __call__(
+        self,
+        *,
+        context: MCContext,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        rep_idx: int,
+        **kwargs: Any,
+    ) -> OLSResult: ...
 
 
 @dataclass(frozen=True)

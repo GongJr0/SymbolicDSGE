@@ -14,6 +14,7 @@ from .._diag_tests.wald_test import (
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
+from ..regression.ols import OLSResult, ols
 from .mc_constructs import (
     DataGenReturn,
     MCContext,
@@ -24,6 +25,18 @@ from .mc_constructs import (
     SeedIncrement,
     ShockMapping,
 )
+
+InpSources = Literal[
+    "states",
+    "observables",
+    "x_pred",
+    "x_filt",
+    "y_pred",
+    "y_filt",
+    "innov",
+    "std_innov",
+    "payload",
+]
 
 
 def simulate_dgp(
@@ -62,7 +75,10 @@ def simulate_dgp(
     if obs_names:
         obs_mat = np.ascontiguousarray(
             np.column_stack(
-                [np.asarray(raw[name], dtype=np.float64)[1:] for name in obs_names]
+                [
+                    np.asarray(raw[name], dtype=np.float64)[1:]
+                    for name in obs_names  # pyright: ignore
+                ]
             ),
             dtype=np.float64,
         )
@@ -240,6 +256,65 @@ def run_wald_test(
     raise ValueError(f"Unsupported Wald test kind: {kind}")
 
 
+def run_regression(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    y_source: InpSources,
+    X_source: InpSources,
+    filter_key: str = "filter",
+    y_payload_key: str | None = None,
+    x_payload_key: str | None = None,
+    y_columns: Sequence[int] | slice | None = None,
+    x_columns: Sequence[int] | slice | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    variables: Sequence[str] | None = None,
+) -> OLSResult:
+    del reference, dgp, rep_idx
+
+    y = _resolve_context_array(
+        context,
+        source=y_source,
+        filter_key=filter_key,
+        payload_key=y_payload_key,
+        columns=y_columns,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+    X = _resolve_context_array(
+        context,
+        source=X_source,
+        filter_key=filter_key,
+        payload_key=x_payload_key,
+        columns=x_columns,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+
+    if y.shape[1] != 1:
+        raise ValueError(
+            "Regression response must resolve to exactly one column. "
+            f"Got shape {y.shape}."
+        )
+    if y.shape[0] != X.shape[0]:
+        raise ValueError(
+            "Regression response and design matrix must have the same number "
+            f"of rows. Got y={y.shape[0]} and X={X.shape[0]}."
+        )
+    if variables is not None and len(variables) != X.shape[1]:
+        raise ValueError(
+            "Regression variable names must match the number of design columns. "
+            f"Got {len(variables)} names for {X.shape[1]} columns."
+        )
+
+    y_vec = np.ascontiguousarray(y[:, 0], dtype=np.float64)
+    variable_names = list(variables) if variables is not None else None
+    return ols(X, y_vec, variables=variable_names)
+
+
 def simulation_step(name: str = "datagen", **kwargs: Any) -> MCStep:
     return MCStep(name=name, op_type=OpType.DATAGEN, func=simulate_dgp, kwargs=kwargs)
 
@@ -274,6 +349,12 @@ def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
 
 def wald_test_step(name: str, **kwargs: Any) -> MCStep:
     return MCStep(name=name, op_type=OpType.TEST, func=run_wald_test, kwargs=kwargs)
+
+
+def regression_step(name: str, **kwargs: Any) -> MCStep:
+    return MCStep(
+        name=name, op_type=OpType.REGRESSION, func=run_regression, kwargs=kwargs
+    )
 
 
 class MCReferenceConstruct:
@@ -379,7 +460,7 @@ def _clone_or_pass_shocks(
             seed = None if shock.seed is None else int(shock.seed) + seed_offset
             out[name] = Shock(
                 T=shock.T,
-                dist=shock.dist,
+                dist=shock.dist,  # pyright: ignore
                 multivar=shock.multivar,
                 seed=seed,
                 dist_args=shock.dist_args,

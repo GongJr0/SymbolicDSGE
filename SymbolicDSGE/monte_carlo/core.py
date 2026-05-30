@@ -8,6 +8,7 @@ import numpy as np
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
+from ..regression.ols import OLSResult
 from .mc_constructs import (
     DataGenReturn,
     MCContext,
@@ -73,7 +74,7 @@ class MCPipeline:
                 failures.append(
                     MCFailure(
                         rep_idx=rep_idx,
-                        step_name=step.name,
+                        step_name=step.name,  # pyright: ignore
                         error_type=type(exc).__name__,
                         message=str(exc),
                     )
@@ -133,6 +134,8 @@ class MCPipeline:
             context.data = out
         if step.op_type is OpType.FILTER and not isinstance(out, FilterResult):
             raise TypeError("FILTER steps must return FilterResult.")
+        if step.op_type is OpType.REGRESSION and not isinstance(out, OLSResult):
+            raise TypeError("REGRESSION steps must return OLSResult.")
         if step.op_type is OpType.TEST:
             if not isinstance(out, TestResult):
                 raise TypeError("TEST steps must return TestResult.")
