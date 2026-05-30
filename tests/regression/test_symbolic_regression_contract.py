@@ -2,10 +2,10 @@
 import pandas as pd
 import sympy as sp
 
-from SymbolicDSGE.regression.config import TemplateConfig
-from SymbolicDSGE.regression.model_defaults import PySRParams
-from SymbolicDSGE.regression.model_parametrizer import ModelParametrizer
-from SymbolicDSGE.regression.symbolic_regression import SymbolicRegressor
+from SymbolicDSGE.regression.sr.config import TemplateConfig
+from SymbolicDSGE.regression.sr.model_defaults import PySRParams
+from SymbolicDSGE.regression.sr.model_parametrizer import ModelParametrizer
+from SymbolicDSGE.regression.sr.symbolic_regression import SymbolicRegressor
 
 
 class _FakeRegressor(SymbolicRegressor):

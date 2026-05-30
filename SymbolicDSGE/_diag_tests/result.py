@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -11,17 +12,47 @@ from .distributions import (
     ReferenceDistribution,
 )
 
+DfSpec = FloatScalar | Sequence[FloatScalar] | NDArray[float64]
+NormalizedDf = float64 | tuple[float64, ...]
+
+
+def _normalize_df(df: DfSpec) -> NormalizedDf:
+    if isinstance(df, np.ndarray):
+        arr = np.asarray(df, dtype=np.float64)
+        if arr.ndim == 0:
+            return float64(arr.item())
+        if arr.ndim != 1:
+            raise ValueError("df sequence must be 1D")
+        if arr.size == 0:
+            raise ValueError("df sequence must be non-empty")
+        return tuple(float64(value) for value in arr)
+
+    if isinstance(df, Sequence):
+        if isinstance(df, str | bytes):
+            raise TypeError("df must be numeric or a numeric sequence")
+        if len(df) == 0:
+            raise ValueError("df sequence must be non-empty")
+        return tuple(float64(value) for value in df)
+
+    return float64(df)
+
+
+def _df_args(df: DfSpec) -> tuple[float64, ...]:
+    normalized = _normalize_df(df)
+    if isinstance(normalized, tuple):
+        return normalized
+    return (normalized,)
+
 
 def _compute_pvalues(
     dist: ReferenceDistribution,
-    df: FloatScalar,
+    df: DfSpec,
     pval_method: PvalMethod,
     statistic: FloatScalar | NDArray[float64],
 ) -> tuple[FrozenDistribution, NDArray[float64]]:
     if not isinstance(dist, ReferenceDistribution):
         raise ValueError(f"Unsupported reference distribution: {dist}")
-
-    frozen_dist = dist.freeze(df)
+    frozen_dist = dist.freeze(*_df_args(df))
     pvals = np.asarray(pval_method(frozen_dist, statistic), dtype=np.float64)
     return frozen_dist, pvals
 
@@ -30,7 +61,7 @@ def _compute_pvalues(
 class TestResult:
     test_name: str
     dist: ReferenceDistribution
-    df: float64
+    df: DfSpec
     pval_method: PvalMethod
     alpha: float64
     statistic: float64
@@ -44,6 +75,7 @@ class TestResult:
     def __post_init__(self) -> None:
         statistic = float64(self.statistic)
         object.__setattr__(self, "statistic", statistic)
+        object.__setattr__(self, "df", _normalize_df(self.df))
 
         if self._auto_pval:
             self.compute_pval()
@@ -110,7 +142,7 @@ class TestResult:
 class MCResult:
     test_name: str
     dist: ReferenceDistribution
-    df: float64
+    df: DfSpec
     pval_method: PvalMethod
     alpha: float64
     statistic_trace: NDArray[float64]
@@ -133,9 +165,11 @@ class MCResult:
         if n == 0:
             raise ValueError("statistic_trace must be non-empty")
 
+        df = _normalize_df(self.df)
+        object.__setattr__(self, "df", df)
         frozen_dist, pval_trace = _compute_pvalues(
             self.dist,
-            self.df,
+            df,
             self.pval_method,
             statistic_trace,
         )

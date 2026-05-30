@@ -21,11 +21,11 @@ from ..kalman.interface import KalmanInterface
 from ..kalman.filter import FilterResult
 
 
-from ..regression.sr_interface import SRInterface
-from ..regression.config import TemplateConfig
-from ..regression.model_defaults import PySRParams
-from ..regression.model_parametrizer import ModelParametrizer
-from ..regression.fit_result import FitResult
+from ..regression.sr.sr_interface import SRInterface
+from ..regression.sr.config import TemplateConfig
+from ..regression.sr.model_defaults import PySRParams
+from ..regression.sr.model_parametrizer import ModelParametrizer
+from ..regression.sr.fit_result import FitResult
 
 _JIT_CACHE: dict[int, Callable] = {}
 ND = NDArray

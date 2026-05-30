@@ -12,6 +12,7 @@ from .._diag_tests.result import MCResult, TestResult
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
+from ..regression.ols import MCRegressionResult, OLSResult, Status
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
@@ -25,6 +26,7 @@ class OpType(StrEnum):
     TRANSFORM = "transform"
     FILTER = "filter"
     TEST = "test"
+    REGRESSION = "regression"
     POSTPROC = "postproc"
 
 
@@ -56,6 +58,7 @@ class MCContext:
     data: MCData | None = None
     payloads: dict[str, Any] = field(default_factory=dict)
     results: dict[str, TestResult] = field(default_factory=dict)
+    regressions: dict[str, OLSResult] = field(default_factory=dict)
 
     def require_data(self) -> MCData:
         if self.data is None:
@@ -117,6 +120,18 @@ class TestOp(Protocol):
     ) -> TestResult: ...
 
 
+class RegressionOp(Protocol):
+    def __call__(
+        self,
+        *,
+        context: MCContext,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        rep_idx: int,
+        **kwargs: Any,
+    ) -> OLSResult: ...
+
+
 @dataclass(frozen=True)
 class MCStep:
     name: str
@@ -148,11 +163,12 @@ class MCFailure:
 class MCPipelineResult:
     n_rep: int
     n_successful: int
-    summaries: Mapping[str, MCResult]
+    test_summaries: Mapping[str, MCResult]
     test_results: Mapping[str, tuple[TestResult, ...]] | None
     payloads: tuple[Mapping[str, Any], ...] | None
     contexts: tuple[MCContext, ...] | None
     failures: tuple[MCFailure, ...] = ()
+    regression_summaries: Mapping[str, MCRegressionResult] = field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
@@ -161,16 +177,33 @@ class MCPipelineResult:
     @property
     def statistic_traces(self) -> Mapping[str, NDF]:
         return {
-            name: summary.statistic_trace for name, summary in self.summaries.items()
+            name: summary.statistic_trace
+            for name, summary in self.test_summaries.items()
         }
 
     @property
     def pval_traces(self) -> Mapping[str, NDF]:
-        return {name: summary.pval_trace for name, summary in self.summaries.items()}
+        return {
+            name: summary.pval_trace for name, summary in self.test_summaries.items()
+        }
 
     @property
     def rejection_traces(self) -> Mapping[str, NDB]:
         return {
             name: np.asarray(summary.pval_trace < summary.alpha, dtype=bool)
-            for name, summary in self.summaries.items()
+            for name, summary in self.test_summaries.items()
+        }
+
+    @property
+    def coefficient_traces(self) -> Mapping[str, NDF]:
+        return {
+            name: summary.coef_trace
+            for name, summary in self.regression_summaries.items()
+        }
+
+    @property
+    def regression_status_traces(self) -> Mapping[str, tuple[Status, ...]]:
+        return {
+            name: summary.status_trace
+            for name, summary in self.regression_summaries.items()
         }

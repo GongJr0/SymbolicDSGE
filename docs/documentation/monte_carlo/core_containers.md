@@ -21,8 +21,8 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.summaries`. |
-| op_type | `#!python OpType` | Operation type: `DATAGEN`, `TRANSFORM`, `FILTER`, `TEST`, or `POSTPROC`. |
+| name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.test_summaries`. |
+| op_type | `#!python OpType` | Operation type: `DATAGEN`, `TRANSFORM`, `FILTER`, `TEST`, `REGRESSION`, or `POSTPROC`. |
 | func | `#!python Callable` | Callable executed by the pipeline. |
 | kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step and passed into `func`. |
 | store_key | `#!python str | None` | Optional payload key. If omitted, `name` is used. |
@@ -63,6 +63,7 @@ class MCContext(
     data: MCData | None = None,
     payloads: dict[str, Any] = {},
     results: dict[str, TestResult] = {},
+    regressions: dict[str, OLSResult] = {},
 )
 ```
 
@@ -82,11 +83,12 @@ __Methods:__
 class MCPipelineResult(
     n_rep: int,
     n_successful: int,
-    summaries: Mapping[str, MCResult],
+    test_summaries: Mapping[str, MCResult],
     test_results: Mapping[str, tuple[TestResult, ...]] | None,
     payloads: tuple[Mapping[str, Any], ...] | None,
     contexts: tuple[MCContext, ...] | None,
     failures: tuple[MCFailure, ...] = (),
+    regression_summaries: Mapping[str, MCRegressionResult] = {},
 )
 ```
 
@@ -98,15 +100,18 @@ __Fields and Properties:__
 |:---------|:--------:|----------------:|
 | n_rep | `#!python int` | Requested replication count. |
 | n_successful | `#!python int` | Number of completed replications. |
-| summaries | `#!python Mapping[str, MCResult]` | Per-test aggregate result containers. |
+| test_summaries | `#!python Mapping[str, MCResult]` | Per-test aggregate result containers. |
 | test_results | `#!python Mapping[str, tuple[TestResult, ...]] | None` | Optional scalar per-replication test results. |
 | payloads | `#!python tuple[Mapping[str, Any], ...] | None` | Optional per-replication payload dictionaries. |
 | contexts | `#!python tuple[MCContext, ...] | None` | Optional full contexts. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
+| regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
 | succeeded | `#!python bool` | `True` when no failures were collected. |
-| statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each summary's statistic trace. |
-| pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each summary's p-value trace. |
-| rejection_traces | `#!python Mapping[str, ndarray]` | Boolean rejection trace for each summary. |
+| statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
+| pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
+| rejection_traces | `#!python Mapping[str, ndarray]` | Boolean rejection trace for each test summary. |
+| coefficient_traces | `#!python Mapping[str, ndarray]` | Shortcut for each regression summary's coefficient trace. |
+| regression_status_traces | `#!python Mapping[str, tuple[Status, ...]]` | Shortcut for each regression summary's status trace. |
 
 ???+ note "P-Value Evaluation"
-    Scalar `TestResult` objects produced inside Monte Carlo Wald steps defer p-value and frozen-distribution construction until `pval`, `frozen_dist`, or `compute_pval()` is accessed. Aggregate `MCResult` objects compute vectorized p-values when `MCPipelineResult.summaries` is built.
+    Scalar `TestResult` objects produced inside Monte Carlo Wald steps defer p-value and frozen-distribution construction until `pval`, `frozen_dist`, or `compute_pval()` is accessed. Aggregate `MCResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built.

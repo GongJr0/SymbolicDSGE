@@ -4,7 +4,9 @@ tags:
 ---
 # Result Access
 
-`MCPipelineResult.summaries` maps each test step name to an `MCResult` aggregate.
+`MCPipelineResult.test_summaries` maps each test step name to an `MCResult` aggregate.
+
+`MCPipelineResult.regression_summaries` maps each regression step name to an `MCRegressionResult` aggregate.
 
 __Summary Fields and Methods:__
 

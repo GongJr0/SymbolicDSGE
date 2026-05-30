@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from scipy.stats import chi2
+from scipy.stats import chi2, f
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult, TestResult as DiagTestResult
@@ -42,6 +42,20 @@ def test_test_result_can_defer_p_value_until_requested() -> None:
     assert out.pval == pytest.approx(chi2(df=2).sf(10.0))
 
 
+def test_test_result_supports_multi_df_reference_distribution() -> None:
+    out = DiagTestResult(
+        test_name="f_test",
+        dist=ReferenceDistribution.F,
+        df=(np.float64(2.0), np.float64(10.0)),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.05),
+        statistic=np.float64(3.0),
+    )
+
+    assert out.df == (np.float64(2.0), np.float64(10.0))
+    assert out.pval == pytest.approx(f(dfn=2.0, dfd=10.0).sf(3.0))
+
+
 def test_test_result_to_dict_excludes_frozen_distribution() -> None:
     out = DiagTestResult(
         test_name="wald",
@@ -77,6 +91,21 @@ def test_mc_result_derives_n_from_trace_length() -> None:
     assert out.n == 3
     np.testing.assert_allclose(out.pval_trace, chi2(df=2).sf(statistic_trace))
     assert out.rejection_rate == pytest.approx(2.0 / 3.0)
+
+
+def test_mc_result_supports_multi_df_reference_distribution() -> None:
+    statistic_trace = np.array([1.0, 3.0, 5.0], dtype=np.float64)
+    out = MCResult(
+        test_name="f_test",
+        dist=ReferenceDistribution.F,
+        df=[np.float64(2.0), np.float64(10.0)],
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.05),
+        statistic_trace=statistic_trace,
+    )
+
+    assert out.df == (np.float64(2.0), np.float64(10.0))
+    np.testing.assert_allclose(out.pval_trace, f(dfn=2.0, dfd=10.0).sf(statistic_trace))
 
 
 def test_pval_method_enum_members_dispatch_to_frozen_distribution() -> None:

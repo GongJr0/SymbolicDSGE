@@ -1,7 +1,7 @@
 # type: ignore
 import sympy as sp
 
-from SymbolicDSGE.regression.expr_to_string import (
+from SymbolicDSGE.regression.sr.expr_to_string import (
     JFloat,
     _needs_float_wrap,
     _spec_ready_expr,

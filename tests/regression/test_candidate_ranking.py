@@ -2,7 +2,7 @@
 import pandas as pd
 import sympy as sp
 
-from SymbolicDSGE.regression.candidate_ranking import CandidateRanking
+from SymbolicDSGE.regression.sr.candidate_ranking import CandidateRanking
 
 
 def _toy_exprs() -> pd.DataFrame:

@@ -177,8 +177,8 @@ mc.succeeded, mc.n_successful
 >>> (True, 500)
 ```
 
-This returns a `MCPipelineResult` object containing summaries for each test step executed in the pipeline.
-To extract the test results, their p-values, and other relevant statistics, we can access the summaries by key (step names).
+This returns a `MCPipelineResult` object containing test summaries for each test step executed in the pipeline.
+To extract the test results, their p-values, and other relevant statistics, we can access the test summaries by key (step names).
 
 ```python
 
@@ -191,7 +191,7 @@ summary = pd.DataFrame(
             "ci_low": res.pval_confidence_interval()[0],
             "ci_high": res.pval_confidence_interval()[1],
         }
-        for name, res in mc.summaries.items()
+        for name, res in mc.test_summaries.items()
     }
 ).T
 print(summary.round(4))
