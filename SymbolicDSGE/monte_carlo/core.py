@@ -8,7 +8,7 @@ import numpy as np
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
-from ..regression.ols import OLSResult
+from ..regression.ols import MCRegressionResult, OLSResult
 from .mc_constructs import (
     DataGenReturn,
     MCContext,
@@ -62,6 +62,7 @@ class MCPipeline:
         payload_traces: list[Mapping[str, object]] = []
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
+        regression_results_by_step: dict[str, list[OLSResult]] = {}
 
         for rep_idx in range(n_rep):
             context = MCContext(rep_idx=rep_idx, reference=reference, dgp=dgp)
@@ -84,14 +85,19 @@ class MCPipeline:
             contexts.append(context)
             if retain_payloads:
                 payload_traces.append(dict(context.payloads))
-            for name, result in context.results.items():
-                results_by_step.setdefault(name, []).append(result)
+            for name, test_result in context.results.items():
+                results_by_step.setdefault(name, []).append(test_result)
+            for name, regression_result in context.regressions.items():
+                regression_results_by_step.setdefault(name, []).append(
+                    regression_result
+                )
 
-        summaries = _summarize_results(results_by_step)
+        test_summaries = _summarize_tests(results_by_step)
+        regression_summaries = _summarize_regressions(regression_results_by_step)
         return MCPipelineResult(
             n_rep=n_rep,
             n_successful=len(contexts),
-            summaries=summaries,
+            test_summaries=test_summaries,
             test_results=(
                 {name: tuple(values) for name, values in results_by_step.items()}
                 if retain_test_results
@@ -100,6 +106,7 @@ class MCPipeline:
             payloads=tuple(payload_traces) if retain_payloads else None,
             contexts=tuple(contexts) if retain_contexts else None,
             failures=tuple(failures),
+            regression_summaries=regression_summaries,
         )
 
     def _run_step(self, context: MCContext, step: MCStep) -> None:
@@ -136,6 +143,8 @@ class MCPipeline:
             raise TypeError("FILTER steps must return FilterResult.")
         if step.op_type is OpType.REGRESSION and not isinstance(out, OLSResult):
             raise TypeError("REGRESSION steps must return OLSResult.")
+        if step.op_type is OpType.REGRESSION:
+            context.regressions[step.name] = out
         if step.op_type is OpType.TEST:
             if not isinstance(out, TestResult):
                 raise TypeError("TEST steps must return TestResult.")
@@ -143,10 +152,10 @@ class MCPipeline:
         context.payloads[step.output_key] = out
 
 
-def _summarize_results(
+def _summarize_tests(
     results_by_step: Mapping[str, list[TestResult]],
 ) -> dict[str, MCResult]:
-    summaries: dict[str, MCResult] = {}
+    test_summaries: dict[str, MCResult] = {}
 
     for step_name, results in results_by_step.items():
         if not results:
@@ -173,6 +182,17 @@ def _summarize_results(
             alpha=first.alpha,
             statistic_trace=stat_trace,
         )
-        summaries[step_name] = summary
+        test_summaries[step_name] = summary
 
-    return summaries
+    return test_summaries
+
+
+def _summarize_regressions(
+    results_by_step: Mapping[str, list[OLSResult]],
+) -> dict[str, MCRegressionResult]:
+    regression_summaries: dict[str, MCRegressionResult] = {}
+    for step_name, results in results_by_step.items():
+        if not results:
+            continue
+        regression_summaries[step_name] = MCRegressionResult.from_results(results)
+    return regression_summaries

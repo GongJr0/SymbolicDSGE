@@ -5,12 +5,13 @@ import pytest
 from scipy.stats import t
 
 from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
+from SymbolicDSGE.regression.ols import MCRegressionResult as ExportedMCRegressionResult
 from SymbolicDSGE.regression.ols import OLSResult as ExportedOLSResult
 from SymbolicDSGE.regression.ols import Status as ExportedStatus
 from SymbolicDSGE.regression.ols import ols as exported_ols
 from SymbolicDSGE.regression.ols.diag_utils import r2, r2_adj, se, se_from_pinv
 from SymbolicDSGE.regression.ols.core import ols
-from SymbolicDSGE.regression.ols.ols_result import OLSResult, Status
+from SymbolicDSGE.regression.ols.ols_result import MCRegressionResult, OLSResult, Status
 from SymbolicDSGE.regression.ols.solvers import (
     OK,
     RANK_DEFICIENT,
@@ -47,6 +48,7 @@ def test_chol_solve_returns_factor_for_standard_error_calculation() -> None:
 
 def test_ols_package_exports_public_entry_points() -> None:
     assert ExportedOLSResult is OLSResult
+    assert ExportedMCRegressionResult is MCRegressionResult
     assert ExportedStatus is Status
     assert exported_ols is ols
 
@@ -262,3 +264,141 @@ def test_rank_deficient_ols_result_uses_pseudoinverse_standard_errors() -> None:
 
     assert out.status is Status.RANK_DEFICIENT
     np.testing.assert_allclose(out.se, se_from_pinv(x, y, out.y_hat))
+
+
+def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
+    x = np.array(
+        [
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [1.0, 2.0],
+            [1.0, 3.0],
+            [1.0, 4.0],
+        ],
+        dtype=np.float64,
+    )
+    y0 = np.array([1.0, 1.9, 3.2, 3.9, 5.1], dtype=np.float64)
+    y1 = np.array([0.8, 2.2, 2.9, 4.4, 4.8], dtype=np.float64)
+    results = (
+        ols(x, y0, variables=["const", "trend"]),
+        ols(x, y1, variables=["const", "trend"]),
+    )
+
+    out = MCRegressionResult.from_results(results)
+
+    np.testing.assert_allclose(
+        out.coef_trace,
+        np.vstack([result.coefficients for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.coefficients,
+        np.vstack([result.coefficients for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.y_hat_trace,
+        np.vstack([result.y_hat for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.se_trace,
+        np.vstack([result.se for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.t_stat_trace,
+        np.vstack([result.t_stat for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.pval_trace,
+        np.vstack([result.p_values for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.r2_trace,
+        np.asarray([result.r2 for result in results], dtype=np.float64),
+    )
+    np.testing.assert_allclose(
+        out.r2_adj_trace,
+        np.asarray([result.r2_adj for result in results], dtype=np.float64),
+    )
+    np.testing.assert_allclose(
+        out.partial_r2_trace,
+        np.vstack([result.partial_r2 for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.F_stat_trace,
+        np.asarray([result.F_test().statistic for result in results]),
+    )
+    np.testing.assert_allclose(
+        out.F_pval_trace,
+        np.asarray([result.F_test().pval for result in results]),
+    )
+
+    ci = out.confidence_intervals(alpha=0.1)
+    assert ci.shape == (2, 2, 2)
+    np.testing.assert_allclose(ci[0], results[0].confidence_intervals(alpha=0.1))
+
+    summary = out.summary(alpha=0.1)
+    assert list(summary.index.names) == ["rep", "variable"]
+    assert list(summary.columns) == [
+        "coef",
+        "std_err",
+        "coef_ci_low",
+        "coef_ci_high",
+        "t_stat",
+        "pval",
+        "partial_r2",
+    ]
+
+    f_test = out.F_test(alpha=0.1)
+    assert f_test.test_name == "F-test"
+    assert f_test.dist is ReferenceDistribution.F
+    assert f_test.df == (np.float64(out.k), np.float64(out.n - out.k - 1))
+    np.testing.assert_allclose(f_test.statistic_trace, out.F_stat_trace)
+
+    as_dict = out.to_dict()
+    assert as_dict["variables"] == ["const", "trend"]
+    assert as_dict["status_trace"] == (Status.OK, Status.OK)
+
+
+def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs() -> (
+    None
+):
+    x = np.array(
+        [
+            [1.0, 1.0, 2.0],
+            [1.0, 2.0, 4.0],
+            [1.0, 3.0, 6.0],
+            [1.0, 4.0, 8.0],
+        ],
+        dtype=np.float64,
+    )
+    results = (
+        ols(x, np.array([1.0, 2.1, 2.9, 4.2], dtype=np.float64)),
+        ols(x, np.array([0.8, 2.4, 3.2, 3.9], dtype=np.float64)),
+    )
+
+    out = MCRegressionResult.from_results(results)
+
+    assert out.status_trace == (Status.RANK_DEFICIENT, Status.RANK_DEFICIENT)
+    np.testing.assert_allclose(
+        out.se_trace,
+        np.vstack([result.se for result in results]),
+    )
+
+
+def test_mc_regression_result_validates_compatible_runs() -> None:
+    x = np.array(
+        [
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [1.0, 2.0],
+        ],
+        dtype=np.float64,
+    )
+    first = ols(x, np.array([1.0, 2.0, 3.0], dtype=np.float64), variables=["c", "x"])
+    second = ols(
+        x,
+        np.array([1.5, 2.5, 3.5], dtype=np.float64),
+        variables=["const", "trend"],
+    )
+
+    with pytest.raises(ValueError, match="incompatible variables"):
+        MCRegressionResult.from_results((first, second))

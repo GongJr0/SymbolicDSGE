@@ -268,7 +268,7 @@ def run_regression(
     y_payload_key: str | None = None,
     x_payload_key: str | None = None,
     y_columns: Sequence[int] | slice | None = None,
-    x_columns: Sequence[int] | slice | None = None,
+    X_columns: Sequence[int] | slice | None = None,
     burn_in: int = 0,
     drop_initial: bool = False,
     variables: Sequence[str] | None = None,
@@ -289,7 +289,7 @@ def run_regression(
         source=X_source,
         filter_key=filter_key,
         payload_key=x_payload_key,
-        columns=x_columns,
+        columns=X_columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
     )

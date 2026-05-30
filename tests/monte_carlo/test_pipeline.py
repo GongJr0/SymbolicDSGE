@@ -133,14 +133,14 @@ def test_raw_data_pipeline_runs_without_dgp_and_aggregates_wald_results() -> Non
         dtype=np.float64,
     )
     np.testing.assert_allclose(out.statistic_traces["state_mean"], expected)
-    assert out.summaries["state_mean"].n == 2
+    assert out.test_summaries["state_mean"].n == 2
     assert out.test_results is not None
     assert len(out.test_results["state_mean"]) == 2
     assert all(result._pval is None for result in out.test_results["state_mean"])
     assert all(result._frozen_dist is None for result in out.test_results["state_mean"])
     np.testing.assert_allclose(
         out.pval_traces["state_mean"],
-        out.summaries["state_mean"].pval_trace,
+        out.test_summaries["state_mean"].pval_trace,
     )
     assert out.payloads is not None
     assert "datagen" in out.payloads[0]
@@ -223,7 +223,7 @@ def test_pipeline_retention_controls_drop_payload_and_result_traces() -> None:
     assert out.payloads is None
     assert out.test_results is None
     assert out.contexts is None
-    assert "state_mean" in out.summaries
+    assert "state_mean" in out.test_summaries
     assert out.statistic_traces["state_mean"].shape == (2,)
 
 
@@ -260,7 +260,7 @@ def test_sim_filter_wald_pipeline_uses_reference_filter_payload() -> None:
         dtype=np.float64,
     )
     np.testing.assert_allclose(out.statistic_traces["std_innov_mean"], expected)
-    assert out.summaries["std_innov_mean"].n == 2
+    assert out.test_summaries["std_innov_mean"].n == 2
 
 
 def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
@@ -349,7 +349,7 @@ def test_regression_step_runs_ols_and_stores_result_payload() -> None:
                 y_source="observables",
                 X_source="observables",
                 y_columns=[0],
-                x_columns=[1],
+                X_columns=[1],
                 variables=["x"],
             ),
         ]
@@ -364,7 +364,47 @@ def test_regression_step_runs_ols_and_stores_result_payload() -> None:
     np.testing.assert_allclose(result.coefficients, np.array([2.5]))
     np.testing.assert_allclose(result.y, y)
     np.testing.assert_allclose(result.x, x.reshape(-1, 1))
-    assert out.summaries == {}
+    assert out.test_summaries == {}
+    assert "ols" in out.regression_summaries
+    np.testing.assert_allclose(
+        out.coefficient_traces["ols"], np.array([[2.5]], dtype=np.float64)
+    )
+    assert out.regression_summaries["ols"].status_trace == (result.status,)
+
+
+def test_regression_summary_does_not_depend_on_payload_retention() -> None:
+    reference = _FakeSolvedModel()
+    x = np.arange(1.0, 7.0, dtype=np.float64)
+    y = 3.0 * x
+    observables = np.stack(
+        [
+            np.column_stack([y, x]),
+            np.column_stack([y + x, x]),
+        ]
+    )
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables, observable_names=("y", "x")),
+            regression_step(
+                "ols",
+                y_source="observables",
+                X_source="observables",
+                y_columns=[0],
+                X_columns=[1],
+                variables=["x"],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=2, retain_payloads=False)
+
+    assert out.payloads is None
+    assert out.test_summaries == {}
+    np.testing.assert_allclose(
+        out.coefficient_traces["ols"],
+        np.array([[3.0], [4.0]], dtype=np.float64),
+    )
+    assert out.regression_summaries["ols"].n_rep == 2
 
 
 def test_regression_step_requires_single_response_column() -> None:
@@ -384,7 +424,7 @@ def test_regression_step_requires_single_response_column() -> None:
                 y_source="observables",
                 X_source="observables",
                 y_columns=slice(0, 2),
-                x_columns=[2],
+                X_columns=[2],
             ),
         ]
     )
@@ -405,7 +445,7 @@ def test_regression_step_requires_matching_row_counts() -> None:
                 y_source="observables",
                 X_source="states",
                 y_columns=[0],
-                x_columns=[0],
+                X_columns=[0],
             ),
         ]
     )
