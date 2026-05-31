@@ -280,13 +280,10 @@ def run_ljung_box_test(
         burn_in=burn_in,
         drop_initial=drop_initial,
     )
-    n = arr.size  # size == n iff 1D array
-    if any(arr.shape == shape for shape in [(n,), (n, 1), (1, n)]):
-        arr = arr.flatten()
-    else:
+    if arr.shape[1] != 1:
         raise ValueError("Ljung-Box test requires a single column of data.")
 
-    return ljung_box(arr, L=lags, alpha=alpha)
+    return ljung_box(arr[:, 0], L=lags, alpha=alpha)
 
 
 def run_regression(

@@ -5,9 +5,8 @@ from numpy import float64
 from numpy.typing import NDArray
 from numba import njit
 
-from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
-from SymbolicDSGE._diag_tests.result import TestResult
-
+from .distributions import PvalMethod, ReferenceDistribution
+from .result import TestResult
 from .status import TestStatus
 
 NDF = NDArray[float64]
@@ -88,13 +87,16 @@ def lb_stat(x: NDF, L: int) -> tuple[int, float64]:
 def ljung_box(x: NDF, L: int, alpha: float = 0.05) -> TestResult:
     """Ljung-Box test for x up to lag L."""
     err, stat = lb_stat(x, L)
-    name = f"Ljung-Box (L={L})"
+    df = L
+    if x.ndim == 1 and x.size > 1 and L >= x.size:
+        df = x.size - 1
+    name = f"Ljung-Box (L={df})"
     return TestResult(
         test_name=name,
         statistic=stat,
         dist=ReferenceDistribution.CHI2,
         pval_method=PvalMethod.SF,
-        df=L,
+        df=df,
         alpha=float64(alpha),
         status=TestStatus(err),
         _auto_pval=True,
