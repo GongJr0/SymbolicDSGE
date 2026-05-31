@@ -170,7 +170,14 @@ nav:
           - Overview: documentation/monte_carlo/index.md
           - MCPipeline: documentation/monte_carlo/pipeline.md
           - Core Containers: documentation/monte_carlo/core_containers.md
-          - Built-In Steps: documentation/monte_carlo/built_in_steps.md
+          - Built-In Steps:
+              - DGP Simulation: documentation/monte_carlo/builtin/sim.md
+              - Raw Data: documentation/monte_carlo/builtin/raw_data.md
+              - Reference Filtering: documentation/monte_carlo/builtin/filter.md
+              - Wald Tests: documentation/monte_carlo/builtin/wald.md
+              - Ljung-Box Tests: documentation/monte_carlo/builtin/ljung_box.md
+              - Regression Steps: documentation/monte_carlo/builtin/regression.md
+              - Transform Steps: documentation/monte_carlo/builtin/transform.md
           - Result Access: documentation/monte_carlo/result_access.md
       - Prior Specification:
           - Prior: documentation/prior_spec/Prior.md
