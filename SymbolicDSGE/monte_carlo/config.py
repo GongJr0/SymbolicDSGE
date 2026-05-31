@@ -297,7 +297,7 @@ def run_regression(
     filter_key: str = "filter",
     y_payload_key: str | None = None,
     x_payload_key: str | None = None,
-    y_columns: Sequence[int] | slice | None = None,
+    y_column: Sequence[int] | int | None = None,
     X_columns: Sequence[int] | slice | None = None,
     burn_in: int = 0,
     drop_initial: bool = False,
@@ -305,12 +305,18 @@ def run_regression(
 ) -> OLSResult:
     del reference, dgp, rep_idx
 
+    y_col_idx: Sequence[int] | None
+    if isinstance(y_column, int):
+        y_col_idx = [y_column]
+    else:
+        y_col_idx = y_column
+    
     y = _resolve_context_array(
         context,
         source=y_source,
         filter_key=filter_key,
         payload_key=y_payload_key,
-        columns=y_columns,
+        columns=y_col_idx,
         burn_in=burn_in,
         drop_initial=drop_initial,
     )
