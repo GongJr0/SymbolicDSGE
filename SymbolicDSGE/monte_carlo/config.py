@@ -310,7 +310,7 @@ def run_regression(
         y_col_idx = [y_column]
     else:
         y_col_idx = y_column
-    
+
     y = _resolve_context_array(
         context,
         source=y_source,
