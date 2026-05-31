@@ -84,7 +84,9 @@ def lb_stat(x: NDF, L: int) -> tuple[int, float64]:
     return OK, float64(stat)
 
 
-def ljung_box(x: NDF, L: int, alpha: float = 0.05) -> TestResult:
+def ljung_box(
+    x: NDF, L: int, alpha: float = 0.05, _auto_pval: bool = True
+) -> TestResult:
     """Ljung-Box test for x up to lag L."""
     err, stat = lb_stat(x, L)
     df = L
@@ -99,5 +101,5 @@ def ljung_box(x: NDF, L: int, alpha: float = 0.05) -> TestResult:
         df=df,
         alpha=float64(alpha),
         status=TestStatus(err),
-        _auto_pval=True,
+        _auto_pval=_auto_pval,
     )

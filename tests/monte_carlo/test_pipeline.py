@@ -19,6 +19,8 @@ from SymbolicDSGE.monte_carlo import (
     raw_data_step,
     reference_filter_step,
     regression_step,
+    report_mc_performance,
+    report_mc_step_performance,
     simulation_step,
     transform_step,
     wald_test_step,
@@ -287,6 +289,83 @@ def test_pipeline_retention_controls_drop_payload_and_result_traces() -> None:
     assert out.contexts is None
     assert "state_mean" in out.test_summaries
     assert out.statistic_traces["state_mean"].shape == (2,)
+
+
+def test_pipeline_result_reports_overall_and_step_performance() -> None:
+    reference = _FakeSolvedModel()
+    states = _batched_states()
+    pipeline = MCPipeline(
+        [
+            raw_data_step(states=states, n_exog=0),
+            wald_test_step(
+                "state_mean",
+                source="states",
+                target=np.zeros(2, dtype=np.float64),
+                bandwidth=0,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=2)
+
+    assert out.elapsed_s >= 0.0
+    assert out.it_s > 0.0
+    assert set(out.step_elapsed_s) == {"datagen", "state_mean"}
+    assert out.step_counts == {"datagen": 2, "state_mean": 2}
+    assert out.step_failures == {"datagen": 0, "state_mean": 0}
+    assert set(out.step_it_s) == {"datagen", "state_mean"}
+
+    lines: list[str] = []
+    report_mc_performance(out, print_func=lines.append)
+    assert lines[0].startswith("MC run concluded successfully with ")
+    assert lines[0].endswith(" it/s.")
+
+    lines.clear()
+    out.report_step_performance(print_func=lines.append)
+    assert len(lines) == 2
+    assert lines[0].startswith("datagen concluded successfully with ")
+    assert lines[0].endswith(" it/s.")
+    assert lines[1].startswith("state_mean concluded successfully with ")
+    assert lines[1].endswith(" it/s.")
+
+    lines.clear()
+    report_mc_step_performance(out, print_func=lines.append)
+    assert len(lines) == 2
+
+
+def test_pipeline_run_verbosity_controls_performance_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reference = _FakeSolvedModel()
+    states = _batched_states()
+    pipeline = MCPipeline(
+        [
+            raw_data_step(states=states, n_exog=0),
+            wald_test_step(
+                "state_mean",
+                source="states",
+                target=np.zeros(2, dtype=np.float64),
+                bandwidth=0,
+            ),
+        ]
+    )
+
+    pipeline.run(reference=reference, n_rep=2)
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("MC run concluded successfully with ")
+
+    pipeline.run(reference=reference, n_rep=2, verbosity=0)
+    assert capsys.readouterr().out == ""
+
+    pipeline.run(reference=reference, n_rep=2, verbosity=2)
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith("datagen concluded successfully with ")
+    assert lines[1].startswith("state_mean concluded successfully with ")
+
+    with pytest.raises(ValueError, match="verbosity"):
+        pipeline.run(reference=reference, n_rep=2, verbosity=3)
 
 
 def test_sim_filter_wald_pipeline_uses_reference_filter_payload() -> None:
@@ -581,3 +660,14 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     assert out.failures[0].rep_idx == 2
     assert out.failures[0].step_name == "datagen"
     assert out.statistic_traces["state_mean"].shape == (2,)
+    assert out.step_counts == {"datagen": 3, "state_mean": 2}
+    assert out.step_failures == {"datagen": 1, "state_mean": 0}
+
+    lines: list[str] = []
+    out.report_performance(print_func=lines.append)
+    assert lines[0].startswith("MC run concluded unsuccessfully with ")
+
+    lines.clear()
+    report_mc_step_performance(out, print_func=lines.append)
+    assert lines[0].startswith("datagen concluded unsuccessfully with ")
+    assert lines[1].startswith("state_mean concluded successfully with ")

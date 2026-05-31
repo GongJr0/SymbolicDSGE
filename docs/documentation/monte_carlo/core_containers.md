@@ -89,6 +89,10 @@ class MCPipelineResult(
     contexts: tuple[MCContext, ...] | None,
     failures: tuple[MCFailure, ...] = (),
     regression_summaries: Mapping[str, MCRegressionResult] = {},
+    elapsed_s: float = 0.0,
+    step_elapsed_s: Mapping[str, float] = {},
+    step_counts: Mapping[str, int] = {},
+    step_failures: Mapping[str, int] = {},
 )
 ```
 
@@ -106,12 +110,20 @@ __Fields and Properties:__
 | contexts | `#!python tuple[MCContext, ...] | None` | Optional full contexts. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
+| elapsed_s | `#!python float` | Total elapsed wall time for the pipeline run. |
+| step_elapsed_s | `#!python Mapping[str, float]` | Elapsed wall time by step name. |
+| step_counts | `#!python Mapping[str, int]` | Number of attempted calls by step name. |
+| step_failures | `#!python Mapping[str, int]` | Number of collected failures by step name. |
 | succeeded | `#!python bool` | `True` when no failures were collected. |
+| it_s | `#!python float` | Replications attempted per elapsed second. |
+| step_it_s | `#!python Mapping[str, float]` | Step calls attempted per elapsed second by step name. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
 | rejection_traces | `#!python Mapping[str, ndarray]` | Boolean rejection trace for each test summary. |
 | coefficient_traces | `#!python Mapping[str, ndarray]` | Shortcut for each regression summary's coefficient trace. |
 | regression_status_traces | `#!python Mapping[str, tuple[RegressionStatus, ...]]` | Shortcut for each regression summary's status trace. |
+| `report_performance()` | `#!python None` | Print the aggregate pipeline throughput report. |
+| `report_step_performance()` | `#!python None` | Print one throughput report line per pipeline step. |
 
 ???+ note "P-Value Evaluation"
     Scalar `TestResult` objects produced inside Monte Carlo Wald steps defer p-value and frozen-distribution construction until `pval`, `frozen_dist`, or `compute_pval()` is accessed. Aggregate `MCResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built.

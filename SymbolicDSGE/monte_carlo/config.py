@@ -283,7 +283,7 @@ def run_ljung_box_test(
     if arr.shape[1] != 1:
         raise ValueError("Ljung-Box test requires a single column of data.")
 
-    return ljung_box(arr[:, 0], L=lags, alpha=alpha)
+    return ljung_box(arr[:, 0], L=lags, alpha=alpha, _auto_pval=False)
 
 
 def run_regression(
