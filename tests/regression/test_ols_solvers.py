@@ -7,11 +7,15 @@ from scipy.stats import t
 from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
 from SymbolicDSGE.regression.ols import MCRegressionResult as ExportedMCRegressionResult
 from SymbolicDSGE.regression.ols import OLSResult as ExportedOLSResult
-from SymbolicDSGE.regression.ols import Status as ExportedStatus
+from SymbolicDSGE.regression.ols import RegressionStatus as ExportedRegressionStatus
 from SymbolicDSGE.regression.ols import ols as exported_ols
 from SymbolicDSGE.regression.ols.diag_utils import r2, r2_adj, se, se_from_pinv
 from SymbolicDSGE.regression.ols.core import ols
-from SymbolicDSGE.regression.ols.ols_result import MCRegressionResult, OLSResult, Status
+from SymbolicDSGE.regression.ols.ols_result import (
+    MCRegressionResult,
+    OLSResult,
+    RegressionStatus,
+)
 from SymbolicDSGE.regression.ols.solvers import (
     OK,
     RANK_DEFICIENT,
@@ -49,7 +53,7 @@ def test_chol_solve_returns_factor_for_standard_error_calculation() -> None:
 def test_ols_package_exports_public_entry_points() -> None:
     assert ExportedOLSResult is OLSResult
     assert ExportedMCRegressionResult is MCRegressionResult
-    assert ExportedStatus is Status
+    assert ExportedRegressionStatus is RegressionStatus
     assert exported_ols is ols
 
 
@@ -70,7 +74,7 @@ def test_ols_core_uses_cholesky_solver_and_default_variable_names() -> None:
 
     expected_coef = np.linalg.solve(x.T @ x, x.T @ y)
     assert out.variables == ["x0", "x1"]
-    assert out.status is Status.OK
+    assert out.status is RegressionStatus.OK
     np.testing.assert_allclose(out.coefficients, expected_coef)
 
 
@@ -90,7 +94,7 @@ def test_ols_core_falls_back_to_lstsq_for_rank_deficient_design() -> None:
 
     expected_coef, *_ = np.linalg.lstsq(x, y, rcond=None)
     assert out.variables == ["const", "x", "two_x"]
-    assert out.status is Status.RANK_DEFICIENT
+    assert out.status is RegressionStatus.RANK_DEFICIENT
     np.testing.assert_allclose(out.coefficients, expected_coef)
 
 
@@ -195,7 +199,7 @@ def test_ols_result_exposes_summary_diagnostics_and_f_test() -> None:
         coefficients=coef,
         y=y,
         x=x,
-        status=Status(status),
+        status=RegressionStatus(status),
         _L=L,
     )
 
@@ -238,7 +242,7 @@ def test_ols_result_exposes_summary_diagnostics_and_f_test() -> None:
 
     as_dict = out.to_dict()
     assert as_dict["variables"] == ["const", "trend"]
-    assert as_dict["status"] == Status.OK
+    assert as_dict["status"] == RegressionStatus.OK
 
 
 def test_rank_deficient_ols_result_uses_pseudoinverse_standard_errors() -> None:
@@ -258,11 +262,11 @@ def test_rank_deficient_ols_result_uses_pseudoinverse_standard_errors() -> None:
         coefficients=coef,
         y=y,
         x=x,
-        status=Status(status),
+        status=RegressionStatus(status),
         _L=L,
     )
 
-    assert out.status is Status.RANK_DEFICIENT
+    assert out.status is RegressionStatus.RANK_DEFICIENT
     np.testing.assert_allclose(out.se, se_from_pinv(x, y, out.y_hat))
 
 
@@ -355,7 +359,7 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
 
     as_dict = out.to_dict()
     assert as_dict["variables"] == ["const", "trend"]
-    assert as_dict["status_trace"] == (Status.OK, Status.OK)
+    assert as_dict["status_trace"] == (RegressionStatus.OK, RegressionStatus.OK)
 
 
 def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs() -> (
@@ -377,7 +381,10 @@ def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs()
 
     out = MCRegressionResult.from_results(results)
 
-    assert out.status_trace == (Status.RANK_DEFICIENT, Status.RANK_DEFICIENT)
+    assert out.status_trace == (
+        RegressionStatus.RANK_DEFICIENT,
+        RegressionStatus.RANK_DEFICIENT,
+    )
     np.testing.assert_allclose(
         out.se_trace,
         np.vstack([result.se for result in results]),

@@ -12,7 +12,7 @@ from .._diag_tests.result import MCResult, TestResult
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
-from ..regression.ols import MCRegressionResult, OLSResult, Status
+from ..regression.ols import MCRegressionResult, OLSResult, RegressionStatus
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
@@ -202,7 +202,9 @@ class MCPipelineResult:
         }
 
     @property
-    def regression_status_traces(self) -> Mapping[str, tuple[Status, ...]]:
+    def regression_status_traces(
+        self,
+    ) -> Mapping[str, tuple[RegressionStatus, ...]]:
         return {
             name: summary.status_trace
             for name, summary in self.regression_summaries.items()

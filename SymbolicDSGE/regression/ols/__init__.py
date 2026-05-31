@@ -1,9 +1,9 @@
-from .ols_result import MCRegressionResult, OLSResult, Status
+from .ols_result import MCRegressionResult, OLSResult, RegressionStatus
 from .core import ols
 
 __all__ = [
     "MCRegressionResult",
     "OLSResult",
-    "Status",
+    "RegressionStatus",
     "ols",
 ]

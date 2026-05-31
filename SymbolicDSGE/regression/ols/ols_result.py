@@ -5,6 +5,7 @@ from SymbolicDSGE._diag_tests.distributions import (
     ReferenceDistribution,
     PvalMethod,
 )
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.regression.ols.diag_utils import r2, r2_adj, se
 from ..._diag_tests.result import MCResult, TestResult
 
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 NDF = NDArray[float64]
 
 
-class Status(IntEnum):
+class RegressionStatus(IntEnum):
     OK = 0
     RANK_DEFICIENT = -1
 
@@ -42,7 +43,7 @@ class OLSResult:
     k: int = field(init=False)
 
     # Meta
-    status: Status
+    status: RegressionStatus
     _L: NDF = field(repr=False)
 
     def __post_init__(self) -> None:
@@ -127,6 +128,7 @@ class OLSResult:
             pval_method=PvalMethod.SF,
             alpha=float64(alpha),
             statistic=F_stat,
+            status=TestStatus.OK,
             _auto_pval=True,
         )
 
@@ -140,7 +142,7 @@ class MCRegressionResult:
     results: tuple[OLSResult, ...] = field(repr=False)
 
     coef_trace: NDF = field(init=False)
-    status_trace: tuple[Status, ...] = field(init=False)
+    status_trace: tuple[RegressionStatus, ...] = field(init=False)
     n_rep: int = field(init=False)
     n: int = field(init=False)
     k: int = field(init=False)
@@ -163,7 +165,7 @@ class MCRegressionResult:
             )
 
         coef_trace: list[NDF] = []
-        status_trace: list[Status] = []
+        status_trace: list[RegressionStatus] = []
         for result in results:
             if result.variables != variables:
                 raise ValueError("MC regression results have incompatible variables.")
