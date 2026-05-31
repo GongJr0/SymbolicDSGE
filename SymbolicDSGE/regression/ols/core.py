@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .ols_result import OLSResult, Status
+from .ols_result import OLSResult, RegressionStatus
 from .solvers import chol_solve, ltsq_solve
 
 from numpy import float64
@@ -23,6 +23,6 @@ def ols(x: NDF, y: NDF, variables: list[str] | None = None) -> OLSResult:
         coefficients=coef,
         y=y,
         x=x,
-        status=Status(status),
+        status=RegressionStatus(status),
         _L=L,
     )

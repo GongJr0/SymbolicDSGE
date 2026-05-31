@@ -144,7 +144,7 @@ class MCPipeline:
         if step.op_type is OpType.REGRESSION and not isinstance(out, OLSResult):
             raise TypeError("REGRESSION steps must return OLSResult.")
         if step.op_type is OpType.REGRESSION:
-            context.regressions[step.name] = out
+            context.regressions[step.name] = out  # pyright: ignore
         if step.op_type is OpType.TEST:
             if not isinstance(out, TestResult):
                 raise TypeError("TEST steps must return TestResult.")

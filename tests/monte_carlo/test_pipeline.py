@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE import Shock
+from SymbolicDSGE._diag_tests.ljung_box import ljung_box
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.kalman.filter import FilterResult
 from SymbolicDSGE.monte_carlo import (
@@ -13,6 +15,7 @@ from SymbolicDSGE.monte_carlo import (
     MCData,
     MCStep,
     OpType,
+    ljung_box_test_step,
     raw_data_step,
     reference_filter_step,
     regression_step,
@@ -178,6 +181,65 @@ def test_raw_data_pipeline_accepts_observables_without_states() -> None:
     assert out.contexts[0].data is not None
     assert out.contexts[0].data.states is None
     np.testing.assert_allclose(out.contexts[0].data.observables, observables[0])
+
+
+def test_ljung_box_pipeline_selects_column_and_aggregates_results() -> None:
+    reference = _FakeSolvedModel()
+    first = np.column_stack(
+        [
+            np.array([1.0, 2.0, 0.0, 4.0, 3.0], dtype=np.float64),
+            np.array([0.0, 1.0, 0.5, -1.0, 2.0], dtype=np.float64),
+        ]
+    )
+    second = np.column_stack(
+        [
+            np.array([2.0, 1.0, 3.0, 0.0, 4.0], dtype=np.float64),
+            np.array([1.5, -0.5, 0.0, 2.5, 1.0], dtype=np.float64),
+        ]
+    )
+    observables = np.stack([first, second])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables, observable_names=("a", "b")),
+            ljung_box_test_step(
+                "lb_b",
+                source="observables",
+                column=[1],
+                lags=2,
+                alpha=0.1,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=2)
+
+    expected = np.asarray(
+        [ljung_box(observables[i, :, 1], L=2, alpha=0.1).statistic for i in range(2)],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(out.statistic_traces["lb_b"], expected)
+    assert out.test_summaries["lb_b"].n == 2
+    assert out.test_summaries["lb_b"].df == np.float64(2.0)
+    assert out.test_results is not None
+    assert all(result.status is TestStatus.OK for result in out.test_results["lb_b"])
+
+
+def test_ljung_box_pipeline_rejects_multi_column_inputs() -> None:
+    reference = _FakeSolvedModel()
+    observables = np.array([[1.0, 2.0]], dtype=np.float64)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables, observable_names=("a", "b")),
+            ljung_box_test_step(
+                "lb",
+                source="observables",
+                lags=1,
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="single column"):
+        pipeline.run(reference=reference, n_rep=1)
 
 
 def test_raw_data_pipeline_rejects_empty_raw_data() -> None:

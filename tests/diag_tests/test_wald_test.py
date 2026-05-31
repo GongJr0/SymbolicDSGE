@@ -7,6 +7,7 @@ from SymbolicDSGE._diag_tests.hac_covariance import (
     kernel_dispatcher,
     wooldridge_bandwidth,
 )
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.wald_test import (
     ERR_BAD_SHAPE,
     ERR_LINALG,
@@ -105,6 +106,7 @@ def test_jit_wald_hac_stat_matches_manual_statistic() -> None:
     manual_stat = g.shape[0] * manual_mean @ np.linalg.solve(manual_omega, manual_mean)
 
     assert err == OK
+    assert OK == TestStatus.OK
     assert df == 2
     assert np.isclose(stat, manual_stat)
 
@@ -126,6 +128,7 @@ def test_wald_mean_hac_uses_right_tail_p_value_method() -> None:
     out = wald_mean_hac(g, np.zeros(2, dtype=np.float64), bandwidth=0)
 
     assert out.pval_method is PvalMethod.SF
+    assert out.status is TestStatus.OK
 
 
 def test_wald_mean_hac_rejects_large_mean_deviation() -> None:
@@ -226,6 +229,7 @@ def test_jit_wald_hac_stat_returns_shape_error_for_bad_target() -> None:
     )
 
     assert err == ERR_BAD_SHAPE
+    assert ERR_BAD_SHAPE == TestStatus.BAD_SHAPE
     assert np.isnan(stat)
     assert df == 2
 
@@ -254,5 +258,6 @@ def test_jit_wald_stat_from_mean_and_cov_returns_linalg_error_for_singular_covar
     )
 
     assert err == ERR_LINALG
+    assert ERR_LINALG == TestStatus.LINALG
     assert np.isnan(stat)
     assert df == 2

@@ -2,6 +2,7 @@ from .hac_covariance import jit_hac_estimator_loop_into, hac_covariance
 from .moment_calculation_utils import jit_fill_centered, jit_fill_mean_ax0
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
+from .status import TestStatus
 import numpy as np
 from numpy import float64, int64
 from numpy.typing import NDArray
@@ -12,9 +13,9 @@ from typing import Callable, Literal
 
 NDF = NDArray[float64]
 
-OK = int64(0)
-ERR_BAD_SHAPE = int64(-1)
-ERR_LINALG = int64(-2)
+OK = int64(TestStatus.OK)
+ERR_BAD_SHAPE = int64(TestStatus.BAD_SHAPE)
+ERR_LINALG = int64(TestStatus.LINALG)
 
 F64_NAN = float64(np.nan)
 
@@ -191,6 +192,7 @@ def wald_mean_hac(
         statistic=stat,
         pval_method=PvalMethod.SF,
         alpha=float64(alpha),
+        status=TestStatus.OK,
         _auto_pval=_auto_pval,
     )
     return res
@@ -273,6 +275,7 @@ def wald_covariance_hac(
         statistic=stat,
         pval_method=PvalMethod.SF,
         alpha=float64(alpha),
+        status=TestStatus.OK,
         _auto_pval=_auto_pval,
     )
     return res
@@ -350,6 +353,7 @@ def wald_second_moment_hac(
         statistic=stat,
         pval_method=PvalMethod.SF,
         alpha=float64(alpha),
+        status=TestStatus.OK,
         _auto_pval=_auto_pval,
     )
     return res

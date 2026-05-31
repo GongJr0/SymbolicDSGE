@@ -11,6 +11,7 @@ from .distributions import (
     PvalMethod,
     ReferenceDistribution,
 )
+from .status import TestStatus
 
 DfSpec = FloatScalar | Sequence[FloatScalar] | NDArray[float64]
 NormalizedDf = float64 | tuple[float64, ...]
@@ -65,6 +66,7 @@ class TestResult:
     pval_method: PvalMethod
     alpha: float64
     statistic: float64
+    status: TestStatus
     _auto_pval: bool = field(default=True, repr=False, compare=False)
 
     _frozen_dist: FrozenDistribution | None = field(
@@ -76,6 +78,7 @@ class TestResult:
         statistic = float64(self.statistic)
         object.__setattr__(self, "statistic", statistic)
         object.__setattr__(self, "df", _normalize_df(self.df))
+        object.__setattr__(self, "status", TestStatus(self.status))
 
         if self._auto_pval:
             self.compute_pval()
@@ -134,6 +137,7 @@ class TestResult:
             "pval_method": self.pval_method.value,
             "alpha": self.alpha,
             "statistic": self.statistic,
+            "status": self.status,
             "pval": self.pval,
         }
 

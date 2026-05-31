@@ -111,7 +111,7 @@ __Fields and Properties:__
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
 | rejection_traces | `#!python Mapping[str, ndarray]` | Boolean rejection trace for each test summary. |
 | coefficient_traces | `#!python Mapping[str, ndarray]` | Shortcut for each regression summary's coefficient trace. |
-| regression_status_traces | `#!python Mapping[str, tuple[Status, ...]]` | Shortcut for each regression summary's status trace. |
+| regression_status_traces | `#!python Mapping[str, tuple[RegressionStatus, ...]]` | Shortcut for each regression summary's status trace. |
 
 ???+ note "P-Value Evaluation"
     Scalar `TestResult` objects produced inside Monte Carlo Wald steps defer p-value and frozen-distribution construction until `pval`, `frozen_dist`, or `compute_pval()` is accessed. Aggregate `MCResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built.

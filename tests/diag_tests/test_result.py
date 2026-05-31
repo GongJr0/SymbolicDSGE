@@ -6,6 +6,7 @@ from scipy.stats import chi2, f
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult, TestResult as DiagTestResult
+from SymbolicDSGE._diag_tests.status import TestStatus
 
 
 def test_test_result_computes_p_value_from_reference_distribution() -> None:
@@ -16,10 +17,12 @@ def test_test_result_computes_p_value_from_reference_distribution() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic=np.float64(10.0),
+        status=TestStatus.OK,
     )
 
     assert out.pval == pytest.approx(chi2(df=2).sf(10.0))
     assert out.is_significant()
+    assert out.status is TestStatus.OK
 
 
 def test_test_result_can_defer_p_value_until_requested() -> None:
@@ -30,6 +33,7 @@ def test_test_result_can_defer_p_value_until_requested() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic=np.float64(10.0),
+        status=TestStatus.OK,
         _auto_pval=False,
     )
 
@@ -50,6 +54,7 @@ def test_test_result_supports_multi_df_reference_distribution() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic=np.float64(3.0),
+        status=TestStatus.OK,
     )
 
     assert out.df == (np.float64(2.0), np.float64(10.0))
@@ -64,6 +69,7 @@ def test_test_result_to_dict_excludes_frozen_distribution() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic=np.float64(10.0),
+        status=TestStatus.OK,
     )
 
     assert out.to_dict() == {
@@ -73,6 +79,7 @@ def test_test_result_to_dict_excludes_frozen_distribution() -> None:
         "pval_method": "sf",
         "alpha": np.float64(0.05),
         "statistic": np.float64(10.0),
+        "status": TestStatus.OK,
         "pval": out.pval,
     }
 
