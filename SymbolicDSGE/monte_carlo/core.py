@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -17,6 +18,8 @@ from .mc_constructs import (
     MCPipelineResult,
     MCStep,
     OpType,
+    report_mc_performance,
+    report_mc_step_performance,
 )
 
 
@@ -54,28 +57,45 @@ class MCPipeline:
         retain_test_results: bool = True,
         retain_contexts: bool = False,
         fail_fast: bool = True,
+        verbosity: int = 1,
     ) -> MCPipelineResult:
         if n_rep <= 0:
             raise ValueError("n_rep must be positive.")
+        if verbosity not in (0, 1, 2):
+            raise ValueError("verbosity must be 0, 1, or 2.")
 
         contexts: list[MCContext] = []
         payload_traces: list[Mapping[str, object]] = []
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
         regression_results_by_step: dict[str, list[OLSResult]] = {}
+        step_elapsed_s: dict[str, float] = {step.name: 0.0 for step in self.steps}
+        step_counts: dict[str, int] = {step.name: 0 for step in self.steps}
+        step_failures: dict[str, int] = {step.name: 0 for step in self.steps}
 
+        run_start = perf_counter()
         for rep_idx in range(n_rep):
             context = MCContext(rep_idx=rep_idx, reference=reference, dgp=dgp)
+            failed_step_name: str | None = None
             try:
                 for step in self.steps:
-                    self._run_step(context, step)
+                    failed_step_name = step.name
+                    step_start = perf_counter()
+                    try:
+                        self._run_step(context, step)
+                    except Exception:
+                        step_failures[step.name] += 1
+                        raise
+                    finally:
+                        step_elapsed_s[step.name] += perf_counter() - step_start
+                        step_counts[step.name] += 1
             except Exception as exc:
                 if fail_fast:
                     raise
                 failures.append(
                     MCFailure(
                         rep_idx=rep_idx,
-                        step_name=step.name,  # pyright: ignore
+                        step_name=failed_step_name or "",
                         error_type=type(exc).__name__,
                         message=str(exc),
                     )
@@ -94,7 +114,8 @@ class MCPipeline:
 
         test_summaries = _summarize_tests(results_by_step)
         regression_summaries = _summarize_regressions(regression_results_by_step)
-        return MCPipelineResult(
+        elapsed_s = perf_counter() - run_start
+        result = MCPipelineResult(
             n_rep=n_rep,
             n_successful=len(contexts),
             test_summaries=test_summaries,
@@ -107,7 +128,16 @@ class MCPipeline:
             contexts=tuple(contexts) if retain_contexts else None,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
+            elapsed_s=elapsed_s,
+            step_elapsed_s=step_elapsed_s,
+            step_counts=step_counts,
+            step_failures=step_failures,
         )
+        if verbosity == 1:
+            report_mc_performance(result)
+        elif verbosity == 2:
+            report_mc_step_performance(result)
+        return result
 
     def _run_step(self, context: MCContext, step: MCStep) -> None:
         kwargs = dict(step.kwargs)

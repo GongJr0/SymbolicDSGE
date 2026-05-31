@@ -169,10 +169,42 @@ class MCPipelineResult:
     contexts: tuple[MCContext, ...] | None
     failures: tuple[MCFailure, ...] = ()
     regression_summaries: Mapping[str, MCRegressionResult] = field(default_factory=dict)
+    elapsed_s: float = 0.0
+    step_elapsed_s: Mapping[str, float] = field(default_factory=dict)
+    step_counts: Mapping[str, int] = field(default_factory=dict)
+    step_failures: Mapping[str, int] = field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
         return len(self.failures) == 0
+
+    @property
+    def it_s(self) -> float:
+        return _iterations_per_second(self.n_rep, self.elapsed_s)
+
+    @property
+    def step_it_s(self) -> Mapping[str, float]:
+        return {
+            name: _iterations_per_second(
+                self.step_counts.get(name, 0),
+                elapsed_s,
+            )
+            for name, elapsed_s in self.step_elapsed_s.items()
+        }
+
+    def report_performance(
+        self,
+        *,
+        print_func: Callable[[str], None] = print,
+    ) -> None:
+        report_mc_performance(self, print_func=print_func)
+
+    def report_step_performance(
+        self,
+        *,
+        print_func: Callable[[str], None] = print,
+    ) -> None:
+        report_mc_step_performance(self, print_func=print_func)
 
     @property
     def statistic_traces(self) -> Mapping[str, NDF]:
@@ -209,3 +241,40 @@ class MCPipelineResult:
             name: summary.status_trace
             for name, summary in self.regression_summaries.items()
         }
+
+
+def _iterations_per_second(n_iter: int, elapsed_s: float) -> float:
+    if n_iter == 0:
+        return 0.0
+    if elapsed_s <= 0.0:
+        return float("inf")
+    return n_iter / elapsed_s
+
+
+def _conclusion_word(succeeded: bool) -> str:
+    return "successfully" if succeeded else "unsuccessfully"
+
+
+def report_mc_performance(
+    result: MCPipelineResult,
+    *,
+    print_func: Callable[[str], None] = print,
+) -> None:
+    print_func(
+        "MC run concluded "
+        f"{_conclusion_word(result.succeeded)} with {result.it_s:.2f} it/s."
+    )
+
+
+def report_mc_step_performance(
+    result: MCPipelineResult,
+    *,
+    print_func: Callable[[str], None] = print,
+) -> None:
+    step_rates = result.step_it_s
+    for step_name in result.step_elapsed_s:
+        step_succeeded = result.step_failures.get(step_name, 0) == 0
+        print_func(
+            f"{step_name} concluded {_conclusion_word(step_succeeded)} "
+            f"with {step_rates.get(step_name, 0.0):.2f} it/s."
+        )

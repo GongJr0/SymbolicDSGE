@@ -28,6 +28,8 @@ from .mc_constructs import (
     OpType,
     RegressionOp,
     TestOp,
+    report_mc_performance,
+    report_mc_step_performance,
 )
 
 __all__ = [
@@ -48,6 +50,8 @@ __all__ = [
     "raw_data_datagen",
     "raw_data_step",
     "reference_filter_step",
+    "report_mc_performance",
+    "report_mc_step_performance",
     "regression_step",
     "run_reference_filter",
     "run_regression",

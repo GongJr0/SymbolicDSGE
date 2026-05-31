@@ -30,6 +30,7 @@ MCPipeline.run(
     retain_test_results: bool = True,
     retain_contexts: bool = False,
     fail_fast: bool = True,
+    verbosity: int = 1,
 ) -> MCPipelineResult
 ```
 
@@ -44,6 +45,7 @@ __Inputs:__
 | retain_test_results | Store scalar `TestResult` objects from each successful replication. |
 | retain_contexts | Store full `MCContext` objects. This is useful for debugging and memory-heavy for large runs. |
 | fail_fast | If `True`, raise on the first failed replication. If `False`, collect `MCFailure` entries and summarize successful replications. |
+| verbosity | Performance-reporting level: `0` prints nothing, `1` prints one aggregate throughput line, and `2` prints one throughput line per step. |
 
 __Returns:__
 
