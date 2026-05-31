@@ -11,6 +11,8 @@ from .._diag_tests.wald_test import (
     wald_mean_hac,
     wald_second_moment_hac,
 )
+from .._diag_tests.ljung_box import ljung_box
+
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
@@ -193,17 +195,7 @@ def run_wald_test(
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
-    source: Literal[
-        "states",
-        "observables",
-        "x_pred",
-        "x_filt",
-        "y_pred",
-        "y_filt",
-        "innov",
-        "std_innov",
-        "payload",
-    ],
+    source: InpSources,
     target: NDF,
     kind: Literal["mean", "covariance", "second_moment"] = "mean",
     filter_key: str = "filter",
@@ -254,6 +246,47 @@ def run_wald_test(
             _auto_pval=False,
         )
     raise ValueError(f"Unsupported Wald test kind: {kind}")
+
+
+def run_ljung_box_test(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    source: InpSources,
+    filter_key: str = "filter",
+    payload_key: str | None = None,
+    column: Sequence[int] | int | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    lags: int = 10,
+    alpha: float = 0.05,
+) -> TestResult:
+    del reference, dgp, rep_idx
+
+    col_idx: Sequence[int] | None
+    if isinstance(column, int):
+        col_idx = [column]
+    else:
+        col_idx = column
+
+    arr = _resolve_context_array(
+        context,
+        source=source,
+        filter_key=filter_key,
+        payload_key=payload_key,
+        columns=col_idx,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+    n = arr.size  # size == n iff 1D array
+    if any(arr.shape == shape for shape in [(n,), (n, 1), (1, n)]):
+        arr = arr.flatten()
+    else:
+        raise ValueError("Ljung-Box test requires a single column of data.")
+
+    return ljung_box(arr, L=lags, alpha=alpha)
 
 
 def run_regression(
@@ -349,6 +382,12 @@ def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
 
 def wald_test_step(name: str, **kwargs: Any) -> MCStep:
     return MCStep(name=name, op_type=OpType.TEST, func=run_wald_test, kwargs=kwargs)
+
+
+def ljung_box_test_step(name: str, **kwargs: Any) -> MCStep:
+    return MCStep(
+        name=name, op_type=OpType.TEST, func=run_ljung_box_test, kwargs=kwargs
+    )
 
 
 def regression_step(name: str, **kwargs: Any) -> MCStep:
