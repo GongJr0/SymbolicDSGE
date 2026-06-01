@@ -2,8 +2,19 @@ from __future__ import annotations
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
+from numba import njit
 
 NDF = NDArray[float64]
+
+
+@njit(cache=True)
+def log_grid(start: float64, stop: float64, num: int) -> NDF:
+    if num == 1:
+        return np.array([start], dtype=float64)
+    elif num == 2:
+        return np.array([start, stop], dtype=float64)
+    else:
+        return np.exp(np.linspace(np.log(start), np.log(stop), num=num))
 
 
 def process_args(

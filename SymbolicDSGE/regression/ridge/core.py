@@ -9,6 +9,7 @@ from numba import njit
 from ..enums import RegressionStatus
 from ..utils import process_args
 from ..solvers import chol_solve_L2
+from ..utils import log_grid
 from .result import RidgeResult, RidgeObjective
 
 NDF = NDArray[float64]
@@ -23,16 +24,6 @@ LOOP_LIMIT_P = 1e3
 @njit(cache=True)
 def should_loop(n: int, p: int) -> bool:
     return n * p <= LOOP_LIMIT_N and p <= LOOP_LIMIT_P
-
-
-@njit(cache=True)
-def log_grid(start: float64, stop: float64, num: int) -> NDF:
-    if num == 1:
-        return np.array([start], dtype=float64)
-    elif num == 2:
-        return np.array([start, stop], dtype=float64)
-    else:
-        return np.exp(np.linspace(np.log(start), np.log(stop), num=num))
 
 
 @njit(cache=True)
