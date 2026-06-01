@@ -60,11 +60,11 @@ def test_ols_package_exports_public_entry_points() -> None:
 def test_ols_core_uses_cholesky_solver_and_default_variable_names() -> None:
     x = np.array(
         [
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [1.0, 2.0],
-            [1.0, 3.0],
-            [1.0, 4.0],
+            [0.0],
+            [1.0],
+            [2.0],
+            [3.0],
+            [4.0],
         ],
         dtype=np.float64,
     )
@@ -72,8 +72,9 @@ def test_ols_core_uses_cholesky_solver_and_default_variable_names() -> None:
 
     out = ols(x, y)
 
-    expected_coef = np.linalg.solve(x.T @ x, x.T @ y)
-    assert out.variables == ["x0", "x1"]
+    X = np.column_stack([np.ones(x.shape[0], dtype=np.float64), x])
+    expected_coef = np.linalg.solve(X.T @ X, X.T @ y)
+    assert out.variables == ["Intercept", "x0"]
     assert out.status is RegressionStatus.OK
     np.testing.assert_allclose(out.coefficients, expected_coef)
 
@@ -90,7 +91,7 @@ def test_ols_core_falls_back_to_lstsq_for_rank_deficient_design() -> None:
     )
     y = np.array([1.0, 2.1, 2.9, 4.2], dtype=np.float64)
 
-    out = ols(x, y, variables=["const", "x", "two_x"])
+    out = ols(x, y, variables=["const", "x", "two_x"], intercept=False)
 
     expected_coef, *_ = np.linalg.lstsq(x, y, rcond=None)
     assert out.variables == ["const", "x", "two_x"]
@@ -198,7 +199,7 @@ def test_ols_result_exposes_summary_diagnostics_and_f_test() -> None:
         variables=["const", "trend"],
         coefficients=coef,
         y=y,
-        x=x,
+        X=x,
         status=RegressionStatus(status),
         _L=L,
     )
@@ -261,7 +262,7 @@ def test_rank_deficient_ols_result_uses_pseudoinverse_standard_errors() -> None:
         variables=["const", "x", "two_x"],
         coefficients=coef,
         y=y,
-        x=x,
+        X=x,
         status=RegressionStatus(status),
         _L=L,
     )
@@ -284,8 +285,8 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
     y0 = np.array([1.0, 1.9, 3.2, 3.9, 5.1], dtype=np.float64)
     y1 = np.array([0.8, 2.2, 2.9, 4.4, 4.8], dtype=np.float64)
     results = (
-        ols(x, y0, variables=["const", "trend"]),
-        ols(x, y1, variables=["const", "trend"]),
+        ols(x, y0, variables=["const", "trend"], intercept=False),
+        ols(x, y1, variables=["const", "trend"], intercept=False),
     )
 
     out = MCRegressionResult.from_results(results)
@@ -375,8 +376,8 @@ def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs()
         dtype=np.float64,
     )
     results = (
-        ols(x, np.array([1.0, 2.1, 2.9, 4.2], dtype=np.float64)),
-        ols(x, np.array([0.8, 2.4, 3.2, 3.9], dtype=np.float64)),
+        ols(x, np.array([1.0, 2.1, 2.9, 4.2], dtype=np.float64), intercept=False),
+        ols(x, np.array([0.8, 2.4, 3.2, 3.9], dtype=np.float64), intercept=False),
     )
 
     out = MCRegressionResult.from_results(results)
@@ -400,11 +401,17 @@ def test_mc_regression_result_validates_compatible_runs() -> None:
         ],
         dtype=np.float64,
     )
-    first = ols(x, np.array([1.0, 2.0, 3.0], dtype=np.float64), variables=["c", "x"])
+    first = ols(
+        x,
+        np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        variables=["c", "x"],
+        intercept=False,
+    )
     second = ols(
         x,
         np.array([1.5, 2.5, 3.5], dtype=np.float64),
         variables=["const", "trend"],
+        intercept=False,
     )
 
     with pytest.raises(ValueError, match="incompatible variables"):

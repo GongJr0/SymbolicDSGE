@@ -4,20 +4,9 @@ import numpy as np
 from numpy import float64, asarray
 from numpy.typing import NDArray
 from numba import njit
+from ..result import r2, r2_adj
 
 NDF = NDArray[float64]
-
-
-def r2(y: NDF, y_hat: NDF) -> float64:
-    ssr = ((y - y_hat) ** 2).sum()
-    sst = ((y - y.mean()) ** 2).sum()
-    return 1 - ssr / sst if sst > 0 else float64(0.0)
-
-
-def r2_adj(r2: float64, n: int, k: int) -> float64:
-    if n <= k + 1:
-        return float64(0.0)
-    return 1 - (1 - r2) * (n - 1) / (n - k - 1)
 
 
 @njit(cache=True)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Mapping, Sequence
+from typing import Literal, Mapping, Sequence, Any
 
 import numpy as np
 from numpy import float64, ndarray
@@ -14,7 +14,10 @@ from .._diag_tests.wald_test import (
 )
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
-from ..regression.ols import OLSResult, ols
+from ..regression.enums import RegressionKind
+from ..regression.ols import ols
+from ..regression.result import RegressionResult
+from ..regression.ridge import ridge, ridge_gs
 from .mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from .operation_utils import (
     InpSources,
@@ -275,6 +278,7 @@ def run_regression(
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
+    kind: Literal["ols", "ridge", "ridge_gs"] = "ols",
     y_source: InpSources,
     X_source: InpSources,
     filter_key: str = "filter",
@@ -282,10 +286,12 @@ def run_regression(
     x_payload_key: str | None = None,
     y_column: Sequence[int] | int | None = None,
     X_columns: Sequence[int] | slice | None = None,
+    intercept: bool = True,
     burn_in: int = 0,
     drop_initial: bool = False,
     variables: Sequence[str] | None = None,
-) -> OLSResult:
+    **kind_kwargs: Any,
+) -> RegressionResult:
     del reference, dgp, rep_idx
 
     y_col_idx: Sequence[int] | None
@@ -331,4 +337,31 @@ def run_regression(
 
     y_vec = np.ascontiguousarray(y[:, 0], dtype=np.float64)
     variable_names = list(variables) if variables is not None else None
-    return ols(X, y_vec, variables=variable_names)
+
+    match RegressionKind(kind):
+        case RegressionKind.OLS:
+            return ols(
+                X,
+                y_vec,
+                intercept=intercept,
+                variables=variable_names,
+                **kind_kwargs,
+            )
+        case RegressionKind.RIDGE:
+            return ridge(
+                X,
+                y_vec,
+                intercept=intercept,
+                variables=variable_names,
+                **kind_kwargs,
+            )
+        case RegressionKind.RIDGE_GS:
+            return ridge_gs(
+                X,
+                y_vec,
+                intercept=intercept,
+                variables=variable_names,
+                **kind_kwargs,
+            )
+        case _:
+            raise ValueError(f"Unsupported regression kind: {kind}")

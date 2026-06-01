@@ -5,11 +5,13 @@ from SymbolicDSGE._diag_tests.distributions import (
     ReferenceDistribution,
     PvalMethod,
 )
-from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.regression.ols.diag_utils import r2, r2_adj, se
+from .diag_utils import se
+from ..enums import RegressionStatus
+from ..result import RegressionResult
 from ..._diag_tests.result import MCResult, TestResult
+from ..._diag_tests.status import TestStatus
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy import float64, asarray
@@ -17,8 +19,7 @@ from numpy.typing import NDArray
 from scipy.stats import t
 from functools import cached_property
 
-from typing import TYPE_CHECKING, Sequence
-from enum import IntEnum
+from typing import TYPE_CHECKING, Sequence, cast
 
 if TYPE_CHECKING:
     from pandas import DataFrame
@@ -26,49 +27,28 @@ if TYPE_CHECKING:
 NDF = NDArray[float64]
 
 
-class RegressionStatus(IntEnum):
-    OK = 0
-    RANK_DEFICIENT = -1
+def _f_test_degrees_of_freedom(
+    n: int,
+    k: int,
+    variables: Sequence[str],
+) -> tuple[int, int]:
+    has_intercept = len(variables) > 0 and variables[0] == "Intercept"
+    if has_intercept:
+        return k - 1, n - k
+    return k, n - k - 1
 
 
 @dataclass(frozen=True)
-class OLSResult:
-    variables: list[str]
-    coefficients: NDF
-
-    # Raw Data
-    y: NDF
-    x: NDF
-    n: int = field(init=False)
-    k: int = field(init=False)
-
-    # Meta
-    status: RegressionStatus
+class OLSResult(RegressionResult):
     _L: NDF = field(repr=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "n", self.y.shape[0])
-        object.__setattr__(self, "k", self.x.shape[1])
-
-    @cached_property
-    def y_hat(self) -> NDF:
-        return self.x @ self.coefficients
 
     @cached_property
     def se(self) -> NDF:
-        return se(self._L, self.y, self.y_hat, self.x)
+        return se(self._L, self.y, self.y_hat, self.X)
 
     @cached_property
     def t_stat(self) -> NDF:
         return self.coefficients / self.se
-
-    @cached_property
-    def r2(self) -> float64:
-        return r2(self.y, self.y_hat)
-
-    @cached_property
-    def r2_adj(self) -> float64:
-        return r2_adj(self.r2, self.n, self.k)
 
     @cached_property
     def partial_r2(self) -> NDF:
@@ -114,8 +94,7 @@ class OLSResult:
         n = self.n
         k = self.k
 
-        dfn = k
-        dfd = n - k - 1
+        dfn, dfd = _f_test_degrees_of_freedom(n, k, self.variables)
 
         num = r2 / dfn
         denom = (1 - r2) / dfd
@@ -132,14 +111,11 @@ class OLSResult:
             _auto_pval=True,
         )
 
-    def to_dict(self) -> dict:
-        return asdict(self)
-
 
 @dataclass(frozen=True)
 class MCRegressionResult:
     variables: list[str]
-    results: tuple[OLSResult, ...] = field(repr=False)
+    results: tuple[RegressionResult, ...] = field(repr=False)
 
     coef_trace: NDF = field(init=False)
     status_trace: tuple[RegressionStatus, ...] = field(init=False)
@@ -150,7 +126,7 @@ class MCRegressionResult:
     def __post_init__(self) -> None:
         results = tuple(self.results)
         if not results:
-            raise ValueError("MCRegressionResult requires at least one OLSResult.")
+            raise ValueError("MCRegressionResult requires at least one result.")
 
         first = results[0]
         variables = list(self.variables)
@@ -173,7 +149,7 @@ class MCRegressionResult:
                 raise ValueError("MC regression results have incompatible dimensions.")
             if result.y.shape != (n,):
                 raise ValueError("MC regression results require 1D response arrays.")
-            if result.x.shape != (n, k):
+            if result.X.shape != (n, k):
                 raise ValueError("MC regression results have incompatible designs.")
             if result.coefficients.shape != (k,):
                 raise ValueError(
@@ -191,11 +167,18 @@ class MCRegressionResult:
         object.__setattr__(self, "k", k)
 
     @classmethod
-    def from_results(cls, results: Sequence[OLSResult]) -> "MCRegressionResult":
+    def from_results(cls, results: Sequence[RegressionResult]) -> "MCRegressionResult":
         result_tuple = tuple(results)
         if not result_tuple:
-            raise ValueError("MCRegressionResult requires at least one OLSResult.")
+            raise ValueError("MCRegressionResult requires at least one result.")
         return cls(variables=list(result_tuple[0].variables), results=result_tuple)
+
+    def _require_ols_results(self) -> tuple[OLSResult, ...]:
+        if not all(isinstance(result, OLSResult) for result in self.results):
+            raise TypeError(
+                "OLS-specific MC diagnostics require all results to be OLSResult."
+            )
+        return cast(tuple[OLSResult, ...], self.results)
 
     @property
     def coefficients(self) -> NDF:
@@ -211,7 +194,7 @@ class MCRegressionResult:
     @cached_property
     def x_trace(self) -> NDF:
         return np.ascontiguousarray(
-            np.stack([result.x for result in self.results]),
+            np.stack([result.X for result in self.results]),
             dtype=np.float64,
         )
 
@@ -223,19 +206,40 @@ class MCRegressionResult:
         )
 
     @cached_property
+    def residual_trace(self) -> NDF:
+        return np.asarray(self.y_trace - self.y_hat_trace, dtype=np.float64)
+
+    @cached_property
+    def ssr_trace(self) -> NDF:
+        return np.asarray((self.residual_trace**2).sum(axis=1), dtype=np.float64)
+
+    @cached_property
+    def sst_trace(self) -> NDF:
+        centered = self.y_trace - self.y_trace.mean(axis=1, keepdims=True)
+        return np.asarray((centered**2).sum(axis=1), dtype=np.float64)
+
+    @cached_property
+    def mse_trace(self) -> NDF:
+        return np.asarray(self.ssr_trace / self.n, dtype=np.float64)
+
+    @cached_property
+    def rmse_trace(self) -> NDF:
+        return np.asarray(np.sqrt(self.mse_trace), dtype=np.float64)
+
+    @cached_property
     def se_trace(self) -> NDF:
-        if all(result._L.shape == (self.k, self.k) for result in self.results):
-            eps = self.y_trace - self.y_hat_trace
-            sigma2 = (eps**2).sum(axis=1) / (self.n - self.k)
+        results = self._require_ols_results()
+        if all(result._L.shape == (self.k, self.k) for result in results):
+            sigma2 = self.ssr_trace / (self.n - self.k)
             eye = np.eye(self.k, dtype=np.float64)
             rhs = np.broadcast_to(eye, (self.n_rep, self.k, self.k))
-            L_trace = np.stack([result._L for result in self.results])
+            L_trace = np.stack([result._L for result in results])
             L_inv = np.linalg.solve(L_trace, rhs)
             inv_diag = (L_inv * L_inv).sum(axis=1)
             return np.asarray(np.sqrt(inv_diag * sigma2[:, None]), dtype=np.float64)
 
         return np.asarray(
-            np.vstack([result.se for result in self.results]), dtype=np.float64
+            np.vstack([result.se for result in results]), dtype=np.float64
         )
 
     @cached_property
@@ -244,13 +248,9 @@ class MCRegressionResult:
 
     @cached_property
     def r2_trace(self) -> NDF:
-        eps = self.y_trace - self.y_hat_trace
-        ssr = (eps**2).sum(axis=1)
-        centered = self.y_trace - self.y_trace.mean(axis=1, keepdims=True)
-        sst = (centered**2).sum(axis=1)
         out = np.zeros(self.n_rep, dtype=np.float64)
-        mask = sst > 0
-        out[mask] = 1 - ssr[mask] / sst[mask]
+        mask = self.sst_trace > 0
+        out[mask] = 1 - self.ssr_trace[mask] / self.sst_trace[mask]
         return out
 
     @cached_property
@@ -274,20 +274,20 @@ class MCRegressionResult:
 
     @cached_property
     def F_stat_trace(self) -> NDF:
-        dfn = self.k
-        dfd = self.n - self.k - 1
+        self._require_ols_results()
+        dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         num = self.r2_trace / dfn
         denom = (1 - self.r2_trace) / dfd
         return np.asarray(num / denom, dtype=np.float64)
 
     @cached_property
     def F_pval_trace(self) -> NDF:
-        frozen = ReferenceDistribution.F.freeze(
-            float64(self.k), float64(self.n - self.k - 1)
-        )
+        dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
+        frozen = ReferenceDistribution.F.freeze(float64(dfn), float64(dfd))
         return np.asarray(PvalMethod.SF(frozen, self.F_stat_trace), dtype=np.float64)
 
     def confidence_intervals(self, alpha: FloatScalar = 0.05) -> NDF:
+        self._require_ols_results()
         q = 1 - alpha / 2
         df = self.n - self.k
         t_crit = t.ppf(q, df)
@@ -298,10 +298,18 @@ class MCRegressionResult:
     def summary(self, alpha: FloatScalar = 0.05) -> DataFrame:
         import pandas as pd
 
-        coef_ci = self.confidence_intervals(alpha)
         index = pd.MultiIndex.from_product(
             [range(self.n_rep), self.variables], names=["rep", "variable"]
         )
+        if not all(isinstance(result, OLSResult) for result in self.results):
+            return pd.DataFrame(
+                {
+                    "coef": self.coef_trace.reshape(-1),
+                },
+                index=index,
+            )
+
+        coef_ci = self.confidence_intervals(alpha)
         return pd.DataFrame(
             {
                 "coef": self.coef_trace.reshape(-1),
@@ -316,10 +324,12 @@ class MCRegressionResult:
         )
 
     def F_test(self, alpha: FloatScalar = 0.05) -> MCResult:
+        self._require_ols_results()
+        dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         return MCResult(
             test_name="F-test",
             dist=ReferenceDistribution.F,
-            df=(float64(self.k), float64(self.n - self.k - 1)),
+            df=(float64(dfn), float64(dfd)),
             pval_method=PvalMethod.SF,
             alpha=float64(alpha),
             statistic_trace=self.F_stat_trace,

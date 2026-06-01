@@ -26,6 +26,7 @@ from SymbolicDSGE.monte_carlo import (
     wald_test_step,
 )
 from SymbolicDSGE.regression.ols import OLSResult
+from SymbolicDSGE.regression.ridge import RidgeResult
 
 
 class _FakeSolvedModel:
@@ -501,14 +502,19 @@ def test_regression_step_runs_ols_and_stores_result_payload() -> None:
     assert out.payloads is not None
     result = out.payloads[0]["ols"]
     assert isinstance(result, OLSResult)
-    assert result.variables == ["x"]
-    np.testing.assert_allclose(result.coefficients, np.array([2.5]))
+    assert result.variables == ["Intercept", "x"]
+    np.testing.assert_allclose(result.coefficients, np.array([0.0, 2.5]), atol=1e-12)
     np.testing.assert_allclose(result.y, y)
-    np.testing.assert_allclose(result.x, x.reshape(-1, 1))
+    np.testing.assert_allclose(
+        result.X,
+        np.column_stack([np.ones_like(x), x]),
+    )
     assert out.test_summaries == {}
     assert "ols" in out.regression_summaries
     np.testing.assert_allclose(
-        out.coefficient_traces["ols"], np.array([[2.5]], dtype=np.float64)
+        out.coefficient_traces["ols"],
+        np.array([[0.0, 2.5]], dtype=np.float64),
+        atol=1e-12,
     )
     assert out.regression_summaries["ols"].status_trace == (result.status,)
 
@@ -543,9 +549,54 @@ def test_regression_summary_does_not_depend_on_payload_retention() -> None:
     assert out.test_summaries == {}
     np.testing.assert_allclose(
         out.coefficient_traces["ols"],
-        np.array([[3.0], [4.0]], dtype=np.float64),
+        np.array([[0.0, 3.0], [0.0, 4.0]], dtype=np.float64),
+        atol=1e-12,
     )
     assert out.regression_summaries["ols"].n_rep == 2
+
+
+def test_regression_step_runs_ridge_kind_and_aggregates_summary() -> None:
+    reference = _FakeSolvedModel()
+    x = np.arange(1.0, 7.0, dtype=np.float64)
+    y = 1.0 + 2.0 * x
+    alpha = np.float64(0.5)
+    observables = np.column_stack([y, x])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables, observable_names=("y", "x")),
+            regression_step(
+                "ridge",
+                kind="ridge",
+                y_source="observables",
+                X_source="observables",
+                y_column=0,
+                X_columns=[1],
+                variables=["x"],
+                alpha=alpha,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=1)
+
+    assert out.payloads is not None
+    result = out.payloads[0]["ridge"]
+    assert isinstance(result, RidgeResult)
+    X = np.column_stack([np.ones_like(x), x])
+    G = X.T @ X
+    expected_coef = np.linalg.solve(
+        G + np.diag([0.0, alpha]),
+        X.T @ y,
+    )
+    assert result.variables == ["Intercept", "x"]
+    np.testing.assert_allclose(result.coefficients, expected_coef)
+    np.testing.assert_allclose(out.coefficient_traces["ridge"], expected_coef[None, :])
+    np.testing.assert_allclose(
+        out.regression_summaries["ridge"].r2_trace,
+        np.asarray([result.r2], dtype=np.float64),
+    )
+    with pytest.raises(TypeError, match="OLS-specific"):
+        _ = out.regression_summaries["ridge"].se_trace
 
 
 def test_regression_step_requires_single_response_column() -> None:
@@ -609,7 +660,9 @@ def test_regression_step_validates_result_type() -> None:
         ]
     )
 
-    with pytest.raises(TypeError, match="REGRESSION steps must return OLSResult"):
+    with pytest.raises(
+        TypeError, match="REGRESSION steps must return RegressionResult"
+    ):
         pipeline.run(reference=reference, n_rep=1)
 
 

@@ -12,7 +12,9 @@ from .._diag_tests.result import MCResult, TestResult
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
-from ..regression.ols import MCRegressionResult, OLSResult, RegressionStatus
+from ..regression.enums import RegressionStatus
+from ..regression.ols import MCRegressionResult
+from ..regression.result import RegressionResult
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
@@ -58,7 +60,7 @@ class MCContext:
     data: MCData | None = None
     payloads: dict[str, Any] = field(default_factory=dict)
     results: dict[str, TestResult] = field(default_factory=dict)
-    regressions: dict[str, OLSResult] = field(default_factory=dict)
+    regressions: dict[str, RegressionResult] = field(default_factory=dict)
 
     def require_data(self) -> MCData:
         if self.data is None:
@@ -129,7 +131,7 @@ class RegressionOp(Protocol):
         dgp: SolvedModel | None,
         rep_idx: int,
         **kwargs: Any,
-    ) -> OLSResult: ...
+    ) -> RegressionResult: ...
 
 
 @dataclass(frozen=True)

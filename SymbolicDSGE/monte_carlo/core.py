@@ -9,7 +9,8 @@ import numpy as np
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
-from ..regression.ols import MCRegressionResult, OLSResult
+from ..regression.ols import MCRegressionResult
+from ..regression.result import RegressionResult
 from .mc_constructs import (
     DataGenReturn,
     MCContext,
@@ -68,7 +69,7 @@ class MCPipeline:
         payload_traces: list[Mapping[str, object]] = []
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
-        regression_results_by_step: dict[str, list[OLSResult]] = {}
+        regression_results_by_step: dict[str, list[RegressionResult]] = {}
         step_elapsed_s: dict[str, float] = {step.name: 0.0 for step in self.steps}
         step_counts: dict[str, int] = {step.name: 0 for step in self.steps}
         step_failures: dict[str, int] = {step.name: 0 for step in self.steps}
@@ -171,8 +172,8 @@ class MCPipeline:
             context.data = out
         if step.op_type is OpType.FILTER and not isinstance(out, FilterResult):
             raise TypeError("FILTER steps must return FilterResult.")
-        if step.op_type is OpType.REGRESSION and not isinstance(out, OLSResult):
-            raise TypeError("REGRESSION steps must return OLSResult.")
+        if step.op_type is OpType.REGRESSION and not isinstance(out, RegressionResult):
+            raise TypeError("REGRESSION steps must return RegressionResult.")
         if step.op_type is OpType.REGRESSION:
             context.regressions[step.name] = out  # pyright: ignore
         if step.op_type is OpType.TEST:
@@ -218,7 +219,7 @@ def _summarize_tests(
 
 
 def _summarize_regressions(
-    results_by_step: Mapping[str, list[OLSResult]],
+    results_by_step: Mapping[str, list[RegressionResult]],
 ) -> dict[str, MCRegressionResult]:
     regression_summaries: dict[str, MCRegressionResult] = {}
     for step_name, results in results_by_step.items():
