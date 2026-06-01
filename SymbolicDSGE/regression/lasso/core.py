@@ -94,7 +94,12 @@ def solve_small(A: NDF, b: NDF) -> NDF:
 
 
 @njit(cache=True, fastmath=True)
-def lars_lasso_gram(G: NDF, c: NDF) -> tuple[NDF, NDF, int]:
+def lars_lasso_gram(
+    G: NDF,
+    c: NDF,
+    max_iter: int = 500,
+    tol: float64 = float64(1e-12),
+) -> tuple[NDF, NDF, int]:
     """
     Full LARS-Lasso path on the Gram matrix.
 
@@ -109,16 +114,16 @@ def lars_lasso_gram(G: NDF, c: NDF) -> tuple[NDF, NDF, int]:
     Use lasso_path_eval() below for this.
     """
     k = G.shape[0]
-    max_active = k
 
     beta = np.zeros(k)
     active = np.zeros(k, np.bool_)
     signs = np.zeros(k)  # signs of active correlations
     n_active = 0
+    drop = False
 
-    # storage: at most k+1 knots
-    lam_path = np.zeros(k + 1)
-    beta_path = np.zeros((k + 1, k))
+    # Lasso drop events can produce more path knots than variables.
+    lam_path = np.zeros(max_iter + 1)
+    beta_path = np.zeros((max_iter + 1, k))
 
     # residual correlations  r = c - G @ beta  (maintained incrementally)
     r = c.copy()
@@ -133,19 +138,29 @@ def lars_lasso_gram(G: NDF, c: NDF) -> tuple[NDF, NDF, int]:
     beta_path[0] = beta
     knot = 1
 
-    for _ in range(max_active):
-        # find variable(s) with |r_j| == lam
-        new_var = -1
-        for j in range(k):
-            if not active[j] and abs(abs(r[j]) - lam) < 1e-12 * lam:
-                new_var = j
-                break
-        if new_var < 0:
-            break
+    if lam <= tol:
+        return lam_path[:knot], beta_path[:knot], OK
 
-        active[new_var] = True
-        signs[new_var] = 1.0 if r[new_var] > 0.0 else -1.0
-        n_active += 1
+    for _ in range(max_iter):
+        if not drop:
+            # Add the inactive variable with maximal absolute correlation.
+            new_var = -1
+            new_lam = float64(-1.0)
+            for j in range(k):
+                if not active[j]:
+                    abs_r = abs(r[j])
+                    if abs_r > new_lam:
+                        new_lam = abs_r
+                        new_var = j
+            if new_var >= 0:
+                lam = new_lam
+                active[new_var] = True
+                signs[new_var] = 1.0 if r[new_var] > 0.0 else -1.0
+                n_active += 1
+            elif n_active == 0:
+                return lam_path[:knot], beta_path[:knot], OK
+
+        drop = False
 
         # solve (G_AA) d_A = s_A  (least-squares equiangular direction)
         # collect active indices
@@ -170,8 +185,8 @@ def lars_lasso_gram(G: NDF, c: NDF) -> tuple[NDF, NDF, int]:
         sw = 0.0
         for a in range(n_active):
             sw += s_A[a] * w[a]
-        if sw <= 0.0:
-            break
+        if sw <= 0.0 or not np.isfinite(sw):
+            return lam_path[:knot], beta_path[:knot], NON_CONVERGENT
         A_scalar = 1.0 / sw**0.5
         # d_A = A * w  (direction in full β space)
         d = np.zeros(k)
@@ -184,8 +199,9 @@ def lars_lasso_gram(G: NDF, c: NDF) -> tuple[NDF, NDF, int]:
             for a in range(n_active):
                 Gd[j] += G[j, act_idx[a]] * d[act_idx[a]]
 
-        # step length: earliest of join or lasso-drop events
-        step = lam  # at most shrink to 0
+        # Step length in coefficient space. Active correlations shrink by
+        # step * A_scalar, so the terminal step is lam / A_scalar.
+        step = lam / A_scalar
         drop_var = -1
 
         for j in range(k):
@@ -213,22 +229,25 @@ def lars_lasso_gram(G: NDF, c: NDF) -> tuple[NDF, NDF, int]:
                     drop_var = j
 
         # update
-        lam -= step
         for j in range(k):
             beta[j] += step * d[j]
             r[j] -= step * Gd[j]
+        lam -= step * A_scalar
+        if lam < 0.0 and lam > -tol:
+            lam = float64(0.0)
 
         # handle drop
         if drop_var >= 0:
             active[drop_var] = False
             beta[drop_var] = 0.0
             n_active -= 1
+            drop = True
 
         lam_path[knot] = lam
         beta_path[knot] = beta.copy()
         knot += 1
 
-        if lam <= 0.0 or n_active >= max_active:
+        if lam <= tol:
             return lam_path[:knot], beta_path[:knot], OK
 
     return lam_path[:knot], beta_path[:knot], NON_CONVERGENT
@@ -334,6 +353,9 @@ def lasso(
         y_fit = y
 
     G, c = xtx_xty(x_fit, y_fit)
+    scale = float64(1.0 / y_fit.shape[0])
+    G = np.asarray(G * scale, dtype=np.float64)
+    c = np.asarray(c * scale, dtype=np.float64)
     beta, status = lasso_gram_cd(G, c, float64(alpha), max_iter, float64(tol))
 
     if intercept:
@@ -379,22 +401,18 @@ def lasso_gs(
         y_fit = y
 
     G, c = xtx_xty(x_fit, y_fit)
+    scale = float64(1.0 / y_fit.shape[0])
+    G = np.asarray(G * scale, dtype=np.float64)
+    c = np.asarray(c * scale, dtype=np.float64)
 
     lam_grid = log_grid(start, stop, num)
-    beta_grid = np.empty((num, x_fit.shape[1]), dtype=np.float64)
-    objective_trace = np.empty(num, dtype=np.float64)
-    status_trace = np.empty(num, dtype=np.int64)
-
-    for i in range(num):
-        beta, status = lasso_gram_cd(
-            G,
-            c,
-            float64(lam_grid[i]),
-            max_iter,
-            float64(tol),
-        )
-        beta_grid[i] = beta
-        status_trace[i] = status
+    lam_path, beta_path, status = lars_lasso_gram(
+        G,
+        c,
+        max_iter=max_iter,
+        tol=float64(tol),
+    )
+    beta_grid = lasso_path_eval(lam_path, beta_path, lam_grid)
 
     if intercept:
         coef_grid = _restore_intercept_path(beta_grid, x_mean, y_mean)
@@ -404,11 +422,11 @@ def lasso_gs(
         design = x
 
     residuals = y[:, None] - design @ coef_grid.T
-    objective_trace[:] = np.asarray((residuals**2).sum(axis=0), dtype=np.float64)
-    objective_trace[status_trace != OK] = np.inf
+    objective_trace = np.asarray((residuals**2).sum(axis=0), dtype=np.float64)
+    if status != OK:
+        objective_trace[:] = np.inf
     opt = int(np.argmin(objective_trace))
     coef = np.ascontiguousarray(coef_grid[opt], dtype=np.float64)
-    status = int(status_trace[opt])
 
     return LassoResult(
         variables=list(variables),
@@ -422,4 +440,10 @@ def lasso_gs(
         alpha_grid=lam_grid,
         coefficient_path=coef_grid,
         objective_trace=objective_trace,
+        knot_lambdas=lam_path,
+        knot_coefficients=(
+            _restore_intercept_path(beta_path, x_mean, y_mean)
+            if intercept
+            else beta_path
+        ),
     )
