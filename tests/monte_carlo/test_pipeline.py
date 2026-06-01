@@ -26,6 +26,7 @@ from SymbolicDSGE.monte_carlo import (
     wald_test_step,
 )
 from SymbolicDSGE.regression.ols import OLSResult
+from SymbolicDSGE.regression.lasso import LassoResult
 from SymbolicDSGE.regression.ridge import RidgeResult
 
 
@@ -597,6 +598,43 @@ def test_regression_step_runs_ridge_kind_and_aggregates_summary() -> None:
     )
     with pytest.raises(TypeError, match="OLS-specific"):
         _ = out.regression_summaries["ridge"].se_trace
+
+
+def test_regression_step_runs_lasso_kind_and_aggregates_summary() -> None:
+    reference = _FakeSolvedModel()
+    x = np.eye(3, dtype=np.float64)
+    y = np.array([3.0, -1.0, 0.25], dtype=np.float64)
+    observables = np.column_stack([y, x])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            regression_step(
+                "lasso",
+                kind="lasso",
+                y_source="observables",
+                X_source="observables",
+                y_column=0,
+                X_columns=[1, 2, 3],
+                intercept=False,
+                alpha=np.float64(0.5),
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=1)
+
+    assert out.payloads is not None
+    result = out.payloads[0]["lasso"]
+    assert isinstance(result, LassoResult)
+    np.testing.assert_allclose(result.coefficients, np.array([1.5, 0.0, 0.0]))
+    np.testing.assert_allclose(
+        out.coefficient_traces["lasso"],
+        np.array([[1.5, 0.0, 0.0]], dtype=np.float64),
+    )
+    np.testing.assert_allclose(
+        out.regression_summaries["lasso"].r2_trace,
+        np.asarray([result.r2], dtype=np.float64),
+    )
 
 
 def test_regression_step_requires_single_response_column() -> None:

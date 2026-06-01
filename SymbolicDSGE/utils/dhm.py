@@ -134,7 +134,10 @@ def _simulate_linear_states(
     return X
 
 
-@njit(cache=True)
+# These builders accept another njit-compiled function as an argument. Numba can
+# execute that in nopython mode, but disk-caching the higher-order signature can
+# fail while serializing the CPUDispatcher argument.
+@njit
 def _build_forward_moments(
     current_states: np.ndarray,
     forward_states: np.ndarray,
@@ -182,7 +185,7 @@ def _build_forward_moments(
     return moments, residuals, instruments
 
 
-@njit(cache=True)
+@njit
 def _build_lagged_foc_moments(
     current_states: np.ndarray,
     forward_states: np.ndarray,

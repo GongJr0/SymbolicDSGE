@@ -15,6 +15,7 @@ from .._diag_tests.wald_test import (
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
 from ..regression.enums import RegressionKind
+from ..regression.lasso import lasso, lasso_gs
 from ..regression.ols import ols
 from ..regression.result import RegressionResult
 from ..regression.ridge import ridge, ridge_gs
@@ -278,7 +279,7 @@ def run_regression(
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
-    kind: Literal["ols", "ridge", "ridge_gs"] = "ols",
+    kind: Literal["ols", "ridge", "ridge_gs", "lasso", "lasso_gs"] = "ols",
     y_source: InpSources,
     X_source: InpSources,
     filter_key: str = "filter",
@@ -357,6 +358,22 @@ def run_regression(
             )
         case RegressionKind.RIDGE_GS:
             return ridge_gs(
+                X,
+                y_vec,
+                intercept=intercept,
+                variables=variable_names,
+                **kind_kwargs,
+            )
+        case RegressionKind.LASSO:
+            return lasso(
+                X,
+                y_vec,
+                intercept=intercept,
+                variables=variable_names,
+                **kind_kwargs,
+            )
+        case RegressionKind.LASSO_GS:
+            return lasso_gs(
                 X,
                 y_vec,
                 intercept=intercept,
