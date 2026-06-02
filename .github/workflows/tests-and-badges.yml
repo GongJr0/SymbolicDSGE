@@ -2,7 +2,8 @@ name: Tests & Badges
 
 on:
   push:
-    branches: ["**"]
+    branches:
+      - main
     paths-ignore:
       - "coverage/*.svg"
   pull_request:
