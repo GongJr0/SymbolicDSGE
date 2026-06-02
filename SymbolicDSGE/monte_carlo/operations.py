@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Mapping, Sequence, Any
+from typing import Literal, Mapping, Sequence, Any, Callable
 
 import numpy as np
 from numpy import float64, ndarray
@@ -19,6 +19,7 @@ from ..regression.lasso import lasso, lasso_gs
 from ..regression.ols import ols
 from ..regression.result import RegressionResult
 from ..regression.ridge import ridge, ridge_gs
+from ..regression.elastic_net import elastic_net, elastic_net_gs
 from .mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from .operation_utils import (
     InpSources,
@@ -339,46 +340,29 @@ def run_regression(
     y_vec = np.ascontiguousarray(y[:, 0], dtype=np.float64)
     variable_names = list(variables) if variables is not None else None
 
+    fun: Callable[..., RegressionResult]
     match RegressionKind(kind):
         case RegressionKind.OLS:
-            return ols(
-                X,
-                y_vec,
-                intercept=intercept,
-                variables=variable_names,
-                **kind_kwargs,
-            )
+            fun = ols
         case RegressionKind.RIDGE:
-            return ridge(
-                X,
-                y_vec,
-                intercept=intercept,
-                variables=variable_names,
-                **kind_kwargs,
-            )
+            fun = ridge
         case RegressionKind.RIDGE_GS:
-            return ridge_gs(
-                X,
-                y_vec,
-                intercept=intercept,
-                variables=variable_names,
-                **kind_kwargs,
-            )
+            fun = ridge_gs
         case RegressionKind.LASSO:
-            return lasso(
-                X,
-                y_vec,
-                intercept=intercept,
-                variables=variable_names,
-                **kind_kwargs,
-            )
+            fun = lasso
         case RegressionKind.LASSO_GS:
-            return lasso_gs(
-                X,
-                y_vec,
-                intercept=intercept,
-                variables=variable_names,
-                **kind_kwargs,
-            )
+            fun = lasso_gs
+        case RegressionKind.ELASTIC_NET:
+            fun = elastic_net
+        case RegressionKind.ELASTIC_NET_GS:
+            fun = elastic_net_gs
         case _:
             raise ValueError(f"Unsupported regression kind: {kind}")
+
+    return fun(
+        X,
+        y_vec,
+        intercept=intercept,
+        variables=variable_names,
+        **kind_kwargs,
+    )
