@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import numpy as np
 from numpy import float64
@@ -18,9 +18,9 @@ from ..lasso.core import (
     lasso_gs as _lasso_gs,
     smooth_threshold,
 )
-from ..ridge.core import aic, bic, l2_loss, ridge as _ridge, ridge_gs as _ridge_gs
+from ..ridge.core import ridge as _ridge, ridge_gs as _ridge_gs
 from ..solvers import xtx_xty
-from ..utils import log_grid, process_args
+from ..utils import get_criterion, log_grid, process_args
 from .result import ElasticNetResult
 
 NDF = NDArray[float64]
@@ -98,7 +98,10 @@ def elastic_net_gram_cd_path(
     if n_alpha > 1 and alpha_grid[0] < alpha_grid[n_alpha - 1]:
         for pos in range(n_alpha):
             idx = n_alpha - pos - 1
-            alpha_l1, alpha_l2 = split_penalty(alpha_grid[idx], l1_ratio)
+            alpha_l1, alpha_l2 = split_penalty(
+                alpha_grid[idx],  # pyright: ignore
+                l1_ratio,
+            )
             beta, status = elastic_net_gram_cd(
                 G,
                 g,
@@ -134,11 +137,12 @@ def elastic_net_active_dof(
     beta: NDF,
     alpha_l2: float64,
     intercept: bool,
+    atol: float64 = float64(1e-10),
 ) -> float64:
     k = beta.shape[0]
     n_active = 0
     for j in range(k):
-        if beta[j] != 0.0:
+        if np.abs(beta[j]) > atol:
             n_active += 1
 
     if n_active == 0:
@@ -147,7 +151,7 @@ def elastic_net_active_dof(
     active = np.empty(n_active, dtype=np.int64)
     cursor = 0
     for j in range(k):
-        if beta[j] != 0.0:
+        if np.abs(beta[j]) > atol:
             active[cursor] = j
             cursor += 1
 
@@ -212,10 +216,10 @@ def elastic_net(
         max_iter,
         float64(tol),
     )
-    effective_dof = elastic_net_active_dof(G, beta, alpha_l2, intercept)
+    effective_dof = elastic_net_active_dof(G, beta, alpha_l2, intercept, float64(tol))
 
     if intercept:
-        coef = _restore_intercept(beta, x_mean, y_mean)
+        coef = _restore_intercept(beta, x_mean, y_mean)  # pyright: ignore
         design, variables = _add_intercept(x, variables)
     else:
         coef = beta
@@ -252,7 +256,7 @@ def elastic_net_gs(
     if num <= 0:
         raise ValueError("num must be positive.")
     _validate_elastic_net_params(float64(start), l1_ratio, max_iter, tol)
-    objective = _objective_function(criterion)
+    objective = get_criterion(criterion)
 
     if l1_ratio == 0.0:
         return _wrap_result(
@@ -284,7 +288,11 @@ def elastic_net_gs(
     )
 
     if intercept:
-        coef_grid = _restore_intercept_path(beta_grid, x_mean, y_mean)
+        coef_grid = _restore_intercept_path(
+            beta_grid,
+            x_mean,  # pyright: ignore
+            y_mean,  # pyright: ignore
+        )
         design, variables = _add_intercept(x, variables)
     else:
         coef_grid = beta_grid
@@ -306,6 +314,7 @@ def elastic_net_gs(
             beta_grid[i],
             alpha_l2,
             intercept,
+            float64(tol),
         )
         effective_dof_trace[i] = effective_dof
         objective_trace[i] = objective(rss_trace[i], y.shape[0], effective_dof)
@@ -355,20 +364,6 @@ def _validate_elastic_net_params(
         raise ValueError("max_iter must be positive.")
     if tol <= 0:
         raise ValueError("tol must be positive.")
-
-
-def _objective_function(
-    criterion: Literal["aic", "bic", "loss"],
-) -> Callable[[float64, int, float64], float64]:
-    match criterion:
-        case "aic":
-            return aic  # type: ignore[no-any-return]
-        case "bic":
-            return bic  # type: ignore[no-any-return]
-        case "loss":
-            return l2_loss  # type: ignore[no-any-return]
-        case _:
-            raise ValueError("criterion must be one of 'aic', 'bic', or 'loss'.")
 
 
 def _wrap_result(result: Any, l1_ratio: float | float64) -> ElasticNetResult:

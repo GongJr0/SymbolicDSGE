@@ -9,7 +9,7 @@ from numba import njit
 from ..enums import RegressionStatus
 from ..utils import process_args
 from ..solvers import chol_solve_L2
-from ..utils import log_grid
+from ..utils import log_grid, get_criterion
 from .result import RidgeResult, RidgeObjective
 
 NDF = NDArray[float64]
@@ -24,26 +24,6 @@ LOOP_LIMIT_P = 1e3
 @njit(cache=True)
 def should_loop(n: int, p: int) -> bool:
     return n * p <= LOOP_LIMIT_N and p <= LOOP_LIMIT_P
-
-
-@njit(cache=True)
-def aic(rss: float64, n: int, k: float64) -> float64:
-    if rss <= 0:
-        return float64(-np.inf)
-    return float64(n * np.log(rss / n) + 2 * k)
-
-
-@njit(cache=True)
-def bic(rss: float64, n: int, k: float64) -> float64:
-    if rss <= 0:
-        return float64(-np.inf)
-    return float64(n * np.log(rss / n) + np.log(n) * k)
-
-
-@njit(cache=True)
-def l2_loss(rss: float64, n: int, k: float64) -> float64:
-    # Unify function signature for grid search, we only care about rss here
-    return rss
 
 
 @njit(cache=True)
@@ -138,15 +118,7 @@ def ridge_gs(
         X = np.hstack((np.ones((X.shape[0], 1), dtype=np.float64), X))
         variables = ["Intercept", *variables]
 
-    match criterion:
-        case "aic":
-            obj = aic
-        case "bic":
-            obj = bic
-        case "loss":
-            obj = l2_loss
-        case _:
-            raise ValueError("criterion must be one of 'aic', 'bic', or 'loss'.")
+    obj = get_criterion(criterion)
 
     alpha, coef, obj_val, status = l2_grid_search(
         X, y, float64(start), float64(stop), num, obj, intercept
