@@ -4,7 +4,10 @@ from numpy import float64
 from numpy.typing import NDArray
 from numba import njit
 
+from typing import Callable, Literal, cast
+
 NDF = NDArray[float64]
+OBJECTIVE_FUNC = Callable[[float64, int, float64], float64]
 
 
 @njit(cache=True)
@@ -15,6 +18,40 @@ def log_grid(start: float64, stop: float64, num: int) -> NDF:
         return np.array([start, stop], dtype=float64)
     else:
         return np.exp(np.linspace(np.log(start), np.log(stop), num=num))
+
+
+@njit(cache=True)
+def aic(rss: float64, n: int, k: float64) -> float64:
+    if rss <= 0:
+        return float64(-np.inf)
+    return float64(n * np.log(rss / n) + 2 * k)
+
+
+@njit(cache=True)
+def bic(rss: float64, n: int, k: float64) -> float64:
+    if rss <= 0:
+        return float64(-np.inf)
+    return float64(n * np.log(rss / n) + np.log(n) * k)
+
+
+@njit(cache=True)
+def l2_loss(rss: float64, n: int, k: float64) -> float64:
+    # Unify function signature for grid search, we only care about rss here
+    return rss
+
+
+def get_criterion(
+    criterion: Literal["aic", "bic", "loss"],
+) -> Callable[[float64, int, float64], float64]:
+    match criterion:
+        case "aic":
+            return cast(OBJECTIVE_FUNC, aic)
+        case "bic":
+            return cast(OBJECTIVE_FUNC, bic)
+        case "loss":
+            return cast(OBJECTIVE_FUNC, l2_loss)
+        case _:
+            raise ValueError("criterion must be one of 'aic', 'bic', or 'loss'.")
 
 
 def process_args(

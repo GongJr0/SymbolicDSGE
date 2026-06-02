@@ -27,4 +27,4 @@ class RidgeResult(RegressionResult):
     @cached_property
     def l2_penalty(self) -> float64:
         coef = self.coefficients[1:] if self.intercept else self.coefficients
-        return float64(self.alpha * np.dot(coef, coef))
+        return float64(0.5 * self.alpha * np.dot(coef, coef))

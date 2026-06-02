@@ -584,10 +584,11 @@ def test_regression_step_runs_ridge_kind_and_aggregates_summary() -> None:
     result = out.payloads[0]["ridge"]
     assert isinstance(result, RidgeResult)
     X = np.column_stack([np.ones_like(x), x])
-    G = X.T @ X
+    G = (X.T @ X) / X.shape[0]
+    g = (X.T @ y) / X.shape[0]
     expected_coef = np.linalg.solve(
         G + np.diag([0.0, alpha]),
-        X.T @ y,
+        g,
     )
     assert result.variables == ["Intercept", "x"]
     np.testing.assert_allclose(result.coefficients, expected_coef)

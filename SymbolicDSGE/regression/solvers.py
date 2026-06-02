@@ -56,8 +56,12 @@ def chol_solve(X: NDF, y: NDF) -> tuple[NDF, NDF, int]:
 def chol_solve_L2(
     X: NDF, y: NDF, alpha: float64, intercept: bool
 ) -> tuple[NDF, NDF, float64, int]:
+    n = y.shape[0]
 
     G, g = xtx_xty(X, y)
+    G /= n
+    g /= n
+
     G_unpenalized = G.copy()
     p = G.shape[0]
 

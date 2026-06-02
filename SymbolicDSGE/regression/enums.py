@@ -15,3 +15,5 @@ class RegressionKind(StrEnum):
     RIDGE_GS = "ridge_gs"
     LASSO = "lasso"
     LASSO_GS = "lasso_gs"
+    ELASTIC_NET = "elastic_net"
+    ELASTIC_NET_GS = "elastic_net_gs"

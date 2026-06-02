@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.regression import RegressionResult
+from SymbolicDSGE.regression.utils import l2_loss
 from SymbolicDSGE.regression.ridge import (
     RidgeObjective,
     RidgeResult,
     l2_grid_search,
-    l2_loss,
     ridge,
     ridge_gs,
 )
@@ -31,9 +31,10 @@ def test_ridge_returns_result_with_shared_regression_diagnostics() -> None:
     out = ridge(x, y, alpha=alpha, variables=["trend"])
 
     X = np.column_stack([np.ones(x.shape[0], dtype=np.float64), x])
-    G = X.T @ X
+    G = (X.T @ X) / X.shape[0]
+    g = (X.T @ y) / X.shape[0]
     penalty = np.diag([0.0, alpha])
-    expected_coef = np.linalg.solve(G + penalty, X.T @ y)
+    expected_coef = np.linalg.solve(G + penalty, g)
     expected_y_hat = X @ expected_coef
 
     assert isinstance(out, RidgeResult)
@@ -48,7 +49,7 @@ def test_ridge_returns_result_with_shared_regression_diagnostics() -> None:
     assert out.rmse == pytest.approx(np.sqrt(out.mse))
     assert out.effective_dof == pytest.approx(np.trace(np.linalg.solve(G + penalty, G)))
     assert out.l2_penalty == pytest.approx(
-        alpha * np.dot(expected_coef[1:], expected_coef[1:])
+        0.5 * alpha * np.dot(expected_coef[1:], expected_coef[1:])
     )
 
 
@@ -71,12 +72,14 @@ def test_l2_grid_search_selects_alpha_with_lowest_objective() -> None:
     alpha, coef, obj, status = l2_grid_search(x, y, start, stop, num, l2_loss, False)
 
     alphas = np.exp(np.linspace(np.log(start), np.log(stop), num=num))
+    G = (x.T @ x) / x.shape[0]
+    g = (x.T @ y) / x.shape[0]
     expected_values = []
     expected_coefs = []
     for candidate in alphas:
         candidate_coef = np.linalg.solve(
-            x.T @ x + candidate * np.eye(x.shape[1]),
-            x.T @ y,
+            G + candidate * np.eye(x.shape[1]),
+            g,
         )
         expected_coefs.append(candidate_coef)
         expected_values.append(((y - x @ candidate_coef) ** 2).sum())
@@ -115,7 +118,8 @@ def test_ridge_grid_search_keeps_intercept_unpenalized() -> None:
     )
 
     X = np.column_stack([np.ones(x.shape[0], dtype=np.float64), x])
-    G = X.T @ X
+    G = (X.T @ X) / X.shape[0]
+    g = (X.T @ y) / X.shape[0]
     alphas = np.exp(np.linspace(np.log(start), np.log(stop), num=num))
     expected_values = []
     expected_coefs = []
@@ -123,7 +127,7 @@ def test_ridge_grid_search_keeps_intercept_unpenalized() -> None:
     for candidate in alphas:
         penalty = np.diag([0.0, candidate])
         penalized = G + penalty
-        candidate_coef = np.linalg.solve(penalized, X.T @ y)
+        candidate_coef = np.linalg.solve(penalized, g)
         expected_coefs.append(candidate_coef)
         expected_values.append(((y - X @ candidate_coef) ** 2).sum())
         expected_dofs.append(np.trace(np.linalg.solve(penalized, G)))
@@ -137,5 +141,5 @@ def test_ridge_grid_search_keeps_intercept_unpenalized() -> None:
     assert out.effective_dof == pytest.approx(expected_dofs[expected_idx])
     np.testing.assert_allclose(out.coefficients, expected_coef)
     assert out.l2_penalty == pytest.approx(
-        out.alpha * np.dot(expected_coef[1:], expected_coef[1:])
+        0.5 * out.alpha * np.dot(expected_coef[1:], expected_coef[1:])
     )
