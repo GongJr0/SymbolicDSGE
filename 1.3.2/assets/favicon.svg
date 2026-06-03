@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="1999.9999"
+   height="2000"
+   viewBox="0 0 529.16662 529.16664"
+   version="1.1"
+   id="svg1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <g
+     id="layer2">
+    <path
+       style="fill:#1e2129;fill-opacity:1;stroke-width:0.264583"
+       id="rect4"
+       width="530.88202"
+       height="530.88208"
+       x="0"
+       y="0"
+       d="m 96,0 h 338.88202 c 53.184,0 96,42.816 96,96 v 338.88208 c 0,53.184 -42.816,96 -96,96 H 96 c -53.184,0 -96,-42.816 -96,-96 V 96 C 0,42.816 42.816,0 96,0 Z"
+       rx="96" />
+  </g>
+  <g
+     id="layer1">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:352.778px;font-family:'IBM Plex Mono';-inkscape-font-specification:'IBM Plex Mono';writing-mode:lr-tb;direction:ltr;fill:#ffffff;fill-opacity:1;stroke-width:0.264583"
+       x="58.031551"
+       y="355.95279"
+       id="text1"><tspan
+         id="tspan1"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:352.778px;font-family:'IBM Plex Mono';-inkscape-font-specification:'IBM Plex Mono Bold';fill:#ffffff;fill-opacity:1;stroke-width:0.264583"
+         x="58.031551"
+         y="355.95279">S_</tspan></text>
+  </g>
+</svg>
