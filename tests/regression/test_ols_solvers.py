@@ -9,7 +9,13 @@ from SymbolicDSGE.regression.ols import MCRegressionResult as ExportedMCRegressi
 from SymbolicDSGE.regression.ols import OLSResult as ExportedOLSResult
 from SymbolicDSGE.regression.ols import RegressionStatus as ExportedRegressionStatus
 from SymbolicDSGE.regression.ols import ols as exported_ols
-from SymbolicDSGE.regression.ols.diag_utils import r2, r2_adj, se, se_from_pinv
+from SymbolicDSGE.regression.ols.diag_utils import (
+    r2,
+    r2_adj,
+    se,
+    se_from_cholesky,
+    se_from_pinv,
+)
 from SymbolicDSGE.regression.ols.core import ols
 from SymbolicDSGE.regression.ols.ols_result import (
     MCRegressionResult,
@@ -48,6 +54,7 @@ def test_chol_solve_returns_factor_for_standard_error_calculation() -> None:
     assert status == OK
     np.testing.assert_allclose(L @ L.T, x.T @ x)
     np.testing.assert_allclose(out, expected)
+    np.testing.assert_allclose(se_from_cholesky.py_func(L, y, y_hat), expected)
 
 
 def test_ols_package_exports_public_entry_points() -> None:

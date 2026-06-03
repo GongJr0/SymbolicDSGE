@@ -8,11 +8,16 @@ from SymbolicDSGE._diag_tests.hac_covariance import (
     wooldridge_bandwidth,
 )
 from SymbolicDSGE._diag_tests.status import TestStatus
+from SymbolicDSGE._diag_tests.moment_calculation_utils import (
+    jit_fill_centered,
+    jit_fill_mean_ax0,
+)
 from SymbolicDSGE._diag_tests.wald_test import (
     ERR_BAD_SHAPE,
     ERR_LINALG,
     OK,
     jit_wald_hac_stat,
+    jit_symmetric_outer_prod_2dim,
     jit_wald_stat_from_mean_and_cov,
     wald_covariance_hac,
     wald_mean_hac,
@@ -261,3 +266,43 @@ def test_jit_wald_stat_from_mean_and_cov_returns_linalg_error_for_singular_covar
     assert ERR_LINALG == TestStatus.LINALG
     assert np.isnan(stat)
     assert df == 2
+
+
+def test_moment_fill_helpers_write_mean_and_centered_buffers() -> None:
+    x = np.array([[1.0, 2.0], [3.0, 0.0], [5.0, 4.0]], dtype=np.float64)
+    mean = np.empty(2, dtype=np.float64)
+    centered = np.empty_like(x)
+
+    jit_fill_mean_ax0.py_func(x, mean)
+    jit_fill_centered.py_func(x, mean, centered)
+
+    np.testing.assert_allclose(mean, x.mean(axis=0))
+    np.testing.assert_allclose(centered, x - x.mean(axis=0))
+
+
+def test_symmetric_outer_product_reports_bad_output_shape() -> None:
+    x = np.arange(6.0, dtype=np.float64).reshape(3, 2)
+    out = np.empty((3, 2), dtype=np.float64)
+
+    err = jit_symmetric_outer_prod_2dim.py_func(x, out)
+
+    assert err == ERR_BAD_SHAPE
+
+
+def test_wald_public_wrappers_validate_targets_and_report_failures() -> None:
+    g = _quadratic_sample()
+
+    with np.testing.assert_raises_regex(ValueError, "covariance matrix must be square"):
+        wald_covariance_hac(g, np.ones(2, dtype=np.float64), bandwidth=0)
+
+    with np.testing.assert_raises_regex(
+        ValueError, "second moment matrix must be square"
+    ):
+        wald_second_moment_hac(g, np.ones(2, dtype=np.float64), bandwidth=0)
+
+    with np.testing.assert_raises_regex(ValueError, "Wald test failed"):
+        wald_mean_hac(
+            np.ones((4, 2), dtype=np.float64),
+            np.zeros(3, dtype=np.float64),
+            bandwidth=0,
+        )
