@@ -12,7 +12,9 @@ from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.kalman.filter import FilterResult
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
+    MCContext,
     MCData,
+    MCReferenceConstruct,
     MCStep,
     OpType,
     ljung_box_test_step,
@@ -25,6 +27,13 @@ from SymbolicDSGE.monte_carlo import (
     transform_step,
     wald_test_step,
 )
+from SymbolicDSGE.monte_carlo.operation_utils import (
+    _clone_or_pass_shocks,
+    _resolve_context_array,
+    _resolve_seed_increment,
+    _select_raw_rep_array,
+)
+from SymbolicDSGE.regression.elastic_net import ElasticNetResult
 from SymbolicDSGE.regression.ols import OLSResult
 from SymbolicDSGE.regression.lasso import LassoResult
 from SymbolicDSGE.regression.ridge import RidgeResult
@@ -638,6 +647,78 @@ def test_regression_step_runs_lasso_kind_and_aggregates_summary() -> None:
     )
 
 
+def test_regression_step_runs_elastic_net_kind_and_aggregates_summary() -> None:
+    reference = _FakeSolvedModel()
+    x = np.eye(3, dtype=np.float64)
+    y = np.array([3.0, -1.0, 0.25], dtype=np.float64)
+    observables = np.column_stack([y, x])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            regression_step(
+                "elastic_net",
+                kind="elastic_net",
+                y_source="observables",
+                X_source="observables",
+                y_column=0,
+                X_columns=[1, 2, 3],
+                intercept=False,
+                alpha=np.float64(0.5),
+                l1_ratio=np.float64(0.5),
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=1)
+
+    assert out.payloads is not None
+    result = out.payloads[0]["elastic_net"]
+    assert isinstance(result, ElasticNetResult)
+    np.testing.assert_allclose(
+        result.coefficients,
+        np.array([9.0 / 7.0, -1.0 / 7.0, 0.0], dtype=np.float64),
+    )
+    np.testing.assert_allclose(
+        out.coefficient_traces["elastic_net"],
+        result.coefficients[None, :],
+    )
+    assert out.regression_summaries["elastic_net"].status_trace == (result.status,)
+
+
+def test_regression_step_runs_elastic_net_grid_search_kind() -> None:
+    reference = _FakeSolvedModel()
+    x = np.eye(2, dtype=np.float64)
+    y = np.array([3.0, -1.0], dtype=np.float64)
+    observables = np.column_stack([y, x])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            regression_step(
+                "elastic_net_gs",
+                kind="elastic_net_gs",
+                y_source="observables",
+                X_source="observables",
+                y_column=0,
+                X_columns=[1, 2],
+                intercept=False,
+                start=np.float64(0.5),
+                stop=np.float64(2.0),
+                num=3,
+                l1_ratio=np.float64(0.5),
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=1)
+
+    assert out.payloads is not None
+    result = out.payloads[0]["elastic_net_gs"]
+    assert isinstance(result, ElasticNetResult)
+    assert result.alpha_grid is not None
+    assert result.coefficient_path is not None
+    assert out.coefficient_traces["elastic_net_gs"].shape == (1, 2)
+
+
 def test_regression_step_requires_single_response_column() -> None:
     reference = _FakeSolvedModel()
     observables = np.column_stack(
@@ -763,3 +844,205 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     report_mc_step_performance(out, print_func=lines.append)
     assert lines[0].startswith("datagen concluded unsuccessfully with ")
     assert lines[1].startswith("state_mean concluded successfully with ")
+
+
+def test_mc_operation_utils_validate_seeded_shock_specs() -> None:
+    arr = np.ones((2, 1), dtype=np.float64)
+    callable_shock = lambda scale: np.ones((2,), dtype=np.float64) * scale
+
+    assert _clone_or_pass_shocks(None, T=2, rep_idx=0, seed_increment="auto") is None
+    out = _clone_or_pass_shocks(
+        {"arr": arr, "callable": callable_shock},
+        T=2,
+        rep_idx=3,
+        seed_increment=1,
+    )
+    assert out is not None
+    assert out["arr"] is arr
+    assert out["callable"] is callable_shock
+    assert _resolve_seed_increment({"arr": arr}, "auto") == 0
+    assert _resolve_seed_increment({"eps": Shock(2, "norm", seed=5)}, "auto") == 1
+    assert _resolve_seed_increment({"eps": Shock(2, "norm", seed=None)}, "auto") == 0
+    assert _resolve_seed_increment({"eps": Shock(2, "norm", seed=5)}, 4) == 4
+
+    with pytest.raises(ValueError, match="non-negative"):
+        _resolve_seed_increment({"eps": Shock(2, "norm", seed=5)}, -1)
+    with pytest.raises(ValueError, match="expected 2"):
+        _clone_or_pass_shocks(
+            {"eps": Shock(3, "norm", seed=5)},
+            T=2,
+            rep_idx=0,
+            seed_increment="auto",
+        )
+    with pytest.raises(ValueError, match="generator-style"):
+        _clone_or_pass_shocks(
+            {"eps": Shock(2, "norm", seed=5, shock_arr=np.zeros(2))},
+            T=2,
+            rep_idx=0,
+            seed_increment="auto",
+        )
+    with pytest.raises(ValueError, match="multivar=True"):
+        _clone_or_pass_shocks(
+            {"eps,z": Shock(2, "norm", multivar=False, seed=5)},
+            T=2,
+            rep_idx=0,
+            seed_increment="auto",
+        )
+    with pytest.raises(ValueError, match="multivar=False"):
+        _clone_or_pass_shocks(
+            {"eps": Shock(2, "norm", multivar=True, seed=5)},
+            T=2,
+            rep_idx=0,
+            seed_increment="auto",
+        )
+
+
+def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
+    reference = _FakeSolvedModel()
+    states = np.arange(12.0, dtype=np.float64).reshape(4, 3)
+    observables = np.arange(8.0, dtype=np.float64).reshape(4, 2)
+    context = MCContext(
+        rep_idx=0,
+        reference=reference,
+        dgp=None,
+        data=MCData(states=states, observables=observables),
+        payloads={"vector": np.arange(5.0, dtype=np.float64)},
+    )
+
+    selected = _resolve_context_array(
+        context,
+        source="states",
+        filter_key="filter",
+        payload_key=None,
+        columns=[1],
+        burn_in=1,
+        drop_initial=True,
+    )
+    np.testing.assert_allclose(selected, states[2:, [1]])
+
+    payload = _resolve_context_array(
+        context,
+        source="payload",
+        filter_key="filter",
+        payload_key="vector",
+        columns=None,
+        burn_in=2,
+        drop_initial=False,
+    )
+    np.testing.assert_allclose(payload, np.arange(2.0, 5.0).reshape(3, 1))
+
+    filt = reference.kalman(observables)
+    context.payloads["filter"] = filt
+    np.testing.assert_allclose(
+        _resolve_context_array(
+            context,
+            source="std_innov",
+            filter_key="filter",
+            payload_key=None,
+            columns=slice(0, 1),
+            burn_in=0,
+            drop_initial=False,
+        ),
+        filt.std_innov[:, :1],
+    )
+
+    with pytest.raises(ValueError, match="burn_in"):
+        _resolve_context_array(
+            context,
+            source="states",
+            filter_key="filter",
+            payload_key=None,
+            columns=None,
+            burn_in=-1,
+            drop_initial=False,
+        )
+    with pytest.raises(ValueError, match="payload_key"):
+        _resolve_context_array(
+            context,
+            source="payload",
+            filter_key="filter",
+            payload_key=None,
+            columns=None,
+            burn_in=0,
+            drop_initial=False,
+        )
+    context.payloads["not_filter"] = np.zeros(1, dtype=np.float64)
+    with pytest.raises(TypeError, match="FilterResult"):
+        _resolve_context_array(
+            context,
+            source="std_innov",
+            filter_key="not_filter",
+            payload_key=None,
+            columns=None,
+            burn_in=0,
+            drop_initial=False,
+        )
+    context.payloads["cube"] = np.zeros((1, 2, 3), dtype=np.float64)
+    with pytest.raises(ValueError, match="1D or 2D"):
+        _resolve_context_array(
+            context,
+            source="payload",
+            filter_key="filter",
+            payload_key="cube",
+            columns=None,
+            burn_in=0,
+            drop_initial=False,
+        )
+
+    raw = np.arange(24.0, dtype=np.float64).reshape(2, 4, 3)
+    np.testing.assert_allclose(
+        _select_raw_rep_array(raw, rep_idx=1, name="raw", allow_vector=False),
+        raw[1],
+    )
+    np.testing.assert_allclose(
+        _select_raw_rep_array(
+            np.arange(4.0, dtype=np.float64),
+            rep_idx=0,
+            name="vector",
+            allow_vector=True,
+        ),
+        np.arange(4.0, dtype=np.float64).reshape(4, 1),
+    )
+    with pytest.raises(IndexError, match="rep_idx=2"):
+        _select_raw_rep_array(raw, rep_idx=2, name="raw", allow_vector=False)
+    with pytest.raises(ValueError, match="2D or 3D"):
+        _select_raw_rep_array(
+            np.arange(4.0, dtype=np.float64),
+            rep_idx=0,
+            name="vector",
+            allow_vector=False,
+        )
+
+
+def test_reference_construct_wraps_model_and_external_generators() -> None:
+    model = _FakeSolvedModel(offset=1.0)
+    construct = MCReferenceConstruct(model, T=3, N=5)
+
+    assert construct.model is model
+    assert construct.T == 3
+    assert construct.N == 5
+    data = construct._data_from_sim(observables=True)
+    assert data.state_mat is not None
+    assert data.obs_mat is not None
+    assert data.n_exog == 1
+    assert data.state_mat.shape == (4, 2)
+    assert data.obs_mat.shape == (3, 1)
+
+    def generator(T: int) -> tuple[np.ndarray, np.ndarray]:
+        return (
+            np.ones((T + 1, 2), dtype=np.float64),
+            np.ones((T, 1), dtype=np.float64) * 2.0,
+        )
+
+    callable_construct = MCReferenceConstruct.DataGeneratingCallable(
+        generator,
+        T=4,
+        N=7,
+    )
+    out = callable_construct()
+    assert callable_construct.func is generator
+    assert callable_construct.T == 4
+    assert callable_construct.N == 7
+    np.testing.assert_allclose(out.state_mat, np.ones((5, 2), dtype=np.float64))
+    np.testing.assert_allclose(out.obs_mat, np.ones((4, 1), dtype=np.float64) * 2.0)
+    assert out.n_exog == -1

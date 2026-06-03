@@ -11,6 +11,13 @@ from SymbolicDSGE.regression.lasso import (
     lasso_gs,
     lasso_path_eval,
 )
+from SymbolicDSGE.regression.lasso.core import (
+    NON_CONVERGENT,
+    OK,
+    lasso_gram_cd,
+    smooth_threshold,
+    solve_small,
+)
 
 
 def test_lasso_result_validates_and_exposes_l1_diagnostics() -> None:
@@ -176,3 +183,126 @@ def test_lasso_result_validates_grid_shapes() -> None:
             alpha_grid=np.array([0.1, 1.0], dtype=np.float64),
             coefficient_path=np.ones((3, 2), dtype=np.float64),
         )
+
+    base = dict(
+        variables=["x0", "x1"],
+        coefficients=np.array([1.0, 0.0], dtype=np.float64),
+        y=y,
+        X=x,
+        status=0,
+        alpha=np.float64(0.1),
+        effective_dof=np.float64(1.0),
+        intercept=False,
+    )
+    with pytest.raises(ValueError, match="objective_trace"):
+        LassoResult(
+            **base,
+            alpha_grid=np.array([0.1, 1.0], dtype=np.float64),
+            objective_trace=np.array([1.0], dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="alpha_grid is required"):
+        LassoResult(
+            **base,
+            objective_trace=np.array([1.0], dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="alpha_grid"):
+        LassoResult(**base, alpha_grid=np.ones((1, 1), dtype=np.float64))
+    with pytest.raises(ValueError, match="coefficient_path"):
+        LassoResult(
+            **base,
+            alpha_grid=np.array([0.1], dtype=np.float64),
+            coefficient_path=np.ones(2, dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="knot_coefficients is required"):
+        LassoResult(
+            **base,
+            knot_lambdas=np.array([1.0], dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="knot_lambdas is required"):
+        LassoResult(
+            **base,
+            knot_coefficients=np.ones((1, 2), dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="knot_coefficients"):
+        LassoResult(
+            **base,
+            knot_lambdas=np.array([1.0], dtype=np.float64),
+            knot_coefficients=np.ones((2, 2), dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="knot_lambdas"):
+        LassoResult(**base, knot_lambdas=np.ones((1, 1), dtype=np.float64))
+    with pytest.raises(ValueError, match="knot_coefficients"):
+        LassoResult(
+            **base,
+            knot_lambdas=np.array([1.0], dtype=np.float64),
+            knot_coefficients=np.ones(2, dtype=np.float64),
+        )
+
+
+def test_lasso_low_level_coordinate_descent_branches() -> None:
+    assert smooth_threshold.py_func(np.float64(2.0), np.float64(0.5)) == np.float64(1.5)
+    assert smooth_threshold.py_func(np.float64(-2.0), np.float64(0.5)) == np.float64(
+        -1.5
+    )
+    assert smooth_threshold.py_func(np.float64(0.25), np.float64(0.5)) == np.float64(
+        0.0
+    )
+
+    coef, status = lasso_gram_cd.py_func(
+        np.array([[0.0]], dtype=np.float64),
+        np.array([1.0], dtype=np.float64),
+        np.float64(0.1),
+    )
+    assert status == OK
+    np.testing.assert_allclose(coef, np.zeros(1, dtype=np.float64))
+
+    coef, status = lasso_gram_cd.py_func(
+        np.eye(1, dtype=np.float64),
+        np.array([10.0], dtype=np.float64),
+        np.float64(0.0),
+        max_iter=1,
+        tol=np.float64(1e-14),
+    )
+    assert status == NON_CONVERGENT
+    np.testing.assert_allclose(coef, np.array([10.0], dtype=np.float64))
+
+
+def test_lasso_low_level_lars_and_path_edge_cases() -> None:
+    A = np.array([[0.0, 2.0], [1.0, 1.0]], dtype=np.float64)
+    b = np.array([4.0, 3.0], dtype=np.float64)
+    np.testing.assert_allclose(solve_small.py_func(A, b), np.linalg.solve(A, b))
+
+    lam_path, beta_path, status = lars_lasso_gram.py_func(
+        np.eye(2, dtype=np.float64),
+        np.zeros(2, dtype=np.float64),
+    )
+    assert status == OK
+    np.testing.assert_allclose(lam_path, np.zeros(1, dtype=np.float64))
+    np.testing.assert_allclose(beta_path, np.zeros((1, 2), dtype=np.float64))
+
+    lam_path, beta_path, status = lars_lasso_gram.py_func(
+        -np.eye(1, dtype=np.float64),
+        np.array([1.0], dtype=np.float64),
+    )
+    assert status == NON_CONVERGENT
+    np.testing.assert_allclose(lam_path, np.array([1.0], dtype=np.float64))
+    np.testing.assert_allclose(beta_path, np.zeros((1, 1), dtype=np.float64))
+
+    out = lasso_path_eval.py_func(
+        np.array([2.0, 1.0, 0.0], dtype=np.float64),
+        np.array([[0.0], [1.0], [3.0]], dtype=np.float64),
+        np.array([3.0, -1.0], dtype=np.float64),
+    )
+    np.testing.assert_allclose(out, np.array([[0.0], [3.0]], dtype=np.float64))
+
+
+def test_lasso_validates_public_wrapper_inputs() -> None:
+    x = np.eye(2, dtype=np.float64)
+    y = np.array([1.0, 2.0], dtype=np.float64)
+
+    with pytest.raises(ValueError, match="alpha"):
+        lasso(x, y, alpha=np.float64(-0.1))
+    with pytest.raises(ValueError, match="start and stop"):
+        lasso_gs(x, y, start=0.0, stop=1.0, num=2)
+    with pytest.raises(ValueError, match="num"):
+        lasso_gs(x, y, start=0.1, stop=1.0, num=0)
