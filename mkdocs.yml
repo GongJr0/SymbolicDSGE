@@ -166,6 +166,13 @@ nav:
       - Shock: documentation/Shock.md
       - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
+      - Regression:
+          - Overview: documentation/regression/index.md
+          - Regression Results: documentation/regression/results.md
+          - OLS: documentation/regression/ols.md
+          - Ridge: documentation/regression/ridge.md
+          - Lasso: documentation/regression/lasso.md
+          - Elastic Net: documentation/regression/elastic_net.md
       - Monte Carlo:
           - Overview: documentation/monte_carlo/index.md
           - MCPipeline: documentation/monte_carlo/pipeline.md
