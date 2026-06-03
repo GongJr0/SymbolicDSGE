@@ -58,7 +58,7 @@ The library supports a wide set of features beyond augmentation:
   - Output transformations
   - Filtering
   - Data generation
- 
+
 ### Read the Docs
 
 Alongside API references and implementation conventions, the [documentation](https://gongjr0.github.io/SymbolicDSGE/latest/) includes guides covering model setup, estimation, simulation, and filtering.
@@ -83,11 +83,11 @@ model, kalman = parsed
 # Compile the model
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
-    variable_order=None, 
-    params_order=None, 
-    n_state=3, 
-    n_exog=2, 
-    linearize=False, 
+    variable_order=None,
+    params_order=None,
+    n_state=3,
+    n_exog=2,
+    linearize=False,
 )
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)), "\n")
 print("Equations as passed to the solver: \n", compiled.equations)
@@ -108,10 +108,10 @@ Equations as passed to the solver:
 # Solve the compiled model
 sol = solver.solve(
     compiled,
-    parameters=None, 
+    parameters=None,
     steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
 )
-print("Is stable: ", sol.policy.stab == 0)  
+print("Is stable: ", sol.policy.stab == 0)
 print("Eigenvalues: ", sol.policy.eig)
 ```
 ```text
