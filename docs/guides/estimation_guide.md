@@ -8,7 +8,7 @@ tags:
 ??? tip "TL;DR"
     Refer to [this](../assets/param_estimation.ipynb) notebook for an example parameter estimation workflow.
 
-??? warning "Read the Quickstart Guide"
+???+ warning "Read the Quickstart Guide"
     This guide only handles the estimation process and is written assuming the reader have some familiarity for the core DSGE API (i.e. `DSGESolver`, `SolvedModel` etc.). It is strongly recommended to at least have read the [Quickstart Guide](./quickstart.md) before working with parameter estimation.
 
 This guide walks through the parameter estimation workflow of `SymbolicDSGE` using an example setup and a MCMC sampling based Bayesian Estimation setup.

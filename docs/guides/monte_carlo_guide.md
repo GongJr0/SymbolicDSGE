@@ -122,12 +122,12 @@ One test checks mean equivalence of observables, and the other checks the second
 ```python
 
 mean_test_step = wald_test_step(
-            "std_innov_mean",  # (1)!
-            source="std_innov",  # (2)!
-            target=np.zeros(n_obs),  # (3)!
-            kind="mean",  # (4)!
-            burn_in=20,  # (5)!
-        )
+    "std_innov_mean",  # (1)!
+    source="std_innov",  # (2)!
+    target=np.zeros(n_obs),  # (3)!
+    kind="mean",  # (4)!
+    burn_in=20,  # (5)!
+)
 second_moment_test_step = wald_test_step(
     "std_innov_second_moment",
     source="std_innov",
