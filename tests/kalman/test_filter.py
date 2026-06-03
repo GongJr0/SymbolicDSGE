@@ -51,7 +51,7 @@ def test_shape_validate_raises_on_bad_A_shape():
 
 def test_sym_returns_explicitly_symmetric_matrix():
     P = np.array([[1.0, 2.0], [0.0, 1.0]], dtype=float64)
-    S = KalmanFilter._sym(P)
+    S = KalmanFilter._sym.py_func(P)
     assert np.allclose(S, S.T)
     assert np.allclose(S, np.array([[1.0, 1.0], [1.0, 1.0]], dtype=float64))
 

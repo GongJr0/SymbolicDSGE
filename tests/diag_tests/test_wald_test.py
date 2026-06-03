@@ -96,7 +96,7 @@ def test_jit_wald_hac_stat_matches_manual_statistic() -> None:
     omega_buffer = np.empty((2, 2), dtype=np.float64)
     bandwidth = wooldridge_bandwidth(g)
 
-    err, stat, df = jit_wald_hac_stat(
+    err, stat, df = jit_wald_hac_stat.py_func(
         g,
         target,
         kernel_dispatcher("bartlett"),
@@ -223,7 +223,7 @@ def test_jit_wald_hac_stat_returns_shape_error_for_bad_target() -> None:
     centered_buffer = np.empty_like(g)
     omega_buffer = np.empty((2, 2), dtype=np.float64)
 
-    err, stat, df = jit_wald_hac_stat(
+    err, stat, df = jit_wald_hac_stat.py_func(
         g,
         target,
         kernel_dispatcher("bartlett"),
@@ -240,7 +240,7 @@ def test_jit_wald_hac_stat_returns_shape_error_for_bad_target() -> None:
 
 
 def test_jit_wald_stat_from_mean_and_cov_returns_shape_error_for_bad_target() -> None:
-    err, stat, df = jit_wald_stat_from_mean_and_cov(
+    err, stat, df = jit_wald_stat_from_mean_and_cov.py_func(
         np.zeros(2, dtype=np.float64),
         np.zeros(3, dtype=np.float64),
         np.eye(2, dtype=np.float64),
@@ -252,10 +252,23 @@ def test_jit_wald_stat_from_mean_and_cov_returns_shape_error_for_bad_target() ->
     assert df == 2
 
 
+def test_jit_wald_stat_from_mean_and_cov_computes_valid_statistic() -> None:
+    err, stat, df = jit_wald_stat_from_mean_and_cov.py_func(
+        np.array([1.0, 2.0], dtype=np.float64),
+        np.zeros(2, dtype=np.float64),
+        np.eye(2, dtype=np.float64),
+        3,
+    )
+
+    assert err == OK
+    assert stat == np.float64(15.0)
+    assert df == 2
+
+
 def test_jit_wald_stat_from_mean_and_cov_returns_linalg_error_for_singular_covariance() -> (
     None
 ):
-    err, stat, df = jit_wald_stat_from_mean_and_cov(
+    err, stat, df = jit_wald_stat_from_mean_and_cov.py_func(
         np.array([1.0, 0.0], dtype=np.float64),
         np.zeros(2, dtype=np.float64),
         np.zeros((2, 2), dtype=np.float64),
@@ -287,6 +300,19 @@ def test_symmetric_outer_product_reports_bad_output_shape() -> None:
     err = jit_symmetric_outer_prod_2dim.py_func(x, out)
 
     assert err == ERR_BAD_SHAPE
+
+
+def test_symmetric_outer_product_fills_upper_triangle_moments() -> None:
+    x = np.array([[1.0, 2.0], [3.0, -1.0]], dtype=np.float64)
+    out = np.empty((2, 3), dtype=np.float64)
+
+    err = jit_symmetric_outer_prod_2dim.py_func(x, out)
+
+    assert err == OK
+    np.testing.assert_allclose(
+        out,
+        np.array([[1.0, 2.0, 4.0], [9.0, -3.0, 1.0]], dtype=np.float64),
+    )
 
 
 def test_wald_public_wrappers_validate_targets_and_report_failures() -> None:

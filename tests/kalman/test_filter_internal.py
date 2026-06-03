@@ -50,23 +50,32 @@ def test_low_level_linear_algebra_helpers_match_numpy():
     S = np.array([[4.0, 1.0], [1.0, 3.0]], dtype=float64)
     b = np.array([1.0, 2.0], dtype=float64)
     B = np.array([[1.0, 0.5], [2.0, -1.0]], dtype=float64)
-    L = filter_module._chol_shifted(S, jit=0.0)
+    L = filter_module._chol_shifted.py_func(S, jit=0.0)
+    L_jitter = filter_module._chol_shifted.py_func(
+        np.array([[0.0]], dtype=float64), jit=1e-8
+    )
 
     assert np.allclose(L @ L.T, S)
-    assert np.allclose(filter_module._forward_subst_vec(L, b), np.linalg.solve(L, b))
+    assert np.allclose(L_jitter, np.array([[1e-4]], dtype=float64))
     assert np.allclose(
-        filter_module._backward_subst_vec(L.T, b),
+        filter_module._forward_subst_vec.py_func(L, b),
+        np.linalg.solve(L, b),
+    )
+    assert np.allclose(
+        filter_module._backward_subst_vec.py_func(L.T, b),
         np.linalg.solve(L.T, b),
     )
     assert np.allclose(
-        filter_module._chol_solve_vec(L, b),
+        filter_module._chol_solve_vec.py_func(L, b),
         np.linalg.solve(S, b),
     )
     assert np.allclose(
-        filter_module._chol_solve_mat(L, B),
+        filter_module._chol_solve_mat.py_func(L, B),
         np.linalg.solve(S, B),
     )
-    assert filter_module._logdet_from_chol(L) == pytest.approx(np.log(np.linalg.det(S)))
+    assert filter_module._logdet_from_chol.py_func(L) == pytest.approx(
+        np.log(np.linalg.det(S))
+    )
 
 
 def test_direct_kalman_hot_loop_covers_return_shocks_branch():
@@ -75,7 +84,7 @@ def test_direct_kalman_hot_loop_covers_return_shocks_branch():
     x0 = np.array([0.0], dtype=float64)
     P0 = np.array([[1.0]], dtype=float64)
 
-    err, _, out = filter_module._kalman_hot_loop(
+    err, _, out = filter_module._kalman_hot_loop.py_func(
         4,
         (1, 1, 1),
         A,
@@ -125,6 +134,26 @@ def test_direct_kalman_hot_loop_covers_return_shocks_branch():
         std_innov[0] @ std_innov[0],
         innov[0] @ np.linalg.solve(S_hist[0], innov[0]),
     )
+
+    err_sym, _, out_sym = filter_module._kalman_hot_loop.py_func(
+        2,
+        (1, 1, 1),
+        A,
+        B,
+        C,
+        d,
+        Q,
+        R,
+        y[:2],
+        x0,
+        P0,
+        True,
+        0.0,
+        False,
+    )
+    assert err_sym == filter_module.OK
+    assert np.allclose(out_sym[2], np.transpose(out_sym[2], (0, 2, 1)))
+    assert np.allclose(out_sym[3], np.transpose(out_sym[3], (0, 2, 1)))
 
 
 def test_direct_extended_hot_loops_cover_python_and_numba_paths():
@@ -182,7 +211,7 @@ def test_direct_extended_hot_loops_cover_python_and_numba_paths():
     def H_array(x, params):
         return np.array([[1.0]], dtype=float64)
 
-    err_nb, _, out_nb = filter_module._ekf_hot_loop_numba(
+    err_nb, _, out_nb = filter_module._ekf_hot_loop_numba.py_func(
         3,
         (1, 1, 1),
         A,
@@ -214,6 +243,63 @@ def test_direct_extended_hot_loops_cover_python_and_numba_paths():
     assert np.allclose(
         std_innov_nb[0] @ std_innov_nb[0],
         innov_nb[0] @ np.linalg.solve(S_nb[0], innov_nb[0]),
+    )
+
+    err_nb_y, _, out_nb_y = filter_module._ekf_hot_loop_numba.py_func(
+        1,
+        (1, 1, 1),
+        A,
+        B,
+        h_array,
+        H_array,
+        calib,
+        Q,
+        R,
+        y[:1],
+        x0,
+        P0,
+        True,
+        0.0,
+        True,
+        False,
+    )
+    assert err_nb_y == filter_module.OK
+    assert np.isfinite(out_nb_y[5]).all()
+
+
+def test_extended_dispatch_helpers_cover_array_dispatch_branches():
+    def h_array(state, params):
+        return np.array([state[0] + params[0]], dtype=float64)
+
+    def H_array(state, params):
+        return np.array([[1.0 + params[0] * 0.0]], dtype=float64)
+
+    h_array._symbolicdsge_array_dispatch = True
+    H_array._symbolicdsge_array_dispatch = True
+
+    state = np.array([1.0], dtype=float64)
+    params = np.array([0.25], dtype=float64)
+
+    assert filter_module._is_numba_array_dispatch(h_array)
+    np.testing.assert_allclose(
+        filter_module._call_extended_measurement(h_array, state, params),
+        np.array([1.25], dtype=float64),
+    )
+    np.testing.assert_allclose(
+        filter_module._call_extended_jacobian(H_array, state, params),
+        np.array([[1.0]], dtype=float64),
+    )
+
+
+def test_chol_solve_staticmethod_covers_vector_and_direct_solve_fallbacks():
+    S = np.array([[2.0, 0.0], [0.0, 3.0]], dtype=float64)
+    b = np.array([1.0, 6.0], dtype=float64)
+    L = np.linalg.cholesky(S).astype(float64)
+
+    np.testing.assert_allclose(KalmanFilter._chol_solve(L, S, b), np.linalg.solve(S, b))
+    np.testing.assert_allclose(
+        KalmanFilter._chol_solve(None, S, b),
+        np.linalg.solve(S, b),
     )
 
 
