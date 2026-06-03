@@ -6,6 +6,7 @@ from scipy.stats import chi2, f
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult, TestResult as DiagTestResult
+from SymbolicDSGE._diag_tests.result import _df_args, _normalize_df
 from SymbolicDSGE._diag_tests.status import TestStatus
 
 
@@ -124,6 +125,12 @@ def test_pval_method_enum_members_dispatch_to_frozen_distribution() -> None:
     np.testing.assert_allclose(PvalMethod.SF(dist, statistic), dist.sf(statistic))
 
 
+def test_reference_distribution_freezes_t_distribution() -> None:
+    frozen = ReferenceDistribution.t.freeze(np.float64(5.0))
+
+    assert frozen.mean() == pytest.approx(0.0)
+
+
 def test_mc_result_raises_on_empty_traces() -> None:
     with pytest.raises(ValueError, match="statistic_trace must be non-empty"):
         MCResult(
@@ -158,3 +165,56 @@ def test_mc_result_raises_on_unsupported_reference_distribution() -> None:
             alpha=np.float64(0.05),
             statistic_trace=np.array([1.0], dtype=np.float64),
         )
+
+
+def test_df_normalization_accepts_scalars_and_rejects_bad_sequences() -> None:
+    assert _normalize_df(np.array(2.0, dtype=np.float64)) == np.float64(2.0)
+    assert _df_args(np.float64(2.0)) == (np.float64(2.0),)
+
+    with pytest.raises(ValueError, match="1D"):
+        _normalize_df(np.ones((1, 1), dtype=np.float64))
+    with pytest.raises(ValueError, match="non-empty"):
+        _normalize_df(np.array([], dtype=np.float64))
+    with pytest.raises(TypeError, match="numeric"):
+        _normalize_df("2")
+    with pytest.raises(ValueError, match="non-empty"):
+        _normalize_df([])
+
+
+def test_test_result_lazy_distribution_and_repeated_pval_access() -> None:
+    out = DiagTestResult(
+        test_name="wald",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.05),
+        statistic=np.float64(1.0),
+        status=TestStatus.OK,
+        _auto_pval=False,
+    )
+
+    assert out._frozen_dist is None
+    assert out.frozen_dist is out._frozen_dist
+    first = out.compute_pval()
+    assert out.compute_pval() == first
+
+
+def test_mc_result_confidence_intervals_cover_wilson_normal_and_t_paths() -> None:
+    out = MCResult(
+        test_name="demo",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.5),
+        statistic_trace=np.array([0.1, 1.0, 3.0, 5.0], dtype=np.float64),
+    )
+
+    wilson = out.pval_confidence_interval(wilson=True)
+    normal = out.pval_confidence_interval(wilson=False)
+    z_interval = out.statistic_confidence_interval(t_interval=False)
+    t_interval = out.statistic_confidence_interval(t_interval=True)
+
+    assert 0.0 <= wilson[0] <= wilson[1] <= 1.0
+    assert normal[0] <= normal[1]
+    assert z_interval[0] <= z_interval[1]
+    assert t_interval[0] <= t_interval[1]

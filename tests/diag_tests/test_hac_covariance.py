@@ -6,7 +6,15 @@ import pytest
 from SymbolicDSGE._diag_tests.hac_covariance import (
     andrews_bandwidth,
     andrews_bandwidth_matrix,
+    bartlett_kernel,
     hac_covariance,
+    jit_hac_estimator_loop,
+    jit_hac_estimator_loop_into,
+    jit_hac_estimator_matmul,
+    kernel_dispatcher,
+    parzen_kernel,
+    py_hac_estimator,
+    quadratic_spectral_kernel,
     wooldridge_bandwidth,
 )
 
@@ -111,3 +119,78 @@ def test_hac_covariance_raises_on_bad_bandwidth() -> None:
 
     with pytest.raises(ValueError, match="Unsupported bandwidth"):
         hac_covariance(GOLDEN_R, bandwidth="bad")
+
+
+def test_kernel_functions_and_dispatcher_cover_boundary_branches() -> None:
+    assert bartlett_kernel(3, 2) == np.float64(0.0)
+    assert bartlett_kernel(1, 2) == pytest.approx(2.0 / 3.0)
+
+    assert parzen_kernel(4, 2) == np.float64(0.0)
+    assert parzen_kernel(1, 3) == pytest.approx(1.0 - 6.0 * 0.25**2 + 6.0 * 0.25**3)
+    assert parzen_kernel(2, 2) == pytest.approx(2.0 * (1.0 / 3.0) ** 3)
+
+    assert quadratic_spectral_kernel(0, 2) == pytest.approx(1.0)
+    assert np.isfinite(quadratic_spectral_kernel(1, 2))
+
+    assert kernel_dispatcher("bartlett", nopython=False) is bartlett_kernel
+    assert callable(kernel_dispatcher("bartlett", nopython=True))
+
+
+def test_hac_covariance_covers_auto_and_explicit_selection_branches() -> None:
+    out_wooldridge = hac_covariance(
+        GOLDEN_R,
+        kernel="bartlett",
+        bandwidth="wooldridge",
+        nopython=False,
+    )
+    out_andrews = hac_covariance(
+        GOLDEN_R,
+        kernel="parzen",
+        bandwidth="andrews",
+        nopython=False,
+    )
+    out_none = hac_covariance(
+        GOLDEN_R,
+        kernel="bartlett",
+        bandwidth=None,
+        nopython=False,
+    )
+    wide = np.tile(GOLDEN_R[:, :1], (1, 9))
+    out_wide = hac_covariance(wide, kernel="bartlett", bandwidth=1, nopython=True)
+
+    assert out_wooldridge.shape == (2, 2)
+    assert out_andrews.shape == (2, 2)
+    assert out_none.shape == (2, 2)
+    assert out_wide.shape == (9, 9)
+    np.testing.assert_allclose(
+        py_hac_estimator(GOLDEN_R, bartlett_kernel, 0),
+        GOLDEN_R.T @ GOLDEN_R / GOLDEN_R.shape[0],
+    )
+
+
+def test_hac_jit_estimators_python_paths_match_py_estimator() -> None:
+    expected = py_hac_estimator(GOLDEN_R, bartlett_kernel, 2)
+    loop_out = jit_hac_estimator_loop.py_func(GOLDEN_R, bartlett_kernel, 2)
+    matmul_out = jit_hac_estimator_matmul.py_func(GOLDEN_R, bartlett_kernel, 2)
+    into_out = np.empty((2, 2), dtype=np.float64)
+
+    jit_hac_estimator_loop_into.py_func(GOLDEN_R, bartlett_kernel, 2, into_out)
+
+    np.testing.assert_allclose(loop_out, expected)
+    np.testing.assert_allclose(matmul_out, expected)
+    np.testing.assert_allclose(into_out, expected)
+
+
+def test_andrews_bandwidth_matrix_validates_shape_and_accepts_vectors() -> None:
+    assert andrews_bandwidth_matrix(GOLDEN_R[:, 0], kernel="bartlett") >= 1
+
+    with pytest.raises(ValueError, match="1D or 2D"):
+        andrews_bandwidth_matrix(np.zeros((1, 2, 3), dtype=np.float64))
+
+
+def test_hac_covariance_raises_on_bad_kernel_and_invalid_bandwidth_type() -> None:
+    with pytest.raises(ValueError, match="Unsupported kernel"):
+        hac_covariance(GOLDEN_R, kernel="bad", bandwidth="auto")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="Invalid bandwidth"):
+        hac_covariance(GOLDEN_R, bandwidth=1.5)  # type: ignore[arg-type]

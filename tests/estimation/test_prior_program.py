@@ -6,7 +6,41 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.bayesian import make_prior
-from SymbolicDSGE.estimation.prior_program import build_packed_logprior
+from SymbolicDSGE.estimation.prior_program import (
+    DIST_BETA,
+    DIST_GAMMA,
+    DIST_HALF_CAUCHY,
+    DIST_HALF_NORMAL,
+    DIST_INV_GAMMA,
+    DIST_LOG_NORMAL,
+    DIST_NORMAL,
+    DIST_TRUNC_NORMAL,
+    DIST_UNIFORM,
+    N_DIST_PARAMS,
+    N_TRANSFORM_PARAMS,
+    TRANSFORM_AFFINE_LOGIT,
+    TRANSFORM_AFFINE_PROBIT,
+    TRANSFORM_IDENTITY,
+    TRANSFORM_LOG,
+    TRANSFORM_LOGIT,
+    TRANSFORM_LOWER_BOUNDED,
+    TRANSFORM_PROBIT,
+    TRANSFORM_SOFTPLUS,
+    TRANSFORM_UPPER_BOUNDED,
+    _dist_logpdf,
+    _evaluate_logprior_program,
+    _lkj_chol_logjac,
+    _lkj_chol_logpdf_from_z,
+    _log_sigmoid_scalar,
+    _pack_distribution,
+    _pack_transform,
+    _sigmoid_scalar,
+    _softplus_scalar,
+    _std_norm_cdf,
+    _std_norm_logpdf,
+    _transform_inverse_and_logjac,
+    build_packed_logprior,
+)
 
 
 def _scalar_prior_cases():
@@ -196,3 +230,344 @@ def test_packed_lkj_block_unit_matches_python_golden():
     assert packed is not None
     assert float(prior.logpdf(theta)) == pytest.approx(expected, rel=1e-13, abs=1e-13)
     assert float(packed.logpdf(theta)) == pytest.approx(expected, rel=1e-13, abs=1e-13)
+
+
+def test_packed_logprior_matches_cache_identity_and_rejects_unsupported_specs():
+    prior = make_prior(
+        "normal",
+        {"mean": 0.0, "std": 1.0, "random_state": 1},
+        "identity",
+    )
+    packed = build_packed_logprior(
+        priors={"rho": prior},
+        param_index={"rho": 0},
+        matrix_blocks={},
+        matrix_member_names=set(),
+    )
+
+    assert (
+        build_packed_logprior(
+            priors=None,
+            param_index={},
+            matrix_blocks={},
+            matrix_member_names=set(),
+        )
+        is None
+    )
+    assert packed is not None
+    assert packed.matches({"rho": prior})
+    assert not packed.matches(None)
+    assert not packed.matches({"other": prior})
+    assert not packed.matches(
+        {
+            "rho": make_prior(
+                "normal",
+                {"mean": 0.0, "std": 1.0, "random_state": 2},
+                "identity",
+            )
+        }
+    )
+
+    block = SimpleNamespace(dim=2, theta_indices=np.asarray([0], dtype=np.int64))
+    assert (
+        build_packed_logprior(
+            priors={"corr": object()},
+            param_index={},
+            matrix_blocks={"corr": block},
+            matrix_member_names=set(),
+        )
+        is None
+    )
+    assert (
+        build_packed_logprior(
+            priors={"corr": prior},
+            param_index={},
+            matrix_blocks={"corr": block},
+            matrix_member_names=set(),
+        )
+        is None
+    )
+    assert (
+        build_packed_logprior(
+            priors={"rho": prior},
+            param_index={},
+            matrix_blocks={},
+            matrix_member_names=set(),
+        )
+        is None
+    )
+    assert (
+        build_packed_logprior(
+            priors={"rho": object()},
+            param_index={"rho": 0},
+            matrix_blocks={},
+            matrix_member_names=set(),
+        )
+        is None
+    )
+    assert (
+        build_packed_logprior(
+            priors={"rho": object()},
+            param_index={},
+            matrix_blocks={},
+            matrix_member_names={"rho"},
+        )
+        is not None
+    )
+    assert _pack_distribution(object())[0] is None
+    assert _pack_transform(object())[0] is None
+
+    unsupported_dist_prior = make_prior(
+        "normal",
+        {"mean": 0.0, "std": 1.0, "random_state": 1},
+        "identity",
+    )
+    object.__setattr__(unsupported_dist_prior, "dist", object())
+    assert (
+        build_packed_logprior(
+            priors={"rho": unsupported_dist_prior},
+            param_index={"rho": 0},
+            matrix_blocks={},
+            matrix_member_names=set(),
+        )
+        is None
+    )
+
+
+def test_prior_program_scalar_transform_helpers_cover_all_branches():
+    assert _softplus_scalar.py_func(np.float64(2.0)) == pytest.approx(
+        np.log1p(np.exp(2.0))
+    )
+    assert _softplus_scalar.py_func(np.float64(-2.0)) == pytest.approx(
+        np.log1p(np.exp(-2.0))
+    )
+    assert _log_sigmoid_scalar.py_func(np.float64(2.0)) == pytest.approx(
+        -np.log1p(np.exp(-2.0))
+    )
+    assert _log_sigmoid_scalar.py_func(np.float64(-2.0)) == pytest.approx(
+        -2.0 - np.log1p(np.exp(-2.0))
+    )
+    assert _sigmoid_scalar.py_func(np.float64(2.0)) == pytest.approx(
+        1.0 / (1.0 + np.exp(-2.0))
+    )
+    assert _sigmoid_scalar.py_func(np.float64(-2.0)) == pytest.approx(
+        np.exp(-2.0) / (1.0 + np.exp(-2.0))
+    )
+    assert _std_norm_cdf.py_func(np.float64(0.0)) == pytest.approx(0.5)
+    assert _std_norm_logpdf.py_func(np.float64(0.0)) == pytest.approx(
+        -0.5 * np.log(2.0 * np.pi)
+    )
+
+    params = np.array([1.0, 3.0, 2.0], dtype=np.float64)
+    for code in (
+        TRANSFORM_IDENTITY,
+        TRANSFORM_LOG,
+        TRANSFORM_SOFTPLUS,
+        TRANSFORM_LOGIT,
+        TRANSFORM_PROBIT,
+        TRANSFORM_AFFINE_LOGIT,
+        TRANSFORM_AFFINE_PROBIT,
+        TRANSFORM_LOWER_BOUNDED,
+        TRANSFORM_UPPER_BOUNDED,
+    ):
+        x, logjac = _transform_inverse_and_logjac.py_func(
+            code,
+            params,
+            np.float64(0.25),
+        )
+        assert np.isfinite(x)
+        assert np.isfinite(logjac)
+
+    x, logjac = _transform_inverse_and_logjac.py_func(
+        999,
+        params,
+        np.float64(0.25),
+    )
+    assert np.isnan(x)
+    assert np.isnan(logjac)
+
+
+def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
+    scalar_priors = {
+        "normal": make_prior(
+            "normal", {"mean": 0.0, "std": 1.0, "random_state": 1}, "identity"
+        ),
+        "log_normal": make_prior(
+            "log_normal", {"mean": 0.0, "std": 0.5, "random_state": 1}, "identity"
+        ),
+        "half_normal": make_prior(
+            "half_normal", {"std": 1.0, "random_state": 1}, "identity"
+        ),
+        "trunc_normal": make_prior(
+            "trunc_normal",
+            {"mean": 0.0, "std": 1.0, "low": -1.0, "high": 1.0, "random_state": 1},
+            "identity",
+        ),
+        "half_cauchy": make_prior(
+            "half_cauchy", {"gamma": 1.0, "random_state": 1}, "identity"
+        ),
+        "beta": make_prior("beta", {"a": 2.0, "b": 3.0, "random_state": 1}, "identity"),
+        "gamma": make_prior(
+            "gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "identity"
+        ),
+        "inv_gamma": make_prior(
+            "inv_gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "identity"
+        ),
+        "uniform": make_prior(
+            "uniform", {"low": -1.0, "high": 1.0, "random_state": 1}, "identity"
+        ),
+    }
+    valid_x = {
+        DIST_NORMAL: 0.25,
+        DIST_LOG_NORMAL: 1.2,
+        DIST_HALF_NORMAL: 0.25,
+        DIST_TRUNC_NORMAL: 0.25,
+        DIST_HALF_CAUCHY: 0.25,
+        DIST_BETA: 0.25,
+        DIST_GAMMA: 1.5,
+        DIST_INV_GAMMA: 1.5,
+        DIST_UNIFORM: 0.25,
+    }
+
+    for prior in scalar_priors.values():
+        code, params = _pack_distribution(prior.dist)
+        assert code is not None
+        out = _dist_logpdf.py_func(
+            code,
+            np.asarray(params, dtype=np.float64),
+            np.float64(valid_x[code]),
+        )
+        assert np.isfinite(out)
+
+    for code, params, bad_x in (
+        (DIST_LOG_NORMAL, [0.0, 1.0, 0.0, 0.0, 0.0], -1.0),
+        (DIST_HALF_NORMAL, [1.0, 0.0, 0.0, 0.0, 0.0], -1.0),
+        (DIST_TRUNC_NORMAL, [0.0, 1.0, -1.0, 1.0, 0.0], 2.0),
+        (DIST_HALF_CAUCHY, [1.0, 0.0, 0.0, 0.0, 0.0], -1.0),
+        (DIST_BETA, [1.0, 1.0, 0.0, 0.0, 0.0], 2.0),
+        (DIST_GAMMA, [1.0, 1.0, 0.0, 0.0, 0.0], -1.0),
+        (DIST_INV_GAMMA, [1.0, 1.0, 0.0, 0.0, 0.0], 0.0),
+        (DIST_UNIFORM, [-1.0, 1.0, 2.0, 0.0, 0.0], 2.0),
+        (999, [0.0] * N_DIST_PARAMS, 0.0),
+    ):
+        assert np.isnan(
+            _dist_logpdf.py_func(
+                code,
+                np.asarray(params, dtype=np.float64),
+                np.float64(bad_x),
+            )
+        )
+
+
+def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
+    z = np.array([0.25, -0.15, 0.45], dtype=np.float64)
+
+    assert np.isfinite(_lkj_chol_logjac.py_func(z, 3, z.size))
+    assert np.isnan(_lkj_chol_logjac.py_func(z[:1], 3, 1))
+    assert np.isfinite(
+        _lkj_chol_logpdf_from_z.py_func(
+            z,
+            3,
+            z.size,
+            np.float64(1.5),
+            np.float64(0.0),
+        )
+    )
+    assert np.isnan(
+        _lkj_chol_logpdf_from_z.py_func(
+            z[:1],
+            3,
+            1,
+            np.float64(1.5),
+            np.float64(0.0),
+        )
+    )
+
+    theta = np.array([0.25], dtype=np.float64)
+    scalar_indices = np.array([0], dtype=np.int64)
+    scalar_dist_codes = np.array([DIST_NORMAL], dtype=np.int64)
+    scalar_transform_codes = np.array([TRANSFORM_IDENTITY], dtype=np.int64)
+    scalar_dist_params = np.zeros((1, N_DIST_PARAMS), dtype=np.float64)
+    scalar_dist_params[0, 1] = 1.0
+    scalar_transform_params = np.zeros((1, N_TRANSFORM_PARAMS), dtype=np.float64)
+    empty_i = np.empty((0,), dtype=np.int64)
+    empty_f = np.empty((0,), dtype=np.float64)
+    empty_m = np.empty((0, 0), dtype=np.int64)
+
+    assert np.isfinite(
+        _evaluate_logprior_program.py_func(
+            theta,
+            scalar_indices,
+            scalar_dist_codes,
+            scalar_transform_codes,
+            scalar_dist_params,
+            scalar_transform_params,
+            empty_m,
+            empty_i,
+            empty_i,
+            empty_f,
+            empty_f,
+        )
+    )
+    assert np.isnan(
+        _evaluate_logprior_program.py_func(
+            np.array([-0.25], dtype=np.float64),
+            scalar_indices,
+            np.array([DIST_LOG_NORMAL], dtype=np.int64),
+            scalar_transform_codes,
+            scalar_dist_params,
+            scalar_transform_params,
+            empty_m,
+            empty_i,
+            empty_i,
+            empty_f,
+            empty_f,
+        )
+    )
+    assert np.isnan(
+        _evaluate_logprior_program.py_func(
+            theta,
+            scalar_indices,
+            scalar_dist_codes,
+            np.array([999], dtype=np.int64),
+            scalar_dist_params,
+            scalar_transform_params,
+            empty_m,
+            empty_i,
+            empty_i,
+            empty_f,
+            empty_f,
+        )
+    )
+
+    assert np.isnan(
+        _evaluate_logprior_program.py_func(
+            np.array([0.1], dtype=np.float64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0, N_DIST_PARAMS), dtype=np.float64),
+            np.empty((0, N_TRANSFORM_PARAMS), dtype=np.float64),
+            np.array([[0]], dtype=np.int64),
+            np.array([3], dtype=np.int64),
+            np.array([1], dtype=np.int64),
+            np.array([1.5], dtype=np.float64),
+            np.array([0.0], dtype=np.float64),
+        )
+    )
+
+    assert np.isfinite(
+        _evaluate_logprior_program.py_func(
+            np.array([0.25, -0.15, 0.45], dtype=np.float64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0,), dtype=np.int64),
+            np.empty((0, N_DIST_PARAMS), dtype=np.float64),
+            np.empty((0, N_TRANSFORM_PARAMS), dtype=np.float64),
+            np.array([[0, 1, 2]], dtype=np.int64),
+            np.array([3], dtype=np.int64),
+            np.array([3], dtype=np.int64),
+            np.array([1.5], dtype=np.float64),
+            np.array([0.0], dtype=np.float64),
+        )
+    )

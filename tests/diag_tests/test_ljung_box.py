@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from scipy.stats import chi2
 
+import SymbolicDSGE._diag_tests.ljung_box as ljung_module
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.ljung_box import (
     BAD_LAG,
@@ -40,7 +41,7 @@ def test_acorr_matches_manual_autocorrelation() -> None:
     x = np.array([1.0, 2.0, 0.0, 4.0, 3.0], dtype=np.float64)
     L = 3
 
-    err, out = acorr(x, L)
+    err, out = acorr.py_func(x, L)
 
     assert err == OK
     assert OK == TestStatus.OK
@@ -48,18 +49,30 @@ def test_acorr_matches_manual_autocorrelation() -> None:
 
 
 def test_acorr_reports_undefined_variance_for_constant_series() -> None:
-    err, out = acorr(np.ones(5, dtype=np.float64), 2)
+    err, out = acorr.py_func(np.ones(5, dtype=np.float64), 2)
 
     assert err == UDEF_VARIANCE
     assert UDEF_VARIANCE == TestStatus.UDEF_VARIANCE
     assert np.isnan(out).all()
 
 
+def test_acorr_python_vectorized_branch_matches_manual_autocorrelation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    x = np.array([1.0, 2.0, 0.0, 4.0, 3.0], dtype=np.float64)
+    monkeypatch.setattr(ljung_module, "LOOP_LIMIT_N", 1)
+
+    err, out = acorr.py_func(x, 2)
+
+    assert err == OK
+    np.testing.assert_allclose(out, _manual_acorr(x, 2))
+
+
 def test_lb_stat_matches_manual_ljung_box_statistic() -> None:
     x = np.array([1.0, 2.0, 0.0, 4.0, 3.0, -1.0], dtype=np.float64)
     L = 3
 
-    err, stat = lb_stat(x, L)
+    err, stat = lb_stat.py_func(x, L)
 
     assert err == OK
     assert stat == pytest.approx(_manual_ljung_box(x, L))
@@ -68,25 +81,29 @@ def test_lb_stat_matches_manual_ljung_box_statistic() -> None:
 def test_lb_stat_caps_lag_at_available_observations() -> None:
     x = np.array([1.0, 2.0, 0.0, 4.0], dtype=np.float64)
 
-    err, stat = lb_stat(x, 20)
+    err, stat = lb_stat.py_func(x, 20)
 
     assert err == OK
     assert stat == pytest.approx(_manual_ljung_box(x, x.size - 1))
 
 
 def test_lb_stat_reports_input_status_codes() -> None:
-    err, stat = lb_stat(np.ones((2, 2), dtype=np.float64), 1)
+    err, stat = lb_stat.py_func(np.ones((2, 2), dtype=np.float64), 1)
     assert err == BAD_SHAPE
     assert BAD_SHAPE == TestStatus.BAD_SHAPE
     assert np.isnan(stat)
 
-    err, stat = lb_stat(np.array([1.0], dtype=np.float64), 1)
+    err, stat = lb_stat.py_func(np.array([1.0], dtype=np.float64), 1)
     assert err == UDEF_VARIANCE
     assert np.isnan(stat)
 
-    err, stat = lb_stat(np.array([1.0, 2.0], dtype=np.float64), 0)
+    err, stat = lb_stat.py_func(np.array([1.0, 2.0], dtype=np.float64), 0)
     assert err == BAD_LAG
     assert BAD_LAG == TestStatus.BAD_LAG
+    assert np.isnan(stat)
+
+    err, stat = lb_stat.py_func(np.ones(3, dtype=np.float64), 1)
+    assert err == UDEF_VARIANCE
     assert np.isnan(stat)
 
 

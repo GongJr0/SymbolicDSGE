@@ -52,6 +52,12 @@ def test_normalize_parameter_input_variants_cover_success_and_errors():
     with pytest.raises(ValueError, match="parameter_names is required"):
         linearsolve._normalize_parameter_input(np.array([0.9], dtype=float))
 
+    with pytest.raises(ValueError, match="parameter_names length"):
+        linearsolve._normalize_parameter_input(
+            np.array([0.9, 0.99], dtype=float),
+            parameter_names=["rho"],
+        )
+
 
 def test_normalize_named_vector_variants_cover_reordering_and_errors():
     out_mapping = linearsolve._normalize_named_vector(
@@ -73,8 +79,48 @@ def test_normalize_named_vector_variants_cover_reordering_and_errors():
     with pytest.raises(ValueError, match="Expected vector of length 1"):
         linearsolve._normalize_named_vector(np.array([1.0, 2.0]), ["a"])
 
+    class _LabeledNoLoc:
+        index = ["k", "a"]
+
+        def __getitem__(self, keys):
+            return [2.0 if key == "k" else 1.0 for key in keys]
+
+    out_no_loc = linearsolve._normalize_named_vector(
+        _LabeledNoLoc(),
+        ["a", "k"],
+        dtype=np.float64,
+    )
+    assert np.array_equal(out_no_loc, np.array([1.0, 2.0], dtype=np.float64))
+
+
+def test_linearsolve_misc_normalizers_cover_remaining_value_layouts():
+    assert linearsolve._value_dtype({}) == np.dtype(np.float64)
+    assert np.array_equal(
+        linearsolve._cast_parameter_values([0.9, 0.99], np.float64),
+        np.array([0.9, 0.99], dtype=np.float64),
+    )
+    assert np.array_equal(
+        linearsolve._as_1d_array({"rho": 0.9}),
+        np.array([0.9], dtype=np.float64),
+    )
+    assert np.array_equal(
+        linearsolve._as_1d_array(pd.Series({"rho": 0.9}, dtype=float)),
+        np.array([0.9], dtype=np.float64),
+    )
+
 
 def test_linearsolve_model_constructor_handles_multiple_layouts_and_shocks():
+    mdl_empty = linearsolve.model(
+        equations=_series_equations,
+        parameters={"rho": 0.9},
+    )
+    assert mdl_empty.n_states == 0
+    assert mdl_empty.n_exo_states == 0
+    assert mdl_empty.n_endo_states == 0
+    assert mdl_empty.n_costates == 0
+    assert mdl_empty.names["variables"] == []
+    assert len(mdl_empty.names["shocks"]) == 0
+
     mdl_components = linearsolve.model(
         equations=_series_equations,
         costates=["c"],
@@ -104,6 +150,108 @@ def test_linearsolve_model_constructor_handles_multiple_layouts_and_shocks():
     assert mdl_reordered.n_costates == 1
     assert mdl_reordered.names["variables"] == ["a", "k", "c"]
     assert mdl_reordered.names["param"] == ["rho"]
+
+    mdl_states_with_exo = linearsolve.model(
+        equations=_series_equations,
+        costates=["c"],
+        states=["k", "a"],
+        exo_states=["a"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_states_with_exo.names["variables"] == ["a", "k", "c"]
+    assert mdl_states_with_exo.n_exo_states == 1
+    assert mdl_states_with_exo.n_endo_states == 1
+
+    mdl_states_with_endo = linearsolve.model(
+        equations=_series_equations,
+        costates=["c"],
+        states=["k", "a"],
+        endo_states=["k"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_states_with_endo.names["variables"] == ["a", "k", "c"]
+    assert mdl_states_with_endo.n_exo_states == 1
+    assert mdl_states_with_endo.n_endo_states == 1
+
+    mdl_states_all_exo = linearsolve.model(
+        equations=_series_equations,
+        costates=["c"],
+        states=["a"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_states_all_exo.names["variables"] == ["a", "c"]
+    assert mdl_states_all_exo.n_exo_states == 1
+
+    mdl_vars_exo_endo = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "k", "c"],
+        exo_states=["a"],
+        endo_states=["k"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_exo_endo.names["variables"] == ["a", "k", "c"]
+
+    mdl_vars_states_endo = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "k", "c"],
+        states=["a", "k"],
+        endo_states=["k"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_states_endo.names["variables"] == ["a", "k", "c"]
+
+    mdl_vars_states_all_exo = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "k", "c"],
+        states=["a", "k"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_states_all_exo.n_exo_states == 2
+
+    mdl_vars_infer_states = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "c"],
+        n_exo_states=1,
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_infer_states.n_states == 1
+
+    mdl_vars_default_counts = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "c"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_default_counts.n_exo_states == 0
+    assert mdl_vars_default_counts.n_states == 0
+    assert mdl_vars_default_counts.n_costates == 2
+
+    mdl_vars_with_state_count = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "c"],
+        n_states=1,
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_with_state_count.n_exo_states == 0
+    assert mdl_vars_with_state_count.n_endo_states == 1
+    assert mdl_vars_with_state_count.n_costates == 1
+
+    mdl_vars_only_endo = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "k", "c"],
+        endo_states=["k"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_only_endo.n_exo_states == 0
+    assert mdl_vars_only_endo.n_endo_states == 1
+
+    mdl_vars_only_exo = linearsolve.model(
+        equations=_series_equations,
+        variables=["a", "k", "c"],
+        exo_states=["a"],
+        parameters={"rho": 0.9},
+    )
+    assert mdl_vars_only_exo.n_exo_states == 1
+    assert mdl_vars_only_exo.n_endo_states == 0
 
 
 def test_linearsolve_model_rejects_mismatched_shock_names():
@@ -140,7 +288,41 @@ def test_set_ss_and_resolve_steady_state_cover_dtype_promotion_and_missing_ss():
 
 
 def test_numeric_approximation_helpers_match_expected_linearization():
-    a, b = linearsolve._approximate_system_numeric(
+    eval_linear = linearsolve._evaluate_equilibrium_numeric.py_func(
+        _array_equations_numeric,
+        np.array([1.0], dtype=np.complex128),
+        np.array([1.0], dtype=np.complex128),
+        np.array([0.9], dtype=np.complex128),
+        False,
+    )
+    eval_log = linearsolve._evaluate_equilibrium_numeric.py_func(
+        _array_equations_numeric,
+        np.array([0.0], dtype=np.complex128),
+        np.array([0.0], dtype=np.complex128),
+        np.array([0.9], dtype=np.complex128),
+        True,
+    )
+    assert np.allclose(eval_linear, np.array([0.1], dtype=np.complex128))
+    assert np.allclose(eval_log, np.log(np.array([1.1], dtype=np.complex128)))
+
+    jac_fwd = linearsolve._complex_step_jacobian.py_func(
+        _array_equations_numeric,
+        np.array([1.0], dtype=np.float64),
+        np.array([0.9], dtype=np.float64),
+        False,
+        True,
+    )
+    jac_cur = linearsolve._complex_step_jacobian.py_func(
+        _array_equations_numeric,
+        np.array([1.0], dtype=np.float64),
+        np.array([0.9], dtype=np.float64),
+        False,
+        False,
+    )
+    assert np.allclose(jac_fwd, np.array([[1.0]], dtype=np.float64))
+    assert np.allclose(jac_cur, np.array([[-0.9]], dtype=np.float64))
+
+    a, b = linearsolve._approximate_system_numeric.py_func(
         _array_equations_numeric,
         np.array([1.0], dtype=np.float64),
         np.array([0.9], dtype=np.float64),
@@ -149,7 +331,7 @@ def test_numeric_approximation_helpers_match_expected_linearization():
     assert np.allclose(a, np.array([[1.0]], dtype=np.float64))
     assert np.allclose(b, np.array([[0.9]], dtype=np.float64))
 
-    a_log, b_log = linearsolve._approximate_system_numeric(
+    a_log, b_log = linearsolve._approximate_system_numeric.py_func(
         _array_equations_numeric,
         np.array([1.0], dtype=np.float64),
         np.array([0.9], dtype=np.float64),
@@ -183,6 +365,33 @@ def test_numeric_approximation_rejects_complex_and_nonpositive_inputs():
 
 
 def test_log_linear_python_fallback_and_approximate_and_solve_work():
+    mdl_linear_complex = linearsolve.model(
+        equations=_series_equations,
+        variables=["x"],
+        parameters=pd.Series({"rho": 0.9 + 0.0j}, dtype=np.complex128),
+        n_states=1,
+        n_exo_states=0,
+    )
+    mdl_linear_complex.set_ss(pd.Series({"x": 1.0}, dtype=float))
+    mdl_linear_complex.linear_approximation()
+    assert mdl_linear_complex.a.shape == (1, 1)
+    assert mdl_linear_complex.b.shape == (1, 1)
+
+    mdl_log_real = linearsolve.model(
+        equations=lambda fwd, cur, par: np.array(
+            [fwd["x"] / (cur["x"] ** par["rho"]) - 1.0],
+            dtype=np.complex128,
+        ),
+        variables=["x"],
+        parameters=pd.Series({"rho": 0.9}, dtype=float),
+        n_states=1,
+        n_exo_states=0,
+    )
+    mdl_log_real.set_ss(pd.Series({"x": 1.0}, dtype=float))
+    mdl_log_real.log_linear_approximation()
+    assert mdl_log_real.a.shape == (1, 1)
+    assert mdl_log_real.b.shape == (1, 1)
+
     mdl_python = linearsolve.model(
         equations=_series_equations,
         variables=["x"],
@@ -230,7 +439,17 @@ def test_klein_helpers_cover_optional_matrices_postprocess_and_default_solve():
             1,
         )
 
-    f0, n0, p0, l0, stab0, eig0 = linearsolve._klein_postprocess(
+    converted = linearsolve._to_complex.py_func(
+        np.eye(1, dtype=np.float64),
+        np.eye(1, dtype=np.float64),
+        np.ones(1, dtype=np.float64),
+        np.ones(1, dtype=np.float64),
+        np.eye(1, dtype=np.float64),
+        np.eye(1, dtype=np.float64),
+    )
+    assert all(np.iscomplexobj(arr) for arr in converted)
+
+    f0, n0, p0, l0, stab0, eig0 = linearsolve._klein_postprocess.py_func(
         np.array([[2.0 + 0.0j]], dtype=np.complex128),
         np.array([[1.0 + 0.0j]], dtype=np.complex128),
         np.array([[1.0 + 0.0j]], dtype=np.complex128),
@@ -246,7 +465,7 @@ def test_klein_helpers_cover_optional_matrices_postprocess_and_default_solve():
     assert stab0 == 1
     assert eig0.shape == (1,)
 
-    f1, n1, p1, l1, stab1, eig1 = linearsolve._klein_postprocess(
+    f1, n1, p1, l1, stab1, eig1 = linearsolve._klein_postprocess.py_func(
         np.array([[1.0, 0.2], [0.0, 1.0]], dtype=np.complex128),
         np.array([[0.8, 0.1], [0.0, 0.5]], dtype=np.complex128),
         np.array([[1.0], [0.5]], dtype=np.complex128),
@@ -261,6 +480,28 @@ def test_klein_helpers_cover_optional_matrices_postprocess_and_default_solve():
     assert l1.shape == (1, 1)
     assert stab1 == 1
     assert eig1.shape == (2,)
+
+    _, _, _, _, stab_too_few, _ = linearsolve._klein_postprocess.py_func(
+        np.array([[1.0]], dtype=np.complex128),
+        np.array([[2.0]], dtype=np.complex128),
+        np.eye(1, dtype=np.complex128),
+        np.eye(1, dtype=np.complex128),
+        np.empty((0, 0), dtype=np.float64),
+        np.empty((0, 0), dtype=np.float64),
+        1,
+    )
+    assert stab_too_few == -1
+
+    _, _, _, _, _, eig_inf = linearsolve._klein_postprocess.py_func(
+        np.array([[0.0]], dtype=np.complex128),
+        np.array([[1.0]], dtype=np.complex128),
+        np.eye(1, dtype=np.complex128),
+        np.eye(1, dtype=np.complex128),
+        np.empty((0, 0), dtype=np.float64),
+        np.empty((0, 0), dtype=np.float64),
+        0,
+    )
+    assert np.isinf(eig_inf[0])
 
     mdl = linearsolve.model(
         equations=_series_equations,
