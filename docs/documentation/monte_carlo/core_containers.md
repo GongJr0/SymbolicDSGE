@@ -63,7 +63,7 @@ class MCContext(
     data: MCData | None = None,
     payloads: dict[str, Any] = {},
     results: dict[str, TestResult] = {},
-    regressions: dict[str, OLSResult] = {},
+    regressions: dict[str, RegressionResult] = {},
 )
 ```
 
