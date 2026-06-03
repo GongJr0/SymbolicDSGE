@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 import numba
 from numba import njit
 
-import pandas as pd  # fuck linearsolve
+import pandas as pd
 
 from .. import _linearsolve as linearsolve
 from .config import ModelConfig
