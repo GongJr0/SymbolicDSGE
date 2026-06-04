@@ -1,8 +1,7 @@
-from logging import warning
 import warnings
 import sympy as sp
 from sympy import Symbol, Function, Expr
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from textwrap import dedent
 
 import numpy as np
@@ -16,7 +15,7 @@ import pandas as pd
 
 from .. import _linearsolve as linearsolve
 from .config import ModelConfig
-from .compiled_model import CompiledModel
+from .compiled_model import CompiledModel, VariableLayout
 from .linearization import linearize_model
 from .solved_model import SolvedModel
 
@@ -37,7 +36,7 @@ class DSGESolver:
     def compile(
         self,
         *,
-        variable_order: list[Function] | None = None,
+        variable_order: Sequence[Function | str] | None = None,
         n_state: int | None = None,
         n_exog: int | None = None,
         params_order: list[str] | None = None,
@@ -59,27 +58,51 @@ class DSGESolver:
 
         shifted = [self._offset_lags(o, t) for o in obj]
 
-        # Deterministic var order
-        if not variable_order:
-            var_order: list[str] = [
-                v.func.__name__ if hasattr(v, "func") else v.__name__
-                for v in ordered_variables
-            ]
-            var_order = [v.__name__ for v in ordered_variables]
-        else:
-            var_order = [  # pyright: ignore
-                v.__name__ if hasattr(v, "func") else v for v in variable_order
-            ]
-
         name_to_func = {v.__name__: v for v in ordered_variables}
+        inferred_layout = self._infer_variable_layout(conf)
+        resolved_n_exog = self._resolve_layout_count(
+            provided=n_exog,
+            inferred=inferred_layout.n_exog,
+            name="n_exog",
+        )
+        resolved_n_state = self._resolve_layout_count(
+            provided=n_state,
+            inferred=inferred_layout.n_state,
+            name="n_state",
+        )
+
+        if variable_order is None:
+            var_order = list(inferred_layout.canonical_names)
+        else:
+            var_order = [self._coerce_variable_name(v) for v in variable_order]
+            self._validate_explicit_variable_order(
+                var_order=var_order,
+                inferred_layout=inferred_layout,
+                n_exog=resolved_n_exog,
+                n_state=resolved_n_state,
+            )
+
         missing = [v for v in var_order if v not in name_to_func]
         if missing:
             raise ValueError(
                 f"The following variables in var_order do not exist in the model: {missing}"
             )
+        if len(set(var_order)) != len(var_order):
+            raise ValueError("variable_order contains duplicate variables.")
+
+        layout = VariableLayout(
+            declared_names=inferred_layout.declared_names,
+            canonical_names=tuple(var_order),
+            exo_state_names=tuple(var_order[:resolved_n_exog]),
+            endo_state_names=tuple(var_order[resolved_n_exog:resolved_n_state]),
+            control_names=tuple(var_order[resolved_n_state:]),
+            n_exog=resolved_n_exog,
+            n_state=resolved_n_state,
+            idx={name: i for i, name in enumerate(var_order)},
+        )
 
         var_funcs = [name_to_func[name] for name in var_order]
-        idx = {name: i for i, name in enumerate(var_order)}
+        idx = dict(layout.idx)
 
         for i, obj in enumerate(shifted):
             bad = self._bad_time_offsets(obj, var_funcs, t)
@@ -93,7 +116,7 @@ class DSGESolver:
         fwd_syms = [Symbol(f"fwd_{n}") for n in var_order]
 
         subs_map = {}
-        for name, f, cur, fwd in zip(var_order, var_funcs, cur_syms, fwd_syms):
+        for _, f, cur, fwd in zip(var_order, var_funcs, cur_syms, fwd_syms):
 
             subs_map[f(t)] = cur  # pyright: ignore
             subs_map[f(t + 1)] = fwd  # pyright: ignore
@@ -110,18 +133,14 @@ class DSGESolver:
         compiled: list[Expr] = [sp.simplify(o.subs(subs_map)) for o in shifted]
         shock_zero_subs = {shock: 0.0 for shock in conf.shock_map.keys()}
         compiled_numeric: list[Expr] = [
-            sp.simplify(expr.subs(shock_zero_subs)) for expr in compiled
+            sp.simplify(expr.subs(shock_zero_subs))  # pyright: ignore
+            for expr in compiled
         ]
 
         lambda_args = [*fwd_syms, *cur_syms, *params]
         objective_scalar_funcs = [
             njit(sp.lambdify(lambda_args, c, modules="numpy")) for c in compiled_numeric
         ]
-
-        if n_state is None or n_exog is None:
-            raise ValueError(
-                "For linearsolve backend you must provide n_state and n_exog explicitly."
-            )
 
         shifted_obs = [
             self._offset_lags(expr, t) for expr in conf.equations.observable.values()
@@ -132,18 +151,25 @@ class DSGESolver:
             for expr in observable_exprs
         ]
 
-        symbolic_jacobian: sp.Matrix = conf.equations.obs_jacobian
-        variables = [ordered_variables[idx[name]] for name in var_order]
+        if observable_exprs:
+            symbolic_jacobian = sp.Matrix(
+                [
+                    [sp.diff(expr, cur_sym) for cur_sym in cur_syms]
+                    for expr in observable_exprs
+                ]
+            )
+        else:
+            symbolic_jacobian = sp.zeros(0, len(cur_syms))
 
-        jac_scalars = list(symbolic_jacobian)
+        jac_scalars = list(symbolic_jacobian)  # pyright: ignore
         jac_scalar_funcs = tuple(
-            njit(sp.lambdify([*variables, *params], scalar, modules="numpy"))
+            njit(sp.lambdify([*cur_syms, *params], scalar, modules="numpy"))
             for scalar in jac_scalars
         )
 
         n_obs, n_vars = symbolic_jacobian.shape
 
-        arg_names = [f"var{i}" for i in range(len(variables))] + [
+        arg_names = [f"var{i}" for i in range(len(cur_syms))] + [
             f"param{i}" for i in range(len(params))
         ]
         args_str = ", ".join(f"{name}: float64" for name in arg_names)
@@ -183,12 +209,15 @@ def jacobian_func({args_str}) -> NDF:
             warnings.simplefilter(
                 "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
             )
-            jacobian_func.compile(tuple(numba.float64 for _ in arg_names))
+            jacobian_func.compile(  # pyright: ignore
+                tuple(numba.float64 for _ in arg_names)
+            )
 
         return CompiledModel(
             config=conf,
             kalman=kalman_conf,
             cur_syms=cur_syms,
+            layout=layout,
             var_names=var_order,
             calib_params=params,
             idx=idx,
@@ -199,9 +228,157 @@ def jacobian_func({args_str}) -> NDF:
             observable_funcs=observable_funcs,
             observable_jacobian=jacobian_func,
             observable_jacobian_funcs=jac_scalar_funcs,
-            n_state=int(n_state),
-            n_exog=int(n_exog),
+            n_state=layout.n_state,
+            n_exog=layout.n_exog,
         )
+
+    @staticmethod
+    def _coerce_variable_name(var: Any) -> str:
+        if isinstance(var, str):
+            return var
+        if hasattr(var, "__name__"):
+            return str(var.__name__)
+        if hasattr(var, "name"):
+            return str(var.name)
+        if hasattr(var, "func") and hasattr(var.func, "__name__"):
+            return str(var.func.__name__)
+        return str(var)
+
+    @staticmethod
+    def _resolve_layout_count(
+        *,
+        provided: int | None,
+        inferred: int,
+        name: str,
+    ) -> int:
+        if provided is None:
+            return inferred
+        provided_int = int(provided)
+        if provided_int != inferred:
+            raise ValueError(
+                f"{name}={provided_int} does not match inferred {name}={inferred}."
+            )
+        return provided_int
+
+    def _infer_variable_layout(self, conf: ModelConfig) -> VariableLayout:
+        declared_names = tuple(v.__name__ for v in conf.variables.variables)
+        declared_set = set(declared_names)
+        t = self.t
+
+        shock_targets = [
+            self._coerce_variable_name(target) for target in conf.shock_map.values()
+        ]
+        unknown_targets = [name for name in shock_targets if name not in declared_set]
+        if unknown_targets:
+            raise ValueError(
+                "shock_map targets unknown model variable(s): "
+                + ", ".join(unknown_targets)
+            )
+        if len(set(shock_targets)) != len(shock_targets):
+            raise ValueError(
+                "shock_map contains multiple shocks for the same variable."
+            )
+
+        shocked = set(shock_targets)
+        exo_state_names = tuple(name for name in declared_names if name in shocked)
+
+        state_candidates: set[str] = set()
+        for eq in conf.equations.model:
+            lhs_info = self._function_call_offset(eq.lhs, declared_set, t)
+            if lhs_info is not None:
+                name, offset = lhs_info
+                if offset == 1:
+                    state_candidates.add(name)
+
+            expr = sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
+            for call in expr.atoms(sp.Function):
+                call_info = self._function_call_offset(call, declared_set, t)
+                if call_info is None:
+                    continue
+                name, offset = call_info
+                if offset == -1:
+                    state_candidates.add(name)
+
+        endo_state_names = tuple(
+            name
+            for name in declared_names
+            if name in state_candidates and name not in shocked
+        )
+        state_names = (*exo_state_names, *endo_state_names)
+        control_names = tuple(
+            name for name in declared_names if name not in set(state_names)
+        )
+        canonical_names = (*state_names, *control_names)
+
+        return VariableLayout(
+            declared_names=declared_names,
+            canonical_names=canonical_names,
+            exo_state_names=exo_state_names,
+            endo_state_names=endo_state_names,
+            control_names=control_names,
+            n_exog=len(exo_state_names),
+            n_state=len(state_names),
+            idx={name: i for i, name in enumerate(canonical_names)},
+        )
+
+    @staticmethod
+    def _function_call_offset(
+        expr: Any,
+        declared_names: set[str],
+        t: Symbol,
+    ) -> tuple[str, int] | None:
+        if not hasattr(expr, "func") or not hasattr(expr.func, "__name__"):
+            return None
+        name = str(expr.func.__name__)
+        if name not in declared_names or not getattr(expr, "args", None):
+            return None
+
+        arg0 = expr.args[0]
+        if t not in getattr(arg0, "free_symbols", set()):
+            return None
+        offset = sp.simplify(arg0 - t)
+        if offset.is_Integer or offset.is_integer is True:
+            return name, int(offset)
+        return None
+
+    @staticmethod
+    def _validate_explicit_variable_order(
+        *,
+        var_order: Sequence[str],
+        inferred_layout: VariableLayout,
+        n_exog: int,
+        n_state: int,
+    ) -> None:
+        declared = set(inferred_layout.declared_names)
+        unknown = [name for name in var_order if name not in declared]
+        if unknown:
+            raise ValueError(
+                f"The following variables in var_order do not exist in the model: {unknown}"
+            )
+        if len(set(var_order)) != len(var_order):
+            raise ValueError("variable_order contains duplicate variables.")
+        if set(var_order) != declared:
+            raise ValueError("variable_order must contain every model variable.")
+
+        expected_exo = set(inferred_layout.exo_state_names)
+        got_exo = set(var_order[:n_exog])
+        if got_exo != expected_exo:
+            raise ValueError(
+                "variable_order is incompatible with inferred state layout. "
+                f"Expected first n_exog variables to be shocked states "
+                f"{list(inferred_layout.exo_state_names)}."
+            )
+
+        expected_states = set(
+            (*inferred_layout.exo_state_names, *inferred_layout.endo_state_names)
+        )
+        got_states = set(var_order[:n_state])
+        if got_states != expected_states:
+            raise ValueError(
+                "variable_order is incompatible with inferred state layout. "
+                f"Expected first n_state variables to be states "
+                f"{list((*inferred_layout.exo_state_names, *inferred_layout.endo_state_names))}."
+            )
 
     def solve(
         self,
