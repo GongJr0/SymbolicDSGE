@@ -18,7 +18,7 @@ tags:
 - Shock symbol declarations
 
 This guide contains detailed information about config sections, how they are parsed, and the conventions users are expected to follow for correct parsing.
-The ordering of fields does not matter for the parser, however ordering of the components can change the model behavior. We will start with an empty config and build components to create a valid model in this guide.
+The ordering of top-level fields does not matter for the parser. Component order is preserved as a stable tie-breaker in places where the model does not imply a unique order, but variables do not need to be manually arranged for the solver backend. We will start with an empty config and build components to create a valid model in this guide.
 
 To start with, the configuration accepts a `name` field to specify the model's alias. This name is accessible in the parsed model but never used; it remains in the model object as a reference for users.
 
@@ -28,7 +28,11 @@ name: "Test Model"
 
 ## Variables
 
-The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping and the ordering of variables will be respected in the solver unless explicitly given a separate ordering. In addition to variable names, each variable requires an explicit boolean entry in the `constrained` field. Having this toggle allows the constraint equations to be predefined in the config but only used when explicitly enabled.
+The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping. At compile time, the solver infers its canonical layout from the model config: variables targeted by `shock_map` form the shocked/exogenous state block, dynamic equations define the remaining state variables, and all other variables are controls. Declaration order is preserved within those inferred groups.
+
+If an explicit compile-time `variable_order`, `n_state`, or `n_exog` is supplied, it is treated as an expectation and sanity-checked against the inferred layout. A mismatch raises before solving.
+
+In addition to variable names, each variable requires an explicit boolean entry in the `constrained` field. Having this toggle allows the constraint equations to be predefined in the config but only used when explicitly enabled.
 
 When using a mapping instead of a list, the preferred linearization method and the parameter corresponding to a variable's steady-state level can be specified. This additional information is only used when linearizing a non-linear model.
 

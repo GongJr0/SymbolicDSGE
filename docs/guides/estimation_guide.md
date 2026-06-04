@@ -29,14 +29,10 @@ parsed = ModelParser("MODELS/POST82.yaml").get_all()
 model, kalman = parsed
 
 solver = DSGESolver(model, kalman)
-compiled = solver.compile(
-    n_state=3, # (1)!
-    n_exog=3, # (2)!
-)
+compiled = solver.compile()
 ```
 
-1. Number of state variables for the linear solver backend.
-2. Number of exogenous variables; first `n_exog` variables must match the exogenous order contract.
+`compile()` infers the solver variable layout from the model config. If you supply `#!python variable_order`, `#!python n_state`, or `#!python n_exog`, they are checked against the inferred layout and a mismatch raises before the model is solved.
 
 ???+ note "Data Input"
     In this example, observed "measurements" are pulled from `FRED` and transformed into model units first. In this guide we assume you already have `observed` as a `DataFrame` with observable columns.

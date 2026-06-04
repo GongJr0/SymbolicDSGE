@@ -38,10 +38,7 @@ steady_state = np.zeros(5, dtype=np.float64)  # (2)!
 
 # Solve the reference model
 solver = DSGESolver(model, kalman)
-compiled = solver.compile(
-    n_state=3,
-    n_exog=3,
-)
+compiled = solver.compile()
 reference = solver.solve(compiled, steady_state=steady_state)
 
 # Change parameters and re-compile to get the DGP model
