@@ -219,6 +219,7 @@ def test_solved_model_non_affine_measurement_and_jit_cache():
     compiled = SimpleNamespace(
         observable_funcs=[_obs_shift, _obs_scale],
         observable_names=["ObsShift", "ObsScale"],
+        calib_params=[alpha],
         cur_syms=[Symbol("x")],
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 2.0})),
     )

@@ -469,7 +469,7 @@ class SolvedModel:
         # Arguments in form [*cur_vars, *params]
         params = self.compiled.config.calibration.parameters
         param_vals = [
-            float64(params[p]) for p in self.config.calibration.parameters
+            float64(params[p]) for p in self.compiled.calib_params
         ]  # Ensure dtype + order
 
         # Assume state is in canonical order of cur_syms (Checked at compile time)

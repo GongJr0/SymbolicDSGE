@@ -21,12 +21,25 @@ ND = NDArray
 
 
 @dataclass(frozen=True)
+class VariableLayout:
+    declared_names: tuple[str, ...]
+    canonical_names: tuple[str, ...]
+    exo_state_names: tuple[str, ...]
+    endo_state_names: tuple[str, ...]
+    control_names: tuple[str, ...]
+    n_exog: int
+    n_state: int
+    idx: dict[str, int]
+
+
+@dataclass(frozen=True)
 class CompiledModel:
     config: ModelConfig
     kalman: KalmanConfig | None
 
     cur_syms: list[Symbol]
 
+    layout: VariableLayout
     var_names: list[str]
     idx: dict[str, int]
 

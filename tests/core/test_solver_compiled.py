@@ -227,12 +227,15 @@ def test_compile_rejects_unknown_param_order(parsed_test):
         )
 
 
-def test_compile_requires_n_state_and_n_exog(parsed_test):
+def test_compile_infers_n_state_and_n_exog(parsed_test):
     model, kalman = parsed_test
     solver = DSGESolver(model, kalman)
 
-    with pytest.raises(ValueError, match="must provide n_state and n_exog"):
-        solver.compile()
+    compiled = solver.compile()
+
+    assert compiled.n_state == 3
+    assert compiled.n_exog == 2
+    assert compiled.var_names[: compiled.n_state] == ["u", "v", "r"]
 
 
 def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
