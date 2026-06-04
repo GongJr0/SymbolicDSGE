@@ -52,11 +52,8 @@ from SymbolicDSGE import DSGESolver
 
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
-    variable_order=None, # (1)!
-    params_order=None, # (2)!
-    n_state=3, # (3)!
-    n_exog=2, # (4)!
-    linearize=False, # (5)!
+    params_order=None, # (1)!
+    linearize=False, # (2)!
 )
 
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)))
@@ -65,11 +62,8 @@ print("Equations as passed to the solver: \n", compiled.equations)
 
 ```
 
-1. `#!python None | list[Function]`. `#!python None` uses the order in the config file.
-2. `#!python None | list[str]`. `#!python None` uses the order in the config file.
-3. Number of state variables (must be supplied)
-4. Number of exogenous variables (must be supplied)
-5. Set to `#!python True` to symbolically linearize the model config before compiling it
+1. `#!python None | list[str]`. `#!python None` uses the parameter order in the config file.
+2. Set to `#!python True` to symbolically linearize the model config before compiling it.
 
 At compilation, the equations are transformed as shown in the code output:
 ```
@@ -85,8 +79,10 @@ Equations as passed to the solver:
  <function DSGESolver.compile.<locals>.equations at 0x0000012D16AB5B20>
 ```
 
-???+ warning "Variable Placement"
-    The solver relies on the exogenous variables being placed in the first indices. You should ensure the first `n_exog` entries of the order correctly map to the exogenous variables. (either through the config or via the ordering)
+???+ note "Variable Layout"
+    The compiler infers the canonical solver layout from the configuration. Shock-map targets form the shocked/exogenous state block, dynamic equations determine the remaining state variables, and the rest are controls.
+
+    If you pass `#!python variable_order`, `#!python n_state`, or `#!python n_exog`, they are treated as explicit expectations. The compiler checks them against the inferred layout and raises if they do not match the config.
 
 ???+ note "Linearization"
     When passing the linearization flag, the parsed `ModelConfig` must have the linearization parameters defined. (refer to the [Config Guide](./model_config_guide.md))

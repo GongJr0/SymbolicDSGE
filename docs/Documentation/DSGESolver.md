@@ -23,32 +23,28 @@ __Methods:__
 ```python
 DSGESolver.compile(
     *,
-    variable_order: list[sp.Function] | None = None,
-    n_state: int = None,
-    n_exog: int = None,
+    variable_order: list[sp.Function | str] | None = None,
+    n_state: int | None = None,
+    n_exog: int | None = None,
     params_order: list[str] | None = None,
     linearize: bool = False,
 ) -> CompiledModel
 ```
 
-???+ warning "Variable Ordering Convention"
-    The model expects the first `#!python n_exog` variables to be the exogenous components. Before solving the model either;
+???+ note "Inferred Variable Layout"
+    `DSGESolver.compile(...)` infers the solver layout from the model config. Shock-map targets define the shocked/exogenous state block, dynamic equations define the remaining state variables, and the rest are treated as controls.
 
-    - Ensure the variable ordering in the config file follows this convention.
-    - Supply an order specification at compile time.
+    If `#!python variable_order`, `#!python n_state`, or `#!python n_exog` are supplied, they are treated as explicit expectations. The compiler sanity-checks them against the config-derived layout and raises if they disagree.
 
-??? info "Planned Changes"
-    Current input constraints will be eliminated as `#! SymbolicDSGE` moves towards the beta releases. `n_exog` and `n_state` will be inferred through flags in the config; and variable ordering will be managed internally.
-
-Produces a `#!python CompiledModel` object respecting the given orders. `#!python n_exog` and `#!python n_state` must be supplied for the current `#!python linearsolve` backend.
+Produces a `#!python CompiledModel` object using the inferred canonical variable layout unless an explicit, validated order is supplied.
 
  __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| variable_order | Custom ordering of variables if desired. |
-| n_state | Number of state variables. |
-| n_exog | Number of exogenous variables. |
+| variable_order | Optional expected variable order. If supplied, it must agree with the config-derived state/exogenous grouping. |
+| n_state | Optional expected number of state variables. Raises if it disagrees with inference. |
+| n_exog | Optional expected number of shocked/exogenous state variables. Raises if it disagrees with inference. |
 | params_order | Custom ordering of model parameters if desired. |
 | linearize | Apply symbolic linearization to a copied model config before compilation. |
 
