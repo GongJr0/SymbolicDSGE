@@ -806,68 +806,112 @@ def _ekf_hot_loop_numba(
 
     eps_hat = zeros((shock_history_T, k), dtype=float64)
 
+    x_pred_buf = zeros((n,), dtype=float64)
+    x_filt_buf = zeros((n,), dtype=float64)
+    y_pred_buf = zeros((m,), dtype=float64)
+    v_buf = zeros((m,), dtype=float64)
+    u_buf = zeros((m,), dtype=float64)
+    S_inv_v = zeros((m,), dtype=float64)
+
+    P_pred_buf = zeros((n, n), dtype=float64)
+    P_filt_buf = zeros((n, n), dtype=float64)
+    H_buf = zeros((m, n), dtype=float64)
+    S_buf = zeros((m, m), dtype=float64)
+    L = zeros((m, m), dtype=float64)
+    PHt = zeros((n, m), dtype=float64)
+    K = zeros((n, m), dtype=float64)
+    KH = zeros((n, n), dtype=float64)
+    I_minus_KH = zeros((n, n), dtype=float64)
+
+    temp_nn = zeros((n, n), dtype=float64)
+    temp_nm = zeros((n, m), dtype=float64)
+    temp_mn = zeros((m, n), dtype=float64)
+    solve_forward = zeros((m,), dtype=float64)
+    solve_backward = zeros((m,), dtype=float64)
+
+    BQBT = zeros((n, n), dtype=float64)
+    temp_nk = zeros((n, k), dtype=float64)
+    _build_bqbt_into(B, Q, temp_nk, BQBT)
+
+    M = zeros((k, m), dtype=float64)
+    temp_km = zeros((k, m), dtype=float64)
+
     loglik = float64(0.0)
     const = m * np.log(2 * np.pi)
 
-    BT = np.ascontiguousarray(B.T)
-    AT = np.ascontiguousarray(A.T)
-
-    In = eye(n, dtype=float64)
-    BQBT = _sym(B @ Q @ BT)
-
     for t in range(T):
-        x_t_pred = A @ x_prev
-        P_t_pred = A @ P_prev @ AT + BQBT
+        _matvec_into(A, x_prev, x_pred_buf)
+        _predict_cov_into(A, P_prev, BQBT, temp_nn, P_pred_buf)
 
         if symmetrize:
-            P_t_pred = _sym(P_t_pred)
+            _sym_inplace(P_pred_buf)
 
-        y_t_pred = h(x_t_pred, calib_params).reshape(m)
-        H_t = H_jac(x_t_pred, calib_params).reshape(m, n)
-        H_tT = np.ascontiguousarray(H_t.T)
+        y_t_pred = h(x_pred_buf, calib_params).reshape(m)
+        H_t = H_jac(x_pred_buf, calib_params).reshape(m, n)
+        for i in range(m):
+            y_pred_buf[i] = y_t_pred[i]
+            for j in range(n):
+                H_buf[i, j] = H_t[i, j]
 
-        v_t = y[t] - y_t_pred
-        S_t = H_t @ P_t_pred @ H_tT + R
+        _row_minus_vec_into(y, t, y_pred_buf, v_buf)
+        _measurement_cov_into(H_buf, P_pred_buf, R, temp_mn, S_buf)
 
         if symmetrize:
-            S_t = _sym(S_t)
+            _sym_inplace(S_buf)
 
-        L = _chol_shifted(S_t, jitter)
-        u_t = _forward_subst_vec(L, v_t)
-        S_inv_v = _backward_subst_vec(L.T, u_t)
+        _chol_shifted_into(S_buf, jitter, L)
+        _forward_subst_vec_into(L, v_buf, u_buf)
+        _backward_subst_chol_t_vec_into(L, u_buf, S_inv_v)
 
-        PHt = P_t_pred @ H_tT
-        K_t = _chol_solve_mat(L, PHt.T).T
+        _pc_t_into(P_pred_buf, H_buf, PHt)
+        _gain_from_pc_t_into(L, PHt, solve_forward, solve_backward, K)
 
-        x_t_filt = x_t_pred + K_t @ v_t
+        _state_update_into(x_pred_buf, K, v_buf, x_filt_buf)
 
-        KH = K_t @ H_t
-        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_t.T
+        _joseph_cov_into(
+            K,
+            H_buf,
+            P_pred_buf,
+            R,
+            KH,
+            I_minus_KH,
+            temp_nn,
+            temp_nm,
+            P_filt_buf,
+        )
         if symmetrize:
-            P_t_filt = _sym(P_t_filt)
+            _sym_inplace(P_filt_buf)
 
         ldS = _logdet_from_chol(L)
-        quad = float64(v_t @ S_inv_v)
+        quad = _dot_vec(v_buf, S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
         if compute_y_filt and _store_history:
-            y_filt[t] = h(x_t_filt, calib_params).reshape(m)
+            y_t_filt = h(x_filt_buf, calib_params).reshape(m)
+            for i in range(m):
+                y_filt[t, i] = y_t_filt[i]
         if return_shocks and _store_history:
-            M = Q @ (BT @ H_tT)
-            eps_hat[t] = M @ S_inv_v
+            _build_shock_projection_into(B, H_buf, Q, temp_km, M)
+            _matvec_into(M, S_inv_v, eps_hat[t])
 
         if _store_history:
-            x_pred[t] = x_t_pred
-            x_filt[t] = x_t_filt
-            P_pred[t] = P_t_pred
-            P_filt[t] = P_t_filt
-            y_pred[t] = y_t_pred
-            v[t] = v_t
-            u[t] = u_t
-            S[t] = S_t
+            for i in range(n):
+                x_pred[t, i] = x_pred_buf[i]
+                x_filt[t, i] = x_filt_buf[i]
+            for i in range(n):
+                for j in range(n):
+                    P_pred[t, i, j] = P_pred_buf[i, j]
+                    P_filt[t, i, j] = P_filt_buf[i, j]
+            for i in range(m):
+                y_pred[t, i] = y_pred_buf[i]
+                v[t, i] = v_buf[i]
+                u[t, i] = u_buf[i]
+            for i in range(m):
+                for j in range(m):
+                    S[t, i, j] = S_buf[i, j]
 
-        x_prev = x_t_filt
-        P_prev = P_t_filt
+        x_prev = x_filt_buf
+        P_prev = P_filt_buf
 
     return (
         OK,
