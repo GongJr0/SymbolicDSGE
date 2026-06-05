@@ -16,6 +16,8 @@
   &nbsp;
   <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/tests-badge.svg" alt="tests"></a>
   &nbsp;
+  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/pre-commit-badge.svg" alt="pre-commit"></a>
+  &nbsp;
   <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/coverage-badge.svg" alt="coverage"></a>
   &nbsp;
   <a href="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE"><img src="https://wakatime.com/badge/github/GongJr0/SymbolicDSGE.svg" alt="wakatime"></a>
@@ -34,6 +36,7 @@
 ```bash
 pip install SymbolicDSGE
 pip install "SymbolicDSGE[fred]"  # FRED API utilities
+pip install "SymbolicDSGE[sr]"    # Symbolic Regression Deps
 ```
 
 ### Useful Links

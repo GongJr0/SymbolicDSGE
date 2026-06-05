@@ -1,0 +1,195 @@
+name: Pre-Commit
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "coverage/*.svg"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pre_commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+
+    steps:
+      - name: Checkout
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/checkout@v6
+
+      - name: Checkout pull request branch
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.19"
+          enable-cache: true
+          prune-cache: false
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PRE_COMMIT_HOME }}
+          key: pre-commit-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-
+
+      - name: Run autofix hooks
+        id: autofix
+        shell: bash
+        run: |
+          run_autofix_hook() {
+            local hook="$1"
+            local before_hash
+            local after_hash
+            before_hash="$(git diff --binary | git hash-object --stdin)"
+
+            set +e
+            uv run pre-commit run "$hook" --show-diff-on-failure --color=always --all-files
+            local hook_status=$?
+            set -e
+
+            after_hash="$(git diff --binary | git hash-object --stdin)"
+            if [ "$hook_status" -ne 0 ] && [ "$before_hash" = "$after_hash" ]; then
+              echo "$hook failed without producing file changes."
+              exit "$hook_status"
+            fi
+          }
+
+          run_autofix_hook black-jupyter
+          run_autofix_hook end-of-file-fixer
+          run_autofix_hook trailing-whitespace
+
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "Autofix hooks changed these files:"
+          git diff --name-only
+
+      - name: Commit and push autofix changes
+        if: ${{ steps.autofix.outputs.changed == 'true' && github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -u
+          git commit -m "ci: apply pre-commit fixes"
+          git push
+
+      - name: Commit and push autofix changes to pull request
+        if: ${{ steps.autofix.outputs.changed == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -u
+          git commit -m "ci: apply pre-commit fixes"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - name: Fail if autofix changes cannot be pushed
+        if: ${{ steps.autofix.outputs.changed == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        shell: bash
+        run: |
+          echo "Autofix hooks changed files, but this workflow cannot push fixes to fork pull requests."
+          git diff --name-only
+          exit 1
+
+      - name: Run blocking hooks
+        shell: bash
+        run: |
+          uv run pre-commit run mypy --show-diff-on-failure --color=always --all-files
+          uv run pre-commit run block-nonempty-env --show-diff-on-failure --color=always --all-files
+
+      - name: Generate passing pre-commit badge
+        if: ${{ github.event_name == 'push' }}
+        run: >
+          curl -fsSL -o coverage/pre-commit-badge.svg
+          "https://img.shields.io/badge/pre--commit-passing-2e7d32?style=flat&labelColor=333333"
+
+      - name: Commit passing pre-commit badge
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add coverage/pre-commit-badge.svg
+
+          if git diff --cached --quiet; then
+            echo "No pre-commit badge changes to commit."
+            exit 0
+          fi
+
+          git commit -m "ci: update pre-commit badge"
+          git push
+
+  pre_commit_failed_badge:
+    runs-on: ubuntu-latest
+    needs: [pre_commit]
+    if: ${{ always() && needs.pre_commit.result == 'failure' && github.event_name == 'push' }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Generate failing pre-commit badge
+        uses: emibcn/badge-action@v2
+        with:
+          label: pre-commit
+          status: failing
+          color: red
+          path: coverage/pre-commit-badge.svg
+
+      - name: Commit failing pre-commit badge
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add coverage/pre-commit-badge.svg
+
+          if git diff --cached --quiet; then
+            echo "No pre-commit badge changes to commit."
+            exit 0
+          fi
+
+          git commit -m "ci: update failing pre-commit badge"
+          git push
