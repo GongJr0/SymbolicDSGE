@@ -44,19 +44,16 @@ from SymbolicDSGE.regression.ridge import RidgeResult
 class _FakeSolvedModel:
     def __init__(self, offset: float = 0.0) -> None:
         self.offset = offset
-        self.compiled = SimpleNamespace(n_exog=1, observable_names=["obs"])
+        self.compiled = SimpleNamespace(
+            idx={"x": 0, "z": 1},
+            var_names=["x", "z"],
+            n_exog=1,
+            observable_names=["obs"],
+        )
         self.kalman_calls: list[dict] = []
         self.sim_shocks: list[dict[str, np.ndarray]] = []
 
-    def sim(
-        self,
-        T,
-        shocks=None,
-        shock_scale=1.0,
-        x0=None,
-        observables=False,
-    ):
-        del shock_scale, x0
+    def _draw_shocks(self, shocks=None) -> None:
         shock_draws = {}
         if shocks is not None:
             for name, shock in shocks.items():
@@ -70,12 +67,42 @@ class _FakeSolvedModel:
                 else:
                     shock_draws[name] = np.asarray(shock, dtype=np.float64)
         self.sim_shocks.append(shock_draws)
+
+    def _simulate_state_matrix(
+        self,
+        T,
+        shocks=None,
+        shock_scale=1.0,
+        x0=None,
+    ):
+        del shock_scale, x0
+        self._draw_shocks(shocks)
         t = np.arange(T + 1, dtype=np.float64)
-        states = np.column_stack(
+        return np.column_stack(
             [
                 t + self.offset,
                 ((t % 3.0) - 1.0) + 0.5 * self.offset,
             ]
+        )
+
+    def _simulate_observable_matrix(self, states, *, drop_initial=False):
+        start = 1 if drop_initial else 0
+        obs = 0.5 * states[:, 0] + states[:, 1]
+        return np.ascontiguousarray(obs[start:].reshape(-1, 1), dtype=np.float64)
+
+    def sim(
+        self,
+        T,
+        shocks=None,
+        shock_scale=1.0,
+        x0=None,
+        observables=False,
+    ):
+        states = self._simulate_state_matrix(
+            T=T,
+            shocks=shocks,
+            shock_scale=shock_scale,
+            x0=x0,
         )
         out = {
             "_X": states,
@@ -83,7 +110,10 @@ class _FakeSolvedModel:
             "z": states[:, 1],
         }
         if observables:
-            out["obs"] = 0.5 * states[:, 0] + states[:, 1]
+            out["obs"] = self._simulate_observable_matrix(
+                states,
+                drop_initial=False,
+            )[:, 0]
         return out
 
     def kalman(self, y, **kwargs):

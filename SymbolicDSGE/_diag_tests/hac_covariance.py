@@ -4,7 +4,9 @@ from numpy.typing import NDArray
 
 from numba import njit
 
-from typing import Literal, Callable
+from typing import Literal, Callable, cast
+
+NDF = NDArray[float64]
 
 # Andrews (1991) bandwidth constants for different kernels
 _C_BARTLETT = 1.1447
@@ -19,14 +21,14 @@ _ANDREWS_C_Q_GETTER: dict[str, tuple[float, float]] = {
 
 
 # Wooldridge Textbook bandwoidth selection rule
-def wooldridge_bandwidth(x: NDArray[float64]) -> int:
+def wooldridge_bandwidth(x: NDF) -> int:
     n = x.shape[0]
     return int(np.floor(4 * (n / 100) ** (2 / 9)))
 
 
 # Andrews (1991) bandwidth selection rule for HAC covariance estimation
 def andrews_bandwidth(
-    y: NDArray[float64], kernel: Literal["bartlett", "parzen", "qs"] = "bartlett"
+    y: NDF, kernel: Literal["bartlett", "parzen", "qs"] = "bartlett"
 ) -> int:
     n = y.shape[0]
     if n < 2 or np.var(y) <= 1e-14:
@@ -55,7 +57,7 @@ def andrews_bandwidth(
 
 
 def andrews_bandwidth_matrix(
-    r: NDArray[np.float64],
+    r: NDF,
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
 ) -> int:
     r = np.asarray(r, dtype=np.float64)
@@ -146,10 +148,10 @@ def kernel_dispatcher(
 # HAC covariance estimation using the specified kernel and bandwidth
 @njit(cache=True)
 def jit_hac_estimator_matmul(
-    r: NDArray[float64],
+    r: NDF,
     k: Callable[[int, int], float64],  # Kernel function
     L: int,  # Bandwidth
-) -> NDArray[float64]:
+) -> NDF:
     n = r.shape[0]
     S = np.zeros((r.shape[1], r.shape[1]), dtype=float64)
     L = min(L, n - 1)
@@ -165,44 +167,13 @@ def jit_hac_estimator_matmul(
     return S
 
 
-@njit(cache=True)
-def jit_hac_estimator_loop(
-    r: NDArray[float64],
-    k: Callable[[int, int], float64],  # Kernel function
-    L: int,  # Bandwidth
-) -> NDArray[float64]:
-    n, p = r.shape
-    S = np.zeros((p, p), dtype=float64)
-    L = min(L, n - 1)
-
-    for t in range(n):
-        for a in range(p):
-            ra = r[t, a]
-            for b in range(p):
-                S[a, b] += ra * r[t, b]
-
-    for j in range(1, L + 1):
-        w_j = k(j, L)
-        if w_j == 0.0:
-            continue
-
-        for t in range(j, n):
-            for a in range(p):
-                ra = r[t, a]
-                ra_lag = r[t - j, a]
-                for b in range(p):
-                    S[a, b] += w_j * (ra * r[t - j, b] + r[t, b] * ra_lag)
-    S /= n
-    return S
-
-
 # Only used when nopython is disabled on kernel dispatch.
 # For testing and maintaining functionality in cases where numba isn't supported.
 def py_hac_estimator(
-    r: NDArray[float64],
+    r: NDF,
     k: Callable[[int, int], float64],  # Kernel function
     L: int,  # Bandwidth
-) -> NDArray[float64]:
+) -> NDF:
 
     n, p = r.shape
     S = np.zeros((p, p), dtype=float64)
@@ -219,67 +190,19 @@ def py_hac_estimator(
     return S
 
 
-# Buffer-write estimator for compiled Wald test path
-@njit(cache=True)
-def jit_hac_estimator_loop_into(
-    r: NDArray[float64],
-    k: Callable[[int, int], float64],
-    L: int,
-    S: NDArray[float64],
-) -> None:
-    n, p = r.shape
-    L = min(L, n - 1)
-
-    for a in range(p):
-        for b in range(p):
-            S[a, b] = 0.0
-
-    # Gamma_0 numerator
-    for t in range(n):
-        for a in range(p):
-            ra = r[t, a]
-            for b in range(p):
-                S[a, b] += ra * r[t, b]
-
-    # Weighted autocovariances
-    for j in range(1, L + 1):
-        w_j = k(j, L)
-        if w_j == 0.0:
-            continue
-
-        for t in range(j, n):
-            for a in range(p):
-                ra = r[t, a]
-                ra_lag = r[t - j, a]
-
-                for b in range(p):
-                    S[a, b] += w_j * (ra * r[t - j, b] + r[t, b] * ra_lag)
-
-    for a in range(p):
-        for b in range(p):
-            S[a, b] /= n
-
-
-_ESTIMATOR_DISPATCHER = {
-    "matmul": jit_hac_estimator_matmul,
-    "loop": jit_hac_estimator_loop,
-    "py": py_hac_estimator,
-}
-
-
 def hac_covariance(
-    r: NDArray[np.float64],
+    r: NDF,
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
     bandwidth: int | Literal["wooldridge", "andrews", "auto"] | None = "auto",
     center: bool = False,
     nopython: bool = True,
-) -> NDArray[np.float64]:
+) -> NDF:
     r = np.ascontiguousarray(r, dtype=np.float64)
 
     if r.ndim != 2:
         raise ValueError(f"r must be 2D with shape (n, p), got {r.shape}.")
 
-    n, p = r.shape
+    n = r.shape[0]
     if n < 2:
         raise ValueError(f"r must have at least 2 observations, got {n}.")
 
@@ -311,12 +234,6 @@ def hac_covariance(
     k = kernel_dispatcher(kernel, nopython=nopython)
 
     if nopython:
-        if p <= 8:
-            estimator_func = _ESTIMATOR_DISPATCHER["loop"]
-        else:
-            estimator_func = _ESTIMATOR_DISPATCHER["matmul"]
-    else:
-        estimator_func = _ESTIMATOR_DISPATCHER["py"]
+        return cast(NDF, jit_hac_estimator_matmul(r, k, L))
 
-    out: NDArray[float64] = estimator_func(r, k, L)
-    return out
+    return py_hac_estimator(r, k, L)

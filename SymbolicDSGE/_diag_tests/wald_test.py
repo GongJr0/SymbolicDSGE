@@ -1,4 +1,4 @@
-from .hac_covariance import jit_hac_estimator_loop_into, hac_covariance
+from .hac_covariance import jit_hac_estimator_matmul, hac_covariance
 from .moment_calculation_utils import jit_fill_centered, jit_fill_mean_ax0
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
@@ -18,6 +18,8 @@ ERR_BAD_SHAPE = int64(TestStatus.BAD_SHAPE)
 ERR_LINALG = int64(TestStatus.LINALG)
 
 F64_NAN = float64(np.nan)
+SYMMETRY_ATOL = float64(1e-8)
+SYMMETRY_RTOL = float64(1e-5)
 
 
 @njit(cache=True)
@@ -100,7 +102,10 @@ def jit_wald_hac_stat(
     jit_fill_mean_ax0(g, mean_buffer)
     jit_fill_centered(g, mean_buffer, centered_buffer)
 
-    jit_hac_estimator_loop_into(centered_buffer, k, L, omega_buffer)
+    omega = jit_hac_estimator_matmul(centered_buffer, k, L)
+    for i in range(q):
+        for j in range(q):
+            omega_buffer[i, j] = omega[i, j]
 
     out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
         mean_buffer,
@@ -127,6 +132,34 @@ def jit_symmetric_outer_prod_2dim(x: NDF, out: NDF) -> int64:
             for j in range(i, p):
                 out[t, k] = x_i * x[t, j]
                 k += 1
+    return OK
+
+
+@njit(cache=True)
+def jit_fill_symmetric_target_vec(
+    target: NDF,
+    out: NDF,
+    atol: float64 = SYMMETRY_ATOL,
+    rtol: float64 = SYMMETRY_RTOL,
+) -> int64:
+    p = target.shape[0]
+    q = p * (p + 1) // 2
+
+    if target.shape[1] != p or out.shape[0] != q:
+        return ERR_BAD_SHAPE
+
+    k = 0
+    for i in range(p):
+        for j in range(i, p):
+            a = target[i, j]
+            b = target[j, i]
+            if a != b:
+                diff = abs(a - b)
+                if not np.isfinite(diff) or diff > atol + rtol * abs(b):
+                    return ERR_BAD_SHAPE
+            out[k] = a
+            k += 1
+
     return OK
 
 
@@ -163,21 +196,25 @@ def wald_mean_hac(
          Wald test result containing the test statistic, degrees of freedom, and p-value method.
     """
 
-    n, q = g.shape
+    g_arr = np.ascontiguousarray(g, dtype=float64)
+    target_arr = np.ascontiguousarray(target, dtype=float64)
+    n, q = g_arr.shape
 
     mean_buffer = np.empty(q, dtype=float64)
-    jit_fill_mean_ax0(g, mean_buffer)
+    centered_buffer = np.empty_like(g_arr)
+    jit_fill_mean_ax0(g_arr, mean_buffer)
+    jit_fill_centered(g_arr, mean_buffer, centered_buffer)
 
     omega = hac_covariance(
-        g,
+        centered_buffer,
         kernel=kernel,
         bandwidth=bandwidth,
-        center=True,
+        center=False,
         nopython=True,
     )
     out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
         mean_buffer,
-        target,
+        target_arr,
         omega,
         n,
     )
@@ -223,22 +260,25 @@ def wald_covariance_hac(
         Significance level for the test, used for p-value calculation. Default is 0.05.
     """
 
-    if target.ndim != 2 or target.shape[0] != target.shape[1]:
+    g_arr = np.ascontiguousarray(g, dtype=float64)
+    target_arr = np.ascontiguousarray(target, dtype=float64)
+
+    if target_arr.ndim != 2 or target_arr.shape[0] != target_arr.shape[1]:
         raise ValueError("Target covariance matrix must be square")
-    if target.shape[0] != g.shape[1]:
+    if target_arr.shape[0] != g_arr.shape[1]:
         raise ValueError("Target covariance matrix dimension must match g columns")
-    if not np.allclose(target, target.T, atol=1e-8):
+
+    n, p = g_arr.shape
+    q = p * (p + 1) // 2
+    target_vec = np.empty(q, dtype=float64)
+    err = jit_fill_symmetric_target_vec(target_arr, target_vec)
+    if err != OK:
         raise ValueError("Target covariance matrix must be symmetric")
-    vech_idx = np.triu_indices(target.shape[0])
-    target_vec = target[vech_idx]  # p * (p + 1) // 2
 
-    n, _ = g.shape
-    q = target_vec.shape[0]
-
-    centered = np.empty_like(g)
-    mean = np.empty(g.shape[1], dtype=float64)
-    jit_fill_mean_ax0(g, mean)
-    jit_fill_centered(g, mean, centered)
+    centered = np.empty_like(g_arr)
+    mean = np.empty(p, dtype=float64)
+    jit_fill_mean_ax0(g_arr, mean)
+    jit_fill_centered(g_arr, mean, centered)
 
     g_cov = np.empty((n, q), dtype=float64)
     err = jit_symmetric_outer_prod_2dim(centered, g_cov)
@@ -248,13 +288,15 @@ def wald_covariance_hac(
         )
 
     g_cov_mean = np.empty(q, dtype=float64)
+    g_cov_centered = np.empty_like(g_cov)
     jit_fill_mean_ax0(g_cov, g_cov_mean)
+    jit_fill_centered(g_cov, g_cov_mean, g_cov_centered)
 
     omega = hac_covariance(
-        g_cov,
+        g_cov_centered,
         kernel=kernel,
         bandwidth=bandwidth,
-        center=True,
+        center=False,
         nopython=True,
     )
 
@@ -262,7 +304,7 @@ def wald_covariance_hac(
         g_cov_mean,
         target_vec,
         omega,
-        g.shape[0],
+        g_arr.shape[0],
     )
     err, stat, df = out
     if err != OK:
@@ -306,33 +348,42 @@ def wald_second_moment_hac(
         Significance level for the test, used for p-value calculation. Default is 0.05.
     """
 
-    if target.ndim != 2 or target.shape[0] != target.shape[1]:
-        raise ValueError("Target second moment matrix must be square")
-    if target.shape[0] != g.shape[1]:
-        raise ValueError("Target second moment matrix dimension must match g columns")
-    if not np.allclose(target, target.T, atol=1e-8):
-        raise ValueError("Target second moment matrix must be symmetric")
-    vech_idx = np.triu_indices(target.shape[0])
-    target_vec = target[vech_idx]  # p * (p + 1) // 2
+    g_arr = np.ascontiguousarray(g, dtype=float64)
+    target_arr = np.ascontiguousarray(target, dtype=float64)
 
-    n, _ = g.shape
-    q = target_vec.shape[0]
+    if target_arr.ndim != 2 or target_arr.shape[0] != target_arr.shape[1]:
+        raise ValueError("Target second moment matrix must be square")
+    if target_arr.shape[0] != g_arr.shape[1]:
+        raise ValueError("Target second moment matrix dimension must match g columns")
+
+    n, p = g_arr.shape
+    q = p * (p + 1) // 2
+    target_vec = np.empty(q, dtype=float64)
+    err = jit_fill_symmetric_target_vec(target_arr, target_vec)
+    if err != OK:
+        raise ValueError("Target second moment matrix must be symmetric")
 
     g_second_moment = np.empty((n, q), dtype=float64)
-    err = jit_symmetric_outer_prod_2dim(g, g_second_moment)
+    err = jit_symmetric_outer_prod_2dim(g_arr, g_second_moment)
     if err != OK:
         raise ValueError(
             f"Failed to compute symmetric outer product with error code {err}"
         )
 
     g_second_moment_mean = np.empty(q, dtype=float64)
+    g_second_moment_centered = np.empty_like(g_second_moment)
     jit_fill_mean_ax0(g_second_moment, g_second_moment_mean)
+    jit_fill_centered(
+        g_second_moment,
+        g_second_moment_mean,
+        g_second_moment_centered,
+    )
 
     omega = hac_covariance(
-        g_second_moment,
+        g_second_moment_centered,
         kernel=kernel,
         bandwidth=bandwidth,
-        center=True,
+        center=False,
         nopython=True,
     )
 
@@ -340,7 +391,7 @@ def wald_second_moment_hac(
         g_second_moment_mean,
         target_vec,
         omega,
-        g.shape[0],
+        g_arr.shape[0],
     )
     err, stat, df = out
     if err != OK:
