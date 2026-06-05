@@ -13,6 +13,10 @@ from sympy import Symbol
 
 import SymbolicDSGE.core.solved_model as solved_model_module
 from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE.core.simulation import (
+    affine_observations_into,
+    simulate_linear_states_into,
+)
 from SymbolicDSGE.kalman.interface import KalmanInterface
 
 
@@ -37,6 +41,70 @@ def test_solved_model_sim_shapes_and_keys(solved_test):
         assert out[name].shape == (T + 1,)
 
 
+def test_linear_simulation_kernel_writes_manual_recursion() -> None:
+    A = np.array([[0.5, 0.0], [0.25, 0.75]], dtype=np.float64)
+    B = np.array([[1.0, -0.5], [0.0, 0.25]], dtype=np.float64)
+    x0 = np.array([1.0, -1.0], dtype=np.float64)
+    shock_mat = np.array(
+        [[0.5, 1.0], [-1.0, 0.0], [0.25, -0.5]],
+        dtype=np.float64,
+    )
+    out = np.empty((shock_mat.shape[0] + 1, A.shape[0]), dtype=np.float64)
+    py_out = np.empty_like(out)
+
+    simulate_linear_states_into(A, B, x0, shock_mat, out)
+    simulate_linear_states_into.py_func(A, B, x0, shock_mat, py_out)
+
+    expected = np.empty_like(out)
+    expected[0] = x0
+    for t in range(shock_mat.shape[0]):
+        expected[t + 1] = A @ expected[t] + B @ shock_mat[t]
+    np.testing.assert_allclose(out, expected)
+    np.testing.assert_allclose(py_out, expected)
+
+
+def test_affine_observation_kernel_writes_with_state_offset() -> None:
+    states = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, -1.0],
+            [0.5, 4.0],
+        ],
+        dtype=np.float64,
+    )
+    C = np.array([[2.0, -0.5], [0.0, 1.5]], dtype=np.float64)
+    d = np.array([1.0, -2.0], dtype=np.float64)
+    out = np.empty((2, 2), dtype=np.float64)
+    py_out = np.empty_like(out)
+
+    affine_observations_into(states, C, d, 1, out)
+    affine_observations_into.py_func(states, C, d, 1, py_out)
+
+    np.testing.assert_allclose(out, states[1:] @ C.T + d)
+    np.testing.assert_allclose(py_out, states[1:] @ C.T + d)
+
+
+def test_solved_model_sim_matches_manual_state_recursion(solved_test):
+    T = 4
+    shocks = {
+        "u": np.array([0.5, -1.0, 0.25, 0.75], dtype=np.float64),
+        "v": np.array([1.0, 0.0, -0.5, 0.25], dtype=np.float64),
+    }
+
+    out = solved_test.sim(T, shocks=shocks, shock_scale=0.5)
+
+    shock_mat = solved_test._simulation_shock_matrix(
+        T=T,
+        shocks=shocks,
+        shock_scale=0.5,
+    )
+    expected = np.empty_like(out["_X"])
+    expected[0] = solved_test._simulation_initial_state(None)
+    for t in range(T):
+        expected[t + 1] = solved_test.A @ expected[t] + solved_test.B @ shock_mat[t]
+    np.testing.assert_allclose(out["_X"], expected)
+
+
 def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
     with pytest.raises(ValueError, match="must have length"):
         solved_test.sim(8, shocks={"u": np.ones(7)})
@@ -47,6 +115,17 @@ def test_solved_model_sim_with_observables_includes_measurements(solved_test):
     for obs in solved_test.compiled.observable_names:
         assert obs in out
         assert out[obs].shape == (11,)
+
+
+def test_solved_model_affine_observables_can_drop_initial_row(solved_test):
+    out = solved_test.sim(10, observables=True)
+
+    Y = solved_test._simulate_observable_matrix(out["_X"], drop_initial=True)
+
+    expected = np.column_stack(
+        [out[name][1:] for name in solved_test.compiled.observable_names]
+    )
+    np.testing.assert_allclose(Y, expected)
 
 
 def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
