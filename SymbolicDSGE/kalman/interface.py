@@ -185,10 +185,6 @@ class KalmanInterface(KalmanFilter):
             return validated_R
 
         conf = self.kalman_config
-        if conf is None:
-            raise ValueError(
-                "Kalman Filter configuration with the R matrix is required."
-            )
 
         builder = getattr(conf, "R_builder", None)
         arg_names = getattr(conf, "R_param_names", None)
@@ -332,8 +328,6 @@ class KalmanInterface(KalmanFilter):
                     "P0 diagonal specification must be provided in configuration when p0_mode is 'diag'."
                 )
             elif p0_mode == "eye":
-                if p0_scale is None:
-                    raise ValueError("p0_scale must be provided when p0_mode is 'eye'.")
                 return np.eye(n, dtype=float64) * float64(p0_scale)
             else:
                 raise ValueError(

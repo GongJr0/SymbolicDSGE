@@ -84,15 +84,14 @@ def _shape_validate(
 
 OK = 0
 ERR_COND = -3
-ERR_LINALG = -4
 
 
-@njit
+@njit(cache=True)
 def _sym(P: NDF) -> NDF:
     return 0.5 * (P + P.T)
 
 
-@njit
+@njit(cache=True)
 def _chol_shifted(S: NDF, jit: float = 0.0) -> NDF:
     n = S.shape[0]
     if jit > 0.0:
@@ -100,7 +99,7 @@ def _chol_shifted(S: NDF, jit: float = 0.0) -> NDF:
     return linalg.cholesky(S).astype(float64)
 
 
-@njit
+@njit(cache=True)
 def _forward_subst_vec(L: NDF, b: NDF) -> NDF:
     """
     Solve L x = b for x, where L is lower triangular (n,n), b is (n,).
@@ -117,7 +116,7 @@ def _forward_subst_vec(L: NDF, b: NDF) -> NDF:
     return x.astype(float64)
 
 
-@njit
+@njit(cache=True)
 def _backward_subst_vec(U: NDF, b: NDF) -> NDF:
     """
     Solve U x = b for x, where U is upper triangular (n,n), b is (n,).
@@ -134,17 +133,7 @@ def _backward_subst_vec(U: NDF, b: NDF) -> NDF:
     return x.astype(float64)
 
 
-@njit
-def _chol_solve_vec(L: NDF, b: NDF) -> NDF:
-    """
-    Solve (L L.T) x = b for x, where b is (n,).
-    """
-    y: NDF = _forward_subst_vec(L, b)
-    x: NDF = _backward_subst_vec(L.T, y)
-    return x.astype(float64)
-
-
-@njit
+@njit(cache=True)
 def _chol_solve_mat(L: NDF, B: NDF) -> NDF:
     """
     Solve (L L.T) X = B for X, where B is (n, k).
@@ -159,7 +148,7 @@ def _chol_solve_mat(L: NDF, B: NDF) -> NDF:
     return X
 
 
-@njit
+@njit(cache=True)
 def _logdet_from_chol(L: NDF) -> float64:
     s = float64(0.0)
     n = L.shape[0]
@@ -168,7 +157,283 @@ def _logdet_from_chol(L: NDF) -> float64:
     return float64(2.0) * s
 
 
-@njit
+@njit(cache=True)
+def _zero_mat_into(out: NDF) -> None:
+    for i in range(out.shape[0]):
+        for j in range(out.shape[1]):
+            out[i, j] = 0.0
+
+
+@njit(cache=True)
+def _sym_inplace(P: NDF) -> None:
+    n = P.shape[0]
+    for i in range(n):
+        for j in range(i + 1, n):
+            avg = 0.5 * (P[i, j] + P[j, i])
+            P[i, j] = avg
+            P[j, i] = avg
+
+
+@njit(cache=True)
+def _matmul_into(A: NDF, B: NDF, out: NDF) -> None:
+    n, p = A.shape
+    m = B.shape[1]
+    for i in range(n):
+        for j in range(m):
+            s = 0.0
+            for k in range(p):
+                s += A[i, k] * B[k, j]
+            out[i, j] = s
+
+
+@njit(cache=True)
+def _matmul_abt_plus_c_into(A: NDF, B: NDF, C: NDF, out: NDF) -> None:
+    n, p = A.shape
+    m = B.shape[0]
+    for i in range(n):
+        for j in range(m):
+            s = 0.0
+            for k in range(p):
+                s += A[i, k] * B[j, k]
+            out[i, j] = s + C[i, j]
+
+
+@njit(cache=True)
+def _matmul_abt_into(A: NDF, B: NDF, out: NDF) -> None:
+    n, p = A.shape
+    m = B.shape[0]
+    for i in range(n):
+        for j in range(m):
+            s = 0.0
+            for k in range(p):
+                s += A[i, k] * B[j, k]
+            out[i, j] = s
+
+
+@njit(cache=True)
+def _matvec_into(A: NDF, x: NDF, out: NDF) -> None:
+    n, m = A.shape
+    for i in range(n):
+        s = 0.0
+        for j in range(m):
+            s += A[i, j] * x[j]
+        out[i] = s
+
+
+@njit(cache=True)
+def _matvec_plus_vec_into(A: NDF, x: NDF, b: NDF, out: NDF) -> None:
+    n, m = A.shape
+    for i in range(n):
+        s = b[i]
+        for j in range(m):
+            s += A[i, j] * x[j]
+        out[i] = s
+
+
+@njit(cache=True)
+def _row_minus_vec_into(A: NDF, row: int, x: NDF, out: NDF) -> None:
+    for j in range(x.shape[0]):
+        out[j] = A[row, j] - x[j]
+
+
+@njit(cache=True)
+def _dot_vec(a: NDF, b: NDF) -> float64:
+    s = float64(0.0)
+    for i in range(a.shape[0]):
+        s += a[i] * b[i]
+    return s
+
+
+@njit(cache=True)
+def _chol_shifted_into(S: NDF, jit: float, L: NDF) -> None:
+    n = S.shape[0]
+    _zero_mat_into(L)
+    for i in range(n):
+        for j in range(i + 1):
+            s = S[i, j]
+            if i == j and jit > 0.0:
+                s += jit
+            for k in range(j):
+                s -= L[i, k] * L[j, k]
+            if i == j:
+                if s <= 0.0:
+                    raise linalg.LinAlgError("Matrix is not positive definite.")
+                L[i, j] = np.sqrt(s)
+            else:
+                L[i, j] = s / L[j, j]
+
+
+@njit(cache=True)
+def _forward_subst_vec_into(L: NDF, b: NDF, out: NDF) -> None:
+    n = L.shape[0]
+    for i in range(n):
+        s = 0.0
+        for j in range(i):
+            s += L[i, j] * out[j]
+        out[i] = (b[i] - s) / L[i, i]
+
+
+@njit(cache=True)
+def _backward_subst_chol_t_vec_into(L: NDF, b: NDF, out: NDF) -> None:
+    n = L.shape[0]
+    for i in range(n - 1, -1, -1):
+        s = 0.0
+        for j in range(i + 1, n):
+            s += L[j, i] * out[j]
+        out[i] = (b[i] - s) / L[i, i]
+
+
+@njit(cache=True)
+def _chol_solve_row_into(
+    L: NDF,
+    B: NDF,
+    row: int,
+    forward_buf: NDF,
+    backward_buf: NDF,
+    out: NDF,
+) -> None:
+    n = L.shape[0]
+    for i in range(n):
+        s = 0.0
+        for j in range(i):
+            s += L[i, j] * forward_buf[j]
+        forward_buf[i] = (B[row, i] - s) / L[i, i]
+
+    for i in range(n - 1, -1, -1):
+        s = 0.0
+        for j in range(i + 1, n):
+            s += L[j, i] * backward_buf[j]
+        backward_buf[i] = (forward_buf[i] - s) / L[i, i]
+
+    for i in range(n):
+        out[row, i] = backward_buf[i]
+
+
+@njit(cache=True)
+def _predict_cov_into(
+    A: NDF,
+    P_prev: NDF,
+    BQBT: NDF,
+    temp_nn: NDF,
+    out: NDF,
+) -> None:
+    _matmul_into(A, P_prev, temp_nn)
+    _matmul_abt_plus_c_into(temp_nn, A, BQBT, out)
+
+
+@njit(cache=True)
+def _measurement_cov_into(
+    C: NDF,
+    P_pred: NDF,
+    R: NDF,
+    temp_mn: NDF,
+    out: NDF,
+) -> None:
+    _matmul_into(C, P_pred, temp_mn)
+    _matmul_abt_plus_c_into(temp_mn, C, R, out)
+
+
+@njit(cache=True)
+def _pc_t_into(P_pred: NDF, C: NDF, out: NDF) -> None:
+    n = P_pred.shape[0]
+    m = C.shape[0]
+    for i in range(n):
+        for j in range(m):
+            s = 0.0
+            for k in range(n):
+                s += P_pred[i, k] * C[j, k]
+            out[i, j] = s
+
+
+@njit(cache=True)
+def _gain_from_pc_t_into(
+    L: NDF,
+    PCt: NDF,
+    forward_buf: NDF,
+    backward_buf: NDF,
+    out: NDF,
+) -> None:
+    for row in range(PCt.shape[0]):
+        _chol_solve_row_into(L, PCt, row, forward_buf, backward_buf, out)
+
+
+@njit(cache=True)
+def _state_update_into(x_pred: NDF, K: NDF, v: NDF, out: NDF) -> None:
+    n, m = K.shape
+    for i in range(n):
+        s = x_pred[i]
+        for j in range(m):
+            s += K[i, j] * v[j]
+        out[i] = s
+
+
+@njit(cache=True)
+def _identity_minus_into(A: NDF, out: NDF) -> None:
+    n = A.shape[0]
+    for i in range(n):
+        for j in range(n):
+            out[i, j] = -A[i, j]
+        out[i, i] += 1.0
+
+
+@njit(cache=True)
+def _joseph_cov_into(
+    K: NDF,
+    C: NDF,
+    P_pred: NDF,
+    R: NDF,
+    KC: NDF,
+    I_minus_KC: NDF,
+    temp_nn: NDF,
+    temp_nm: NDF,
+    out: NDF,
+) -> None:
+    _matmul_into(K, C, KC)
+    _identity_minus_into(KC, I_minus_KC)
+    _matmul_into(I_minus_KC, P_pred, temp_nn)
+    _matmul_abt_into(temp_nn, I_minus_KC, out)
+    _matmul_into(K, R, temp_nm)
+    n = K.shape[0]
+    m = K.shape[1]
+    for i in range(n):
+        for j in range(n):
+            s = 0.0
+            for k in range(m):
+                s += temp_nm[i, k] * K[j, k]
+            out[i, j] += s
+
+
+@njit(cache=True)
+def _build_bqbt_into(B: NDF, Q: NDF, temp_nk: NDF, out: NDF) -> None:
+    _matmul_into(B, Q, temp_nk)
+    n = B.shape[0]
+    k_dim = B.shape[1]
+    for i in range(n):
+        for j in range(n):
+            s = 0.0
+            for k in range(k_dim):
+                s += temp_nk[i, k] * B[j, k]
+            out[i, j] = s
+    _sym_inplace(out)
+
+
+@njit(cache=True)
+def _build_shock_projection_into(
+    B: NDF, C: NDF, Q: NDF, temp_km: NDF, out: NDF
+) -> None:
+    n = B.shape[0]
+    k_dim = B.shape[1]
+    m = C.shape[0]
+    for i in range(k_dim):
+        for j in range(m):
+            s = 0.0
+            for l in range(n):
+                s += B[l, i] * C[j, l]
+            temp_km[i, j] = s
+    _matmul_into(Q, temp_km, out)
+
+
+@njit(cache=True)
 def _kalman_hot_loop(
     T: int,
     nmk: Tuple[int, int, int],
@@ -213,75 +478,107 @@ def _kalman_hot_loop(
 
     eps_hat = zeros((shock_history_T, k), dtype=float64)
 
+    x_pred_buf = zeros((n,), dtype=float64)
+    x_filt_buf = zeros((n,), dtype=float64)
+    y_pred_buf = zeros((m,), dtype=float64)
+    y_filt_buf = zeros((m,), dtype=float64)
+    v_buf = zeros((m,), dtype=float64)
+    u_buf = zeros((m,), dtype=float64)
+    S_inv_v = zeros((m,), dtype=float64)
+
+    P_pred_buf = zeros((n, n), dtype=float64)
+    P_filt_buf = zeros((n, n), dtype=float64)
+    S_buf = zeros((m, m), dtype=float64)
+    L = zeros((m, m), dtype=float64)
+    PCt = zeros((n, m), dtype=float64)
+    K = zeros((n, m), dtype=float64)
+    KC = zeros((n, n), dtype=float64)
+    I_minus_KC = zeros((n, n), dtype=float64)
+
+    temp_nn = zeros((n, n), dtype=float64)
+    temp_nm = zeros((n, m), dtype=float64)
+    temp_mn = zeros((m, n), dtype=float64)
+    solve_forward = zeros((m,), dtype=float64)
+    solve_backward = zeros((m,), dtype=float64)
+
+    BQBT = zeros((n, n), dtype=float64)
+    temp_nk = zeros((n, k), dtype=float64)
+    _build_bqbt_into(B, Q, temp_nk, BQBT)
+
+    M = zeros((k, m), dtype=float64)
+    if return_shocks and _store_history:
+        temp_km = zeros((k, m), dtype=float64)
+        _build_shock_projection_into(B, C, Q, temp_km, M)
+
     loglik = float64(0.0)
     const = m * np.log(2.0 * np.pi)
 
-    BT = np.ascontiguousarray(B.T)
-    CT = np.ascontiguousarray(C.T)
-    AT = np.ascontiguousarray(A.T)
-
-    BQBT = _sym(B @ Q @ BT)
-    In = eye(n, dtype=float64)
-    M = zeros((k, m), dtype=float64)
-    if return_shocks and _store_history:
-        M = Q @ (BT @ CT)
-
     for t in range(T):
-        x_t_pred = A @ x_prev
-        P_t_pred = A @ P_prev @ AT + BQBT
+        _matvec_into(A, x_prev, x_pred_buf)
+        _predict_cov_into(A, P_prev, BQBT, temp_nn, P_pred_buf)
 
         if symmetrize:
-            P_t_pred = _sym(P_t_pred)
+            _sym_inplace(P_pred_buf)
 
-        y_t_pred = C @ x_t_pred + d
-        v_t = y[t] - y_t_pred
-        S_t = C @ P_t_pred @ CT + R
-
-        if symmetrize:
-            S_t = _sym(S_t)
-
-        L = _chol_shifted(S_t, jitter)
-        u_t = _forward_subst_vec(L, v_t)
-        S_inv_v = _backward_subst_vec(L.T, u_t)
-
-        PCt = P_t_pred @ CT  # (n, m)
-        K_tT = _chol_solve_mat(L, PCt.T)
-        K_t = np.ascontiguousarray(K_tT.T)
-
-        x_t_filt = x_t_pred + K_t @ v_t
-
-        KC = K_t @ C
-        P_t_filt = (In - KC) @ P_t_pred @ (In - KC).T + K_t @ R @ K_tT
+        _matvec_plus_vec_into(C, x_pred_buf, d, y_pred_buf)
+        _row_minus_vec_into(y, t, y_pred_buf, v_buf)
+        _measurement_cov_into(C, P_pred_buf, R, temp_mn, S_buf)
 
         if symmetrize:
-            P_t_filt = _sym(P_t_filt)
+            _sym_inplace(S_buf)
+
+        _chol_shifted_into(S_buf, jitter, L)
+        _forward_subst_vec_into(L, v_buf, u_buf)
+        _backward_subst_chol_t_vec_into(L, u_buf, S_inv_v)
+
+        _pc_t_into(P_pred_buf, C, PCt)
+        _gain_from_pc_t_into(L, PCt, solve_forward, solve_backward, K)
+
+        _state_update_into(x_pred_buf, K, v_buf, x_filt_buf)
+
+        _joseph_cov_into(
+            K,
+            C,
+            P_pred_buf,
+            R,
+            KC,
+            I_minus_KC,
+            temp_nn,
+            temp_nm,
+            P_filt_buf,
+        )
+
+        if symmetrize:
+            _sym_inplace(P_filt_buf)
 
         ldS = _logdet_from_chol(L)
-        quad = float64(v_t @ S_inv_v)
+        quad = _dot_vec(v_buf, S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
         if return_shocks and _store_history:
-            eps_hat[t] = M @ S_inv_v
+            _matvec_into(M, S_inv_v, eps_hat[t])
 
         if _store_history:
-            y_t_filt = C @ x_t_filt + d
+            _matvec_plus_vec_into(C, x_filt_buf, d, y_filt_buf)
 
-            x_pred[t] = x_t_pred
-            x_filt[t] = x_t_filt
+            for i in range(n):
+                x_pred[t, i] = x_pred_buf[i]
+                x_filt[t, i] = x_filt_buf[i]
+            for i in range(n):
+                for j in range(n):
+                    P_pred[t, i, j] = P_pred_buf[i, j]
+                    P_filt[t, i, j] = P_filt_buf[i, j]
+            for i in range(m):
+                y_pred[t, i] = y_pred_buf[i]
+                y_filt[t, i] = y_filt_buf[i]
+                v[t, i] = v_buf[i]
+                u[t, i] = u_buf[i]
+            for i in range(m):
+                for j in range(m):
+                    S_hist[t, i, j] = S_buf[i, j]
 
-            P_pred[t] = P_t_pred
-            P_filt[t] = P_t_filt
-
-            y_pred[t] = y_t_pred
-            y_filt[t] = y_t_filt
-
-            v[t] = v_t
-            u[t] = u_t
-
-            S_hist[t] = S_t
-
-        x_prev = x_t_filt
-        P_prev = P_t_filt
+        x_prev = x_filt_buf
+        P_prev = P_filt_buf
 
     return (
         OK,
@@ -509,68 +806,112 @@ def _ekf_hot_loop_numba(
 
     eps_hat = zeros((shock_history_T, k), dtype=float64)
 
+    x_pred_buf = zeros((n,), dtype=float64)
+    x_filt_buf = zeros((n,), dtype=float64)
+    y_pred_buf = zeros((m,), dtype=float64)
+    v_buf = zeros((m,), dtype=float64)
+    u_buf = zeros((m,), dtype=float64)
+    S_inv_v = zeros((m,), dtype=float64)
+
+    P_pred_buf = zeros((n, n), dtype=float64)
+    P_filt_buf = zeros((n, n), dtype=float64)
+    H_buf = zeros((m, n), dtype=float64)
+    S_buf = zeros((m, m), dtype=float64)
+    L = zeros((m, m), dtype=float64)
+    PHt = zeros((n, m), dtype=float64)
+    K = zeros((n, m), dtype=float64)
+    KH = zeros((n, n), dtype=float64)
+    I_minus_KH = zeros((n, n), dtype=float64)
+
+    temp_nn = zeros((n, n), dtype=float64)
+    temp_nm = zeros((n, m), dtype=float64)
+    temp_mn = zeros((m, n), dtype=float64)
+    solve_forward = zeros((m,), dtype=float64)
+    solve_backward = zeros((m,), dtype=float64)
+
+    BQBT = zeros((n, n), dtype=float64)
+    temp_nk = zeros((n, k), dtype=float64)
+    _build_bqbt_into(B, Q, temp_nk, BQBT)
+
+    M = zeros((k, m), dtype=float64)
+    temp_km = zeros((k, m), dtype=float64)
+
     loglik = float64(0.0)
     const = m * np.log(2 * np.pi)
 
-    BT = np.ascontiguousarray(B.T)
-    AT = np.ascontiguousarray(A.T)
-
-    In = eye(n, dtype=float64)
-    BQBT = _sym(B @ Q @ BT)
-
     for t in range(T):
-        x_t_pred = A @ x_prev
-        P_t_pred = A @ P_prev @ AT + BQBT
+        _matvec_into(A, x_prev, x_pred_buf)
+        _predict_cov_into(A, P_prev, BQBT, temp_nn, P_pred_buf)
 
         if symmetrize:
-            P_t_pred = _sym(P_t_pred)
+            _sym_inplace(P_pred_buf)
 
-        y_t_pred = h(x_t_pred, calib_params).reshape(m)
-        H_t = H_jac(x_t_pred, calib_params).reshape(m, n)
-        H_tT = np.ascontiguousarray(H_t.T)
+        y_t_pred = h(x_pred_buf, calib_params).reshape(m)
+        H_t = H_jac(x_pred_buf, calib_params).reshape(m, n)
+        for i in range(m):
+            y_pred_buf[i] = y_t_pred[i]
+            for j in range(n):
+                H_buf[i, j] = H_t[i, j]
 
-        v_t = y[t] - y_t_pred
-        S_t = H_t @ P_t_pred @ H_tT + R
+        _row_minus_vec_into(y, t, y_pred_buf, v_buf)
+        _measurement_cov_into(H_buf, P_pred_buf, R, temp_mn, S_buf)
 
         if symmetrize:
-            S_t = _sym(S_t)
+            _sym_inplace(S_buf)
 
-        L = _chol_shifted(S_t, jitter)
-        u_t = _forward_subst_vec(L, v_t)
-        S_inv_v = _backward_subst_vec(L.T, u_t)
+        _chol_shifted_into(S_buf, jitter, L)
+        _forward_subst_vec_into(L, v_buf, u_buf)
+        _backward_subst_chol_t_vec_into(L, u_buf, S_inv_v)
 
-        PHt = P_t_pred @ H_tT
-        K_t = _chol_solve_mat(L, PHt.T).T
+        _pc_t_into(P_pred_buf, H_buf, PHt)
+        _gain_from_pc_t_into(L, PHt, solve_forward, solve_backward, K)
 
-        x_t_filt = x_t_pred + K_t @ v_t
+        _state_update_into(x_pred_buf, K, v_buf, x_filt_buf)
 
-        KH = K_t @ H_t
-        P_t_filt = (In - KH) @ P_t_pred @ (In - KH).T + K_t @ R @ K_t.T
+        _joseph_cov_into(
+            K,
+            H_buf,
+            P_pred_buf,
+            R,
+            KH,
+            I_minus_KH,
+            temp_nn,
+            temp_nm,
+            P_filt_buf,
+        )
         if symmetrize:
-            P_t_filt = _sym(P_t_filt)
+            _sym_inplace(P_filt_buf)
 
         ldS = _logdet_from_chol(L)
-        quad = float64(v_t @ S_inv_v)
+        quad = _dot_vec(v_buf, S_inv_v)
         loglik += -0.5 * (const + ldS + quad)
 
         if compute_y_filt and _store_history:
-            y_filt[t] = h(x_t_filt, calib_params).reshape(m)
+            y_t_filt = h(x_filt_buf, calib_params).reshape(m)
+            for i in range(m):
+                y_filt[t, i] = y_t_filt[i]
         if return_shocks and _store_history:
-            M = Q @ (BT @ H_tT)
-            eps_hat[t] = M @ S_inv_v
+            _build_shock_projection_into(B, H_buf, Q, temp_km, M)
+            _matvec_into(M, S_inv_v, eps_hat[t])
 
         if _store_history:
-            x_pred[t] = x_t_pred
-            x_filt[t] = x_t_filt
-            P_pred[t] = P_t_pred
-            P_filt[t] = P_t_filt
-            y_pred[t] = y_t_pred
-            v[t] = v_t
-            u[t] = u_t
-            S[t] = S_t
+            for i in range(n):
+                x_pred[t, i] = x_pred_buf[i]
+                x_filt[t, i] = x_filt_buf[i]
+            for i in range(n):
+                for j in range(n):
+                    P_pred[t, i, j] = P_pred_buf[i, j]
+                    P_filt[t, i, j] = P_filt_buf[i, j]
+            for i in range(m):
+                y_pred[t, i] = y_pred_buf[i]
+                v[t, i] = v_buf[i]
+                u[t, i] = u_buf[i]
+            for i in range(m):
+                for j in range(m):
+                    S[t, i, j] = S_buf[i, j]
 
-        x_prev = x_t_filt
-        P_prev = P_t_filt
+        x_prev = x_filt_buf
+        P_prev = P_filt_buf
 
     return (
         OK,
@@ -595,43 +936,6 @@ def _ekf_hot_loop_numba(
 class KalmanFilter:
     _get_real = staticmethod(_get_real)
     _shape_validate = staticmethod(_shape_validate)
-    _sym = staticmethod(_sym)
-
-    @staticmethod
-    def _chol(S: NDF, jit: float = 0.0) -> NDF | None:
-        try:
-            out: NDF = _chol_shifted(np.ascontiguousarray(S, dtype=float64), jit)
-            return out
-        except linalg.LinAlgError:
-            return None
-
-    @staticmethod
-    def _chol_solve(L: NDF | None, S: NDF, B: NDF) -> NDF:
-        if L is not None:
-            B_arr = np.ascontiguousarray(B, dtype=float64)
-            if B_arr.ndim == 1:
-                out: NDF = _chol_solve_vec(L, B_arr)
-                return out
-            out = _chol_solve_mat(L, B_arr)
-            return out
-        c = linalg.cond(S)
-        if c > 1e12:
-            raise MatrixConditionError(c)
-
-        return linalg.solve(S, B).astype(float64)
-
-    @staticmethod
-    def _logdet(L: NDF | None, S: NDF) -> float64:
-        if L is not None:
-            out: float64 = _logdet_from_chol(L)
-            return out
-
-        sign, ldS = linalg.slogdet(S)
-        if sign <= 0:
-            raise linalg.LinAlgError(
-                "Innovation covariance S is not positive definite."
-            )
-        return float64(ldS)
 
     @staticmethod
     def run(
