@@ -8,8 +8,6 @@ from SymbolicDSGE._diag_tests.hac_covariance import (
     andrews_bandwidth_matrix,
     bartlett_kernel,
     hac_covariance,
-    jit_hac_estimator_loop,
-    jit_hac_estimator_loop_into,
     jit_hac_estimator_matmul,
     kernel_dispatcher,
     parzen_kernel,
@@ -168,17 +166,11 @@ def test_hac_covariance_covers_auto_and_explicit_selection_branches() -> None:
     )
 
 
-def test_hac_jit_estimators_python_paths_match_py_estimator() -> None:
+def test_hac_jit_matmul_python_path_matches_py_estimator() -> None:
     expected = py_hac_estimator(GOLDEN_R, bartlett_kernel, 2)
-    loop_out = jit_hac_estimator_loop.py_func(GOLDEN_R, bartlett_kernel, 2)
     matmul_out = jit_hac_estimator_matmul.py_func(GOLDEN_R, bartlett_kernel, 2)
-    into_out = np.empty((2, 2), dtype=np.float64)
 
-    jit_hac_estimator_loop_into.py_func(GOLDEN_R, bartlett_kernel, 2, into_out)
-
-    np.testing.assert_allclose(loop_out, expected)
     np.testing.assert_allclose(matmul_out, expected)
-    np.testing.assert_allclose(into_out, expected)
 
 
 def test_andrews_bandwidth_matrix_validates_shape_and_accepts_vectors() -> None:

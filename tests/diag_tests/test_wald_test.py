@@ -16,6 +16,7 @@ from SymbolicDSGE._diag_tests.wald_test import (
     ERR_BAD_SHAPE,
     ERR_LINALG,
     OK,
+    jit_fill_symmetric_target_vec,
     jit_wald_hac_stat,
     jit_symmetric_outer_prod_2dim,
     jit_wald_stat_from_mean_and_cov,
@@ -313,6 +314,22 @@ def test_symmetric_outer_product_fills_upper_triangle_moments() -> None:
         out,
         np.array([[1.0, 2.0, 4.0], [9.0, -3.0, 1.0]], dtype=np.float64),
     )
+
+
+def test_symmetric_target_vector_helper_fills_and_rejects_bad_shapes() -> None:
+    target = np.array([[1.0, 0.25], [0.25, 2.0]], dtype=np.float64)
+    out = np.empty(3, dtype=np.float64)
+
+    err = jit_fill_symmetric_target_vec.py_func(target, out)
+
+    assert err == OK
+    np.testing.assert_allclose(out, np.array([1.0, 0.25, 2.0], dtype=np.float64))
+
+    bad_target = np.array([[1.0, 0.1], [0.2, 1.0]], dtype=np.float64)
+    assert jit_fill_symmetric_target_vec.py_func(bad_target, out) == ERR_BAD_SHAPE
+
+    bad_out = np.empty(2, dtype=np.float64)
+    assert jit_fill_symmetric_target_vec.py_func(target, bad_out) == ERR_BAD_SHAPE
 
 
 def test_wald_public_wrappers_validate_targets_and_report_failures() -> None:

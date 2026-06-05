@@ -50,36 +50,35 @@ def simulate_dgp(
         rep_idx=rep_idx,
         seed_increment=seed_increment,
     )
-    if isinstance(dgp, SolvedModel):
-        states = np.ascontiguousarray(
-            dgp._simulate_state_matrix(
-                T=T,
-                shocks=sim_shocks,
-                shock_scale=shock_scale,
-                x0=x0,
-            ),
-            dtype=np.float64,
-        )
-        obs_names = (
-            tuple(getattr(dgp.compiled, "observable_names", ())) if observables else ()
-        )
-        obs_mat = None
-        raw: dict[str, np.ndarray] = {
-            name: states[:, dgp.compiled.idx[name]] for name in dgp.compiled.var_names
-        }
-        raw["_X"] = states
-        if obs_names:
-            obs_full = dgp._simulate_observable_matrix(states, drop_initial=False)
-            obs_mat = np.ascontiguousarray(obs_full[1:], dtype=np.float64)
-            for i, name in enumerate(obs_names):
-                raw[name] = obs_full[:, i]
-        return MCData(
-            states=states,
-            observables=obs_mat,
-            raw=raw,
-            n_exog=int(getattr(dgp.compiled, "n_exog", -1)),
-            observable_names=obs_names,
-        )
+    states = np.ascontiguousarray(
+        dgp._simulate_state_matrix(
+            T=T,
+            shocks=sim_shocks,
+            shock_scale=shock_scale,
+            x0=x0,
+        ),
+        dtype=np.float64,
+    )
+    obs_names = (
+        tuple(getattr(dgp.compiled, "observable_names", ())) if observables else ()
+    )
+    obs_mat = None
+    raw: dict[str, np.ndarray] = {
+        name: states[:, dgp.compiled.idx[name]] for name in dgp.compiled.var_names
+    }
+    raw["_X"] = states
+    if obs_names:
+        obs_full = dgp._simulate_observable_matrix(states, drop_initial=False)
+        obs_mat = np.ascontiguousarray(obs_full[1:], dtype=np.float64)
+        for i, name in enumerate(obs_names):
+            raw[name] = obs_full[:, i]
+    return MCData(
+        states=states,
+        observables=obs_mat,
+        raw=raw,
+        n_exog=int(getattr(dgp.compiled, "n_exog", -1)),
+        observable_names=obs_names,
+    )
 
 
 def raw_data_datagen(
