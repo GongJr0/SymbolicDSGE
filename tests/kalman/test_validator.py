@@ -310,3 +310,18 @@ def test_validate_kf_inputs_accepts_valid_linear_and_extended_inputs():
     assert isinstance(linear, KFValidationContext)
     assert linear == KFValidationContext(n_state=2, n_obs=1, n_shock=1, T=4)
     assert extended == KFValidationContext(n_state=2, n_obs=2, n_shock=1, T=4)
+
+
+def test_validate_kf_inputs_extended_zero_probe_state_branch():
+    captured = {}
+    kwargs = _extended_inputs()
+
+    def h(x0, x1, p0):
+        captured["state"] = (x0, x1)
+        return np.array([x0 + p0, x1 + p0], dtype=np.float64)
+
+    kwargs["h"] = h
+    out = validate_kf_inputs(**kwargs, probe_state="zeros")
+
+    assert out == KFValidationContext(n_state=2, n_obs=2, n_shock=1, T=4)
+    assert captured["state"] == (0.0, 0.0)

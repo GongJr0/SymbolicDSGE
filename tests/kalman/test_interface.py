@@ -181,6 +181,18 @@ def test_interface_init_estimate_r_diag_uses_data_variance_not_config():
     )
 
 
+def test_interface_init_accepts_user_r_override():
+    user_R = np.array([[0.75]], dtype=FLOAT)
+    ki = KalmanInterface(
+        model=_make_stub_model(),
+        observables=["ObsB"],
+        y=np.array([[10.0], [20.0]], dtype=FLOAT),
+        R=user_R,
+    )
+
+    assert np.array_equal(ki.R, user_R)
+
+
 def test_interface_init_raises_if_reordering_fails(monkeypatch):
     monkeypatch.setattr(
         KalmanInterface,
@@ -227,6 +239,17 @@ def test_validate_user_r_and_build_constant_r_subset_paths():
     assert np.array_equal(ki._validate_user_R(user_R), user_R)
     assert np.array_equal(ki._build_constant_R(user_R), user_R)
     assert np.array_equal(ki._build_constant_R(None), np.array([[9.0]], dtype=FLOAT))
+
+
+def test_build_q_defaults_missing_shock_correlation_to_zero():
+    model = _make_stub_model()
+    model.config.calibration.shock_corr = {}
+    ki = _make_shell(model)
+
+    np.testing.assert_allclose(
+        ki._build_Q(),
+        np.diag([0.04, 0.09]).astype(FLOAT),
+    )
 
 
 def test_build_constant_r_uses_builder_and_validates_builder_contract():

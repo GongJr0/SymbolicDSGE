@@ -84,7 +84,6 @@ def _shape_validate(
 
 OK = 0
 ERR_COND = -3
-ERR_LINALG = -4
 
 
 @njit(cache=True)
@@ -131,16 +130,6 @@ def _backward_subst_vec(U: NDF, b: NDF) -> NDF:
             s += U[i, j] * x[j]
         x[i] = (b[i] - s) / U[i, i]
 
-    return x.astype(float64)
-
-
-@njit(cache=True)
-def _chol_solve_vec(L: NDF, b: NDF) -> NDF:
-    """
-    Solve (L L.T) x = b for x, where b is (n,).
-    """
-    y: NDF = _forward_subst_vec(L, b)
-    x: NDF = _backward_subst_vec(L.T, y)
     return x.astype(float64)
 
 
@@ -903,43 +892,6 @@ def _ekf_hot_loop_numba(
 class KalmanFilter:
     _get_real = staticmethod(_get_real)
     _shape_validate = staticmethod(_shape_validate)
-    _sym = staticmethod(_sym)
-
-    @staticmethod
-    def _chol(S: NDF, jit: float = 0.0) -> NDF | None:
-        try:
-            out: NDF = _chol_shifted(np.ascontiguousarray(S, dtype=float64), jit)
-            return out
-        except linalg.LinAlgError:
-            return None
-
-    @staticmethod
-    def _chol_solve(L: NDF | None, S: NDF, B: NDF) -> NDF:
-        if L is not None:
-            B_arr = np.ascontiguousarray(B, dtype=float64)
-            if B_arr.ndim == 1:
-                out: NDF = _chol_solve_vec(L, B_arr)
-                return out
-            out = _chol_solve_mat(L, B_arr)
-            return out
-        c = linalg.cond(S)
-        if c > 1e12:
-            raise MatrixConditionError(c)
-
-        return linalg.solve(S, B).astype(float64)
-
-    @staticmethod
-    def _logdet(L: NDF | None, S: NDF) -> float64:
-        if L is not None:
-            out: float64 = _logdet_from_chol(L)
-            return out
-
-        sign, ldS = linalg.slogdet(S)
-        if sign <= 0:
-            raise linalg.LinAlgError(
-                "Innovation covariance S is not positive definite."
-            )
-        return float64(ldS)
 
     @staticmethod
     def run(

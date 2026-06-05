@@ -46,36 +46,176 @@ def test_shape_validate_covers_all_matrix_arguments(mutator, expected_name):
         KalmanFilter._shape_validate(*mutator(A, B, Q, R, C, d), nmk=(2, 1, 1))
 
 
-def test_low_level_linear_algebra_helpers_match_numpy():
+def test_write_into_linear_algebra_helpers_match_numpy():
     S = np.array([[4.0, 1.0], [1.0, 3.0]], dtype=float64)
     b = np.array([1.0, 2.0], dtype=float64)
-    B = np.array([[1.0, 0.5], [2.0, -1.0]], dtype=float64)
-    L = filter_module._chol_shifted.py_func(S, jit=0.0)
-    L_jitter = filter_module._chol_shifted.py_func(
-        np.array([[0.0]], dtype=float64), jit=1e-8
+    B_rows = np.array([[1.0, 0.5], [2.0, -1.0]], dtype=float64)
+
+    sym_input = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=float64)
+    np.testing.assert_allclose(
+        filter_module._sym.py_func(sym_input),
+        np.array([[1.0, 2.5], [2.5, 4.0]], dtype=float64),
     )
 
-    assert np.allclose(L @ L.T, S)
-    assert np.allclose(L_jitter, np.array([[1e-4]], dtype=float64))
-    assert np.allclose(
-        filter_module._forward_subst_vec.py_func(L, b),
-        np.linalg.solve(L, b),
+    L_old = filter_module._chol_shifted.py_func(S, jit=0.0)
+    L_old_jitter = filter_module._chol_shifted.py_func(
+        np.array([[0.0]], dtype=float64), jit=1e-8
     )
-    assert np.allclose(
-        filter_module._backward_subst_vec.py_func(L.T, b),
-        np.linalg.solve(L.T, b),
+    np.testing.assert_allclose(L_old @ L_old.T, S)
+    np.testing.assert_allclose(L_old_jitter, np.array([[1e-4]], dtype=float64))
+    np.testing.assert_allclose(
+        filter_module._forward_subst_vec.py_func(L_old, b),
+        np.linalg.solve(L_old, b),
     )
-    assert np.allclose(
-        filter_module._chol_solve_vec.py_func(L, b),
-        np.linalg.solve(S, b),
+    np.testing.assert_allclose(
+        filter_module._backward_subst_vec.py_func(L_old.T, b),
+        np.linalg.solve(L_old.T, b),
     )
-    assert np.allclose(
-        filter_module._chol_solve_mat.py_func(L, B),
-        np.linalg.solve(S, B),
+    np.testing.assert_allclose(
+        filter_module._chol_solve_mat.py_func(L_old, B_rows.T),
+        np.linalg.solve(S, B_rows.T),
     )
+
+    zero_target = np.full((2, 2), 7.0, dtype=float64)
+    filter_module._zero_mat_into.py_func(zero_target)
+    np.testing.assert_allclose(zero_target, np.zeros((2, 2), dtype=float64))
+
+    sym_target = sym_input.copy()
+    filter_module._sym_inplace.py_func(sym_target)
+    np.testing.assert_allclose(sym_target, filter_module._sym.py_func(sym_input))
+
+    L = np.empty_like(S)
+    filter_module._chol_shifted_into.py_func(S, 0.0, L)
+    np.testing.assert_allclose(L @ L.T, S)
+
+    L_jitter = np.empty((1, 1), dtype=float64)
+    filter_module._chol_shifted_into.py_func(
+        np.array([[0.0]], dtype=float64), 1e-8, L_jitter
+    )
+    np.testing.assert_allclose(L_jitter, np.array([[1e-4]], dtype=float64))
+
+    with pytest.raises(np.linalg.LinAlgError):
+        filter_module._chol_shifted_into.py_func(
+            np.array([[0.0]], dtype=float64), 0.0, L_jitter
+        )
+
+    forward = np.empty_like(b)
+    backward = np.empty_like(b)
+    filter_module._forward_subst_vec_into.py_func(L, b, forward)
+    filter_module._backward_subst_chol_t_vec_into.py_func(L, forward, backward)
+    np.testing.assert_allclose(forward, np.linalg.solve(L, b))
+    np.testing.assert_allclose(backward, np.linalg.solve(S, b))
+
+    chol_solve_rows = np.empty_like(B_rows)
+    for row in range(B_rows.shape[0]):
+        filter_module._chol_solve_row_into.py_func(
+            L,
+            B_rows,
+            row,
+            np.empty_like(b),
+            np.empty_like(b),
+            chol_solve_rows,
+        )
+    np.testing.assert_allclose(chol_solve_rows, np.linalg.solve(S, B_rows.T).T)
+
     assert filter_module._logdet_from_chol.py_func(L) == pytest.approx(
         np.log(np.linalg.det(S))
     )
+
+
+def test_write_into_kalman_covariance_helpers_match_numpy():
+    A = np.array([[0.8, 0.1], [0.0, 0.6]], dtype=float64)
+    B = np.array([[1.0, 0.2], [0.5, -0.4]], dtype=float64)
+    C = np.array([[1.0, 0.0], [0.2, 0.9]], dtype=float64)
+    Q = np.array([[0.5, 0.1], [0.1, 0.3]], dtype=float64)
+    R = np.array([[0.2, 0.05], [0.05, 0.4]], dtype=float64)
+    P_prev = np.array([[1.5, 0.2], [0.2, 0.8]], dtype=float64)
+    x = np.array([0.4, -0.2], dtype=float64)
+    d = np.array([0.1, -0.3], dtype=float64)
+    v = np.array([0.25, -0.1], dtype=float64)
+
+    mat_out = np.empty((2, 2), dtype=float64)
+    filter_module._matmul_into.py_func(A, P_prev, mat_out)
+    np.testing.assert_allclose(mat_out, A @ P_prev)
+
+    abt_out = np.empty((2, 2), dtype=float64)
+    filter_module._matmul_abt_into.py_func(A, B, abt_out)
+    np.testing.assert_allclose(abt_out, A @ B.T)
+
+    abt_plus_out = np.empty((2, 2), dtype=float64)
+    filter_module._matmul_abt_plus_c_into.py_func(A, B, R, abt_plus_out)
+    np.testing.assert_allclose(abt_plus_out, A @ B.T + R)
+
+    vec_out = np.empty((2,), dtype=float64)
+    filter_module._matvec_into.py_func(A, x, vec_out)
+    np.testing.assert_allclose(vec_out, A @ x)
+    filter_module._matvec_plus_vec_into.py_func(C, x, d, vec_out)
+    np.testing.assert_allclose(vec_out, C @ x + d)
+
+    row_diff = np.empty((2,), dtype=float64)
+    y = np.array([[0.0, 1.0], [0.5, -0.7]], dtype=float64)
+    filter_module._row_minus_vec_into.py_func(y, 1, vec_out, row_diff)
+    np.testing.assert_allclose(row_diff, y[1] - vec_out)
+    assert filter_module._dot_vec.py_func(row_diff, vec_out) == pytest.approx(
+        row_diff @ vec_out
+    )
+
+    BQBT = np.empty((2, 2), dtype=float64)
+    filter_module._build_bqbt_into.py_func(B, Q, np.empty((2, 2), dtype=float64), BQBT)
+    np.testing.assert_allclose(BQBT, B @ Q @ B.T)
+    np.testing.assert_allclose(BQBT, BQBT.T)
+
+    P_pred = np.empty((2, 2), dtype=float64)
+    filter_module._predict_cov_into.py_func(
+        A, P_prev, BQBT, np.empty((2, 2), dtype=float64), P_pred
+    )
+    np.testing.assert_allclose(P_pred, A @ P_prev @ A.T + BQBT)
+
+    S = np.empty((2, 2), dtype=float64)
+    filter_module._measurement_cov_into.py_func(
+        C, P_pred, R, np.empty((2, 2), dtype=float64), S
+    )
+    np.testing.assert_allclose(S, C @ P_pred @ C.T + R)
+
+    PCt = np.empty((2, 2), dtype=float64)
+    filter_module._pc_t_into.py_func(P_pred, C, PCt)
+    np.testing.assert_allclose(PCt, P_pred @ C.T)
+
+    L = np.linalg.cholesky(S).astype(float64)
+    K = np.empty((2, 2), dtype=float64)
+    filter_module._gain_from_pc_t_into.py_func(
+        L, PCt, np.empty((2,), dtype=float64), np.empty((2,), dtype=float64), K
+    )
+    np.testing.assert_allclose(K, np.linalg.solve(S, PCt.T).T)
+
+    x_filt = np.empty((2,), dtype=float64)
+    filter_module._state_update_into.py_func(x, K, v, x_filt)
+    np.testing.assert_allclose(x_filt, x + K @ v)
+
+    I_minus = np.empty((2, 2), dtype=float64)
+    filter_module._identity_minus_into.py_func(K @ C, I_minus)
+    np.testing.assert_allclose(I_minus, np.eye(2, dtype=float64) - K @ C)
+
+    P_filt = np.empty((2, 2), dtype=float64)
+    filter_module._joseph_cov_into.py_func(
+        K,
+        C,
+        P_pred,
+        R,
+        np.empty((2, 2), dtype=float64),
+        np.empty((2, 2), dtype=float64),
+        np.empty((2, 2), dtype=float64),
+        np.empty((2, 2), dtype=float64),
+        P_filt,
+    )
+    expected_p_filt = I_minus @ P_pred @ I_minus.T + K @ R @ K.T
+    np.testing.assert_allclose(P_filt, expected_p_filt)
+
+    shock_projection = np.empty((2, 2), dtype=float64)
+    filter_module._build_shock_projection_into.py_func(
+        B, C, Q, np.empty((2, 2), dtype=float64), shock_projection
+    )
+    np.testing.assert_allclose(shock_projection, Q @ (B.T @ C.T))
 
 
 def test_direct_kalman_hot_loop_covers_return_shocks_branch():
@@ -267,6 +407,41 @@ def test_direct_extended_hot_loops_cover_python_and_numba_paths():
     assert np.isfinite(out_nb_y[5]).all()
 
 
+def test_run_extended_uses_numba_array_dispatch_branch():
+    A, B, _, _, Q, R = _linear_system_1d()
+    y = np.full((2, 1), 0.1, dtype=float64)
+    calib = np.array([0.05], dtype=float64)
+
+    @njit
+    def h_array(x, params):
+        return np.array([x[0] + params[0]], dtype=float64)
+
+    @njit
+    def H_array(x, params):
+        return np.array([[1.0]], dtype=float64)
+
+    h_array._symbolicdsge_array_dispatch = True
+    H_array._symbolicdsge_array_dispatch = True
+
+    out = KalmanFilter.run_extended(
+        A,
+        B,
+        h_array,
+        H_array,
+        calib,
+        Q,
+        R,
+        y,
+        compute_y_filt=True,
+        return_shocks=True,
+    )
+
+    assert out.y_filt.shape == (2, 1)
+    assert out.eps_hat is not None
+    assert out.eps_hat.shape == (2, 1)
+    assert np.isfinite(out.loglik)
+
+
 def test_extended_dispatch_helpers_cover_array_dispatch_branches():
     def h_array(state, params):
         return np.array([state[0] + params[0]], dtype=float64)
@@ -288,18 +463,6 @@ def test_extended_dispatch_helpers_cover_array_dispatch_branches():
     np.testing.assert_allclose(
         filter_module._call_extended_jacobian(H_array, state, params),
         np.array([[1.0]], dtype=float64),
-    )
-
-
-def test_chol_solve_staticmethod_covers_vector_and_direct_solve_fallbacks():
-    S = np.array([[2.0, 0.0], [0.0, 3.0]], dtype=float64)
-    b = np.array([1.0, 6.0], dtype=float64)
-    L = np.linalg.cholesky(S).astype(float64)
-
-    np.testing.assert_allclose(KalmanFilter._chol_solve(L, S, b), np.linalg.solve(S, b))
-    np.testing.assert_allclose(
-        KalmanFilter._chol_solve(None, S, b),
-        np.linalg.solve(S, b),
     )
 
 

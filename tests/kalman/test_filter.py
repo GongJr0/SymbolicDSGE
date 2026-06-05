@@ -4,7 +4,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from numpy import float64
+from sympy import Symbol
 
+from SymbolicDSGE.kalman.config import make_R
+from SymbolicDSGE.kalman.errors import ErrorCode, get_error_constructor
 from SymbolicDSGE.kalman.filter import (
     ComplexMatrixError,
     KalmanFilter,
@@ -21,6 +24,32 @@ def _linear_system_1d():
     Q = np.array([[0.04]], dtype=float64)
     R = np.array([[0.01]], dtype=float64)
     return A, B, C, d, Q, R
+
+
+def test_make_r_builds_covariance_from_std_and_corr_maps():
+    obs_a = Symbol("ObsA")
+    obs_b = Symbol("ObsB")
+
+    out = make_R(
+        [obs_a, obs_b],
+        {obs_a: float64(2.0), obs_b: float64(3.0)},
+        {frozenset({obs_a, obs_b}): float64(0.25)},
+    )
+
+    np.testing.assert_allclose(
+        out,
+        np.array([[4.0, 1.5], [1.5, 9.0]], dtype=float64),
+    )
+
+
+def test_error_code_dispatch_maps_known_errors_and_rejects_unknown():
+    assert get_error_constructor(ErrorCode.COMPLEX_MATRIX) is ComplexMatrixError
+    assert get_error_constructor(ErrorCode.SHAPE_MISMATCH) is ShapeMismatchError
+    assert get_error_constructor(ErrorCode.MATRIX_CONDITION) is MatrixConditionError
+    assert get_error_constructor(ErrorCode.LINALG_ERROR) is np.linalg.LinAlgError
+
+    with pytest.raises(ValueError, match="Unknown error code"):
+        get_error_constructor(ErrorCode.SUCCESS)
 
 
 def test_get_real_accepts_nearly_real_complex():
@@ -47,62 +76,6 @@ def test_shape_validate_raises_on_bad_A_shape():
 
     with pytest.raises(ShapeMismatchError):
         KalmanFilter._shape_validate(A[:1], B, Q, R, C, d, nmk=(2, 1, 1))
-
-
-def test_sym_returns_explicitly_symmetric_matrix():
-    P = np.array([[1.0, 2.0], [0.0, 1.0]], dtype=float64)
-    S = KalmanFilter._sym.py_func(P)
-    assert np.allclose(S, S.T)
-    assert np.allclose(S, np.array([[1.0, 1.0], [1.0, 1.0]], dtype=float64))
-
-
-def test_chol_and_chol_solve_paths():
-    S = np.array([[4.0, 1.0], [1.0, 3.0]], dtype=float64)
-    B = np.array([[1.0], [2.0]], dtype=float64)
-    L = KalmanFilter._chol(S, jit=0.0)
-
-    x_chol = KalmanFilter._chol_solve(L, S, B)
-    x_np = np.linalg.solve(S, B)
-
-    assert L is not None
-    assert np.allclose(x_chol, x_np)
-
-
-def test_chol_with_zero_jitter_returns_none_on_non_pd():
-    S = np.array([[0.0]], dtype=float64)
-    L = KalmanFilter._chol(S, jit=0.0)
-    assert L is None
-
-
-def test_chol_uses_jitter_when_needed():
-    S = np.array([[0.0]], dtype=float64)
-    L = KalmanFilter._chol(S, jit=1e-8)
-    assert L is not None
-    assert np.allclose(L, np.array([[1e-4]], dtype=float64))
-
-
-def test_chol_solve_raises_on_ill_conditioned_matrix_without_chol():
-    S = np.array([[1.0, 1.0], [1.0, 1.0 + 1e-15]], dtype=float64)
-    B = np.array([[1.0], [1.0]], dtype=float64)
-    with pytest.raises(MatrixConditionError):
-        KalmanFilter._chol_solve(None, S, B)
-
-
-def test_logdet_with_and_without_cholesky():
-    S = np.array([[2.0, 0.0], [0.0, 3.0]], dtype=float64)
-    L = np.linalg.cholesky(S).astype(float64)
-
-    ld_from_chol = KalmanFilter._logdet(L, S)
-    ld_from_slogdet = KalmanFilter._logdet(None, S)
-
-    assert np.allclose(ld_from_chol, np.log(6.0))
-    assert np.allclose(ld_from_slogdet, np.log(6.0))
-
-
-def test_logdet_raises_when_slogdet_sign_nonpositive():
-    S = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=float64)
-    with pytest.raises(np.linalg.LinAlgError):
-        KalmanFilter._logdet(None, S)
 
 
 def test_run_linear_outputs_shapes_and_first_prediction():
