@@ -1,5 +1,15 @@
 from dataclasses import dataclass, asdict
-from typing import Any, Callable, Tuple, Union, Literal, TypedDict, Mapping
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Tuple,
+    Union,
+    Literal,
+    TypedDict,
+    Mapping,
+    cast,
+)
 import textwrap
 
 
@@ -21,16 +31,22 @@ from ..kalman.config import KalmanConfig
 from ..kalman.interface import KalmanInterface
 from ..kalman.filter import FilterResult
 
-
-from ..regression.sr.sr_interface import SRInterface
-from ..regression.sr.config import TemplateConfig
-from ..regression.sr.model_defaults import PySRParams
-from ..regression.sr.model_parametrizer import ModelParametrizer
-from ..regression.sr.fit_result import FitResult
+if TYPE_CHECKING:
+    from ..regression.sr.config import TemplateConfig
+    from ..regression.sr.fit_result import FitResult
+    from ..regression.sr.model_defaults import PySRParams
+    from ..regression.sr.model_parametrizer import ModelParametrizer
 
 _JIT_CACHE: dict[int, Callable] = {}
 ND = NDArray
 NDF = NDArray[float64]
+
+
+def _load_sr_fit_dependencies() -> tuple[type, type]:
+    from ..regression.sr.model_parametrizer import ModelParametrizer
+    from ..regression.sr.sr_interface import SRInterface
+
+    return ModelParametrizer, SRInterface
 
 
 class MeasurementSpec(TypedDict):
@@ -605,16 +621,17 @@ class SolvedModel:
         self,
         y: NDF | pd.DataFrame,
         observable: str,
-        template_config: TemplateConfig | None = None,
-        sr_params: PySRParams | None = None,
+        template_config: "TemplateConfig | None" = None,
+        sr_params: "PySRParams | None" = None,
         variables: list[str] | None = None,
-        parametrizer: ModelParametrizer | None = None,
-    ) -> FitResult:
+        parametrizer: "ModelParametrizer | None" = None,
+    ) -> "FitResult":
         if parametrizer is None:
             if template_config is None or sr_params is None:
                 raise ValueError(
                     "Provide either a pre-built parametrizer or both template_config and sr_params."
                 )
+            ModelParametrizer, SRInterface = _load_sr_fit_dependencies()
             parametrizer = ModelParametrizer(
                 variables or self.compiled.var_names,
                 sr_params,
@@ -626,6 +643,8 @@ class SolvedModel:
             raise ValueError(
                 "Provided variables do not match the parametrizer's variable names."
             )
+        else:
+            _, SRInterface = _load_sr_fit_dependencies()
 
         interface = SRInterface(
             model=self,
@@ -633,4 +652,4 @@ class SolvedModel:
             parametrizer=parametrizer,
         )
 
-        return interface.fit_to_kf(y)
+        return cast("FitResult", interface.fit_to_kf(y))
