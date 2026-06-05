@@ -37,6 +37,11 @@ fred = [
 sr = [
     "pysr>=1.5.10",
 ]
+ui = [
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "uvicorn[standard]>=0.32.0",
+]
 
 [dependency-groups]
 dev = [

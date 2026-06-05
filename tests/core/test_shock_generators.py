@@ -70,6 +70,16 @@ def test_shock_class_generator_and_assertions():
     arr = gen(0.5)
     assert arr.shape == (6,)
 
+    sh_t = Shock(
+        T=6,
+        dist="t",
+        multivar=True,
+        seed=3,
+        dist_kwargs={"loc": [0.0, 0.0], "df": 5.0},
+    )
+    t_arr = sh_t.shock_generator()(np.eye(2, dtype=float64))
+    assert t_arr.shape == (6, 2)
+
     with pytest.raises(AssertionError, match="scale"):
         Shock(T=6, dist="norm", dist_kwargs={"scale": 1.0}).shock_generator()
 
