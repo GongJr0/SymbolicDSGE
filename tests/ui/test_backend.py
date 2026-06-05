@@ -41,6 +41,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert loaded_body["loaded"] is True
     assert loaded_body["solved"] is False
     assert loaded_body["name"] == "TEST"
+    assert 'name: "TEST"' in loaded_body["raw_yaml"]
     assert loaded_body["shock_specs"] == [
         {"shock": "e_u", "target": "u", "std_param": "sig_u", "std_value": 0.5},
         {"shock": "e_v", "target": "v", "std_param": "sig_v", "std_value": 0.25},

@@ -142,19 +142,23 @@ class UISession:
     def model_summary(self, role: Role) -> dict[str, Any]:
         slot = self._slot(role)
         if slot.solved is not None:
-            return summarize_solved_model(
+            summary = summarize_solved_model(
                 role=role,
                 model=slot.solved,
                 source=slot.source,
             )
-        if slot.model_config is not None:
-            return summarize_parsed_model(
+        elif slot.model_config is not None:
+            summary = summarize_parsed_model(
                 role=role,
                 model=slot.model_config,
                 kalman=slot.kalman_config,
                 source=slot.source,
             )
-        return empty_model_summary(role)
+        else:
+            return empty_model_summary(role)
+        if slot.raw_yaml is not None:
+            summary["raw_yaml"] = slot.raw_yaml
+        return summary
 
     def run_simulation(
         self,

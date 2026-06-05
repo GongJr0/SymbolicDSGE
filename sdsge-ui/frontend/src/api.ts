@@ -54,10 +54,13 @@ export function loadYamlContent(
   });
 }
 
-export function solveModel(role: Role): Promise<ModelSummary> {
+export function solveModel(
+  role: Role,
+  compileKwargs: Record<string, unknown> = {},
+): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/solve", {
     method: "POST",
-    body: JSON.stringify({ role }),
+    body: JSON.stringify({ role, compile_kwargs: compileKwargs }),
   });
 }
 

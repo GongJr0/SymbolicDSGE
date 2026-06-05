@@ -110,20 +110,17 @@ label {
   grid-template-columns: 1fr 1fr;
 }
 
-.route-nav {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr 1fr;
+.switch-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
 }
 
-.route-nav button {
-  background: #f3f4f6;
-  color: #374151;
-}
-
-.route-nav button.active {
-  background: #1f2937;
-  color: #ffffff;
+.switch-row input {
+  accent-color: #1f2937;
+  height: 18px;
+  min-height: 0;
+  width: 18px;
 }
 
 .workspace {
@@ -165,11 +162,79 @@ label {
   color: #991b1b;
 }
 
+.view-tabs {
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  gap: 4px;
+}
+
+.view-tabs button {
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: #4b5563;
+  min-height: 38px;
+  padding: 8px 14px;
+}
+
+.view-tabs button.active {
+  border-bottom-color: #1f2937;
+  color: #111827;
+}
+
 .run-panel {
   align-items: end;
   display: grid;
   gap: 14px;
   grid-template-columns: 120px 150px 140px;
+}
+
+.builder-panel {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 16px;
+  padding: 14px;
+}
+
+.builder-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+}
+
+.builder-toolbar h3 {
+  color: #374151;
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.builder-toolbar p {
+  color: #6b7280;
+  font-size: 12px;
+  margin: 0;
+}
+
+.builder-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.builder-editor {
+  color: #4b5563;
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+}
+
+.monaco-shell {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  min-height: 460px;
+  overflow: hidden;
 }
 
 .shock-panel {
@@ -301,6 +366,16 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .builder-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .builder-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -317,6 +392,7 @@ label {
 }
 
 .theme-dark .sidebar,
+.theme-dark .builder-panel,
 .theme-dark .summary-block,
 .theme-dark .shock-panel,
 .theme-dark .results {
@@ -342,16 +418,6 @@ label {
   color: #f9fafb;
 }
 
-.theme-dark .route-nav button {
-  background: #374151;
-  color: #e5e7eb;
-}
-
-.theme-dark .route-nav button.active {
-  background: #f9fafb;
-  color: #111827;
-}
-
 .theme-dark button:disabled {
   background: #4b5563;
   color: #9ca3af;
@@ -364,9 +430,19 @@ label {
 }
 
 .theme-dark label,
+.theme-dark .builder-editor,
+.theme-dark .builder-toolbar h3,
 .theme-dark .panel-heading,
 .theme-dark .summary-block h3 {
   color: #d1d5db;
+}
+
+.theme-dark .builder-toolbar p {
+  color: #9ca3af;
+}
+
+.theme-dark .monaco-shell {
+  border-color: #4b5563;
 }
 
 .theme-dark .summary-block span,
@@ -385,4 +461,18 @@ label {
   background: #450a0a;
   border-color: #b91c1c;
   color: #fecaca;
+}
+
+.theme-dark .view-tabs {
+  border-bottom-color: #374151;
+}
+
+.theme-dark .view-tabs button {
+  background: transparent;
+  color: #d1d5db;
+}
+
+.theme-dark .view-tabs button.active {
+  border-bottom-color: #f9fafb;
+  color: #ffffff;
 }

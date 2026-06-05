@@ -45,6 +45,7 @@ export interface ModelSummary {
   loaded: boolean;
   solved: boolean;
   source?: string;
+  raw_yaml?: string;
   name?: string;
   variables?: string[];
   observables?: string[];

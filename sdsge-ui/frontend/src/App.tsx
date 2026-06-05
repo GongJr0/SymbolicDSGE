@@ -8,6 +8,8 @@ import {
   Legend,
 } from "chart.js";
 import { Database, Moon, Play, RefreshCw, Sun, Upload, Zap } from "lucide-react";
+import Editor from "@monaco-editor/react";
+import { configureMonacoYaml } from "monaco-yaml";
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Line } from "react-chartjs-2";
@@ -20,6 +22,11 @@ import {
   runSimulation,
   solveModel,
 } from "./api";
+import {
+  symbolicDsgeConfigModelPath,
+  symbolicDsgeConfigSchema,
+  symbolicDsgeSchemaUri,
+} from "./configSchema";
 import type {
   ModelSummary,
   Role,
@@ -41,8 +48,20 @@ ChartJS.register(
   Legend,
 );
 
-const SERIES_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#d97706"];
-type View = "spec" | "graph";
+const SERIES_COLORS = [
+  "#2563eb",
+  "#16a34a",
+  "#dc2626",
+  "#9333ea",
+  "#d97706",
+  "#0891b2",
+  "#be123c",
+  "#4f46e5",
+  "#65a30d",
+  "#c2410c",
+];
+let yamlLanguageConfigured = false;
+type View = "builder" | "spec" | "graph";
 type ShockMode = "raw" | "generated";
 
 export default function App() {
@@ -50,6 +69,7 @@ export default function App() {
   const [role, setRole] = useState<Role>("reference");
   const [path, setPath] = useState("MODELS/POST82.yaml");
   const [content, setContent] = useState("");
+  const [linearize, setLinearize] = useState(false);
   const [simT, setSimT] = useState(100);
   const [includeObs, setIncludeObs] = useState(true);
   const [result, setResult] = useState<SimResult | null>(null);
@@ -91,7 +111,7 @@ export default function App() {
   }
 
   function navigate(next: View) {
-    const path = next === "spec" ? "/spec" : "/graph";
+    const path = `/${next}`;
     window.history.pushState({}, "", path);
     setView(next);
   }
@@ -123,7 +143,7 @@ export default function App() {
 
   useEffect(() => {
     if (result === null) return;
-    setSelected(graphSeries.slice(0, 4).map((series) => series.name));
+    setSelected(graphSeries.map((series) => series.name));
   }, [result, graphSeries]);
 
   useEffect(() => {
@@ -152,6 +172,12 @@ export default function App() {
     setShockCorrParams(next);
   }, [shockCorrSpecs]);
 
+  useEffect(() => {
+    if (content.trim() === "" && activeModel.raw_yaml !== undefined) {
+      setContent(activeModel.raw_yaml);
+    }
+  }, [activeModel.raw_yaml, content]);
+
   const chartData = useMemo(() => {
     const series = graphSeries.filter((item) => selected.includes(item.name));
     const maxLen = Math.max(
@@ -160,14 +186,17 @@ export default function App() {
     );
     return {
       labels: Array.from({ length: maxLen }, (_, i) => String(i)),
-      datasets: series.map((item, i) => ({
-        label: item.name,
-        data: Array.from(decodeArray(item.array)),
-        borderColor: SERIES_COLORS[i % SERIES_COLORS.length],
-        backgroundColor: SERIES_COLORS[i % SERIES_COLORS.length],
-        pointRadius: 0,
-        borderWidth: 1.8,
-      })),
+      datasets: series.map((item) => {
+        const color = colorForSeries(item.name);
+        return {
+          label: item.name,
+          data: Array.from(decodeArray(item.array)),
+          borderColor: color,
+          backgroundColor: color,
+          pointRadius: 0,
+          borderWidth: 1.8,
+        };
+      }),
     };
   }, [graphSeries, selected]);
 
@@ -239,21 +268,6 @@ export default function App() {
           {theme === "light" ? "Dark" : "Light"}
         </button>
 
-        <nav className="route-nav">
-          <button
-            className={view === "spec" ? "active" : "secondary"}
-            onClick={() => navigate("spec")}
-          >
-            Spec
-          </button>
-          <button
-            className={view === "graph" ? "active" : "secondary"}
-            onClick={() => navigate("graph")}
-          >
-            Graph
-          </button>
-        </nav>
-
         <label>
           Role
           <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
@@ -272,7 +286,12 @@ export default function App() {
             disabled={busy || path.trim() === ""}
             onClick={() =>
               runAction(
-                () => loadYamlPath(role, path.trim()),
+                async () => {
+                  const loaded = await loadYamlPath(role, path.trim());
+                  if (loaded.raw_yaml !== undefined) {
+                    setContent(loaded.raw_yaml);
+                  }
+                },
                 "YAML loaded from path.",
               )
             }
@@ -286,31 +305,23 @@ export default function App() {
           </button>
         </div>
 
-        <label>
-          YAML Content
-          <textarea
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            placeholder="Paste a model config here"
+        <label className="switch-row">
+          <span>Linearize</span>
+          <input
+            type="checkbox"
+            checked={linearize}
+            onChange={(event) => setLinearize(event.target.checked)}
           />
         </label>
 
         <button
-          disabled={busy || content.trim() === ""}
+          disabled={busy || !activeModel.loaded}
           onClick={() =>
             runAction(
-              () => loadYamlContent(role, content),
-              "YAML loaded from content.",
+              () => solveModel(role, { linearize }),
+              linearize ? "Model linearized and solved." : "Model solved.",
             )
           }
-        >
-          <Upload size={16} />
-          Load Content
-        </button>
-
-        <button
-          disabled={busy || !activeModel.loaded}
-          onClick={() => runAction(() => solveModel(role), "Model solved.")}
         >
           <Play size={16} />
           Solve
@@ -325,7 +336,44 @@ export default function App() {
           </span>
         </header>
 
-        {view === "spec" ? (
+        <nav className="view-tabs">
+          <button
+            className={view === "builder" ? "active" : ""}
+            onClick={() => navigate("builder")}
+          >
+            Builder
+          </button>
+          <button
+            className={view === "spec" ? "active" : ""}
+            onClick={() => navigate("spec")}
+          >
+            Spec
+          </button>
+          <button
+            className={view === "graph" ? "active" : ""}
+            onClick={() => navigate("graph")}
+          >
+            Graph
+          </button>
+        </nav>
+
+        {view === "builder" ? (
+          <BuilderView
+            role={role}
+            busy={busy}
+            theme={theme}
+            content={content}
+            setContent={setContent}
+            beforeEditorMount={configureYamlEditor}
+            loadContentAction={() =>
+              runAction(
+                () => loadYamlContent(role, content),
+                "YAML loaded from content.",
+              )
+            }
+            syncAction={() => runAction(refreshSession, "Ready.")}
+          />
+        ) : view === "spec" ? (
           <SpecView
             activeModel={activeModel}
             shockSpecs={shockSpecs}
@@ -377,6 +425,77 @@ export default function App() {
         )}
       </section>
     </main>
+  );
+}
+
+function BuilderView({
+  role,
+  busy,
+  theme,
+  content,
+  setContent,
+  beforeEditorMount,
+  loadContentAction,
+  syncAction,
+}: {
+  role: Role;
+  busy: boolean;
+  theme: "light" | "dark";
+  content: string;
+  setContent: Dispatch<SetStateAction<string>>;
+  beforeEditorMount: Parameters<typeof Editor>[0]["beforeMount"];
+  loadContentAction: () => void;
+  syncAction: () => void;
+}) {
+  return (
+    <section className="builder-panel">
+      <div className="builder-toolbar">
+        <div>
+          <h3>Config Builder</h3>
+          <p>Target role: {role}</p>
+        </div>
+        <div className="builder-actions">
+          <button disabled={busy || content.trim() === ""} onClick={loadContentAction}>
+            <Upload size={16} />
+            Load
+          </button>
+          <button className="secondary" disabled={busy} onClick={syncAction}>
+            <RefreshCw size={16} />
+            Sync
+          </button>
+        </div>
+      </div>
+
+      <div className="builder-editor">
+        <span>YAML Content</span>
+        <div className="monaco-shell">
+          <Editor
+            height="460px"
+            language="yaml"
+            path={symbolicDsgeConfigModelPath}
+            theme={theme === "dark" ? "vs-dark" : "light"}
+            value={content}
+            beforeMount={beforeEditorMount}
+            onChange={(value) => setContent(value ?? "")}
+            options={{
+              automaticLayout: true,
+              fontSize: 13,
+              minimap: { enabled: false },
+              quickSuggestions: {
+                comments: false,
+                other: true,
+                strings: true,
+              },
+              suggestOnTriggerCharacters: true,
+              scrollBeyondLastLine: false,
+              tabSize: 2,
+              tabCompletion: "on",
+              wordWrap: "on",
+            }}
+          />
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -660,7 +779,36 @@ function GraphView({
 }
 
 function initialView(): View {
-  return window.location.pathname.endsWith("/graph") ? "graph" : "spec";
+  if (window.location.pathname.endsWith("/builder")) return "builder";
+  if (window.location.pathname.endsWith("/graph")) return "graph";
+  return "spec";
+}
+
+function colorForSeries(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  }
+  return SERIES_COLORS[Math.abs(hash) % SERIES_COLORS.length];
+}
+
+function configureYamlEditor(monaco: Parameters<typeof configureMonacoYaml>[0]) {
+  if (yamlLanguageConfigured) return;
+  configureMonacoYaml(monaco, {
+    completion: true,
+    enableSchemaRequest: false,
+    format: { enable: true },
+    hover: true,
+    validate: true,
+    schemas: [
+      {
+        uri: symbolicDsgeSchemaUri,
+        fileMatch: [symbolicDsgeConfigModelPath, "**/*.yaml", "**/*.yml"],
+        schema: symbolicDsgeConfigSchema,
+      },
+    ],
+  });
+  yamlLanguageConfigured = true;
 }
 
 function parseFinite(value: string | undefined, label: string): number {
