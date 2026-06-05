@@ -9,6 +9,7 @@ from SymbolicDSGE import Shock
 from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
+from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterResult
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
@@ -23,6 +24,7 @@ from SymbolicDSGE.monte_carlo import (
     regression_step,
     report_mc_performance,
     report_mc_step_performance,
+    simulate_dgp,
     simulation_step,
     transform_step,
     wald_test_step,
@@ -446,6 +448,65 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
         )
         np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["g,z"], expected_gz)
         np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["r"], expected_r)
+
+
+def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
+    T = 3
+    shock = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+    A = np.array([[0.5, 0.0], [0.0, 0.25]], dtype=np.float64)
+    B = np.array([[1.0], [0.5]], dtype=np.float64)
+    C = np.array([[2.0, 0.5]], dtype=np.float64)
+    d = np.array([1.0], dtype=np.float64)
+
+    config = SimpleNamespace(
+        shock_map={},
+        calibration=SimpleNamespace(parameters={}, shock_std={}),
+        equations=SimpleNamespace(obs_is_affine={"obs": True}),
+    )
+
+    def build_affine_measurement_matrices(params, y_names):
+        assert params == {}
+        assert y_names == ["obs"]
+        return C, d
+
+    compiled = SimpleNamespace(
+        idx={"u": 0, "x": 1},
+        var_names=["u", "x"],
+        n_exog=1,
+        n_state=1,
+        observable_names=["obs"],
+        config=config,
+        build_affine_measurement_matrices=build_affine_measurement_matrices,
+    )
+    dgp = SolvedModel(
+        compiled=compiled,
+        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64)),
+        A=A,
+        B=B,
+    )
+
+    data = simulate_dgp(
+        reference=dgp,
+        dgp=dgp,
+        rep_idx=0,
+        T=T,
+        shocks={"u": shock},
+        observables=True,
+    )
+
+    expected_states = np.empty((T + 1, 2), dtype=np.float64)
+    expected_states[0] = 0.0
+    for t in range(T):
+        expected_states[t + 1] = A @ expected_states[t] + B[:, 0] * shock[t]
+    expected_obs = expected_states @ C.T + d
+
+    np.testing.assert_allclose(data.states, expected_states)
+    np.testing.assert_allclose(data.observables, expected_obs[1:])
+    np.testing.assert_allclose(data.raw["_X"], expected_states)
+    np.testing.assert_allclose(data.raw["u"], expected_states[:, 0])
+    np.testing.assert_allclose(data.raw["obs"], expected_obs[:, 0])
+    assert data.observable_names == ("obs",)
+    assert data.n_exog == 1
 
 
 def test_transform_step_returning_mcdata_updates_downstream_data() -> None:

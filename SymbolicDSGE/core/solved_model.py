@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
+from .simulation import affine_observations_into, simulate_linear_states_into
 from ..kalman.config import KalmanConfig
 from ..kalman.interface import KalmanInterface
 from ..kalman.filter import FilterResult
@@ -85,49 +86,92 @@ class SolvedModel:
         dict[str, ndarray]
             A dictionary mapping variable names to their simulated time series.
         """
-        n = self.A.shape[0]
-
-        if x0 is None:
-            x0 = np.zeros((n,))
-        x0 = asarray(x0, dtype=float64)
-        n_state = self.compiled.n_state
-        x0[n_state:] = x0[:n_state] @ np.real_if_close(self.policy.f.T)
-
-        shock_mat = np.zeros(
-            (T, self.B.shape[1]), dtype=float
-        )  # Deterministic if no shocks
-
-        if shocks is not None:
-            shock_list = self._shock_unpack(shocks)
-            for idx, shock_vals in shock_list:
-                if shock_vals.shape[0] != T:
-                    raise ValueError(
-                        f"Shock array for variable index {idx} must have length {T}."
-                    )
-                shock_mat[:, idx] = shock_scale * shock_vals
-
-        X = np.zeros((T + 1, n), dtype=float64)
-        X[0, :] = x0
-
-        for t in range(T):
-            X[t + 1] = self.A @ X[t] + self.B @ shock_mat[t]
+        X = self._simulate_state_matrix(
+            T=T,
+            shocks=shocks,
+            shock_scale=shock_scale,
+            x0=x0,
+        )
 
         out = {name: X[:, self.compiled.idx[name]] for name in self.compiled.var_names}
         out["_X"] = X  # Include full state matrix for reference
 
         if observables:
-            is_affine = self.config.equations.obs_is_affine
-            if all(is_affine.values()):
-                C, d = self._build_C_d_from_obs(self.compiled.observable_names)
-                Y = X @ C.T + d
-                for i, name in enumerate(self.compiled.observable_names):
-                    out[name] = Y[:, i]
-            else:
-                Y = self._non_affine_measurement(self.compiled.observable_names, X)
-                for i, name in enumerate(self.compiled.observable_names):
-                    out[name] = Y[:, i]
+            Y = self._simulate_observable_matrix(X, drop_initial=False)
+            for i, name in enumerate(self.compiled.observable_names):
+                out[name] = Y[:, i]
 
         return out
+
+    def _simulation_initial_state(self, x0: ndarray | None = None) -> NDF:
+        n = self.A.shape[0]
+        if x0 is None:
+            x0_arr = np.zeros((n,), dtype=float64)
+        else:
+            x0_arr = asarray(x0, dtype=float64)
+        n_state = self.compiled.n_state
+        x0_arr[n_state:] = x0_arr[:n_state] @ np.real_if_close(self.policy.f.T)
+        return x0_arr
+
+    def _simulation_shock_matrix(
+        self,
+        T: int,
+        shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None = None,
+        shock_scale: float = 1.0,
+    ) -> NDF:
+        shock_mat = np.zeros((T, self.B.shape[1]), dtype=float64)
+        if shocks is None:
+            return shock_mat
+
+        shock_list = self._shock_unpack(shocks)
+        for idx, shock_vals in shock_list:
+            if shock_vals.shape[0] != T:
+                raise ValueError(
+                    f"Shock array for variable index {idx} must have length {T}."
+                )
+            shock_mat[:, idx] = shock_scale * shock_vals
+        return shock_mat
+
+    def _simulate_state_matrix(
+        self,
+        T: int,
+        shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None = None,
+        shock_scale: float = 1.0,
+        x0: ndarray | None = None,
+    ) -> NDF:
+        x0_arr = self._simulation_initial_state(x0)
+        shock_mat = self._simulation_shock_matrix(
+            T=T,
+            shocks=shocks,
+            shock_scale=shock_scale,
+        )
+        X = np.empty((T + 1, self.A.shape[0]), dtype=float64)
+        simulate_linear_states_into(
+            asarray(self.A, dtype=float64),
+            asarray(self.B, dtype=float64),
+            x0_arr,
+            shock_mat,
+            X,
+        )
+        return X
+
+    def _simulate_observable_matrix(
+        self,
+        states: NDF,
+        *,
+        drop_initial: bool = False,
+    ) -> NDF:
+        start = 1 if drop_initial else 0
+        y_names = self.compiled.observable_names
+        is_affine = self.config.equations.obs_is_affine
+        if all(is_affine.values()):
+            C, d = self._build_C_d_from_obs(y_names)
+            Y = np.empty((states.shape[0] - start, len(y_names)), dtype=float64)
+            affine_observations_into(states, C, d, start, Y)
+            return Y
+
+        Y = self._non_affine_measurement(y_names, states)
+        return np.ascontiguousarray(Y[start:], dtype=float64)
 
     def irf(
         self, shocks: list[str], T: int, scale: float = 1.0, observables: bool = False
