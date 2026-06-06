@@ -20,10 +20,12 @@ export function PanelWorkspace({
   panels,
   defaultLayout = "vertical",
   defaultSplit = 50,
+  fillHeight = false,
 }: {
   panels: PanelDef[];
   defaultLayout?: LayoutDirection;
   defaultSplit?: number;
+  fillHeight?: boolean;
 }) {
   const [order, setOrder] = useState<string[]>(() => panels.map((p) => p.id));
   const [folded, setFolded] = useState<Record<string, boolean>>(() =>
@@ -136,6 +138,7 @@ export function PanelWorkspace({
   function panelStyle(id: string): CSSProperties | undefined {
     if (folded[id]) return undefined;
     if (layout === "vertical") return { flex: 1 };
+    if (fillHeight) return undefined;
     return { height: panelHeights[id] };
   }
 
@@ -151,7 +154,7 @@ export function PanelWorkspace({
 
   return (
     <section
-      className={`output-workspace ${layout}`}
+      className={`output-workspace ${layout}${fillHeight ? " fill-height" : ""}`}
       style={
         layout === "horizontal" && multi
           ? { gridTemplateColumns: `${split}fr 6px ${100 - split}fr` }
@@ -225,7 +228,7 @@ export function PanelWorkspace({
               {!isFolded && (
                 <>
                   <div className={bodyClass(def)}>{def.content}</div>
-                  {layout === "horizontal" && multi && (
+                  {!fillHeight && layout === "horizontal" && multi && (
                     <div
                       className="output-height-handle"
                       onPointerDown={(e) => startHeightResize(id, e)}

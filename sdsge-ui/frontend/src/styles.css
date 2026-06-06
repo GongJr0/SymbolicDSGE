@@ -413,18 +413,28 @@ label {
   min-height: 70px;
 }
 
-.shock-controls,
-.param-grid {
-  display: grid;
+.shock-controls {
+  align-items: flex-end;
+  display: flex;
   gap: 12px;
 }
 
-.shock-controls {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+.shock-controls > label {
+  flex: 1;
+}
+
+.shock-controls > .shock-num {
+  flex: 0 0 auto;
+}
+
+.shock-controls .shock-num input {
+  width: 64px;
 }
 
 .param-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
 }
 
 .param-grid textarea {
@@ -689,6 +699,11 @@ label {
   min-height: 0;
 }
 
+.output-panel-body.no-padding .code-panel {
+  flex: 1;
+  min-height: 0;
+}
+
 .output-height-handle {
   cursor: row-resize;
   flex-shrink: 0;
@@ -732,6 +747,278 @@ label {
   min-width: 0;
 }
 
+/* ── Spec tab layout ────────────────────────────────────────────── */
+
+.spec-layout {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spec-overview-row {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+}
+
+.spec-code-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── Code panel ─────────────────────────────────────────────────── */
+
+.code-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.code-editor-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.code-panel-footer {
+  background: #fafafa;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.code-fn-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.code-fn-list {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.code-fn-empty {
+  font-size: 12px;
+}
+
+.code-fn-chip {
+  align-items: center;
+  background: #ede9fe;
+  border-radius: 20px;
+  color: #4f46e5;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 2px;
+  padding: 2px 4px 2px 10px;
+}
+
+.code-fn-chip .code-fn-remove {
+  align-items: center;
+  background: transparent;
+  border-radius: 50%;
+  color: #4f46e5;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 18px;
+  min-width: 18px;
+  padding: 2px;
+}
+
+.code-fn-chip .code-fn-remove:hover {
+  background: rgb(99 102 241 / 20%);
+  opacity: 1;
+}
+
+.code-submit-btn {
+  flex-shrink: 0;
+}
+
+.code-error {
+  font-size: 12px;
+}
+
+/* ── Output tab two-row layout ──────────────────────────────────── */
+
+.output-layout {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.output-top-row {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.output-figures-row {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── fill-height panels (spec code section, output top row) ─────── */
+
+.output-workspace.fill-height {
+  height: 100%;
+}
+
+.output-workspace.fill-height.horizontal .output-slot {
+  height: 100%;
+}
+
+.output-workspace.fill-height .output-panel {
+  height: 100% !important;
+}
+
+/* ── Figures panel ──────────────────────────────────────────────── */
+
+.figures-empty {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  padding: 24px;
+}
+
+.figures-grid {
+  display: flex;
+  flex: 1;
+  flex-wrap: nowrap;
+  gap: 12px;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px;
+}
+
+.figure-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  max-width: 480px;
+  min-width: 280px;
+  overflow: hidden;
+}
+
+.figure-card-toolbar {
+  align-items: center;
+  background: #fafafa;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  min-height: 34px;
+  padding: 4px 8px;
+}
+
+.figure-card-name {
+  color: #1e293b;
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figure-img {
+  flex: 1 1 0px;
+  min-height: 0;
+  object-fit: contain;
+  object-position: center;
+  width: 100%;
+}
+
+.figure-card-error {
+  min-width: 260px;
+  max-width: 420px;
+}
+
+.figure-card-err-body {
+  padding: 10px 12px;
+}
+
+.figures-empty-inline {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  padding: 24px;
+}
+
+/* ── Fullscreen figure overlay ──────────────────────────────────── */
+
+.figure-overlay {
+  align-items: center;
+  background: rgb(0 0 0 / 60%);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 1000;
+}
+
+.figure-modal {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 30%);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  max-width: 90vw;
+  min-width: 320px;
+  overflow: hidden;
+}
+
+.figure-modal-toolbar {
+  align-items: center;
+  background: #fafafa;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  min-height: 42px;
+  padding: 6px 12px;
+}
+
+.figure-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.figure-modal-img {
+  display: block;
+  max-height: calc(90vh - 80px);
+  max-width: 100%;
+  object-fit: contain;
+}
+
 @media (max-width: 900px) {
   .app {
     grid-template-columns: 1fr;
@@ -771,9 +1058,12 @@ label {
 
   .summary-grid,
   .run-panel,
-  .shock-controls,
   .param-grid {
     grid-template-columns: 1fr;
+  }
+
+  .shock-controls {
+    flex-direction: column;
   }
 
   .builder-toolbar {
@@ -959,4 +1249,46 @@ label {
 
 .theme-dark .output-panel-header span {
   color: #64748b;
+}
+
+.theme-dark .code-panel-footer {
+  background: #152032;
+  border-top-color: #334155;
+}
+
+.theme-dark .code-fn-chip {
+  background: #312e81;
+  color: #c7d2fe;
+}
+
+.theme-dark .code-fn-chip .code-fn-remove {
+  color: #c7d2fe;
+}
+
+.theme-dark .code-fn-chip .code-fn-remove:hover {
+  background: rgb(199 210 254 / 20%);
+}
+
+.theme-dark .figure-card {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.theme-dark .figure-card-toolbar {
+  background: #152032;
+  border-bottom-color: #334155;
+}
+
+.theme-dark .figure-card-name {
+  color: #e2e8f0;
+}
+
+.theme-dark .figure-modal {
+  background: #1e293b;
+  border: 1px solid #334155;
+}
+
+.theme-dark .figure-modal-toolbar {
+  background: #152032;
+  border-bottom-color: #334155;
 }

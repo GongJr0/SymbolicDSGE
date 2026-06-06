@@ -14,11 +14,12 @@ import {
   PanelLeftOpen,
   Play,
   RefreshCw,
+  RotateCcw,
   Sun,
   Upload,
 } from "lucide-react";
 import Editor from "@monaco-editor/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, PointerEvent, SetStateAction } from "react";
 import {
   decodeArray,
@@ -33,6 +34,8 @@ import {
   symbolicDsgeConfigModelPath,
 } from "./configSchema";
 import { configureSymbolicDsgeYaml } from "./monacoWorkers";
+import { CodePanel } from "./CodePanel";
+import type { CodePanelHandle } from "./CodePanel";
 import { OutputWorkspace } from "./OutputWorkspace";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
@@ -90,7 +93,7 @@ export default function App() {
   const [shockDf, setShockDf] = useState("5");
   const [shockStdParams, setShockStdParams] = useState<Record<string, string>>({});
   const [shockCorrParams, setShockCorrParams] = useState<Record<string, string>>({});
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [view, setView] = useState<View>(initialView);
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
@@ -149,6 +152,14 @@ export default function App() {
       showMessage(error instanceof Error ? error.message : String(error), true);
     });
   }, []);
+
+  // Populate the builder with yaml from the backend when the page is refreshed
+  // (content state starts empty; session carries the last-loaded yaml)
+  useEffect(() => {
+    if (session === null) return;
+    const yaml = session.models[role]?.raw_yaml;
+    if (yaml) setContent((c) => (c === "" ? yaml : c));
+  }, [session, role]);
 
   useEffect(() => {
     if (message === "" || messageIsError) return;
@@ -414,80 +425,82 @@ export default function App() {
           </button>
         </nav>
 
-        {view === "builder" ? (
-          <BuilderView
-            role={role}
-            busy={busy}
-            theme={theme}
-            content={content}
-            setContent={setContent}
-            loadContentAction={() =>
-              runAction(
-                () => loadYamlContent(role, content),
-                "YAML loaded from content.",
-              )
-            }
-            syncAction={() =>
-              runAction(async () => undefined, "Session refreshed.")
-            }
-          />
-        ) : view === "spec" ? (
-          <SpecView
-            activeModel={activeModel}
-            shockSpecs={shockSpecs}
-            shockCorrSpecs={shockCorrSpecs}
-            shockMode={shockMode}
-            setShockMode={setShockMode}
-            shockDist={shockDist}
-            setShockDist={setShockDist}
-            shockSeed={shockSeed}
-            setShockSeed={setShockSeed}
-            shockLoc={shockLoc}
-            setShockLoc={setShockLoc}
-            shockDf={shockDf}
-            setShockDf={setShockDf}
-            shockInputs={shockInputs}
-            setShockInputs={setShockInputs}
-            shockStdParams={shockStdParams}
-            setShockStdParams={setShockStdParams}
-            shockCorrParams={shockCorrParams}
-            setShockCorrParams={setShockCorrParams}
-          />
-        ) : (
-          <OutputsView
-            busy={busy}
-            activeModel={activeModel}
-            simT={simT}
-            setSimT={setSimT}
-            includeObs={includeObs}
-            setIncludeObs={setIncludeObs}
-            runSimulationAction={() =>
-              runAction(async () => {
-                const sim = await runSimulation(
-                  role,
-                  simT,
-                  includeObs,
-                  shockMode === "raw" ? buildShockPayload() : undefined,
-                  shockMode === "generated" ? buildShockGeneration() : undefined,
-                  buildShockParams(),
-                );
-                setResult(sim);
-              }, "Simulation complete.")
-            }
-            result={result}
-            graphSeries={graphSeries}
-            selected={selected}
-            setSelected={setSelected}
-            chartData={chartData}
-            theme={theme}
-          />
-        )}
+        <BuilderView
+          hidden={view !== "builder"}
+          role={role}
+          busy={busy}
+          theme={theme}
+          content={content}
+          setContent={setContent}
+          loadContentAction={() =>
+            runAction(
+              () => loadYamlContent(role, content),
+              "YAML loaded from content.",
+            )
+          }
+          syncAction={() =>
+            runAction(async () => undefined, "Session refreshed.")
+          }
+        />
+        <SpecView
+          hidden={view !== "spec"}
+          role={role}
+          theme={theme}
+          activeModel={activeModel}
+          shockSpecs={shockSpecs}
+          shockCorrSpecs={shockCorrSpecs}
+          shockMode={shockMode}
+          setShockMode={setShockMode}
+          shockDist={shockDist}
+          setShockDist={setShockDist}
+          shockSeed={shockSeed}
+          setShockSeed={setShockSeed}
+          shockLoc={shockLoc}
+          setShockLoc={setShockLoc}
+          shockDf={shockDf}
+          setShockDf={setShockDf}
+          shockInputs={shockInputs}
+          setShockInputs={setShockInputs}
+          shockStdParams={shockStdParams}
+          setShockStdParams={setShockStdParams}
+          shockCorrParams={shockCorrParams}
+          setShockCorrParams={setShockCorrParams}
+        />
+        <OutputsView
+          hidden={view !== "outputs"}
+          busy={busy}
+          activeModel={activeModel}
+          simT={simT}
+          setSimT={setSimT}
+          includeObs={includeObs}
+          setIncludeObs={setIncludeObs}
+          runSimulationAction={() =>
+            runAction(async () => {
+              const sim = await runSimulation(
+                role,
+                simT,
+                includeObs,
+                shockMode === "raw" ? buildShockPayload() : undefined,
+                shockMode === "generated" ? buildShockGeneration() : undefined,
+                buildShockParams(),
+              );
+              setResult(sim);
+            }, "Simulation complete.")
+          }
+          result={result}
+          graphSeries={graphSeries}
+          selected={selected}
+          setSelected={setSelected}
+          chartData={chartData}
+          theme={theme}
+        />
       </section>
     </main>
   );
 }
 
 function BuilderView({
+  hidden,
   role,
   busy,
   theme,
@@ -496,6 +509,7 @@ function BuilderView({
   loadContentAction,
   syncAction,
 }: {
+  hidden?: boolean;
   role: Role;
   busy: boolean;
   theme: "light" | "dark";
@@ -550,13 +564,16 @@ function BuilderView({
   ];
 
   return (
-    <div className="panel-view">
+    <div className="panel-view" style={hidden ? { display: "none" } : undefined}>
       <PanelWorkspace panels={panels} defaultLayout="vertical" />
     </div>
   );
 }
 
 function SpecView({
+  hidden,
+  role,
+  theme,
   activeModel,
   shockSpecs,
   shockCorrSpecs,
@@ -577,6 +594,9 @@ function SpecView({
   shockCorrParams,
   setShockCorrParams,
 }: {
+  hidden?: boolean;
+  role: Role;
+  theme: "light" | "dark";
   activeModel: ModelSummary;
   shockSpecs: ShockSpec[];
   shockCorrSpecs: ShockCorrSpec[];
@@ -597,7 +617,7 @@ function SpecView({
   shockCorrParams: Record<string, string>;
   setShockCorrParams: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
-  const panels: PanelDef[] = [
+  const overviewPanels: PanelDef[] = [
     {
       id: "summary",
       title: "Model",
@@ -620,6 +640,7 @@ function SpecView({
     {
       id: "shocks",
       title: "Shocks",
+      defaultHeight: 200,
       scrollable: true,
       content: (
         <>
@@ -650,21 +671,21 @@ function SpecView({
                     <option value="uni">uniform</option>
                   </select>
                 </label>
-                <label>
+                <label className="shock-num">
                   Seed
                   <input
                     value={shockSeed}
                     onChange={(event) => setShockSeed(event.target.value)}
                   />
                 </label>
-                <label>
+                <label className="shock-num">
                   Loc
                   <input
                     value={shockLoc}
                     onChange={(event) => setShockLoc(event.target.value)}
                   />
                 </label>
-                <label>
+                <label className="shock-num">
                   DF
                   <input
                     value={shockDf}
@@ -736,14 +757,62 @@ function SpecView({
     },
   ];
 
+  const arrayPanelRef = useRef<CodePanelHandle>(null);
+  const figurePanelRef = useRef<CodePanelHandle>(null);
+
+  const codePanels: PanelDef[] = [
+    {
+      id: "code-array",
+      title: "Transform",
+      badge: "Python",
+      noPadding: true,
+      headerActions: (
+        <button
+          className="icon-button"
+          onClick={() => arrayPanelRef.current?.resetTemplate()}
+          title="Reset to default template"
+        >
+          <RotateCcw size={15} />
+        </button>
+      ),
+      content: (
+        <CodePanel ref={arrayPanelRef} kind="array" role={role} activeModel={activeModel} theme={theme} />
+      ),
+    },
+    {
+      id: "code-figure",
+      title: "Plot",
+      badge: "Python",
+      noPadding: true,
+      headerActions: (
+        <button
+          className="icon-button"
+          onClick={() => figurePanelRef.current?.resetTemplate()}
+          title="Reset to default template"
+        >
+          <RotateCcw size={15} />
+        </button>
+      ),
+      content: (
+        <CodePanel ref={figurePanelRef} kind="figure" role={role} activeModel={activeModel} theme={theme} />
+      ),
+    },
+  ];
+
   return (
-    <div className="panel-view">
-      <PanelWorkspace panels={panels} defaultLayout="vertical" defaultSplit={30} />
+    <div className="spec-layout" style={hidden ? { display: "none" } : undefined}>
+      <div className="spec-overview-row">
+        <PanelWorkspace panels={overviewPanels} defaultLayout="horizontal" defaultSplit={50} />
+      </div>
+      <div className="spec-code-section">
+        <PanelWorkspace panels={codePanels} defaultLayout="horizontal" defaultSplit={50} fillHeight />
+      </div>
     </div>
   );
 }
 
 function OutputsView({
+  hidden,
   busy,
   activeModel,
   simT,
@@ -781,9 +850,10 @@ function OutputsView({
     }[];
   };
   theme: "light" | "dark";
+  hidden?: boolean;
 }) {
   return (
-    <div className="panel-view">
+    <div className="panel-view" style={hidden ? { display: "none" } : undefined}>
       <section className="run-panel">
         <label>
           T

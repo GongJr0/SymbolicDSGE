@@ -13,6 +13,7 @@ import {
 import type { Dispatch, SetStateAction } from "react";
 import { Line } from "react-chartjs-2";
 import { decodeArray } from "./api";
+import { FiguresPanel } from "./FiguresPanel";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
 import type { SimResult } from "./types";
@@ -52,12 +53,13 @@ export const OutputWorkspace = memo(function OutputWorkspace({
 }) {
   const tablePanelRef = useRef<TableHandle>(null);
   const table = useMemo(() => createTableData(graphSeries), [graphSeries]);
+  const figures = result.figures ?? [];
 
   function exportCsv() {
     tablePanelRef.current?.exportCsv(result.role, result.run_id);
   }
 
-  const panels: PanelDef[] = [
+  const topPanels: PanelDef[] = [
     {
       id: "graph",
       title: "Graph",
@@ -84,7 +86,26 @@ export const OutputWorkspace = memo(function OutputWorkspace({
     },
   ];
 
-  return <PanelWorkspace panels={panels} defaultLayout="vertical" />;
+  const figurePanels: PanelDef[] = [
+    {
+      id: "figures",
+      title: "Figures",
+      badge: figures.length > 0 ? `${figures.length} plot${figures.length === 1 ? "" : "s"}` : undefined,
+      content: <FiguresPanel figures={figures} />,
+      scrollable: false,
+    },
+  ];
+
+  return (
+    <div className="output-layout">
+      <div className="output-top-row">
+        <PanelWorkspace panels={topPanels} defaultLayout="horizontal" defaultSplit={70} fillHeight />
+      </div>
+      <div className="output-figures-row">
+        <PanelWorkspace panels={figurePanels} defaultLayout="vertical" />
+      </div>
+    </div>
+  );
 });
 
 const GraphPanel = memo(function GraphPanel({

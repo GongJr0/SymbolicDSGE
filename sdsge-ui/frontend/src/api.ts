@@ -1,5 +1,7 @@
 import type {
   ArrayEnvelope,
+  FunctionKind,
+  FunctionRecord,
   ModelSummary,
   Role,
   SessionSummary,
@@ -83,6 +85,31 @@ export function runSimulation(
       shock_params: shockParams,
     }),
   });
+}
+
+export function submitFunction(
+  role: Role,
+  code: string,
+  kind: FunctionKind = "array",
+): Promise<FunctionRecord> {
+  return requestJson<FunctionRecord>("/api/code/submit", {
+    method: "POST",
+    body: JSON.stringify({ role, code, kind }),
+  });
+}
+
+export function removeFunction(
+  role: Role,
+  name: string,
+): Promise<{ removed: string }> {
+  return requestJson<{ removed: string }>(
+    `/api/code/${role}/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function listFunctions(role: Role): Promise<FunctionRecord[]> {
+  return requestJson<FunctionRecord[]>(`/api/code/${role}/functions`);
 }
 
 export function encodeArray(values: Float64Array): ArrayEnvelope {

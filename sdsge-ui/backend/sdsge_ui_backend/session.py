@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import ast
+import base64
+import inspect
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Mapping, cast
 from uuid import uuid4
+
+# Set non-interactive backend before any user code can import pyplot.
+try:
+    import matplotlib as _mpl
+
+    _mpl.use("Agg")
+except Exception:
+    pass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,7 +29,13 @@ from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.config import KalmanConfig
 
-from .schemas import ArrayEnvelope, Role, ShockGenerationRequest, ShockParamUpdate
+from .schemas import (
+    ArrayEnvelope,
+    FunctionKind,
+    Role,
+    ShockGenerationRequest,
+    ShockParamUpdate,
+)
 from .serializers import (
     decode_array,
     empty_model_summary,
@@ -25,6 +43,14 @@ from .serializers import (
     summarize_parsed_model,
     summarize_solved_model,
 )
+
+
+@dataclass
+class FunctionRecord:
+    name: str
+    kind: str
+    source: str
+    func: Any
 
 
 @dataclass
@@ -59,6 +85,10 @@ class UISession:
             "dgp": ModelSlot(role="dgp"),
         }
         self.runs: dict[str, RunRecord] = {}
+        self.functions: dict[Role, dict[str, FunctionRecord]] = {
+            "reference": {},
+            "dgp": {},
+        }
         if reference is not None:
             self.set_solved_model("reference", reference)
         if dgp is not None:
@@ -190,13 +220,20 @@ class UISession:
             observables=observables,
         )
         run_id = str(uuid4())
+        sim_dict = dict(sim)
+        all_series = encode_named_arrays(sim)
+        extra = self._apply_array_functions(role, sim_dict)
+        if extra:
+            all_series = all_series + encode_named_arrays(extra)
+        figures = self._apply_figure_functions(role, sim_dict)
         payload: dict[str, Any] = {
             "run_id": run_id,
             "kind": "sim",
             "role": role,
             "T": T,
             "observables": observables,
-            "series": encode_named_arrays(sim),
+            "series": all_series,
+            "figures": figures,
         }
         self.runs[run_id] = RunRecord(
             run_id=run_id,
@@ -206,10 +243,97 @@ class UISession:
         )
         return payload
 
+    def submit_function(
+        self,
+        *,
+        role: Role,
+        code: str,
+        kind: FunctionKind = "array",
+    ) -> dict[str, Any]:
+        tree = ast.parse(code)
+        func_defs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+        if not func_defs:
+            raise ValueError("No function definition found in submitted code.")
+        if len(func_defs) > 1:
+            raise ValueError("Submit one function at a time.")
+        name = func_defs[0].name
+        namespace: dict[str, Any] = {"np": np, "numpy": np}
+        exec(compile(tree, "<string>", "exec"), namespace)  # noqa: S102
+        func = namespace[name]
+        self.functions[role][name] = FunctionRecord(
+            name=name, kind=kind, source=code, func=func
+        )
+        return {"name": name, "kind": kind, "source": code}
+
+    def remove_function(self, *, role: Role, name: str) -> None:
+        if name not in self.functions[role]:
+            raise KeyError(name)
+        del self.functions[role][name]
+
+    def list_functions(self, *, role: Role) -> list[dict[str, Any]]:
+        return [
+            {"name": r.name, "kind": r.kind, "source": r.source}
+            for r in self.functions[role].values()
+        ]
+
     def get_run(self, run_id: str) -> dict[str, Any]:
         if run_id not in self.runs:
             raise KeyError(run_id)
         return dict(self.runs[run_id].payload)
+
+    def _apply_figure_functions(
+        self,
+        role: Role,
+        sim_dict: dict[str, NDArray[np.float64]],
+    ) -> list[dict[str, str]]:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return [
+                {
+                    "name": "__error__",
+                    "error": "matplotlib is not installed — run: pip install matplotlib",
+                }
+            ]
+        except Exception as exc:
+            return [{"name": "__error__", "error": f"matplotlib unavailable: {exc}"}]
+
+        results: list[dict[str, str]] = []
+        for name, record in self.functions[role].items():
+            if record.kind != "figure":
+                continue
+            try:
+                sig = inspect.signature(record.func)
+                kwargs = {p: sim_dict[p] for p in sig.parameters if p in sim_dict}
+                fig_result = record.func(**kwargs)
+                fig = plt.gcf() if fig_result is None else fig_result
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
+                buf.seek(0)
+                image_b64 = base64.b64encode(buf.read()).decode("ascii")
+                results.append({"name": name, "image_b64": image_b64})
+                plt.close(fig)
+            except Exception as exc:
+                results.append({"name": name, "error": str(exc)})
+        return results
+
+    def _apply_array_functions(
+        self,
+        role: Role,
+        sim_dict: dict[str, NDArray[np.float64]],
+    ) -> dict[str, NDArray[np.float64]]:
+        extra: dict[str, NDArray[np.float64]] = {}
+        for name, record in self.functions[role].items():
+            if record.kind != "array":
+                continue
+            try:
+                sig = inspect.signature(record.func)
+                kwargs = {p: sim_dict[p] for p in sig.parameters if p in sim_dict}
+                result = np.asarray(record.func(**kwargs), dtype=np.float64)
+                extra[name] = result
+            except Exception:
+                pass
+        return extra
 
     def _slot(self, role: Role) -> ModelSlot:
         if role not in self.slots:

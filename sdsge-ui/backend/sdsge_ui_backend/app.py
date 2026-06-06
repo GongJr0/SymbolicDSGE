@@ -7,7 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from SymbolicDSGE.core.solved_model import SolvedModel
 
-from .schemas import LoadYamlRequest, Role, SimRunRequest, SolveModelRequest
+from .schemas import (
+    LoadYamlRequest,
+    Role,
+    SimRunRequest,
+    SolveModelRequest,
+    SubmitFunctionRequest,
+)
 from .session import UISession
 
 
@@ -98,6 +104,41 @@ def create_app(
     def get_run(run_id: str) -> dict[str, Any]:
         try:
             return ui_session.get_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=_error_detail(exc),
+            ) from exc
+
+    @app.post("/api/code/submit")
+    def submit_function(request: SubmitFunctionRequest) -> dict[str, Any]:
+        try:
+            return ui_session.submit_function(
+                role=request.role,
+                code=request.code,
+                kind=request.kind,
+            )
+        except (SyntaxError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=_error_detail(exc),
+            ) from exc
+
+    @app.delete("/api/code/{role}/{name}")
+    def remove_function(role: Role, name: str) -> dict[str, Any]:
+        try:
+            ui_session.remove_function(role=role, name=name)
+            return {"removed": name}
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=_error_detail(exc),
+            ) from exc
+
+    @app.get("/api/code/{role}/functions")
+    def list_functions(role: Role) -> list[dict[str, Any]]:
+        try:
+            return ui_session.list_functions(role=role)
         except KeyError as exc:
             raise HTTPException(
                 status_code=404,

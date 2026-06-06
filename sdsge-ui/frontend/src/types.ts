@@ -64,6 +64,20 @@ export interface SessionSummary {
   runs: Array<{ run_id: string; kind: string; role: Role }>;
 }
 
+export type FunctionKind = "array" | "figure";
+
+export interface FunctionRecord {
+  name: string;
+  kind: FunctionKind;
+  source: string;
+}
+
+export interface FigureResult {
+  name: string;
+  image_b64?: string;
+  error?: string;
+}
+
 export interface SimResult {
   run_id: string;
   kind: "sim";
@@ -71,4 +85,5 @@ export interface SimResult {
   T: number;
   observables: boolean;
   series: NamedArray[];
+  figures?: FigureResult[];
 }

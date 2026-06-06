@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 Role = Literal["reference", "dgp"]
 ShockDistribution = Literal["norm", "t", "uni"]
+FunctionKind = Literal["array", "figure"]
 
 
 class ArrayEnvelope(BaseModel):
@@ -47,3 +48,9 @@ class SimRunRequest(BaseModel):
     shocks: dict[str, ArrayEnvelope] | None = None
     shock_generation: ShockGenerationRequest | None = None
     shock_params: ShockParamUpdate | None = None
+
+
+class SubmitFunctionRequest(BaseModel):
+    role: Role
+    code: str
+    kind: FunctionKind = "array"
