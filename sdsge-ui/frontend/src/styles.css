@@ -496,16 +496,7 @@ label {
   padding: 14px;
 }
 
-.spec-view {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.outputs-view {
+.panel-view {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -682,6 +673,22 @@ label {
   padding: 12px;
 }
 
+.output-panel-body.no-padding {
+  gap: 0;
+  padding: 0;
+}
+
+.output-panel-body.scrollable {
+  overflow-y: auto;
+}
+
+.output-panel-body.no-padding .monaco-shell {
+  border-radius: 0;
+  border: 0;
+  flex: 1;
+  min-height: 0;
+}
+
 .output-height-handle {
   cursor: row-resize;
   flex-shrink: 0;
@@ -754,8 +761,7 @@ label {
     overflow-y: visible;
   }
 
-  .spec-view,
-  .outputs-view {
+  .panel-view {
     overflow: visible;
   }
 

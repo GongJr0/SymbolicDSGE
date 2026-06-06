@@ -16,7 +16,6 @@ import {
   RefreshCw,
   Sun,
   Upload,
-  Zap,
 } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { useEffect, useMemo, useState } from "react";
@@ -35,6 +34,8 @@ import {
 } from "./configSchema";
 import { configureSymbolicDsgeYaml } from "./monacoWorkers";
 import { OutputWorkspace } from "./OutputWorkspace";
+import { PanelWorkspace } from "./PanelWorkspace";
+import type { PanelDef } from "./PanelWorkspace";
 import type {
   ModelSummary,
   Role,
@@ -503,14 +504,14 @@ function BuilderView({
   loadContentAction: () => void;
   syncAction: () => void;
 }) {
-  return (
-    <section className="builder-panel">
-      <div className="builder-toolbar">
-        <div>
-          <h3>Config Builder</h3>
-          <p>Target role: {role}</p>
-        </div>
-        <div className="builder-actions">
+  const panels: PanelDef[] = [
+    {
+      id: "editor",
+      title: "Config Builder",
+      badge: role,
+      noPadding: true,
+      headerActions: (
+        <>
           <button disabled={busy || content.trim() === ""} onClick={loadContentAction}>
             <Upload size={16} />
             Load
@@ -519,11 +520,9 @@ function BuilderView({
             <RefreshCw size={16} />
             Sync
           </button>
-        </div>
-      </div>
-
-      <div className="builder-editor">
-        <span>YAML Content</span>
+        </>
+      ),
+      content: (
         <div className="monaco-shell">
           <Editor
             beforeMount={configureSymbolicDsgeYaml}
@@ -537,11 +536,7 @@ function BuilderView({
               automaticLayout: true,
               fontSize: 13,
               minimap: { enabled: false },
-              quickSuggestions: {
-                comments: false,
-                other: true,
-                strings: true,
-              },
+              quickSuggestions: { comments: false, other: true, strings: true },
               suggestOnTriggerCharacters: true,
               scrollBeyondLastLine: false,
               tabSize: 2,
@@ -550,8 +545,14 @@ function BuilderView({
             }}
           />
         </div>
-      </div>
-    </section>
+      ),
+    },
+  ];
+
+  return (
+    <div className="panel-view">
+      <PanelWorkspace panels={panels} defaultLayout="vertical" />
+    </div>
   );
 }
 
@@ -596,135 +597,148 @@ function SpecView({
   shockCorrParams: Record<string, string>;
   setShockCorrParams: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
-  return (
-    <div className="spec-view">
-      <section className="summary-grid">
-        <SummaryBlock title="Variables" values={activeModel.variables ?? []} />
-        <SummaryBlock title="Observables" values={activeModel.observables ?? []} />
-        <SummaryBlock
-          title="State Layout"
-          values={[
-            `n_state: ${activeModel.n_state ?? "pending"}`,
-            `n_exog: ${activeModel.n_exog ?? "pending"}`,
-          ]}
-        />
-      </section>
-
-      <section className="shock-panel">
-        <div className="panel-heading">
-          <Zap size={16} />
-          <h3>Shocks</h3>
+  const panels: PanelDef[] = [
+    {
+      id: "summary",
+      title: "Model",
+      badge: activeModel.name ?? activeModel.role,
+      defaultHeight: 200,
+      content: (
+        <div className="summary-grid">
+          <SummaryBlock title="Variables" values={activeModel.variables ?? []} />
+          <SummaryBlock title="Observables" values={activeModel.observables ?? []} />
+          <SummaryBlock
+            title="State Layout"
+            values={[
+              `n_state: ${activeModel.n_state ?? "pending"}`,
+              `n_exog: ${activeModel.n_exog ?? "pending"}`,
+            ]}
+          />
         </div>
+      ),
+    },
+    {
+      id: "shocks",
+      title: "Shocks",
+      scrollable: true,
+      content: (
+        <>
+          <div className="shock-controls">
+            <label>
+              Source
+              <select
+                value={shockMode}
+                onChange={(event) => setShockMode(event.target.value as ShockMode)}
+              >
+                <option value="generated">Shock</option>
+                <option value="raw">Raw</option>
+              </select>
+            </label>
 
-        <div className="shock-controls">
-          <label>
-            Source
-            <select
-              value={shockMode}
-              onChange={(event) => setShockMode(event.target.value as ShockMode)}
-            >
-              <option value="generated">Shock</option>
-              <option value="raw">Raw</option>
-            </select>
-          </label>
-
-          {shockMode === "generated" && (
-            <>
-              <label>
-                Distribution
-                <select
-                  value={shockDist}
-                  onChange={(event) =>
-                    setShockDist(event.target.value as ShockDistribution)
-                  }
-                >
-                  <option value="norm">normal</option>
-                  <option value="t">student-t</option>
-                  <option value="uni">uniform</option>
-                </select>
-              </label>
-              <label>
-                Seed
-                <input
-                  value={shockSeed}
-                  onChange={(event) => setShockSeed(event.target.value)}
-                />
-              </label>
-              <label>
-                Loc
-                <input
-                  value={shockLoc}
-                  onChange={(event) => setShockLoc(event.target.value)}
-                />
-              </label>
-              <label>
-                DF
-                <input
-                  value={shockDf}
-                  disabled={shockDist !== "t"}
-                  onChange={(event) => setShockDf(event.target.value)}
-                />
-              </label>
-            </>
-          )}
-        </div>
-
-        {shockMode === "raw" ? (
-          <div className="param-grid">
-            {shockSpecs.length === 0 ? (
-              <span className="muted">none</span>
-            ) : (
-              shockSpecs.map((spec) => (
-                <label key={spec.target}>
-                  {spec.shock} {"->"} {spec.target}
-                  <textarea
-                    className="shock-input"
-                    value={shockInputs[spec.target] ?? ""}
+            {shockMode === "generated" && (
+              <>
+                <label>
+                  Distribution
+                  <select
+                    value={shockDist}
                     onChange={(event) =>
-                      setShockInputs((current) => ({
-                        ...current,
-                        [spec.target]: event.target.value,
-                      }))
+                      setShockDist(event.target.value as ShockDistribution)
                     }
-                    placeholder="0 0 1 0"
+                  >
+                    <option value="norm">normal</option>
+                    <option value="t">student-t</option>
+                    <option value="uni">uniform</option>
+                  </select>
+                </label>
+                <label>
+                  Seed
+                  <input
+                    value={shockSeed}
+                    onChange={(event) => setShockSeed(event.target.value)}
                   />
                 </label>
-              ))
+                <label>
+                  Loc
+                  <input
+                    value={shockLoc}
+                    onChange={(event) => setShockLoc(event.target.value)}
+                  />
+                </label>
+                <label>
+                  DF
+                  <input
+                    value={shockDf}
+                    disabled={shockDist !== "t"}
+                    onChange={(event) => setShockDf(event.target.value)}
+                  />
+                </label>
+              </>
             )}
           </div>
-        ) : (
-          <div className="param-grid">
-            {shockSpecs.map((spec) => (
-              <label key={spec.shock}>
-                {spec.shock} std {spec.std_param ? `(${spec.std_param})` : ""}
-                <input
-                  value={shockStdParams[spec.shock] ?? ""}
-                  onChange={(event) =>
-                    setShockStdParams((current) => ({
-                      ...current,
-                      [spec.shock]: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            ))}
-            {shockCorrSpecs.map((spec) => (
-              <label key={spec.key}>
-                {spec.key} corr ({spec.corr_param})
-                <input
-                  value={shockCorrParams[spec.key] ?? ""}
-                  onChange={(event) =>
-                    setShockCorrParams((current) => ({
-                      ...current,
-                      [spec.key]: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            ))}
-          </div>
-        )}
-      </section>
+
+          {shockMode === "raw" ? (
+            <div className="param-grid">
+              {shockSpecs.length === 0 ? (
+                <span className="muted">none</span>
+              ) : (
+                shockSpecs.map((spec) => (
+                  <label key={spec.target}>
+                    {spec.shock} {"->"} {spec.target}
+                    <textarea
+                      className="shock-input"
+                      value={shockInputs[spec.target] ?? ""}
+                      onChange={(event) =>
+                        setShockInputs((current) => ({
+                          ...current,
+                          [spec.target]: event.target.value,
+                        }))
+                      }
+                      placeholder="0 0 1 0"
+                    />
+                  </label>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="param-grid">
+              {shockSpecs.map((spec) => (
+                <label key={spec.shock}>
+                  {spec.shock} std {spec.std_param ? `(${spec.std_param})` : ""}
+                  <input
+                    value={shockStdParams[spec.shock] ?? ""}
+                    onChange={(event) =>
+                      setShockStdParams((current) => ({
+                        ...current,
+                        [spec.shock]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              ))}
+              {shockCorrSpecs.map((spec) => (
+                <label key={spec.key}>
+                  {spec.key} corr ({spec.corr_param})
+                  <input
+                    value={shockCorrParams[spec.key] ?? ""}
+                    onChange={(event) =>
+                      setShockCorrParams((current) => ({
+                        ...current,
+                        [spec.key]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <div className="panel-view">
+      <PanelWorkspace panels={panels} defaultLayout="vertical" defaultSplit={30} />
     </div>
   );
 }
@@ -769,7 +783,7 @@ function OutputsView({
   theme: "light" | "dark";
 }) {
   return (
-    <div className="outputs-view">
+    <div className="panel-view">
       <section className="run-panel">
         <label>
           T

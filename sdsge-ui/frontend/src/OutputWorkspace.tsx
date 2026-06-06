@@ -1,30 +1,23 @@
 import { HotTable } from "@handsontable/react-wrapper";
 import type { HotTableRef } from "@handsontable/react-wrapper";
-import {
-  ChevronDown,
-  ChevronRight,
-  Download,
-  GripVertical,
-} from "lucide-react";
+import { Download } from "lucide-react";
 import { registerAllModules } from "handsontable/registry";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CSSProperties,
-  Dispatch,
-  DragEvent,
-  PointerEvent,
-  RefObject,
-  SetStateAction,
+import {
+  forwardRef,
+  memo,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
 } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { Line } from "react-chartjs-2";
 import { decodeArray } from "./api";
+import { PanelWorkspace } from "./PanelWorkspace";
+import type { PanelDef } from "./PanelWorkspace";
 import type { SimResult } from "./types";
 
 registerAllModules();
-
-type PanelId = "graph" | "table";
-type LayoutDirection = "horizontal" | "vertical";
-type DropPlacement = "top" | "right" | "bottom" | "left";
 
 interface ChartData {
   labels: string[];
@@ -36,6 +29,10 @@ interface ChartData {
     pointRadius: number;
     borderWidth: number;
   }[];
+}
+
+interface TableHandle {
+  exportCsv: (role: string, runId: string) => void;
 }
 
 export const OutputWorkspace = memo(function OutputWorkspace({
@@ -53,265 +50,41 @@ export const OutputWorkspace = memo(function OutputWorkspace({
   chartData: ChartData;
   theme: "light" | "dark";
 }) {
-  const [order, setOrder] = useState<PanelId[]>(["graph", "table"]);
-  const [folded, setFolded] = useState<Record<PanelId, boolean>>({
-    graph: false,
-    table: false,
-  });
-  const [panelHeights, setPanelHeights] = useState<Record<PanelId, number>>({
-    graph: 470,
-    table: 470,
-  });
-  const [split, setSplit] = useState(50);
-  const [layout, setLayout] = useState<LayoutDirection>("vertical");
-  const [dragged, setDragged] = useState<PanelId | null>(null);
-  const [dropTarget, setDropTarget] = useState<{
-    panel: PanelId;
-    placement: DropPlacement;
-  } | null>(null);
-  const tableRef = useRef<HotTableRef>(null);
-  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const tablePanelRef = useRef<TableHandle>(null);
   const table = useMemo(() => createTableData(graphSeries), [graphSeries]);
 
-  useEffect(() => {
-    const container = tableContainerRef.current;
-    if (container === null) return;
-    let frame = 0;
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        tableRef.current?.hotInstance?.refreshDimensions();
-      });
-    });
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    };
-  }, []);
-
-  function dragOverPanel(target: PanelId, event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    if (dragged === null || dragged === target) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const distances: Array<[DropPlacement, number]> = [
-      ["top", y],
-      ["right", rect.width - x],
-      ["bottom", rect.height - y],
-      ["left", x],
-    ];
-    const placement = distances.reduce((closest, candidate) =>
-      candidate[1] < closest[1] ? candidate : closest,
-    )[0];
-    setDropTarget((current) =>
-      current?.panel === target && current.placement === placement
-        ? current
-        : { panel: target, placement },
-    );
-  }
-
-  function dropPanel(target: PanelId) {
-    if (dragged === null || dragged === target || dropTarget === null) return;
-    const draggedFirst =
-      dropTarget.placement === "top" || dropTarget.placement === "left";
-    const newLayout: LayoutDirection =
-      dropTarget.placement === "top" || dropTarget.placement === "bottom"
-        ? "vertical"
-        : "horizontal";
-    setOrder(draggedFirst ? [dragged, target] : [target, dragged]);
-    if (newLayout !== layout) {
-      setLayout(newLayout);
-      setSplit(50);
-    }
-    setDragged(null);
-    setDropTarget(null);
-  }
-
-  function startSplitResize(event: PointerEvent<HTMLDivElement>) {
-    const outputWorkspace = (event.currentTarget as HTMLElement).closest<HTMLElement>(
-      ".output-workspace",
-    );
-    if (outputWorkspace === null) return;
-    const rect = outputWorkspace.getBoundingClientRect();
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startSplit = split;
-
-    function move(pointerEvent: globalThis.PointerEvent) {
-      if (layout === "horizontal") {
-        const delta = ((pointerEvent.clientX - startX) / rect.width) * 100;
-        setSplit(Math.min(75, Math.max(25, startSplit + delta)));
-        return;
-      }
-      const delta = ((pointerEvent.clientY - startY) / rect.height) * 100;
-      setSplit(Math.min(80, Math.max(20, startSplit + delta)));
-    }
-
-    function stop() {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-    }
-
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-  }
-
-  function startHeightResize(panel: PanelId, event: PointerEvent<HTMLDivElement>) {
-    const startY = event.clientY;
-    const startHeight = panelHeights[panel];
-
-    function move(pointerEvent: globalThis.PointerEvent) {
-      setPanelHeights((current) => ({
-        ...current,
-        [panel]: Math.max(260, startHeight + pointerEvent.clientY - startY),
-      }));
-    }
-
-    function stop() {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-    }
-
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-  }
-
-  function getSlotStyle(panel: PanelId, index: number): CSSProperties | undefined {
-    if (layout !== "vertical") return undefined;
-    const otherPanel = order[1 - index] as PanelId;
-    if (folded[panel]) return { flex: "0 0 auto" };
-    if (folded[otherPanel]) return { flex: 1, minHeight: 0 };
-    return { flex: index === 0 ? split : 100 - split, minHeight: 0 };
-  }
-
-  function getPanelStyle(panel: PanelId): CSSProperties | undefined {
-    if (folded[panel]) return undefined;
-    if (layout === "vertical") return { flex: 1 };
-    return { height: panelHeights[panel] };
-  }
-
   function exportCsv() {
-    tableRef.current?.hotInstance
-      ?.getPlugin("exportFile")
-      .downloadFile("csv", {
-        bom: true,
-        colHeaders: true,
-        filename: `${result.role}-${result.run_id}-[YYYY]-[MM]-[DD]`,
-      });
+    tablePanelRef.current?.exportCsv(result.role, result.run_id);
   }
 
-  const panels: Record<PanelId, React.ReactNode> = {
-    graph: (
-      <GraphPanel
-        graphSeries={graphSeries}
-        selected={selected}
-        setSelected={setSelected}
-        chartData={chartData}
-      />
-    ),
-    table: (
-      <TablePanel
-        tableRef={tableRef}
-        tableContainerRef={tableContainerRef}
-        table={table}
-        theme={theme}
-      />
-    ),
-  };
+  const panels: PanelDef[] = [
+    {
+      id: "graph",
+      title: "Graph",
+      badge: `${graphSeries.length} series`,
+      content: (
+        <GraphPanel
+          graphSeries={graphSeries}
+          selected={selected}
+          setSelected={setSelected}
+          chartData={chartData}
+        />
+      ),
+    },
+    {
+      id: "table",
+      title: "Table",
+      badge: `${graphSeries.length} series`,
+      content: <TablePanel ref={tablePanelRef} table={table} theme={theme} />,
+      headerActions: (
+        <button className="icon-button" onClick={exportCsv} title="Export table as CSV">
+          <Download size={16} />
+        </button>
+      ),
+    },
+  ];
 
-  return (
-    <section
-      className={`output-workspace ${layout}`}
-      style={
-        layout === "horizontal"
-          ? { gridTemplateColumns: `${split}fr 6px ${100 - split}fr` }
-          : undefined
-      }
-    >
-      {order.map((panel, index) => (
-        <div
-          key={panel}
-          className={index === 1 ? "output-slot second" : "output-slot"}
-          style={getSlotStyle(panel, index)}
-        >
-          {index === 1 && !folded[order[0]] && !folded[order[1]] && (
-            <div
-              className="output-splitter"
-              onPointerDown={startSplitResize}
-              title="Resize output panels"
-            />
-          )}
-          <section
-            className={`output-panel ${folded[panel] ? "folded" : ""}`}
-            style={getPanelStyle(panel)}
-            onDragOver={(event) => dragOverPanel(panel, event)}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-                setDropTarget(null);
-              }
-            }}
-            onDrop={() => dropPanel(panel)}
-          >
-            {dropTarget?.panel === panel && (
-              <div className={`panel-drop-indicator ${dropTarget.placement}`} />
-            )}
-            <header
-              className="output-panel-header"
-              draggable
-              onDragStart={(event: DragEvent<HTMLElement>) => {
-                event.dataTransfer.effectAllowed = "move";
-                setDragged(panel);
-              }}
-              onDragEnd={() => {
-                setDragged(null);
-                setDropTarget(null);
-              }}
-            >
-              <div>
-                <GripVertical size={16} />
-                <strong>{panel === "graph" ? "Graph" : "Table"}</strong>
-                <span>{graphSeries.length} series</span>
-              </div>
-              <div className="output-panel-actions">
-                {panel === "table" && (
-                  <button
-                    className="icon-button"
-                    onClick={exportCsv}
-                    title="Export table as CSV"
-                  >
-                    <Download size={16} />
-                  </button>
-                )}
-                <button
-                  className="icon-button"
-                  onClick={() =>
-                    setFolded((current) => ({ ...current, [panel]: !current[panel] }))
-                  }
-                  title={folded[panel] ? `Expand ${panel}` : `Fold ${panel}`}
-                >
-                  {folded[panel] ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-                </button>
-              </div>
-            </header>
-            {!folded[panel] && (
-              <>
-                <div className="output-panel-body">{panels[panel]}</div>
-                {layout === "horizontal" && (
-                  <div
-                    className="output-height-handle"
-                    onPointerDown={(event) => startHeightResize(panel, event)}
-                    title={`Resize ${panel} height`}
-                  />
-                )}
-              </>
-            )}
-          </section>
-        </div>
-      ))}
-    </section>
-  );
+  return <PanelWorkspace panels={panels} defaultLayout="vertical" />;
 });
 
 const GraphPanel = memo(function GraphPanel({
@@ -365,19 +138,44 @@ const GraphPanel = memo(function GraphPanel({
   );
 });
 
-const TablePanel = memo(function TablePanel({
-  tableRef,
-  tableContainerRef,
-  table,
-  theme,
-}: {
-  tableRef: RefObject<HotTableRef | null>;
-  tableContainerRef: RefObject<HTMLDivElement | null>;
-  table: ReturnType<typeof createTableData>;
-  theme: "light" | "dark";
-}) {
+const TablePanel = forwardRef<
+  TableHandle,
+  { table: ReturnType<typeof createTableData>; theme: "light" | "dark" }
+>(function TablePanel({ table, theme }, ref) {
+  const tableRef = useRef<HotTableRef>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    exportCsv(role: string, runId: string) {
+      tableRef.current?.hotInstance
+        ?.getPlugin("exportFile")
+        .downloadFile("csv", {
+          bom: true,
+          colHeaders: true,
+          filename: `${role}-${runId}-[YYYY]-[MM]-[DD]`,
+        });
+    },
+  }));
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        tableRef.current?.hotInstance?.refreshDimensions();
+      });
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
   return (
-    <div ref={tableContainerRef} className="output-table">
+    <div ref={containerRef} className="output-table">
       <HotTable
         ref={tableRef}
         data={table.rows}
@@ -409,10 +207,7 @@ function createTableData(series: SimResult["series"]) {
     headers: ["period", ...decoded.map((item) => item.name)],
     columns: [
       { type: "numeric", numericFormat: { pattern: "0" } },
-      ...decoded.map(() => ({
-        type: "numeric",
-        numericFormat: { pattern: "0.000" },
-      })),
+      ...decoded.map(() => ({ type: "numeric", numericFormat: { pattern: "0.000" } })),
     ],
     rows: Array.from({ length: rowCount }, (_, period) => [
       period,
