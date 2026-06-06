@@ -185,7 +185,7 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
       },
     },
   },
-  additionalProperties: true,
+  additionalProperties: false,
 };
 
 export const symbolicDsgeSchemaUri =

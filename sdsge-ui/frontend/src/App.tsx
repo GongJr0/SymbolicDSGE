@@ -7,12 +7,20 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import { Database, Moon, Play, RefreshCw, Sun, Upload, Zap } from "lucide-react";
+import {
+  Database,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Play,
+  RefreshCw,
+  Sun,
+  Upload,
+  Zap,
+} from "lucide-react";
 import Editor from "@monaco-editor/react";
-import { configureMonacoYaml } from "monaco-yaml";
 import { useEffect, useMemo, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
-import { Line } from "react-chartjs-2";
+import type { CSSProperties, Dispatch, PointerEvent, SetStateAction } from "react";
 import {
   decodeArray,
   encodeArray,
@@ -24,9 +32,9 @@ import {
 } from "./api";
 import {
   symbolicDsgeConfigModelPath,
-  symbolicDsgeConfigSchema,
-  symbolicDsgeSchemaUri,
 } from "./configSchema";
+import { configureSymbolicDsgeYaml } from "./monacoWorkers";
+import { OutputWorkspace } from "./OutputWorkspace";
 import type {
   ModelSummary,
   Role,
@@ -60,8 +68,7 @@ const SERIES_COLORS = [
   "#65a30d",
   "#c2410c",
 ];
-let yamlLanguageConfigured = false;
-type View = "builder" | "spec" | "graph";
+type View = "builder" | "spec" | "outputs";
 type ShockMode = "raw" | "generated";
 
 export default function App() {
@@ -84,8 +91,11 @@ export default function App() {
   const [shockCorrParams, setShockCorrParams] = useState<Record<string, string>>({});
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [view, setView] = useState<View>(initialView);
-  const [message, setMessage] = useState("Backend not checked yet.");
+  const [message, setMessage] = useState("");
+  const [messageIsError, setMessageIsError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(320);
 
   const activeModel = session?.models[role] ?? { role, loaded: false, solved: false };
   const shockSpecs = useMemo(
@@ -107,7 +117,11 @@ export default function App() {
   async function refreshSession() {
     const next = await getSession();
     setSession(next);
-    setMessage("Session refreshed.");
+  }
+
+  function showMessage(text: string, isError = false) {
+    setMessage(text);
+    setMessageIsError(isError);
   }
 
   function navigate(next: View) {
@@ -120,10 +134,10 @@ export default function App() {
     setBusy(true);
     try {
       await action();
-      setMessage(done);
       await refreshSession();
+      showMessage(done);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      showMessage(error instanceof Error ? error.message : String(error), true);
     } finally {
       setBusy(false);
     }
@@ -131,9 +145,15 @@ export default function App() {
 
   useEffect(() => {
     refreshSession().catch((error: unknown) => {
-      setMessage(error instanceof Error ? error.message : String(error));
+      showMessage(error instanceof Error ? error.message : String(error), true);
     });
   }, []);
+
+  useEffect(() => {
+    if (message === "" || messageIsError) return;
+    const timeout = window.setTimeout(() => setMessage(""), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [message, messageIsError]);
 
   useEffect(() => {
     const onPopState = () => setView(initialView());
@@ -171,12 +191,6 @@ export default function App() {
     }
     setShockCorrParams(next);
   }, [shockCorrSpecs]);
-
-  useEffect(() => {
-    if (content.trim() === "" && activeModel.raw_yaml !== undefined) {
-      setContent(activeModel.raw_yaml);
-    }
-  }, [activeModel.raw_yaml, content]);
 
   const chartData = useMemo(() => {
     const series = graphSeries.filter((item) => selected.includes(item.name));
@@ -249,23 +263,57 @@ export default function App() {
     };
   }
 
+  function startSidebarResize(event: PointerEvent<HTMLDivElement>) {
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    function move(pointerEvent: globalThis.PointerEvent) {
+      setSidebarWidth(
+        Math.min(480, Math.max(240, startWidth + pointerEvent.clientX - startX)),
+      );
+    }
+
+    function stop() {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    }
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  }
+
   return (
-    <main className={`app theme-${theme}`}>
-      <aside className="sidebar">
+    <main
+      className={`app theme-${theme}`}
+      style={
+        {
+          "--sidebar-width": `${sidebarCollapsed ? 58 : sidebarWidth}px`,
+        } as CSSProperties
+      }
+    >
+      <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
         <div className="brand">
           <Database size={22} />
           <div>
             <h1>SymbolicDSGE</h1>
             <span>localhost playground</span>
           </div>
+          <button
+            className="icon-button sidebar-fold"
+            onClick={() => setSidebarCollapsed((current) => !current)}
+            title={sidebarCollapsed ? "Expand sidebar" : "Fold sidebar"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          </button>
         </div>
 
         <button
-          className="secondary"
+          className="secondary sidebar-theme"
           onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+          title={theme === "light" ? "Use dark theme" : "Use light theme"}
         >
           {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
-          {theme === "light" ? "Dark" : "Light"}
+          <span>{theme === "light" ? "Dark" : "Light"}</span>
         </button>
 
         <label>
@@ -299,7 +347,10 @@ export default function App() {
             <Upload size={16} />
             Load
           </button>
-          <button disabled={busy} onClick={() => runAction(refreshSession, "Ready.")}>
+          <button
+            disabled={busy}
+            onClick={() => runAction(async () => undefined, "Session refreshed.")}
+          >
             <RefreshCw size={16} />
             Sync
           </button>
@@ -327,13 +378,18 @@ export default function App() {
           Solve
         </button>
       </aside>
+      <div
+        className={`sidebar-resizer ${sidebarCollapsed ? "disabled" : ""}`}
+        onPointerDown={sidebarCollapsed ? undefined : startSidebarResize}
+        title="Resize sidebar"
+      />
 
       <section className="workspace">
         <header className="topbar">
           <ModelStatus model={activeModel} />
-          <span className={message.includes("failed") ? "status error" : "status"}>
-            {message}
-          </span>
+          {message !== "" && (
+            <span className={messageIsError ? "status error" : "status"}>{message}</span>
+          )}
         </header>
 
         <nav className="view-tabs">
@@ -350,10 +406,10 @@ export default function App() {
             Spec
           </button>
           <button
-            className={view === "graph" ? "active" : ""}
-            onClick={() => navigate("graph")}
+            className={view === "outputs" ? "active" : ""}
+            onClick={() => navigate("outputs")}
           >
-            Graph
+            Outputs
           </button>
         </nav>
 
@@ -364,14 +420,15 @@ export default function App() {
             theme={theme}
             content={content}
             setContent={setContent}
-            beforeEditorMount={configureYamlEditor}
             loadContentAction={() =>
               runAction(
                 () => loadYamlContent(role, content),
                 "YAML loaded from content.",
               )
             }
-            syncAction={() => runAction(refreshSession, "Ready.")}
+            syncAction={() =>
+              runAction(async () => undefined, "Session refreshed.")
+            }
           />
         ) : view === "spec" ? (
           <SpecView
@@ -396,7 +453,7 @@ export default function App() {
             setShockCorrParams={setShockCorrParams}
           />
         ) : (
-          <GraphView
+          <OutputsView
             busy={busy}
             activeModel={activeModel}
             simT={simT}
@@ -421,6 +478,7 @@ export default function App() {
             selected={selected}
             setSelected={setSelected}
             chartData={chartData}
+            theme={theme}
           />
         )}
       </section>
@@ -434,7 +492,6 @@ function BuilderView({
   theme,
   content,
   setContent,
-  beforeEditorMount,
   loadContentAction,
   syncAction,
 }: {
@@ -443,7 +500,6 @@ function BuilderView({
   theme: "light" | "dark";
   content: string;
   setContent: Dispatch<SetStateAction<string>>;
-  beforeEditorMount: Parameters<typeof Editor>[0]["beforeMount"];
   loadContentAction: () => void;
   syncAction: () => void;
 }) {
@@ -470,12 +526,12 @@ function BuilderView({
         <span>YAML Content</span>
         <div className="monaco-shell">
           <Editor
-            height="460px"
+            beforeMount={configureSymbolicDsgeYaml}
+            height="100%"
             language="yaml"
             path={symbolicDsgeConfigModelPath}
             theme={theme === "dark" ? "vs-dark" : "light"}
             value={content}
-            beforeMount={beforeEditorMount}
             onChange={(value) => setContent(value ?? "")}
             options={{
               automaticLayout: true,
@@ -673,7 +729,7 @@ function SpecView({
   );
 }
 
-function GraphView({
+function OutputsView({
   busy,
   activeModel,
   simT,
@@ -686,6 +742,7 @@ function GraphView({
   selected,
   setSelected,
   chartData,
+  theme,
 }: {
   busy: boolean;
   activeModel: ModelSummary;
@@ -709,6 +766,7 @@ function GraphView({
       borderWidth: number;
     }[];
   };
+  theme: "light" | "dark";
 }) {
   return (
     <>
@@ -737,42 +795,14 @@ function GraphView({
       </section>
 
       {result !== null && (
-        <section className="results">
-          <div className="series-list">
-            {graphSeries.map((item) => (
-              <label key={item.name} className="series-toggle">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(item.name)}
-                  onChange={(event) => {
-                    setSelected((current) =>
-                      event.target.checked
-                        ? [...current, item.name]
-                        : current.filter((name) => name !== item.name),
-                    );
-                  }}
-                />
-                {item.name}
-              </label>
-            ))}
-          </div>
-          <div className="chart-wrap">
-            <Line
-              data={chartData}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                interaction: { mode: "nearest", intersect: false },
-                plugins: { legend: { position: "bottom" } },
-                scales: {
-                  x: { ticks: { maxTicksLimit: 12 } },
-                  y: { beginAtZero: false },
-                },
-              }}
-            />
-          </div>
-        </section>
+        <OutputWorkspace
+          result={result}
+          graphSeries={graphSeries}
+          selected={selected}
+          setSelected={setSelected}
+          chartData={chartData}
+          theme={theme}
+        />
       )}
     </>
   );
@@ -780,7 +810,12 @@ function GraphView({
 
 function initialView(): View {
   if (window.location.pathname.endsWith("/builder")) return "builder";
-  if (window.location.pathname.endsWith("/graph")) return "graph";
+  if (
+    window.location.pathname.endsWith("/outputs") ||
+    window.location.pathname.endsWith("/graph")
+  ) {
+    return "outputs";
+  }
   return "spec";
 }
 
@@ -790,25 +825,6 @@ function colorForSeries(name: string): string {
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   }
   return SERIES_COLORS[Math.abs(hash) % SERIES_COLORS.length];
-}
-
-function configureYamlEditor(monaco: Parameters<typeof configureMonacoYaml>[0]) {
-  if (yamlLanguageConfigured) return;
-  configureMonacoYaml(monaco, {
-    completion: true,
-    enableSchemaRequest: false,
-    format: { enable: true },
-    hover: true,
-    validate: true,
-    schemas: [
-      {
-        uri: symbolicDsgeSchemaUri,
-        fileMatch: [symbolicDsgeConfigModelPath, "**/*.yaml", "**/*.yml"],
-        schema: symbolicDsgeConfigSchema,
-      },
-    ],
-  });
-  yamlLanguageConfigured = true;
 }
 
 function parseFinite(value: string | undefined, label: string): number {
