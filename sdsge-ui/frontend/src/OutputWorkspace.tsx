@@ -9,6 +9,7 @@ import {
 import { registerAllModules } from "handsontable/registry";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CSSProperties,
   Dispatch,
   DragEvent,
   PointerEvent,
@@ -62,7 +63,7 @@ export const OutputWorkspace = memo(function OutputWorkspace({
     table: 470,
   });
   const [split, setSplit] = useState(50);
-  const [layout, setLayout] = useState<LayoutDirection>("horizontal");
+  const [layout, setLayout] = useState<LayoutDirection>("vertical");
   const [dragged, setDragged] = useState<PanelId | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     panel: PanelId;
@@ -115,40 +116,37 @@ export const OutputWorkspace = memo(function OutputWorkspace({
     if (dragged === null || dragged === target || dropTarget === null) return;
     const draggedFirst =
       dropTarget.placement === "top" || dropTarget.placement === "left";
-    setOrder(draggedFirst ? [dragged, target] : [target, dragged]);
-    setLayout(
+    const newLayout: LayoutDirection =
       dropTarget.placement === "top" || dropTarget.placement === "bottom"
         ? "vertical"
-        : "horizontal",
-    );
+        : "horizontal";
+    setOrder(draggedFirst ? [dragged, target] : [target, dragged]);
+    if (newLayout !== layout) {
+      setLayout(newLayout);
+      setSplit(50);
+    }
     setDragged(null);
     setDropTarget(null);
   }
 
   function startSplitResize(event: PointerEvent<HTMLDivElement>) {
-    const workspace = event.currentTarget.parentElement;
-    if (workspace === null) return;
+    const outputWorkspace = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+      ".output-workspace",
+    );
+    if (outputWorkspace === null) return;
+    const rect = outputWorkspace.getBoundingClientRect();
     const startX = event.clientX;
     const startY = event.clientY;
     const startSplit = split;
-    const first = order[0];
-    const second = order[1];
-    const firstHeight = panelHeights[first];
-    const secondHeight = panelHeights[second];
-    const width = workspace.getBoundingClientRect().width;
 
     function move(pointerEvent: globalThis.PointerEvent) {
       if (layout === "horizontal") {
-        const delta = ((pointerEvent.clientX - startX) / width) * 100;
+        const delta = ((pointerEvent.clientX - startX) / rect.width) * 100;
         setSplit(Math.min(75, Math.max(25, startSplit + delta)));
         return;
       }
-      const delta = pointerEvent.clientY - startY;
-      setPanelHeights((current) => ({
-        ...current,
-        [first]: Math.max(260, firstHeight + delta),
-        [second]: Math.max(260, secondHeight - delta),
-      }));
+      const delta = ((pointerEvent.clientY - startY) / rect.height) * 100;
+      setSplit(Math.min(80, Math.max(20, startSplit + delta)));
     }
 
     function stop() {
@@ -178,6 +176,20 @@ export const OutputWorkspace = memo(function OutputWorkspace({
 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
+  }
+
+  function getSlotStyle(panel: PanelId, index: number): CSSProperties | undefined {
+    if (layout !== "vertical") return undefined;
+    const otherPanel = order[1 - index] as PanelId;
+    if (folded[panel]) return { flex: "0 0 auto" };
+    if (folded[otherPanel]) return { flex: 1, minHeight: 0 };
+    return { flex: index === 0 ? split : 100 - split, minHeight: 0 };
+  }
+
+  function getPanelStyle(panel: PanelId): CSSProperties | undefined {
+    if (folded[panel]) return undefined;
+    if (layout === "vertical") return { flex: 1 };
+    return { height: panelHeights[panel] };
   }
 
   function exportCsv() {
@@ -219,7 +231,11 @@ export const OutputWorkspace = memo(function OutputWorkspace({
       }
     >
       {order.map((panel, index) => (
-        <div key={panel} className={index === 1 ? "output-slot second" : "output-slot"}>
+        <div
+          key={panel}
+          className={index === 1 ? "output-slot second" : "output-slot"}
+          style={getSlotStyle(panel, index)}
+        >
           {index === 1 && !folded[order[0]] && !folded[order[1]] && (
             <div
               className="output-splitter"
@@ -229,7 +245,7 @@ export const OutputWorkspace = memo(function OutputWorkspace({
           )}
           <section
             className={`output-panel ${folded[panel] ? "folded" : ""}`}
-            style={{ height: folded[panel] ? undefined : panelHeights[panel] }}
+            style={getPanelStyle(panel)}
             onDragOver={(event) => dragOverPanel(panel, event)}
             onDragLeave={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node)) {
@@ -282,11 +298,13 @@ export const OutputWorkspace = memo(function OutputWorkspace({
             {!folded[panel] && (
               <>
                 <div className="output-panel-body">{panels[panel]}</div>
-                <div
-                  className="output-height-handle"
-                  onPointerDown={(event) => startHeightResize(panel, event)}
-                  title={`Resize ${panel} height`}
-                />
+                {layout === "horizontal" && (
+                  <div
+                    className="output-height-handle"
+                    onPointerDown={(event) => startHeightResize(panel, event)}
+                    title={`Resize ${panel} height`}
+                  />
+                )}
               </>
             )}
           </section>
@@ -384,7 +402,7 @@ const TablePanel = memo(function TablePanel({
 function createTableData(series: SimResult["series"]) {
   const decoded = series.map((item) => ({
     name: item.name,
-    values: Array.from(decodeArray(item.array)),
+    values: decodeArray(item.array),
   }));
   const rowCount = Math.max(0, ...decoded.map((item) => item.values.length));
   return {

@@ -194,23 +194,23 @@ export default function App() {
 
   const chartData = useMemo(() => {
     const series = graphSeries.filter((item) => selected.includes(item.name));
-    const maxLen = Math.max(
-      0,
-      ...series.map((item) => decodeArray(item.array).length),
-    );
+    let maxLen = 0;
+    const datasets = series.map((item) => {
+      const decoded = decodeArray(item.array);
+      if (decoded.length > maxLen) maxLen = decoded.length;
+      const color = colorForSeries(item.name);
+      return {
+        label: item.name,
+        data: Array.from(decoded),
+        borderColor: color,
+        backgroundColor: color,
+        pointRadius: 0,
+        borderWidth: 1.8,
+      };
+    });
     return {
       labels: Array.from({ length: maxLen }, (_, i) => String(i)),
-      datasets: series.map((item) => {
-        const color = colorForSeries(item.name);
-        return {
-          label: item.name,
-          data: Array.from(decodeArray(item.array)),
-          borderColor: color,
-          backgroundColor: color,
-          pointRadius: 0,
-          borderWidth: 1.8,
-        };
-      }),
+      datasets,
     };
   }, [graphSeries, selected]);
 
@@ -597,7 +597,7 @@ function SpecView({
   setShockCorrParams: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
   return (
-    <>
+    <div className="spec-view">
       <section className="summary-grid">
         <SummaryBlock title="Variables" values={activeModel.variables ?? []} />
         <SummaryBlock title="Observables" values={activeModel.observables ?? []} />
@@ -725,7 +725,7 @@ function SpecView({
           </div>
         )}
       </section>
-    </>
+    </div>
   );
 }
 
@@ -769,7 +769,7 @@ function OutputsView({
   theme: "light" | "dark";
 }) {
   return (
-    <>
+    <div className="outputs-view">
       <section className="run-panel">
         <label>
           T
@@ -804,7 +804,7 @@ function OutputsView({
           theme={theme}
         />
       )}
-    </>
+    </div>
   );
 }
 
