@@ -21,17 +21,19 @@ export function PanelWorkspace({
   defaultLayout = "vertical",
   defaultSplit = 50,
   fillHeight = false,
+  initialFolded,
   onFoldChange,
 }: {
   panels: PanelDef[];
   defaultLayout?: LayoutDirection;
   defaultSplit?: number;
   fillHeight?: boolean;
+  initialFolded?: Record<string, boolean>;
   onFoldChange?: (folded: Record<string, boolean>) => void;
 }) {
   const [order, setOrder] = useState<string[]>(() => panels.map((p) => p.id));
   const [folded, setFolded] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(panels.map((p) => [p.id, false])),
+    Object.fromEntries(panels.map((p) => [p.id, initialFolded?.[p.id] ?? false])),
   );
   const [panelHeights, setPanelHeights] = useState<Record<string, number>>(() =>
     Object.fromEntries(panels.map((p) => [p.id, p.defaultHeight ?? 470])),

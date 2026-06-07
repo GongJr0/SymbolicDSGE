@@ -1,7 +1,12 @@
-import { Play, RefreshCw, Upload } from "lucide-react";
+import { Play, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Line } from "react-chartjs-2";
 import { getEstimationCatalog, runEstimation } from "./api";
+import {
+  clearEstimationWorkspace,
+  loadEstimationWorkspace,
+  saveEstimationWorkspace,
+} from "./estimationPersistence";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
 import type {
@@ -43,6 +48,9 @@ export function EstimationView({
   const [error, setError] = useState(false);
   const [result, setResult] = useState<EstimationRunResult | null>(null);
   const [modeFolded, setModeFolded] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [chartRevision, setChartRevision] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -54,27 +62,115 @@ export function EstimationView({
       });
   }, []);
 
-  const parameterKey = JSON.stringify(model.parameter_values ?? {});
   useEffect(() => {
-    const values = model.parameter_values ?? {};
-    setParameters(
-      Object.entries(values).map(([name, value]) =>
-        makeParameter(name, value, catalog),
-      ),
-    );
-    setSelected((current) =>
-      current !== null && current in values ? current : Object.keys(values)[0] ?? null,
-    );
-  }, [catalog, parameterKey]);
+    if (hidden) return;
+    const frame = window.requestAnimationFrame(() => {
+      setChartRevision((current) => current + 1);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hidden]);
 
+  const parameterKey = Object.keys(model.parameter_values ?? {}).join(",");
   const observableKey = (model.observables ?? []).join(",");
+  const modelKey = JSON.stringify({
+    role,
+    source: model.source ?? null,
+    parameters: parameterKey,
+    observables: observableKey,
+  });
+
   useEffect(() => {
+    if (catalog === null) return;
+    let cancelled = false;
+    const values = model.parameter_values ?? {};
     const names = model.observables ?? [];
-    setObservables(names.join(", "));
-    setDataVectors((current) =>
-      Object.fromEntries(names.map((name) => [name, current[name] ?? ""])),
-    );
-  }, [observableKey]);
+    setHydrated(false);
+    void loadEstimationWorkspace(role)
+      .catch(() => null)
+      .then((workspace) => {
+        if (cancelled) return;
+        if (workspace !== null && workspace.modelKey === modelKey) {
+          setMethod(workspace.method);
+          setParameters(workspace.parameters);
+          setSelected(workspace.selected);
+          setObservables(workspace.observables);
+          setDataVectors(workspace.dataVectors);
+          setMaxIter(workspace.maxIter);
+          setNDraws(workspace.nDraws);
+          setBurnIn(workspace.burnIn);
+          setThin(workspace.thin);
+          setSeed(workspace.seed);
+          setAdapt(workspace.adapt);
+          setProposalScale(workspace.proposalScale);
+          setPosteriorPoint(workspace.posteriorPoint);
+          setResult(workspace.result);
+          setModeFolded(workspace.modeFolded);
+        } else {
+          setParameters(
+            Object.entries(values).map(([name, value]) =>
+              makeParameter(name, value, catalog),
+            ),
+          );
+          setSelected(Object.keys(values)[0] ?? null);
+          setObservables(names.join(", "));
+          setDataVectors(Object.fromEntries(names.map((name) => [name, ""])));
+          setResult(null);
+        }
+        setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, modelKey, role]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const timeout = window.setTimeout(() => {
+      void saveEstimationWorkspace({
+        version: 1,
+        role,
+        modelKey,
+        method,
+        parameters,
+        selected,
+        observables,
+        dataVectors,
+        maxIter,
+        nDraws,
+        burnIn,
+        thin,
+        seed,
+        adapt,
+        proposalScale,
+        posteriorPoint,
+        result,
+        modeFolded,
+      }).catch((reason: unknown) => {
+        setNotice(reason instanceof Error ? reason.message : String(reason));
+        setError(true);
+      });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [
+    adapt,
+    burnIn,
+    dataVectors,
+    hydrated,
+    maxIter,
+    method,
+    modeFolded,
+    modelKey,
+    nDraws,
+    observables,
+    parameters,
+    posteriorPoint,
+    proposalScale,
+    result,
+    role,
+    seed,
+    selected,
+    thin,
+  ]);
 
   const active = parameters.find((parameter) => parameter.name === selected) ?? null;
   const estimatedCount = parameters.filter((parameter) => parameter.estimate).length;
@@ -163,6 +259,37 @@ export function EstimationView({
       setError(true);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function clearWorkspace() {
+    const values = model.parameter_values ?? {};
+    const names = model.observables ?? [];
+    setMethod("mle");
+    setParameters(
+      Object.entries(values).map(([name, value]) => makeParameter(name, value, catalog)),
+    );
+    setSelected(Object.keys(values)[0] ?? null);
+    setObservables(names.join(", "));
+    setDataVectors(Object.fromEntries(names.map((name) => [name, ""])));
+    setMaxIter(1000);
+    setNDraws(1000);
+    setBurnIn(500);
+    setThin(1);
+    setSeed(0);
+    setAdapt(true);
+    setProposalScale(0.1);
+    setPosteriorPoint("mean");
+    setResult(null);
+    setModeFolded(false);
+    setWorkspaceRevision((current) => current + 1);
+    try {
+      await clearEstimationWorkspace(role);
+      setNotice("Estimation workspace cleared.");
+      setError(false);
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : String(reason));
+      setError(true);
     }
   }
 
@@ -288,6 +415,14 @@ export function EstimationView({
                 <RefreshCw size={15} />
                 Estimate & Solve
               </button>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => void clearWorkspace()}
+              >
+                <Trash2 size={15} />
+                Clear
+              </button>
               {notice !== "" && (
                 <span className={error ? "status error" : "status"}>{notice}</span>
               )}
@@ -332,6 +467,7 @@ export function EstimationView({
           method={method}
           catalog={catalog}
           result={result}
+          chartRevision={chartRevision}
           onChange={(update) => updateParameter(active.name, update)}
           onPriorChange={(update) => updatePrior(active.name, update)}
         />
@@ -345,13 +481,16 @@ export function EstimationView({
     <div className="estimation-layout" style={hidden ? { display: "none" } : undefined}>
       <div className={`estimation-mode-row${modeFolded ? " folded" : ""}`}>
         <PanelWorkspace
+          key={`mode:${workspaceRevision}:${hydrated ? "ready" : "loading"}`}
           panels={modePanels}
           defaultLayout="vertical"
+          initialFolded={{ "estimation-mode": modeFolded }}
           onFoldChange={(folded) => setModeFolded(folded["estimation-mode"] ?? false)}
         />
       </div>
       <div className="estimation-detail-row">
         <PanelWorkspace
+          key={`details:${workspaceRevision}`}
           panels={detailPanels}
           defaultLayout="horizontal"
           defaultSplit={32}
@@ -367,6 +506,7 @@ function ParameterDetails({
   method,
   catalog,
   result,
+  chartRevision,
   onChange,
   onPriorChange,
 }: {
@@ -374,6 +514,7 @@ function ParameterDetails({
   method: EstimationMethod;
   catalog: EstimationCatalog | null;
   result: EstimationRunResult | null;
+  chartRevision: number;
   onChange: (update: Partial<EstimationParameterSpec>) => void;
   onPriorChange: (
     update: Partial<NonNullable<EstimationParameterSpec["prior"]>>,
@@ -504,7 +645,12 @@ function ParameterDetails({
             )}
           </div>
           {result.method === "mcmc" && (
-            <MCMCCharts result={result} parameter={parameter.name} />
+            <MCMCCharts
+              key={`${result.run_id}:${parameter.name}`}
+              chartRevision={chartRevision}
+              result={result}
+              parameter={parameter.name}
+            />
           )}
         </section>
       )}
@@ -568,9 +714,11 @@ function ResultValue({ label, value }: { label: string; value: string }) {
 function MCMCCharts({
   result,
   parameter,
+  chartRevision,
 }: {
   result: EstimationRunResult;
   parameter: string;
+  chartRevision: number;
 }) {
   const trace = result.result.logpost_trace ?? [];
   const samples = result.result.samples?.[parameter] ?? [];
@@ -594,6 +742,8 @@ function MCMCCharts({
           <h4>Log-posterior trace</h4>
           <div>
             <Line
+              key={`trace:${result.run_id}:${chartRevision}`}
+              redraw
               data={{
                 labels: tracePlot.indices.map((index) => String(index + 1)),
                 datasets: [
@@ -618,6 +768,8 @@ function MCMCCharts({
           <h4>{parameter} posterior distribution</h4>
           <div>
             <Line
+              key={`posterior:${result.run_id}:${parameter}:${chartRevision}`}
+              redraw
               data={{
                 labels: histogram.labels,
                 datasets: [

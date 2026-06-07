@@ -565,6 +565,14 @@ label {
   flex-direction: column;
 }
 
+.output-workspace.horizontal {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.output-workspace.horizontal .output-slot {
+  min-height: 0;
+}
+
 .output-workspace.vertical .output-slot {
   display: flex;
   flex-direction: column;
@@ -746,6 +754,7 @@ label {
 
 .output-panel-body.scrollable {
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .output-panel-body.no-padding .monaco-shell {
@@ -1098,6 +1107,7 @@ label {
 
 .estimation-parameter-list {
   display: grid;
+  flex: 0 0 auto;
   gap: 6px;
 }
 
@@ -1142,6 +1152,7 @@ button.estimation-parameter-card.selected {
 
 .estimation-details {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 14px;
 }
