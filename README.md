@@ -37,6 +37,7 @@
 pip install SymbolicDSGE
 pip install "SymbolicDSGE[fred]"  # FRED API utilities
 pip install "SymbolicDSGE[sr]"    # Symbolic Regression Deps
+pip install "SymbolicDSGE[ui]"    # Web based GUI
 ```
 
 ### Useful Links
