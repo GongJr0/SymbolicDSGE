@@ -281,6 +281,24 @@ class UISession:
             raise KeyError(run_id)
         return dict(self.runs[run_id].payload)
 
+    def solved_model(self, role: Role) -> SolvedModel | None:
+        return self._slot(role).solved
+
+    def record_run(
+        self,
+        *,
+        run_id: str,
+        kind: str,
+        role: Role,
+        payload: Mapping[str, Any],
+    ) -> None:
+        self.runs[run_id] = RunRecord(
+            run_id=run_id,
+            kind=kind,
+            role=role,
+            payload=payload,
+        )
+
     def _apply_figure_functions(
         self,
         role: Role,

@@ -19,7 +19,7 @@ import {
   Upload,
 } from "lucide-react";
 import Editor from "@monaco-editor/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, PointerEvent, SetStateAction } from "react";
 import {
   decodeArray,
@@ -72,7 +72,9 @@ const SERIES_COLORS = [
   "#65a30d",
   "#c2410c",
 ];
-type View = "builder" | "spec" | "outputs";
+const MCPipelineView = lazy(() => import("./mc/MCPipelineView"));
+
+type View = "builder" | "spec" | "outputs" | "mc";
 type ShockMode = "raw" | "generated";
 
 export default function App() {
@@ -100,6 +102,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [mcMounted, setMcMounted] = useState(() => initialView() === "mc");
 
   const activeModel = session?.models[role] ?? { role, loaded: false, solved: false };
   const shockSpecs = useMemo(
@@ -172,6 +175,10 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (view === "mc") setMcMounted(true);
+  }, [view]);
 
   useEffect(() => {
     if (result === null) return;
@@ -423,6 +430,12 @@ export default function App() {
           >
             Outputs
           </button>
+          <button
+            className={view === "mc" ? "active" : ""}
+            onClick={() => navigate("mc")}
+          >
+            MC Pipeline
+          </button>
         </nav>
 
         <BuilderView
@@ -494,6 +507,17 @@ export default function App() {
           chartData={chartData}
           theme={theme}
         />
+        {mcMounted && (
+          <Suspense
+            fallback={
+              <div className="panel-view">
+                <span className="muted">Loading pipeline builder...</span>
+              </div>
+            }
+          >
+            <MCPipelineView hidden={view !== "mc"} session={session} />
+          </Suspense>
+        )}
       </section>
     </main>
   );
@@ -894,6 +918,7 @@ function OutputsView({
 
 function initialView(): View {
   if (window.location.pathname.endsWith("/builder")) return "builder";
+  if (window.location.pathname.endsWith("/mc")) return "mc";
   if (
     window.location.pathname.endsWith("/outputs") ||
     window.location.pathname.endsWith("/graph")

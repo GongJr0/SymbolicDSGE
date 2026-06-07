@@ -3,6 +3,9 @@ import type {
   FunctionKind,
   FunctionRecord,
   ModelSummary,
+  MCCatalog,
+  MCPipelineResult,
+  MCPipelineSpec,
   Role,
   SessionSummary,
   ShockGeneration,
@@ -110,6 +113,34 @@ export function removeFunction(
 
 export function listFunctions(role: Role): Promise<FunctionRecord[]> {
   return requestJson<FunctionRecord[]>(`/api/code/${role}/functions`);
+}
+
+export function getMCCatalog(): Promise<MCCatalog> {
+  return requestJson<MCCatalog>("/api/mc/catalog");
+}
+
+export function validateMCPipeline(
+  pipeline: MCPipelineSpec,
+): Promise<{ valid: true; order: string[] }> {
+  return requestJson<{ valid: true; order: string[] }>("/api/mc/validate", {
+    method: "POST",
+    body: JSON.stringify(pipeline),
+  });
+}
+
+export function runMCPipeline(
+  pipeline: MCPipelineSpec,
+  nRep: number,
+  failFast: boolean,
+): Promise<MCPipelineResult> {
+  return requestJson<MCPipelineResult>("/api/run/mc", {
+    method: "POST",
+    body: JSON.stringify({
+      pipeline,
+      n_rep: nRep,
+      fail_fast: failFast,
+    }),
+  });
 }
 
 export function encodeArray(values: Float64Array): ArrayEnvelope {

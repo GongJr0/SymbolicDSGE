@@ -11,6 +11,7 @@
   "dependencies": {
     "@handsontable/react-wrapper": "^17.1.0",
     "@monaco-editor/react": "^4.7.0",
+    "@xyflow/react": "^12.11.0",
     "chart.js": "^4.4.7",
     "handsontable": "^17.1.0",
     "lucide-react": "^0.468.0",

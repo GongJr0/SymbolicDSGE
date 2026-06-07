@@ -21,11 +21,13 @@ export function PanelWorkspace({
   defaultLayout = "vertical",
   defaultSplit = 50,
   fillHeight = false,
+  onFoldChange,
 }: {
   panels: PanelDef[];
   defaultLayout?: LayoutDirection;
   defaultSplit?: number;
   fillHeight?: boolean;
+  onFoldChange?: (folded: Record<string, boolean>) => void;
 }) {
   const [order, setOrder] = useState<string[]>(() => panels.map((p) => p.id));
   const [folded, setFolded] = useState<Record<string, boolean>>(() =>
@@ -142,6 +144,27 @@ export function PanelWorkspace({
     return { height: panelHeights[id] };
   }
 
+  function toggleFold(id: string) {
+    setFolded((current) => {
+      const next = { ...current, [id]: !current[id] };
+      onFoldChange?.(next);
+      return next;
+    });
+  }
+
+  function horizontalTemplate(): CSSProperties | undefined {
+    if (layout !== "horizontal" || !multi) return undefined;
+    if (order.length === 2) {
+      if (folded[order[0]]) {
+        return { gridTemplateColumns: "42px 6px minmax(0, 1fr)" };
+      }
+      if (folded[order[1]]) {
+        return { gridTemplateColumns: "minmax(0, 1fr) 6px 42px" };
+      }
+    }
+    return { gridTemplateColumns: `${split}fr 6px ${100 - split}fr` };
+  }
+
   function bodyClass(def: PanelDef) {
     return [
       "output-panel-body",
@@ -155,11 +178,7 @@ export function PanelWorkspace({
   return (
     <section
       className={`output-workspace ${layout}${fillHeight ? " fill-height" : ""}`}
-      style={
-        layout === "horizontal" && multi
-          ? { gridTemplateColumns: `${split}fr 6px ${100 - split}fr` }
-          : undefined
-      }
+      style={horizontalTemplate()}
     >
       {order.map((id, index) => {
         const def = byId[id];
@@ -218,7 +237,7 @@ export function PanelWorkspace({
                   {def.headerActions}
                   <button
                     className="icon-button"
-                    onClick={() => setFolded((f) => ({ ...f, [id]: !f[id] }))}
+                    onClick={() => toggleFold(id)}
                     title={isFolded ? `Expand ${def.title}` : `Fold ${def.title}`}
                   >
                     {isFolded ? <ChevronRight size={16} /> : <ChevronDown size={16} />}

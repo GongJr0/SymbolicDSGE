@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from SymbolicDSGE.core.solved_model import SolvedModel
 
+from .mc import (
+    build_pipeline,
+    mc_catalog,
+    run_pipeline,
+    serialize_pipeline_result,
+    validate_pipeline_spec,
+)
+from .mc_schemas import MCPipelineSpec, MCRunRequest
 from .schemas import (
     LoadYamlRequest,
     Role,
@@ -43,6 +52,47 @@ def create_app(
     @app.get("/api/session")
     def session_summary() -> dict[str, Any]:
         return ui_session.summary()
+
+    @app.get("/api/mc/catalog")
+    def monte_carlo_catalog() -> dict[str, Any]:
+        return mc_catalog()
+
+    @app.post("/api/mc/validate")
+    def validate_monte_carlo_pipeline(request: MCPipelineSpec) -> dict[str, Any]:
+        try:
+            ordered = validate_pipeline_spec(
+                request,
+                has_reference=ui_session.solved_model("reference") is not None,
+                has_dgp=ui_session.solved_model("dgp") is not None,
+            )
+            dgp = ui_session.solved_model("dgp")
+            assert dgp is not None
+            build_pipeline(ordered, dgp=dgp)
+            return {"valid": True, "order": [node.id for node in ordered]}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
+
+    @app.post("/api/run/mc")
+    def run_monte_carlo_pipeline(request: MCRunRequest) -> dict[str, Any]:
+        try:
+            result = run_pipeline(
+                request.pipeline,
+                reference=ui_session.solved_model("reference"),
+                dgp=ui_session.solved_model("dgp"),
+                n_rep=request.n_rep,
+                fail_fast=request.fail_fast,
+            )
+            run_id = str(uuid4())
+            payload = serialize_pipeline_result(result, run_id=run_id)
+            ui_session.record_run(
+                run_id=run_id,
+                kind="mc",
+                role="reference",
+                payload=payload,
+            )
+            return payload
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 
     @app.post("/api/model/load-yaml")
     def load_yaml(request: LoadYamlRequest) -> dict[str, Any]:
