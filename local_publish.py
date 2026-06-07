@@ -19,6 +19,17 @@ def main() -> None:
     if os.path.exists(build_path):
         shutil.rmtree(build_path)
 
+    print("Building the frontend into the package...")
+    frontend_result = subprocess.run(
+        [sys.executable, "scripts/build_frontend.py"], stderr=subprocess.PIPE
+    )
+    if frontend_result.returncode:
+        print(
+            f"Frontend build failed with error code {frontend_result.returncode}."
+            f" Error output:\n{frontend_result.stderr.decode()}\nExiting."
+        )
+        sys.exit(1)
+
     print("Building the package...")
     build_result = subprocess.run(["uv", "build"], stderr=subprocess.PIPE)
     build_err = build_result.returncode

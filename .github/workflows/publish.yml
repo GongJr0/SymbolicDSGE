@@ -48,6 +48,16 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: sdsge-ui/frontend/package-lock.json
+
+      - name: Build frontend into package
+        run: python scripts/build_frontend.py
+
       - name: Build distributions
         run: uv build
 

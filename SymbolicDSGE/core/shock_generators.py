@@ -241,12 +241,15 @@ class Shock:
     def shock_generator(self) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
         self._assert_generator()
         kwargs = self.dist_kwargs.copy()
+        scale_key = "scale"
+        if self.multivar:
+            scale_key = "shape" if self.dist == "t" else "cov"
         fun = lambda s: abstract_shock_array(
             self.T,
             self.seed,
             self._get_dist(),
             *self.dist_args,
-            **{**kwargs, "scale" if not self.multivar else "cov": s},
+            **{**kwargs, scale_key: s},
         )
 
         return fun

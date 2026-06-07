@@ -1,0 +1,35 @@
+{
+  "name": "symbolicdsge-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@handsontable/react-wrapper": "^17.1.0",
+    "@monaco-editor/react": "^4.7.0",
+    "@xyflow/react": "^12.11.0",
+    "chart.js": "^4.4.7",
+    "handsontable": "^17.1.0",
+    "lucide-react": "^0.468.0",
+    "monaco-editor": "0.54.0",
+    "monaco-yaml": "^5.5.1",
+    "react": "^19.0.0",
+    "react-chartjs-2": "^5.3.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "pyright": "^1.1.410",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "ws": "^8.21.0"
+  }
+}
