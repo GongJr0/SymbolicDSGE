@@ -4,6 +4,7 @@ import {
   LinearScale,
   LineElement,
   PointElement,
+  Filler,
   Tooltip,
   Legend,
 } from "chart.js";
@@ -37,6 +38,7 @@ import { configureSymbolicDsgeYaml } from "./monacoWorkers";
 import { CodePanel } from "./CodePanel";
 import type { CodePanelHandle } from "./CodePanel";
 import { OutputWorkspace } from "./OutputWorkspace";
+import { EstimationView } from "./EstimationView";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
 import type {
@@ -56,6 +58,7 @@ ChartJS.register(
   LinearScale,
   LineElement,
   PointElement,
+  Filler,
   Tooltip,
   Legend,
 );
@@ -74,7 +77,7 @@ const SERIES_COLORS = [
 ];
 const MCPipelineView = lazy(() => import("./mc/MCPipelineView"));
 
-type View = "builder" | "spec" | "outputs" | "mc";
+type View = "builder" | "spec" | "outputs" | "estimation" | "mc";
 type ShockMode = "raw" | "generated";
 
 export default function App() {
@@ -431,6 +434,12 @@ export default function App() {
             Outputs
           </button>
           <button
+            className={view === "estimation" ? "active" : ""}
+            onClick={() => navigate("estimation")}
+          >
+            Estimation
+          </button>
+          <button
             className={view === "mc" ? "active" : ""}
             onClick={() => navigate("mc")}
           >
@@ -506,6 +515,12 @@ export default function App() {
           setSelected={setSelected}
           chartData={chartData}
           theme={theme}
+        />
+        <EstimationView
+          hidden={view !== "estimation"}
+          role={role}
+          model={activeModel}
+          onSessionRefresh={refreshSession}
         />
         {mcMounted && (
           <Suspense
@@ -888,13 +903,13 @@ function OutputsView({
             onChange={(event) => setSimT(Number(event.target.value))}
           />
         </label>
-        <label className="checkbox">
+        <label className="switch-row">
+          <span>Observables</span>
           <input
             type="checkbox"
             checked={includeObs}
             onChange={(event) => setIncludeObs(event.target.checked)}
           />
-          observables
         </label>
         <button disabled={busy || !activeModel.solved} onClick={runSimulationAction}>
           <Play size={16} />
@@ -918,6 +933,7 @@ function OutputsView({
 
 function initialView(): View {
   if (window.location.pathname.endsWith("/builder")) return "builder";
+  if (window.location.pathname.endsWith("/estimation")) return "estimation";
   if (window.location.pathname.endsWith("/mc")) return "mc";
   if (
     window.location.pathname.endsWith("/outputs") ||

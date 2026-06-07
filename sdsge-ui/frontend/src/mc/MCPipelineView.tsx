@@ -400,13 +400,13 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
             onChange={(event) => setNRep(Number(event.target.value))}
           />
         </label>
-        <label className="checkbox">
+        <label className="switch-row">
+          <span>Fail fast</span>
           <input
             type="checkbox"
             checked={failFast}
             onChange={(event) => setFailFast(event.target.checked)}
           />
-          fail fast
         </label>
         <button className="secondary" disabled={busy} onClick={() => void validate()}>
           <Check size={15} />

@@ -97,6 +97,46 @@ textarea:focus {
   outline-offset: 0;
 }
 
+input[type="checkbox"] {
+  appearance: none;
+  background: #cbd5e1;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  height: 20px;
+  min-height: 20px;
+  padding: 2px;
+  transition: background 120ms ease;
+  width: 36px;
+}
+
+input[type="checkbox"]::after {
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 24%);
+  content: "";
+  display: block;
+  height: 16px;
+  transform: translateX(0);
+  transition: transform 120ms ease;
+  width: 16px;
+}
+
+input[type="checkbox"]:checked {
+  background: #4f46e5;
+}
+
+input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
+input[type="checkbox"]:focus {
+  border: 0;
+  outline: 2px solid rgb(99 102 241 / 28%);
+  outline-offset: 2px;
+}
+
 textarea {
   min-height: 140px;
   resize: vertical;
@@ -221,14 +261,12 @@ label {
 .switch-row {
   align-items: center;
   display: flex;
+  gap: 12px;
   justify-content: space-between;
 }
 
 .switch-row input {
-  accent-color: #1f2937;
-  height: 18px;
-  min-height: 0;
-  width: 18px;
+  width: 36px;
 }
 
 .workspace {
@@ -450,7 +488,7 @@ label {
 
 .checkbox input,
 .series-toggle input {
-  width: auto;
+  width: 36px;
 }
 
 .summary-grid {
@@ -909,6 +947,287 @@ label {
 
 .output-workspace.fill-height.vertical .output-panel.folded {
   height: 42px !important;
+}
+
+/* ── Estimation workspace ─────────────────────────────────────── */
+
+.estimation-layout {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.estimation-mode-row {
+  display: flex;
+  flex: 0 0 310px;
+  min-height: 0;
+  transition: flex-basis 140ms ease;
+}
+
+.estimation-mode-row.folded {
+  flex-basis: 42px;
+}
+
+.estimation-detail-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.estimation-mode-row > .output-workspace,
+.estimation-detail-row > .output-workspace {
+  width: 100%;
+}
+
+.estimation-mode-content {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.8fr);
+  min-height: 100%;
+}
+
+.estimation-method-section,
+.estimation-data-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 9px;
+}
+
+.estimation-method-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.estimation-method-fields {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+}
+
+.estimation-data-section {
+  display: grid;
+  gap: 8px;
+  grid-template-rows: auto minmax(90px, 1fr) auto;
+}
+
+.estimation-data-section > header {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(160px, 1fr) auto;
+}
+
+.estimation-file-input {
+  display: none;
+}
+
+.estimation-vector-list {
+  display: grid;
+  gap: 8px;
+  grid-auto-columns: minmax(130px, 1fr);
+  grid-auto-flow: column;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 3px;
+}
+
+.estimation-vector-field {
+  min-width: 0;
+}
+
+.estimation-vector-field > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.estimation-vector-field textarea {
+  height: 100%;
+  min-height: 82px;
+  resize: none;
+}
+
+.segmented-control {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  min-width: 0;
+  padding: 3px;
+}
+
+.segmented-control button {
+  background: transparent;
+  color: #64748b;
+  gap: 0;
+  letter-spacing: 0;
+  min-height: 30px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 6px;
+  width: 100%;
+}
+
+.segmented-control button.active {
+  background: #4f46e5;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 12%);
+  color: white;
+}
+
+.estimation-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.estimation-actions .status {
+  max-width: none;
+}
+
+.estimation-parameter-list {
+  display: grid;
+  gap: 6px;
+}
+
+button.estimation-parameter-card {
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  display: flex;
+  justify-content: space-between;
+  min-height: 42px;
+  opacity: 1;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+button.estimation-parameter-card:hover {
+  background: #e2e8f0;
+  opacity: 1;
+}
+
+button.estimation-parameter-card.estimated {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+
+button.estimation-parameter-card.selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px rgb(99 102 241 / 18%);
+}
+
+.estimation-parameter-card strong {
+  font-size: 12px;
+}
+
+.estimation-parameter-card span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.estimation-details {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.estimation-estimate-switch {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  padding: 9px 10px;
+}
+
+.estimation-form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.estimation-details h3 {
+  color: #64748b;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin: 2px 0 -4px;
+  text-transform: uppercase;
+}
+
+.estimation-result {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 2px;
+  padding-top: 12px;
+}
+
+.estimation-result > h3 {
+  margin: 0 0 10px;
+}
+
+.estimation-result-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
+.estimation-result-grid > span {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+}
+
+.estimation-result-grid small {
+  color: #64748b;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.estimation-result-grid strong {
+  color: #1e293b;
+  font-size: 12px;
+}
+
+.estimation-chart-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 12px;
+}
+
+.estimation-chart {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 9px;
+}
+
+.estimation-chart h4 {
+  color: #475569;
+  font-size: 11px;
+  margin: 0 0 8px;
+}
+
+.estimation-chart > div {
+  height: 190px;
+  min-width: 0;
+  position: relative;
 }
 
 /* ── Monte Carlo pipeline builder ──────────────────────────────── */
@@ -1490,6 +1809,34 @@ button.mc-palette-step:hover {
     overflow: visible;
   }
 
+  .estimation-layout {
+    min-height: 920px;
+    overflow: visible;
+  }
+
+  .estimation-mode-row {
+    flex: 0 0 auto;
+    min-height: 720px;
+  }
+
+  .estimation-mode-row.folded {
+    min-height: 42px;
+  }
+
+  .estimation-detail-row {
+    flex: 0 0 auto;
+    min-height: 440px;
+  }
+
+  .estimation-mode-content {
+    grid-template-columns: 1fr;
+  }
+
+  .estimation-vector-list {
+    grid-auto-flow: row;
+    overflow: visible;
+  }
+
   .monaco-shell {
     min-height: 460px;
   }
@@ -1616,6 +1963,14 @@ button.mc-palette-step:hover {
   outline-color: rgb(129 140 248 / 20%);
 }
 
+.theme-dark input[type="checkbox"] {
+  background: #475569;
+}
+
+.theme-dark input[type="checkbox"]:checked {
+  background: #6366f1;
+}
+
 .theme-dark button {
   background: #f1f5f9;
   color: #0f172a;
@@ -1705,6 +2060,64 @@ button.mc-palette-step:hover {
 .theme-dark .view-tabs button.active {
   background: #312e81;
   color: #a5b4fc;
+}
+
+.theme-dark .segmented-control {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+.theme-dark .segmented-control button {
+  color: #94a3b8;
+}
+
+.theme-dark .segmented-control button.active {
+  background: #6366f1;
+  box-shadow: none;
+  color: white;
+}
+
+.theme-dark .estimation-method-section,
+.theme-dark .estimation-data-section,
+.theme-dark button.estimation-parameter-card {
+  background: #152032;
+  border-color: #334155;
+  color: #64748b;
+}
+
+.theme-dark button.estimation-parameter-card:hover {
+  background: #273449;
+}
+
+.theme-dark button.estimation-parameter-card.estimated {
+  background: #312e81;
+  border-color: #4338ca;
+  color: #c7d2fe;
+}
+
+.theme-dark button.estimation-parameter-card.selected {
+  border-color: #818cf8;
+}
+
+.theme-dark .estimation-estimate-switch,
+.theme-dark .estimation-result-grid > span,
+.theme-dark .estimation-chart {
+  background: #152032;
+  border-color: #334155;
+}
+
+.theme-dark .estimation-details h3,
+.theme-dark .estimation-result-grid small,
+.theme-dark .estimation-chart h4 {
+  color: #94a3b8;
+}
+
+.theme-dark .estimation-result {
+  border-top-color: #334155;
+}
+
+.theme-dark .estimation-result-grid strong {
+  color: #e2e8f0;
 }
 
 .theme-dark .output-panel-header {

@@ -2,6 +2,9 @@ import type {
   ArrayEnvelope,
   FunctionKind,
   FunctionRecord,
+  EstimationCatalog,
+  EstimationRunRequest,
+  EstimationRunResult,
   ModelSummary,
   MCCatalog,
   MCPipelineResult,
@@ -87,6 +90,19 @@ export function runSimulation(
       shock_generation: shockGeneration,
       shock_params: shockParams,
     }),
+  });
+}
+
+export function getEstimationCatalog(): Promise<EstimationCatalog> {
+  return requestJson<EstimationCatalog>("/api/estimation/catalog");
+}
+
+export function runEstimation(
+  request: EstimationRunRequest,
+): Promise<EstimationRunResult> {
+  return requestJson<EstimationRunResult>("/api/run/estimation", {
+    method: "POST",
+    body: JSON.stringify(request),
   });
 }
 

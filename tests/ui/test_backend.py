@@ -4,14 +4,20 @@ from pathlib import Path
 
 import numpy as np
 from fastapi.testclient import TestClient
+from scipy.optimize import OptimizeResult
 
+from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
 from SymbolicDSGE.ui.app import create_app
+from SymbolicDSGE.ui.estimation import (
+    build_estimation_inputs,
+    serialize_estimation_result,
+)
 from SymbolicDSGE.ui.mc import (
     serialize_pipeline_result,
     validate_pipeline_spec,
 )
 from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
-from SymbolicDSGE.ui.schemas import ArrayEnvelope
+from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
@@ -179,6 +185,159 @@ def test_ui_backend_reports_configured_shock_correlations() -> None:
             "corr_value": 0.36,
         }
     ]
+
+
+def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> None:
+    parameters = [
+        EstimationParameterSpec.model_validate(
+            {
+                "name": "beta",
+                "estimate": True,
+                "initial": 0.99,
+                "lower": 0.9,
+                "upper": 1.0,
+                "prior": {
+                    "distribution": "normal",
+                    "parameters": {"mean": 0.99, "std": 0.01},
+                    "transform": "identity",
+                },
+            }
+        ),
+        EstimationParameterSpec(name="sigma", estimate=False, initial=1.0),
+    ]
+
+    names, theta0, priors, bounds = build_estimation_inputs(parameters, method="map")
+
+    assert names == ["beta"]
+    assert theta0 == {"beta": 0.99}
+    assert priors is not None
+    assert set(priors) == {"beta"}
+    assert bounds == [(0.9, 1.0)]
+
+    with np.testing.assert_raises_regex(ValueError, "Select at least one parameter"):
+        build_estimation_inputs(
+            [EstimationParameterSpec(name="beta", initial=0.99)],
+            method="mle",
+        )
+
+
+def test_ui_estimation_serializes_mcmc_traces_for_charts() -> None:
+    result = MCMCResult(
+        param_names=["beta", "sigma"],
+        samples=np.array([[0.98, 1.1], [0.99, 1.0]], dtype=np.float64),
+        logpost_trace=np.array([-3.0, -2.5], dtype=np.float64),
+        accept_rate=np.float64(0.5),
+        n_draws=2,
+        burn_in=1,
+        thin=1,
+    )
+
+    payload = serialize_estimation_result(result)
+
+    assert payload["samples"] == {"beta": [0.98, 0.99], "sigma": [1.1, 1.0]}
+    assert payload["logpost_trace"] == [-3.0, -2.5]
+
+
+def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) -> None:
+    app = create_app()
+    client = TestClient(app)
+    loaded = client.post(
+        "/api/model/load-yaml",
+        json={"role": "reference", "path": "MODELS/test.yaml"},
+    )
+    assert loaded.status_code == 200
+    assert loaded.json()["parameter_values"]["beta"] == 0.99
+
+    catalog = client.get("/api/estimation/catalog")
+    assert catalog.status_code == 200
+    catalog_body = catalog.json()
+    assert catalog_body["distributions"]["normal"]["std"] == 1.0
+    assert "lkj_chol" not in catalog_body["distributions"]
+    assert "cholesky_corr" not in catalog_body["transforms"]
+
+    solved = client.post(
+        "/api/model/solve",
+        json={
+            "role": "reference",
+            "compile_kwargs": {"n_state": 3, "n_exog": 2},
+        },
+    )
+    assert solved.status_code == 200
+
+    slot = app.state.ui_session._slot("reference")
+    assert slot.solver is not None
+    assert slot.solved is not None
+    solved_model = slot.solved
+    result = OptimizationResult(
+        kind="mle",
+        x=np.array([0.98], dtype=np.float64),
+        theta={"beta": np.float64(0.98)},
+        success=True,
+        message="converged",
+        fun=np.float64(1.25),
+        loglik=np.float64(-1.25),
+        logprior=np.float64(0.0),
+        logpost=np.float64(-1.25),
+        nfev=4,
+        nit=2,
+        raw=OptimizeResult(),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_estimate(**kwargs):
+        captured.update(kwargs)
+        return result
+
+    monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
+    request = {
+        "role": "reference",
+        "method": "mle",
+        "y": [[3.2, 0.1], [3.3, 0.2]],
+        "observables": ["Infl", "Rate"],
+        "parameters": [
+            {
+                "name": "beta",
+                "estimate": True,
+                "initial": 0.99,
+                "lower": 0.9,
+                "upper": 1.0,
+            }
+        ],
+        "method_kwargs": {"options": {"maxiter": 25}},
+    }
+    response = client.post("/api/run/estimation", json=request)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "estimation"
+    assert body["solved"] is False
+    assert body["result"]["theta"] == {"beta": 0.98}
+    assert captured["method"] == "mle"
+    assert captured["theta0"] == {"beta": 0.99}
+    assert captured["estimated_params"] == ["beta"]
+    assert captured["bounds"] == [(0.9, 1.0)]
+    assert captured["options"] == {"maxiter": 25}
+
+    invalid = client.post(
+        "/api/run/estimation",
+        json={**request, "method_kwargs": {"method": "Powell"}},
+    )
+    assert invalid.status_code == 400
+    assert "reserved arguments" in invalid.json()["detail"]["message"]
+
+    def fake_estimate_and_solve(**kwargs):
+        captured.update(kwargs)
+        return result, solved_model
+
+    monkeypatch.setattr(slot.solver, "estimate_and_solve", fake_estimate_and_solve)
+    estimate_and_solve = client.post(
+        "/api/run/estimation",
+        json={**request, "estimate_and_solve": True},
+    )
+
+    assert estimate_and_solve.status_code == 200
+    assert estimate_and_solve.json()["solved"] is True
+    assert app.state.ui_session.solved_model("reference") is solved_model
 
 
 def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:

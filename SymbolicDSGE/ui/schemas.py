@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 Role = Literal["reference", "dgp"]
 ShockDistribution = Literal["norm", "t", "uni"]
 FunctionKind = Literal["array", "figure"]
+EstimationMethod = Literal["mle", "map", "mcmc"]
 
 
 class ArrayEnvelope(BaseModel):
@@ -54,3 +55,32 @@ class SubmitFunctionRequest(BaseModel):
     role: Role
     code: str
     kind: FunctionKind = "array"
+
+
+class PriorSpec(BaseModel):
+    distribution: str = "normal"
+    parameters: dict[str, float | int] = Field(default_factory=dict)
+    transform: str = "identity"
+    transform_kwargs: dict[str, float | int] = Field(default_factory=dict)
+
+
+class EstimationParameterSpec(BaseModel):
+    name: str = Field(min_length=1)
+    estimate: bool = False
+    initial: float
+    lower: float | None = None
+    upper: float | None = None
+    prior: PriorSpec | None = None
+
+
+class EstimationRunRequest(BaseModel):
+    role: Role = "reference"
+    method: EstimationMethod = "mle"
+    y: list[list[float]] = Field(min_length=1)
+    observables: list[str] | None = None
+    parameters: list[EstimationParameterSpec] = Field(min_length=1)
+    method_kwargs: dict[str, Any] = Field(default_factory=dict)
+    compile_kwargs: dict[str, Any] = Field(default_factory=dict)
+    steady_state: list[float] | None = None
+    posterior_point: str = "mean"
+    estimate_and_solve: bool = False
