@@ -1,7 +1,6 @@
 import {
   Background,
   Controls,
-  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -17,7 +16,13 @@ import type {
   NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Check, Play, Plus, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  Play,
+  Plus,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -38,6 +43,14 @@ import type {
 import { StepInspector } from "./StepInspector";
 import { StepNode } from "./StepNode";
 import { MCResultPanel } from "./MCResultPanel";
+import {
+  clearMCWorkspace,
+  loadMCResult,
+  loadMCWorkspace,
+  saveMCResult,
+  saveMCWorkspace,
+} from "./persistence";
+import type { MCPersistedWorkspace } from "./persistence";
 import type { MCFlowNode } from "./types";
 
 const nodeTypes = { mcStep: StepNode };
@@ -69,27 +82,42 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
   const [notice, setNotice] = useState("");
   const [noticeError, setNoticeError] = useState(false);
   const [result, setResult] = useState<MCPipelineResult | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [summaryShare, setSummaryShare] = useState(36);
   const [summaryFolded, setSummaryFolded] = useState(false);
   const { screenToFlowPosition, fitView } = useReactFlow<MCFlowNode, Edge>();
 
   useEffect(() => {
     getMCCatalog()
-      .then((value) => {
+      .then(async (value) => {
         setCatalog(value);
-        const simulation = value.steps.find((step) => step.step_type === "simulation");
-        if (simulation === undefined) return;
-        setNodes((current) =>
-          current.length > 0
-            ? current
-            : [makeNode(simulation, { x: 100, y: 140 }, current)],
-        );
+        const [workspace, persistedResult] = await Promise.all([
+          loadMCWorkspace().catch(() => null),
+          loadMCResult().catch(() => null),
+        ]);
+        const restored = restoreNodes(workspace, value);
+        if (restored !== null) {
+          setNodes(restored.nodes);
+          setEdges(restored.edges);
+          setNRep(workspace?.nRep ?? 100);
+          setFailFast(workspace?.failFast ?? true);
+        } else {
+          const simulation = value.steps.find(
+            (step) => step.step_type === "simulation",
+          );
+          if (simulation !== undefined) {
+            setNodes([makeNode(simulation, { x: 100, y: 140 }, [])]);
+          }
+        }
+        setResult(persistedResult);
+        setHydrated(true);
       })
       .catch((error: unknown) => {
         setNotice(error instanceof Error ? error.message : String(error));
         setNoticeError(true);
+        setHydrated(true);
       });
-  }, [setNodes]);
+  }, [setEdges, setNodes]);
 
   const selectedNode = nodes.find((node) => node.id === selectedId) ?? null;
   const pipeline = useMemo(() => toPipelineSpec(nodes, edges), [nodes, edges]);
@@ -99,8 +127,37 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
   const markDirty = useCallback(() => {
     setNotice("");
     setNoticeError(false);
-    setResult(null);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const timeout = window.setTimeout(() => {
+      void saveMCWorkspace({
+        version: 1,
+        pipeline,
+        positions: Object.fromEntries(
+          nodes.map((node) => [
+            node.id,
+            { x: node.position.x, y: node.position.y },
+          ]),
+        ),
+        nRep,
+        failFast,
+      }).catch((error: unknown) => {
+        setNotice(error instanceof Error ? error.message : String(error));
+        setNoticeError(true);
+      });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [edges, failFast, hydrated, nRep, nodes, pipeline]);
+
+  useEffect(() => {
+    if (!hydrated || result === null) return;
+    void saveMCResult(result).catch((error: unknown) => {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeError(true);
+    });
+  }, [hydrated, result]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<MCFlowNode>[]) => {
@@ -227,6 +284,29 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
     }
   }
 
+  async function clearWorkspace() {
+    resetPipeline();
+    setResult(null);
+    setNRep(100);
+    setFailFast(true);
+    try {
+      await clearMCWorkspace();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeError(true);
+    }
+  }
+
+  function resetPipeline() {
+    const simulation = catalog?.steps.find((step) => step.step_type === "simulation");
+    setNodes(simulation ? [makeNode(simulation, { x: 100, y: 140 }, [])] : []);
+    setEdges([]);
+    setSelectedId(null);
+    setNotice("");
+    setNoticeError(false);
+    window.requestAnimationFrame(() => void fitView());
+  }
+
   const canvasPanels: PanelDef[] = [
     {
       id: "pipeline",
@@ -234,8 +314,8 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
       badge: `${nodes.length} steps`,
       noPadding: true,
       headerActions: (
-        <button className="icon-button" onClick={() => void fitView()} title="Fit pipeline">
-          <RefreshCw size={15} />
+        <button className="icon-button" onClick={resetPipeline} title="Clear pipeline">
+          <Trash2 size={15} />
         </button>
       ),
       content: (
@@ -261,7 +341,6 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
           >
             <Background gap={20} size={1} />
             <Controls />
-            <MiniMap pannable zoomable />
           </ReactFlow>
         </div>
       ),
@@ -336,6 +415,14 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
         <button disabled={busy || !modelsReady} onClick={() => void run()}>
           <Play size={15} />
           Run pipeline
+        </button>
+        <button
+          className="secondary"
+          disabled={busy}
+          onClick={() => void clearWorkspace()}
+        >
+          <Trash2 size={15} />
+          Clear workspace
         </button>
         {notice !== "" && (
           <span className={noticeError ? "status error mc-notice" : "status mc-notice"}>
@@ -447,5 +534,40 @@ function toPipelineSpec(nodes: MCFlowNode[], edges: Edge[]): MCPipelineSpec {
       params: node.data.params,
     })),
     edges: edges.map((edge) => ({ source: edge.source, target: edge.target })),
+  };
+}
+
+function restoreNodes(
+  workspace: MCPersistedWorkspace | null,
+  catalog: MCCatalog,
+): { nodes: MCFlowNode[]; edges: Edge[] } | null {
+  if (workspace === null || workspace.version !== 1) return null;
+  const nodes: MCFlowNode[] = [];
+  for (const spec of workspace.pipeline.nodes) {
+    const item = catalog.steps.find((step) => step.step_type === spec.step_type);
+    if (item === undefined) return null;
+    nodes.push({
+      id: spec.id,
+      type: "mcStep",
+      position: workspace.positions[spec.id] ?? { x: 100, y: 140 },
+      data: {
+        stepType: spec.step_type,
+        name: spec.name,
+        params: {
+          ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
+          ...spec.params,
+        },
+        catalog: item,
+      },
+    });
+  }
+  return {
+    nodes,
+    edges: workspace.pipeline.edges.map((edge) => ({
+      id: `mc-edge-${edge.source}-${edge.target}`,
+      source: edge.source,
+      target: edge.target,
+      type: "smoothstep",
+    })),
   };
 }
