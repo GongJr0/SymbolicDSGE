@@ -150,6 +150,12 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - GUI Usage:
+      - Overview: gui_usage/index.md
+      - Builder: gui_usage/builder.md
+      - Spec: gui_usage/spec.md
+      - Outputs: gui_usage/outputs.md
+      - MC Pipeline: gui_usage/monte_carlo.md
   - Guides:
       - Model Configuration Guide: guides/model_config_guide.md
       - Quick Start: guides/quickstart.md

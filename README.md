@@ -62,6 +62,44 @@ The library supports a wide set of features beyond augmentation:
   - Filtering
   - Data generation
 
+### Web-UI
+
+`SymbolicDSGE` ships a `[ui]` dependency with the goal of making DSGE basic experiments accessible to non-programmers.
+While model estimation is currently not implemented, given a configuration file GUI users can:
+
+- Adjust parameters
+- Solve
+- Simulate
+- Create and run Monte Carlo experiments
+- Apply data transformations to outputs
+- Produce figures
+- Access raw output data
+
+There are two intended ways to access the GUI:
+
+```bash
+# Option 1: Serve the GUI from the command line
+#           This launhes an empty GUI and the configuration should be done through the Builder tab.
+sdsge-ui
+```
+
+```python
+# Option 2: Serve the GUI with a pre-loaded SolvedModel object
+
+# Read a config and solve the model as usual
+from SymbolicDSGE import ModelParser, DSGESolver
+
+model, kalman = ModelParser(...).get_all()
+solver = DSGESolver(model, kalman)
+compiled = solver.compile(...)
+sol = solver.solve(compiled, ...)
+
+# Serve the GUI with the solved model pre-loaded in the reference slot
+sol.serve(open_browser=True)
+```
+
+The UI does not support all capabilities of the library; however it can significantly aid the demonstration of findings to a non-technical audience by allowing them to interact with a given model. The UI is in active development and supporting all built-in features is a long-term goal.
+
 ### Read the Docs
 
 Alongside API references and implementation conventions, the [documentation](https://gongjr0.github.io/SymbolicDSGE/latest/) includes guides covering model setup, estimation, simulation, and filtering.
