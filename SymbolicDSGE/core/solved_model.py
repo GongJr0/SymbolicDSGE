@@ -314,6 +314,42 @@ class SolvedModel:
         """
         return asdict(self)
 
+    def serve(
+        self,
+        *,
+        host: str = "127.0.0.1",
+        port: int | None = None,
+        open_browser: bool = True,
+    ) -> None:
+        """Launch the SymbolicDSGE web playground with this model preloaded.
+
+        Serves the bundled UI and opens a browser, with this model loaded as
+        the ``reference`` model. Requires the optional UI dependencies::
+
+            pip install 'SymbolicDSGE[ui]'
+
+        Parameters
+        ----------
+        host, port:
+            Bind address; ``port`` defaults to an available port.
+        open_browser:
+            Whether to open a browser window automatically.
+        """
+        try:
+            from ..ui.cli import run_server
+        except ImportError as exc:  # pragma: no cover - exercised without [ui]
+            raise ImportError(
+                "The SymbolicDSGE UI extra is required for .serve(). "
+                "Install it with: pip install 'SymbolicDSGE[ui]'"
+            ) from exc
+
+        run_server(
+            reference=self,
+            host=host,
+            port=port,
+            open_browser=open_browser,
+        )
+
     def _shock_unpack(
         self, shocks: Mapping[str, NDF | Callable[[float | NDF], NDF]]
     ) -> list[Tuple[int, NDF]]:

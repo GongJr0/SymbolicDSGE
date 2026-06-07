@@ -29,6 +29,9 @@ dependencies = [
 Documentation = "https://gongjr0.github.io/SymbolicDSGE/"
 Repository = "https://github.com/GongJr0/SymbolicDSGE"
 
+[project.scripts]
+sdsge-ui = "SymbolicDSGE.ui.cli:main"
+
 [project.optional-dependencies]
 fred = [
     "fredapi>=0.5.2",
@@ -39,7 +42,6 @@ sr = [
 ]
 ui = [
     "fastapi>=0.115.0",
-    "httpx>=0.28.0",
     "uvicorn[standard]>=0.32.0",
 ]
 
@@ -65,15 +67,24 @@ dev = [
     "jupytext>=1.19.1",
     "pip>=26.0.1",
     "jupyterlab-execute-time>=3.3.0",
+    "httpx2>=2.3.0",
 ]
 
 [build-system]
 requires = ["setuptools>=65.5.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["SymbolicDSGE*"]
+
+[tool.setuptools.package-data]
+"SymbolicDSGE.ui" = ["_static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+addopts = "--import-mode=importlib"

@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 from fastapi.testclient import TestClient
 
-BACKEND_PATH = Path(__file__).resolve().parents[2] / "sdsge-ui" / "backend"
-sys.path.insert(0, str(BACKEND_PATH))
-
-from sdsge_ui_backend.app import create_app  # noqa: E402
-from sdsge_ui_backend.mc import (  # noqa: E402
+from SymbolicDSGE.ui.app import create_app
+from SymbolicDSGE.ui.mc import (
     serialize_pipeline_result,
     validate_pipeline_spec,
 )
-from sdsge_ui_backend.mc_schemas import MCPipelineSpec  # noqa: E402
-from sdsge_ui_backend.schemas import ArrayEnvelope  # noqa: E402
-from sdsge_ui_backend.serializers import decode_array, encode_array  # noqa: E402
+from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
+from SymbolicDSGE.ui.schemas import ArrayEnvelope
+from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult
