@@ -87,7 +87,10 @@ jobs:
           fi
 
           git commit -m "ci: update badges"
-          git push
+
+          if ! git pull --rebase origin "${GITHUB_REF_NAME}" || ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "::warning::Badge push skipped due to non-fast-forward or rebase conflict."
+          fi
 
   test_failed_badge:
     runs-on: ubuntu-latest
@@ -121,4 +124,7 @@ jobs:
           fi
 
           git commit -m "ci: update failing badge"
-          git push
+
+          if ! git pull --rebase origin "${GITHUB_REF_NAME}" || ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "::warning::Badge push skipped due to non-fast-forward or rebase conflict."
+          fi
