@@ -13,19 +13,22 @@ repos:
         types_or: [python, pyi, jupyter]
         additional_dependencies: [".[jupyter]"]
 
-  - repo: local
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "a66e98d"
     hooks:
       - id: mypy
         name: mypy
         description: 'Static type checker for Python'
-        entry: uv run mypy
-        language: system
+        entry: mypy
+        language: python
         'types_or': [ python, pyi ]
         pass_filenames: false
         args: [
             "--config-file=./mypy.ini", "."
         ]
         require_serial: true
+        additional_dependencies: ["numpy>=2.0", "pandas-stubs", "scipy-stubs", "matplotlib-stubs", "types-PyYAML"]
+        minimum_pre_commit_version: '2.9.2'
 
   - repo: local
     hooks:

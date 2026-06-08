@@ -9,4 +9,3 @@ class TestStatus(IntEnum):
     LINALG = -2
     UDEF_VARIANCE = -3
     BAD_LAG = -4
-    INSUFFICIENT_SAMPLES = -5

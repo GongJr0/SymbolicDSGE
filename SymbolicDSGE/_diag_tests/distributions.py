@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, TypeAlias
+from typing import Any
 
-import numpy as np
-from numpy import float64, floating, integer
+from numpy import float64, floating
 from numpy.typing import NDArray
 from scipy.stats._distn_infrastructure import rv_frozen
 
-FloatScalar: TypeAlias = float | floating[Any]
-IntegerScalar: TypeAlias = int | integer[Any]
-DistributionParameter: TypeAlias = FloatScalar | IntegerScalar
-FrozenDistribution: TypeAlias = rv_frozen[Any, Any]
+FloatScalar = float | floating[Any]
+FrozenDistribution = rv_frozen[Any, Any]
 
 
 def cdf_pval(
@@ -48,9 +45,8 @@ class ReferenceDistribution(Enum):
     CHI2 = "chi2"
     F = "f"
     t = "t"
-    JB_LOOKUP = "jb_lookup"
 
-    def freeze(self, *df: DistributionParameter) -> FrozenDistribution:
+    def freeze(self, *df: FloatScalar) -> FrozenDistribution:
         match self:
             case ReferenceDistribution.CHI2:
                 from scipy.stats import chi2
@@ -64,16 +60,5 @@ class ReferenceDistribution(Enum):
                 from scipy.stats import t
 
                 return t(*df)
-            case ReferenceDistribution.JB_LOOKUP:
-                from .jb_lookup import JarqueBeraDist
-
-                if len(df) != 1:
-                    raise TypeError(
-                        "JB_LOOKUP requires exactly one sample-size argument"
-                    )
-                n = df[0]
-                if isinstance(n, bool | np.bool_) or not isinstance(n, int | integer):
-                    raise TypeError("JB_LOOKUP sample size must be an integer")
-                return JarqueBeraDist(n)
             case _:
                 raise ValueError(f"Unsupported reference distribution: {self}")
