@@ -27,6 +27,9 @@ def jb_stat(x: NDF) -> tuple[int, float64]:
         return BAD_SHAPE, float64(np.nan)
 
     n = x.size
+    if n == 0:
+        return INSUFFICIENT_SAMPLES, float64(np.nan)
+
     mean = 0.0
     for i in range(n):
         mean += x[i]

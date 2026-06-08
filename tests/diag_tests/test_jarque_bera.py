@@ -14,16 +14,23 @@ from SymbolicDSGE._diag_tests.jb_lookup import (
 from SymbolicDSGE._diag_tests.status import TestStatus
 
 
-def test_jb_stat_matches_scipy_and_rejects_bad_shape() -> None:
+def test_jb_stat_matches_scipy_and_reports_small_sample_status() -> None:
     x = np.array([0.2, -1.0, 0.4, 1.8, -0.3, 0.9], dtype=np.float64)
 
     status, statistic = jb_stat(x)
     bad_status, bad_statistic = jb_stat(x.reshape(2, 3))
 
-    assert status == TestStatus.OK
+    assert status == TestStatus.INSUFFICIENT_SAMPLES
     np.testing.assert_allclose(statistic, scipy_jarque_bera(x).statistic)
     assert bad_status == TestStatus.BAD_SHAPE
     assert np.isnan(bad_statistic)
+
+
+def test_jb_stat_handles_empty_input() -> None:
+    status, statistic = jb_stat(np.array([], dtype=np.float64))
+
+    assert status == TestStatus.INSUFFICIENT_SAMPLES
+    assert np.isnan(statistic)
 
 
 def test_jarque_bera_returns_lookup_backed_test_result() -> None:

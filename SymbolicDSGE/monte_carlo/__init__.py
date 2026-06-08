@@ -1,11 +1,12 @@
 from .config import (
+    jarque_bera_test_step,
+    ljung_box_test_step,
     raw_data_step,
     reference_filter_step,
     regression_step,
     simulation_step,
     transform_step,
     wald_test_step,
-    ljung_box_test_step,
 )
 from .core import MCPipeline
 from .mc_constructs import (
@@ -26,6 +27,7 @@ from .mc_constructs import (
 )
 from .operations import (
     raw_data_datagen,
+    run_jarque_bera_test,
     run_ljung_box_test,
     run_reference_filter,
     run_regression,
@@ -49,6 +51,8 @@ __all__ = [
     "OpType",
     "RegressionOp",
     "TestOp",
+    "jarque_bera_test_step",
+    "ljung_box_test_step",
     "raw_data_datagen",
     "raw_data_step",
     "reference_filter_step",
@@ -57,11 +61,11 @@ __all__ = [
     "regression_step",
     "run_reference_filter",
     "run_regression",
-    "run_wald_test",
+    "run_jarque_bera_test",
     "run_ljung_box_test",
+    "run_wald_test",
     "simulate_dgp",
     "simulation_step",
     "transform_step",
     "wald_test_step",
-    "ljung_box_test_step",
 ]
