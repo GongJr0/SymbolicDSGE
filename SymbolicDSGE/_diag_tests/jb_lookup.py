@@ -231,7 +231,7 @@ class JarqueBeraDist(rv_frozen):
     @overload
     def cdf(self, x: onp.ToFloatND, /) -> NDF: ...
 
-    def cdf(self, x: Any, /) -> DistributionOutput:
+    def cdf(self, x: Any, /) -> DistributionOutput:  # pyright: ignore
         if self._small_n:
             return 1.0 - self._small_n_sf(x)
         else:
@@ -243,7 +243,7 @@ class JarqueBeraDist(rv_frozen):
     @overload
     def sf(self, x: onp.ToFloatND, /) -> NDF: ...
 
-    def sf(self, x: Any, /) -> DistributionOutput:
+    def sf(self, x: Any, /) -> DistributionOutput:  # pyright: ignore
         if self._small_n:
             return self._small_n_sf(x)
         else:
@@ -255,7 +255,7 @@ class JarqueBeraDist(rv_frozen):
     @overload
     def ppf(self, q: onp.ToFloatND, /) -> NDF: ...
 
-    def ppf(self, q: Any, /) -> DistributionOutput:
+    def ppf(self, q: Any, /) -> DistributionOutput:  # pyright: ignore
         if self._small_n:
             return self._small_n_isf(1.0 - np.asarray(q, dtype=np.float64))
         else:
@@ -267,7 +267,7 @@ class JarqueBeraDist(rv_frozen):
     @overload
     def isf(self, q: onp.ToFloatND, /) -> NDF: ...
 
-    def isf(self, q: Any, /) -> DistributionOutput:
+    def isf(self, q: Any, /) -> DistributionOutput:  # pyright: ignore
         if self._small_n:
             return self._small_n_isf(q)
         else:
