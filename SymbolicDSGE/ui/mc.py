@@ -539,7 +539,7 @@ def _bind_graph_dependency(
             raise ValueError(
                 f"Step '{node.name}' uses filter output and must link from a filter."
             )
-    return cast(MCNodeSpec, node.model_copy(update={"params": params}))
+    return node.model_copy(update={"params": params})
 
 
 def _clean_params(params: Mapping[str, Any]) -> dict[str, Any]:

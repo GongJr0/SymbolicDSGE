@@ -28,3 +28,11 @@ def jit_fill_centered(x: NDF, mean: NDF, centered: NDF) -> None:
     for t in range(n):
         for j in range(q):
             centered[t, j] = x[t, j] - mean[j]
+
+
+@njit(cache=True)
+def jit_nth_central_moment_into(x: NDF, mean: float64, n: int, out: NDF) -> None:
+    """Calculate the n-th central moment of x and store it in out."""
+    for i in range(x.size):
+        out[0] += (x[i] - mean) ** n
+    out[0] /= x.size

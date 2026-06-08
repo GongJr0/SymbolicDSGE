@@ -1,11 +1,13 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any, TypeAlias, cast
 
 import numpy as np
 from numpy import float64, sqrt
 from numpy.typing import NDArray
 
 from .distributions import (
+    DistributionParameter,
     FloatScalar,
     FrozenDistribution,
     PvalMethod,
@@ -13,32 +15,49 @@ from .distributions import (
 )
 from .status import TestStatus
 
-DfSpec = FloatScalar | Sequence[FloatScalar] | NDArray[float64]
-NormalizedDf = float64 | tuple[float64, ...]
+DfSpec: TypeAlias = (
+    DistributionParameter
+    | Sequence[DistributionParameter]
+    | NDArray[float64]
+    | NDArray[np.integer[Any]]
+)
+NormalizedParameter: TypeAlias = float64 | int
+NormalizedDf: TypeAlias = NormalizedParameter | tuple[NormalizedParameter, ...]
+
+
+def _normalize_distribution_parameter(value: object) -> NormalizedParameter:
+    if isinstance(value, bool | np.bool_):
+        raise TypeError("df must be numeric")
+    if isinstance(value, int | np.integer):
+        return int(value)
+    try:
+        return float64(cast(Any, value))
+    except (TypeError, ValueError) as exc:
+        raise TypeError("df must be numeric") from exc
 
 
 def _normalize_df(df: DfSpec) -> NormalizedDf:
     if isinstance(df, np.ndarray):
-        arr = np.asarray(df, dtype=np.float64)
+        arr = np.asarray(df)
         if arr.ndim == 0:
-            return float64(arr.item())
+            return _normalize_distribution_parameter(arr.item())
         if arr.ndim != 1:
             raise ValueError("df sequence must be 1D")
         if arr.size == 0:
             raise ValueError("df sequence must be non-empty")
-        return tuple(float64(value) for value in arr)
+        return tuple(_normalize_distribution_parameter(value) for value in arr)
 
     if isinstance(df, Sequence):
         if isinstance(df, str | bytes):
             raise TypeError("df must be numeric or a numeric sequence")
         if len(df) == 0:
             raise ValueError("df sequence must be non-empty")
-        return tuple(float64(value) for value in df)
+        return tuple(_normalize_distribution_parameter(value) for value in df)
 
-    return float64(df)
+    return _normalize_distribution_parameter(df)
 
 
-def _df_args(df: DfSpec) -> tuple[float64, ...]:
+def _df_args(df: DfSpec) -> tuple[NormalizedParameter, ...]:
     normalized = _normalize_df(df)
     if isinstance(normalized, tuple):
         return normalized
