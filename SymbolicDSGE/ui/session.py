@@ -31,11 +31,13 @@ from SymbolicDSGE.kalman.config import KalmanConfig
 
 from .schemas import (
     ArrayEnvelope,
+    EstimationRunRequest,
     FunctionKind,
     Role,
     ShockGenerationRequest,
     ShockParamUpdate,
 )
+from .estimation import build_estimation_inputs, serialize_estimation_result
 from .serializers import (
     decode_array,
     empty_model_summary,
@@ -239,6 +241,92 @@ class UISession:
             run_id=run_id,
             kind="sim",
             role=role,
+            payload=payload,
+        )
+        return payload
+
+    def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
+        slot = self._slot(request.role)
+        if slot.solver is None:
+            raise ValueError(f"No model is loaded for role '{request.role}'.")
+        if slot.compiled is None:
+            slot.compiled = slot.solver.compile(**dict(request.compile_kwargs))
+
+        y = np.asarray(request.y, dtype=np.float64)
+        if y.ndim != 2:
+            raise ValueError(
+                "Observed estimation data must be a two-dimensional array."
+            )
+        observables = request.observables
+        expected = (
+            len(observables)
+            if observables is not None
+            else len(getattr(slot.compiled, "observable_names", []))
+        )
+        if expected and y.shape[1] != expected:
+            raise ValueError(
+                f"Observed estimation data has {y.shape[1]} columns; expected {expected}."
+            )
+
+        names, theta0, priors, bounds = build_estimation_inputs(
+            request.parameters,
+            method=request.method,
+        )
+        kwargs = dict(request.method_kwargs)
+        reserved = {
+            "compiled",
+            "estimated_params",
+            "method",
+            "observables",
+            "posterior_point",
+            "priors",
+            "steady_state",
+            "theta0",
+            "y",
+        }
+        overlap = sorted(reserved.intersection(kwargs))
+        if overlap:
+            raise ValueError(
+                f"Estimation method kwargs cannot override reserved arguments: {overlap}."
+            )
+        if bounds is not None and request.method in {"mle", "map"}:
+            kwargs["bounds"] = bounds
+
+        common: dict[str, Any] = {
+            "compiled": slot.compiled,
+            "y": y,
+            "method": request.method,
+            "theta0": theta0,
+            "observables": observables,
+            "estimated_params": names,
+            "priors": priors,
+            "steady_state": request.steady_state,
+            **kwargs,
+        }
+        solved = False
+        if request.estimate_and_solve:
+            result, model = slot.solver.estimate_and_solve(
+                posterior_point=request.posterior_point,
+                **common,
+            )
+            slot.solved = model
+            solved = True
+        else:
+            result = slot.solver.estimate(**common)
+
+        run_id = str(uuid4())
+        payload: dict[str, Any] = {
+            "run_id": run_id,
+            "kind": "estimation",
+            "role": request.role,
+            "method": request.method,
+            "solved": solved,
+            "result": serialize_estimation_result(result),
+        }
+        self.record_run(
+            run_id=run_id,
+            kind="estimation",
+            role=request.role,
             payload=payload,
         )
         return payload

@@ -16,7 +16,9 @@ from .mc import (
     validate_pipeline_spec,
 )
 from .mc_schemas import MCPipelineSpec, MCRunRequest
+from .estimation import estimation_catalog
 from .schemas import (
+    EstimationRunRequest,
     LoadYamlRequest,
     Role,
     SimRunRequest,
@@ -56,6 +58,17 @@ def create_app(
     @app.get("/api/mc/catalog")
     def monte_carlo_catalog() -> dict[str, Any]:
         return mc_catalog()
+
+    @app.get("/api/estimation/catalog")
+    def get_estimation_catalog() -> dict[str, Any]:
+        return estimation_catalog()
+
+    @app.post("/api/run/estimation")
+    def run_estimation(request: EstimationRunRequest) -> dict[str, Any]:
+        try:
+            return ui_session.run_estimation(request)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 
     @app.post("/api/mc/validate")
     def validate_monte_carlo_pipeline(request: MCPipelineSpec) -> dict[str, Any]:

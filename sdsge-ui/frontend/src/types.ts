@@ -50,6 +50,7 @@ export interface ModelSummary {
   variables?: string[];
   observables?: string[];
   parameters?: string[];
+  parameter_values?: Record<string, number>;
   shock_specs?: ShockSpec[];
   shock_corr_specs?: ShockCorrSpec[];
   n_state?: number;
@@ -86,6 +87,76 @@ export interface SimResult {
   observables: boolean;
   series: NamedArray[];
   figures?: FigureResult[];
+}
+
+export type EstimationMethod = "mle" | "map" | "mcmc";
+
+export interface EstimationCatalog {
+  distributions: Record<string, Record<string, number | null>>;
+  transforms: Record<string, Record<string, number | null>>;
+  optimizer_methods: string[];
+  posterior_points: string[];
+}
+
+export interface EstimationPriorSpec {
+  distribution: string;
+  parameters: Record<string, number>;
+  transform: string;
+  transform_kwargs: Record<string, number>;
+}
+
+export interface EstimationParameterSpec {
+  name: string;
+  estimate: boolean;
+  initial: number;
+  lower: number | null;
+  upper: number | null;
+  prior: EstimationPriorSpec | null;
+}
+
+export interface EstimationRunRequest {
+  role: Role;
+  method: EstimationMethod;
+  y: number[][];
+  observables: string[] | null;
+  parameters: EstimationParameterSpec[];
+  method_kwargs: Record<string, unknown>;
+  compile_kwargs: Record<string, unknown>;
+  steady_state: number[] | null;
+  posterior_point: string;
+  estimate_and_solve: boolean;
+}
+
+export interface EstimationRunResult {
+  run_id: string;
+  kind: "estimation";
+  role: Role;
+  method: EstimationMethod;
+  solved: boolean;
+  result: {
+    kind: EstimationMethod;
+    success?: boolean;
+    message?: string;
+    theta?: Record<string, number>;
+    fun?: number;
+    loglik?: number;
+    logprior?: number;
+    logpost?: number;
+    nfev?: number;
+    nit?: number | null;
+    param_names?: string[];
+    posterior_mean?: Record<string, number>;
+    posterior_std?: Record<string, number>;
+    samples?: Record<string, number[]>;
+    logpost_trace?: number[];
+    accept_rate?: number;
+    n_draws?: number;
+    burn_in?: number;
+    thin?: number;
+    logpost_mean?: number;
+    logpost_min?: number;
+    logpost_max?: number;
+  };
 }
 
 export type MCStepType =

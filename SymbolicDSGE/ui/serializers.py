@@ -58,6 +58,7 @@ def summarize_parsed_model(
         "name": model.name,
         "variables": _symbol_names(model.variables.variables),
         "parameters": _symbol_names(model.parameters),
+        "parameter_values": _parameter_values(model),
         "observables": _symbol_names(model.observables),
         "shock_specs": _shock_specs(model),
         "shock_corr_specs": _shock_corr_specs(model),
@@ -82,6 +83,8 @@ def summarize_solved_model(
         "name": compiled.config.name,
         "variables": list(compiled.var_names),
         "observables": list(compiled.observable_names),
+        "parameters": _symbol_names(compiled.config.parameters),
+        "parameter_values": _parameter_values(compiled.config),
         "shock_specs": _shock_specs(compiled.config),
         "shock_corr_specs": _shock_corr_specs(compiled.config),
         "n_state": int(compiled.n_state),
@@ -163,3 +166,10 @@ def _param_value(model: ModelConfig, param: Any) -> float | None:
     if sym in model.calibration.parameters:
         return float(model.calibration.parameters[sym])
     return None
+
+
+def _parameter_values(model: ModelConfig) -> dict[str, float]:
+    return {
+        str(parameter): float(value)
+        for parameter, value in model.calibration.parameters.items()
+    }

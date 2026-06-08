@@ -59,6 +59,7 @@ def run_server(
     try:
         import uvicorn
         from fastapi.staticfiles import StaticFiles
+        from starlette.responses import Response
         from starlette.types import Receive, Scope, Send
     except ImportError as exc:  # pragma: no cover - exercised without [ui]
         raise SystemExit(_MISSING_UI_DEPS) from exc
@@ -83,6 +84,24 @@ def run_server(
                     await send({"type": "websocket.close", "code": 1000})
                 return
             await super().__call__(scope, receive, send)
+
+        async def get_response(self, path: str, scope: Scope) -> Response:
+            from starlette.exceptions import HTTPException as StarletteHTTPException
+
+            request_path = str(scope.get("path", path)).lstrip("/")
+            if request_path == "favicon.ico":
+                path = "favicon.svg"
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                is_frontend_route = (
+                    exc.status_code == 404
+                    and "." not in Path(request_path).name
+                    and not request_path.startswith(("api/", "_lsp/"))
+                )
+                if not is_frontend_route:
+                    raise
+                return await super().get_response("index.html", scope)
 
     app = create_app(reference=reference, dgp=dgp)
     # Mounted last so it does not shadow the /api routes registered above.
