@@ -18,6 +18,8 @@ NDI: TypeAlias = NDArray[int64]
 DistributionOutput: TypeAlias = float | float64 | NDF
 
 # Small N Critical value tables
+# Source: Würtz and Keller (2004) "Precise finite-sample quantiles of the Jarque-Bera adjusted Lagrange multiplier test"
+
 JB_N_GRID: NDI = np.ascontiguousarray(
     np.array(
         [10, 20, 35, 50, 75, 100, 150, 200, 300, 500, 800, 1_000, 1_600, 2_400, 10_000],
