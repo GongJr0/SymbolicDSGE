@@ -164,6 +164,7 @@ export type MCStepType =
   | "filter"
   | "wald"
   | "ljung_box"
+  | "jarque_bera"
   | "regression";
 
 export type MCFieldType =

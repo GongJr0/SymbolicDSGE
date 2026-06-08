@@ -11,6 +11,7 @@ from SymbolicDSGE.monte_carlo import (
     MCContext,
     MCPipeline,
     MCPipelineResult,
+    jarque_bera_test_step,
     ljung_box_test_step,
     reference_filter_step,
     regression_step,
@@ -32,7 +33,7 @@ INPUT_SOURCES = [
     "std_innov",
 ]
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
-TERMINAL_STEP_TYPES = {"wald", "ljung_box", "regression"}
+TERMINAL_STEP_TYPES = {"wald", "ljung_box", "jarque_bera", "regression"}
 
 
 def mc_catalog() -> dict[str, Any]:
@@ -137,6 +138,21 @@ def mc_catalog() -> dict[str, Any]:
                     _field("burn_in", "Burn-in", "number", 0, minimum=0),
                     _field("drop_initial", "Drop initial", "boolean", False),
                     _field("lags", "Lags", "number", 10, minimum=1),
+                    _field("alpha", "Alpha", "number", 0.05),
+                ],
+            ),
+            _step_catalog(
+                "jarque_bera",
+                "Jarque-Bera Test",
+                "jarque_bera",
+                "Test one selected series for normality.",
+                [
+                    _field(
+                        "source", "Source", "select", "std_innov", options=INPUT_SOURCES
+                    ),
+                    _field("column", "Column", "number_list", []),
+                    _field("burn_in", "Burn-in", "number", 0, minimum=0),
+                    _field("drop_initial", "Drop initial", "boolean", False),
                     _field("alpha", "Alpha", "number", 0.05),
                 ],
             ),
@@ -361,6 +377,8 @@ def build_pipeline(
             steps.append(wald_test_step(node.name, **params))
         elif node.step_type == "ljung_box":
             steps.append(ljung_box_test_step(node.name, **params))
+        elif node.step_type == "jarque_bera":
+            steps.append(jarque_bera_test_step(node.name, **params))
         elif node.step_type == "regression":
             steps.append(regression_step(node.name, **_regression_params(params)))
         else:

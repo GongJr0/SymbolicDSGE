@@ -14,13 +14,16 @@ const ICONS = {
   filter: Filter,
   wald: Sigma,
   ljung_box: Activity,
+  jarque_bera: Activity,
   regression: TestTubeDiagonal,
 };
 
 export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {
   const Icon = ICONS[data.stepType];
   const summary = summarizeParams(data.params);
-  const terminal = ["wald", "ljung_box", "regression"].includes(data.stepType);
+  const terminal = ["wald", "ljung_box", "jarque_bera", "regression"].includes(
+    data.stepType,
+  );
   return (
     <div className={`mc-step-node ${data.stepType}${selected ? " selected" : ""}`}>
       {data.stepType !== "simulation" && (
