@@ -1,4 +1,6 @@
 from .config import (
+    breusch_godfrey_test_step,
+    breusch_pagan_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     raw_data_step,
@@ -7,7 +9,6 @@ from .config import (
     simulation_step,
     transform_step,
     wald_test_step,
-    breusch_pagan_test_step,
 )
 from .core import MCPipeline
 from .mc_constructs import (
@@ -28,12 +29,13 @@ from .mc_constructs import (
 )
 from .operations import (
     raw_data_datagen,
+    run_breusch_godfrey_test,
+    run_breusch_pagan_test,
     run_jarque_bera_test,
     run_ljung_box_test,
     run_reference_filter,
     run_regression,
     run_wald_test,
-    run_breusch_pagan_test,
     simulate_dgp,
 )
 from .reference_constructs import MCReferenceConstruct
@@ -53,6 +55,8 @@ __all__ = [
     "OpType",
     "RegressionOp",
     "TestOp",
+    "breusch_godfrey_test_step",
+    "breusch_pagan_test_step",
     "jarque_bera_test_step",
     "ljung_box_test_step",
     "raw_data_datagen",
@@ -61,15 +65,15 @@ __all__ = [
     "report_mc_performance",
     "report_mc_step_performance",
     "regression_step",
+    "run_breusch_godfrey_test",
+    "run_breusch_pagan_test",
     "run_reference_filter",
     "run_regression",
     "run_jarque_bera_test",
     "run_ljung_box_test",
     "run_wald_test",
-    "run_breusch_pagan_test",
     "simulate_dgp",
     "simulation_step",
     "transform_step",
     "wald_test_step",
-    "breusch_pagan_test_step",
 ]

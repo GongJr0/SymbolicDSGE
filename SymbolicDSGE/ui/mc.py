@@ -11,6 +11,7 @@ from SymbolicDSGE.monte_carlo import (
     MCContext,
     MCPipeline,
     MCPipelineResult,
+    breusch_godfrey_test_step,
     breusch_pagan_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
@@ -39,6 +40,7 @@ TERMINAL_STEP_TYPES = {
     "ljung_box",
     "jarque_bera",
     "breusch_pagan",
+    "breusch_godfrey",
     "regression",
 }
 
@@ -188,6 +190,34 @@ def mc_catalog() -> dict[str, Any]:
                     _field("burn_in", "Burn-in", "number", 0, minimum=0),
                     _field("drop_initial", "Drop initial", "boolean", False),
                     _field("robust", "Robust (Koenker)", "boolean", False),
+                    _field("alpha", "Alpha", "number", 0.05),
+                ],
+            ),
+            _step_catalog(
+                "breusch_godfrey",
+                "Breusch-Godfrey Test",
+                "breusch_godfrey",
+                "Test residuals for serial correlation up to a given lag order.",
+                [
+                    _field(
+                        "residual_source",
+                        "Residual source",
+                        "select",
+                        "std_innov",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field(
+                        "X_source",
+                        "Regressor source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field("residual_col", "Residual column", "number_list", [0]),
+                    _field("X_columns", "Regressor columns", "number_list", [0]),
+                    _field("burn_in", "Burn-in", "number", 0, minimum=0),
+                    _field("drop_initial", "Drop initial", "boolean", False),
+                    _field("lags", "Lags", "number", 1, minimum=1),
                     _field("alpha", "Alpha", "number", 0.05),
                 ],
             ),
@@ -416,6 +446,8 @@ def build_pipeline(
             steps.append(jarque_bera_test_step(node.name, **params))
         elif node.step_type == "breusch_pagan":
             steps.append(breusch_pagan_test_step(node.name, **params))
+        elif node.step_type == "breusch_godfrey":
+            steps.append(breusch_godfrey_test_step(node.name, **params))
         elif node.step_type == "regression":
             steps.append(regression_step(node.name, **_regression_params(params)))
         else:

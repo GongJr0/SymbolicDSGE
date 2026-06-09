@@ -11,6 +11,7 @@ MCStepKind = Literal[
     "ljung_box",
     "jarque_bera",
     "breusch_pagan",
+    "breusch_godfrey",
     "regression",
 ]
 
