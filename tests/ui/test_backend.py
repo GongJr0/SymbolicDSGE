@@ -361,6 +361,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "filter",
         "wald",
         "ljung_box",
+        "jarque_bera",
         "regression",
     }
 
@@ -476,6 +477,61 @@ def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
     )
     assert run.status_code == 200
     assert set(run.json()["test_summaries"]) == {"a", "b"}
+
+
+def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        loaded = client.post(
+            "/api/model/load-yaml",
+            json={"role": role, "path": "MODELS/test.yaml"},
+        )
+        assert loaded.status_code == 200
+        solved = client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+        assert solved.status_code == 200
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 12},
+            },
+            {
+                "id": "jb",
+                "step_type": "jarque_bera",
+                "name": "normality",
+                "params": {
+                    "source": "states",
+                    "column": [0],
+                    "burn_in": 1,
+                    "alpha": 0.1,
+                },
+            },
+        ],
+        "edges": [{"source": "sim", "target": "jb"}],
+    }
+
+    validated = client.post("/api/mc/validate", json=pipeline)
+    assert validated.status_code == 200
+    assert validated.json()["order"] == ["sim", "jb"]
+
+    run = client.post(
+        "/api/run/mc",
+        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+    )
+    assert run.status_code == 200
+    body = run.json()
+    assert body["succeeded"] is True
+    assert set(body["test_summaries"]) == {"normality"}
+    summary = body["test_summaries"]["normality"]
+    assert summary["distribution"] == "jb_lookup"
+    assert summary["df"] == 12
+    assert summary["n"] == 2
 
 
 def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:

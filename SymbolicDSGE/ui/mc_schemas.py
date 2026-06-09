@@ -4,7 +4,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-MCStepKind = Literal["simulation", "filter", "wald", "ljung_box", "regression"]
+MCStepKind = Literal[
+    "simulation", "filter", "wald", "ljung_box", "jarque_bera", "regression"
+]
 
 
 class MCNodeSpec(BaseModel):

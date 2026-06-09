@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE import Shock
+from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
 from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
@@ -18,6 +19,7 @@ from SymbolicDSGE.monte_carlo import (
     MCReferenceConstruct,
     MCStep,
     OpType,
+    jarque_bera_test_step,
     ljung_box_test_step,
     raw_data_step,
     reference_filter_step,
@@ -285,6 +287,87 @@ def test_ljung_box_pipeline_rejects_multi_column_inputs() -> None:
 
     with pytest.raises(ValueError, match="single column"):
         pipeline.run(reference=reference, n_rep=1)
+
+
+def test_jarque_bera_pipeline_selects_column_and_aggregates_results() -> None:
+    reference = _FakeSolvedModel()
+    base = np.column_stack(
+        [
+            np.linspace(-2.0, 3.0, 12, dtype=np.float64) ** 2,
+            np.linspace(1.0, 4.0, 12, dtype=np.float64),
+        ]
+    )
+    observables = np.stack([base, base + np.array([0.5, -0.25])])
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables, observable_names=("a", "b")),
+            jarque_bera_test_step(
+                "jb_a",
+                source="observables",
+                column=0,
+                alpha=0.1,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=2, verbosity=0)
+
+    expected = np.asarray(
+        [jarque_bera(observables[i, :, 0], alpha=0.1).statistic for i in range(2)],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(out.statistic_traces["jb_a"], expected)
+    assert out.succeeded
+    assert out.test_summaries["jb_a"].df == 12
+    assert out.test_results is not None
+    assert all(result.status is TestStatus.OK for result in out.test_results["jb_a"])
+    assert all(result._pval is None for result in out.test_results["jb_a"])
+
+
+def test_jarque_bera_pipeline_rejects_multi_column_inputs() -> None:
+    reference = _FakeSolvedModel()
+    observables = np.arange(24.0, dtype=np.float64).reshape(12, 2)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            jarque_bera_test_step("jb", source="observables"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="single column"):
+        pipeline.run(reference=reference, n_rep=1, verbosity=0)
+
+
+def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None:
+    reference = _FakeSolvedModel()
+    observables = np.stack(
+        [
+            np.arange(6.0, dtype=np.float64).reshape(-1, 1),
+            np.arange(6.0, 12.0, dtype=np.float64).reshape(-1, 1),
+        ]
+    )
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            jarque_bera_test_step(
+                "jb",
+                source="observables",
+                burn_in=observables.shape[1],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=reference, n_rep=2, verbosity=0)
+
+    assert out.succeeded
+    assert out.failures == ()
+    assert out.test_results is not None
+    assert all(
+        result.status is TestStatus.INSUFFICIENT_SAMPLES
+        for result in out.test_results["jb"]
+    )
+    assert np.isnan(out.statistic_traces["jb"]).all()
+    assert np.isnan(out.pval_traces["jb"]).all()
 
 
 def test_raw_data_pipeline_rejects_empty_raw_data() -> None:

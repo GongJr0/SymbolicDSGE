@@ -12,6 +12,7 @@ from .._diag_tests.wald_test import (
     wald_mean_hac,
     wald_second_moment_hac,
 )
+from .._diag_tests.jarque_bera import jarque_bera
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
 from ..regression.enums import RegressionKind
@@ -272,6 +273,43 @@ def run_ljung_box_test(
         raise ValueError("Ljung-Box test requires a single column of data.")
 
     return ljung_box(arr[:, 0], L=lags, alpha=alpha, _auto_pval=False)
+
+
+def run_jarque_bera_test(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    source: InpSources,
+    filter_key: str = "filter",
+    payload_key: str | None = None,
+    column: Sequence[int] | int | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    alpha: float = 0.05,
+) -> TestResult:
+    del reference, dgp, rep_idx
+
+    col_idx: Sequence[int] | None
+    if isinstance(column, int):
+        col_idx = [column]
+    else:
+        col_idx = column
+
+    arr = _resolve_context_array(
+        context,
+        source=source,
+        filter_key=filter_key,
+        payload_key=payload_key,
+        columns=col_idx,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+    if arr.shape[1] != 1:
+        raise ValueError("Jarque-Bera test requires a single column of data.")
+
+    return jarque_bera(arr[:, 0], alpha=alpha, _auto_pval=False)
 
 
 def run_regression(
