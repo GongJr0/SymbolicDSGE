@@ -22,6 +22,7 @@ from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.monte_carlo import MCContext, MCData, MCPipelineResult
 from SymbolicDSGE.regression.ols import MCRegressionResult, ols
 
@@ -593,6 +594,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic_trace=np.array([0.5, 1.5], dtype=np.float64),
+        status_trace=(TestStatus.OK, TestStatus.BAD_SHAPE),
     )
     context = MCContext(
         rep_idx=0,
@@ -617,6 +619,11 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
 
     assert payload["test_summaries"]["diagnostic"]["statistic_ci"][0] is not None
     assert payload["test_summaries"]["diagnostic"]["rejection_ci"][0] is not None
+    assert payload["test_summaries"]["diagnostic"]["status_trace"] == [0, -1]
+    assert payload["test_summaries"]["diagnostic"]["status_counts"] == {
+        "OK": 1,
+        "BAD_SHAPE": 1,
+    }
     assert payload["regression_summaries"]["ols"]["ols"] is not None
     assert (
         payload["regression_summaries"]["ols"]["coefficient_summaries"][0]["variable"]

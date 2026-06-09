@@ -164,6 +164,7 @@ function TestSummary({ result }: { result: MCPipelineResult }) {
               <th>Step</th>
               <th>Reference</th>
               <th>N</th>
+              <th>Status</th>
               <th>Mean statistic</th>
               <th>Statistic 95% CI</th>
               <th>Statistic SE</th>
@@ -179,6 +180,7 @@ function TestSummary({ result }: { result: MCPipelineResult }) {
                 <td>{name}</td>
                 <td>{summary.distribution}({formatDf(summary.df)})</td>
                 <td>{summary.n}</td>
+                <td>{formatStatusCounts(summary.status_counts)}</td>
                 <td>{format(summary.mean_statistic)}</td>
                 <td>{formatInterval(summary.statistic_ci)}</td>
                 <td>{format(summary.statistic_se)}</td>
@@ -217,6 +219,12 @@ function TestSummary({ result }: { result: MCPipelineResult }) {
       </div>
     </div>
   );
+}
+
+function formatStatusCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([status, count]) => `${status}: ${count}`)
+    .join(", ");
 }
 
 function RegressionSummary({ result }: { result: MCPipelineResult }) {

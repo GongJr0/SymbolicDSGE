@@ -169,6 +169,7 @@ class MCResult:
     pval_method: PvalMethod
     alpha: float64
     statistic_trace: NDArray[float64]
+    status_trace: tuple[TestStatus, ...]
 
     frozen_dist: FrozenDistribution = field(init=False, repr=False)
     pval_trace: NDArray[float64] = field(init=False)
@@ -188,6 +189,12 @@ class MCResult:
         if n == 0:
             raise ValueError("statistic_trace must be non-empty")
 
+        status_trace = tuple(TestStatus(status) for status in self.status_trace)
+        if len(status_trace) != n:
+            raise ValueError(
+                "status_trace and statistic_trace must have the same length"
+            )
+
         df = _normalize_df(self.df)
         object.__setattr__(self, "df", df)
         frozen_dist, pval_trace = _compute_pvalues(
@@ -203,6 +210,11 @@ class MCResult:
             self,
             "statistic_trace",
             statistic_trace,
+        )
+        object.__setattr__(
+            self,
+            "status_trace",
+            status_trace,
         )
         object.__setattr__(
             self,

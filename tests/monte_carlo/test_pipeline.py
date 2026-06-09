@@ -366,6 +366,10 @@ def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None
         result.status is TestStatus.INSUFFICIENT_SAMPLES
         for result in out.test_results["jb"]
     )
+    assert out.test_status_traces["jb"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
+    assert (
+        out.test_summaries["jb"].status_trace == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
+    )
     assert np.isnan(out.statistic_traces["jb"]).all()
     assert np.isnan(out.pval_traces["jb"]).all()
 

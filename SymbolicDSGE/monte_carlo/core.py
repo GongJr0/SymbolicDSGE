@@ -212,6 +212,7 @@ def _summarize_tests(
             pval_method=first.pval_method,
             alpha=first.alpha,
             statistic_trace=stat_trace,
+            status_trace=tuple(result.status for result in results),
         )
         test_summaries[step_name] = summary
 

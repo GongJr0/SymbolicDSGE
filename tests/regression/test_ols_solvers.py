@@ -5,6 +5,7 @@ import pytest
 from scipy.stats import t
 
 from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.regression.ols import MCRegressionResult as ExportedMCRegressionResult
 from SymbolicDSGE.regression.ols import OLSResult as ExportedOLSResult
 from SymbolicDSGE.regression.ols import RegressionStatus as ExportedRegressionStatus
@@ -364,6 +365,7 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
     assert f_test.dist is ReferenceDistribution.F
     assert f_test.df == (np.float64(out.k), np.float64(out.n - out.k - 1))
     np.testing.assert_allclose(f_test.statistic_trace, out.F_stat_trace)
+    assert f_test.status_trace == (TestStatus.OK, TestStatus.OK)
 
     as_dict = out.to_dict()
     assert as_dict["variables"] == ["const", "trend"]
