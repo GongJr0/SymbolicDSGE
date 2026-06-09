@@ -333,6 +333,10 @@ class MCRegressionResult:
             pval_method=PvalMethod.SF,
             alpha=float64(alpha),
             statistic_trace=self.F_stat_trace,
+            status_trace=tuple(
+                TestStatus.OK if status is RegressionStatus.OK else TestStatus.LINALG
+                for status in self.status_trace
+            ),
         )
 
     def to_dict(self) -> dict:

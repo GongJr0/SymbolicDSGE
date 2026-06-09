@@ -254,6 +254,8 @@ export interface MCTestSummary {
   rejection_ci: Array<number | null>;
   statistic_trace: Array<number | null>;
   pval_trace: Array<number | null>;
+  status_trace: number[];
+  status_counts: Record<string, number>;
   statistic_summary: MCTraceSummary;
   pval_summary: MCTraceSummary;
 }

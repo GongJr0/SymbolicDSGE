@@ -455,6 +455,8 @@ def serialize_pipeline_result(
                 "rejection_ci": _json_value(summary.pval_confidence_interval()),
                 "statistic_trace": _json_value(summary.statistic_trace),
                 "pval_trace": _json_value(summary.pval_trace),
+                "status_trace": [int(status) for status in summary.status_trace],
+                "status_counts": _status_counts(summary.status_trace),
                 "statistic_summary": _trace_summary(summary.statistic_trace),
                 "pval_summary": _trace_summary(summary.pval_trace),
             }
@@ -675,9 +677,6 @@ def _regression_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
-    status_counts: dict[str, int] = {}
-    for status in summary.status_trace:
-        status_counts[status.name] = status_counts.get(status.name, 0) + 1
     coefficient_summaries = [
         {
             "variable": variable,
@@ -700,7 +699,7 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
         "coef_trace": _json_value(summary.coef_trace),
         "r2_trace": _json_value(summary.r2_trace),
         "status_trace": [int(status) for status in summary.status_trace],
-        "status_counts": status_counts,
+        "status_counts": _status_counts(summary.status_trace),
         "coefficient_summaries": coefficient_summaries,
         "metrics": metrics,
         "ols": None,
@@ -715,6 +714,13 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
             "f_pvalue": _trace_summary(summary.F_pval_trace),
         }
     return out
+
+
+def _status_counts(status_trace: Sequence[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for status in status_trace:
+        counts[status.name] = counts.get(status.name, 0) + 1
+    return counts
 
 
 def _summarize_context_data(contexts: Sequence[MCContext]) -> dict[str, Any]:

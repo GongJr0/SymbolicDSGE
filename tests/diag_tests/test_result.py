@@ -95,11 +95,13 @@ def test_mc_result_derives_n_from_trace_length() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic_trace=statistic_trace,
+        status_trace=(TestStatus.OK,) * statistic_trace.size,
     )
 
     assert out.n == 3
     np.testing.assert_allclose(out.pval_trace, chi2(df=2).sf(statistic_trace))
     assert out.rejection_rate == pytest.approx(2.0 / 3.0)
+    assert out.status_trace == (TestStatus.OK,) * 3
 
 
 def test_mc_result_supports_multi_df_reference_distribution() -> None:
@@ -111,6 +113,7 @@ def test_mc_result_supports_multi_df_reference_distribution() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic_trace=statistic_trace,
+        status_trace=(TestStatus.OK,) * statistic_trace.size,
     )
 
     assert out.df == (np.float64(2.0), np.float64(10.0))
@@ -162,6 +165,7 @@ def test_test_and_mc_results_preserve_integer_jb_sample_size() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic_trace=np.array([1.0, 5.0], dtype=np.float64),
+        status_trace=(TestStatus.OK, TestStatus.INSUFFICIENT_SAMPLES),
     )
 
     assert test_result.df == 100
@@ -182,6 +186,7 @@ def test_mc_result_raises_on_empty_traces() -> None:
             pval_method=PvalMethod.SF,
             alpha=np.float64(0.05),
             statistic_trace=np.array([], dtype=np.float64),
+            status_trace=(),
         )
 
 
@@ -194,6 +199,7 @@ def test_mc_result_raises_on_non_1d_statistic_trace() -> None:
             pval_method=PvalMethod.SF,
             alpha=np.float64(0.05),
             statistic_trace=np.ones((2, 2), dtype=np.float64),
+            status_trace=(TestStatus.OK,) * 4,
         )
 
 
@@ -206,6 +212,20 @@ def test_mc_result_raises_on_unsupported_reference_distribution() -> None:
             pval_method=PvalMethod.SF,
             alpha=np.float64(0.05),
             statistic_trace=np.array([1.0], dtype=np.float64),
+            status_trace=(TestStatus.OK,),
+        )
+
+
+def test_mc_result_rejects_mismatched_status_trace() -> None:
+    with pytest.raises(ValueError, match="same length"):
+        MCResult(
+            test_name="demo",
+            dist=ReferenceDistribution.CHI2,
+            df=np.float64(2.0),
+            pval_method=PvalMethod.SF,
+            alpha=np.float64(0.05),
+            statistic_trace=np.array([1.0, 2.0], dtype=np.float64),
+            status_trace=(TestStatus.OK,),
         )
 
 
@@ -251,6 +271,7 @@ def test_mc_result_confidence_intervals_cover_wilson_normal_and_t_paths() -> Non
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.5),
         statistic_trace=np.array([0.1, 1.0, 3.0, 5.0], dtype=np.float64),
+        status_trace=(TestStatus.OK,) * 4,
     )
 
     wilson = out.pval_confidence_interval(wilson=True)

@@ -9,6 +9,7 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from .._diag_tests.result import MCResult, TestResult
+from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
@@ -219,6 +220,12 @@ class MCPipelineResult:
     def pval_traces(self) -> Mapping[str, NDF]:
         return {
             name: summary.pval_trace for name, summary in self.test_summaries.items()
+        }
+
+    @property
+    def test_status_traces(self) -> Mapping[str, tuple[TestStatus, ...]]:
+        return {
+            name: summary.status_trace for name, summary in self.test_summaries.items()
         }
 
     @property
