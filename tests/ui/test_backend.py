@@ -364,6 +364,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "ljung_box",
         "jarque_bera",
         "breusch_pagan",
+        "breusch_godfrey",
         "regression",
     }
 
@@ -592,6 +593,65 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
     assert summary["test_name"] == "heteroskedasticity"
     assert summary["distribution"] == "chi2"
     assert summary["df"] == 1
+    assert summary["n"] == 2
+
+
+def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        loaded = client.post(
+            "/api/model/load-yaml",
+            json={"role": role, "path": "MODELS/test.yaml"},
+        )
+        assert loaded.status_code == 200
+        solved = client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+        assert solved.status_code == 200
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 20},
+            },
+            {
+                "id": "bg",
+                "step_type": "breusch_godfrey",
+                "name": "serial_correlation",
+                "params": {
+                    "residual_source": "states",
+                    "X_source": "states",
+                    "residual_col": [0],
+                    "X_columns": [1],
+                    "burn_in": 1,
+                    "lags": 2,
+                    "alpha": 0.1,
+                },
+            },
+        ],
+        "edges": [{"source": "sim", "target": "bg"}],
+    }
+
+    validated = client.post("/api/mc/validate", json=pipeline)
+    assert validated.status_code == 200
+    assert validated.json()["order"] == ["sim", "bg"]
+
+    run = client.post(
+        "/api/run/mc",
+        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+    )
+    assert run.status_code == 200
+    body = run.json()
+    assert body["succeeded"] is True
+    assert set(body["test_summaries"]) == {"serial_correlation"}
+    summary = body["test_summaries"]["serial_correlation"]
+    assert summary["test_name"] == "serial_correlation"
+    assert summary["distribution"] == "chi2"
+    assert summary["df"] == 2
     assert summary["n"] == 2
 
 
