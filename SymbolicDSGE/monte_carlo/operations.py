@@ -5,14 +5,16 @@ from typing import Literal, Mapping, Sequence, Any, Callable
 import numpy as np
 from numpy import float64, ndarray
 
-from .._diag_tests.ljung_box import ljung_box
 from .._diag_tests.result import TestResult
 from .._diag_tests.wald_test import (
     wald_covariance_hac,
     wald_mean_hac,
     wald_second_moment_hac,
 )
+from .._diag_tests.ljung_box import ljung_box
 from .._diag_tests.jarque_bera import jarque_bera
+from .._diag_tests.breusch_pagan import breusch_pagan, robust_breusch_pagan
+
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
 from ..regression.enums import RegressionKind
@@ -310,6 +312,68 @@ def run_jarque_bera_test(
         raise ValueError("Jarque-Bera test requires a single column of data.")
 
     return jarque_bera(arr[:, 0], alpha=alpha, _auto_pval=False)
+
+
+def run_breusch_pagan_test(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    residual_source: InpSources,
+    X_source: InpSources,
+    filter_key: str = "filter",
+    residual_payload_key: str | None = None,
+    x_payload_key: str | None = None,
+    residual_col: Sequence[int] | int | None = None,
+    X_columns: Sequence[int] | slice | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    alpha: float = 0.05,
+    robust: bool = False,
+) -> TestResult:
+    del reference, dgp, rep_idx
+
+    residual_col_idx: Sequence[int] | None
+    if isinstance(residual_col, int):
+        residual_col_idx = [residual_col]
+    else:
+        residual_col_idx = residual_col
+
+    residuals = _resolve_context_array(
+        context,
+        source=residual_source,
+        filter_key=filter_key,
+        payload_key=residual_payload_key,
+        columns=residual_col_idx,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+    X = _resolve_context_array(
+        context,
+        source=X_source,
+        filter_key=filter_key,
+        payload_key=x_payload_key,
+        columns=X_columns,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+
+    if residuals.shape[1] != 1:
+        raise ValueError(
+            "Breusch-Pagan residuals must resolve to exactly one column. "
+            f"Got shape {residuals.shape}."
+        )
+    if residuals.shape[0] != X.shape[0]:
+        raise ValueError(
+            "Breusch-Pagan residuals and regressors must have the same number "
+            f"of rows. Got residuals={residuals.shape[0]} and X={X.shape[0]}."
+        )
+
+    residual_vec = np.ascontiguousarray(residuals[:, 0], dtype=np.float64)
+    if robust:
+        return robust_breusch_pagan(residual_vec, X, alpha=alpha, _auto_pval=False)
+    return breusch_pagan(residual_vec, X, alpha=alpha, _auto_pval=False)
 
 
 def run_regression(

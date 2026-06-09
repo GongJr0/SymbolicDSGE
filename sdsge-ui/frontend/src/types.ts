@@ -165,6 +165,7 @@ export type MCStepType =
   | "wald"
   | "ljung_box"
   | "jarque_bera"
+  | "breusch_pagan"
   | "regression";
 
 export type MCFieldType =

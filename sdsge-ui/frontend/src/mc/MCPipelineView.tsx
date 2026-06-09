@@ -183,9 +183,13 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
       const target = nodes.find((node) => node.id === connection.target);
       if (source === undefined || target === undefined) return false;
       if (
-        ["wald", "ljung_box", "jarque_bera", "regression"].includes(
-          source.data.stepType,
-        )
+        [
+          "wald",
+          "ljung_box",
+          "jarque_bera",
+          "breusch_pagan",
+          "regression",
+        ].includes(source.data.stepType)
       ) {
         return false;
       }

@@ -1418,7 +1418,8 @@ button.mc-palette-step:hover {
 
 .mc-step-node.wald,
 .mc-step-node.ljung_box,
-.mc-step-node.jarque_bera {
+.mc-step-node.jarque_bera,
+.mc-step-node.breusch_pagan {
   border-left-color: #9333ea;
 }
 

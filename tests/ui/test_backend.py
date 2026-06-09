@@ -363,6 +363,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "wald",
         "ljung_box",
         "jarque_bera",
+        "breusch_pagan",
         "regression",
     }
 
@@ -535,6 +536,65 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
     assert summary["n"] == 2
 
 
+def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        loaded = client.post(
+            "/api/model/load-yaml",
+            json={"role": role, "path": "MODELS/test.yaml"},
+        )
+        assert loaded.status_code == 200
+        solved = client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+        assert solved.status_code == 200
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 20},
+            },
+            {
+                "id": "bp",
+                "step_type": "breusch_pagan",
+                "name": "heteroskedasticity",
+                "params": {
+                    "residual_source": "states",
+                    "X_source": "states",
+                    "residual_col": [0],
+                    "X_columns": [1],
+                    "burn_in": 1,
+                    "robust": True,
+                    "alpha": 0.1,
+                },
+            },
+        ],
+        "edges": [{"source": "sim", "target": "bp"}],
+    }
+
+    validated = client.post("/api/mc/validate", json=pipeline)
+    assert validated.status_code == 200
+    assert validated.json()["order"] == ["sim", "bp"]
+
+    run = client.post(
+        "/api/run/mc",
+        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+    )
+    assert run.status_code == 200
+    body = run.json()
+    assert body["succeeded"] is True
+    assert set(body["test_summaries"]) == {"heteroskedasticity"}
+    summary = body["test_summaries"]["heteroskedasticity"]
+    assert summary["test_name"] == "heteroskedasticity"
+    assert summary["distribution"] == "chi2"
+    assert summary["df"] == 1
+    assert summary["n"] == 2
+
+
 def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
@@ -646,9 +706,14 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
                 {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
                 {
                     "id": "test",
-                    "step_type": "wald",
+                    "step_type": "breusch_pagan",
                     "name": "diagnostic",
-                    "params": {"source": "std_innov", "target_vector": [0.0]},
+                    "params": {
+                        "residual_source": "std_innov",
+                        "X_source": "observables",
+                        "residual_col": [0],
+                        "X_columns": [0],
+                    },
                 },
             ],
             "edges": [
