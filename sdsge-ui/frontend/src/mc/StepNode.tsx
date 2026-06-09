@@ -7,23 +7,30 @@ import {
   Sigma,
   TestTubeDiagonal,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { MCStepType } from "../types";
 import type { MCFlowNode } from "./types";
 
-const ICONS = {
+const ICONS: Record<MCStepType, LucideIcon> = {
   simulation: DatabaseZap,
   filter: Filter,
   wald: Sigma,
   ljung_box: Activity,
   jarque_bera: Activity,
+  breusch_pagan: Activity,
   regression: TestTubeDiagonal,
 };
 
 export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {
-  const Icon = ICONS[data.stepType];
+  const Icon = ICONS[data.stepType] ?? Activity;
   const summary = summarizeParams(data.params);
-  const terminal = ["wald", "ljung_box", "jarque_bera", "regression"].includes(
-    data.stepType,
-  );
+  const terminal = [
+    "wald",
+    "ljung_box",
+    "jarque_bera",
+    "breusch_pagan",
+    "regression",
+  ].includes(data.stepType);
   return (
     <div className={`mc-step-node ${data.stepType}${selected ? " selected" : ""}`}>
       {data.stepType !== "simulation" && (

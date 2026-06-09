@@ -11,6 +11,7 @@ from SymbolicDSGE.monte_carlo import (
     MCContext,
     MCPipeline,
     MCPipelineResult,
+    breusch_pagan_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     reference_filter_step,
@@ -33,7 +34,13 @@ INPUT_SOURCES = [
     "std_innov",
 ]
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
-TERMINAL_STEP_TYPES = {"wald", "ljung_box", "jarque_bera", "regression"}
+TERMINAL_STEP_TYPES = {
+    "wald",
+    "ljung_box",
+    "jarque_bera",
+    "breusch_pagan",
+    "regression",
+}
 
 
 def mc_catalog() -> dict[str, Any]:
@@ -153,6 +160,34 @@ def mc_catalog() -> dict[str, Any]:
                     _field("column", "Column", "number_list", []),
                     _field("burn_in", "Burn-in", "number", 0, minimum=0),
                     _field("drop_initial", "Drop initial", "boolean", False),
+                    _field("alpha", "Alpha", "number", 0.05),
+                ],
+            ),
+            _step_catalog(
+                "breusch_pagan",
+                "Breusch-Pagan Test",
+                "breusch_pagan",
+                "Test residual variance against selected regressors.",
+                [
+                    _field(
+                        "residual_source",
+                        "Residual source",
+                        "select",
+                        "std_innov",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field(
+                        "X_source",
+                        "Regressor source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field("residual_col", "Residual column", "number_list", [0]),
+                    _field("X_columns", "Regressor columns", "number_list", [0]),
+                    _field("burn_in", "Burn-in", "number", 0, minimum=0),
+                    _field("drop_initial", "Drop initial", "boolean", False),
+                    _field("robust", "Robust (Koenker)", "boolean", False),
                     _field("alpha", "Alpha", "number", 0.05),
                 ],
             ),
@@ -379,6 +414,8 @@ def build_pipeline(
             steps.append(ljung_box_test_step(node.name, **params))
         elif node.step_type == "jarque_bera":
             steps.append(jarque_bera_test_step(node.name, **params))
+        elif node.step_type == "breusch_pagan":
+            steps.append(breusch_pagan_test_step(node.name, **params))
         elif node.step_type == "regression":
             steps.append(regression_step(node.name, **_regression_params(params)))
         else:
@@ -515,7 +552,7 @@ def _validate_dependency(node: MCNodeSpec, prior_names: set[str]) -> None:
         return
     sources = [
         params.get(key)
-        for key in ("source", "y_source", "X_source")
+        for key in ("source", "residual_source", "y_source", "X_source")
         if params.get(key) is not None
     ]
     if any(source in FILTER_SOURCES for source in sources):
@@ -526,7 +563,12 @@ def _validate_dependency(node: MCNodeSpec, prior_names: set[str]) -> None:
             )
     payload_keys = [
         params.get(key)
-        for key in ("payload_key", "y_payload_key", "x_payload_key")
+        for key in (
+            "payload_key",
+            "residual_payload_key",
+            "y_payload_key",
+            "x_payload_key",
+        )
         if params.get(key)
     ]
     for payload_key in payload_keys:
@@ -548,7 +590,7 @@ def _bind_graph_dependency(
     elif node.step_type in TERMINAL_STEP_TYPES:
         sources = [
             params.get(key)
-            for key in ("source", "y_source", "X_source")
+            for key in ("source", "residual_source", "y_source", "X_source")
             if params.get(key) is not None
         ]
         if any(source == "payload" for source in sources):

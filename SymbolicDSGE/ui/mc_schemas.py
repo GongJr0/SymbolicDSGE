@@ -5,7 +5,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 MCStepKind = Literal[
-    "simulation", "filter", "wald", "ljung_box", "jarque_bera", "regression"
+    "simulation",
+    "filter",
+    "wald",
+    "ljung_box",
+    "jarque_bera",
+    "breusch_pagan",
+    "regression",
 ]
 
 

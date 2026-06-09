@@ -6,6 +6,10 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE import Shock
+from SymbolicDSGE._diag_tests.breusch_pagan import (
+    breusch_pagan,
+    robust_breusch_pagan,
+)
 from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
 from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
@@ -19,6 +23,7 @@ from SymbolicDSGE.monte_carlo import (
     MCReferenceConstruct,
     MCStep,
     OpType,
+    breusch_pagan_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     raw_data_step,
@@ -372,6 +377,187 @@ def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None
     )
     assert np.isnan(out.statistic_traces["jb"]).all()
     assert np.isnan(out.pval_traces["jb"]).all()
+
+
+def test_breusch_pagan_pipeline_selects_columns_and_aggregates_results() -> None:
+    rng = np.random.default_rng(512)
+    X = rng.normal(size=(2, 40, 2))
+    eps = rng.normal(scale=np.exp(0.4 * X[:, :, 0]))
+    observables = np.concatenate((eps[:, :, None], X), axis=2)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            breusch_pagan_test_step(
+                "bp",
+                residual_source="observables",
+                X_source="observables",
+                residual_col=0,
+                X_columns=[1, 2],
+            ),
+            breusch_pagan_test_step(
+                "robust_bp",
+                residual_source="observables",
+                X_source="observables",
+                residual_col=0,
+                X_columns=[1, 2],
+                robust=True,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    expected = np.asarray(
+        [breusch_pagan(eps[i], X[i]).statistic for i in range(2)],
+        dtype=np.float64,
+    )
+    robust_expected = np.asarray(
+        [robust_breusch_pagan(eps[i], X[i]).statistic for i in range(2)],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(out.statistic_traces["bp"], expected)
+    np.testing.assert_allclose(out.statistic_traces["robust_bp"], robust_expected)
+    assert out.test_summaries["bp"].df == 2
+    assert out.test_summaries["robust_bp"].df == 2
+    assert out.test_status_traces["bp"] == (TestStatus.OK, TestStatus.OK)
+    assert out.test_status_traces["robust_bp"] == (TestStatus.OK, TestStatus.OK)
+
+
+def test_breusch_pagan_pipeline_supports_separate_residual_and_regressor_sources() -> (
+    None
+):
+    rng = np.random.default_rng(128)
+    states = rng.normal(size=(2, 30, 2))
+    residuals = rng.normal(scale=np.exp(0.4 * states[:, :, 0]))
+    observables = residuals[:, :, None]
+    pipeline = MCPipeline(
+        [
+            raw_data_step(states=states, observables=observables),
+            breusch_pagan_test_step(
+                "bp",
+                residual_source="observables",
+                X_source="states",
+                residual_col=0,
+                X_columns=[0, 1],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    expected = np.asarray(
+        [breusch_pagan(residuals[i], states[i]).statistic for i in range(2)],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(out.statistic_traces["bp"], expected)
+
+
+def test_breusch_pagan_pipeline_supports_separate_payload_sources() -> None:
+    rng = np.random.default_rng(256)
+    X = rng.normal(size=(30, 2))
+    residuals = rng.normal(scale=np.exp(0.4 * X[:, 0]), size=30)
+
+    def residual_payload(**_: object) -> np.ndarray:
+        return residuals
+
+    def regressor_payload(**_: object) -> np.ndarray:
+        return X
+
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=residuals[:, None]),
+            transform_step("residual_payload", residual_payload),
+            transform_step("regressor_payload", regressor_payload),
+            breusch_pagan_test_step(
+                "bp",
+                residual_source="payload",
+                X_source="payload",
+                residual_payload_key="residual_payload",
+                x_payload_key="regressor_payload",
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    np.testing.assert_allclose(
+        out.statistic_traces["bp"],
+        np.full(2, breusch_pagan(residuals, X).statistic, dtype=np.float64),
+    )
+
+
+def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> None:
+    observables = np.arange(30.0, dtype=np.float64).reshape(10, 3)
+    reference = _FakeSolvedModel()
+
+    with pytest.raises(ValueError, match="exactly one column"):
+        MCPipeline(
+            [
+                raw_data_step(observables=observables),
+                breusch_pagan_test_step(
+                    "bp",
+                    residual_source="observables",
+                    X_source="observables",
+                    X_columns=[1, 2],
+                ),
+            ]
+        ).run(reference=reference, n_rep=1, verbosity=0)
+
+    with pytest.raises(ValueError, match="at least one variance regressor"):
+        MCPipeline(
+            [
+                raw_data_step(observables=observables),
+                breusch_pagan_test_step(
+                    "bp",
+                    residual_source="observables",
+                    X_source="observables",
+                    residual_col=0,
+                    X_columns=[],
+                ),
+            ]
+        ).run(reference=reference, n_rep=1, verbosity=0)
+
+    with pytest.raises(ValueError, match="same number of rows"):
+        MCPipeline(
+            [
+                raw_data_step(
+                    states=np.arange(33.0, dtype=np.float64).reshape(11, 3),
+                    observables=observables,
+                ),
+                breusch_pagan_test_step(
+                    "bp",
+                    residual_source="observables",
+                    X_source="states",
+                    residual_col=0,
+                    X_columns=[0, 1],
+                ),
+            ]
+        ).run(reference=reference, n_rep=1, verbosity=0)
+
+
+def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples() -> None:
+    base = np.arange(30.0, dtype=np.float64).reshape(10, 3)
+    observables = np.stack((base, base + 0.5))
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            breusch_pagan_test_step(
+                "bp",
+                residual_source="observables",
+                X_source="observables",
+                residual_col=0,
+                X_columns=[1, 2],
+                burn_in=observables.shape[1],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    assert out.succeeded
+    assert out.test_status_traces["bp"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
+    assert np.isnan(out.statistic_traces["bp"]).all()
+    assert np.isnan(out.pval_traces["bp"]).all()
 
 
 def test_raw_data_pipeline_rejects_empty_raw_data() -> None:
