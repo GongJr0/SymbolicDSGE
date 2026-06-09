@@ -1352,27 +1352,12 @@ button.estimation-parameter-card.selected {
 }
 
 .mc-palette {
-  background: rgb(255 255 255 / 94%);
-  border: 1px solid #cbd5e1;
-  border-radius: 7px;
-  box-shadow: 0 3px 12px rgb(15 23 42 / 10%);
   display: flex;
   flex-direction: column;
   gap: 5px;
-  left: 10px;
   padding: 8px;
-  position: absolute;
-  top: 10px;
-  width: 150px;
-  z-index: 5;
 }
 
-.mc-palette > strong {
-  color: #475569;
-  font-size: 11px;
-  padding: 2px 3px;
-  text-transform: uppercase;
-}
 
 button.mc-palette-step {
   background: #f8fafc;
@@ -1419,7 +1404,8 @@ button.mc-palette-step:hover {
 .mc-step-node.wald,
 .mc-step-node.ljung_box,
 .mc-step-node.jarque_bera,
-.mc-step-node.breusch_pagan {
+.mc-step-node.breusch_pagan,
+.mc-step-node.breusch_godfrey {
   border-left-color: #9333ea;
 }
 
@@ -2191,7 +2177,6 @@ button.mc-palette-step:hover {
 }
 
 .theme-dark .mc-runbar,
-.theme-dark .mc-palette,
 .theme-dark .mc-step-node,
 .theme-dark .mc-metric {
   background: #1e293b;
@@ -2199,9 +2184,6 @@ button.mc-palette-step:hover {
   box-shadow: none;
 }
 
-.theme-dark .mc-palette {
-  background: rgb(30 41 59 / 94%);
-}
 
 .theme-dark button.mc-palette-step {
   background: #152032;
@@ -2214,7 +2196,6 @@ button.mc-palette-step:hover {
   color: #c7d2fe;
 }
 
-.theme-dark .mc-palette > strong,
 .theme-dark .mc-step-node-heading,
 .theme-dark .mc-step-node-summary,
 .theme-dark .mc-inspector-title span,

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE import Shock
+from SymbolicDSGE._diag_tests.breusch_godfrey import breusch_godfrey
 from SymbolicDSGE._diag_tests.breusch_pagan import (
     breusch_pagan,
     robust_breusch_pagan,
@@ -23,6 +24,7 @@ from SymbolicDSGE.monte_carlo import (
     MCReferenceConstruct,
     MCStep,
     OpType,
+    breusch_godfrey_test_step,
     breusch_pagan_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
@@ -558,6 +560,96 @@ def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples() -> No
     assert out.test_status_traces["bp"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
     assert np.isnan(out.statistic_traces["bp"]).all()
     assert np.isnan(out.pval_traces["bp"]).all()
+
+
+def test_breusch_godfrey_pipeline_selects_columns_and_aggregates_results() -> None:
+    rng = np.random.default_rng(512)
+    X = rng.normal(size=(2, 40, 2))
+    eps = rng.normal(size=(2, 40))
+    observables = np.concatenate((eps[:, :, None], X), axis=2)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            breusch_godfrey_test_step(
+                "bg",
+                residual_source="observables",
+                X_source="observables",
+                residual_col=0,
+                X_columns=[1, 2],
+                lags=2,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    expected = np.asarray(
+        [breusch_godfrey(eps[i], X[i], lags=2).statistic for i in range(2)],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(out.statistic_traces["bg"], expected)
+    assert out.test_summaries["bg"].df == 2
+    assert out.test_status_traces["bg"] == (TestStatus.OK, TestStatus.OK)
+
+
+def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs() -> None:
+    observables = np.arange(30.0, dtype=np.float64).reshape(10, 3)
+    reference = _FakeSolvedModel()
+
+    with pytest.raises(ValueError, match="exactly one column"):
+        MCPipeline(
+            [
+                raw_data_step(observables=observables),
+                breusch_godfrey_test_step(
+                    "bg",
+                    residual_source="observables",
+                    X_source="observables",
+                    X_columns=[1, 2],
+                ),
+            ]
+        ).run(reference=reference, n_rep=1, verbosity=0)
+
+    with pytest.raises(ValueError, match="same number of rows"):
+        MCPipeline(
+            [
+                raw_data_step(
+                    states=np.arange(33.0, dtype=np.float64).reshape(11, 3),
+                    observables=observables,
+                ),
+                breusch_godfrey_test_step(
+                    "bg",
+                    residual_source="observables",
+                    X_source="states",
+                    residual_col=0,
+                    X_columns=[0, 1],
+                ),
+            ]
+        ).run(reference=reference, n_rep=1, verbosity=0)
+
+
+def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples() -> None:
+    base = np.arange(30.0, dtype=np.float64).reshape(10, 3)
+    observables = np.stack((base, base + 0.5))
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            breusch_godfrey_test_step(
+                "bg",
+                residual_source="observables",
+                X_source="observables",
+                residual_col=0,
+                X_columns=[1, 2],
+                burn_in=observables.shape[1],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    assert out.succeeded
+    assert out.test_status_traces["bg"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
+    assert np.isnan(out.statistic_traces["bg"]).all()
+    assert np.isnan(out.pval_traces["bg"]).all()
 
 
 def test_raw_data_pipeline_rejects_empty_raw_data() -> None:

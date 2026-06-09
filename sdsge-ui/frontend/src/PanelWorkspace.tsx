@@ -20,6 +20,7 @@ export function PanelWorkspace({
   panels,
   defaultLayout = "vertical",
   defaultSplit = 50,
+  defaultSizes,
   fillHeight = false,
   initialFolded,
   onFoldChange,
@@ -27,6 +28,7 @@ export function PanelWorkspace({
   panels: PanelDef[];
   defaultLayout?: LayoutDirection;
   defaultSplit?: number;
+  defaultSizes?: number[];
   fillHeight?: boolean;
   initialFolded?: Record<string, boolean>;
   onFoldChange?: (folded: Record<string, boolean>) => void;
@@ -38,7 +40,11 @@ export function PanelWorkspace({
   const [panelHeights, setPanelHeights] = useState<Record<string, number>>(() =>
     Object.fromEntries(panels.map((p) => [p.id, p.defaultHeight ?? 470])),
   );
-  const [split, setSplit] = useState(defaultSplit);
+  const [sizes, setSizes] = useState<number[]>(() => {
+    if (defaultSizes && defaultSizes.length === panels.length) return [...defaultSizes];
+    if (panels.length === 2) return [defaultSplit, 100 - defaultSplit];
+    return Array.from({ length: panels.length }, () => 100 / panels.length);
+  });
   const [layout, setLayout] = useState<LayoutDirection>(defaultLayout);
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -83,13 +89,13 @@ export function PanelWorkspace({
     setOrder(without);
     if (newLayout !== layout) {
       setLayout(newLayout);
-      setSplit(50);
+      setSizes(Array.from({ length: order.length }, () => 100 / order.length));
     }
     setDragged(null);
     setDropTarget(null);
   }
 
-  function startSplitResize(event: PointerEvent<HTMLDivElement>) {
+  function startSplitResize(boundary: number, event: PointerEvent<HTMLDivElement>) {
     const ws = (event.currentTarget as HTMLElement).closest<HTMLElement>(
       ".output-workspace",
     );
@@ -97,14 +103,32 @@ export function PanelWorkspace({
     const rect = ws.getBoundingClientRect();
     const sx = event.clientX;
     const sy = event.clientY;
-    const s0 = split;
+    const base = [...sizes];
+    const left = boundary - 1;
+    const right = boundary;
+    const total = (base[left] ?? 0) + (base[right] ?? 0);
+    const min = 10;
 
     function move(e: globalThis.PointerEvent) {
-      if (layout === "horizontal") {
-        setSplit(Math.min(75, Math.max(25, s0 + ((e.clientX - sx) / rect.width) * 100)));
-      } else {
-        setSplit(Math.min(80, Math.max(20, s0 + ((e.clientY - sy) / rect.height) * 100)));
+      const deltaPct =
+        layout === "horizontal"
+          ? ((e.clientX - sx) / rect.width) * 100
+          : ((e.clientY - sy) / rect.height) * 100;
+      let l = (base[left] ?? 0) + deltaPct;
+      let r = (base[right] ?? 0) - deltaPct;
+      if (l < min) {
+        l = min;
+        r = total - min;
+      } else if (r < min) {
+        r = min;
+        l = total - min;
       }
+      setSizes((cur) => {
+        const next = [...cur];
+        next[left] = l;
+        next[right] = r;
+        return next;
+      });
     }
     function stop() {
       window.removeEventListener("pointermove", move);
@@ -129,14 +153,12 @@ export function PanelWorkspace({
   }
 
   function slotStyle(id: string, index: number): CSSProperties | undefined {
-    if (layout !== "vertical") return undefined;
-    const others = order.filter((oid) => oid !== id);
-    if (folded[id]) return { flex: "0 0 auto" };
-    if (others.some((oid) => folded[oid])) return { flex: 1, minHeight: 0 };
-    if (order.length === 2) {
-      return { flex: index === 0 ? split : 100 - split, minHeight: 0 };
+    if (layout === "horizontal") {
+      return { gridColumn: String(2 * index + 1) };
     }
-    return { flex: 1, minHeight: 0 };
+    if (folded[id]) return { flex: "0 0 auto" };
+    if (order.some((oid) => folded[oid])) return { flex: 1, minHeight: 0 };
+    return { flex: `${sizes[index] ?? 1} 1 0`, minHeight: 0 };
   }
 
   function panelStyle(id: string): CSSProperties | undefined {
@@ -156,15 +178,12 @@ export function PanelWorkspace({
 
   function horizontalTemplate(): CSSProperties | undefined {
     if (layout !== "horizontal" || !multi) return undefined;
-    if (order.length === 2) {
-      if (folded[order[0]]) {
-        return { gridTemplateColumns: "42px 6px minmax(0, 1fr)" };
-      }
-      if (folded[order[1]]) {
-        return { gridTemplateColumns: "minmax(0, 1fr) 6px 42px" };
-      }
-    }
-    return { gridTemplateColumns: `${split}fr 6px ${100 - split}fr` };
+    const cols: string[] = [];
+    order.forEach((id, i) => {
+      if (i > 0) cols.push("6px");
+      cols.push(folded[id] ? "42px" : `${sizes[i] ?? 1}fr`);
+    });
+    return { gridTemplateColumns: cols.join(" ") };
   }
 
   function bodyClass(def: PanelDef) {
@@ -198,9 +217,8 @@ export function PanelWorkspace({
             {showSplitter && (
               <div
                 className="output-splitter"
-                onPointerDown={order.length === 2 ? startSplitResize : undefined}
-                style={order.length !== 2 ? { cursor: "default" } : undefined}
-                title={order.length === 2 ? "Resize panels" : undefined}
+                onPointerDown={(e) => startSplitResize(index, e)}
+                title="Resize panels"
               />
             )}
             <section

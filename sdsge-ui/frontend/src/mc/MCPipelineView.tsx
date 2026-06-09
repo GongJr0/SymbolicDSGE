@@ -188,6 +188,7 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
           "ljung_box",
           "jarque_bera",
           "breusch_pagan",
+          "breusch_godfrey",
           "regression",
         ].includes(source.data.stepType)
       ) {
@@ -317,6 +318,13 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
 
   const canvasPanels: PanelDef[] = [
     {
+      id: "steps",
+      title: "Steps",
+      badge: catalog ? `${catalog.steps.length}` : undefined,
+      scrollable: true,
+      content: <StepPalette catalog={catalog} onAdd={addStep} />,
+    },
+    {
       id: "pipeline",
       title: "Pipeline",
       badge: `${nodes.length} steps`,
@@ -332,7 +340,6 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
           onDragOver={(event) => event.preventDefault()}
           onDrop={onDrop}
         >
-          <StepPalette catalog={catalog} onAdd={addStep} />
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -447,7 +454,7 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
           <PanelWorkspace
             panels={canvasPanels}
             defaultLayout="horizontal"
-            defaultSplit={72}
+            defaultSizes={[18, 54, 28]}
             fillHeight
           />
         </div>
@@ -483,7 +490,6 @@ function StepPalette({
 }) {
   return (
     <div className="mc-palette">
-      <strong>Steps</strong>
       {catalog?.steps.map((item) => (
         <button
           key={item.step_type}

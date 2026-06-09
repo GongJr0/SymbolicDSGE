@@ -11,6 +11,7 @@ from .operations import (
     run_wald_test as _run_wald_test,
     run_jarque_bera_test as _run_jarque_bera_test,
     run_breusch_pagan_test as _run_breusch_pagan_test,
+    run_breusch_godfrey_test as _run_breusch_godfrey_test,
     simulate_dgp as _simulate_dgp,
 )
 
@@ -66,6 +67,12 @@ def jarque_bera_test_step(name: str, **kwargs: Any) -> MCStep:
 def breusch_pagan_test_step(name: str, **kwargs: Any) -> MCStep:
     return MCStep(
         name=name, op_type=OpType.TEST, func=_run_breusch_pagan_test, kwargs=kwargs
+    )
+
+
+def breusch_godfrey_test_step(name: str, **kwargs: Any) -> MCStep:
+    return MCStep(
+        name=name, op_type=OpType.TEST, func=_run_breusch_godfrey_test, kwargs=kwargs
     )
 
 
