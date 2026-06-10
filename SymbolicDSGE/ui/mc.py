@@ -14,6 +14,7 @@ from SymbolicDSGE.monte_carlo import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     cusum_test_step,
+    cusumsq_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     reference_filter_step,
@@ -43,6 +44,7 @@ TERMINAL_STEP_TYPES = {
     "breusch_pagan",
     "breusch_godfrey",
     "cusum",
+    "cusumsq",
     "regression",
 }
 
@@ -228,6 +230,33 @@ def mc_catalog() -> dict[str, Any]:
                 "CUSUM Test",
                 "cusum",
                 "Test regression coefficients for stability via recursive residuals.",
+                [
+                    _field(
+                        "y_source",
+                        "Response source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field(
+                        "x_source",
+                        "Regressor source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field("y_column", "Response column", "number_list", [0]),
+                    _field("X_columns", "Regressor columns", "number_list", [1]),
+                    _field("burn_in", "Burn-in", "number", 0, minimum=0),
+                    _field("drop_initial", "Drop initial", "boolean", False),
+                    _field("alpha", "Alpha", "number", 0.05),
+                ],
+            ),
+            _step_catalog(
+                "cusumsq",
+                "CUSUM of Squares Test",
+                "cusumsq",
+                "Test regression variance stability via squared recursive residuals.",
                 [
                     _field(
                         "y_source",
@@ -479,6 +508,8 @@ def build_pipeline(
             steps.append(breusch_godfrey_test_step(node.name, **params))
         elif node.step_type == "cusum":
             steps.append(cusum_test_step(node.name, **params))
+        elif node.step_type == "cusumsq":
+            steps.append(cusumsq_test_step(node.name, **params))
         elif node.step_type == "regression":
             steps.append(regression_step(node.name, **_regression_params(params)))
         else:

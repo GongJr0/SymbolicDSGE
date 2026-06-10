@@ -366,6 +366,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "breusch_pagan",
         "breusch_godfrey",
         "cusum",
+        "cusumsq",
         "regression",
     }
 
@@ -710,6 +711,63 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
     summary = body["test_summaries"]["stability"]
     assert summary["test_name"] == "stability"
     assert summary["distribution"] == "cusum"
+    assert summary["n"] == 2
+
+
+def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        loaded = client.post(
+            "/api/model/load-yaml",
+            json={"role": role, "path": "MODELS/test.yaml"},
+        )
+        assert loaded.status_code == 200
+        solved = client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+        assert solved.status_code == 200
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 30},
+            },
+            {
+                "id": "csq",
+                "step_type": "cusumsq",
+                "name": "variance_stability",
+                "params": {
+                    "y_source": "states",
+                    "x_source": "states",
+                    "y_column": [0],
+                    "X_columns": [1],
+                    "burn_in": 1,
+                    "alpha": 0.1,
+                },
+            },
+        ],
+        "edges": [{"source": "sim", "target": "csq"}],
+    }
+
+    validated = client.post("/api/mc/validate", json=pipeline)
+    assert validated.status_code == 200
+    assert validated.json()["order"] == ["sim", "csq"]
+
+    run = client.post(
+        "/api/run/mc",
+        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+    )
+    assert run.status_code == 200
+    body = run.json()
+    assert body["succeeded"] is True
+    assert set(body["test_summaries"]) == {"variance_stability"}
+    summary = body["test_summaries"]["variance_stability"]
+    assert summary["test_name"] == "variance_stability"
+    assert summary["distribution"] == "cusumsq"
     assert summary["n"] == 2
 
 

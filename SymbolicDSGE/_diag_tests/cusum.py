@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, TypeAlias, cast, overload
 
 import numpy as np
 from numpy import float64
-from numpy.typing import NDArray
 from numba import njit
 
 # Normal distribution with Numba JIT
@@ -17,19 +16,14 @@ from scipy.stats._distn_infrastructure import rv_frozen
 from .status import TestStatus
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
+from .cusum_utils import OK, NDF, recursive_residuals
 
 from ..regression.solvers import chol_solve, lstsq_solve
 
 if TYPE_CHECKING:
     import optype.numpy as onp
 
-NDF: TypeAlias = NDArray[float64]
 DistributionOutput: TypeAlias = float | float64 | NDF
-
-# Test Status
-OK = int(TestStatus.OK)
-BAD_SHAPE = int(TestStatus.BAD_SHAPE)
-INSUFFICIENT_SAMPLES = int(TestStatus.INSUFFICIENT_SAMPLES)
 
 # Newton Status
 CONVERGED = 0
@@ -88,7 +82,7 @@ def _a_from_alpha(
     while _alpha_from_a(hi) > alpha:
         hi *= 2.0
 
-    a = hi
+    a: float64 = hi
 
     for _ in range(max_iter):
         fa = _alpha_from_a(a) - alpha
@@ -102,13 +96,13 @@ def _a_from_alpha(
 
         da = _d_da(a)
         if da == 0.0:
-            cand = 0.5 * (lo + hi)
+            cand: float64 = float64(0.5 * (lo + hi))
         else:
             cand = a - fa / da
             # Reject Newton steps that leave the bracket; bisect instead so
             # the iterate can never escape to a region where da underflows.
             if cand <= lo or cand >= hi:
-                cand = 0.5 * (lo + hi)
+                cand = float64(0.5 * (lo + hi))
 
         if abs(cand - a) < tol * max(1.0, abs(a)):
             return CONVERGED, cand
@@ -200,10 +194,9 @@ class CusumDist(rv_frozen):
 @njit(cache=True)
 def cusum_series(y: NDF, X: NDF) -> tuple[int, NDF]:
     T, p = X.shape
-    if T == 0 or T <= p:
-        return INSUFFICIENT_SAMPLES, np.empty(0, dtype=float64)
-    if y.size != T:
-        return BAD_SHAPE, np.empty(0, dtype=float64)
+    status, rec_resid = recursive_residuals(y, X)
+    if status != OK:
+        return status, rec_resid
 
     try:
         bhat, _, _ = chol_solve(X, y)
@@ -212,60 +205,6 @@ def cusum_series(y: NDF, X: NDF) -> tuple[int, NDF]:
 
     resid = y - X @ bhat
     sigma_hat = sqrt(np.sum(resid**2) / (T - p))  # DoF correction
-
-    # Seed the recursion from the first p observations: P = (X_p' X_p)^-1 and
-    # beta = P X_p' y_p. The Gram matrix and X_p' y_p are accumulated by direct
-    # indexing (no slice views), leaving only a single small p x p inverse.
-    G = np.zeros((p, p), dtype=float64)
-    Xty = np.zeros(p, dtype=float64)
-    for r in range(p):
-        yr = y[r]
-        for a in range(p):
-            xra = X[r, a]
-            Xty[a] += xra * yr
-            for b in range(p):
-                G[a, b] += xra * X[r, b]
-    P = np.linalg.inv(G)
-
-    beta = np.zeros(p, dtype=float64)
-    for a in range(p):
-        s = 0.0
-        for b in range(p):
-            s += P[a, b] * Xty[b]
-        beta[a] = s
-
-    # Recursive residuals. P stays symmetric (a symmetric rank-1 downdate of a
-    # symmetric matrix), so Px == P @ x_t == x_t @ P is computed once per step
-    # and reused for the quadratic form, the downdate, and the beta update.
-    # Manual loops avoid per-iteration BLAS dispatch, which dominates at the
-    # small p typical of CUSUM regressions.
-    rec_resid = np.empty(T - p, dtype=float64)
-    Px = np.empty(p, dtype=float64)
-    for i in range(T - p):
-        xt = X[p + i]
-
-        e = y[p + i]
-        for a in range(p):
-            e -= xt[a] * beta[a]
-
-        quad = 0.0
-        for a in range(p):
-            s = 0.0
-            for b in range(p):
-                s += P[a, b] * xt[b]
-            Px[a] = s
-            quad += xt[a] * s
-
-        ft = 1.0 + quad
-        rec_resid[i] = e / sqrt(ft)
-
-        inv_ft = 1.0 / ft
-        coef = e * inv_ft
-        for a in range(p):
-            pa = Px[a]
-            beta[a] += pa * coef
-            for b in range(p):
-                P[a, b] -= pa * Px[b] * inv_ft
 
     std_cusum = np.cumsum(rec_resid) / sigma_hat
     return OK, std_cusum
@@ -291,7 +230,7 @@ def cusum(y: NDF, X: NDF, alpha: float = 0.05, _auto_pval: bool = True) -> TestR
     test_status, stat = cusum_stat(y, X)
     # _a_from_alpha is only used to validate alpha (in-bounds + convergent);
     # the p-value itself comes from sf(stat) inside TestResult.
-    newton_status, _ = _a_from_alpha(alpha)
+    newton_status, _ = _a_from_alpha(float64(alpha))
 
     test_ok = test_status == OK
     nwt_ok = newton_status == CONVERGED

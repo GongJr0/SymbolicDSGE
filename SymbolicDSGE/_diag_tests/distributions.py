@@ -50,6 +50,7 @@ class ReferenceDistribution(Enum):
     t = "t"
     JB_LOOKUP = "jb_lookup"
     CUSUM = "cusum"
+    CUSUMSQ = "cusumsq"
 
     def freeze(self, *df: DistributionParameter) -> FrozenDistribution:
         match self:
@@ -82,5 +83,14 @@ class ReferenceDistribution(Enum):
                 # CUSUM is parameter-free; any df forwarded by TestResult
                 # (a NaN placeholder) is ignored.
                 return CusumDist()
+            case ReferenceDistribution.CUSUMSQ:
+                from .cusumsq import CusumSq
+
+                if len(df) != 1:
+                    raise TypeError("CUSUMSQ requires exactly one sample-size argument")
+                n = df[0]
+                if isinstance(n, bool | np.bool_) or not isinstance(n, int | integer):
+                    raise TypeError("CUSUMSQ sample size must be an integer")
+                return CusumSq(n)
             case _:
                 raise ValueError(f"Unsupported reference distribution: {self}")
