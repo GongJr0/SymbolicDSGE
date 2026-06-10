@@ -15,6 +15,7 @@ from .._diag_tests.ljung_box import ljung_box
 from .._diag_tests.jarque_bera import jarque_bera
 from .._diag_tests.breusch_pagan import breusch_pagan, robust_breusch_pagan
 from .._diag_tests.breusch_godfrey import breusch_godfrey
+from .._diag_tests.cusum import cusum
 
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterResult
@@ -435,6 +436,59 @@ def run_breusch_godfrey_test(
 
     residual_vec = np.ascontiguousarray(residuals[:, 0], dtype=np.float64)
     return breusch_godfrey(residual_vec, X, lags=lags, alpha=alpha, _auto_pval=False)
+
+
+def run_cusum_test(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    x_source: InpSources,
+    y_source: InpSources,
+    filter_key: str = "filter",
+    payload_key: str | None = None,
+    y_column: Sequence[int] | int | None = None,
+    X_columns: Sequence[int] | slice | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    alpha: float = 0.05,
+) -> TestResult:
+    del reference, dgp, rep_idx
+    y_col_idx: Sequence[int] | None
+    if isinstance(y_column, int):
+        y_col_idx = [y_column]
+    else:
+        y_col_idx = y_column
+    y = _resolve_context_array(
+        context,
+        source=y_source,
+        filter_key=filter_key,
+        payload_key=payload_key,
+        columns=y_col_idx,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+    X = _resolve_context_array(
+        context,
+        source=x_source,
+        filter_key=filter_key,
+        payload_key=payload_key,
+        columns=X_columns,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
+    if y.shape[1] != 1:
+        raise ValueError(
+            "CUSUM test requires the dependent variable to resolve to exactly "
+            f"one column. Got shape {y.shape}."
+        )
+    if y.shape[0] != X.shape[0]:
+        raise ValueError(
+            "CUSUM test dependent variable and regressors must have the same "
+            f"number of rows. Got y={y.shape[0]} and X={X.shape[0]}."
+        )
+    return cusum(y[:, 0], X, alpha=alpha, _auto_pval=False)
 
 
 def run_regression(

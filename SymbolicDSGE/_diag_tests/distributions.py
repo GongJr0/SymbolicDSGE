@@ -49,6 +49,7 @@ class ReferenceDistribution(Enum):
     F = "f"
     t = "t"
     JB_LOOKUP = "jb_lookup"
+    CUSUM = "cusum"
 
     def freeze(self, *df: DistributionParameter) -> FrozenDistribution:
         match self:
@@ -75,5 +76,11 @@ class ReferenceDistribution(Enum):
                 if isinstance(n, bool | np.bool_) or not isinstance(n, int | integer):
                     raise TypeError("JB_LOOKUP sample size must be an integer")
                 return JarqueBeraDist(n)
+            case ReferenceDistribution.CUSUM:
+                from .cusum import CusumDist
+
+                # CUSUM is parameter-free; any df forwarded by TestResult
+                # (a NaN placeholder) is ignored.
+                return CusumDist()
             case _:
                 raise ValueError(f"Unsupported reference distribution: {self}")

@@ -373,5 +373,12 @@ function formatInterval(values: Array<number | null>): string {
 }
 
 function formatDf(value: number | Array<number | null> | null): string {
-  return Array.isArray(value) ? value.map(format).join(", ") : format(value);
+  // Parameter-free reference distributions (e.g. CUSUM) carry no df; the
+  // backend sends null. Render "N/A" so it reads as "not applicable" rather
+  // than a missing/failed value.
+  if (value == null) return "N/A";
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "N/A" : value.map(format).join(", ");
+  }
+  return format(value);
 }
