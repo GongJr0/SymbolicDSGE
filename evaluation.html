@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SymbolicDSGE — Evaluation Report</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3250;
+    --accent: #f97316;
+    --accent2: #6366f1;
+    --accent3: #10b981;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --warn: #f59e0b;
+    --good: #22c55e;
+    --bad: #ef4444;
+    --bar-bg: #2e3250;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem 1rem 4rem;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+
+  /* HEADER */
+  .header {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem;
+  }
+  .header-top { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .logo { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent); }
+  .badge {
+    font-size: 0.7rem; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .badge-orange { background: rgba(249,115,22,0.15); color: var(--accent); border: 1px solid rgba(249,115,22,0.3); }
+  .badge-blue { background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
+  .badge-green { background: rgba(16,185,129,0.15); color: var(--accent3); border: 1px solid rgba(16,185,129,0.3); }
+  .subtitle { color: var(--muted); font-size: 0.9rem; line-height: 1.6; max-width: 700px; }
+  .meta { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.25rem; }
+  .meta-item { font-size: 0.75rem; color: var(--muted); display: flex; gap: 0.3rem; align-items: center; }
+  .meta-item a { color: var(--accent2); text-decoration: none; }
+  .meta-item a:hover { text-decoration: underline; }
+
+  /* SECTION TITLES */
+  .section-title {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--muted); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;
+  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* OVERALL SCORE CARD */
+  .overall-card {
+    background: linear-gradient(135deg, #1e2140 0%, #1a1d27 100%);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.5rem 2rem; margin-bottom: 2rem;
+    display: grid; grid-template-columns: auto 1fr; gap: 2rem; align-items: center;
+  }
+  .big-score {
+    font-size: 5rem; font-weight: 900; line-height: 1; letter-spacing: -2px;
+    background: linear-gradient(135deg, var(--accent), #fbbf24);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .big-score sub { font-size: 1.5rem; opacity: 0.5; vertical-align: super; }
+  .overall-text h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.4rem; }
+  .overall-text p { font-size: 0.85rem; color: var(--muted); line-height: 1.7; }
+
+  /* SCORES GRID */
+  .scores-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .score-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.1rem 1.2rem;
+  }
+  .score-card-header {
+    display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.6rem;
+  }
+  .score-card-title { font-size: 0.82rem; font-weight: 600; color: var(--text); line-height: 1.3; }
+  .score-num {
+    font-size: 1.4rem; font-weight: 800; min-width: 2.2rem; text-align: right; line-height: 1;
+  }
+  .score-bar { height: 4px; background: var(--bar-bg); border-radius: 2px; overflow: hidden; margin-bottom: 0.6rem; }
+  .score-bar-fill { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
+  .score-note { font-size: 0.73rem; color: var(--muted); line-height: 1.5; }
+  /* color tiers */
+  .s-high .score-num { color: var(--good); }
+  .s-high .score-bar-fill { background: var(--good); }
+  .s-mid .score-num { color: var(--warn); }
+  .s-mid .score-bar-fill { background: var(--warn); }
+  .s-low .score-num { color: var(--bad); }
+  .s-low .score-bar-fill { background: var(--bad); }
+  .s-accent .score-num { color: var(--accent); }
+  .s-accent .score-bar-fill { background: var(--accent); }
+
+  /* COMPETITIVE TABLE */
+  .comp-table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    overflow-x: auto; margin-bottom: 2rem;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  thead tr { border-bottom: 1px solid var(--border); }
+  thead th {
+    padding: 0.75rem 1rem; text-align: left; font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  }
+  thead th:first-child { min-width: 130px; }
+  tbody tr { border-bottom: 1px solid rgba(46,50,80,0.5); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { padding: 0.7rem 1rem; vertical-align: middle; }
+  tbody td:first-child { font-weight: 600; }
+  .highlight-row td { background: rgba(99,102,241,0.06); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .dot-green { background: var(--good); }
+  .dot-yellow { background: var(--warn); }
+  .dot-red { background: var(--bad); }
+  .cell-score { font-weight: 700; }
+  .cell-yes { color: var(--good); font-size: 0.85rem; }
+  .cell-partial { color: var(--warn); font-size: 0.85rem; }
+  .cell-no { color: var(--muted); font-size: 0.85rem; }
+
+  /* STRENGTHS / WEAKNESSES */
+  .sw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+  @media (max-width: 600px) { .sw-grid { grid-template-columns: 1fr; } .overall-card { grid-template-columns: 1fr; } .big-score { font-size: 3.5rem; } }
+  .sw-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.1rem 1.2rem;
+  }
+  .sw-card h4 { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.8rem; }
+  .sw-card.strengths h4 { color: var(--good); }
+  .sw-card.weaknesses h4 { color: var(--bad); }
+  .sw-item {
+    display: flex; gap: 0.5rem; font-size: 0.78rem; color: var(--text); line-height: 1.5;
+    margin-bottom: 0.5rem; align-items: flex-start;
+  }
+  .sw-icon { flex-shrink: 0; margin-top: 0.1rem; }
+
+  /* NOTES / COMMENTARY */
+  .note-block {
+    background: var(--surface2); border-left: 3px solid var(--accent2); border-radius: 0 8px 8px 0;
+    padding: 0.9rem 1.1rem; margin-bottom: 2rem; font-size: 0.82rem; line-height: 1.7; color: var(--text);
+  }
+  .note-block strong { color: var(--accent2); }
+
+  /* FOOTER */
+  .footer { font-size: 0.72rem; color: var(--muted); text-align: center; padding-top: 2rem; border-top: 1px solid var(--border); line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-top">
+      <div class="logo">Symbolic<span>DSGE</span></div>
+      <span class="badge badge-orange">v1.4.0</span>
+      <span class="badge badge-green">95% Coverage</span>
+      <span class="badge badge-blue">MIT</span>
+    </div>
+    <p class="subtitle">
+      A Python DSGE engine with a SymPy symbolic backend, Numba-JIT compiled numerics,
+      and an integrated suite for Monte Carlo experiments, estimation (MLE/MAP/MCMC),
+      Kalman filtering, symbolic regression augmentation, and a web GUI.
+    </p>
+    <div class="meta">
+      <span class="meta-item">🐍 Python ≥ 3.13</span>
+      <span class="meta-item">📦 <a href="https://pypi.org/project/SymbolicDSGE/" target="_blank">PyPI</a></span>
+      <span class="meta-item">📖 <a href="https://gongjr0.github.io/SymbolicDSGE/latest/" target="_blank">Docs</a></span>
+      <span class="meta-item">🔗 <a href="https://github.com/GongJr0/SymbolicDSGE" target="_blank">GitHub</a></span>
+      <span class="meta-item">🎓 DOI: 10.5281/zenodo.20115401</span>
+      <span class="meta-item">📅 Evaluated: June 2026</span>
+    </div>
+  </div>
+
+  <!-- OVERALL -->
+  <div class="overall-card">
+    <div>
+      <div class="big-score">6.9<sub>/10</sub></div>
+    </div>
+    <div class="overall-text">
+      <h3>Overall Assessment</h3>
+      <p>
+        SymbolicDSGE is a technically impressive solo project that punches well above its weight class.
+        Its clearest competitive edge is the <em>config → MC experiment</em> pipeline: the composable step system,
+        tight Kalman integration, and symbolic regression augmentation represent a genuinely novel workflow
+        that no other Python DSGE tool offers. The main drags on the score are the Python 3.13+ constraint
+        (a significant adoption barrier), the linear-only solver, and single-maintainer risk.
+        Appropriately scoped — not competing with Dynare's breadth, winning on friction-free Python experimentation.
+      </p>
+    </div>
+  </div>
+
+  <!-- SCORES GRID -->
+  <div class="section-title">Category Scores</div>
+  <div class="scores-grid">
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Code &amp; Distribution Quality</div>
+        <div class="score-num">7</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:70%"></div></div>
+      <div class="score-note">95% test coverage, mypy + black + pre-commit, CI/CD, DOI, PyPI extras, CITATION.cff.
+      Deducted for Python 3.13+ only (most research is on 3.10–3.12), <code>assert</code> in production paths
+      (<code>_shock_unpack</code>), and <code>exec()+njit</code> in the solver compile path which is opaque to debug.</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Performance Optimizations</div>
+        <div class="score-num">7</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:70%"></div></div>
+      <div class="score-note">Numba JIT on all scalar objective and observable functions; affine
+      measurement fast path bypasses per-step function calls; code-gen'd Jacobian pre-compiled at solver
+      startup. MCPipeline runs sequentially — no parallel MC sweeps despite the embarrassingly-parallel
+      structure being trivial to exploit. SymPy <code>simplify()</code> in compile paths is one-time cost, acceptable.</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Position vs. Competitors</div>
+        <div class="score-num">6</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:60%"></div></div>
+      <div class="score-note">Outclassed by Dynare (breadth, community, institutional) and DSGE.jl (Julia speed, SMC).
+      Comparable to pydsge but lacks OBC/ZLB; compensates with richer MC pipeline and SR augmentation.
+      Clear win: Python-native with zero MATLAB dependency, composable MC workflow, GUI for non-programmers.
+      Linear-only is the central gap against serious academic alternatives.</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Usability — Experienced Programmer, Less DSGE</div>
+        <div class="score-num">7</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:70%"></div></div>
+      <div class="score-note">Pure Python, pip-install, type-hinted API, Pythonic return types (dataclasses, dicts).
+      Workflow is linear and reasonably discoverable. <code>compile()</code> requiring <code>n_state/n_exog</code>
+      is a friction point — these are inferred correctly in most cases but must be confirmed by the user.
+      Error messages are good; could use more guided "what to do next" messaging.</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Usability — DSGE Academic, Less Programming</div>
+        <div class="score-num">6</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:60%"></div></div>
+      <div class="score-note">YAML config lets equations be written near paper-form, and guides cover end-to-end workflow.
+      Python 3.13 env setup is a real hurdle for researchers with locked environments. No publication-ready
+      table output from estimation (Dynare's TeX tables are a gold standard here). The MC pipeline is powerful
+      but verbose for someone writing their first Python script.</div>
+    </div>
+
+    <div class="score-card s-low">
+      <div class="score-card-header">
+        <div class="score-card-title">Usability — Non-Technical Macro/Policy</div>
+        <div class="score-num">5</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:50%"></div></div>
+      <div class="score-note">The web GUI covers core use-cases (simulate, IRF, MC, transforms, figures) and can be
+      pre-loaded from a <code>SolvedModel</code> — a well-designed handoff. But estimation is absent from the GUI,
+      setup still requires a technical owner, and there is no hosted/cloud version. Score reflects honest current
+      state rather than potential; the GUI roadmap is promising.</div>
+    </div>
+
+    <div class="score-card s-high">
+      <div class="score-card-header">
+        <div class="score-card-title">Documentation &amp; Guide Quality</div>
+        <div class="score-num">8</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:80%"></div></div>
+      <div class="score-note">Versioned MkDocs Material site, full API reference, five topic guides, GUI docs,
+      contributing guide, demo notebooks, CITATION.cff. The "AI parsability" callout is a thoughtful touch.
+      Deducted for thin SR augmentation docs, no tutorial video, and a few edge-case gaps (when to prefer
+      extended vs linear KF, prior transform interaction subtleties).</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Extensibility</div>
+        <div class="score-num">7</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:70%"></div></div>
+      <div class="score-note">MC pipeline was explicitly designed for user-defined steps; <code>MCStep</code>
+      protocol with <code>OpType</code> enum is clean and composable. Custom shock distributions, user-supplied
+      Kalman R matrices, and in-place <code>ModelConfig</code> modification are all supported.
+      Extending the solver core (e.g., adding nonlinear methods) would require replacing linearsolve —
+      no plugin point at that level. No abstract base classes for alternative backends.</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Ease of Contributing</div>
+        <div class="score-num">7</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:70%"></div></div>
+      <div class="score-note">Thorough CONTRIBUTING.md, uv-based one-command setup, pre-commit automation,
+      four issue templates, dependabot. The test suite is well-structured with pytest fixtures and module-scope
+      caching. Main barrier: single-maintainer review bottleneck. The MCStep protocol and some implicit contracts
+      (DATAGEN must be first, step names must be unique) are underdocumented for contributors adding built-in steps.</div>
+    </div>
+
+    <div class="score-card s-high">
+      <div class="score-card-header">
+        <div class="score-card-title">Feature Set</div>
+        <div class="score-num">8</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:80%"></div></div>
+      <div class="score-note">MLE/MAP/MCMC · Linear+Extended Kalman · SR measurement augmentation · Composable
+      MC pipeline · 5 statistical tests · OLS/Ridge/Lasso/ElasticNet in MC context · FRED integration · Web UI ·
+      Symbolic in-place manipulation · LKJ correlation priors · Custom shock distributions · Log/Taylor linearization.
+      Gap: no global (nonlinear) solution, no OBC/ZLB, no heterogeneous agents, no identification/sensitivity analysis.</div>
+    </div>
+
+    <div class="score-card s-mid">
+      <div class="score-card-header">
+        <div class="score-card-title">Research Institute Adoption Potential</div>
+        <div class="score-num">6</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:60%"></div></div>
+      <div class="score-note">Real advantages: Python-native, no MATLAB license, fast MC experimentation, SR novelty
+      publishable as methodology, GUI for policy collaborators. Barriers: Python 3.13 requirement (most lab stacks
+      are 3.10–3.11), single-maintainer continuity risk, no institution backing, linear-only. Best fit as a
+      <em>companion tool</em> to Dynare — the "quick model testing ground" use-case is well-served.</div>
+    </div>
+
+    <div class="score-card s-accent">
+      <div class="score-card-header">
+        <div class="score-card-title">Innovation &amp; Novelty ✦</div>
+        <div class="score-num">8</div>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill" style="width:80%"></div></div>
+      <div class="score-note">SR-based measurement equation discovery is a genuine research contribution not seen in
+      any comparable Python DSGE tool. The typed, composable MC pipeline with Kalman-integration and statistical
+      test steps is an original design. Serving a solved model into a web GUI is practically unique.
+      Symbolic in-place modification + recompile workflow offers iteration speed unavailable in config-only tools.</div>
+    </div>
+
+  </div>
+
+  <!-- COMPETITIVE COMPARISON -->
+  <div class="section-title">Competitive Landscape</div>
+  <div class="comp-table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Language</th>
+          <th>Linear DSGE</th>
+          <th>Nonlinear</th>
+          <th>OBC/ZLB</th>
+          <th>Estimation</th>
+          <th>MC Pipeline</th>
+          <th>GUI</th>
+          <th>SR Augment</th>
+          <th>Community</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="highlight-row">
+          <td><span class="dot dot-green"></span><strong>SymbolicDSGE</strong></td>
+          <td>Python</td>
+          <td class="cell-yes">✓</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-yes">MLE/MAP/MCMC</td>
+          <td class="cell-yes">✓ Composable</td>
+          <td class="cell-yes">✓ Web</td>
+          <td class="cell-yes">✓ PySR</td>
+          <td class="cell-partial">Solo</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-red"></span><strong>Dynare</strong></td>
+          <td>MATLAB/Julia</td>
+          <td class="cell-yes">✓</td>
+          <td class="cell-yes">✓ Full</td>
+          <td class="cell-yes">✓</td>
+          <td class="cell-yes">Bayesian/MLE</td>
+          <td class="cell-partial">Manual</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-yes">Institutional</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-yellow"></span><strong>DSGE.jl (FRBNY)</strong></td>
+          <td>Julia</td>
+          <td class="cell-yes">✓</td>
+          <td class="cell-partial">Partial</td>
+          <td class="cell-no">—</td>
+          <td class="cell-yes">SMC/MH</td>
+          <td class="cell-partial">Manual</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-yes">NY Fed</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-yellow"></span><strong>pydsge</strong></td>
+          <td>Python</td>
+          <td class="cell-yes">✓</td>
+          <td class="cell-no">—</td>
+          <td class="cell-yes">✓ ZLB</td>
+          <td class="cell-yes">MLE/MCMC</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-partial">Solo</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-yellow"></span><strong>gEcon (R)</strong></td>
+          <td>R</td>
+          <td class="cell-yes">✓</td>
+          <td class="cell-partial">Symbolic</td>
+          <td class="cell-no">—</td>
+          <td class="cell-partial">MLE</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-no">—</td>
+          <td class="cell-partial">Academic</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- STRENGTHS & WEAKNESSES -->
+  <div class="section-title">Strengths &amp; Weaknesses</div>
+  <div class="sw-grid">
+    <div class="sw-card strengths">
+      <h4>✦ Strengths</h4>
+      <div class="sw-item"><span class="sw-icon">🔬</span><span>SR-based measurement augmentation — novel, publishable, unavailable elsewhere in Python DSGE tooling</span></div>
+      <div class="sw-item"><span class="sw-icon">⚡</span><span>Lowest friction config→MC pipeline in the Python DSGE space; composable step protocol is clean and extensible</span></div>
+      <div class="sw-item"><span class="sw-icon">🧮</span><span>Symbolic manipulation post-parse: modify equations, recompile, re-solve without touching YAML</span></div>
+      <div class="sw-item"><span class="sw-icon">🌐</span><span>Web GUI served directly from <code>SolvedModel.serve()</code> — practical for non-programmer collaborators</span></div>
+      <div class="sw-item"><span class="sw-icon">📊</span><span>95% test coverage with well-structured fixtures; CI badges, DOI, CITATION.cff show academic seriousness</span></div>
+      <div class="sw-item"><span class="sw-icon">🔗</span><span>FRED data integration + SciPy shock distributions + LKJ priors cover a realistic empirical workflow</span></div>
+      <div class="sw-item"><span class="sw-icon">🚀</span><span>Numba JIT + pre-compiled Jacobian gives competitive runtime after warmup; affine measurement fast path is smart</span></div>
+    </div>
+    <div class="sw-card weaknesses">
+      <h4>✗ Weaknesses</h4>
+      <div class="sw-item"><span class="sw-icon">🐍</span><span><strong>Python ≥ 3.13 requirement</strong> is the single biggest adoption barrier — most research environments pin 3.10 or 3.11</span></div>
+      <div class="sw-item"><span class="sw-icon">🔧</span><span>Linear-only solver (no perturbation beyond first order, no global methods) limits applicability to DSGE research requiring nonlinear dynamics</span></div>
+      <div class="sw-item"><span class="sw-icon">👤</span><span>Single-maintainer continuity risk; no institutional backing makes long-term support uncertain for labs</span></div>
+      <div class="sw-item"><span class="sw-icon">🔄</span><span>MC pipeline runs sequentially — obvious parallelism opportunity left on the table</span></div>
+      <div class="sw-item"><span class="sw-icon">⚠️</span><span><code>assert</code> used in production paths (<code>_shock_unpack</code>) — fails silently under <code>-O</code> optimized mode</span></div>
+      <div class="sw-item"><span class="sw-icon">📋</span><span>No publication-ready estimation output (TeX tables, parameter significance, convergence diagnostics) — Dynare's reporting is the benchmark</span></div>
+      <div class="sw-item"><span class="sw-icon">🏘️</span><span>No community forum, no mailing list; low discoverability outside the SR/symbolic niche</span></div>
+    </div>
+  </div>
+
+  <!-- COMMENTARY NOTE -->
+  <div class="section-title">Evaluator Note</div>
+  <div class="note-block">
+    <strong>On the "quick testing ground" use-case:</strong> This is where SymbolicDSGE is most convincing.
+    The workflow from <code>ModelParser → compile → solve → .sim() → MCPipeline.run()</code> with typed steps,
+    built-in Kalman integration, and result containers is genuinely faster to iterate on than anything Dynare or
+    DSGE.jl offer. The SR augmentation pipeline (<code>fit_kf</code>) for discovering measurement equations from
+    Kalman innovations is a research contribution in its own right. For a lab that already has Dynare for production
+    models and wants a Python-native scratchpad with MC and estimation built in, this fills a real gap.
+    <br><br>
+    <strong>On the Python 3.13 constraint:</strong> This should be treated as the highest-priority actionable item.
+    Dropping it to ≥3.10 (or ≥3.11 at most) would unlock the vast majority of existing research environments
+    and CI runners. The only likely blocker is a dependency, not the library code itself — worth investigating.
+    <br><br>
+    <strong>On the scores relative to Dynare/DSGE.jl:</strong> These are not the right comparators for an absolute
+    score — they represent 30 years of institutional investment vs. a solo project. On the specific axes where
+    SymbolicDSGE competes (Python ergonomics, MC pipeline, symbolic manipulation, SR augmentation), it scores 8–9
+    against anything available in the Python ecosystem.
+  </div>
+
+  <div class="footer">
+    Evaluation based on source code review (v1.4.0, branch: CUSUM), documentation at gongjr0.github.io/SymbolicDSGE/latest,
+    and comparison with Dynare 7.x, DSGE.jl (FRBNY), pydsge, and gEcon. · June 2026
+  </div>
+
+</div>
+</body>
+</html>
