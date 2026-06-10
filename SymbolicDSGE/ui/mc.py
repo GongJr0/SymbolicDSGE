@@ -13,6 +13,7 @@ from SymbolicDSGE.monte_carlo import (
     MCPipelineResult,
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
+    cusum_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     reference_filter_step,
@@ -41,6 +42,7 @@ TERMINAL_STEP_TYPES = {
     "jarque_bera",
     "breusch_pagan",
     "breusch_godfrey",
+    "cusum",
     "regression",
 }
 
@@ -218,6 +220,33 @@ def mc_catalog() -> dict[str, Any]:
                     _field("burn_in", "Burn-in", "number", 0, minimum=0),
                     _field("drop_initial", "Drop initial", "boolean", False),
                     _field("lags", "Lags", "number", 1, minimum=1),
+                    _field("alpha", "Alpha", "number", 0.05),
+                ],
+            ),
+            _step_catalog(
+                "cusum",
+                "CUSUM Test",
+                "cusum",
+                "Test regression coefficients for stability via recursive residuals.",
+                [
+                    _field(
+                        "y_source",
+                        "Response source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field(
+                        "x_source",
+                        "Regressor source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field("y_column", "Response column", "number_list", [0]),
+                    _field("X_columns", "Regressor columns", "number_list", [1]),
+                    _field("burn_in", "Burn-in", "number", 0, minimum=0),
+                    _field("drop_initial", "Drop initial", "boolean", False),
                     _field("alpha", "Alpha", "number", 0.05),
                 ],
             ),
@@ -448,6 +477,8 @@ def build_pipeline(
             steps.append(breusch_pagan_test_step(node.name, **params))
         elif node.step_type == "breusch_godfrey":
             steps.append(breusch_godfrey_test_step(node.name, **params))
+        elif node.step_type == "cusum":
+            steps.append(cusum_test_step(node.name, **params))
         elif node.step_type == "regression":
             steps.append(regression_step(node.name, **_regression_params(params)))
         else:
@@ -584,7 +615,7 @@ def _validate_dependency(node: MCNodeSpec, prior_names: set[str]) -> None:
         return
     sources = [
         params.get(key)
-        for key in ("source", "residual_source", "y_source", "X_source")
+        for key in ("source", "residual_source", "y_source", "X_source", "x_source")
         if params.get(key) is not None
     ]
     if any(source in FILTER_SOURCES for source in sources):
@@ -622,7 +653,7 @@ def _bind_graph_dependency(
     elif node.step_type in TERMINAL_STEP_TYPES:
         sources = [
             params.get(key)
-            for key in ("source", "residual_source", "y_source", "X_source")
+            for key in ("source", "residual_source", "y_source", "X_source", "x_source")
             if params.get(key) is not None
         ]
         if any(source == "payload" for source in sources):

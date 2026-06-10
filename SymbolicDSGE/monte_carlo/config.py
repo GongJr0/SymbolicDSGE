@@ -12,6 +12,7 @@ from .operations import (
     run_jarque_bera_test as _run_jarque_bera_test,
     run_breusch_pagan_test as _run_breusch_pagan_test,
     run_breusch_godfrey_test as _run_breusch_godfrey_test,
+    run_cusum_test as _run_cusum_test,
     simulate_dgp as _simulate_dgp,
 )
 
@@ -74,6 +75,10 @@ def breusch_godfrey_test_step(name: str, **kwargs: Any) -> MCStep:
     return MCStep(
         name=name, op_type=OpType.TEST, func=_run_breusch_godfrey_test, kwargs=kwargs
     )
+
+
+def cusum_test_step(name: str, **kwargs: Any) -> MCStep:
+    return MCStep(name=name, op_type=OpType.TEST, func=_run_cusum_test, kwargs=kwargs)
 
 
 def regression_step(name: str, **kwargs: Any) -> MCStep:

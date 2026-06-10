@@ -11,6 +11,7 @@ from SymbolicDSGE._diag_tests.breusch_pagan import (
     breusch_pagan,
     robust_breusch_pagan,
 )
+from SymbolicDSGE._diag_tests.cusum import cusum
 from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
 from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
@@ -26,6 +27,7 @@ from SymbolicDSGE.monte_carlo import (
     OpType,
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
+    cusum_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     raw_data_step,
@@ -650,6 +652,37 @@ def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples() -> 
     assert out.test_status_traces["bg"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
     assert np.isnan(out.statistic_traces["bg"]).all()
     assert np.isnan(out.pval_traces["bg"]).all()
+
+
+def test_cusum_pipeline_aggregates_results_with_nan_df() -> None:
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(2, 60, 2))
+    X[:, :, 0] = 1.0  # constant column for a well-posed recursion
+    y = X @ np.array([0.5, -0.3]) + rng.normal(size=(2, 60))
+    observables = np.concatenate((y[:, :, None], X), axis=2)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            cusum_test_step(
+                "cs",
+                y_source="observables",
+                x_source="observables",
+                y_column=0,
+                X_columns=[1, 2],
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    expected = np.asarray(
+        [cusum(y[i], X[i]).statistic for i in range(2)], dtype=np.float64
+    )
+    np.testing.assert_allclose(out.statistic_traces["cs"], expected)
+    assert out.test_status_traces["cs"] == (TestStatus.OK, TestStatus.OK)
+    # CUSUM is parameter-free: the NaN df placeholder must survive aggregation
+    # across replications (the metadata-equality check is NaN-aware).
+    assert np.isnan(out.test_summaries["cs"].df)
 
 
 def test_raw_data_pipeline_rejects_empty_raw_data() -> None:

@@ -1,6 +1,7 @@
 from .config import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
+    cusum_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
     raw_data_step,
@@ -29,6 +30,7 @@ from .mc_constructs import (
 )
 from .operations import (
     raw_data_datagen,
+    run_cusum_test,
     run_breusch_godfrey_test,
     run_breusch_pagan_test,
     run_jarque_bera_test,
@@ -57,6 +59,7 @@ __all__ = [
     "TestOp",
     "breusch_godfrey_test_step",
     "breusch_pagan_test_step",
+    "cusum_test_step",
     "jarque_bera_test_step",
     "ljung_box_test_step",
     "raw_data_datagen",
@@ -67,6 +70,7 @@ __all__ = [
     "regression_step",
     "run_breusch_godfrey_test",
     "run_breusch_pagan_test",
+    "run_cusum_test",
     "run_reference_filter",
     "run_regression",
     "run_jarque_bera_test",

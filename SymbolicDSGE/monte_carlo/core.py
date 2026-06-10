@@ -183,6 +183,28 @@ class MCPipeline:
         context.payloads[step.output_key] = out
 
 
+def _df_metadata_matches(a: object, b: object) -> bool:
+    """Compare normalized df metadata across replications, treating NaN == NaN
+    as a match. Parameter-free reference distributions (CUSUM) carry a NaN df
+    placeholder, which a plain ``!=`` would otherwise flag as incompatible."""
+    at = a if isinstance(a, tuple) else (a,)
+    bt = b if isinstance(b, tuple) else (b,)
+    if len(at) != len(bt):
+        return False
+    for x, y in zip(at, bt):
+        if x == y:
+            continue
+        if (
+            isinstance(x, float | np.floating)
+            and isinstance(y, float | np.floating)
+            and np.isnan(x)
+            and np.isnan(y)
+        ):
+            continue
+        return False
+    return True
+
+
 def _summarize_tests(
     results_by_step: Mapping[str, list[TestResult]],
 ) -> dict[str, MCResult]:
@@ -196,7 +218,7 @@ def _summarize_tests(
             if (
                 result.dist is not first.dist
                 or result.pval_method is not first.pval_method
-                or result.df != first.df
+                or not _df_metadata_matches(result.df, first.df)
                 or result.alpha != first.alpha
             ):
                 raise ValueError(
