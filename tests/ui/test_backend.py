@@ -367,6 +367,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "breusch_godfrey",
         "cusum",
         "cusumsq",
+        "chow",
         "regression",
     }
 
@@ -768,6 +769,64 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
     summary = body["test_summaries"]["variance_stability"]
     assert summary["test_name"] == "variance_stability"
     assert summary["distribution"] == "cusumsq"
+    assert summary["n"] == 2
+
+
+def test_ui_backend_runs_chow_monte_carlo_step() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        loaded = client.post(
+            "/api/model/load-yaml",
+            json={"role": role, "path": "MODELS/test.yaml"},
+        )
+        assert loaded.status_code == 200
+        solved = client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+        assert solved.status_code == 200
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 30},
+            },
+            {
+                "id": "ch",
+                "step_type": "chow",
+                "name": "structural_break",
+                "params": {
+                    "y_source": "states",
+                    "x_source": "states",
+                    "y_column": [0],
+                    "X_columns": [1],
+                    "t_break": 10,
+                    "burn_in": 1,
+                    "alpha": 0.1,
+                },
+            },
+        ],
+        "edges": [{"source": "sim", "target": "ch"}],
+    }
+
+    validated = client.post("/api/mc/validate", json=pipeline)
+    assert validated.status_code == 200
+    assert validated.json()["order"] == ["sim", "ch"]
+
+    run = client.post(
+        "/api/run/mc",
+        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+    )
+    assert run.status_code == 200
+    body = run.json()
+    assert body["succeeded"] is True
+    assert set(body["test_summaries"]) == {"structural_break"}
+    summary = body["test_summaries"]["structural_break"]
+    assert summary["test_name"] == "structural_break"
+    assert summary["distribution"] == "f"
     assert summary["n"] == 2
 
 

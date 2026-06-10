@@ -14,6 +14,7 @@ from .operations import (
     run_breusch_godfrey_test as _run_breusch_godfrey_test,
     run_cusum_test as _run_cusum_test,
     run_cusumsq_test as _run_cusumsq_test,
+    run_chow_test as _run_chow_test,
     simulate_dgp as _simulate_dgp,
 )
 
@@ -84,6 +85,10 @@ def cusum_test_step(name: str, **kwargs: Any) -> MCStep:
 
 def cusumsq_test_step(name: str, **kwargs: Any) -> MCStep:
     return MCStep(name=name, op_type=OpType.TEST, func=_run_cusumsq_test, kwargs=kwargs)
+
+
+def chow_test_step(name: str, **kwargs: Any) -> MCStep:
+    return MCStep(name=name, op_type=OpType.TEST, func=_run_chow_test, kwargs=kwargs)
 
 
 def regression_step(name: str, **kwargs: Any) -> MCStep:

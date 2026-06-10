@@ -1407,7 +1407,8 @@ button.mc-palette-step:hover {
 .mc-step-node.breusch_pagan,
 .mc-step-node.breusch_godfrey,
 .mc-step-node.cusum,
-.mc-step-node.cusumsq {
+.mc-step-node.cusumsq,
+.mc-step-node.chow {
   border-left-color: #9333ea;
 }
 
