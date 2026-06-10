@@ -13,6 +13,7 @@ MCStepKind = Literal[
     "breusch_pagan",
     "breusch_godfrey",
     "cusum",
+    "cusumsq",
     "regression",
 ]
 

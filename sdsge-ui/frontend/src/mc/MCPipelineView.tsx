@@ -190,6 +190,7 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
           "breusch_pagan",
           "breusch_godfrey",
           "cusum",
+          "cusumsq",
           "regression",
         ].includes(source.data.stepType)
       ) {
