@@ -30,5 +30,5 @@ keywords:
   - rational expectations equilibrium
 license: MIT
 commit: 56aa38278a635f3007f541edcf1cdf73bf1851f6
-version: 1.4.0
-date-released: '2026-06-07'
+version: 1.4.1
+date-released: '2026-06-10'
