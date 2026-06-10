@@ -155,6 +155,7 @@ nav:
       - Builder: gui_usage/builder.md
       - Spec: gui_usage/spec.md
       - Outputs: gui_usage/outputs.md
+      - Estimation: gui_usage/estimation.md
       - MC Pipeline: gui_usage/monte_carlo.md
   - Guides:
       - Model Configuration Guide: guides/model_config_guide.md
@@ -189,6 +190,12 @@ nav:
               - Reference Filtering: documentation/monte_carlo/builtin/filter.md
               - Wald Tests: documentation/monte_carlo/builtin/wald.md
               - Ljung-Box Tests: documentation/monte_carlo/builtin/ljung_box.md
+              - Jarque-Bera Tests: documentation/monte_carlo/builtin/jarque_bera.md
+              - Breusch-Pagan Tests: documentation/monte_carlo/builtin/breusch_pagan.md
+              - Breusch-Godfrey Tests: documentation/monte_carlo/builtin/breusch_godfrey.md
+              - CUSUM Tests: documentation/monte_carlo/builtin/cusum.md
+              - CUSUM of Squares Tests: documentation/monte_carlo/builtin/cusumsq.md
+              - Chow Tests: documentation/monte_carlo/builtin/chow.md
               - Regression Steps: documentation/monte_carlo/builtin/regression.md
               - Transform Steps: documentation/monte_carlo/builtin/transform.md
           - Result Access: documentation/monte_carlo/result_access.md
