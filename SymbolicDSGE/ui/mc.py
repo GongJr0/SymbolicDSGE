@@ -13,6 +13,7 @@ from SymbolicDSGE.monte_carlo import (
     MCPipelineResult,
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
+    chow_test_step,
     cusum_test_step,
     cusumsq_test_step,
     jarque_bera_test_step,
@@ -45,6 +46,7 @@ TERMINAL_STEP_TYPES = {
     "breusch_godfrey",
     "cusum",
     "cusumsq",
+    "chow",
     "regression",
 }
 
@@ -274,6 +276,42 @@ def mc_catalog() -> dict[str, Any]:
                     ),
                     _field("y_column", "Response column", "number_list", [0]),
                     _field("X_columns", "Regressor columns", "number_list", [1]),
+                    _field("burn_in", "Burn-in", "number", 0, minimum=0),
+                    _field("drop_initial", "Drop initial", "boolean", False),
+                    _field("alpha", "Alpha", "number", 0.05),
+                ],
+            ),
+            _step_catalog(
+                "chow",
+                "Chow Test",
+                "chow",
+                "Test for a structural break in regression coefficients at a "
+                "known break point.",
+                [
+                    _field(
+                        "y_source",
+                        "Response source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field(
+                        "x_source",
+                        "Regressor source",
+                        "select",
+                        "observables",
+                        options=INPUT_SOURCES,
+                    ),
+                    _field("y_column", "Response column", "number_list", [0]),
+                    _field("X_columns", "Regressor columns", "number_list", [1]),
+                    _field(
+                        "t_break",
+                        "Break point",
+                        "number",
+                        10,
+                        required=True,
+                        minimum=1,
+                    ),
                     _field("burn_in", "Burn-in", "number", 0, minimum=0),
                     _field("drop_initial", "Drop initial", "boolean", False),
                     _field("alpha", "Alpha", "number", 0.05),
@@ -510,6 +548,8 @@ def build_pipeline(
             steps.append(cusum_test_step(node.name, **params))
         elif node.step_type == "cusumsq":
             steps.append(cusumsq_test_step(node.name, **params))
+        elif node.step_type == "chow":
+            steps.append(chow_test_step(node.name, **params))
         elif node.step_type == "regression":
             steps.append(regression_step(node.name, **_regression_params(params)))
         else:

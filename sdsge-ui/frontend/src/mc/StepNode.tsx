@@ -21,6 +21,7 @@ const ICONS: Record<MCStepType, LucideIcon> = {
   breusch_godfrey: Activity,
   cusum: Activity,
   cusumsq: Activity,
+  chow: Activity,
   regression: TestTubeDiagonal,
 };
 
@@ -35,6 +36,7 @@ export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {
     "breusch_godfrey",
     "cusum",
     "cusumsq",
+    "chow",
     "regression",
   ].includes(data.stepType);
   return (

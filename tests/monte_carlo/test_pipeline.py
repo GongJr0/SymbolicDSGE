@@ -11,6 +11,7 @@ from SymbolicDSGE._diag_tests.breusch_pagan import (
     breusch_pagan,
     robust_breusch_pagan,
 )
+from SymbolicDSGE._diag_tests.chow import chow
 from SymbolicDSGE._diag_tests.cusum import cusum
 from SymbolicDSGE._diag_tests.cusumsq import cusumsq_test
 from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
@@ -28,6 +29,7 @@ from SymbolicDSGE.monte_carlo import (
     OpType,
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
+    chow_test_step,
     cusum_test_step,
     cusumsq_test_step,
     jarque_bera_test_step,
@@ -717,6 +719,38 @@ def test_cusumsq_pipeline_aggregates_results() -> None:
     # is identical across equal-shape replications and survives aggregation as
     # the shared df.
     assert out.test_summaries["csq"].df == 60 - 2
+
+
+def test_chow_pipeline_aggregates_results() -> None:
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(2, 60, 2))
+    X[:, :, 0] = 1.0  # constant column for a well-posed partition
+    y = X @ np.array([0.5, -0.3]) + rng.normal(size=(2, 60))
+    observables = np.concatenate((y[:, :, None], X), axis=2)
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=observables),
+            chow_test_step(
+                "ch",
+                y_source="observables",
+                x_source="observables",
+                y_column=0,
+                X_columns=[1, 2],
+                t_break=30,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
+
+    expected = np.asarray(
+        [chow(y[i], X[i], t_break=30).statistic for i in range(2)], dtype=np.float64
+    )
+    np.testing.assert_allclose(out.statistic_traces["ch"], expected)
+    assert out.test_status_traces["ch"] == (TestStatus.OK, TestStatus.OK)
+    # Chow uses an F reference with df = (p, T - 2p), identical across
+    # equal-shape replications and preserved through aggregation.
+    assert out.test_summaries["ch"].df == (2, 60 - 2 * 2)
 
 
 def test_raw_data_pipeline_rejects_empty_raw_data() -> None:

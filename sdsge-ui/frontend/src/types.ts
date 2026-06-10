@@ -169,6 +169,7 @@ export type MCStepType =
   | "breusch_godfrey"
   | "cusum"
   | "cusumsq"
+  | "chow"
   | "regression";
 
 export type MCFieldType =
