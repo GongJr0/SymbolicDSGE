@@ -41,6 +41,7 @@ The sidebar controls the active model role and is available from every tab.
 - [Builder](builder.md): edit and load YAML model configurations.
 - [Spec](spec.md): inspect the model, configure shocks, and submit transforms or plots.
 - [Outputs](outputs.md): simulate the active model and inspect its generated series.
+- [Estimation](estimation.md): fit the active model's parameters to data with MLE, MAP, or MCMC.
 - [MC Pipeline](monte_carlo.md): visually construct and run repeated simulation experiments.
 
 Panels throughout the GUI can be resized, folded, and rearranged where drag controls are available.
