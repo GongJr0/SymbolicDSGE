@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Iterator
 
 import yaml
@@ -60,6 +62,24 @@ class ModelParser:
 
     def get_all(self) -> ParsedConfig:
         return self.parsed
+
+    @classmethod
+    def from_string(cls, text: str) -> "ModelParser":
+        """Construct a parser from YAML *text* (e.g. a bundle config member).
+
+        Mirrors path-based construction by routing the text through a temporary
+        file, so the full parse pipeline (including the Kalman block) runs
+        unchanged.
+        """
+        with NamedTemporaryFile(
+            "w", suffix=".yaml", encoding="utf-8", delete=False
+        ) as handle:
+            handle.write(text)
+            tmp_path = Path(handle.name)
+        try:
+            return cls(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     # --- existing validators unchanged ---
     @classmethod
@@ -148,45 +168,52 @@ class ModelParser:
         )
         return data, ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
 
+    def to_yaml(
+        self,
+        config: ModelConfig | None = None,
+        *,
+        digits: int = 3,
+    ) -> str:
+        """Emit the authored configuration as canonical YAML text.
+
+        Re-dumps the retained ``raw_data`` so the Kalman block and the
+        ``(t)``/``(t+1)`` equation grammar round-trip through :class:`ModelParser`
+        unchanged. When ``config`` is given, its calibration is baked in (rounded
+        to ``digits``), capturing e.g. estimated parameter values.
+        """
+        data_out = copy.deepcopy(self.raw_data)
+
+        if config is not None:
+            normalized_params = {
+                str(k): round(float(v), digits)
+                for k, v in config.calibration.parameters.items()
+            }
+            data_out["parameters"] = list(normalized_params.keys())
+            data_out.setdefault("calibration", {})["parameters"] = normalized_params
+
+        for key in ("parameters", "variables", "observables"):
+            if isinstance(data_out.get(key), list):
+                data_out[key] = InlineList(data_out[key])
+        kalman = data_out.get("kalman")
+        if isinstance(kalman, dict) and isinstance(kalman.get("y"), list):
+            kalman["y"] = InlineList(kalman["y"])
+
+        yaml.add_representer(InlineList, _list_representer)
+        buffer = StringIO()
+        yaml.dump(data_out, buffer, sort_keys=False)
+        return buffer.getvalue()
+
     def update_calibration_parameters(
         self,
         new_config: ModelConfig,
         digits: int = 3,
         output_path: str | Path | None = None,
     ) -> StringIO:
-        new_params = new_config.calibration.parameters
-        data_out = self.raw_data.copy()
-
-        normalized_params = {
-            str(k): round(float(v), digits) for k, v in new_params.items()
-        }
-        param_names = list(normalized_params.keys())
-        param_names = InlineList(param_names)
-        data_out["parameters"] = param_names
-
-        data_out.setdefault("calibration", {})["parameters"] = normalized_params
-        raw_variables = data_out.get("variables", [])
-        if isinstance(raw_variables, list):
-            data_out["variables"] = InlineList(raw_variables)
-
-        obs = data_out.get("observables", [])
-        data_out["observables"] = InlineList(obs)
-
-        kalman = data_out.get("kalman", None)
-        if kalman:
-            y = kalman.get("y", [])
-            kalman["y"] = InlineList(y)
-
-        buffer = StringIO()
-
-        yaml.add_representer(InlineList, _list_representer)
-        yaml.dump(data_out, buffer, sort_keys=False)
-        buffer.seek(0)
-
+        text = self.to_yaml(new_config, digits=digits)
         if output_path:
             with open(output_path, "w", encoding="utf-8") as f:
-                f.write(buffer.getvalue())
-        return buffer
+                f.write(text)
+        return StringIO(text)
 
     # ---------------- helpers ----------------
 
