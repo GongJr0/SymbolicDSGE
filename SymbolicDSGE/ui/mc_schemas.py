@@ -1,22 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-MCStepKind = Literal[
-    "simulation",
-    "filter",
-    "wald",
-    "ljung_box",
-    "jarque_bera",
-    "breusch_pagan",
-    "breusch_godfrey",
-    "cusum",
-    "cusumsq",
-    "chow",
-    "regression",
-]
+from SymbolicDSGE.monte_carlo.spec import MCStepKind, PipelineSpec
 
 
 class MCNodeSpec(BaseModel):
@@ -34,6 +22,10 @@ class MCEdgeSpec(BaseModel):
 class MCPipelineSpec(BaseModel):
     nodes: list[MCNodeSpec] = Field(min_length=1)
     edges: list[MCEdgeSpec] = Field(default_factory=list)
+
+    def to_core(self) -> PipelineSpec:
+        """Convert to the pydantic-free core spec (bundle/text serialization)."""
+        return PipelineSpec.from_dict(self.model_dump())
 
 
 class MCRunRequest(BaseModel):

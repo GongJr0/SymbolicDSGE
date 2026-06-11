@@ -8,7 +8,6 @@ import numpy as np
 from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import (
-    MCContext,
     MCPipeline,
     MCPipelineResult,
     breusch_godfrey_test_step,
@@ -23,7 +22,9 @@ from SymbolicDSGE.monte_carlo import (
     simulation_step,
     wald_test_step,
 )
-from SymbolicDSGE.regression.ols import OLSResult
+from SymbolicDSGE.monte_carlo.serialize import (
+    serialize_pipeline_result as serialize_pipeline_result,
+)
 
 from .mc_schemas import MCNodeSpec, MCPipelineSpec
 
@@ -585,62 +586,6 @@ def run_pipeline(
     )
 
 
-def serialize_pipeline_result(
-    result: MCPipelineResult, *, run_id: str
-) -> dict[str, Any]:
-    return {
-        "run_id": run_id,
-        "kind": "mc",
-        "n_rep": result.n_rep,
-        "n_successful": result.n_successful,
-        "succeeded": result.succeeded,
-        "elapsed_s": result.elapsed_s,
-        "it_s": result.it_s,
-        "step_elapsed_s": dict(result.step_elapsed_s),
-        "step_it_s": dict(result.step_it_s),
-        "step_counts": dict(result.step_counts),
-        "step_failures": dict(result.step_failures),
-        "failures": [
-            {
-                "rep_idx": failure.rep_idx,
-                "step_name": failure.step_name,
-                "error_type": failure.error_type,
-                "message": failure.message,
-            }
-            for failure in result.failures
-        ],
-        "test_summaries": {
-            name: {
-                "test_name": summary.test_name,
-                "n": summary.n,
-                "alpha": float(summary.alpha),
-                "distribution": summary.dist.value,
-                "df": _json_value(summary.df),
-                "pval_method": summary.pval_method.value,
-                "mean_statistic": float(summary.mean_statistic),
-                "mean_pval": float(summary.mean_pval),
-                "rejection_rate": float(summary.rejection_rate),
-                "statistic_se": _json_float(summary.statistic_se),
-                "pval_se": _json_float(summary.pval_se),
-                "statistic_ci": _json_value(summary.statistic_confidence_interval()),
-                "rejection_ci": _json_value(summary.pval_confidence_interval()),
-                "statistic_trace": _json_value(summary.statistic_trace),
-                "pval_trace": _json_value(summary.pval_trace),
-                "status_trace": [int(status) for status in summary.status_trace],
-                "status_counts": _status_counts(summary.status_trace),
-                "statistic_summary": _trace_summary(summary.statistic_trace),
-                "pval_summary": _trace_summary(summary.pval_trace),
-            }
-            for name, summary in result.test_summaries.items()
-        },
-        "regression_summaries": {
-            name: _serialize_regression_summary(summary)
-            for name, summary in result.regression_summaries.items()
-        },
-        "data_summaries": _summarize_context_data(result.contexts or ()),
-    }
-
-
 def _step_catalog(
     step_type: str,
     title: str,
@@ -850,150 +795,3 @@ def _regression_params(params: dict[str, Any]) -> dict[str, Any]:
         for key, value in params.items()
         if key not in conditional or key in allowed
     }
-
-
-def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
-    coefficient_summaries = [
-        {
-            "variable": variable,
-            **_trace_summary(summary.coef_trace[:, index]),
-        }
-        for index, variable in enumerate(summary.variables)
-    ]
-    metrics = {
-        "r2": _trace_summary(summary.r2_trace),
-        "adjusted_r2": _trace_summary(summary.r2_adj_trace),
-        "rmse": _trace_summary(summary.rmse_trace),
-        "mse": _trace_summary(summary.mse_trace),
-        "ssr": _trace_summary(summary.ssr_trace),
-    }
-    out = {
-        "variables": summary.variables,
-        "n_rep": summary.n_rep,
-        "n": summary.n,
-        "k": summary.k,
-        "coef_trace": _json_value(summary.coef_trace),
-        "r2_trace": _json_value(summary.r2_trace),
-        "status_trace": [int(status) for status in summary.status_trace],
-        "status_counts": _status_counts(summary.status_trace),
-        "coefficient_summaries": coefficient_summaries,
-        "metrics": metrics,
-        "ols": None,
-    }
-    if all(isinstance(item, OLSResult) for item in summary.results):
-        out["ols"] = {
-            "mean_standard_errors": _json_value(np.mean(summary.se_trace, axis=0)),
-            "mean_t_statistics": _json_value(np.mean(summary.t_stat_trace, axis=0)),
-            "mean_pvalues": _json_value(np.mean(summary.pval_trace, axis=0)),
-            "mean_partial_r2": _json_value(np.mean(summary.partial_r2_trace, axis=0)),
-            "f_statistic": _trace_summary(summary.F_stat_trace),
-            "f_pvalue": _trace_summary(summary.F_pval_trace),
-        }
-    return out
-
-
-def _status_counts(status_trace: Sequence[Any]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for status in status_trace:
-        counts[status.name] = counts.get(status.name, 0) + 1
-    return counts
-
-
-def _summarize_context_data(contexts: Sequence[MCContext]) -> dict[str, Any]:
-    arrays: dict[str, list[np.ndarray]] = {}
-    for context in contexts:
-        if context.data is None:
-            continue
-        data = context.data
-        if data.states is not None:
-            arrays.setdefault("states", []).append(np.asarray(data.states))
-        if data.observables is not None:
-            arrays.setdefault("observables", []).append(np.asarray(data.observables))
-        for name, value in data.raw.items():
-            if name != "_X":
-                arrays.setdefault(f"raw:{name}", []).append(np.asarray(value))
-    return {name: _array_collection_summary(values) for name, values in arrays.items()}
-
-
-def _array_collection_summary(values: Sequence[np.ndarray]) -> dict[str, Any]:
-    n_total = sum(int(arr.size) for arr in values)
-    n_finite = 0
-    value_sum = 0.0
-    square_sum = 0.0
-    minimum = np.inf
-    maximum = -np.inf
-    for arr in values:
-        finite = arr[np.isfinite(arr)]
-        if finite.size == 0:
-            continue
-        n_finite += int(finite.size)
-        value_sum += float(finite.sum())
-        square_sum += float(np.square(finite).sum())
-        minimum = min(minimum, float(finite.min()))
-        maximum = max(maximum, float(finite.max()))
-    if n_finite == 0:
-        return {
-            "n_rep": len(values),
-            "shape": list(values[0].shape),
-            "n_values": n_total,
-            "n_finite": 0,
-            "mean": None,
-            "std": None,
-            "min": None,
-            "max": None,
-        }
-    mean = value_sum / n_finite
-    variance = max(0.0, square_sum / n_finite - mean**2)
-    return {
-        "n_rep": len(values),
-        "shape": list(values[0].shape),
-        "n_values": n_total,
-        "n_finite": n_finite,
-        "mean": _json_float(mean),
-        "std": _json_float(variance**0.5),
-        "min": _json_float(minimum),
-        "max": _json_float(maximum),
-    }
-
-
-def _trace_summary(values: Any) -> dict[str, Any]:
-    arr = np.asarray(values, dtype=np.float64).reshape(-1)
-    finite = arr[np.isfinite(arr)]
-    if finite.size == 0:
-        return {
-            "n": int(arr.size),
-            "n_finite": 0,
-            "mean": None,
-            "std": None,
-            "min": None,
-            "max": None,
-            "q025": None,
-            "q975": None,
-        }
-    return {
-        "n": int(arr.size),
-        "n_finite": int(finite.size),
-        "mean": _json_float(finite.mean()),
-        "std": _json_float(finite.std()),
-        "min": _json_float(finite.min()),
-        "max": _json_float(finite.max()),
-        "q025": _json_float(np.quantile(finite, 0.025)),
-        "q975": _json_float(np.quantile(finite, 0.975)),
-    }
-
-
-def _json_float(value: Any) -> float | None:
-    scalar = float(value)
-    return scalar if np.isfinite(scalar) else None
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, np.ndarray):
-        return _json_value(value.tolist())
-    if isinstance(value, tuple | list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, float | np.floating):
-        return _json_float(value)
-    return value
