@@ -1,0 +1,293 @@
+"""Serialization for Monte Carlo pipeline results.
+
+Lifted out of ``SymbolicDSGE.ui.mc`` so the result wire format is reusable by the
+``.sdsge`` bundle without depending on the HTTP layer. ``serialize_pipeline_result``
+remains the canonical (unchanged) wire shape consumed by the UI; the bundle path uses
+the parquet-friendly split below:
+
+- ``result_document`` -> JSON-safe metadata + summaries (no bulk trace arrays),
+- ``result_traces`` -> the bulk numeric trace columns as ndarrays (no I/O here),
+- ``pipeline_result_wire`` -> re-merges the two back into the UI wire shape (hydration).
+"""
+
+from __future__ import annotations
+
+import copy
+from collections.abc import Sequence
+from typing import Any
+
+import numpy as np
+from numpy.typing import NDArray
+
+from ..regression.ols import OLSResult
+from .mc_constructs import MCContext, MCPipelineResult
+
+
+def serialize_pipeline_result(
+    result: MCPipelineResult, *, run_id: str
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "kind": "mc",
+        "n_rep": result.n_rep,
+        "n_successful": result.n_successful,
+        "succeeded": result.succeeded,
+        "elapsed_s": result.elapsed_s,
+        "it_s": result.it_s,
+        "step_elapsed_s": dict(result.step_elapsed_s),
+        "step_it_s": dict(result.step_it_s),
+        "step_counts": dict(result.step_counts),
+        "step_failures": dict(result.step_failures),
+        "failures": [
+            {
+                "rep_idx": failure.rep_idx,
+                "step_name": failure.step_name,
+                "error_type": failure.error_type,
+                "message": failure.message,
+            }
+            for failure in result.failures
+        ],
+        "test_summaries": {
+            name: {
+                "test_name": summary.test_name,
+                "n": summary.n,
+                "alpha": float(summary.alpha),
+                "distribution": summary.dist.value,
+                "df": _json_value(summary.df),
+                "pval_method": summary.pval_method.value,
+                "mean_statistic": float(summary.mean_statistic),
+                "mean_pval": float(summary.mean_pval),
+                "rejection_rate": float(summary.rejection_rate),
+                "statistic_se": _json_float(summary.statistic_se),
+                "pval_se": _json_float(summary.pval_se),
+                "statistic_ci": _json_value(summary.statistic_confidence_interval()),
+                "rejection_ci": _json_value(summary.pval_confidence_interval()),
+                "statistic_trace": _json_value(summary.statistic_trace),
+                "pval_trace": _json_value(summary.pval_trace),
+                "status_trace": [int(status) for status in summary.status_trace],
+                "status_counts": _status_counts(summary.status_trace),
+                "statistic_summary": _trace_summary(summary.statistic_trace),
+                "pval_summary": _trace_summary(summary.pval_trace),
+            }
+            for name, summary in result.test_summaries.items()
+        },
+        "regression_summaries": {
+            name: _serialize_regression_summary(summary)
+            for name, summary in result.regression_summaries.items()
+        },
+        "data_summaries": _summarize_context_data(result.contexts or ()),
+    }
+
+
+# Bulk trace keys stripped from the JSON document and carried as ndarray columns.
+_TEST_TRACE_KEYS = ("statistic_trace", "pval_trace", "status_trace")
+_REGRESSION_TRACE_KEYS = ("coef_trace", "r2_trace", "status_trace")
+
+
+def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
+    """Bulk numeric trace columns, keyed for a later parquet writer (no I/O).
+
+    Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
+    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``).
+    """
+    traces: dict[str, NDArray[Any]] = {}
+    for name, test_summary in result.test_summaries.items():
+        traces[f"test.{name}.statistic"] = np.asarray(
+            test_summary.statistic_trace, dtype=np.float64
+        )
+        traces[f"test.{name}.pval"] = np.asarray(
+            test_summary.pval_trace, dtype=np.float64
+        )
+        traces[f"test.{name}.status"] = np.asarray(
+            [int(status) for status in test_summary.status_trace], dtype=np.int64
+        )
+    for name, reg_summary in result.regression_summaries.items():
+        traces[f"regression.{name}.coef"] = np.asarray(
+            reg_summary.coef_trace, dtype=np.float64
+        )
+        traces[f"regression.{name}.r2"] = np.asarray(
+            reg_summary.r2_trace, dtype=np.float64
+        )
+        traces[f"regression.{name}.status"] = np.asarray(
+            [int(status) for status in reg_summary.status_trace], dtype=np.int64
+        )
+    return traces
+
+
+def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, Any]:
+    """JSON-safe metadata + summaries with the bulk trace arrays removed.
+
+    Pairs with :func:`result_traces`; recombine via :func:`pipeline_result_wire`.
+    """
+    document = serialize_pipeline_result(result, run_id=run_id)
+    for entry in document["test_summaries"].values():
+        for key in _TEST_TRACE_KEYS:
+            entry.pop(key, None)
+    for entry in document["regression_summaries"].values():
+        for key in _REGRESSION_TRACE_KEYS:
+            entry.pop(key, None)
+    return document
+
+
+def pipeline_result_wire(
+    document: dict[str, Any], traces: dict[str, NDArray[Any]]
+) -> dict[str, Any]:
+    """Re-merge a trace-free :func:`result_document` with :func:`result_traces`
+    into the canonical UI wire shape (used for hydration)."""
+    wire = copy.deepcopy(document)
+    for name, entry in wire["test_summaries"].items():
+        entry["statistic_trace"] = _json_value(traces[f"test.{name}.statistic"])
+        entry["pval_trace"] = _json_value(traces[f"test.{name}.pval"])
+        entry["status_trace"] = [int(x) for x in traces[f"test.{name}.status"]]
+    for name, entry in wire["regression_summaries"].items():
+        entry["coef_trace"] = _json_value(traces[f"regression.{name}.coef"])
+        entry["r2_trace"] = _json_value(traces[f"regression.{name}.r2"])
+        entry["status_trace"] = [int(x) for x in traces[f"regression.{name}.status"]]
+    return wire
+
+
+def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
+    coefficient_summaries = [
+        {
+            "variable": variable,
+            **_trace_summary(summary.coef_trace[:, index]),
+        }
+        for index, variable in enumerate(summary.variables)
+    ]
+    metrics = {
+        "r2": _trace_summary(summary.r2_trace),
+        "adjusted_r2": _trace_summary(summary.r2_adj_trace),
+        "rmse": _trace_summary(summary.rmse_trace),
+        "mse": _trace_summary(summary.mse_trace),
+        "ssr": _trace_summary(summary.ssr_trace),
+    }
+    out = {
+        "variables": summary.variables,
+        "n_rep": summary.n_rep,
+        "n": summary.n,
+        "k": summary.k,
+        "coef_trace": _json_value(summary.coef_trace),
+        "r2_trace": _json_value(summary.r2_trace),
+        "status_trace": [int(status) for status in summary.status_trace],
+        "status_counts": _status_counts(summary.status_trace),
+        "coefficient_summaries": coefficient_summaries,
+        "metrics": metrics,
+        "ols": None,
+    }
+    if all(isinstance(item, OLSResult) for item in summary.results):
+        out["ols"] = {
+            "mean_standard_errors": _json_value(np.mean(summary.se_trace, axis=0)),
+            "mean_t_statistics": _json_value(np.mean(summary.t_stat_trace, axis=0)),
+            "mean_pvalues": _json_value(np.mean(summary.pval_trace, axis=0)),
+            "mean_partial_r2": _json_value(np.mean(summary.partial_r2_trace, axis=0)),
+            "f_statistic": _trace_summary(summary.F_stat_trace),
+            "f_pvalue": _trace_summary(summary.F_pval_trace),
+        }
+    return out
+
+
+def _status_counts(status_trace: Sequence[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for status in status_trace:
+        counts[status.name] = counts.get(status.name, 0) + 1
+    return counts
+
+
+def _summarize_context_data(contexts: Sequence[MCContext]) -> dict[str, Any]:
+    arrays: dict[str, list[np.ndarray]] = {}
+    for context in contexts:
+        if context.data is None:
+            continue
+        data = context.data
+        if data.states is not None:
+            arrays.setdefault("states", []).append(np.asarray(data.states))
+        if data.observables is not None:
+            arrays.setdefault("observables", []).append(np.asarray(data.observables))
+        for name, value in data.raw.items():
+            if name != "_X":
+                arrays.setdefault(f"raw:{name}", []).append(np.asarray(value))
+    return {name: _array_collection_summary(values) for name, values in arrays.items()}
+
+
+def _array_collection_summary(values: Sequence[np.ndarray]) -> dict[str, Any]:
+    n_total = sum(int(arr.size) for arr in values)
+    n_finite = 0
+    value_sum = 0.0
+    square_sum = 0.0
+    minimum = np.inf
+    maximum = -np.inf
+    for arr in values:
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            continue
+        n_finite += int(finite.size)
+        value_sum += float(finite.sum())
+        square_sum += float(np.square(finite).sum())
+        minimum = min(minimum, float(finite.min()))
+        maximum = max(maximum, float(finite.max()))
+    if n_finite == 0:
+        return {
+            "n_rep": len(values),
+            "shape": list(values[0].shape),
+            "n_values": n_total,
+            "n_finite": 0,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
+        }
+    mean = value_sum / n_finite
+    variance = max(0.0, square_sum / n_finite - mean**2)
+    return {
+        "n_rep": len(values),
+        "shape": list(values[0].shape),
+        "n_values": n_total,
+        "n_finite": n_finite,
+        "mean": _json_float(mean),
+        "std": _json_float(variance**0.5),
+        "min": _json_float(minimum),
+        "max": _json_float(maximum),
+    }
+
+
+def _trace_summary(values: Any) -> dict[str, Any]:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return {
+            "n": int(arr.size),
+            "n_finite": 0,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
+            "q025": None,
+            "q975": None,
+        }
+    return {
+        "n": int(arr.size),
+        "n_finite": int(finite.size),
+        "mean": _json_float(finite.mean()),
+        "std": _json_float(finite.std()),
+        "min": _json_float(finite.min()),
+        "max": _json_float(finite.max()),
+        "q025": _json_float(np.quantile(finite, 0.025)),
+        "q975": _json_float(np.quantile(finite, 0.975)),
+    }
+
+
+def _json_float(value: Any) -> float | None:
+    scalar = float(value)
+    return scalar if np.isfinite(scalar) else None
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return _json_value(value.tolist())
+    if isinstance(value, tuple | list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, float | np.floating):
+        return _json_float(value)
+    return value

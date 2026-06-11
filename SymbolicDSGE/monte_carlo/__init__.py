@@ -45,11 +45,19 @@ from .operations import (
     simulate_dgp,
 )
 from .reference_constructs import MCReferenceConstruct
+from .serialize import (
+    pipeline_result_wire,
+    result_document,
+    result_traces,
+    serialize_pipeline_result,
+)
+from .spec import EdgeSpec, MCStepKind, NodeSpec, PipelineSpec
 
 __all__ = [
     "ContextOp",
     "DataGenOp",
     "DataGenReturn",
+    "EdgeSpec",
     "FilterOp",
     "MCContext",
     "MCData",
@@ -58,7 +66,10 @@ __all__ = [
     "MCPipelineResult",
     "MCReferenceConstruct",
     "MCStep",
+    "MCStepKind",
+    "NodeSpec",
     "OpType",
+    "PipelineSpec",
     "RegressionOp",
     "TestOp",
     "breusch_godfrey_test_step",
@@ -88,4 +99,8 @@ __all__ = [
     "simulation_step",
     "transform_step",
     "wald_test_step",
+    "pipeline_result_wire",
+    "result_document",
+    "result_traces",
+    "serialize_pipeline_result",
 ]
