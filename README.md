@@ -80,7 +80,7 @@ There are two intended ways to access the GUI:
 
 ```bash
 # Option 1: Serve the GUI from the command line
-#           This launhes an empty GUI and the configuration should be done through the Builder tab.
+#           This launches an empty GUI and the configuration should be done through the Builder tab.
 sdsge-ui
 ```
 
