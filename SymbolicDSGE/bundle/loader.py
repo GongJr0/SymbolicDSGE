@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 from numpy.typing import NDArray
 
 from ..core.model_parser import ModelParser
@@ -27,8 +28,8 @@ from ..estimation.spec import (
 from ..monte_carlo.serialize import pipeline_result_wire
 from ..monte_carlo.spec import PipelineSpec
 from .container import BundleArchive
-from .manifest import Manifest, SimSpec
-from .parquet import collapse_columns, from_parquet_columns
+from .manifest import Manifest, Member, SimSpec
+from .parquet import collapse_columns, csv_to_columns, from_parquet_columns
 
 
 @dataclass
@@ -97,6 +98,43 @@ def _load_model(
     return solver.solve(compiled, **solve_kwargs)
 
 
+def _load_columns(archive: BundleArchive, member: Member) -> dict[str, list[Any]]:
+    """Format-agnostic column read: dispatch on ``member.format`` (#142)."""
+    raw = archive.read(member.path)
+    if member.format == "parquet":
+        return from_parquet_columns(raw)
+    if member.format == "csv":
+        return csv_to_columns(raw)
+    raise ValueError(
+        f"Cannot load member {member.path!r} as columns: format "
+        f"{member.format!r} is neither 'parquet' nor 'csv'."
+    )
+
+
+def _stack_observed(cols: dict[str, list[Any]], member: Member) -> NDArray[np.float64]:
+    """Reconstruct the observed ``(n, k)`` matrix from CSV or Parquet columns.
+
+    Handles both the mechanical ``y.{j}`` layout (Parquet path and CSV without
+    ``observable_names``) and the semantic-header CSV layout (columns named by
+    ``Member.columns``).
+    """
+    collapsed = collapse_columns(cols)
+    y = collapsed.get("y")
+    if isinstance(y, np.ndarray) and y.ndim == 2:
+        return y.astype(np.float64, copy=False)
+    if member.columns:
+        return np.column_stack([_float_column(cols[name]) for name in member.columns])
+    raise ValueError(
+        f"Cannot reconstruct observed matrix from {member.path!r}: no 'y.*' "
+        f"columns and no Member.columns metadata to stack semantic headers."
+    )
+
+
+def _float_column(values: list[Any]) -> NDArray[np.float64]:
+    """Coerce a column of numbers/Nones to ``float64`` (None -> NaN)."""
+    return np.asarray([np.nan if v is None else v for v in values], dtype=np.float64)
+
+
 def _load_estimation(
     archive: BundleArchive, manifest: Manifest
 ) -> LoadedEstimation | None:
@@ -118,17 +156,14 @@ def _load_estimation(
     observed: NDArray[Any] | None = None
     data_members = manifest.members_by_kind("estimation_data")
     if data_members:
-        columns = collapse_columns(
-            from_parquet_columns(archive.read(data_members[0].path))
+        observed = _stack_observed(
+            _load_columns(archive, data_members[0]), data_members[0]
         )
-        observed = columns.get("y")
 
     posterior: dict[str, NDArray[Any]] | None = None
     trace_members = manifest.members_by_kind("estimation_trace")
     if trace_members:
-        posterior = collapse_columns(
-            from_parquet_columns(archive.read(trace_members[0].path))
-        )
+        posterior = collapse_columns(_load_columns(archive, trace_members[0]))
 
     return LoadedEstimation(
         spec=spec, result=result, observed=observed, posterior=posterior
@@ -149,8 +184,6 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
     traces: dict[str, NDArray[Any]] | None = None
     trace_members = manifest.members_by_kind("mc_trace")
     if trace_members:
-        traces = collapse_columns(
-            from_parquet_columns(archive.read(trace_members[0].path))
-        )
+        traces = collapse_columns(_load_columns(archive, trace_members[0]))
 
     return LoadedMC(spec=spec, document=document, traces=traces)

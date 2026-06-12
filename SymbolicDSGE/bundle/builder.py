@@ -9,8 +9,11 @@ container (#142) and the assembly point the future ``sdsge-compile`` CLI calls.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
+import math
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
@@ -31,16 +34,19 @@ from ..monte_carlo.serialize import result_document, result_traces
 from ..monte_carlo.spec import PipelineSpec
 from .container import write_bundle
 from .manifest import Manifest, Member, SimSpec
-from .parquet import csv_to_json, to_parquet, trace_to_json
+from .parquet import csv_to_json, to_parquet, trace_to_csv, trace_to_json
 
 _MODEL_PATH = "model/{role}.yaml"
 _ESTIMATION_SPEC = "estimation/spec.json"
 _ESTIMATION_RESULT = "estimation/result.json"
-_ESTIMATION_DATA = "estimation/observed.parquet"
-_ESTIMATION_POSTERIOR = "estimation/posterior.parquet"
+_ESTIMATION_DATA_PARQUET = "estimation/observed.parquet"
+_ESTIMATION_DATA_CSV = "estimation/observed.csv"
+_ESTIMATION_POSTERIOR_PARQUET = "estimation/posterior.parquet"
+_ESTIMATION_POSTERIOR_CSV = "estimation/posterior.csv"
 _MC_PIPELINE = "montecarlo/pipeline.json"
 _MC_RESULT = "montecarlo/result.json"
-_MC_TRACE = "montecarlo/traces.parquet"
+_MC_TRACE_PARQUET = "montecarlo/traces.parquet"
+_MC_TRACE_CSV = "montecarlo/traces.csv"
 
 
 def _library_version() -> str:
@@ -118,9 +124,17 @@ class BundleBuilder:
         observed: NDArray[Any] | None = None,
         observable_names: list[str] | None = None,
         posterior: Mapping[str, NDArray[Any]] | None = None,
+        as_parquet: bool = True,
     ) -> BundleBuilder:
         """Add the estimation tab: spec (always), and optionally its result
-        metadata, observed ``y`` matrix, and MCMC posterior traces."""
+        metadata, observed ``y`` matrix, and MCMC posterior traces.
+
+        ``as_parquet=False`` writes observed/posterior as CSV instead — the
+        format-agnostic loader reads either. ``observed.csv`` uses the
+        ``observable_names`` as headers when supplied (user-friendly for
+        hand-authoring); posterior CSV uses the mechanical ``{name}.{j}``
+        expansion that mirrors :func:`trace_to_csv`.
+        """
         self._add(
             Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
             spec.to_json(indent=2).encode("utf-8"),
@@ -136,19 +150,24 @@ class BundleBuilder:
             matrix = np.asarray(observed, dtype=np.float64)
             if matrix.ndim != 2:
                 raise ValueError("observed must be a 2-D (n, k) array.")
+            if as_parquet:
+                path = _ESTIMATION_DATA_PARQUET
+                data = to_parquet(trace_to_json({"y": matrix}))
+            else:
+                path = _ESTIMATION_DATA_CSV
+                data = _observed_to_csv(matrix, observable_names)
             self._add(
-                Member(
-                    path=_ESTIMATION_DATA,
-                    kind="estimation_data",
-                    columns=observable_names,
-                ),
-                to_parquet(trace_to_json({"y": matrix})),
+                Member(path=path, kind="estimation_data", columns=observable_names),
+                data,
             )
         if posterior is not None:
-            self._add(
-                Member(path=_ESTIMATION_POSTERIOR, kind="estimation_trace"),
-                to_parquet(trace_to_json(dict(posterior))),
-            )
+            if as_parquet:
+                path = _ESTIMATION_POSTERIOR_PARQUET
+                data = to_parquet(trace_to_json(dict(posterior)))
+            else:
+                path = _ESTIMATION_POSTERIOR_CSV
+                data = trace_to_csv(dict(posterior))
+            self._add(Member(path=path, kind="estimation_trace"), data)
         return self
 
     # -- monte carlo ----------------------------------------------------------
@@ -159,9 +178,14 @@ class BundleBuilder:
         *,
         result: MCPipelineResult | None = None,
         run_id: str = "",
+        as_parquet: bool = True,
     ) -> BundleBuilder:
         """Add the MC tab: pipeline spec (always), and optionally a run result
-        (split into a trace-free document + a Parquet trace member)."""
+        (split into a trace-free document + a trace member).
+
+        ``as_parquet=False`` writes traces as CSV instead — the format-agnostic
+        loader reads either.
+        """
         self._add(
             Member(path=_MC_PIPELINE, kind="mc_pipeline"),
             pipeline.to_json(indent=2).encode("utf-8"),
@@ -174,10 +198,13 @@ class BundleBuilder:
             )
             traces = result_traces(result)
             if traces:
-                self._add(
-                    Member(path=_MC_TRACE, kind="mc_trace"),
-                    to_parquet(trace_to_json(traces)),
-                )
+                if as_parquet:
+                    path = _MC_TRACE_PARQUET
+                    data = to_parquet(trace_to_json(traces))
+                else:
+                    path = _MC_TRACE_CSV
+                    data = trace_to_csv(traces)
+                self._add(Member(path=path, kind="mc_trace"), data)
         return self
 
     # -- simulation prefill ---------------------------------------------------
@@ -214,6 +241,36 @@ class BundleBuilder:
             raise ValueError(f"Duplicate bundle member path {member.path!r}.")
         self._members.append(member)
         self._files[member.path] = data
+
+
+def _observed_to_csv(matrix: NDArray[Any], names: list[str] | None) -> bytes:
+    """Render a 2-D observed matrix as CSV with user-friendly headers.
+
+    Uses ``names`` as the header row when provided (paired with
+    ``Member.columns`` so the loader can stack semantic-header CSVs back into
+    the matrix). Falls back to mechanical ``y.{j}`` headers — round-trips
+    through :func:`SymbolicDSGE.bundle.parquet.collapse_columns` the same way
+    Parquet observed data does.
+    """
+    if names is not None and len(names) != matrix.shape[1]:
+        raise ValueError(
+            f"observable_names length {len(names)} does not match observed "
+            f"column count {matrix.shape[1]}."
+        )
+    headers = (
+        list(names) if names is not None else [f"y.{j}" for j in range(matrix.shape[1])]
+    )
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(headers)
+    for i in range(matrix.shape[0]):
+        writer.writerow([_float_cell(matrix[i, j]) for j in range(matrix.shape[1])])
+    return out.getvalue().encode("utf-8")
+
+
+def _float_cell(value: float) -> str:
+    number = float(value)
+    return "" if not math.isfinite(number) else repr(number)
 
 
 def _meta_from_optimization(result: OptimizationResult) -> OptimizationResultMeta:

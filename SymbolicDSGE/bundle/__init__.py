@@ -12,10 +12,12 @@ from .manifest import (
 )
 from .parquet import (
     collapse_columns,
+    csv_to_columns,
     csv_to_json,
     from_parquet,
     from_parquet_columns,
     to_parquet,
+    trace_to_csv,
     trace_to_json,
 )
 
@@ -24,7 +26,9 @@ __all__ = [
     "to_parquet",
     "from_parquet",
     "csv_to_json",
+    "csv_to_columns",
     "trace_to_json",
+    "trace_to_csv",
     "from_parquet_columns",
     "collapse_columns",
     # manifest
