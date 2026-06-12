@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     from SymbolicDSGE.core.solved_model import SolvedModel
 
+    from .session import Workspace
+
 _STATIC_DIR = Path(__file__).parent / "_static"
 
 _MISSING_UI_DEPS = (
@@ -41,6 +43,7 @@ def run_server(
     *,
     reference: "SolvedModel | None" = None,
     dgp: "SolvedModel | None" = None,
+    workspace: "Workspace | None" = None,
     host: str = "127.0.0.1",
     port: int | None = None,
     open_browser: bool = True,
@@ -103,7 +106,7 @@ def run_server(
                     raise
                 return await super().get_response("index.html", scope)
 
-    app = create_app(reference=reference, dgp=dgp)
+    app = create_app(reference=reference, dgp=dgp, workspace=workspace)
     # Mounted last so it does not shadow the /api routes registered above.
     app.mount("/", _HttpOnlyStaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 
@@ -120,10 +123,22 @@ def run_server(
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Console-script entry point (``sdsge-ui``)."""
+    """Console-script entry point (``sdsge-ui``).
+
+    With no positional argument the GUI launches empty. Passing a ``.sdsge``
+    bundle path preloads the reference/dgp models and the estimation/MC/sim
+    tabs from the bundle.
+    """
     parser = argparse.ArgumentParser(
         prog="sdsge-ui",
         description="Launch the SymbolicDSGE web playground.",
+    )
+    parser.add_argument(
+        "bundle",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="Optional .sdsge bundle to hydrate the GUI from.",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Bind host.")
     parser.add_argument(
@@ -139,7 +154,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    run_server(host=args.host, port=args.port, open_browser=not args.no_browser)
+    if args.bundle is not None and not args.bundle.is_file():
+        raise SystemExit(
+            f"sdsge-ui: bundle path does not exist or is not a file: {args.bundle}"
+        )
+
+    from .serve import serve_from
+
+    serve_from(
+        source=args.bundle,
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+    )
 
 
 if __name__ == "__main__":

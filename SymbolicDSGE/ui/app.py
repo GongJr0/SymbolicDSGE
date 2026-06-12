@@ -25,7 +25,7 @@ from .schemas import (
     SolveModelRequest,
     SubmitFunctionRequest,
 )
-from .session import UISession
+from .session import UISession, Workspace
 
 
 def create_app(
@@ -33,9 +33,12 @@ def create_app(
     session: UISession | None = None,
     reference: SolvedModel | None = None,
     dgp: SolvedModel | None = None,
+    workspace: Workspace | None = None,
 ) -> FastAPI:
     ui_session = (
-        session if session is not None else UISession(reference=reference, dgp=dgp)
+        session
+        if session is not None
+        else UISession(reference=reference, dgp=dgp, workspace=workspace)
     )
     app = FastAPI(title="SymbolicDSGE UI", version="0.1.0")
     app.state.ui_session = ui_session

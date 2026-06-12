@@ -1,5 +1,13 @@
 from .app import create_app
 from .cli import run_server
-from .session import UISession
+from .serve import build_workspace, serve_from
+from .session import UISession, Workspace
 
-__all__ = ["UISession", "create_app", "run_server"]
+__all__ = [
+    "UISession",
+    "Workspace",
+    "build_workspace",
+    "create_app",
+    "run_server",
+    "serve_from",
+]
