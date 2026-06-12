@@ -157,12 +157,18 @@ nav:
       - Outputs: gui_usage/outputs.md
       - Estimation: gui_usage/estimation.md
       - MC Pipeline: gui_usage/monte_carlo.md
+  - Portable Experiments:
+      - Overview: portable_experiments/index.md
+      - sdsge-compile: portable_experiments/sdsge-compile.md
+      - sdsge-decompile: portable_experiments/sdsge-decompile.md
   - Guides:
       - Model Configuration Guide: guides/model_config_guide.md
       - Quick Start: guides/quickstart.md
       - Kalman Filter Configuration Guide: guides/kalman_config_guide.md
       - Estimation Guide: guides/estimation_guide.md
       - Monte Carlo Guide: guides/monte_carlo_guide.md
+      - Bundle Authoring Guide: guides/bundle_authoring_guide.md
+      - Bundle Loading Guide: guides/bundle_loading_guide.md
   - Documentation:
       - ModelConfig: documentation/ModelConfig.md
       - ModelParser: documentation/ModelParser.md
@@ -180,6 +186,12 @@ nav:
           - Ridge: documentation/regression/ridge.md
           - Lasso: documentation/regression/lasso.md
           - Elastic Net: documentation/regression/elastic_net.md
+      - Bundle:
+          - Overview: documentation/bundle/index.md
+          - BundleBuilder: documentation/bundle/BundleBuilder.md
+          - LoadedBundle: documentation/bundle/LoadedBundle.md
+          - Manifest: documentation/bundle/Manifest.md
+          - load_bundle: documentation/bundle/load_bundle.md
       - Monte Carlo:
           - Overview: documentation/monte_carlo/index.md
           - MCPipeline: documentation/monte_carlo/pipeline.md

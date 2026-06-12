@@ -20,6 +20,9 @@ A solved model can also open the GUI with itself preloaded as the reference mode
 solved.serve()
 ```
 
+???+ info "Opening a `.sdsge` bundle"
+    `sdsge-ui` accepts an optional positional argument: `sdsge-ui my-experiment.sdsge` launches the GUI with every tab pre-populated from the bundle. See [Portable Experiments](../portable_experiments/index.md) for how bundles are produced.
+
 ## Shared Controls
 
 The sidebar controls the active model role and is available from every tab.
