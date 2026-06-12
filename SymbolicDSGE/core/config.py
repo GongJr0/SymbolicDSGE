@@ -103,3 +103,8 @@ class ModelConfig(Base):
     equations: Equations
     calibration: Calib
     symbolically_linearized: bool = False
+    #: Source YAML text the config was parsed from, retained so a model can be
+    #: round-tripped into a ``.sdsge`` bundle without re-reading from disk
+    #: (avoiding the staleness window between solve and save). ``None`` for
+    #: programmatic construction.
+    source_yaml: str | None = None

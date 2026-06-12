@@ -350,6 +350,65 @@ class SolvedModel:
             open_browser=open_browser,
         )
 
+    def to_bundle_builder(
+        self,
+        *,
+        yaml_text: str | None = None,
+        role: str = "reference",
+        compile_kwargs: Mapping[str, Any] | None = None,
+        solve_kwargs: Mapping[str, Any] | None = None,
+        created_by: str | None = None,
+    ) -> "Any":
+        """Return a :class:`BundleBuilder` pre-seeded with this model's YAML.
+
+        Chain estimation/MC/simulation members and call ``.write(path)``::
+
+            solved.to_bundle_builder().add_estimation(spec, ...).write("out.sdsge")
+
+        ``yaml_text`` overrides the YAML embedded in the bundle; if not given,
+        the source YAML retained on :attr:`compiled.config.source_yaml` is used.
+        Raises :class:`ValueError` when neither is available (e.g. for models
+        built programmatically without parsing a YAML).
+        """
+        from ..bundle.builder import BundleBuilder
+
+        yaml = yaml_text if yaml_text is not None else self.compiled.config.source_yaml
+        if yaml is None:
+            raise ValueError(
+                "Cannot create a .sdsge bundle: this model has no source YAML "
+                "attached. Pass yaml_text=... explicitly, or load the model via "
+                "ModelParser(path) / ModelParser.from_string(text) so the "
+                "source is retained on compiled.config.source_yaml."
+            )
+        return BundleBuilder(created_by=created_by).add_model(
+            role,
+            yaml,
+            compile_kwargs=compile_kwargs,
+            solve_kwargs=solve_kwargs,
+        )
+
+    def save_sdsge(
+        self,
+        path: "str | Any",
+        *,
+        yaml_text: str | None = None,
+        role: str = "reference",
+        compile_kwargs: Mapping[str, Any] | None = None,
+        solve_kwargs: Mapping[str, Any] | None = None,
+    ) -> "Any":
+        """Write a model-only ``.sdsge`` bundle at ``path``.
+
+        Shortcut for ``self.to_bundle_builder(...).write(path)``. For bundles
+        that also carry estimation / Monte-Carlo / simulation members, call
+        :meth:`to_bundle_builder` directly and chain the additions.
+        """
+        return self.to_bundle_builder(
+            yaml_text=yaml_text,
+            role=role,
+            compile_kwargs=compile_kwargs,
+            solve_kwargs=solve_kwargs,
+        ).write(path)
+
     def _shock_unpack(
         self, shocks: Mapping[str, NDF | Callable[[float | NDF], NDF]]
     ) -> list[Tuple[int, NDF]]:
