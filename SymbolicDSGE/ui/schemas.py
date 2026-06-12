@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from SymbolicDSGE.estimation.spec import EstimationSpec
+
 Role = Literal["reference", "dgp"]
 ShockDistribution = Literal["norm", "t", "uni"]
 FunctionKind = Literal["array", "figure"]
@@ -84,3 +86,11 @@ class EstimationRunRequest(BaseModel):
     steady_state: list[float] | None = None
     posterior_point: str = "mean"
     estimate_and_solve: bool = False
+
+    def to_core(self) -> EstimationSpec:
+        """Convert to the pydantic-free core spec (bundle/text serialization).
+
+        Drops UI-only fields (``role``, ``y``, ``estimate_and_solve``); ``y``
+        rides a Parquet member alongside the spec in a bundle.
+        """
+        return EstimationSpec.from_dict(self.model_dump())
