@@ -75,12 +75,30 @@ class RunRecord:
     payload: Mapping[str, Any]
 
 
+@dataclass
+class Workspace:
+    """One-shot preload payload for a session.
+
+    Each field carries the wire-shaped dict the corresponding tab would
+    populate after a run, so the frontend can seed its state on first paint
+    without the user having to drive the GUI manually. Populated by
+    :func:`SymbolicDSGE.ui.serve.serve_from` from a loaded ``.sdsge`` bundle.
+    """
+
+    estimation: dict[str, Any] | None = None
+    mc: dict[str, Any] | None = None
+    simulation: dict[str, Any] | None = None
+    estimation_spec: dict[str, Any] | None = None
+    mc_pipeline: dict[str, Any] | None = None
+
+
 class UISession:
     def __init__(
         self,
         *,
         reference: SolvedModel | None = None,
         dgp: SolvedModel | None = None,
+        workspace: Workspace | None = None,
     ) -> None:
         self.slots: dict[Role, ModelSlot] = {
             "reference": ModelSlot(role="reference"),
@@ -91,6 +109,7 @@ class UISession:
             "reference": {},
             "dgp": {},
         }
+        self.workspace: Workspace = workspace if workspace is not None else Workspace()
         if reference is not None:
             self.set_solved_model("reference", reference)
         if dgp is not None:
@@ -108,7 +127,23 @@ class UISession:
                 }
                 for run in self.runs.values()
             ],
+            "workspace": self._workspace_payload(),
         }
+
+    def _workspace_payload(self) -> dict[str, Any]:
+        """Wire shape for the workspace preload (omits unset slots)."""
+        out: dict[str, Any] = {}
+        if self.workspace.estimation is not None:
+            out["estimation"] = self.workspace.estimation
+        if self.workspace.estimation_spec is not None:
+            out["estimation_spec"] = self.workspace.estimation_spec
+        if self.workspace.mc is not None:
+            out["mc"] = self.workspace.mc
+        if self.workspace.mc_pipeline is not None:
+            out["mc_pipeline"] = self.workspace.mc_pipeline
+        if self.workspace.simulation is not None:
+            out["simulation"] = self.workspace.simulation
+        return out
 
     def set_solved_model(self, role: Role, model: SolvedModel) -> dict[str, Any]:
         slot = self._slot(role)

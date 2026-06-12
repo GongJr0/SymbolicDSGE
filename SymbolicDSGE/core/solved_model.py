@@ -336,15 +336,15 @@ class SolvedModel:
             Whether to open a browser window automatically.
         """
         try:
-            from ..ui.cli import run_server
+            from ..ui.serve import serve_from
         except ImportError as exc:  # pragma: no cover - exercised without [ui]
             raise ImportError(
                 "The SymbolicDSGE UI extra is required for .serve(). "
                 "Install it with: pip install 'SymbolicDSGE[ui]'"
             ) from exc
 
-        run_server(
-            reference=self,
+        serve_from(
+            source=self,
             host=host,
             port=port,
             open_browser=open_browser,
