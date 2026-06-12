@@ -50,6 +50,7 @@ class ModelParser:
     def __init__(self, config_path: str | Path) -> None:
         self.config_path = Path(config_path)
         self.raw_data, self.parsed = self.from_yaml()
+        self.parsed.model.source_yaml = self.config_path.read_text(encoding="utf-8")
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -77,9 +78,13 @@ class ModelParser:
             handle.write(text)
             tmp_path = Path(handle.name)
         try:
-            return cls(tmp_path)
+            parser = cls(tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
+        # Preserve the caller's original text verbatim (the temp-file round-trip
+        # is a no-op today, but pin it here so callers can rely on equality).
+        parser.parsed.model.source_yaml = text
+        return parser
 
     # --- existing validators unchanged ---
     @classmethod

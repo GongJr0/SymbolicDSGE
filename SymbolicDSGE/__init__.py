@@ -7,6 +7,7 @@ from .core import (
 )
 from .kalman import KalmanFilter
 from .estimation import Estimator
+from .bundle import BundleBuilder, LoadedBundle, build_from as load_bundle
 from . import utils
 
 __all__ = [
@@ -18,4 +19,8 @@ __all__ = [
     "Shock",
     "utils",
     "linearize_model",
+    # .sdsge bundle API
+    "BundleBuilder",
+    "LoadedBundle",
+    "load_bundle",
 ]
