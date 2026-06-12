@@ -32,6 +32,8 @@ Repository = "https://github.com/GongJr0/SymbolicDSGE"
 
 [project.scripts]
 sdsge-ui = "SymbolicDSGE.ui.cli:main"
+sdsge-compile = "SymbolicDSGE.bundle.cli:main_compile"
+sdsge-decompile = "SymbolicDSGE.bundle.cli:main_decompile"
 
 [project.optional-dependencies]
 fred = [

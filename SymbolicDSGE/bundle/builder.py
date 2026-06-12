@@ -213,6 +213,19 @@ class BundleBuilder:
         self._simulation = simulation
         return self
 
+    # -- low-level passthrough ------------------------------------------------
+
+    def add_member(self, member: Member, data: bytes) -> BundleBuilder:
+        """Append a pre-encoded member at its declared path.
+
+        Public seam for callers that already hold the final member bytes —
+        e.g. the ``sdsge-compile`` CLI copying a Parquet ``data/`` file through
+        verbatim, or staging a pre-split MC result + traces pair. The
+        higher-level ``add_*`` methods would otherwise re-encode.
+        """
+        self._add(member, data)
+        return self
+
     # -- emit -----------------------------------------------------------------
 
     def manifest(self) -> Manifest:
