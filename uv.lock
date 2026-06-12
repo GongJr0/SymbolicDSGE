@@ -2012,6 +2012,44 @@ wheels = [
 ]
 
 [[package]]
+name = "parquet-engine"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/6d/604388cdf53245f57d3e2469aa23096b2e953a1408e08f6728d7a18985c6/parquet_engine-0.1.1.tar.gz", hash = "sha256:8f7aacfd9d9317241bf6d7e9446fd2b1e661dfe26d68f20d86583aec26ce2b84", size = 25375, upload-time = "2026-06-11T17:32:53.713Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/49/f122acfc5d5104a2bfd5ada7c8edcd5fcf21446a1bd15935ee1af1cd04b4/parquet_engine-0.1.1-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:d2f1694de5a0938b99de821ad188051ac1ebab31b08cd7ef1f575815be144b90", size = 3931483, upload-time = "2026-06-11T17:33:10.202Z" },
+    { url = "https://files.pythonhosted.org/packages/61/3e/3fc208b5852f0ec99771f182772ec428e289f01c8c8a999f83d396531710/parquet_engine-0.1.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:76da40e21424554cce47ca77e3784421f757b19c7502d9a6d36c021a2367e11a", size = 3791042, upload-time = "2026-06-11T17:32:46.676Z" },
+    { url = "https://files.pythonhosted.org/packages/02/5b/03b5b2dde59cba4a88ec6b2969a8bd323b76c54abe6b29e2a0163ab254f2/parquet_engine-0.1.1-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2dd2c83f5aa85823f91489b38ee6da503c2690d0f575a823bf2ed9b309427fce", size = 4230363, upload-time = "2026-06-11T17:32:58.833Z" },
+    { url = "https://files.pythonhosted.org/packages/73/73/b3c640d2f62e37bda614f62617edebd194fd2c7576ead60c41d75e66a0c6/parquet_engine-0.1.1-cp310-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:d3a1911e8f31d40c5b076901de187af372a032b96c8260bf9ee50909173ec90b", size = 4215414, upload-time = "2026-06-11T17:33:27.402Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/86/470af98ab110a0ae682684994258068d1cac81d93753bd5ef99adb1b6584/parquet_engine-0.1.1-cp310-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:1897b9a802ec770d51655ab04c991625d68a0fac837d7a0d1875cc7a44dae3fa", size = 5151296, upload-time = "2026-06-11T17:32:49.506Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/bf/8a510b71d623a5796a08121cb3f65ac638b5842e4f4c0385b2ca015befdd/parquet_engine-0.1.1-cp310-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:6606f28e4933be0c5345bd8c45713000edcc93942f3f0981962e0dbad2bb0b96", size = 4487610, upload-time = "2026-06-11T17:33:12.303Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/9b/3d5b697ae874bd994b50e20df5bd921604734dbc393115addb62277a7017/parquet_engine-0.1.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5cb38e1d5fadc96053f35282643bb0af9f7944544ea0057c694320cbf2930e95", size = 4384022, upload-time = "2026-06-11T17:33:03.162Z" },
+    { url = "https://files.pythonhosted.org/packages/82/2f/3a2b63a43e0dd871a57b69398e765888889fcd5a46ad522664ad64eaf8f4/parquet_engine-0.1.1-cp310-abi3-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:c9bba7a9e04c8218e6c4f68b394d124594b6a4808ae791e9edee034ad3445849", size = 4573843, upload-time = "2026-06-11T17:33:24.585Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/b2/3d237de24465cdc7d5ce2d9291584b248a0ee072dfa4d77fc07fd46aab87/parquet_engine-0.1.1-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:cd26d5fc608c80d475fbe734e640570e17dee50575d50e73ef161e325ed3d490", size = 4407700, upload-time = "2026-06-11T17:32:52.565Z" },
+    { url = "https://files.pythonhosted.org/packages/67/eb/edfe45459c427627b8487502502c332c35aa1b9341f59fc4485eec5e5129/parquet_engine-0.1.1-cp310-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:a1e42fa16f317fb1c45766b9de9f58f80dd5321f15cfe4dc56097686ebeab1a7", size = 4467165, upload-time = "2026-06-11T17:32:54.567Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/fd/827a062996e812352f90134b6f781a6cec35dac6e42ff212957172ffd686/parquet_engine-0.1.1-cp310-abi3-musllinux_1_2_i686.whl", hash = "sha256:80213b5c3671ea71b3700ab4a7286694f3b1813f1217ae51c0db9ad0a2b82594", size = 4588158, upload-time = "2026-06-11T17:33:13.801Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/44/2dfb69d4392effa63616a596ca424943ab6e9931dd40619627e4eb52b463/parquet_engine-0.1.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:073656fcf57814657792902f4e56e6473eb6ea04203747ec37bec241057637dc", size = 4478907, upload-time = "2026-06-11T17:33:05.796Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/d3/3e75d2c40a67b8b49e1c1876ceb2916623627e6c07882b91214f5df7fc82/parquet_engine-0.1.1-cp310-abi3-win32.whl", hash = "sha256:fe0d83c41502f6e74a8970bd76d9bc328c9b47ddc43c51286b9ecbc2b2cd39e5", size = 3222425, upload-time = "2026-06-11T17:33:16.28Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/14/af531ed2b8eb05ea0df4970560a0dd366183c6968e6477c8f34b39b30e5b/parquet_engine-0.1.1-cp310-abi3-win_amd64.whl", hash = "sha256:7a7906db15b1c171f68c0562682474372222d757c1db6e81974a730fee31c4b7", size = 3537894, upload-time = "2026-06-11T17:33:22.992Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/a7/87e4ecb62e6c856d92e3c0f51fc55210dac615603c070df3a0a8e0093d74/parquet_engine-0.1.1-cp310-abi3-win_arm64.whl", hash = "sha256:73b2928d08d14b3a16375fa0019360c1bc22eed5da3f3f1f1ad8a885210cb5cc", size = 3362025, upload-time = "2026-06-11T17:33:04.522Z" },
+    { url = "https://files.pythonhosted.org/packages/af/92/5c25f6132f84016fa561ba5bf97258ca1ec74308abc907b4351f9518e97b/parquet_engine-0.1.1-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:bdc5cf871110f81d7479cfa44fbf86f6895848a204c727d83e3a67029f86eb6f", size = 3928919, upload-time = "2026-06-11T17:33:07.189Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/03/fd23f8d611d9abae33fd860c2ed076906fcac328f80844b33f449d976d2a/parquet_engine-0.1.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:680eca0016f424c059604a96f34db03b0cf6f26d2009e2192ec53f31243e9b74", size = 3789504, upload-time = "2026-06-11T17:33:29.051Z" },
+    { url = "https://files.pythonhosted.org/packages/43/1d/34fc0a32fdbfdd3b73dc9b76ac65daf874e494d2910bac0c0f85df5f9c71/parquet_engine-0.1.1-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d9eb66b79e9eae679735a527624a1590e1634dcb7de60abaa1bf34843889da62", size = 4227349, upload-time = "2026-06-11T17:33:08.579Z" },
+    { url = "https://files.pythonhosted.org/packages/01/c1/7a67e362753e021b285053644eeb600544ccbe142d9da2a6679d44d2fbfc/parquet_engine-0.1.1-cp314-cp314t-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:ef53257345b656edb29b85162aef777ec220dd9bb864d8187f7b3a2d8938db58", size = 4211140, upload-time = "2026-06-11T17:33:00.208Z" },
+    { url = "https://files.pythonhosted.org/packages/61/d7/8335f6445beacf719bb2812b5beda938c8dface0efa7b957e455e601bc5c/parquet_engine-0.1.1-cp314-cp314t-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:9f1860ac22889da183765ed713e669f6a08aa6d660611f9187bbd001b54beb7d", size = 5149231, upload-time = "2026-06-11T17:33:15.117Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/fd/2d24a386d5bf216a9039c43abb21103b22d381829940f38bbf9e71ae47cd/parquet_engine-0.1.1-cp314-cp314t-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:0e8629ad96f923b370a3b0fb3487594c58786c3d5beef62381388f50765369bd", size = 4484073, upload-time = "2026-06-11T17:33:17.599Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/c4/9064324626deefbcc62b634efd5968ec6ab8b80d3a44dac847c3713ded82/parquet_engine-0.1.1-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:643923f45e5bf4366859574daa32d62b47caeea4c6951d68ca05872fe1c2528b", size = 4381706, upload-time = "2026-06-11T17:32:50.925Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/00/e508c15a5c848c230f47406906daa0715a8447d5f9e0b13c6c48e3763ebe/parquet_engine-0.1.1-cp314-cp314t-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:de1887e1b218e6d148bc8eadc99a405c2f60e7da4e440f408c3a7b890ddb671b", size = 4569460, upload-time = "2026-06-11T17:33:01.614Z" },
+    { url = "https://files.pythonhosted.org/packages/23/2d/c3da1922e38c63106e69a8ed438882bda653bdd4473954a933467ccce114/parquet_engine-0.1.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:43481e83362c37b2d3793bbc88f86cb8a759ce8807032675db5c64dce22f0d1a", size = 4404725, upload-time = "2026-06-11T17:33:18.978Z" },
+    { url = "https://files.pythonhosted.org/packages/df/c5/e1fade4688cb7f04c6ea370396b780eca84a2a02636f3f273a336c3f0458/parquet_engine-0.1.1-cp314-cp314t-musllinux_1_2_armv7l.whl", hash = "sha256:8c9d1890f1c9e2e1bfe81adce111a28519eef1feebe207ca9993d58941ad935e", size = 4462871, upload-time = "2026-06-11T17:33:20.311Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/44/95d26e64236c17ab461f0a498abe9648fe224d0fa452b721f63ea9b614e5/parquet_engine-0.1.1-cp314-cp314t-musllinux_1_2_i686.whl", hash = "sha256:53c66bf61c8bf839c5e18a65e8afa5e3305fc96cdf0b582e2ddaf8c036f9e787", size = 4582181, upload-time = "2026-06-11T17:33:25.897Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/e4/a8181f7b1fd83d3369c2767cc7d9d356405927934f7596e29dd199fc9f07/parquet_engine-0.1.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9eda1b866118f423ac8093150d2722d5f470e91ffc2cf55c799d3250dfbc1b68", size = 4475727, upload-time = "2026-06-11T17:32:48.177Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/53/8915104d600185caef63afaa5a0efba7d9e3bcf7d95557f12f9cd2b2d3f9/parquet_engine-0.1.1-cp314-cp314t-win32.whl", hash = "sha256:f81ab2d7edd8b7cde126fc8271df4401b488853e38b5d594dc9f27110d19f6f5", size = 3221780, upload-time = "2026-06-11T17:33:21.709Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/7a/6ae1c9151ed433f04578507fca621b938a5207e116ada6a8f0ca95c7abbb/parquet_engine-0.1.1-cp314-cp314t-win_amd64.whl", hash = "sha256:6e9ef8bc693ef43c6c118359ae632f4818493ec99b0f9e438096665aec29b668", size = 3537259, upload-time = "2026-06-11T17:32:55.878Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/22/a4b69f33338bd29e891f5de965961c372258e600a558c3b8392620a17c8f/parquet_engine-0.1.1-cp314-cp314t-win_arm64.whl", hash = "sha256:22c6a23e1b988f442fa2f9596011e064aae5f049c06f9bc53868b59dc9d9fbca", size = 3363005, upload-time = "2026-06-11T17:32:57.28Z" },
+]
+
+[[package]]
 name = "parso"
 version = "0.8.7"
 source = { registry = "https://pypi.org/simple" }
@@ -2912,6 +2950,7 @@ dependencies = [
     { name = "numba" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "parquet-engine" },
     { name = "pyyaml" },
     { name = "scipy" },
     { name = "statsmodels" },
@@ -2964,6 +3003,7 @@ requires-dist = [
     { name = "numba", specifier = ">=0.62.1" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "pandas", specifier = ">=2.3.3" },
+    { name = "parquet-engine", specifier = ">=0.1.1" },
     { name = "pysr", marker = "extra == 'sr'", specifier = ">=1.5.10" },
     { name = "python-dotenv", marker = "extra == 'fred'", specifier = ">=1.2.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
