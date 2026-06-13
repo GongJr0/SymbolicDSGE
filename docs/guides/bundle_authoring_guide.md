@@ -5,6 +5,11 @@ tags:
 
 # Bundle Authoring Guide
 
+??? tip "__TL;DR__"
+    Assemble a complete `.sdsge` bundle from code with `BundleBuilder` — chain `add_model`, `add_estimation`, `add_mc`, `set_simulation`, and `add_raw_data`, then `.write(...)` the archive. Each member is optional, so the same builder covers a model-only bundle and a full experiment alike.
+
+    You can find a demonstration notebook [here](../assets/bundle_authoring.ipynb).
+
 This guide walks through assembling a complete `.sdsge` bundle from code — model + Kalman config, estimation spec and result, observed data, Monte Carlo pipeline and traces, simulation prefill. Every member type the bundle supports is covered.
 
 We start from `MODELS/POST82.yaml` (also used in the [Quick Start](quickstart.md)). The full assembly fits in a single script you can copy and run.
@@ -202,7 +207,7 @@ import io
 import pandas as pd
 
 aux = pd.DataFrame({
-    "date": pd.date_range("2000-01-01", periods=40, freq="Q"),
+    "date": pd.date_range("2000-01-01", periods=40, freq="QS"),
     "gdp_growth": rng.standard_normal(40),
 })
 csv_buffer = io.StringIO()
