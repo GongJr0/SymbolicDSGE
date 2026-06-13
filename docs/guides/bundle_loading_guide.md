@@ -136,8 +136,41 @@ if estimation.posterior is not None:
     mcmc.hpd_intervals(alpha=0.05)
     ```
 
-???+ info "Re-running a loaded estimation"
-    `loaded.estimation.spec.to_estimator_inputs()` lowers the spec to concrete `Estimator` arguments — `estimated_params`, `theta0`, `bounds`, and `priors` rebuilt from their specs — so the run can be replayed (paired with `loaded.estimation.observed`) without the `[ui]` extra. See the [Estimation Guide](estimation_guide.md).
+### Re-run an estimation from a loaded bundle
+
+`EstimationSpec.to_estimator_inputs()` lowers the loaded spec to concrete arguments — `estimated_params`, `theta0`, `bounds`, and `priors` (built `Prior` objects, not specs) — directly feedable to `DSGESolver.estimate(...)`. The lowering lives in the core library, so no `[ui]` extra is required.
+
+```python
+from SymbolicDSGE import DSGESolver
+
+inputs = estimation.spec.to_estimator_inputs() # (1)!
+
+solver = DSGESolver(loaded.reference.config, loaded.reference.kalman_config)
+extras: dict = {} # (2)!
+if inputs.bounds is not None and estimation.spec.method != "mcmc":
+    extras["bounds"] = inputs.bounds
+
+fresh_result = solver.estimate(
+    compiled=loaded.reference.compiled, # (3)!
+    y=estimation.observed, # (4)!
+    method=estimation.spec.method,
+    estimated_params=inputs.estimated_params,
+    theta0=inputs.theta0,
+    priors=inputs.priors,
+    observables=estimation.spec.observables,
+    **extras,
+)
+```
+
+1. Selects `estimate=True` parameters, materializes their initials/bounds, and (for MAP/MCMC) builds a `Prior` object from each `PriorSpec`. Raises if MAP/MCMC parameters lack a prior.
+2. `solver.estimate` forwards `**method_kwargs` to the underlying `mle`/`map`/`mcmc` call. `bounds` is accepted by MLE/MAP but not by MCMC, so we gate it on the method.
+3. The `CompiledModel` reuses the layout `load_bundle` already produced when re-solving the embedded YAML — no need to recompile.
+4. The observed matrix the original run was fit against — already reconstructed by `load_bundle` and stored on `LoadedEstimation.observed`.
+
+???+ info "Why `to_estimator_inputs` exists"
+    The spec is human-authored (or GUI-authored): it carries `PriorSpec` for declarative reasons. The estimator needs built `Prior` objects. `to_estimator_inputs` is the seam where the materialization happens, and where MAP/MCMC's prior-required invariant is enforced.
+
+See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ## Reach the Monte Carlo tab
 
@@ -157,24 +190,29 @@ if mc is not None:
 
 1. `mc.wire()` returns `None` when either `document` or `traces` is missing — a bundle authored with only the pipeline spec carries neither.
 
-???+ info "Re-running a loaded pipeline"
-    The compile path lives in the core `monte_carlo` module, so a loaded pipeline can be re-run against the loaded models **without the `[ui]` extra**:
+### Re-run a Monte Carlo pipeline from a loaded bundle
 
-    ```python
-    from SymbolicDSGE.monte_carlo import run_pipeline
+The pipeline runner lives in the core `monte_carlo` module — a loaded pipeline runs against the loaded models without the `[ui]` extra.
 
-    result = run_pipeline(
-        loaded.mc.spec, # (1)!
-        reference=loaded.reference,
-        dgp=loaded.dgp,
-        n_rep=500,
-        fail_fast=True,
-    )
-    ```
+```python
+from SymbolicDSGE.monte_carlo import run_pipeline
 
-    1. `run_pipeline` validates the graph, compiles each step through the step catalogue, and runs it — `validate_pipeline_spec` / `build_pipeline` are also exported if you want the stages separately.
+mc_result = run_pipeline(
+    loaded.mc.spec, # (1)!
+    reference=loaded.reference,
+    dgp=loaded.dgp,
+    n_rep=500,
+    fail_fast=True,
+)
+print("Successful reps:", mc_result.n_successful, "/", mc_result.n_rep)
+```
 
-    See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar.
+1. `run_pipeline` validates the graph against [`STEP_CATALOG`](../documentation/monte_carlo/index.md#step-catalog), compiles each step, and runs it. `validate_pipeline_spec` and `build_pipeline` are also exported when you want the stages separately.
+
+???+ info "Validating without running"
+    `validate_pipeline_spec(loaded.mc.spec, has_reference=loaded.reference is not None, has_dgp=loaded.dgp is not None)` returns the topologically ordered node list when the graph is well-formed and raises with a specific message otherwise — useful to surface validation errors before a long run.
+
+See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and the [`monte_carlo` API reference](../documentation/monte_carlo/index.md) for the core runner exports.
 
 ## Reach the simulation prefill
 

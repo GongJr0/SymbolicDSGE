@@ -46,6 +46,9 @@ __Fields:__
 ???+ note "Pairing metadata with traces"
     `MCMCResultMeta` carries only the scalar slice. To reconstruct the full sampling diagnostics or repaint the GUI, pair the metadata with `posterior` — both come back as part of the same `LoadedEstimation` so callers don't have to track member paths.
 
+???+ tip "Re-running a loaded estimation"
+    `spec.to_estimator_inputs()` lowers the spec to an [`EstimatorInputs`](index.md#estimation-spec-and-result-types) — `estimated_params`, `theta0`, `priors` (built `Prior` objects), and `bounds` — directly feedable to `#!python DSGESolver.estimate(...)`. The lowering lives in the core library, so a loaded estimation can be re-run without the `[ui]` extra. See the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-an-estimation-from-a-loaded-bundle).
+
 ## `LoadedMC`
 
 ```python
@@ -72,6 +75,9 @@ Re-merge `document` and `traces` into the canonical UI wire shape (the same dict
 
 ???+ info "When `wire()` returns `None`"
     A bundle authored with the pipeline spec only (no completed run attached) carries neither `document` nor `traces`. `wire()` reports `None` so callers can distinguish "no run available" from a run with empty traces.
+
+???+ tip "Re-running a loaded pipeline"
+    `#!python from SymbolicDSGE.monte_carlo import run_pipeline` runs `spec` against the loaded models without the `[ui]` extra. See [Monte Carlo > Overview](../monte_carlo/index.md) for the core-side runner exports and the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-a-monte-carlo-pipeline-from-a-loaded-bundle).
 
 ## Example
 

@@ -20,16 +20,24 @@ For task-oriented walkthroughs see the [Bundle Authoring Guide](../../guides/bun
 | [`LoadedBundle`](LoadedBundle.md) | Container holding every component returned by `load_bundle`. |
 | [`Manifest`](Manifest.md) | Versioned archive index — schema for `manifest.json`. |
 
-## Estimation result metadata
+## Estimation spec and result types
 
-Estimation results carry both a small text-only metadata slice and (for MCMC) bulk trace arrays. The metadata classes live in `SymbolicDSGE.estimation.spec`:
+Estimation specs and results live in `SymbolicDSGE.estimation.spec`. The bundle stores text representations; the same types are how loaded bundles re-enter the estimation pipeline without the `[ui]` extra.
 
-| Class | Purpose |
+| Class / function | Purpose |
 | --- | --- |
+| `EstimationSpec` | Serializable spec for an estimation run (method, parameters, observables, kwargs, posterior point). |
+| `EstimationSpec.from_targets(...)` | Build a spec from just the parameter names + initials/priors/bounds — mirrors `DSGESolver.estimate`'s signature and sets `estimate=True` for you. |
+| `EstimationSpec.to_estimator_inputs()` | Lower a spec to concrete `EstimatorInputs` for a run. Builds `Prior` objects from each `PriorSpec`. |
+| `EstimatorInputs` | Concrete arguments lowered from `EstimationSpec` — `estimated_params`, `theta0`, `priors`, `bounds`. Directly feedable to `DSGESolver.estimate(...)`. |
 | `OptimizationResultMeta` | Scalar metadata for `OptimizationResult` (`kind`, `theta`, `success`, `message`, `fun`, `loglik`, `logprior`, `logpost`, `nfev`, `nit`). Sufficient to repaint MLE/MAP summaries on load. |
 | `MCMCResultMeta` | Scalar metadata for `MCMCResult` (`param_names`, `accept_rate`, `n_draws`, `burn_in`, `thin`). Bulk `samples` and `logpost_trace` ride a Parquet member alongside the metadata and pair with it at load time. |
 
-Both classes expose `to_dict()` / `from_dict()` and are reused unchanged by both the in-code path and the bundle.
+Live `OptimizationResult` and `MCMCResult` carry `.to_meta()` projections; `MCMCResult.posterior_arrays()` returns the bulk `{"samples", "logpost"}` dict the bundle expects. See [`Estimator.to_spec`](../Estimator.md) for the equivalent projection on an `Estimator` instance.
+
+???+ tip "Authoring fast paths"
+    - `Estimator.to_spec(method="map", priors={...})` snapshots an `Estimator`'s configuration into an `EstimationSpec` for bundling.
+    - `BundleBuilder.add_estimation(spec, result=estimator.run(...), observed=y)` accepts the live result directly — no manual `*Meta` construction needed.
 
 ## Convention summary
 
