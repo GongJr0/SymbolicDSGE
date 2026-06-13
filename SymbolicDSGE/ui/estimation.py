@@ -9,11 +9,17 @@ from SymbolicDSGE.bayesian.distributions.param_builder import DIST_PARAMS_DISPAT
 from SymbolicDSGE.bayesian.transforms.transform_dispatch import (
     TRANSFORM_METHOD_DISPATCH,
 )
-from SymbolicDSGE.estimation.estimator import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
-from SymbolicDSGE.estimation.spec import MCMCResultMeta, OptimizationResultMeta
+from SymbolicDSGE.estimation.spec import (
+    EstimationParameterSpec as CoreEstimationParameterSpec,
+)
+from SymbolicDSGE.estimation.spec import (
+    EstimationSpec,
+    MCMCResultMeta,
+    OptimizationResultMeta,
+)
 
-from .schemas import EstimationParameterSpec, PriorSpec
+from .schemas import EstimationParameterSpec
 
 
 def estimation_catalog() -> dict[str, Any]:
@@ -61,32 +67,25 @@ def build_estimation_inputs(
     dict[str, Any] | None,
     list[tuple[float | None, float | None]] | None,
 ]:
-    active = [parameter for parameter in parameters if parameter.estimate]
-    if not active:
+    """Lower UI estimation parameters to Estimator inputs.
+
+    Thin adapter: converts the pydantic request models to the core
+    :class:`~SymbolicDSGE.estimation.spec.EstimationSpec` and delegates the
+    compilation to :meth:`EstimationSpec.to_estimator_inputs`. The empty-selection
+    guard keeps the GUI-facing message.
+    """
+    if not any(parameter.estimate for parameter in parameters):
         raise ValueError("Select at least one parameter to estimate.")
 
-    names = [parameter.name for parameter in active]
-    if len(set(names)) != len(names):
-        raise ValueError("Estimated parameter names must be unique.")
-
-    theta0 = {parameter.name: parameter.initial for parameter in active}
-    bounds = [(parameter.lower, parameter.upper) for parameter in active]
-    bound_arg = (
-        bounds
-        if any(low is not None or high is not None for low, high in bounds)
-        else None
+    spec = EstimationSpec(
+        method=method,
+        parameters=[
+            CoreEstimationParameterSpec.from_dict(parameter.model_dump())
+            for parameter in parameters
+        ],
     )
-
-    priors: dict[str, Any] | None = None
-    if method in {"map", "mcmc"}:
-        priors = {}
-        for parameter in active:
-            if parameter.prior is None:
-                raise ValueError(
-                    f"Parameter '{parameter.name}' requires a prior for {method.upper()}."
-                )
-            priors[parameter.name] = _make_prior(parameter.prior)
-    return names, theta0, priors, bound_arg
+    inputs = spec.to_estimator_inputs()
+    return inputs.estimated_params, inputs.theta0, inputs.priors, inputs.bounds
 
 
 def emit_estimation_wire(
@@ -180,15 +179,6 @@ def _emit_mcmc_wire(
 def serialize_estimation_result(result: Any) -> dict[str, Any]:
     """Backwards-compatible thin wrapper around :func:`emit_estimation_wire`."""
     return emit_estimation_wire(result)
-
-
-def _make_prior(spec: PriorSpec) -> Any:
-    return Estimator.make_prior(
-        distribution=spec.distribution,
-        parameters=dict(spec.parameters),
-        transform=spec.transform,
-        transform_kwargs=dict(spec.transform_kwargs),
-    )
 
 
 def _json_value(value: Any) -> Any:

@@ -136,6 +136,9 @@ if estimation.posterior is not None:
     mcmc.hpd_intervals(alpha=0.05)
     ```
 
+???+ info "Re-running a loaded estimation"
+    `loaded.estimation.spec.to_estimator_inputs()` lowers the spec to concrete `Estimator` arguments — `estimated_params`, `theta0`, `bounds`, and `priors` rebuilt from their specs — so the run can be replayed (paired with `loaded.estimation.observed`) without the `[ui]` extra. See the [Estimation Guide](estimation_guide.md).
+
 ## Reach the Monte Carlo tab
 
 `LoadedMC.spec` is the [`PipelineSpec`](../documentation/monte_carlo/pipeline.md) describing the graph. When the bundle carries a completed run, `document` holds the trace-free summary and `traces` holds the bulk columns. The convenience method `wire()` re-merges them into the canonical UI shape.
@@ -155,7 +158,23 @@ if mc is not None:
 1. `mc.wire()` returns `None` when either `document` or `traces` is missing — a bundle authored with only the pipeline spec carries neither.
 
 ???+ info "Re-running a loaded pipeline"
-    To re-run the pipeline against the loaded models, build an `MCPipeline` via `build_pipeline(loaded.mc.spec, dgp=loaded.dgp)` and call `pipeline.run(...)`. See the [Monte Carlo Guide](monte_carlo_guide.md).
+    The compile path lives in the core `monte_carlo` module, so a loaded pipeline can be re-run against the loaded models **without the `[ui]` extra**:
+
+    ```python
+    from SymbolicDSGE.monte_carlo import run_pipeline
+
+    result = run_pipeline(
+        loaded.mc.spec, # (1)!
+        reference=loaded.reference,
+        dgp=loaded.dgp,
+        n_rep=500,
+        fail_fast=True,
+    )
+    ```
+
+    1. `run_pipeline` validates the graph, compiles each step through the step catalogue, and runs it — `validate_pipeline_spec` / `build_pipeline` are also exported if you want the stages separately.
+
+    See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar.
 
 ## Reach the simulation prefill
 

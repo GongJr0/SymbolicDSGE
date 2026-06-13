@@ -24,6 +24,7 @@ from ..core.solver import DSGESolver
 from . import backend
 from .prior_program import PackedLogPrior, build_packed_logprior
 from .results import MCMCResult, OptimizationResult
+from .spec import EstimationSpec, PriorSpec
 
 NDF = NDArray[np.float64]
 _MatrixName = Literal["R", "Q"]
@@ -553,6 +554,40 @@ class Estimator:
         Lcorr = backend._corr_chol_from_unconstrained(theta_block, block.dim)
         corr = np.asarray(Lcorr @ Lcorr.T, dtype=float64)
         return corr, np.asarray(Lcorr, dtype=float64)
+
+    def to_spec(
+        self,
+        *,
+        method: str,
+        priors: Mapping[str, PriorSpec] | None = None,
+        observables: Sequence[str] | None = None,
+        method_kwargs: Mapping[str, Any] | None = None,
+        posterior_point: str = "mean",
+    ) -> EstimationSpec:
+        """Project this estimator's configuration to a serializable
+        :class:`~SymbolicDSGE.estimation.spec.EstimationSpec` for bundling.
+
+        Captures the estimated parameter names, their calibration values as
+        ``initial``, and the observables faithfully. ``method`` is supplied by
+        the caller because an :class:`Estimator` is method-agnostic (the same
+        instance can run ``mle``/``map``/``mcmc``).
+
+        Priors are *not* reverse-engineered — a live :class:`Prior` is an opaque
+        ``(dist, transform)`` pair with no stored spec. Pass ``priors`` as a
+        mapping of :class:`~SymbolicDSGE.estimation.spec.PriorSpec` to attach
+        them faithfully; omit it (e.g. for MLE) to leave them off.
+        """
+        return EstimationSpec.from_targets(
+            list(self.param_names),
+            method=method,
+            initial={name: float(self._base_params[name]) for name in self.param_names},
+            priors=priors,
+            observables=(
+                list(observables) if observables is not None else self.observables
+            ),
+            method_kwargs=method_kwargs,
+            posterior_point=posterior_point,
+        )
 
     def theta0(self) -> NDF:
         constrained = asarray(

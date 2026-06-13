@@ -15,7 +15,7 @@ metadata at load time, mirroring the
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
@@ -24,6 +24,36 @@ PosteriorPoint = Literal["mean", "map", "last"]
 
 ESTIMATION_METHODS: frozenset[str] = frozenset(get_args(EstimationMethod))
 POSTERIOR_POINTS: frozenset[str] = frozenset(get_args(PosteriorPoint))
+
+
+@dataclass
+class EstimatorInputs:
+    """Concrete arguments lowered from an :class:`EstimationSpec`.
+
+    The pydantic-free, core-resident result of compiling a spec for execution
+    (the inverse of authoring it). ``priors`` holds built
+    :class:`~SymbolicDSGE.bayesian.priors.Prior` objects (``None`` for MLE);
+    ``bounds`` is ``None`` unless at least one parameter sets a bound, matching
+    what :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate` expects.
+    """
+
+    estimated_params: list[str]
+    theta0: dict[str, float]
+    priors: dict[str, Any] | None = None
+    bounds: list[tuple[float | None, float | None]] | None = None
+
+
+def _prior_from_spec(prior: PriorSpec) -> Any:
+    # Lazy import: keeps this module's import light (bayesian pulls numba/scipy);
+    # only paid when a spec is actually lowered for a MAP/MCMC run.
+    from ..bayesian.priors import make_prior
+
+    return make_prior(
+        distribution=prior.distribution,
+        parameters=dict(prior.parameters),
+        transform=prior.transform,
+        transform_kwargs=dict(prior.transform_kwargs),
+    )
 
 
 @dataclass
@@ -161,6 +191,103 @@ class EstimationSpec:
                 else None
             ),
             posterior_point=str(data.get("posterior_point", "mean")),
+        )
+
+    @classmethod
+    def from_targets(
+        cls,
+        estimated_params: Sequence[str],
+        *,
+        method: str = "mle",
+        initial: Mapping[str, float] | None = None,
+        priors: Mapping[str, PriorSpec] | None = None,
+        bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
+        observables: Sequence[str] | None = None,
+        method_kwargs: Mapping[str, Any] | None = None,
+        compile_kwargs: Mapping[str, Any] | None = None,
+        steady_state: Sequence[float] | None = None,
+        posterior_point: str = "mean",
+    ) -> EstimationSpec:
+        """Build a spec from estimation *targets* alone, mirroring
+        :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate`.
+
+        Only the parameters you intend to estimate are listed — each is flagged
+        ``estimate=True`` for you, so the GUI-shaped ``estimate`` toggle never
+        has to be set by hand. ``initial`` supplies starting values (default
+        ``0.0`` when omitted; calibration values are a better source, which is
+        why :meth:`SymbolicDSGE.estimation.estimator.Estimator.to_spec` fills
+        them in). ``priors``/``bounds`` are keyed by parameter name.
+        """
+        if not estimated_params:
+            raise ValueError("from_targets requires at least one estimated parameter.")
+        initial = dict(initial or {})
+        prior_map = dict(priors or {})
+        bound_map = dict(bounds or {})
+        parameters: list[EstimationParameterSpec] = []
+        for name in estimated_params:
+            lower, upper = bound_map.get(name, (None, None))
+            parameters.append(
+                EstimationParameterSpec(
+                    name=name,
+                    initial=float(initial.get(name, 0.0)),
+                    estimate=True,
+                    lower=None if lower is None else float(lower),
+                    upper=None if upper is None else float(upper),
+                    prior=prior_map.get(name),
+                )
+            )
+        return cls(
+            method=method,
+            parameters=parameters,
+            observables=list(observables) if observables is not None else None,
+            method_kwargs=dict(method_kwargs or {}),
+            compile_kwargs=dict(compile_kwargs or {}),
+            steady_state=(
+                [float(x) for x in steady_state] if steady_state is not None else None
+            ),
+            posterior_point=posterior_point,
+        )
+
+    def to_estimator_inputs(self) -> EstimatorInputs:
+        """Lower this spec to concrete :class:`EstimatorInputs` for a run.
+
+        The inverse of authoring: selects the ``estimate=True`` parameters,
+        collects their initials and bounds, and (for MAP/MCMC) builds the
+        :class:`~SymbolicDSGE.bayesian.priors.Prior` objects from each
+        :class:`PriorSpec`. Lets a loaded ``.sdsge`` bundle drive
+        ``DSGESolver.estimate`` without the ``[ui]`` extra.
+        """
+        active = [p for p in self.parameters if p.estimate]
+        if not active:
+            raise ValueError("EstimationSpec has no parameters marked estimate=True.")
+        names = [p.name for p in active]
+        if len(set(names)) != len(names):
+            raise ValueError("Estimated parameter names must be unique.")
+
+        theta0 = {p.name: float(p.initial) for p in active}
+        bounds = [(p.lower, p.upper) for p in active]
+        bound_arg = (
+            bounds
+            if any(low is not None or high is not None for low, high in bounds)
+            else None
+        )
+
+        priors: dict[str, Any] | None = None
+        if self.method in {"map", "mcmc"}:
+            priors = {}
+            for p in active:
+                if p.prior is None:
+                    raise ValueError(
+                        f"Parameter '{p.name}' requires a prior for "
+                        f"{self.method.upper()}."
+                    )
+                priors[p.name] = _prior_from_spec(p.prior)
+
+        return EstimatorInputs(
+            estimated_params=names,
+            theta0=theta0,
+            priors=priors,
+            bounds=bound_arg,
         )
 
     def to_json(self, *, indent: int | None = None) -> str:

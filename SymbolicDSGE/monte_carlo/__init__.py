@@ -52,12 +52,21 @@ from .serialize import (
     serialize_pipeline_result,
 )
 from .spec import EdgeSpec, MCStepKind, NodeSpec, PipelineSpec
+from .catalog import (
+    STEP_CATALOG,
+    TERMINAL_STEP_TYPES,
+    FieldSpec,
+    StepDefinition,
+    catalog_payload,
+)
+from .builder import build_pipeline, run_pipeline, validate_pipeline_spec
 
 __all__ = [
     "ContextOp",
     "DataGenOp",
     "DataGenReturn",
     "EdgeSpec",
+    "FieldSpec",
     "FilterOp",
     "MCContext",
     "MCData",
@@ -71,8 +80,13 @@ __all__ = [
     "OpType",
     "PipelineSpec",
     "RegressionOp",
+    "STEP_CATALOG",
+    "StepDefinition",
+    "TERMINAL_STEP_TYPES",
     "TestOp",
     "breusch_godfrey_test_step",
+    "build_pipeline",
+    "catalog_payload",
     "breusch_pagan_test_step",
     "chow_test_step",
     "cusum_test_step",
@@ -94,9 +108,11 @@ __all__ = [
     "run_regression",
     "run_jarque_bera_test",
     "run_ljung_box_test",
+    "run_pipeline",
     "run_wald_test",
     "simulate_dgp",
     "simulation_step",
+    "validate_pipeline_spec",
     "transform_step",
     "wald_test_step",
     "pipeline_result_wire",

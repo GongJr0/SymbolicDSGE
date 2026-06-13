@@ -50,38 +50,24 @@ We define a small MAP run estimating `psi_pi` and `psi_x` against synthetic obse
 import numpy as np
 
 from SymbolicDSGE.estimation.spec import (
-    EstimationParameterSpec,
     EstimationSpec,
     OptimizationResultMeta,
     PriorSpec,
 )
 
-estimation_spec = EstimationSpec(
-    method="map", # (1)!
-    parameters=[
-        EstimationParameterSpec(
-            name="psi_pi",
-            initial=1.5,
-            estimate=True,
-            lower=1.0,
-            upper=3.0,
-            prior=PriorSpec(
-                distribution="normal",
-                parameters={"loc": 1.5, "scale": 0.25},
-            ),
+estimation_spec = EstimationSpec.from_targets(
+    ["psi_pi", "psi_x"], # (1)!
+    method="map",
+    initial={"psi_pi": 1.5, "psi_x": 0.5},
+    bounds={"psi_pi": (1.0, 3.0), "psi_x": (0.0, 1.0)},
+    priors={
+        "psi_pi": PriorSpec(
+            distribution="normal", parameters={"loc": 1.5, "scale": 0.25}
         ),
-        EstimationParameterSpec(
-            name="psi_x",
-            initial=0.5,
-            estimate=True,
-            lower=0.0,
-            upper=1.0,
-            prior=PriorSpec(
-                distribution="normal",
-                parameters={"loc": 0.5, "scale": 0.2},
-            ),
+        "psi_x": PriorSpec(
+            distribution="normal", parameters={"loc": 0.5, "scale": 0.2}
         ),
-    ],
+    },
     observables=["Infl", "Rate"], # (2)!
     method_kwargs={"options": {"maxiter": 50}},
 )
@@ -102,13 +88,13 @@ estimation_result_meta = OptimizationResultMeta(
 )
 ```
 
-1. `"mle"`, `"map"`, or `"mcmc"`. MAP/MCMC require priors; MLE does not.
+1. `from_targets` lists **only** the parameters you estimate and flags each `estimate=True` for you — no GUI-style toggle to set by hand. `method` is `"mle"`, `"map"`, or `"mcmc"`; MAP/MCMC require priors, MLE does not.
 2. Order matters — the loader cross-checks these against the model's declared observables at compile time.
 3. Synthetic data shaped `(n_periods, n_observables)`. Substitute the real `y` matrix you fitted the model to.
 4. The bundle stores only the result metadata, not the raw `scipy.optimize.OptimizeResult` — `theta` carries the same information by parameter name.
 
-???+ info "Source of the result metadata"
-    A live `OptimizationResult` from `Estimator.run(...)` projects to `OptimizationResultMeta` field-for-field. The same applies to `MCMCResult` ↔ `MCMCResultMeta` — except MCMC also requires the `samples` and `logpost` bulk arrays as a separate `posterior` dict.
+???+ tip "Bundling a real run — skip the manual metadata"
+    The hand-built `OptimizationResultMeta` above is only for this synthetic example. When you have actually run estimation, pass the **live** result straight to `add_estimation(result=...)`: an `OptimizationResult`/`MCMCResult` is projected via `.to_meta()` automatically, and a live `MCMCResult` auto-attaches its `posterior` (samples + log-posterior) — no separate `posterior=` dict needed. A configured `Estimator` can also emit the spec directly with `est.to_spec(method="map", priors={...})`, filling parameter initials from the model's calibration.
 
 ## Build a Monte Carlo pipeline
 
