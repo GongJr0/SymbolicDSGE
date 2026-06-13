@@ -5,6 +5,11 @@ tags:
 
 # Bundle Loading Guide
 
+??? tip "__TL;DR__"
+    Open a `.sdsge` bundle with `load_bundle(...)` and reach every component through the typed `LoadedBundle` fields — the re-solved `SolvedModel`s, the estimation spec / result / observed data / posterior, the Monte Carlo pipeline / result / traces, and the simulation prefill. Loading is deterministic: the policy matrices match the author's.
+
+    You can find a demonstration notebook [here](../assets/bundle_loading.ipynb).
+
 This guide walks through opening a `.sdsge` bundle and reaching each library object it carries — the re-solved `SolvedModel`s, the estimation spec / result / observed data / posterior, the Monte Carlo pipeline / result / traces, and the simulation prefill.
 
 We use `experiment-1.sdsge` as produced by the [Bundle Authoring Guide](bundle_authoring_guide.md). Substitute any other bundle path.
