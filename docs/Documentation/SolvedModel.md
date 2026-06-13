@@ -274,3 +274,81 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python dict[str, Any]` | Dictionary representation of the `#!python SolvedModel` object. |
+
+&nbsp;
+
+```python
+SolvedModel.save_sdsge(
+    path: str | Path,
+    *,
+    yaml_text: str | None = None, # (1)!
+    role: str = "reference",
+    compile_kwargs: Mapping[str, Any] | None = None,
+    solve_kwargs: Mapping[str, Any] | None = None,
+) -> Path
+```
+
+1. Override the YAML embedded in the bundle. Defaults to `compiled.config.source_yaml` (populated automatically by `#!python ModelParser`).
+
+Write a model-only `.sdsge` bundle around this `#!python SolvedModel`. For bundles that also carry estimation, Monte Carlo, or simulation members, use [`SolvedModel.to_bundle_builder`](#solvedmodelto_bundle_builder) and chain the additions before calling `.write()`.
+
+???+ warning "Source YAML required"
+    Raises `#!python ValueError` when `compiled.config.source_yaml` is `#!python None` and no `yaml_text=` override is supplied. Loading via `#!python ModelParser(path)` or `#!python ModelParser.from_string(text)` populates `source_yaml` automatically; programmatic `#!python ModelConfig` construction does not.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| path | Output `.sdsge` path. |
+| yaml_text | Explicit YAML override. |
+| role | `"reference"` or `"dgp"`. |
+| compile_kwargs | Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
+| solve_kwargs | Kwargs the loader will use at the solve step. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python Path` | The path the bundle was written to. |
+
+&nbsp;
+
+```python
+SolvedModel.to_bundle_builder(
+    *,
+    yaml_text: str | None = None,
+    role: str = "reference",
+    compile_kwargs: Mapping[str, Any] | None = None,
+    solve_kwargs: Mapping[str, Any] | None = None,
+    created_by: str | None = None, # (1)!
+) -> BundleBuilder
+```
+
+1. Defaults to `#!python "SymbolicDSGE <version>"` when omitted.
+
+Return a [`#!python BundleBuilder`](./bundle/BundleBuilder.md) pre-seeded with this model's YAML. Chain estimation, Monte Carlo, or simulation members and then call `.write()` to materialize the archive.
+
+```python
+sol.to_bundle_builder() \
+    .add_estimation(spec, observed=y, observable_names=["Infl", "Rate"]) \
+    .add_mc(pipeline) \
+    .write("experiment-1.sdsge")
+```
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| yaml_text | Explicit YAML override; defaults to `compiled.config.source_yaml`. |
+| role | `"reference"` or `"dgp"`. |
+| compile_kwargs | Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
+| solve_kwargs | Kwargs the loader will use at the solve step. |
+| created_by | Manifest `created_by` string. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python BundleBuilder` | A fluent builder with the model member already attached. |
+
+See the [`bundle` module documentation](./bundle/index.md) and the [Bundle Authoring Guide](../guides/bundle_authoring_guide.md) for the complete picture.
