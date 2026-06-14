@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import sympy as sp
 
 from .model_defaults import PySRParams
-from pysr import ExpressionSpec, PySRRegressor
-from typing import Sequence, cast, Callable
+from typing import TYPE_CHECKING, Sequence, cast, Callable
 import warnings
 import numpy as np
 import pandas as pd
@@ -10,6 +11,12 @@ import re  # :(
 
 from .model_parametrizer import ModelParametrizer, _normalize_variables
 from .constant_handler import ConstantHandler
+
+if TYPE_CHECKING:
+    # Type-only import — `pysr` is loaded lazily inside the methods that
+    # actually construct or isinstance-check its types so collecting the
+    # package (or its tests) does not start the Julia runtime.
+    from pysr import ExpressionSpec, PySRRegressor
 
 
 class SymbolicRegressorBackend:
@@ -79,6 +86,8 @@ class SymbolicRegressorBackend:
         template = self.parametrizer.params.expression_spec
         if template is None:
             raise ValueError("No template found in parametrizer params.")
+
+        from pysr import ExpressionSpec  # lazy: defers Julia runtime start
 
         if isinstance(template, ExpressionSpec):
             return expr_block  # already in sympy format
@@ -175,7 +184,9 @@ class SymbolicRegressorBackend:
         out["sympy_format"] = expr_subbed
         return out
 
-    def _load_params(self) -> PySRRegressor:
+    def _load_params(self) -> "PySRRegressor":
+        from pysr import PySRRegressor  # lazy: defers Julia runtime start
+
         return PySRRegressor(**self.params)  # pyright: ignore
 
     def _validate_and_normalize_varnames(

@@ -1,11 +1,10 @@
-from importlib.util import find_spec
+"""Symbolic regression integration.
 
-if find_spec("pysr") is None:
-    raise ImportError(
-        "Symbolic regression requires the 'sr' optional dependency. "
-        "Install it with 'pip install SymbolicDSGE[sr]' or an equivalent "
-        "environment command before importing SymbolicDSGE.regression.sr."
-    )
+The submodules type-hint pysr classes via :data:`typing.TYPE_CHECKING` and only
+``from pysr import ...`` inside the functions that actually need the Julia
+runtime, so importing this package without the ``[sr]`` extra succeeds. The
+``ImportError`` surfaces lazily at first use of a pysr-backed function.
+"""
 
 from .model_parametrizer import ModelParametrizer
 from .model_defaults import make_operator_general, CustomOp, PySRParams

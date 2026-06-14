@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .model_defaults import (
     PySRParams,
     CustomOp,
@@ -11,9 +13,12 @@ from .config import TemplateConfig
 from .config_validator import ConfigValidator
 import sympy as sp
 
-from pysr import TemplateExpressionSpec
+from typing import TYPE_CHECKING, Callable, Sequence
 
-from typing import Callable, Sequence
+if TYPE_CHECKING:
+    # Type-only — pysr stays unloaded at import time so the Julia runtime
+    # is not started just by touching the SR module.
+    from pysr import TemplateExpressionSpec
 
 
 def _normalize_variables(

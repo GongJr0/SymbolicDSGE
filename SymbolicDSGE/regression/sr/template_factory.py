@@ -1,4 +1,5 @@
-from pysr import TemplateExpressionSpec
+from __future__ import annotations
+
 import sympy as sp
 
 from .config import TemplateConfig, InteractionForm, HessianMode
@@ -6,7 +7,12 @@ from .config_validator import ConfigValidator
 from .interaction_generator import InteractionGenerator
 from .expr_to_string import get_expr
 
-from typing import Literal, Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
+
+if TYPE_CHECKING:
+    # Type-only — pysr stays unloaded at import time so the Julia runtime
+    # is not started just by touching the SR module.
+    from pysr import TemplateExpressionSpec
 
 
 class MissingExpressionError(Exception):
@@ -108,6 +114,8 @@ class TemplateFactory:
                 template_components.append(f"{func_name}({inner})")
 
         template_str = " + ".join(template_components)
+
+        from pysr import TemplateExpressionSpec  # lazy: defers Julia runtime start
 
         return clean_expr, TemplateExpressionSpec(
             combine=template_str,
