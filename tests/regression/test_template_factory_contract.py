@@ -2,8 +2,12 @@
 import sympy as sp
 import pytest
 
-from SymbolicDSGE.regression.sr.config import TemplateConfig
-from SymbolicDSGE.regression.sr.template_factory import (
+# TemplateFactory.get_template lazy-imports TemplateExpressionSpec from pysr,
+# which starts the Julia runtime. Skip the file when the [sr] extra is absent.
+pytest.importorskip("pysr")
+
+from SymbolicDSGE.regression.sr.config import TemplateConfig  # noqa: E402
+from SymbolicDSGE.regression.sr.template_factory import (  # noqa: E402
     MissingExpressionError,
     TemplateFactory,
 )

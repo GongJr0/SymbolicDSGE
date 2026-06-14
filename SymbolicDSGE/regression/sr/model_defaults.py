@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, asdict
-from typing import Callable, Literal, Iterator, cast
+from typing import TYPE_CHECKING, Callable, Literal, Iterator, cast
 from enum import StrEnum
 
 import warnings
 
-from pysr import ExpressionSpec, TemplateExpressionSpec, TensorBoardLoggerSpec
 import sympy as sp
+
+if TYPE_CHECKING:
+    # Type-only — pysr stays unloaded at import time so the Julia runtime
+    # is not started just by touching the SR module.
+    from pysr import ExpressionSpec, TemplateExpressionSpec, TensorBoardLoggerSpec
 
 
 class OpType(StrEnum):

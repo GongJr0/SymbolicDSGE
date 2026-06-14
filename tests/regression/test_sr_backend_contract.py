@@ -8,12 +8,20 @@ import numpy as np
 import pandas as pd
 import pytest
 import sympy as sp
-from pysr import ExpressionSpec, TemplateExpressionSpec
 
-from SymbolicDSGE.regression.sr.config import TemplateConfig
-from SymbolicDSGE.regression.sr.model_defaults import PySRParams
-from SymbolicDSGE.regression.sr.model_parametrizer import ModelParametrizer
-from SymbolicDSGE.regression.sr.sr_backend import SymbolicRegressorBackend
+# Skip the file when the [sr] extra is not installed. The lazy-import refactor
+# in regression/sr/* keeps pysr / juliacall out of the main test run so the
+# Julia runtime never starts when these tests are absent.
+pytest.importorskip("pysr")
+
+from pysr import ExpressionSpec, TemplateExpressionSpec  # noqa: E402
+
+from SymbolicDSGE.regression.sr.config import TemplateConfig  # noqa: E402
+from SymbolicDSGE.regression.sr.model_defaults import PySRParams  # noqa: E402
+from SymbolicDSGE.regression.sr.model_parametrizer import (
+    ModelParametrizer,
+)  # noqa: E402
+from SymbolicDSGE.regression.sr.sr_backend import SymbolicRegressorBackend  # noqa: E402
 
 
 @dataclass
