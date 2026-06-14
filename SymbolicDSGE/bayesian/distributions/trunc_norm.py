@@ -1,4 +1,11 @@
-from .distribution import Distribution, RandomState, Size, VecF64, _std_norm_cdf_scalar
+from .distribution import (
+    Distribution,
+    DistributionFamily,
+    RandomState,
+    Size,
+    VecF64,
+    _std_norm_cdf_scalar,
+)
 from ._as241 import ndtri_as241
 from ..support import OutOfSupportError, Support
 
@@ -98,6 +105,14 @@ class TruncNormal(Distribution[float64, VecF64]):
             + math.log(float(z))
         )
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.TRUNCNORMAL.value, {
+            "low": float(self._low_trunc),
+            "high": float(self._high_trunc),
+            "mean": float(self._mean),
+            "std": float(self._std),
+        }
 
     @overload
     def logpdf(self, x: float64) -> float64: ...

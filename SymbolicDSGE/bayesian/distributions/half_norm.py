@@ -1,4 +1,4 @@
-from .distribution import Distribution, Size, RandomState, VecF64
+from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 from typing import TypedDict, cast, overload, Callable
 
@@ -61,6 +61,9 @@ class HalfNormal(Distribution[float64, VecF64]):
         self._var = float64(self._std**2 * (1.0 - 2.0 / np.pi))
         self._mode = float64(0.0)
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.HALFNORMAL.value, {"std": float(self._std)}
 
     @overload
     def logpdf(self, x: float64) -> float64: ...

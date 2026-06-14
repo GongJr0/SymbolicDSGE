@@ -1,4 +1,4 @@
-from .transform import Transform
+from .transform import Transform, TransformMethod
 from ..support import Support, OutOfSupportError
 from typing import overload
 
@@ -12,6 +12,9 @@ from scipy.special import expit
 class LogitTransform(Transform):
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return TransformMethod.LOGIT.value, {}
 
     @overload
     def forward(self, x: float64) -> float64: ...

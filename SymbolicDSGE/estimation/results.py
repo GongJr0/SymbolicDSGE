@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy import float64
@@ -27,12 +27,16 @@ class OptimizationResult:
     nfev: int
     nit: int | None
     raw: OptimizeResult
+    #: Call configuration for the ``mle``/``map`` run (optimizer ``method``,
+    #: ``bounds``, ``options``) — recorded so the run is reconstructable.
+    optimizer_config: dict[str, Any] = field(default_factory=dict)
 
     def to_meta(self) -> "OptimizationResultMeta":
         """Project to the text-only metadata carried in a ``.sdsge`` bundle.
 
         Drops the flat ``x`` vector and the opaque ``scipy`` ``raw`` state;
-        ``theta`` carries the same point estimate by parameter name.
+        ``theta`` carries the same point estimate by parameter name. The
+        ``optimizer_config`` (method/bounds/options) is preserved.
         """
         from .spec import OptimizationResultMeta
 
@@ -47,6 +51,7 @@ class OptimizationResult:
             logpost=float(self.logpost),
             nfev=int(self.nfev),
             nit=None if self.nit is None else int(self.nit),
+            optimizer_config=dict(self.optimizer_config),
         )
 
 
@@ -59,12 +64,16 @@ class MCMCResult:
     n_draws: int
     burn_in: int
     thin: int
+    #: Sampler tuning for the ``mcmc`` run (``adapt``/``proposal_scale``/seed/…)
+    #: beyond ``n_draws``/``burn_in``/``thin`` — recorded for reconstruction.
+    sampler_config: dict[str, Any] = field(default_factory=dict)
 
     def to_meta(self) -> "MCMCResultMeta":
         """Project to the scalar text metadata carried in a ``.sdsge`` bundle.
 
         Bulk ``samples`` / ``logpost_trace`` are not included — pair this with
         :meth:`posterior_arrays` when bundling so they ride a sibling member.
+        The ``sampler_config`` is preserved.
         """
         from .spec import MCMCResultMeta
 
@@ -74,6 +83,7 @@ class MCMCResult:
             n_draws=int(self.n_draws),
             burn_in=int(self.burn_in),
             thin=int(self.thin),
+            sampler_config=dict(self.sampler_config),
         )
 
     def posterior_arrays(self) -> dict[str, NDF]:

@@ -1,4 +1,4 @@
-from .distribution import Distribution, RandomState, Size, VecF64
+from .distribution import Distribution, DistributionFamily, RandomState, Size, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
@@ -58,6 +58,12 @@ class Normal(Distribution[float64, VecF64]):
         self._std = float64(std)
         self._var = float64(std**2)
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.NORMAL.value, {
+            "mean": float(self._mean),
+            "std": float(self._std),
+        }
 
     @overload
     def logpdf(self, x: float64) -> float64: ...

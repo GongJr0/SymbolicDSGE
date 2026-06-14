@@ -65,11 +65,17 @@ jobs:
           if [ -z "$BASE" ]; then
             echo "No diff base resolvable (first push / workflow_dispatch); installing [sr] defensively."
             echo "sr_changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE" HEAD -- 'SymbolicDSGE/regression/sr/' | grep -q .; then
+          elif git diff --name-only "$BASE" HEAD -- \
+            'SymbolicDSGE/regression/sr/' \
+            'tests/regression/test_model_parametrizer_contract.py' \
+            'tests/regression/test_sr_backend_contract.py' \
+            'tests/regression/test_sr_interface_contract.py' \
+            'tests/regression/test_template_factory_contract.py' \
+            | grep -q .; then
             echo "SR module changed in this diff; installing [sr] and running SR tests."
             echo "sr_changed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "SR module unchanged; skipping [sr] install. SR tests skip via pytest.importorskip."
+            echo "SR module unchanged; skipping [sr] install and SR-marked tests."
             echo "sr_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -87,7 +93,11 @@ jobs:
           SR_CHANGED: ${{ steps.sr_diff.outputs.sr_changed }}
         run: |
           set +e
-          uv run pytest -q ./tests --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
+          PYTEST_MARKERS=()
+          if [ "$SR_CHANGED" != "true" ]; then
+            PYTEST_MARKERS=(-m "not sr")
+          fi
+          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
           EXIT=$?
           set -e
           # juliacall's C-extension finalizers can segfault during interpreter

@@ -1,4 +1,4 @@
-from .transform import Transform
+from .transform import Transform, TransformMethod
 from ..support import Support, OutOfSupportError
 from typing import overload
 
@@ -14,6 +14,9 @@ class LowerBoundedTransform(Transform):
 
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return TransformMethod.LOWER_BOUNDED.value, {"low": float(self.low)}
 
     def _x_minus_low(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
         return x - self.low

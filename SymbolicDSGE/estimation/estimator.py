@@ -558,34 +558,76 @@ class Estimator:
     def to_spec(
         self,
         *,
-        method: str,
+        method: str | None = None,
+        result: OptimizationResult | MCMCResult | None = None,
         priors: Mapping[str, PriorSpec] | None = None,
         observables: Sequence[str] | None = None,
         method_kwargs: Mapping[str, Any] | None = None,
         posterior_point: str = "mean",
     ) -> EstimationSpec:
-        """Project this estimator's configuration to a serializable
-        :class:`~SymbolicDSGE.estimation.spec.EstimationSpec` for bundling.
+        """Project this estimator (and optionally a run ``result``) to a
+        serializable :class:`~SymbolicDSGE.estimation.spec.EstimationSpec`.
 
-        Captures the estimated parameter names, their calibration values as
-        ``initial``, and the observables faithfully. ``method`` is supplied by
-        the caller because an :class:`Estimator` is method-agnostic (the same
-        instance can run ``mle``/``map``/``mcmc``).
+        Captures the estimated scalar parameters (calibration values as
+        ``initial``), the observables, scalar priors (reversed losslessly from
+        the live :class:`Prior` objects), and any block (LKJ) priors on
+        ``R_corr``/``Q_corr``.
 
-        Priors are *not* reverse-engineered — a live :class:`Prior` is an opaque
-        ``(dist, transform)`` pair with no stored spec. Pass ``priors`` as a
-        mapping of :class:`~SymbolicDSGE.estimation.spec.PriorSpec` to attach
-        them faithfully; omit it (e.g. for MLE) to leave them off.
+        When ``result`` is supplied the run is folded in: ``method`` is inferred
+        from it, and its recorded ``method_kwargs`` (optimizer/sampler config)
+        and parameter ``bounds`` are merged into the spec — so the spec fully
+        reproduces the run. Explicit ``method``/``method_kwargs``/``priors``
+        override the inferred values. Provide at least one of ``method`` or
+        ``result``.
         """
+        resolved_method = method or _method_from_result(result)
+        if resolved_method is None:
+            raise ValueError(
+                "Provide method= or result= to determine the estimation method."
+            )
+
+        scalar_names = [
+            name for name in self.param_names if name not in self._matrix_member_names
+        ]
+
+        scalar_priors: dict[str, PriorSpec]
+        if priors is not None:
+            scalar_priors = dict(priors)
+        else:
+            scalar_priors = {}
+            for name in scalar_names:
+                prior = (self.priors or {}).get(name)
+                if prior is not None and hasattr(prior, "to_spec"):
+                    scalar_priors[name] = prior.to_spec()
+
+        matrix_priors = {
+            target: block.prior.to_spec()
+            for target, block in self._matrix_blocks.items()
+        }
+
+        if method_kwargs is not None:
+            resolved_kwargs = dict(method_kwargs)
+        elif result is not None:
+            resolved_kwargs = _method_kwargs_from_result(result)
+        else:
+            resolved_kwargs = {}
+
+        bounds_map = _bounds_from_result(result, self.param_names)
+        scalar_bounds = {
+            name: bounds_map[name] for name in scalar_names if name in bounds_map
+        } or None
+
         return EstimationSpec.from_targets(
-            list(self.param_names),
-            method=method,
-            initial={name: float(self._base_params[name]) for name in self.param_names},
-            priors=priors,
+            scalar_names,
+            method=resolved_method,
+            initial={name: float(self._base_params[name]) for name in scalar_names},
+            priors=scalar_priors or None,
+            matrix_priors=matrix_priors or None,
+            bounds=scalar_bounds,
             observables=(
                 list(observables) if observables is not None else self.observables
             ),
-            method_kwargs=method_kwargs,
+            method_kwargs=resolved_kwargs or None,
             posterior_point=posterior_point,
         )
 
@@ -832,8 +874,23 @@ class Estimator:
         except BaseException:
             return float64(-np.inf)
 
+    @staticmethod
+    def _serialize_bounds(
+        bounds: Sequence[tuple[float, float]] | None,
+    ) -> list[list[float | None]] | None:
+        if bounds is None:
+            return None
+        return [
+            [None if lo is None else float(lo), None if hi is None else float(hi)]
+            for lo, hi in bounds
+        ]
+
     def _pack_opt_result(
-        self, kind: str, res: optimize.OptimizeResult
+        self,
+        kind: str,
+        res: optimize.OptimizeResult,
+        *,
+        config: Mapping[str, Any] | None = None,
     ) -> OptimizationResult:
         x = asarray(res.x, dtype=float64)
         theta = self.theta_to_params(x)
@@ -859,6 +916,7 @@ class Estimator:
             nfev=int(res.nfev),
             nit=(int(res.nit) if hasattr(res, "nit") and res.nit is not None else None),
             raw=res,
+            optimizer_config=dict(config or {}),
         )
 
     def mle(
@@ -889,7 +947,15 @@ class Estimator:
                 options=(dict(options) if options is not None else None),
             ),
         )
-        out = self._pack_opt_result("mle", res)
+        out = self._pack_opt_result(
+            "mle",
+            res,
+            config={
+                "method": method,
+                "bounds": self._serialize_bounds(bounds),
+                "options": dict(options) if options is not None else {},
+            },
+        )
         self._report_search_warning_count("mle")
         return out
 
@@ -924,7 +990,15 @@ class Estimator:
                 options=(dict(options) if options is not None else None),
             ),
         )
-        out = self._pack_opt_result("map", res)
+        out = self._pack_opt_result(
+            "map",
+            res,
+            config={
+                "method": method,
+                "bounds": self._serialize_bounds(bounds),
+                "options": dict(options) if options is not None else {},
+            },
+        )
         self._report_search_warning_count("map")
         return out
 
@@ -1073,6 +1147,64 @@ class Estimator:
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
+            sampler_config={
+                "adapt": bool(adapt),
+                "adapt_start": int(adapt_start),
+                "adapt_interval": int(adapt_interval),
+                "proposal_scale": float(proposal_scale),
+                "adapt_epsilon": float(adapt_epsilon),
+                "update_R_in_iterations": bool(update_R_in_iterations),
+                "random_state": (
+                    int(random_state)
+                    if isinstance(random_state, (int, np.integer))
+                    else None
+                ),
+            },
         )
         self._report_search_warning_count("mcmc")
         return out
+
+
+def _method_from_result(
+    result: OptimizationResult | MCMCResult | None,
+) -> str | None:
+    """The estimation method (``mle``/``map``/``mcmc``) implied by a result."""
+    if result is None:
+        return None
+    if isinstance(result, MCMCResult):
+        return "mcmc"
+    if isinstance(result, OptimizationResult):
+        return result.kind
+    raise TypeError(f"Unsupported estimation result type: {type(result).__name__}")
+
+
+def _method_kwargs_from_result(
+    result: OptimizationResult | MCMCResult,
+) -> dict[str, Any]:
+    """The method kwargs recorded on a result (sans bounds, folded separately)."""
+    if isinstance(result, MCMCResult):
+        return {
+            "n_draws": int(result.n_draws),
+            "burn_in": int(result.burn_in),
+            "thin": int(result.thin),
+            **dict(result.sampler_config),
+        }
+    cfg = dict(result.optimizer_config)
+    out: dict[str, Any] = {}
+    if cfg.get("method") is not None:
+        out["method"] = cfg["method"]
+    if cfg.get("options"):
+        out["options"] = cfg["options"]
+    return out
+
+
+def _bounds_from_result(
+    result: OptimizationResult | MCMCResult | None,
+    param_names: Sequence[str],
+) -> dict[str, tuple[float | None, float | None]]:
+    """Per-parameter bounds recorded on an optimization result (empty otherwise)."""
+    if isinstance(result, OptimizationResult):
+        raw = result.optimizer_config.get("bounds")
+        if raw:
+            return {name: (pair[0], pair[1]) for name, pair in zip(param_names, raw)}
+    return {}

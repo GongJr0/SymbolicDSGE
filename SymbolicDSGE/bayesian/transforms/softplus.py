@@ -1,4 +1,4 @@
-from .transform import Transform
+from .transform import Transform, TransformMethod
 from ..support import Support, OutOfSupportError
 from typing import overload
 
@@ -19,6 +19,9 @@ class SoftplusTransform(Transform):
 
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return TransformMethod.SOFTPLUS.value, {}
 
     # ---- private numerics helpers ----
     def _softplus(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:

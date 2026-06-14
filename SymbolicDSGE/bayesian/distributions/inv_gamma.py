@@ -1,4 +1,4 @@
-from .distribution import Distribution, Size, RandomState, VecF64
+from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
@@ -65,6 +65,12 @@ class InvGamma(Distribution[float64, VecF64]):
             float(self._a) * math.log(float(self._beta)) - math.lgamma(float(self._a))
         )
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.INVGAMMA.value, {
+            "mean": float(self._mean),
+            "std": float(self._std),
+        }
 
     @staticmethod
     def to_shape(mean: float, std: float) -> float64:

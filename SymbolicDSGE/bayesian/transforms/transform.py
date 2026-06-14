@@ -38,6 +38,18 @@ class Transform(ABC):
     @abstractmethod
     def __repr__(self) -> str: ...
 
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        """Return ``(method, kwargs)`` for serialization into a ``PriorSpec``.
+
+        ``kwargs`` is keyed as the transform's constructor expects, so
+        ``get_transform(method)(**kwargs)`` rebuilds it. Subclasses declare
+        their own mapping; the default raises for transforms without a
+        round-trippable spec (e.g. ``cholesky_corr``).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support spec serialization."
+        )
+
     @overload
     def forward(self, x: float64) -> float64: ...
     @overload

@@ -10,12 +10,15 @@ from .distributions.param_builder import get_dist_params
 
 from .support import OutOfSupportError, Support
 
-from typing import TypedDict, Any, cast
+from typing import TYPE_CHECKING, TypedDict, Any, cast
 from numpy import float64
 from numpy.typing import NDArray
 
 
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from ..estimation.spec import PriorSpec
 from typing import overload
 
 
@@ -68,6 +71,28 @@ class Prior:
 
     def rvs(self, size: Size, random_state: RandomState) -> NDArray[float64]:
         return cast(VecF64, self.dist.rvs(size, random_state))
+
+    def to_spec(self) -> PriorSpec:
+        """Project this prior to a serializable ``PriorSpec``.
+
+        Composes the distribution's ``(family, parameters)`` with the
+        transform's ``(method, kwargs)`` so that
+        ``make_prior(**spec.__dict__)`` reconstructs an equivalent prior. Lets a
+        live ``Prior`` be bundled without the caller re-authoring a spec. Raises
+        ``NotImplementedError`` for families/transforms without a round-trippable
+        spec (e.g. ``lkj_chol`` / ``cholesky_corr``).
+        """
+        # Lazy import avoids a bayesian <-> estimation import cycle.
+        from ..estimation.spec import PriorSpec
+
+        distribution, parameters = self.dist.to_spec()
+        transform, transform_kwargs = self.transform.to_spec()
+        return PriorSpec(
+            distribution=distribution,
+            parameters=parameters,
+            transform=transform,
+            transform_kwargs=transform_kwargs,
+        )
 
     def _confirm_bound_match(self) -> None:
         _sup = self.dist.support

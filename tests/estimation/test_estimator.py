@@ -187,6 +187,84 @@ def test_to_spec_captures_targets_initials_and_method():
     assert spec.observables == ["y"]
 
 
+def test_to_spec_reverses_live_scalar_priors():
+    from SymbolicDSGE.bayesian.priors import make_prior
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["a"],
+        priors={
+            "a": make_prior(
+                distribution="normal",
+                parameters={"mean": 0.0, "std": 1.0},
+                transform="identity",
+                transform_kwargs={},
+            )
+        },
+    )
+
+    spec = est.to_spec(method="map")  # no explicit priors -> auto-reversed
+
+    param = spec.parameters[0]
+    assert param.name == "a"
+    assert param.prior is not None
+    assert param.prior.distribution == "normal"
+    assert param.prior.parameters == {"mean": 0.0, "std": 1.0}
+
+
+def test_mle_records_optimizer_config(monkeypatch):
+    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["a"],
+    )
+    out = est.mle(
+        theta0=np.array([0.0], dtype=np.float64),
+        bounds=[(-5.0, 5.0)],
+        options={"maxiter": 10},
+    )
+
+    assert out.optimizer_config["method"] == "L-BFGS-B"
+    assert out.optimizer_config["bounds"] == [[-5.0, 5.0]]
+    assert out.optimizer_config["options"] == {"maxiter": 10}
+    # config survives projection to bundle metadata
+    assert out.to_meta().optimizer_config == out.optimizer_config
+
+
+def test_mcmc_records_sampler_config(monkeypatch):
+    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["a"],
+        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
+    )
+    out = est.mcmc(n_draws=5, burn_in=2, thin=1, random_state=7, proposal_scale=0.2)
+
+    cfg = out.sampler_config
+    assert cfg["random_state"] == 7
+    assert cfg["proposal_scale"] == 0.2
+    assert set(cfg) == {
+        "adapt",
+        "adapt_start",
+        "adapt_interval",
+        "proposal_scale",
+        "adapt_epsilon",
+        "update_R_in_iterations",
+        "random_state",
+    }
+    # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
+    assert "n_draws" not in cfg
+    assert out.to_meta().sampler_config == cfg
+
+
 def test_map_is_public_and_uses_prior(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 

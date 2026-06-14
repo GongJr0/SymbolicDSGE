@@ -14,6 +14,8 @@ from SymbolicDSGE.regression.sr.fit_result import FitResult
 from SymbolicDSGE.regression.sr.sr_interface import SRInterface
 from SymbolicDSGE.regression.sr.symbolic_regression import SymbolicRegressor
 
+pytestmark = pytest.mark.sr
+
 
 class _BuiltinParametrizer(ModelParametrizer):
     def __init__(self, variable_names, params, config):

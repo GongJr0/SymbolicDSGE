@@ -1,4 +1,4 @@
-from .distribution import Distribution, RandomState, Size, VecF64
+from .distribution import Distribution, DistributionFamily, RandomState, Size, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
@@ -63,6 +63,12 @@ class LogNormal(Distribution[float64, VecF64]):
         self._meanlog = float64(mean)
         self._stdlog = float64(std)
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.LOGNORMAL.value, {
+            "mean": float(self._meanlog),
+            "std": float(self._stdlog),
+        }
 
     @overload
     def logpdf(self, x: float64) -> float64: ...

@@ -1,5 +1,6 @@
 from .distribution import (
     Distribution,
+    DistributionFamily,
     Size,
     RandomState,
     VecF64,
@@ -72,6 +73,12 @@ class Gamma(Distribution[float64, VecF64]):
             math.lgamma(float(self._a)) + float(self._a) * math.log(float(self._theta))
         )
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.GAMMA.value, {
+            "mean": float(self._mean),
+            "std": float(self._std),
+        }
 
     @staticmethod
     def to_shape(mean: float, std: float) -> float64:
