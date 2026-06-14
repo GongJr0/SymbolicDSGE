@@ -1,5 +1,6 @@
 from .distribution import (
     Distribution,
+    DistributionFamily,
     Size,
     RandomState,
     VecF64,
@@ -66,6 +67,12 @@ class Beta(Distribution[float64, VecF64]):
         self._b = float64(b)
         self._log_norm = float64(log_beta(self._a, self._b))
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.BETA.value, {
+            "a": float(self._a),
+            "b": float(self._b),
+        }
 
     @overload
     def logpdf(self, x: float64) -> float64: ...

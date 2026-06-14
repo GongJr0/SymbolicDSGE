@@ -1,4 +1,4 @@
-from .distribution import Distribution, Size, RandomState, MatF64
+from .distribution import Distribution, DistributionFamily, Size, RandomState, MatF64
 from ..support import Support
 
 import math
@@ -140,11 +140,17 @@ class LKJChol(Distribution[MatF64, MatF64]):
         if eta <= 0:
             raise ValueError("eta must be > 0.")
         self._eta = eta
-        self._K = K
+        self._K = int(K)
         self._random_state = random_state
 
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.LKJCHOL.value, {
+            "eta": float(self._eta),
+            "K": int(self._K),
+        }
 
     @corr_chol
     def logpdf(self, L: MatF64) -> float64:

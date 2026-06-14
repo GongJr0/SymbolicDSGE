@@ -18,12 +18,15 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ..estimation.results import MCMCResult, OptimizationResult
+
+if TYPE_CHECKING:
+    from ..estimation.estimator import Estimator
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
@@ -118,7 +121,7 @@ class BundleBuilder:
 
     def add_estimation(
         self,
-        spec: EstimationSpec,
+        source: EstimationSpec | "Estimator",
         *,
         result: (
             OptimizationResult
@@ -132,20 +135,43 @@ class BundleBuilder:
         posterior: Mapping[str, NDArray[Any]] | None = None,
         as_parquet: bool = True,
     ) -> BundleBuilder:
-        """Add the estimation tab: spec (always), and optionally its result,
-        observed ``y`` matrix, and MCMC posterior traces.
+        """Add the estimation tab from a live :class:`Estimator` or a spec.
 
-        ``result`` accepts either a live ``OptimizationResult``/``MCMCResult``
-        or its projected ``*Meta``; live results are projected via ``to_meta()``,
-        and a live ``MCMCResult`` auto-supplies ``posterior`` (its
-        ``posterior_arrays()``) when ``posterior`` is not given explicitly.
+        Two entry shapes:
 
-        ``as_parquet=False`` writes observed/posterior as CSV instead — the
-        format-agnostic loader reads either. ``observed.csv`` uses the
-        ``observable_names`` as headers when supplied (user-friendly for
-        hand-authoring); posterior CSV uses the mechanical ``{name}.{j}``
-        expansion that mirrors :func:`trace_to_csv`.
+        - ``add_estimation(estimator, result=run)`` — the high-level path. The
+          spec is built from the estimator and the live ``result`` (method,
+          ``method_kwargs``, bounds, priors, and observed ``y`` all flattened
+          for you); MCMC posteriors are pulled from the result automatically.
+        - ``add_estimation(spec, result=..., observed=..., ...)`` — the explicit
+          path for a hand-authored :class:`EstimationSpec`.
+
+        ``result`` accepts a live ``OptimizationResult``/``MCMCResult`` (projected
+        via ``to_meta()``, and a live ``MCMCResult`` auto-supplies ``posterior``)
+        or its projected ``*Meta``. ``as_parquet=False`` writes observed/posterior
+        as CSV; the format-agnostic loader reads either.
         """
+        if isinstance(source, EstimationSpec):
+            spec = source
+        else:
+            from ..estimation.estimator import Estimator
+
+            if not isinstance(source, Estimator):
+                raise TypeError(
+                    "add_estimation expects an EstimationSpec or Estimator as the "
+                    f"first argument, got {type(source).__name__}."
+                )
+            if not isinstance(result, (OptimizationResult, MCMCResult)):
+                raise ValueError(
+                    "add_estimation(estimator, ...) requires a live "
+                    "OptimizationResult or MCMCResult."
+                )
+            spec = source.to_spec(result=result)
+            if observed is None:
+                observed, derived_names = _estimator_observed(source)
+                if observable_names is None:
+                    observable_names = derived_names
+
         self._add(
             Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
             spec.to_json(indent=2).encode("utf-8"),
@@ -269,6 +295,22 @@ class BundleBuilder:
             raise ValueError(f"Duplicate bundle member path {member.path!r}.")
         self._members.append(member)
         self._files[member.path] = data
+
+
+def _estimator_observed(
+    estimator: "Estimator",
+) -> tuple[NDArray[Any], list[str] | None]:
+    """Extract the observed matrix + observable names from an estimator's ``y``."""
+    y = estimator.y
+    if hasattr(y, "columns"):  # pandas DataFrame
+        frame = cast(Any, y)
+        return (
+            np.asarray(frame.to_numpy(), dtype=np.float64),
+            [str(column) for column in frame.columns],
+        )
+    matrix = np.asarray(y, dtype=np.float64)
+    names = list(estimator.observables) if estimator.observables else None
+    return matrix, names
 
 
 def _observed_to_csv(matrix: NDArray[Any], names: list[str] | None) -> bytes:

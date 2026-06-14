@@ -1,4 +1,4 @@
-from .transform import Transform
+from .transform import Transform, TransformMethod
 from ._affine_helpers import affine_to_unit, unit_to_affine
 from ..support import Support, OutOfSupportError
 from typing import overload
@@ -22,6 +22,12 @@ class AffineProbitTransform(Transform):
 
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return TransformMethod.AFFINE_PROBIT.value, {
+            "low": float(self.low),
+            "high": float(self.high),
+        }
 
     @overload
     def forward(self, x: float64) -> float64: ...

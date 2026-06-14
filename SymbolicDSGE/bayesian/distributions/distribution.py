@@ -105,6 +105,20 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     @abstractmethod
     def __repr__(self) -> str: ...
 
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        """Return ``(family, parameters)`` for serialization into a ``PriorSpec``.
+
+        ``parameters`` is keyed exactly as :func:`make_prior` expects, so
+        ``make_prior(family, parameters, ...)`` rebuilds an equivalent
+        distribution. Subclasses declare their own mapping — stored attributes
+        are not uniformly named after the constructor params, so this is not
+        introspected generically. The default raises for families without a
+        round-trippable spec (e.g. ``lkj_chol``).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support spec serialization."
+        )
+
     @overload
     def pdf(self, x: EventT) -> float64: ...
     @overload

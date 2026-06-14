@@ -6,7 +6,7 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .transform import Transform
+from .transform import Transform, TransformMethod
 from ..support import Support
 
 
@@ -61,6 +61,9 @@ class CholeskyCorrTransform(Transform):
 
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return TransformMethod.CHOLESKY_CORR.value, {"K": int(self._K)}
 
     @property
     def K(self) -> int:

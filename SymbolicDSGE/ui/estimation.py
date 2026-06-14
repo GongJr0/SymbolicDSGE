@@ -85,6 +85,8 @@ def build_estimation_inputs(
         ],
     )
     inputs = spec.to_estimator_inputs()
+    # The UI path never carries matrix priors, so theta0 is always derived.
+    assert inputs.theta0 is not None
     return inputs.estimated_params, inputs.theta0, inputs.priors, inputs.bounds
 
 

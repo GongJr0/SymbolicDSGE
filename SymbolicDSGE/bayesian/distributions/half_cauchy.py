@@ -1,4 +1,4 @@
-from .distribution import Distribution, Size, RandomState, VecF64
+from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
@@ -50,6 +50,9 @@ class HalfCauchy(Distribution):
     def __init__(self, gamma: float, random_state: RandomState = None) -> None:
         self._gamma = float64(gamma)
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.HALFCAUCHY.value, {"gamma": float(self._gamma)}
 
     @overload
     def logpdf(self, x: float64) -> float64: ...

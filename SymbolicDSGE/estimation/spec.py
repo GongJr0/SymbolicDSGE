@@ -34,11 +34,13 @@ class EstimatorInputs:
     (the inverse of authoring it). ``priors`` holds built
     :class:`~SymbolicDSGE.bayesian.priors.Prior` objects (``None`` for MLE);
     ``bounds`` is ``None`` unless at least one parameter sets a bound, matching
-    what :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate` expects.
+    what :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate` expects. ``theta0``
+    is ``None`` when block (matrix) priors are present, so the estimator derives
+    all initials from calibration.
     """
 
     estimated_params: list[str]
-    theta0: dict[str, float]
+    theta0: dict[str, float] | None
     priors: dict[str, Any] | None = None
     bounds: list[tuple[float | None, float | None]] | None = None
 
@@ -134,9 +136,12 @@ class EstimationSpec:
 
     method: str = "mle"
     parameters: list[EstimationParameterSpec] = field(default_factory=list)
+    #: Block (LKJ) priors keyed by reserved matrix target ("R_corr"/"Q_corr").
+    #: These cover whole correlation matrices, not scalar parameters, so they
+    #: live apart from ``parameters`` (no scalar ``initial``/``bounds``).
+    matrix_priors: dict[str, PriorSpec] = field(default_factory=dict)
     observables: list[str] | None = None
     method_kwargs: dict[str, Any] = field(default_factory=dict)
-    compile_kwargs: dict[str, Any] = field(default_factory=dict)
     steady_state: list[float] | None = None
     posterior_point: str = "mean"
 
@@ -146,8 +151,10 @@ class EstimationSpec:
                 f"Unknown estimation method {self.method!r}; "
                 f"expected one of {sorted(ESTIMATION_METHODS)}."
             )
-        if not self.parameters:
-            raise ValueError("EstimationSpec.parameters must be non-empty.")
+        if not self.parameters and not self.matrix_priors:
+            raise ValueError(
+                "EstimationSpec requires at least one parameter or matrix prior."
+            )
         if self.posterior_point not in POSTERIOR_POINTS:
             raise ValueError(
                 f"Unknown posterior_point {self.posterior_point!r}; "
@@ -162,9 +169,12 @@ class EstimationSpec:
             "method": self.method,
             "parameters": [p.to_dict() for p in self.parameters],
             "method_kwargs": dict(self.method_kwargs),
-            "compile_kwargs": dict(self.compile_kwargs),
             "posterior_point": self.posterior_point,
         }
+        if self.matrix_priors:
+            out["matrix_priors"] = {
+                target: prior.to_dict() for target, prior in self.matrix_priors.items()
+            }
         if self.observables is not None:
             out["observables"] = list(self.observables)
         if self.steady_state is not None:
@@ -178,13 +188,16 @@ class EstimationSpec:
             parameters=[
                 EstimationParameterSpec.from_dict(p) for p in data.get("parameters", [])
             ],
+            matrix_priors={
+                str(target): PriorSpec.from_dict(prior)
+                for target, prior in dict(data.get("matrix_priors", {})).items()
+            },
             observables=(
                 list(data["observables"])
                 if data.get("observables") is not None
                 else None
             ),
             method_kwargs=dict(data.get("method_kwargs", {})),
-            compile_kwargs=dict(data.get("compile_kwargs", {})),
             steady_state=(
                 [float(x) for x in data["steady_state"]]
                 if data.get("steady_state") is not None
@@ -202,9 +215,9 @@ class EstimationSpec:
         initial: Mapping[str, float] | None = None,
         priors: Mapping[str, PriorSpec] | None = None,
         bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
+        matrix_priors: Mapping[str, PriorSpec] | None = None,
         observables: Sequence[str] | None = None,
         method_kwargs: Mapping[str, Any] | None = None,
-        compile_kwargs: Mapping[str, Any] | None = None,
         steady_state: Sequence[float] | None = None,
         posterior_point: str = "mean",
     ) -> EstimationSpec:
@@ -216,10 +229,15 @@ class EstimationSpec:
         has to be set by hand. ``initial`` supplies starting values (default
         ``0.0`` when omitted; calibration values are a better source, which is
         why :meth:`SymbolicDSGE.estimation.estimator.Estimator.to_spec` fills
-        them in). ``priors``/``bounds`` are keyed by parameter name.
+        them in). ``priors``/``bounds`` are keyed by parameter name;
+        ``matrix_priors`` carries block (LKJ) priors keyed by reserved target
+        (``"R_corr"``/``"Q_corr"``).
         """
-        if not estimated_params:
-            raise ValueError("from_targets requires at least one estimated parameter.")
+        if not estimated_params and not matrix_priors:
+            raise ValueError(
+                "from_targets requires at least one estimated parameter or "
+                "matrix prior."
+            )
         initial = dict(initial or {})
         prior_map = dict(priors or {})
         bound_map = dict(bounds or {})
@@ -239,9 +257,9 @@ class EstimationSpec:
         return cls(
             method=method,
             parameters=parameters,
+            matrix_priors=dict(matrix_priors or {}),
             observables=list(observables) if observables is not None else None,
             method_kwargs=dict(method_kwargs or {}),
-            compile_kwargs=dict(compile_kwargs or {}),
             steady_state=(
                 [float(x) for x in steady_state] if steady_state is not None else None
             ),
@@ -254,22 +272,38 @@ class EstimationSpec:
         The inverse of authoring: selects the ``estimate=True`` parameters,
         collects their initials and bounds, and (for MAP/MCMC) builds the
         :class:`~SymbolicDSGE.bayesian.priors.Prior` objects from each
-        :class:`PriorSpec`. Lets a loaded ``.sdsge`` bundle drive
+        :class:`PriorSpec`. Block (LKJ) ``matrix_priors`` are appended to
+        ``estimated_params`` under their reserved target name and built as
+        priors; the estimator expands them to correlation members and derives
+        those initials from calibration, so ``theta0`` is left ``None`` whenever
+        matrix priors are present. Lets a loaded ``.sdsge`` bundle drive
         ``DSGESolver.estimate`` without the ``[ui]`` extra.
         """
         active = [p for p in self.parameters if p.estimate]
-        if not active:
-            raise ValueError("EstimationSpec has no parameters marked estimate=True.")
+        matrix_targets = list(self.matrix_priors)
+        if not active and not matrix_targets:
+            raise ValueError(
+                "EstimationSpec has no estimated parameters or matrix priors."
+            )
+        if matrix_targets and self.method not in {"map", "mcmc"}:
+            raise ValueError(
+                "Matrix (LKJ) priors require method 'map' or 'mcmc'; "
+                f"got {self.method!r}."
+            )
         names = [p.name for p in active]
         if len(set(names)) != len(names):
             raise ValueError("Estimated parameter names must be unique.")
 
-        theta0 = {p.name: float(p.initial) for p in active}
         bounds = [(p.lower, p.upper) for p in active]
         bound_arg = (
             bounds
             if any(low is not None or high is not None for low, high in bounds)
             else None
+        )
+        # Matrix targets expand to correlation members whose initials come from
+        # calibration, so defer theta0 derivation to the estimator entirely.
+        theta0: dict[str, float] | None = (
+            None if matrix_targets else {p.name: float(p.initial) for p in active}
         )
 
         priors: dict[str, Any] | None = None
@@ -282,9 +316,11 @@ class EstimationSpec:
                         f"{self.method.upper()}."
                     )
                 priors[p.name] = _prior_from_spec(p.prior)
+            for target, prior in self.matrix_priors.items():
+                priors[target] = _prior_from_spec(prior)
 
         return EstimatorInputs(
-            estimated_params=names,
+            estimated_params=names + matrix_targets,
             theta0=theta0,
             priors=priors,
             bounds=bound_arg,
@@ -317,6 +353,7 @@ class OptimizationResultMeta:
     logpost: float
     nfev: int
     nit: int | None = None
+    optimizer_config: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -334,6 +371,7 @@ class OptimizationResultMeta:
             "logpost": float(self.logpost),
             "nfev": int(self.nfev),
             "nit": None if self.nit is None else int(self.nit),
+            "optimizer_config": dict(self.optimizer_config),
         }
 
     @classmethod
@@ -349,6 +387,7 @@ class OptimizationResultMeta:
             logpost=float(data["logpost"]),
             nfev=int(data["nfev"]),
             nit=None if data.get("nit") is None else int(data["nit"]),
+            optimizer_config=dict(data.get("optimizer_config", {})),
         )
 
 
@@ -366,6 +405,7 @@ class MCMCResultMeta:
     n_draws: int
     burn_in: int
     thin: int
+    sampler_config: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.param_names:
@@ -384,6 +424,7 @@ class MCMCResultMeta:
             "n_draws": int(self.n_draws),
             "burn_in": int(self.burn_in),
             "thin": int(self.thin),
+            "sampler_config": dict(self.sampler_config),
         }
 
     @classmethod
@@ -394,4 +435,5 @@ class MCMCResultMeta:
             n_draws=int(data["n_draws"]),
             burn_in=int(data["burn_in"]),
             thin=int(data["thin"]),
+            sampler_config=dict(data.get("sampler_config", {})),
         )

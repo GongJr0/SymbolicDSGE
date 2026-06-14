@@ -31,7 +31,6 @@ def _baseline_spec() -> EstimationSpec:
         ],
         observables=["y", "pi"],
         method_kwargs={"options": {"maxiter": 100}},
-        compile_kwargs={"linearize": True},
         steady_state=[0.0, 0.0],
         posterior_point="map",
     )
@@ -295,7 +294,7 @@ def test_to_estimator_inputs_requires_active_parameter() -> None:
         method="mle",
         parameters=[EstimationParameterSpec(name="beta", initial=0.99, estimate=False)],
     )
-    with pytest.raises(ValueError, match="no parameters marked estimate=True"):
+    with pytest.raises(ValueError, match="no estimated parameters or matrix priors"):
         spec.to_estimator_inputs()
 
 
@@ -306,6 +305,110 @@ def test_to_estimator_inputs_requires_prior_for_map() -> None:
     )
     with pytest.raises(ValueError, match="requires a prior for MAP"):
         spec.to_estimator_inputs()
+
+
+def test_optimization_result_meta_round_trips_with_config() -> None:
+    meta = OptimizationResultMeta(
+        kind="mle",
+        theta={"a": 1.0},
+        success=True,
+        message="",
+        fun=0.0,
+        loglik=0.0,
+        logprior=0.0,
+        logpost=0.0,
+        nfev=1,
+        nit=None,
+        optimizer_config={
+            "method": "L-BFGS-B",
+            "bounds": [[0.0, 1.0]],
+            "options": {"maxiter": 10},
+        },
+    )
+    as_dict = meta.to_dict()
+    assert as_dict["optimizer_config"]["method"] == "L-BFGS-B"
+    assert OptimizationResultMeta.from_dict(as_dict).to_dict() == as_dict
+
+
+def test_mcmc_result_meta_round_trips_with_config() -> None:
+    meta = MCMCResultMeta(
+        param_names=["a"],
+        accept_rate=0.3,
+        n_draws=10,
+        burn_in=0,
+        thin=1,
+        sampler_config={"adapt": True, "proposal_scale": 0.1, "random_state": 7},
+    )
+    as_dict = meta.to_dict()
+    assert as_dict["sampler_config"]["random_state"] == 7
+    assert MCMCResultMeta.from_dict(as_dict).to_dict() == as_dict
+
+
+def _lkj_prior_spec() -> PriorSpec:
+    return PriorSpec(
+        distribution="lkj_chol",
+        parameters={"eta": 2.0, "K": 3},
+        transform="cholesky_corr",
+        transform_kwargs={"K": 3},
+    )
+
+
+def test_matrix_priors_round_trip() -> None:
+    spec = EstimationSpec(
+        method="map",
+        parameters=[EstimationParameterSpec(name="beta", initial=0.99, estimate=True)],
+        matrix_priors={"R_corr": _lkj_prior_spec()},
+    )
+    as_dict = spec.to_dict()
+    assert "R_corr" in as_dict["matrix_priors"]
+    assert EstimationSpec.from_dict(as_dict).to_dict() == as_dict
+    assert EstimationSpec.from_json(spec.to_json()).to_dict() == as_dict
+
+
+def test_matrix_only_spec_is_valid() -> None:
+    # No scalar parameters, only a block prior — must be accepted.
+    spec = EstimationSpec(method="mcmc", matrix_priors={"Q_corr": _lkj_prior_spec()})
+    assert spec.parameters == []
+
+
+def test_to_estimator_inputs_lowers_matrix_priors() -> None:
+    spec = EstimationSpec(
+        method="map",
+        parameters=[
+            EstimationParameterSpec(
+                name="beta",
+                initial=0.99,
+                estimate=True,
+                prior=PriorSpec(
+                    distribution="normal", parameters={"mean": 0.99, "std": 0.1}
+                ),
+            )
+        ],
+        matrix_priors={"R_corr": _lkj_prior_spec()},
+    )
+    inputs = spec.to_estimator_inputs()
+
+    assert inputs.estimated_params == ["beta", "R_corr"]
+    assert inputs.priors is not None and set(inputs.priors) == {"beta", "R_corr"}
+    assert hasattr(inputs.priors["R_corr"], "logpdf")  # built Prior object
+    # matrix members' initials come from calibration -> theta0 deferred entirely
+    assert inputs.theta0 is None
+
+
+def test_matrix_priors_require_bayesian_method() -> None:
+    spec = EstimationSpec(method="mle", matrix_priors={"R_corr": _lkj_prior_spec()})
+    with pytest.raises(ValueError, match="require method 'map' or 'mcmc'"):
+        spec.to_estimator_inputs()
+
+
+def test_from_targets_accepts_matrix_priors() -> None:
+    spec = EstimationSpec.from_targets(
+        [],
+        method="mcmc",
+        matrix_priors={"R_corr": _lkj_prior_spec()},
+    )
+    assert spec.parameters == []
+    assert "R_corr" in spec.matrix_priors
 
 
 def test_estimation_run_request_to_core_drops_ui_fields() -> None:
@@ -349,7 +452,7 @@ def test_estimation_run_request_to_core_drops_ui_fields() -> None:
     assert as_dict["posterior_point"] == "map"
     assert as_dict["steady_state"] == [0.0, 0.0]
     assert as_dict["method_kwargs"] == {"options": {"maxiter": 100}}
-    assert as_dict["compile_kwargs"] == {"linearize": True}
+    assert "compile_kwargs" not in as_dict  # now a model-level concern, dropped
     assert as_dict["parameters"][0]["name"] == "beta"
     assert as_dict["parameters"][0]["prior"]["distribution"] == "beta"
     assert "lower" not in as_dict["parameters"][1]  # unset optional dropped

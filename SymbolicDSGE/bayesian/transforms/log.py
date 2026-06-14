@@ -1,4 +1,4 @@
-from .transform import Transform
+from .transform import Transform, TransformMethod
 from ..support import Support, OutOfSupportError
 from typing import overload
 
@@ -10,6 +10,9 @@ from numpy.typing import NDArray
 class LogTransform(Transform):
     def __repr__(self) -> str:
         return self.__class__.__name__
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return TransformMethod.LOG.value, {}
 
     @overload
     def forward(self, x: float64) -> float64: ...

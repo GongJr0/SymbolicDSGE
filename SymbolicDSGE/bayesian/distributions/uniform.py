@@ -1,4 +1,4 @@
-from .distribution import Distribution, Size, RandomState, VecF64
+from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
 import numpy as np
@@ -61,6 +61,12 @@ class Uniform(Distribution[float64, VecF64]):
         self._high = float64(high)
         self._width = float64(high - low)
         self._random_state = random_state
+
+    def to_spec(self) -> tuple[str, dict[str, float]]:
+        return DistributionFamily.UNIFORM.value, {
+            "low": float(self._low),
+            "high": float(self._high),
+        }
 
     @overload
     def logpdf(self, x: float64) -> float64: ...
