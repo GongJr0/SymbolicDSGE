@@ -120,14 +120,25 @@ class BundleBuilder:
         self,
         spec: EstimationSpec,
         *,
-        result: OptimizationResultMeta | MCMCResultMeta | None = None,
+        result: (
+            OptimizationResult
+            | MCMCResult
+            | OptimizationResultMeta
+            | MCMCResultMeta
+            | None
+        ) = None,
         observed: NDArray[Any] | None = None,
         observable_names: list[str] | None = None,
         posterior: Mapping[str, NDArray[Any]] | None = None,
         as_parquet: bool = True,
     ) -> BundleBuilder:
-        """Add the estimation tab: spec (always), and optionally its result
-        metadata, observed ``y`` matrix, and MCMC posterior traces.
+        """Add the estimation tab: spec (always), and optionally its result,
+        observed ``y`` matrix, and MCMC posterior traces.
+
+        ``result`` accepts either a live ``OptimizationResult``/``MCMCResult``
+        or its projected ``*Meta``; live results are projected via ``to_meta()``,
+        and a live ``MCMCResult`` auto-supplies ``posterior`` (its
+        ``posterior_arrays()``) when ``posterior`` is not given explicitly.
 
         ``as_parquet=False`` writes observed/posterior as CSV instead — the
         format-agnostic loader reads either. ``observed.csv`` uses the
@@ -139,6 +150,10 @@ class BundleBuilder:
             Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
             spec.to_json(indent=2).encode("utf-8"),
         )
+        if isinstance(result, (OptimizationResult, MCMCResult)):
+            if isinstance(result, MCMCResult) and posterior is None:
+                posterior = result.posterior_arrays()
+            result = result.to_meta()
         if result is not None:
             kind = "mcmc" if isinstance(result, MCMCResultMeta) else "optimization"
             payload = json.dumps({"type": kind, "data": result.to_dict()}, indent=2)
@@ -284,30 +299,3 @@ def _observed_to_csv(matrix: NDArray[Any], names: list[str] | None) -> bytes:
 def _float_cell(value: float) -> str:
     number = float(value)
     return "" if not math.isfinite(number) else repr(number)
-
-
-def _meta_from_optimization(result: OptimizationResult) -> OptimizationResultMeta:
-    """Helper: project a live :class:`OptimizationResult` to its text metadata."""
-    return OptimizationResultMeta(
-        kind=result.kind,
-        theta={k: float(v) for k, v in result.theta.items()},
-        success=bool(result.success),
-        message=str(result.message),
-        fun=float(result.fun),
-        loglik=float(result.loglik),
-        logprior=float(result.logprior),
-        logpost=float(result.logpost),
-        nfev=int(result.nfev),
-        nit=None if result.nit is None else int(result.nit),
-    )
-
-
-def _meta_from_mcmc(result: MCMCResult) -> MCMCResultMeta:
-    """Helper: project a live :class:`MCMCResult` to its text metadata."""
-    return MCMCResultMeta(
-        param_names=list(result.param_names),
-        accept_rate=float(result.accept_rate),
-        n_draws=int(result.n_draws),
-        burn_in=int(result.burn_in),
-        thin=int(result.thin),
-    )

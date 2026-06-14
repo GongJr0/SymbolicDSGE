@@ -78,24 +78,36 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 BundleBuilder.add_estimation(
     spec: EstimationSpec,
     *,
-    result: OptimizationResultMeta | MCMCResultMeta | None = None,
+    result: ( # (1)!
+        OptimizationResult
+        | MCMCResult
+        | OptimizationResultMeta
+        | MCMCResultMeta
+        | None
+    ) = None,
     observed: NDArray[Any] | None = None,
     observable_names: list[str] | None = None,
-    posterior: Mapping[str, NDArray[Any]] | None = None,
+    posterior: Mapping[str, NDArray[Any]] | None = None, # (2)!
     as_parquet: bool = True,
 ) -> BundleBuilder
 ```
+
+1. Live `#!python OptimizationResult` / `#!python MCMCResult` are auto-projected to their `#!python *Meta` via `#!python result.to_meta()` — no hand construction required.
+2. Auto-supplied from `#!python result.posterior_arrays()` when `#!python result` is a live `#!python MCMCResult` and `#!python posterior` is omitted.
 
 Add the estimation tab. `spec` is always written; the other arguments are conditional. With `as_parquet=False`, `observed` is stored as a semantic-header CSV (using `observable_names` as headers) and `posterior` is stored via mechanical `{name}.{j}` expansion.
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | spec | `EstimationSpec` for the run (method, parameters, observables, kwargs, posterior point). |
-| result | Result metadata — either `OptimizationResultMeta` (MLE/MAP) or `MCMCResultMeta` (MCMC). Bulk MCMC traces ride alongside via `posterior`. |
+| result | Either a live `OptimizationResult` / `MCMCResult` returned by `Estimator.run(...)`, or its projected `OptimizationResultMeta` / `MCMCResultMeta`. Live results are projected internally. |
 | observed | Observed `y` matrix shaped `(n, k)`. |
 | observable_names | List of `k` observable names matching the matrix columns. Stored on the manifest member for semantic-header CSV authoring. |
-| posterior | MCMC posterior columns — typically `{"samples": (n_draws, n_params), "logpost": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key. |
+| posterior | MCMC posterior columns — typically `{"samples": (n_draws, n_params), "logpost": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key. Auto-filled when `result` is a live `MCMCResult`. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
+
+???+ tip "Live-result fast path"
+    The shortest authoring path for a real run is `#!python builder.add_estimation(spec, result=estimator.run(...), observed=y)`. The builder calls `#!python result.to_meta()` and (for MCMC) attaches `#!python result.posterior_arrays()` automatically — you only reach for the explicit `*Meta` constructors when serializing a result that did not originate from `#!python Estimator.run(...)`.
 
 ???+ warning "Observable name validation"
     `observable_names` must match the model's `observables` in count **and** order. Mismatch raises at compile time with an actionable message. See [`sdsge-compile` validation](../../portable_experiments/sdsge-compile.md#validation) for the details.

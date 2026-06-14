@@ -111,6 +111,39 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     assert set(loaded.manifest.checksums) == {m.path for m in loaded.manifest.members}
 
 
+def test_add_estimation_accepts_live_mcmc_result() -> None:
+    import json
+
+    from SymbolicDSGE.estimation.results import MCMCResult
+
+    rng = np.random.default_rng(1)
+    mcmc = MCMCResult(
+        param_names=["a", "b"],
+        samples=rng.standard_normal((5, 2)),
+        logpost_trace=rng.standard_normal(5),
+        accept_rate=np.float64(0.4),
+        n_draws=5,
+        burn_in=0,
+        thin=1,
+    )
+    spec = EstimationSpec.from_targets(["a", "b"], method="mcmc")
+
+    builder = BundleBuilder().add_estimation(spec, result=mcmc)
+    _, files = builder.build()
+
+    # live result projected to meta, tagged mcmc
+    payload = json.loads(files["estimation/result.json"])
+    assert payload["type"] == "mcmc"
+    assert payload["data"]["accept_rate"] == 0.4
+    # posterior auto-extracted from the live result (not passed explicitly)
+    assert "estimation/posterior.parquet" in files
+    posterior = collapse_columns(
+        from_parquet_columns(files["estimation/posterior.parquet"])
+    )
+    np.testing.assert_allclose(posterior["samples"], mcmc.samples)
+    np.testing.assert_allclose(posterior["logpost"], mcmc.logpost_trace)
+
+
 def test_raw_data_member_round_trips(tmp_path: Path) -> None:
     builder = BundleBuilder().add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
     _, files = builder.build()

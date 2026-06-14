@@ -1,9 +1,13 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
+
+if TYPE_CHECKING:
+    from .spec import MCMCResultMeta, OptimizationResultMeta
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -24,6 +28,27 @@ class OptimizationResult:
     nit: int | None
     raw: OptimizeResult
 
+    def to_meta(self) -> "OptimizationResultMeta":
+        """Project to the text-only metadata carried in a ``.sdsge`` bundle.
+
+        Drops the flat ``x`` vector and the opaque ``scipy`` ``raw`` state;
+        ``theta`` carries the same point estimate by parameter name.
+        """
+        from .spec import OptimizationResultMeta
+
+        return OptimizationResultMeta(
+            kind=self.kind,
+            theta={str(k): float(v) for k, v in self.theta.items()},
+            success=bool(self.success),
+            message=str(self.message),
+            fun=float(self.fun),
+            loglik=float(self.loglik),
+            logprior=float(self.logprior),
+            logpost=float(self.logpost),
+            nfev=int(self.nfev),
+            nit=None if self.nit is None else int(self.nit),
+        )
+
 
 @dataclass(frozen=True)
 class MCMCResult:
@@ -34,6 +59,31 @@ class MCMCResult:
     n_draws: int
     burn_in: int
     thin: int
+
+    def to_meta(self) -> "MCMCResultMeta":
+        """Project to the scalar text metadata carried in a ``.sdsge`` bundle.
+
+        Bulk ``samples`` / ``logpost_trace`` are not included — pair this with
+        :meth:`posterior_arrays` when bundling so they ride a sibling member.
+        """
+        from .spec import MCMCResultMeta
+
+        return MCMCResultMeta(
+            param_names=list(self.param_names),
+            accept_rate=float(self.accept_rate),
+            n_draws=int(self.n_draws),
+            burn_in=int(self.burn_in),
+            thin=int(self.thin),
+        )
+
+    def posterior_arrays(self) -> dict[str, NDF]:
+        """Bulk posterior columns keyed for :func:`SymbolicDSGE.bundle.trace_to_json`.
+
+        ``{"samples": (n_draws, n_params), "logpost": (n_draws,)}`` — the shape
+        :class:`BundleBuilder` expects as ``posterior`` and the loader returns in
+        ``LoadedEstimation.posterior``.
+        """
+        return {"samples": self.samples, "logpost": self.logpost_trace}
 
     @staticmethod
     def _validate_hpd_alpha(alpha: float) -> float64:

@@ -1,8 +1,11 @@
 # type: ignore
 import numpy as np
 import pytest
+from numpy import float64
+from scipy.optimize import OptimizeResult
 
-from SymbolicDSGE.estimation.results import MCMCResult
+from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
+from SymbolicDSGE.estimation.spec import MCMCResultMeta, OptimizationResultMeta
 
 
 def _result(
@@ -198,3 +201,47 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
     res.logpost_trace_plot()
 
     assert calls == ["show", "show", "show"]
+
+
+def test_optimization_result_to_meta_projects_field_for_field():
+    res = OptimizationResult(
+        kind="map",
+        x=np.array([0.1, 0.2], dtype=np.float64),
+        theta={"a": float64(0.1), "b": float64(0.2)},
+        success=True,
+        message="converged",
+        fun=float64(-3.5),
+        loglik=float64(-3.0),
+        logprior=float64(-0.5),
+        logpost=float64(-3.5),
+        nfev=42,
+        nit=7,
+        raw=OptimizeResult(),
+    )
+
+    meta = res.to_meta()
+
+    assert isinstance(meta, OptimizationResultMeta)
+    assert meta.kind == "map"
+    assert meta.theta == {"a": 0.1, "b": 0.2}
+    assert meta.nfev == 42 and meta.nit == 7
+    assert meta.logpost == -3.5
+    # round-trips through the bundle text form
+    assert OptimizationResultMeta.from_dict(meta.to_dict()).to_dict() == meta.to_dict()
+
+
+def test_mcmc_result_to_meta_and_posterior_arrays():
+    samples = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64)
+    logpost = np.array([-1.0, -2.0], dtype=np.float64)
+    res = _result(samples=samples, logpost=logpost)
+
+    meta = res.to_meta()
+    assert isinstance(meta, MCMCResultMeta)
+    assert meta.param_names == ["a", "b"]
+    assert meta.accept_rate == 0.25
+    assert (meta.n_draws, meta.burn_in, meta.thin) == (2, 10, 2)
+
+    arrays = res.posterior_arrays()
+    assert set(arrays) == {"samples", "logpost"}
+    np.testing.assert_array_equal(arrays["samples"], samples)
+    np.testing.assert_array_equal(arrays["logpost"], logpost)

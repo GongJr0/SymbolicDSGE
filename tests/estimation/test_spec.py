@@ -198,6 +198,116 @@ def test_mcmc_result_meta_validates(kwargs: dict) -> None:
         MCMCResultMeta(**base)
 
 
+def test_from_targets_flags_only_listed_params() -> None:
+    spec = EstimationSpec.from_targets(
+        ["psi_pi", "psi_x"],
+        method="map",
+        initial={"psi_pi": 1.5, "psi_x": 0.5},
+        priors={
+            "psi_pi": PriorSpec(
+                distribution="normal", parameters={"loc": 1.5, "scale": 0.25}
+            )
+        },
+        bounds={"psi_pi": (1.0, 3.0)},
+        observables=["Infl", "Rate"],
+    )
+
+    assert [p.name for p in spec.parameters] == ["psi_pi", "psi_x"]
+    assert all(p.estimate for p in spec.parameters)  # never typed by the user
+    psi_pi, psi_x = spec.parameters
+    assert psi_pi.initial == 1.5
+    assert (psi_pi.lower, psi_pi.upper) == (1.0, 3.0)
+    assert psi_pi.prior is not None and psi_pi.prior.distribution == "normal"
+    assert psi_x.prior is None  # no prior supplied for this target
+    assert (psi_x.lower, psi_x.upper) == (None, None)
+    assert spec.method == "map"
+    assert spec.observables == ["Infl", "Rate"]
+
+
+def test_from_targets_defaults_initial_to_zero() -> None:
+    spec = EstimationSpec.from_targets(["a"])
+    assert spec.parameters[0].initial == 0.0
+    assert spec.parameters[0].estimate is True
+
+
+def test_from_targets_round_trips_through_json() -> None:
+    spec = EstimationSpec.from_targets(
+        ["a", "b"], method="mcmc", initial={"a": 0.1, "b": 0.2}
+    )
+    restored = EstimationSpec.from_json(spec.to_json())
+    assert restored.to_dict() == spec.to_dict()
+
+
+def test_from_targets_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        EstimationSpec.from_targets([])
+
+
+def test_from_targets_rejects_duplicate_targets() -> None:
+    with pytest.raises(ValueError):
+        EstimationSpec.from_targets(["a", "a"])
+
+
+def test_to_estimator_inputs_lowers_targets_priors_and_bounds() -> None:
+    spec = EstimationSpec.from_targets(
+        ["beta", "rho"],
+        method="map",
+        initial={"beta": 0.99, "rho": 0.5},
+        bounds={"beta": (0.9, 1.0)},
+        priors={
+            "beta": PriorSpec(
+                distribution="normal", parameters={"mean": 0.99, "std": 0.01}
+            ),
+            "rho": PriorSpec(
+                distribution="normal", parameters={"mean": 0.5, "std": 0.1}
+            ),
+        },
+    )
+
+    inputs = spec.to_estimator_inputs()
+
+    assert inputs.estimated_params == ["beta", "rho"]
+    assert inputs.theta0 == {"beta": 0.99, "rho": 0.5}
+    assert inputs.bounds == [(0.9, 1.0), (None, None)]
+    assert inputs.priors is not None and set(inputs.priors) == {"beta", "rho"}
+    # priors are built Prior objects, not specs
+    assert all(hasattr(prior, "logpdf") for prior in inputs.priors.values())
+
+
+def test_to_estimator_inputs_skips_non_estimated_and_omits_bounds() -> None:
+    spec = EstimationSpec(
+        method="mle",
+        parameters=[
+            EstimationParameterSpec(name="beta", initial=0.99, estimate=True),
+            EstimationParameterSpec(name="rho", initial=0.5, estimate=False),
+        ],
+    )
+
+    inputs = spec.to_estimator_inputs()
+
+    assert inputs.estimated_params == ["beta"]
+    assert inputs.priors is None  # MLE needs none
+    assert inputs.bounds is None  # no bounds set on the active parameter
+
+
+def test_to_estimator_inputs_requires_active_parameter() -> None:
+    spec = EstimationSpec(
+        method="mle",
+        parameters=[EstimationParameterSpec(name="beta", initial=0.99, estimate=False)],
+    )
+    with pytest.raises(ValueError, match="no parameters marked estimate=True"):
+        spec.to_estimator_inputs()
+
+
+def test_to_estimator_inputs_requires_prior_for_map() -> None:
+    spec = EstimationSpec(
+        method="map",
+        parameters=[EstimationParameterSpec(name="beta", initial=0.99, estimate=True)],
+    )
+    with pytest.raises(ValueError, match="requires a prior for MAP"):
+        spec.to_estimator_inputs()
+
+
 def test_estimation_run_request_to_core_drops_ui_fields() -> None:
     from SymbolicDSGE.ui.schemas import EstimationRunRequest
 

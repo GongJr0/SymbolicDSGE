@@ -161,6 +161,32 @@ def test_mle_finds_quadratic_mode(monkeypatch):
     assert abs(out.theta["a"] - 2.0) < 1e-4
 
 
+def test_to_spec_captures_targets_initials_and_method():
+    from SymbolicDSGE.estimation.spec import EstimationSpec, PriorSpec
+
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["a"],
+    )
+
+    spec = est.to_spec(
+        method="mle",
+        priors={"a": PriorSpec(distribution="normal", parameters={"loc": 0.0})},
+        observables=["y"],
+    )
+
+    assert isinstance(spec, EstimationSpec)
+    assert spec.method == "mle"
+    assert [p.name for p in spec.parameters] == ["a"]
+    param = spec.parameters[0]
+    assert param.estimate is True
+    assert param.initial == 0.0  # pulled from calibration via _base_params
+    assert param.prior is not None and param.prior.distribution == "normal"
+    assert spec.observables == ["y"]
+
+
 def test_map_is_public_and_uses_prior(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
