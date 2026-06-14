@@ -91,3 +91,6 @@ include = ["SymbolicDSGE*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "--import-mode=importlib"
+markers = [
+    "sr: tests that require the optional symbolic-regression dependency",
+]

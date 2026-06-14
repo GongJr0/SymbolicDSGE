@@ -51,6 +51,7 @@ def test_add_operator_updates_params_and_primitive_ops():
     assert any("foo(" in s for s in p.params.unary_operators or [])
 
 
+@pytest.mark.sr
 def test_make_template_and_add_template_sets_expression_spec():
     p = _make_parametrizer(config=TemplateConfig())
     tmpl = p.make_template(expr=None)
@@ -60,6 +61,7 @@ def test_make_template_and_add_template_sets_expression_spec():
     assert p.params.expression_spec is tmpl
 
 
+@pytest.mark.sr
 def test_make_and_add_template_with_include_expression_sets_clean_expr():
     t = sp.Symbol("t", integer=True)
     x = sp.Function("x")

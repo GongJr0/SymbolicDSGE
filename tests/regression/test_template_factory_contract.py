@@ -2,6 +2,8 @@
 import sympy as sp
 import pytest
 
+pytestmark = pytest.mark.sr
+
 # TemplateFactory.get_template lazy-imports TemplateExpressionSpec from pysr,
 # which starts the Julia runtime. Skip the file when the [sr] extra is absent.
 pytest.importorskip("pysr")

@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 import sympy as sp
 
+pytestmark = pytest.mark.sr
+
 # Skip the file when the [sr] extra is not installed. The lazy-import refactor
 # in regression/sr/* keeps pysr / juliacall out of the main test run so the
 # Julia runtime never starts when these tests are absent.
