@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
 MCStepKind = Literal[
+    # datagen / filter
     "simulation",
     "filter",
+    # terminal: tests
     "wald",
     "ljung_box",
     "jarque_bera",
@@ -24,9 +26,21 @@ MCStepKind = Literal[
     "cusum",
     "cusumsq",
     "chow",
+    # terminal: regression
     "regression",
+    # transforms
+    "standardize",
+    "log",
+    "log_diff",
+    "diff",
+    "rolling_mean",
+    "rolling_std",
+    "rolling_var",
 ]
 
+#: Authoritative set of valid step-type strings. Must agree with the keys of
+#: :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG` — there's a regression
+#: test in ``tests/monte_carlo/test_catalog_builder.py`` that enforces parity.
 STEP_KINDS: frozenset[str] = frozenset(get_args(MCStepKind))
 
 
