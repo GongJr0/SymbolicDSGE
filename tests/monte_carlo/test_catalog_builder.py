@@ -35,7 +35,7 @@ def _stub_dgp(*targets: str) -> SimpleNamespace:
 def test_catalog_payload_shape_and_known_fields() -> None:
     payload = catalog_payload()
     steps = payload["steps"]
-    assert len(steps) == len(STEP_CATALOG) == 11
+    assert len(steps) == len(STEP_CATALOG) == 18
 
     for step in steps:
         assert set(step) == {

@@ -369,6 +369,13 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "cusumsq",
         "chow",
         "regression",
+        "standardize",
+        "log",
+        "log_diff",
+        "diff",
+        "rolling_mean",
+        "rolling_std",
+        "rolling_var",
     }
 
     pipeline = {

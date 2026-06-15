@@ -22,11 +22,18 @@ from .config import (
     chow_test_step,
     cusum_test_step,
     cusumsq_test_step,
+    diff_step,
     jarque_bera_test_step,
     ljung_box_test_step,
+    log_diff_step,
+    log_step,
     reference_filter_step,
     regression_step,
+    rolling_mean_step,
+    rolling_std_step,
+    rolling_var_step,
     simulation_step,
+    standardize_step,
     wald_test_step,
 )
 from .mc_constructs import MCStep
@@ -48,7 +55,7 @@ INPUT_SOURCES = [
 #: Sources produced only by a filter step (require an upstream filter link).
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
-StepRole = Literal["datagen", "filter", "terminal"]
+StepRole = Literal["datagen", "filter", "transform", "terminal"]
 CompileParams = Callable[[dict[str, Any], "SolvedModel"], dict[str, Any]]
 
 
@@ -94,6 +101,10 @@ class StepDefinition:
     @property
     def is_terminal(self) -> bool:
         return self.op_role == "terminal"
+
+    @property
+    def is_transform(self) -> bool:
+        return self.op_role == "transform"
 
     def catalog_entry(self) -> dict[str, Any]:
         return {
@@ -575,6 +586,120 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
             ),
         ),
     ),
+    # ----- transforms -----
+    StepDefinition(
+        step_type="standardize",
+        title="Standardize",
+        default_name="standardize",
+        description=(
+            "Per-column z-score: (x - mean) / std. Columns with zero std "
+            "pass through as zeros."
+        ),
+        op_role="transform",
+        factory=standardize_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
+        ),
+    ),
+    StepDefinition(
+        step_type="log",
+        title="Log",
+        default_name="log",
+        description="Elementwise log(x + offset). Offset handles inputs that touch zero.",
+        op_role="transform",
+        factory=log_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("offset", "Offset", "number", 0.0),
+        ),
+    ),
+    StepDefinition(
+        step_type="log_diff",
+        title="Log Difference",
+        default_name="log_diff",
+        description=(
+            "One-period log differences along the time axis. Output is one "
+            "row shorter than the input."
+        ),
+        op_role="transform",
+        factory=log_diff_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("offset", "Offset", "number", 0.0),
+        ),
+    ),
+    StepDefinition(
+        step_type="diff",
+        title="Difference",
+        default_name="diff",
+        description="Repeated np.diff along the time axis (order-th difference).",
+        op_role="transform",
+        factory=diff_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("order", "Order", "number", 1, minimum=1),
+        ),
+    ),
+    StepDefinition(
+        step_type="rolling_mean",
+        title="Rolling Mean",
+        default_name="rolling_mean",
+        description="Trailing rolling mean over the time axis.",
+        op_role="transform",
+        factory=rolling_mean_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("window", "Window", "number", 10, required=True, minimum=1),
+        ),
+    ),
+    StepDefinition(
+        step_type="rolling_std",
+        title="Rolling Std",
+        default_name="rolling_std",
+        description="Trailing rolling standard deviation over the time axis.",
+        op_role="transform",
+        factory=rolling_std_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("window", "Window", "number", 10, required=True, minimum=1),
+            FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
+        ),
+    ),
+    StepDefinition(
+        step_type="rolling_var",
+        title="Rolling Variance",
+        default_name="rolling_var",
+        description="Trailing rolling variance over the time axis.",
+        op_role="transform",
+        factory=rolling_var_step,
+        fields=(
+            _source_field("source", "Source"),
+            FieldSpec("columns", "Columns", "number_list", []),
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+            FieldSpec("window", "Window", "number", 10, required=True, minimum=1),
+            FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
+        ),
+    ),
 )
 
 #: Step kind -> definition, insertion order matching the GUI catalogue payload.
@@ -587,6 +712,14 @@ TERMINAL_STEP_TYPES: frozenset[str] = frozenset(
     step_type
     for step_type, definition in STEP_CATALOG.items()
     if definition.is_terminal
+)
+
+#: Step kinds that produce a single ndarray payload downstream nodes can chain
+#: from (one-input-one-output graph middle nodes).
+TRANSFORM_STEP_TYPES: frozenset[str] = frozenset(
+    step_type
+    for step_type, definition in STEP_CATALOG.items()
+    if definition.is_transform
 )
 
 
