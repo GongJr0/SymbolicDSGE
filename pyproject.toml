@@ -15,6 +15,7 @@ license-files = ["LICENSE"]
 keywords = ["DSGE", "symbolic", "measurement augmentation", "misspecification", "model diagnostics", "Kalman Filter", "function discovery", "Monte Carlo"]
 requires-python = ">=3.13"
 dependencies = [
+    "cloudpickle>=3.1.2",
     "matplotlib>=3.10.9",
     "numba>=0.62.1",
     "numpy>=2.3.5",
