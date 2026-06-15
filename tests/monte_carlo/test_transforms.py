@@ -585,6 +585,80 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> No
     assert jb.params["payload_key"] == "standardize"
 
 
+def test_step_kinds_match_catalog() -> None:
+    """The spec-side `STEP_KINDS` and the catalog-side `STEP_CATALOG` must
+    cover identical sets — drift between them would silently reject perfectly
+    valid bundles at load time."""
+    from SymbolicDSGE.monte_carlo.catalog import STEP_CATALOG
+    from SymbolicDSGE.monte_carlo.spec import STEP_KINDS
+
+    assert STEP_KINDS == frozenset(STEP_CATALOG.keys())
+
+
+def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
+    """Authoring a transform-containing pipeline and re-opening it from a
+    bundle preserves every node and its bound params."""
+    import pathlib
+
+    from SymbolicDSGE import BundleBuilder, load_bundle
+
+    yaml_text = pathlib.Path("MODELS/test.yaml").read_text(encoding="utf-8")
+    pipeline = PipelineSpec(
+        nodes=[
+            _sim_node(),
+            NodeSpec(
+                id="std",
+                step_type="standardize",
+                name="standardize",
+                params={"source": "observables"},
+            ),
+            NodeSpec(
+                id="rm",
+                step_type="rolling_mean",
+                name="rmean",
+                params={"window": 3},
+            ),
+            NodeSpec(
+                id="wm",
+                step_type="wald",
+                name="wald_mean",
+                params={"kind": "mean", "target_vector": [0.0]},
+            ),
+        ],
+        edges=[
+            EdgeSpec(source="sim", target="std"),
+            EdgeSpec(source="std", target="rm"),
+            EdgeSpec(source="rm", target="wm"),
+        ],
+    )
+
+    target = (
+        BundleBuilder(created_by="tx-test")
+        .add_model("reference", yaml_text, compile_kwargs={"n_state": 3, "n_exog": 2})
+        .add_mc(pipeline)
+        .write(tmp_path / "tx.sdsge")
+    )
+
+    loaded = load_bundle(target)
+    assert loaded.mc is not None
+    restored_step_types = [n.step_type for n in loaded.mc.spec.nodes]
+    assert restored_step_types == [
+        "simulation",
+        "standardize",
+        "rolling_mean",
+        "wald",
+    ]
+    # Validation against the restored spec still passes (no drift between the
+    # spec's Literal and the catalog at load time).
+    ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=True)
+    assert [node.name for node in ordered] == [
+        "datagen",
+        "standardize",
+        "rmean",
+        "wald_mean",
+    ]
+
+
 def test_build_pipeline_emits_transform_mcstep_with_bound_params() -> None:
     spec = PipelineSpec(
         nodes=[
