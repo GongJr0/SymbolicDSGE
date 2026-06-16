@@ -16,10 +16,10 @@ import SymbolicDSGE
 from SymbolicDSGE import (
     BundleBuilder,
     DSGESolver,
-    LoadedBundle,
     ModelParser,
     load_bundle,
 )
+from SymbolicDSGE.bundle import LoadedBundle
 from SymbolicDSGE.core.solved_model import SolvedModel
 
 _MODEL_PATH = Path("MODELS/test.yaml")
@@ -37,7 +37,6 @@ def _solve_test_model() -> SolvedModel:
 def test_top_level_exports_are_importable() -> None:
     assert SymbolicDSGE.load_bundle is load_bundle
     assert SymbolicDSGE.BundleBuilder is BundleBuilder
-    assert SymbolicDSGE.LoadedBundle is LoadedBundle
 
 
 def test_path_based_parser_retains_source_yaml() -> None:

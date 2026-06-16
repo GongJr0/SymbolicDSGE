@@ -16,6 +16,7 @@ from typing import Any, Literal, get_args
 MCStepKind = Literal[
     # datagen / filter
     "simulation",
+    "raw_data",
     "filter",
     # terminal: tests
     "wald",
@@ -36,6 +37,8 @@ MCStepKind = Literal[
     "rolling_mean",
     "rolling_std",
     "rolling_var",
+    # custom (user-supplied op, shipped as a cloudpickle bundle member)
+    "custom",
 ]
 
 #: Authoritative set of valid step-type strings. Must agree with the keys of

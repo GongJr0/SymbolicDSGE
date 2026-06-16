@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -133,17 +133,48 @@ def pipeline_result_wire(
     document: dict[str, Any], traces: dict[str, NDArray[Any]]
 ) -> dict[str, Any]:
     """Re-merge a trace-free :func:`result_document` with :func:`result_traces`
-    into the canonical UI wire shape (used for hydration)."""
+    into the canonical UI wire shape (used for hydration).
+
+    A float trace column that is degenerate across *every* replication (e.g. a
+    test that returns an undefined-variance NaN statistic in all reps) is dropped
+    by the Parquet encoder, since an all-null column carries no values. Such a
+    column is reconstructed here as a null-filled trace of the summary's length —
+    which is exactly what the canonical wire reports for an all-NaN trace — so
+    hydration stays robust instead of raising ``KeyError`` on the missing key.
+    """
     wire = copy.deepcopy(document)
     for name, entry in wire["test_summaries"].items():
-        entry["statistic_trace"] = _json_value(traces[f"test.{name}.statistic"])
-        entry["pval_trace"] = _json_value(traces[f"test.{name}.pval"])
-        entry["status_trace"] = [int(x) for x in traces[f"test.{name}.status"]]
+        n = int(entry.get("n", 0))
+        entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)
+        entry["pval_trace"] = _trace_or_null(traces, f"test.{name}.pval", n)
+        entry["status_trace"] = _status_trace(traces, f"test.{name}.status")
     for name, entry in wire["regression_summaries"].items():
-        entry["coef_trace"] = _json_value(traces[f"regression.{name}.coef"])
-        entry["r2_trace"] = _json_value(traces[f"regression.{name}.r2"])
-        entry["status_trace"] = [int(x) for x in traces[f"regression.{name}.status"]]
+        n_rep = int(entry.get("n_rep", 0))
+        k = int(entry.get("k", 0))
+        coef = traces.get(f"regression.{name}.coef")
+        entry["coef_trace"] = (
+            _json_value(coef)
+            if coef is not None
+            else [[None] * k for _ in range(n_rep)]
+        )
+        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_rep)
+        entry["status_trace"] = _status_trace(traces, f"regression.{name}.status")
     return wire
+
+
+def _trace_or_null(traces: dict[str, NDArray[Any]], key: str, n: int) -> list[Any]:
+    """A trace column as a JSON-safe list, or ``n`` nulls if it was dropped."""
+    arr = traces.get(key)
+    if arr is not None:
+        return cast(list[Any], _json_value(arr))
+    return [None] * n
+
+
+def _status_trace(traces: dict[str, NDArray[Any]], key: str) -> list[int]:
+    """Status traces are integer-valued and never all-null, so a missing column
+    only occurs for an empty run; fall back to an empty list."""
+    arr = traces.get(key)
+    return [int(x) for x in arr] if arr is not None else []
 
 
 def _serialize_regression_summary(summary: Any) -> dict[str, Any]:

@@ -32,12 +32,20 @@ from ..estimation.spec import (
     MCMCResultMeta,
     OptimizationResultMeta,
 )
-from ..monte_carlo.mc_constructs import MCPipelineResult
+from ..monte_carlo.core import MCPipeline
+from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from ..monte_carlo.serialize import result_document, result_traces
 from ..monte_carlo.spec import PipelineSpec
+from ..monte_carlo.spec_compile import raw_data_arrays
 from .container import write_bundle
 from .manifest import Manifest, Member, SimSpec
-from .parquet import csv_to_json, to_parquet, trace_to_csv, trace_to_json
+from .parquet import (
+    arrays_to_parquet,
+    csv_to_json,
+    to_parquet,
+    trace_to_csv,
+    trace_to_json,
+)
 
 _MODEL_PATH = "model/{role}.yaml"
 _ESTIMATION_SPEC = "estimation/spec.json"
@@ -50,6 +58,8 @@ _MC_PIPELINE = "montecarlo/pipeline.json"
 _MC_RESULT = "montecarlo/result.json"
 _MC_TRACE_PARQUET = "montecarlo/traces.parquet"
 _MC_TRACE_CSV = "montecarlo/traces.csv"
+_MC_RAW_DATA = "montecarlo/data/{ref}.parquet"
+_MC_CUSTOM_OP = "montecarlo/custom/{ref}.pkl"
 
 
 def _library_version() -> str:
@@ -215,21 +225,35 @@ class BundleBuilder:
 
     def add_mc(
         self,
-        pipeline: PipelineSpec,
+        pipeline: MCPipeline | PipelineSpec,
         *,
         result: MCPipelineResult | None = None,
         run_id: str = "",
         as_parquet: bool = True,
     ) -> BundleBuilder:
-        """Add the MC tab: pipeline spec (always), and optionally a run result
-        (split into a trace-free document + a trace member).
+        """Add the MC tab from a live :class:`MCPipeline` or a :class:`PipelineSpec`.
 
-        ``as_parquet=False`` writes traces as CSV instead — the format-agnostic
-        loader reads either.
+        ``add_mc(pipeline)`` — the high-level path. A live pipeline is compiled to
+        its graph spec via :meth:`MCPipeline.to_spec`, and its bulk side-channels
+        are shipped as their own members: ``raw_data`` datagen arrays as Parquet,
+        and ``custom`` ops as cloudpickle blobs (each callable is enforced/wrapped
+        as a :class:`NumpyCustomFunc` so its source travels for receiver audit).
+
+        ``add_mc(spec)`` — the explicit path for a hand-authored spec (any
+        ``raw_data``/``custom`` members must be staged separately).
+
+        Optionally records a run ``result`` (split into a trace-free document + a
+        trace member); ``as_parquet=False`` writes traces as CSV — the
+        format-agnostic loader reads either.
         """
+        if isinstance(pipeline, MCPipeline):
+            spec = pipeline.to_spec()
+            self._add_mc_resources(pipeline)
+        else:
+            spec = pipeline
         self._add(
             Member(path=_MC_PIPELINE, kind="mc_pipeline"),
-            pipeline.to_json(indent=2).encode("utf-8"),
+            spec.to_json(indent=2).encode("utf-8"),
         )
         if result is not None:
             document = result_document(result, run_id=run_id)
@@ -247,6 +271,37 @@ class BundleBuilder:
                     data = trace_to_csv(traces)
                 self._add(Member(path=path, kind="mc_trace"), data)
         return self
+
+    def _add_mc_resources(self, pipeline: MCPipeline) -> None:
+        """Ship the bulk side-channels a live pipeline references by key.
+
+        ``raw_data`` datagens become Parquet array members; ``custom`` ops become
+        cloudpickle members (wrapped as :class:`NumpyCustomFunc` first, which
+        enforces the author-side contract and carries the source for audit).
+        """
+        for step in pipeline.steps:
+            if step.step_type == "raw_data":
+                arrays = raw_data_arrays(step.kwargs)
+                if not arrays:
+                    continue
+                data, _shapes = arrays_to_parquet(arrays)
+                self._add(
+                    Member(
+                        path=_MC_RAW_DATA.format(ref=step.name),
+                        kind="mc_raw_data",
+                        options={"ref": step.name},
+                    ),
+                    data,
+                )
+            elif step.step_type == "custom":
+                self._add(
+                    Member(
+                        path=_MC_CUSTOM_OP.format(ref=step.name),
+                        kind="mc_custom_op",
+                        options={"ref": step.name},
+                    ),
+                    _custom_op_blob(step),
+                )
 
     # -- simulation prefill ---------------------------------------------------
 
@@ -295,6 +350,21 @@ class BundleBuilder:
             raise ValueError(f"Duplicate bundle member path {member.path!r}.")
         self._members.append(member)
         self._files[member.path] = data
+
+
+def _custom_op_blob(step: MCStep) -> bytes:
+    """Wrap a custom step's callable as a NumpyCustomFunc and cloudpickle it.
+
+    Wrapping enforces the author-side contract (top-level def, safe namespace)
+    and snapshots the source + captured globals, so the receiver can audit the
+    op at load. Already-wrapped callables pass through idempotently.
+    """
+    import cloudpickle
+
+    from ..monte_carlo.custom_op import NumpyCustomFunc
+
+    wrapped = NumpyCustomFunc(step.func)
+    return cast(bytes, cloudpickle.dumps(wrapped))
 
 
 def _estimator_observed(

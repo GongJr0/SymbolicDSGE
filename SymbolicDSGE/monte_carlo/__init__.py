@@ -1,64 +1,13 @@
-from .config import (
-    breusch_godfrey_test_step,
-    breusch_pagan_test_step,
-    chow_test_step,
-    cusum_test_step,
-    cusumsq_test_step,
-    diff_step,
-    jarque_bera_test_step,
-    ljung_box_test_step,
-    log_diff_step,
-    log_step,
-    raw_data_step,
-    reference_filter_step,
-    regression_step,
-    rolling_mean_step,
-    rolling_std_step,
-    rolling_var_step,
-    simulation_step,
-    standardize_step,
-    transform_step,
-    wald_test_step,
-)
-from .core import MCPipeline
-from .mc_constructs import (
-    ContextOp,
-    DataGenOp,
-    DataGenReturn,
-    FilterOp,
-    MCContext,
-    MCData,
-    MCFailure,
-    MCPipelineResult,
-    MCStep,
-    OpType,
-    RegressionOp,
-    TestOp,
-    report_mc_performance,
-    report_mc_step_performance,
-)
-from .operations import (
-    raw_data_datagen,
-    run_chow_test,
-    run_cusum_test,
-    run_cusumsq_test,
-    run_breusch_godfrey_test,
-    run_breusch_pagan_test,
-    run_jarque_bera_test,
-    run_ljung_box_test,
-    run_reference_filter,
-    run_regression,
-    run_wald_test,
-    simulate_dgp,
-)
-from .reference_constructs import MCReferenceConstruct
-from .serialize import (
-    pipeline_result_wire,
-    result_document,
-    result_traces,
-    serialize_pipeline_result,
-)
-from .spec import EdgeSpec, MCStepKind, NodeSpec, PipelineSpec
+"""Monte-Carlo pipelines: public API.
+
+Step factories live in :mod:`SymbolicDSGE.monte_carlo.operations` and are reached
+through their group (``operations.tests``, ``operations.transforms``,
+``operations.regressions``, ``operations.core``). Result serialization helpers
+live in :mod:`SymbolicDSGE.monte_carlo.serialize`. This namespace exposes the
+types and entry points needed to build, run, and inspect pipelines in code.
+"""
+
+from .builder import build_pipeline, run_pipeline, validate_pipeline_spec
 from .catalog import (
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
@@ -67,72 +16,41 @@ from .catalog import (
     StepDefinition,
     catalog_payload,
 )
-from .builder import build_pipeline, run_pipeline, validate_pipeline_spec
+from .core import MCPipeline
+from .custom_op import NumpyCustomFunc, custom_operation
+from .mc_constructs import (
+    MCContext,
+    MCData,
+    MCPipelineResult,
+    MCStep,
+    OpType,
+)
+from .spec import EdgeSpec, MCStepKind, NodeSpec, PipelineSpec
 
 __all__ = [
-    "ContextOp",
-    "DataGenOp",
-    "DataGenReturn",
-    "EdgeSpec",
-    "FieldSpec",
-    "FilterOp",
-    "MCContext",
-    "MCData",
-    "MCFailure",
+    # pipeline + execution
     "MCPipeline",
     "MCPipelineResult",
-    "MCReferenceConstruct",
+    "build_pipeline",
+    "run_pipeline",
+    "validate_pipeline_spec",
+    # step constructs (custom-op authoring surface)
     "MCStep",
-    "MCStepKind",
-    "NodeSpec",
+    "MCContext",
+    "MCData",
     "OpType",
+    "custom_operation",
+    "NumpyCustomFunc",
+    # graph spec (serialization / bundle)
     "PipelineSpec",
-    "RegressionOp",
+    "NodeSpec",
+    "EdgeSpec",
+    "MCStepKind",
+    # catalogue
     "STEP_CATALOG",
     "StepDefinition",
+    "FieldSpec",
     "TERMINAL_STEP_TYPES",
     "TRANSFORM_STEP_TYPES",
-    "TestOp",
-    "breusch_godfrey_test_step",
-    "build_pipeline",
     "catalog_payload",
-    "breusch_pagan_test_step",
-    "chow_test_step",
-    "cusum_test_step",
-    "cusumsq_test_step",
-    "jarque_bera_test_step",
-    "ljung_box_test_step",
-    "raw_data_datagen",
-    "raw_data_step",
-    "reference_filter_step",
-    "report_mc_performance",
-    "report_mc_step_performance",
-    "regression_step",
-    "run_breusch_godfrey_test",
-    "run_breusch_pagan_test",
-    "run_chow_test",
-    "run_cusum_test",
-    "run_cusumsq_test",
-    "run_reference_filter",
-    "run_regression",
-    "run_jarque_bera_test",
-    "run_ljung_box_test",
-    "run_pipeline",
-    "run_wald_test",
-    "simulate_dgp",
-    "simulation_step",
-    "validate_pipeline_spec",
-    "diff_step",
-    "log_diff_step",
-    "log_step",
-    "rolling_mean_step",
-    "rolling_std_step",
-    "rolling_var_step",
-    "standardize_step",
-    "transform_step",
-    "wald_test_step",
-    "pipeline_result_wire",
-    "result_document",
-    "result_traces",
-    "serialize_pipeline_result",
 ]

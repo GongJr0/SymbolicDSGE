@@ -224,6 +224,22 @@ def _extract_source(func: Callable[..., Any]) -> str:
 # ---- AST validation ------------------------------------------------------
 
 
+def _is_custom_operation_decorator(node: ast.expr) -> bool:
+    """Recognize the ``@custom_operation`` marker.
+
+    A function decorated with :func:`custom_operation` carries that decorator in
+    its captured source (``inspect.getsource`` includes decorator lines), so the
+    validator must tolerate this one marker while still rejecting every other
+    decorator. Matched by trailing name so ``@custom_operation`` and
+    ``@sd.custom_operation`` both pass.
+    """
+    if isinstance(node, ast.Name):
+        return node.id == "custom_operation"
+    if isinstance(node, ast.Attribute):
+        return node.attr == "custom_operation"
+    return False
+
+
 def _walk_attribute_chain(node: ast.Attribute) -> tuple[str, list[str]] | None:
     """Reduce ``np.linalg.solve`` to ``("np", ["linalg", "solve"])``.
 
@@ -272,11 +288,13 @@ class _Validator(ast.NodeVisitor):
         return list(self._attribute_loads)
 
     def validate(self, tree: ast.FunctionDef) -> None:
-        if tree.decorator_list:
-            self._fail(
-                "decorated functions cannot be wrapped. Apply NumpyCustomFunc "
-                "as the innermost wrapper, or remove decorators."
-            )
+        for decorator in tree.decorator_list:
+            if not _is_custom_operation_decorator(decorator):
+                self._fail(
+                    "decorated functions cannot be wrapped (other than the "
+                    "@custom_operation marker). Apply @custom_operation as the "
+                    "only decorator, or remove decorators."
+                )
         args = tree.args
         for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
             self._function_locals.add(arg.arg)
@@ -733,3 +751,22 @@ class NumpyCustomFunc:
 
     def __repr__(self) -> str:
         return f"NumpyCustomFunc({self._name})"
+
+
+def custom_operation(func: Callable[..., Any]) -> NumpyCustomFunc:
+    """Decorator marking a numerical function as a shippable custom op.
+
+    Equivalent to wrapping with :class:`NumpyCustomFunc`, but as a decorator it
+    documents intent at the definition site — a reviewer reading the code sees
+    the op is destined for a ``.sdsge`` bundle — and guarantees the function is
+    validated and snapshotted up front rather than (auto-)wrapped later::
+
+        @custom_operation
+        def zscore(*, context, **kwargs):
+            arr = context.require_data().observables
+            return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+
+    The decorated name becomes a callable :class:`NumpyCustomFunc`, so it can be
+    handed straight to ``transform_step`` (or any custom-op factory).
+    """
+    return NumpyCustomFunc(func)

@@ -13,7 +13,26 @@ from SymbolicDSGE.monte_carlo import (
     catalog_payload,
     validate_pipeline_spec,
 )
-from SymbolicDSGE.monte_carlo.spec import EdgeSpec, NodeSpec, PipelineSpec
+from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.spec import STEP_KINDS, EdgeSpec, NodeSpec, PipelineSpec
+
+
+def test_factories_stamp_step_type_matching_catalog() -> None:
+    # Every catalog factory must stamp the same step_type as its catalog key,
+    # so a live MCPipeline can be compiled back to a PipelineSpec losslessly.
+    for step_type, definition in STEP_CATALOG.items():
+        step = definition.factory(name="probe")
+        assert step.step_type == step_type
+
+
+def test_catalog_keys_are_all_valid_step_kinds() -> None:
+    assert set(STEP_CATALOG) <= STEP_KINDS
+
+
+def test_transform_step_stamps_custom_kind() -> None:
+    step = transform_step("tf", lambda **_: None)
+    assert step.step_type == "custom"
+
 
 _FIELD_KEYS = {
     "key",

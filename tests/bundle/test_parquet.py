@@ -5,11 +5,54 @@ import json
 import numpy as np
 import pytest
 
-from SymbolicDSGE.bundle import csv_to_json, from_parquet, to_parquet, trace_to_json
+from SymbolicDSGE.bundle import (
+    arrays_from_parquet,
+    arrays_to_parquet,
+    csv_to_json,
+    from_parquet,
+    to_parquet,
+    trace_to_json,
+)
 
 
 def _records(ndjson: bytes) -> list[dict]:
     return [json.loads(line) for line in ndjson.splitlines() if line.strip()]
+
+
+def test_arrays_to_parquet_round_trips_3d_per_rep() -> None:
+    rng = np.random.default_rng(0)
+    states = rng.normal(size=(4, 5, 2))  # n_rep, T, k
+    observables = rng.normal(size=(4, 5, 3))
+
+    data, shapes = arrays_to_parquet({"states": states, "observables": observables})
+    assert shapes == {"states": [4, 5, 2], "observables": [4, 5, 3]}
+
+    restored = arrays_from_parquet(data, shapes)
+    np.testing.assert_allclose(restored["states"], states)
+    np.testing.assert_allclose(restored["observables"], observables)
+
+
+def test_arrays_to_parquet_round_trips_mixed_2d_and_1d() -> None:
+    states = np.arange(15, dtype=float).reshape(5, 3)  # shared (T, k)
+    vector = np.linspace(0.0, 1.0, 5)  # 1-D (T,)
+
+    data, shapes = arrays_to_parquet({"states": states, "raw:eps": vector})
+    assert shapes == {"states": [5, 3], "raw:eps": [5]}
+
+    restored = arrays_from_parquet(data, shapes)
+    np.testing.assert_allclose(restored["states"], states)
+    np.testing.assert_allclose(restored["raw:eps"], vector)
+
+
+def test_arrays_to_parquet_rejects_empty() -> None:
+    with pytest.raises(ValueError, match="at least one array"):
+        arrays_to_parquet({})
+
+
+def test_arrays_from_parquet_reports_missing_array() -> None:
+    data, shapes = arrays_to_parquet({"states": np.zeros((3, 2))})
+    with pytest.raises(KeyError, match="observables"):
+        arrays_from_parquet(data, {"observables": [3, 2]})
 
 
 def test_to_parquet_round_trip_via_ndjson() -> None:

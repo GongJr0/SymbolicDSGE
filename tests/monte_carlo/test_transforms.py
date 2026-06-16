@@ -19,18 +19,20 @@ import pytest
 from SymbolicDSGE.monte_carlo import (
     TRANSFORM_STEP_TYPES,
     build_pipeline,
+    validate_pipeline_spec,
+)
+from SymbolicDSGE.monte_carlo.operations.core import simulation_step
+from SymbolicDSGE.monte_carlo.operations.transforms import (
     diff_step,
     log_diff_step,
     log_step,
     rolling_mean_step,
     rolling_std_step,
     rolling_var_step,
-    simulation_step,
     standardize_step,
-    validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCContext, MCData, OpType
-from SymbolicDSGE.monte_carlo.operations import (
+from SymbolicDSGE.monte_carlo.operations.transforms.ops import (
     run_diff,
     run_log,
     run_log_diff,
@@ -586,13 +588,15 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> No
 
 
 def test_step_kinds_match_catalog() -> None:
-    """The spec-side `STEP_KINDS` and the catalog-side `STEP_CATALOG` must
-    cover identical sets — drift between them would silently reject perfectly
-    valid bundles at load time."""
+    """Every GUI-catalog step kind must be a valid spec `STEP_KIND`; drift would
+    silently reject perfectly valid bundles at load time. `STEP_KINDS` may be a
+    strict superset: serialization-only datagens (e.g. ``raw_data``) are valid
+    spec kinds but carry no GUI-authorable `StepDefinition`."""
     from SymbolicDSGE.monte_carlo.catalog import STEP_CATALOG
     from SymbolicDSGE.monte_carlo.spec import STEP_KINDS
 
-    assert STEP_KINDS == frozenset(STEP_CATALOG.keys())
+    assert frozenset(STEP_CATALOG.keys()) <= STEP_KINDS
+    assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {"raw_data", "custom"}
 
 
 def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:

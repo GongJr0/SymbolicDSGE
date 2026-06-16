@@ -24,9 +24,22 @@ from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     MCContext,
     MCData,
-    MCReferenceConstruct,
     MCStep,
     OpType,
+)
+from SymbolicDSGE.monte_carlo.mc_constructs import (
+    report_mc_performance,
+    report_mc_step_performance,
+)
+from SymbolicDSGE.monte_carlo.reference_constructs import MCReferenceConstruct
+from SymbolicDSGE.monte_carlo.operations.core import (
+    raw_data_step,
+    reference_filter_step,
+    simulation_step,
+)
+from SymbolicDSGE.monte_carlo.operations.core.ops import simulate_dgp
+from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
+from SymbolicDSGE.monte_carlo.operations.tests import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
@@ -34,17 +47,10 @@ from SymbolicDSGE.monte_carlo import (
     cusumsq_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
-    raw_data_step,
-    reference_filter_step,
-    regression_step,
-    report_mc_performance,
-    report_mc_step_performance,
-    simulate_dgp,
-    simulation_step,
-    transform_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operation_utils import (
+from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.operations.utils import (
     _clone_or_pass_shocks,
     _resolve_context_array,
     _resolve_seed_increment,

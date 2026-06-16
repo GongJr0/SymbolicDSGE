@@ -13,10 +13,12 @@ from SymbolicDSGE.monte_carlo import (
     MCPipelineResult,
     NodeSpec,
     PipelineSpec,
-    jarque_bera_test_step,
+)
+from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
+from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
+from SymbolicDSGE.monte_carlo.serialize import (
     pipeline_result_wire,
-    raw_data_step,
-    regression_step,
     result_document,
     result_traces,
     serialize_pipeline_result,
@@ -92,6 +94,26 @@ def test_wire_equals_document_plus_traces() -> None:
         result_document(result, run_id="r1"), result_traces(result)
     )
     assert recombined == wire
+
+
+def test_wire_reconstructs_dropped_all_nan_trace_columns() -> None:
+    # A test whose statistic/pval are NaN in every rep yields all-null float
+    # trace columns, which the Parquet encoder drops. Hydration must not raise
+    # on the missing keys; it reconstructs them as null-filled traces.
+    result = _run_demo_pipeline(n_rep=3)
+    document = result_document(result, run_id="r1")
+    traces = result_traces(result)
+    # Simulate the encoder dropping the all-null float columns for "jb".
+    del traces["test.jb.statistic"]
+    del traces["test.jb.pval"]
+
+    wire = pipeline_result_wire(document, traces)
+
+    entry = wire["test_summaries"]["jb"]
+    assert entry["statistic_trace"] == [None, None, None]
+    assert entry["pval_trace"] == [None, None, None]
+    # status (integer-valued) survives and is unchanged.
+    assert len(entry["status_trace"]) == 3
 
 
 def test_pipeline_spec_round_trips() -> None:

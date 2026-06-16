@@ -142,6 +142,12 @@ class MCStep:
     func: Callable[..., Any]
     kwargs: Mapping[str, Any] = field(default_factory=dict)
     store_key: str | None = None
+    #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
+    #: or ``"custom"`` for user-supplied ops. Stamped by the step factories;
+    #: lets a live ``MCPipeline`` be compiled back to a serializable
+    #: ``PipelineSpec`` without a ``func``-to-kind reverse map. ``None`` only for
+    #: hand-built steps that bypassed the factories.
+    step_type: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name:

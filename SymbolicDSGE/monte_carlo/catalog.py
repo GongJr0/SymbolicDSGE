@@ -10,31 +10,33 @@ registry replaces both the old ``ui.mc.mc_catalog`` literal and the ``build_pipe
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 import numpy as np
 
 from ..core.shock_generators import Shock
-from .config import (
+from .operations.core import reference_filter_step, simulation_step
+from .operations.regressions import regression_step
+from .operations.tests import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
     cusum_test_step,
     cusumsq_test_step,
-    diff_step,
     jarque_bera_test_step,
     ljung_box_test_step,
+    wald_test_step,
+)
+from .operations.transforms import (
+    diff_step,
     log_diff_step,
     log_step,
-    reference_filter_step,
-    regression_step,
     rolling_mean_step,
     rolling_std_step,
     rolling_var_step,
-    simulation_step,
     standardize_step,
-    wald_test_step,
 )
 from .mc_constructs import MCStep
 
@@ -56,7 +58,7 @@ INPUT_SOURCES = [
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
 StepRole = Literal["datagen", "filter", "transform", "terminal"]
-CompileParams = Callable[[dict[str, Any], "SolvedModel"], dict[str, Any]]
+CompileParams = Callable[[dict[str, Any], "SolvedModel | None"], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -115,7 +117,9 @@ class StepDefinition:
             "fields": [spec.to_dict() for spec in self.fields],
         }
 
-    def build(self, name: str, params: dict[str, Any], dgp: SolvedModel) -> MCStep:
+    def build(
+        self, name: str, params: dict[str, Any], dgp: SolvedModel | None
+    ) -> MCStep:
         """Compile cleaned ``params`` into an :class:`MCStep` via the factory."""
         if self.compile_params is not None:
             params = self.compile_params(params, dgp)
@@ -145,8 +149,13 @@ def _integer_or_keyword(
 
 
 def _build_generated_shocks(
-    dgp: SolvedModel, params: dict[str, Any]
+    dgp: SolvedModel | None, params: dict[str, Any]
 ) -> dict[str, Shock] | None:
+    if dgp is None:
+        raise ValueError(
+            "A solved DGP model is required to generate simulation shocks; pass "
+            "explicit `shocks` to author a simulation step without one."
+        )
     T = int(params["T"])
     distribution_value = str(params.pop("distribution", "norm"))
     if distribution_value not in {"norm", "t", "uni"}:
@@ -232,24 +241,55 @@ def _regression_params(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _compile_simulation(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _coerce_shock_mapping(value: Any) -> dict[str, Shock]:
+    """Normalize a ``shocks`` mapping of live :class:`Shock` / serialized dicts.
+
+    Library-authored pipelines carry explicit :class:`Shock` instances; a spec
+    loaded from a bundle carries their :meth:`Shock.to_dict` form. Both compile
+    to the same live mapping the factory stores.
+    """
+    if not isinstance(value, Mapping):
+        raise TypeError("simulation 'shocks' must be a mapping of name -> Shock.")
+    out: dict[str, Shock] = {}
+    for key, shock in value.items():
+        if isinstance(shock, Shock):
+            out[str(key)] = shock
+        elif isinstance(shock, Mapping):
+            out[str(key)] = Shock.from_dict(shock)
+        else:
+            raise TypeError(
+                f"shocks[{key!r}] must be a Shock or a serialized shock dict."
+            )
+    return out
+
+
+def _compile_simulation(
+    params: dict[str, Any], dgp: SolvedModel | None
+) -> dict[str, Any]:
     params = dict(params)
     params["seed_increment"] = _integer_or_keyword(
         params.get("seed_increment", "auto"),
         keywords={"auto"},
         field_name="seed_increment",
     )
-    params["shocks"] = _build_generated_shocks(dgp, params)
+    if params.get("shocks") is not None:
+        # Explicit (library-authored or bundle-loaded) shocks: pass them through
+        # instead of generating from the GUI shorthand.
+        params["shocks"] = _coerce_shock_mapping(params["shocks"])
+        for key in ("distribution", "seed", "loc", "df"):
+            params.pop(key, None)
+    else:
+        params["shocks"] = _build_generated_shocks(dgp, params)
     return params
 
 
-def _compile_filter(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_filter(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, Any]:
     params = dict(params)
     params.pop("filter_key", None)
     return params
 
 
-def _compile_wald(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_wald(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, Any]:
     params = dict(params)
     kind = str(params.get("kind", "mean"))
     target_key = "target_vector" if kind == "mean" else "target_matrix"
@@ -266,7 +306,9 @@ def _compile_wald(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
     return params
 
 
-def _compile_regression(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_regression(
+    params: dict[str, Any], dgp: SolvedModel | None
+) -> dict[str, Any]:
     return _regression_params(params)
 
 
@@ -706,6 +748,11 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
 STEP_CATALOG: dict[str, StepDefinition] = {
     definition.step_type: definition for definition in _STEP_DEFINITIONS
 }
+
+#: Step kinds that act as the pipeline's single root datagen. ``simulation`` is
+#: catalogue-driven (GUI-authorable); ``raw_data`` ships pre-computed arrays as a
+#: bundle member and has no GUI ``StepDefinition``.
+DATAGEN_STEP_TYPES: frozenset[str] = frozenset({"simulation", "raw_data"})
 
 #: Step kinds that terminate a branch (tests + regression).
 TERMINAL_STEP_TYPES: frozenset[str] = frozenset(
