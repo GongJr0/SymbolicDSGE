@@ -16,9 +16,9 @@ The serializable pipeline spec and the runner that consumes it live in the core 
 | Export | Purpose |
 | --- | --- |
 | `PipelineSpec` / `NodeSpec` / `EdgeSpec` | Pydantic-free graph specification. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
-| `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against [`STEP_CATALOG`](#step-catalog); returns the ordered node list when the graph is well-formed. |
-| `build_pipeline(ordered_nodes, *, dgp)` | Compile validated nodes into an `MCPipeline` ready to run. |
-| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast)` | One-shot validate + compile + run; returns `MCPipelineResult`. |
+| `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against the step-kind sets and catalog metadata; returns the ordered node list when the graph is well-formed. |
+| `build_pipeline(ordered_nodes, *, dgp=None, resources=None)` | Compile validated nodes into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a bundle spec. |
+| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, resources=None)` | One-shot validate + compile + run; returns `MCPipelineResult`. |
 
 ```python
 from SymbolicDSGE import load_bundle
@@ -31,20 +31,26 @@ result = run_pipeline(
     dgp=loaded.dgp,
     n_rep=500,
     fail_fast=True,
+    resources=loaded.mc.resources,
 )
 ```
 
 ???+ tip "Bundle integration"
-    A loaded `LoadedMC.spec` is a `PipelineSpec` ready for these entry points. See the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-a-monte-carlo-pipeline-from-a-loaded-bundle) for the end-to-end flow.
+    A loaded `LoadedMC.spec` is a `PipelineSpec`; `LoadedMC.resources` carries the side-channel arrays/callables needed by `raw_data` and `custom` nodes. See the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-a-monte-carlo-pipeline-from-a-loaded-bundle) for the end-to-end flow.
 
 ## Step catalog
 
-`STEP_CATALOG` is the registry that drives validation, compilation, and the GUI step palette. Compilation is catalog-driven — there is no per-step branching in `build_pipeline`.
+`STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_data` and `custom` reattach large arrays or callables through the `resources` seam when a bundled pipeline is loaded.
 
-| Export | Purpose |
+| Name | Purpose |
 | --- | --- |
 | `STEP_CATALOG` | Mapping from `step_type` (string) to `StepDefinition`. |
-| `StepDefinition` | Per-step metadata: human label, parameter `FieldSpec` list, source/output flags, terminal flag. |
+| `StepDefinition` | Per-step metadata: human label, parameter `FieldSpec` list, operation role, category, factory, and optional parameter compile hook. |
 | `FieldSpec` | One parameter on a step: name, type, default, validation hints. Drives the GUI form generation. |
-| `TERMINAL_STEP_TYPES` | Set of step types that emit a result column (tests, regressions). Validation enforces that every pipeline ends in one. |
+| `DATAGEN_STEP_TYPES` | Catalog-local step-kind set for valid datagen roots: `"simulation"` and `"raw_data"`. |
+| `TRANSFORM_STEP_TYPES` | Catalog-local step-kind set for catalog-backed transforms. |
+| `TERMINAL_STEP_TYPES` | Catalog-local step-kind set for test/regression summaries. Terminal steps cannot link forward. |
 | `catalog_payload()` | JSON-safe rendering of the catalog for the GUI / external consumers. |
+
+???+ note "Step-kind sets"
+    The step-kind sets are implementation metadata in `SymbolicDSGE.monte_carlo.catalog`. They describe compiler behavior but are not the primary user-facing import surface.

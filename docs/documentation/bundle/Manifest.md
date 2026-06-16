@@ -85,6 +85,8 @@ __Recognized kinds (`MEMBER_KINDS`):__
 | `mc_pipeline` | `PipelineSpec` JSON. |
 | `mc_result` | Trace-free MC run document (JSON). |
 | `mc_trace` | MC trace columns (CSV or Parquet). |
+| `mc_raw_data` | Raw-data arrays referenced by MC `raw_data` nodes. |
+| `mc_custom_op` | Bundle-safe custom operation referenced by MC `custom` nodes. |
 
 ???+ note "Kind whitelist"
     `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`. Adding a new kind requires bumping `SDSGE_FORMAT_VERSION` so older readers don't silently drop it.

@@ -12,10 +12,11 @@ class MCStep(
     func: Callable[..., Any],
     kwargs: Mapping[str, Any] = {},
     store_key: str | None = None,
+    step_type: str | None = None,
 )
 ```
 
-`MCStep` describes one operation in the pipeline. Most users should create steps through `simulation_step`, `raw_data_step`, `transform_step`, `reference_filter_step`, and `wald_test_step`.
+`MCStep` describes one operation in the pipeline. Most users should create steps through the factories under `SymbolicDSGE.monte_carlo.operations`.
 
 __Fields:__
 
@@ -26,6 +27,15 @@ __Fields:__
 | func | `#!python Callable` | Callable executed by the pipeline. |
 | kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step and passed into `func`. |
 | store_key | `#!python str | None` | Optional payload key. If omitted, `name` is used. |
+| step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, or `"custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
+
+???+ note "Factory groups"
+    Step factories are organized by operation group:
+
+    - `SymbolicDSGE.monte_carlo.operations.core`
+    - `SymbolicDSGE.monte_carlo.operations.tests`
+    - `SymbolicDSGE.monte_carlo.operations.regressions`
+    - `SymbolicDSGE.monte_carlo.operations.transforms`
 
 &nbsp;
 
@@ -55,6 +65,19 @@ __Fields:__
 &nbsp;
 
 ```python
+@dataclass(frozen=True)
+class DataGenReturn(
+    state_mat: ndarray | None,
+    obs_mat: ndarray | None,
+    n_exog: int,
+)
+```
+
+Legacy simulation-data container kept for compatibility.
+
+&nbsp;
+
+```python
 @dataclass
 class MCContext(
     rep_idx: int,
@@ -75,6 +98,29 @@ __Methods:__
 |:---------|----------------:|
 | `require_data()` | Return `data` or raise if no data-generation step has populated it. |
 | `require_payload(key)` | Return a payload by key or raise if the key is missing. |
+
+&nbsp;
+
+```python
+@dataclass(frozen=True)
+class MCFailure(
+    rep_idx: int,
+    step_name: str,
+    error_type: str,
+    message: str,
+)
+```
+
+`MCFailure` records one collected replication failure when `MCPipeline.run(..., fail_fast=False)`.
+
+__Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| rep_idx | `#!python int` | Replication index that failed. |
+| step_name | `#!python str` | Step executing when the failure occurred. |
+| error_type | `#!python str` | Exception type name. |
+| message | `#!python str` | Exception message. |
 
 &nbsp;
 
@@ -119,6 +165,7 @@ __Fields and Properties:__
 | step_it_s | `#!python Mapping[str, float]` | Step calls attempted per elapsed second by step name. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
+| test_status_traces | `#!python Mapping[str, tuple[TestStatus, ...]]` | Shortcut for each test summary's status trace. |
 | rejection_traces | `#!python Mapping[str, ndarray]` | Boolean rejection trace for each test summary. |
 | coefficient_traces | `#!python Mapping[str, ndarray]` | Shortcut for each regression summary's coefficient trace. |
 | regression_status_traces | `#!python Mapping[str, tuple[RegressionStatus, ...]]` | Shortcut for each regression summary's status trace. |

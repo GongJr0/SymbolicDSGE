@@ -13,14 +13,16 @@ Add steps from the palette by selecting or dragging them onto the canvas. Select
 
 The graph represents data dependencies:
 
-- The DGP simulation is the single root node.
-- Simulation and filter steps may connect to multiple dependent steps.
-- Filters must connect directly from simulation.
-- Tests and regressions connect from simulation or a filter and are terminal.
+- The data source node is the single root. It may be a DGP simulation or raw data node.
+- Filters connect directly from the data source and may feed multiple dependent steps.
+- Built-in transforms and custom transforms may consume data, filter outputs, or upstream payloads. They can feed other transforms, tests, or regressions.
+- Tests and regressions are terminal and cannot feed downstream nodes.
 
 Step order does not affect the current built-in test and regression results. The backend infers a valid execution order from the dependency graph.
 
 Target vectors accept comma- or space-separated values. Target matrices use one row per line, with values separated by commas or spaces.
+
+Custom transform nodes use a restricted numpy-oriented function contract so they can be validated and, when bundled, restored from the `.sdsge` archive.
 
 ## Running and Inspecting Results
 

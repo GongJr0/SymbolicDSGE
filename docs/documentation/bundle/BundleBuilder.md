@@ -116,7 +116,7 @@ Add the estimation tab. `spec` is always written; the other arguments are condit
 
 ```python
 BundleBuilder.add_mc(
-    pipeline: PipelineSpec,
+    pipeline: MCPipeline | PipelineSpec,
     *,
     result: MCPipelineResult | None = None,
     run_id: str = "",
@@ -124,14 +124,17 @@ BundleBuilder.add_mc(
 ) -> BundleBuilder
 ```
 
-Add the Monte Carlo tab. The pipeline spec is always written; an attached `result` is split into a trace-free document (JSON) plus a trace member (Parquet by default, CSV when `as_parquet=False`).
+Add the Monte Carlo tab. A live `MCPipeline` is compiled to a `PipelineSpec` and any side-channel resources it references are written as bundle members. A hand-authored `PipelineSpec` is written as-is. An attached `result` is split into a trace-free document (JSON) plus a trace member (Parquet by default, CSV when `as_parquet=False`).
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| pipeline | `PipelineSpec` describing the MC graph. |
+| pipeline | Live `MCPipeline` or `PipelineSpec` describing the MC graph. |
 | result | Optional live `MCPipelineResult`; the builder splits the document from the bulk traces internally. |
 | run_id | Identifier embedded in the result document. |
 | as_parquet | When `False` the trace member is written as CSV. |
+
+???+ note "MC resources"
+    `raw_data` datagen arrays are written as `mc_raw_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members. These resources are restored on load as `LoadedMC.resources`.
 
 &nbsp;
 

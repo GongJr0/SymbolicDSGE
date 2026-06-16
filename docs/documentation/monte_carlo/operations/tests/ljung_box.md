@@ -22,7 +22,6 @@ ljung_box_test_step(
     ],
     filter_key: str = "filter",
     payload_key: str | None = None,
-    payload_key: str | None = None,
     column: Sequence[int] | int | None = None,
     burn_in: int = 0,
     drop_initial: bool = False,

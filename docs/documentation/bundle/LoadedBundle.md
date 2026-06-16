@@ -63,6 +63,7 @@ __Fields:__
 | spec | `#!python PipelineSpec` | The pipeline graph (nodes + edges). Always present when `LoadedMC` is. |
 | document | `#!python dict[str, Any] \| None` | Trace-free run document (test/regression summaries, timing, etc.). |
 | traces | `#!python dict[str, NDArray] \| None` | Bulk trace columns keyed by `test.<name>.{statistic,pval,status}` / `regression.<name>.{coef,r2,status}`. |
+| resources | `#!python dict[str, Any]` | Restored side-channel objects referenced by the spec, including raw-data arrays and custom callables. |
 
 __Methods:__
 
@@ -77,7 +78,7 @@ Re-merge `document` and `traces` into the canonical UI wire shape (the same dict
     A bundle authored with the pipeline spec only (no completed run attached) carries neither `document` nor `traces`. `wire()` reports `None` so callers can distinguish "no run available" from a run with empty traces.
 
 ???+ tip "Re-running a loaded pipeline"
-    `#!python from SymbolicDSGE.monte_carlo import run_pipeline` runs `spec` against the loaded models without the `[ui]` extra. See [Monte Carlo > Overview](../monte_carlo/index.md) for the core-side runner exports and the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-a-monte-carlo-pipeline-from-a-loaded-bundle).
+    `#!python from SymbolicDSGE.monte_carlo import run_pipeline` runs `spec` against the loaded models without the `[ui]` extra. Pass `resources=loaded.mc.resources` when the spec contains raw-data or custom nodes. See [Monte Carlo > Overview](../monte_carlo/index.md) for the core-side runner exports and the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-a-monte-carlo-pipeline-from-a-loaded-bundle).
 
 ## Example
 

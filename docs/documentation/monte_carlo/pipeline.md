@@ -21,6 +21,18 @@ __Contract:__
 __Methods:__
 
 ```python
+MCPipeline.graph -> PipelineGraph
+```
+
+Return the cached dependency graph inferred from the pipeline's step kwargs. The graph records structural edges used by serialization, including filter dependencies and payload-producing transform/custom steps.
+
+```python
+MCPipeline.to_spec() -> PipelineSpec
+```
+
+Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channels are referenced by key: `raw_data` arrays and `custom` callables are written as separate bundle members by `BundleBuilder.add_mc(...)`.
+
+```python
 MCPipeline.run(
     *,
     reference: SolvedModel,
@@ -52,3 +64,6 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python MCPipelineResult` | Aggregate container with test summaries, optional per-replication payloads, optional scalar test results, optional contexts, and failures. |
+
+???+ warning "Serializable steps"
+    `to_spec()` requires each step to carry a `step_type`. Use the built-in factories rather than hand-building `MCStep` objects when the pipeline needs to enter a `.sdsge` bundle.
