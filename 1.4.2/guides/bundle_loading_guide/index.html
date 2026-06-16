@@ -4160,7 +4160,7 @@
 </span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Parameters:&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">estimation</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">parameters</span><span class="p">])</span>
 </span></code></pre></div>
 <ol>
-<li><code>estimation.spec</code> is an <a href="../../documentation/bundle/#estimation-result-metadata"><code>EstimationSpec</code></a> instance — round-trippable to / from JSON via <code>to_dict()</code> / <code>from_dict()</code>.</li>
+<li><code>estimation.spec</code> is an <a href="../../documentation/bundle/#estimation-spec-and-result-types"><code>EstimationSpec</code></a> instance — round-trippable to / from JSON via <code>to_dict()</code> / <code>from_dict()</code>.</li>
 </ol>
 <p>The result metadata discriminates by type. For MLE / MAP runs the result is an <code>OptimizationResultMeta</code>; for MCMC it is an <code>MCMCResultMeta</code> paired with bulk traces in <code>estimation.posterior</code>.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.estimation.spec</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
