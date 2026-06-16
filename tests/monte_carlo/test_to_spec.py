@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
-import pytest
 
 from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -138,12 +137,18 @@ def test_to_spec_records_raw_data_reference_not_arrays() -> None:
     assert PipelineSpec.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
 
 
-def test_to_spec_rejects_custom_operations() -> None:
+def test_to_spec_emits_custom_with_func_ref() -> None:
     pipe = MCPipeline(
         [
             raw_data_step("dat", observables=np.zeros((4, 5, 3))),
             transform_step("tf", lambda **_: None, source="observables"),
         ]
     )
-    with pytest.raises(NotImplementedError, match="Custom operations"):
-        pipe.to_spec()
+    spec = pipe.to_spec()
+
+    tf = {n.name: n for n in spec.nodes}["tf"]
+    assert tf.step_type == "custom"
+    # the callable rides a separate bundle member; the spec only references it
+    assert tf.params["func_ref"] == "tf"
+    assert tf.params["source"] == "observables"
+    assert {(e.source, e.target) for e in spec.edges} == {("dat", "tf")}

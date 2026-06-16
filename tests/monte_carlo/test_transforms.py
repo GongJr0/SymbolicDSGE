@@ -596,7 +596,7 @@ def test_step_kinds_match_catalog() -> None:
     from SymbolicDSGE.monte_carlo.spec import STEP_KINDS
 
     assert frozenset(STEP_CATALOG.keys()) <= STEP_KINDS
-    assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {"raw_data"}
+    assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {"raw_data", "custom"}
 
 
 def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:

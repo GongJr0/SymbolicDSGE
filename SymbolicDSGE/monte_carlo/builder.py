@@ -16,6 +16,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .catalog import (
+    DATAGEN_STEP_TYPES,
     FILTER_SOURCES,
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
@@ -23,10 +24,20 @@ from .catalog import (
 )
 from .core import MCPipeline
 from .mc_constructs import MCPipelineResult
+from .operations.core import raw_data_step
+from .operations.transforms import transform_step
 from .spec import NodeSpec, PipelineSpec
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
+
+#: Transform-role kinds at the spec level: the catalogue transforms plus the
+#: user ``custom`` op (an ``OpType.TRANSFORM`` middle node shipped as a member).
+_TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"custom"}
+
+#: ``source`` kinds a transform/terminal may legally link from (the structural
+#: parent edge): the root datagen, a filter, or another transform.
+_ROOT_SOURCE_TYPES = DATAGEN_STEP_TYPES | {"filter"}
 
 _DEPENDENCY_SOURCE_KEYS = (
     "source",
@@ -51,9 +62,10 @@ def validate_pipeline_spec(
 ) -> list[NodeSpec]:
     """Validate the pipeline graph and return its steps in execution order.
 
-    Enforces unique ids/names, well-formed edges, exactly one simulation, the
-    terminal/filter linking rules, and single-parent dependencies, then binds
-    each terminal step to its upstream filter (recording ``filter_key``).
+    Enforces unique ids/names, well-formed edges, exactly one datagen
+    (``simulation`` or ``raw_data``), the terminal/filter linking rules, and
+    single-parent dependencies, then binds each terminal step to its upstream
+    filter (recording ``filter_key``).
     """
     nodes = {node.id: node for node in spec.nodes}
     if len(nodes) != len(spec.nodes):
@@ -79,48 +91,38 @@ def validate_pipeline_spec(
             raise ValueError(
                 f"Terminal step '{source.name}' cannot link to another step."
             )
-        if target.step_type == "simulation":
-            raise ValueError("The simulation step cannot have an incoming link.")
-        if target.step_type == "filter" and source.step_type != "simulation":
-            raise ValueError("Filter steps must link directly from simulation.")
+        if target.step_type in DATAGEN_STEP_TYPES:
+            raise ValueError("The datagen step cannot have an incoming link.")
+        if target.step_type == "filter" and source.step_type not in DATAGEN_STEP_TYPES:
+            raise ValueError("Filter steps must link directly from the datagen.")
         if (
-            target.step_type in TRANSFORM_STEP_TYPES
-            and source.step_type
-            not in {
-                "simulation",
-                "filter",
-            }
-            | TRANSFORM_STEP_TYPES
+            target.step_type in _TRANSFORM_KINDS
+            and source.step_type not in _ROOT_SOURCE_TYPES | _TRANSFORM_KINDS
         ):
             raise ValueError(
-                f"Transform '{target.name}' must link from simulation, a "
+                f"Transform '{target.name}' must link from the datagen, a "
                 "filter, or another transform."
             )
         if (
             target.step_type in TERMINAL_STEP_TYPES
-            and source.step_type
-            not in {
-                "simulation",
-                "filter",
-            }
-            | TRANSFORM_STEP_TYPES
+            and source.step_type not in _ROOT_SOURCE_TYPES | _TRANSFORM_KINDS
         ):
             raise ValueError(
-                "Tests and regressions must link from simulation, a filter, "
+                "Tests and regressions must link from the datagen, a filter, "
                 "or a transform."
             )
         seen_edges.add(pair)
         outgoing[edge.source].append(edge.target)
         incoming[edge.target].append(edge.source)
 
-    simulations = [node for node in spec.nodes if node.step_type == "simulation"]
-    if len(simulations) != 1:
-        raise ValueError("Pipeline supports exactly one simulation step.")
-    simulation = simulations[0]
-    if incoming[simulation.id]:
-        raise ValueError("The simulation step cannot have an incoming link.")
+    datagens = [node for node in spec.nodes if node.step_type in DATAGEN_STEP_TYPES]
+    if len(datagens) != 1:
+        raise ValueError("Pipeline supports exactly one datagen step.")
+    datagen = datagens[0]
+    if incoming[datagen.id]:
+        raise ValueError("The datagen step cannot have an incoming link.")
     for node in spec.nodes:
-        if node.id == simulation.id:
+        if node.id == datagen.id:
             continue
         if len(incoming[node.id]) != 1:
             raise ValueError(
@@ -131,19 +133,19 @@ def validate_pipeline_spec(
 
     if not has_reference:
         raise ValueError("A solved reference model is required.")
-    if not has_dgp:
+    if datagen.step_type == "simulation" and not has_dgp:
         raise ValueError("A solved DGP model is required by the simulation step.")
 
     filter_nodes = [node for node in spec.nodes if node.step_type == "filter"]
     transform_nodes = _topological_transforms(
-        [node for node in spec.nodes if node.step_type in TRANSFORM_STEP_TYPES],
+        [node for node in spec.nodes if node.step_type in _TRANSFORM_KINDS],
         incoming,
-        placed_ids={simulation.id, *(node.id for node in filter_nodes)},
+        placed_ids={datagen.id, *(node.id for node in filter_nodes)},
     )
     terminal_nodes = [
         node for node in spec.nodes if node.step_type in TERMINAL_STEP_TYPES
     ]
-    ordered = [simulation, *filter_nodes, *transform_nodes, *terminal_nodes]
+    ordered = [datagen, *filter_nodes, *transform_nodes, *terminal_nodes]
 
     bound: list[NodeSpec] = []
     bound_by_id: dict[str, NodeSpec] = {}
@@ -151,7 +153,7 @@ def validate_pipeline_spec(
     for node in ordered:
         parent_id = incoming[node.id][0] if incoming[node.id] else None
         parent = bound_by_id.get(parent_id) if parent_id is not None else None
-        bound_node = _bind_graph_dependency(node, parent, simulation)
+        bound_node = _bind_graph_dependency(node, parent, datagen)
         _validate_dependency(bound_node, prior_names)
         bound.append(bound_node)
         bound_by_id[node.id] = bound_node
@@ -197,16 +199,74 @@ def _topological_transforms(
 def build_pipeline(
     ordered: Sequence[NodeSpec],
     *,
-    dgp: SolvedModel,
+    dgp: SolvedModel | None = None,
+    resources: Mapping[str, Any] | None = None,
 ) -> MCPipeline:
-    """Compile validated, ordered nodes into a runnable :class:`MCPipeline`."""
+    """Compile validated, ordered nodes into a runnable :class:`MCPipeline`.
+
+    ``resources`` reattaches bulk side-channel data the JSON spec only references
+    by key: a ``raw_data`` node's arrays (keyed by its ``data_ref``) and a
+    ``custom`` node's callable (keyed by its ``func_ref``). The bundle loader
+    supplies it; for an all-builtin pipeline it can be omitted.
+    """
+    resources = resources or {}
     steps = []
     for node in ordered:
-        definition = STEP_CATALOG.get(node.step_type)
-        if definition is None:
-            raise ValueError(f"Unsupported MC step type: {node.step_type}")
-        steps.append(definition.build(node.name, _clean_params(node.params), dgp))
+        if node.step_type == "raw_data":
+            steps.append(_build_raw_data(node, resources))
+        elif node.step_type == "custom":
+            steps.append(_build_custom(node, resources))
+        else:
+            definition = STEP_CATALOG.get(node.step_type)
+            if definition is None:
+                raise ValueError(f"Unsupported MC step type: {node.step_type}")
+            # ``dgp`` is only dereferenced by simulation shock generation; other
+            # steps ignore it, so a DGP-free (e.g. raw_data) pipeline still builds.
+            steps.append(definition.build(node.name, _clean_params(node.params), dgp))
     return MCPipeline(steps)
+
+
+def _build_raw_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
+    """Rehydrate a ``raw_data`` datagen, injecting its arrays from resources."""
+    params = dict(node.params)
+    ref = params.pop("data_ref", node.name)
+    params.pop("data_shapes", None)
+    arrays = resources.get(ref)
+    if arrays is None:
+        raise ValueError(
+            f"raw_data step '{node.name}' references data '{ref}' that is not "
+            "present in the supplied resources."
+        )
+    kwargs: dict[str, Any] = {}
+    if "states" in arrays:
+        kwargs["states"] = arrays["states"]
+    if "observables" in arrays:
+        kwargs["observables"] = arrays["observables"]
+    raw = {
+        key[len("raw:") :]: value
+        for key, value in arrays.items()
+        if key.startswith("raw:")
+    }
+    if raw:
+        kwargs["raw"] = raw
+    if "n_exog" in params:
+        kwargs["n_exog"] = params["n_exog"]
+    if params.get("observable_names"):
+        kwargs["observable_names"] = tuple(params["observable_names"])
+    return raw_data_step(node.name, **kwargs)
+
+
+def _build_custom(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
+    """Rehydrate a ``custom`` op, reattaching its callable from resources."""
+    params = dict(node.params)
+    ref = params.pop("func_ref", node.name)
+    func = resources.get(ref)
+    if func is None:
+        raise ValueError(
+            f"custom step '{node.name}' references callable '{ref}' that is not "
+            "present in the supplied resources."
+        )
+    return transform_step(node.name, func, **_clean_params(params))
 
 
 def run_pipeline(
@@ -238,16 +298,23 @@ def run_pipeline(
     )
 
 
+def _datagen_has_observables(datagen: NodeSpec) -> bool:
+    """Whether the root datagen produces observables a filter can consume."""
+    if datagen.step_type == "raw_data":
+        return "observables" in dict(datagen.params.get("data_shapes", {}))
+    return bool(datagen.params.get("observables", True))
+
+
 def _bind_graph_dependency(
     node: NodeSpec,
     parent: NodeSpec | None,
-    simulation: NodeSpec,
+    datagen: NodeSpec,
 ) -> NodeSpec:
     params = dict(node.params)
     if node.step_type == "filter":
-        if not bool(simulation.params.get("observables", True)):
-            raise ValueError("Filter steps require simulation observables.")
-    elif node.step_type in TRANSFORM_STEP_TYPES:
+        if not _datagen_has_observables(datagen):
+            raise ValueError("Filter steps require the datagen to produce observables.")
+    elif node.step_type in _TRANSFORM_KINDS:
         _bind_consumer_payload(node, parent, params)
     elif node.step_type in TERMINAL_STEP_TYPES:
         _bind_consumer_payload(node, parent, params)
@@ -280,7 +347,7 @@ def _bind_consumer_payload(
       * Transform parent + multi-input consumer with no explicit ``payload``
         leg: raise, asking the user to mark the legs that should chain.
     """
-    if parent is None or parent.step_type not in TRANSFORM_STEP_TYPES:
+    if parent is None or parent.step_type not in _TRANSFORM_KINDS:
         if node.step_type in TERMINAL_STEP_TYPES and any(
             source == "payload" for source in _sources(params)
         ):

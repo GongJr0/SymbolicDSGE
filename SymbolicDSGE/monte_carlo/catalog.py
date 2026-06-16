@@ -58,7 +58,7 @@ INPUT_SOURCES = [
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
 StepRole = Literal["datagen", "filter", "transform", "terminal"]
-CompileParams = Callable[[dict[str, Any], "SolvedModel"], dict[str, Any]]
+CompileParams = Callable[[dict[str, Any], "SolvedModel | None"], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -117,7 +117,9 @@ class StepDefinition:
             "fields": [spec.to_dict() for spec in self.fields],
         }
 
-    def build(self, name: str, params: dict[str, Any], dgp: SolvedModel) -> MCStep:
+    def build(
+        self, name: str, params: dict[str, Any], dgp: SolvedModel | None
+    ) -> MCStep:
         """Compile cleaned ``params`` into an :class:`MCStep` via the factory."""
         if self.compile_params is not None:
             params = self.compile_params(params, dgp)
@@ -147,8 +149,13 @@ def _integer_or_keyword(
 
 
 def _build_generated_shocks(
-    dgp: SolvedModel, params: dict[str, Any]
+    dgp: SolvedModel | None, params: dict[str, Any]
 ) -> dict[str, Shock] | None:
+    if dgp is None:
+        raise ValueError(
+            "A solved DGP model is required to generate simulation shocks; pass "
+            "explicit `shocks` to author a simulation step without one."
+        )
     T = int(params["T"])
     distribution_value = str(params.pop("distribution", "norm"))
     if distribution_value not in {"norm", "t", "uni"}:
@@ -256,7 +263,9 @@ def _coerce_shock_mapping(value: Any) -> dict[str, Shock]:
     return out
 
 
-def _compile_simulation(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_simulation(
+    params: dict[str, Any], dgp: SolvedModel | None
+) -> dict[str, Any]:
     params = dict(params)
     params["seed_increment"] = _integer_or_keyword(
         params.get("seed_increment", "auto"),
@@ -274,13 +283,13 @@ def _compile_simulation(params: dict[str, Any], dgp: SolvedModel) -> dict[str, A
     return params
 
 
-def _compile_filter(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_filter(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, Any]:
     params = dict(params)
     params.pop("filter_key", None)
     return params
 
 
-def _compile_wald(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_wald(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, Any]:
     params = dict(params)
     kind = str(params.get("kind", "mean"))
     target_key = "target_vector" if kind == "mean" else "target_matrix"
@@ -297,7 +306,9 @@ def _compile_wald(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
     return params
 
 
-def _compile_regression(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
+def _compile_regression(
+    params: dict[str, Any], dgp: SolvedModel | None
+) -> dict[str, Any]:
     return _regression_params(params)
 
 
@@ -737,6 +748,11 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
 STEP_CATALOG: dict[str, StepDefinition] = {
     definition.step_type: definition for definition in _STEP_DEFINITIONS
 }
+
+#: Step kinds that act as the pipeline's single root datagen. ``simulation`` is
+#: catalogue-driven (GUI-authorable); ``raw_data`` ships pre-computed arrays as a
+#: bundle member and has no GUI ``StepDefinition``.
+DATAGEN_STEP_TYPES: frozenset[str] = frozenset({"simulation", "raw_data"})
 
 #: Step kinds that terminate a branch (tests + regression).
 TERMINAL_STEP_TYPES: frozenset[str] = frozenset(

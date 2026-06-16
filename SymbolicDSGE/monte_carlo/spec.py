@@ -37,6 +37,8 @@ MCStepKind = Literal[
     "rolling_mean",
     "rolling_std",
     "rolling_var",
+    # custom (user-supplied op, shipped as a cloudpickle bundle member)
+    "custom",
 ]
 
 #: Authoritative set of valid step-type strings. Must agree with the keys of

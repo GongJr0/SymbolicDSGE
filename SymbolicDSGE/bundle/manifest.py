@@ -30,16 +30,19 @@ MemberKind = Literal[
     "mc_pipeline",
     "mc_result",
     "mc_trace",
+    "mc_raw_data",
+    "mc_custom_op",
 ]
 MEMBER_KINDS: frozenset[str] = frozenset(get_args(MemberKind))
 
-MemberFormat = Literal["yaml", "json", "csv", "parquet"]
+MemberFormat = Literal["yaml", "json", "csv", "parquet", "pickle"]
 _FORMAT_BY_EXT: dict[str, str] = {
     ".yaml": "yaml",
     ".yml": "yaml",
     ".json": "json",
     ".csv": "csv",
     ".parquet": "parquet",
+    ".pkl": "pickle",
 }
 
 

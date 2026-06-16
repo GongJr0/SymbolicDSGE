@@ -17,13 +17,14 @@ Recovery is mostly pass-through. The cases that need inverting a compile hook:
   ``data_ref`` (the bundle member key), the array ``data_shapes``, and the scalar
   metadata; the bundle builder writes the parquet member from
   :func:`raw_data_arrays`.
+- **custom** — the user callable cannot ride the JSON spec either, so the node
+  records a ``func_ref`` (the bundle member key) alongside its plain kwargs; the
+  bundle builder writes the cloudpickle member and ``build_pipeline`` reattaches
+  the callable from the loaded resources.
 
 Binder-derived dependency keys (``filter_key`` / ``*_payload_key``) are dropped:
 ``validate_pipeline_spec`` re-derives them from the edges, so emitting them would
 break idempotency.
-
-Custom operations are *not* handled here — they are shipped by the bundle builder
-as a cloudpickle member, not represented in the pipeline spec.
 """
 
 from __future__ import annotations
@@ -91,11 +92,6 @@ def _step_type(step: "MCStep") -> str:
         raise ValueError(
             f"Step {step.name!r} has no step_type and cannot be serialized."
         )
-    if step_type == "custom":
-        raise NotImplementedError(
-            "Custom operations are shipped by the bundle builder as a cloudpickle "
-            "member, not represented in a PipelineSpec."
-        )
     return step_type
 
 
@@ -107,6 +103,9 @@ def _recover_params(step: "MCStep") -> dict[str, Any]:
         params = _recover_simulation(step.kwargs)
     elif step_type == "wald":
         params = _recover_wald(step.kwargs)
+    elif step_type == "custom":
+        params = _jsonable_params(dict(step.kwargs))
+        params["func_ref"] = step.name
     else:
         params = _jsonable_params(dict(step.kwargs))
     for key in _BINDER_KEYS:
