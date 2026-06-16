@@ -16,6 +16,7 @@ from typing import Any, Literal, get_args
 MCStepKind = Literal[
     # datagen / filter
     "simulation",
+    "raw_data",
     "filter",
     # terminal: tests
     "wald",

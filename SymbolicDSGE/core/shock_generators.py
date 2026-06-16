@@ -7,9 +7,9 @@ from scipy.stats import (
 )
 from scipy.stats._distn_infrastructure import rv_generic
 from scipy.stats._multivariate import multi_rv_generic
-from numpy import asarray, ndarray, float64, random, zeros
+from numpy import asarray, ndarray, float64, random, zeros, generic
 from numpy.typing import NDArray
-from typing import Literal, Callable, cast, overload
+from typing import Any, Literal, Callable, Mapping, cast, overload
 
 
 def abstract_shock_array(
@@ -330,3 +330,62 @@ class Shock:
                 dist, rv_generic | multi_rv_generic
             ), "dist must be a valid scipy.stats distribution or a string identifier."
             return dist
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize a generator-style Shock to a JSON-able dict.
+
+        Only the generator form is representable: a string ``dist`` identifier
+        (``"norm"``/``"t"``/``"uni"``) and no materialized ``shock_arr``. A live
+        scipy distribution object cannot be faithfully reproduced from JSON, and
+        a placed shock array is bulk data that belongs with the parquet members,
+        not the pipeline spec.
+        """
+        if not isinstance(self.dist, str):
+            raise TypeError(
+                "Only string-identified distributions ('norm'/'t'/'uni') are "
+                "serializable; got a live scipy distribution object."
+            )
+        if self.shock_arr is not None:
+            raise ValueError(
+                "Cannot serialize a Shock carrying a materialized shock_arr; "
+                "array-backed shocks must be shipped as bulk (parquet) data."
+            )
+        return {
+            "T": int(self.T),
+            "dist": self.dist,
+            "multivar": bool(self.multivar),
+            "seed": None if self.seed is None else int(self.seed),
+            "dist_args": [_jsonable(arg) for arg in self.dist_args],
+            "dist_kwargs": {k: _jsonable(v) for k, v in self.dist_kwargs.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
+        """Rebuild a generator-style Shock from :meth:`to_dict` output."""
+        dist = data["dist"]
+        if dist not in {"norm", "t", "uni"}:
+            raise ValueError(
+                f"Shock.from_dict expects a 'norm'/'t'/'uni' dist, got {dist!r}."
+            )
+        seed = data.get("seed")
+        return cls(
+            T=int(data["T"]),
+            dist=cast(Literal["norm", "t", "uni"], dist),
+            multivar=bool(data.get("multivar", False)),
+            seed=None if seed is None else int(seed),
+            dist_args=tuple(data.get("dist_args") or ()),
+            dist_kwargs=dict(data.get("dist_kwargs") or {}),
+        )
+
+
+def _jsonable(value: Any) -> Any:
+    """Coerce shock arg/kwarg values into JSON-serializable form."""
+    if isinstance(value, ndarray):
+        return value.tolist()
+    if isinstance(value, generic):
+        return value.item()
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, Mapping):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    return value

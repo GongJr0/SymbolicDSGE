@@ -10,6 +10,7 @@ registry replaces both the old ``ui.mc.mc_catalog`` literal and the ``build_pipe
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
@@ -233,6 +234,28 @@ def _regression_params(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _coerce_shock_mapping(value: Any) -> dict[str, Shock]:
+    """Normalize a ``shocks`` mapping of live :class:`Shock` / serialized dicts.
+
+    Library-authored pipelines carry explicit :class:`Shock` instances; a spec
+    loaded from a bundle carries their :meth:`Shock.to_dict` form. Both compile
+    to the same live mapping the factory stores.
+    """
+    if not isinstance(value, Mapping):
+        raise TypeError("simulation 'shocks' must be a mapping of name -> Shock.")
+    out: dict[str, Shock] = {}
+    for key, shock in value.items():
+        if isinstance(shock, Shock):
+            out[str(key)] = shock
+        elif isinstance(shock, Mapping):
+            out[str(key)] = Shock.from_dict(shock)
+        else:
+            raise TypeError(
+                f"shocks[{key!r}] must be a Shock or a serialized shock dict."
+            )
+    return out
+
+
 def _compile_simulation(params: dict[str, Any], dgp: SolvedModel) -> dict[str, Any]:
     params = dict(params)
     params["seed_increment"] = _integer_or_keyword(
@@ -240,7 +263,14 @@ def _compile_simulation(params: dict[str, Any], dgp: SolvedModel) -> dict[str, A
         keywords={"auto"},
         field_name="seed_increment",
     )
-    params["shocks"] = _build_generated_shocks(dgp, params)
+    if params.get("shocks") is not None:
+        # Explicit (library-authored or bundle-loaded) shocks: pass them through
+        # instead of generating from the GUI shorthand.
+        params["shocks"] = _coerce_shock_mapping(params["shocks"])
+        for key in ("distribution", "seed", "loc", "df"):
+            params.pop(key, None)
+    else:
+        params["shocks"] = _build_generated_shocks(dgp, params)
     return params
 
 

@@ -9,6 +9,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .graph import PipelineGraph
+    from .spec import PipelineSpec
 
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
@@ -63,6 +64,18 @@ class MCPipeline:
         from .graph import PipelineGraph
 
         return PipelineGraph.from_steps(self.steps)
+
+    def to_spec(self) -> "PipelineSpec":
+        """Serialize this pipeline to its graph-form :class:`PipelineSpec`.
+
+        The inverse of :func:`build_pipeline`: lets a pipeline authored with
+        plain library objects be stored in a bundle without touching the spec
+        DTOs. Bulk side-channels (``raw_data`` arrays, custom-op blobs) are
+        referenced by key and written as bundle members by the bundle builder.
+        """
+        from .spec_compile import pipeline_to_spec
+
+        return pipeline_to_spec(self)
 
     def run(
         self,

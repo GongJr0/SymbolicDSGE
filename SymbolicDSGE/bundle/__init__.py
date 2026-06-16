@@ -11,6 +11,8 @@ from .manifest import (
     SimSpec,
 )
 from .parquet import (
+    arrays_from_parquet,
+    arrays_to_parquet,
     collapse_columns,
     csv_to_columns,
     csv_to_json,
@@ -31,6 +33,8 @@ __all__ = [
     "trace_to_csv",
     "from_parquet_columns",
     "collapse_columns",
+    "arrays_to_parquet",
+    "arrays_from_parquet",
     # manifest
     "Manifest",
     "Member",

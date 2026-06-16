@@ -33,6 +33,8 @@ __all__ = [
     "from_parquet_columns",
     "csv_to_columns",
     "collapse_columns",
+    "arrays_to_parquet",
+    "arrays_from_parquet",
 ]
 
 _INDEXED_COLUMN = re.compile(r"^(?P<base>.+)\.(?P<idx>\d+)$")
@@ -60,6 +62,48 @@ def to_parquet(
 def from_parquet(data: bytes) -> str:
     """Decode Parquet bytes back into newline-delimited JSON."""
     return parquet_engine.decode(data)
+
+
+def arrays_to_parquet(
+    arrays: Mapping[str, NDArray[Any]],
+    *,
+    compression_level: int = 3,
+) -> tuple[bytes, dict[str, list[int]]]:
+    """Serialize named N-D float arrays to Parquet bytes + a shape manifest.
+
+    Built for the ``raw_data`` datagen: its states / observables / raw arrays are
+    bulk data that cannot ride the JSON pipeline spec. Each array is flattened to
+    2-D ``(-1, last_dim)`` (1-D stays 1-D) so :func:`trace_to_json` can expand it
+    into columns, and its original shape is recorded in the returned manifest so
+    :func:`arrays_from_parquet` can restore the N-D form. All arrays must share
+    the flattened leading length (e.g. ``n_rep * T`` for per-replication 3-D
+    inputs, or ``T`` for shared 2-D inputs) so they pack into one column block.
+    """
+    if not arrays:
+        raise ValueError("arrays_to_parquet requires at least one array.")
+    columns: dict[str, NDArray[Any]] = {}
+    shapes: dict[str, list[int]] = {}
+    for name, value in arrays.items():
+        arr = np.asarray(value, dtype=np.float64)
+        if arr.ndim == 0:
+            raise ValueError(f"array {name!r} must be at least 1-D.")
+        shapes[name] = list(arr.shape)
+        columns[name] = arr if arr.ndim == 1 else arr.reshape(-1, arr.shape[-1])
+    data = to_parquet(trace_to_json(columns), compression_level=compression_level)
+    return data, shapes
+
+
+def arrays_from_parquet(
+    data: bytes, shapes: Mapping[str, Sequence[int]]
+) -> dict[str, NDArray[Any]]:
+    """Restore N-D arrays from :func:`arrays_to_parquet` output."""
+    columns = collapse_columns(from_parquet_columns(data))
+    out: dict[str, NDArray[Any]] = {}
+    for name, shape in shapes.items():
+        if name not in columns:
+            raise KeyError(f"parquet payload is missing array {name!r}.")
+        out[name] = np.asarray(columns[name], dtype=np.float64).reshape(tuple(shape))
+    return out
 
 
 def csv_to_json(data: bytes | str, *, dialect: str = "excel") -> bytes:
