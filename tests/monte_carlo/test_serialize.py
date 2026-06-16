@@ -13,10 +13,12 @@ from SymbolicDSGE.monte_carlo import (
     MCPipelineResult,
     NodeSpec,
     PipelineSpec,
-    jarque_bera_test_step,
+)
+from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
+from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
+from SymbolicDSGE.monte_carlo.serialize import (
     pipeline_result_wire,
-    raw_data_step,
-    regression_step,
     result_document,
     result_traces,
     serialize_pipeline_result,

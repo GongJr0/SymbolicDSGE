@@ -16,25 +16,26 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 import numpy as np
 
 from ..core.shock_generators import Shock
-from .config import (
+from .operations.core import reference_filter_step, simulation_step
+from .operations.regressions import regression_step
+from .operations.tests import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
     cusum_test_step,
     cusumsq_test_step,
-    diff_step,
     jarque_bera_test_step,
     ljung_box_test_step,
+    wald_test_step,
+)
+from .operations.transforms import (
+    diff_step,
     log_diff_step,
     log_step,
-    reference_filter_step,
-    regression_step,
     rolling_mean_step,
     rolling_std_step,
     rolling_var_step,
-    simulation_step,
     standardize_step,
-    wald_test_step,
 )
 from .mc_constructs import MCStep
 

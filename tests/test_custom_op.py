@@ -1,4 +1,4 @@
-"""Tests for ``SymbolicDSGE.custom_op.NumpyCustomFunc``.
+"""Tests for ``SymbolicDSGE.monte_carlo.custom_op.NumpyCustomFunc``.
 
 These tests intentionally define their target functions at module scope so
 ``inspect.getsource`` resolves cleanly the same way it would for a user's
@@ -15,15 +15,30 @@ import cloudpickle
 import numpy as np
 import pytest
 
-from SymbolicDSGE.custom_op import (
+from SymbolicDSGE.monte_carlo.custom_op import (
     CustomOpValidationError,
     NumpyCustomFunc,
     SAFE_NAMESPACE_VERSION,
+    custom_operation,
 )
 
 WEIGHTS = np.array([1.0, 2.0, 3.0])
 SCALE = 2.5
 _NESTED = {"alpha": [1, 2, np.array([0.5, 0.5])]}
+
+
+def _identity_decorator(func):
+    return func
+
+
+@custom_operation
+def _decorated_log_diff(arr):
+    return np.diff(np.log(arr + 1.0))
+
+
+@_identity_decorator
+def _singly_decorated(arr):
+    return np.asarray(arr)
 
 
 # ---- clean wrap targets --------------------------------------------------
@@ -400,3 +415,26 @@ def test_cloudpickle_round_trip_preserves_helper_recursion() -> None:
         restored(np.array([1.0, 2.0])),
         wrapped(np.array([1.0, 2.0])),
     )
+
+
+# ---- @custom_operation decorator ----------------------------------------
+
+
+def test_custom_operation_decorator_produces_numpy_custom_func() -> None:
+    assert isinstance(_decorated_log_diff, NumpyCustomFunc)
+    arr = np.array([1.0, 3.0, 7.0])
+    np.testing.assert_allclose(_decorated_log_diff(arr), np.diff(np.log(arr + 1.0)))
+    # The marker decorator stays in the captured source (intent for reviewers).
+    assert "@custom_operation" in _decorated_log_diff.source
+
+
+def test_custom_operation_decorated_func_round_trips() -> None:
+    restored = cloudpickle.loads(cloudpickle.dumps(_decorated_log_diff))
+    arr = np.array([1.0, 3.0, 7.0])
+    np.testing.assert_allclose(restored(arr), _decorated_log_diff(arr))
+    assert restored.source == _decorated_log_diff.source
+
+
+def test_non_marker_decorator_is_still_rejected() -> None:
+    with pytest.raises(CustomOpValidationError, match="decorator"):
+        NumpyCustomFunc(_singly_decorated)

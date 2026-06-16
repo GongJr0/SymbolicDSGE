@@ -19,18 +19,20 @@ import pytest
 from SymbolicDSGE.monte_carlo import (
     TRANSFORM_STEP_TYPES,
     build_pipeline,
+    validate_pipeline_spec,
+)
+from SymbolicDSGE.monte_carlo.operations.core import simulation_step
+from SymbolicDSGE.monte_carlo.operations.transforms import (
     diff_step,
     log_diff_step,
     log_step,
     rolling_mean_step,
     rolling_std_step,
     rolling_var_step,
-    simulation_step,
     standardize_step,
-    validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCContext, MCData, OpType
-from SymbolicDSGE.monte_carlo.operations import (
+from SymbolicDSGE.monte_carlo.operations.transforms.ops import (
     run_diff,
     run_log,
     run_log_diff,

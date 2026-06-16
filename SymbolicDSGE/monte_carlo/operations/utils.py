@@ -1,24 +1,13 @@
 from __future__ import annotations
 
-from typing import Callable, Literal, Mapping, Sequence
+from typing import Callable, Mapping, Sequence
+from .types import NDF
 
 import numpy as np
 
-from ..core.shock_generators import Shock
-from ..kalman.filter import FilterResult
-from .mc_constructs import MCContext, NDF, SeedIncrement, ShockMapping
-
-InpSources = Literal[
-    "states",
-    "observables",
-    "x_pred",
-    "x_filt",
-    "y_pred",
-    "y_filt",
-    "innov",
-    "std_innov",
-    "payload",
-]
+from ...core.shock_generators import Shock
+from ...kalman.filter import FilterResult
+from ..mc_constructs import MCContext, SeedIncrement, ShockMapping
 
 
 def _clone_or_pass_shocks(

@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from typing import Literal, Mapping, Sequence, Any, Callable
+
+import numpy as np
+from numpy import float64, ndarray
+
+
+from ....core.solved_model import SolvedModel
+from ....kalman.filter import FilterResult
+from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
+from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
+
+
+def simulate_dgp(
+    *,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    T: int,
+    shocks: ShockMapping | None = None,
+    seed_increment: SeedIncrement = "auto",
+    shock_scale: float | float64 = 1.0,
+    x0: ndarray | None = None,
+    observables: bool = True,
+) -> MCData:
+    del reference
+    if dgp is None:
+        raise ValueError("simulate_dgp requires a DGP SolvedModel.")
+    sim_shocks = _clone_or_pass_shocks(
+        shocks,
+        T=T,
+        rep_idx=rep_idx,
+        seed_increment=seed_increment,
+    )
+    states = np.ascontiguousarray(
+        dgp._simulate_state_matrix(
+            T=T,
+            shocks=sim_shocks,
+            shock_scale=shock_scale,
+            x0=x0,
+        ),
+        dtype=np.float64,
+    )
+    obs_names = (
+        tuple(getattr(dgp.compiled, "observable_names", ())) if observables else ()
+    )
+    obs_mat = None
+    raw: dict[str, np.ndarray] = {
+        name: states[:, dgp.compiled.idx[name]] for name in dgp.compiled.var_names
+    }
+    raw["_X"] = states
+    if obs_names:
+        obs_full = dgp._simulate_observable_matrix(states, drop_initial=False)
+        obs_mat = np.ascontiguousarray(obs_full[1:], dtype=np.float64)
+        for i, name in enumerate(obs_names):
+            raw[name] = obs_full[:, i]
+    return MCData(
+        states=states,
+        observables=obs_mat,
+        raw=raw,
+        n_exog=int(getattr(dgp.compiled, "n_exog", -1)),
+        observable_names=obs_names,
+    )
+
+
+def raw_data_datagen(
+    *,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    states: NDF | None = None,
+    observables: NDF | None = None,
+    n_exog: int = -1,
+    raw: Mapping[str, NDF] | None = None,
+    observable_names: Sequence[str] = (),
+) -> MCData:
+    del reference, dgp
+    if states is None and observables is None:
+        raise ValueError("raw_data_datagen requires states, observables, or both.")
+
+    state_mat = None
+    if states is not None:
+        state_mat = _select_raw_rep_array(
+            states,
+            rep_idx=rep_idx,
+            name="states",
+            allow_vector=False,
+        )
+    obs_mat = None
+    if observables is not None:
+        obs_mat = _select_raw_rep_array(
+            observables,
+            rep_idx=rep_idx,
+            name="observables",
+            allow_vector=True,
+        )
+    raw_payload: dict[str, NDF] = {}
+    if state_mat is not None:
+        raw_payload["_X"] = state_mat
+    if raw is not None:
+        raw_payload.update(
+            {
+                key: _select_raw_rep_array(
+                    value,
+                    rep_idx=rep_idx,
+                    name=f"raw['{key}']",
+                    allow_vector=True,
+                )
+                for key, value in raw.items()
+            }
+        )
+    return MCData(
+        states=state_mat,
+        observables=obs_mat,
+        n_exog=int(n_exog),
+        raw=raw_payload,
+        observable_names=tuple(observable_names),
+    )
+
+
+def run_reference_filter(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    filter_mode: Literal["linear", "extended"] = "linear",
+    observables: list[str] | None = None,
+    x0: NDF | None = None,
+    p0_mode: Literal["diag", "eye"] | None = None,
+    p0_scale: float | float64 | None = None,
+    jitter: float | float64 | None = None,
+    symmetrize: bool | None = None,
+    return_shocks: bool = False,
+    R: NDF | None = None,
+    estimate_R_diag: bool = False,
+    R_scale: float = 1.0,
+) -> FilterResult:
+    del dgp, rep_idx
+    data = context.require_data()
+    if data.observables is None:
+        raise ValueError("Reference filter step requires generated observables.")
+    obs = observables
+    if obs is None and data.observable_names:
+        obs = list(data.observable_names)
+    return reference.kalman(
+        y=data.observables,
+        filter_mode=filter_mode,
+        observables=obs,
+        x0=x0,
+        p0_mode=p0_mode,
+        p0_scale=p0_scale,
+        jitter=jitter,
+        symmetrize=symmetrize,
+        return_shocks=return_shocks,
+        R=R,
+        estimate_R_diag=estimate_R_diag,
+        R_scale=R_scale,
+    )
