@@ -73,8 +73,9 @@ def test_to_spec_structure_and_edges() -> None:
     }
 
     by_name = {n.name: n for n in spec.nodes}
-    # binder-derived keys are dropped (re-derived from edges on rebuild)
-    assert "payload_key" not in by_name["jb"].params
+    # payload references are kept (the producer is named by key, not an edge)
+    assert by_name["jb"].params["payload_key"] == "s"
+    # filter_key stays edge-derived (re-bound from the filter edge on rebuild)
     assert "filter_key" not in by_name["w"].params
     # wald target ndarray is inverted to the spec's target_vector field
     assert by_name["w"].params["target_vector"] == [0.0]

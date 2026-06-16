@@ -41,14 +41,10 @@ if TYPE_CHECKING:
     from .core import MCPipeline
     from .mc_constructs import MCStep
 
-#: Dependency keys the graph binder sets from edges; never authored into a spec.
-_BINDER_KEYS = (
-    "filter_key",
-    "payload_key",
-    "residual_payload_key",
-    "y_payload_key",
-    "x_payload_key",
-)
+#: Dependency keys re-derived from edges on rebuild, so dropped from the spec.
+#: ``filter_key`` is re-bound from the filter edge; the ``*_payload_key`` keys are
+#: kept because payloads are referenced by key (no edge to re-derive them from).
+_BINDER_KEYS = ("filter_key",)
 
 
 def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
