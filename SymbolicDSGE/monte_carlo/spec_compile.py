@@ -126,8 +126,20 @@ def _shock_dict(value: Any) -> dict[str, Any]:
         return value.to_dict()
     if isinstance(value, Mapping):
         return dict(value)
+    hint = ""
+    if isinstance(value, np.ndarray):
+        hint = (
+            " Got a raw shock array, which is not bundleable; author the "
+            "simulation with a `Shock` generator spec instead."
+        )
+    elif callable(value):
+        hint = (
+            " Got a shock generator (a callable). Pass the `Shock` instance "
+            "itself, e.g. `Shock(...)` rather than `Shock(...).shock_generator()`, "
+            "so it can be serialized and replayed deterministically."
+        )
     raise TypeError(
-        "simulation shocks must be Shock instances (or serialized shock dicts)."
+        "simulation shocks must be Shock instances (or serialized shock dicts)." + hint
     )
 
 

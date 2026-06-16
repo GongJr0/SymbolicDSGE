@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
+import pytest
 
 from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -93,6 +94,23 @@ def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
 
     spec2 = rebuilt.to_spec()
     assert spec2 == spec1
+
+
+def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
+    # `.shock_generator()` returns an opaque callable the runtime accepts but
+    # that cannot be serialized; to_spec must say how to fix it.
+    pipe = MCPipeline(
+        [
+            simulation_step(
+                "dgp",
+                T=8,
+                shocks={"u": Shock(T=8, dist="norm", seed=0).shock_generator()},
+            ),
+            jarque_bera_test_step("jb", source="observables"),
+        ]
+    )
+    with pytest.raises(TypeError, match="shock generator"):
+        pipe.to_spec()
 
 
 def test_rebuilt_simulation_recovers_live_shocks() -> None:

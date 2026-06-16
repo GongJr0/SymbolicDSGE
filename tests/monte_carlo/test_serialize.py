@@ -96,6 +96,26 @@ def test_wire_equals_document_plus_traces() -> None:
     assert recombined == wire
 
 
+def test_wire_reconstructs_dropped_all_nan_trace_columns() -> None:
+    # A test whose statistic/pval are NaN in every rep yields all-null float
+    # trace columns, which the Parquet encoder drops. Hydration must not raise
+    # on the missing keys; it reconstructs them as null-filled traces.
+    result = _run_demo_pipeline(n_rep=3)
+    document = result_document(result, run_id="r1")
+    traces = result_traces(result)
+    # Simulate the encoder dropping the all-null float columns for "jb".
+    del traces["test.jb.statistic"]
+    del traces["test.jb.pval"]
+
+    wire = pipeline_result_wire(document, traces)
+
+    entry = wire["test_summaries"]["jb"]
+    assert entry["statistic_trace"] == [None, None, None]
+    assert entry["pval_trace"] == [None, None, None]
+    # status (integer-valued) survives and is unchanged.
+    assert len(entry["status_trace"]) == 3
+
+
 def test_pipeline_spec_round_trips() -> None:
     spec = PipelineSpec(
         nodes=[
