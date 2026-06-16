@@ -19,177 +19,139 @@ We start from `MODELS/POST82.yaml` (also used in the [Quick Start](quickstart.md
 
 ## Solve a reference model
 
+We initialize a `BundleBuilder` to store all upcoming components. A model is then defined and solved to be attached to the bundle. You can refer to the [Quick Start](quickstart.md) for details on basic model authoring and solving.
+
 ```python
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, ModelParser, BundleBuilder
 from numpy import array, float64
 
-parser = ModelParser("MODELS/POST82.yaml") # (1)!
+bundle = BundleBuilder(created_by="Central Bank") # (1)!
+
+parser = ModelParser("MODELS/POST82.yaml") # (2)!
 model, kalman = parser.get_all()
 
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
-    linearize=False, # (2)!
+    linearize=False, # (3)!
 )
 sol = solver.solve(
     compiled,
-    steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
+    steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
+)
+
+bundle.add_model(
+    "reference",
+    model.source_yaml, # (4)!
+    compile_kwargs={"linearize": False},
+    solve_kwargs={"steady_state": [0.0, 0.0, 0.0, 0.0, 0.0]},
+)
+
+bundle.add_model(
+    "dgp",
+    model.source_yaml,
+    compile_kwargs={"linearize": False},
+    solve_kwargs={"steady_state": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 ```
 
-1. `ModelParser` populates `ModelConfig.source_yaml` automatically; the bundle re-uses it without re-reading the file.
-2. Set `True` for models authored in nonlinear levels — see the [Quick Start](quickstart.md#compilation) for details.
+1. We can set `created_by` to any string; it is recorded in the bundle manifest for provenance. Defaults to `"SymbolicDSGE <version>"` when omitted.
+2. `ModelParser` populates `ModelConfig.source_yaml` automatically; the bundle re-uses it without re-reading the file.
+3. Set `True` for models authored in nonlinear levels — see the [Quick Start](quickstart.md#compilation) for details.
+4. The bundle keeps the YAML text originating our model. The loader will repsect the solve/compile kwargs and re-solve the model to obtain the exact same `SolvedModel` deterministically.
 
 ???+ note "Why we solve first"
     The bundle preserves the YAML and the recorded compile/solve kwargs, then re-runs them at load time. Solving here is only required if we want to attach an estimation, an MC pipeline, or a `SolvedModel`-derived result. Author-only bundles do not need a live `SolvedModel`.
 
+???+ note "Model Roles"
+    The model framework inside bundles can work with two model roles: `reference` and `dgp`. At least one if them must be present. `reference` is later used as the subject of subject of Monte Carlo experiments and simulation prefill. `dgp` is used as the data-generating process for Monte Carlo experiments. We attach the same model twice here for demonstration, but in practice you may want to attach two different models.
+
 ## Specify the estimation tab
 
-We define a small MAP run estimating `psi_pi` and `psi_x` against synthetic observed data. The spec captures the run shape and parameter priors; the result captures the optimization outcome. Observed data is fed in as a numpy matrix and stored as a CSV column-pair with semantic headers.
+We define a small MCMC run estimating `psi_pi` and `psi_x` against synthetic observed data. The estimation is carried out as it would be in a live run.
+You can refer to the [Estimation Guide](estimation_guide.md) and [API Reference](../documentation/Estimator.md) for details on the `Estimator` API usage.
 
 ```python
 import numpy as np
+from SymbolicDSGE import Estimator
+from SymbolicDSGE.bayesian import make_prior
 
-from SymbolicDSGE.estimation.spec import (
-    EstimationSpec,
-    OptimizationResultMeta,
-    PriorSpec,
-)
-
-estimation_spec = EstimationSpec.from_targets(
-    ["psi_pi", "psi_x"], # (1)!
-    method="map",
-    initial={"psi_pi": 1.5, "psi_x": 0.5},
-    bounds={"psi_pi": (1.0, 3.0), "psi_x": (0.0, 1.0)},
-    priors={
-        "psi_pi": PriorSpec(
-            distribution="normal", parameters={"loc": 1.5, "scale": 0.25}
-        ),
-        "psi_x": PriorSpec(
-            distribution="normal", parameters={"loc": 0.5, "scale": 0.2}
-        ),
-    },
-    observables=["Infl", "Rate"], # (2)!
-    method_kwargs={"options": {"maxiter": 50}},
-)
+priors = {
+    "psi_pi": make_prior(
+        distribution="normal",
+        parameters={"mean": 1.5, "std": 0.25},
+        transform="identity",
+    ),
+    "psi_x": make_prior(
+        distribution="normal",
+        parameters={"mean": 0.5, "std": 0.2},
+        transform="identity",
+    ),
+}
 
 rng = np.random.default_rng(0)
-observed = rng.standard_normal((40, 2)) # (3)!
-estimation_result_meta = OptimizationResultMeta(
-    kind="map",
-    theta={"psi_pi": 1.48, "psi_x": 0.55}, # (4)!
-    success=True,
-    message="Optimization converged.",
-    fun=-87.3,
-    loglik=-85.1,
-    logprior=-2.2,
-    logpost=-87.3,
-    nfev=124,
-    nit=14,
-)
-```
-
-1. `from_targets` lists **only** the parameters you estimate and flags each `estimate=True` for you — no GUI-style toggle to set by hand. `method` is `"mle"`, `"map"`, or `"mcmc"`; MAP/MCMC require priors, MLE does not.
-2. Order matters — the loader cross-checks these against the model's declared observables at compile time.
-3. Synthetic data shaped `(n_periods, n_observables)`. Substitute the real `y` matrix you fitted the model to.
-4. The bundle stores only the result metadata, not the raw `scipy.optimize.OptimizeResult` — `theta` carries the same information by parameter name.
-
-???+ tip "Bundling a real run — skip the manual metadata"
-    The hand-built `OptimizationResultMeta` above is only for this synthetic example. When you have actually run estimation, pass the **live** result straight to `add_estimation(result=...)`: an `OptimizationResult`/`MCMCResult` is projected via `.to_meta()` automatically, and a live `MCMCResult` auto-attaches its `posterior` (samples + log-posterior) — no separate `posterior=` dict needed. A configured `Estimator` can also emit the spec directly with `est.to_spec(method="map", priors={...})`, filling parameter initials from the model's calibration.
-
-### Fast path: build spec and result from a real run
-
-When the bundle wraps an actual estimation, the chain compresses to a few lines — `Estimator.to_spec` captures the spec, `Estimator.map` / `.mle` / `.mcmc` produces the live result, and `add_estimation` projects + attaches both internally.
-
-```python
-from SymbolicDSGE import Estimator
-from SymbolicDSGE.estimation.spec import PriorSpec
-
-prior_specs = { # (1)!
-    "psi_pi": PriorSpec(distribution="normal", parameters={"loc": 1.5, "scale": 0.25}),
-    "psi_x":  PriorSpec(distribution="normal", parameters={"loc": 0.5, "scale": 0.2}),
-}
-built_priors = { # (2)!
-    name: Estimator.make_prior(
-        distribution=spec.distribution,
-        parameters=dict(spec.parameters),
-        transform=spec.transform,
-    )
-    for name, spec in prior_specs.items()
-}
-
-estimator = Estimator(
+observed = rng.standard_normal((40, 3))
+estim = Estimator(
     solver=solver,
     compiled=compiled,
+    observables=["OutGap", "Infl", "Rate"],
     y=observed,
-    estimated_params=["psi_pi", "psi_x"],
-    priors=built_priors,
+    priors=priors,
 )
-live_result = estimator.map() # (3)!
+res = estim.mcmc(  # (1)!
+    n_draws=1000,
+    burn_in=200,
+    thin=2,
+)
 
-spec_from_live = estimator.to_spec( # (4)!
-    method="map",
-    priors=prior_specs,
+bundle.add_estimation(  # (2)!
+    source=estim,
+    result=res,
 )
 ```
 
-1. `PriorSpec` is the *declarative* form — what the bundle stores. Kept around because priors cannot be reverse-engineered from a built `Prior`.
-2. `Prior` is the *runtime* form — what `Estimator` evaluates. `Estimator.make_prior` (or `SymbolicDSGE.bayesian.make_prior`) materializes one from a `PriorSpec`.
-3. `.mle()` / `.map()` returns an `OptimizationResult`, `.mcmc(n_draws=...)` returns an `MCMCResult`. Either works as `result=...` below.
-4. `to_spec` reads the estimator's `param_names`, calibration values (used as `initial`), and `observables` — no need to re-list them. `priors=prior_specs` records the original specs faithfully on the bundle. See [`Estimator.to_spec`](../documentation/Estimator.md).
+1. We can bundle results from an executed estimation, or we can bundle a estimation spec without results.
+2. `add_estimation` can bundle live results and initialized `Estimator` instances. On the backend, these are converted to human-readable specifications. Bundling live objects does not make the final bundle dependent unreadable binary objects.
 
-Pass the live result to `add_estimation` directly:
-
-```python
-BundleBuilder() \
-    .add_model("reference", model.source_yaml) \
-    .add_estimation(
-        spec_from_live,
-        result=live_result, # (1)!
-        observed=observed,
-        observable_names=["Infl", "Rate"],
-    ) \
-    .write("real-run.sdsge")
-```
-
-1. The builder calls `live_result.to_meta()` for serialization and (for MCMC) `live_result.posterior_arrays()` to attach the bulk traces. No manual `OptimizationResultMeta` / `MCMCResultMeta` construction required.
-
-???+ note "Skipping the manual `Prior` materialization"
-    For the one-shot solver convenience, `solver.estimate(compiled=..., y=..., method="map", estimated_params=[...], priors=built_priors)` runs an estimation and returns the result in a single call — but it does not give you the `Estimator` instance, so use it when you only want the result. The two-step `Estimator(...)` construction above is what enables `to_spec`.
+???+ note "Estimation Methods"
+    MCMC returns a special result object `MCMCResult` while MLE and MAP both return `OptimizationResult`. The bundler handles both cases.
 
 ## Build a Monte Carlo pipeline
 
-`PipelineSpec` is the pydantic-free representation of an MC graph. Here we attach the pipeline spec without a completed run; the loader returns the spec for the GUI to render and the user to fill in `n_rep` and click **Run**.
+We create a Monte Carlo pipeline and run it as we would in a live session. Similar to estimation, we can bundle a pipeline spec without running it, or we can bundle a live `MCPipelineResult` from a run. The bundler converts the live result to a human-readable spec internally. You can refer to the [Monte Carlo Guide](monte_carlo_guide.md) and [API Reference](../documentation/monte_carlo/pipeline.md) for details on the `MCPipeline` API usage.
 
 ```python
-from SymbolicDSGE.monte_carlo.spec import EdgeSpec, NodeSpec, PipelineSpec
-
-mc_pipeline = PipelineSpec(
-    nodes=[
-        NodeSpec(
-            id="sim",
-            step_type="simulation",
-            name="DGP Simulation",
-            params={"T": 100},
-        ),
-        NodeSpec(
-            id="jb",
-            step_type="jarque_bera",
-            name="Normality Check",
-            params={"source": "observables"},
-        ),
-    ],
-    edges=[EdgeSpec(source="sim", target="jb")], # (1)!
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.operations import (
+    core as c,  # (1)!
+    tests as t,  # (2)!
 )
+
+gz_shock = Shock(T=200, seed=42, multivar=True, dist="norm")  # (3)!
+r_shock = Shock(T=200, seed=42, multivar=False, dist="norm")
+
+mc_pipeline = MCPipeline([
+        c.simulation_step(T=200, shocks={"g,z": gz_shock, "r": r_shock}),
+        t.jarque_bera_test_step("jb_test", source="observables", column=0),
+])
+mc_res = mc_pipeline.run(
+    reference=sol,
+    dgp=sol,
+    n_rep=1000,
+    retain_payloads=False,
+    retain_contexts=True,
+    verbosity=2,
+)
+
+bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 ```
 
-1. Edges describe the directed graph of step dependencies. See the [Monte Carlo Guide](monte_carlo_guide.md) for the full pipeline grammar.
-
-???+ note "Attaching a completed MC run"
-    If you already have an `MCPipelineResult` from a live run, pass it as `result=` to `add_mc(...)` below. `BundleBuilder` splits the trace-free document from the bulk traces internally — no manual unpacking required.
+1. `core` contains data generation, raw data consumption, and Kalman filtering.
+2. `tests` contains multiple built-in statistical tests.
+3. Notice we don't call `Shock.shock_generator` here. This is because the MC pipeline needs to manage the seed per-replication to avoid repeating the same shock path across replications.
 
 ## Specify a simulation prefill
 
-`SimSpec` rides inline in the manifest. It controls what the GUI's Outputs tab pre-fills when the receiver opens the bundle.
+`SimSpec` rides inline in the manifest. It controls what the GUI's Outputs tab pre-fills when the receiver opens the bundle on `sdsge-ui`.
 
 ```python
 from SymbolicDSGE.bundle import ShockGeneration, SimSpec
@@ -213,37 +175,6 @@ simulation = SimSpec(
 
 `BundleBuilder` chains every component into one archive. Each `add_*` call returns `self`; the final `.write(path)` materializes the bundle and returns the path written.
 
-```python
-from SymbolicDSGE import BundleBuilder
-
-bundle_path = (
-    BundleBuilder(created_by="experiment-1") # (1)!
-    .add_model(
-        "reference",
-        model.source_yaml, # (2)!
-        compile_kwargs={"linearize": False},
-    )
-    .add_estimation(
-        estimation_spec,
-        result=estimation_result_meta,
-        observed=observed,
-        observable_names=["Infl", "Rate"], # (3)!
-    )
-    .add_mc(mc_pipeline)
-    .set_simulation(simulation)
-    .write("experiment-1.sdsge")
-)
-
-print("Bundle written to:", bundle_path)
-```
-
-1. `created_by` is purely metadata recorded in the manifest. Defaults to `"SymbolicDSGE <version>"` when omitted.
-2. `model.source_yaml` is the YAML text retained on the `ModelConfig` by `ModelParser`. For programmatically constructed configs you would supply the YAML as a string here directly.
-3. The names must match the model's `observables` in count and order — the loader validates this at compile time and refuses to write a mismatched bundle.
-
-???+ warning "Observable name validation"
-    Order is significant. `["Rate", "Infl"]` is rejected even if `["Infl", "Rate"]` would have been accepted — the bundle's downstream consumers index observed data by column position, so reordering would silently produce wrong inference. See the [`sdsge-compile` validation reference](../portable_experiments/sdsge-compile.md#validation) for the message format.
-
 ## Add raw data alongside the model
 
 `add_raw_data` covers any extra CSV files you want to ship in `data/`. They are not interpreted by the loader — they are passthrough storage for context the receiver may want.
@@ -256,21 +187,30 @@ aux = pd.DataFrame({
     "date": pd.date_range("2000-01-01", periods=40, freq="QS"),
     "gdp_growth": rng.standard_normal(40),
 })
-csv_buffer = io.StringIO()
-aux.to_csv(csv_buffer, index=False)
+csv_buf = io.StringIO()
+aux.to_csv(csv_buf, index=False)
 
-BundleBuilder() \
-    .add_model("reference", model.source_yaml) \
-    .add_raw_data("auxiliary_series", csv_buffer.getvalue()) \
-    .write("with-raw-data.sdsge")
+bundle.add_raw_data(
+    name="auxiliary_series",
+    data=csv_buf.getvalue(),
+)
 ```
 
 ???+ info "CSV vs Parquet for raw data"
     `add_raw_data` re-encodes CSV input as Parquet by default. Pass `as_parquet=False` to embed the CSV verbatim — useful for hand-zip-friendly bundles.
 
+## Write the bundle
+
+The bundle is written to disk as a zip file that's aliased as a `.sdsge` file.
+
+```python
+bundle_path = bundle.write("experiment-1.sdsge")
+print(f"Bundle written to {bundle_path}")
+```
+
 ## Inspect the result
 
-The bundle is a zip — every member is human-inspectable.
+Since `.sdsge` is just an alias, a bundle acts exactly like a zip file. You can use and `zip` utility to inspect its contents or use the `sdsge-decompile` CLI to extract it into a directory structure.
 
 ```bash
 unzip -l experiment-1.sdsge
@@ -280,12 +220,19 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     ...    ...        ...    manifest.json
-     ...    ...        ...    model/reference.yaml
-     ...    ...        ...    estimation/spec.json
-     ...    ...        ...    estimation/result.json
-     ...    ...        ...    estimation/observed.parquet
-     ...    ...        ...    montecarlo/pipeline.json
+     3122  16-06-2026 14:26   manifest.json
+     2599  16-06-2026 14:26   model/reference.yaml
+     2599  16-06-2026 14:26   model/dgp.yaml
+      973  16-06-2026 14:26   estimation/spec.json
+      420  16-06-2026 14:26   estimation/result.json
+     1939  16-06-2026 14:26   estimation/observed.parquet
+    19943  16-06-2026 14:26   estimation/posterior.parquet
+      832  16-06-2026 14:26   montecarlo/pipeline.json
+     4475  16-06-2026 14:26   montecarlo/result.json
+    15645  16-06-2026 14:26   montecarlo/traces.parquet
+     1282  16-06-2026 14:26   data/auxiliary_series.parquet
+---------                     -------
+    53829                     11 files
 ```
 
 For a structured view, decompile it:
@@ -294,7 +241,7 @@ For a structured view, decompile it:
 sdsge-decompile experiment-1.sdsge -o experiment-1/
 ```
 
-Or open it directly in Python — see the [Bundle Loading Guide](bundle_loading_guide.md).
+Or open it directly in Python: see the [Bundle Loading Guide](bundle_loading_guide.md).
 
 ## Further steps
 
@@ -302,3 +249,5 @@ Or open it directly in Python — see the [Bundle Loading Guide](bundle_loading_
 - [`SolvedModel.save_sdsge`](../documentation/SolvedModel.md) — one-shot bundle write for the model-only case.
 - [`SolvedModel.to_bundle_builder`](../documentation/SolvedModel.md) — pre-seeded builder factory, equivalent to the chain in this guide.
 - [`BundleBuilder` API reference](../documentation/bundle/BundleBuilder.md).
+
+[Download Guide Notebook](../assets/bundle_authoring.ipynb){ .md-button download="" }

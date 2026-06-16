@@ -196,20 +196,35 @@ nav:
           - Overview: documentation/monte_carlo/index.md
           - MCPipeline: documentation/monte_carlo/pipeline.md
           - Core Containers: documentation/monte_carlo/core_containers.md
-          - Built-In Steps:
-              - DGP Simulation: documentation/monte_carlo/builtin/sim.md
-              - Raw Data: documentation/monte_carlo/builtin/raw_data.md
-              - Reference Filtering: documentation/monte_carlo/builtin/filter.md
-              - Wald Tests: documentation/monte_carlo/builtin/wald.md
-              - Ljung-Box Tests: documentation/monte_carlo/builtin/ljung_box.md
-              - Jarque-Bera Tests: documentation/monte_carlo/builtin/jarque_bera.md
-              - Breusch-Pagan Tests: documentation/monte_carlo/builtin/breusch_pagan.md
-              - Breusch-Godfrey Tests: documentation/monte_carlo/builtin/breusch_godfrey.md
-              - CUSUM Tests: documentation/monte_carlo/builtin/cusum.md
-              - CUSUM of Squares Tests: documentation/monte_carlo/builtin/cusumsq.md
-              - Chow Tests: documentation/monte_carlo/builtin/chow.md
-              - Regression Steps: documentation/monte_carlo/builtin/regression.md
-              - Transform Steps: documentation/monte_carlo/builtin/transform.md
+          - Pipeline Spec: documentation/monte_carlo/spec.md
+          - Pipeline Graph: documentation/monte_carlo/graph.md
+          - Step Catalog: documentation/monte_carlo/catalog.md
+          - Custom Operations: documentation/monte_carlo/custom_ops.md
+          - Operations:
+              - Core:
+                  - DGP Simulation: documentation/monte_carlo/operations/core/simulation.md
+                  - Raw Data: documentation/monte_carlo/operations/core/raw_data.md
+                  - Reference Filtering: documentation/monte_carlo/operations/core/filter.md
+              - Tests:
+                  - Wald Tests: documentation/monte_carlo/operations/tests/wald.md
+                  - Ljung-Box Tests: documentation/monte_carlo/operations/tests/ljung_box.md
+                  - Jarque-Bera Tests: documentation/monte_carlo/operations/tests/jarque_bera.md
+                  - Breusch-Pagan Tests: documentation/monte_carlo/operations/tests/breusch_pagan.md
+                  - Breusch-Godfrey Tests: documentation/monte_carlo/operations/tests/breusch_godfrey.md
+                  - CUSUM Tests: documentation/monte_carlo/operations/tests/cusum.md
+                  - CUSUM of Squares Tests: documentation/monte_carlo/operations/tests/cusumsq.md
+                  - Chow Tests: documentation/monte_carlo/operations/tests/chow.md
+              - Regressions:
+                  - Regression Steps: documentation/monte_carlo/operations/regressions/regression.md
+              - Transforms:
+                  - Custom Transform: documentation/monte_carlo/operations/transforms/custom.md
+                  - Standardize: documentation/monte_carlo/operations/transforms/standardize.md
+                  - Log: documentation/monte_carlo/operations/transforms/log.md
+                  - Log Difference: documentation/monte_carlo/operations/transforms/log_diff.md
+                  - Difference: documentation/monte_carlo/operations/transforms/diff.md
+                  - Rolling Mean: documentation/monte_carlo/operations/transforms/rolling_mean.md
+                  - Rolling Standard Deviation: documentation/monte_carlo/operations/transforms/rolling_std.md
+                  - Rolling Variance: documentation/monte_carlo/operations/transforms/rolling_var.md
           - Result Access: documentation/monte_carlo/result_access.md
       - Prior Specification:
           - Prior: documentation/prior_spec/Prior.md
