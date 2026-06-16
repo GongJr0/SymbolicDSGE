@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from time import perf_counter
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .graph import PipelineGraph
 
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
@@ -47,6 +51,18 @@ class MCPipeline:
                 raise ValueError(
                     "MCPipeline supports only one DATAGEN step, in first position."
                 )
+
+    @cached_property
+    def graph(self) -> "PipelineGraph":
+        """The pipeline's dependency DAG, resolved from the steps' kwargs.
+
+        Built once and cached. Owns the graph structure (parents/children/leaves/
+        typed input edges) that serialization and validation read instead of
+        re-deriving it. Lazily imported to keep ``core`` light at import time.
+        """
+        from .graph import PipelineGraph
+
+        return PipelineGraph.from_steps(self.steps)
 
     def run(
         self,
