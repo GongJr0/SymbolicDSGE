@@ -85,4 +85,4 @@ sdsge-compile my-experiment/                  # → updated my-experiment.sdsge
 
 - [`sdsge-compile`](sdsge-compile.md) — the inverse operation.
 - [Bundle Loading Guide](../guides/bundle_loading_guide.md) — read a `.sdsge` from code instead.
-- [`load_bundle`](../documentation/bundle/index.md#load_bundle) — the in-code equivalent of this CLI.
+- [`load_bundle`](../documentation/bundle/load_bundle.md) — the in-code equivalent of this CLI.

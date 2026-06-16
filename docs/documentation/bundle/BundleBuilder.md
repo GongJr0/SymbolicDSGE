@@ -29,6 +29,8 @@ BundleBuilder(
 
 __Methods:__
 
+## `BundleBuilder.add_model`
+
 ```python
 BundleBuilder.add_model(
     role: str,
@@ -53,6 +55,8 @@ Add a model configuration to the bundle. `role` is `"reference"` or `"dgp"`. `ya
 
 &nbsp;
 
+## `BundleBuilder.add_raw_data`
+
 ```python
 BundleBuilder.add_raw_data(
     name: str,
@@ -69,10 +73,12 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | name | Member stem — stored under `data/<name>.csv` or `data/<name>.parquet`. |
-| data | CSV bytes or text. Parquet input should be added through [`add_member`](#raw-passthrough) instead. |
+| data | CSV bytes or text. Parquet input should be added through [`add_member`](#bundlebuilderadd_member) instead. |
 | as_parquet | When `True` the CSV is re-encoded as Parquet for size; when `False` it is stored verbatim. |
 
 &nbsp;
+
+## `BundleBuilder.add_estimation`
 
 ```python
 BundleBuilder.add_estimation(
@@ -114,6 +120,8 @@ Add the estimation tab. `spec` is always written; the other arguments are condit
 
 &nbsp;
 
+## `BundleBuilder.add_mc`
+
 ```python
 BundleBuilder.add_mc(
     pipeline: MCPipeline | PipelineSpec,
@@ -138,6 +146,8 @@ Add the Monte Carlo tab. A live `MCPipeline` is compiled to a `PipelineSpec` and
 
 &nbsp;
 
+## `BundleBuilder.set_simulation`
+
 ```python
 BundleBuilder.set_simulation(
     simulation: SimSpec,
@@ -147,6 +157,8 @@ BundleBuilder.set_simulation(
 Attach the simulation prefill. `SimSpec` rides inline in the manifest rather than as its own member.
 
 &nbsp;
+
+## `BundleBuilder.add_member`
 
 ```python
 BundleBuilder.add_member(
@@ -162,6 +174,8 @@ Low-level passthrough — append a pre-encoded member at its declared path. Used
 
 &nbsp;
 
+## `BundleBuilder.write`
+
 ```python
 BundleBuilder.write(
     path: str | Path,
@@ -172,6 +186,8 @@ Materialize the bundle to disk and return the written path. Equivalent to `write
 
 &nbsp;
 
+## `BundleBuilder.build`
+
 ```python
 BundleBuilder.build(
 ) -> tuple[Manifest, dict[str, bytes]]
@@ -180,6 +196,8 @@ BundleBuilder.build(
 Return the in-memory `(manifest, files)` pair instead of writing — useful for tests and for callers that handle the I/O themselves.
 
 &nbsp;
+
+## `BundleBuilder.manifest`
 
 ```python
 BundleBuilder.manifest(

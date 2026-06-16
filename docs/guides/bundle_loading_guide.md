@@ -86,7 +86,7 @@ if estimation is not None:
     print("Parameters:", [p.name for p in estimation.spec.parameters])
 ```
 
-1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-result-metadata) instance — round-trippable to / from JSON via `to_dict()` / `from_dict()`.
+1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-spec-and-result-types) instance — round-trippable to / from JSON via `to_dict()` / `from_dict()`.
 
 The result metadata discriminates by type. For MLE / MAP runs the result is an `OptimizationResultMeta`; for MCMC it is an `MCMCResultMeta` paired with bulk traces in `estimation.posterior`.
 

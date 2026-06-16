@@ -117,10 +117,10 @@ The reader dispatches each member by file extension:
 }
 ```
 
-`type` discriminates `"mcmc"` from `"optimization"`; `data` is the result-metadata dataclass `to_dict()`. See [`MCMCResultMeta`](../documentation/bundle/index.md#estimation-result-metadata) and [`OptimizationResultMeta`](../documentation/bundle/index.md#estimation-result-metadata) for the field-level documentation.
+`type` discriminates `"mcmc"` from `"optimization"`; `data` is the result-metadata dataclass `to_dict()`. See [`MCMCResultMeta`](../documentation/bundle/index.md#estimation-spec-and-result-types) and [`OptimizationResultMeta`](../documentation/bundle/index.md#estimation-spec-and-result-types) for the field-level documentation.
 
 ## See also
 
 - [`sdsge-decompile`](sdsge-decompile.md) — the inverse operation.
 - [Bundle Authoring Guide](../guides/bundle_authoring_guide.md) — assemble a bundle from code.
-- [`BundleBuilder`](../documentation/bundle/index.md#bundlebuilder) — the in-code equivalent of this CLI.
+- [`BundleBuilder`](../documentation/bundle/BundleBuilder.md) — the in-code equivalent of this CLI.

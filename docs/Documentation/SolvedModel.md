@@ -277,6 +277,8 @@ __Returns:__
 
 &nbsp;
 
+## `SolvedModel.save_sdsge`
+
 ```python
 SolvedModel.save_sdsge(
     path: str | Path,
@@ -312,6 +314,8 @@ __Returns:__
 | `#!python Path` | The path the bundle was written to. |
 
 &nbsp;
+
+## `SolvedModel.to_bundle_builder`
 
 ```python
 SolvedModel.to_bundle_builder(
