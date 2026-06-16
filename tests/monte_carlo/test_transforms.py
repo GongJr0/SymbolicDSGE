@@ -353,7 +353,9 @@ def test_terminal_with_transform_parent_rejects_fixed_source() -> None:
     assert terminal.params["payload_key"] == "log_obs"
 
 
-def test_multi_input_consumer_requires_explicit_payload_leg() -> None:
+def test_multi_input_consumer_without_payload_leg_reads_declared_sources() -> None:
+    # A multi-input node may sit downstream of a transform without consuming its
+    # payload — it just reads the sources its legs declare (no forced payload).
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -378,8 +380,11 @@ def test_multi_input_consumer_requires_explicit_payload_leg() -> None:
             EdgeSpec(source="d", target="bp"),
         ],
     )
-    with pytest.raises(ValueError, match="no input leg is set to source='payload'"):
-        validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    bp = ordered[-1]
+    assert bp.params["residual_source"] == "observables"
+    assert bp.params["X_source"] == "observables"
+    assert "residual_payload_key" not in bp.params
 
 
 def test_multi_input_consumer_with_explicit_payload_leg_binds_payload_key() -> None:
@@ -414,7 +419,9 @@ def test_multi_input_consumer_with_explicit_payload_leg_binds_payload_key() -> N
     assert bp.params["X_source"] == "observables"
 
 
-def test_payload_source_without_transform_parent_is_rejected() -> None:
+def test_payload_source_with_dangling_key_is_rejected() -> None:
+    # A payload leg now resolves by key; a key naming no prior producer is the
+    # error (rather than "requires a transform parent edge").
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -427,7 +434,7 @@ def test_payload_source_without_transform_parent_is_rejected() -> None:
         ],
         edges=[EdgeSpec(source="sim", target="jb")],
     )
-    with pytest.raises(ValueError, match="require a transform parent"):
+    with pytest.raises(ValueError, match="requires prior payload"):
         validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
 

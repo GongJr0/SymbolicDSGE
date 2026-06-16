@@ -7,16 +7,38 @@ import { registerPythonLsp } from "../lsp/registerPythonLsp";
 import type { MCFieldSpec } from "../types";
 import type { MCFlowNode } from "./types";
 
+// Input legs whose value is a dependency source (a "select" with INPUT_SOURCES
+// options). A leg set to "payload" reads a producer's output by key.
+const SOURCE_LEG_KEYS = new Set([
+  "source",
+  "residual_source",
+  "y_source",
+  "X_source",
+  "x_source",
+]);
+
+// Source leg -> the param naming that leg's payload producer (mirrors the
+// backend's _LEG_TO_PAYLOAD_KEY).
+const LEG_PAYLOAD_KEY: Record<string, string> = {
+  source: "payload_key",
+  residual_source: "residual_payload_key",
+  y_source: "y_payload_key",
+  X_source: "x_payload_key",
+  x_source: "x_payload_key",
+};
+
 export function StepInspector({
   node,
   onChange,
   onDelete,
   theme,
+  payloadProducers,
 }: {
   node: MCFlowNode | null;
   onChange: (node: MCFlowNode) => void;
   onDelete: (id: string) => void;
   theme: "light" | "dark";
+  payloadProducers: string[];
 }) {
   if (node === null) {
     return (
@@ -37,6 +59,7 @@ export function StepInspector({
   };
 
   const isCustom = node.data.stepType === "custom";
+  const producers = payloadProducers.filter((name) => name !== node.data.name);
 
   return (
     <div className="mc-inspector">
@@ -76,15 +99,83 @@ export function StepInspector({
         <div className="mc-inspector-fields">
           {node.data.catalog.fields
             .filter((field) => fieldVisible(field, node.data.params))
-            .map((field) => (
-              <FieldEditor
-                key={`${node.id}:${field.key}`}
-                field={field}
-                value={node.data.params[field.key] ?? field.default}
-                onChange={(value) => updateParam(field.key, value)}
-              />
-            ))}
+            .map((field) => {
+              const key = `${node.id}:${field.key}`;
+              if (field.type === "select" && SOURCE_LEG_KEYS.has(field.key)) {
+                const payloadKey = LEG_PAYLOAD_KEY[field.key];
+                return (
+                  <SourceLegEditor
+                    key={key}
+                    field={field}
+                    channel={String(node.data.params[field.key] ?? field.default ?? "")}
+                    producer={String(node.data.params[payloadKey] ?? "")}
+                    producers={producers}
+                    onChannelChange={(value) => updateParam(field.key, value)}
+                    onProducerChange={(value) => updateParam(payloadKey, value)}
+                  />
+                );
+              }
+              return (
+                <FieldEditor
+                  key={key}
+                  field={field}
+                  value={node.data.params[field.key] ?? field.default}
+                  onChange={(value) => updateParam(field.key, value)}
+                />
+              );
+            })}
         </div>
+      )}
+    </div>
+  );
+}
+
+function SourceLegEditor({
+  field,
+  channel,
+  producer,
+  producers,
+  onChannelChange,
+  onProducerChange,
+}: {
+  field: MCFieldSpec;
+  channel: string;
+  producer: string;
+  producers: string[];
+  onChannelChange: (value: string) => void;
+  onProducerChange: (value: string) => void;
+}) {
+  // "payload" is always selectable; picking it reveals a producer key dropdown.
+  const options = field.options.includes("payload")
+    ? field.options
+    : [...field.options, "payload"];
+  return (
+    <div className="mc-source-leg">
+      <label>
+        {field.label}
+        <select value={channel} onChange={(event) => onChannelChange(event.target.value)}>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+      {channel === "payload" && (
+        <label className="mc-payload-producer">
+          Payload from
+          <select
+            value={producer}
+            onChange={(event) => onProducerChange(event.target.value)}
+          >
+            <option value="">— select producer —</option>
+            {producers.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +28,32 @@ def test_factories_stamp_step_type_matching_catalog() -> None:
 
 def test_catalog_keys_are_all_valid_step_kinds() -> None:
     assert set(STEP_CATALOG) <= STEP_KINDS
+
+
+# Source leg -> the payload-key kwarg the binder produces for it. Each step's
+# run op must accept the key for every source leg it declares, else a key-based
+# (or transform-fed) payload arrives as an unexpected kwarg at run time.
+_SOURCE_LEG_TO_PAYLOAD_KEY = {
+    "source": "payload_key",
+    "residual_source": "residual_payload_key",
+    "y_source": "y_payload_key",
+    "X_source": "x_payload_key",
+    "x_source": "x_payload_key",
+}
+
+
+def test_every_source_leg_op_accepts_its_payload_key() -> None:
+    for step_type, definition in STEP_CATALOG.items():
+        step = definition.factory(name="probe")
+        op_params = set(inspect.signature(step.func).parameters)
+        for field in definition.fields:
+            payload_key = _SOURCE_LEG_TO_PAYLOAD_KEY.get(field.key)
+            if payload_key is None:
+                continue
+            assert payload_key in op_params, (
+                f"'{step_type}' run op does not accept '{payload_key}' for leg "
+                f"'{field.key}'; a key-based payload would be an unexpected kwarg."
+            )
 
 
 def test_transform_step_stamps_custom_kind() -> None:
@@ -130,6 +157,86 @@ def test_validate_orders_steps_and_binds_filter_key() -> None:
 
     assert [node.id for node in ordered] == ["sim", "filter", "test"]
     assert ordered[-1].params["filter_key"] == "renamed_filter"
+
+
+def test_validate_binds_multi_source_terminal_from_distinct_producers() -> None:
+    # A terminal can now read a payload (transform) on one leg and a filter
+    # source on another, linking from both producers.
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec("filter", "filter", "filter", {}),
+            NodeSpec("std", "standardize", "std", {"source": "observables"}),
+            NodeSpec(
+                "bp",
+                "breusch_pagan",
+                "bp",
+                {"residual_source": "std_innov", "X_source": "payload"},
+            ),
+        ],
+        edges=[
+            EdgeSpec("sim", "filter"),
+            EdgeSpec("sim", "std"),
+            EdgeSpec("filter", "bp"),
+            EdgeSpec("std", "bp"),
+        ],
+    )
+
+    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    bp = next(node for node in ordered if node.id == "bp")
+    assert bp.params["filter_key"] == "filter"  # filter leg bound from the filter
+    assert bp.params["x_payload_key"] == "std"  # payload leg bound from transform
+
+
+def test_validate_resolves_payload_by_key_without_an_edge() -> None:
+    # A terminal selects a transform's payload by key (payload_key) with no edge
+    # linking them; ordering + validation resolve it from the reference.
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec("std", "standardize", "std", {"source": "observables"}),
+            NodeSpec(
+                "jb",
+                "jarque_bera",
+                "jb",
+                {"source": "payload", "payload_key": "std"},
+            ),
+        ],
+        edges=[EdgeSpec("sim", "std"), EdgeSpec("sim", "jb")],
+    )
+    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    assert [node.id for node in ordered] == ["sim", "std", "jb"]
+
+
+def test_validate_orders_payload_key_chain_without_edges() -> None:
+    # Transform chain wired purely by key: tf2 reads tf1's payload, tf1 reads
+    # tf0's payload. Ordering must place tf0 -> tf1 -> tf2 from the references.
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec("tf2", "log", "tf2", {"source": "payload", "payload_key": "tf1"}),
+            NodeSpec("tf1", "log", "tf1", {"source": "payload", "payload_key": "tf0"}),
+            NodeSpec("tf0", "standardize", "tf0", {"source": "observables"}),
+        ],
+        edges=[EdgeSpec("sim", "tf0")],
+    )
+    ordered = [
+        node.id
+        for node in validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ]
+    assert ordered.index("tf0") < ordered.index("tf1") < ordered.index("tf2")
+
+
+def test_validate_rejects_payload_leg_without_producer() -> None:
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec("jb", "jarque_bera", "jb", {"source": "payload"}),
+        ],
+        edges=[EdgeSpec("sim", "jb")],
+    )
+    with pytest.raises(ValueError, match="no .*producer is selected"):
+        validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
 
 def test_validate_rejects_filter_source_without_filter_link() -> None:

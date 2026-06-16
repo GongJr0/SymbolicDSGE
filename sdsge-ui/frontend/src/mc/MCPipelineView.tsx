@@ -1,6 +1,7 @@
 import {
   Background,
   Controls,
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -113,7 +114,8 @@ function MCPipelineBuilder({
   const [hydrated, setHydrated] = useState(false);
   const [summaryShare, setSummaryShare] = useState(36);
   const [summaryFolded, setSummaryFolded] = useState(false);
-  const { screenToFlowPosition, fitView } = useReactFlow<MCFlowNode, Edge>();
+  const { screenToFlowPosition, fitView, getViewport } =
+    useReactFlow<MCFlowNode, Edge>();
 
   useEffect(() => {
     Promise.all([
@@ -156,7 +158,28 @@ function MCPipelineBuilder({
   }, [setEdges, setNodes]);
 
   const selectedNode = nodes.find((node) => node.id === selectedId) ?? null;
+  // Every transform/custom step produces a payload addressable by its name — the
+  // registry a consumer picks from when a leg reads "payload".
+  const payloadProducers = nodes
+    .filter((node) => node.data.catalog.category === "transforms")
+    .map((node) => node.data.name);
   const pipeline = useMemo(() => toPipelineSpec(nodes, edges), [nodes, edges]);
+
+  // Color edges by their producer's kind so a node's inputs are readable at a
+  // glance (datagen / filter / transform) without opening the inspector.
+  const styledEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        const source = nodes.find((node) => node.id === edge.source);
+        const color = producerColor(source?.data.stepType);
+        return {
+          ...edge,
+          style: { ...edge.style, stroke: color, strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color },
+        };
+      }),
+    [edges, nodes],
+  );
   const modelsReady =
     session?.models.reference?.solved === true && session.models.dgp?.solved === true;
 
@@ -237,7 +260,9 @@ function MCPipelineBuilder({
       if (target.data.stepType === "filter" && source.data.stepType !== "simulation") {
         return false;
       }
-      if (edges.some((edge) => edge.target === connection.target)) return false;
+      // A node may now take several incoming edges — one per input leg (e.g. a
+      // payload from a transform + a filter source). Only reject duplicate
+      // edges between the same pair.
       if (
         edges.some(
           (edge) =>
@@ -280,12 +305,23 @@ function MCPipelineBuilder({
     markDirty();
   }
 
+  // Spawn near the top-left of the *current* viewport (in flow coordinates),
+  // cascading a little so repeated clicks don't stack — instead of marching off
+  // to the right as if the canvas were a single uniform row.
+  function viewportSpawnPosition(existingCount: number): { x: number; y: number } {
+    const viewport = getViewport();
+    const baseX = (80 - viewport.x) / viewport.zoom;
+    const baseY = (80 - viewport.y) / viewport.zoom;
+    const cascade = (existingCount % 6) * 28;
+    return { x: baseX + cascade, y: baseY + cascade };
+  }
+
   function addStep(item: MCStepCatalogItem, position?: { x: number; y: number }) {
     setNodes((current) => [
       ...current,
       makeNode(
         item,
-        position ?? { x: 120 + current.length * 220, y: 140 },
+        position ?? viewportSpawnPosition(current.length),
         current,
         customTemplateRef.current,
       ),
@@ -382,7 +418,7 @@ function MCPipelineBuilder({
         >
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={styledEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -397,6 +433,7 @@ function MCPipelineBuilder({
             <Background gap={20} size={1} />
             <Controls />
           </ReactFlow>
+          <EdgeLegend />
         </div>
       ),
     },
@@ -411,6 +448,7 @@ function MCPipelineBuilder({
           onChange={updateNode}
           onDelete={deleteNode}
           theme={theme}
+          payloadProducers={payloadProducers}
         />
       ),
     },
@@ -532,6 +570,42 @@ const STEP_CATEGORIES: { id: MCStepCategory; label: string }[] = [
   { id: "tests", label: "Tests" },
   { id: "regressions", label: "Regressions" },
 ];
+
+// Edge colors by producer kind, so each consumer's inputs are distinguishable.
+const EDGE_KINDS: { kind: string; label: string; color: string }[] = [
+  { kind: "datagen", label: "Datagen", color: "#2563eb" },
+  { kind: "filter", label: "Filter", color: "#0d9488" },
+  { kind: "transform", label: "Transform", color: "#7c3aed" },
+];
+const EDGE_COLOR_BY_KIND: Record<string, string> = Object.fromEntries(
+  EDGE_KINDS.map((entry) => [entry.kind, entry.color]),
+);
+
+function producerKind(stepType: string | undefined): string {
+  if (stepType === "simulation" || stepType === "raw_data") return "datagen";
+  if (stepType === "filter") return "filter";
+  return "transform";
+}
+
+function producerColor(stepType: string | undefined): string {
+  return EDGE_COLOR_BY_KIND[producerKind(stepType)] ?? "#94a3b8";
+}
+
+function EdgeLegend() {
+  return (
+    <div className="mc-edge-legend">
+      {EDGE_KINDS.map((entry) => (
+        <span key={entry.kind} className="mc-edge-legend-item">
+          <span
+            className="mc-edge-legend-swatch"
+            style={{ background: entry.color }}
+          />
+          {entry.label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function StepPalette({
   catalog,
