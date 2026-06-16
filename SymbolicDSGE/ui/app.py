@@ -10,12 +10,15 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 
 from .mc import (
     build_pipeline,
+    compile_custom_resources,
     mc_catalog,
+    mc_custom_op_template,
     run_pipeline,
     serialize_pipeline_result,
+    validate_custom_op,
     validate_pipeline_spec,
 )
-from .mc_schemas import MCPipelineSpec, MCRunRequest
+from .mc_schemas import MCCustomOpRequest, MCPipelineSpec, MCRunRequest
 from .estimation import estimation_catalog
 from .schemas import (
     EstimationRunRequest,
@@ -62,6 +65,14 @@ def create_app(
     def monte_carlo_catalog() -> dict[str, Any]:
         return mc_catalog()
 
+    @app.get("/api/mc/custom/template")
+    def monte_carlo_custom_template() -> dict[str, str]:
+        return mc_custom_op_template()
+
+    @app.post("/api/mc/custom/validate")
+    def monte_carlo_custom_validate(request: MCCustomOpRequest) -> dict[str, Any]:
+        return validate_custom_op(request.code)
+
     @app.get("/api/estimation/catalog")
     def get_estimation_catalog() -> dict[str, Any]:
         return estimation_catalog()
@@ -83,7 +94,9 @@ def create_app(
             )
             dgp = ui_session.solved_model("dgp")
             assert dgp is not None
-            build_pipeline(ordered, dgp=dgp)
+            build_pipeline(
+                ordered, dgp=dgp, resources=compile_custom_resources(request)
+            )
             return {"valid": True, "order": [node.id for node in ordered]}
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc

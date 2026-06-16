@@ -2,10 +2,12 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import {
   Activity,
+  Code,
   DatabaseZap,
   Filter,
   Sigma,
   TestTubeDiagonal,
+  Waves,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { MCStepType } from "../types";
@@ -23,6 +25,14 @@ const ICONS: Record<MCStepType, LucideIcon> = {
   cusumsq: Activity,
   chow: Activity,
   regression: TestTubeDiagonal,
+  standardize: Waves,
+  log: Waves,
+  log_diff: Waves,
+  diff: Waves,
+  rolling_mean: Waves,
+  rolling_std: Waves,
+  rolling_var: Waves,
+  custom: Code,
 };
 
 export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {

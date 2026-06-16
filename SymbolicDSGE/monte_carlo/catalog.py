@@ -108,12 +108,29 @@ class StepDefinition:
     def is_transform(self) -> bool:
         return self.op_role == "transform"
 
+    @property
+    def category(self) -> str:
+        """Palette grouping for the GUI step selector tabs.
+
+        Derived from ``op_role`` (so new steps group automatically): datagen and
+        filter are ``"core"``, transforms ``"transforms"``, the regression step
+        ``"regressions"``, and the remaining terminals (tests) ``"tests"``.
+        """
+        if self.op_role in ("datagen", "filter"):
+            return "core"
+        if self.op_role == "transform":
+            return "transforms"
+        if self.step_type == "regression":
+            return "regressions"
+        return "tests"
+
     def catalog_entry(self) -> dict[str, Any]:
         return {
             "step_type": self.step_type,
             "title": self.title,
             "default_name": self.default_name,
             "description": self.description,
+            "category": self.category,
             "fields": [spec.to_dict() for spec in self.fields],
         }
 

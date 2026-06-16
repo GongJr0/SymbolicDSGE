@@ -32,3 +32,9 @@ class MCRunRequest(BaseModel):
     pipeline: MCPipelineSpec
     n_rep: int = Field(default=100, gt=0)
     fail_fast: bool = True
+
+
+class MCCustomOpRequest(BaseModel):
+    """A single custom-op source submission for live editor validation."""
+
+    code: str = Field(min_length=1)

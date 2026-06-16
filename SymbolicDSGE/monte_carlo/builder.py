@@ -260,6 +260,9 @@ def _build_custom(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
     """Rehydrate a ``custom`` op, reattaching its callable from resources."""
     params = dict(node.params)
     ref = params.pop("func_ref", node.name)
+    # The authoring source rides in ``code`` (compiled into the resources
+    # callable upstream); it is not a runtime kwarg of the op.
+    params.pop("code", None)
     func = resources.get(ref)
     if func is None:
         raise ValueError(
@@ -276,8 +279,13 @@ def run_pipeline(
     dgp: SolvedModel | None,
     n_rep: int,
     fail_fast: bool,
+    resources: Mapping[str, Any] | None = None,
 ) -> MCPipelineResult:
-    """Validate, compile, and run ``spec`` against the reference and DGP models."""
+    """Validate, compile, and run ``spec`` against the reference and DGP models.
+
+    ``resources`` reattaches bulk side-channels the spec references by key
+    (``raw_data`` arrays, ``custom`` callables); see :func:`build_pipeline`.
+    """
     ordered = validate_pipeline_spec(
         spec,
         has_reference=reference is not None,
@@ -285,7 +293,7 @@ def run_pipeline(
     )
     assert reference is not None
     assert dgp is not None
-    pipeline = build_pipeline(ordered, dgp=dgp)
+    pipeline = build_pipeline(ordered, dgp=dgp, resources=resources)
     return pipeline.run(
         reference=reference,
         dgp=dgp,

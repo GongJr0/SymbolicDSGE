@@ -1,5 +1,9 @@
-import { Trash2 } from "lucide-react";
+import Editor from "@monaco-editor/react";
+import type * as Monaco from "monaco-editor";
+import { Check, TriangleAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { validateCustomOp } from "../api";
+import { registerPythonLsp } from "../lsp/registerPythonLsp";
 import type { MCFieldSpec } from "../types";
 import type { MCFlowNode } from "./types";
 
@@ -7,10 +11,12 @@ export function StepInspector({
   node,
   onChange,
   onDelete,
+  theme,
 }: {
   node: MCFlowNode | null;
   onChange: (node: MCFlowNode) => void;
   onDelete: (id: string) => void;
+  theme: "light" | "dark";
 }) {
   if (node === null) {
     return (
@@ -29,6 +35,8 @@ export function StepInspector({
       },
     });
   };
+
+  const isCustom = node.data.stepType === "custom";
 
   return (
     <div className="mc-inspector">
@@ -57,17 +65,106 @@ export function StepInspector({
           }
         />
       </label>
-      <div className="mc-inspector-fields">
-        {node.data.catalog.fields
-          .filter((field) => fieldVisible(field, node.data.params))
-          .map((field) => (
-            <FieldEditor
-              key={`${node.id}:${field.key}`}
-              field={field}
-              value={node.data.params[field.key] ?? field.default}
-              onChange={(value) => updateParam(field.key, value)}
-            />
-          ))}
+      {isCustom ? (
+        <CustomOpEditor
+          nodeId={node.id}
+          code={String(node.data.params.code ?? "")}
+          theme={theme}
+          onChange={(value) => updateParam("code", value)}
+        />
+      ) : (
+        <div className="mc-inspector-fields">
+          {node.data.catalog.fields
+            .filter((field) => fieldVisible(field, node.data.params))
+            .map((field) => (
+              <FieldEditor
+                key={`${node.id}:${field.key}`}
+                field={field}
+                value={node.data.params[field.key] ?? field.default}
+                onChange={(value) => updateParam(field.key, value)}
+              />
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomOpEditor({
+  nodeId,
+  code,
+  theme,
+  onChange,
+}: {
+  nodeId: string;
+  code: string;
+  theme: "light" | "dark";
+  onChange: (value: string) => void;
+}) {
+  const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function validate() {
+    setBusy(true);
+    try {
+      const result = await validateCustomOp(code);
+      setStatus(
+        result.valid
+          ? { ok: true, message: `Valid op: ${result.name ?? ""}` }
+          : { ok: false, message: result.error ?? "Invalid op." },
+      );
+    } catch (error) {
+      setStatus({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mc-custom-editor">
+      <div className="mc-custom-editor-wrap">
+        <Editor
+          height="100%"
+          language="python"
+          path={`sdsge-mc-custom://${nodeId}.py`}
+          theme={theme === "dark" ? "vs-dark" : "light"}
+          value={code}
+          onChange={(value) => onChange(value ?? "")}
+          onMount={(_editor: Monaco.editor.IStandaloneCodeEditor, monaco) => {
+            void registerPythonLsp(monaco);
+          }}
+          options={{
+            automaticLayout: true,
+            fontSize: 13,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            tabSize: 4,
+            wordWrap: "on",
+          }}
+        />
+      </div>
+      <div className="mc-custom-editor-footer">
+        <button
+          className="secondary"
+          disabled={busy || code.trim() === ""}
+          onClick={() => void validate()}
+        >
+          <Check size={14} />
+          Validate op
+        </button>
+        {status !== null && (
+          <span
+            className={
+              status.ok ? "status mc-custom-status" : "status error mc-custom-status"
+            }
+          >
+            {status.ok ? <Check size={13} /> : <TriangleAlert size={13} />}
+            {status.message}
+          </span>
+        )}
       </div>
     </div>
   );

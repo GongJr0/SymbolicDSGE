@@ -438,3 +438,49 @@ def test_custom_operation_decorated_func_round_trips() -> None:
 def test_non_marker_decorator_is_still_rejected() -> None:
     with pytest.raises(CustomOpValidationError, match="decorator"):
         NumpyCustomFunc(_singly_decorated)
+
+
+# --- from_source (UI / web-editor path) -----------------------------------
+
+_FROM_SOURCE_OK = """@custom_operation
+def standardize_cols(*, context, reference, dgp, rep_idx, **kwargs):
+    arr = np.asarray(kwargs["x"], dtype=float)
+    return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+"""
+
+
+def test_from_source_validates_execs_and_runs() -> None:
+    func = NumpyCustomFunc.from_source(_FROM_SOURCE_OK)
+    assert func.name == "standardize_cols"
+    # The @custom_operation marker is preserved in the audit source.
+    assert "@custom_operation" in func.source
+    out = func(
+        context=None, reference=None, dgp=None, rep_idx=0, x=np.array([1.0, 2, 3])
+    )
+    np.testing.assert_allclose(out.mean(), 0.0, atol=1e-12)
+
+
+def test_from_source_round_trips_through_cloudpickle() -> None:
+    func = NumpyCustomFunc.from_source(_FROM_SOURCE_OK)
+    restored = cloudpickle.loads(cloudpickle.dumps(func))
+    x = np.array([2.0, 4.0, 6.0])
+    np.testing.assert_allclose(
+        restored(context=None, reference=None, dgp=None, rep_idx=0, x=x),
+        func(context=None, reference=None, dgp=None, rep_idx=0, x=x),
+    )
+    assert restored.source == func.source
+
+
+def test_from_source_rejects_extra_statements() -> None:
+    with pytest.raises(CustomOpValidationError, match="exactly one top-level"):
+        NumpyCustomFunc.from_source("import os\ndef f(**kwargs):\n    return 1\n")
+
+
+def test_from_source_rejects_unsafe_names() -> None:
+    with pytest.raises(CustomOpValidationError, match="deny list"):
+        NumpyCustomFunc.from_source('def f(**kwargs):\n    return open("x")\n')
+
+
+def test_from_source_reports_syntax_errors() -> None:
+    with pytest.raises(CustomOpValidationError, match="did not parse"):
+        NumpyCustomFunc.from_source("def f(**kwargs)\n    return 1\n")

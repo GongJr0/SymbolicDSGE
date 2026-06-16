@@ -1375,6 +1375,93 @@ button.mc-palette-step:hover {
   opacity: 1;
 }
 
+.mc-palette-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+button.mc-palette-tab {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #64748b;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  padding: 4px 8px;
+}
+
+button.mc-palette-tab:hover {
+  background: #f1f5f9;
+  color: #334155;
+  opacity: 1;
+}
+
+button.mc-palette-tab.active {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+
+.mc-palette-tab-count {
+  background: #e2e8f0;
+  border-radius: 999px;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 600;
+  min-width: 15px;
+  padding: 0 5px;
+  text-align: center;
+}
+
+button.mc-palette-tab.active .mc-palette-tab-count {
+  background: #c7d2fe;
+  color: #3730a3;
+}
+
+.mc-palette-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mc-palette-empty {
+  font-size: 11px;
+  padding: 6px 2px;
+}
+
+.mc-custom-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mc-custom-editor-wrap {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  height: 360px;
+  overflow: hidden;
+}
+
+.mc-custom-editor-footer {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mc-custom-status {
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.theme-dark .mc-custom-editor-wrap {
+  border-color: #334155;
+}
+
 .mc-step-node {
   background: white;
   border: 1px solid #cbd5e1;
@@ -2197,6 +2284,31 @@ button.mc-palette-step:hover {
 .theme-dark button.mc-palette-step:hover {
   background: #312e81;
   color: #c7d2fe;
+}
+
+.theme-dark button.mc-palette-tab {
+  color: #94a3b8;
+}
+
+.theme-dark button.mc-palette-tab:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.theme-dark button.mc-palette-tab.active {
+  background: #312e81;
+  border-color: #4338ca;
+  color: #c7d2fe;
+}
+
+.theme-dark .mc-palette-tab-count {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+.theme-dark button.mc-palette-tab.active .mc-palette-tab-count {
+  background: #4338ca;
+  color: #e0e7ff;
 }
 
 .theme-dark .mc-step-node-heading,

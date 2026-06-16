@@ -530,7 +530,7 @@ export default function App() {
               </div>
             }
           >
-            <MCPipelineView hidden={view !== "mc"} session={session} />
+            <MCPipelineView hidden={view !== "mc"} session={session} theme={theme} />
           </Suspense>
         )}
       </section>

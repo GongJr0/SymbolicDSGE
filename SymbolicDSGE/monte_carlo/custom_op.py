@@ -744,6 +744,64 @@ class NumpyCustomFunc:
         """Version of the safe-namespace contract enforced at wrap time."""
         return self._safe_namespace_version
 
+    # ----- alternate constructor -----
+
+    @classmethod
+    def from_source(cls, source: str) -> "NumpyCustomFunc":
+        """Build a wrapper from source *text* rather than a live function.
+
+        The constructor recovers source via ``inspect.getsource``, which needs a
+        real ``def`` in a module file or notebook cell — unavailable for code
+        typed into a web editor and ``exec``'d. This validates the supplied text
+        directly (same AST contract) and executes it in the safe namespace to
+        obtain the callable, snapshotting the original text as :attr:`source` for
+        receiver-side audit. A leading ``@custom_operation`` marker is accepted
+        and treated as a no-op (the result is wrapped here regardless).
+
+        Raises :class:`CustomOpValidationError` on a parse error, a structure
+        other than a single top-level ``def``, a safe-namespace violation, or an
+        execution failure.
+        """
+        text = textwrap.dedent(source)
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            raise CustomOpValidationError(
+                f"submitted source did not parse — {exc.msg} (line {exc.lineno})."
+            ) from exc
+        if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
+            raise CustomOpValidationError(
+                "submitted source must contain exactly one top-level `def` "
+                "(no imports or extra statements; numpy is available as `np`)."
+            )
+        func_def = tree.body[0]
+        func_name = func_def.name
+
+        validator = _Validator(func_name)
+        validator.validate(func_def)
+
+        # `custom_operation` is neutralized so a decorated template execs to the
+        # bare function (its own getsource-based wrap would fail on exec'd code).
+        namespace: dict[str, Any] = {**SAFE_MODULES, "custom_operation": lambda f: f}
+        try:
+            exec(compile(tree, "<custom_op>", "exec"), namespace)  # noqa: S102
+        except Exception as exc:
+            raise CustomOpValidationError(
+                f"{func_name!r}: failed to execute submitted source — {exc}."
+            ) from exc
+        func = namespace[func_name]
+        captured = _capture_globals(
+            func, validator.global_loads, validator.attribute_loads, func_name
+        )
+
+        instance = object.__new__(cls)
+        instance._func = func
+        instance._source = text
+        instance._captured_globals = captured
+        instance._name = func_name
+        instance._safe_namespace_version = SAFE_NAMESPACE_VERSION
+        return instance
+
     # ----- runtime surface -----
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
