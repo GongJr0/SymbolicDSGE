@@ -27,10 +27,16 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { DragEvent, PointerEvent } from "react";
-import { getMCCatalog, runMCPipeline, validateMCPipeline } from "../api";
+import {
+  getMCCatalog,
+  getMCCustomTemplate,
+  runMCPipeline,
+  validateMCPipeline,
+} from "../api";
 import { PanelWorkspace } from "../PanelWorkspace";
 import type { PanelDef } from "../PanelWorkspace";
 import type {
@@ -38,6 +44,7 @@ import type {
   MCPipelineResult,
   MCPipelineSpec,
   MCStepCatalogItem,
+  MCStepCategory,
   SessionSummary,
 } from "../types";
 import { StepInspector } from "./StepInspector";
@@ -55,23 +62,44 @@ import type { MCFlowNode } from "./types";
 
 const nodeTypes = { mcStep: StepNode };
 
+// "custom" has no backend StepDefinition (it isn't GUI-authored via fields), so
+// it never appears in the catalogue payload. We inject a synthetic palette entry
+// for it under the Transforms tab; its single "param" is the op source code.
+const CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
+  step_type: "custom",
+  title: "Custom Op",
+  default_name: "custom_op",
+  description: "User-defined Python transform, validated and run per replication.",
+  category: "transforms",
+  fields: [],
+};
+
 export default function MCPipelineView({
   hidden,
   session,
+  theme,
 }: {
   hidden?: boolean;
   session: SessionSummary | null;
+  theme: "light" | "dark";
 }) {
   return (
     <div className="mc-layout" style={hidden ? { display: "none" } : undefined}>
       <ReactFlowProvider>
-        <MCPipelineBuilder session={session} />
+        <MCPipelineBuilder session={session} theme={theme} />
       </ReactFlowProvider>
     </div>
   );
 }
 
-function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
+function MCPipelineBuilder({
+  session,
+  theme,
+}: {
+  session: SessionSummary | null;
+  theme: "light" | "dark";
+}) {
+  const customTemplateRef = useRef<string>("");
   const [catalog, setCatalog] = useState<MCCatalog | null>(null);
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<MCFlowNode>([]);
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([]);
@@ -88,8 +116,16 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
   const { screenToFlowPosition, fitView } = useReactFlow<MCFlowNode, Edge>();
 
   useEffect(() => {
-    getMCCatalog()
-      .then(async (value) => {
+    Promise.all([
+      getMCCatalog(),
+      getMCCustomTemplate().catch(() => ({ template: "" })),
+    ])
+      .then(async ([rawCatalog, tmpl]) => {
+        customTemplateRef.current = tmpl.template;
+        const value: MCCatalog = {
+          ...rawCatalog,
+          steps: [...rawCatalog.steps, CUSTOM_CATALOG_ITEM],
+        };
         setCatalog(value);
         const [workspace, persistedResult] = await Promise.all([
           loadMCWorkspace().catch(() => null),
@@ -251,6 +287,7 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
         item,
         position ?? { x: 120 + current.length * 220, y: 140 },
         current,
+        customTemplateRef.current,
       ),
     ]);
     markDirty();
@@ -369,7 +406,12 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
       badge: selectedNode?.data.name,
       scrollable: true,
       content: (
-        <StepInspector node={selectedNode} onChange={updateNode} onDelete={deleteNode} />
+        <StepInspector
+          node={selectedNode}
+          onChange={updateNode}
+          onDelete={deleteNode}
+          theme={theme}
+        />
       ),
     },
   ];
@@ -484,6 +526,13 @@ function MCPipelineBuilder({ session }: { session: SessionSummary | null }) {
   );
 }
 
+const STEP_CATEGORIES: { id: MCStepCategory; label: string }[] = [
+  { id: "core", label: "Core" },
+  { id: "transforms", label: "Transforms" },
+  { id: "tests", label: "Tests" },
+  { id: "regressions", label: "Regressions" },
+];
+
 function StepPalette({
   catalog,
   onAdd,
@@ -491,24 +540,51 @@ function StepPalette({
   catalog: MCCatalog | null;
   onAdd: (item: MCStepCatalogItem) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<MCStepCategory>("core");
+  const steps = catalog?.steps ?? [];
+  const visible = steps.filter((item) => item.category === activeTab);
+
   return (
     <div className="mc-palette">
-      {catalog?.steps.map((item) => (
-        <button
-          key={item.step_type}
-          className="mc-palette-step"
-          draggable
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = "copy";
-            event.dataTransfer.setData("application/sdsge-mc-step", item.step_type);
-          }}
-          onClick={() => onAdd(item)}
-          title={item.description}
-        >
-          <Plus size={13} />
-          {item.title}
-        </button>
-      ))}
+      <div className="mc-palette-tabs" role="tablist">
+        {STEP_CATEGORIES.map((category) => {
+          const count = steps.filter((step) => step.category === category.id).length;
+          return (
+            <button
+              key={category.id}
+              role="tab"
+              aria-selected={activeTab === category.id}
+              className={`mc-palette-tab${activeTab === category.id ? " active" : ""}`}
+              onClick={() => setActiveTab(category.id)}
+            >
+              {category.label}
+              {count > 0 && <span className="mc-palette-tab-count">{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mc-palette-steps">
+        {visible.length === 0 ? (
+          <span className="muted mc-palette-empty">No steps in this group.</span>
+        ) : (
+          visible.map((item) => (
+            <button
+              key={item.step_type}
+              className="mc-palette-step"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData("application/sdsge-mc-step", item.step_type);
+              }}
+              onClick={() => onAdd(item)}
+              title={item.description}
+            >
+              <Plus size={13} />
+              {item.title}
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -526,9 +602,14 @@ function makeNode(
   item: MCStepCatalogItem,
   position: { x: number; y: number },
   existing: MCFlowNode[],
+  customTemplate = "",
 ): MCFlowNode {
   const count = existing.filter((node) => node.data.stepType === item.step_type).length;
   const name = count === 0 ? item.default_name : `${item.default_name}_${count + 1}`;
+  const params =
+    item.step_type === "custom"
+      ? { code: customTemplate }
+      : Object.fromEntries(item.fields.map((field) => [field.key, field.default]));
   return {
     id: `${item.step_type}-${crypto.randomUUID()}`,
     type: "mcStep",
@@ -536,7 +617,7 @@ function makeNode(
     data: {
       stepType: item.step_type,
       name,
-      params: Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
+      params,
       catalog: item,
     },
   };

@@ -62,6 +62,7 @@ def test_catalog_payload_shape_and_known_fields() -> None:
             "title",
             "default_name",
             "description",
+            "category",
             "fields",
         }
         for field in step["fields"]:
@@ -76,6 +77,22 @@ def test_catalog_payload_shape_and_known_fields() -> None:
     wald_fields = {f["key"]: f for f in by_type["wald"]["fields"]}
     assert wald_fields["target_vector"]["when"] == ["mean"]
     assert wald_fields["source"]["options"][0] == "states"
+
+
+def test_catalog_entries_carry_selector_category() -> None:
+    by_type = {s["step_type"]: s for s in catalog_payload()["steps"]}
+    assert by_type["simulation"]["category"] == "core"
+    assert by_type["filter"]["category"] == "core"
+    assert by_type["standardize"]["category"] == "transforms"
+    assert by_type["jarque_bera"]["category"] == "tests"
+    assert by_type["wald"]["category"] == "tests"
+    assert by_type["regression"]["category"] == "regressions"
+    assert {s["category"] for s in by_type.values()} == {
+        "core",
+        "transforms",
+        "tests",
+        "regressions",
+    }
 
 
 def test_terminal_step_types_derived_from_catalog() -> None:

@@ -980,3 +980,118 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
     )
     with np.testing.assert_raises_regex(ValueError, "must link from a filter"):
         validate_pipeline_spec(direct, has_reference=True, has_dgp=True)
+
+
+_UI_CUSTOM_OP = """@custom_operation
+def zscore(*, context, reference, dgp, rep_idx, **kwargs):
+    arr = np.asarray(context.require_data().observables, dtype=float)
+    return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+"""
+
+
+def test_ui_backend_custom_op_template_and_validate() -> None:
+    client = TestClient(create_app())
+
+    template = client.get("/api/mc/custom/template")
+    assert template.status_code == 200
+    assert "@custom_operation" in template.json()["template"]
+
+    ok = client.post("/api/mc/custom/validate", json={"code": _UI_CUSTOM_OP})
+    assert ok.status_code == 200
+    assert ok.json() == {"valid": True, "name": "zscore"}
+
+    bad = client.post(
+        "/api/mc/custom/validate",
+        json={"code": 'def f(**kwargs):\n    return open("x")\n'},
+    )
+    assert bad.status_code == 200
+    body = bad.json()
+    assert body["valid"] is False
+    assert "deny list" in body["error"]
+
+
+def test_ui_backend_runs_custom_op_pipeline() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        client.post(
+            "/api/model/load-yaml", json={"role": role, "path": "MODELS/test.yaml"}
+        )
+        client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 8, "observables": True, "seed": 1},
+            },
+            {
+                "id": "z",
+                "step_type": "custom",
+                "name": "zscore",
+                "params": {"code": _UI_CUSTOM_OP},
+            },
+            {
+                "id": "jb",
+                "step_type": "jarque_bera",
+                "name": "jb",
+                "params": {"source": "payload", "column": [0]},
+            },
+        ],
+        "edges": [
+            {"source": "sim", "target": "z"},
+            {"source": "z", "target": "jb"},
+        ],
+    }
+
+    validated = client.post("/api/mc/validate", json=pipeline)
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+
+    run = client.post(
+        "/api/run/mc", json={"pipeline": pipeline, "n_rep": 3, "fail_fast": True}
+    )
+    assert run.status_code == 200
+    body = run.json()
+    assert body["n_successful"] == 3
+    assert "jb" in body["test_summaries"]
+
+
+def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
+    client = TestClient(create_app())
+    for role in ("reference", "dgp"):
+        client.post(
+            "/api/model/load-yaml", json={"role": role, "path": "MODELS/test.yaml"}
+        )
+        client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+
+    pipeline = {
+        "nodes": [
+            {
+                "id": "sim",
+                "step_type": "simulation",
+                "name": "datagen",
+                "params": {"T": 8, "observables": True, "seed": 1},
+            },
+            {
+                "id": "z",
+                "step_type": "custom",
+                "name": "zscore",
+                "params": {"code": 'def f(**kwargs):\n    return __import__("os")\n'},
+            },
+        ],
+        "edges": [{"source": "sim", "target": "z"}],
+    }
+
+    run = client.post(
+        "/api/run/mc", json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True}
+    )
+    assert run.status_code == 400
+    assert "zscore" in run.json()["detail"]["message"]

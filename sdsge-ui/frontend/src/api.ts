@@ -135,6 +135,19 @@ export function getMCCatalog(): Promise<MCCatalog> {
   return requestJson<MCCatalog>("/api/mc/catalog");
 }
 
+export function getMCCustomTemplate(): Promise<{ template: string }> {
+  return requestJson<{ template: string }>("/api/mc/custom/template");
+}
+
+export function validateCustomOp(
+  code: string,
+): Promise<{ valid: boolean; name?: string; error?: string }> {
+  return requestJson<{ valid: boolean; name?: string; error?: string }>(
+    "/api/mc/custom/validate",
+    { method: "POST", body: JSON.stringify({ code }) },
+  );
+}
+
 export function validateMCPipeline(
   pipeline: MCPipelineSpec,
 ): Promise<{ valid: true; order: string[] }> {

@@ -170,7 +170,17 @@ export type MCStepType =
   | "cusum"
   | "cusumsq"
   | "chow"
-  | "regression";
+  | "regression"
+  | "standardize"
+  | "log"
+  | "log_diff"
+  | "diff"
+  | "rolling_mean"
+  | "rolling_std"
+  | "rolling_var"
+  | "custom";
+
+export type MCStepCategory = "core" | "transforms" | "tests" | "regressions";
 
 export type MCFieldType =
   | "text"
@@ -197,6 +207,7 @@ export interface MCStepCatalogItem {
   title: string;
   default_name: string;
   description: string;
+  category: MCStepCategory;
   fields: MCFieldSpec[];
 }
 
