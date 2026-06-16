@@ -42,12 +42,15 @@ result = run_pipeline(
 
 `STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_data` and `custom` reattach large arrays or callables through the `resources` seam when a bundled pipeline is loaded.
 
-| Export | Purpose |
+| Name | Purpose |
 | --- | --- |
 | `STEP_CATALOG` | Mapping from `step_type` (string) to `StepDefinition`. |
 | `StepDefinition` | Per-step metadata: human label, parameter `FieldSpec` list, operation role, category, factory, and optional parameter compile hook. |
 | `FieldSpec` | One parameter on a step: name, type, default, validation hints. Drives the GUI form generation. |
-| `DATAGEN_STEP_TYPES` | Step kinds that may be the single root datagen: `"simulation"` and `"raw_data"`. |
-| `TRANSFORM_STEP_TYPES` | Catalog-backed transform step kinds that can sit between data/filter outputs and terminal consumers. |
-| `TERMINAL_STEP_TYPES` | Step types that emit test/regression summaries. Terminal steps cannot link forward. |
+| `DATAGEN_STEP_TYPES` | Catalog-local step-kind set for valid datagen roots: `"simulation"` and `"raw_data"`. |
+| `TRANSFORM_STEP_TYPES` | Catalog-local step-kind set for catalog-backed transforms. |
+| `TERMINAL_STEP_TYPES` | Catalog-local step-kind set for test/regression summaries. Terminal steps cannot link forward. |
 | `catalog_payload()` | JSON-safe rendering of the catalog for the GUI / external consumers. |
+
+???+ note "Step-kind sets"
+    The step-kind sets are implementation metadata in `SymbolicDSGE.monte_carlo.catalog`. They describe compiler behavior but are not the primary user-facing import surface.

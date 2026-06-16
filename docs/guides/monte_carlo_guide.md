@@ -26,12 +26,12 @@ import numpy as np
 import pandas as pd
 
 from SymbolicDSGE import DSGESolver, ModelParser, Shock
-from SymbolicDSGE.monte_carlo import (
-    MCPipeline,
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.operations.core import (
     reference_filter_step,
     simulation_step,
-    wald_test_step,
 )
+from SymbolicDSGE.monte_carlo.operations.tests import wald_test_step
 
 model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
 steady_state = np.zeros(5, dtype=np.float64)  # (2)!
@@ -77,7 +77,7 @@ pipeline = MCPipeline([...])
 
 `MCPipeline` is used to compile the steps that need to be executed for each repetition.
 Every step of `MCPipeline` must be an `MCStep` object.
-The pipeline will be built using the step-generating functions built-in to `SymbolicDSGE`.
+The pipeline will be built using the step-generating functions under `SymbolicDSGE.monte_carlo.operations`.
 
 ### Data Generation
 
@@ -208,7 +208,7 @@ std_innov_second_moment    1.000
 ## Conclusion
 
 This guide demonstrates the usage of basic MC functionality through the pre-configured steps available in the library.
-Guides on constructing custom `MCStep` objects will be provided once the user-facing API of custom OPs are locked.
+Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_operation`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
 
 For future reference or a ready-made boilerplate, you can visit [this](../assets/monte_carlo.ipynb) link to access a notebook containing the process outlined in this guide.
 

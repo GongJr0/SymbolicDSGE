@@ -174,7 +174,7 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ## Reach the Monte Carlo tab
 
-`LoadedMC.spec` is the [`PipelineSpec`](../documentation/monte_carlo/pipeline.md) describing the graph. When the bundle carries a completed run, `document` holds the trace-free summary and `traces` holds the bulk columns. The convenience method `wire()` re-merges them into the canonical UI shape.
+`LoadedMC.spec` is the [`PipelineSpec`](../documentation/monte_carlo/spec.md) describing the graph. `LoadedMC.resources` carries any side-channel arrays or custom callables referenced by raw-data/custom nodes. When the bundle carries a completed run, `document` holds the trace-free summary and `traces` holds the bulk columns. The convenience method `wire()` re-merges them into the canonical UI shape.
 
 ```python
 mc = loaded.mc
@@ -203,11 +203,13 @@ mc_result = run_pipeline(
     dgp=loaded.dgp,
     n_rep=500,
     fail_fast=True,
+    resources=loaded.mc.resources, # (2)!
 )
 print("Successful reps:", mc_result.n_successful, "/", mc_result.n_rep)
 ```
 
 1. `run_pipeline` validates the graph against [`STEP_CATALOG`](../documentation/monte_carlo/index.md#step-catalog), compiles each step, and runs it. `validate_pipeline_spec` and `build_pipeline` are also exported when you want the stages separately.
+2. `resources` is required when the stored spec references raw-data arrays or custom operations. It is harmless for specs that do not need side-channel resources.
 
 ???+ info "Validating without running"
     `validate_pipeline_spec(loaded.mc.spec, has_reference=loaded.reference is not None, has_dgp=loaded.dgp is not None)` returns the topologically ordered node list when the graph is well-formed and raises with a specific message otherwise — useful to surface validation errors before a long run.

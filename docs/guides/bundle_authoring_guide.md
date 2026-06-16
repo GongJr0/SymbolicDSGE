@@ -57,13 +57,13 @@ bundle.add_model(
 1. We can set `created_by` to any string; it is recorded in the bundle manifest for provenance. Defaults to `"SymbolicDSGE <version>"` when omitted.
 2. `ModelParser` populates `ModelConfig.source_yaml` automatically; the bundle re-uses it without re-reading the file.
 3. Set `True` for models authored in nonlinear levels — see the [Quick Start](quickstart.md#compilation) for details.
-4. The bundle keeps the YAML text originating our model. The loader will repsect the solve/compile kwargs and re-solve the model to obtain the exact same `SolvedModel` deterministically.
+4. The bundle keeps the YAML text originating our model. The loader will respect the solve/compile kwargs and re-solve the model to obtain the exact same `SolvedModel` deterministically.
 
 ???+ note "Why we solve first"
     The bundle preserves the YAML and the recorded compile/solve kwargs, then re-runs them at load time. Solving here is only required if we want to attach an estimation, an MC pipeline, or a `SolvedModel`-derived result. Author-only bundles do not need a live `SolvedModel`.
 
 ???+ note "Model Roles"
-    The model framework inside bundles can work with two model roles: `reference` and `dgp`. At least one if them must be present. `reference` is later used as the subject of subject of Monte Carlo experiments and simulation prefill. `dgp` is used as the data-generating process for Monte Carlo experiments. We attach the same model twice here for demonstration, but in practice you may want to attach two different models.
+    The model framework inside bundles can work with two model roles: `reference` and `dgp`. At least one of them must be present. `reference` is later used as the subject of Monte Carlo experiments and simulation prefill. `dgp` is used as the data-generating process for Monte Carlo experiments. We attach the same model twice here for demonstration, but in practice you may want to attach two different models.
 
 ## Specify the estimation tab
 
@@ -109,17 +109,18 @@ bundle.add_estimation(  # (2)!
 )
 ```
 
-1. We can bundle results from an executed estimation, or we can bundle a estimation spec without results.
-2. `add_estimation` can bundle live results and initialized `Estimator` instances. On the backend, these are converted to human-readable specifications. Bundling live objects does not make the final bundle dependent unreadable binary objects.
+1. We can bundle results from an executed estimation, or we can bundle an estimation spec without results.
+2. `add_estimation` can bundle live results and initialized `Estimator` instances. On the backend, these are converted to human-readable specifications. Bundling live objects does not make the final bundle depend on unreadable binary objects.
 
 ???+ note "Estimation Methods"
     MCMC returns a special result object `MCMCResult` while MLE and MAP both return `OptimizationResult`. The bundler handles both cases.
 
 ## Build a Monte Carlo pipeline
 
-We create a Monte Carlo pipeline and run it as we would in a live session. Similar to estimation, we can bundle a pipeline spec without running it, or we can bundle a live `MCPipelineResult` from a run. The bundler converts the live result to a human-readable spec internally. You can refer to the [Monte Carlo Guide](monte_carlo_guide.md) and [API Reference](../documentation/monte_carlo/pipeline.md) for details on the `MCPipeline` API usage.
+We create a Monte Carlo pipeline and run it as we would in a live session. Similar to estimation, we can bundle a pipeline spec without running it, or we can bundle a live `MCPipelineResult` from a run. The bundler converts a live `MCPipeline` to a portable [`PipelineSpec`](../documentation/monte_carlo/spec.md) and splits the live result into document and trace members. You can refer to the [Monte Carlo Guide](monte_carlo_guide.md) and [API Reference](../documentation/monte_carlo/pipeline.md) for details on the `MCPipeline` API usage.
 
 ```python
+from SymbolicDSGE import Shock
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.operations import (
     core as c,  # (1)!
@@ -167,13 +168,11 @@ simulation = SimSpec(
         loc=0.0,
     ),
 )
+
+bundle.set_simulation(simulation)
 ```
 
 1. The seed makes the replayed simulation deterministic — both the bundle author and the receiver produce identical paths when clicking **Run**.
-
-## Assemble and write
-
-`BundleBuilder` chains every component into one archive. Each `add_*` call returns `self`; the final `.write(path)` materializes the bundle and returns the path written.
 
 ## Add raw data alongside the model
 
@@ -200,6 +199,8 @@ bundle.add_raw_data(
     `add_raw_data` re-encodes CSV input as Parquet by default. Pass `as_parquet=False` to embed the CSV verbatim — useful for hand-zip-friendly bundles.
 
 ## Write the bundle
+
+`BundleBuilder` chains every component into one archive. Each `add_*` call returns `self`; the final `.write(path)` materializes the bundle and returns the path written.
 
 The bundle is written to disk as a zip file that's aliased as a `.sdsge` file.
 
