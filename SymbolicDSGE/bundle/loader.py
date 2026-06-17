@@ -61,12 +61,13 @@ class LoadedMC:
     document: dict[str, Any] | None = None
     traces: dict[str, NDArray[Any]] | None = None
     resources: dict[str, Any] = field(default_factory=dict)
+    postproc_arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
 
     def wire(self) -> dict[str, Any] | None:
         """Re-merge document + traces into the UI wire shape, when both exist."""
         if self.document is None or self.traces is None:
             return None
-        return pipeline_result_wire(self.document, self.traces)
+        return pipeline_result_wire(self.document, self.traces, self.postproc_arrays)
 
 
 @dataclass
@@ -198,9 +199,37 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
     if trace_members:
         traces = collapse_columns(_load_columns(archive, trace_members[0]))
 
+    postproc_arrays = _load_mc_postproc(archive, manifest)
     resources = _load_mc_resources(archive, manifest, spec)
 
-    return LoadedMC(spec=spec, document=document, traces=traces, resources=resources)
+    return LoadedMC(
+        spec=spec,
+        document=document,
+        traces=traces,
+        resources=resources,
+        postproc_arrays=postproc_arrays,
+    )
+
+
+def _load_mc_postproc(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, NDArray[Any]]:
+    """Restore bulk POSTPROC ndarray artifacts, keyed by artifact name.
+
+    Each member holds one shape-manifest array under the fixed ``"a"`` column;
+    its name and shape ride the member options. An all-NaN array is dropped to
+    nothing by the Parquet encoder, so a missing column is rebuilt as a NaN array
+    of the recorded shape (matching the wire's null-trace convention)."""
+    out: dict[str, NDArray[Any]] = {}
+    for member in manifest.members_by_kind("mc_postproc"):
+        name = str(member.options.get("name", ""))
+        shape = tuple(int(d) for d in member.options.get("shape", []))
+        raw = archive.read(member.path)
+        try:
+            out[name] = arrays_from_parquet(raw, {"a": shape})["a"]
+        except KeyError:
+            out[name] = np.full(shape, np.nan)
+    return out
 
 
 def _load_mc_resources(

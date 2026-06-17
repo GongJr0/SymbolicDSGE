@@ -17,12 +17,32 @@ from SymbolicDSGE.monte_carlo import (
 from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
+from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
 from SymbolicDSGE.monte_carlo.serialize import (
     pipeline_result_wire,
     result_document,
+    result_postproc_arrays,
     result_traces,
     serialize_pipeline_result,
 )
+
+
+def _postproc_result() -> MCPipelineResult:
+    """A bare result carrying a scalar Summary plus 1-D and 2-D array artifacts."""
+    return MCPipelineResult(
+        n_rep=5,
+        n_successful=5,
+        test_summaries={},
+        test_results=None,
+        payloads=None,
+        contexts=None,
+        postproc={
+            "pcs": Summary(value=0.6, title="PCS"),
+            "selection": Raw(value=np.array([0.0, 1.0, 0.0, 1.0, 0.0])),
+            "density": Raw(value=np.arange(8.0).reshape(4, 2)),
+            "moments": Summary(value=np.array([1.0, 2.0]), render="array"),
+        },
+    )
 
 
 def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
@@ -114,6 +134,82 @@ def test_wire_reconstructs_dropped_all_nan_trace_columns() -> None:
     assert entry["pval_trace"] == [None, None, None]
     # status (integer-valued) survives and is unchanged.
     assert len(entry["status_trace"]) == 3
+
+
+def test_postproc_scalar_inline_array_to_traces() -> None:
+    result = _postproc_result()
+    document = result_document(result, run_id="r1")
+    arrays = result_postproc_arrays(result)
+
+    # Scalars (and their metadata) stay inline in the document.
+    pcs = document["postproc"]["pcs"]
+    assert pcs == {
+        "kind": "summary",
+        "title": "PCS",
+        "render": "auto",
+        "artifact": "scalar",
+        "value": 0.6,
+    }
+    # Array artifacts keep metadata but the bulk value is stripped to parquet.
+    density = document["postproc"]["density"]
+    assert density == {"kind": "raw", "artifact": "array", "shape": [4, 2]}
+    assert "value" not in document["postproc"]["selection"]
+    assert "value" not in document["postproc"]["moments"]
+
+    # Only the ndarray artifacts (Raw + array-valued Summary) become payloads.
+    assert set(arrays) == {"selection", "density", "moments"}
+    assert arrays["density"].shape == (4, 2)
+    json.dumps(document)
+
+
+def test_postproc_wire_round_trips_scalar_and_arrays() -> None:
+    result = _postproc_result()
+    wire = serialize_pipeline_result(result, run_id="r1")
+    recombined = pipeline_result_wire(
+        result_document(result, run_id="r1"),
+        result_traces(result),
+        result_postproc_arrays(result),
+    )
+    assert recombined == wire
+    assert recombined["postproc"]["pcs"]["value"] == 0.6
+    assert recombined["postproc"]["density"]["value"] == [
+        [0.0, 1.0],
+        [2.0, 3.0],
+        [4.0, 5.0],
+        [6.0, 7.0],
+    ]
+
+
+def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
+    # An all-NaN Raw becomes an all-null column the Parquet encoder drops;
+    # hydration rebuilds it as a NaN array of the recorded shape (-> JSON null).
+    result = MCPipelineResult(
+        n_rep=3,
+        n_successful=3,
+        test_summaries={},
+        test_results=None,
+        payloads=None,
+        contexts=None,
+        postproc={"empty": Raw(value=np.full(3, np.nan))},
+    )
+    document = result_document(result, run_id="r1")
+    wire = pipeline_result_wire(document, {}, {})  # array dropped -> absent
+    assert wire["postproc"]["empty"]["value"] == [None, None, None]
+
+
+def test_postproc_summary_rejects_non_scalar_value() -> None:
+    # Tabular/DataFrame Summary values are out of scope until #181.
+    result = MCPipelineResult(
+        n_rep=1,
+        n_successful=1,
+        test_summaries={},
+        test_results=None,
+        payloads=None,
+        contexts=None,
+        postproc={"table": Summary(value={"a": [1, 2]})},
+    )
+    with pytest.raises(TypeError, match="#181"):
+        serialize_pipeline_result(result, run_id="r1")
 
 
 def test_pipeline_spec_round_trips() -> None:
