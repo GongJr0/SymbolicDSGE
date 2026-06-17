@@ -66,9 +66,11 @@ The library supports a wide set of features beyond augmentation:
 ### Web-UI
 
 `SymbolicDSGE` ships a `[ui]` dependency with the goal of making DSGE basic experiments accessible to non-programmers.
-While model estimation is currently not implemented, given a configuration file GUI users can:
+GUI users can:
 
-- Adjust parameters
+- Create a model config
+- Load nad adjust existing configs
+- Estimate
 - Solve
 - Simulate
 - Create and run Monte Carlo experiments
