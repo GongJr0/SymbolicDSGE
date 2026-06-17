@@ -36,7 +36,7 @@ def transform_step(
         func=func,
         kwargs=kwargs,
         store_key=store_key,
-        step_type="custom",
+        step_type="transform:custom",
     )
 
 

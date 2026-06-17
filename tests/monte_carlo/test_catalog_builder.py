@@ -58,7 +58,7 @@ def test_every_source_leg_op_accepts_its_payload_key() -> None:
 
 def test_transform_step_stamps_custom_kind() -> None:
     step = transform_step("tf", lambda **_: None)
-    assert step.step_type == "custom"
+    assert step.step_type == "transform:custom"
 
 
 _FIELD_KEYS = {
@@ -81,7 +81,7 @@ def _stub_dgp(*targets: str) -> SimpleNamespace:
 def test_catalog_payload_shape_and_known_fields() -> None:
     payload = catalog_payload()
     steps = payload["steps"]
-    assert len(steps) == len(STEP_CATALOG) == 18
+    assert len(steps) == len(STEP_CATALOG) == 19
 
     for step in steps:
         assert set(step) == {
@@ -114,11 +114,13 @@ def test_catalog_entries_carry_selector_category() -> None:
     assert by_type["jarque_bera"]["category"] == "tests"
     assert by_type["wald"]["category"] == "tests"
     assert by_type["regression"]["category"] == "regressions"
+    assert by_type["kde"]["category"] == "postproc"
     assert {s["category"] for s in by_type.values()} == {
         "core",
         "transforms",
         "tests",
         "regressions",
+        "postproc",
     }
 
 
@@ -296,3 +298,63 @@ def test_build_pipeline_rejects_unknown_step_type() -> None:
     node = NodeSpec(id="x", step_type="bogus", name="x", params={})
     with pytest.raises(ValueError, match="Unsupported MC step type"):
         build_pipeline([node], dgp=_stub_dgp("u"))
+
+
+# --- POSTPROC (post-loop) kind: ordering, edges, compilation -----------------
+
+
+def test_postproc_is_ordered_last_after_terminals() -> None:
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec("k", "kde", "kde", {"trace": "test.jb.statistic"}),
+        ],
+        edges=[EdgeSpec("sim", "jb")],
+    )
+    ordered = [
+        n.id for n in validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ]
+    assert ordered == ["sim", "jb", "k"]  # postproc last, no edge needed
+
+
+def test_postproc_rejects_edges() -> None:
+    base = [
+        NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+        NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+        NodeSpec("k", "kde", "kde", {"trace": "test.jb.statistic"}),
+    ]
+    # Edge into the postproc node (from the datagen, so the terminal-source rule
+    # doesn't fire first) is rejected: postproc is wired by trace key, not edges.
+    into = PipelineSpec(nodes=base, edges=[EdgeSpec("sim", "jb"), EdgeSpec("sim", "k")])
+    with pytest.raises(ValueError, match="reference producers by name, not edges"):
+        validate_pipeline_spec(into, has_reference=True, has_dgp=True)
+
+
+def test_kde_catalog_entry_is_postproc_with_trace_field() -> None:
+    kde = STEP_CATALOG["kde"]
+    assert kde.op_role == "postproc"
+    assert kde.category == "postproc"
+    field_keys = [f.key for f in kde.fields]
+    assert "trace" in field_keys
+    # the trace selector must NOT use a per-rep source-leg name
+    assert "source" not in field_keys
+
+
+def test_build_postproc_custom_from_resources() -> None:
+    def my_summary(*, traces, reference, dgp):
+        return 1.0
+
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec("p", "postproc:custom", "p", {"func_ref": "p", "code": "..."}),
+        ],
+        edges=[],
+    )
+    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    pipeline = build_pipeline(ordered, dgp=_stub_dgp("u"), resources={"p": my_summary})
+    step = {s.name: s for s in pipeline.steps}["p"]
+    assert step.op_type is OpType.POSTPROC
+    assert step.step_type == "postproc:custom"
+    assert "code" not in step.kwargs and "func_ref" not in step.kwargs

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from .catalog import (
     DATAGEN_STEP_TYPES,
     FILTER_SOURCES,
+    POSTPROC_STEP_TYPES,
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
     TRANSFORM_STEP_TYPES,
@@ -25,6 +26,7 @@ from .catalog import (
 from .core import MCPipeline
 from .mc_constructs import MCPipelineResult
 from .operations.core import raw_data_step
+from .operations.postproc import postproc_step
 from .operations.transforms import transform_step
 from .spec import NodeSpec, PipelineSpec
 
@@ -32,8 +34,12 @@ if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
 
 #: Transform-role kinds at the spec level: the catalogue transforms plus the
-#: user ``custom`` op (an ``OpType.TRANSFORM`` middle node shipped as a member).
-_TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"custom"}
+#: user transform custom op (an ``OpType.TRANSFORM`` middle node shipped as a
+#: member).
+_TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"transform:custom"}
+
+#: Post-loop kinds: the catalogue postproc ops plus the user postproc custom op.
+_POSTPROC_KINDS = POSTPROC_STEP_TYPES | {"postproc:custom"}
 
 #: ``source`` kinds a transform/terminal may legally link from (the structural
 #: parent edge): the root datagen, a filter, or another transform.
@@ -94,6 +100,11 @@ def validate_pipeline_spec(
         if source.step_type in TERMINAL_STEP_TYPES:
             raise ValueError(
                 f"Terminal step '{source.name}' cannot link to another step."
+            )
+        if source.step_type in _POSTPROC_KINDS or target.step_type in _POSTPROC_KINDS:
+            raise ValueError(
+                "POSTPROC steps reference producers by name, not edges; remove the "
+                f"edge {edge.source!r} -> {edge.target!r}."
             )
         if target.step_type in DATAGEN_STEP_TYPES:
             raise ValueError("The datagen step cannot have an incoming link.")
@@ -156,7 +167,15 @@ def validate_pipeline_spec(
     terminal_nodes = [
         node for node in spec.nodes if node.step_type in TERMINAL_STEP_TYPES
     ]
-    ordered = [datagen, *filter_nodes, *transform_nodes, *terminal_nodes]
+    # Post-loop ops run after everything, over the assembled across-rep traces.
+    postproc_nodes = [node for node in spec.nodes if node.step_type in _POSTPROC_KINDS]
+    ordered = [
+        datagen,
+        *filter_nodes,
+        *transform_nodes,
+        *terminal_nodes,
+        *postproc_nodes,
+    ]
 
     bound: list[NodeSpec] = []
     bound_by_id: dict[str, NodeSpec] = {}
@@ -239,8 +258,10 @@ def build_pipeline(
     for node in ordered:
         if node.step_type == "raw_data":
             steps.append(_build_raw_data(node, resources))
-        elif node.step_type == "custom":
-            steps.append(_build_custom(node, resources))
+        elif node.step_type == "transform:custom":
+            steps.append(_build_custom(node, resources, transform_step))
+        elif node.step_type == "postproc:custom":
+            steps.append(_build_custom(node, resources, postproc_step))
         else:
             definition = STEP_CATALOG.get(node.step_type)
             if definition is None:
@@ -281,8 +302,16 @@ def _build_raw_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
     return raw_data_step(node.name, **kwargs)
 
 
-def _build_custom(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
-    """Rehydrate a ``custom`` op, reattaching its callable from resources."""
+def _build_custom(
+    node: NodeSpec,
+    resources: Mapping[str, Any],
+    factory: Any,
+) -> Any:
+    """Rehydrate a custom op, reattaching its callable from resources.
+
+    ``factory`` is the step constructor for the op role (``transform_step`` for
+    ``transform:custom``, ``postproc_step`` for ``postproc:custom``).
+    """
     params = dict(node.params)
     ref = params.pop("func_ref", node.name)
     # The authoring source rides in ``code`` (compiled into the resources
@@ -294,7 +323,7 @@ def _build_custom(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
             f"custom step '{node.name}' references callable '{ref}' that is not "
             "present in the supplied resources."
         )
-    return transform_step(node.name, func, **_clean_params(params))
+    return factory(node.name, func, **_clean_params(params))
 
 
 def run_pipeline(

@@ -58,7 +58,7 @@ export function StepInspector({
     });
   };
 
-  const isCustom = node.data.stepType === "custom";
+  const isCustom = node.data.stepType === "transform:custom";
   const producers = payloadProducers.filter((name) => name !== node.data.name);
 
   return (

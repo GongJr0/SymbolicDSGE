@@ -12,6 +12,6 @@ The underlying ``run_*`` op implementations are internal and live in each
 group's ``ops`` module (e.g. ``operations.core.ops.simulate_dgp``).
 """
 
-from . import core, regressions, tests, transforms
+from . import core, postproc, regressions, tests, transforms
 
-__all__ = ["core", "tests", "transforms", "regressions"]
+__all__ = ["core", "tests", "transforms", "regressions", "postproc"]

@@ -82,7 +82,7 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=False)
     rebuilt = build_pipeline(ordered, resources=loaded.mc.resources)
     z_step = {s.name: s for s in rebuilt.steps}["z"]
-    assert z_step.step_type == "custom"
+    assert z_step.step_type == "transform:custom"
     assert callable(z_step.func)
 
 

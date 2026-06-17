@@ -80,7 +80,7 @@ def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
     """
     resources: dict[str, Any] = {}
     for node in spec.nodes:
-        if node.step_type != "custom":
+        if node.step_type not in ("transform:custom", "postproc:custom"):
             continue
         code = node.params.get("code", "")
         if not isinstance(code, str) or not code.strip():

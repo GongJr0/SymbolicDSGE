@@ -63,11 +63,12 @@ import type { MCFlowNode } from "./types";
 
 const nodeTypes = { mcStep: StepNode };
 
-// "custom" has no backend StepDefinition (it isn't GUI-authored via fields), so
-// it never appears in the catalogue payload. We inject a synthetic palette entry
-// for it under the Transforms tab; its single "param" is the op source code.
+// "transform:custom" has no backend StepDefinition (it isn't GUI-authored via
+// fields), so it never appears in the catalogue payload. We inject a synthetic
+// palette entry for it under the Transforms tab; its single "param" is the op
+// source code.
 const CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
-  step_type: "custom",
+  step_type: "transform:custom",
   title: "Custom Op",
   default_name: "custom_op",
   description: "User-defined Python transform, validated and run per replication.",
@@ -569,6 +570,7 @@ const STEP_CATEGORIES: { id: MCStepCategory; label: string }[] = [
   { id: "transforms", label: "Transforms" },
   { id: "tests", label: "Tests" },
   { id: "regressions", label: "Regressions" },
+  { id: "postproc", label: "Postproc" },
 ];
 
 // Edge colors by producer kind, so each consumer's inputs are distinguishable.
@@ -681,7 +683,7 @@ function makeNode(
   const count = existing.filter((node) => node.data.stepType === item.step_type).length;
   const name = count === 0 ? item.default_name : `${item.default_name}_${count + 1}`;
   const params =
-    item.step_type === "custom"
+    item.step_type === "transform:custom"
       ? { code: customTemplate }
       : Object.fromEntries(item.fields.map((field) => [field.key, field.default]));
   return {

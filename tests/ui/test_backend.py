@@ -376,6 +376,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         "rolling_mean",
         "rolling_std",
         "rolling_var",
+        "kde",
     }
 
     pipeline = {
@@ -1031,7 +1032,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
             },
             {
                 "id": "z",
-                "step_type": "custom",
+                "step_type": "transform:custom",
                 "name": "zscore",
                 "params": {"code": _UI_CUSTOM_OP},
             },
@@ -1082,7 +1083,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
             },
             {
                 "id": "z",
-                "step_type": "custom",
+                "step_type": "transform:custom",
                 "name": "zscore",
                 "params": {"code": 'def f(**kwargs):\n    return __import__("os")\n'},
             },

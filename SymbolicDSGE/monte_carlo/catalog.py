@@ -18,6 +18,7 @@ import numpy as np
 
 from ..core.shock_generators import Shock
 from .operations.core import reference_filter_step, simulation_step
+from .operations.postproc import kde_step
 from .operations.regressions import regression_step
 from .operations.tests import (
     breusch_godfrey_test_step,
@@ -57,7 +58,7 @@ INPUT_SOURCES = [
 #: Sources produced only by a filter step (require an upstream filter link).
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
-StepRole = Literal["datagen", "filter", "transform", "terminal"]
+StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
 CompileParams = Callable[[dict[str, Any], "SolvedModel | None"], dict[str, Any]]
 
 
@@ -113,13 +114,16 @@ class StepDefinition:
         """Palette grouping for the GUI step selector tabs.
 
         Derived from ``op_role`` (so new steps group automatically): datagen and
-        filter are ``"core"``, transforms ``"transforms"``, the regression step
-        ``"regressions"``, and the remaining terminals (tests) ``"tests"``.
+        filter are ``"core"``, transforms ``"transforms"``, post-loop ops
+        ``"postproc"``, the regression step ``"regressions"``, and the remaining
+        terminals (tests) ``"tests"``.
         """
         if self.op_role in ("datagen", "filter"):
             return "core"
         if self.op_role == "transform":
             return "transforms"
+        if self.op_role == "postproc":
+            return "postproc"
         if self.step_type == "regression":
             return "regressions"
         return "tests"
@@ -759,6 +763,26 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
             FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
         ),
     ),
+    # ----- post-processing -----
+    StepDefinition(
+        step_type="kde",
+        title="KDE",
+        default_name="kde",
+        description=(
+            "Gaussian kernel density estimate of an across-replication trace; "
+            "returns the raw (x, density) curve."
+        ),
+        op_role="postproc",
+        factory=kde_step,
+        fields=(
+            # ``trace`` names an across-rep trace key (e.g. "test.<name>.statistic");
+            # the selectable options are populated from the producer registry (#179).
+            FieldSpec("trace", "Trace", "select", "", required=True),
+            FieldSpec("bandwidth", "Bandwidth", "text", "scott"),
+            FieldSpec("grid_points", "Grid points", "number", 200, minimum=2),
+            FieldSpec("kernel", "Kernel", "select", "gaussian", options=("gaussian",)),
+        ),
+    ),
 )
 
 #: Step kind -> definition, insertion order matching the GUI catalogue payload.
@@ -784,6 +808,14 @@ TRANSFORM_STEP_TYPES: frozenset[str] = frozenset(
     step_type
     for step_type, definition in STEP_CATALOG.items()
     if definition.is_transform
+)
+
+#: Post-loop step kinds (run once after the replication loop over the assembled
+#: across-rep traces).
+POSTPROC_STEP_TYPES: frozenset[str] = frozenset(
+    step_type
+    for step_type, definition in STEP_CATALOG.items()
+    if definition.op_role == "postproc"
 )
 
 

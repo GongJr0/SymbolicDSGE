@@ -149,3 +149,20 @@ def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
     # per-rep steps run 7 times; the postproc runs exactly once.
     assert result.step_counts["jb"] == 7
     assert result.step_counts["probe"] == 1
+
+
+def test_kde_builtin_runs_and_returns_raw_curve() -> None:
+    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=_observables(12), observable_names=("y", "x")),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            kde_step("density", trace="test.jb.statistic", grid_points=64),
+        ]
+    )
+    result = pipeline.run(reference=_REFERENCE, n_rep=12, verbosity=0)
+
+    art = result.postproc["density"]
+    assert isinstance(art, Raw)
+    assert art.value.shape == (64, 2)  # (x, density)
