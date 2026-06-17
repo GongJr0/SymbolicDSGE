@@ -29,6 +29,7 @@ from .operations.core import raw_data_step
 from .operations.postproc import postproc_step
 from .operations.transforms import transform_step
 from .spec import NodeSpec, PipelineSpec
+from .traces import available_traces
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -169,6 +170,7 @@ def validate_pipeline_spec(
     ]
     # Post-loop ops run after everything, over the assembled across-rep traces.
     postproc_nodes = [node for node in spec.nodes if node.step_type in _POSTPROC_KINDS]
+    _validate_postproc_trace_refs(postproc_nodes, available_traces(spec))
     ordered = [
         datagen,
         *filter_nodes,
@@ -192,6 +194,37 @@ def validate_pipeline_spec(
         bound_by_id[node.id] = bound_node
         prior_names.add(bound_node.name)
     return bound
+
+
+def _validate_postproc_trace_refs(
+    postproc_nodes: Sequence[NodeSpec], registry: Sequence[str]
+) -> None:
+    """Validate that each POSTPROC node's declared ``trace`` references resolve.
+
+    Catalogue postproc steps mark trace-selector fields with ``type == "trace"``;
+    their values must name a trace the pipeline produces. Custom postproc ops
+    reference traces in opaque code, so they're not statically validated.
+    """
+    available = set(registry)
+    for node in postproc_nodes:
+        definition = STEP_CATALOG.get(node.step_type)
+        if definition is None:
+            continue
+        for field in definition.fields:
+            if field.type != "trace":
+                continue
+            ref = node.params.get(field.key)
+            if not ref:
+                raise ValueError(
+                    f"POSTPROC step '{node.name}' must select a trace for "
+                    f"'{field.key}' (available: {sorted(available)})."
+                )
+            if ref not in available:
+                raise ValueError(
+                    f"POSTPROC step '{node.name}' field '{field.key}' references "
+                    f"trace {ref!r}, which no step in the pipeline produces "
+                    f"(available: {sorted(available)})."
+                )
 
 
 def _payload_dep_ids(node: NodeSpec, name_to_id: Mapping[str, str]) -> set[str]:
@@ -447,7 +480,7 @@ def _bind_consumer_payload(
     if payload_legs:
         if has_transform_parent:
             assert parent is not None
-            for _source_key, payload_key in payload_legs:
+            for _, payload_key in payload_legs:
                 params.setdefault(payload_key, parent.name)
         return
 

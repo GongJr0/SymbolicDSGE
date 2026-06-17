@@ -21,6 +21,7 @@ from numpy.typing import NDArray
 
 from ..regression.ols import OLSResult
 from .mc_constructs import MCContext, MCPipelineResult
+from .traces import regression_trace_keys, test_trace_keys
 
 
 def serialize_pipeline_result(
@@ -97,23 +98,19 @@ def traces_from_summaries(
     """
     traces: dict[str, NDArray[Any]] = {}
     for name, test_summary in test_summaries.items():
-        traces[f"test.{name}.statistic"] = np.asarray(
+        keys = test_trace_keys(name)
+        traces[keys["statistic"]] = np.asarray(
             test_summary.statistic_trace, dtype=np.float64
         )
-        traces[f"test.{name}.pval"] = np.asarray(
-            test_summary.pval_trace, dtype=np.float64
-        )
-        traces[f"test.{name}.status"] = np.asarray(
+        traces[keys["pval"]] = np.asarray(test_summary.pval_trace, dtype=np.float64)
+        traces[keys["status"]] = np.asarray(
             [int(status) for status in test_summary.status_trace], dtype=np.int64
         )
     for name, reg_summary in regression_summaries.items():
-        traces[f"regression.{name}.coef"] = np.asarray(
-            reg_summary.coef_trace, dtype=np.float64
-        )
-        traces[f"regression.{name}.r2"] = np.asarray(
-            reg_summary.r2_trace, dtype=np.float64
-        )
-        traces[f"regression.{name}.status"] = np.asarray(
+        keys = regression_trace_keys(name)
+        traces[keys["coef"]] = np.asarray(reg_summary.coef_trace, dtype=np.float64)
+        traces[keys["r2"]] = np.asarray(reg_summary.r2_trace, dtype=np.float64)
+        traces[keys["status"]] = np.asarray(
             [int(status) for status in reg_summary.status_trace], dtype=np.int64
         )
     return traces

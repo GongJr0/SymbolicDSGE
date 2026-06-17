@@ -775,9 +775,10 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         op_role="postproc",
         factory=kde_step,
         fields=(
-            # ``trace`` names an across-rep trace key (e.g. "test.<name>.statistic");
-            # the selectable options are populated from the producer registry (#179).
-            FieldSpec("trace", "Trace", "select", "", required=True),
+            # A ``"trace"`` field references an across-rep trace key (e.g.
+            # "test.<name>.statistic"); validated against the pipeline's producible
+            # traces, and (GUI, #184) offered from that registry.
+            FieldSpec("trace", "Trace", "trace", "", required=True),
             FieldSpec("bandwidth", "Bandwidth", "text", "scott"),
             FieldSpec("grid_points", "Grid points", "number", 200, minimum=2),
             FieldSpec("kernel", "Kernel", "select", "gaussian", options=("gaussian",)),
