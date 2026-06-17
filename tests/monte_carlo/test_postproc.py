@@ -53,6 +53,48 @@ def test_no_postproc_yields_empty_bucket() -> None:
     assert _run([]).postproc == {}
 
 
+def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
+    # PCS (Probability of Correct Selection): across reps, the test with the
+    # smallest p-value is "selected"; PCS is the rate at which that index matches
+    # the expected one. A worked example, not a built-in — its meaning depends on
+    # the upstream tests, so the engine doesn't define it.
+    from SymbolicDSGE.monte_carlo.serialize import result_traces
+
+    n_rep = 6
+    pval_keys = ["test.jb_y.pval", "test.jb_x.pval"]
+
+    def selection(*, traces, reference, dgp, expected):
+        mat = np.column_stack([traces[k] for k in pval_keys])
+        return Raw((mat.argmin(axis=1) == expected).astype(float))
+
+    def pcs(*, traces, reference, dgp, expected):
+        mat = np.column_stack([traces[k] for k in pval_keys])
+        return float((mat.argmin(axis=1) == expected).mean())
+
+    pipeline = MCPipeline(
+        [
+            raw_data_step(observables=_observables(n_rep), observable_names=("y", "x")),
+            jarque_bera_test_step("jb_y", source="observables", column=0),
+            jarque_bera_test_step("jb_x", source="observables", column=1),
+            _postproc("sel", selection, expected=0),
+            _postproc("pcs", pcs, expected=0),
+        ]
+    )
+    result = pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=0)
+
+    # Recompute independently from the stored traces (same arrays the op saw).
+    mat = np.column_stack([result_traces(result)[k] for k in pval_keys])
+    indicator = (mat.argmin(axis=1) == 0).astype(float)
+    expected_pcs = float(indicator.mean())
+
+    assert result.postproc["pcs"].value == pytest.approx(expected_pcs)
+    np.testing.assert_array_equal(result.postproc["sel"].value, indicator)
+    # PCS is exactly the across-rep mean = sum / len of the 0/1 selection vector.
+    assert result.postproc["pcs"].value == pytest.approx(
+        indicator.sum() / len(indicator)
+    )
+
+
 def test_traces_expose_test_pvals_with_n_successful_length() -> None:
     captured: dict[str, Any] = {}
 

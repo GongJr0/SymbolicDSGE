@@ -21,7 +21,12 @@ from numpy.typing import NDArray
 
 from ..regression.ols import OLSResult
 from .mc_constructs import MCContext, MCPipelineResult
+from .postproc import Raw, Summary
 from .traces import regression_trace_keys, test_trace_keys
+
+#: Scalar artifact-value types that ride the JSON document inline; ndarray values
+#: go to the parquet side-channel, anything else is a tabular artifact (#181).
+_SCALAR_TYPES = (bool, int, float, str, np.integer, np.floating, np.bool_)
 
 
 def serialize_pipeline_result(
@@ -77,6 +82,10 @@ def serialize_pipeline_result(
             for name, summary in result.regression_summaries.items()
         },
         "data_summaries": _summarize_context_data(result.contexts or ()),
+        "postproc": {
+            name: _serialize_artifact(artifact)
+            for name, artifact in result.postproc.items()
+        },
     }
 
 
@@ -121,6 +130,71 @@ def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
     return traces_from_summaries(result.test_summaries, result.regression_summaries)
 
 
+def _artifact_array(artifact: Raw | Summary) -> NDArray[Any] | None:
+    """The ndarray a POSTPROC artifact carries as bulk data, or ``None``.
+
+    ``Raw`` is always bulk; a ``Summary`` is bulk only when its value is an
+    ndarray (a scalar Summary rides the JSON document inline).
+    """
+    if isinstance(artifact, Raw):
+        return np.asarray(artifact.value)
+    if isinstance(artifact, Summary) and isinstance(artifact.value, np.ndarray):
+        return artifact.value
+    return None
+
+
+def _serialize_artifact(artifact: Raw | Summary) -> dict[str, Any]:
+    """Wire entry for one POSTPROC artifact (arrays inlined for the UI wire).
+
+    Scalars live inline; ndarrays carry a ``shape`` + inlined ``value`` (the
+    ``value`` is stripped by :func:`result_document` and re-merged from the
+    parquet side-channel). Tabular/DataFrame artifacts are out of scope (#181).
+    """
+    if isinstance(artifact, Raw):
+        arr = np.asarray(artifact.value)
+        return {
+            "kind": "raw",
+            "artifact": "array",
+            "shape": list(arr.shape),
+            "value": _json_value(arr),
+        }
+    entry: dict[str, Any] = {
+        "kind": "summary",
+        "title": artifact.title,
+        "render": artifact.render,
+    }
+    value = artifact.value
+    if isinstance(value, np.ndarray):
+        entry["artifact"] = "array"
+        entry["shape"] = list(value.shape)
+        entry["value"] = _json_value(value)
+    elif value is None or isinstance(value, _SCALAR_TYPES):
+        entry["artifact"] = "scalar"
+        entry["value"] = _json_value(value)
+    else:
+        raise TypeError(
+            f"POSTPROC Summary value of type {type(value).__name__!r} is not a "
+            "scalar or ndarray; tabular/DataFrame artifacts are not yet "
+            "serializable (#181)."
+        )
+    return entry
+
+
+def result_postproc_arrays(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
+    """The bulk ndarray POSTPROC artifacts, keyed by artifact name (no I/O).
+
+    Unlike :func:`result_traces` (uniform ``R``-length columns), these are
+    arbitrary-shape *payloads* (e.g. a KDE ``N x 2`` curve), each serialized to
+    its own shape-manifest parquet member by the bundle builder.
+    """
+    out: dict[str, NDArray[Any]] = {}
+    for name, artifact in result.postproc.items():
+        arr = _artifact_array(artifact)
+        if arr is not None:
+            out[name] = arr
+    return out
+
+
 def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, Any]:
     """JSON-safe metadata + summaries with the bulk trace arrays removed.
 
@@ -133,14 +207,20 @@ def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, 
     for entry in document["regression_summaries"].values():
         for key in _REGRESSION_TRACE_KEYS:
             entry.pop(key, None)
+    for entry in document["postproc"].values():
+        if entry.get("artifact") == "array":  # bulk -> parquet side-channel
+            entry.pop("value", None)
     return document
 
 
 def pipeline_result_wire(
-    document: dict[str, Any], traces: dict[str, NDArray[Any]]
+    document: dict[str, Any],
+    traces: dict[str, NDArray[Any]],
+    postproc_arrays: Mapping[str, NDArray[Any]] | None = None,
 ) -> dict[str, Any]:
     """Re-merge a trace-free :func:`result_document` with :func:`result_traces`
-    into the canonical UI wire shape (used for hydration).
+    (and :func:`result_postproc_arrays`) into the canonical UI wire shape (used
+    for hydration).
 
     A float trace column that is degenerate across *every* replication (e.g. a
     test that returns an undefined-variance NaN statistic in all reps) is dropped
@@ -148,8 +228,19 @@ def pipeline_result_wire(
     column is reconstructed here as a null-filled trace of the summary's length —
     which is exactly what the canonical wire reports for an all-NaN trace — so
     hydration stays robust instead of raising ``KeyError`` on the missing key.
+    The same null-from-``shape`` fallback applies to a dropped POSTPROC array.
     """
+    arrays = postproc_arrays or {}
     wire = copy.deepcopy(document)
+    for name, entry in wire.get("postproc", {}).items():
+        if entry.get("artifact") != "array":
+            continue  # scalar value already inline in the document
+        arr = arrays.get(name)
+        if arr is not None:
+            entry["value"] = _json_value(arr)
+        else:
+            shape = tuple(int(d) for d in entry.get("shape", []))
+            entry["value"] = _json_value(np.full(shape, np.nan)) if shape else None
     for name, entry in wire["test_summaries"].items():
         n = int(entry.get("n", 0))
         entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)

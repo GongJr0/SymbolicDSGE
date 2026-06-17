@@ -1,20 +1,33 @@
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pytest
 
 from SymbolicDSGE.bundle import BundleBuilder, build_from
+from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline, build_pipeline, validate_pipeline_spec
 from SymbolicDSGE.monte_carlo.custom_op import NumpyCustomFunc
 from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
 
 
 def zscore(*, context, **kwargs):
     """Top-level custom op (NumpyCustomFunc-eligible)."""
     arr = context.require_data().observables
     return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+
+
+def selection_rate(*, traces, reference, dgp):
+    """Top-level postproc op: bare values auto-wrap (scalar -> Summary, array ->
+    Raw), so the op body references no captured types."""
+    pval = traces["test.jb.pval"]
+    indicator = (pval < 0.5).astype(float)
+    return {"rate": float(indicator.mean()), "flags": indicator}
 
 
 def _raw_data_pipeline() -> MCPipeline:
@@ -84,6 +97,39 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     z_step = {s.name: s for s in rebuilt.steps}["z"]
     assert z_step.step_type == "transform:custom"
     assert callable(z_step.func)
+
+
+def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
+    observables = np.random.default_rng(2).normal(size=(4, 20, 2))
+    pipe = MCPipeline(
+        [
+            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            postproc_step("post", selection_rate),
+        ]
+    )
+    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+
+    target = (
+        BundleBuilder(created_by="mc-test")
+        .add_mc(pipe, result=result, run_id="r1")
+        .write(tmp_path / "pp.sdsge")
+    )
+
+    loaded = build_from(target)
+    assert loaded.mc is not None
+    # The bulk array artifact rides its own shape-manifest parquet member.
+    assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
+    np.testing.assert_array_equal(
+        loaded.mc.postproc_arrays["post.flags"], result.postproc["post.flags"].value
+    )
+
+    # document (scalar inline) + parquet array re-merge to the live wire shape.
+    wire = loaded.mc.wire()
+    assert wire is not None
+    assert (
+        wire["postproc"] == serialize_pipeline_result(result, run_id="r1")["postproc"]
+    )
 
 
 def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:

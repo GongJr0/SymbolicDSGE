@@ -34,7 +34,11 @@ from ..estimation.spec import (
 )
 from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
-from ..monte_carlo.serialize import result_document, result_traces
+from ..monte_carlo.serialize import (
+    result_document,
+    result_postproc_arrays,
+    result_traces,
+)
 from ..monte_carlo.spec import PipelineSpec
 from ..monte_carlo.spec_compile import raw_data_arrays
 from .container import write_bundle
@@ -60,6 +64,11 @@ _MC_TRACE_PARQUET = "montecarlo/traces.parquet"
 _MC_TRACE_CSV = "montecarlo/traces.csv"
 _MC_RAW_DATA = "montecarlo/data/{ref}.parquet"
 _MC_CUSTOM_OP = "montecarlo/custom/{ref}.pkl"
+_MC_POSTPROC = "montecarlo/postproc/{ref}.parquet"
+
+#: Single-array column name inside a postproc parquet member (avoids dotted
+#: artifact names colliding with the ``"{name}.{j}"`` 2-D column expansion).
+_POSTPROC_COL = "a"
 
 
 def _library_version() -> str:
@@ -131,7 +140,7 @@ class BundleBuilder:
 
     def add_estimation(
         self,
-        source: EstimationSpec | "Estimator",
+        source: EstimationSpec | "Estimator",  # pyright: ignore
         *,
         result: (
             OptimizationResult
@@ -270,7 +279,28 @@ class BundleBuilder:
                     path = _MC_TRACE_CSV
                     data = trace_to_csv(traces)
                 self._add(Member(path=path, kind="mc_trace"), data)
+            self._add_postproc_arrays(result)
         return self
+
+    def _add_postproc_arrays(self, result: MCPipelineResult) -> None:
+        """Ship bulk POSTPROC ndarray artifacts as shape-manifest parquet members.
+
+        Each artifact is an arbitrary-shape payload (e.g. a KDE ``N x 2`` curve),
+        so — unlike the uniform-length ``mc_trace`` columns — they cannot share
+        one column block; each rides its own member with its shape recorded in the
+        member options for restore. Scalar artifacts stay inline in the result
+        document.
+        """
+        for index, (name, arr) in enumerate(result_postproc_arrays(result).items()):
+            data, _ = arrays_to_parquet({_POSTPROC_COL: arr})
+            self._add(
+                Member(
+                    path=_MC_POSTPROC.format(ref=index),
+                    kind="mc_postproc",
+                    options={"name": name, "shape": list(arr.shape)},
+                ),
+                data,
+            )
 
     def _add_mc_resources(self, pipeline: MCPipeline) -> None:
         """Ship the bulk side-channels a live pipeline references by key.
@@ -284,7 +314,7 @@ class BundleBuilder:
                 arrays = raw_data_arrays(step.kwargs)
                 if not arrays:
                     continue
-                data, _shapes = arrays_to_parquet(arrays)
+                data, _ = arrays_to_parquet(arrays)
                 self._add(
                     Member(
                         path=_MC_RAW_DATA.format(ref=step.name),
