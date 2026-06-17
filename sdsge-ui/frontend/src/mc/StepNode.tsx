@@ -32,7 +32,9 @@ const ICONS: Record<MCStepType, LucideIcon> = {
   rolling_mean: Waves,
   rolling_std: Waves,
   rolling_var: Waves,
-  custom: Code,
+  kde: Activity,
+  "transform:custom": Code,
+  "postproc:custom": Code,
 };
 
 export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {

@@ -293,7 +293,7 @@ class BundleBuilder:
                     ),
                     data,
                 )
-            elif step.step_type == "custom":
+            elif step.step_type in ("transform:custom", "postproc:custom"):
                 self._add(
                     Member(
                         path=_MC_CUSTOM_OP.format(ref=step.name),

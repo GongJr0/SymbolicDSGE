@@ -99,7 +99,7 @@ def _recover_params(step: "MCStep") -> dict[str, Any]:
         params = _recover_simulation(step.kwargs)
     elif step_type == "wald":
         params = _recover_wald(step.kwargs)
-    elif step_type == "custom":
+    elif step_type in ("transform:custom", "postproc:custom"):
         params = _jsonable_params(dict(step.kwargs))
         params["func_ref"] = step.name
     else:

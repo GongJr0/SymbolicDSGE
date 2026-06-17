@@ -178,9 +178,16 @@ export type MCStepType =
   | "rolling_mean"
   | "rolling_std"
   | "rolling_var"
-  | "custom";
+  | "kde"
+  | "transform:custom"
+  | "postproc:custom";
 
-export type MCStepCategory = "core" | "transforms" | "tests" | "regressions";
+export type MCStepCategory =
+  | "core"
+  | "transforms"
+  | "tests"
+  | "regressions"
+  | "postproc";
 
 export type MCFieldType =
   | "text"

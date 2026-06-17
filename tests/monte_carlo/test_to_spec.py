@@ -166,8 +166,38 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     spec = pipe.to_spec()
 
     tf = {n.name: n for n in spec.nodes}["tf"]
-    assert tf.step_type == "custom"
+    assert tf.step_type == "transform:custom"
     # the callable rides a separate bundle member; the spec only references it
     assert tf.params["func_ref"] == "tf"
     assert tf.params["source"] == "observables"
     assert {(e.source, e.target) for e in spec.edges} == {("dat", "tf")}
+
+
+def test_to_spec_round_trips_a_postproc_pipeline() -> None:
+    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+
+    pipe = MCPipeline(
+        [
+            simulation_step(
+                "dgp",
+                T=8,
+                observables=True,
+                seed_increment="auto",
+                shocks={"u": Shock(T=8, dist="norm", seed=0)},
+            ),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            kde_step("kde", trace="test.jb.statistic", grid_points=50),
+        ]
+    )
+    spec1 = pipe.to_spec()
+    kde_node = {n.name: n for n in spec1.nodes}["kde"]
+    assert kde_node.step_type == "kde"
+    assert kde_node.params["trace"] == "test.jb.statistic"
+    # POSTPROC nodes carry no edges (referenced by trace key, ordered last).
+    assert all(e.target != "kde" and e.source != "kde" for e in spec1.edges)
+
+    stub_dgp = cast(SolvedModel, SimpleNamespace())
+    ordered = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
+    assert [n.id for n in ordered] == ["dgp", "jb", "kde"]
+    rebuilt = build_pipeline(ordered, dgp=stub_dgp)
+    assert rebuilt.to_spec() == spec1  # fixed point

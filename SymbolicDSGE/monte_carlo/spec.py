@@ -37,8 +37,12 @@ MCStepKind = Literal[
     "rolling_mean",
     "rolling_std",
     "rolling_var",
-    # custom (user-supplied op, shipped as a cloudpickle bundle member)
-    "custom",
+    # post-processing (post-loop ops over across-rep traces)
+    "kde",
+    # custom (user-supplied ops, shipped as cloudpickle bundle members); the
+    # prefix records the op role since a custom op may be a transform or a postproc.
+    "transform:custom",
+    "postproc:custom",
 ]
 
 #: Authoritative set of valid step-type strings. Must agree with the keys of
