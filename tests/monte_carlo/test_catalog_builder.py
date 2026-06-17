@@ -358,3 +358,86 @@ def test_build_postproc_custom_from_resources() -> None:
     assert step.op_type is OpType.POSTPROC
     assert step.step_type == "postproc:custom"
     assert "code" not in step.kwargs and "func_ref" not in step.kwargs
+
+
+# --- #179 trace registry + POSTPROC trace-reference validation ---------------
+
+from SymbolicDSGE.monte_carlo.traces import available_traces  # noqa: E402
+
+
+def test_available_traces_enumerates_producer_keys() -> None:
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            NodeSpec("f", "filter", "f", {}),
+            NodeSpec("s", "standardize", "s", {"source": "observables"}),
+            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec(
+                "reg",
+                "regression",
+                "reg",
+                {"y_source": "observables", "X_source": "observables"},
+            ),
+        ],
+        edges=[],
+    )
+    assert set(available_traces(spec)) == {
+        "test.jb.statistic",
+        "test.jb.pval",
+        "test.jb.status",
+        "regression.reg.coef",
+        "regression.reg.r2",
+        "regression.reg.status",
+        "payload.s",  # transform output
+    }
+    # datagen / filter produce no consumable trace.
+
+
+def _kde_spec(trace_params: dict) -> PipelineSpec:
+    return PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec("k", "kde", "k", trace_params),
+        ],
+        edges=[EdgeSpec("sim", "jb")],
+    )
+
+
+def test_kde_valid_trace_reference_passes() -> None:
+    ordered = validate_pipeline_spec(
+        _kde_spec({"trace": "test.jb.statistic"}), has_reference=True, has_dgp=True
+    )
+    assert [n.id for n in ordered] == ["sim", "jb", "k"]
+
+
+def test_kde_bogus_trace_reference_raises_listing_available() -> None:
+    with pytest.raises(ValueError, match="no step in the pipeline produces"):
+        validate_pipeline_spec(
+            _kde_spec({"trace": "test.ghost.pval"}), has_reference=True, has_dgp=True
+        )
+
+
+def test_kde_missing_trace_reference_raises() -> None:
+    with pytest.raises(ValueError, match="must select a trace"):
+        validate_pipeline_spec(_kde_spec({}), has_reference=True, has_dgp=True)
+
+
+def test_postproc_custom_trace_refs_not_statically_validated() -> None:
+    # A custom postproc references traces in opaque code; it must validate even
+    # though we can't statically know which keys it reads.
+    spec = PipelineSpec(
+        nodes=[
+            NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec("p", "postproc:custom", "p", {"func_ref": "p", "code": "..."}),
+        ],
+        edges=[EdgeSpec("sim", "jb")],
+    )
+    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    assert [n.id for n in ordered] == ["sim", "jb", "p"]
+
+
+def test_kde_trace_field_is_typed_trace() -> None:
+    trace_field = next(f for f in STEP_CATALOG["kde"].fields if f.key == "trace")
+    assert trace_field.type == "trace"

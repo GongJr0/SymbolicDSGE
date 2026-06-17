@@ -166,3 +166,29 @@ def test_kde_builtin_runs_and_returns_raw_curve() -> None:
     art = result.postproc["density"]
     assert isinstance(art, Raw)
     assert art.value.shape == (64, 2)  # (x, density)
+
+
+def test_runtime_traces_match_available_registry() -> None:
+    # The static registry (#179) must equal the keys a run actually produces.
+    from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
+    from SymbolicDSGE.monte_carlo.traces import available_traces
+
+    captured: dict[str, set] = {}
+
+    def probe(*, traces, reference, dgp):
+        captured["keys"] = set(traces)
+        return 0.0
+
+    pipe = MCPipeline(
+        [
+            raw_data_step(
+                "dat", observables=_observables(5), observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            standardize_step("s", source="observables"),
+            postproc_step("probe", probe),
+        ]
+    )
+    pipe.run(reference=_REFERENCE, n_rep=5, verbosity=0)
+
+    assert captured["keys"] == set(available_traces(pipe.to_spec()))

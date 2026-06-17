@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Mapping, Sequence, Any, Callable
+from typing import Literal, Mapping, Sequence
 
 import numpy as np
 from numpy import float64, ndarray

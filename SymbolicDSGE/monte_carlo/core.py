@@ -329,10 +329,12 @@ def _stack_payload_columns(
 
     Only keys whose per-rep arrays share a shape across replications are stacked
     (a transform whose output length varies per rep is skipped)."""
+    from .traces import payload_trace_key
+
     out: dict[str, np.ndarray] = {}
     for name, arrays in columns.items():
         if arrays and len({array.shape for array in arrays}) == 1:
-            out[f"payload.{name}"] = np.stack(arrays)
+            out[payload_trace_key(name)] = np.stack(arrays)
     return out
 
 
