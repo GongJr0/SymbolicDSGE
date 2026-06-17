@@ -171,6 +171,10 @@ class PipelineGraph:
 def _resolve_inputs(step: MCStep, *, root_name: str) -> tuple[InputEdge, ...]:
     if step.op_type is OpType.DATAGEN:
         return ()
+    if step.op_type is OpType.POSTPROC:
+        # Post-loop ops reference producers by trace key, not by an input
+        # channel/edge, so they contribute no structural graph edges.
+        return ()
     if step.op_type is OpType.FILTER:
         # Filters consume the datagen's observables implicitly (no source kwarg).
         return (InputEdge(role="source", producer=root_name, channel="observables"),)

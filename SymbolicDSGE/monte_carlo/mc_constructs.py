@@ -182,6 +182,10 @@ class MCPipelineResult:
     step_elapsed_s: Mapping[str, float] = field(default_factory=dict)
     step_counts: Mapping[str, int] = field(default_factory=dict)
     step_failures: Mapping[str, int] = field(default_factory=dict)
+    #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name (or
+    #: ``"<step>.<key>"`` for multi-artifact ops). Values are
+    #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
+    postproc: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:

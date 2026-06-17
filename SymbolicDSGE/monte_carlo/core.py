@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 from time import perf_counter
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -27,6 +27,7 @@ from .mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
+from .postproc import normalize_artifacts
 
 
 @dataclass(frozen=True)
@@ -103,12 +104,18 @@ class MCPipeline:
         step_counts: dict[str, int] = {step.name: 0 for step in self.steps}
         step_failures: dict[str, int] = {step.name: 0 for step in self.steps}
 
+        # POSTPROC ops don't run per replication — they run once after the loop,
+        # over the assembled across-rep traces.
+        postproc_steps = [s for s in self.steps if s.op_type is OpType.POSTPROC]
+        rep_steps = [s for s in self.steps if s.op_type is not OpType.POSTPROC]
+        payload_columns: dict[str, list[np.ndarray]] = {}
+
         run_start = perf_counter()
         for rep_idx in range(n_rep):
             context = MCContext(rep_idx=rep_idx, reference=reference, dgp=dgp)
             failed_step_name: str | None = None
             try:
-                for step in self.steps:
+                for step in rep_steps:
                     failed_step_name = step.name
                     step_start = perf_counter()
                     try:
@@ -141,9 +148,24 @@ class MCPipeline:
                 regression_results_by_step.setdefault(name, []).append(
                     regression_result
                 )
+            if postproc_steps:
+                _accumulate_payload_columns(payload_columns, context.payloads)
 
         test_summaries = _summarize_tests(results_by_step)
         regression_summaries = _summarize_regressions(regression_results_by_step)
+        postproc = self._run_postproc(
+            postproc_steps,
+            test_summaries=test_summaries,
+            regression_summaries=regression_summaries,
+            payload_columns=payload_columns,
+            reference=reference,
+            dgp=dgp,
+            fail_fast=fail_fast,
+            failures=failures,
+            step_elapsed_s=step_elapsed_s,
+            step_counts=step_counts,
+            step_failures=step_failures,
+        )
         elapsed_s = perf_counter() - run_start
         result = MCPipelineResult(
             n_rep=n_rep,
@@ -162,6 +184,7 @@ class MCPipeline:
             step_elapsed_s=step_elapsed_s,
             step_counts=step_counts,
             step_failures=step_failures,
+            postproc=postproc,
         )
         if verbosity == 1:
             report_mc_performance(result)
@@ -210,6 +233,107 @@ class MCPipeline:
                 raise TypeError("TEST steps must return TestResult.")
             context.results[step.name] = out
         context.payloads[step.output_key] = out
+
+    def _run_postproc(
+        self,
+        postproc_steps: Sequence[MCStep],
+        *,
+        test_summaries: Mapping[str, Any],
+        regression_summaries: Mapping[str, Any],
+        payload_columns: Mapping[str, list[np.ndarray]],
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+        fail_fast: bool,
+        failures: list[MCFailure],
+        step_elapsed_s: dict[str, float],
+        step_counts: dict[str, int],
+        step_failures: dict[str, int],
+    ) -> dict[str, Any]:
+        """Run POSTPROC ops once over the assembled traces; collect artifacts.
+
+        ``traces`` carries every keyed across-rep ndarray — the test/regression
+        summary traces (shared with the result wire) plus stacked transform
+        payloads. A failing op honors ``fail_fast`` (re-raise) or records an
+        :class:`MCFailure` with ``rep_idx=-1`` (post-loop sentinel) and is skipped.
+        """
+        if not postproc_steps:
+            return {}
+
+        from .serialize import traces_from_summaries
+
+        traces: dict[str, np.ndarray] = traces_from_summaries(
+            test_summaries, regression_summaries
+        )
+        traces.update(_stack_payload_columns(payload_columns))
+
+        postproc: dict[str, Any] = {}
+        for step in postproc_steps:
+            step_start = perf_counter()
+            out: Any = None
+            failed = False
+            try:
+                out = step.func(
+                    reference=reference,
+                    dgp=dgp,
+                    traces=traces,
+                    **dict(step.kwargs),
+                )
+            except Exception as exc:
+                failed = True
+                step_failures[step.name] += 1
+                if fail_fast:
+                    raise
+                failures.append(
+                    MCFailure(
+                        rep_idx=-1,
+                        step_name=step.name,
+                        error_type=type(exc).__name__,
+                        message=str(exc),
+                    )
+                )
+            finally:
+                step_elapsed_s[step.name] += perf_counter() - step_start
+                step_counts[step.name] += 1
+            if not failed:
+                postproc.update(normalize_artifacts(out, step.name))
+        return postproc
+
+
+def _payload_to_array(value: object) -> np.ndarray | None:
+    """A per-rep payload value as a stackable numeric array, else ``None``.
+
+    Only numeric ndarray / scalar payloads (e.g. transform outputs) qualify;
+    structured payloads (``MCData`` / ``FilterResult`` / result objects) are
+    skipped from the post-loop trace registry.
+    """
+    if isinstance(value, np.ndarray):
+        return value
+    if isinstance(value, (int, float, np.number)):
+        return np.asarray(value, dtype=np.float64)
+    return None
+
+
+def _accumulate_payload_columns(
+    columns: dict[str, list[np.ndarray]], payloads: Mapping[str, object]
+) -> None:
+    for key, value in payloads.items():
+        array = _payload_to_array(value)
+        if array is not None:
+            columns.setdefault(key, []).append(array)
+
+
+def _stack_payload_columns(
+    columns: Mapping[str, list[np.ndarray]],
+) -> dict[str, np.ndarray]:
+    """Stack per-rep payload arrays into ``payload.<name>`` traces.
+
+    Only keys whose per-rep arrays share a shape across replications are stacked
+    (a transform whose output length varies per rep is skipped)."""
+    out: dict[str, np.ndarray] = {}
+    for name, arrays in columns.items():
+        if arrays and len({array.shape for array in arrays}) == 1:
+            out[f"payload.{name}"] = np.stack(arrays)
+    return out
 
 
 def _df_metadata_matches(a: object, b: object) -> bool:

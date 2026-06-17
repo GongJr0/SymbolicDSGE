@@ -18,6 +18,7 @@ from .catalog import (
 )
 from .core import MCPipeline
 from .custom_op import NumpyCustomFunc, custom_operation
+from .postproc import Raw, Summary
 from .mc_constructs import (
     MCContext,
     MCData,
@@ -41,6 +42,8 @@ __all__ = [
     "OpType",
     "custom_operation",
     "NumpyCustomFunc",
+    "Summary",
+    "Raw",
     # graph spec (serialization / bundle)
     "PipelineSpec",
     "NodeSpec",

@@ -13,7 +13,7 @@ the parquet-friendly split below:
 from __future__ import annotations
 
 import copy
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 import numpy as np
@@ -84,14 +84,19 @@ _TEST_TRACE_KEYS = ("statistic_trace", "pval_trace", "status_trace")
 _REGRESSION_TRACE_KEYS = ("coef_trace", "r2_trace", "status_trace")
 
 
-def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
-    """Bulk numeric trace columns, keyed for a later parquet writer (no I/O).
+def traces_from_summaries(
+    test_summaries: Mapping[str, Any],
+    regression_summaries: Mapping[str, Any],
+) -> dict[str, NDArray[Any]]:
+    """Bulk numeric trace columns from the test/regression summaries (no I/O).
 
     Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
-    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``).
+    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``). The
+    single source of truth for trace shaping — shared by :func:`result_traces`
+    (the wire) and the post-loop ``OpType.POSTPROC`` trace registry.
     """
     traces: dict[str, NDArray[Any]] = {}
-    for name, test_summary in result.test_summaries.items():
+    for name, test_summary in test_summaries.items():
         traces[f"test.{name}.statistic"] = np.asarray(
             test_summary.statistic_trace, dtype=np.float64
         )
@@ -101,7 +106,7 @@ def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
         traces[f"test.{name}.status"] = np.asarray(
             [int(status) for status in test_summary.status_trace], dtype=np.int64
         )
-    for name, reg_summary in result.regression_summaries.items():
+    for name, reg_summary in regression_summaries.items():
         traces[f"regression.{name}.coef"] = np.asarray(
             reg_summary.coef_trace, dtype=np.float64
         )
@@ -112,6 +117,11 @@ def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
             [int(status) for status in reg_summary.status_trace], dtype=np.int64
         )
     return traces
+
+
+def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
+    """Bulk numeric trace columns for a later parquet writer (no I/O)."""
+    return traces_from_summaries(result.test_summaries, result.regression_summaries)
 
 
 def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, Any]:
