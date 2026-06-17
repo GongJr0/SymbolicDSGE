@@ -211,7 +211,7 @@ print(f"Bundle written to {bundle_path}")
 
 ## Inspect the result
 
-Since `.sdsge` is just an alias, a bundle acts exactly like a zip file. You can use and `zip` utility to inspect its contents or use the `sdsge-decompile` CLI to extract it into a directory structure.
+Since `.sdsge` is just an alias, a bundle acts exactly like a zip file. You can use any `zip` utility to inspect its contents or use the `sdsge-decompile` CLI to extract it into a directory structure.
 
 ```bash
 unzip -l experiment-1.sdsge
