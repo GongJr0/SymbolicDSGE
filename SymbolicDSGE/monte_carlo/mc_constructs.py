@@ -16,6 +16,7 @@ from ..kalman.filter import FilterResult
 from ..regression.enums import RegressionStatus
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
+from .custom_op import PandasCustomFunc
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
@@ -154,6 +155,18 @@ class MCStep:
             raise ValueError("MCStep name must be non-empty.")
         object.__setattr__(self, "op_type", OpType(self.op_type))
         object.__setattr__(self, "kwargs", dict(self.kwargs))
+        # The pandas namespace is a post-loop-only privilege: a PandasCustomFunc
+        # in a per-rep step would reference pandas inside the replication loop,
+        # which the looser contract is not meant to sanction.
+        if (
+            isinstance(self.func, PandasCustomFunc)
+            and self.op_type is not OpType.POSTPROC
+        ):
+            raise ValueError(
+                f"MCStep {self.name!r}: a PandasCustomFunc is only allowed in a "
+                "post-loop (POSTPROC) step, not a "
+                f"{self.op_type.value!r} step."
+            )
 
     @property
     def output_key(self) -> str:

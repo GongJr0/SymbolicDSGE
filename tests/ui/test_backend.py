@@ -983,7 +983,7 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
         validate_pipeline_spec(direct, has_reference=True, has_dgp=True)
 
 
-_UI_CUSTOM_OP = """@custom_operation
+_UI_CUSTOM_OP = """@numpy_operation
 def zscore(*, context, reference, dgp, rep_idx, **kwargs):
     arr = np.asarray(context.require_data().observables, dtype=float)
     return (arr - arr.mean(axis=0)) / arr.std(axis=0)
@@ -995,7 +995,7 @@ def test_ui_backend_custom_op_template_and_validate() -> None:
 
     template = client.get("/api/mc/custom/template")
     assert template.status_code == 200
-    assert "@custom_operation" in template.json()["template"]
+    assert "@numpy_operation" in template.json()["template"]
 
     ok = client.post("/api/mc/custom/validate", json={"code": _UI_CUSTOM_OP})
     assert ok.status_code == 200

@@ -409,17 +409,31 @@ class BundleBuilder:
 
 
 def _custom_op_blob(step: MCStep) -> bytes:
-    """Wrap a custom step's callable as a NumpyCustomFunc and cloudpickle it.
+    """Wrap a custom step's callable in the phase wrapper and cloudpickle it.
 
     Wrapping enforces the author-side contract (top-level def, safe namespace)
     and snapshots the source + captured globals, so the receiver can audit the
-    op at load. Already-wrapped callables pass through idempotently.
+    op at load. Post-loop (POSTPROC) ops get the looser pandas namespace; every
+    other phase gets numpy. An already-wrapped callable passes through; a pandas
+    wrapper outside the post-loop phase is rejected.
     """
     import cloudpickle
 
-    from ..monte_carlo.custom_op import NumpyCustomFunc
+    from ..monte_carlo.custom_op import (
+        CustomFunc,
+        CustomOpValidationError,
+        NumpyCustomFunc,
+        PandasCustomFunc,
+    )
+    from ..monte_carlo.mc_constructs import OpType
 
-    wrapped = NumpyCustomFunc(step.func)
+    wrapper = PandasCustomFunc if step.op_type is OpType.POSTPROC else NumpyCustomFunc
+    if isinstance(step.func, PandasCustomFunc) and wrapper is NumpyCustomFunc:
+        raise CustomOpValidationError(
+            f"{step.name!r}: a PandasCustomFunc is only allowed in a post-loop "
+            f"(POSTPROC) step, not a {step.op_type.value!r} step."
+        )
+    wrapped = step.func if isinstance(step.func, CustomFunc) else wrapper(step.func)
     return cast(bytes, cloudpickle.dumps(wrapped))
 
 

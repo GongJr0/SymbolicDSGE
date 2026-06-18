@@ -3,12 +3,17 @@ from __future__ import annotations
 from typing import cast
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from SymbolicDSGE.bundle import BundleBuilder, build_from
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline, build_pipeline, validate_pipeline_spec
-from SymbolicDSGE.monte_carlo.custom_op import NumpyCustomFunc
+from SymbolicDSGE.monte_carlo.custom_op import (
+    CustomOpValidationError,
+    NumpyCustomFunc,
+    PandasCustomFunc,
+)
 from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
 from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
@@ -20,6 +25,12 @@ def zscore(*, context, **kwargs):
     """Top-level custom op (NumpyCustomFunc-eligible)."""
     arr = context.require_data().observables
     return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+
+
+def pval_table(*, traces, reference, dgp):
+    """Top-level pandas post-loop op returning a DataFrame (references `pd`)."""
+    pvals = traces["test.jb.pval"]
+    return pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})
 
 
 def selection_rate(*, traces, reference, dgp):
@@ -163,6 +174,41 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
     assert (
         wire["postproc"] == serialize_pipeline_result(result, run_id="r1")["postproc"]
     )
+
+
+def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> None:
+    observables = np.random.default_rng(5).normal(size=(6, 20, 2))
+    pipe = MCPipeline(
+        [
+            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            postproc_step("ptab", pval_table),  # plain func -> auto-wrapped at ship
+        ]
+    )
+    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=6, verbosity=0)
+
+    target = (
+        BundleBuilder(created_by="mc-test")
+        .add_mc(pipe, result=result, run_id="r1")
+        .write(tmp_path / "pandas_pp.sdsge")
+    )
+
+    loaded = build_from(target)
+    assert loaded.mc is not None
+    # The post-loop op was wrapped under the pandas namespace and round-trips.
+    func = loaded.mc.resources["ptab"]
+    assert isinstance(func, PandasCustomFunc)
+    out = func(traces={"test.jb.pval": np.array([0.1, 0.2])}, reference=None, dgp=None)
+    assert isinstance(out, pd.DataFrame)
+    # The DataFrame artifact also lands as a table member.
+    assert any(m.kind == "mc_postproc_table" for m in loaded.manifest.members)
+
+
+def test_pandas_wrapper_rejected_outside_postproc() -> None:
+    # A PandasCustomFunc on a per-rep transform is rejected at pipeline build.
+    wrapped = PandasCustomFunc(pval_table)
+    with pytest.raises((ValueError, CustomOpValidationError), match="POSTPROC"):
+        transform_step("bad", wrapped, source="observables")
 
 
 def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:
