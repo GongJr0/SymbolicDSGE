@@ -9,6 +9,7 @@ import type {
   MCCatalog,
   MCPipelineResult,
   MCPipelineSpec,
+  MCStepType,
   Role,
   SessionSummary,
   ShockGeneration,
@@ -141,11 +142,21 @@ export function getMCCustomTemplate(): Promise<{ template: string }> {
 
 export function validateCustomOp(
   code: string,
+  stepType: MCStepType = "transform:custom",
 ): Promise<{ valid: boolean; name?: string; error?: string }> {
   return requestJson<{ valid: boolean; name?: string; error?: string }>(
     "/api/mc/custom/validate",
-    { method: "POST", body: JSON.stringify({ code }) },
+    { method: "POST", body: JSON.stringify({ code, step_type: stepType }) },
   );
+}
+
+export function fetchAvailableTraces(
+  pipeline: MCPipelineSpec,
+): Promise<{ traces: string[] }> {
+  return requestJson<{ traces: string[] }>("/api/mc/traces", {
+    method: "POST",
+    body: JSON.stringify(pipeline),
+  });
 }
 
 export function validateMCPipeline(

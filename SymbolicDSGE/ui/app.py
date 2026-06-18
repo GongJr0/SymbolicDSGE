@@ -11,6 +11,7 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from .mc import (
     build_pipeline,
     compile_custom_resources,
+    mc_available_traces,
     mc_catalog,
     mc_custom_op_template,
     run_pipeline,
@@ -71,7 +72,11 @@ def create_app(
 
     @app.post("/api/mc/custom/validate")
     def monte_carlo_custom_validate(request: MCCustomOpRequest) -> dict[str, Any]:
-        return validate_custom_op(request.code)
+        return validate_custom_op(request.code, step_type=request.step_type)
+
+    @app.post("/api/mc/traces")
+    def monte_carlo_traces(request: MCPipelineSpec) -> dict[str, list[str]]:
+        return mc_available_traces(request)
 
     @app.get("/api/estimation/catalog")
     def get_estimation_catalog() -> dict[str, Any]:

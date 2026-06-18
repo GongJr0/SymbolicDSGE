@@ -194,6 +194,7 @@ export type MCFieldType =
   | "number"
   | "boolean"
   | "select"
+  | "trace"
   | "number_list"
   | "number_matrix"
   | "text_list";
@@ -325,4 +326,21 @@ export interface MCPipelineResult {
   test_summaries: Record<string, MCTestSummary>;
   regression_summaries: Record<string, MCRegressionSummary>;
   data_summaries: Record<string, MCDataSummary>;
+  postproc?: Record<string, MCPostprocArtifact>;
+}
+
+// A post-loop (POSTPROC) artifact, one per summary surface. `scalar` carries an
+// inline `value`; `array` an `value` (1-D or N-D nested arrays); `table` a
+// columnar `data` map plus `columns`/`dtypes`/`index` metadata.
+export interface MCPostprocArtifact {
+  kind: "summary" | "raw";
+  artifact: "scalar" | "array" | "table";
+  title?: string | null;
+  render?: string;
+  value?: unknown;
+  shape?: number[];
+  columns?: string[];
+  dtypes?: Record<string, string>;
+  index?: { kind: string; name: string | null };
+  data?: Record<string, unknown[]>;
 }
