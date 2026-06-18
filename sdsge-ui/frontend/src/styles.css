@@ -1712,6 +1712,53 @@ button.mc-palette-tab.active .mc-palette-tab-count {
   color: #4338ca;
 }
 
+/* POSTPROC artifact surfaces (#184) */
+.mc-summary-tabs {
+  flex-wrap: wrap;
+}
+
+.mc-postproc-views {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.mc-postproc-views button {
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  color: #64748b;
+  font-size: 11px;
+  padding: 3px 9px;
+  text-transform: capitalize;
+}
+
+.mc-postproc-views button.active {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+
+.mc-postproc-chart {
+  margin-bottom: 10px;
+  position: relative;
+}
+
+.mc-foldable-table {
+  margin-top: 6px;
+}
+
+.mc-foldable-table > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
 .mc-summary-body {
   flex: 1;
   min-height: 0;

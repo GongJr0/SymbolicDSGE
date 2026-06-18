@@ -33,6 +33,7 @@ import {
 } from "react";
 import type { DragEvent, PointerEvent } from "react";
 import {
+  fetchAvailableTraces,
   getMCCatalog,
   getMCCustomTemplate,
   runMCPipeline,
@@ -75,6 +76,32 @@ const CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
   category: "transforms",
   fields: [],
 };
+
+// Post-loop sibling of CUSTOM_CATALOG_ITEM: a user-authored summary op run once
+// after the replication loop (pandas namespace; may return a DataFrame).
+const POSTPROC_CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
+  step_type: "postproc:custom",
+  title: "Custom Postproc",
+  default_name: "postproc_op",
+  description: "User-defined post-loop summary op over the across-rep traces.",
+  category: "postproc",
+  fields: [],
+};
+
+// Starter source for a custom post-loop op. The pandas namespace applies, so the
+// body may reference `pd` (and `np`); `import` stays banned, like `np`.
+const POSTPROC_CUSTOM_TEMPLATE = `@pandas_operation
+def postproc_op(*, traces, reference, dgp):
+    """Post-loop summary over the across-rep traces. Runs once after the loop.
+
+    \`traces\` maps producer keys (e.g. "test.<name>.pval", "regression.<name>.coef",
+    "payload.<name>") to length-R ndarrays. Return a scalar (-> Summary), an
+    ndarray (-> Raw), a DataFrame (-> table), or a dict of several. \`pd\` and
+    \`np\` are available (no imports).
+    """
+    pvals = traces["test.example.pval"]
+    return pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})
+`;
 
 export default function MCPipelineView({
   hidden,
@@ -127,7 +154,11 @@ function MCPipelineBuilder({
         customTemplateRef.current = tmpl.template;
         const value: MCCatalog = {
           ...rawCatalog,
-          steps: [...rawCatalog.steps, CUSTOM_CATALOG_ITEM],
+          steps: [
+            ...rawCatalog.steps,
+            CUSTOM_CATALOG_ITEM,
+            POSTPROC_CUSTOM_CATALOG_ITEM,
+          ],
         };
         setCatalog(value);
         const [workspace, persistedResult] = await Promise.all([
@@ -165,6 +196,27 @@ function MCPipelineBuilder({
     .filter((node) => node.data.catalog.category === "transforms")
     .map((node) => node.data.name);
   const pipeline = useMemo(() => toPipelineSpec(nodes, edges), [nodes, edges]);
+
+  // The producible across-rep traces a POSTPROC op can consume. Refreshed from
+  // the backend registry whenever the pipeline's producers change (debounced),
+  // so the trace picker stays in sync without duplicating the key format here.
+  const [availableTraces, setAvailableTraces] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      fetchAvailableTraces(pipeline)
+        .then((result) => {
+          if (!cancelled) setAvailableTraces(result.traces);
+        })
+        .catch(() => {
+          if (!cancelled) setAvailableTraces([]);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [pipeline]);
 
   // Color edges by their producer's kind so a node's inputs are readable at a
   // glance (datagen / filter / transform) without opening the inspector.
@@ -450,6 +502,7 @@ function MCPipelineBuilder({
           onDelete={deleteNode}
           theme={theme}
           payloadProducers={payloadProducers}
+          availableTraces={availableTraces}
         />
       ),
     },
@@ -685,7 +738,9 @@ function makeNode(
   const params =
     item.step_type === "transform:custom"
       ? { code: customTemplate }
-      : Object.fromEntries(item.fields.map((field) => [field.key, field.default]));
+      : item.step_type === "postproc:custom"
+        ? { code: POSTPROC_CUSTOM_TEMPLATE }
+        : Object.fromEntries(item.fields.map((field) => [field.key, field.default]));
   return {
     id: `${item.step_type}-${crypto.randomUUID()}`,
     type: "mcStep",

@@ -419,6 +419,96 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     assert fetched.json()["run_id"] == body["run_id"]
 
 
+def _solve_reference(client: TestClient) -> None:
+    for role in ("reference", "dgp"):  # simulation datagen needs a solved dgp
+        loaded = client.post(
+            "/api/model/load-yaml", json={"role": role, "path": "MODELS/test.yaml"}
+        )
+        assert loaded.status_code == 200
+        solved = client.post(
+            "/api/model/solve",
+            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+        )
+        assert solved.status_code == 200
+
+
+_POSTPROC_PIPELINE = {
+    "nodes": [
+        {
+            "id": "sim",
+            "step_type": "simulation",
+            "name": "datagen",
+            "params": {"T": 8, "observables": True, "distribution": "norm", "seed": 10},
+        },
+        {
+            "id": "jb",
+            "step_type": "jarque_bera",
+            "name": "jb",
+            "params": {"source": "observables", "column": 0},
+        },
+        {
+            "id": "k",
+            "step_type": "kde",
+            "name": "density",
+            "params": {"trace": "test.jb.statistic", "grid_points": 16},
+        },
+    ],
+    "edges": [{"source": "sim", "target": "jb"}],
+}
+
+
+def test_ui_backend_run_payload_includes_postproc_artifacts() -> None:
+    client = TestClient(create_app())
+    _solve_reference(client)
+
+    run = client.post(
+        "/api/run/mc",
+        json={"pipeline": _POSTPROC_PIPELINE, "n_rep": 4, "fail_fast": True},
+    )
+    assert run.status_code == 200
+    postproc = run.json()["postproc"]
+    # KDE emits an array curve and a descriptives table, each its own surface.
+    curve = postproc["density.curve"]
+    assert curve["artifact"] == "array" and curve["shape"] == [16, 2]
+    assert len(curve["value"]) == 16
+    table = postproc["density.descriptives"]
+    assert table["artifact"] == "table"
+    assert "statistic" in table["columns"]
+    assert table["data"]["statistic"][0] == "count"
+
+
+def test_ui_backend_available_traces_endpoint() -> None:
+    client = TestClient(create_app())
+    traces = client.post("/api/mc/traces", json=_POSTPROC_PIPELINE)
+    assert traces.status_code == 200
+    keys = traces.json()["traces"]
+    assert "test.jb.statistic" in keys
+    assert "test.jb.pval" in keys
+
+
+_PANDAS_OP_SRC = '''@pandas_operation
+def summarize(*, traces, reference, dgp):
+    """Post-loop table op referencing pd."""
+    return pd.DataFrame({"a": [1.0]})
+'''
+
+
+def test_ui_backend_custom_validate_is_phase_aware() -> None:
+    client = TestClient(create_app())
+    # A pandas post-loop op validates under the postproc namespace ...
+    ok = client.post(
+        "/api/mc/custom/validate",
+        json={"code": _PANDAS_OP_SRC, "step_type": "postproc:custom"},
+    )
+    assert ok.status_code == 200 and ok.json()["valid"] is True
+    # ... but the same source is rejected under the per-rep transform namespace.
+    bad = client.post(
+        "/api/mc/custom/validate",
+        json={"code": _PANDAS_OP_SRC, "step_type": "transform:custom"},
+    )
+    assert bad.status_code == 200 and bad.json()["valid"] is False
+
+
 def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):

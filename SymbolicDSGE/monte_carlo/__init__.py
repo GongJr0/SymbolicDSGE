@@ -33,6 +33,7 @@ from .mc_constructs import (
     OpType,
 )
 from .spec import EdgeSpec, MCStepKind, NodeSpec, PipelineSpec
+from .traces import available_traces
 
 __all__ = [
     # pipeline + execution
@@ -58,6 +59,7 @@ __all__ = [
     "NodeSpec",
     "EdgeSpec",
     "MCStepKind",
+    "available_traces",
     # catalogue
     "STEP_CATALOG",
     "StepDefinition",

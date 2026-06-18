@@ -12,6 +12,7 @@ from typing import Any
 
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipelineResult, NodeSpec
+from SymbolicDSGE.monte_carlo import available_traces as _available_traces
 from SymbolicDSGE.monte_carlo import build_pipeline as build_pipeline
 from SymbolicDSGE.monte_carlo import catalog_payload
 from SymbolicDSGE.monte_carlo import run_pipeline as _run_pipeline
@@ -58,6 +59,15 @@ def mc_catalog() -> dict[str, Any]:
 def mc_custom_op_template() -> dict[str, str]:
     """The starter source served to the custom-op editor."""
     return {"template": MC_CUSTOM_OP_TEMPLATE}
+
+
+def mc_available_traces(spec: MCPipelineSpec) -> dict[str, list[str]]:
+    """The across-rep trace keys the pipeline's producers will emit.
+
+    Feeds the post-loop trace picker (a ``type="trace"`` field) so a POSTPROC op
+    can select which test/regression/transform producer it consumes.
+    """
+    return {"traces": _available_traces(spec.to_core())}
 
 
 def _custom_func_class(step_type: str) -> type[CustomFunc]:

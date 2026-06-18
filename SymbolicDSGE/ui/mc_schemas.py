@@ -35,6 +35,11 @@ class MCRunRequest(BaseModel):
 
 
 class MCCustomOpRequest(BaseModel):
-    """A single custom-op source submission for live editor validation."""
+    """A single custom-op source submission for live editor validation.
+
+    ``step_type`` selects the validation namespace: ``postproc:custom`` validates
+    under the pandas namespace, everything else under numpy.
+    """
 
     code: str = Field(min_length=1)
+    step_type: MCStepKind = "transform:custom"

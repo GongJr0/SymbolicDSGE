@@ -4,7 +4,7 @@ import { Check, TriangleAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { validateCustomOp } from "../api";
 import { registerPythonLsp } from "../lsp/registerPythonLsp";
-import type { MCFieldSpec } from "../types";
+import type { MCFieldSpec, MCStepType } from "../types";
 import type { MCFlowNode } from "./types";
 
 // Input legs whose value is a dependency source (a "select" with INPUT_SOURCES
@@ -33,12 +33,14 @@ export function StepInspector({
   onDelete,
   theme,
   payloadProducers,
+  availableTraces,
 }: {
   node: MCFlowNode | null;
   onChange: (node: MCFlowNode) => void;
   onDelete: (id: string) => void;
   theme: "light" | "dark";
   payloadProducers: string[];
+  availableTraces: string[];
 }) {
   if (node === null) {
     return (
@@ -58,7 +60,9 @@ export function StepInspector({
     });
   };
 
-  const isCustom = node.data.stepType === "transform:custom";
+  const isCustom =
+    node.data.stepType === "transform:custom" ||
+    node.data.stepType === "postproc:custom";
   const producers = payloadProducers.filter((name) => name !== node.data.name);
 
   return (
@@ -91,6 +95,7 @@ export function StepInspector({
       {isCustom ? (
         <CustomOpEditor
           nodeId={node.id}
+          stepType={node.data.stepType}
           code={String(node.data.params.code ?? "")}
           theme={theme}
           onChange={(value) => updateParam("code", value)}
@@ -120,6 +125,7 @@ export function StepInspector({
                   key={key}
                   field={field}
                   value={node.data.params[field.key] ?? field.default}
+                  availableTraces={availableTraces}
                   onChange={(value) => updateParam(field.key, value)}
                 />
               );
@@ -183,11 +189,13 @@ function SourceLegEditor({
 
 function CustomOpEditor({
   nodeId,
+  stepType,
   code,
   theme,
   onChange,
 }: {
   nodeId: string;
+  stepType: MCStepType;
   code: string;
   theme: "light" | "dark";
   onChange: (value: string) => void;
@@ -198,7 +206,7 @@ function CustomOpEditor({
   async function validate() {
     setBusy(true);
     try {
-      const result = await validateCustomOp(code);
+      const result = await validateCustomOp(code, stepType);
       setStatus(
         result.valid
           ? { ok: true, message: `Valid op: ${result.name ?? ""}` }
@@ -264,12 +272,35 @@ function CustomOpEditor({
 function FieldEditor({
   field,
   value,
+  availableTraces,
   onChange,
 }: {
   field: MCFieldSpec;
   value: unknown;
+  availableTraces: string[];
   onChange: (value: unknown) => void;
 }) {
+  if (field.type === "trace") {
+    const current = String(value ?? "");
+    // Offer the pipeline's producible traces; keep a stale selection visible.
+    const options =
+      current && !availableTraces.includes(current)
+        ? [current, ...availableTraces]
+        : availableTraces;
+    return (
+      <label>
+        {field.label}
+        <select value={current} onChange={(event) => onChange(event.target.value)}>
+          <option value="">— select trace —</option>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
   if (field.type === "boolean") {
     return (
       <label className="switch-row">
