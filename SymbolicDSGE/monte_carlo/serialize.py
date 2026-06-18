@@ -172,11 +172,13 @@ def _serialize_artifact(artifact: Raw | Summary) -> dict[str, Any]:
         entry["artifact"] = "scalar"
         entry["value"] = _json_value(value)
     else:
-        raise TypeError(
-            f"POSTPROC Summary value of type {type(value).__name__!r} is not a "
-            "scalar or ndarray; tabular/DataFrame artifacts are not yet "
-            "serializable (#181)."
-        )
+        frame = _artifact_frame(artifact)
+        if frame is None:
+            raise TypeError(
+                f"POSTPROC Summary value of type {type(value).__name__!r} is not "
+                "a scalar, ndarray, or DataFrame and cannot be serialized."
+            )
+        entry.update(_frame_to_wire(frame))  # bulk `data` stripped by result_document
     return entry
 
 
@@ -195,6 +197,109 @@ def result_postproc_arrays(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
     return out
 
 
+_INDEX_COL = "__index__"  # reserved data key carrying a labeled index's values
+
+
+def _artifact_frame(artifact: Raw | Summary) -> Any | None:
+    """The pandas DataFrame a ``Summary`` carries as a tabular artifact, else None."""
+    if not isinstance(artifact, Summary):
+        return None
+    import pandas as pd
+
+    value = artifact.value
+    return value if isinstance(value, pd.DataFrame) else None
+
+
+def _wire_dtype(dtype: Any) -> str:
+    """Normalize a pandas dtype to a wire dtype tag.
+
+    Only ``numeric`` (``int``/``float``), ``bool``, and ``string`` are carried;
+    everything else (object, categorical, datetime) round-trips as ``string`` —
+    dictionary-encoded Parquet collapses repeated category labels anyway.
+    """
+    import pandas as pd
+
+    if pd.api.types.is_bool_dtype(dtype):
+        return "bool"
+    if pd.api.types.is_integer_dtype(dtype):
+        return "int"
+    if pd.api.types.is_float_dtype(dtype):
+        return "float"
+    return "string"
+
+
+def _frame_column_cells(series: Any, wire_dtype: str) -> list[Any]:
+    """A column's cells as JSON-safe scalars (NaN/NaT/None -> ``None``)."""
+    import pandas as pd
+
+    if wire_dtype == "string":
+        return [None if pd.isna(v) else str(v) for v in series.tolist()]
+    if wire_dtype == "bool":
+        return [bool(v) for v in series.to_numpy()]
+    return [_json_value(v) for v in series.to_numpy()]
+
+
+def _is_default_range_index(index: Any) -> bool:
+    import pandas as pd
+
+    return (
+        isinstance(index, pd.RangeIndex)
+        and index.start == 0
+        and index.step == 1
+        and index.name is None
+    )
+
+
+def _frame_to_columns(frame: Any) -> dict[str, list[Any]]:
+    """The table's columnar payload (the bulk ``data``), index column first.
+
+    A labeled (non-default-range) index is carried as the reserved
+    :data:`_INDEX_COL` column; a default ``RangeIndex`` is metadata-only.
+    """
+    data: dict[str, list[Any]] = {}
+    if not _is_default_range_index(frame.index):
+        data[_INDEX_COL] = _frame_column_cells(
+            frame.index.to_series(), _wire_dtype(frame.index.dtype)
+        )
+    for col in frame.columns:
+        data[str(col)] = _frame_column_cells(frame[col], _wire_dtype(frame[col].dtype))
+    return data
+
+
+def _frame_to_wire(frame: Any) -> dict[str, Any]:
+    """Tabular artifact wire entry: metadata + inlined columnar ``data``."""
+    labeled = not _is_default_range_index(frame.index)
+    dtypes = {str(col): _wire_dtype(frame[col].dtype) for col in frame.columns}
+    if labeled:
+        dtypes[_INDEX_COL] = _wire_dtype(frame.index.dtype)
+    return {
+        "artifact": "table",
+        "shape": [int(frame.shape[0]), int(frame.shape[1])],
+        "columns": [str(col) for col in frame.columns],
+        "dtypes": dtypes,
+        "index": {
+            "kind": "labeled" if labeled else "range",
+            "name": frame.index.name,
+        },
+        "data": _frame_to_columns(frame),
+    }
+
+
+def result_postproc_tables(result: MCPipelineResult) -> dict[str, dict[str, list[Any]]]:
+    """The columnar payloads of tabular POSTPROC artifacts, keyed by name (no I/O).
+
+    Each table is mixed-dtype, so — unlike :func:`result_postproc_arrays` (float
+    payloads) — it rides the columnar NDJSON parquet seam (``frame_to_json`` +
+    ``to_parquet``), one member per table.
+    """
+    out: dict[str, dict[str, list[Any]]] = {}
+    for name, artifact in result.postproc.items():
+        frame = _artifact_frame(artifact)
+        if frame is not None:
+            out[name] = _frame_to_columns(frame)
+    return out
+
+
 def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, Any]:
     """JSON-safe metadata + summaries with the bulk trace arrays removed.
 
@@ -208,8 +313,11 @@ def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, 
         for key in _REGRESSION_TRACE_KEYS:
             entry.pop(key, None)
     for entry in document["postproc"].values():
-        if entry.get("artifact") == "array":  # bulk -> parquet side-channel
+        artifact = entry.get("artifact")
+        if artifact == "array":  # bulk -> shape-manifest parquet member
             entry.pop("value", None)
+        elif artifact == "table":  # bulk -> columnar parquet member
+            entry.pop("data", None)
     return document
 
 
@@ -217,6 +325,7 @@ def pipeline_result_wire(
     document: dict[str, Any],
     traces: dict[str, NDArray[Any]],
     postproc_arrays: Mapping[str, NDArray[Any]] | None = None,
+    postproc_tables: Mapping[str, Mapping[str, Sequence[Any]]] | None = None,
 ) -> dict[str, Any]:
     """Re-merge a trace-free :func:`result_document` with :func:`result_traces`
     (and :func:`result_postproc_arrays`) into the canonical UI wire shape (used
@@ -231,16 +340,20 @@ def pipeline_result_wire(
     The same null-from-``shape`` fallback applies to a dropped POSTPROC array.
     """
     arrays = postproc_arrays or {}
+    tables = postproc_tables or {}
     wire = copy.deepcopy(document)
     for name, entry in wire.get("postproc", {}).items():
-        if entry.get("artifact") != "array":
-            continue  # scalar value already inline in the document
-        arr = arrays.get(name)
-        if arr is not None:
-            entry["value"] = _json_value(arr)
-        else:
-            shape = tuple(int(d) for d in entry.get("shape", []))
-            entry["value"] = _json_value(np.full(shape, np.nan)) if shape else None
+        artifact = entry.get("artifact")
+        if artifact == "array":
+            arr = arrays.get(name)
+            if arr is not None:
+                entry["value"] = _json_value(arr)
+            else:
+                shape = tuple(int(d) for d in entry.get("shape", []))
+                entry["value"] = _json_value(np.full(shape, np.nan)) if shape else None
+        elif artifact == "table":
+            entry["data"] = _table_data_or_null(entry, tables.get(name, {}))
+        # scalar artifacts keep their inline value from the document
     for name, entry in wire["test_summaries"].items():
         n = int(entry.get("n", 0))
         entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)
@@ -258,6 +371,22 @@ def pipeline_result_wire(
         entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_rep)
         entry["status_trace"] = _status_trace(traces, f"regression.{name}.status")
     return wire
+
+
+def _table_data_or_null(
+    entry: Mapping[str, Any], columns: Mapping[str, Sequence[Any]]
+) -> dict[str, list[Any]]:
+    """Rebuild a table's columnar ``data`` from its decoded parquet columns.
+
+    A column that was all-null is dropped by the Parquet encoder; it is rebuilt
+    as ``n`` nulls (matching the trace-column convention). A labeled index rides
+    the reserved :data:`_INDEX_COL` column.
+    """
+    n = int(entry.get("shape", [0, 0])[0])
+    keys = list(entry.get("columns", []))
+    if entry.get("index", {}).get("kind") == "labeled":
+        keys = [_INDEX_COL, *keys]
+    return {key: list(columns[key]) if key in columns else [None] * n for key in keys}
 
 
 def _trace_or_null(traces: dict[str, NDArray[Any]], key: str, n: int) -> list[Any]:

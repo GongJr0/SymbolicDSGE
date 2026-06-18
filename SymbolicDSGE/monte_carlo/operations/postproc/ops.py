@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ....core.solved_model import SolvedModel
-from ...postproc import Raw
+from ...postproc import Raw, Summary
 
 
 def run_kde(
@@ -26,14 +26,15 @@ def run_kde(
     bandwidth: str | float = "scott",
     grid_points: int = 200,
     kernel: str = "gaussian",
-) -> Raw:
+) -> dict[str, Raw | Summary]:
     """Gaussian kernel density estimate of an across-replication trace.
 
     Reads ``traces[trace]`` (e.g. ``"test.<name>.statistic"``), estimates its
-    density on a uniform grid spanning the finite data range, and returns the raw
-    ``(x, density)`` curve as an ``N x 2`` array — the bulk data callers need for
-    plotting. A descriptive :class:`Summary` (moments/quantiles as a table) is
-    added once tabular artifacts land (#181).
+    density on a uniform grid spanning the finite data range, and emits two
+    artifacts: ``"curve"`` — the raw ``(x, density)`` ``N x 2`` array callers need
+    for plotting — and ``"descriptives"`` — a small :class:`Summary` table of the
+    trace's moments/quantiles. Keyed under the step name (``"<step>.curve"`` /
+    ``"<step>.descriptives"``).
     """
     from scipy.stats import gaussian_kde
 
@@ -55,4 +56,26 @@ def run_kde(
     estimator = gaussian_kde(cast(Any, data), bw_method=cast(Any, bandwidth))
     grid = np.linspace(float(data.min()), float(data.max()), int(grid_points))
     density = np.asarray(estimator(grid), dtype=np.float64)
-    return Raw(value=np.column_stack([grid, density]))
+    return {
+        "curve": Raw(value=np.column_stack([grid, density])),
+        "descriptives": Summary(
+            value=_describe(data, trace), title=f"{trace} descriptives", render="table"
+        ),
+    }
+
+
+def _describe(data: NDArray[Any], trace: str) -> Any:
+    """A tidy ``(statistic, value)`` DataFrame of a trace's descriptive moments."""
+    import pandas as pd
+
+    stats = {
+        "count": float(data.size),
+        "mean": float(data.mean()),
+        "std": float(data.std(ddof=1)) if data.size > 1 else float("nan"),
+        "min": float(data.min()),
+        "q25": float(np.quantile(data, 0.25)),
+        "median": float(np.median(data)),
+        "q75": float(np.quantile(data, 0.75)),
+        "max": float(data.max()),
+    }
+    return pd.DataFrame({"statistic": list(stats), "value": list(stats.values())})

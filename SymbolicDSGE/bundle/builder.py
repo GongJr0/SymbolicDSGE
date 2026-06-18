@@ -37,6 +37,7 @@ from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from ..monte_carlo.serialize import (
     result_document,
     result_postproc_arrays,
+    result_postproc_tables,
     result_traces,
 )
 from ..monte_carlo.spec import PipelineSpec
@@ -46,6 +47,7 @@ from .manifest import Manifest, Member, SimSpec
 from .parquet import (
     arrays_to_parquet,
     csv_to_json,
+    frame_to_json,
     to_parquet,
     trace_to_csv,
     trace_to_json,
@@ -65,6 +67,7 @@ _MC_TRACE_CSV = "montecarlo/traces.csv"
 _MC_RAW_DATA = "montecarlo/data/{ref}.parquet"
 _MC_CUSTOM_OP = "montecarlo/custom/{ref}.pkl"
 _MC_POSTPROC = "montecarlo/postproc/{ref}.parquet"
+_MC_POSTPROC_TABLE = "montecarlo/postproc/table/{ref}.parquet"
 
 #: Single-array column name inside a postproc parquet member (avoids dotted
 #: artifact names colliding with the ``"{name}.{j}"`` 2-D column expansion).
@@ -280,7 +283,30 @@ class BundleBuilder:
                     data = trace_to_csv(traces)
                 self._add(Member(path=path, kind="mc_trace"), data)
             self._add_postproc_arrays(result)
+            self._add_postproc_tables(result)
         return self
+
+    def _add_postproc_tables(self, result: MCPipelineResult) -> None:
+        """Ship tabular POSTPROC artifacts as columnar parquet members.
+
+        Tables are mixed-dtype, so they ride the columnar NDJSON seam
+        (:func:`frame_to_json` + :func:`to_parquet`) rather than the float
+        shape-manifest one; column/dtype/index metadata lives in the result
+        document, the artifact name in the member options. An empty (0-row) table
+        carries no parquet rows and is skipped — the loader rebuilds its columns.
+        """
+        for index, (name, columns) in enumerate(result_postproc_tables(result).items()):
+            payload = frame_to_json(columns)
+            if not payload:  # 0-row table -> nothing to encode
+                continue
+            self._add(
+                Member(
+                    path=_MC_POSTPROC_TABLE.format(ref=index),
+                    kind="mc_postproc_table",
+                    options={"name": name},
+                ),
+                to_parquet(payload),
+            )
 
     def _add_postproc_arrays(self, result: MCPipelineResult) -> None:
         """Ship bulk POSTPROC ndarray artifacts as shape-manifest parquet members.

@@ -35,6 +35,7 @@ __all__ = [
     "collapse_columns",
     "arrays_to_parquet",
     "arrays_from_parquet",
+    "frame_to_json",
 ]
 
 _INDEXED_COLUMN = re.compile(r"^(?P<base>.+)\.(?P<idx>\d+)$")
@@ -179,6 +180,33 @@ def trace_to_json(columns: Mapping[str, Any]) -> bytes:
     out = io.BytesIO()
     for i in range(length):
         obj = {name: _json_scalar(flat[name][i]) for name in names}
+        out.write(json.dumps(obj, allow_nan=False).encode("utf-8"))
+        out.write(b"\n")
+    return out.getvalue()
+
+
+def frame_to_json(columns: Mapping[str, Sequence[Any]]) -> bytes:
+    """Encode a columnar table (mixed numeric / string / bool) to NDJSON.
+
+    Sibling of :func:`trace_to_json` for tabular POSTPROC artifacts (#181): each
+    value is a 1-D sequence of *scalar* cells (no 2-D expansion — table cells are
+    already scalar), and columns may be non-numeric. All columns must share
+    length; non-finite floats and ``None`` become JSON ``null``. Decode with
+    :func:`from_parquet_columns` (no :func:`collapse_columns` needed).
+    """
+    if not columns:
+        return b""
+    names = list(columns)
+    length = len(columns[names[0]])
+    for name in names:
+        if len(columns[name]) != length:
+            raise ValueError(
+                f"table columns must share length; {name!r} has "
+                f"{len(columns[name])}, expected {length}"
+            )
+    out = io.BytesIO()
+    for i in range(length):
+        obj = {name: _json_scalar(columns[name][i]) for name in names}
         out.write(json.dumps(obj, allow_nan=False).encode("utf-8"))
         out.write(b"\n")
     return out.getvalue()
