@@ -27,7 +27,7 @@ def transform_step(
     ``MCData``-returning data ops). Bundling such a step additionally requires
     the callable to be a
     :class:`~SymbolicDSGE.monte_carlo.custom_op.NumpyCustomFunc` (use
-    ``@custom_operation`` or pass one); the bundle builder enforces and
+    ``@numpy_operation`` or pass one); the bundle builder enforces and
     auto-wraps that at serialization time.
     """
     return MCStep(

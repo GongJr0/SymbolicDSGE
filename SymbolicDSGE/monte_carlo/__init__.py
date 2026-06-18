@@ -17,7 +17,13 @@ from .catalog import (
     catalog_payload,
 )
 from .core import MCPipeline
-from .custom_op import NumpyCustomFunc, custom_operation
+from .custom_op import (
+    CustomFunc,
+    NumpyCustomFunc,
+    PandasCustomFunc,
+    numpy_operation,
+    pandas_operation,
+)
 from .postproc import Raw, Summary
 from .mc_constructs import (
     MCContext,
@@ -40,8 +46,11 @@ __all__ = [
     "MCContext",
     "MCData",
     "OpType",
-    "custom_operation",
+    "numpy_operation",
+    "pandas_operation",
+    "CustomFunc",
     "NumpyCustomFunc",
+    "PandasCustomFunc",
     "Summary",
     "Raw",
     # graph spec (serialization / bundle)

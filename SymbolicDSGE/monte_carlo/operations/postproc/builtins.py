@@ -20,8 +20,9 @@ def postproc_step(
     Post-loop op contract: ``func(*, traces, reference, dgp, **kwargs)`` returning
     :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` artifacts (or a
     mapping of them). Bundling additionally requires the callable to be a
-    :class:`~SymbolicDSGE.monte_carlo.custom_op.NumpyCustomFunc`; the bundle
-    builder enforces/auto-wraps that at serialization time.
+    :class:`~SymbolicDSGE.monte_carlo.custom_op.CustomFunc`; the bundle builder
+    enforces/auto-wraps post-loop ops under the pandas namespace (so a returned
+    DataFrame's builder code may reference ``pd``) at serialization time.
     """
     return MCStep(
         name=name,

@@ -17,8 +17,10 @@ from SymbolicDSGE.monte_carlo import catalog_payload
 from SymbolicDSGE.monte_carlo import run_pipeline as _run_pipeline
 from SymbolicDSGE.monte_carlo import validate_pipeline_spec as _validate_pipeline_spec
 from SymbolicDSGE.monte_carlo.custom_op import (
+    CustomFunc,
     CustomOpValidationError,
     NumpyCustomFunc,
+    PandasCustomFunc,
 )
 from SymbolicDSGE.monte_carlo.serialize import (
     serialize_pipeline_result as serialize_pipeline_result,
@@ -28,7 +30,7 @@ from .mc_schemas import MCPipelineSpec
 
 #: Pre-fill for the custom-op Monaco editor. numpy is available as ``np`` inside
 #: the safe namespace, so no imports are needed (and the validator rejects them).
-MC_CUSTOM_OP_TEMPLATE = '''@custom_operation
+MC_CUSTOM_OP_TEMPLATE = '''@numpy_operation
 def transform(*, context, reference, dgp, rep_idx, **kwargs):
     """Custom Monte-Carlo transform. Runs once per replication."""
     # numpy is available as `np` (no imports needed). Read this replication's
@@ -58,14 +60,22 @@ def mc_custom_op_template() -> dict[str, str]:
     return {"template": MC_CUSTOM_OP_TEMPLATE}
 
 
-def validate_custom_op(code: str) -> dict[str, Any]:
+def _custom_func_class(step_type: str) -> type[CustomFunc]:
+    """The wrapper class for a custom step kind: pandas for post-loop, else numpy."""
+    return PandasCustomFunc if step_type == "postproc:custom" else NumpyCustomFunc
+
+
+def validate_custom_op(
+    code: str, *, step_type: str = "transform:custom"
+) -> dict[str, Any]:
     """Validate a single custom-op source for live editor feedback.
 
     Returns ``{"valid": True, "name": ...}`` or ``{"valid": False, "error": ...}``
-    (a 200 either way) so the editor can render the message inline.
+    (a 200 either way) so the editor can render the message inline. ``step_type``
+    selects the namespace (``"postproc:custom"`` gets the pandas namespace).
     """
     try:
-        func = NumpyCustomFunc.from_source(code)
+        func = _custom_func_class(step_type).from_source(code)
     except CustomOpValidationError as exc:
         return {"valid": False, "error": str(exc)}
     return {"valid": True, "name": func.name}
@@ -74,9 +84,11 @@ def validate_custom_op(code: str) -> dict[str, Any]:
 def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
     """Compile each ``custom`` node's source into a callable, keyed by node name.
 
-    Feeds ``build_pipeline``/``run_pipeline`` via their ``resources`` seam. Raises
-    ``ValueError`` (node-scoped) on missing or invalid source so the validate/run
-    endpoints report which step failed.
+    Feeds ``build_pipeline``/``run_pipeline`` via their ``resources`` seam. The
+    namespace is phase-based: ``postproc:custom`` nodes compile under the pandas
+    namespace, ``transform:custom`` under numpy. Raises ``ValueError``
+    (node-scoped) on missing or invalid source so the validate/run endpoints
+    report which step failed.
     """
     resources: dict[str, Any] = {}
     for node in spec.nodes:
@@ -86,7 +98,7 @@ def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
         if not isinstance(code, str) or not code.strip():
             raise ValueError(f"Custom step '{node.name}' has no source code.")
         try:
-            resources[node.name] = NumpyCustomFunc.from_source(code)
+            resources[node.name] = _custom_func_class(node.step_type).from_source(code)
         except CustomOpValidationError as exc:
             raise ValueError(f"Custom step '{node.name}': {exc}") from exc
     return resources
