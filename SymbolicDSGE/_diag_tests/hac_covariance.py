@@ -145,8 +145,15 @@ def kernel_dispatcher(
         return _KERNEL_GETTER[kernel]
 
 
-# HAC covariance estimation using the specified kernel and bandwidth
-@njit(cache=True)
+# HAC covariance estimation using the specified kernel and bandwidth.
+# NOTE: deliberately *not* cache=True. `k` is a jitted dispatcher argument, and
+# numba keys an on-disk cache entry on the dispatcher's identity (a weakref), not
+# a stable signature. Each session's kernel is a new object, so the cache never
+# hits cross-session — it only accumulates stale keys whose weakrefs die with the
+# process that made them; the next save re-pickles the index and raises
+# "ReferenceError: underlying object has vanished". In-process JIT reuse is
+# unaffected (the compiled overload is still memoized in memory).
+@njit
 def jit_hac_estimator_matmul(
     r: NDF,
     k: Callable[[int, int], float64],  # Kernel function
