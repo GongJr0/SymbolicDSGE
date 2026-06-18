@@ -33,6 +33,19 @@ def pval_table(*, traces, reference, dgp):
     return pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})
 
 
+def summary_bundle(*, traces, reference, dgp, threshold):
+    """Post-loop op emitting all three artifact kinds: scalar, array, table."""
+    pvals = traces["test.jb.pval"]
+    flags = (pvals < threshold).astype(float)
+    return {
+        "pcs": float(flags.mean()),  # scalar -> Summary (document)
+        "flags": flags,  # array -> Raw (mc_postproc)
+        "table": pd.DataFrame(  # DataFrame -> Summary table (mc_postproc_table)
+            {"rep": np.arange(pvals.size), "pval": pvals}
+        ),
+    }
+
+
 def selection_rate(*, traces, reference, dgp):
     """Top-level postproc op: bare values auto-wrap (scalar -> Summary, array ->
     Raw), so the op body references no captured types."""
@@ -202,6 +215,66 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
     assert isinstance(out, pd.DataFrame)
     # The DataFrame artifact also lands as a table member.
     assert any(m.kind == "mc_postproc_table" for m in loaded.manifest.members)
+
+
+def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
+    # Acceptance (#183): a pipeline with a custom POSTPROC op emitting scalar +
+    # array + table artifacts writes to .sdsge and reloads to an equivalent
+    # runnable pipeline whose re-run reproduces the recovered artifacts.
+    observables = np.random.default_rng(7).normal(size=(8, 25, 2))
+    pipe = MCPipeline(
+        [
+            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            postproc_step("sum", summary_bundle, threshold=0.5),
+        ]
+    )
+    ref = cast(SolvedModel, object())
+    result = pipe.run(reference=ref, n_rep=8, verbosity=0)
+
+    target = (
+        BundleBuilder(created_by="mc-test")
+        .add_mc(pipe, result=result, run_id="r1")
+        .write(tmp_path / "pp_full.sdsge")
+    )
+    loaded = build_from(target)
+    assert loaded.mc is not None
+
+    # All three artifact channels plus the custom-op blob shipped.
+    kinds = {m.kind for m in loaded.manifest.members}
+    assert {"mc_custom_op", "mc_postproc", "mc_postproc_table"} <= kinds
+
+    # The post-loop op rehydrated under the pandas namespace, kwargs preserved.
+    func = loaded.mc.resources["sum"]
+    assert isinstance(func, PandasCustomFunc)
+
+    # Recovered artifacts (document + parquet members) == the live wire.
+    assert (
+        loaded.mc.wire()["postproc"]
+        == serialize_pipeline_result(result, run_id="r1")["postproc"]
+    )
+    assert loaded.mc.postproc_tables["sum.table"]["pval"] == list(
+        result.postproc["sum.table"].value["pval"]
+    )
+
+    # Rebuild from spec + resources -> equivalent runnable pipeline.
+    ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=False)
+    rebuilt = build_pipeline(ordered, resources=loaded.mc.resources)
+    assert [s.step_type for s in rebuilt.steps] == [
+        "raw_data",
+        "jarque_bera",
+        "postproc:custom",
+    ]
+
+    # Re-running reproduces every artifact (deterministic replayed data).
+    rerun = rebuilt.run(reference=ref, n_rep=8, verbosity=0)
+    assert rerun.postproc["sum.pcs"].value == result.postproc["sum.pcs"].value
+    np.testing.assert_array_equal(
+        rerun.postproc["sum.flags"].value, result.postproc["sum.flags"].value
+    )
+    assert list(rerun.postproc["sum.table"].value["pval"]) == list(
+        result.postproc["sum.table"].value["pval"]
+    )
 
 
 def test_pandas_wrapper_rejected_outside_postproc() -> None:
