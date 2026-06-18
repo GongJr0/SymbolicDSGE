@@ -62,12 +62,15 @@ class LoadedMC:
     traces: dict[str, NDArray[Any]] | None = None
     resources: dict[str, Any] = field(default_factory=dict)
     postproc_arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
+    postproc_tables: dict[str, dict[str, list[Any]]] = field(default_factory=dict)
 
     def wire(self) -> dict[str, Any] | None:
         """Re-merge document + traces into the UI wire shape, when both exist."""
         if self.document is None or self.traces is None:
             return None
-        return pipeline_result_wire(self.document, self.traces, self.postproc_arrays)
+        return pipeline_result_wire(
+            self.document, self.traces, self.postproc_arrays, self.postproc_tables
+        )
 
 
 @dataclass
@@ -200,6 +203,7 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
         traces = collapse_columns(_load_columns(archive, trace_members[0]))
 
     postproc_arrays = _load_mc_postproc(archive, manifest)
+    postproc_tables = _load_mc_postproc_tables(archive, manifest)
     resources = _load_mc_resources(archive, manifest, spec)
 
     return LoadedMC(
@@ -208,7 +212,23 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
         traces=traces,
         resources=resources,
         postproc_arrays=postproc_arrays,
+        postproc_tables=postproc_tables,
     )
+
+
+def _load_mc_postproc_tables(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, dict[str, list[Any]]]:
+    """Restore tabular POSTPROC artifacts as columnar dicts, keyed by artifact name.
+
+    Each member is a columnar parquet table (mixed dtype); the artifact name rides
+    the member options. Dropped all-null columns are rebuilt by
+    :func:`pipeline_result_wire` from the document's column metadata."""
+    out: dict[str, dict[str, list[Any]]] = {}
+    for member in manifest.members_by_kind("mc_postproc_table"):
+        name = str(member.options.get("name", ""))
+        out[name] = from_parquet_columns(archive.read(member.path))
+    return out
 
 
 def _load_mc_postproc(

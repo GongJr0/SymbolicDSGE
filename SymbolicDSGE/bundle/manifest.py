@@ -33,6 +33,7 @@ MemberKind = Literal[
     "mc_raw_data",
     "mc_custom_op",
     "mc_postproc",
+    "mc_postproc_table",
 ]
 MEMBER_KINDS: frozenset[str] = frozenset(get_args(MemberKind))
 

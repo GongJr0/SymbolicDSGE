@@ -132,6 +132,39 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     )
 
 
+def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
+    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+
+    observables = np.random.default_rng(3).normal(size=(12, 30, 2))
+    pipe = MCPipeline(
+        [
+            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            jarque_bera_test_step("jb", source="observables", column=0),
+            kde_step("kde", trace="test.jb.statistic", grid_points=32),
+        ]
+    )
+    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=12, verbosity=0)
+
+    target = (
+        BundleBuilder(created_by="mc-test")
+        .add_mc(pipe, result=result, run_id="r1")
+        .write(tmp_path / "kde.sdsge")
+    )
+
+    loaded = build_from(target)
+    assert loaded.mc is not None
+    # KDE emits a Raw curve (array member) and a descriptives table member.
+    assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
+    assert any(m.kind == "mc_postproc_table" for m in loaded.manifest.members)
+    assert "kde.descriptives" in loaded.mc.postproc_tables
+
+    wire = loaded.mc.wire()
+    assert wire is not None
+    assert (
+        wire["postproc"] == serialize_pipeline_result(result, run_id="r1")["postproc"]
+    )
+
+
 def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:
     pipe = MCPipeline(
         [

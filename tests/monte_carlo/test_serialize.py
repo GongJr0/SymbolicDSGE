@@ -22,9 +22,22 @@ from SymbolicDSGE.monte_carlo.serialize import (
     pipeline_result_wire,
     result_document,
     result_postproc_arrays,
+    result_postproc_tables,
     result_traces,
     serialize_pipeline_result,
 )
+
+
+def _table_result(postproc: dict) -> MCPipelineResult:
+    return MCPipelineResult(
+        n_rep=3,
+        n_successful=3,
+        test_summaries={},
+        test_results=None,
+        payloads=None,
+        contexts=None,
+        postproc=postproc,
+    )
 
 
 def _postproc_result() -> MCPipelineResult:
@@ -197,19 +210,73 @@ def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
     assert wire["postproc"]["empty"]["value"] == [None, None, None]
 
 
-def test_postproc_summary_rejects_non_scalar_value() -> None:
-    # Tabular/DataFrame Summary values are out of scope until #181.
-    result = MCPipelineResult(
-        n_rep=1,
-        n_successful=1,
-        test_summaries={},
-        test_results=None,
-        payloads=None,
-        contexts=None,
-        postproc={"table": Summary(value={"a": [1, 2]})},
-    )
-    with pytest.raises(TypeError, match="#181"):
+def test_postproc_summary_rejects_unserializable_value() -> None:
+    # Scalar / ndarray / DataFrame are supported; a bare dict is not.
+    result = _table_result({"bad": Summary(value={"a": [1, 2]})})
+    with pytest.raises(TypeError, match="scalar, ndarray, or DataFrame"):
         serialize_pipeline_result(result, run_id="r1")
+
+
+def test_postproc_table_metadata_inline_data_to_parquet() -> None:
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {"stat": ["mean", "std"], "value": [1.5, 2.0], "ok": [True, False]}
+    )
+    result = _table_result({"desc": Summary(df, render="table")})
+
+    document = result_document(result, run_id="r1")
+    entry = document["postproc"]["desc"]
+    assert entry["artifact"] == "table"
+    assert entry["columns"] == ["stat", "value", "ok"]
+    assert entry["dtypes"] == {"stat": "string", "value": "float", "ok": "bool"}
+    assert entry["index"] == {"kind": "range", "name": None}
+    assert "data" not in entry  # bulk -> parquet side-channel
+    json.dumps(document)
+
+    tables = result_postproc_tables(result)
+    assert tables["desc"]["stat"] == ["mean", "std"]
+    assert tables["desc"]["ok"] == [True, False]
+
+
+def test_postproc_table_wire_round_trips() -> None:
+    import pandas as pd
+
+    df = pd.DataFrame({"stat": ["a", "b", "c"], "value": [1.0, np.nan, 3.0]})
+    labeled = pd.DataFrame(
+        {"v": [10.0, 20.0]}, index=pd.Index(["x", "y"], name="label")
+    )
+    result = _table_result(
+        {"desc": Summary(df, render="table"), "lab": Summary(labeled)}
+    )
+
+    wire = serialize_pipeline_result(result, run_id="r1")
+    recombined = pipeline_result_wire(
+        result_document(result, run_id="r1"),
+        result_traces(result),
+        result_postproc_arrays(result),
+        result_postproc_tables(result),
+    )
+    assert recombined == wire
+    # NaN cell -> JSON null, matching the trace convention.
+    assert recombined["postproc"]["desc"]["data"]["value"] == [1.0, None, 3.0]
+    # Labeled index rides the reserved __index__ column.
+    assert recombined["postproc"]["lab"]["index"]["kind"] == "labeled"
+    assert recombined["postproc"]["lab"]["data"]["__index__"] == ["x", "y"]
+
+
+def test_postproc_table_wire_reconstructs_dropped_all_null_column() -> None:
+    import pandas as pd
+
+    # An all-null column is dropped by the Parquet encoder; hydration rebuilds it
+    # as n nulls from the document's column metadata.
+    df = pd.DataFrame({"a": [1.0, 2.0], "blank": [np.nan, np.nan]})
+    result = _table_result({"t": Summary(df, render="table")})
+    document = result_document(result, run_id="r1")
+
+    wire = pipeline_result_wire(document, {}, {}, {"t": {"a": [1.0, 2.0]}})
+    assert wire["postproc"]["t"]["data"]["blank"] == [None, None]
+    assert wire["postproc"]["t"]["data"]["a"] == [1.0, 2.0]
 
 
 def test_pipeline_spec_round_trips() -> None:

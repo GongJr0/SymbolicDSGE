@@ -193,7 +193,9 @@ def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
     assert result.step_counts["probe"] == 1
 
 
-def test_kde_builtin_runs_and_returns_raw_curve() -> None:
+def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
+    import pandas as pd
+
     from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
 
     pipeline = MCPipeline(
@@ -205,9 +207,24 @@ def test_kde_builtin_runs_and_returns_raw_curve() -> None:
     )
     result = pipeline.run(reference=_REFERENCE, n_rep=12, verbosity=0)
 
-    art = result.postproc["density"]
-    assert isinstance(art, Raw)
-    assert art.value.shape == (64, 2)  # (x, density)
+    curve = result.postproc["density.curve"]
+    assert isinstance(curve, Raw)
+    assert curve.value.shape == (64, 2)  # (x, density)
+
+    desc = result.postproc["density.descriptives"]
+    assert isinstance(desc, Summary) and desc.render == "table"
+    assert isinstance(desc.value, pd.DataFrame)
+    assert list(desc.value["statistic"]) == [
+        "count",
+        "mean",
+        "std",
+        "min",
+        "q25",
+        "median",
+        "q75",
+        "max",
+    ]
+    assert desc.value.loc[0, "value"] == 12.0  # count == n_rep
 
 
 def test_runtime_traces_match_available_registry() -> None:
