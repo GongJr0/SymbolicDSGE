@@ -173,6 +173,30 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     assert {(e.source, e.target) for e in spec.edges} == {("dat", "tf")}
 
 
+def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
+    from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
+
+    def my_summary(*, traces, reference, dgp, threshold):
+        return float(threshold)
+
+    pipe = MCPipeline(
+        [
+            raw_data_step("dat", observables=np.zeros((4, 5, 3))),
+            jarque_bera_test_step("jb", source="observables"),
+            postproc_step("sum", my_summary, threshold=0.5),
+        ]
+    )
+    spec = pipe.to_spec()
+
+    node = {n.name: n for n in spec.nodes}["sum"]
+    assert node.step_type == "postproc:custom"
+    # callable rides a bundle member; op kwargs survive as plain spec params
+    assert node.params["func_ref"] == "sum"
+    assert node.params["threshold"] == 0.5
+    # POSTPROC nodes are referenced by trace key, not edges.
+    assert all(e.source != "sum" and e.target != "sum" for e in spec.edges)
+
+
 def test_to_spec_round_trips_a_postproc_pipeline() -> None:
     from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
 

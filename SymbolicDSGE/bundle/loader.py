@@ -53,8 +53,14 @@ class LoadedMC:
 
     ``resources`` reattaches the bulk side-channels the spec references by key:
     each ``raw_data`` ``data_ref`` maps to its restored ``{name: ndarray}`` arrays
-    and each ``custom`` ``func_ref`` to its callable. Pass it straight to
-    :func:`SymbolicDSGE.monte_carlo.build_pipeline` to rebuild a runnable pipeline.
+    and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
+    Pass it straight to :func:`SymbolicDSGE.monte_carlo.build_pipeline` to rebuild
+    a runnable pipeline.
+
+    Recovered run artifacts of a POSTPROC phase: ``postproc_arrays`` (bulk ndarray
+    artifacts) and ``postproc_tables`` (tabular/DataFrame artifacts as columnar
+    dicts); scalar artifacts ride inline in ``document``. :meth:`wire` re-merges
+    all three back into the canonical UI wire shape.
     """
 
     spec: PipelineSpec
