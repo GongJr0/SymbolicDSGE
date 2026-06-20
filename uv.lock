@@ -2843,14 +2843,14 @@ wheels = [
 
 [[package]]
 name = "scipy-stubs"
-version = "1.17.1.5"
+version = "1.18.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "optype", extra = ["numpy"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/30/7a2e621918d1317ab972f797161131f2635648ad5d92baf0695dd009e4f9/scipy_stubs-1.17.1.5.tar.gz", hash = "sha256:284b1dd1dd46107a614971d170030d310cd88b2ac6b483f85285ee0ff87720bd", size = 399933, upload-time = "2026-05-25T21:34:33.6Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/9b/6cb11393563241c79b74e035c1d697329d1dce1635565e40b0085d56a2fe/scipy_stubs-1.18.0.0.tar.gz", hash = "sha256:a1fc917da66e4d338998839170e218754a669f6455c24243890a1e572bde98f6", size = 402538, upload-time = "2026-06-19T10:56:39.57Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/26/d4bc2ba3427a623f79a6c10c8f427c7a55b56eb8b3eddc369319d97f741b/scipy_stubs-1.17.1.5-py3-none-any.whl", hash = "sha256:58ebf054a86c000c72e8982e121c4ead0d3d9ba7a6c38aa5fa71b07f96a427fd", size = 607388, upload-time = "2026-05-25T21:34:32.073Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/b4/82d4de656500722dea533151b88f926672341b46289cc31eb2e2c1c7c1d7/scipy_stubs-1.18.0.0-py3-none-any.whl", hash = "sha256:872ec1066a75feb5c5d8451231e8f7826d08d53fb806c526abd5f97bb1ba29fb", size = 608175, upload-time = "2026-06-19T10:56:37.905Z" },
 ]
 
 [[package]]
@@ -3046,7 +3046,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "scipy-stubs", specifier = ">=1.16.3.2" },
+    { name = "scipy-stubs", specifier = ">=1.18.0.0" },
     { name = "tabulate", specifier = ">=0.9.0" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
 ]
