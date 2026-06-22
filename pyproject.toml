@@ -52,6 +52,7 @@ ui = [
 [dependency-groups]
 dev = [
     "black[jupyter]>=25.11.0",
+    "cython>=3.0.11",
     "mypy>=1.19.0",
     "pre-commit>=4.5.0",
     "types-pyyaml>=6.0.12.20250915",
@@ -75,7 +76,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=65.5.1", "wheel"]
+requires = ["setuptools>=65.5.1", "wheel", "Cython>=3.0.11"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -87,6 +88,7 @@ include = ["SymbolicDSGE*"]
 
 [tool.setuptools.package-data]
 "SymbolicDSGE.ui" = ["_static/**/*"]
+"SymbolicDSGE.ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.c", "**/*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
