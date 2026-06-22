@@ -1,6 +1,21 @@
 from .config import TemplateConfig, HessianMode, InteractionForm, ConstantFiltering
+from enum import StrEnum
 import sympy as sp
 import warnings
+
+
+def _is_valid(value: str, enum_cls: type[StrEnum]) -> bool:
+    """Return True if ``value`` is a member (or a member's value) of ``enum_cls``.
+
+    ``value in EnumClass`` only gained value-based semantics in Python 3.12; on
+    3.11 it raises ``TypeError`` for non-member operands. The enum constructor
+    works on every supported version and accepts both raw values and members.
+    """
+    try:
+        enum_cls(value)
+        return True
+    except ValueError:
+        return False
 
 
 class RestrictedBehaviorWarning(UserWarning):
@@ -51,7 +66,7 @@ class ConfigValidator:
 
     @staticmethod
     def _validate_hessian_restriction(config: TemplateConfig) -> None:
-        if (hessian := config.hessian_restriction) not in HessianMode:
+        if not _is_valid((hessian := config.hessian_restriction), HessianMode):
             raise ValueError(
                 "hessian_restriction must be one of 'free', 'diag', or 'full'."
             )
@@ -112,12 +127,14 @@ class ConfigValidator:
             )
 
         # Interaction Format Block
-        if config.interaction_form not in InteractionForm:
+        if not _is_valid(config.interaction_form, InteractionForm):
             raise ValueError("interaction_form must be either 'func' or 'prod'.")
 
     @staticmethod
     def _validate_constant_handling(config: TemplateConfig) -> None:
-        if (const_strategy := config.constant_filtering) not in ConstantFiltering:
+        if not _is_valid(
+            (const_strategy := config.constant_filtering), ConstantFiltering
+        ):
             raise ValueError(
                 (
                     f"constant_filtering= is not a valid constant filtering strategy. "
