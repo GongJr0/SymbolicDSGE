@@ -236,3 +236,6 @@ SymbolicDSGE/ui/_static/
 #   the _*.c pattern only catches generated files.
 *.pyd
 SymbolicDSGE/_ckernels/**/_*.c
+
+# cibuildwheel output
+wheelhouse/
