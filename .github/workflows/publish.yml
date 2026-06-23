@@ -1,6 +1,7 @@
-name: Publish to PyPI & Draft Release
+name: Wheels, Publish & Release
 
 on:
+  pull_request:
   push:
     tags:
       - "v*"
@@ -12,14 +13,93 @@ on:
         type: string
 
 permissions:
-  contents: write     # create release + upload assets
-  id-token: write     # PyPI Trusted Publishing
+  contents: read
 
 jobs:
+  build_wheels:
+    name: Wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest      # manylinux + musllinux x86_64
+          - ubuntu-24.04-arm   # manylinux + musllinux aarch64 (public-repo runner)
+          - windows-latest     # win_amd64
+          - macos-13           # x86_64
+          - macos-latest       # arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # UI assets ship in the wheel via package-data; they are identical across
+      # platforms and irrelevant to validating the native build, so only build
+      # them for real (tag/dispatch) wheels, not PR validation runs.
+      - name: Set up Python
+        if: github.event_name != 'pull_request'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Set up Node
+        if: github.event_name != 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: sdsge-ui/frontend/package-lock.json
+      - name: Build frontend into package
+        if: github.event_name != 'pull_request'
+        run: python scripts/build_frontend.py
+
+      # Reads [tool.cibuildwheel] from pyproject; builds + per-platform tests.
+      - name: Build & test wheels
+        uses: pypa/cibuildwheel@v4.1.0
+
+      - name: Upload wheels
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v7
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: sdsge-ui/frontend/package-lock.json
+      - name: Build frontend into package
+        run: python scripts/build_frontend.py
+      - name: Build sdist
+        run: uv build --sdist
+      - name: Upload sdist
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
   publish:
+    name: Publish & Release
+    needs: [build_wheels, build_sdist]
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: pypi
-
+    permissions:
+      contents: write     # create release + upload assets
+      id-token: write     # PyPI Trusted Publishing
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,21 +126,19 @@ jobs:
           TAG_NAME: ${{ steps.vars.outputs.tag }}
         run: python hook_scripts/check_version_match.py
 
-      - uses: astral-sh/setup-uv@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Download wheels
+        uses: actions/download-artifact@v4
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: sdsge-ui/frontend/package-lock.json
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
 
-      - name: Build frontend into package
-        run: python scripts/build_frontend.py
-
-      - name: Build distributions
-        run: uv build
-
+      - uses: astral-sh/setup-uv@v7
       - name: Publish to PyPI
         run: uv publish
 
