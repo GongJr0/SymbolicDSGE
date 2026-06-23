@@ -14,6 +14,8 @@ from sympy import Symbol
 import SymbolicDSGE.core.solved_model as solved_model_module
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.simulation import (
+    _affine_observations_into_numba,
+    _simulate_linear_states_into_numba,
     affine_observations_into,
     simulate_linear_states_into,
 )
@@ -53,7 +55,7 @@ def test_linear_simulation_kernel_writes_manual_recursion() -> None:
     py_out = np.empty_like(out)
 
     simulate_linear_states_into(A, B, x0, shock_mat, out)
-    simulate_linear_states_into.py_func(A, B, x0, shock_mat, py_out)
+    _simulate_linear_states_into_numba.py_func(A, B, x0, shock_mat, py_out)
 
     expected = np.empty_like(out)
     expected[0] = x0
@@ -78,7 +80,7 @@ def test_affine_observation_kernel_writes_with_state_offset() -> None:
     py_out = np.empty_like(out)
 
     affine_observations_into(states, C, d, 1, out)
-    affine_observations_into.py_func(states, C, d, 1, py_out)
+    _affine_observations_into_numba.py_func(states, C, d, 1, py_out)
 
     np.testing.assert_allclose(out, states[1:] @ C.T + d)
     np.testing.assert_allclose(py_out, states[1:] @ C.T + d)

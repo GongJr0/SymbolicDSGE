@@ -1,4 +1,4 @@
-# `ckernels` — native numeric kernels
+# `_ckernels` — native numeric kernels
 
 Compiled replacements for the hot numba `@njit` kernels. The goal is to remove
 JIT warm-up (and the on-disk `.nbc` cache fragility) for the *static*,
@@ -7,7 +7,7 @@ monomorphic `float64` kernels by shipping precompiled C.
 ## Layout
 
 ```
-ckernels/
+_ckernels/
   __init__.py            # leaf package; no SymbolicDSGE imports
   _common/               # shared pure-C primitives (no Python, no NumPy C-API)
     sdsge_common.h       # portable macros (restrict, ...)
@@ -49,13 +49,13 @@ protocol, so NumPy's C-API never enters the build.
 
 ## Adding a subsystem (recipe)
 
-1. Write `foo.{c,h}` (pure C) under `ckernels/foo/`.
-2. Write `ckernels/foo/_foo.pyx`: `cdef extern from "foo.h"` the prototypes, then
+1. Write `foo.{c,h}` (pure C) under `_ckernels/foo/`.
+2. Write `_ckernels/foo/_foo.pyx`: `cdef extern from "foo.h"` the prototypes, then
    a `def` wrapper per entrypoint with memoryview args + `with nogil:`.
-3. Re-export in `ckernels/foo/__init__.py`: `from ._foo import bar as bar`.
+3. Re-export in `_ckernels/foo/__init__.py`: `from ._foo import bar as bar`.
 4. In the consumer (`SymbolicDSGE/foo/...`), `try` the native import and fall
    back to the numba kernel on `ImportError`.
-5. Add a parity test under `tests/ckernels/`.
+5. Add a parity test under `tests/_ckernels/`.
 
-`setup.py` auto-discovers any `ckernels/*/_*.pyx` and links its sibling `*.c`
+`setup.py` auto-discovers any `_ckernels/*/_*.pyx` and links its sibling `*.c`
 plus all `_common/*.c` — no per-subsystem build edits needed.
