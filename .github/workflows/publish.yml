@@ -23,10 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest      # manylinux + musllinux x86_64
-          - ubuntu-24.04-arm   # manylinux + musllinux aarch64 (public-repo runner)
+          - ubuntu-latest      # manylinux x86_64
+          - ubuntu-24.04-arm   # manylinux aarch64 (public-repo runner)
           - windows-latest     # win_amd64
-          - macos-13           # x86_64
+          - macos-15-intel     # x86_64 (macos-13 is retired; this is the current Intel label)
           - macos-latest       # arm64
     steps:
       - uses: actions/checkout@v4
