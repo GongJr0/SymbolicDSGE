@@ -1,7 +1,7 @@
 """Build the native Cython/C extensions for SymbolicDSGE.
 
 Project metadata lives in ``pyproject.toml`` (PEP 621); this file only declares
-the compiled extensions. One extension per ``ckernels`` subsystem that ships a
+the compiled extensions. One extension per ``_ckernels`` subsystem that ships a
 ``_<name>.pyx`` shim; each links its sibling ``*.c`` plus the shared
 ``_common/*.c`` sources.
 
@@ -17,7 +17,7 @@ from typing import cast
 
 from setuptools import Extension, setup
 
-_CKERNELS = os.path.join("SymbolicDSGE", "ckernels")
+_CKERNELS = os.path.join("SymbolicDSGE", "_ckernels")
 _COMMON = os.path.join(_CKERNELS, "_common")
 
 
@@ -43,9 +43,15 @@ def _extensions() -> list[Extension]:
     for pyx in sorted(glob.glob(os.path.join(_CKERNELS, "*", "_*.pyx"))):
         subdir = os.path.dirname(pyx)
         module = os.path.relpath(pyx, ".").replace(os.sep, ".")[: -len(".pyx")]
-        sources = (
-            [pyx] + sorted(glob.glob(os.path.join(subdir, "*.c"))) + common_sources
-        )
+        # Hand-written C only; a leading underscore marks the Cython-generated
+        # _<name>.c (cythonize adds that itself, so globbing it duplicates the
+        # object -> LNK4042).
+        hand_c = [
+            c
+            for c in sorted(glob.glob(os.path.join(subdir, "*.c")))
+            if not os.path.basename(c).startswith("_")
+        ]
+        sources = [pyx] + hand_c + common_sources
         extensions.append(
             Extension(
                 module,

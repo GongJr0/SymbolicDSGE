@@ -88,7 +88,7 @@ include = ["SymbolicDSGE*"]
 
 [tool.setuptools.package-data]
 "SymbolicDSGE.ui" = ["_static/**/*"]
-"SymbolicDSGE.ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.c", "**/*.h"]
+"SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.c", "**/*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

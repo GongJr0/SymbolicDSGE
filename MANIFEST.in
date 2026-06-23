@@ -3,4 +3,4 @@
 recursive-include SymbolicDSGE/ui/_static *
 
 # Native-kernel sources so wheels can be built from the sdist.
-recursive-include SymbolicDSGE/ckernels *.pyx *.pxd *.c *.h
+recursive-include SymbolicDSGE/_ckernels *.pyx *.pxd *.c *.h
