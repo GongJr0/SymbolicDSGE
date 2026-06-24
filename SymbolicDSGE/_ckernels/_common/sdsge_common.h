@@ -9,11 +9,11 @@
  * Numeric primitives reused across subsystems (matmul, cholesky, triangular
  * solves, dot products) will live alongside this header in sdsge_linalg.{c,h}
  * once the kalman port lands. Everything here is plain C operating on f64*
- * buffers -- no CPython or NumPy API. */
+ * buffers; no CPython or NumPy API. */
 
 /* Architecture-agnostic numeric types. Use these everywhere instead of bare
  * `long`/`int`/`double` so width and indexing semantics are identical across
- * the whole wheel matrix -- notably `long` is 32-bit on Windows (LLP64) but
+ * the whole wheel matrix; notably `long` is 32-bit on Windows (LLP64) but
  * 64-bit on Linux/macOS (LP64). All counts and indices are i64. */
 typedef int8_t i8;
 typedef int16_t i16;
