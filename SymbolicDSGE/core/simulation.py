@@ -1,3 +1,5 @@
+from typing import Callable
+
 from numba import njit
 import numpy as np
 from numpy import ascontiguousarray, float64
@@ -8,14 +10,30 @@ NDF = NDArray[np.float64]
 # Prefer the compiled native kernels; fall back to the numba kernels below when
 # the _ckernels extension is not built (sdist without a compiler, etc.). The
 # numba versions stay in place permanently as the fallback and the parity oracle.
-try:
-    from .._ckernels.core import (
-        affine_observations_into as _affine_native,
-        simulate_linear_states_into as _simulate_native,
-    )
-except ImportError:  # pragma: no cover - exercised only without the extension
+# ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override this default (see _native_dispatch).
+from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
+
+# Declared explicitly so the FORCE_NUMBA branch (which binds None first) doesn't
+# pin the inferred type to None; the native handle matches the _core.pyi stub.
+_SimulateKernel = Callable[[NDF, NDF, NDF, NDF, NDF], None]
+_AffineKernel = Callable[[NDF, NDF, NDF, int, NDF], None]
+_simulate_native: _SimulateKernel | None
+_affine_native: _AffineKernel | None
+
+if FORCE_NUMBA:
     _affine_native = None
     _simulate_native = None
+else:
+    try:
+        from .._ckernels.core import (
+            affine_observations_into as _affine_native,
+            simulate_linear_states_into as _simulate_native,
+        )
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _affine_native = None
+        _simulate_native = None
 
 
 @njit(cache=True)
