@@ -26,11 +26,29 @@ NDC = NDArray[complex128]
 
 # Prefer the compiled native linear hot loop; fall back to the numba kernel
 # below when the extension is not built. The numba version stays as the fallback
-# and the parity oracle.
-try:
-    from .._ckernels.kalman import kalman_hot_loop as _kalman_hot_loop_native
-except ImportError:  # pragma: no cover - exercised only without the extension
+# and the parity oracle. ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override this default
+# (see _native_dispatch).
+from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
+
+# Declared explicitly so the FORCE_NUMBA branch (which binds None first) doesn't
+# pin the inferred type to None; the native handle matches the _kalman.pyi stub
+# and the numba _kalman_hot_loop return shape.
+_KalmanReturn = Tuple[
+    int,
+    Tuple[float64, float64, float64],
+    Tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+]
+_kalman_hot_loop_native: Callable[..., _KalmanReturn] | None
+
+if FORCE_NUMBA:
     _kalman_hot_loop_native = None
+else:
+    try:
+        from .._ckernels.kalman import kalman_hot_loop as _kalman_hot_loop_native
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _kalman_hot_loop_native = None
 
 
 @dataclass(frozen=True)

@@ -88,8 +88,9 @@ where = ["."]
 include = ["SymbolicDSGE*"]
 
 [tool.setuptools.package-data]
+"SymbolicDSGE" = ["py.typed"]
 "SymbolicDSGE.ui" = ["_static/**/*"]
-"SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.c", "**/*.h"]
+"SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.pyi", "**/*.c", "**/*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
