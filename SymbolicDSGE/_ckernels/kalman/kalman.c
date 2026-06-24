@@ -1,5 +1,7 @@
 #include "kalman.h"
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 void kf_zero_mat(f64 *SDSGE_RESTRICT out, i64 r, i64 c) {
     const i64 total = r * c;
@@ -258,4 +260,114 @@ void kf_build_shock_projection(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RES
         }
     }
     kf_matmul(Q, temp_km, out, k, k, m);
+}
+
+int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
+    const i64 n = in->n, m = in->m, k = in->k, T = in->T;
+
+    /* One scratch arena carved into every per-step buffer (allocated once). */
+    const i64 total = 2 * n + 7 * m   /* vectors + triangular-solve scratch */
+                      + 6 * n * n     /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+                      + 2 * m * m     /* S_buf, L */
+                      + 3 * n * m     /* PCt, K, temp_nm */
+                      + m * n         /* temp_mn */
+                      + n * k         /* temp_nk */
+                      + 2 * k * m;    /* M, temp_km */
+    f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
+    if (arena == NULL)
+        return KF_ERR_ALLOC;
+
+    f64 *p = arena;
+    f64 *x_pred_buf = p; p += n;
+    f64 *x_filt_buf = p; p += n;
+    f64 *y_pred_buf = p; p += m;
+    f64 *y_filt_buf = p; p += m;
+    f64 *v_buf = p; p += m;
+    f64 *u_buf = p; p += m;
+    f64 *S_inv_v = p; p += m;
+    f64 *solve_f = p; p += m;
+    f64 *solve_b = p; p += m;
+    f64 *P_pred_buf = p; p += n * n;
+    f64 *P_filt_buf = p; p += n * n;
+    f64 *KC = p; p += n * n;
+    f64 *I_minus_KC = p; p += n * n;
+    f64 *temp_nn = p; p += n * n;
+    f64 *BQBT = p; p += n * n;
+    f64 *S_buf = p; p += m * m;
+    f64 *L = p; p += m * m;
+    f64 *PCt = p; p += n * m;
+    f64 *K = p; p += n * m;
+    f64 *temp_nm = p; p += n * m;
+    f64 *temp_mn = p; p += m * n;
+    f64 *temp_nk = p; p += n * k;
+    f64 *M = p; p += k * m;
+    f64 *temp_km = p; p += k * m;
+
+    kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
+    if (in->return_shocks && in->store_history)
+        kf_build_shock_projection(in->B, in->C, in->Q, temp_km, M, n, k, m);
+
+    const f64 const_term = (f64)m * log(TWO_PI); /* m * log(2*pi) */
+    f64 loglik = 0.0;
+
+    /* x_prev/P_prev start at the inputs, then alias the filtered scratch; each
+     * is read (into x_pred_buf / P_pred_buf) before being overwritten. */
+    const f64 *x_prev = in->x0;
+    const f64 *P_prev = in->P0;
+    int status = KF_OK;
+
+    for (i64 t = 0; t < T; ++t) {
+        kf_matvec(in->A, x_prev, x_pred_buf, n, n);
+        kf_predict_cov(in->A, P_prev, BQBT, temp_nn, P_pred_buf, n);
+        if (in->symmetrize)
+            kf_sym_inplace(P_pred_buf, n);
+
+        kf_matvec_plus_vec(in->C, x_pred_buf, in->d, y_pred_buf, m, n);
+        kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
+        kf_measurement_cov(in->C, P_pred_buf, in->R, temp_mn, S_buf, n, m);
+        if (in->symmetrize)
+            kf_sym_inplace(S_buf, m);
+
+        status = kf_chol_shifted(S_buf, in->jitter, L, m);
+        if (status != KF_OK)
+            break;
+
+        kf_forward_subst(L, v_buf, u_buf, m);
+        kf_backward_subst_chol_t(L, u_buf, S_inv_v, m);
+
+        kf_pc_t(P_pred_buf, in->C, PCt, n, m);
+        kf_gain_from_pc_t(L, PCt, solve_f, solve_b, K, n, m);
+
+        kf_state_update(x_pred_buf, K, v_buf, x_filt_buf, n, m);
+        kf_joseph_cov(K, in->C, P_pred_buf, in->R, KC, I_minus_KC, temp_nn,
+                      temp_nm, P_filt_buf, n, m);
+        if (in->symmetrize)
+            kf_sym_inplace(P_filt_buf, n);
+
+        loglik += -0.5 * (const_term + kf_logdet_from_chol(L, m)
+                          + kf_dot(v_buf, S_inv_v, m));
+
+        if (in->return_shocks && in->store_history)
+            kf_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
+
+        if (in->store_history) {
+            kf_matvec_plus_vec(in->C, x_filt_buf, in->d, y_filt_buf, m, n);
+            memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));
+            memcpy(out->x_filt + t * n, x_filt_buf, (size_t)n * sizeof(f64));
+            memcpy(out->P_pred + t * n * n, P_pred_buf, (size_t)(n * n) * sizeof(f64));
+            memcpy(out->P_filt + t * n * n, P_filt_buf, (size_t)(n * n) * sizeof(f64));
+            memcpy(out->y_pred + t * m, y_pred_buf, (size_t)m * sizeof(f64));
+            memcpy(out->y_filt + t * m, y_filt_buf, (size_t)m * sizeof(f64));
+            memcpy(out->innov + t * m, v_buf, (size_t)m * sizeof(f64));
+            memcpy(out->std_innov + t * m, u_buf, (size_t)m * sizeof(f64));
+            memcpy(out->S + t * m * m, S_buf, (size_t)(m * m) * sizeof(f64));
+        }
+
+        x_prev = x_filt_buf;
+        P_prev = P_filt_buf;
+    }
+
+    *out->loglik = loglik;
+    free(arena);
+    return status;
 }

@@ -26,6 +26,10 @@ typedef uint64_t u64;
 typedef float f32;
 typedef double f64;
 
+/* 2*pi as the nearest IEEE-754 double (== 2.0 * numpy's pi, exactly); shared by
+ * the kalman / distribution / transform kernels. */
+#define TWO_PI 6.283185307179586
+
 /* Portable `restrict` qualifier (C99 `restrict` is not in C++ and is spelled
  * differently by MSVC). */
 #if defined(__GNUC__) || defined(__clang__)

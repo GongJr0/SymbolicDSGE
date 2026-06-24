@@ -8,6 +8,7 @@
 #define KF_ERR_SHAPE_MISMATCH -2
 #define KF_ERR_MATRIX_CONDITION -3
 #define KF_ERR_SINGULAR_MATRIX -4
+#define KF_ERR_ALLOC -5
 
 /* Kalman hot-loop helpers ported from the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.
@@ -105,5 +106,49 @@ void kf_build_bqbt(const f64 *B, const f64 *Q, f64 *temp_nk, f64 *out,
 /* out(k,m) := Q(k,k) @ (B^T C^T)(k,m), via temp_km(k,m) */
 void kf_build_shock_projection(const f64 *B, const f64 *C, const f64 *Q,
                                f64 *temp_km, f64 *out, i64 n, i64 k, i64 m);
+
+/* ---- Linear Kalman filter hot loop ---- */
+
+/* Model + data inputs. All matrices C-contiguous, row-major, f64. */
+typedef struct {
+    i64 n;              /* state dimension */
+    i64 m;              /* observation dimension */
+    i64 k;              /* shock dimension */
+    i64 T;              /* number of time steps */
+    const f64 *A;       /* (n, n) state transition */
+    const f64 *B;       /* (n, k) shock loading */
+    const f64 *C;       /* (m, n) observation */
+    const f64 *d;       /* (m,)   observation intercept */
+    const f64 *Q;       /* (k, k) shock covariance */
+    const f64 *R;       /* (m, m) measurement covariance */
+    const f64 *y;       /* (T, m) observations */
+    const f64 *x0;      /* (n,)   initial state mean */
+    const f64 *P0;      /* (n, n) initial state covariance (pre-symmetrized) */
+    int symmetrize;     /* symmetrize P/S each step (0/1) */
+    f64 jitter;         /* diagonal jitter for the Cholesky */
+    int return_shocks;  /* compute eps_hat (0/1) */
+    int store_history;  /* fill the per-step history arrays (0/1) */
+} kf_inputs;
+
+/* Caller-allocated outputs. When store_history is 0 the history arrays may be
+ * NULL / zero-length; eps_hat is written only when return_shocks &&
+ * store_history. loglik is always written. */
+typedef struct {
+    f64 *x_pred;     /* (T, n) */
+    f64 *x_filt;     /* (T, n) */
+    f64 *P_pred;     /* (T, n, n) */
+    f64 *P_filt;     /* (T, n, n) */
+    f64 *y_pred;     /* (T, m) */
+    f64 *y_filt;     /* (T, m) */
+    f64 *innov;      /* (T, m)  innovations v */
+    f64 *std_innov;  /* (T, m)  L^-1 v */
+    f64 *S;          /* (T, m, m) innovation covariances */
+    f64 *eps_hat;    /* (T, k) or NULL */
+    f64 *loglik;     /* scalar out */
+} kf_outputs;
+
+/* Run the linear Kalman filter. Returns KF_OK, KF_ERR_MATRIX_CONDITION (non-PD
+ * innovation covariance), or KF_ERR_ALLOC (scratch allocation failed). */
+int kf_hot_loop(const kf_inputs *in, kf_outputs *out);
 
 #endif /* SDSGE_KALMAN_H */
