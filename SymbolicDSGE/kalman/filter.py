@@ -24,6 +24,14 @@ from typing import Tuple, Callable
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
 
+# Prefer the compiled native linear hot loop; fall back to the numba kernel
+# below when the extension is not built. The numba version stays as the fallback
+# and the parity oracle.
+try:
+    from .._ckernels.kalman import kalman_hot_loop as _kalman_hot_loop_native
+except ImportError:  # pragma: no cover - exercised only without the extension
+    _kalman_hot_loop_native = None
+
 
 @dataclass(frozen=True)
 class FilterResult:
@@ -993,8 +1001,13 @@ class KalmanFilter:
         if symmetrize:
             P_prev = _sym(P_prev)
 
+        hot_loop = (
+            _kalman_hot_loop_native
+            if _kalman_hot_loop_native is not None
+            else _kalman_hot_loop
+        )
         try:
-            err, err_info, out = _kalman_hot_loop(
+            err, err_info, out = hot_loop(
                 T,
                 (n, m, k),
                 A,

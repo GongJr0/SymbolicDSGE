@@ -73,6 +73,7 @@ dev = [
     "pip>=26.0.1",
     "jupyterlab-execute-time>=3.3.0",
     "httpx2>=2.3.0",
+    "setuptools>=82.0.1",
 ]
 
 [build-system]

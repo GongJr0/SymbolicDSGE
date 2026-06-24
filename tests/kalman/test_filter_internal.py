@@ -470,6 +470,10 @@ def test_run_converts_internal_linalg_and_error_codes(monkeypatch):
     A, B, C, d, Q, R = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
 
+    # Force the numba path so the monkeypatched hot loop is the one run() calls
+    # (run() prefers the native extension when it is built).
+    monkeypatch.setattr(filter_module, "_kalman_hot_loop_native", None)
+
     def raising_hot_loop(*args, **kwargs):
         raise np.linalg.LinAlgError("boom")
 
