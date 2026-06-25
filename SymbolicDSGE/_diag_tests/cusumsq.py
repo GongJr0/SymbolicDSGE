@@ -15,6 +15,7 @@ from SymbolicDSGE._diag_tests.result import TestResult
 
 from .cusum_utils import recursive_residuals
 from .status import TestStatus
+from ._native import native as _native, DIAG_FALLBACK
 
 if TYPE_CHECKING:
     import optype.numpy as onp
@@ -25,8 +26,21 @@ DistributionOutput: TypeAlias = float | float64 | NDF
 OK = int(TestStatus.OK)
 
 
-@njit(cache=True)
 def _cusumsq_stat(y: NDF, X: NDF) -> tuple[int, int, float64]:
+    """CUSUM-of-squares statistic; native fast path, numba fallback."""
+    if _native is not None and y.shape[0] == X.shape[0]:
+        status, n, stat = _native.cusumsq_stat(
+            np.ascontiguousarray(y, dtype=np.float64),
+            np.ascontiguousarray(X, dtype=np.float64),
+        )
+        if status != DIAG_FALLBACK:
+            return status, int(n), float64(stat)
+    nb_status, nb_n, nb_stat = _cusumsq_stat_numba(y, X)
+    return int(nb_status), int(nb_n), float64(nb_stat)
+
+
+@njit(cache=True)
+def _cusumsq_stat_numba(y: NDF, X: NDF) -> tuple[int, int, float64]:
     status, rec_eps = recursive_residuals(y, X)
     N = rec_eps.size
     if status != OK:

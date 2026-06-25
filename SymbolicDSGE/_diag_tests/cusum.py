@@ -18,12 +18,16 @@ from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from .cusum_utils import OK, NDF, recursive_residuals
 
+from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
+from ._native import native as _native, DIAG_FALLBACK
 
 if TYPE_CHECKING:
     import optype.numpy as onp
 
 DistributionOutput: TypeAlias = float | float64 | NDF
+
+REGRESSION_OK = int(RegressionStatus.OK)
 
 # Newton Status
 CONVERGED = 0
@@ -191,16 +195,28 @@ class CusumDist(rv_frozen):
 
 
 # Test Code
-@njit(cache=True)
 def cusum_series(y: NDF, X: NDF) -> tuple[int, NDF]:
+    """Standardized CUSUM series; native fast path, numba fallback."""
+    if _native is not None and y.shape[0] == X.shape[0]:
+        status, series = _native.cusum_series(
+            np.ascontiguousarray(y, dtype=np.float64),
+            np.ascontiguousarray(X, dtype=np.float64),
+        )
+        if status != DIAG_FALLBACK:
+            return status, series
+    nb_status, nb_series = _cusum_series_numba(y, X)
+    return int(nb_status), nb_series
+
+
+@njit(cache=True)
+def _cusum_series_numba(y: NDF, X: NDF) -> tuple[int, NDF]:
     T, p = X.shape
     status, rec_resid = recursive_residuals(y, X)
     if status != OK:
         return status, rec_resid
 
-    try:
-        bhat, _, _ = chol_solve(X, y)
-    except Exception:
+    bhat, _, regression_status = chol_solve(X, y)
+    if regression_status != REGRESSION_OK:
         bhat, _, _ = lstsq_solve(X, y)
 
     resid = y - X @ bhat
@@ -210,10 +226,23 @@ def cusum_series(y: NDF, X: NDF) -> tuple[int, NDF]:
     return OK, std_cusum
 
 
-@njit(cache=True)
 def cusum_stat(y: NDF, X: NDF) -> tuple[int, float64]:
+    """CUSUM statistic; native fast path, numba fallback."""
+    if _native is not None and y.shape[0] == X.shape[0]:
+        status, stat = _native.cusum_stat(
+            np.ascontiguousarray(y, dtype=np.float64),
+            np.ascontiguousarray(X, dtype=np.float64),
+        )
+        if status != DIAG_FALLBACK:
+            return status, float64(stat)
+    nb_status, nb_stat = _cusum_stat_numba(y, X)
+    return int(nb_status), float64(nb_stat)
+
+
+@njit(cache=True)
+def _cusum_stat_numba(y: NDF, X: NDF) -> tuple[int, float64]:
     T, p = X.shape
-    status, cusum = cusum_series(y, X)
+    status, cusum = _cusum_series_numba(y, X)
     if status != OK:
         return status, float64(np.nan)
 

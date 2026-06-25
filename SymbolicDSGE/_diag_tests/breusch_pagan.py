@@ -10,6 +10,7 @@ from ..regression.solvers import chol_solve, lstsq_solve
 from .distributions import PvalMethod, ReferenceDistribution
 from .result import TestResult
 from .status import TestStatus
+from ._native import native as _native, DIAG_FALLBACK
 
 OK = int(TestStatus.OK)
 LINALG = int(TestStatus.LINALG)
@@ -33,9 +34,8 @@ def bp_aux(eps: NDF, X: NDF) -> tuple[int, float64, float64]:
         return UDEF_VARIANCE, float64(np.nan), float64(np.nan)
     g = eps_sq / sigma2
 
-    try:
-        bhat, _, regression_status = chol_solve(X, g)
-    except Exception:
+    bhat, _, regression_status = chol_solve(X, g)
+    if regression_status != REGRESSION_OK:
         bhat, _, regression_status = lstsq_solve(X, g)
     if regression_status != REGRESSION_OK:
         return LINALG, float64(np.nan), float64(np.nan)
@@ -48,7 +48,7 @@ def bp_aux(eps: NDF, X: NDF) -> tuple[int, float64, float64]:
 
 
 @njit(cache=True)
-def bp_stat(eps: NDF, X: NDF) -> tuple[int, float64]:
+def _bp_stat_numba(eps: NDF, X: NDF) -> tuple[int, float64]:
     status, rss, tss = bp_aux(eps, X)
     if status != OK:
         return status, float64(np.nan)
@@ -57,7 +57,7 @@ def bp_stat(eps: NDF, X: NDF) -> tuple[int, float64]:
 
 
 @njit(cache=True)
-def robust_bp_stat(eps: NDF, X: NDF) -> tuple[int, float64]:
+def _robust_bp_stat_numba(eps: NDF, X: NDF) -> tuple[int, float64]:
     status, rss, tss = bp_aux(eps, X)
     if status != OK:
         return status, float64(np.nan)
@@ -66,6 +66,50 @@ def robust_bp_stat(eps: NDF, X: NDF) -> tuple[int, float64]:
 
     r2 = min(float64(1.0), max(float64(0.0), float64(1.0 - rss / tss)))
     return OK, r2 * len(eps)
+
+
+def _native_bp_aux(eps: NDF, X: NDF) -> tuple[int, float64, float64] | None:
+    """Run the native auxiliary regression, or None to defer to numba.
+
+    Returns None when the extension is absent or the design is rank-deficient
+    (``DIAG_FALLBACK``); otherwise the (status, rss, tss) triple.
+    """
+    if _native is None or eps.shape[0] != X.shape[0]:
+        return None
+    status, rss, tss = _native.bp_aux(
+        np.ascontiguousarray(eps, dtype=np.float64),
+        np.ascontiguousarray(X, dtype=np.float64),
+    )
+    if status == DIAG_FALLBACK:
+        return None
+    return status, float64(rss), float64(tss)
+
+
+def bp_stat(eps: NDF, X: NDF) -> tuple[int, float64]:
+    """Breusch-Pagan statistic; native fast path, numba fallback."""
+    native = _native_bp_aux(eps, X)
+    if native is not None:
+        status, rss, tss = native
+        if status != OK:
+            return status, float64(np.nan)
+        return OK, max(float64(0.0), (tss - rss) * 0.5)
+    nb_status, nb_stat = _bp_stat_numba(eps, X)
+    return int(nb_status), float64(nb_stat)
+
+
+def robust_bp_stat(eps: NDF, X: NDF) -> tuple[int, float64]:
+    """Robust Breusch-Pagan statistic; native fast path, numba fallback."""
+    native = _native_bp_aux(eps, X)
+    if native is not None:
+        status, rss, tss = native
+        if status != OK:
+            return status, float64(np.nan)
+        if tss <= 0.0:
+            return OK, float64(0.0)
+        r2 = min(float64(1.0), max(float64(0.0), float64(1.0 - rss / tss)))
+        return OK, r2 * len(eps)
+    nb_status, nb_stat = _robust_bp_stat_numba(eps, X)
+    return int(nb_status), float64(nb_stat)
 
 
 def _prepare_bp_inputs(eps: NDF, X: NDF) -> tuple[NDF, NDF]:

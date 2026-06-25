@@ -1,0 +1,220 @@
+#include "sdsge_linalg.h"
+#include <math.h>
+#include <float.h>
+
+void sdsge_zero_mat(f64 *SDSGE_RESTRICT out, i64 r, i64 c) {
+    const i64 total = r * c;
+    for (i64 i = 0; i < total; ++i)
+        out[i] = 0.0;
+}
+
+void sdsge_sym_inplace(f64 *SDSGE_RESTRICT P, i64 n) {
+    for (i64 i = 0; i < n; ++i) {
+        for (i64 j = i + 1; j < n; ++j) {
+            f64 avg = 0.5 * (P[i * n + j] + P[j * n + i]);
+            P[i * n + j] = avg;
+            P[j * n + i] = avg;
+        }
+    }
+}
+
+void sdsge_matmul(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
+                  f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
+    for (i64 i = 0; i < n; ++i) {
+        for (i64 j = 0; j < m; ++j) {
+            f64 s = 0.0;
+            for (i64 k = 0; k < p; ++k)
+                s += A[i * p + k] * B[k * m + j];
+            out[i * m + j] = s;
+        }
+    }
+}
+
+void sdsge_matmul_abt(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
+                      f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
+    for (i64 i = 0; i < n; ++i) {
+        for (i64 j = 0; j < m; ++j) {
+            f64 s = 0.0;
+            for (i64 k = 0; k < p; ++k)
+                s += A[i * p + k] * B[j * p + k];
+            out[i * m + j] = s;
+        }
+    }
+}
+
+void sdsge_matmul_abt_plus_c(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
+                             const f64 *SDSGE_RESTRICT C, f64 *SDSGE_RESTRICT out,
+                             i64 n, i64 p, i64 m) {
+    for (i64 i = 0; i < n; ++i) {
+        for (i64 j = 0; j < m; ++j) {
+            f64 s = 0.0;
+            for (i64 k = 0; k < p; ++k)
+                s += A[i * p + k] * B[j * p + k];
+            out[i * m + j] = s + C[i * m + j];
+        }
+    }
+}
+
+void sdsge_matvec(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT x,
+                  f64 *SDSGE_RESTRICT out, i64 n, i64 m) {
+    for (i64 i = 0; i < n; ++i) {
+        f64 s = 0.0;
+        for (i64 j = 0; j < m; ++j)
+            s += A[i * m + j] * x[j];
+        out[i] = s;
+    }
+}
+
+void sdsge_matvec_plus_vec(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT x,
+                           const f64 *SDSGE_RESTRICT b, f64 *SDSGE_RESTRICT out,
+                           i64 n, i64 m) {
+    for (i64 i = 0; i < n; ++i) {
+        f64 s = b[i];
+        for (i64 j = 0; j < m; ++j)
+            s += A[i * m + j] * x[j];
+        out[i] = s;
+    }
+}
+
+f64 sdsge_dot(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b, i64 n) {
+    f64 s = 0.0;
+    for (i64 i = 0; i < n; ++i)
+        s += a[i] * b[i];
+    return s;
+}
+
+f64 sdsge_logdet_from_chol(const f64 *SDSGE_RESTRICT L, i64 n) {
+    f64 s = 0.0;
+    for (i64 i = 0; i < n; ++i)
+        s += log(L[i * n + i]);
+    return 2.0 * s;
+}
+
+int sdsge_chol(const f64 *SDSGE_RESTRICT S, f64 jitter,
+               f64 *SDSGE_RESTRICT L, i64 n) {
+    sdsge_zero_mat(L, n, n);
+    /* Scale reference for a relative positive-definiteness threshold: the
+     * largest (jittered) diagonal entry. A genuinely rank-deficient matrix has
+     * an exact-arithmetic pivot of zero, but in floating point that pivot rounds
+     * to a tiny value of either sign that depends on the compiler/BLAS build.
+     * Testing the pivot against 0.0 therefore detects rank deficiency
+     * nondeterministically across builds. Comparing against scale * n * eps
+     * makes the decision deterministic while never rejecting a pivot of a truly
+     * positive-definite matrix (those sit far above this floor). */
+    f64 scale = 0.0;
+    for (i64 i = 0; i < n; ++i) {
+        f64 d = S[i * n + i];
+        if (jitter > 0.0)
+            d += jitter;
+        if (d > scale)
+            scale = d;
+    }
+    const f64 pivot_tol = scale * (f64)n * DBL_EPSILON;
+    for (i64 i = 0; i < n; ++i) {
+        for (i64 j = 0; j <= i; ++j) {
+            f64 s = S[i * n + j];
+            if (i == j && jitter > 0.0)
+                s += jitter;
+            for (i64 k = 0; k < j; ++k)
+                s -= L[i * n + k] * L[j * n + k];
+            if (i == j) {
+                if (s <= pivot_tol)
+                    return SDSGE_NOT_PD;
+                L[i * n + j] = sqrt(s);
+            } else {
+                L[i * n + j] = s / L[j * n + j];
+            }
+        }
+    }
+    return SDSGE_OK;
+}
+
+/* out may alias b: out[i] is written only after reading b[i], and the loop reads
+ * out[j] for j < i, which were already written this call. */
+void sdsge_forward_subst(const f64 *SDSGE_RESTRICT L, const f64 *b,
+                         f64 *out, i64 n) {
+    for (i64 i = 0; i < n; ++i) {
+        f64 s = 0.0;
+        for (i64 j = 0; j < i; ++j)
+            s += L[i * n + j] * out[j];
+        out[i] = (b[i] - s) / L[i * n + i];
+    }
+}
+
+/* out may alias b: descending i reads out[j] for j > i (already written) and
+ * b[i] at the index about to be written. */
+void sdsge_backward_subst_chol_t(const f64 *SDSGE_RESTRICT L, const f64 *b,
+                                 f64 *out, i64 n) {
+    for (i64 i = n - 1; i >= 0; --i) {
+        f64 s = 0.0;
+        for (i64 j = i + 1; j < n; ++j)
+            s += L[j * n + i] * out[j];
+        out[i] = (b[i] - s) / L[i * n + i];
+    }
+}
+
+void sdsge_gram(const f64 *SDSGE_RESTRICT X, f64 *SDSGE_RESTRICT G, i64 n, i64 p) {
+    sdsge_zero_mat(G, p, p);
+    /* Lower triangle, accumulated row-by-row to match the numba xtx_xty order. */
+    for (i64 r = 0; r < n; ++r) {
+        const f64 *Xr = X + r * p;
+        for (i64 a = 0; a < p; ++a) {
+            f64 xra = Xr[a];
+            for (i64 b = 0; b <= a; ++b)
+                G[a * p + b] += xra * Xr[b];
+        }
+    }
+    /* Mirror to full symmetric. */
+    for (i64 a = 0; a < p; ++a)
+        for (i64 b = 0; b < a; ++b)
+            G[b * p + a] = G[a * p + b];
+}
+
+void sdsge_gram_rhs(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
+                    f64 *SDSGE_RESTRICT g, i64 n, i64 p) {
+    for (i64 a = 0; a < p; ++a)
+        g[a] = 0.0;
+    for (i64 r = 0; r < n; ++r) {
+        const f64 *Xr = X + r * p;
+        f64 yr = y[r];
+        for (i64 a = 0; a < p; ++a)
+            g[a] += Xr[a] * yr;
+    }
+}
+
+int sdsge_chol_solve(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT g,
+                     f64 *SDSGE_RESTRICT coef, f64 *SDSGE_RESTRICT scratch_L,
+                     i64 p) {
+    int status = sdsge_chol(G, 0.0, scratch_L, p);
+    if (status != SDSGE_OK)
+        return status;
+    /* coef holds z := L^-1 g, then is overwritten with L^-T z in place. */
+    sdsge_forward_subst(scratch_L, g, coef, p);
+    sdsge_backward_subst_chol_t(scratch_L, coef, coef, p);
+    return SDSGE_OK;
+}
+
+int sdsge_chol_inv(const f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT Pinv,
+                   f64 *SDSGE_RESTRICT scratch_L, i64 p) {
+    int status = sdsge_chol(G, 0.0, scratch_L, p);
+    if (status != SDSGE_OK)
+        return status;
+    /* Solve (L L^T) x = e_j for each unit column j; column j of Pinv stores the
+     * forward-substitution result z, then is overwritten in place with x. */
+    for (i64 j = 0; j < p; ++j) {
+        for (i64 i = 0; i < p; ++i) {
+            f64 s = 0.0;
+            for (i64 t = 0; t < i; ++t)
+                s += scratch_L[i * p + t] * Pinv[t * p + j];
+            f64 rhs = (i == j) ? 1.0 : 0.0;
+            Pinv[i * p + j] = (rhs - s) / scratch_L[i * p + i];
+        }
+        for (i64 i = p - 1; i >= 0; --i) {
+            f64 s = 0.0;
+            for (i64 t = i + 1; t < p; ++t)
+                s += scratch_L[t * p + i] * Pinv[t * p + j];
+            Pinv[i * p + j] = (Pinv[i * p + j] - s) / scratch_L[i * p + i];
+        }
+    }
+    return SDSGE_OK;
+}

@@ -2,6 +2,7 @@
 #define SDSGE_KALMAN_H
 
 #include "../_common/sdsge_common.h"
+#include "../_common/sdsge_linalg.h"
 
 #define KF_OK 0
 #define KF_ERR_COMPLEX_MATRIX -1
@@ -13,53 +14,14 @@
 /* Kalman hot-loop helpers ported from the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.
  * Buffers are caller-allocated; nothing here aliases (inputs and outputs are
- * always distinct). The dense linear-algebra primitives (kf_matmul, kf_chol_*,
- * kf_*subst, kf_dot, ...) are candidates to promote to _common/sdsge_linalg
- * once the regression port needs them. */
+ * always distinct). The dense linear-algebra primitives these build on
+ * (sdsge_matmul, sdsge_chol, sdsge_*subst, sdsge_dot, ...) now live in
+ * _common/sdsge_linalg so the regression / diagnostic kernels share them. */
 
-/* ---- Dense linear-algebra primitives ---- */
-
-/* out(r,c) := 0 */
-void kf_zero_mat(f64 *out, i64 r, i64 c);
-
-/* P(n,n) := (P + P^T) / 2, in place */
-void kf_sym_inplace(f64 *P, i64 n);
-
-/* out(n,m) := A(n,p) @ B(p,m) */
-void kf_matmul(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
-
-/* out(n,m) := A(n,p) @ B(m,p)^T */
-void kf_matmul_abt(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
-
-/* out(n,m) := A(n,p) @ B(m,p)^T + C(n,m) */
-void kf_matmul_abt_plus_c(const f64 *A, const f64 *B, const f64 *C, f64 *out,
-                          i64 n, i64 p, i64 m);
-
-/* out(n) := A(n,m) @ x(m) */
-void kf_matvec(const f64 *A, const f64 *x, f64 *out, i64 n, i64 m);
-
-/* out(n) := A(n,m) @ x(m) + b(n) */
-void kf_matvec_plus_vec(const f64 *A, const f64 *x, const f64 *b, f64 *out,
-                        i64 n, i64 m);
+/* ---- Kalman-specific dense helpers (not general enough for sdsge_linalg) ---- */
 
 /* out(m) := A[row, :] - x(m), where A has m columns */
 void kf_row_minus_vec(const f64 *A, i64 row, const f64 *x, f64 *out, i64 m);
-
-/* dot product of a(n) and b(n) */
-f64 kf_dot(const f64 *a, const f64 *b, i64 n);
-
-/* 2 * sum(log(diag(L))) for lower-triangular L(n,n) */
-f64 kf_logdet_from_chol(const f64 *L, i64 n);
-
-/* Lower Cholesky L(n,n) of S(n,n) (+ jitter on the diagonal). Returns KF_OK,
- * or KF_ERR_MATRIX_CONDITION if S is not positive definite. */
-int kf_chol_shifted(const f64 *S, f64 jitter, f64 *L, i64 n);
-
-/* Solve L(n,n) x = b(n) for lower-triangular L; writes x into out(n). */
-void kf_forward_subst(const f64 *L, const f64 *b, f64 *out, i64 n);
-
-/* Solve L^T x = b using lower-triangular L(n,n); writes x into out(n). */
-void kf_backward_subst_chol_t(const f64 *L, const f64 *b, f64 *out, i64 n);
 
 /* Solve (L L^T) x = B[row, :] for the single row; writes x into out[row, :].
  * `n` is the Cholesky dimension (= column count of B and out); fbuf/bbuf are

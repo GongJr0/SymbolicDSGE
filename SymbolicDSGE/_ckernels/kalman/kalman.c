@@ -3,141 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-void kf_zero_mat(f64 *SDSGE_RESTRICT out, i64 r, i64 c) {
-    const i64 total = r * c;
-    for (i64 i = 0; i < total; ++i)
-        out[i] = 0.0;
-}
-
-void kf_sym_inplace(f64 *SDSGE_RESTRICT P, i64 n) {
-    for (i64 i = 0; i < n; ++i) {
-        for (i64 j = i + 1; j < n; ++j) {
-            f64 avg = 0.5 * (P[i * n + j] + P[j * n + i]);
-            P[i * n + j] = avg;
-            P[j * n + i] = avg;
-        }
-    }
-}
-
-void kf_matmul(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
-               f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
-    for (i64 i = 0; i < n; ++i) {
-        for (i64 j = 0; j < m; ++j) {
-            f64 s = 0.0;
-            for (i64 k = 0; k < p; ++k)
-                s += A[i * p + k] * B[k * m + j];
-            out[i * m + j] = s;
-        }
-    }
-}
-
-void kf_matmul_abt(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
-                   f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
-    for (i64 i = 0; i < n; ++i) {
-        for (i64 j = 0; j < m; ++j) {
-            f64 s = 0.0;
-            for (i64 k = 0; k < p; ++k)
-                s += A[i * p + k] * B[j * p + k];
-            out[i * m + j] = s;
-        }
-    }
-}
-
-void kf_matmul_abt_plus_c(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
-                          const f64 *SDSGE_RESTRICT C, f64 *SDSGE_RESTRICT out,
-                          i64 n, i64 p, i64 m) {
-    for (i64 i = 0; i < n; ++i) {
-        for (i64 j = 0; j < m; ++j) {
-            f64 s = 0.0;
-            for (i64 k = 0; k < p; ++k)
-                s += A[i * p + k] * B[j * p + k];
-            out[i * m + j] = s + C[i * m + j];
-        }
-    }
-}
-
-void kf_matvec(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT x,
-               f64 *SDSGE_RESTRICT out, i64 n, i64 m) {
-    for (i64 i = 0; i < n; ++i) {
-        f64 s = 0.0;
-        for (i64 j = 0; j < m; ++j)
-            s += A[i * m + j] * x[j];
-        out[i] = s;
-    }
-}
-
-void kf_matvec_plus_vec(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT x,
-                        const f64 *SDSGE_RESTRICT b, f64 *SDSGE_RESTRICT out,
-                        i64 n, i64 m) {
-    for (i64 i = 0; i < n; ++i) {
-        f64 s = b[i];
-        for (i64 j = 0; j < m; ++j)
-            s += A[i * m + j] * x[j];
-        out[i] = s;
-    }
-}
-
 void kf_row_minus_vec(const f64 *SDSGE_RESTRICT A, i64 row,
                       const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT out, i64 m) {
     const f64 *Arow = A + row * m;
     for (i64 j = 0; j < m; ++j)
         out[j] = Arow[j] - x[j];
-}
-
-f64 kf_dot(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b, i64 n) {
-    f64 s = 0.0;
-    for (i64 i = 0; i < n; ++i)
-        s += a[i] * b[i];
-    return s;
-}
-
-f64 kf_logdet_from_chol(const f64 *SDSGE_RESTRICT L, i64 n) {
-    f64 s = 0.0;
-    for (i64 i = 0; i < n; ++i)
-        s += log(L[i * n + i]);
-    return 2.0 * s;
-}
-
-int kf_chol_shifted(const f64 *SDSGE_RESTRICT S, f64 jitter,
-                    f64 *SDSGE_RESTRICT L, i64 n) {
-    kf_zero_mat(L, n, n);
-    for (i64 i = 0; i < n; ++i) {
-        for (i64 j = 0; j <= i; ++j) {
-            f64 s = S[i * n + j];
-            if (i == j && jitter > 0.0)
-                s += jitter;
-            for (i64 k = 0; k < j; ++k)
-                s -= L[i * n + k] * L[j * n + k];
-            if (i == j) {
-                if (s <= 0.0)
-                    return KF_ERR_MATRIX_CONDITION;
-                L[i * n + j] = sqrt(s);
-            } else {
-                L[i * n + j] = s / L[j * n + j];
-            }
-        }
-    }
-    return KF_OK;
-}
-
-void kf_forward_subst(const f64 *SDSGE_RESTRICT L, const f64 *SDSGE_RESTRICT b,
-                      f64 *SDSGE_RESTRICT out, i64 n) {
-    for (i64 i = 0; i < n; ++i) {
-        f64 s = 0.0;
-        for (i64 j = 0; j < i; ++j)
-            s += L[i * n + j] * out[j];
-        out[i] = (b[i] - s) / L[i * n + i];
-    }
-}
-
-void kf_backward_subst_chol_t(const f64 *SDSGE_RESTRICT L, const f64 *SDSGE_RESTRICT b,
-                              f64 *SDSGE_RESTRICT out, i64 n) {
-    for (i64 i = n - 1; i >= 0; --i) {
-        f64 s = 0.0;
-        for (i64 j = i + 1; j < n; ++j)
-            s += L[j * n + i] * out[j];
-        out[i] = (b[i] - s) / L[i * n + i];
-    }
 }
 
 void kf_chol_solve_row(const f64 *SDSGE_RESTRICT L, const f64 *SDSGE_RESTRICT B,
@@ -164,15 +34,15 @@ void kf_chol_solve_row(const f64 *SDSGE_RESTRICT L, const f64 *SDSGE_RESTRICT B,
 void kf_predict_cov(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT P_prev,
                     const f64 *SDSGE_RESTRICT BQBT, f64 *SDSGE_RESTRICT temp_nn,
                     f64 *SDSGE_RESTRICT out, i64 n) {
-    kf_matmul(A, P_prev, temp_nn, n, n, n);
-    kf_matmul_abt_plus_c(temp_nn, A, BQBT, out, n, n, n);
+    sdsge_matmul(A, P_prev, temp_nn, n, n, n);
+    sdsge_matmul_abt_plus_c(temp_nn, A, BQBT, out, n, n, n);
 }
 
 void kf_measurement_cov(const f64 *SDSGE_RESTRICT C, const f64 *SDSGE_RESTRICT P_pred,
                         const f64 *SDSGE_RESTRICT R, f64 *SDSGE_RESTRICT temp_mn,
                         f64 *SDSGE_RESTRICT out, i64 n, i64 m) {
-    kf_matmul(C, P_pred, temp_mn, m, n, n);
-    kf_matmul_abt_plus_c(temp_mn, C, R, out, m, n, m);
+    sdsge_matmul(C, P_pred, temp_mn, m, n, n);
+    sdsge_matmul_abt_plus_c(temp_mn, C, R, out, m, n, m);
 }
 
 void kf_pc_t(const f64 *SDSGE_RESTRICT P_pred, const f64 *SDSGE_RESTRICT C,
@@ -218,11 +88,11 @@ void kf_joseph_cov(const f64 *SDSGE_RESTRICT K, const f64 *SDSGE_RESTRICT C,
                    f64 *SDSGE_RESTRICT KC, f64 *SDSGE_RESTRICT I_minus_KC,
                    f64 *SDSGE_RESTRICT temp_nn, f64 *SDSGE_RESTRICT temp_nm,
                    f64 *SDSGE_RESTRICT out, i64 n, i64 m) {
-    kf_matmul(K, C, KC, n, m, n);
+    sdsge_matmul(K, C, KC, n, m, n);
     kf_identity_minus(KC, I_minus_KC, n);
-    kf_matmul(I_minus_KC, P_pred, temp_nn, n, n, n);
-    kf_matmul_abt(temp_nn, I_minus_KC, out, n, n, n);
-    kf_matmul(K, R, temp_nm, n, m, m);
+    sdsge_matmul(I_minus_KC, P_pred, temp_nn, n, n, n);
+    sdsge_matmul_abt(temp_nn, I_minus_KC, out, n, n, n);
+    sdsge_matmul(K, R, temp_nm, n, m, m);
     for (i64 i = 0; i < n; ++i) {
         for (i64 j = 0; j < n; ++j) {
             f64 s = 0.0;
@@ -236,7 +106,7 @@ void kf_joseph_cov(const f64 *SDSGE_RESTRICT K, const f64 *SDSGE_RESTRICT C,
 void kf_build_bqbt(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RESTRICT Q,
                    f64 *SDSGE_RESTRICT temp_nk, f64 *SDSGE_RESTRICT out,
                    i64 n, i64 k) {
-    kf_matmul(B, Q, temp_nk, n, k, k);
+    sdsge_matmul(B, Q, temp_nk, n, k, k);
     for (i64 i = 0; i < n; ++i) {
         for (i64 j = 0; j < n; ++j) {
             f64 s = 0.0;
@@ -245,7 +115,7 @@ void kf_build_bqbt(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RESTRICT Q,
             out[i * n + j] = s;
         }
     }
-    kf_sym_inplace(out, n);
+    sdsge_sym_inplace(out, n);
 }
 
 void kf_build_shock_projection(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RESTRICT C,
@@ -259,7 +129,7 @@ void kf_build_shock_projection(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RES
             temp_km[i * m + j] = s;
         }
     }
-    kf_matmul(Q, temp_km, out, k, k, m);
+    sdsge_matmul(Q, temp_km, out, k, k, m);
 }
 
 int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
@@ -317,23 +187,24 @@ int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
     int status = KF_OK;
 
     for (i64 t = 0; t < T; ++t) {
-        kf_matvec(in->A, x_prev, x_pred_buf, n, n);
+        sdsge_matvec(in->A, x_prev, x_pred_buf, n, n);
         kf_predict_cov(in->A, P_prev, BQBT, temp_nn, P_pred_buf, n);
         if (in->symmetrize)
-            kf_sym_inplace(P_pred_buf, n);
+            sdsge_sym_inplace(P_pred_buf, n);
 
-        kf_matvec_plus_vec(in->C, x_pred_buf, in->d, y_pred_buf, m, n);
+        sdsge_matvec_plus_vec(in->C, x_pred_buf, in->d, y_pred_buf, m, n);
         kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
         kf_measurement_cov(in->C, P_pred_buf, in->R, temp_mn, S_buf, n, m);
         if (in->symmetrize)
-            kf_sym_inplace(S_buf, m);
+            sdsge_sym_inplace(S_buf, m);
 
-        status = kf_chol_shifted(S_buf, in->jitter, L, m);
-        if (status != KF_OK)
+        if (sdsge_chol(S_buf, in->jitter, L, m) != SDSGE_OK) {
+            status = KF_ERR_MATRIX_CONDITION;
             break;
+        }
 
-        kf_forward_subst(L, v_buf, u_buf, m);
-        kf_backward_subst_chol_t(L, u_buf, S_inv_v, m);
+        sdsge_forward_subst(L, v_buf, u_buf, m);
+        sdsge_backward_subst_chol_t(L, u_buf, S_inv_v, m);
 
         kf_pc_t(P_pred_buf, in->C, PCt, n, m);
         kf_gain_from_pc_t(L, PCt, solve_f, solve_b, K, n, m);
@@ -342,16 +213,16 @@ int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
         kf_joseph_cov(K, in->C, P_pred_buf, in->R, KC, I_minus_KC, temp_nn,
                       temp_nm, P_filt_buf, n, m);
         if (in->symmetrize)
-            kf_sym_inplace(P_filt_buf, n);
+            sdsge_sym_inplace(P_filt_buf, n);
 
-        loglik += -0.5 * (const_term + kf_logdet_from_chol(L, m)
-                          + kf_dot(v_buf, S_inv_v, m));
+        loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, m)
+                          + sdsge_dot(v_buf, S_inv_v, m));
 
         if (in->return_shocks && in->store_history)
-            kf_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
+            sdsge_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
 
         if (in->store_history) {
-            kf_matvec_plus_vec(in->C, x_filt_buf, in->d, y_filt_buf, m, n);
+            sdsge_matvec_plus_vec(in->C, x_filt_buf, in->d, y_filt_buf, m, n);
             memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));
             memcpy(out->x_filt + t * n, x_filt_buf, (size_t)n * sizeof(f64));
             memcpy(out->P_pred + t * n * n, P_pred_buf, (size_t)(n * n) * sizeof(f64));

@@ -43,8 +43,50 @@ def xtx_xty(X: NDF, y: NDF) -> tuple[NDF, NDF]:
 
 
 @njit(cache=True)
+def _gram_is_pd(G: NDF) -> bool:
+    """Deterministic positive-definiteness check for the Gram matrix.
+
+    Runs a hand-rolled Cholesky purely to test the pivots against a relative
+    floor (``scale * p * eps``). A rank-deficient Gram has an exact pivot of
+    zero that rounds to a tiny value of either sign depending on the BLAS build,
+    so relying on ``numpy.linalg.cholesky`` to raise (and on the caller's
+    ``try/except`` to catch it) detects rank deficiency nondeterministically
+    across builds. This gate makes the decision build-independent; when it
+    passes, the fast LAPACK path below is used unchanged, so positive-definite
+    results stay bit-for-bit identical. Mirrors the native ``sdsge_chol``.
+    """
+    p = G.shape[0]
+    scale = float64(0.0)
+    for i in range(p):
+        if G[i, i] > scale:
+            scale = G[i, i]
+    pivot_tol = scale * p * np.finfo(float64).eps
+    L = np.zeros((p, p), dtype=float64)
+    for i in range(p):
+        for j in range(i + 1):
+            s = G[i, j]
+            for k in range(j):
+                s -= L[i, k] * L[j, k]
+            if i == j:
+                if s <= pivot_tol:
+                    return False
+                L[i, j] = np.sqrt(s)
+            else:
+                L[i, j] = s / L[j, j]
+    return True
+
+
+@njit(cache=True)
 def chol_solve(X: NDF, y: NDF) -> tuple[NDF, NDF, int]:
     G, g = xtx_xty(X, y)
+
+    if not _gram_is_pd(G):
+        p = G.shape[0]
+        return (
+            np.full(p, np.nan, dtype=float64),
+            np.empty((0, 0), dtype=float64),
+            RANK_DEFICIENT,
+        )
 
     L = cholesky(G)
     z = solve(L, g)

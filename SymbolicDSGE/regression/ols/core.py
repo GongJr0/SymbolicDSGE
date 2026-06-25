@@ -25,9 +25,8 @@ def ols(
         X = np.hstack((np.ones((X.shape[0], 1), dtype=np.float64), X))
         var_names = ["Intercept", *var_names]
 
-    try:
-        coef, L, status = chol_solve(X, y)
-    except Exception:
+    coef, L, status = chol_solve(X, y)
+    if status != int(RegressionStatus.OK):
         coef, L, status = lstsq_solve(X, y)
 
     return OLSResult(
