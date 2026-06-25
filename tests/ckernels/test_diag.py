@@ -23,10 +23,20 @@ RTOL = 1e-7
 ATOL = 1e-9
 
 
-def _design(rng, T=160, k=3):
-    """Full-rank design with an intercept plus a stable response."""
-    X = np.column_stack([np.ones(T), rng.standard_normal((T, k - 1))])
-    beta = rng.standard_normal(k)
+def _design(rng, T=160, k=3, intercept=True):
+    """Full-rank design plus a stable response.
+
+    ``intercept`` controls whether a leading column of ones is included. The
+    Breusch-Godfrey kernel builds its own intercept into the auxiliary design,
+    so it must be fed an intercept-free X — otherwise the augmented matrix has
+    two identical columns of ones and is rank-deficient (cond ~1e16), which
+    makes the chol-vs-lstsq path build-dependent rather than a parity check.
+    """
+    if intercept:
+        X = np.column_stack([np.ones(T), rng.standard_normal((T, k - 1))])
+    else:
+        X = rng.standard_normal((T, k))
+    beta = rng.standard_normal(X.shape[1])
     y = X @ beta + rng.standard_normal(T)
     return np.ascontiguousarray(y), np.ascontiguousarray(X)
 
@@ -44,7 +54,8 @@ def _collinear_design(rng, T=160):
 
 def test_bg_stat_parity():
     rng = np.random.default_rng(0)
-    y, X = _design(rng)
+    # bg adds its own intercept; feed an intercept-free design to keep it full rank.
+    y, X = _design(rng, intercept=False)
     eps = np.ascontiguousarray(rng.standard_normal(X.shape[0]))
     for lags in (1, 2, 4):
         ns, nstat = diag.bg_stat(eps, X, lags)

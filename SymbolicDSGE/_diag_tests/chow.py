@@ -8,6 +8,7 @@ from numba import njit
 from .status import TestStatus
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
+from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
 from ._native import native as _native, DIAG_FALLBACK
 
@@ -18,6 +19,7 @@ LINALG = int(TestStatus.LINALG)
 BAD_SHAPE = int(TestStatus.BAD_SHAPE)
 INSUFFICIENT_SAMPLES = int(TestStatus.INSUFFICIENT_SAMPLES)
 BAD_PARAMETER = int(TestStatus.BAD_PARAMETER)
+REGRESSION_OK = int(RegressionStatus.OK)
 
 
 def _chow_stat(y: NDF, X: NDF, t_break: int) -> tuple[int, float64]:
@@ -62,9 +64,8 @@ def _chow_stat_numba(y: NDF, X: NDF, t_break: int) -> tuple[int, float64]:
     tss = np.empty(3, dtype=float64)
 
     for i, (Xi, yi) in enumerate([(X, y), (X1, y1), (X2, y2)]):
-        try:
-            beta, _, status = chol_solve(Xi, yi)
-        except Exception:
+        beta, _, status = chol_solve(Xi, yi)
+        if status != REGRESSION_OK:
             beta, _, status = lstsq_solve(Xi, yi)
 
         statuses[i] = status

@@ -1,5 +1,6 @@
 #include "sdsge_linalg.h"
 #include <math.h>
+#include <float.h>
 
 void sdsge_zero_mat(f64 *SDSGE_RESTRICT out, i64 r, i64 c) {
     const i64 total = r * c;
@@ -92,6 +93,23 @@ f64 sdsge_logdet_from_chol(const f64 *SDSGE_RESTRICT L, i64 n) {
 int sdsge_chol(const f64 *SDSGE_RESTRICT S, f64 jitter,
                f64 *SDSGE_RESTRICT L, i64 n) {
     sdsge_zero_mat(L, n, n);
+    /* Scale reference for a relative positive-definiteness threshold: the
+     * largest (jittered) diagonal entry. A genuinely rank-deficient matrix has
+     * an exact-arithmetic pivot of zero, but in floating point that pivot rounds
+     * to a tiny value of either sign that depends on the compiler/BLAS build.
+     * Testing the pivot against 0.0 therefore detects rank deficiency
+     * nondeterministically across builds. Comparing against scale * n * eps
+     * makes the decision deterministic while never rejecting a pivot of a truly
+     * positive-definite matrix (those sit far above this floor). */
+    f64 scale = 0.0;
+    for (i64 i = 0; i < n; ++i) {
+        f64 d = S[i * n + i];
+        if (jitter > 0.0)
+            d += jitter;
+        if (d > scale)
+            scale = d;
+    }
+    const f64 pivot_tol = scale * (f64)n * DBL_EPSILON;
     for (i64 i = 0; i < n; ++i) {
         for (i64 j = 0; j <= i; ++j) {
             f64 s = S[i * n + j];
@@ -100,7 +118,7 @@ int sdsge_chol(const f64 *SDSGE_RESTRICT S, f64 jitter,
             for (i64 k = 0; k < j; ++k)
                 s -= L[i * n + k] * L[j * n + k];
             if (i == j) {
-                if (s <= 0.0)
+                if (s <= pivot_tol)
                     return SDSGE_NOT_PD;
                 L[i * n + j] = sqrt(s);
             } else {

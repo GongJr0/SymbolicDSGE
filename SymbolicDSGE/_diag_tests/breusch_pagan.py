@@ -34,9 +34,8 @@ def bp_aux(eps: NDF, X: NDF) -> tuple[int, float64, float64]:
         return UDEF_VARIANCE, float64(np.nan), float64(np.nan)
     g = eps_sq / sigma2
 
-    try:
-        bhat, _, regression_status = chol_solve(X, g)
-    except Exception:
+    bhat, _, regression_status = chol_solve(X, g)
+    if regression_status != REGRESSION_OK:
         bhat, _, regression_status = lstsq_solve(X, g)
     if regression_status != REGRESSION_OK:
         return LINALG, float64(np.nan), float64(np.nan)

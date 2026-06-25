@@ -18,6 +18,7 @@ from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from .cusum_utils import OK, NDF, recursive_residuals
 
+from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
 from ._native import native as _native, DIAG_FALLBACK
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     import optype.numpy as onp
 
 DistributionOutput: TypeAlias = float | float64 | NDF
+
+REGRESSION_OK = int(RegressionStatus.OK)
 
 # Newton Status
 CONVERGED = 0
@@ -212,9 +215,8 @@ def _cusum_series_numba(y: NDF, X: NDF) -> tuple[int, NDF]:
     if status != OK:
         return status, rec_resid
 
-    try:
-        bhat, _, _ = chol_solve(X, y)
-    except Exception:
+    bhat, _, regression_status = chol_solve(X, y)
+    if regression_status != REGRESSION_OK:
         bhat, _, _ = lstsq_solve(X, y)
 
     resid = y - X @ bhat

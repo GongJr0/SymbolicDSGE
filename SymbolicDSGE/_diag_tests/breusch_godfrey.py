@@ -5,6 +5,7 @@ from numpy import float64
 from numpy.typing import NDArray
 from numba import njit
 
+from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
 
 from .status import TestStatus
@@ -18,6 +19,7 @@ OK = int(TestStatus.OK)
 UDEF_VARIANCE = int(TestStatus.UDEF_VARIANCE)
 BAD_SHAPE = int(TestStatus.BAD_SHAPE)
 INSUFFICIENT_SAMPLES = int(TestStatus.INSUFFICIENT_SAMPLES)
+REGRESSION_OK = int(RegressionStatus.OK)
 
 
 @njit(cache=True)
@@ -46,9 +48,8 @@ def _bg_stat_numba(eps: NDF, X: NDF, lags: int) -> tuple[int, float64]:
 
     design = build_design_matrix(X, eps, lags)
 
-    try:
-        bhat, _, _ = chol_solve(design, eps)
-    except Exception:
+    bhat, _, regression_status = chol_solve(design, eps)
+    if regression_status != REGRESSION_OK:
         bhat, _, _ = lstsq_solve(design, eps)
 
     resid = eps - design @ bhat
