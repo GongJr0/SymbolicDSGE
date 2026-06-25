@@ -30,6 +30,13 @@ typedef double f64;
  * the kalman / distribution / transform kernels. */
 #define TWO_PI 6.283185307179586
 
+/* Shared status codes for the dense linear-algebra primitives in sdsge_linalg.
+ * Subsystems map these onto their own error conventions (e.g. the kalman hot
+ * loop translates SDSGE_NOT_PD -> KF_ERR_MATRIX_CONDITION; the diag kernels turn
+ * it into a DIAG_FALLBACK request). SDSGE_OK is 0 so it coincides with KF_OK. */
+#define SDSGE_OK 0
+#define SDSGE_NOT_PD -1
+
 /* Portable `restrict` qualifier (C99 `restrict` is not in C++ and is spelled
  * differently by MSVC). */
 #if defined(__GNUC__) || defined(__clang__)

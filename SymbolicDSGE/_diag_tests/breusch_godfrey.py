@@ -10,6 +10,7 @@ from ..regression.solvers import chol_solve, lstsq_solve
 from .status import TestStatus
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
+from ._native import native as _native, DIAG_FALLBACK
 
 NDF = NDArray[float64]
 
@@ -36,7 +37,7 @@ def build_design_matrix(X: NDF, eps: NDF, lags: int) -> NDF:
 
 
 @njit(cache=True)
-def bg_stat(eps: NDF, X: NDF, lags: int) -> tuple[int, float64]:
+def _bg_stat_numba(eps: NDF, X: NDF, lags: int) -> tuple[int, float64]:
     n = eps.size
     if n <= lags:
         return INSUFFICIENT_SAMPLES, float64(np.nan)
@@ -55,6 +56,25 @@ def bg_stat(eps: NDF, X: NDF, lags: int) -> tuple[int, float64]:
     stat = n * (1.0 - np.sum(resid**2) / tss) if tss > 0.0 else 0.0
 
     return OK, float64(stat)
+
+
+def bg_stat(eps: NDF, X: NDF, lags: int) -> tuple[int, float64]:
+    """Breusch-Godfrey LM statistic; native fast path, numba fallback.
+
+    The native kernel handles the full-rank case; on a rank-deficient design it
+    returns ``DIAG_FALLBACK`` and we recompute through the numba kernel (which
+    has the lstsq fallback).
+    """
+    if _native is not None and eps.size > lags and X.shape[0] == eps.size:
+        status, stat = _native.bg_stat(
+            np.ascontiguousarray(eps, dtype=np.float64),
+            np.ascontiguousarray(X, dtype=np.float64),
+            lags,
+        )
+        if status != DIAG_FALLBACK:
+            return status, float64(stat)
+    nb_status, nb_stat = _bg_stat_numba(eps, X, lags)
+    return int(nb_status), float64(nb_stat)
 
 
 def breusch_godfrey(

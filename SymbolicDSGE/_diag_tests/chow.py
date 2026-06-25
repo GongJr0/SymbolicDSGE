@@ -9,6 +9,7 @@ from .status import TestStatus
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from ..regression.solvers import chol_solve, lstsq_solve
+from ._native import native as _native, DIAG_FALLBACK
 
 NDF = NDArray[float64]
 
@@ -19,8 +20,27 @@ INSUFFICIENT_SAMPLES = int(TestStatus.INSUFFICIENT_SAMPLES)
 BAD_PARAMETER = int(TestStatus.BAD_PARAMETER)
 
 
-@njit(cache=True)
 def _chow_stat(y: NDF, X: NDF, t_break: int) -> tuple[int, float64]:
+    """Chow break-point F statistic; native fast path, numba fallback.
+
+    The native kernel returns ``DIAG_FALLBACK`` if any of the three regressions
+    is rank-deficient, in which case the numba kernel (with its lstsq fallback)
+    recomputes the statistic.
+    """
+    if _native is not None and y.size == X.shape[0]:
+        status, stat = _native.chow_stat(
+            np.ascontiguousarray(y, dtype=np.float64),
+            np.ascontiguousarray(X, dtype=np.float64),
+            t_break,
+        )
+        if status != DIAG_FALLBACK:
+            return status, float64(stat)
+    nb_status, nb_stat = _chow_stat_numba(y, X, t_break)
+    return int(nb_status), float64(nb_stat)
+
+
+@njit(cache=True)
+def _chow_stat_numba(y: NDF, X: NDF, t_break: int) -> tuple[int, float64]:
     if y.size != X.shape[0]:
         return BAD_SHAPE, float64(np.nan)
 
