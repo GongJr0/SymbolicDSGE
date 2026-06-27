@@ -29,13 +29,21 @@ typedef double f64;
 /* 2*pi as the nearest IEEE-754 double (== 2.0 * numpy's pi, exactly); shared by
  * the kalman / distribution / transform kernels. */
 #define TWO_PI 6.283185307179586
+#define PI 3.141592653589793
 
 /* Shared status codes for the dense linear-algebra primitives in sdsge_linalg.
  * Subsystems map these onto their own error conventions (e.g. the kalman hot
- * loop translates SDSGE_NOT_PD -> KF_ERR_MATRIX_CONDITION; the diag kernels turn
- * it into a DIAG_FALLBACK request). SDSGE_OK is 0 so it coincides with KF_OK. */
+ * loop translates SDSGE_NOT_PD -> KF_ERR_MATRIX_CONDITION; the diag kernels
+ * turn it into a DIAG_FALLBACK request). SDSGE_OK is 0 so it coincides with
+ * KF_OK. */
 #define SDSGE_OK 0
 #define SDSGE_NOT_PD -1
+
+/* Inline min/max for i64 and f64. */
+static inline i64 min_i64(i64 a, i64 b) { return (a < b) ? a : b; }
+static inline i64 max_i64(i64 a, i64 b) { return (a > b) ? a : b; }
+static inline f64 min_f64(f64 a, f64 b) { return (a < b) ? a : b; }
+static inline f64 max_f64(f64 a, f64 b) { return (a > b) ? a : b; }
 
 /* Portable `restrict` qualifier (C99 `restrict` is not in C++ and is spelled
  * differently by MSVC). */

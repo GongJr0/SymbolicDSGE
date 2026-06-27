@@ -1,6 +1,7 @@
 #include "sdsge_linalg.h"
 #include <math.h>
 #include <float.h>
+#include <stdlib.h>
 
 void sdsge_zero_mat(f64 *SDSGE_RESTRICT out, i64 r, i64 c) {
     const i64 total = r * c;
@@ -26,6 +27,22 @@ void sdsge_matmul(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
             for (i64 k = 0; k < p; ++k)
                 s += A[i * p + k] * B[k * m + j];
             out[i * m + j] = s;
+        }
+    }
+}
+
+void sdsge_matmul_atb(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
+                      f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
+    /* Row-contraction accumulated row-by-row (matches sdsge_gram's order, and is
+     * cache-optimal: A row and B row stream contiguously, out stays hot). */
+    sdsge_zero_mat(out, p, m);
+    for (i64 i = 0; i < n; ++i) {
+        const f64 *Ai = A + i * p;
+        const f64 *Bi = B + i * m;
+        for (i64 k = 0; k < p; ++k) {
+            f64 aik = Ai[k];
+            for (i64 l = 0; l < m; ++l)
+                out[k * m + l] += aik * Bi[l];
         }
     }
 }
@@ -217,4 +234,24 @@ int sdsge_chol_inv(const f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT Pinv,
         }
     }
     return SDSGE_OK;
+}
+
+static int sdsge_cmp_f64(const void *a, const void *b) {
+    f64 fa = *(const f64 *)a;
+    f64 fb = *(const f64 *)b;
+    return (fa > fb) - (fa < fb);
+}
+
+void sdsge_sort_f64(f64 *SDSGE_RESTRICT arr, i64 n) {
+    if (n > 1)
+        qsort(arr, (size_t)n, sizeof(f64), sdsge_cmp_f64);
+}
+
+f64 sdsge_median_f64(f64 *SDSGE_RESTRICT arr, i64 n) {
+    if (n <= 0)
+        return NAN;
+    sdsge_sort_f64(arr, n);
+    if (n % 2 == 0)
+        return 0.5 * (arr[n / 2 - 1] + arr[n / 2]);
+    return arr[n / 2];
 }
