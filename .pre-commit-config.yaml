@@ -3,7 +3,7 @@ repos:
     rev: 25.11.0
     hooks:
       - id: black-jupyter
-        name: black-jupyter
+        name: Black (Jupyter)
         description:
           "Black code formatter with Jupyter notebook support"
         entry: black
@@ -13,10 +13,22 @@ repos:
         types_or: [python, pyi, jupyter]
         additional_dependencies: [".[jupyter]"]
 
+  - repo: https://github.com/MarcoGorelli/cython-lint
+    rev: v0.21.0
+    hooks:
+      - id: cython-lint
+        name: Cython Linter
+        description: "Lint Cython files for style and syntax issues"
+        files: \.(pyx|pxd|pxi)$
+      - id: double-quote-cython-strings
+        name: Double Quote Cython Strings
+        description: "Enforce double quotes for strings in Cython files"
+        files: \.(pyx|pxd|pxi)$
+
   - repo: local
     hooks:
       - id: mypy
-        name: mypy
+        name: MyPy
         description: 'Static type checker for Python'
         entry: uv run mypy
         language: system
