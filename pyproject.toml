@@ -72,7 +72,7 @@ dev = [
     "jupytext>=1.19.1",
     "pip>=26.0.1",
     "jupyterlab-execute-time>=3.3.0",
-    "httpx2>=2.3.0",
+    "httpx2>=2.5.0",
     "setuptools>=82.0.1",
 ]
 
