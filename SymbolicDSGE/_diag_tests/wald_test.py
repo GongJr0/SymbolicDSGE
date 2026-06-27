@@ -3,9 +3,11 @@ from .moment_calculation_utils import jit_fill_centered, jit_fill_mean_ax0
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from .status import TestStatus
+from ..regression.solvers import _gram_is_pd
 import numpy as np
 from numpy import float64, int64
 from numpy.typing import NDArray
+from numpy.linalg import cholesky, solve
 
 from numba import njit
 
@@ -39,10 +41,21 @@ def jit_wald_stat_from_mean_and_cov(
     for i in range(q):
         dev[i] = mean[i] - target[i]
 
-    try:
-        solved = np.linalg.solve(omega, dev)
-    except Exception:
-        return ERR_LINALG, F64_NAN, int64(q)
+    # Cholesky on the PD fast path -- same algorithm as the native
+    # sdsge_chol_solve, so native parity is same-algorithm rather than
+    # Cholesky-vs-LU. LU (np.linalg.solve) is kept only as the fallback for an
+    # indefinite-but-nonsingular omega. The PD gate is the deterministic
+    # relative-threshold check shared with the native sdsge_chol; relying on
+    # np.linalg.cholesky to raise is not reliably catchable in nopython mode.
+    if _gram_is_pd(omega):
+        L = cholesky(omega)
+        z = solve(L, dev)
+        solved = solve(L.T, z)
+    else:
+        try:
+            solved = solve(omega, dev)
+        except Exception:
+            return ERR_LINALG, F64_NAN, int64(q)
 
     stat = 0.0
     for i in range(q):

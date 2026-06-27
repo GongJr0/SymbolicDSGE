@@ -52,7 +52,10 @@ def _quadratic_wald_stat(
     centered_moments = quadratic_moments - mean
     omega = _manual_bartlett_hac(centered_moments, bandwidth)
     dev = mean - target[vech_idx]
-    return float(g.shape[0] * dev @ np.linalg.solve(omega, dev))
+    # Match the production Cholesky solve so the oracle stays same-algorithm.
+    L = np.linalg.cholesky(omega)
+    solved = np.linalg.solve(L.T, np.linalg.solve(L, dev))
+    return float(g.shape[0] * dev @ solved)
 
 
 def _quadratic_sample() -> np.ndarray:

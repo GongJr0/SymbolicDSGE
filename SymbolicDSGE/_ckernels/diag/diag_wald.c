@@ -1,4 +1,5 @@
 #include "diag_wald.h"
+#include "diag.h"
 #include <math.h>
 
 /* Column mean/var of a row-major (n, p) buffer (not on the Python side). */
@@ -201,3 +202,81 @@ void sdsge_hac_estimator_matmul(f64 *SDSGE_RESTRICT r, KernelID kernel_id,
 
 // ------
 // --- wald_test ---
+
+int sdsge_wald_stat_from_mean_and_cov(const f64 *SDSGE_RESTRICT mean,
+                                      const f64 *SDSGE_RESTRICT target,
+                                      const f64 *SDSGE_RESTRICT omega,
+                                      const i64 n, const i64 p,
+                                      f64 *SDSGE_RESTRICT dev_scratch,
+                                      f64 *SDSGE_RESTRICT L_scratch,
+                                      f64 *SDSGE_RESTRICT stat_out) {
+  /* Compute the Wald statistic: *
+   * dev = mean - target;
+   * stat = n * (dev^T @ omega^-1 @ dev); */
+  for (i64 i = 0; i < p; ++i) {
+    dev_scratch[i] = mean[i] - target[i];
+  }
+  int code = sdsge_chol(omega, 0.0, L_scratch, p);
+  if (code != SDSGE_OK) {
+    return DIAG_FALLBACK;
+  }
+
+  sdsge_forward_subst(L_scratch, dev_scratch, dev_scratch, p);
+
+  /* Stat = n * sum(z_i^2) */
+  f64 stat = 0.0;
+  for (i64 i = 0; i < p; ++i) {
+    stat += dev_scratch[i] * dev_scratch[i];
+  }
+
+  *stat_out = (f64)n * stat;
+  return DIAG_OK;
+}
+
+int sdsge_symmetric_outer_prod_2dim(const f64 *SDSGE_RESTRICT x, const i64 n,
+                                    const i64 p, const i64 q,
+                                    f64 *SDSGE_RESTRICT out) {
+  /* out is (n, q) with q = floor(p * (p + 1) / 2); the python side computes q
+   * for shape checks, so don't recompute it here. x is (n, p): its row stride is
+   * p, only out's row stride is q. */
+  i64 k = 0;
+  f64 x_i = 0.0;
+  for (i64 t = 0; t < n; ++t) {
+    k = 0;
+    for (i64 i = 0; i < p; ++i) {
+      x_i = x[t * p + i];
+      for (i64 j = i; j < p; ++j) {
+        out[t * q + k] = x_i * x[t * p + j];
+        k += 1;
+      }
+    }
+  }
+  return DIAG_OK;
+}
+
+int sdsge_fill_symmetric_target_vec(const f64 *SDSGE_RESTRICT target,
+                                    const f64 atol, const f64 rtol, const i64 p,
+                                    f64 *SDSGE_RESTRICT out) {
+
+  i64 k = 0;
+  f64 a = 0.0;
+  f64 b = 0.0;
+  f64 diff = 0.0;
+
+  for (i64 i = 0; i < p; ++i) {
+    for (i64 j = i; j < p; ++j) {
+      a = target[i * p + j];
+      b = target[j * p + i];
+      if (a != b) {
+        diff = fabs(a - b);
+
+        if (!isfinite(diff) || diff > atol + rtol * fabs(b)) {
+          return DIAG_BAD_SHAPE;
+        }
+      }
+      out[k] = a;
+      k += 1;
+    }
+  }
+  return DIAG_OK;
+}

@@ -43,6 +43,19 @@ cdef extern from "diag_wald.h":
                                     int64_t n, int64_t p, double *gamma_scratch,
                                     double *out) nogil
 
+    int sdsge_wald_stat_from_mean_and_cov(const double *mean,
+                                          const double *target,
+                                          const double *omega, int64_t n,
+                                          int64_t p, double *dev_scratch,
+                                          double *L_scratch,
+                                          double *stat_out) nogil
+
+    int sdsge_symmetric_outer_prod_2dim(const double *x, int64_t n, int64_t p,
+                                        int64_t q, double *out) nogil
+
+    int sdsge_fill_symmetric_target_vec(const double *target, double atol,
+                                        double rtol, int64_t p,
+                                        double *out) nogil
 
 # Re-exported so the Python dispatch layer can recognise the "retry in numba"
 # signal without hard-coding the magic number.
