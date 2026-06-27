@@ -24,6 +24,15 @@ static const kernel_inp_t KERNEL_SPECS[KERNEL_COUNT] = {
     [PARZEN] = {.c = C_PARZEN, .q = 2.0},
     [QS] = {.c = C_QS, .q = 2.0}};
 
+/* Column means of x(n,p) over axis 0; writes mean(p). */
+void sdsge_fill_mean_ax0(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
+                         f64 *SDSGE_RESTRICT mean);
+
+/* x(n,p) with its column means subtracted; writes centered(n,p). */
+void sdsge_fill_centered_ax0(const f64 *SDSGE_RESTRICT x,
+                             const f64 *SDSGE_RESTRICT mean, const i64 n,
+                             const i64 p, f64 *SDSGE_RESTRICT centered);
+
 /* Full HAC long-run covariance: out(p,p) := (Gamma_0 + sum_{j=1..L} w_j
  * (Gamma_j
  * + Gamma_j^T)) / n, mirroring the numba jit_hac_estimator_matmul. `r` is the

@@ -6,6 +6,8 @@ from numba import njit
 
 from typing import Literal, cast
 
+from ._native import native as _native
+
 NDF = NDArray[float64]
 
 
@@ -225,6 +227,13 @@ def hac_covariance(
     L = min(L, n - 1)
 
     if nopython:
+        if _native is not None:
+            return cast(
+                NDF,
+                _native.hac_estimator_matmul(
+                    np.ascontiguousarray(r, dtype=np.float64), kernel_id, L
+                ),
+            )
         return cast(NDF, jit_hac_estimator_matmul(r, kernel_id, L))
 
     return py_hac_estimator(r, kernel_id, L)

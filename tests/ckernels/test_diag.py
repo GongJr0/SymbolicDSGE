@@ -216,3 +216,89 @@ def test_hac_estimator_parity(kernel_id, shape, lags):
     native = diag.hac_estimator_matmul(r, kernel_id, lags)
     ref = jit_hac_estimator_matmul(r, kernel_id, lags)
     np.testing.assert_allclose(native, ref, rtol=RTOL, atol=ATOL)
+
+
+# ---------------------------------------------------------------- Wald helpers
+
+from SymbolicDSGE._diag_tests.wald_test import (  # noqa: E402
+    jit_fill_symmetric_target_vec,
+    jit_symmetric_outer_prod_2dim,
+    jit_wald_stat_from_mean_and_cov,
+)
+
+
+@pytest.mark.parametrize("q", [1, 2, 5])
+def test_wald_stat_parity(q):
+    """Native Wald statistic matches numba on a positive-definite omega."""
+    rng = np.random.default_rng([q, 11])
+    mean = np.ascontiguousarray(rng.standard_normal(q))
+    target = np.ascontiguousarray(rng.standard_normal(q))
+    m = rng.standard_normal((q, q))
+    omega = np.ascontiguousarray(m @ m.T + q * np.eye(q))  # SPD, well-conditioned
+    ns, nstat = diag.wald_stat_from_mean_and_cov(mean, target, omega, 100)
+    rs, rstat, rdf = jit_wald_stat_from_mean_and_cov(mean, target, omega, 100)
+    assert ns == rs == 0
+    assert rdf == q
+    assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)
+
+
+def test_wald_stat_fallback_on_non_pd():
+    """A non-PD omega makes the native Cholesky path signal DIAG_FALLBACK."""
+    q = 3
+    mean = np.ascontiguousarray(np.ones(q))
+    target = np.ascontiguousarray(np.zeros(q))
+    omega = np.zeros((q, q), dtype=np.float64)
+    assert diag.wald_stat_from_mean_and_cov(mean, target, omega, 50)[0] == diag.FALLBACK
+
+
+@pytest.mark.parametrize("shape", [(10, 1), (20, 3), (15, 4)])
+def test_symmetric_outer_prod_parity(shape):
+    """Native per-row vech outer product matches numba."""
+    n, p = shape
+    rng = np.random.default_rng([n, p])
+    x = np.ascontiguousarray(rng.standard_normal((n, p)))
+    ns, nout = diag.symmetric_outer_prod_2dim(x)
+    rout = np.empty((n, p * (p + 1) // 2), dtype=np.float64)
+    rs = jit_symmetric_outer_prod_2dim(x, rout)
+    assert ns == rs == 0
+    np.testing.assert_allclose(nout, rout, rtol=RTOL, atol=ATOL)
+
+
+def test_fill_symmetric_target_vec_parity():
+    """Native vech packing matches numba; asymmetric input is rejected."""
+    rng = np.random.default_rng(99)
+    p = 4
+    a = rng.standard_normal((p, p))
+    sym = np.ascontiguousarray(a + a.T)
+    ns, nvec = diag.fill_symmetric_target_vec(sym, 1e-8, 1e-5)
+    rvec = np.empty(p * (p + 1) // 2, dtype=np.float64)
+    rs = jit_fill_symmetric_target_vec(sym, rvec)
+    assert ns == rs == 0
+    np.testing.assert_allclose(nvec, rvec, rtol=RTOL, atol=ATOL)
+
+    asym = np.ascontiguousarray(np.array([[1.0, 0.1], [0.2, 1.0]]))
+    assert diag.fill_symmetric_target_vec(asym, 1e-8, 1e-5)[0] != 0
+
+
+from SymbolicDSGE._diag_tests.moment_calculation_utils import (  # noqa: E402
+    jit_fill_centered,
+    jit_fill_mean_ax0,
+)
+
+
+@pytest.mark.parametrize("shape", [(10, 1), (20, 3), (50, 4)])
+def test_fill_mean_and_centered_parity(shape):
+    """Native column-mean and centering match numba (bit-exact loops)."""
+    n, p = shape
+    rng = np.random.default_rng([n, p, 7])
+    x = np.ascontiguousarray(rng.standard_normal((n, p)))
+
+    nmean = diag.fill_mean_ax0(x)
+    rmean = np.empty(p, dtype=np.float64)
+    jit_fill_mean_ax0(x, rmean)
+    np.testing.assert_allclose(nmean, rmean, rtol=RTOL, atol=ATOL)
+
+    ncentered = diag.fill_centered_ax0(x, nmean)
+    rcentered = np.empty((n, p), dtype=np.float64)
+    jit_fill_centered(x, rmean, rcentered)
+    np.testing.assert_allclose(ncentered, rcentered, rtol=RTOL, atol=ATOL)

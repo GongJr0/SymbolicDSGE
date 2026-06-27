@@ -25,8 +25,8 @@ static f64 col_var(const f64 *SDSGE_RESTRICT x, f64 mean, const i64 n,
 
 // --- moment_calculation_utils ---
 
-static void fill_mean_ax0(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT mean,
-                          const i64 n, const i64 p) {
+void sdsge_fill_mean_ax0(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
+                         f64 *SDSGE_RESTRICT mean) {
 
   for (i64 i = 0; i < p; ++i) {
     mean[i] = 0.0;
@@ -42,9 +42,9 @@ static void fill_mean_ax0(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT mean,
   }
 }
 
-static void fill_centered_ax0(const f64 *SDSGE_RESTRICT x,
-                              const f64 *SDSGE_RESTRICT mean, const i64 n,
-                              const i64 p, f64 *SDSGE_RESTRICT centered) {
+void sdsge_fill_centered_ax0(const f64 *SDSGE_RESTRICT x,
+                             const f64 *SDSGE_RESTRICT mean, const i64 n,
+                             const i64 p, f64 *SDSGE_RESTRICT centered) {
   for (i64 i = 0; i < n; ++i) {
     for (i64 j = 0; j < p; ++j) {
       centered[i * p + j] = x[i * p + j] - mean[j];
