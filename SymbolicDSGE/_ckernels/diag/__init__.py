@@ -13,5 +13,11 @@ from ._diag import (
     cusum_series as cusum_series,
     cusum_stat as cusum_stat,
     cusumsq_stat as cusumsq_stat,
+    fill_centered_ax0 as fill_centered_ax0,
+    fill_mean_ax0 as fill_mean_ax0,
+    fill_symmetric_target_vec as fill_symmetric_target_vec,
+    hac_estimator_matmul as hac_estimator_matmul,
     recursive_residuals as recursive_residuals,
+    symmetric_outer_prod_2dim as symmetric_outer_prod_2dim,
+    wald_stat_from_mean_and_cov as wald_stat_from_mean_and_cov,
 )

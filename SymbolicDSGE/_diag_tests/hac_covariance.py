@@ -4,19 +4,35 @@ from numpy.typing import NDArray
 
 from numba import njit
 
-from typing import Literal, Callable, cast
+from typing import Literal, cast
+
+from ._native import native as _native
 
 NDF = NDArray[float64]
+
+
+# Kernel IDs (integer). The HAC estimator selects a lag window by id rather than
+# by a passed-in callable, so the jitted path can be ``cache=True`` and the whole
+# branch maps directly onto a plain C ``switch`` for the native port.
+_BARTLETT: int = 0
+_PARZEN: int = 1
+_QS: int = 2
+
+_KERNEL_STR_TO_ID: dict[str, int] = {
+    "bartlett": _BARTLETT,
+    "parzen": _PARZEN,
+    "qs": _QS,
+}
 
 # Andrews (1991) bandwidth constants for different kernels
 _C_BARTLETT = 1.1447
 _C_PARZEN = 2.6614
 _C_QUADRATIC_SPECTRAL = 1.3221
 
-_ANDREWS_C_Q_GETTER: dict[str, tuple[float, float]] = {
-    "bartlett": (_C_BARTLETT, 1.0),
-    "parzen": (_C_PARZEN, 2.0),
-    "qs": (_C_QUADRATIC_SPECTRAL, 2.0),
+_ANDREWS_C_Q_GETTER: dict[int, tuple[float, float]] = {
+    _BARTLETT: (_C_BARTLETT, 1.0),
+    _PARZEN: (_C_PARZEN, 2.0),
+    _QS: (_C_QUADRATIC_SPECTRAL, 2.0),
 }
 
 
@@ -27,9 +43,7 @@ def wooldridge_bandwidth(x: NDF) -> int:
 
 
 # Andrews (1991) bandwidth selection rule for HAC covariance estimation
-def andrews_bandwidth(
-    y: NDF, kernel: Literal["bartlett", "parzen", "qs"] = "bartlett"
-) -> int:
+def andrews_bandwidth(y: NDF, kernel_id: int = _BARTLETT) -> int:
     n = y.shape[0]
     if n < 2 or np.var(y) <= 1e-14:
         return 1
@@ -51,19 +65,19 @@ def andrews_bandwidth(
     if Rhat <= 0.0 or not np.isfinite(Rhat):
         return 1
 
-    c, q = _ANDREWS_C_Q_GETTER[kernel]
+    c, q = _ANDREWS_C_Q_GETTER[kernel_id]
     b = c * (Rhat ** (1.0 / (2 * q + 1))) * (n ** (1.0 / (2 * q + 1)))
     return max(1, int(np.floor(b)))
 
 
 def andrews_bandwidth_matrix(
     r: NDF,
-    kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
+    kernel_id: int = _BARTLETT,
 ) -> int:
     r = np.asarray(r, dtype=np.float64)
 
     if r.ndim == 1:
-        return andrews_bandwidth(r, kernel=kernel)
+        return andrews_bandwidth(r, kernel_id=kernel_id)
 
     if r.ndim != 2:
         raise ValueError(f"r must be 1D or 2D, got shape {r.shape}.")
@@ -72,7 +86,7 @@ def andrews_bandwidth_matrix(
     for j in range(r.shape[1]):
         col = r[:, j]
         if np.var(col) > 1e-14:
-            Ls.append(andrews_bandwidth(col, kernel=kernel))
+            Ls.append(andrews_bandwidth(col, kernel_id=kernel_id))
 
     if not Ls:
         return 1
@@ -80,93 +94,57 @@ def andrews_bandwidth_matrix(
     return int(np.median(np.asarray(Ls)))
 
 
-_BW_SELECTION_DISPATCHER: dict[str, Callable] = {
-    "wooldridge": wooldridge_bandwidth,
-    "andrews": andrews_bandwidth_matrix,
-}
+@njit(cache=True)
+def _kernel_weight(j: int, L: int, kernel_id: int) -> float64:
+    """Lag-window weight w(j; L) for the selected kernel.
 
-
-def bartlett_kernel(j: int, L: int) -> float64:
-    out: float64 = float64(0.0)
-    if j > L:
-        return out
-    else:
-        out += 1.0 - float64(j) / (float64(L) + 1.0)
-        return out
-
-
-def parzen_kernel(j: int, L: int) -> float64:
-    out: float64 = float64(0.0)
+    A single branch over the integer kernel id (rather than a passed-in callable)
+    so the jitted HAC estimator can be ``cache=True`` and the whole thing maps
+    onto a plain C ``switch`` for the native port. All three closed forms are
+    math.h-expressible.
+    """
     x: float64 = float64(j) / (float64(L) + 1.0)
 
-    if x > 1.0:
-        return out
-    elif x <= 0.5:
-        out += 1.0 - 6.0 * x**2 + 6.0 * x**3
-        return out
-    else:
-        out += 2.0 * (1.0 - x) ** 3
-        return out
+    if kernel_id == _BARTLETT:
+        if j > L:
+            return float64(0.0)
+        return float64(1.0 - x)
+
+    if kernel_id == _PARZEN:
+        if x > 1.0:
+            return float64(0.0)
+        if x <= 0.5:
+            return float64(1.0 - 6.0 * x**2 + 6.0 * x**3)
+        return float64(2.0 * (1.0 - x) ** 3)
+
+    # _QS
+    if abs(x) <= 1e-8:
+        return float64(1.0)
+    outer = 25.0 / (12.0 * np.pi**2 * x**2)
+    arg = 6.0 * np.pi * x / 5.0
+    inner = np.sin(arg) / arg - np.cos(arg)
+    return float64(outer * inner)
 
 
-def quadratic_spectral_kernel(j: int, L: int) -> float64:
-    out: float64 = float64(0.0)
-    x: float64 = float64(j) / (float64(L) + 1.0)
-
-    if np.isclose(x, 0.0, atol=1e-8):
-        out += 1.0
-        return out
-    else:
-        outer = 25.0 / (12.0 * np.pi**2 * x**2)
-        inner = np.sin(6.0 * np.pi * x / 5.0) / (6.0 * np.pi * x / 5.0) - np.cos(
-            6.0 * np.pi * x / 5.0
-        )
-        out += outer * inner
-        return out
-
-
-_KERNEL_GETTER: dict[str, Callable[[int, int], float64]] = {
-    "bartlett": bartlett_kernel,
-    "parzen": parzen_kernel,
-    "qs": quadratic_spectral_kernel,
-}
-
-_JIT_CACHE: dict[str, Callable[[int, int], float64]] = {}
-
-
-def kernel_dispatcher(
-    kernel: Literal["bartlett", "parzen", "qs"], nopython: bool = True
-) -> Callable[[int, int], float64]:
-    if nopython:
-        if kernel not in _JIT_CACHE:
-            _JIT_CACHE[kernel] = njit(_KERNEL_GETTER[kernel], cache=True)
-        return _JIT_CACHE[kernel]
-    else:
-        return _KERNEL_GETTER[kernel]
-
-
-# HAC covariance estimation using the specified kernel and bandwidth.
-# NOTE: deliberately *not* cache=True. `k` is a jitted dispatcher argument, and
-# numba keys an on-disk cache entry on the dispatcher's identity (a weakref), not
-# a stable signature. Each session's kernel is a new object, so the cache never
-# hits cross-session — it only accumulates stale keys whose weakrefs die with the
-# process that made them; the next save re-pickles the index and raises
-# "ReferenceError: underlying object has vanished". In-process JIT reuse is
-# unaffected (the compiled overload is still memoized in memory).
-@njit
+# HAC covariance estimation using the selected kernel and bandwidth. Now that the
+# kernel is chosen by integer id (no jitted-callable argument), this can be
+# ``cache=True``: the on-disk cache keys on the stable (array, int, int)
+# signature instead of a dispatcher weakref that dies with the process.
+@njit(cache=True)
 def jit_hac_estimator_matmul(
     r: NDF,
-    k: Callable[[int, int], float64],  # Kernel function
+    kernel_id: int,
     L: int,  # Bandwidth
 ) -> NDF:
     n = r.shape[0]
-    S = np.zeros((r.shape[1], r.shape[1]), dtype=float64)
+    p = r.shape[1]
+    S = np.zeros((p, p), dtype=float64)
     L = min(L, n - 1)
 
     S += r.T @ r / n  # Gamma 0
 
     for j in range(1, L + 1):
-        w_j = k(j, L)
+        w_j = _kernel_weight(j, L, kernel_id)
         if w_j == 0.0:
             continue
         gamma_j = r[j:].T @ r[:-j] / n
@@ -178,10 +156,9 @@ def jit_hac_estimator_matmul(
 # For testing and maintaining functionality in cases where numba isn't supported.
 def py_hac_estimator(
     r: NDF,
-    k: Callable[[int, int], float64],  # Kernel function
+    kernel_id: int,
     L: int,  # Bandwidth
 ) -> NDF:
-
     n, p = r.shape
     S = np.zeros((p, p), dtype=float64)
     L = min(L, n - 1)
@@ -189,7 +166,7 @@ def py_hac_estimator(
     S += r.T @ r / n  # Gamma 0
 
     for j in range(1, L + 1):
-        w_j = k(j, L)
+        w_j = _kernel_weight.py_func(j, L, kernel_id)
         if w_j == 0.0:
             continue
         gamma_j = r[j:].T @ r[:-j] / n
@@ -200,7 +177,7 @@ def py_hac_estimator(
 def hac_covariance(
     r: NDF,
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
-    bandwidth: int | Literal["wooldridge", "andrews", "auto"] | None = "auto",
+    bandwidth: int | Literal["wooldridge", "andrews", "auto"] | None = None,
     center: bool = False,
     nopython: bool = True,
 ) -> NDF:
@@ -213,23 +190,33 @@ def hac_covariance(
     if n < 2:
         raise ValueError(f"r must have at least 2 observations, got {n}.")
 
+    kernel_id = _KERNEL_STR_TO_ID.get(kernel)
+    if kernel_id is None:
+        raise ValueError(
+            f"Unsupported kernel: {kernel}. Supported kernels are: "
+            f"{list(_KERNEL_STR_TO_ID)}"
+        )
+
     if center:
         r = r - r.mean(axis=0)
 
-    L = -1
+    # Bandwidth resolution. An explicit non-negative int is used as L directly; a
+    # string names a data-driven selection rule; None/"auto" picks the rule
+    # conventionally paired with the kernel (Wooldridge for Bartlett, Andrews
+    # otherwise). There is no integer id for the selection rules -- a bare int
+    # always means a manual bandwidth.
     if bandwidth is None or bandwidth == "auto":
         if kernel == "bartlett":
             L = wooldridge_bandwidth(r)
-        elif kernel in ("parzen", "qs"):
-            L = andrews_bandwidth_matrix(r, kernel=kernel)
         else:
-            raise ValueError(f"Unsupported kernel: {kernel}")
-
+            L = andrews_bandwidth_matrix(r, kernel_id=kernel_id)
     elif isinstance(bandwidth, str):
-        if bandwidth not in _BW_SELECTION_DISPATCHER:
+        if bandwidth == "wooldridge":
+            L = wooldridge_bandwidth(r)
+        elif bandwidth == "andrews":
+            L = andrews_bandwidth_matrix(r, kernel_id=kernel_id)
+        else:
             raise ValueError(f"Unsupported bandwidth selection method: {bandwidth}")
-        L = _BW_SELECTION_DISPATCHER[bandwidth](r)
-
     elif isinstance(bandwidth, int):
         if bandwidth < 0:
             raise ValueError(f"Bandwidth must be non-negative, got {bandwidth}.")
@@ -238,9 +225,15 @@ def hac_covariance(
         raise ValueError(f"Invalid bandwidth specification: {bandwidth}")
 
     L = min(L, n - 1)
-    k = kernel_dispatcher(kernel, nopython=nopython)
 
     if nopython:
-        return cast(NDF, jit_hac_estimator_matmul(r, k, L))
+        if _native is not None:
+            return cast(
+                NDF,
+                _native.hac_estimator_matmul(
+                    np.ascontiguousarray(r, dtype=np.float64), kernel_id, L
+                ),
+            )
+        return cast(NDF, jit_hac_estimator_matmul(r, kernel_id, L))
 
-    return py_hac_estimator(r, k, L)
+    return py_hac_estimator(r, kernel_id, L)

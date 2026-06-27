@@ -36,3 +36,25 @@ def cusum_stat(y: _F64, X: _F64) -> tuple[int, float]:
 
 def cusumsq_stat(y: _F64, X: _F64) -> tuple[int, int, float]:
     """CUSUM-of-squares statistic. Returns (status, n, stat)."""
+
+def fill_mean_ax0(x: _F64) -> _F64:
+    """Column means of x over axis 0. Returns mean(p)."""
+
+def fill_centered_ax0(x: _F64, mean: _F64) -> _F64:
+    """x with its column means subtracted. Returns centered(n, p)."""
+
+def hac_estimator_matmul(r: _F64, kernel_id: int, L: int) -> _F64:
+    """HAC long-run covariance (full estimator). Returns the (p, p) matrix."""
+
+def wald_stat_from_mean_and_cov(
+    mean: _F64, target: _F64, omega: _F64, n: int
+) -> tuple[int, float]:
+    """Wald statistic n * dev^T omega^-1 dev. Returns (status, stat)."""
+
+def symmetric_outer_prod_2dim(x: _F64) -> tuple[int, _F64]:
+    """Per-row vech of x_t x_t'. Returns (status, out(n, q))."""
+
+def fill_symmetric_target_vec(
+    target: _F64, atol: float, rtol: float
+) -> tuple[int, _F64]:
+    """Pack the upper triangle of a symmetric target. Returns (status, vec(q))."""

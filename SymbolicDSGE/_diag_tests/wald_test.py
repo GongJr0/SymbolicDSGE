@@ -1,15 +1,18 @@
-from .hac_covariance import jit_hac_estimator_matmul, hac_covariance
+from .hac_covariance import hac_covariance
 from .moment_calculation_utils import jit_fill_centered, jit_fill_mean_ax0
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from .status import TestStatus
+from ._native import native as _native, DIAG_FALLBACK
+from ..regression.solvers import _gram_is_pd
 import numpy as np
 from numpy import float64, int64
 from numpy.typing import NDArray
+from numpy.linalg import cholesky, solve
 
 from numba import njit
 
-from typing import Callable, Literal
+from typing import Literal, cast
 
 NDF = NDArray[float64]
 
@@ -39,10 +42,21 @@ def jit_wald_stat_from_mean_and_cov(
     for i in range(q):
         dev[i] = mean[i] - target[i]
 
-    try:
-        solved = np.linalg.solve(omega, dev)
-    except Exception:
-        return ERR_LINALG, F64_NAN, int64(q)
+    # Cholesky on the PD fast path -- same algorithm as the native
+    # sdsge_chol_solve, so native parity is same-algorithm rather than
+    # Cholesky-vs-LU. LU (np.linalg.solve) is kept only as the fallback for an
+    # indefinite-but-nonsingular omega. The PD gate is the deterministic
+    # relative-threshold check shared with the native sdsge_chol; relying on
+    # np.linalg.cholesky to raise is not reliably catchable in nopython mode.
+    if _gram_is_pd(omega):
+        L = cholesky(omega)
+        z = solve(L, dev)
+        solved = solve(L.T, z)
+    else:
+        try:
+            solved = solve(omega, dev)
+        except Exception:
+            return ERR_LINALG, F64_NAN, int64(q)
 
     stat = 0.0
     for i in range(q):
@@ -55,65 +69,85 @@ def jit_wald_stat_from_mean_and_cov(
     return OK, float64(stat), int64(q)
 
 
-@njit(cache=True)
-def jit_wald_hac_stat(
-    g: NDF,
-    target: NDF,
-    k: Callable[[int, int], float64],
-    L: int,
-    mean_buffer: NDF,
-    centered_buffer: NDF,
-    omega_buffer: NDF,
+def _wald_stat(
+    mean: NDF, target: NDF, omega: NDF, n: int
 ) -> tuple[int64, float64, int64]:
+    """Wald statistic; native Cholesky fast path, numba fallback.
+
+    The native kernel returns ``DIAG_FALLBACK`` when omega is not positive
+    definite, in which case the numba kernel recomputes via its LU fallback
+    (which handles an indefinite-but-nonsingular omega). Shapes are guaranteed by
+    the callers, so the native path is only gated on the extension being present.
     """
-    Generic HAC-robust Wald statistic for H0: E[g_t] = target.
+    q = mean.shape[0]
+    if _native is not None:
+        status, stat = _native.wald_stat_from_mean_and_cov(
+            np.ascontiguousarray(mean, dtype=float64),
+            np.ascontiguousarray(target, dtype=float64),
+            np.ascontiguousarray(omega, dtype=float64),
+            n,
+        )
+        if status != DIAG_FALLBACK:
+            return int64(status), float64(stat), int64(q)
+    nb_err, nb_stat, nb_df = jit_wald_stat_from_mean_and_cov(mean, target, omega, n)
+    return int64(nb_err), float64(nb_stat), int64(nb_df)
 
-    Parameters
-    ----------
-    g:
-        Moment array with shape (n, q).
-    target:
-        Target vector with shape (q,).
-    k:
-        Numba-compatible HAC kernel.
-    L:
-        HAC bandwidth.
-    mean_buf:
-        Work buffer with shape (q,).
-    centered_buf:
-        Work buffer with shape (n, q).
-    omega_buf:
-        Work buffer with shape (q, q).
 
-    Returns
-    -------
-    err:
-        0 if successful, negative error code otherwise.
-    statistic:
-        Wald statistic.
-    df:
-        Chi-square degrees of freedom.
+def _fill_symmetric_target_vec(target: NDF) -> tuple[int64, NDF]:
+    """Pack a symmetric target into its vech vector; native or numba.
+
+    No fallback path: the kernel is a pure copy that returns BAD_SHAPE only on a
+    genuinely asymmetric target (a hard error the caller raises on), so the native
+    branch is used whenever the extension is present.
     """
-    n, q = g.shape
+    if _native is not None:
+        status, vec = _native.fill_symmetric_target_vec(
+            np.ascontiguousarray(target, dtype=float64),
+            SYMMETRY_ATOL,
+            SYMMETRY_RTOL,
+        )
+        return int64(status), vec
+    p = target.shape[0]
+    out = np.empty(p * (p + 1) // 2, dtype=float64)
+    err = jit_fill_symmetric_target_vec(target, out)
+    return int64(err), out
 
-    if target.shape[0] != q:
-        return ERR_BAD_SHAPE, F64_NAN, q
 
-    jit_fill_mean_ax0(g, mean_buffer)
-    jit_fill_centered(g, mean_buffer, centered_buffer)
+def _symmetric_outer_prod(x: NDF) -> tuple[int64, NDF]:
+    """Per-row vech of the outer product x_t x_t'; native or numba."""
+    n, p = x.shape
+    if _native is not None:
+        status, out = _native.symmetric_outer_prod_2dim(
+            np.ascontiguousarray(x, dtype=float64)
+        )
+        return int64(status), out
+    out = np.empty((n, p * (p + 1) // 2), dtype=float64)
+    err = jit_symmetric_outer_prod_2dim(x, out)
+    return int64(err), out
 
-    omega = jit_hac_estimator_matmul(centered_buffer, k, L)
-    for i in range(q):
-        for j in range(q):
-            omega_buffer[i, j] = omega[i, j]
 
-    out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
-        mean_buffer,
-        target,
-        omega_buffer,
-        n,
-    )
-    return out
+def _fill_mean_ax0(x: NDF) -> NDF:
+    """Column means of x over axis 0; native or numba (no JIT cost when native)."""
+    if _native is not None:
+        return cast(NDF, _native.fill_mean_ax0(np.ascontiguousarray(x, dtype=float64)))
+    mean = np.empty(x.shape[1], dtype=float64)
+    jit_fill_mean_ax0(x, mean)
+    return mean
+
+
+def _fill_centered_ax0(x: NDF, mean: NDF) -> NDF:
+    """x with its column means subtracted; native or numba."""
+    if _native is not None:
+        return cast(
+            NDF,
+            _native.fill_centered_ax0(
+                np.ascontiguousarray(x, dtype=float64),
+                np.ascontiguousarray(mean, dtype=float64),
+            ),
+        )
+    centered = np.empty_like(x)
+    jit_fill_centered(x, mean, centered)
+    return centered
 
 
 @njit(cache=True)
@@ -198,12 +232,10 @@ def wald_mean_hac(
 
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
-    n, q = g_arr.shape
+    n = g_arr.shape[0]
 
-    mean_buffer = np.empty(q, dtype=float64)
-    centered_buffer = np.empty_like(g_arr)
-    jit_fill_mean_ax0(g_arr, mean_buffer)
-    jit_fill_centered(g_arr, mean_buffer, centered_buffer)
+    mean_buffer = _fill_mean_ax0(g_arr)
+    centered_buffer = _fill_centered_ax0(g_arr, mean_buffer)
 
     omega = hac_covariance(
         centered_buffer,
@@ -212,7 +244,7 @@ def wald_mean_hac(
         center=False,
         nopython=True,
     )
-    out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
+    out: tuple[int64, float64, int64] = _wald_stat(
         mean_buffer,
         target_arr,
         omega,
@@ -268,29 +300,21 @@ def wald_covariance_hac(
     if target_arr.shape[0] != g_arr.shape[1]:
         raise ValueError("Target covariance matrix dimension must match g columns")
 
-    n, p = g_arr.shape
-    q = p * (p + 1) // 2
-    target_vec = np.empty(q, dtype=float64)
-    err = jit_fill_symmetric_target_vec(target_arr, target_vec)
+    err, target_vec = _fill_symmetric_target_vec(target_arr)
     if err != OK:
         raise ValueError("Target covariance matrix must be symmetric")
 
-    centered = np.empty_like(g_arr)
-    mean = np.empty(p, dtype=float64)
-    jit_fill_mean_ax0(g_arr, mean)
-    jit_fill_centered(g_arr, mean, centered)
+    mean = _fill_mean_ax0(g_arr)
+    centered = _fill_centered_ax0(g_arr, mean)
 
-    g_cov = np.empty((n, q), dtype=float64)
-    err = jit_symmetric_outer_prod_2dim(centered, g_cov)
+    err, g_cov = _symmetric_outer_prod(centered)
     if err != OK:
         raise ValueError(
             f"Failed to compute symmetric outer product with error code {err}"
         )
 
-    g_cov_mean = np.empty(q, dtype=float64)
-    g_cov_centered = np.empty_like(g_cov)
-    jit_fill_mean_ax0(g_cov, g_cov_mean)
-    jit_fill_centered(g_cov, g_cov_mean, g_cov_centered)
+    g_cov_mean = _fill_mean_ax0(g_cov)
+    g_cov_centered = _fill_centered_ax0(g_cov, g_cov_mean)
 
     omega = hac_covariance(
         g_cov_centered,
@@ -300,7 +324,7 @@ def wald_covariance_hac(
         nopython=True,
     )
 
-    out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
+    out: tuple[int64, float64, int64] = _wald_stat(
         g_cov_mean,
         target_vec,
         omega,
@@ -356,28 +380,18 @@ def wald_second_moment_hac(
     if target_arr.shape[0] != g_arr.shape[1]:
         raise ValueError("Target second moment matrix dimension must match g columns")
 
-    n, p = g_arr.shape
-    q = p * (p + 1) // 2
-    target_vec = np.empty(q, dtype=float64)
-    err = jit_fill_symmetric_target_vec(target_arr, target_vec)
+    err, target_vec = _fill_symmetric_target_vec(target_arr)
     if err != OK:
         raise ValueError("Target second moment matrix must be symmetric")
 
-    g_second_moment = np.empty((n, q), dtype=float64)
-    err = jit_symmetric_outer_prod_2dim(g_arr, g_second_moment)
+    err, g_second_moment = _symmetric_outer_prod(g_arr)
     if err != OK:
         raise ValueError(
             f"Failed to compute symmetric outer product with error code {err}"
         )
 
-    g_second_moment_mean = np.empty(q, dtype=float64)
-    g_second_moment_centered = np.empty_like(g_second_moment)
-    jit_fill_mean_ax0(g_second_moment, g_second_moment_mean)
-    jit_fill_centered(
-        g_second_moment,
-        g_second_moment_mean,
-        g_second_moment_centered,
-    )
+    g_second_moment_mean = _fill_mean_ax0(g_second_moment)
+    g_second_moment_centered = _fill_centered_ax0(g_second_moment, g_second_moment_mean)
 
     omega = hac_covariance(
         g_second_moment_centered,
@@ -387,7 +401,7 @@ def wald_second_moment_hac(
         nopython=True,
     )
 
-    out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
+    out: tuple[int64, float64, int64] = _wald_stat(
         g_second_moment_mean,
         target_vec,
         omega,

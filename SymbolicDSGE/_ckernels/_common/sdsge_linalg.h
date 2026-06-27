@@ -19,6 +19,14 @@ void sdsge_sym_inplace(f64 *P, i64 n);
 /* out(n,m) := A(n,p) @ B(p,m) */
 void sdsge_matmul(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
 
+/* out(p,m) := A(n,p)^T @ B(n,m). The transpose is folded into the indexing (no
+ * materialized A^T); contraction is over the row axis, accumulated row-by-row
+ * like sdsge_gram (of which this is the asymmetric generalization: matmul_atb of
+ * X with itself equals the full gram of X). `out` must not alias A or B, but A
+ * and B may overlap each other -- both are read-only, so e.g. lagged views of
+ * one buffer (A = M, B = M + j*cols) are fine. */
+void sdsge_matmul_atb(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
+
 /* out(n,m) := A(n,p) @ B(m,p)^T */
 void sdsge_matmul_abt(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
 
@@ -70,5 +78,14 @@ int sdsge_chol_solve(const f64 *G, const f64 *g, f64 *coef, f64 *scratch_L,
 /* SPD inverse: Pinv(p,p) := G(p,p)^-1 via Cholesky. scratch_L(p,p) holds the
  * factor. Returns SDSGE_OK or SDSGE_NOT_PD. */
 int sdsge_chol_inv(const f64 *G, f64 *Pinv, f64 *scratch_L, i64 p);
+
+/* ---- small statistical reductions (diagnostics) ---- */
+
+/* Sort n doubles ascending, in place (libc qsort). */
+void sdsge_sort_f64(f64 *arr, i64 n);
+
+/* Median of n doubles; sorts arr IN PLACE (destroys order). Even n averages the
+ * two central order statistics (matches numpy.median). Returns NaN for n <= 0. */
+f64 sdsge_median_f64(f64 *arr, i64 n);
 
 #endif /* SDSGE_LINALG_H */
