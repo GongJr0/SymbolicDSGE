@@ -36,3 +36,6 @@ def cusum_stat(y: _F64, X: _F64) -> tuple[int, float]:
 
 def cusumsq_stat(y: _F64, X: _F64) -> tuple[int, int, float]:
     """CUSUM-of-squares statistic. Returns (status, n, stat)."""
+
+def hac_estimator_matmul(r: _F64, kernel_id: int, L: int) -> _F64:
+    """HAC long-run covariance (full estimator). Returns the (p, p) matrix."""

@@ -165,11 +165,14 @@ f64 kernel_weight(i64 j, i64 L, KernelID kernel_id) {
   }
 }
 
-void hac_estimator_matmul(f64 *SDSGE_RESTRICT r, KernelID kernel_id, i64 L,
-                          i64 n, i64 p, f64 *SDSGE_RESTRICT gamma_scratch,
-                          f64 *SDSGE_RESTRICT out) {
-  L = min_i64(L, n - 1);
+void sdsge_hac_estimator_matmul(f64 *SDSGE_RESTRICT r, KernelID kernel_id,
+                                i64 L, i64 n, i64 p,
+                                f64 *SDSGE_RESTRICT gamma_scratch,
+                                f64 *SDSGE_RESTRICT out) {
+  /* Gamma_0 = r^T r (full symmetric); the lag terms accumulate on top. */
+  sdsge_gram(r, out, n, p);
 
+  L = min_i64(L, n - 1);
   for (i64 j = 1; j <= L; ++j) {
     f64 w_j = kernel_weight(j, L, kernel_id);
 
@@ -188,4 +191,13 @@ void hac_estimator_matmul(f64 *SDSGE_RESTRICT r, KernelID kernel_id, i64 L,
       }
     }
   }
+
+  /* The numba reference divides every autocovariance by n; do it once over the
+   * assembled sum -- identical up to rounding, well within parity tolerance. */
+  for (i64 i = 0; i < p * p; ++i) {
+    out[i] /= (f64)n;
+  }
 }
+
+// ------
+// --- wald_test ---

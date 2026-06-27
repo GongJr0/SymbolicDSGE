@@ -13,5 +13,6 @@ from ._diag import (
     cusum_series as cusum_series,
     cusum_stat as cusum_stat,
     cusumsq_stat as cusumsq_stat,
+    hac_estimator_matmul as hac_estimator_matmul,
     recursive_residuals as recursive_residuals,
 )
