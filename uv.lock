@@ -705,6 +705,20 @@ wheels = [
 ]
 
 [[package]]
+name = "cython-lint"
+version = "0.21.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cython" },
+    { name = "pycodestyle" },
+    { name = "tokenize-rt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/fb/6f9faa66a488110e555667a4eb803c2b34abd2039d9974c9a971b22de413/cython_lint-0.21.0.tar.gz", hash = "sha256:d4c4e58fd3770fa7fb6db9084735be1d1ba2b9c01618f939ccb568033964beba", size = 29055, upload-time = "2026-06-21T11:36:44.421Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/fa/94f7b38bdc810c31f0b817acecdb9eba1160105794a2fd9c563b6b22c190/cython_lint-0.21.0-py3-none-any.whl", hash = "sha256:49796d815fd1ca93b9dff15de30c502a99164519c6a36901584a7e41ac8132ac", size = 14263, upload-time = "2026-06-21T11:36:43.277Z" },
+]
+
+[[package]]
 name = "debugpy"
 version = "1.8.21"
 source = { registry = "https://pypi.org/simple" }
@@ -2758,6 +2772,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pycodestyle"
+version = "2.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/e0/abfd2a0d2efe47670df87f3e3a0e2edda42f055053c85361f19c0e2c1ca8/pycodestyle-2.14.0.tar.gz", hash = "sha256:c4b5b517d278089ff9d0abdec919cd97262a3367449ea1c8b49b91529167b783", size = 39472, upload-time = "2025-06-20T18:49:48.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/27/a58ddaf8c588a3ef080db9d0b7e0b97215cee3a45df74f3a94dbbf5c893a/pycodestyle-2.14.0-py2.py3-none-any.whl", hash = "sha256:dd6bf7cb4ee77f8e016f9c8e74a35ddd9f67e1d5fd4184d86c3b98e07099f42d", size = 31594, upload-time = "2025-06-20T18:49:47.491Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3754,6 +3777,7 @@ ui = [
 dev = [
     { name = "black", extra = ["jupyter"] },
     { name = "cython" },
+    { name = "cython-lint" },
     { name = "httpx2" },
     { name = "ipykernel" },
     { name = "jupyter" },
@@ -3802,6 +3826,7 @@ provides-extras = ["fred", "sr", "ui"]
 dev = [
     { name = "black", extras = ["jupyter"], specifier = ">=25.11.0" },
     { name = "cython", specifier = ">=3.2.6" },
+    { name = "cython-lint", specifier = ">=0.21.0" },
     { name = "httpx2", specifier = ">=2.5.0" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "jupyter", specifier = ">=1.1.1" },

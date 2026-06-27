@@ -74,6 +74,7 @@ dev = [
     "jupyterlab-execute-time>=3.3.0",
     "httpx2>=2.5.0",
     "setuptools>=82.0.1",
+    "cython-lint>=0.21.0",
 ]
 
 [build-system]
