@@ -4,15 +4,15 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._diag_tests.hac_covariance import (
+    _BARTLETT,
+    _PARZEN,
+    _QS,
+    _kernel_weight,
     andrews_bandwidth,
     andrews_bandwidth_matrix,
-    bartlett_kernel,
     hac_covariance,
     jit_hac_estimator_matmul,
-    kernel_dispatcher,
-    parzen_kernel,
     py_hac_estimator,
-    quadratic_spectral_kernel,
     wooldridge_bandwidth,
 )
 
@@ -88,7 +88,7 @@ def test_andrews_bandwidth_matrix_handles_negative_rhat_columns() -> None:
     series = np.array([(-1.0) ** i for i in range(20)], dtype=np.float64)
     r = np.column_stack([series])
 
-    assert andrews_bandwidth_matrix(r, kernel="qs") == 1
+    assert andrews_bandwidth_matrix(r, kernel_id=_QS) == 1
     out = hac_covariance(r, kernel="qs", bandwidth="auto", nopython=False)
 
     assert out.shape == (1, 1)
@@ -119,19 +119,18 @@ def test_hac_covariance_raises_on_bad_bandwidth() -> None:
         hac_covariance(GOLDEN_R, bandwidth="bad")
 
 
-def test_kernel_functions_and_dispatcher_cover_boundary_branches() -> None:
-    assert bartlett_kernel(3, 2) == np.float64(0.0)
-    assert bartlett_kernel(1, 2) == pytest.approx(2.0 / 3.0)
+def test_kernel_weight_covers_boundary_branches() -> None:
+    w = _kernel_weight.py_func
 
-    assert parzen_kernel(4, 2) == np.float64(0.0)
-    assert parzen_kernel(1, 3) == pytest.approx(1.0 - 6.0 * 0.25**2 + 6.0 * 0.25**3)
-    assert parzen_kernel(2, 2) == pytest.approx(2.0 * (1.0 / 3.0) ** 3)
+    assert w(3, 2, _BARTLETT) == np.float64(0.0)
+    assert w(1, 2, _BARTLETT) == pytest.approx(2.0 / 3.0)
 
-    assert quadratic_spectral_kernel(0, 2) == pytest.approx(1.0)
-    assert np.isfinite(quadratic_spectral_kernel(1, 2))
+    assert w(4, 2, _PARZEN) == np.float64(0.0)
+    assert w(1, 3, _PARZEN) == pytest.approx(1.0 - 6.0 * 0.25**2 + 6.0 * 0.25**3)
+    assert w(2, 2, _PARZEN) == pytest.approx(2.0 * (1.0 / 3.0) ** 3)
 
-    assert kernel_dispatcher("bartlett", nopython=False) is bartlett_kernel
-    assert callable(kernel_dispatcher("bartlett", nopython=True))
+    assert w(0, 2, _QS) == pytest.approx(1.0)
+    assert np.isfinite(w(1, 2, _QS))
 
 
 def test_hac_covariance_covers_auto_and_explicit_selection_branches() -> None:
@@ -161,20 +160,20 @@ def test_hac_covariance_covers_auto_and_explicit_selection_branches() -> None:
     assert out_none.shape == (2, 2)
     assert out_wide.shape == (9, 9)
     np.testing.assert_allclose(
-        py_hac_estimator(GOLDEN_R, bartlett_kernel, 0),
+        py_hac_estimator(GOLDEN_R, _BARTLETT, 0),
         GOLDEN_R.T @ GOLDEN_R / GOLDEN_R.shape[0],
     )
 
 
 def test_hac_jit_matmul_python_path_matches_py_estimator() -> None:
-    expected = py_hac_estimator(GOLDEN_R, bartlett_kernel, 2)
-    matmul_out = jit_hac_estimator_matmul.py_func(GOLDEN_R, bartlett_kernel, 2)
+    expected = py_hac_estimator(GOLDEN_R, _BARTLETT, 2)
+    matmul_out = jit_hac_estimator_matmul.py_func(GOLDEN_R, _BARTLETT, 2)
 
     np.testing.assert_allclose(matmul_out, expected)
 
 
 def test_andrews_bandwidth_matrix_validates_shape_and_accepts_vectors() -> None:
-    assert andrews_bandwidth_matrix(GOLDEN_R[:, 0], kernel="bartlett") >= 1
+    assert andrews_bandwidth_matrix(GOLDEN_R[:, 0], kernel_id=_BARTLETT) >= 1
 
     with pytest.raises(ValueError, match="1D or 2D"):
         andrews_bandwidth_matrix(np.zeros((1, 2, 3), dtype=np.float64))

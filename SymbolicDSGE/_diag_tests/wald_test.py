@@ -1,4 +1,4 @@
-from .hac_covariance import jit_hac_estimator_matmul, hac_covariance
+from .hac_covariance import hac_covariance
 from .moment_calculation_utils import jit_fill_centered, jit_fill_mean_ax0
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from numba import njit
 
-from typing import Callable, Literal
+from typing import Literal
 
 NDF = NDArray[float64]
 
@@ -53,67 +53,6 @@ def jit_wald_stat_from_mean_and_cov(
         stat = 0.0
 
     return OK, float64(stat), int64(q)
-
-
-@njit(cache=True)
-def jit_wald_hac_stat(
-    g: NDF,
-    target: NDF,
-    k: Callable[[int, int], float64],
-    L: int,
-    mean_buffer: NDF,
-    centered_buffer: NDF,
-    omega_buffer: NDF,
-) -> tuple[int64, float64, int64]:
-    """
-    Generic HAC-robust Wald statistic for H0: E[g_t] = target.
-
-    Parameters
-    ----------
-    g:
-        Moment array with shape (n, q).
-    target:
-        Target vector with shape (q,).
-    k:
-        Numba-compatible HAC kernel.
-    L:
-        HAC bandwidth.
-    mean_buf:
-        Work buffer with shape (q,).
-    centered_buf:
-        Work buffer with shape (n, q).
-    omega_buf:
-        Work buffer with shape (q, q).
-
-    Returns
-    -------
-    err:
-        0 if successful, negative error code otherwise.
-    statistic:
-        Wald statistic.
-    df:
-        Chi-square degrees of freedom.
-    """
-    n, q = g.shape
-
-    if target.shape[0] != q:
-        return ERR_BAD_SHAPE, F64_NAN, q
-
-    jit_fill_mean_ax0(g, mean_buffer)
-    jit_fill_centered(g, mean_buffer, centered_buffer)
-
-    omega = jit_hac_estimator_matmul(centered_buffer, k, L)
-    for i in range(q):
-        for j in range(q):
-            omega_buffer[i, j] = omega[i, j]
-
-    out: tuple[int64, float64, int64] = jit_wald_stat_from_mean_and_cov(
-        mean_buffer,
-        target,
-        omega_buffer,
-        n,
-    )
-    return out
 
 
 @njit(cache=True)

@@ -3,10 +3,6 @@ from __future__ import annotations
 import numpy as np
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod
-from SymbolicDSGE._diag_tests.hac_covariance import (
-    kernel_dispatcher,
-    wooldridge_bandwidth,
-)
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.moment_calculation_utils import (
     jit_fill_centered,
@@ -17,7 +13,6 @@ from SymbolicDSGE._diag_tests.wald_test import (
     ERR_LINALG,
     OK,
     jit_fill_symmetric_target_vec,
-    jit_wald_hac_stat,
     jit_symmetric_outer_prod_2dim,
     jit_wald_stat_from_mean_and_cov,
     wald_covariance_hac,
@@ -76,45 +71,6 @@ def _quadratic_sample() -> np.ndarray:
             dtype=np.float64,
         )
     )
-
-
-def test_jit_wald_hac_stat_matches_manual_statistic() -> None:
-    g = np.ascontiguousarray(
-        np.array(
-            [
-                [1.0, 2.0],
-                [2.0, -1.0],
-                [0.0, 1.0],
-                [3.0, 0.0],
-                [-1.0, 2.0],
-            ],
-            dtype=np.float64,
-        )
-    )
-    target = np.zeros(2, dtype=np.float64)
-    mean_buffer = np.empty(2, dtype=np.float64)
-    centered_buffer = np.empty_like(g)
-    omega_buffer = np.empty((2, 2), dtype=np.float64)
-    bandwidth = wooldridge_bandwidth(g)
-
-    err, stat, df = jit_wald_hac_stat.py_func(
-        g,
-        target,
-        kernel_dispatcher("bartlett"),
-        bandwidth,
-        mean_buffer,
-        centered_buffer,
-        omega_buffer,
-    )
-    manual_mean = g.mean(axis=0)
-    manual_centered = g - manual_mean
-    manual_omega = _manual_bartlett_hac(manual_centered, bandwidth)
-    manual_stat = g.shape[0] * manual_mean @ np.linalg.solve(manual_omega, manual_mean)
-
-    assert err == OK
-    assert OK == TestStatus.OK
-    assert df == 2
-    assert np.isclose(stat, manual_stat)
 
 
 def test_wald_mean_hac_uses_right_tail_p_value_method() -> None:
@@ -215,29 +171,6 @@ def test_wald_quadratic_hac_rejects_target_dimension_mismatch() -> None:
 
     with np.testing.assert_raises_regex(ValueError, "second moment matrix dimension"):
         wald_second_moment_hac(g, target, bandwidth=0)
-
-
-def test_jit_wald_hac_stat_returns_shape_error_for_bad_target() -> None:
-    g = np.ascontiguousarray(np.ones((5, 2), dtype=np.float64))
-    target = np.zeros(3, dtype=np.float64)
-    mean_buffer = np.empty(2, dtype=np.float64)
-    centered_buffer = np.empty_like(g)
-    omega_buffer = np.empty((2, 2), dtype=np.float64)
-
-    err, stat, df = jit_wald_hac_stat.py_func(
-        g,
-        target,
-        kernel_dispatcher("bartlett"),
-        0,
-        mean_buffer,
-        centered_buffer,
-        omega_buffer,
-    )
-
-    assert err == ERR_BAD_SHAPE
-    assert ERR_BAD_SHAPE == TestStatus.BAD_SHAPE
-    assert np.isnan(stat)
-    assert df == 2
 
 
 def test_jit_wald_stat_from_mean_and_cov_returns_shape_error_for_bad_target() -> None:
