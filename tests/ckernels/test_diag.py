@@ -302,3 +302,47 @@ def test_fill_mean_and_centered_parity(shape):
     rcentered = np.empty((n, p), dtype=np.float64)
     jit_fill_centered(x, rmean, rcentered)
     np.testing.assert_allclose(ncentered, rcentered, rtol=RTOL, atol=ATOL)
+
+
+# ---------------------------------------------------------------- Ljung-Box
+
+from SymbolicDSGE._diag_tests.ljung_box import (  # noqa: E402
+    BAD_LAG,
+    INSUFFICIENT_SAMPLES,
+    UDEF_VARIANCE,
+    acorr as jit_acorr,
+    lb_stat as jit_lb_stat,
+)
+
+
+@pytest.mark.parametrize("n,L", [(50, 5), (160, 10), (8, 3), (20, 25)])
+def test_acorr_parity(n, L):
+    """Native autocorrelation matches numba, including the L >= n case."""
+    rng = np.random.default_rng([n, L, 3])
+    x = np.ascontiguousarray(rng.standard_normal(n))
+    ns, nout = diag.acorr(x, L)
+    rs, rout = jit_acorr(x, L)
+    assert ns == rs == 0
+    np.testing.assert_allclose(nout, rout, rtol=RTOL, atol=ATOL)
+
+
+def test_acorr_constant_series_reports_undefined_variance():
+    assert diag.acorr(np.ones(5, dtype=np.float64), 2)[0] == UDEF_VARIANCE
+
+
+@pytest.mark.parametrize("n,L", [(50, 5), (160, 10), (8, 3), (20, 25)])
+def test_lb_stat_parity(n, L):
+    """Native Ljung-Box statistic matches numba, including the L >= n clamp."""
+    rng = np.random.default_rng([n, L, 4])
+    x = np.ascontiguousarray(rng.standard_normal(n))
+    ns, nstat = diag.lb_stat(x, L)
+    rs, rstat = jit_lb_stat(x, L)
+    assert ns == rs == 0
+    assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)
+
+
+def test_lb_stat_status_paths():
+    """n<=1 -> INSUFFICIENT, constant series -> UDEF_VARIANCE, L<=0 -> BAD_LAG."""
+    assert diag.lb_stat(np.array([1.0], dtype=np.float64), 1)[0] == INSUFFICIENT_SAMPLES
+    assert diag.lb_stat(np.ones(3, dtype=np.float64), 1)[0] == UDEF_VARIANCE
+    assert diag.lb_stat(np.array([1.0, 2.0], dtype=np.float64), 0)[0] == BAD_LAG

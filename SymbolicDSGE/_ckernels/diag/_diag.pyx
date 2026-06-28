@@ -30,8 +30,11 @@ cdef extern from "diag.h":
                          int64_t p, double *stat_out) nogil
     int sdsge_cusumsq_stat(const double *y, const double *X, int64_t T,
                            int64_t p, int64_t *n_out, double *stat_out) nogil
-
-
+    int sdsge_acorr(const double *x, const int64_t n, const int64_t L,
+                    double *z_scratch, double *out) nogil
+    int sdsge_lb_stat(const double *x, const int64_t n, int64_t L,
+                      double *z_scratch, double *acorr_scratch,
+                      double *out) nogil
 cdef extern from "diag_wald.h":
     ctypedef enum KernelID:
         BARTLETT
@@ -150,6 +153,46 @@ def cusumsq_stat(double[::1] y, double[:, ::1] X):
     with nogil:
         status = sdsge_cusumsq_stat(&y[0], &X[0, 0], T, p, &n, &stat)
     return status, n, stat
+
+
+def acorr(double[::1] x, int64_t L):
+    """Autocorrelation of x up to lag L. Returns (status, out(L+1)).
+
+    Mirrors the numba ``acorr`` (no L/n clamping here); ``out`` is length L+1 and
+    z_scratch is length n. status is DIAG_UDEF_VARIANCE for a constant series.
+    """
+    cdef int64_t n = x.shape[0]
+    out = np.empty(L + 1, dtype=np.float64)
+    z = np.empty(n, dtype=np.float64)
+    cdef double[::1] out_mv = out
+    cdef double[::1] z_mv = z
+    cdef double *x_ptr = &x[0] if n > 0 else NULL
+    cdef double *z_ptr = &z_mv[0] if n > 0 else NULL
+    cdef int status
+    with nogil:
+        status = sdsge_acorr(x_ptr, n, L, z_ptr, &out_mv[0])
+    return status, out
+
+
+def lb_stat(double[::1] x, int64_t L):
+    """Ljung-Box statistic for x up to lag L. Returns (status, stat).
+
+    The kernel clamps L to n-1 and validates n/L internally; the two length-n
+    scratch buffers cover the clamped lag (L_eff <= n-1, so L_eff+1 <= n).
+    """
+    cdef int64_t n = x.shape[0]
+    cdef double stat = 0.0
+    cdef int status
+    z = np.empty(n, dtype=np.float64)
+    rho = np.empty(n, dtype=np.float64)
+    cdef double[::1] z_mv = z
+    cdef double[::1] rho_mv = rho
+    cdef double *x_ptr = &x[0] if n > 0 else NULL
+    cdef double *z_ptr = &z_mv[0] if n > 0 else NULL
+    cdef double *rho_ptr = &rho_mv[0] if n > 0 else NULL
+    with nogil:
+        status = sdsge_lb_stat(x_ptr, n, L, z_ptr, rho_ptr, &stat)
+    return status, stat
 
 
 def hac_estimator_matmul(double[:, ::1] r, int kernel_id, int64_t L):

@@ -28,39 +28,53 @@
 
 /* Breusch-Godfrey LM statistic. eps(n), X(n,K). Builds the auxiliary design
  * [1 | X | lagged eps] internally. Writes the statistic to *stat_out. */
-int sdsge_bg_stat(const f64 *eps, const f64 *X, i64 n, i64 K, i64 lags,
-                  f64 *stat_out);
+int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
+                  i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT stat_out);
 
 /* Breusch-Pagan auxiliary regression. eps(n), X_aug(n,p) already augmented with
  * the intercept column (the augment + constant-column validation stay in the
  * Python wrapper). Writes RSS and centered TSS of the auxiliary fit. */
-int sdsge_bp_aux(const f64 *eps, const f64 *X_aug, i64 n, i64 p, f64 *rss_out,
-                 f64 *tss_out);
+int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
+                 i64 n, i64 p, f64 *SDSGE_RESTRICT rss_out,
+                 f64 *SDSGE_RESTRICT tss_out);
 
 /* Chow break-point F statistic. y(T), X(T,p), split at t_break. Fits the pooled
- * and the two sub-sample regressions; DIAG_FALLBACK if any is rank-deficient. */
-int sdsge_chow_stat(const f64 *y, const f64 *X, i64 T, i64 p, i64 t_break,
-                    f64 *stat_out);
+ * and the two sub-sample regressions; DIAG_FALLBACK if any is rank-deficient.
+ */
+int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
+                    i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT stat_out);
 
 /* Brown-Durbin-Evans recursive residuals (the w series, length T-p). y(T),
  * X(T,p). Fully native: seeds beta/P from the first p rows via an SPD inverse,
  * then the rank-1 downdate recursion. DIAG_FALLBACK if the seed Gram is
  * singular. */
-int sdsge_recursive_residuals(const f64 *y, const f64 *X, i64 T, i64 p,
-                              f64 *w_out);
+int sdsge_recursive_residuals(const f64 *SDSGE_RESTRICT y,
+                              const f64 *SDSGE_RESTRICT X, i64 T, i64 p,
+                              f64 *SDSGE_RESTRICT w_out);
 
 /* Standardized CUSUM series (length T-p): cumsum(recursive residuals) / sigma,
  * where sigma is the full-sample OLS residual std. DIAG_FALLBACK if the seed
  * Gram or the full-sample normal equations are rank-deficient. */
-int sdsge_cusum_series(const f64 *y, const f64 *X, i64 T, i64 p, f64 *series_out);
+int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
+                       i64 T, i64 p, f64 *SDSGE_RESTRICT series_out);
 
-/* CUSUM statistic: max over t of |series_t| / (sqrt(T-p) + 2 (t-p) / sqrt(T-p)). */
-int sdsge_cusum_stat(const f64 *y, const f64 *X, i64 T, i64 p, f64 *stat_out);
+/* CUSUM statistic: max over t of |series_t| / (sqrt(T-p) + 2 (t-p) /
+ * sqrt(T-p)). */
+int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
+                     i64 T, i64 p, f64 *SDSGE_RESTRICT stat_out);
 
 /* CUSUM-of-squares statistic. Writes the residual count n = T-p and the
  * Kolmogorov-type max deviation of the normalized squared-residual partial sums
  * from the t/n line, divided by sqrt(2). */
-int sdsge_cusumsq_stat(const f64 *y, const f64 *X, i64 T, i64 p, i64 *n_out,
-                       f64 *stat_out);
+int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
+                       i64 T, i64 p, i64 *SDSGE_RESTRICT n_out,
+                       f64 *SDSGE_RESTRICT stat_out);
+
+int sdsge_acorr(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 L,
+                f64 *SDSGE_RESTRICT z_scratch, f64 *SDSGE_RESTRICT out);
+
+int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
+                  f64 *SDSGE_RESTRICT z_scratch,
+                  f64 *SDSGE_RESTRICT acorr_scratch, f64 *SDSGE_RESTRICT out);
 
 #endif /* SDSGE_DIAG_H */
