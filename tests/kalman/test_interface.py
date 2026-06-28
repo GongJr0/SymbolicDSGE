@@ -90,6 +90,18 @@ def _make_stub_model(
         kalman_config=kalman_config,
     )
     model._build_C_d_from_obs = build_measurement
+
+    # Mirror SolvedModel's Kalman-matrix cache contract so the interface's
+    # cache-aware construction path works against the stub.
+    _cache: dict = {}
+
+    def _calibration_fingerprint():
+        p = calibration.parameters
+        return hash((tuple(p.keys()), tuple(float(v) for v in p.values())))
+
+    model._calibration_fingerprint = _calibration_fingerprint
+    model._kf_cache_get = _cache.get
+    model._kf_cache_put = _cache.__setitem__
     return model
 
 

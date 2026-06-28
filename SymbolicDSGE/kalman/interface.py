@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from ..core.config import ModelConfig, SymbolGetterDict
 
 
+from dataclasses import dataclass
 from functools import cached_property
 
 import numpy as np
@@ -23,6 +24,27 @@ import pandas as pd
 
 NDF = NDArray[float64]
 Float64Like = float | float64 | int | int64
+
+
+@dataclass
+class _KFMatrices:
+    """Cached model-constant Kalman matrices for one cache key.
+
+    Stored on the :class:`SolvedModel` (see ``SolvedModel._kf_cache``) and shared
+    across repeated filter calls so the per-call interface stops rebuilding
+    ``C``/``d``/``Q``/``P0``/``R`` for a fixed calibration. ``R_const`` is filled
+    lazily on the first constant-R call for the key (a key first seen via a
+    user-supplied or estimated ``R`` leaves it ``None``). ``validated`` flips to
+    ``True`` once the constant covariances pass the symmetry / non-negative-
+    diagonal checks, letting subsequent constant-R calls skip them.
+    """
+
+    C: NDF | None
+    d: NDF | None
+    Q: NDF
+    P0: NDF
+    R_const: NDF | None = None
+    validated: bool = False
 
 
 class KalmanInterface(KalmanFilter):
@@ -57,19 +79,49 @@ class KalmanInterface(KalmanFilter):
         self.y = y
 
         self.A, self.B = model.A, model.B
-        if self.mode == FilterMode.LINEAR:
-            self.C, self.d = self._get_C_d()
-        else:
-            self.C, self.d = None, None  # type: ignore[assignment]
 
-        self.Q = self._build_Q()
-        self.P0 = self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale)
-        if R is not None:
+        # C/d/Q/P0 (and, on the default path, R) are model-constant: rebuilt
+        # identically on every call for a fixed calibration. Resolve them through
+        # the model's cache so repeated filtering (Monte Carlo, MLE/MCMC that
+        # revisits a parameter vector) skips the rebuild. The key carries every
+        # dependency; the calibration fingerprint turns a parameter change into a
+        # cache miss, so estimation that varies parameters stays correct.
+        self._uses_const_R = R is None and not self.estimate_R_diag
+        cache_key = (
+            self.mode,
+            tuple(self.observables),
+            p0_mode,
+            None if p0_scale is None else float(p0_scale),
+            model._calibration_fingerprint(),
+        )
+        record = model._kf_cache_get(cache_key)
+        if record is None:
+            if self.mode == FilterMode.LINEAR:
+                C, d = self._get_C_d()
+            else:
+                C, d = None, None
+            record = _KFMatrices(
+                C=C,
+                d=d,
+                Q=self._build_Q(),
+                P0=self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale),
+            )
+            model._kf_cache_put(cache_key, record)
+        self._cache_record = record
+
+        self.C, self.d = record.C, record.d
+        self.Q = record.Q
+        self.P0 = record.P0
+        if self._uses_const_R:
+            # Fill R lazily so a key first seen with a user/estimated R still
+            # gets a constant R when later reused on the default path.
+            if record.R_const is None:
+                record.R_const = self._build_constant_R(None)
+            self.R = record.R_const
+        elif R is not None:
             self.R = self._build_constant_R(R)
-        elif self.estimate_R_diag:
-            self.R = self._initial_R_diag_guess()
         else:
-            self.R = self._build_constant_R(None)
+            self.R = self._initial_R_diag_guess()
 
         self.h_func = h_func
         self.H_jac = H_jac
@@ -103,15 +155,27 @@ class KalmanInterface(KalmanFilter):
             raise ValueError(f"Unrecognized filter mode: {self.mode}")
 
         validated_args = base_args | _arg_overrides
+
+        # The covariance-sanity checks (symmetry + non-negative diagonals) run on
+        # the model-constant Q/P0/R and dominate per-call validation. Skip them
+        # once they've passed for cached constant matrices; y/x0 and every shape
+        # check still run on each call. A user-supplied or estimated R (and any
+        # explicit override) is not cache-validated and keeps the full checks.
+        const_validated = (
+            self._cache_record.validated and self._uses_const_R and not _arg_overrides
+        )
+        run_const_checks = not const_validated
         validate_kf_inputs(
             **validated_args,
             x0=x0,
             filter_mode=self.mode,
-            check_nonneg_diag=True,
-            check_symmetry=True,
+            check_nonneg_diag=run_const_checks,
+            check_symmetry=run_const_checks,
             probe_measurement=(self.mode == FilterMode.EXTENDED),
             probe_state=("x0" if x0 is not None else "zeros"),
         )
+        if run_const_checks and self._uses_const_R and not _arg_overrides:
+            self._cache_record.validated = True
 
         if self.mode == FilterMode.LINEAR:
 

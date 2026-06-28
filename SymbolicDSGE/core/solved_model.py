@@ -28,7 +28,7 @@ from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
 from .simulation import affine_observations_into, simulate_linear_states_into
 from ..kalman.config import KalmanConfig
-from ..kalman.interface import KalmanInterface
+from ..kalman.interface import KalmanInterface, _KFMatrices
 from ..kalman.filter import FilterResult
 
 if TYPE_CHECKING:
@@ -68,6 +68,48 @@ class SolvedModel:
     @property
     def kalman_config(self) -> KalmanConfig | None:
         return self.compiled.kalman
+
+    def _calibration_fingerprint(self) -> int:
+        """Hashable snapshot of calibration parameter values.
+
+        Keys the Kalman matrix cache so a parameter change (MLE/MCMC) is a cache
+        miss -- the rebuilt matrices stay correct -- while a repeated parameter
+        vector (Monte Carlo, a revisited proposal) is a hit. Cheap: a tuple hash
+        over the handful of scalar parameters, dwarfed by the matrix builds it
+        guards.
+        """
+        params = self.config.calibration.parameters
+        return hash((tuple(params.keys()), tuple(float(v) for v in params.values())))
+
+    def _kf_cache_get(self, key: tuple) -> _KFMatrices | None:
+        """Cached Kalman matrices for ``key``, or ``None`` on miss.
+
+        The cache is a plain dict attached lazily: this is a frozen dataclass, so
+        it lives outside the declared fields and stays invisible to ``asdict`` /
+        bundle serialization.
+        """
+        cache = self.__dict__.get("_kf_cache")
+        return None if cache is None else cache.get(key)
+
+    def _kf_cache_put(self, key: tuple, matrices: _KFMatrices) -> None:
+        cache = self.__dict__.get("_kf_cache")
+        if cache is None:
+            cache = {}
+            object.__setattr__(self, "_kf_cache", cache)
+        cache[key] = matrices
+
+    def clear_kf_cache(self) -> None:
+        """Drop cached Kalman matrices.
+
+        Needed only when a model is mutated in place after a filter call in a way
+        the calibration fingerprint cannot see -- e.g. overwriting a hardcoded
+        ``kalman_config.R`` / ``P0`` matrix (a parametric R built from calibration
+        is covered automatically). The expected lifecycle (solve once, filter
+        many) never needs this.
+        """
+        cache = self.__dict__.get("_kf_cache")
+        if cache is not None:
+            cache.clear()
 
     def sim(
         self,
