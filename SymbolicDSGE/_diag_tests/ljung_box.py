@@ -9,11 +9,14 @@ from .distributions import PvalMethod, ReferenceDistribution
 from .result import TestResult
 from .status import TestStatus
 
+from ._native import native as _native
+
 NDF = NDArray[float64]
 LOOP_LIMIT_N = 1e6
 
 OK = int(TestStatus.OK)
 UDEF_VARIANCE = int(TestStatus.UDEF_VARIANCE)
+INSUFFICIENT_SAMPLES = int(TestStatus.INSUFFICIENT_SAMPLES)
 BAD_SHAPE = int(TestStatus.BAD_SHAPE)
 BAD_LAG = int(TestStatus.BAD_LAG)
 
@@ -42,7 +45,7 @@ def acorr(x: NDF, L: int) -> tuple[int, NDF]:
         z = x - mu
         denom = np.dot(z, z)
 
-    if denom <= 0.0:
+    if denom <= 0.0 or not np.isfinite(denom):
         for ell in range(L + 1):
             out[ell] = np.nan
         return UDEF_VARIANCE, out
@@ -65,7 +68,7 @@ def lb_stat(x: NDF, L: int) -> tuple[int, float64]:
 
     n = x.size
     if n <= 1:
-        return UDEF_VARIANCE, float64(np.nan)
+        return INSUFFICIENT_SAMPLES, float64(np.nan)
 
     if L >= n:
         L = n - 1
@@ -88,7 +91,18 @@ def ljung_box(
     x: NDF, L: int, alpha: float = 0.05, _auto_pval: bool = True
 ) -> TestResult:
     """Ljung-Box test for x up to lag L."""
-    err, stat = lb_stat(x, L)
+    if x.ndim != 1:
+        err, stat = (BAD_SHAPE, float64(np.nan))
+    else:
+        # Coerce once to canonical f64/C-contiguous so both backends behave
+        # identically: the native shim requires it, and the numba kernel fails to
+        # compile for non-f64 inputs (acorr's `z` cannot type-unify), so a raw f32
+        # would work natively but crash under ALWAYS_USE_NUMBA.
+        xc = np.ascontiguousarray(x, dtype=float64)
+        if _native is not None:
+            err, stat = _native.lb_stat(xc, L)
+        else:
+            err, stat = lb_stat(xc, L)
     df = L
     if x.ndim == 1 and x.size > 1 and L >= x.size:
         df = x.size - 1

@@ -9,6 +9,7 @@ from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribu
 from SymbolicDSGE._diag_tests.ljung_box import (
     BAD_LAG,
     BAD_SHAPE,
+    INSUFFICIENT_SAMPLES,
     OK,
     UDEF_VARIANCE,
     acorr,
@@ -94,7 +95,8 @@ def test_lb_stat_reports_input_status_codes() -> None:
     assert np.isnan(stat)
 
     err, stat = lb_stat.py_func(np.array([1.0], dtype=np.float64), 1)
-    assert err == UDEF_VARIANCE
+    assert err == INSUFFICIENT_SAMPLES
+    assert INSUFFICIENT_SAMPLES == TestStatus.INSUFFICIENT_SAMPLES
     assert np.isnan(stat)
 
     err, stat = lb_stat.py_func(np.array([1.0, 2.0], dtype=np.float64), 0)
