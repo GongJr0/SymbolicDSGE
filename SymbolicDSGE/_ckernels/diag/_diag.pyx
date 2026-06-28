@@ -35,6 +35,7 @@ cdef extern from "diag.h":
     int sdsge_lb_stat(const double *x, const int64_t n, int64_t L,
                       double *z_scratch, double *acorr_scratch,
                       double *out) nogil
+    int sdsge_jb_stat(const double *x, int64_t n, double *out) nogil
 cdef extern from "diag_wald.h":
     ctypedef enum KernelID:
         BARTLETT
@@ -153,6 +154,17 @@ def cusumsq_stat(double[::1] y, double[:, ::1] X):
     with nogil:
         status = sdsge_cusumsq_stat(&y[0], &X[0, 0], T, p, &n, &stat)
     return status, n, stat
+
+
+def jb_stat(double[::1] x):
+    """Jarque-Bera normality statistic. Returns (status, stat)."""
+    cdef int64_t n = x.shape[0]
+    cdef double stat = 0.0
+    cdef int status
+    cdef double *x_ptr = &x[0] if n > 0 else NULL
+    with nogil:
+        status = sdsge_jb_stat(x_ptr, n, &stat)
+    return status, stat
 
 
 def acorr(double[::1] x, int64_t L):

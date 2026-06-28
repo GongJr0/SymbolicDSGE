@@ -18,6 +18,7 @@ from ._diag import (
     fill_mean_ax0 as fill_mean_ax0,
     fill_symmetric_target_vec as fill_symmetric_target_vec,
     hac_estimator_matmul as hac_estimator_matmul,
+    jb_stat as jb_stat,
     lb_stat as lb_stat,
     recursive_residuals as recursive_residuals,
     symmetric_outer_prod_2dim as symmetric_outer_prod_2dim,
