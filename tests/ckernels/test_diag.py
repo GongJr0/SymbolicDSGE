@@ -346,3 +346,37 @@ def test_lb_stat_status_paths():
     assert diag.lb_stat(np.array([1.0], dtype=np.float64), 1)[0] == INSUFFICIENT_SAMPLES
     assert diag.lb_stat(np.ones(3, dtype=np.float64), 1)[0] == UDEF_VARIANCE
     assert diag.lb_stat(np.array([1.0, 2.0], dtype=np.float64), 0)[0] == BAD_LAG
+
+
+# ---------------------------------------------------------------- Jarque-Bera
+
+from SymbolicDSGE._diag_tests.jarque_bera import jb_stat as jit_jb_stat  # noqa: E402
+
+
+@pytest.mark.parametrize("n", [10, 50, 200])
+def test_jb_stat_parity(n):
+    """Native Jarque-Bera statistic matches numba on the OK path."""
+    rng = np.random.default_rng([n, 13])
+    x = np.ascontiguousarray(rng.standard_normal(n))
+    ns, nstat = diag.jb_stat(x)
+    rs, rstat = jit_jb_stat(x)
+    assert ns == rs == 0
+    assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)
+
+
+def test_jb_stat_status_paths():
+    """n<10 -> INSUFFICIENT (stat still computed), constant -> UDEF, empty ->
+    INSUFFICIENT -- matching numba in both status and value."""
+    cases = [
+        np.ascontiguousarray(np.random.default_rng(1).standard_normal(8)),
+        np.ones(20, dtype=np.float64),
+        np.empty(0, dtype=np.float64),
+    ]
+    for x in cases:
+        ns, nstat = diag.jb_stat(x)
+        rs, rstat = jit_jb_stat(x)
+        assert ns == rs
+        if np.isnan(nstat) or np.isnan(rstat):
+            assert np.isnan(nstat) and np.isnan(rstat)
+        else:
+            assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)

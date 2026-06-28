@@ -475,3 +475,44 @@ int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
   *out = stat;
   return DIAG_OK;
 }
+
+/* Jarque-Bera normality statistic n * (skew^2/6 + (kurt-3)^2/24), mirroring the
+ * numba jb_stat. The statistic is computed whenever the variance is defined;
+ * the small-sample (n < 10) result is still returned, only with an
+ * INSUFFICIENT_SAMPLES status (matching the numba reference). */
+int sdsge_jb_stat(const f64 *SDSGE_RESTRICT x, i64 n, f64 *SDSGE_RESTRICT out) {
+  if (n == 0) {
+    *out = NAN;
+    return DIAG_INSUFFICIENT_SAMPLES;
+  }
+
+  f64 mean = 0.0;
+  for (i64 i = 0; i < n; ++i)
+    mean += x[i];
+  mean /= (f64)n;
+
+  f64 m2 = 0.0, m3 = 0.0, m4 = 0.0;
+  for (i64 i = 0; i < n; ++i) {
+    f64 centered = x[i] - mean;
+    f64 centered2 = centered * centered;
+    m2 += centered2;
+    m3 += centered2 * centered;
+    m4 += centered2 * centered2;
+  }
+  m2 /= (f64)n;
+  m3 /= (f64)n;
+  m4 /= (f64)n;
+
+  if (m2 <= 0.0) {
+    *out = NAN;
+    return DIAG_UDEF_VARIANCE;
+  }
+
+  f64 skew = m3 / pow(m2, 1.5);
+  f64 kurt = m4 / (m2 * m2);
+  f64 kurt_minus_3 = kurt - 3.0;
+
+  f64 inner = (skew * skew) / 6.0 + (kurt_minus_3 * kurt_minus_3) / 24.0;
+  *out = (f64)n * inner;
+  return (n >= 10) ? DIAG_OK : DIAG_INSUFFICIENT_SAMPLES;
+}

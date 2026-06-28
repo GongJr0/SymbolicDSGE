@@ -12,6 +12,8 @@ from .distributions import PvalMethod, ReferenceDistribution
 from .result import TestResult
 from .status import TestStatus
 
+from ._native import native as _native
+
 OK = int(TestStatus.OK)
 UDEF_VARIANCE = int(TestStatus.UDEF_VARIANCE)
 BAD_SHAPE = int(TestStatus.BAD_SHAPE)
@@ -68,7 +70,16 @@ def jarque_bera(
     _auto_pval: bool = True,
 ) -> TestResult:
     """Perform the Jarque-Bera test for normality."""
-    status, stat = jb_stat(x)
+    if x.ndim != 1:
+        status, stat = BAD_SHAPE, float64(np.nan)
+    else:
+        # Coerce once to canonical f64/C-contiguous so both backends agree (the
+        # native shim requires it; the numba kernel computes in the input dtype).
+        xc = np.ascontiguousarray(x, dtype=float64)
+        if _native is not None:
+            status, stat = _native.jb_stat(xc)
+        else:
+            status, stat = jb_stat(xc)
     return TestResult(
         test_name="jarque_bera",
         dist=ReferenceDistribution.JB_LOOKUP,

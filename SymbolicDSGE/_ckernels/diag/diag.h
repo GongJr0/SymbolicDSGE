@@ -77,4 +77,9 @@ int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
                   f64 *SDSGE_RESTRICT z_scratch,
                   f64 *SDSGE_RESTRICT acorr_scratch, f64 *SDSGE_RESTRICT out);
 
+/* Jarque-Bera normality statistic. x(n). Writes the statistic to *out; returns
+ * INSUFFICIENT_SAMPLES (still writing the stat) when n < 10, UDEF_VARIANCE when
+ * the variance is zero, OK otherwise. */
+int sdsge_jb_stat(const f64 *SDSGE_RESTRICT x, i64 n, f64 *SDSGE_RESTRICT out);
+
 #endif /* SDSGE_DIAG_H */
