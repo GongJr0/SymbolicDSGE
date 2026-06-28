@@ -7,7 +7,9 @@ from scipy.stats import (
 )
 from scipy.stats._distn_infrastructure import rv_generic
 from scipy.stats._multivariate import multi_rv_generic
+import numpy as np
 from numpy import asarray, ndarray, float64, random, zeros, generic
+from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
 from typing import Any, Literal, Callable, Mapping, cast, overload
 
@@ -36,6 +38,76 @@ def abstract_shock_array(
     return asarray(shocks, dtype=float64)
 
 
+# --- numpy Generator fast paths --------------------------------------------
+# scipy's generic ``.rvs`` is ~9x slower than ``np.random.Generator`` here (and
+# ``multivariate_normal.rvs`` re-factorizes the covariance every call). These
+# draw the known shock families directly off a Generator; ``abstract_shock_array``
+# above stays as the fallback for arbitrary scipy distribution objects.
+
+
+def _gaussian_factor(cov: ndarray) -> ndarray:
+    """A factor ``F`` with ``F @ F.T == cov``.
+
+    Cholesky on the common positive-definite path, with an eigh-based fallback so
+    positive-semidefinite (but not strictly PD) covariances still sample -- the
+    robustness scipy's ``_PSD`` gives us, without scipy.
+    """
+    try:
+        return cholesky(cov)
+    except LinAlgError:
+        w, V = eigh(cov)
+        return cast(ndarray, V * np.sqrt(np.clip(w, 0.0, None)))
+
+
+def _draw_normal(
+    T: int, seed: int | None, mu: float | float64, sigma: float | float64
+) -> ndarray:
+    return random.default_rng(seed).normal(loc=mu, scale=sigma, size=T).astype(float64)
+
+
+def _draw_normal_mv(
+    T: int, seed: int | None, mean: ndarray | None, cov: ndarray
+) -> ndarray:
+    cov = asarray(cov, dtype=float64)
+    k = cov.shape[0]
+    mean_vec = zeros(k, dtype=float64) if mean is None else asarray(mean, dtype=float64)
+    z = random.default_rng(seed).standard_normal((T, k))
+    return cast(ndarray, (mean_vec + z @ _gaussian_factor(cov).T).astype(float64))
+
+
+def _draw_t(
+    T: int,
+    seed: int | None,
+    df: float,
+    loc: float | float64,
+    scale: float | float64,
+) -> ndarray:
+    draws = random.default_rng(seed).standard_t(df, size=T)
+    return (loc + scale * draws).astype(float64)
+
+
+def _draw_t_mv(
+    T: int, seed: int | None, df: float, loc: ndarray | None, shape: ndarray
+) -> ndarray:
+    shape = asarray(shape, dtype=float64)
+    k = shape.shape[0]
+    loc_vec = zeros(k, dtype=float64) if loc is None else asarray(loc, dtype=float64)
+    rng = random.default_rng(seed)
+    z = rng.standard_normal((T, k)) @ _gaussian_factor(shape).T
+    g = rng.chisquare(df, size=T) / df
+    return cast(ndarray, (loc_vec + z / np.sqrt(g)[:, None]).astype(float64))
+
+
+def _draw_uniform(
+    T: int, seed: int | None, loc: float | float64, scale: float | float64
+) -> ndarray:
+    return (
+        random.default_rng(seed)
+        .uniform(low=loc, high=loc + scale, size=T)
+        .astype(float64)
+    )
+
+
 def normal_shock_array(
     T: int,
     seed: int,
@@ -53,7 +125,7 @@ def normal_shock_array(
     Returns:
     np.ndarray: An array of normally distributed shocks of length T.
     """
-    return abstract_shock_array(T, seed, norm, loc=mu, scale=sigma)
+    return _draw_normal(T, seed, mu, sigma)
 
 
 def normal_multivariate_shock_array(
@@ -76,8 +148,7 @@ def normal_multivariate_shock_array(
     np.ndarray: An array of shape (T, k) of multivariate normally distributed shocks.
     """
 
-    shocks = abstract_shock_array(T, seed, mnorm, mean=asarray(mus), cov=cov_mat)
-    return asarray(shocks, dtype=float64)
+    return _draw_normal_mv(T, seed, asarray(mus, dtype=float64), asarray(cov_mat))
 
 
 def t_shock_array(
@@ -100,7 +171,7 @@ def t_shock_array(
     Returns:
     np.ndarray: An array of t-distributed shocks of length T.
     """
-    return abstract_shock_array(T, seed, t, df=df, loc=loc, scale=scale)
+    return _draw_t(T, seed, df, loc, scale)
 
 
 def t_multivariate_shock_array(
@@ -124,7 +195,7 @@ def t_multivariate_shock_array(
     Returns:
     np.ndarray: An array of shape (T, k) of multivariate t-distributed shocks.
     """
-    return abstract_shock_array(T, seed, mt, df=df, loc=asarray(locs), shape=cov_mat)
+    return _draw_t_mv(T, seed, df, asarray(locs, dtype=float64), asarray(cov_mat))
 
 
 def uniform_shock_array(
@@ -142,7 +213,7 @@ def uniform_shock_array(
     Returns:
     np.ndarray: An array of uniformly distributed shocks of length T.
     """
-    return abstract_shock_array(T, seed, uniform, loc=loc, scale=scale)
+    return _draw_uniform(T, seed, loc, scale)
 
 
 def uniform_multivariate_shock_array(
@@ -241,6 +312,13 @@ class Shock:
     def shock_generator(self) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
         self._assert_generator()
         kwargs = self.dist_kwargs.copy()
+
+        # Known string families go through the numpy Generator fast paths. A raw
+        # scipy distribution object (or a string with positional dist_args, which
+        # the fast path doesn't model) keeps the scipy ``.rvs`` route.
+        if isinstance(self.dist, str) and not self.dist_args:
+            return self._numpy_shock_generator(kwargs)
+
         scale_key = "scale"
         if self.multivar:
             scale_key = "shape" if self.dist == "t" else "cov"
@@ -253,6 +331,45 @@ class Shock:
         )
 
         return fun
+
+    def _numpy_shock_generator(
+        self, kwargs: dict
+    ) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
+        """Build the per-scale draw closure for a string family on numpy.
+
+        The returned callable takes the scale argument ``s`` (a scalar std for
+        univariate families, a covariance/shape matrix for multivariate ones),
+        mirroring the scipy-path contract.
+        """
+        family = self.dist
+        T, seed, multivar = self.T, self.seed, self.multivar
+
+        if family == "norm":
+            if multivar:
+                mean = kwargs.get("mean")
+                return lambda s: _draw_normal_mv(T, seed, mean, cast(ndarray, s))
+            loc = kwargs.get("loc", 0.0)
+            return lambda s: _draw_normal(T, seed, loc, cast(float, s))
+
+        if family == "t":
+            if "df" not in kwargs:
+                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
+            df = kwargs["df"]
+            if multivar:
+                loc = kwargs.get("loc")
+                return lambda s: _draw_t_mv(T, seed, df, loc, cast(ndarray, s))
+            loc = kwargs.get("loc", 0.0)
+            return lambda s: _draw_t(T, seed, df, loc, cast(float, s))
+
+        if family == "uni":
+            if multivar:
+                raise NotImplementedError(
+                    "Multivariate uniform shocks are not implemented."
+                )
+            loc = kwargs.get("loc", 0.0)
+            return lambda s: _draw_uniform(T, seed, loc, cast(float, s))
+
+        raise ValueError(f"Unknown shock distribution family: {family!r}")
 
     @overload
     def place_shocks(self, shock_spec: ShockSpecUni) -> ndarray: ...
