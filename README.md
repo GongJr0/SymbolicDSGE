@@ -69,7 +69,7 @@ The library supports a wide set of features beyond augmentation:
 GUI users can:
 
 - Create a model config
-- Load nad adjust existing configs
+- Load and adjust existing configs
 - Estimate
 - Solve
 - Simulate
@@ -101,7 +101,7 @@ sol = solver.solve(compiled, ...)
 sol.serve(open_browser=True)
 ```
 
-The UI does not support all capabilities of the library; however it can significantly aid the demonstration of findings to a non-technical audience by allowing them to interact with a given model. The UI is in active development and supporting all built-in features is a long-term goal.
+Although SymbolicDSGE is still a fast-moving project; the UI effectively supports all features with the exception of integration with the `[sr]` extra as of `v1.4.2`. Symbolic Regression requires extensive configuration and templating, therefore it's presence as a GUI component is not planned for the future.
 
 ### Read the Docs
 
