@@ -134,10 +134,24 @@ uv run pytest <optional:your-test-file> --cov
 ### Performance critical code
 
 SymbolicDSGE, being a dynamic modeling library, has multiple hot paths that require careful planning and optimization.
-We generally rely on `numba`'s no-python JIT compilation to speed things up and avoid the platform-specific nature of Cython or its C/C++ counterparts.
+We used to rely on `numba` to JIT compile the numeric kernels.
+However, hundreds of JIT compiled functions create a serious runtime cost with the initial warm-up process.
+Therefore, a native C + Cython setup is now being adopted with most numeric kernels being ported.
+`numba` kernels still live in the library today as parity test targets for the still young C kernels.
+However, the long-term target is to remove all JIT fallbacks to AOT kernels, making `numba` stay only for truely dynamic codegen tasks. 
 
-If you're contributing to a hot path, you should inspect the surrounding code to understand how `numba` is being utilized.
-As a general rule of thumb, sticking to `numpy` types and avoiding Python objects in compiled functions will ensure your code can compile, but it doesn't ensure it will be fast.
+If you're contributing to a hot path, you should inspect the surrounding code to understand how `numba` and/or C/Cython is being utilized.
+As a general rules of thumb for both compilation paths are listed below. However, if you're not confident in your knowledge of `numba`, C, or Cython, you are also welcome to write the logic in pure python and ask for help and/or someone to refactor it into compilable code.
 
-However, if you're not confident in your knowledge of `numba` and its many quirks, you can write the logic and ask for help and/or someone to refactor it into compilable code.
-The above suggestion also applies to new features. You are welcome to implement a feature in plain Python and we can iterate on it together to make it suit the current codebase before merging the PR.
+__Numba rules of thumb:__
+ -  Sticking to `numpy` types and avoiding Python objects in compiled functions will ensure your code can compile.
+ -  `numba` ultimately produces machine-code through `llvm-lite`. Patterns that would be slow in any other AOT compiled code (such as assignments per loop iteration) will remain slow in numba.
+ -  Type hints of function signatures are diregarded when `numba` compiles a function. Instead the types of given arguments are used. Therefore, examples like failing tolerance tests due to accidental `float32` inputs can occur with no errors raised.
+
+__C and Cython rules of thumb:__
+- `SymbolicDSGE` structures its native code such that all allocations are made inside Cython and passed to C as pointers. This ensures that no python object and memory allocation needs to be managed in C.
+- To let Cython handle all allocation tasks, C functions use output buffers passed as pointers, while intermediate helpers can return non-void, the boundary is expected to write-into some container rather than returning results.
+- Cython-side ensures any buffer passed to a C function is C-contiguous. For functions that can take array slices and other non-contiguous views, a recast via `np.ascontiguousarray` is therefore necessary before the C side is invoked.
+- C receives all array inuts as row-major 1D buffers and the outputs are written with the same structure. reshaping is not done inside C.
+- C code primarily uses `<math.h>` only, with `<stdlib.h>` and `<float.h>` appearing rarely. Operations requiring heavy packages like `LAPACK` and `BLAS` already form the `numpy` backend, if raw C can't handle a case, we delegate it to `numpy`.
+- All types in the C-side are bit exact and OS agnostic. We mainly use the type aliases `f64` and `i64`, producing 64-bit floats and signed integers.
