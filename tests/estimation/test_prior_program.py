@@ -7,26 +7,10 @@ import pytest
 
 from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.estimation.prior_program import (
-    DIST_BETA,
-    DIST_GAMMA,
-    DIST_HALF_CAUCHY,
-    DIST_HALF_NORMAL,
-    DIST_INV_GAMMA,
-    DIST_LOG_NORMAL,
-    DIST_NORMAL,
-    DIST_TRUNC_NORMAL,
-    DIST_UNIFORM,
+    DistCode,
     N_DIST_PARAMS,
     N_TRANSFORM_PARAMS,
-    TRANSFORM_AFFINE_LOGIT,
-    TRANSFORM_AFFINE_PROBIT,
-    TRANSFORM_IDENTITY,
-    TRANSFORM_LOG,
-    TRANSFORM_LOGIT,
-    TRANSFORM_LOWER_BOUNDED,
-    TRANSFORM_PROBIT,
-    TRANSFORM_SOFTPLUS,
-    TRANSFORM_UPPER_BOUNDED,
+    TransformCode,
     _dist_logpdf,
     _evaluate_logprior_program,
     _lkj_chol_logjac,
@@ -360,15 +344,15 @@ def test_prior_program_scalar_transform_helpers_cover_all_branches():
 
     params = np.array([1.0, 3.0, 2.0], dtype=np.float64)
     for code in (
-        TRANSFORM_IDENTITY,
-        TRANSFORM_LOG,
-        TRANSFORM_SOFTPLUS,
-        TRANSFORM_LOGIT,
-        TRANSFORM_PROBIT,
-        TRANSFORM_AFFINE_LOGIT,
-        TRANSFORM_AFFINE_PROBIT,
-        TRANSFORM_LOWER_BOUNDED,
-        TRANSFORM_UPPER_BOUNDED,
+        TransformCode.IDENTITY,
+        TransformCode.LOG,
+        TransformCode.SOFTPLUS,
+        TransformCode.LOGIT,
+        TransformCode.PROBIT,
+        TransformCode.AFFINE_LOGIT,
+        TransformCode.AFFINE_PROBIT,
+        TransformCode.LOWER_BOUNDED,
+        TransformCode.UPPER_BOUNDED,
     ):
         x, logjac = _transform_inverse_and_logjac.py_func(
             code,
@@ -418,15 +402,15 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
         ),
     }
     valid_x = {
-        DIST_NORMAL: 0.25,
-        DIST_LOG_NORMAL: 1.2,
-        DIST_HALF_NORMAL: 0.25,
-        DIST_TRUNC_NORMAL: 0.25,
-        DIST_HALF_CAUCHY: 0.25,
-        DIST_BETA: 0.25,
-        DIST_GAMMA: 1.5,
-        DIST_INV_GAMMA: 1.5,
-        DIST_UNIFORM: 0.25,
+        DistCode.NORMAL: 0.25,
+        DistCode.LOG_NORMAL: 1.2,
+        DistCode.HALF_NORMAL: 0.25,
+        DistCode.TRUNC_NORMAL: 0.25,
+        DistCode.HALF_CAUCHY: 0.25,
+        DistCode.BETA: 0.25,
+        DistCode.GAMMA: 1.5,
+        DistCode.INV_GAMMA: 1.5,
+        DistCode.UNIFORM: 0.25,
     }
 
     for prior in scalar_priors.values():
@@ -440,14 +424,14 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
         assert np.isfinite(out)
 
     for code, params, bad_x in (
-        (DIST_LOG_NORMAL, [0.0, 1.0, 0.0, 0.0, 0.0], -1.0),
-        (DIST_HALF_NORMAL, [1.0, 0.0, 0.0, 0.0, 0.0], -1.0),
-        (DIST_TRUNC_NORMAL, [0.0, 1.0, -1.0, 1.0, 0.0], 2.0),
-        (DIST_HALF_CAUCHY, [1.0, 0.0, 0.0, 0.0, 0.0], -1.0),
-        (DIST_BETA, [1.0, 1.0, 0.0, 0.0, 0.0], 2.0),
-        (DIST_GAMMA, [1.0, 1.0, 0.0, 0.0, 0.0], -1.0),
-        (DIST_INV_GAMMA, [1.0, 1.0, 0.0, 0.0, 0.0], 0.0),
-        (DIST_UNIFORM, [-1.0, 1.0, 2.0, 0.0, 0.0], 2.0),
+        (DistCode.LOG_NORMAL, [0.0, 1.0, 0.0, 0.0, 0.0], -1.0),
+        (DistCode.HALF_NORMAL, [1.0, 0.0, 0.0, 0.0, 0.0], -1.0),
+        (DistCode.TRUNC_NORMAL, [0.0, 1.0, -1.0, 1.0, 0.0], 2.0),
+        (DistCode.HALF_CAUCHY, [1.0, 0.0, 0.0, 0.0, 0.0], -1.0),
+        (DistCode.BETA, [1.0, 1.0, 0.0, 0.0, 0.0], 2.0),
+        (DistCode.GAMMA, [1.0, 1.0, 0.0, 0.0, 0.0], -1.0),
+        (DistCode.INV_GAMMA, [1.0, 1.0, 0.0, 0.0, 0.0], 0.0),
+        (DistCode.UNIFORM, [-1.0, 1.0, 2.0, 0.0, 0.0], 2.0),
         (999, [0.0] * N_DIST_PARAMS, 0.0),
     ):
         assert np.isnan(
@@ -485,8 +469,8 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
 
     theta = np.array([0.25], dtype=np.float64)
     scalar_indices = np.array([0], dtype=np.int64)
-    scalar_dist_codes = np.array([DIST_NORMAL], dtype=np.int64)
-    scalar_transform_codes = np.array([TRANSFORM_IDENTITY], dtype=np.int64)
+    scalar_dist_codes = np.array([DistCode.NORMAL], dtype=np.int64)
+    scalar_transform_codes = np.array([TransformCode.IDENTITY], dtype=np.int64)
     scalar_dist_params = np.zeros((1, N_DIST_PARAMS), dtype=np.float64)
     scalar_dist_params[0, 1] = 1.0
     scalar_transform_params = np.zeros((1, N_TRANSFORM_PARAMS), dtype=np.float64)
@@ -513,7 +497,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
         _evaluate_logprior_program.py_func(
             np.array([-0.25], dtype=np.float64),
             scalar_indices,
-            np.array([DIST_LOG_NORMAL], dtype=np.int64),
+            np.array([DistCode.LOG_NORMAL], dtype=np.int64),
             scalar_transform_codes,
             scalar_dist_params,
             scalar_transform_params,

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum
 import math
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import numpy as np
 from numba import njit
 from numpy import float64
 from numpy.typing import NDArray
+
+from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
 from ..bayesian.distributions.beta import Beta
 from ..bayesian.distributions.gamma import Gamma
@@ -34,26 +37,61 @@ from ..bayesian.transforms.upper_bounded import UpperBoundedTransform
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
 
-DIST_NORMAL = 1
-DIST_LOG_NORMAL = 2
-DIST_HALF_NORMAL = 3
-DIST_TRUNC_NORMAL = 4
-DIST_HALF_CAUCHY = 5
-DIST_BETA = 6
-DIST_GAMMA = 7
-DIST_INV_GAMMA = 8
-DIST_UNIFORM = 9
+# Prefer the compiled native log-prior kernel; fall back to the numba kernel
+# below when the extension is not built. ALWAYS_USE_NUMBA / NEVER_USE_NUMBA
+# override the default (see SymbolicDSGE._native_dispatch). Declared explicitly so
+# the FORCE_NUMBA branch (which binds None) doesn't pin the type to None.
+_logprior_program_native: Callable[..., float] | None
+if FORCE_NUMBA:
+    _logprior_program_native = None
+else:
+    try:
+        from .._ckernels.estimation import logprior_program as _logprior_program_native
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _logprior_program_native = None
 
-TRANSFORM_IDENTITY = 1
-TRANSFORM_LOG = 2
-TRANSFORM_SOFTPLUS = 3
-TRANSFORM_LOGIT = 4
-TRANSFORM_PROBIT = 5
-TRANSFORM_AFFINE_LOGIT = 6
-TRANSFORM_AFFINE_PROBIT = 7
-TRANSFORM_LOWER_BOUNDED = 8
-TRANSFORM_UPPER_BOUNDED = 9
 
+class DistCode(IntEnum):
+    """Integer dispatch codes for scalar prior families in the packed kernel.
+
+    Mirrors ``SdsgeDistCode`` in ``prior_program.h`` -- the two MUST stay in
+    lockstep (same names, same values). The Python side packs these into the
+    int64 code arrays the native kernel switches on; numba evaluates the members
+    directly inside the cached njit hot loop.
+    """
+
+    NORMAL = 1
+    LOG_NORMAL = 2
+    HALF_NORMAL = 3
+    TRUNC_NORMAL = 4
+    HALF_CAUCHY = 5
+    BETA = 6
+    GAMMA = 7
+    INV_GAMMA = 8
+    UNIFORM = 9
+
+
+class TransformCode(IntEnum):
+    """Integer dispatch codes for prior transforms in the packed kernel.
+
+    Mirrors ``SdsgeTransformCode`` in ``prior_program.h``; see :class:`DistCode`.
+    """
+
+    IDENTITY = 1
+    LOG = 2
+    SOFTPLUS = 3
+    LOGIT = 4
+    PROBIT = 5
+    AFFINE_LOGIT = 6
+    AFFINE_PROBIT = 7
+    LOWER_BOUNDED = 8
+    UPPER_BOUNDED = 9
+
+
+#: Packed-row strides (mirror ``SDSGE_N_DIST_PARAMS`` / ``SDSGE_N_TRANSFORM_PARAMS``
+#: in ``prior_program.h``).
 N_DIST_PARAMS = 5
 N_TRANSFORM_PARAMS = 3
 
@@ -83,6 +121,22 @@ class PackedLogPrior:
         )
 
     def logpdf(self, theta: NDF) -> float64:
+        if _logprior_program_native is not None:
+            return float64(
+                _logprior_program_native(
+                    np.ascontiguousarray(theta, dtype=float64),
+                    self.scalar_indices,
+                    self.scalar_dist_codes,
+                    self.scalar_transform_codes,
+                    self.scalar_dist_params,
+                    self.scalar_transform_params,
+                    self.matrix_indices,
+                    self.matrix_dims,
+                    self.matrix_lengths,
+                    self.matrix_etas,
+                    self.matrix_log_constants,
+                )
+            )
         return float64(
             _evaluate_logprior_program(
                 theta,
@@ -199,75 +253,75 @@ def _pack_distribution(dist: Any) -> tuple[int | None, list[float]]:
     if isinstance(dist, Normal):
         params[0] = float(getattr(dist, "_mean"))
         params[1] = float(getattr(dist, "_var"))
-        return DIST_NORMAL, params
+        return DistCode.NORMAL, params
     if isinstance(dist, LogNormal):
         params[0] = float(getattr(dist, "_meanlog"))
         params[1] = float(getattr(dist, "_stdlog"))
-        return DIST_LOG_NORMAL, params
+        return DistCode.LOG_NORMAL, params
     if isinstance(dist, HalfNormal):
         params[0] = float(getattr(dist, "_std"))
-        return DIST_HALF_NORMAL, params
+        return DistCode.HALF_NORMAL, params
     if isinstance(dist, TruncNormal):
         params[0] = float(getattr(dist, "_mean"))
         params[1] = float(getattr(dist, "_std"))
         params[2] = float(getattr(dist, "_low_trunc"))
         params[3] = float(getattr(dist, "_high_trunc"))
         params[4] = float(getattr(dist, "_log_norm"))
-        return DIST_TRUNC_NORMAL, params
+        return DistCode.TRUNC_NORMAL, params
     if isinstance(dist, HalfCauchy):
         params[0] = float(getattr(dist, "_gamma"))
-        return DIST_HALF_CAUCHY, params
+        return DistCode.HALF_CAUCHY, params
     if isinstance(dist, Beta):
         params[0] = float(getattr(dist, "_a"))
         params[1] = float(getattr(dist, "_b"))
         params[2] = float(getattr(dist, "_log_norm"))
-        return DIST_BETA, params
+        return DistCode.BETA, params
     if isinstance(dist, Gamma):
         params[0] = float(getattr(dist, "_a"))
         params[1] = float(getattr(dist, "_theta"))
         params[2] = float(getattr(dist, "_log_norm"))
-        return DIST_GAMMA, params
+        return DistCode.GAMMA, params
     if isinstance(dist, InvGamma):
         params[0] = float(getattr(dist, "_a"))
         params[1] = float(getattr(dist, "_beta"))
         params[2] = float(getattr(dist, "_log_prefactor"))
-        return DIST_INV_GAMMA, params
+        return DistCode.INV_GAMMA, params
     if isinstance(dist, Uniform):
         params[0] = float(getattr(dist, "_low"))
         params[1] = float(getattr(dist, "_high"))
         params[2] = float(getattr(dist, "_width"))
-        return DIST_UNIFORM, params
+        return DistCode.UNIFORM, params
     return None, params
 
 
 def _pack_transform(transform: Any) -> tuple[int | None, list[float]]:
     params = _blank_transform_params()
     if isinstance(transform, Identity):
-        return TRANSFORM_IDENTITY, params
+        return TransformCode.IDENTITY, params
     if isinstance(transform, LogTransform):
-        return TRANSFORM_LOG, params
+        return TransformCode.LOG, params
     if isinstance(transform, SoftplusTransform):
-        return TRANSFORM_SOFTPLUS, params
+        return TransformCode.SOFTPLUS, params
     if isinstance(transform, LogitTransform):
-        return TRANSFORM_LOGIT, params
+        return TransformCode.LOGIT, params
     if isinstance(transform, ProbitTransform):
-        return TRANSFORM_PROBIT, params
+        return TransformCode.PROBIT, params
     if isinstance(transform, AffineLogitTransform):
         params[0] = float(transform.low)
         params[1] = float(transform.high)
         params[2] = float(transform.high - transform.low)
-        return TRANSFORM_AFFINE_LOGIT, params
+        return TransformCode.AFFINE_LOGIT, params
     if isinstance(transform, AffineProbitTransform):
         params[0] = float(transform.low)
         params[1] = float(transform.high)
         params[2] = float(transform.high - transform.low)
-        return TRANSFORM_AFFINE_PROBIT, params
+        return TransformCode.AFFINE_PROBIT, params
     if isinstance(transform, LowerBoundedTransform):
         params[0] = float(transform.low)
-        return TRANSFORM_LOWER_BOUNDED, params
+        return TransformCode.LOWER_BOUNDED, params
     if isinstance(transform, UpperBoundedTransform):
         params[0] = float(transform.high)
-        return TRANSFORM_UPPER_BOUNDED, params
+        return TransformCode.UPPER_BOUNDED, params
     return None, params
 
 
@@ -310,19 +364,19 @@ def _transform_inverse_and_logjac(
     params: NDF,
     z: float64,
 ) -> tuple[float64, float64]:
-    if code == TRANSFORM_IDENTITY:
+    if code == TransformCode.IDENTITY:
         return z, float64(0.0)
-    if code == TRANSFORM_LOG:
+    if code == TransformCode.LOG:
         return float64(math.exp(float(z))), z
-    if code == TRANSFORM_SOFTPLUS:
+    if code == TransformCode.SOFTPLUS:
         return _softplus_scalar(z), _log_sigmoid_scalar(z)
-    if code == TRANSFORM_LOGIT:
+    if code == TransformCode.LOGIT:
         return _sigmoid_scalar(z), float64(
             _log_sigmoid_scalar(z) + _log_sigmoid_scalar(-z)
         )
-    if code == TRANSFORM_PROBIT:
+    if code == TransformCode.PROBIT:
         return _std_norm_cdf(z), _std_norm_logpdf(z)
-    if code == TRANSFORM_AFFINE_LOGIT:
+    if code == TransformCode.AFFINE_LOGIT:
         low = params[0]
         span = params[2]
         sig = _sigmoid_scalar(z)
@@ -331,29 +385,29 @@ def _transform_inverse_and_logjac(
             math.log(float(span)) + _log_sigmoid_scalar(z) + _log_sigmoid_scalar(-z)
         )
         return x, logjac
-    if code == TRANSFORM_AFFINE_PROBIT:
+    if code == TransformCode.AFFINE_PROBIT:
         low = params[0]
         span = params[2]
         cdf = _std_norm_cdf(z)
         return float64(low + span * cdf), float64(
             math.log(float(span)) + _std_norm_logpdf(z)
         )
-    if code == TRANSFORM_LOWER_BOUNDED:
+    if code == TransformCode.LOWER_BOUNDED:
         return float64(params[0] + math.exp(float(z))), z
-    if code == TRANSFORM_UPPER_BOUNDED:
+    if code == TransformCode.UPPER_BOUNDED:
         return float64(params[0] - math.exp(float(z))), z
     return float64(np.nan), float64(np.nan)
 
 
 @njit(cache=True)
 def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
-    if code == DIST_NORMAL:
+    if code == DistCode.NORMAL:
         mean = params[0]
         var = params[1]
         return float64(
             -0.5 * math.log(2.0 * math.pi * float(var)) - 0.5 * ((x - mean) ** 2) / var
         )
-    if code == DIST_LOG_NORMAL:
+    if code == DistCode.LOG_NORMAL:
         if x <= 0.0:
             return float64(np.nan)
         meanlog = params[0]
@@ -364,14 +418,14 @@ def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
             - 0.5 * math.log(2.0 * math.pi)
             - 0.5 * ((math.log(float(x)) - meanlog) / stdlog) ** 2
         )
-    if code == DIST_HALF_NORMAL:
+    if code == DistCode.HALF_NORMAL:
         if x < 0.0:
             return float64(np.nan)
         std = params[0]
         return float64(
             0.5 * math.log(2.0 / math.pi) - math.log(float(std)) - 0.5 * (x / std) ** 2
         )
-    if code == DIST_TRUNC_NORMAL:
+    if code == DistCode.TRUNC_NORMAL:
         mean = params[0]
         std = params[1]
         low = params[2]
@@ -381,7 +435,7 @@ def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
             return float64(np.nan)
         z = float64((x - mean) / std)
         return float64(-0.5 * z * z - log_norm)
-    if code == DIST_HALF_CAUCHY:
+    if code == DistCode.HALF_CAUCHY:
         if x < 0.0:
             return float64(np.nan)
         gamma = params[0]
@@ -391,7 +445,7 @@ def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
             - math.log(float(gamma))
             - math.log1p(float(centered * centered))
         )
-    if code == DIST_BETA:
+    if code == DistCode.BETA:
         if x < 0.0 or x > 1.0:
             return float64(np.nan)
         a = params[0]
@@ -403,7 +457,7 @@ def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
         if b != 1.0:
             out += float64((b - 1.0) * math.log1p(float(-x)))
         return float64(out - log_norm)
-    if code == DIST_GAMMA:
+    if code == DistCode.GAMMA:
         if x < 0.0:
             return float64(np.nan)
         a = params[0]
@@ -413,14 +467,14 @@ def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
         if a != 1.0:
             out += float64((a - 1.0) * math.log(float(x)))
         return float64(out - x / theta - log_norm)
-    if code == DIST_INV_GAMMA:
+    if code == DistCode.INV_GAMMA:
         if x <= 0.0:
             return float64(np.nan)
         a = params[0]
         beta = params[1]
         log_prefactor = params[2]
         return float64(log_prefactor - (a + 1.0) * math.log(float(x)) - beta / x)
-    if code == DIST_UNIFORM:
+    if code == DistCode.UNIFORM:
         low = params[0]
         high = params[1]
         width = params[2]

@@ -30,6 +30,7 @@ typedef double f64;
  * the kalman / distribution / transform kernels. */
 #define TWO_PI 6.283185307179586
 #define PI 3.141592653589793
+#define SQRT2 1.4142135623730951
 
 /* Shared status codes for the dense linear-algebra primitives in sdsge_linalg.
  * Subsystems map these onto their own error conventions (e.g. the kalman hot
