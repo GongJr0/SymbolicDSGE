@@ -138,7 +138,7 @@ We used to rely on `numba` to JIT compile the numeric kernels.
 However, hundreds of JIT compiled functions create a serious runtime cost with the initial warm-up process.
 Therefore, a native C + Cython setup is now being adopted with most numeric kernels being ported.
 `numba` kernels still live in the library today as parity test targets for the still young C kernels.
-However, the long-term target is to remove all JIT fallbacks to AOT kernels, making `numba` stay only for truely dynamic codegen tasks. 
+However, the long-term target is to remove all JIT fallbacks to AOT kernels, making `numba` stay only for truely dynamic codegen tasks.
 
 If you're contributing to a hot path, you should inspect the surrounding code to understand how `numba` and/or C/Cython is being utilized.
 As a general rules of thumb for both compilation paths are listed below. However, if you're not confident in your knowledge of `numba`, C, or Cython, you are also welcome to write the logic in pure python and ask for help and/or someone to refactor it into compilable code.
