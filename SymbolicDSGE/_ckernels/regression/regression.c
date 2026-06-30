@@ -171,3 +171,22 @@ void sdsge_ridge_grid_search(const f64 *SDSGE_RESTRICT X,
     }
   }
 }
+
+void sdsge_ols_chol_solve(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
+                          i64 n, i64 p, f64 *SDSGE_RESTRICT coef,
+                          f64 *SDSGE_RESTRICT L, i64 *SDSGE_RESTRICT status,
+                          f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT g) {
+  /* OLS normal equations: G = XᵀX, g = Xᵀy, then a single Cholesky solve. Unlike
+   * the numba chol_solve (a hand-rolled PD gate followed by a *second* LAPACK
+   * factorization), sdsge_chol_solve folds the PD check into the one factor. On a
+   * non-PD Gram the caller falls back to lstsq, matching the numba contract. */
+  sdsge_gram(X, G, n, p);
+  sdsge_gram_rhs(X, y, g, n, p);
+  if (sdsge_chol_solve(G, g, coef, L, p) != SDSGE_OK) {
+    for (i64 i = 0; i < p; ++i)
+      coef[i] = NAN;
+    *status = REGRESSION_RANK_DEFICIENT;
+    return;
+  }
+  *status = REGRESSION_OK;
+}

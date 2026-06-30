@@ -22,7 +22,7 @@ You can use the "Bug Report" issue template within the repository, or use the bu
 
 Even if you're unsure whether you found a bug in the project, it's always better to report it so we can investigate.
 
-Familiarity with the project code is not essential to filling an informative bug report, but at the very least it's very helpful to include the exact method call that produced the error in a reproducible way, and the error message that was produced.
+Familiarity with the project code is not essential to filing an informative bug report, it's very helpful to include the exact method call that produced the error (in a reproducible way when possible), and the error message that was produced.
 
 ## Feature Requests
 
@@ -119,9 +119,8 @@ This command will make git ignore any changes to the file without you having to 
 ### Tests
 
 We ship a testing suite with `pytest` located in the `./tests` directory.
-The complete test suite is run on every commit and pull request, but you can also locally ensure that the suite is passing.
+The complete test suite is run on ever pull request, but you can also locally ensure that the suite is passing.
 
-When you make changes that cause a test failure, you can make a comment in your pull request to explain the behavior change and why the test is failing.
 As you add new code, some pre-existing tests may naturally become outdated or obsolete. In such cases, mention it in the pull request and we can decide whether the tests should be updated as part of the PR.
 
 If you're adding uncovered code, you should also add tests alongside the code contribution.
@@ -138,7 +137,7 @@ We used to rely on `numba` to JIT compile the numeric kernels.
 However, hundreds of JIT compiled functions create a serious runtime cost with the initial warm-up process.
 Therefore, a native C + Cython setup is now being adopted with most numeric kernels being ported.
 `numba` kernels still live in the library today as parity test targets for the still young C kernels.
-However, the long-term target is to remove all JIT fallbacks to AOT kernels, making `numba` stay only for truely dynamic codegen tasks.
+However, the long-term target is to remove all JIT fallbacks to AOT kernels, making `numba` stay only for truly dynamic codegen tasks.
 
 If you're contributing to a hot path, you should inspect the surrounding code to understand how `numba` and/or C/Cython is being utilized.
 As a general rules of thumb for both compilation paths are listed below. However, if you're not confident in your knowledge of `numba`, C, or Cython, you are also welcome to write the logic in pure python and ask for help and/or someone to refactor it into compilable code.
@@ -146,12 +145,12 @@ As a general rules of thumb for both compilation paths are listed below. However
 __Numba rules of thumb:__
  -  Sticking to `numpy` types and avoiding Python objects in compiled functions will ensure your code can compile.
  -  `numba` ultimately produces machine-code through `llvm-lite`. Patterns that would be slow in any other AOT compiled code (such as assignments per loop iteration) will remain slow in numba.
- -  Type hints of function signatures are diregarded when `numba` compiles a function. Instead the types of given arguments are used. Therefore, examples like failing tolerance tests due to accidental `float32` inputs can occur with no errors raised.
+ -  Type hints of function signatures are disregarded when `numba` compiles a function. Instead the types of given arguments are used. Therefore, examples like failing tolerance tests due to accidental `float32` inputs can occur with no errors raised.
 
 __C and Cython rules of thumb:__
 - `SymbolicDSGE` structures its native code such that all allocations are made inside Cython and passed to C as pointers. This ensures that no python object and memory allocation needs to be managed in C.
 - To let Cython handle all allocation tasks, C functions use output buffers passed as pointers, while intermediate helpers can return non-void, the boundary is expected to write-into some container rather than returning results.
 - Cython-side ensures any buffer passed to a C function is C-contiguous. For functions that can take array slices and other non-contiguous views, a recast via `np.ascontiguousarray` is therefore necessary before the C side is invoked.
-- C receives all array inuts as row-major 1D buffers and the outputs are written with the same structure. reshaping is not done inside C.
+- C receives all array inputs as row-major 1D buffers and the outputs are written with the same structure. Reshaping is not done inside C.
 - C code primarily uses `<math.h>` only, with `<stdlib.h>` and `<float.h>` appearing rarely. Operations requiring heavy packages like `LAPACK` and `BLAS` already form the `numpy` backend, if raw C can't handle a case, we delegate it to `numpy`.
 - All types in the C-side are bit exact and OS agnostic. We mainly use the type aliases `f64` and `i64`, producing 64-bit floats and signed integers.

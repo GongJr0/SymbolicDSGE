@@ -26,6 +26,24 @@ cdef extern from "regression.h":
                                  double *out_obj, int64_t *out_status,
                                  double *G_base, double *G, double *g, double *L,
                                  double *coef, double *col) nogil
+    void sdsge_ols_chol_solve(const double *X, const double *y, int64_t n,
+                              int64_t p, double *coef, double *L, int64_t *status,
+                              double *G, double *g) nogil
+
+
+cdef extern from "elastic_net.h":
+    int64_t sdsge_en_gram_cd(const double *G, const double *g, int64_t k,
+                             double alpha_l1, double alpha_l2, const double *beta0,
+                             int64_t max_iter, double tol, double *coef,
+                             double *Gcoef) nogil
+    void sdsge_en_gram_cd_path(const double *G, const double *g, int64_t k,
+                               const double *alpha_grid, int64_t n_alpha,
+                               double l1_ratio, int64_t max_iter, double tol,
+                               double *coefs, int64_t *statuses, double *Gcoef,
+                               double *beta) nogil
+    double sdsge_en_active_dof(const double *G, const double *beta, int64_t k,
+                               double alpha_l2, int64_t intercept,
+                               double atol) nogil
 
 
 cdef extern from "lasso.h":
@@ -126,3 +144,61 @@ def lasso_path_eval(double[::1] lam_path, double[:, ::1] beta_path,
         sdsge_lasso_path_eval(&lam_path[0], &beta_path[0, 0], n_knots, k,
                               &lam_grid[0], n_grid, &out[0, 0])
     return np.asarray(out)
+
+
+def ols_chol_solve(double[:, ::1] X, double[::1] y):
+    """OLS via the Cholesky normal equations. Returns ``(coef, L, status)``."""
+    cdef int64_t n = X.shape[0]
+    cdef int64_t p = X.shape[1]
+    cdef double[::1] coef = np.empty(p, dtype=np.float64)
+    cdef double[:, ::1] L = np.empty((p, p), dtype=np.float64)
+    cdef double[:, ::1] G = np.empty((p, p), dtype=np.float64)
+    cdef double[::1] g = np.empty(p, dtype=np.float64)
+    cdef int64_t status = 0
+    with nogil:
+        sdsge_ols_chol_solve(&X[0, 0], &y[0], n, p, &coef[0], &L[0, 0],
+                             &status, &G[0, 0], &g[0])
+    if status != 0:
+        return np.asarray(coef), np.empty((0, 0), dtype=np.float64), status
+    return np.asarray(coef), np.asarray(L), status
+
+
+def elastic_net_gram_cd(double[:, ::1] G, double[::1] g, double alpha_l1,
+                        double alpha_l2, double[::1] beta0, int64_t max_iter,
+                        double tol):
+    """Elastic-net coordinate descent. Returns ``(coef, status)``."""
+    cdef int64_t k = G.shape[0]
+    cdef double[::1] coef = np.empty(k, dtype=np.float64)
+    cdef double[::1] Gcoef = np.empty(k, dtype=np.float64)
+    cdef int64_t status
+    with nogil:
+        status = sdsge_en_gram_cd(&G[0, 0], &g[0], k, alpha_l1, alpha_l2,
+                                  &beta0[0], max_iter, tol, &coef[0], &Gcoef[0])
+    return np.asarray(coef), status
+
+
+def elastic_net_gram_cd_path(double[:, ::1] G, double[::1] g,
+                             double[::1] alpha_grid, double l1_ratio,
+                             int64_t max_iter, double tol):
+    """Warm-start elastic-net path. Returns ``(coefs, statuses)``."""
+    cdef int64_t k = G.shape[0]
+    cdef int64_t n_alpha = alpha_grid.shape[0]
+    cdef double[:, ::1] coefs = np.empty((n_alpha, k), dtype=np.float64)
+    cdef int64_t[::1] statuses = np.empty(n_alpha, dtype=np.int64)
+    cdef double[::1] Gcoef = np.empty(k, dtype=np.float64)
+    cdef double[::1] beta = np.empty(k, dtype=np.float64)
+    with nogil:
+        sdsge_en_gram_cd_path(&G[0, 0], &g[0], k, &alpha_grid[0], n_alpha,
+                              l1_ratio, max_iter, tol, &coefs[0, 0],
+                              &statuses[0], &Gcoef[0], &beta[0])
+    return np.asarray(coefs), np.asarray(statuses)
+
+
+def elastic_net_active_dof(double[:, ::1] G, double[::1] beta, double alpha_l2,
+                           bint intercept, double atol):
+    """Active-set effective degrees of freedom. Returns a float."""
+    cdef int64_t k = G.shape[0]
+    cdef double dof
+    with nogil:
+        dof = sdsge_en_active_dof(&G[0, 0], &beta[0], k, alpha_l2, intercept, atol)
+    return dof

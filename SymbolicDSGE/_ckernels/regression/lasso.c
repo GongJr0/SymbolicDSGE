@@ -2,14 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 
-/* Soft-thresholding operator (mirrors numba smooth_threshold). */
-static inline f64 sdsge_smooth_threshold(f64 z, f64 gamma) {
-  if (z > gamma)
-    return z - gamma;
-  if (z < -gamma)
-    return z + gamma;
-  return 0.0;
-}
+/* sdsge_smooth_threshold is shared via regression.h (included by lasso.h). */
 
 i64 sdsge_lasso_gram_cd(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT g,
                         i64 k, f64 alpha, i64 max_iter, f64 tol,

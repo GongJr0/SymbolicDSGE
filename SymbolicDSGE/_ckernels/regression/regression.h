@@ -4,6 +4,16 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_linalg.h"
 
+/* Soft-thresholding operator, shared by the lasso and elastic-net coordinate
+ * descents (mirrors the numba smooth_threshold). */
+static inline f64 sdsge_smooth_threshold(f64 z, f64 gamma) {
+  if (z > gamma)
+    return z - gamma;
+  if (z < -gamma)
+    return z + gamma;
+  return 0.0;
+}
+
 typedef enum {
   REGRESSION_OK = 0,
   REGRESSION_RANK_DEFICIENT = -1,
@@ -38,5 +48,12 @@ void sdsge_ridge_grid_search(const f64 *X, const f64 *y, i64 n, i64 p,
                              i64 intercept, f64 *out_alpha, f64 *out_coef,
                              f64 *out_obj, i64 *out_status, f64 *G_base, f64 *G,
                              f64 *g, f64 *L, f64 *coef, f64 *col);
+
+/* OLS via the Cholesky normal equations. Mirrors the numba ``chol_solve``;
+ * writes coef(p), the Cholesky factor L(p,p), and a RegressionStatus. G/g are
+ * caller-allocated scratch of sizes (p,p)/(p). On REGRESSION_RANK_DEFICIENT the
+ * caller falls back to lstsq (and L is undefined). */
+void sdsge_ols_chol_solve(const f64 *X, const f64 *y, i64 n, i64 p, f64 *coef,
+                          f64 *L, i64 *status, f64 *G, f64 *g);
 
 #endif /* SDSGE_REGRESSION_H */

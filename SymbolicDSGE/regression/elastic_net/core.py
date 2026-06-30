@@ -19,14 +19,39 @@ from ..lasso.core import (
     smooth_threshold,
 )
 from ..ridge.core import ridge as _ridge, ridge_gs as _ridge_gs
-from ..solvers import xtx_xty
+from ..solvers import xtx_xty, use_scalar_path
 from ..utils import get_criterion, log_grid, process_args
+from ..._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 from .result import ElasticNetResult
 
 NDF = NDArray[float64]
 
 OK = int(RegressionStatus.OK)
 NON_CONVERGENT = int(RegressionStatus.NON_CONVERGENT)
+
+# Prefer the native elastic-net kernels; fall back to numba when the extension is
+# not built (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override). The numba reference is
+# non-fastmath, so the strict-IEEE native kernels are bit-parity up to libm.
+_en_gram_cd_native: Any | None
+_en_gram_cd_path_native: Any | None
+_en_active_dof_native: Any | None
+if FORCE_NUMBA:
+    _en_gram_cd_native = None
+    _en_gram_cd_path_native = None
+    _en_active_dof_native = None
+else:
+    try:
+        from ..._ckernels.regression import (
+            elastic_net_active_dof as _en_active_dof_native,
+            elastic_net_gram_cd as _en_gram_cd_native,
+            elastic_net_gram_cd_path as _en_gram_cd_path_native,
+        )
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _en_gram_cd_native = None
+        _en_gram_cd_path_native = None
+        _en_active_dof_native = None
 
 
 @njit(cache=True)
@@ -206,17 +231,32 @@ def elastic_net(
 
     G, g = _normalized_gram(x_fit, y_fit)
     alpha_l1, alpha_l2 = split_penalty(float64(alpha), float64(l1_ratio))
-    beta0 = np.zeros(G.shape[0], dtype=np.float64)
-    beta, status = elastic_net_gram_cd(
-        G,
-        g,
-        alpha_l1,
-        alpha_l2,
-        beta0,
-        max_iter,
-        float64(tol),
-    )
-    effective_dof = elastic_net_active_dof(G, beta, alpha_l2, intercept, float64(tol))
+    n, k = x_fit.shape[0], G.shape[0]
+    beta0 = np.zeros(k, dtype=np.float64)
+    if (
+        _en_gram_cd_native is not None
+        and _en_active_dof_native is not None
+        and use_scalar_path(n, k)
+    ):
+        beta, status = _en_gram_cd_native(
+            G, g, float(alpha_l1), float(alpha_l2), beta0, int(max_iter), float(tol)
+        )
+        effective_dof = _en_active_dof_native(
+            G, beta, float(alpha_l2), bool(intercept), float(tol)
+        )
+    else:
+        beta, status = elastic_net_gram_cd(
+            G,
+            g,
+            alpha_l1,
+            alpha_l2,
+            beta0,
+            max_iter,
+            float64(tol),
+        )
+        effective_dof = elastic_net_active_dof(
+            G, beta, alpha_l2, intercept, float64(tol)
+        )
 
     if intercept:
         coef = _restore_intercept(beta, x_mean, y_mean)  # pyright: ignore
@@ -278,14 +318,31 @@ def elastic_net_gs(
 
     G, g = _normalized_gram(x_fit, y_fit)
     alpha_grid = log_grid(float64(start), float64(stop), num)
-    beta_grid, status_trace = elastic_net_gram_cd_path(
-        G,
-        g,
-        alpha_grid,
-        float64(l1_ratio),
-        max_iter,
-        float64(tol),
+    n, k = x_fit.shape[0], G.shape[0]
+    use_native = (
+        _en_gram_cd_path_native is not None
+        and _en_active_dof_native is not None
+        and bool(use_scalar_path(n, k))
     )
+    if use_native:
+        assert _en_gram_cd_path_native is not None  # narrowed by use_native
+        beta_grid, status_trace = _en_gram_cd_path_native(
+            G,
+            g,
+            np.ascontiguousarray(alpha_grid, dtype=np.float64),
+            float(l1_ratio),
+            int(max_iter),
+            float(tol),
+        )
+    else:
+        beta_grid, status_trace = elastic_net_gram_cd_path(
+            G,
+            g,
+            alpha_grid,
+            float64(l1_ratio),
+            max_iter,
+            float64(tol),
+        )
 
     if intercept:
         coef_grid = _restore_intercept_path(
@@ -309,13 +366,23 @@ def elastic_net_gs(
             effective_dof_trace[i] = np.nan
             continue
         _, alpha_l2 = split_penalty(alpha_grid[i], float64(l1_ratio))
-        effective_dof = elastic_net_active_dof(
-            G,
-            beta_grid[i],
-            alpha_l2,
-            intercept,
-            float64(tol),
-        )
+        if use_native:
+            assert _en_active_dof_native is not None  # narrowed by use_native
+            effective_dof = _en_active_dof_native(
+                G,
+                np.ascontiguousarray(beta_grid[i], dtype=np.float64),
+                float(alpha_l2),
+                bool(intercept),
+                float(tol),
+            )
+        else:
+            effective_dof = elastic_net_active_dof(
+                G,
+                beta_grid[i],
+                alpha_l2,
+                intercept,
+                float64(tol),
+            )
         effective_dof_trace[i] = effective_dof
         objective_trace[i] = objective(rss_trace[i], y.shape[0], effective_dof)
 
