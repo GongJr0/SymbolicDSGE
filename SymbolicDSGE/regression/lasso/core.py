@@ -1,20 +1,48 @@
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 from numba import njit
 
 from .result import LassoResult
-from ..solvers import xtx_xty
+from ..solvers import xtx_xty, use_scalar_path
 from ..enums import RegressionStatus
 from ..utils import log_grid, process_args
+from ..._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
 OK = int(RegressionStatus.OK)
 RANK_DEFICIENT = int(RegressionStatus.RANK_DEFICIENT)
 NON_CONVERGENT = int(RegressionStatus.NON_CONVERGENT)
 
 NDF = NDArray[float64]
+
+# Prefer the native lasso kernels; fall back to numba when the extension is not
+# built (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
+# The numba reference is fastmath; the strict-IEEE native kernels converge to the
+# same lasso minimizer (parity at the solver tolerance, not ULP).
+_lasso_gram_cd_native: Callable[..., Any] | None
+_lars_lasso_gram_native: Callable[..., Any] | None
+_lasso_path_eval_native: Callable[..., Any] | None
+if FORCE_NUMBA:
+    _lasso_gram_cd_native = None
+    _lars_lasso_gram_native = None
+    _lasso_path_eval_native = None
+else:
+    try:
+        from ..._ckernels.regression import (
+            lars_lasso_gram as _lars_lasso_gram_native,
+            lasso_gram_cd as _lasso_gram_cd_native,
+            lasso_path_eval as _lasso_path_eval_native,
+        )
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _lasso_gram_cd_native = None
+        _lars_lasso_gram_native = None
+        _lasso_path_eval_native = None
 
 
 @njit(cache=True, fastmath=True)
@@ -354,9 +382,16 @@ def lasso(
 
     G, c = xtx_xty(x_fit, y_fit)
     scale = float64(1.0 / y_fit.shape[0])
-    G = np.asarray(G * scale, dtype=np.float64)
-    c = np.asarray(c * scale, dtype=np.float64)
-    beta, status = lasso_gram_cd(G, c, float64(alpha), max_iter, float64(tol))
+    G = np.ascontiguousarray(G * scale, dtype=np.float64)
+    c = np.ascontiguousarray(c * scale, dtype=np.float64)
+
+    n, k = x_fit.shape[0], G.shape[0]
+    if _lasso_gram_cd_native is not None and use_scalar_path(n, k):
+        beta, status = _lasso_gram_cd_native(
+            G, c, float(alpha), int(max_iter), float(tol)
+        )
+    else:
+        beta, status = lasso_gram_cd(G, c, float64(alpha), max_iter, float64(tol))
 
     if intercept:
         coef = _restore_intercept(beta, x_mean, y_mean)
@@ -402,17 +437,30 @@ def lasso_gs(
 
     G, c = xtx_xty(x_fit, y_fit)
     scale = float64(1.0 / y_fit.shape[0])
-    G = np.asarray(G * scale, dtype=np.float64)
-    c = np.asarray(c * scale, dtype=np.float64)
+    G = np.ascontiguousarray(G * scale, dtype=np.float64)
+    c = np.ascontiguousarray(c * scale, dtype=np.float64)
 
     lam_grid = log_grid(start, stop, num)
-    lam_path, beta_path, status = lars_lasso_gram(
-        G,
-        c,
-        max_iter=max_iter,
-        tol=float64(tol),
-    )
-    beta_grid = lasso_path_eval(lam_path, beta_path, lam_grid)
+    n, k = x_fit.shape[0], G.shape[0]
+    if (
+        _lars_lasso_gram_native is not None
+        and _lasso_path_eval_native is not None
+        and use_scalar_path(n, k)
+    ):
+        lam_path, beta_path, status = _lars_lasso_gram_native(
+            G, c, int(max_iter), float(tol)
+        )
+        beta_grid = _lasso_path_eval_native(
+            lam_path, beta_path, np.ascontiguousarray(lam_grid, dtype=np.float64)
+        )
+    else:
+        lam_path, beta_path, status = lars_lasso_gram(
+            G,
+            c,
+            max_iter=max_iter,
+            tol=float64(tol),
+        )
+        beta_grid = lasso_path_eval(lam_path, beta_path, lam_grid)
 
     if intercept:
         coef_grid = _restore_intercept_path(beta_grid, x_mean, y_mean)

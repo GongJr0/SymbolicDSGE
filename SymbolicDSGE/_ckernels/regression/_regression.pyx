@@ -28,6 +28,18 @@ cdef extern from "regression.h":
                                  double *coef, double *col) nogil
 
 
+cdef extern from "lasso.h":
+    int64_t sdsge_lasso_gram_cd(const double *G, const double *g, int64_t k,
+                                double alpha, int64_t max_iter, double tol,
+                                double *coef, double *Gcoef) nogil
+    int64_t sdsge_lars_lasso_gram(const double *G, const double *c, int64_t k,
+                                  int64_t max_iter, double tol, double *lam_path,
+                                  double *beta_path, int64_t *n_knots) nogil
+    void sdsge_lasso_path_eval(const double *lam_path, const double *beta_path,
+                               int64_t n_knots, int64_t k, const double *lam_grid,
+                               int64_t n_grid, double *out) nogil
+
+
 def chol_solve_L2(double[:, ::1] X, double[::1] y, double alpha, bint intercept):
     """Ridge solve. Returns ``(coef, L, eff_dof, status)`` (L empty if not PD)."""
     cdef int64_t n = X.shape[0]
@@ -71,3 +83,46 @@ def ridge_grid_search(double[:, ::1] X, double[::1] y, double[::1] alphas,
                                 &out_obj, &out_status, &G_base[0, 0], &G[0, 0],
                                 &g[0], &L[0, 0], &coef[0], &col[0])
     return out_alpha, np.asarray(out_coef), out_obj, out_status
+
+
+def lasso_gram_cd(double[:, ::1] G, double[::1] g, double alpha,
+                  int64_t max_iter, double tol):
+    """Coordinate-descent lasso solve. Returns ``(coef, status)``."""
+    cdef int64_t k = G.shape[0]
+    cdef double[::1] coef = np.empty(k, dtype=np.float64)
+    cdef double[::1] Gcoef = np.empty(k, dtype=np.float64)
+    cdef int64_t status
+    with nogil:
+        status = sdsge_lasso_gram_cd(&G[0, 0], &g[0], k, alpha, max_iter, tol,
+                                     &coef[0], &Gcoef[0])
+    return np.asarray(coef), status
+
+
+def lars_lasso_gram(double[:, ::1] G, double[::1] c, int64_t max_iter, double tol):
+    """Full LARS-Lasso path. Returns ``(lam_path, beta_path, status)``."""
+    cdef int64_t k = G.shape[0]
+    cdef double[::1] lam_path = np.empty(max_iter + 1, dtype=np.float64)
+    cdef double[:, ::1] beta_path = np.empty((max_iter + 1, k), dtype=np.float64)
+    cdef int64_t n_knots = 0
+    cdef int64_t status
+    with nogil:
+        status = sdsge_lars_lasso_gram(&G[0, 0], &c[0], k, max_iter, tol,
+                                       &lam_path[0], &beta_path[0, 0], &n_knots)
+    return (
+        np.asarray(lam_path[:n_knots]),
+        np.asarray(beta_path[:n_knots]),
+        status,
+    )
+
+
+def lasso_path_eval(double[::1] lam_path, double[:, ::1] beta_path,
+                    double[::1] lam_grid):
+    """Evaluate a LARS-Lasso path at a lambda grid. Returns ``beta_grid``."""
+    cdef int64_t n_knots = lam_path.shape[0]
+    cdef int64_t k = beta_path.shape[1]
+    cdef int64_t n_grid = lam_grid.shape[0]
+    cdef double[:, ::1] out = np.empty((n_grid, k), dtype=np.float64)
+    with nogil:
+        sdsge_lasso_path_eval(&lam_path[0], &beta_path[0, 0], n_knots, k,
+                              &lam_grid[0], n_grid, &out[0, 0])
+    return np.asarray(out)
