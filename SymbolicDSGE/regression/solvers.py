@@ -12,12 +12,30 @@ NDF = NDArray[float64]
 OK = int(RegressionStatus.OK)
 RANK_DEFICIENT = int(RegressionStatus.RANK_DEFICIENT)
 
+# Single crossover for "hand-rolled scalar kernels (numba manual / native C) beat
+# BLAS/LAPACK". Used by every loop-vs-BLAS decision in the regression stack
+# (xtx_xty's Gram branch, the ridge RSS branch, and the native-dispatch gate) so
+# they can never drift apart -- and so native is only chosen where numba is also
+# on its manual branch, keeping the two bit-parity.
+#
+# Both bounds must hold (logical AND): SCALAR_PATH_MAX_NP caps the O(n*p) /
+# O(n*p^2) data-volume reduction (BLAS threads/vectorizes that), and
+# SCALAR_PATH_MAX_P caps the dense linear algebra (the O(p^3) Cholesky and the
+# p*p Gram, where LAPACK pulls far ahead). If either is exceeded, defer to BLAS.
+SCALAR_PATH_MAX_NP = 1e6
+SCALAR_PATH_MAX_P = 256
+
+
+@njit(cache=True)
+def use_scalar_path(n: int, p: int) -> bool:
+    return n * p <= SCALAR_PATH_MAX_NP and p <= SCALAR_PATH_MAX_P
+
 
 @njit(cache=True)
 def xtx_xty(X: NDF, y: NDF) -> tuple[NDF, NDF]:
     n, p = X.shape
 
-    if (n >= 1e5) or (p >= 100):
+    if not use_scalar_path(n, p):
         # BLAS assignment is faster than manual loops for large matrices
         G = X.T @ X
         g = X.T @ y

@@ -9,12 +9,12 @@ from SymbolicDSGE.regression.ridge.core import (
     l2_grid_search,
     ridge,
     ridge_gs,
-    should_loop,
 )
 from SymbolicDSGE.regression.solvers import (
     chol_solve,
     chol_solve_L2,
     lstsq_solve,
+    use_scalar_path,
     xtx_xty,
 )
 from SymbolicDSGE.regression.utils import (
@@ -105,7 +105,8 @@ def test_solver_helpers_cover_cholesky_lstsq_and_rank_deficient_paths() -> None:
     np.testing.assert_allclose(G, x.T @ x)
     np.testing.assert_allclose(g, x.T @ y)
 
-    wide_x = np.ones((1, 100), dtype=np.float64)
+    # p above SCALAR_PATH_MAX_P -> the BLAS branch of xtx_xty.
+    wide_x = np.ones((1, 300), dtype=np.float64)
     wide_y = np.ones(1, dtype=np.float64)
     G_wide, g_wide = xtx_xty.py_func(wide_x, wide_y)
     np.testing.assert_allclose(G_wide, wide_x.T @ wide_x)
@@ -149,9 +150,9 @@ def test_ridge_grid_search_and_validation_branches() -> None:
     x = np.array([[1.0], [2.0], [3.0]], dtype=np.float64)
     y = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
-    assert should_loop.py_func(10, 10)
-    assert not should_loop.py_func(200_000, 1)
-    assert not should_loop.py_func(1, 2_000)
+    assert use_scalar_path.py_func(10, 10)
+    assert not use_scalar_path.py_func(200_000, 10)  # n*p = 2e6 > 1e6
+    assert not use_scalar_path.py_func(1, 2_000)  # p = 2000 > 256
 
     alpha, coef, obj, status = l2_grid_search.py_func(
         np.ones((3, 2), dtype=np.float64),
