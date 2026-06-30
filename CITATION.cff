@@ -21,7 +21,7 @@ repository-code: 'https://github.com/GongJr0/SymbolicDSGE'
 url: 'https://gongjr0.github.io/SymbolicDSGE/'
 abstract: >-
   A linear DSGE engine with a fully symbolic and modifiable
-  model backend. Includes symbolic regression and ols-based equation
+  model backend. Includes symbolic regression and OLS/L1/L2/EN based equation
   augmentation capabilities.
 keywords:
   - DSGE
@@ -29,5 +29,5 @@ keywords:
   - symbolic computation
   - rational expectations equilibrium
 license: MIT
-version: 1.4.2
-date-released: '2026-06-17'
+version: 1.4.3
+date-released: '2026-06-30'
