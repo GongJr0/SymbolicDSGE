@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 from numpy import float64
@@ -8,22 +8,43 @@ from numba import njit
 
 from ..enums import RegressionStatus
 from ..utils import process_args
-from ..solvers import chol_solve_L2
+from ..solvers import chol_solve_L2, use_scalar_path
 from ..utils import log_grid, get_criterion
 from .result import RidgeResult, RidgeObjective
+from ..._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
 NDF = NDArray[float64]
 
 OK = int(RegressionStatus.OK)
 RANK_DEFICIENT = int(RegressionStatus.RANK_DEFICIENT)
 
-LOOP_LIMIT_N = 1e5
-LOOP_LIMIT_P = 1e3
+# Prefer the native ridge kernels; fall back to numba when the extension is not
+# built (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
+_chol_solve_L2_native: Callable[..., Any] | None
+_ridge_grid_search_native: Callable[..., Any] | None
+if FORCE_NUMBA:
+    _chol_solve_L2_native = None
+    _ridge_grid_search_native = None
+else:
+    try:
+        from ..._ckernels.regression import (
+            chol_solve_L2 as _chol_solve_L2_native,
+            ridge_grid_search as _ridge_grid_search_native,
+        )
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _chol_solve_L2_native = None
+        _ridge_grid_search_native = None
+
+#: Criterion-name -> native RegressionCriterion code (regression.h).
+_CRITERION_CODES = {"aic": 1, "bic": 2, "loss": 3}
 
 
-@njit(cache=True)
-def should_loop(n: int, p: int) -> bool:
-    return n * p <= LOOP_LIMIT_N and p <= LOOP_LIMIT_P
+def _native_dims_ok(n: int, p: int) -> bool:
+    # Native dispatch shares the scalar-path predicate: native is used only where
+    # numba's xtx_xty is also on its manual branch, so the two stay bit-parity.
+    return bool(use_scalar_path(n, p))
 
 
 @njit(cache=True)
@@ -43,7 +64,7 @@ def l2_grid_search(
     err_trace = np.empty(num, dtype=np.int64)
 
     n, p = X.shape
-    loop = should_loop(n, p)
+    loop = use_scalar_path(n, p)
 
     for i in range(num):
         alpha = alphas[i]
@@ -86,7 +107,16 @@ def ridge(
     else:
         X = x
 
-    coef, _, effective_dof, status = chol_solve_L2(X, y, float64(alpha), intercept)
+    n, p = X.shape
+    if _chol_solve_L2_native is not None and _native_dims_ok(n, p):
+        coef, _, effective_dof, status = _chol_solve_L2_native(
+            np.ascontiguousarray(X, dtype=np.float64),
+            np.ascontiguousarray(y, dtype=np.float64),
+            float(alpha),
+            bool(intercept),
+        )
+    else:
+        coef, _, effective_dof, status = chol_solve_L2(X, y, float64(alpha), intercept)
     return RidgeResult(
         variables=list(variables),
         coefficients=coef,
@@ -118,12 +148,34 @@ def ridge_gs(
         X = np.hstack((np.ones((X.shape[0], 1), dtype=np.float64), X))
         variables = ["Intercept", *variables]
 
-    obj = get_criterion(criterion)
+    obj = get_criterion(criterion)  # also validates the criterion name
+    n, p = X.shape
 
-    alpha, coef, obj_val, status = l2_grid_search(
-        X, y, float64(start), float64(stop), num, obj, intercept
-    )
-    _, _, effective_dof, _ = chol_solve_L2(X, y, alpha, intercept)
+    if _ridge_grid_search_native is not None and _native_dims_ok(n, p):
+        alphas = np.ascontiguousarray(
+            log_grid(float64(start), float64(stop), num), dtype=np.float64
+        )
+        alpha, coef, obj_val, status = _ridge_grid_search_native(
+            np.ascontiguousarray(X, dtype=np.float64),
+            np.ascontiguousarray(y, dtype=np.float64),
+            alphas,
+            _CRITERION_CODES[criterion],
+            bool(intercept),
+        )
+    else:
+        alpha, coef, obj_val, status = l2_grid_search(
+            X, y, float64(start), float64(stop), num, obj, intercept
+        )
+
+    if _chol_solve_L2_native is not None and _native_dims_ok(n, p):
+        _, _, effective_dof, _ = _chol_solve_L2_native(
+            np.ascontiguousarray(X, dtype=np.float64),
+            np.ascontiguousarray(y, dtype=np.float64),
+            float(alpha),
+            bool(intercept),
+        )
+    else:
+        _, _, effective_dof, _ = chol_solve_L2(X, y, alpha, intercept)
     return RidgeResult(
         variables=list(variables),
         coefficients=coef,

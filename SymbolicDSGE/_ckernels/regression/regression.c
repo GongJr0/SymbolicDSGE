@@ -1,6 +1,38 @@
 #include "regression.h"
 #include <math.h>
 
+/* Information criterion score, mirroring the numba aic / bic / l2_loss in
+ * SymbolicDSGE/regression/utils.py. l2_loss returns the raw rss regardless of
+ * sign; aic/bic return -inf when rss <= 0 (matching the numba guard). k is the
+ * effective degrees of freedom. */
+static f64 sdsge_ridge_objective(i64 criterion, f64 rss, i64 n, f64 k) {
+  if (criterion == REGRESSION_CRIT_LOSS)
+    return rss;
+  if (rss <= 0.0)
+    return -INFINITY;
+  const f64 nf = (f64)n;
+  const f64 base = nf * log(rss / nf);
+  if (criterion == REGRESSION_CRIT_AIC)
+    return base + 2.0 * k;
+  return base + log(nf) * k; /* REGRESSION_CRIT_BIC */
+}
+
+/* trace(G_pen^-1 @ G_unpen): for each column c, solve (L L^T) s = G_unpen[:, c]
+ * reusing the factor L and accumulate s[c]. col(p) is scratch. */
+static f64 sdsge_ridge_eff_dof(const f64 *SDSGE_RESTRICT L,
+                               const f64 *SDSGE_RESTRICT G_unpen, i64 p,
+                               f64 *SDSGE_RESTRICT col) {
+  f64 dof = 0.0;
+  for (i64 c = 0; c < p; ++c) {
+    for (i64 r = 0; r < p; ++r)
+      col[r] = G_unpen[r * p + c];
+    sdsge_forward_subst(L, col, col, p);
+    sdsge_backward_subst_chol_t(L, col, col, p);
+    dof += col[c];
+  }
+  return dof;
+}
+
 /* Ridge (L2) normal-equation solve, mirroring the numba ``chol_solve_L2`` in
  * SymbolicDSGE/regression/solvers.py. Forms the n-scaled Gram, adds the L2
  * penalty to the diagonal (skipping the intercept column when present), factors
@@ -60,17 +92,82 @@ void sdsge_chol_solve_L2(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT 
   sdsge_forward_subst(L, g, coef, p);
   sdsge_backward_subst_chol_t(L, coef, coef, p);
 
-  /* Effective dof = trace(G_pen⁻¹ @ G_unpen). For each column c, solve
-   * (L Lᵀ) s = G_unpen[:, c] reusing the factor and accumulate s[c], the
-   * c-th diagonal entry of the smoother. */
-  *dof = 0.0;
-  for (i64 c = 0; c < p; ++c) {
-    for (i64 r = 0; r < p; ++r)
-      col[r] = G_unpen[r * p + c];
-    sdsge_forward_subst(L, col, col, p);
-    sdsge_backward_subst_chol_t(L, col, col, p);
-    *dof += col[c];
-  }
+  /* Effective dof = trace(G_pen⁻¹ @ G_unpen), the ridge smoother trace. */
+  *dof = sdsge_ridge_eff_dof(L, G_unpen, p, col);
 
   *status = REGRESSION_OK;
+}
+
+void sdsge_ridge_grid_search(const f64 *SDSGE_RESTRICT X,
+                             const f64 *SDSGE_RESTRICT y, i64 n, i64 p,
+                             const f64 *SDSGE_RESTRICT alphas, i64 num,
+                             i64 criterion, i64 intercept,
+                             f64 *SDSGE_RESTRICT out_alpha,
+                             f64 *SDSGE_RESTRICT out_coef,
+                             f64 *SDSGE_RESTRICT out_obj,
+                             i64 *SDSGE_RESTRICT out_status,
+                             f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
+                             f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT L,
+                             f64 *SDSGE_RESTRICT coef, f64 *SDSGE_RESTRICT col) {
+  const f64 nf = (f64)n;
+
+  /* Gram is alpha-invariant -- form it (and the rhs) once. G_base doubles as the
+   * unpenalized Gram for the effective-dof smoother trace. */
+  sdsge_gram(X, G_base, n, p);
+  sdsge_gram_rhs(X, y, g, n, p);
+  for (i64 i = 0; i < p * p; ++i)
+    G_base[i] /= nf;
+  for (i64 i = 0; i < p; ++i)
+    g[i] /= nf;
+
+  f64 best_obj = INFINITY;
+
+  for (i64 a = 0; a < num; ++a) {
+    const f64 alpha = alphas[a];
+    f64 obj;
+    i64 status;
+
+    /* G := G_base + alpha on the (non-intercept) diagonal. */
+    for (i64 i = 0; i < p * p; ++i)
+      G[i] = G_base[i];
+    for (i64 i = (intercept ? 1 : 0); i < p; ++i)
+      G[i * p + i] += alpha;
+
+    if (sdsge_chol(G, 0.0, L, p) != SDSGE_OK) {
+      for (i64 j = 0; j < p; ++j)
+        coef[j] = NAN;
+      obj = INFINITY;
+      status = REGRESSION_RANK_DEFICIENT;
+    } else {
+      sdsge_forward_subst(L, g, coef, p);
+      sdsge_backward_subst_chol_t(L, coef, coef, p);
+      const f64 dof = sdsge_ridge_eff_dof(L, G_base, p, col);
+
+      /* rss = sum_r (y_r - X_r . coef)^2 (manual reduction, matching the numba
+       * loop branch). */
+      f64 rss = 0.0;
+      for (i64 r = 0; r < n; ++r) {
+        const f64 *Xr = X + r * p;
+        f64 yhat = 0.0;
+        for (i64 j = 0; j < p; ++j)
+          yhat += Xr[j] * coef[j];
+        const f64 resid = y[r] - yhat;
+        rss += resid * resid;
+      }
+      obj = sdsge_ridge_objective(criterion, rss, n, dof);
+      status = REGRESSION_OK;
+    }
+
+    /* argmin with first-wins ties (matches numpy.argmin). On the winning index
+     * snapshot the coef/alpha/obj/status; failed alphas carry NaN coef + inf
+     * obj, exactly like the numba traces. */
+    if (a == 0 || obj < best_obj) {
+      best_obj = obj;
+      *out_alpha = alpha;
+      *out_obj = obj;
+      *out_status = status;
+      for (i64 j = 0; j < p; ++j)
+        out_coef[j] = coef[j];
+    }
+  }
 }
