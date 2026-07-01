@@ -147,3 +147,37 @@ void c128_lu_solve(const c128 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
     }
   }
 }
+
+i64 c128_solve(const c128 *SDSGE_RESTRICT A, const c128 *SDSGE_RESTRICT B,
+               const i64 n, const i64 m, c128 *SDSGE_RESTRICT X) {
+  c128_lu lu = c128_lu_factor(A, n);
+  if (lu.err != SDSGE_LU_SUCCESS) {
+    i64 err = lu.err;
+    c128_lu_free(&lu);
+    return err;
+  }
+  c128_lu_solve(lu.lu, lu.piv, B, X, n, m);
+  c128_lu_free(&lu);
+  return SDSGE_LU_SUCCESS;
+}
+
+i64 c128_inv(const c128 *SDSGE_RESTRICT A, const i64 n,
+             c128 *SDSGE_RESTRICT Ainv) {
+  c128 *I = (c128 *)malloc(sizeof(c128) * n * n);
+  if (!I) {
+    return SDSGE_LU_ALLOC_FAIL;
+  }
+
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < n; ++j) {
+      I[i * n + j] = (i == j) ? c128_make(1.0, 0.0) : c128_make(0.0, 0.0);
+    }
+  }
+
+  i64 err = c128_solve(A, I, n, n, Ainv);
+  free(I);
+  if (err != SDSGE_LU_SUCCESS) {
+    return err;
+  }
+  return SDSGE_LU_SUCCESS;
+}
