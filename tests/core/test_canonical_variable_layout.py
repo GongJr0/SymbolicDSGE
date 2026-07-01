@@ -25,7 +25,6 @@ def _write_misordered_test_model(tmp_path):
     # states, controls].
     data["variables"] = ["Pi", "x", "r_star", "u", "v", "r"]
     data["kalman"] = {
-        "y": ["Infl", "Rate"],
         "P0": {
             "mode": "diag",
             "scale": 1.0,

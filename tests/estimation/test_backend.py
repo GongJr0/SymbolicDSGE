@@ -297,20 +297,14 @@ def test_build_P0_branches():
     assert np.allclose(eye, 2.0 * np.eye(2))
 
     kalman = KalmanConfig(
-        y_names=["Infl"],
         R=np.eye(1, dtype=np.float64),
-        jitter=0.0,
-        symmetrize=False,
         P0=P0Config(mode="diag", scale=3.0, diag={"g": 1.0, "z": 2.0}),
     )
     p0 = backend.build_P0(compiled, kalman, None, None)
     assert np.allclose(p0, np.diag([3.0, 6.0]))
 
     bad_kalman = KalmanConfig(
-        y_names=["Infl"],
         R=np.eye(1, dtype=np.float64),
-        jitter=0.0,
-        symmetrize=False,
         P0=P0Config(mode="diag", scale=1.0, diag={"g": 1.0}),
     )
     with pytest.raises(ValueError, match="Missing P0 diagonal entry"):
@@ -351,12 +345,9 @@ def test_resolve_R_branches():
     assert np.allclose(out_direct, R_ok)
 
     kalman = KalmanConfig(
-        y_names=["Infl", "Rate", "Out"],
         R=np.array(
             [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
         ),
-        jitter=0.0,
-        symmetrize=False,
         P0=P0Config(mode="eye", scale=1.0, diag=None),
     )
     subset = backend.resolve_R(
@@ -687,21 +678,19 @@ def test_build_Q_symbolic_matches_numeric_Q(post82_bundle):
 
 def test_resolve_filter_options_prefers_defaults_and_honors_overrides():
     kalman = KalmanConfig(
-        y_names=["y"],
         R=np.eye(1, dtype=np.float64),
-        jitter=0.25,
-        symmetrize=True,
         P0=P0Config(mode="eye", scale=1.0, diag=None),
     )
 
+    # jitter/symmetrize are call-site concerns now; the config never feeds them.
     assert backend.resolve_filter_options(None, None, None) == pytest.approx(
         (0.0, False)
     )
     assert backend.resolve_filter_options(kalman, None, None) == pytest.approx(
-        (0.25, True)
+        (0.0, False)
     )
-    assert backend.resolve_filter_options(kalman, 0.5, False) == pytest.approx(
-        (0.5, False)
+    assert backend.resolve_filter_options(kalman, 0.5, True) == pytest.approx(
+        (0.5, True)
     )
 
 

@@ -205,8 +205,8 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
     )
 
     expected_logprior = -3.677756133346315
-    expected_loglik = -89.36502293810241
-    expected_logpost = -93.04277907144873
+    expected_loglik = -89.36502293741962
+    expected_logpost = -93.04277907076594
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(
@@ -327,10 +327,10 @@ def test_seeded_mcmc_output_is_unchanged_by_packed_logprior(dense_lkj_bundle):
     )
     expected_logpost = np.asarray(
         [
-            -89.11289967919815,
-            -89.56901008861455,
-            -89.61414761191483,
-            -89.43170424868838,
+            -89.11289967831583,
+            -89.56901008775299,
+            -89.61414761105306,
+            -89.43170424781582,
         ],
         dtype=np.float64,
     )

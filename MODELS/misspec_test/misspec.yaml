@@ -95,7 +95,6 @@ calibration:
       e_g, e_z: rho_gz
 
 kalman:
-  y: [OutGap, Infl, Rate]
 
   R:
     std:
@@ -117,5 +116,3 @@ kalman:
       Pi: 1.0
       x: 1.0
 
-  jitter: 1e-10
-  symmetrize: true

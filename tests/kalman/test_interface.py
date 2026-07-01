@@ -121,6 +121,8 @@ def test_interface_init_reorders_obs_and_builds_state_space():
         observables=["ObsB", "ObsA"],
         y=y,
         return_shocks=1,
+        jitter=0.125,
+        symmetrize=True,
     )
 
     assert ki.observables == ["ObsA", "ObsB"]

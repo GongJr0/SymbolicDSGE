@@ -212,23 +212,10 @@ class KalmanInterface(KalmanFilter):
         return run
 
     def _get_symmetrize(self, symmetrize_arg: bool | None) -> bool:
-        if symmetrize_arg is not None:
-            return bool(symmetrize_arg)
-
-        conf = self.kalman_config
-        if (sym_conf := getattr(conf, "symmetrize", None)) is not None:
-            return bool(sym_conf)
-        return False
+        return bool(symmetrize_arg) if symmetrize_arg is not None else False
 
     def _get_jitter(self, jitter_arg: Float64Like | None) -> float64:
-        if jitter_arg is not None:
-            return float64(jitter_arg)
-
-        conf = self.kalman_config
-        if (jitter_conf := getattr(conf, "jitter", None)) is not None:
-            return float64(jitter_conf)
-
-        return float64(0.0)
+        return float64(jitter_arg) if jitter_arg is not None else float64(0.0)
 
     def _validate_user_R(self, R: NDF | None) -> NDF | None:
         if R is None:
@@ -449,10 +436,7 @@ class KalmanInterface(KalmanFilter):
         canon_idx = self._obs_idx
 
         if obs is None:
-            if (obs_ls := getattr(self.kalman_config, "y_names", None)) is not None:
-                obs_given = list(obs_ls)
-            else:
-                obs_given = list(canon)  # default: all observables in canonical order
+            obs_given = list(canon)  # default: all observables in canonical order
         else:
             obs_given = list(obs)
 

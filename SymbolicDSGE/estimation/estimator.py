@@ -721,14 +721,11 @@ class Estimator:
     def _effective_observables(self) -> list[str]:
         canon = list(self.compiled.observable_names)
         canon_idx = {name: i for i, name in enumerate(canon)}
-        kalman = getattr(self.compiled, "kalman", None)
         prepared = self._prepared_filter
 
         if self.observables is None:
             if prepared is not None:
                 obs_given = list(prepared.observables)
-            elif kalman is not None and getattr(kalman, "y_names", None):
-                obs_given = list(kalman.y_names)
             else:
                 obs_given = list(canon)
         else:

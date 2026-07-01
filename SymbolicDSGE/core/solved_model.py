@@ -719,10 +719,7 @@ class SolvedModel:
         if filter_mode == "extended":
             obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
             if observables is None:
-                if self.kalman_config is not None and self.kalman_config.y_names:
-                    selected_obs = list(self.kalman_config.y_names)
-                else:
-                    selected_obs = list(self.compiled.observable_names)
+                selected_obs = list(self.compiled.observable_names)
             else:
                 selected_obs = list(observables)
             selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])

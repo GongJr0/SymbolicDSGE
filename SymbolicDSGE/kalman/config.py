@@ -17,10 +17,7 @@ class P0Config:
 
 @dataclass(frozen=True)
 class KalmanConfig:
-    y_names: list[str]
     R: NDArray | None
-    jitter: float
-    symmetrize: bool
     P0: P0Config
     R_symbolic: Matrix | None = None
     R_param_symbols: list[Symbol] | None = None
