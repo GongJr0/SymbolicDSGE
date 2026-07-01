@@ -1,11 +1,5 @@
 name: NK_LS_POST82
 variables: [g, z, r, x, Pi]
-constrained:
-  Pi: false
-  x: false
-  r: false
-  g: false
-  z: false
 parameters: [beta, kappa, tau_inv, psi_pi, psi_x, rho_r, rho_g, rho_z, pi_star, r_star,
   sig_r, sig_g, sig_z, rho_gz, meas_infl, meas_rate, meas_outgap, meas_rho_ir, meas_rho_gi,
   meas_rho_gr, x_const, r_const]

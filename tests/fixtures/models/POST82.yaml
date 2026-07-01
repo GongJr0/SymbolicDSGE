@@ -1,12 +1,6 @@
 name: "NK_LS_POST82"
 
 variables: [g, z, r, x, Pi]
-constrained:
-  Pi: false
-  x: false
-  r: false
-  g: false
-  z: false
 
 # Parameter naming:
 # beta: discount factor

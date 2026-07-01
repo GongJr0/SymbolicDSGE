@@ -1,12 +1,6 @@
 name: "LKJ_DENSE_TEST"
 
 variables: [g, z, r, x, Pi]
-constrained:
-  Pi: false
-  x: false
-  r: false
-  g: false
-  z: false
 
 parameters: [beta, kappa, tau_inv,
              psi_pi, psi_x, rho_r,

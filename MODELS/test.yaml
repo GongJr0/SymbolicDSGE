@@ -1,13 +1,6 @@
 name: "TEST"
 
 variables: [u, v, r, Pi, x, r_star]
-constrained:
-    Pi: false
-    x: false
-    r: false
-    v: false
-    r_star: false
-    u: false
 
 parameters: [beta, sigma, kappa,
              phi_pi, phi_x, rho_r,

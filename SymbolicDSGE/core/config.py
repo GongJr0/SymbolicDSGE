@@ -1,6 +1,7 @@
 from dataclasses import dataclass, asdict
 from typing import Any, TypeVar, Dict
-from sympy import Symbol, Function, Eq, Expr, Matrix
+from sympy import Symbol, Function, Eq, Expr, Matrix, And, Or, Not
+from sympy.logic.boolalg import Boolean
 from sympy.core.relational import Relational
 from numpy import float64
 import pickle
@@ -72,7 +73,9 @@ class Base:
 @dataclass
 class Equations(Base):
     model: list[Eq]
-    constraint: SymbolGetterDict[Symbol, Relational]
+    constraint: SymbolGetterDict[
+        Symbol, Dict[Relational | Boolean | And | Or | Not, Expr]
+    ]  # OBC Mapping = {var: {ineq_constraint: alternative_expr}}
     observable: SymbolGetterDict[Symbol, Expr]
     obs_is_affine: SymbolGetterDict[Symbol, bool]
     obs_jacobian: Matrix
@@ -96,13 +99,13 @@ class Variables(Base):
 class ModelConfig(Base):
     name: str
     variables: Variables
-    constrained: dict[Function, bool]
     parameters: list[Symbol]
     shock_map: dict[Symbol, Symbol]
     observables: list[Symbol]
     equations: Equations
     calibration: Calib
     symbolically_linearized: bool = False
+
     #: Source YAML text the config was parsed from, retained so a model can be
     #: round-tripped into a ``.sdsge`` bundle without re-reading from disk
     #: (avoiding the staleness window between solve and save). ``None`` for
