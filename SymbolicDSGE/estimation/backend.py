@@ -80,10 +80,7 @@ def reorder_observables(
     canon_idx = {name: i for i, name in enumerate(canon)}
 
     if observables is None:
-        if kalman is not None and kalman.y_names:
-            obs_given = list(kalman.y_names)
-        else:
-            obs_given = list(canon)
+        obs_given = list(canon)
     else:
         obs_given = list(observables)
 
@@ -127,13 +124,9 @@ def infer_filter_mode(
     compiled: CompiledModel,
     observables: list[str] | None,
 ) -> str:
-    kalman = getattr(compiled, "kalman", None)
     canon = getattr(compiled, "observable_names", [])
     if observables is None:
-        if kalman is not None and getattr(kalman, "y_names", None):
-            obs = list(kalman.y_names)
-        else:
-            obs = list(canon)
+        obs = list(canon)
     else:
         obs = list(observables)
 
@@ -259,22 +252,8 @@ def resolve_filter_options(
     jitter: float | float64 | None,
     symmetrize: bool | None,
 ) -> tuple[float64, bool]:
-    if jitter is None:
-        if kalman is not None and getattr(kalman, "jitter", None) is not None:
-            kf_jitter = float64(kalman.jitter)
-        else:
-            kf_jitter = float64(0.0)
-    else:
-        kf_jitter = float64(jitter)
-
-    if symmetrize is None:
-        if kalman is not None and getattr(kalman, "symmetrize", None) is not None:
-            kf_sym = bool(kalman.symmetrize)
-        else:
-            kf_sym = False
-    else:
-        kf_sym = bool(symmetrize)
-
+    kf_jitter = float64(0.0) if jitter is None else float64(jitter)
+    kf_sym = False if symmetrize is None else bool(symmetrize)
     return kf_jitter, kf_sym
 
 

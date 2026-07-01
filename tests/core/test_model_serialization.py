@@ -38,9 +38,6 @@ def test_kalman_config_round_trips_via_reparse() -> None:
     assert k0 is not None and k1 is not None
 
     # Authored fields survive verbatim.
-    assert k1.y_names == k0.y_names
-    assert k1.jitter == k0.jitter
-    assert k1.symmetrize == k0.symmetrize
     assert k1.P0.mode == k0.P0.mode
     assert k1.P0.scale == k0.P0.scale
     assert k1.P0.diag == k0.P0.diag

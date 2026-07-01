@@ -67,7 +67,6 @@ calibration:
       e_z, e_r: rho_zr_shock
 
 kalman:
-  y: [OutGap, Infl, Rate]
   R:
     std:
       OutGap: meas_outgap
@@ -86,5 +85,3 @@ kalman:
       r: 1.0
       Pi: 1.0
       x: 1.0
-  jitter: 1e-10
-  symmetrize: true

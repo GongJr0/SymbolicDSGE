@@ -51,7 +51,7 @@ _ALLOWED_TOP_LEVEL_KEYS = frozenset(
 _ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "observables"})
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
 _ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
-_ALLOWED_KALMAN_KEYS = frozenset({"y", "jitter", "symmetrize", "P0", "R"})
+_ALLOWED_KALMAN_KEYS = frozenset({"P0", "R"})
 _ALLOWED_P0_KEYS = frozenset({"mode", "scale", "diag"})
 _ALLOWED_R_KEYS = frozenset({"std", "corr"})
 
@@ -601,14 +601,7 @@ class ModelParser:
             return None
 
         y_order = [_LOCALS[o] for o in data["observables"]]
-        y_cfg = kalman_data.get("y", [])
-        if not y_cfg:
-            y_str = [o.name for o in y_order]
-        else:
-            y_str = y_cfg
-
-        jit = kalman_data.get("jitter", None)
-        symm = kalman_data.get("symmetrize", None)
+        obs_names = [o.name for o in y_order]
 
         P0 = kalman_data.get("P0", {}) or {}
         P0_mode = P0.get("mode", "diag")
@@ -647,9 +640,9 @@ class ModelParser:
                 R_corr_param_map[frozenset((names[0], names[1]))] = param_name
             obs_corr_sym: PairGetterDict[Symbol] = PairGetterDict(obs_corr_sym_dict)
 
-            for i in range(len(y_str)):
-                for j in range(i + 1, len(y_str)):
-                    pair = frozenset((y_str[i], y_str[j]))
+            for i in range(len(obs_names)):
+                for j in range(i + 1, len(obs_names)):
+                    pair = frozenset((obs_names[i], obs_names[j]))
                     R_corr_param_map.setdefault(pair, None)
 
             n_obs = len(y_order)
@@ -706,10 +699,7 @@ class ModelParser:
         )
 
         return KalmanConfig(
-            y_names=y_str,
             R=R,
-            jitter=jit,
-            symmetrize=symm,
             P0=P0_cfg,
             R_symbolic=R_symbolic,
             R_param_symbols=r_param_symbols,

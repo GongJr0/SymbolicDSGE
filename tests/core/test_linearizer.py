@@ -98,7 +98,6 @@ def _mixed_methods_nonlinear_yaml() -> str:
               e_z: sig_z
             corr: {}
         kalman:
-          y: [ZObs]
           R:
             std:
               ZObs: meas_z
@@ -107,8 +106,6 @@ def _mixed_methods_nonlinear_yaml() -> str:
             mode: eye
             scale: 1.0
             diag: {}
-          jitter: 1e-10
-          symmetrize: true
         """
     )
 
@@ -148,7 +145,6 @@ def _mixed_methods_hand_linearized_yaml() -> str:
               e_z: sig_z
             corr: {}
         kalman:
-          y: [ZObs]
           R:
             std:
               ZObs: meas_z
@@ -157,8 +153,6 @@ def _mixed_methods_hand_linearized_yaml() -> str:
             mode: eye
             scale: 1.0
             diag: {}
-          jitter: 1e-10
-          symmetrize: true
         """
     )
 
