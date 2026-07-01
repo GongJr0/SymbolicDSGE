@@ -10,12 +10,6 @@ variables:
   Pi:
     linearization: log
     steady_state: pi_star
-constrained:
-  Pi: false
-  x: false
-  r: false
-  g: false
-  z: false
 
 # Parameter naming:
 # beta: discount factor (often fixed near 0.99 in quarterly models; LS paper doesn’t pin it in Table 3)
