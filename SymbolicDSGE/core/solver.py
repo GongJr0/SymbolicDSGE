@@ -13,7 +13,7 @@ from numba import njit
 
 import pandas as pd
 
-from .. import _linearsolve as linearsolve
+from .klein import klein_solve
 from .config import ModelConfig
 from .compiled_model import CompiledModel, VariableLayout
 from .linearization import linearize_model
@@ -407,37 +407,19 @@ def jacobian_func({args_str}) -> NDF:
         else:
             ss = asarray(steady_state, dtype=float64)
 
-        mdl = linearsolve.model(
-            equations=compiled.equations,
-            variables=compiled.var_names,
-            parameters=np.ascontiguousarray(
-                np.array(
-                    [params[p.name] for p in compiled.calib_params], dtype=complex128
-                )
-            ),
-            parameter_names=[p.name for p in compiled.calib_params],
-            n_states=compiled.n_state,
-            n_exo_states=compiled.n_exog,
+        param_vec = np.ascontiguousarray(
+            np.array([params[p.name] for p in compiled.calib_params], dtype=float64)
         )
-        setattr(mdl, "_equations_numeric", compiled.construct_objective_vector_func())
-        setattr(
-            mdl,
-            "_parameter_array",
-            np.ascontiguousarray(
-                np.array([params[p.name] for p in compiled.calib_params], dtype=float64)
-            ),
+        sol = klein_solve(
+            compiled.construct_objective_vector_func(),
+            param_vec,
+            ss,
+            compiled.n_state,
         )
 
-        mdl.set_ss(ss)
-        mdl.approximate_and_solve()
-
-        # Extract solution matrices (linearsolve uses .gx, .hx style in some versions, keep flexible)
-        # Common conventions in linear RE solvers:
-        # x_{t+1} = hx x_t + eta eps_{t+1}
-        # y_t = gx x_t
-
-        p = np.asarray(mdl.p, dtype=complex128)
-        f = np.asarray(mdl.f, dtype=complex128)
+        # Solution matrices: x_{t+1} = p x_t (+ shocks), controls_t = f x_t.
+        p = np.asarray(sol.p, dtype=complex128)
+        f = np.asarray(sol.f, dtype=complex128)
 
         n_s = compiled.n_state
         n_u = len(compiled.var_names) - n_s
@@ -471,14 +453,14 @@ def jacobian_func({args_str}) -> NDF:
             )
         )
 
-        if getattr(mdl, "stab", 0) != 0:
+        if sol.stab != 0:
             raise ValueError(
-                f"Klein stability/uniqueness condition violated (stab={mdl.stab})."
+                f"Klein stability/uniqueness condition violated (stab={sol.stab})."
             )
 
         return SolvedModel(
             compiled=compiled,
-            policy=mdl,
+            policy=sol,
             A=A,
             B=B,
         )

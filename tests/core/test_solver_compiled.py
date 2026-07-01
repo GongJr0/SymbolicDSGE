@@ -6,14 +6,11 @@ import random
 import textwrap
 
 import numpy as np
-import pandas as pd
 import sympy as sp
 import yaml
-from numba import njit
 from numpy import float64
 import pytest
 
-from SymbolicDSGE import _linearsolve as linearsolve
 from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
 
 
@@ -198,11 +195,6 @@ def test_measurement_array_dispatchers_match_scalar_dispatchers(compiled_test):
     assert np.allclose(array_jac, scalar_jac)
 
 
-def test_klein_helpers_use_numba_function_cache():
-    assert type(linearsolve._to_complex._cache).__name__ == "FunctionCache"
-    assert type(linearsolve._klein_postprocess._cache).__name__ == "FunctionCache"
-
-
 def test_compile_rejects_unknown_variable_order(parsed_test):
     model, kalman = parsed_test
     solver = DSGESolver(model, kalman)
@@ -304,58 +296,3 @@ def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0
-
-
-def test_linearsolve_accepts_array_parameters_on_numeric_path():
-    params = np.array([0.9], dtype=np.complex128)
-
-    def equations(fwd, cur, par):
-        return np.array([fwd[0] - par[0] * cur[0]], dtype=np.complex128)
-
-    @njit
-    def equations_numeric(fwd, cur, par):
-        return np.array([fwd[0] - par[0] * cur[0]], dtype=np.complex128)
-
-    mdl = linearsolve.model(
-        equations=equations,
-        variables=["x"],
-        parameters=params,
-        parameter_names=["rho"],
-        n_states=1,
-        n_exo_states=0,
-    )
-    mdl.set_ss(np.array([1.0], dtype=float))
-    setattr(mdl, "_equations_numeric", equations_numeric)
-    setattr(mdl, "_parameter_array", np.array([0.9], dtype=float))
-    mdl.linear_approximation()
-
-    assert mdl.names["param"] == ["rho"]
-    assert isinstance(mdl.parameters, np.ndarray)
-    assert isinstance(mdl.ss, np.ndarray)
-    assert mdl.a.shape == (1, 1)
-    assert mdl.b.shape == (1, 1)
-    assert mdl.a[0, 0] == pytest.approx(1.0)
-    assert mdl.b[0, 0] == pytest.approx(0.9)
-
-
-def test_linearsolve_legacy_fallback_without_numeric_dispatcher():
-    params = pd.Series({"rho": 0.9}, dtype=float)
-
-    def equations(fwd, cur, par):
-        return np.array([fwd["x"] - par["rho"] * cur["x"]], dtype=complex)
-
-    mdl = linearsolve.model(
-        equations=equations,
-        variables=["x"],
-        parameters=params,
-        n_states=1,
-        n_exo_states=0,
-    )
-    mdl.set_ss(pd.Series({"x": 1.0}, dtype=float))
-    mdl.linear_approximation()
-
-    assert isinstance(mdl.ss, np.ndarray)
-    assert mdl.a.shape == (1, 1)
-    assert mdl.b.shape == (1, 1)
-    assert mdl.a[0, 0] == pytest.approx(1.0)
-    assert mdl.b[0, 0] == pytest.approx(0.9)
