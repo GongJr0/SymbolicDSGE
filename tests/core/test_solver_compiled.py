@@ -26,10 +26,6 @@ def _nonlinear_compile_yaml() -> str:
             linearization: taylor
             steady_state: k_ss
           z: {}
-        constrained:
-          a: false
-          k: false
-          z: false
         parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z]
         shock_map:
           e_a: a

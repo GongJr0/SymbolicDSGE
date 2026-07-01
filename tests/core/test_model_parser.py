@@ -34,24 +34,31 @@ def test_parsed_config_is_iterable(parsed_post82):
     assert kalman.y_names == ["OutGap", "Infl", "Rate"]
 
 
-def test_validate_constraints_errors_when_marked_constrained_without_equation(
-    parsed_test,
-):
+def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
-    conf.constrained[conf.variables.variables[0]] = True
-    conf.equations.constraint = type(conf.equations.constraint)({})
-
-    with pytest.raises(ValueError, match="no constraint equations"):
-        ModelParser.validate_constraints(conf)
-
-
-def test_validate_constraints_errors_for_unknown_constrained_variable(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
     ghost = sp.Function("ghost")
-    conf.constrained[ghost] = True
+    var = conf.variables.variables[0]
+    # OBC condition references an undeclared variable -> rejected.
+    conf.equations.constraint = type(conf.equations.constraint)(
+        {var: {ghost(t) < 0: sp.Integer(0)}}
+    )
 
-    with pytest.raises(ValueError, match="do not exist"):
+    with pytest.raises(ValueError, match="unknown symbols"):
         ModelParser.validate_constraints(conf)
+
+
+def test_validate_constraints_accepts_valid_obc(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    # Well-formed OBC over a declared variable ({var(t) < 0: 0}) must not raise;
+    # the time symbol is excluded and the binding is a valid Expr.
+    conf.equations.constraint = type(conf.equations.constraint)(
+        {var: {var(t) < 0: sp.Integer(0)}}
+    )
+
+    ModelParser.validate_constraints(conf)
 
 
 def test_validate_calib_errors_for_unknown_parameter(parsed_test):
