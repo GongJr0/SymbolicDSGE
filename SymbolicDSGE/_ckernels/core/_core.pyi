@@ -8,10 +8,11 @@ must stay in sync with ``_core.pyx`` / ``core.c`` and the numba reference in
 not this stub.
 """
 
-from numpy import float64
+from numpy import complex128, float64
 from numpy.typing import NDArray
 
 _F64 = NDArray[float64]
+_C128 = NDArray[complex128]
 
 def simulate_linear_states_into(
     A: _F64,
@@ -30,3 +31,11 @@ def affine_observations_into(
     out: _F64,
 ) -> None:
     """out[(T, m)] <- d + C @ states[state_start + t]. Mirrors the numba kernel."""
+
+def klein_postprocess(
+    s: _C128,
+    t: _C128,
+    z: _C128,
+    n_states: int,
+) -> tuple[_C128, _C128, int, _C128]:
+    """(f, p, stab, eig) from the ordered Schur factors. Mirrors the numba path."""

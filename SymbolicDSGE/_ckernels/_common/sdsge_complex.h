@@ -74,9 +74,10 @@ i64 c128_lu_factor_inplace(c128 *SDSGE_RESTRICT A, i64 *SDSGE_RESTRICT pivot,
                            const i64 n);
 void c128_lu_free(c128_lu *lu);
 
-/* Solve (L U) X = B for X(n,m) from a factorization (LU(n,n), piv(n)) produced
- * by c128_lu_factor[_inplace]. B(n,m) is the RHS; X(n,m) is the output and must
- * not alias B/LU. m == 1 is a vector solve; B == identity gives the inverse. */
+/* Solve (L U) X = B for X(n,m) from a factorization (LU(n,n),
+ * piv(n)) produced by c128_lu_factor[_inplace]. B(n,m) is the
+ * RHS; X(n,m) is the output and must not alias B/LU. m == 1 is a
+ * vector solve; B == identity gives the inverse. */
 void c128_lu_solve(const c128 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
                    const c128 *SDSGE_RESTRICT B, c128 *SDSGE_RESTRICT X,
                    const i64 n, const i64 m);

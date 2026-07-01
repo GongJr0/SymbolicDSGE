@@ -109,7 +109,8 @@ void c128_lu_free(c128_lu *lu) {
 void c128_lu_solve(const c128 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
                    const c128 *SDSGE_RESTRICT B, c128 *SDSGE_RESTRICT X,
                    const i64 n, const i64 m) {
-  /* X := B, then replay the factorization's row swaps (k <-> piv[k], forward).
+  /* X := B, then replay the factorization's row swaps (k <-> piv[k],
+   * forward).
    */
   memcpy(X, B, sizeof(c128) * n * m);
   for (i64 k = 0; k < n; ++k) {
