@@ -32,6 +32,13 @@ cdef extern from "klein_postproc.h" nogil:
         c128 *f, c128 *p, int64_t *stab, c128 *eig)
 
 
+cdef extern from "spike.h" nogil:
+    ctypedef void (*spike_residual_fn)(
+        c128 *a, c128 *b, c128 *out, int64_t n)
+    void spike_call(
+        spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
+
+
 cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     ctypedef struct bc256:
         c128 a
@@ -139,6 +146,22 @@ def klein_postprocess(
     if err == -3:
         raise ValueError("klein_postprocess: model has no states.")
     return f, p, int(stab), eig
+
+
+def spike_drive(
+    size_t fn_addr,
+    double complex[::1] a,
+    double complex[::1] b,
+    double complex[::1] out,
+):
+    """Stage-0 (#248): invoke a numba @cfunc (given its ``.address``) from the
+    hand-written C ``spike_call``, GIL released. ``fn(a, b, out, n)`` writes into
+    ``out``. Correct results here prove the numba->native ABI + nogil path on MSVC.
+    """
+    cdef int64_t n = a.shape[0]
+    cdef spike_residual_fn fn = <spike_residual_fn><void*>fn_addr
+    with nogil:
+        spike_call(fn, <c128 *>&a[0], <c128 *>&b[0], <c128 *>&out[0], n)
 
 
 # --- bicomplex (bc256) primitive wrappers -------------------------------------

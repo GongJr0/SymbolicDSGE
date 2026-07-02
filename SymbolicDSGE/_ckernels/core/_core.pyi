@@ -40,6 +40,9 @@ def klein_postprocess(
 ) -> tuple[_C128, _C128, int, _C128]:
     """(f, p, stab, eig) from the ordered Schur factors. Mirrors the numba path."""
 
+def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
+    """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
+
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).
 _BC = tuple[float, float, float, float]
