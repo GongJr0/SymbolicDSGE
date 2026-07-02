@@ -105,16 +105,18 @@ static inline bc256 bc256_spow(const bc256 x, const f64 p) {
 }
 
 static inline bc256 bc256_ipow(const bc256 x, i64 p) {
+  const int neg = p < 0;
+  i64 n = neg ? -p : p;
   bc256 r = bc256_from_real(1.0);
   bc256 y = x;
-  while (p) {
-    if (p & 1) {
+  while (n) {
+    if (n & 1) {
       r = bc256_mul(r, y);
     }
     y = bc256_mul(y, y);
-    p >>= 1;
+    n >>= 1;
   }
-  return r;
+  return neg ? bc256_div(bc256_from_real(1.0), r) : r;
 }
 
 static inline bc256 bc256_cpow(const bc256 x, const bc256 y) {
@@ -122,6 +124,21 @@ static inline bc256 bc256_cpow(const bc256 x, const bc256 y) {
   bc256_proj(x, &px1, &px2);
   bc256_proj(y, &py1, &py2);
   return bc256_reconst(c128_cpow(px1, py1), c128_cpow(px2, py2));
+}
+
+/* Principal square root via the direct in-slot solve of w^2 = x (x = z1 + z2 j):
+ *   w1 = sqrt((z1 + sqrt(z1^2 + z2^2)) / 2),   w2 = z2 / (2 w1).
+ * Unlike the idempotent transcendentals this is cancellation-free on a
+ * perturbation (the ij component comes out of a division, not a subtraction of
+ * near-equal O(1) values). Assumes a positive-real-dominant base -- i.e. the
+ * only place a real sqrt is meaningful; w1 = 0 (sqrt of a negative real) is
+ * outside that domain. */
+static inline bc256 bc256_sqrt(const bc256 x) {
+  const c128 s =
+      c128_sqrt(c128_add(c128_mul(x.a, x.a), c128_mul(x.b, x.b)));
+  const c128 w1 = c128_sqrt(c128_real_scale(c128_add(x.a, s), 0.5));
+  const c128 w2 = c128_div(x.b, c128_real_scale(w1, 2.0));
+  return bc256_make(w1, w2);
 }
 
 #endif /* SDSGE_BICOMPLEX_H */

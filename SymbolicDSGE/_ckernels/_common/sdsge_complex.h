@@ -117,20 +117,41 @@ static inline c128 c128_spow(const c128 a, const f64 p) {
 }
 
 static inline c128 c128_ipow(const c128 a, i64 p) {
+  const int neg = p < 0;
+  i64 n = neg ? -p : p;
   c128 r = c128_from_real(1.0);
   c128 x = a;
-  while (p) {
-    if (p & 1) {
+  while (n) {
+    if (n & 1) {
       r = c128_mul(r, x);
     }
     x = c128_mul(x, x);
-    p >>= 1;
+    n >>= 1;
   }
-  return r;
+  return neg ? c128_div(c128_from_real(1.0), r) : r;
 }
 
 static inline c128 c128_cpow(const c128 a, const c128 b) {
   return c128_exp(c128_mul(b, c128_log(a)));
+}
+
+/* Principal complex square root, log-free. Numerically stable: whichever of
+ * (m + re) / (m - re) is the non-cancelling sum drives the computation, and the
+ * other component is recovered by division. */
+static inline c128 c128_sqrt(const c128 a) {
+  if (a.re == 0.0 && a.im == 0.0) {
+    return c128_make(0.0, 0.0);
+  }
+  const f64 m = c128_abs(a); // hypot(re, im)
+  f64 p, q;
+  if (a.re >= 0.0) {
+    p = sqrt(0.5 * (m + a.re));
+    q = a.im / (2.0 * p);
+  } else {
+    q = copysign(sqrt(0.5 * (m - a.re)), a.im);
+    p = a.im / (2.0 * q);
+  }
+  return c128_make(p, q);
 }
 
 /* ERROR CODES */

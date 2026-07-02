@@ -23,6 +23,7 @@ cdef extern from "../_common/sdsge_complex.h":
     ctypedef struct c128:
         double re
         double im
+    c128 c128_sqrt(c128 a)
 
 
 cdef extern from "klein_postproc.h" nogil:
@@ -48,6 +49,7 @@ cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     bc256 bc256_log(bc256 x)
     bc256 bc256_spow(bc256 x, double p)
     bc256 bc256_ipow(bc256 x, int64_t p)
+    bc256 bc256_sqrt(bc256 x)
     bc256 bc256_cpow(bc256 x, bc256 y)
     double bc256_real(bc256 x)
     double bc256_i(bc256 x)
@@ -208,7 +210,20 @@ def bc_spow(x, double p):
 
 
 def bc_ipow(x, int64_t p):
-    return _bc_unpack(bc256_ipow(_bx_pack(x), p))
+    return _bc_unpack(bc256_ipow(_bc_pack(x), p))
+
+
+def bc_sqrt(x):
+    return _bc_unpack(bc256_sqrt(_bc_pack(x)))
+
+
+def c_sqrt(z):
+    """Principal complex sqrt; z = (re, im) -> (re, im)."""
+    cdef c128 v
+    v.re = z[0]
+    v.im = z[1]
+    cdef c128 r = c128_sqrt(v)
+    return (r.re, r.im)
 
 
 def bc_cpow(x, y):

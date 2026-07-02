@@ -36,6 +36,7 @@ from SymbolicDSGE._ckernels.core._core import (
     bc_div,
     bc_exp,
     bc_i_conj,
+    bc_ipow,
     bc_j_conj,
     bc_log,
     bc_mul,
@@ -44,7 +45,9 @@ from SymbolicDSGE._ckernels.core._core import (
     bc_real_scale,
     bc_reconst,
     bc_spow,
+    bc_sqrt,
     bc_sub,
+    c_sqrt,
 )
 
 RTOL = 1e-12
@@ -186,6 +189,65 @@ def test_spow_integer_matches_repeated_mul():
     x3 = bc_mul(x2, x)
     np.testing.assert_allclose(bc_spow(x, 2.0), x2, rtol=1e-9, atol=1e-11)
     np.testing.assert_allclose(bc_spow(x, 3.0), x3, rtol=1e-9, atol=1e-11)
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 5, 8])
+def test_ipow_matches_repeated_mul(n):
+    # Log-free integer power: exact regardless of base sign (here a negative base).
+    x = (-0.7, 0.4, -0.2, 0.1)
+    expect = (1.0, 0.0, 0.0, 0.0)
+    for _ in range(n):
+        expect = bc_mul(expect, x)
+    np.testing.assert_allclose(bc_ipow(x, n), expect, rtol=1e-12, atol=1e-14)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5])
+def test_ipow_negative_is_reciprocal(n):
+    # x^(-n) == 1 / x^n, handled in the kernel so the printer need not special-case.
+    x = (-0.7, 0.4, -0.2, 0.1)
+    one = (1.0, 0.0, 0.0, 0.0)
+    np.testing.assert_allclose(
+        bc_ipow(x, -n), bc_div(one, bc_ipow(x, n)), rtol=1e-11, atol=1e-13
+    )
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_c_sqrt_matches_cmath(seed):
+    rng = np.random.default_rng(seed)
+    z = complex(*rng.uniform(-2.0, 2.0, size=2))
+    r = c_sqrt((z.real, z.imag))
+    ref = cmath.sqrt(z)
+    np.testing.assert_allclose(r, (ref.real, ref.imag), rtol=1e-13, atol=1e-14)
+
+
+def test_c_sqrt_of_negative_real_is_imaginary():
+    np.testing.assert_allclose(c_sqrt((-4.0, 0.0)), (0.0, 2.0), atol=1e-14)
+    np.testing.assert_allclose(c_sqrt((0.0, 0.0)), (0.0, 0.0), atol=1e-15)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_bc_sqrt_squares_back(seed):
+    rng = np.random.default_rng(seed)
+    # Positive-dominant real part (the domain a real sqrt lives in).
+    x = (float(rng.uniform(0.5, 3.0)), *rng.uniform(-0.3, 0.3, size=3))
+    np.testing.assert_allclose(
+        bc_mul(bc_sqrt(x), bc_sqrt(x)), x, rtol=1e-11, atol=1e-13
+    )
+
+
+def test_bc_sqrt_matches_spow_half():
+    # Direct sqrt vs the exp/log half-power on a positive base -- both valid there.
+    x = (1.7, 0.2, -0.1, 0.05)
+    np.testing.assert_allclose(bc_sqrt(x), bc_spow(x, 0.5), rtol=1e-10, atol=1e-12)
+
+
+def test_second_derivative_sqrt_is_cancellation_free():
+    # f(x) = sqrt(x),  f''(x) = -1/4 * x^(-3/2). The direct formula keeps the ij
+    # component clean, so this holds even at very small h (unlike idempotent spow).
+    x0, h = 1.4, 1e-100
+    f = bc_sqrt((x0, h, h, 0.0))
+    analytic = -0.25 * x0 ** (-1.5)
+    assert f[3] / h**2 == pytest.approx(analytic, rel=1e-8)
 
 
 @pytest.mark.parametrize("seed", range(6))
