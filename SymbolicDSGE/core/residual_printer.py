@@ -31,11 +31,19 @@ from sympy import Symbol
 
 
 class OpTable(Protocol):
-    """Renders each primitive to a target-language expression string."""
+    """Renders each primitive to a target-language expression string.
+
+    ``elems_per_var`` is how many ``complex128`` buffer slots one variable
+    occupies (1 for c128, 2 for bicomplex's ``(a, b)``); ``load``/``store`` map a
+    logical variable index to that layout.
+    """
 
     prelude_imports: tuple[str, ...]
+    elems_per_var: int
 
     def const(self, v: float) -> str: ...
+    def load(self, buf: str, idx: int) -> str: ...
+    def store(self, buf: str, idx: int, expr: str) -> str: ...
     def add(self, a: str, b: str) -> str: ...
     def sub(self, a: str, b: str) -> str: ...
     def mul(self, a: str, b: str) -> str: ...
@@ -51,9 +59,16 @@ class C128Ops(OpTable):
     """numba ``complex128`` backend: native operators + ``cmath`` transcendentals."""
 
     prelude_imports = ("import cmath",)
+    elems_per_var = 1
 
     def const(self, v: float) -> str:
         return f"complex({float(v)!r}, 0.0)"
+
+    def load(self, buf: str, idx: int) -> str:
+        return f"{buf}[{idx}]"
+
+    def store(self, buf: str, idx: int, expr: str) -> str:
+        return f"{buf}[{idx}] = {expr}"
 
     def add(self, a: str, b: str) -> str:
         return f"({a} + {b})"
@@ -81,6 +96,58 @@ class C128Ops(OpTable):
 
     def sqrt(self, a: str) -> str:
         return f"cmath.sqrt({a})"
+
+
+class BicomplexOps(OpTable):
+    """numba bicomplex backend for the second-order Hessian residual.
+
+    A variable occupies two ``complex128`` slots ``(a, b)``; arithmetic goes
+    through the ``bc_*`` value-type ops (``core.bicomplex``). Constants are
+    zero-imaginary (``(v, 0, 0, 0)``) so they inject no complex-step derivative.
+    """
+
+    prelude_imports = (
+        "from SymbolicDSGE.core.bicomplex import ("
+        " bc_add, bc_sub, bc_neg, bc_mul, bc_div, bc_real_scale,"
+        " bc_exp, bc_log, bc_sqrt )",
+    )
+    elems_per_var = 2
+
+    def const(self, v: float) -> str:
+        return f"(complex({float(v)!r}, 0.0), 0j)"
+
+    def load(self, buf: str, idx: int) -> str:
+        return f"({buf}[{2 * idx}], {buf}[{2 * idx + 1}])"
+
+    def store(self, buf: str, idx: int, expr: str) -> str:
+        return f"{buf}[{2 * idx}], {buf}[{2 * idx + 1}] = {expr}"
+
+    def add(self, a: str, b: str) -> str:
+        return f"bc_add({a}, {b})"
+
+    def sub(self, a: str, b: str) -> str:
+        return f"bc_sub({a}, {b})"
+
+    def mul(self, a: str, b: str) -> str:
+        return f"bc_mul({a}, {b})"
+
+    def div(self, a: str, b: str) -> str:
+        return f"bc_div({a}, {b})"
+
+    def neg(self, a: str) -> str:
+        return f"bc_neg({a})"
+
+    def real_scale(self, a: str, s: float) -> str:
+        return f"bc_real_scale({a}, {float(s)!r})"
+
+    def exp(self, a: str) -> str:
+        return f"bc_exp({a})"
+
+    def log(self, a: str) -> str:
+        return f"bc_log({a})"
+
+    def sqrt(self, a: str) -> str:
+        return f"bc_sqrt({a})"
 
 
 @dataclass
@@ -135,16 +202,17 @@ class ResidualPrinter:
         self.lines = []
         self._tmp = 0
 
+        n_out = self.ops.elems_per_var * layout.n_eq
         replacements, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("cse_"))
         for sym, sub in replacements:
             rendered = self.render(sub)
             self.lines.append(f"    {sym.name} = {rendered}")
 
         if allocate:
-            self.lines.append(f"    out = np.empty(({layout.n_eq},), np.complex128)")
+            self.lines.append(f"    out = np.empty(({n_out},), np.complex128)")
         for i, expr in enumerate(reduced):
             rendered = self.render(expr)
-            self.lines.append(f"    out[{i}] = {rendered}")
+            self.lines.append("    " + self.ops.store("out", i, rendered))
         if allocate:
             self.lines.append("    return out")
         return self.lines
@@ -176,7 +244,7 @@ class ResidualPrinter:
         if slot is None:
             return str(sym.name)  # a cse temp (cse_0, ...)
         buf, idx = slot
-        return f"{buf}[{idx}]"
+        return self.ops.load(buf, idx)
 
     def _render_add(self, expr: Any) -> str:
         result: str | None = None
@@ -298,11 +366,12 @@ def build_cfunc(
     """``void(fwd*, cur*, par*, out*)`` numba @cfunc; ``.address`` feeds the driver."""
     table: OpTable = C128Ops() if ops is None else ops
     body = ResidualPrinter(table).emit(exprs, layout, allocate=False)
+    w = table.elems_per_var
     preamble = [
-        f"    fwd = carray(fwd_ptr, ({layout.n_var},))",
-        f"    cur = carray(cur_ptr, ({layout.n_var},))",
-        f"    par = carray(par_ptr, ({layout.n_par},))",
-        f"    out = carray(out_ptr, ({layout.n_eq},))",
+        f"    fwd = carray(fwd_ptr, ({w * layout.n_var},))",
+        f"    cur = carray(cur_ptr, ({w * layout.n_var},))",
+        f"    par = carray(par_ptr, ({w * layout.n_par},))",
+        f"    out = carray(out_ptr, ({w * layout.n_eq},))",
     ]
     src = "\n".join(
         [
