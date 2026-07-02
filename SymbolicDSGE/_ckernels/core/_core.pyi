@@ -62,6 +62,15 @@ def residual_path(
 ) -> _F64:
     """Real residual matrix (n_steps, n_eq) from a residual @cfunc over a path."""
 
+def bicomplex_hessian(
+    residual_addr: int,
+    steady_state: _F64,
+    params: _F64,
+    n_eq: int,
+    step: float = ...,
+) -> _F64:
+    """Residual Hessian (n_eq, 2*n_var, 2*n_var) via the bicomplex step."""
+
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).
 _BC = tuple[float, float, float, float]

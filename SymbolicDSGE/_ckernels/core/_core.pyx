@@ -82,6 +82,15 @@ cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     bc256 bc256_reconst(c128 a, c128 b)
 
 
+cdef extern from "bicomplex_hessian.h" nogil:
+    ctypedef void (*bc_residual_fn)(
+        const bc256 *fwd, const bc256 *cur, const bc256 *par, bc256 *out)
+    int64_t sdsge_bicomplex_hessian(
+        bc_residual_fn residual, const double *ss, const double *par,
+        int64_t n_var, int64_t n_par, int64_t n_eq, double step,
+        double *hessian)
+
+
 def simulate_linear_states_into(
     double[:, ::1] A,
     double[:, ::1] B,
@@ -241,6 +250,36 @@ def residual_path(
     if err != 0:
         raise MemoryError("residual_path: allocation failed.")
     return residuals
+
+
+def bicomplex_hessian(
+    size_t residual_addr,
+    double[::1] steady_state,
+    double[::1] params,
+    int64_t n_eq,
+    double step=1e-4,
+):
+    """Residual Hessian ``F_xx`` (n_eq, 2*n_var, 2*n_var) via the bicomplex step,
+    from a bicomplex residual @cfunc (``build_cfunc(..., BicomplexOps())``) given
+    its ``.address``. Second-order native preproc; feeds the g_xx assembly.
+    """
+    cdef int64_t n_var = steady_state.shape[0]
+    cdef int64_t n_par = params.shape[0]
+    cdef int64_t n2 = 2 * n_var
+
+    hessian = np.empty((n_eq, n2, n2), dtype=np.float64)
+    cdef double[:, :, ::1] hv = hessian
+
+    cdef const double *ss_ptr = &steady_state[0] if n_var > 0 else NULL
+    cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
+    cdef bc_residual_fn residual = <bc_residual_fn><void*>residual_addr
+    cdef int64_t err
+    with nogil:
+        err = sdsge_bicomplex_hessian(
+            residual, ss_ptr, par_ptr, n_var, n_par, n_eq, step, &hv[0, 0, 0])
+    if err != 0:
+        raise MemoryError("bicomplex_hessian: allocation failed.")
+    return hessian
 
 
 # --- bicomplex (bc256) primitive wrappers -------------------------------------

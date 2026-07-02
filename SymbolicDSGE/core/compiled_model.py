@@ -14,7 +14,7 @@ from textwrap import dedent
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
-from .residual_printer import ResidualLayout, build_cfunc, build_njit
+from .residual_printer import BicomplexOps, ResidualLayout, build_cfunc, build_njit
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -81,6 +81,17 @@ class CompiledModel:
 
     def construct_objective_cfunc(self) -> Any:
         return self._objective_cfunc
+
+    @cached_property
+    def _objective_cfunc_bicomplex(self) -> Any:
+        # Residual as a bicomplex @cfunc for the second-order Hessian sweep
+        # (bicomplex_hessian). Held here so its .address stays valid.
+        return build_cfunc(
+            self.objective_eqs, ResidualLayout.from_compiled(self), BicomplexOps()
+        )
+
+    def construct_objective_cfunc_bicomplex(self) -> Any:
+        return self._objective_cfunc_bicomplex
 
     def _coerce_param_vector(
         self,

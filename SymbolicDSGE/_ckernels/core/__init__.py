@@ -7,6 +7,7 @@ importing this module raises ``ImportError`` and the consumer
 
 from ._core import (
     affine_observations_into as affine_observations_into,
+    bicomplex_hessian as bicomplex_hessian,
     klein_postprocess as klein_postprocess,
     klein_preprocess as klein_preprocess,
     residual_path as residual_path,
