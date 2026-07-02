@@ -9,6 +9,12 @@ name: cfunc ABI
 
 on:
   workflow_dispatch:
+  # TEMPORARY: workflow_dispatch only fires for workflow files that exist on the
+  # default branch, so this feature branch can't dispatch it yet. Trigger on push
+  # to validate the guard now; revert this `push:` block once it lands on main.
+  push:
+    branches:
+      - SecondOrderPerturbation
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
