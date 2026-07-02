@@ -14,7 +14,7 @@ from textwrap import dedent
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
-from .residual_printer import ResidualLayout, build_njit
+from .residual_printer import ResidualLayout, build_cfunc, build_njit
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -72,6 +72,15 @@ class CompiledModel:
         # Building the vectorized objective function triggers Numba compilation.
         # Cache the dispatcher so solve/approximation can reuse the same kernel.
         return self._objective_vector_func
+
+    @cached_property
+    def _objective_cfunc(self) -> Any:
+        # Residual as a numba @cfunc (C ABI) for the native complex-step preproc
+        # (klein_preprocess). Held here so its .address stays valid for the driver.
+        return build_cfunc(self.objective_eqs, ResidualLayout.from_compiled(self))
+
+    def construct_objective_cfunc(self) -> Any:
+        return self._objective_cfunc
 
     def _coerce_param_vector(
         self,

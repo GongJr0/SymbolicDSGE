@@ -14,7 +14,7 @@ when assembling the state-space ``A``/``B``), matching the previous behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import numpy as np
 from numpy import complex128, float64
@@ -30,15 +30,19 @@ NDC = NDArray[complex128]
 # Prefer the native post-proc; fall back to the numba twin when the extension is
 # not built (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
 _klein_postprocess_native: Callable[..., Any] | None
+_klein_preprocess_native: Callable[..., Any] | None
 if FORCE_NUMBA:
     _klein_postprocess_native = None
+    _klein_preprocess_native = None
 else:
     try:
         from .._ckernels.core import klein_postprocess as _klein_postprocess_native
+        from .._ckernels.core import klein_preprocess as _klein_preprocess_native
     except ImportError:  # pragma: no cover - exercised only without the extension
         if REQUIRE_NATIVE:
             raise
         _klein_postprocess_native = None
+        _klein_preprocess_native = None
 
 
 @dataclass(frozen=True)
@@ -154,24 +158,53 @@ def _postprocess(
     return f, p, int(stab), eig
 
 
+def _preprocess(
+    equations_numeric: Callable[..., NDC],
+    residual_cfunc: Any | None,
+    ss: NDF,
+    par: NDF,
+    n_eq: int,
+    log_linear: bool,
+) -> tuple[NDF, NDF]:
+    """First-order pencil ``(a, b)`` via complex step. Prefers the native driver
+    (``klein_preprocess`` over the residual @cfunc); falls back to the numba
+    ``_approximate_system_numeric``. Both consume the same printer residual, so
+    the pencils agree to machine precision."""
+    if _klein_preprocess_native is not None and residual_cfunc is not None:
+        return cast(
+            "tuple[NDF, NDF]",
+            _klein_preprocess_native(residual_cfunc.address, ss, par, n_eq, log_linear),
+        )
+    return cast(
+        "tuple[NDF, NDF]",
+        _approximate_system_numeric(equations_numeric, ss, par, log_linear),
+    )
+
+
 def klein_solve(
     equations_numeric: Callable[..., NDC],
     params: NDF,
     steady_state: NDF,
     n_states: int,
     *,
+    residual_cfunc: Any | None = None,
     log_linear: bool = False,
 ) -> KleinSolution:
     """First-order Klein solve of the compiled model at ``(params, steady_state)``.
 
     ``equations_numeric`` is the compiled residual (complex-capable) from
-    ``CompiledModel.construct_objective_vector_func()``. Returns a
-    :class:`KleinSolution` with complex ``p``/``f``.
+    ``CompiledModel.construct_objective_vector_func()`` -- the numba fallback for
+    the preproc. ``residual_cfunc`` is the same residual as a numba @cfunc
+    (``construct_objective_cfunc()``); when the native extension is present it
+    drives the complex-step preproc in C. Returns a :class:`KleinSolution` with
+    complex ``p``/``f``.
     """
     ss = np.ascontiguousarray(np.asarray(steady_state, dtype=float64))
     par = np.ascontiguousarray(np.asarray(params, dtype=float64))
 
-    a, b = _approximate_system_numeric(equations_numeric, ss, par, log_linear)
+    # Klein requires a square pencil: n_eq == n_var == len(ss).
+    n_eq = ss.shape[0]
+    a, b = _preprocess(equations_numeric, residual_cfunc, ss, par, n_eq, log_linear)
     s, t, _, _, _, z = ordqz(a, b, sort="ouc", output="complex")
 
     f, p, stab, eig = _postprocess(s, t, z, n_states)

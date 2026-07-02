@@ -409,6 +409,7 @@ def jacobian_func({args_str}) -> NDF:
             param_vec,
             ss,
             compiled.n_state,
+            residual_cfunc=compiled.construct_objective_cfunc(),
         )
 
         # Solution matrices: x_{t+1} = p x_t (+ shocks), controls_t = f x_t.
