@@ -118,7 +118,7 @@ class ModelParser:
     def validate_constraints(cls, conf: ModelConfig) -> None:
         constraints: SymbolGetterDict[Symbol, dict[Relational, Expr]] = (
             conf.equations.constraint
-        )
+        )  # pyright: ignore
         for var, ineq_map in constraints.items():
             # Check if inequalities and OBCs refer to uninitialized variables
             for ineq, alt_obc in ineq_map.items():
@@ -657,7 +657,9 @@ class ModelParser:
                         rho_ij = sp.Integer(1)
                     else:
                         rho_ij = obs_corr_sym.get(frozenset((yi, yj)), sp.Integer(0))
-                    R_symbolic[i, j] = sp.simplify(sig_i * sig_j * rho_ij)
+                    R_symbolic[i, j] = sp.simplify(  # pyright: ignore
+                        sig_i * sig_j * rho_ij
+                    )
 
             r_param_symbols_local: list[Symbol] = []
             seen: set[Symbol] = set()

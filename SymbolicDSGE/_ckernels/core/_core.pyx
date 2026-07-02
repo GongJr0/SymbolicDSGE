@@ -39,6 +39,15 @@ cdef extern from "spike.h" nogil:
         spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
 
 
+cdef extern from "klein_preproc.h" nogil:
+    ctypedef void (*sdsge_residual_fn)(
+        c128 *fwd, c128 *cur, c128 *par, c128 *out)
+    int64_t klein_preproc(
+        sdsge_residual_fn resid, const double *ss, const double *par,
+        int64_t n_var, int64_t n_par, int64_t n_eq, int64_t log_linear,
+        double *a, double *b)
+
+
 cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     ctypedef struct bc256:
         c128 a
@@ -162,6 +171,39 @@ def spike_drive(
     cdef spike_residual_fn fn = <spike_residual_fn><void*>fn_addr
     with nogil:
         spike_call(fn, <c128 *>&a[0], <c128 *>&b[0], <c128 *>&out[0], n)
+
+
+def klein_preprocess(
+    size_t residual_addr,
+    double[::1] steady_state,
+    double[::1] params,
+    int64_t n_eq,
+    bint log_linear,
+):
+    """Complex-step first-order pencil ``(a, b)`` from a numba residual @cfunc
+    (``build_cfunc``) given its ``.address``. Native twin of
+    ``klein._approximate_system_numeric``; ``a``/``b`` feed ``scipy.ordqz``.
+    ``a = d resid/d fwd``, ``b = -(d resid/d cur)``, each ``(n_eq, n_var)``.
+    """
+    cdef int64_t n_var = steady_state.shape[0]
+    cdef int64_t n_par = params.shape[0]
+
+    a = np.empty((n_eq, n_var), dtype=np.float64)
+    b = np.empty((n_eq, n_var), dtype=np.float64)
+    cdef double[:, ::1] av = a
+    cdef double[:, ::1] bv = b
+
+    cdef const double *ss_ptr = &steady_state[0] if n_var > 0 else NULL
+    cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
+    cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
+    cdef int64_t err
+    with nogil:
+        err = klein_preproc(
+            resid, ss_ptr, par_ptr, n_var, n_par, n_eq, log_linear,
+            &av[0, 0], &bv[0, 0])
+    if err != 0:
+        raise MemoryError("klein_preprocess: allocation failed.")
+    return a, b
 
 
 # --- bicomplex (bc256) primitive wrappers -------------------------------------

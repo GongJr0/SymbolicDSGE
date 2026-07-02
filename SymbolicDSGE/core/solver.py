@@ -137,11 +137,6 @@ class DSGESolver:
             for expr in compiled
         ]
 
-        lambda_args = [*fwd_syms, *cur_syms, *params]
-        objective_scalar_funcs = [
-            njit(sp.lambdify(lambda_args, c, modules="numpy")) for c in compiled_numeric
-        ]
-
         shifted_obs = [
             self._offset_lags(expr, t) for expr in conf.equations.observable.values()
         ]
@@ -222,7 +217,6 @@ def jacobian_func({args_str}) -> NDF:
             calib_params=params,
             idx=idx,
             objective_eqs=compiled_numeric,
-            objective_funcs=objective_scalar_funcs,
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_funcs=observable_funcs,

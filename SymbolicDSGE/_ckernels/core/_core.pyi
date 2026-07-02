@@ -43,6 +43,16 @@ def klein_postprocess(
 def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
     """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
 
+def klein_preprocess(
+    residual_addr: int,
+    steady_state: _F64,
+    params: _F64,
+    n_eq: int,
+    log_linear: bool,
+) -> tuple[_F64, _F64]:
+    """Complex-step (a, b) from a residual @cfunc address. Native twin of
+    ``klein._approximate_system_numeric``."""
+
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).
 _BC = tuple[float, float, float, float]

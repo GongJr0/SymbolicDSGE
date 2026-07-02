@@ -66,7 +66,6 @@ def test_compile_builds_expected_structures(compiled_test):
     assert len(c.var_names) == n_vars
     assert len(c.cur_syms) == n_vars
     assert len(c.objective_eqs) == len(c.config.equations.model)
-    assert len(c.objective_funcs) == len(c.config.equations.model)
     assert set(c.idx.keys()) == set(c.var_names)
     assert set(c.observable_names) == {"Infl", "Rate"}
 
