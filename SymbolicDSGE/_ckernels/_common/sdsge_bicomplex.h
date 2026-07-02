@@ -104,6 +104,19 @@ static inline bc256 bc256_spow(const bc256 x, const f64 p) {
                          // for integer powers.
 }
 
+static inline bc256 bc256_ipow(const bc256 x, i64 p) {
+  bc256 r = bc256_from_real(1.0);
+  bc256 y = x;
+  while (p) {
+    if (p & 1) {
+      r = bc256_mul(r, y);
+    }
+    y = bc256_mul(y, y);
+    p >>= 1;
+  }
+  return r;
+}
+
 static inline bc256 bc256_cpow(const bc256 x, const bc256 y) {
   c128 px1, px2, py1, py2;
   bc256_proj(x, &px1, &px2);

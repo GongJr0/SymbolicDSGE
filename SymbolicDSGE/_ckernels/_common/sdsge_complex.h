@@ -116,6 +116,19 @@ static inline c128 c128_spow(const c128 a, const f64 p) {
                                         // multiplication for integer powers.
 }
 
+static inline c128 c128_ipow(const c128 a, i64 p) {
+  c128 r = c128_from_real(1.0);
+  c128 x = a;
+  while (p) {
+    if (p & 1) {
+      r = c128_mul(r, x);
+    }
+    x = c128_mul(x, x);
+    p >>= 1;
+  }
+  return r;
+}
+
 static inline c128 c128_cpow(const c128 a, const c128 b) {
   return c128_exp(c128_mul(b, c128_log(a)));
 }

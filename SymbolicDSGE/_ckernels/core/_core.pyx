@@ -47,6 +47,7 @@ cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     bc256 bc256_exp(bc256 x)
     bc256 bc256_log(bc256 x)
     bc256 bc256_spow(bc256 x, double p)
+    bc256 bc256_ipow(bc256 x, int64_t p)
     bc256 bc256_cpow(bc256 x, bc256 y)
     double bc256_real(bc256 x)
     double bc256_i(bc256 x)
@@ -204,6 +205,10 @@ def bc_log(x):
 
 def bc_spow(x, double p):
     return _bc_unpack(bc256_spow(_bc_pack(x), p))
+
+
+def bc_ipow(x, int64_t p):
+    return _bc_unpack(bc256_ipow(_bx_pack(x), p))
 
 
 def bc_cpow(x, y):
