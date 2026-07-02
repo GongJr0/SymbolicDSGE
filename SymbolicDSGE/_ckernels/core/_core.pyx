@@ -31,6 +31,31 @@ cdef extern from "klein_postproc.h" nogil:
         c128 *f, c128 *p, int64_t *stab, c128 *eig)
 
 
+cdef extern from "../_common/sdsge_bicomplex.h" nogil:
+    ctypedef struct bc256:
+        c128 a
+        c128 b
+    bc256 bc256_add(bc256 x, bc256 y)
+    bc256 bc256_sub(bc256 x, bc256 y)
+    bc256 bc256_neg(bc256 x)
+    bc256 bc256_mul(bc256 x, bc256 y)
+    bc256 bc256_div(bc256 x, bc256 y)
+    bc256 bc256_real_scale(bc256 x, double s)
+    bc256 bc256_i_conj(bc256 x)
+    bc256 bc256_j_conj(bc256 x)
+    bc256 bc256_conj(bc256 x)
+    bc256 bc256_exp(bc256 x)
+    bc256 bc256_log(bc256 x)
+    bc256 bc256_spow(bc256 x, double p)
+    bc256 bc256_cpow(bc256 x, bc256 y)
+    double bc256_real(bc256 x)
+    double bc256_i(bc256 x)
+    double bc256_j(bc256 x)
+    double bc256_ij(bc256 x)
+    void bc256_proj(bc256 x, c128 *p1, c128 *p2)
+    bc256 bc256_reconst(c128 a, c128 b)
+
+
 def simulate_linear_states_into(
     double[:, ::1] A,
     double[:, ::1] B,
@@ -111,3 +136,101 @@ def klein_postprocess(
     if err == -3:
         raise ValueError("klein_postprocess: model has no states.")
     return f, p, int(stab), eig
+
+
+# --- bicomplex (bc256) primitive wrappers -------------------------------------
+# Scalar-arithmetic surface backing the second-order (bicomplex-step) perturbation
+# preproc. Exposed to Python only so the parity/derivative tests can exercise the
+# `static inline` ops in sdsge_bicomplex.h against a reference; the native driver
+# calls these in C, not through here. A bc256 crosses the boundary as the 4-tuple
+# (real, i, j, ij) = (a.re, a.im, b.re, b.im).
+
+cdef bc256 _bc_pack(x):
+    cdef bc256 v
+    v.a.re = x[0]
+    v.a.im = x[1]
+    v.b.re = x[2]
+    v.b.im = x[3]
+    return v
+
+
+cdef tuple _bc_unpack(bc256 v):
+    return (v.a.re, v.a.im, v.b.re, v.b.im)
+
+
+def bc_add(x, y):
+    return _bc_unpack(bc256_add(_bc_pack(x), _bc_pack(y)))
+
+
+def bc_sub(x, y):
+    return _bc_unpack(bc256_sub(_bc_pack(x), _bc_pack(y)))
+
+
+def bc_neg(x):
+    return _bc_unpack(bc256_neg(_bc_pack(x)))
+
+
+def bc_mul(x, y):
+    return _bc_unpack(bc256_mul(_bc_pack(x), _bc_pack(y)))
+
+
+def bc_div(x, y):
+    return _bc_unpack(bc256_div(_bc_pack(x), _bc_pack(y)))
+
+
+def bc_real_scale(x, double s):
+    return _bc_unpack(bc256_real_scale(_bc_pack(x), s))
+
+
+def bc_i_conj(x):
+    return _bc_unpack(bc256_i_conj(_bc_pack(x)))
+
+
+def bc_j_conj(x):
+    return _bc_unpack(bc256_j_conj(_bc_pack(x)))
+
+
+def bc_conj(x):
+    return _bc_unpack(bc256_conj(_bc_pack(x)))
+
+
+def bc_exp(x):
+    return _bc_unpack(bc256_exp(_bc_pack(x)))
+
+
+def bc_log(x):
+    return _bc_unpack(bc256_log(_bc_pack(x)))
+
+
+def bc_spow(x, double p):
+    return _bc_unpack(bc256_spow(_bc_pack(x), p))
+
+
+def bc_cpow(x, y):
+    return _bc_unpack(bc256_cpow(_bc_pack(x), _bc_pack(y)))
+
+
+def bc_accessors(x):
+    """(real, i, j, ij) read back through the C f64 accessors."""
+    cdef bc256 v = _bc_pack(x)
+    return (bc256_real(v), bc256_i(v), bc256_j(v), bc256_ij(v))
+
+
+def bc_proj(x):
+    """Idempotent projection -> (p1.re, p1.im, p2.re, p2.im)."""
+    cdef bc256 v = _bc_pack(x)
+    cdef c128 p1
+    cdef c128 p2
+    bc256_proj(v, &p1, &p2)
+    return (p1.re, p1.im, p2.re, p2.im)
+
+
+def bc_reconst(p):
+    """Inverse of bc_proj; p = (p1.re, p1.im, p2.re, p2.im) -> bc256 4-tuple."""
+    cdef c128 a
+    cdef c128 b
+    a.re = p[0]
+    a.im = p[1]
+    b.re = p[2]
+    b.im = p[3]
+    return _bc_unpack(bc256_reconst(a, b))
