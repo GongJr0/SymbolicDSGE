@@ -53,6 +53,15 @@ def klein_preprocess(
     """Complex-step (a, b) from a residual @cfunc address. Native twin of
     ``klein._approximate_system_numeric``."""
 
+def residual_path(
+    residual_addr: int,
+    cur_states: _C128,
+    fwd_states: _C128,
+    params: _C128,
+    n_eq: int,
+) -> _F64:
+    """Real residual matrix (n_steps, n_eq) from a residual @cfunc over a path."""
+
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).
 _BC = tuple[float, float, float, float]

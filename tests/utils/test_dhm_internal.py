@@ -61,11 +61,16 @@ def test_low_level_state_and_moment_builders_match_manual_construction():
     forward_states = np.array([[5.0, 6.0], [7.0, 8.0]], dtype=np.float64)
     params = np.array([1.0], dtype=np.complex128)
 
-    moments, residuals, instruments = dhm_module._build_forward_moments(
-        current_states,
-        forward_states,
+    residuals_full = dhm_module._forward_residuals_numba(
+        current_states.astype(np.complex128),
+        forward_states.astype(np.complex128),
         params,
         _objective_for_moments,
+        2,
+    )
+    moments, residuals, instruments = dhm_module._build_forward_moments(
+        current_states,
+        residuals_full,
         np.array([0, 1], dtype=np.int64),
         np.array([1], dtype=np.int64),
         True,

@@ -48,6 +48,13 @@ cdef extern from "klein_preproc.h" nogil:
         double *a, double *b)
 
 
+cdef extern from "residual_path.h" nogil:
+    int64_t sdsge_residual_path(
+        sdsge_residual_fn resid, const c128 *cur, const c128 *fwd,
+        const c128 *par, int64_t n_steps, int64_t n_var, int64_t n_eq,
+        double *residuals)
+
+
 cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     ctypedef struct bc256:
         c128 a
@@ -204,6 +211,36 @@ def klein_preprocess(
     if err != 0:
         raise MemoryError("klein_preprocess: allocation failed.")
     return a, b
+
+
+def residual_path(
+    size_t residual_addr,
+    double complex[:, ::1] cur_states,
+    double complex[:, ::1] fwd_states,
+    double complex[::1] params,
+    int64_t n_eq,
+):
+    """Real residual matrix ``(n_steps, n_eq)`` from a residual @cfunc
+    (``build_cfunc``) evaluated over a simulated path. Native backend for the
+    Den Haan-Marcet moment builder -- reuses the solve's cfunc, so it never
+    triggers the numba residual compile.
+    """
+    cdef int64_t n_steps = cur_states.shape[0]
+    cdef int64_t n_var = cur_states.shape[1]
+    residuals = np.empty((n_steps, n_eq), dtype=np.float64)
+    cdef double[:, ::1] rv = residuals
+
+    cdef c128 *cur_ptr = <c128 *>&cur_states[0, 0] if n_steps > 0 else NULL
+    cdef c128 *fwd_ptr = <c128 *>&fwd_states[0, 0] if n_steps > 0 else NULL
+    cdef c128 *par_ptr = <c128 *>&params[0] if params.shape[0] > 0 else NULL
+    cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
+    cdef int64_t err
+    with nogil:
+        err = sdsge_residual_path(
+            resid, cur_ptr, fwd_ptr, par_ptr, n_steps, n_var, n_eq, &rv[0, 0])
+    if err != 0:
+        raise MemoryError("residual_path: allocation failed.")
+    return residuals
 
 
 # --- bicomplex (bc256) primitive wrappers -------------------------------------
