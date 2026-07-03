@@ -53,6 +53,39 @@ def klein_preprocess(
     """Complex-step (a, b) from a residual @cfunc address. Native twin of
     ``klein._approximate_system_numeric``."""
 
+def steady_state_newton(
+    residual_addr: int,
+    seed: _F64,
+    params: _F64,
+    max_iter: int = ...,
+    tol: float = ...,
+) -> tuple[_F64, int]:
+    """Newton solve of F(ss, ss) = 0 from a residual @cfunc address; returns
+    (ss, iters). Jacobian a - b via klein_preproc, step via f64 LU."""
+
+def second_order(
+    a: _F64,
+    b: _F64,
+    f_xx: _F64,
+    gx: _F64,
+    hx: _F64,
+    n_state: int,
+) -> tuple[_F64, _F64]:
+    """SGU second-order tensors (gxx, hxx) -- native twin of
+    core.second_order.solve_second_order."""
+
+def second_order_risk(
+    a: _F64,
+    b: _F64,
+    f_xx: _F64,
+    gx: _F64,
+    gxx: _F64,
+    eta: _F64,
+    n_state: int,
+) -> tuple[_F64, _F64]:
+    """Sigma^2 risk correction (gss, hss) -- native twin of
+    core.second_order.solve_second_order_risk."""
+
 def residual_path(
     residual_addr: int,
     cur_states: _C128,

@@ -20,12 +20,33 @@ states first (nx = n_state), controls after (ny = n - nx):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
+from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
+
 NDF = NDArray[np.float64]
 NDC = NDArray[np.complex128]
+
+# Prefer the native assembly kernels; fall back to the numpy reference below when
+# the extension is not built (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see
+# _native_dispatch). The numpy path stays the parity oracle either way.
+_native_second_order: Callable[..., Any] | None
+_native_second_order_risk: Callable[..., Any] | None
+if FORCE_NUMBA:
+    _native_second_order = None
+    _native_second_order_risk = None
+else:
+    try:
+        from .._ckernels.core import second_order as _native_second_order
+        from .._ckernels.core import second_order_risk as _native_second_order_risk
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _native_second_order = None
+        _native_second_order_risk = None
 
 
 @dataclass(frozen=True)
@@ -90,8 +111,21 @@ def solve_second_order(
     """Second-order policy tensors ``(gxx, hxx)``.
 
     ``gxx`` is ``(ny, nx, nx)`` (controls) and ``hxx`` is ``(nx, nx, nx)``
-    (states), symmetric in the last two indices.
+    (states), symmetric in the last two indices. Prefers the native kernel
+    (``_ckernels.core.second_order``); falls back to :func:`_solve_second_order_numpy`.
     """
+    if _native_second_order is not None:
+        return cast(
+            "tuple[NDF, NDF]",
+            _native_second_order(a, b, hessian, gx, hx, n_state),
+        )
+    return _solve_second_order_numpy(a, b, hessian, gx, hx, n_state)
+
+
+def _solve_second_order_numpy(
+    a: NDF, b: NDF, hessian: NDF, gx: NDF, hx: NDF, n_state: int
+) -> tuple[NDF, NDF]:
+    """Numpy reference for :func:`solve_second_order` (parity oracle + fallback)."""
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
     f_xx = np.asarray(hessian, dtype=np.float64)
@@ -207,9 +241,25 @@ def solve_second_order_risk(
     """Risk correction ``(g_ss, h_ss)`` -- row-major transpile of SGU ``gss_hss.m``.
 
     ``eta`` is the shock loading (nx x ne): ``x' = h(x) + eta @ eps``, ``eps ~
-    N(0, I)`` (so ``eta @ eta.T`` is the state innovation covariance). Only the
-    forward-forward Hessian blocks enter, since the risk term comes from the
-    shock's effect on ``(y', x')``. Solves ``[Qg Qh] [g_ss; h_ss] = -q``. The
+    N(0, I)`` (so ``eta @ eta.T`` is the state innovation covariance). Prefers the
+    native kernel (``_ckernels.core.second_order_risk``); falls back to
+    :func:`_solve_second_order_risk_numpy`.
+    """
+    if _native_second_order_risk is not None:
+        return cast(
+            "tuple[NDF, NDF]",
+            _native_second_order_risk(a, b, hessian, gx, gxx, eta, n_state),
+        )
+    return _solve_second_order_risk_numpy(a, b, hessian, gx, gxx, eta, n_state)
+
+
+def _solve_second_order_risk_numpy(
+    a: NDF, b: NDF, hessian: NDF, gx: NDF, gxx: NDF, eta: NDF, n_state: int
+) -> tuple[NDF, NDF]:
+    """Numpy reference for :func:`solve_second_order_risk`.
+
+    Only the forward-forward Hessian blocks enter, since the risk term comes from
+    the shock's effect on ``(y', x')``. Solves ``[Qg Qh] [g_ss; h_ss] = -q``. The
     ``diag/sum`` idioms in the MATLAB are traces: ``sum(diag(M' N)) = sum(M*N)``.
     """
     a = np.asarray(a, dtype=np.float64)

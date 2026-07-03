@@ -55,6 +55,24 @@ cdef extern from "residual_path.h" nogil:
         double *residuals)
 
 
+cdef extern from "steady_state.h" nogil:
+    int64_t sdsge_steady_state_newton(
+        sdsge_residual_fn residual, const double *seed, const double *par,
+        int64_t n_var, int64_t n_par, int64_t max_iter, double tol,
+        double *ss, int64_t *iters)
+
+
+cdef extern from "second_order.h" nogil:
+    int64_t sdsge_second_order(
+        const double *a, const double *b, const double *f_xx,
+        const double *gx, const double *hx, int64_t n, int64_t nx,
+        double *gxx, double *hxx)
+    int64_t sdsge_second_order_risk(
+        const double *a, const double *b, const double *f_xx,
+        const double *gx, const double *gxx, const double *eta,
+        int64_t n, int64_t nx, int64_t ne, double *gss, double *hss)
+
+
 cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     ctypedef struct bc256:
         c128 a
@@ -220,6 +238,124 @@ def klein_preprocess(
     if err != 0:
         raise MemoryError("klein_preprocess: allocation failed.")
     return a, b
+
+
+def steady_state_newton(
+    size_t residual_addr,
+    double[::1] seed,
+    double[::1] params,
+    int64_t max_iter=50,
+    double tol=1e-12,
+):
+    """Newton solve of ``F(ss, ss) = 0`` from ``seed``, driving a numba residual
+    @cfunc (``build_cfunc``) by its ``.address``. The Jacobian ``a - b`` comes from
+    ``klein_preproc`` each step; the update is ``sdsge_solve``. Returns
+    ``(ss, iters)``; raises on singular Jacobian or non-convergence.
+    """
+    cdef int64_t n_var = seed.shape[0]
+    cdef int64_t n_par = params.shape[0]
+
+    ss = np.empty(n_var, dtype=np.float64)
+    cdef double[::1] ssv = ss
+
+    cdef const double *seed_ptr = &seed[0] if n_var > 0 else NULL
+    cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
+    cdef double *ss_ptr = &ssv[0] if n_var > 0 else NULL
+    cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
+    cdef int64_t iters = 0
+    cdef int64_t err
+    with nogil:
+        err = sdsge_steady_state_newton(
+            resid, seed_ptr, par_ptr, n_var, n_par, max_iter, tol,
+            ss_ptr, &iters)
+    if err == -1:
+        raise MemoryError("steady_state_newton: allocation failed.")
+    if err == -2:
+        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
+    if err == -3:
+        raise ValueError(
+            "steady_state_newton: did not converge within max_iter "
+            "(or the residual went non-finite)."
+        )
+    return ss, int(iters)
+
+
+def second_order(a, b, f_xx, gx, hx, int64_t n_state):
+    """SGU second-order tensors ``(gxx, hxx)`` -- native transcription of
+    ``core.second_order.solve_second_order``. ``a``/``b`` are the first-order
+    pencil ``(n, n)``, ``f_xx`` the residual Hessian ``(n, 2n, 2n)``, ``gx``
+    ``(ny, nx)``, ``hx`` ``(nx, nx)``. Returns ``gxx (ny, nx, nx)``,
+    ``hxx (nx, nx, nx)``.
+
+    Inputs are coerced to C-contiguous f64 (``gx``/``hx`` arrive as real-part
+    views of the complex Klein solution, so a copy is expected here).
+    """
+    cdef double[:, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
+    cdef double[:, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
+    cdef double[:, :, ::1] fxxv = np.ascontiguousarray(f_xx, dtype=np.float64)
+    cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
+    cdef double[:, ::1] hxv = np.ascontiguousarray(hx, dtype=np.float64)
+
+    cdef int64_t n = av.shape[0]
+    cdef int64_t nx = n_state
+    cdef int64_t ny = n - nx
+
+    gxx = np.empty((ny, nx, nx), dtype=np.float64)
+    hxx = np.empty((nx, nx, nx), dtype=np.float64)
+    cdef double[:, :, ::1] gv = gxx
+    cdef double[:, :, ::1] hv = hxx
+
+    cdef const double *gx_ptr = &gxv[0, 0] if ny > 0 else NULL
+    cdef double *gv_ptr = &gv[0, 0, 0] if ny > 0 else NULL
+    cdef int64_t err
+    with nogil:
+        err = sdsge_second_order(
+            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, &hxv[0, 0], n, nx,
+            gv_ptr, &hv[0, 0, 0])
+    if err == -1:
+        raise MemoryError("second_order: allocation failed.")
+    if err == -2:
+        raise ValueError("second_order: singular symmetry-reduced system.")
+    return gxx, hxx
+
+
+def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
+    """Sigma^2 risk correction ``(gss, hss)`` -- native transcription of
+    ``core.second_order.solve_second_order_risk``. ``gxx`` is the second-order
+    controls ``(ny, nx, nx)``; ``eta`` the shock loading ``(nx, ne)``. Returns
+    ``gss (ny,)``, ``hss (nx,)``. Inputs coerced to C-contiguous f64.
+    """
+    cdef double[:, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
+    cdef double[:, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
+    cdef double[:, :, ::1] fxxv = np.ascontiguousarray(f_xx, dtype=np.float64)
+    cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
+    cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
+    cdef double[:, ::1] etav = np.ascontiguousarray(eta, dtype=np.float64)
+
+    cdef int64_t n = av.shape[0]
+    cdef int64_t nx = n_state
+    cdef int64_t ny = n - nx
+    cdef int64_t ne = etav.shape[1]
+
+    gss = np.empty(ny, dtype=np.float64)
+    hss = np.empty(nx, dtype=np.float64)
+    cdef double[::1] gssv = gss
+    cdef double[::1] hssv = hss
+
+    cdef const double *gx_ptr = &gxv[0, 0] if ny > 0 else NULL
+    cdef const double *gxx_ptr = &gxxv[0, 0, 0] if ny > 0 else NULL
+    cdef const double *eta_ptr = &etav[0, 0] if ne > 0 else NULL
+    cdef double *gss_ptr = &gssv[0] if ny > 0 else NULL
+    cdef int64_t err
+    with nogil:
+        err = sdsge_second_order_risk(
+            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, gxx_ptr, eta_ptr,
+            n, nx, ne, gss_ptr, &hssv[0])
+    if err == -1:
+        raise MemoryError("second_order_risk: allocation failed.")
+    if err == -2:
+        raise ValueError("second_order_risk: singular [Qg Qh] system.")
+    return gss, hss
 
 
 def residual_path(
