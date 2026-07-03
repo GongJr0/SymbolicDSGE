@@ -19,10 +19,41 @@ states first (nx = n_state), controls after (ny = n - nx):
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from numpy.typing import NDArray
 
 NDF = NDArray[np.float64]
+NDC = NDArray[np.complex128]
+
+
+@dataclass(frozen=True)
+class PerturbationSolution:
+    """First- (+ optional second-) order perturbation solution.
+
+    A superset of :class:`~SymbolicDSGE.core.klein.KleinSolution`: it carries the
+    same first-order interface (``p`` = h_x, ``f`` = g_x, ``stab``, ``eig``) so it
+    drops into ``SolvedModel.policy`` unchanged -- every existing first-order path
+    (``sim``/``irf``/``kalman``) keeps reading ``.f``/``.p``/``.stab``. The
+    second-order tensors are ``None`` at ``order == 1``:
+
+    * ``hxx`` (nx, nx, nx), ``gxx`` (ny, nx, nx) -- the state-quadratic terms;
+    * ``hss`` (nx,), ``gss`` (ny,) -- the sigma^2 risk correction.
+
+    ``steady_state`` is the (nonlinear) expansion point the tensors are taken at.
+    """
+
+    p: NDC
+    f: NDC
+    stab: int
+    eig: NDC
+    order: int
+    steady_state: NDF
+    gxx: NDF | None = None
+    hxx: NDF | None = None
+    gss: NDF | None = None
+    hss: NDF | None = None
 
 
 def _symmetry_matrix(nx: int, ny: int) -> NDF:
@@ -168,6 +199,56 @@ def solve_second_order(
     gxx = full[:ngxx].reshape((ny, nx, nx))
     hxx = full[ngxx:].reshape((nx, nx, nx))
     return gxx, hxx
+
+
+def solve_second_order_risk(
+    a: NDF, b: NDF, hessian: NDF, gx: NDF, gxx: NDF, eta: NDF, n_state: int
+) -> tuple[NDF, NDF]:
+    """Risk correction ``(g_ss, h_ss)`` -- row-major transpile of SGU ``gss_hss.m``.
+
+    ``eta`` is the shock loading (nx x ne): ``x' = h(x) + eta @ eps``, ``eps ~
+    N(0, I)`` (so ``eta @ eta.T`` is the state innovation covariance). Only the
+    forward-forward Hessian blocks enter, since the risk term comes from the
+    shock's effect on ``(y', x')``. Solves ``[Qg Qh] [g_ss; h_ss] = -q``. The
+    ``diag/sum`` idioms in the MATLAB are traces: ``sum(diag(M' N)) = sum(M*N)``.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    f_xx = np.asarray(hessian, dtype=np.float64)
+    gx = np.asarray(gx, dtype=np.float64)
+    gxx = np.asarray(gxx, dtype=np.float64)
+    eta = np.asarray(eta, dtype=np.float64)
+
+    n = a.shape[0]
+    nx = int(n_state)
+    ny = n - nx
+
+    fxp, fyp = a[:, :nx], a[:, nx:]
+    fy = -b[:, nx:]
+    xp, yp = slice(0, nx), slice(nx, n)
+    fypyp = f_xx[:, yp, yp]
+    fypxp = f_xx[:, yp, xp]
+    fxpyp = f_xx[:, xp, yp]
+    fxpxp = f_xx[:, xp, xp]
+
+    gxe = gx @ eta  # (ny, ne)
+    q_g = np.zeros((n, ny))
+    q_h = np.zeros((n, nx))
+    q = np.zeros(n)
+    for i in range(n):
+        q_h[i] = fyp[i] @ gx + fxp[i]  # 1st + 7th
+        q_g[i] = fyp[i] + fy[i]  # 5th + 6th
+        g4 = np.einsum("a,abc->bc", fyp[i], gxx)  # fyp . gxx over controls
+        q[i] = (
+            np.sum((fypyp[i] @ gxe) * gxe)  # 2nd
+            + np.sum((fypxp[i] @ eta) * gxe)  # 3rd
+            + np.sum((g4 @ eta) * eta)  # 4th
+            + np.sum((fxpyp[i] @ gx @ eta) * eta)  # 8th
+            + np.sum((fxpxp[i] @ eta) * eta)  # 9th
+        )
+
+    x = -np.linalg.solve(np.hstack([q_g, q_h]), q)
+    return x[:ny], x[ny:]
 
 
 def first_order_residual(a: NDF, b: NDF, gx: NDF, hx: NDF, n_state: int) -> NDF:

@@ -5,7 +5,8 @@
 2. a (log-)linear model has an identically-zero second-order solution -- guards
    the assembly + solve plumbing;
 3. the RBC g_xx/h_xx match Dynare's ghxx (with the [k,z]->[z,k] reorder and the
-   (1/rho)^m timing map) -- the independent-solver check on the actual math.
+   (1/rho)^m timing map), and the risk correction g_ss/h_ss match ghs2 directly
+   (a constant -> no timing factor) -- the independent-solver check on the math.
 """
 
 from __future__ import annotations
@@ -18,7 +19,11 @@ from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preproces
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.klein import klein_solve
 from SymbolicDSGE.core.residual_printer import ResidualLayout
-from SymbolicDSGE.core.second_order import first_order_residual, solve_second_order
+from SymbolicDSGE.core.second_order import (
+    first_order_residual,
+    solve_second_order,
+    solve_second_order_risk,
+)
 
 # Dynare stoch_simul(order=2) on tests/fixtures/models/rbc_second_order.mod,
 # untouched full precision. Rows are DR order [k', z (linear -> 0), c]; the four
@@ -95,10 +100,11 @@ def test_linear_model_has_zero_second_order(path):
     np.testing.assert_allclose(hxx, 0.0, atol=1e-6)
 
 
-def test_rbc_second_order_matches_dynare_ghxx():
-    """The golden: our g_xx/h_xx on the RBC match Dynare's ghxx (after the
-    [k,z]->[z,k] reorder + the (1/rho)^m timing map). This is the check that
-    exercises the actual second-order math against an independent solver."""
+def test_rbc_second_order_matches_dynare():
+    """The golden: our g_xx/h_xx match Dynare's ghxx (after the [k,z]->[z,k]
+    reorder + the (1/rho)^m timing map), and the risk correction g_ss/h_ss matches
+    ghs2 directly (a constant, so no timing factor). The independent-solver check
+    on the actual second-order math."""
     model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
     compiled = DSGESolver(model, kalman).compile()
     assert list(compiled.var_names) == ["z", "k", "c"]  # states [z, k], control c
@@ -143,3 +149,63 @@ def test_rbc_second_order_matches_dynare_ghxx():
         atol=1e-6,
     )
     np.testing.assert_allclose(hxx[0], 0.0, atol=1e-6)  # z' is linear
+
+    # Risk correction vs ghs2: eta loads the single shock (std sig) on z (state 0);
+    # x' = h(x) + eta @ eps. No timing factor -- g_ss/h_ss are constants.
+    sig = float(calib[sp.Symbol("sig")])
+    eta = np.zeros((n_state, 1), dtype=np.float64)
+    eta[0, 0] = sig
+    gss, hss = solve_second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+    # ours [g_ss(c); h_ss(z', k')] -> Dynare DR order [k', z, c]
+    np.testing.assert_allclose(
+        [hss[1], hss[0], gss[0]], _DYNARE_GHS2, rtol=1e-4, atol=1e-8
+    )
+
+
+def test_solve_order2_wiring():
+    """The .solve(order=2) public path end to end: it resolves + cross-checks the
+    nonlinear steady state, builds eta from the shock calibration, and returns a
+    PerturbationSolution whose tensors match the Dynare goldens. order=1 is
+    unchanged (a plain KleinSolution with no second-order fields)."""
+    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+
+    solved = solver.solve(compiled, order=2)
+    pol = solved.policy
+    assert pol.order == 2
+
+    calib = compiled.config.calibration.parameters
+    rho = float(calib[sp.Symbol("rho")])
+    k_ss, c_ss = float(calib[sp.Symbol("k_ss")]), float(calib[sp.Symbol("c_ss")])
+    # steady state was solved/validated to the nonlinear point (order [z, k, c]).
+    np.testing.assert_allclose(
+        pol.steady_state, [0.0, k_ss, c_ss], rtol=1e-6, atol=1e-8
+    )
+    np.testing.assert_allclose(
+        pol.gxx[0], _dynare_to_our_convention(_DYNARE_GHXX_C, rho), rtol=1e-4, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        pol.hxx[1],
+        _dynare_to_our_convention(_DYNARE_GHXX_KPRIME, rho),
+        rtol=1e-4,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        [pol.hss[1], pol.hss[0], pol.gss[0]], _DYNARE_GHS2, rtol=1e-4, atol=1e-8
+    )
+    # First order path is untouched: KleinSolution, no second-order tensors.
+    # (levels model -> the expansion point must be supplied; zeros would fail BK.)
+    first = solver.solve(compiled, order=1, steady_state=[0.0, k_ss, c_ss])
+    assert getattr(first.policy, "order", None) is None
+    assert not hasattr(first.policy, "gxx")
+
+
+def test_solve_order2_rejects_inconsistent_steady_state():
+    """A steady_state= that does not clear F(ss, ss) is rejected rather than used
+    as a bad expansion point."""
+    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    with pytest.raises(ValueError, match="disagrees with the numerically solved"):
+        solver.solve(compiled, order=2, steady_state=[0.0, 1.0, 1.0])

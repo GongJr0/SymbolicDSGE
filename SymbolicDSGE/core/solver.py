@@ -1,7 +1,7 @@
 import warnings
 import sympy as sp
 from sympy import Symbol, Function, Expr
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 from textwrap import dedent
 
 import numpy as np
@@ -12,12 +12,29 @@ import numba
 from numba import njit
 
 import pandas as pd
+from scipy.optimize import root
 
 from .klein import klein_solve
-from .config import ModelConfig
+from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout
 from .linearization import linearize_model
 from .solved_model import SolvedModel
+from .second_order import (
+    PerturbationSolution,
+    solve_second_order,
+    solve_second_order_risk,
+)
+
+# Second-order needs the native bicomplex-Hessian / complex-step drivers; there is
+# no numba fallback for the Hessian sweep (order=2 raises if the extension is absent).
+_bicomplex_hessian: Callable[..., Any] | None
+_klein_preprocess: Callable[..., Any] | None
+try:
+    from .._ckernels.core import bicomplex_hessian as _bicomplex_hessian
+    from .._ckernels.core import klein_preprocess as _klein_preprocess
+except ImportError:  # pragma: no cover - exercised only without the extension
+    _bicomplex_hessian = None
+    _klein_preprocess = None
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
@@ -380,7 +397,18 @@ def jacobian_func({args_str}) -> NDF:
         *,
         parameters: dict[str, float] | None = None,
         steady_state: list[float] | ndarray | dict[str, float] | None = None,
+        order: int = 1,
     ) -> SolvedModel:
+        """Solve the model to first (``order=1``) or second (``order=2``) order.
+
+        ``order=1`` is the Klein linear solve (policy is a ``KleinSolution``).
+        ``order=2`` additionally computes the SGU second-order tensors and the
+        sigma^2 risk correction (policy is a ``PerturbationSolution``); it requires
+        the native extension and a nonlinear steady state (see ``_solve_second_order``).
+        The state-space ``A``/``B`` are the first-order transition in both cases.
+        """
+        if order not in (1, 2):
+            raise ValueError(f"order must be 1 or 2, got {order}.")
         conf = self.model_config
 
         if parameters is None:
@@ -392,17 +420,18 @@ def jacobian_func({args_str}) -> NDF:
         else:
             params = {p: float64(v) for p, v in parameters.items()}
 
-        if steady_state is None:
-            ss = np.zeros(len(compiled.var_names), dtype=float64)
-        elif isinstance(steady_state, dict):
-            ss = np.array(
-                [steady_state.get(vn, 0.0) for vn in compiled.var_names], dtype=float64
-            )
-        else:
-            ss = asarray(steady_state, dtype=float64)
-
         param_vec = np.ascontiguousarray(
             np.array([params[p.name] for p in compiled.calib_params], dtype=float64)
+        )
+        given_ss = self._coerce_steady_state(steady_state, compiled)
+
+        if order == 2:
+            return self._solve_second_order(compiled, param_vec, given_ss)
+
+        ss = (
+            given_ss
+            if given_ss is not None
+            else np.zeros(len(compiled.var_names), dtype=float64)
         )
         sol = klein_solve(
             compiled.construct_objective_vector_func(),
@@ -411,54 +440,193 @@ def jacobian_func({args_str}) -> NDF:
             compiled.n_state,
             residual_cfunc=compiled.construct_objective_cfunc(),
         )
+        if sol.stab != 0:
+            raise ValueError(
+                f"Klein stability/uniqueness condition violated (stab={sol.stab})."
+            )
+        A, B = self._assemble_state_space(sol, compiled)
+        return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
 
-        # Solution matrices: x_{t+1} = p x_t (+ shocks), controls_t = f x_t.
+    @staticmethod
+    def _coerce_steady_state(
+        steady_state: list[float] | ndarray | dict[str, float] | None,
+        compiled: CompiledModel,
+    ) -> NDF | None:
+        """User-supplied steady state -> canonical-order vector (or ``None``)."""
+        if steady_state is None:
+            return None
+        if isinstance(steady_state, dict):
+            return np.array(
+                [steady_state.get(vn, 0.0) for vn in compiled.var_names], dtype=float64
+            )
+        return asarray(steady_state, dtype=float64)
+
+    @staticmethod
+    def _assemble_state_space(sol: Any, compiled: CompiledModel) -> tuple[ND, ND]:
+        """First-order state space: X_t = [states; controls], x_{t+1} = p x_t (+
+        shocks), controls_t = f x_t. Shocks hit only the first n_exog states."""
         p = np.asarray(sol.p, dtype=complex128)
         f = np.asarray(sol.f, dtype=complex128)
-
         n_s = compiled.n_state
         n_u = len(compiled.var_names) - n_s
-        n_exo = compiled.n_exog  # number of shocked states (must be <= n_s)
-
+        n_exo = compiled.n_exog
         if n_exo > n_s:
             raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
 
-        # Build full transition for X_t = [states_t; controls_t]
         A = real_if_close(
-            np.block(
-                [
-                    [p, np.zeros((n_s, n_u))],
-                    [f @ p, np.zeros((n_u, n_u))],
-                ]
-            )
+            np.block([[p, np.zeros((n_s, n_u))], [f @ p, np.zeros((n_u, n_u))]])
         )
-        # Shocks hit only the first n_exo states with identity.
         B_state = np.vstack(
             [
                 np.eye(n_exo, dtype=float64),
                 np.zeros((n_s - n_exo, n_exo), dtype=float64),
             ]
         )
-        B = real_if_close(
-            np.vstack(
-                [
-                    B_state,
-                    f @ B_state,
-                ]
-            )
-        )
+        B = real_if_close(np.vstack([B_state, f @ B_state]))
+        return A, B
 
+    def _solve_second_order(
+        self, compiled: CompiledModel, param_vec: NDF, given_ss: NDF | None
+    ) -> SolvedModel:
+        """Second-order (SGU) solve. Resolves + validates the nonlinear steady
+        state, runs the Klein first order, sweeps the bicomplex Hessian, and
+        assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss`` risk correction into a
+        :class:`PerturbationSolution`. Requires the native extension."""
+        if _bicomplex_hessian is None or _klein_preprocess is None:
+            raise RuntimeError(
+                "order=2 requires the native _ckernels extension (bicomplex Hessian "
+                "sweep); it is not available in this build."
+            )
+        n_eq = len(compiled.var_names)
+        n_state = compiled.n_state
+        eq = compiled.construct_objective_vector_func()
+        cf = compiled.construct_objective_cfunc()
+        cf_bc = compiled.construct_objective_cfunc_bicomplex()
+
+        seed = (
+            given_ss
+            if given_ss is not None
+            else self._resolve_config_steady_state(compiled)
+        )
+        ss = self._checked_steady_state(eq, param_vec, seed)
+
+        sol = klein_solve(eq, param_vec, ss, n_state, residual_cfunc=cf)
         if sol.stab != 0:
             raise ValueError(
                 f"Klein stability/uniqueness condition violated (stab={sol.stab})."
             )
+        gx, hx = np.real(sol.f), np.real(sol.p)
 
-        return SolvedModel(
-            compiled=compiled,
-            policy=sol,
-            A=A,
-            B=B,
+        a, b = _klein_preprocess(cf.address, ss, param_vec, n_eq, False)
+        f_xx = _bicomplex_hessian(cf_bc.address, ss, param_vec, n_eq)
+        gxx, hxx = solve_second_order(a, b, f_xx, gx, hx, n_state)
+        eta = self._build_eta(compiled)
+        gss, hss = solve_second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+
+        pert = PerturbationSolution(
+            p=sol.p,
+            f=sol.f,
+            stab=sol.stab,
+            eig=sol.eig,
+            order=2,
+            steady_state=ss,
+            gxx=gxx,
+            hxx=hxx,
+            gss=gss,
+            hss=hss,
         )
+        A, B = self._assemble_state_space(pert, compiled)
+        return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
+
+    @staticmethod
+    def _resolve_config_steady_state(compiled: CompiledModel) -> NDF:
+        """Evaluate each variable's symbolic ``steady_state`` (None -> 0) against
+        the calibration -> a canonical-order vector."""
+        conf = compiled.config
+        name_to_func = {v.__name__: v for v in conf.variables.variables}
+        params = conf.calibration.parameters
+        ss = np.zeros(len(compiled.var_names), dtype=float64)
+        for i, name in enumerate(compiled.var_names):
+            expr = conf.variables.steady_state[name_to_func[name]]
+            if expr is None:
+                continue
+            val = sp.simplify(sp.sympify(expr).subs(params))
+            try:
+                ss[i] = float(val)
+            except TypeError as exc:
+                raise ValueError(
+                    f"Steady state for '{name}' did not evaluate to a number: {val}"
+                ) from exc
+        return ss
+
+    @staticmethod
+    def _checked_steady_state(
+        eq: Callable[..., NDArray], param_vec: NDF, seed: NDF
+    ) -> NDF:
+        """Numerically solve ``F(ss, ss) = 0`` from ``seed`` and cross-check against
+        it: a configured steady state that disagrees with the solved one (beyond
+        tolerance) is a modeling error, so raise rather than expand at a bad point."""
+        par_c = param_vec.astype(complex128)
+
+        def residual(x: NDF) -> NDF:
+            xc = np.ascontiguousarray(x.astype(complex128))
+            return np.real(eq(xc, xc, par_c)).astype(float64)
+
+        result = root(residual, np.asarray(seed, dtype=float64), method="hybr")
+        if not result.success:
+            raise ValueError(
+                "Steady-state solve did not converge from the configured seed "
+                f"{np.asarray(seed)}: {result.message}"
+            )
+        solved = np.asarray(result.x, dtype=float64)
+        if not np.allclose(solved, seed, rtol=1e-6, atol=1e-8):
+            diff = float(np.max(np.abs(solved - seed)))
+            raise ValueError(
+                "Configured steady state disagrees with the numerically solved "
+                f"steady state (max abs diff {diff:.3e}): configured="
+                f"{np.asarray(seed)}, solved={solved}. Fix the model's steady_state "
+                "entries (or the steady_state= argument) so F(ss, ss) = 0 holds."
+            )
+        return solved
+
+    @staticmethod
+    def _build_eta(compiled: CompiledModel) -> NDF:
+        """Shock loading ``eta`` (nx x n_exog): ``eta @ eta.T`` is the state
+        innovation covariance. Stds fill the exog-state rows; correlations enter via
+        the Cholesky of the exog-shock covariance."""
+        conf = compiled.config
+        n_state = compiled.n_state
+        n_exog = compiled.n_exog
+        eta = np.zeros((n_state, n_exog), dtype=float64)
+        if n_exog == 0:
+            return eta
+
+        params = conf.calibration.parameters
+        shock_std = conf.calibration.shock_std
+        shock_corr = conf.calibration.shock_corr
+        rev: SymbolGetterDict = SymbolGetterDict(
+            {v: k for k, v in conf.shock_map.items()}  # variable -> innovation
+        )
+        innovations = [rev[vname] for vname in compiled.var_names[:n_exog]]
+
+        stds = np.empty(n_exog, dtype=float64)
+        for i, innov in enumerate(innovations):
+            sig_sym = shock_std.get(innov)
+            stds[i] = float(params[sig_sym]) if sig_sym in params else 1.0
+        corr = np.eye(n_exog, dtype=float64)
+        for i in range(n_exog):
+            for j in range(i + 1, n_exog):
+                c_sym = shock_corr[innovations[i], innovations[j]]
+                cij = (
+                    float(params[c_sym])
+                    if (c_sym is not None and c_sym in params)
+                    else 0.0
+                )
+                corr[i, j] = corr[j, i] = cij
+
+        cov = corr * np.outer(stds, stds)
+        eta[:n_exog, :] = np.linalg.cholesky(cov)
+        return eta
 
     @staticmethod
     def _validate_prior_initial_guess(
