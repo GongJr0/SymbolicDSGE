@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import (
     bicomplex_hessian,
@@ -27,7 +26,7 @@ from SymbolicDSGE.core.second_order import (
 )
 
 
-def _drive(path, ss_map=None):
+def _drive(path):
     model, kalman = ModelParser(path).get_all()
     compiled = DSGESolver(model, kalman).compile()
     n_eq = len(compiled.var_names)
@@ -38,10 +37,9 @@ def _drive(path, ss_map=None):
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
     eq = compiled.construct_objective_vector_func()
 
-    if ss_map is not None:
-        ss = np.array([ss_map[nm] for nm in compiled.var_names], dtype=np.float64)
-    else:
-        ss = np.zeros(n_eq, dtype=np.float64)
+    # Config steady state, resolved at run time (RBC -> [0, k_ss, c_ss];
+    # deviation-form models -> 0). No file I/O at collection time.
+    ss = DSGESolver._resolve_config_steady_state(compiled)
 
     a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
     sol = klein_solve(eq, par, ss, n_state, residual_cfunc=cf)
@@ -51,26 +49,16 @@ def _drive(path, ss_map=None):
     return a, b, f_xx, gx, hx, n_state, eta
 
 
-def _rbc_ss():
-    model, _ = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
-    calib = model.calibration.parameters
-    return {
-        "z": 0.0,
-        "k": float(calib[sp.Symbol("k_ss")]),
-        "c": float(calib[sp.Symbol("c_ss")]),
-    }
-
-
 @pytest.mark.parametrize(
-    "path, ss_map",
+    "path",
     [
-        ("tests/fixtures/models/rbc_second_order.yaml", _rbc_ss()),  # n=3, nx=2, ny=1
-        ("MODELS/test.yaml", None),  # n=6, nx=3, ny=3
-        ("MODELS/POST82.yaml", None),  # n=5, nx=3, ny=2
+        "tests/fixtures/models/rbc_second_order.yaml",  # n=3, nx=2, ny=1
+        "MODELS/test.yaml",  # n=6, nx=3, ny=3
+        "MODELS/POST82.yaml",  # n=5, nx=3, ny=2
     ],
 )
-def test_native_second_order_matches_numpy(path, ss_map):
-    a, b, f_xx, gx, hx, n_state, eta = _drive(path, ss_map)
+def test_native_second_order_matches_numpy(path):
+    a, b, f_xx, gx, hx, n_state, eta = _drive(path)
 
     gxx_np, hxx_np = _solve_second_order_numpy(a, b, f_xx, gx, hx, n_state)
     gxx_c, hxx_c = second_order(a, b, f_xx, gx, hx, n_state)
