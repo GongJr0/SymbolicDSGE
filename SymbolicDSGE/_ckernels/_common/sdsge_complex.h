@@ -37,6 +37,10 @@ static inline c128 c128_sub(const c128 a, const c128 b) {
   return c128_make(a.re - b.re, a.im - b.im);
 }
 
+static inline c128 c128_neg(const c128 a) { return c128_make(-a.re, -a.im); }
+
+static inline c128 c128_conj(const c128 a) { return c128_make(a.re, -a.im); }
+
 static inline c128 c128_mul(const c128 a, const c128 b) {
   return c128_make(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
 }
@@ -87,6 +91,68 @@ i64 c128_solve(const c128 *SDSGE_RESTRICT A, const c128 *SDSGE_RESTRICT B,
 
 i64 c128_inv(const c128 *SDSGE_RESTRICT A, const i64 n,
              c128 *SDSGE_RESTRICT Ainv);
+
+/* Second-Order Perturbation Arithmetic */
+static inline c128 c128_real_scale(const c128 a, const f64 s) {
+  return c128_make(a.re * s, a.im * s);
+}
+
+static inline c128 c128_i_mul(const c128 a) {
+  return c128_make(-a.im, a.re); // (x, y) = (-y, x)
+}
+
+static inline c128 c128_exp(const c128 a) {
+  const f64 e = exp(a.re);
+  return c128_make(e * cos(a.im), e * sin(a.im));
+}
+
+static inline c128 c128_log(const c128 a) {
+  return c128_make(log(c128_abs(a)), atan2(a.im, a.re));
+}
+
+static inline c128 c128_spow(const c128 a, const f64 p) {
+  return c128_exp(
+      c128_real_scale(c128_log(a), p)); // Undefined for a <= 0; prefer chained
+                                        // multiplication for integer powers.
+}
+
+static inline c128 c128_ipow(const c128 a, i64 p) {
+  const int neg = p < 0;
+  i64 n = neg ? -p : p;
+  c128 r = c128_from_real(1.0);
+  c128 x = a;
+  while (n) {
+    if (n & 1) {
+      r = c128_mul(r, x);
+    }
+    x = c128_mul(x, x);
+    n >>= 1;
+  }
+  return neg ? c128_div(c128_from_real(1.0), r) : r;
+}
+
+static inline c128 c128_cpow(const c128 a, const c128 b) {
+  return c128_exp(c128_mul(b, c128_log(a)));
+}
+
+/* Principal complex square root, log-free. Numerically stable: whichever of
+ * (m + re) / (m - re) is the non-cancelling sum drives the computation, and the
+ * other component is recovered by division. */
+static inline c128 c128_sqrt(const c128 a) {
+  if (a.re == 0.0 && a.im == 0.0) {
+    return c128_make(0.0, 0.0);
+  }
+  const f64 m = c128_abs(a); // hypot(re, im)
+  f64 p, q;
+  if (a.re >= 0.0) {
+    p = sqrt(0.5 * (m + a.re));
+    q = a.im / (2.0 * p);
+  } else {
+    q = copysign(sqrt(0.5 * (m - a.re)), a.im);
+    p = a.im / (2.0 * q);
+  }
+  return c128_make(p, q);
+}
 
 /* ERROR CODES */
 #define SDSGE_LU_SUCCESS 0

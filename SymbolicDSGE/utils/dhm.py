@@ -21,6 +21,21 @@ from sympy.parsing.sympy_parser import (
 
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
+from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
+
+# Prefer the native residual-path kernel (over the solve's cfunc, no numba
+# residual compile); fall back to the numba residual when the extension is
+# absent (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
+_residual_path_native: Callable[..., Any] | None
+if FORCE_NUMBA:
+    _residual_path_native = None
+else:
+    try:
+        from .._ckernels.core import residual_path as _residual_path_native
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _residual_path_native = None
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 _FOC_CACHE: dict[
@@ -134,15 +149,14 @@ def _simulate_linear_states(
     return X
 
 
-# These builders accept another njit-compiled function as an argument. Numba can
-# execute that in nopython mode, but disk-caching the higher-order signature can
-# fail while serializing the CPUDispatcher argument.
+# The residual is evaluated up front into `residuals_full` (n_steps x n_eq_all,
+# real); this builder just assembles moment conditions from it. It no longer
+# takes a higher-order njit residual, which also removes the disk-cache
+# serialization of a CPUDispatcher argument.
 @njit
 def _build_forward_moments(
     current_states: np.ndarray,
-    forward_states: np.ndarray,
-    params: np.ndarray,
-    objective_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
+    residuals_full: np.ndarray,
     equation_idx: np.ndarray,
     instrument_idx: np.ndarray,
     include_constant: bool,
@@ -157,14 +171,7 @@ def _build_forward_moments(
     residuals = np.empty((n_obs, n_eq), dtype=np.float64)
     instruments = np.empty((n_obs, n_inst), dtype=np.float64)
 
-    cur = np.empty((current_states.shape[1],), dtype=np.complex128)
-    fwd = np.empty((forward_states.shape[1],), dtype=np.complex128)
-
     for row, t in enumerate(range(burn_in, n_steps)):
-        cur[:] = current_states[t]
-        fwd[:] = forward_states[t]
-        residual_vec = objective_fn(fwd, cur, params)
-
         col = 0
         if include_constant:
             instruments[row, 0] = 1.0
@@ -175,7 +182,7 @@ def _build_forward_moments(
 
         out_col = 0
         for i in range(n_eq):
-            resid = residual_vec[equation_idx[i]].real
+            resid = residuals_full[t, equation_idx[i]]
             residuals[row, i] = resid
 
             for j in range(n_inst):
@@ -183,6 +190,30 @@ def _build_forward_moments(
                 out_col += 1
 
     return moments, residuals, instruments
+
+
+@njit
+def _forward_residuals_numba(
+    cur_states: np.ndarray,
+    fwd_states: np.ndarray,
+    params: np.ndarray,
+    objective_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
+    n_eq: int,
+) -> np.ndarray:
+    # Numba fallback for the native ``residual_path``: evaluate the numba vector
+    # residual over the path into a real (n_steps x n_eq) matrix.
+    n_steps = cur_states.shape[0]
+    n_var = cur_states.shape[1]
+    residuals = np.empty((n_steps, n_eq), dtype=np.float64)
+    cur = np.empty((n_var,), dtype=np.complex128)
+    fwd = np.empty((n_var,), dtype=np.complex128)
+    for t in range(n_steps):
+        cur[:] = cur_states[t]
+        fwd[:] = fwd_states[t]
+        residual_vec = objective_fn(fwd, cur, params)
+        for k in range(n_eq):
+            residuals[t, k] = residual_vec[k].real
+    return residuals
 
 
 @njit
@@ -237,7 +268,6 @@ class DenHaanMarcet:
         foc_locals: Mapping[str, str] | None = None,
     ) -> None:
         self.solved = solved
-        self._objective = solved.compiled.construct_objective_vector_func()
         self._focs = tuple(focs) if focs is not None else None
         self._foc_locals = dict(foc_locals) if foc_locals is not None else None
         self._t = Symbol("t", integer=True)
@@ -834,6 +864,35 @@ class DenHaanMarcet:
             forward_states = np.ascontiguousarray(states[1:], dtype=np.float64)
         return current_states, forward_states
 
+    def _forward_residuals(
+        self,
+        current_states: np.ndarray,
+        forward_states: np.ndarray,
+    ) -> np.ndarray:
+        """Real residual matrix ``(n_steps, n_eq_all)`` over the state path.
+
+        Uses the native ``residual_path`` kernel driven by the solve's residual
+        @cfunc when the extension is present -- reusing that cached cfunc, so it
+        never triggers the numba residual compile -- else the numba fallback.
+        """
+        compiled = self.solved.compiled
+        n_eq = len(compiled.objective_eqs)
+        par_c = np.ascontiguousarray(self._param_vector_complex(), dtype=np.complex128)
+        cur_c = np.ascontiguousarray(current_states, dtype=np.complex128)
+        fwd_c = np.ascontiguousarray(forward_states, dtype=np.complex128)
+
+        if _residual_path_native is not None:
+            cfunc = compiled.construct_objective_cfunc()
+            return cast(
+                np.ndarray,
+                _residual_path_native(cfunc.address, cur_c, fwd_c, par_c, n_eq),
+            )
+        objective = compiled.construct_objective_vector_func()
+        return cast(
+            np.ndarray,
+            _forward_residuals_numba(cur_c, fwd_c, par_c, objective, n_eq),
+        )
+
     def _evaluate_state_path(
         self,
         states: np.ndarray,
@@ -878,11 +937,10 @@ class DenHaanMarcet:
             foc_expressions = normalized_focs
         else:
             eq_idx = self._resolve_equation_idx(equation_idx)
+            residuals_full = self._forward_residuals(current_states, forward_states)
             moments, residuals, instruments = _build_forward_moments(
                 current_states,
-                forward_states,
-                self._param_vector_complex(),
-                self._objective,
+                residuals_full,
                 eq_idx,
                 inst_idx,
                 include_constant,

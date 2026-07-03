@@ -14,6 +14,7 @@ from textwrap import dedent
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
+from .residual_printer import BicomplexOps, ResidualLayout, build_cfunc, build_njit
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -44,7 +45,6 @@ class CompiledModel:
     idx: dict[str, int]
 
     objective_eqs: list[Expr]
-    objective_funcs: list[Callable]
 
     calib_params: list[Symbol]
 
@@ -59,44 +59,39 @@ class CompiledModel:
 
     @cached_property
     def _objective_vector_func(self) -> Callable[..., ND]:
-        call_args = ", ".join(
-            [
-                *(f"fwd[{i}]" for i in range(len(self.var_names))),
-                *(f"cur[{i}]" for i in range(len(self.var_names))),
-                *(f"params[{i}]" for i in range(len(self.calib_params))),
-            ]
-        )
-        body = "\n    ".join(
-            f"out[{i}] = func_{i}({call_args})"
-            for i in range(len(self.objective_funcs))
-        )
-
-        func_str = f"""
-def vectorized_objective(fwd, cur, params):
-    out = np.empty(({len(self.objective_funcs)},), dtype=np.complex128)
-    {body}
-    return out
-"""
-
-        ns: dict[str, Any] = {"np": np}
-        for i, fn in enumerate(self.objective_funcs):
-            ns[f"func_{i}"] = fn
-
-        exec(dedent(func_str), ns)
-        f = njit(ns["vectorized_objective"])
-        complex_vector = numba.types.Array(numba.complex128, 1, "C")
-
+        f = build_njit(self.objective_eqs, ResidualLayout.from_compiled(self))
+        complex_vec = numba.types.Array(numba.complex128, 1, "C")
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
             )
-            f.compile((complex_vector, complex_vector, complex_vector))
+            f.compile((complex_vec, complex_vec, complex_vec))
         return cast(Callable, f)
 
     def construct_objective_vector_func(self) -> Callable[..., ND]:
         # Building the vectorized objective function triggers Numba compilation.
         # Cache the dispatcher so solve/approximation can reuse the same kernel.
         return self._objective_vector_func
+
+    @cached_property
+    def _objective_cfunc(self) -> Any:
+        # Residual as a numba @cfunc (C ABI) for the native complex-step preproc
+        # (klein_preprocess). Held here so its .address stays valid for the driver.
+        return build_cfunc(self.objective_eqs, ResidualLayout.from_compiled(self))
+
+    def construct_objective_cfunc(self) -> Any:
+        return self._objective_cfunc
+
+    @cached_property
+    def _objective_cfunc_bicomplex(self) -> Any:
+        # Residual as a bicomplex @cfunc for the second-order Hessian sweep
+        # (bicomplex_hessian). Held here so its .address stays valid.
+        return build_cfunc(
+            self.objective_eqs, ResidualLayout.from_compiled(self), BicomplexOps()
+        )
+
+    def construct_objective_cfunc_bicomplex(self) -> Any:
+        return self._objective_cfunc_bicomplex
 
     def _coerce_param_vector(
         self,
@@ -190,7 +185,7 @@ def vectorized_measurements({params_typed}):
             warnings.filterwarnings(
                 "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
             )
-            f.compile(tuple(numba.float64 for _ in params))
+            f.compile(tuple(numba.float64 for _ in params))  # pyright: ignore
         return cast(Callable, f)
 
     def construct_measurement_vector_func(self) -> Callable[..., ND]:
@@ -261,7 +256,7 @@ def measurement_array(state, params):
             warnings.filterwarnings(
                 "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
             )
-            f.compile((float_vector, float_vector))
+            f.compile((float_vector, float_vector))  # pyright: ignore
 
         setattr(f, "_symbolicdsge_array_dispatch", True)
         cache[obs] = cast(Callable, f)
@@ -317,7 +312,7 @@ def jacobian_array(state, params):
             warnings.filterwarnings(
                 "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
             )
-            f.compile((float_vector, float_vector))
+            f.compile((float_vector, float_vector))  # pyright: ignore
 
         setattr(f, "_symbolicdsge_array_dispatch", True)
         cache[obs] = cast(Callable, f)

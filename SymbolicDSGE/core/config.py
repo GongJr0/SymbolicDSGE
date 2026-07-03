@@ -1,7 +1,6 @@
 from dataclasses import dataclass, asdict
 from typing import Any, TypeVar, Dict
 from sympy import Symbol, Function, Eq, Expr, Matrix, And, Or, Not
-from sympy.logic.boolalg import Boolean
 from sympy.core.relational import Relational
 from numpy import float64
 import pickle
@@ -74,7 +73,7 @@ class Base:
 class Equations(Base):
     model: list[Eq]
     constraint: SymbolGetterDict[
-        Symbol, Dict[Relational | Boolean | And | Or | Not, Expr]
+        Symbol, Dict[Relational | And | Or | Not, Expr]
     ]  # OBC Mapping = {var: {ineq_constraint: alternative_expr}}
     observable: SymbolGetterDict[Symbol, Expr]
     obs_is_affine: SymbolGetterDict[Symbol, bool]

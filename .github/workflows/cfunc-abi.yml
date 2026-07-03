@@ -1,0 +1,59 @@
+name: cfunc ABI
+
+# On-demand cross-platform guard for the cfunc-leaf architecture (issue #248):
+# proves a numba @cfunc is callable from native code (by pointer, GIL-free,
+# NRT-free) on every platform we ship wheels for. Runs ONLY tests/ckernels/
+# test_spike.py -- not the full suite -- with base deps only (no [ui]/[fred]/[sr]).
+# The same test also rides along in cibuildwheel's per-platform test-command on
+# each wheel build; this workflow is the fast, targeted, on-demand version.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cfunc_abi:
+    name: cfunc ABI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest # x86_64
+          - ubuntu-24.04-arm # aarch64
+          - windows-latest # win_amd64 (MSVC)
+          - macos-latest # arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.19"
+          enable-cache: true
+          prune-cache: false
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      # Base deps + dev group only. The package's import chain needs the base
+      # numeric stack (numpy/numba/scipy/sympy) to load the extension, but none
+      # of the heavy extras, and we run a single test.
+      - name: Sync minimal deps (builds the native extension)
+        run: uv sync --frozen
+
+      - name: cfunc <-> native ABI check
+        run: uv run pytest tests/ckernels/test_spike.py -q
