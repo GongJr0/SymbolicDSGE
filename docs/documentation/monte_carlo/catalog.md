@@ -52,7 +52,7 @@ __Fields:__
 | title | `#!python str` | Display title. |
 | default_name | `#!python str` | Default runtime step name. |
 | description | `#!python str` | Short user-facing description. |
-| op_role | `#!python Literal["datagen", "filter", "transform", "terminal"]` | Graph role. |
+| op_role | `#!python Literal["datagen", "filter", "transform", "terminal", "postproc"]` | Graph role. |
 | factory | `#!python Callable[..., MCStep]` | Step factory used by `build(...)`. |
 | fields | `#!python tuple[FieldSpec, ...]` | Declared configurable fields. |
 | compile_params | `#!python Callable \| None` | Optional parameter normalization hook. |
@@ -63,7 +63,7 @@ __Properties:__
 |:---------|:--------:|----------------:|
 | is_terminal | `#!python bool` | `True` for test and regression terminal steps. |
 | is_transform | `#!python bool` | `True` for transform steps. |
-| category | `#!python str` | GUI grouping: `"core"`, `"tests"`, `"regressions"`, or `"transforms"`. |
+| category | `#!python str` | GUI grouping: `"core"`, `"tests"`, `"regressions"`, `"transforms"`, or `"postproc"`. |
 
 __Methods:__
 
@@ -80,6 +80,7 @@ StepDefinition.build(name: str, params: dict[str, Any], dgp: SolvedModel | None)
 | `DATAGEN_STEP_TYPES` | `#!python frozenset[str]` | Datagen kinds: simulation and raw data. |
 | `TRANSFORM_STEP_TYPES` | `#!python frozenset[str]` | Built-in transform kinds. |
 | `TERMINAL_STEP_TYPES` | `#!python frozenset[str]` | Test and regression terminal kinds. |
+| `POSTPROC_STEP_TYPES` | `#!python frozenset[str]` | Post-loop kinds run once after the replication loop (e.g. `kde`). |
 | `INPUT_SOURCES` | `#!python list[str]` | Source channels diagnostic/regression steps may read. |
 | `FILTER_SOURCES` | `#!python set[str]` | Source channels produced by the filter step. |
 

@@ -225,6 +225,9 @@ nav:
                   - Rolling Mean: documentation/monte_carlo/operations/transforms/rolling_mean.md
                   - Rolling Standard Deviation: documentation/monte_carlo/operations/transforms/rolling_std.md
                   - Rolling Variance: documentation/monte_carlo/operations/transforms/rolling_var.md
+              - Post-processing:
+                  - Custom Post-processing: documentation/monte_carlo/operations/postproc/custom.md
+                  - KDE: documentation/monte_carlo/operations/postproc/kde.md
           - Result Access: documentation/monte_carlo/result_access.md
       - Prior Specification:
           - Prior: documentation/prior_spec/Prior.md

@@ -50,6 +50,7 @@ result = run_pipeline(
 | `DATAGEN_STEP_TYPES` | Catalog-local step-kind set for valid datagen roots: `"simulation"` and `"raw_data"`. |
 | `TRANSFORM_STEP_TYPES` | Catalog-local step-kind set for catalog-backed transforms. |
 | `TERMINAL_STEP_TYPES` | Catalog-local step-kind set for test/regression summaries. Terminal steps cannot link forward. |
+| `POSTPROC_STEP_TYPES` | Catalog-local step-kind set for post-loop ops (e.g. `kde`) run once after the replication loop. |
 | `catalog_payload()` | JSON-safe rendering of the catalog for the GUI / external consumers. |
 
 ???+ note "Step-kind sets"
