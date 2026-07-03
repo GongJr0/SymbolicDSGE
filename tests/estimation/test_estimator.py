@@ -11,7 +11,10 @@ import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bayesian.priors import Prior
-from SymbolicDSGE.bayesian.transforms import CholeskyCorrTransform, Identity
+from SymbolicDSGE.bayesian.transforms import (
+    AffineLogitTransform,
+    CholeskyCorrTransform,
+)
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
 from SymbolicDSGE.estimation.estimator import MissingConfigError, _MatrixPriorResolution
 
@@ -793,9 +796,12 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params=["R_corr"],
             priors={
+                # Support-valid but not a CholeskyCorrTransform: exercises the
+                # estimator's LKJ-transform check (AffineLogit(-1,1) matches the
+                # LKJChol (-1, 1) support so Prior construction itself succeeds).
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
-                    transform=Identity(),
+                    transform=AffineLogitTransform(low=-1.0, high=1.0),
                 )
             },
         )

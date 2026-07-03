@@ -372,33 +372,41 @@ def test_prior_program_scalar_transform_helpers_cover_all_branches():
 
 
 def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
+    # The test only packs/evaluates prior.dist, but Prior now requires the
+    # distribution support to contain the transform support, so each family is
+    # paired with its natural transform (identity/log/logit/affine_logit).
+    _pm1p1 = {"low": -1.0, "high": 1.0}
     scalar_priors = {
         "normal": make_prior(
             "normal", {"mean": 0.0, "std": 1.0, "random_state": 1}, "identity"
         ),
         "log_normal": make_prior(
-            "log_normal", {"mean": 0.0, "std": 0.5, "random_state": 1}, "identity"
+            "log_normal", {"mean": 0.0, "std": 0.5, "random_state": 1}, "log"
         ),
         "half_normal": make_prior(
-            "half_normal", {"std": 1.0, "random_state": 1}, "identity"
+            "half_normal", {"std": 1.0, "random_state": 1}, "log"
         ),
         "trunc_normal": make_prior(
             "trunc_normal",
             {"mean": 0.0, "std": 1.0, "low": -1.0, "high": 1.0, "random_state": 1},
-            "identity",
+            "affine_logit",
+            _pm1p1,
         ),
         "half_cauchy": make_prior(
-            "half_cauchy", {"gamma": 1.0, "random_state": 1}, "identity"
+            "half_cauchy", {"gamma": 1.0, "random_state": 1}, "log"
         ),
-        "beta": make_prior("beta", {"a": 2.0, "b": 3.0, "random_state": 1}, "identity"),
+        "beta": make_prior("beta", {"a": 2.0, "b": 3.0, "random_state": 1}, "logit"),
         "gamma": make_prior(
-            "gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "identity"
+            "gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "log"
         ),
         "inv_gamma": make_prior(
-            "inv_gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "identity"
+            "inv_gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "log"
         ),
         "uniform": make_prior(
-            "uniform", {"low": -1.0, "high": 1.0, "random_state": 1}, "identity"
+            "uniform",
+            {"low": -1.0, "high": 1.0, "random_state": 1},
+            "affine_logit",
+            _pm1p1,
         ),
     }
     valid_x = {

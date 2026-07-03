@@ -411,23 +411,39 @@ def test_prior_grad_logpdf_uses_inverse_chain_rule_and_jacobian_gradient():
     assert np.allclose(dist.grad_x, adjusted_z - 1.0)
 
 
-def test_confirm_bound_match_allows_transform_support_that_contains_distribution_support():
+def test_confirm_bound_match_allows_distribution_wider_than_transform():
+    # normal (support R) with a log transform (parameter domain (0, inf)) is
+    # valid: the distribution covers every value log^{-1} can produce, so the
+    # prior is a normal constrained to the positive reals.
     prior = make_prior(
-        distribution="gamma",
-        parameters={"mean": 2.0, "std": np.sqrt(2.0)},
-        transform="identity",
+        distribution="normal",
+        parameters={"mean": 0.0, "std": 1.0},
+        transform="log",
     )
+    # dist.support contains transform.support
+    assert prior.support << prior.transform.support
 
-    assert prior.support.contains(float64(0.0))
-    assert prior.transform.support << prior.support
 
-
-def test_confirm_bound_match_raises_on_dist_support_vs_transform_support_mismatch_normal_log():
-    with pytest.raises(ValueError, match="does not match transform support"):
+def test_confirm_bound_match_rejects_transform_wider_than_distribution():
+    # identity maps R -> R, but gamma is only defined on (0, inf): a proposed
+    # negative parameter would fall outside the distribution support.
+    with pytest.raises(ValueError, match="does not contain the transform support"):
         make_prior(
-            distribution="normal",
-            parameters={"mean": 0.0, "std": 1.0},
-            transform="log",
+            distribution="gamma",
+            parameters={"mean": 2.0, "std": np.sqrt(2.0)},
+            transform="identity",
+        )
+
+
+def test_confirm_bound_match_rejects_distribution_narrower_than_transform():
+    # beta lives on (0, 1) but affine_logit(-1, 1) can produce parameters in
+    # (-1, 0] -> outside beta support.
+    with pytest.raises(ValueError, match="does not contain the transform support"):
+        make_prior(
+            distribution="beta",
+            parameters={"a": 2.0, "b": 2.0},
+            transform="affine_logit",
+            transform_kwargs={"low": -1.0, "high": 1.0},
         )
 
 

@@ -95,12 +95,19 @@ class Prior:
         )
 
     def _confirm_bound_match(self) -> None:
+        # logpdf evaluates dist.logpdf(transform.inverse(z)), where inverse(z)
+        # ranges over transform.support (the parameter domain). So the
+        # distribution must be defined over every value the transform can produce:
+        # dist.support must CONTAIN transform.support (not the other way round).
         _sup = self.dist.support
         _trans_sup = self.transform.support
-        if not _trans_sup << _sup:
+        if not _sup << _trans_sup:
             raise ValueError(
-                "Distribution support does not match transform support. "
-                "When priors are defined in parameter space, transform.support must match dist.support. "
+                "Distribution support does not contain the transform support. "
+                "The prior distribution lives in parameter space, so it must cover "
+                "every value the transform can map to: dist.support must contain "
+                f"transform.support (got dist.support={_sup}, "
+                f"transform.support={_trans_sup})."
             )
 
     @property
