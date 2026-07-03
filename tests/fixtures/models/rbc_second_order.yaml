@@ -1,0 +1,49 @@
+# Canonical RBC (CRRA utility, Cobb-Douglas production, one TFP shock) -- the
+# second-order test fixture. Same economics as rbc_second_order.mod (the Dynare
+# golden generator). Levels model, NOT auto-linearized (order > 1 is levels-only);
+# the expansion point is the steady state below. Lives in tests/, not MODELS/.
+#
+# Timing: our solver allows offsets {0, +1} only, so states are indexed at t and
+# t+1 (no t-1 lags). k(t) is predetermined capital available in t; k(t+1) is the
+# investment choice. This is a one-period relabel of Dynare's k(-1)/k.
+
+name: "RBC_SECOND_ORDER"
+
+variables:
+  c: {steady_state: c_ss}
+  k: {steady_state: k_ss}
+  z: {steady_state: null} # z_ss = 0
+
+parameters: [beta, gamma, alpha, delta, rho, sig, k_ss, c_ss]
+
+shock_map:
+  e: z
+
+observables: [c_obs]
+
+equations:
+  model:
+    - c(t)**(-gamma) = beta * c(t+1)**(-gamma) * (alpha * exp(z(t+1)) * k(t+1)**(alpha - 1) + 1 - delta)
+    - k(t+1) = exp(z(t)) * k(t)**alpha + (1 - delta) * k(t) - c(t)
+    - z(t+1) = rho * z(t) + e
+  constraint: {}
+  observables:
+    c_obs: c(t)
+
+calibration:
+  parameters:
+    beta: 0.99
+    gamma: 2.0
+    alpha: 0.33
+    delta: 0.025
+    rho: 0.95
+    sig: 0.01
+    # Steady state (deterministic), consistent with the calibration above:
+    #   k_ss = (alpha / (1/beta - 1 + delta))^(1/(1-alpha))
+    #   c_ss = k_ss^alpha - delta*k_ss
+    k_ss: 28.348418455829357
+    c_ss: 2.3066172286382751
+  shocks:
+    std:
+      e: sig
+    corr: {}
