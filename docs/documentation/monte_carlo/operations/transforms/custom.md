@@ -41,4 +41,4 @@ __Inputs:__
 | kwargs | Extra keyword arguments forwarded to `func`. |
 
 ???+ note "Bundled custom operations"
-    In-process pipelines may use any callable. A pipeline written to an `.sdsge` bundle requires the callable to be a [`NumpyCustomFunc`](../../custom_ops.md#numpycustomfunc), usually via the [`custom_operation`](../../custom_ops.md#custom_operation) decorator. The bundle stores the callable as a side-channel resource and the portable spec references it by key.
+    In-process pipelines may use any callable. A pipeline written to an `.sdsge` bundle requires the callable to be a [`NumpyCustomFunc`](../../custom_ops.md#numpycustomfunc), usually via the [`numpy_operation`](../../custom_ops.md#numpy_operation) decorator. The bundle stores the callable as a side-channel resource and the portable spec references it by key.

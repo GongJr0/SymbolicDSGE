@@ -67,7 +67,7 @@ as long as we specify a `Transform` that maps the distribution support $(a, b) \
 
     A random variable $Z \in\R$ can follow any distribution $f_z(Z)\in\R$. However after applying any transformation $Z \to X$ such that $Z \neq X$; we can intuitively (and mathematically) agree that the distribution $f_z(X)$ no longer accurately describes the density of the transformed variable $X$.
 
-    Fortunately, there's a deterministic and generally applicable correction we can use to ensure $f_z(Z)$ can be accurately represented in of $X$. Denoting the transformation $g_z(Z) \to X$, we can adjust for the mismatch in densities using the derivative (or Jacobian) $\frac{d}{dZ}g_z(Z)$. Skipping the theory, the important bit of knowledge is that $f_z(X)$ is off from the accurate description of $X$'s probability distribution by a factor of the above specified derivative. Therefore, in the scalar case we can denote:
+    Fortunately, there's a deterministic and generally applicable correction we can use to ensure $f_z(Z)$ can be accurately represented in terms of $X$. Denoting the transformation $g_z(Z) \to X$, we can adjust for the mismatch in densities using the derivative (or Jacobian) $\frac{d}{dZ}g_z(Z)$. Skipping the theory, the important bit of knowledge is that $f_z(X)$ is off from the accurate description of $X$'s probability distribution by a factor of this derivative. Therefore, in the scalar case we can denote:
 
     $$
     f_z(Z) = f_z(X) \times \left|\frac{d}{dx}g_z\left(X\right)\right| \Longleftrightarrow \ln\left(f_z\left(Z\right)\right) = \ln\left(f_z\left(X\right)\right) + \ln\Biggl(\left|\frac{d}{dX}g_z(X)\right|\Biggl)
@@ -105,7 +105,7 @@ prior_spec = {
 ```
 
 1. `logit` does not require parameters and (inverse) transforms to (0, 1)
-2. `log` maps real numbers to non-negative reals without requiring parameters.
+2. `log` maps real numbers to positive reals without requiring parameters.
 3. `affine_logit` takes a low ($a$) and high ($b$) bound to map (a, b)
 
 ## Running the Estimation
@@ -116,31 +116,35 @@ The estimation process is carried out by `DSGESolver.estimate()` and `DSGESolver
 res, sol = solver.estimate_and_solve(
     compiled=compiled,
     y=observed, # (1)!
-    method="mcmc", # (2)!
+    observables=["Infl", "Rate"], # (2)!
+    method="mcmc", # (3)!
     priors=prior_spec,
-    estimated_params=list(prior_spec.keys()),
     steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
-    posterior_point='mean', # (3)!
-    n_draws=1000, # (4)!
-    burn_in=500, # (5)!
-    thin=1, # (6)!
-    update_R_in_iterations=False, # (7)!
+    posterior_point='mean', # (4)!
+    n_draws=100_000, # (5)!
+    burn_in=10_000, # (6)!
+    thin=1, # (7)!
+    update_R_in_iterations=False, # (8)!
 )
 ```
 
 1. Observed data we want to calibrate against
-2. Chosen from `{'mle', 'map', 'mcmc'}`.
-3. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
-4. Retained draws.
-5. Burn-in iterations.
-6. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
-7. If parameters of R are being estimated, setting this to `True` will re-compute the R matrix using the current sample's parameters.
+2. Which observables to use from the model specification. If not specified, all observables will be used. Number columns in `y` must match the number of observables in the model specification.
+3. Chosen from `{'mle', 'map', 'mcmc'}`.
+4. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
+5. Effective sample size (retained draws).
+6. Burn-in iterations.
+7. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
+8. If parameters of R are being estimated, setting this to `True` will re-compute the R matrix using the current sample's parameters.
    Otherwise, R will be estimated once before the run begins and will be kept static throughout the run.
 
 ```text
-MCMC sampling concluded in 34.93 seconds with 42.95 iterations per second.
+MCMC sampling concluded in 83.00 seconds with 1325.22 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
+
+???+ note "Draw Count Calculation"
+    `n_draws` directly lets you specify the Effective Sample Size (ESS) you want to retain. Given `n_draws`, `burn_in`, and `thin`, the total number of draws an estimation routine will perform is `n_draws * thin + burn_in`.
 
 ## Inspecting the Results
 
@@ -167,33 +171,33 @@ pd.Series(
         "burn_in": res.burn_in,
         "thin": res.thin,
     }
-)
+).round(3)
 ```
 
 1. We used `posterior_point='mean'`, therefore we're computing the mean of all sample draws to accurately recreate the parameters being used inside the model.
 2. Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)
 
 ```text
-beta              0.971773
-rho_r             0.840123
-rho_g             0.860232
-rho_z             0.873493
-psi_pi            2.736531
-psi_x             0.339134
-kappa             0.366632
-tau_inv           0.569496
-rho_gz            0.149944
-meas_rho_ir       0.230454
-sig_r             0.143704
-sig_g             0.150102
-sig_z             0.685228
-meas_infl         0.574781
-meas_rate         0.934977
-loglik         -300.602336
-accept_rate       0.328667
-n_draws        1000.000000
-burn_in         500.000000
-thin              1.000000
+beta                0.970
+rho_r               0.834
+rho_g               0.853
+rho_z               0.865
+psi_pi              2.960
+psi_x               0.329
+kappa               0.414
+tau_inv             0.627
+rho_gz              0.020
+meas_rho_ir         0.010
+sig_r               0.140
+sig_g               0.138
+sig_z               0.660
+meas_infl           0.009
+meas_rate          -0.010
+loglik           -296.908
+accept_rate         0.227
+n_draws        100000.000
+burn_in         10000.000
+thin                1.000
 dtype: float64
 ```
 
