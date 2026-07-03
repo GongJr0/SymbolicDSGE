@@ -19,7 +19,10 @@ from SymbolicDSGE._ckernels.estimation import (
     transform_inverse_and_logjac as native_transform,
 )
 from SymbolicDSGE.bayesian import make_prior
+from SymbolicDSGE.bayesian.distributions.distribution_dispatch import get_distribution
 from SymbolicDSGE.bayesian.distributions.lkj_chol import _log_lkj_normalizer_C
+from SymbolicDSGE.bayesian.distributions.param_builder import get_dist_params
+from SymbolicDSGE.bayesian.transforms import Identity
 from SymbolicDSGE.estimation.prior_program import (
     DistCode,
     N_DIST_PARAMS,
@@ -36,6 +39,14 @@ from SymbolicDSGE.estimation.prior_program import (
 
 RTOL = 1e-12
 ATOL = 1e-12
+
+
+def _build_dist(family, params):
+    """Distribution instance without the Prior wrapper -- these kernels pack and
+    evaluate the distribution/transform directly, below the Prior abstraction, so
+    they must be exercisable with (dist, transform) pairs that Prior's support
+    check would reject (e.g. a distribution with an identity transform)."""
+    return get_distribution(family)(**(get_dist_params(family) | params))
 
 
 def _agree(native: float, numba: float) -> None:
@@ -69,8 +80,9 @@ _X_SWEEP = (-2.0, -0.5, 0.0, 0.25, 0.5, 0.7, 1.0, 1.5, 3.0)
 @pytest.mark.parametrize("code,spec", list(_DIST_SPECS.items()))
 def test_dist_logpdf_parity(code, spec):
     family, params = spec
-    prior = make_prior(family, params, "identity")
-    packed_code, packed_params = _pack_distribution(prior.dist)
+    # Only the distribution is packed/evaluated here (the x-sweep deliberately
+    # probes out-of-support values), so build the dist directly.
+    packed_code, packed_params = _pack_distribution(_build_dist(family, params))
     assert int(packed_code) == int(code)
     parr = np.asarray(packed_params, dtype=np.float64)
 
@@ -141,17 +153,17 @@ def _empty_block_arrays():
     )
 
 
-def _pack_scalars(specs):
+def _pack_pairs(pairs):
+    """Pack ``(dist, transform)`` object pairs into the program's scalar arrays."""
     codes_d, codes_t, dp, tp = [], [], [], []
-    for fam, params, transform in specs:
-        prior = make_prior(fam, params, transform)
-        dc, dpar = _pack_distribution(prior.dist)
-        tc, tpar = _pack_transform(prior.transform)
+    for dist, transform in pairs:
+        dc, dpar = _pack_distribution(dist)
+        tc, tpar = _pack_transform(transform)
         codes_d.append(int(dc))
         codes_t.append(int(tc))
         dp.append(dpar)
         tp.append(tpar)
-    n = len(specs)
+    n = len(pairs)
     return dict(
         scalar_dist_codes=np.asarray(codes_d, dtype=np.int64),
         scalar_transform_codes=np.asarray(codes_t, dtype=np.int64),
@@ -160,6 +172,14 @@ def _pack_scalars(specs):
             n, N_TRANSFORM_PARAMS
         ),
     )
+
+
+def _pack_scalars(specs):
+    pairs = []
+    for fam, params, transform in specs:
+        prior = make_prior(fam, params, transform)
+        pairs.append((prior.dist, prior.transform))
+    return _pack_pairs(pairs)
 
 
 def _call_both(theta, scalar_indices, packed, block):
@@ -222,9 +242,11 @@ def test_logprior_program_with_lkj_block_parity():
 
 
 def test_logprior_program_out_of_support_is_nan():
-    # gamma + identity with negative theta -> x < 0 -> NaN short-circuit.
-    specs = [("gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "identity")]
-    packed = _pack_scalars(specs)
+    # gamma + identity with negative theta -> x < 0 -> NaN short-circuit. This is
+    # not a valid Prior (identity can emit x outside gamma's support), so pack the
+    # dist/transform objects directly to reach the program's out-of-support guard.
+    gamma = _build_dist("gamma", {"mean": 2.0, "std": 1.0, "random_state": 1})
+    packed = _pack_pairs([(gamma, Identity())])
     scalar_indices = np.array([0], dtype=np.int64)
     theta = np.array([-1.0], dtype=np.float64)
     native, numba = _call_both(theta, scalar_indices, packed, _empty_block_arrays())
