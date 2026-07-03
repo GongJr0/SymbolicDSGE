@@ -235,9 +235,18 @@ export interface MCEdgeSpec {
   target: string;
 }
 
+// A post-loop op. Not a graph node -- no `id`/edges; it references producers by
+// trace key in `params` and runs once over the assembled traces.
+export interface MCPostprocSpec {
+  step_type: MCStepType;
+  name: string;
+  params: Record<string, unknown>;
+}
+
 export interface MCPipelineSpec {
   nodes: MCNodeSpec[];
   edges: MCEdgeSpec[];
+  postprocs: MCPostprocSpec[];
 }
 
 export interface MCTraceSummary {

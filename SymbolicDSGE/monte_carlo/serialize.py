@@ -21,12 +21,27 @@ from numpy.typing import NDArray
 
 from ..regression.ols import OLSResult
 from .mc_constructs import MCContext, MCPipelineResult
-from .postproc import Raw, Summary
+from .postproc import Artifact, Raw, Summary, normalize_artifacts
 from .traces import regression_trace_keys, test_trace_keys
 
 #: Scalar artifact-value types that ride the JSON document inline; ndarray values
 #: go to the parquet side-channel, anything else is a tabular artifact (#181).
 _SCALAR_TYPES = (bool, int, float, str, np.integer, np.floating, np.bool_)
+
+
+def _normalized_postproc(result: MCPipelineResult) -> dict[str, Artifact]:
+    """POSTPROC artifacts, keyed for the wire.
+
+    ``result.postproc`` holds each op's *plain* return value (float / ndarray /
+    DataFrame / mapping). Normalize on arrival: a mapping fans out into
+    ``{"<step>.<key>": artifact}``, a bare value wraps under the step name
+    (ndarray -> ``Raw``, else -> ``Summary``). Downstream serialization keeps its
+    ``Summary``/``Raw`` isinstance dispatch unchanged.
+    """
+    out: dict[str, Artifact] = {}
+    for name, value in result.postproc.items():
+        out.update(normalize_artifacts(value, name))
+    return out
 
 
 def serialize_pipeline_result(
@@ -84,7 +99,7 @@ def serialize_pipeline_result(
         "data_summaries": _summarize_context_data(result.contexts or ()),
         "postproc": {
             name: _serialize_artifact(artifact)
-            for name, artifact in result.postproc.items()
+            for name, artifact in _normalized_postproc(result).items()
         },
     }
 
@@ -190,7 +205,7 @@ def result_postproc_arrays(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
     its own shape-manifest parquet member by the bundle builder.
     """
     out: dict[str, NDArray[Any]] = {}
-    for name, artifact in result.postproc.items():
+    for name, artifact in _normalized_postproc(result).items():
         arr = _artifact_array(artifact)
         if arr is not None:
             out[name] = arr
@@ -293,7 +308,7 @@ def result_postproc_tables(result: MCPipelineResult) -> dict[str, dict[str, list
     ``to_parquet``), one member per table.
     """
     out: dict[str, dict[str, list[Any]]] = {}
-    for name, artifact in result.postproc.items():
+    for name, artifact in _normalized_postproc(result).items():
         frame = _artifact_frame(artifact)
         if frame is not None:
             out[name] = _frame_to_columns(frame)

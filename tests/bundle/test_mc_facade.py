@@ -72,7 +72,7 @@ def _raw_data_pipeline() -> MCPipeline:
 
 def test_add_mc_ships_raw_data_member_and_loader_rehydrates(tmp_path) -> None:
     pipe = _raw_data_pipeline()
-    expected = np.asarray(pipe.steps[0].kwargs["observables"], dtype=np.float64)
+    expected = np.asarray(pipe.per_rep_steps[0].kwargs["observables"], dtype=np.float64)
 
     target = (
         BundleBuilder(created_by="mc-test").add_mc(pipe).write(tmp_path / "raw.sdsge")
@@ -86,10 +86,12 @@ def test_add_mc_ships_raw_data_member_and_loader_rehydrates(tmp_path) -> None:
     np.testing.assert_allclose(arrays["observables"], expected)
 
     # The loaded spec + resources rebuild an equivalent runnable pipeline.
-    ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=False)
-    rebuilt = build_pipeline(ordered, resources=loaded.mc.resources)
-    np.testing.assert_allclose(rebuilt.steps[0].kwargs["observables"], expected)
-    assert [s.step_type for s in rebuilt.steps] == ["raw_data", "jarque_bera"]
+    ordered, postprocs = validate_pipeline_spec(
+        loaded.mc.spec, has_reference=True, has_dgp=False
+    )
+    rebuilt = build_pipeline(ordered, postprocs, resources=loaded.mc.resources)
+    np.testing.assert_allclose(rebuilt.per_rep_steps[0].kwargs["observables"], expected)
+    assert [s.step_type for s in rebuilt.per_rep_steps] == ["raw_data", "jarque_bera"]
 
 
 def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
@@ -116,9 +118,11 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     assert isinstance(func, NumpyCustomFunc)  # wrapped + source-carrying
     assert "zscore" in func.source
 
-    ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=False)
-    rebuilt = build_pipeline(ordered, resources=loaded.mc.resources)
-    z_step = {s.name: s for s in rebuilt.steps}["z"]
+    ordered, postprocs = validate_pipeline_spec(
+        loaded.mc.spec, has_reference=True, has_dgp=False
+    )
+    rebuilt = build_pipeline(ordered, postprocs, resources=loaded.mc.resources)
+    z_step = {s.name: s for s in rebuilt.per_rep_steps}["z"]
     assert z_step.step_type == "transform:custom"
     assert callable(z_step.func)
 
@@ -129,8 +133,8 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
         [
             raw_data_step("dat", observables=observables, observable_names=("y", "x")),
             jarque_bera_test_step("jb", source="observables", column=0),
-            postproc_step("post", selection_rate),
-        ]
+        ],
+        [postproc_step("post", selection_rate)],
     )
     result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
 
@@ -145,7 +149,7 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     # The bulk array artifact rides its own shape-manifest parquet member.
     assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
     np.testing.assert_array_equal(
-        loaded.mc.postproc_arrays["post.flags"], result.postproc["post.flags"].value
+        loaded.mc.postproc_arrays["post.flags"], result.postproc["post"]["flags"]
     )
 
     # document (scalar inline) + parquet array re-merge to the live wire shape.
@@ -164,8 +168,8 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
         [
             raw_data_step("dat", observables=observables, observable_names=("y", "x")),
             jarque_bera_test_step("jb", source="observables", column=0),
-            kde_step("kde", trace="test.jb.statistic", grid_points=32),
-        ]
+        ],
+        [kde_step("kde", trace="test.jb.statistic", grid_points=32)],
     )
     result = pipe.run(reference=cast(SolvedModel, object()), n_rep=12, verbosity=0)
 
@@ -195,8 +199,8 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
         [
             raw_data_step("dat", observables=observables, observable_names=("y", "x")),
             jarque_bera_test_step("jb", source="observables", column=0),
-            postproc_step("ptab", pval_table),  # plain func -> auto-wrapped at ship
-        ]
+        ],
+        [postproc_step("ptab", pval_table)],  # plain func -> auto-wrapped at ship
     )
     result = pipe.run(reference=cast(SolvedModel, object()), n_rep=6, verbosity=0)
 
@@ -226,8 +230,8 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         [
             raw_data_step("dat", observables=observables, observable_names=("y", "x")),
             jarque_bera_test_step("jb", source="observables", column=0),
-            postproc_step("sum", summary_bundle, threshold=0.5),
-        ]
+        ],
+        [postproc_step("sum", summary_bundle, threshold=0.5)],
     )
     ref = cast(SolvedModel, object())
     result = pipe.run(reference=ref, n_rep=8, verbosity=0)
@@ -254,13 +258,15 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         == serialize_pipeline_result(result, run_id="r1")["postproc"]
     )
     assert loaded.mc.postproc_tables["sum.table"]["pval"] == list(
-        result.postproc["sum.table"].value["pval"]
+        result.postproc["sum"]["table"]["pval"]
     )
 
     # Rebuild from spec + resources -> equivalent runnable pipeline.
-    ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=False)
-    rebuilt = build_pipeline(ordered, resources=loaded.mc.resources)
-    assert [s.step_type for s in rebuilt.steps] == [
+    ordered, postprocs = validate_pipeline_spec(
+        loaded.mc.spec, has_reference=True, has_dgp=False
+    )
+    rebuilt = build_pipeline(ordered, postprocs, resources=loaded.mc.resources)
+    assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
         "raw_data",
         "jarque_bera",
         "postproc:custom",
@@ -268,12 +274,12 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 
     # Re-running reproduces every artifact (deterministic replayed data).
     rerun = rebuilt.run(reference=ref, n_rep=8, verbosity=0)
-    assert rerun.postproc["sum.pcs"].value == result.postproc["sum.pcs"].value
+    assert rerun.postproc["sum"]["pcs"] == result.postproc["sum"]["pcs"]
     np.testing.assert_array_equal(
-        rerun.postproc["sum.flags"].value, result.postproc["sum.flags"].value
+        rerun.postproc["sum"]["flags"], result.postproc["sum"]["flags"]
     )
-    assert list(rerun.postproc["sum.table"].value["pval"]) == list(
-        result.postproc["sum.table"].value["pval"]
+    assert list(rerun.postproc["sum"]["table"]["pval"]) == list(
+        result.postproc["sum"]["table"]["pval"]
     )
 
 

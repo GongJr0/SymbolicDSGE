@@ -27,31 +27,53 @@ from .mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
-from .postproc import normalize_artifacts
 
 
 @dataclass(frozen=True)
 class MCPipeline:
-    steps: tuple[MCStep, ...]
+    #: Per-replication steps: the dependency DAG, a single DATAGEN root first.
+    per_rep_steps: tuple[MCStep, ...]
+    #: Post-loop ops, run once after the loop over the assembled across-rep
+    #: traces. A terminal phase -- not part of the graph.
+    postproc_steps: tuple[MCStep, ...]
 
-    def __init__(self, steps: Sequence[MCStep]) -> None:
-        if not steps:
-            raise ValueError("MCPipeline requires at least one step.")
-        step_tuple = tuple(steps)
-        self._validate_steps(step_tuple)
-        object.__setattr__(self, "steps", step_tuple)
+    def __init__(
+        self,
+        per_rep_steps: Sequence[MCStep],
+        postproc_steps: Sequence[MCStep] = (),
+    ) -> None:
+        rep_tuple = tuple(per_rep_steps)
+        postproc_tuple = tuple(postproc_steps)
+        self._validate_steps(rep_tuple, postproc_tuple)
+        object.__setattr__(self, "per_rep_steps", rep_tuple)
+        object.__setattr__(self, "postproc_steps", postproc_tuple)
 
     @staticmethod
-    def _validate_steps(steps: tuple[MCStep, ...]) -> None:
-        names = [step.name for step in steps]
+    def _validate_steps(
+        per_rep_steps: tuple[MCStep, ...],
+        postproc_steps: tuple[MCStep, ...],
+    ) -> None:
+        if not per_rep_steps:
+            raise ValueError("MCPipeline requires at least one per-replication step.")
+        names = [step.name for step in (*per_rep_steps, *postproc_steps)]
         if len(set(names)) != len(names):
             raise ValueError("MCPipeline step names must be unique.")
-        if steps[0].op_type is not OpType.DATAGEN:
-            raise ValueError("MCPipeline first step must be a DATAGEN step.")
-        for step in steps[1:]:
+        if per_rep_steps[0].op_type is not OpType.DATAGEN:
+            raise ValueError("MCPipeline first per-rep step must be a DATAGEN step.")
+        for step in per_rep_steps[1:]:
             if step.op_type is OpType.DATAGEN:
                 raise ValueError(
                     "MCPipeline supports only one DATAGEN step, in first position."
+                )
+            if step.op_type is OpType.POSTPROC:
+                raise ValueError(
+                    "POSTPROC steps belong in postproc_steps, not per_rep_steps."
+                )
+        for step in postproc_steps:
+            if step.op_type is not OpType.POSTPROC:
+                raise ValueError(
+                    f"postproc_steps may only contain POSTPROC steps; {step.name!r} "
+                    f"is {step.op_type}."
                 )
 
     @cached_property
@@ -64,7 +86,7 @@ class MCPipeline:
         """
         from .graph import PipelineGraph
 
-        return PipelineGraph.from_steps(self.steps)
+        return PipelineGraph.from_steps(self.per_rep_steps)
 
     def to_spec(self) -> "PipelineSpec":
         """Serialize this pipeline to its graph-form :class:`PipelineSpec`.
@@ -100,14 +122,15 @@ class MCPipeline:
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
         regression_results_by_step: dict[str, list[RegressionResult]] = {}
-        step_elapsed_s: dict[str, float] = {step.name: 0.0 for step in self.steps}
-        step_counts: dict[str, int] = {step.name: 0 for step in self.steps}
-        step_failures: dict[str, int] = {step.name: 0 for step in self.steps}
+        all_steps = (*self.per_rep_steps, *self.postproc_steps)
+        step_elapsed_s: dict[str, float] = {step.name: 0.0 for step in all_steps}
+        step_counts: dict[str, int] = {step.name: 0 for step in all_steps}
+        step_failures: dict[str, int] = {step.name: 0 for step in all_steps}
 
         # POSTPROC ops don't run per replication — they run once after the loop,
         # over the assembled across-rep traces.
-        postproc_steps = [s for s in self.steps if s.op_type is OpType.POSTPROC]
-        rep_steps = [s for s in self.steps if s.op_type is not OpType.POSTPROC]
+        rep_steps = self.per_rep_steps
+        postproc_steps = self.postproc_steps
         payload_columns: dict[str, list[np.ndarray]] = {}
 
         run_start = perf_counter()
@@ -295,7 +318,7 @@ class MCPipeline:
                 step_elapsed_s[step.name] += perf_counter() - step_start
                 step_counts[step.name] += 1
             if not failed:
-                postproc.update(normalize_artifacts(out, step.name))
+                postproc[step.name] = out
         return postproc
 
 

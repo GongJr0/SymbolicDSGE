@@ -92,7 +92,7 @@ def create_app(
     @app.post("/api/mc/validate")
     def validate_monte_carlo_pipeline(request: MCPipelineSpec) -> dict[str, Any]:
         try:
-            ordered = validate_pipeline_spec(
+            ordered, postprocs = validate_pipeline_spec(
                 request,
                 has_reference=ui_session.solved_model("reference") is not None,
                 has_dgp=ui_session.solved_model("dgp") is not None,
@@ -100,9 +100,13 @@ def create_app(
             dgp = ui_session.solved_model("dgp")
             assert dgp is not None
             build_pipeline(
-                ordered, dgp=dgp, resources=compile_custom_resources(request)
+                ordered, postprocs, dgp=dgp, resources=compile_custom_resources(request)
             )
-            return {"valid": True, "order": [node.id for node in ordered]}
+            return {
+                "valid": True,
+                "order": [node.id for node in ordered],
+                "postprocs": [pp.name for pp in postprocs],
+            }
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 

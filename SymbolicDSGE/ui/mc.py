@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo import MCPipelineResult, NodeSpec
+from SymbolicDSGE.monte_carlo import MCPipelineResult, NodeSpec, PostprocSpec
 from SymbolicDSGE.monte_carlo import available_traces as _available_traces
 from SymbolicDSGE.monte_carlo import build_pipeline as build_pipeline
 from SymbolicDSGE.monte_carlo import catalog_payload
@@ -27,7 +27,7 @@ from SymbolicDSGE.monte_carlo.serialize import (
     serialize_pipeline_result as serialize_pipeline_result,
 )
 
-from .mc_schemas import MCPipelineSpec
+from .mc_schemas import MCNodeSpec, MCPipelineSpec, MCPostprocSpec
 
 #: Pre-fill for the custom-op Monaco editor. numpy is available as ``np`` inside
 #: the safe namespace, so no imports are needed (and the validator rejects them).
@@ -101,7 +101,9 @@ def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
     report which step failed.
     """
     resources: dict[str, Any] = {}
-    for node in spec.nodes:
+    # transform:custom lives in nodes; postproc:custom in postprocs.
+    steps: list[MCNodeSpec | MCPostprocSpec] = [*spec.nodes, *spec.postprocs]
+    for node in steps:
         if node.step_type not in ("transform:custom", "postproc:custom"):
             continue
         code = node.params.get("code", "")
@@ -119,8 +121,8 @@ def validate_pipeline_spec(
     *,
     has_reference: bool,
     has_dgp: bool,
-) -> list[NodeSpec]:
-    """Graph-validate a UI pipeline request and return its ordered core nodes."""
+) -> tuple[list[NodeSpec], list[PostprocSpec]]:
+    """Graph-validate a UI pipeline request; return ordered nodes + postprocs."""
     return _validate_pipeline_spec(
         spec.to_core(), has_reference=has_reference, has_dgp=has_dgp
     )

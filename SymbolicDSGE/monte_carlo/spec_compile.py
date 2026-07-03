@@ -35,7 +35,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.shock_generators import Shock
-from .spec import EdgeSpec, NodeSpec, PipelineSpec
+from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
 
 if TYPE_CHECKING:
     from .core import MCPipeline
@@ -57,10 +57,18 @@ def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
             name=step.name,
             params=_recover_params(step),
         )
-        for step in pipeline.steps
+        for step in pipeline.per_rep_steps
     ]
     edges = [EdgeSpec(source=src, target=dst) for src, dst in graph.edges()]
-    return PipelineSpec(nodes=nodes, edges=edges)
+    postprocs = [
+        PostprocSpec(
+            name=step.name,
+            step_type=_step_type(step),
+            params=_recover_params(step),
+        )
+        for step in pipeline.postproc_steps
+    ]
+    return PipelineSpec(nodes=nodes, edges=edges, postprocs=postprocs)
 
 
 def raw_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:

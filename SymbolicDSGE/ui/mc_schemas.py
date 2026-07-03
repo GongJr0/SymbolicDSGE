@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from SymbolicDSGE.monte_carlo.spec import MCStepKind, PipelineSpec
+from SymbolicDSGE.monte_carlo.spec import MCStepKind, PipelineSpec, PostprocStepKind
 
 
 class MCNodeSpec(BaseModel):
@@ -19,9 +19,19 @@ class MCEdgeSpec(BaseModel):
     target: str = Field(min_length=1)
 
 
+class MCPostprocSpec(BaseModel):
+    """A post-loop op. Not a graph node -- no ``id``/edges; it references producers
+    by trace key in ``params`` and runs once over the assembled traces."""
+
+    step_type: PostprocStepKind
+    name: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class MCPipelineSpec(BaseModel):
     nodes: list[MCNodeSpec] = Field(min_length=1)
     edges: list[MCEdgeSpec] = Field(default_factory=list)
+    postprocs: list[MCPostprocSpec] = Field(default_factory=list)
 
     def to_core(self) -> PipelineSpec:
         """Convert to the pydantic-free core spec (bundle/text serialization)."""
