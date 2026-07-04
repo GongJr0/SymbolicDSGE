@@ -43,7 +43,6 @@ from SymbolicDSGE.monte_carlo.operations.transforms.ops import (
 )
 from SymbolicDSGE.monte_carlo.spec import EdgeSpec, NodeSpec, PipelineSpec
 
-
 # ---- fixtures ------------------------------------------------------------
 
 

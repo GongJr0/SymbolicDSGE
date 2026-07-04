@@ -11,7 +11,6 @@ from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.interface import KalmanInterface
 
-
 EXPECTED_CANONICAL_ORDER = ["u", "v", "r", "Pi", "x", "r_star"]
 EXPECTED_IDX = {name: i for i, name in enumerate(EXPECTED_CANONICAL_ORDER)}
 
