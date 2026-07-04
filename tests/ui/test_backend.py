@@ -24,6 +24,7 @@ from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribu
 from SymbolicDSGE._diag_tests.result import MCResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.monte_carlo import MCContext, MCData, MCPipelineResult
+from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
 from SymbolicDSGE.regression.ols import MCRegressionResult, ols
 
 
@@ -1001,6 +1002,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
     )
     result = MCPipelineResult(
         n_rep=2,
+        meta=MCMeta(n_rep=2),
         n_successful=2,
         test_summaries={"diagnostic": tests},
         test_results=None,

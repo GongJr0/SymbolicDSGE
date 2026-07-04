@@ -208,27 +208,26 @@ class MCFailure:
 
 
 @dataclass(frozen=True)
-class MCPipelineResult:
+class MCMeta:
     n_rep: int
-    n_successful: int
-    test_summaries: Mapping[str, MCResult]
-    test_results: Mapping[str, tuple[TestResult, ...]] | None
-    payloads: tuple[Mapping[str, Any], ...] | None
-    contexts: tuple[MCContext, ...] | None
-    failures: tuple[MCFailure, ...] = ()
-    regression_summaries: Mapping[str, MCRegressionResult] = field(default_factory=dict)
+
+    payloads_retained: bool
+    test_results_retained: bool
+    contexts_retained: bool
+
+    #: Wall-clock seconds of the replication loop alone; the basis for ``it_s``.
+    #: Post-loop aggregation and postproc are excluded (see ``postproc_elapsed_s``).
     elapsed_s: float = 0.0
+    #: Per-replication step timings (postproc excluded; see ``postproc_elapsed_s``).
     step_elapsed_s: Mapping[str, float] = field(default_factory=dict)
     step_counts: Mapping[str, int] = field(default_factory=dict)
     step_failures: Mapping[str, int] = field(default_factory=dict)
-    #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name (or
-    #: ``"<step>.<key>"`` for multi-artifact ops). Values are
-    #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
-    postproc: Mapping[str, Any] = field(default_factory=dict)
+    #: Wall-clock seconds per post-loop (``OpType.POSTPROC``) step. Postproc runs
+    #: once, so it is reported as runtime only, never folded into the it/s rates.
+    postproc_elapsed_s: Mapping[str, float] = field(default_factory=dict)
 
-    @property
-    def succeeded(self) -> bool:
-        return len(self.failures) == 0
+    failed_steps: dict[str, int] = field(default_factory=dict)
+    failed_postprocs: set[str] = field(default_factory=set)
 
     @property
     def it_s(self) -> float:
@@ -244,19 +243,57 @@ class MCPipelineResult:
             for name, elapsed_s in self.step_elapsed_s.items()
         }
 
+    @property
+    def postproc_total_s(self) -> float:
+        """Total wall-clock seconds spent in the post-loop phase."""
+        return sum(self.postproc_elapsed_s.values())
+
+    @property
+    def steps_success(self) -> bool:
+        """Whether all per-replication steps succeeded (no failures recorded)."""
+        return self.failed_steps == {}
+
+    @property
+    def postproc_success(self) -> bool:
+        """Whether all post-loop steps succeeded (no failures recorded)."""
+        return self.failed_postprocs == set()
+
+
+@dataclass(frozen=True)
+class MCPipelineResult:
+    meta: MCMeta
+    n_rep: int
+    n_successful: int
+    test_summaries: Mapping[str, MCResult]
+    test_results: Mapping[str, tuple[TestResult, ...]] | None
+    payloads: tuple[Mapping[str, Any], ...] | None
+    contexts: tuple[MCContext, ...] | None
+    failures: tuple[MCFailure, ...] = ()
+    regression_summaries: Mapping[str, MCRegressionResult] = field(default_factory=dict)
+
+    #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name (or
+    #: ``"<step>.<key>"`` for multi-artifact ops). Values are
+    #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
+    postproc: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def succeeded(self) -> bool:
+        """Whether the run succeeded (no per-replication or post-loop failures)."""
+        return self.meta.steps_success and self.meta.postproc_success
+
     def report_performance(
         self,
         *,
         print_func: Callable[[str], None] = print,
     ) -> None:
-        report_mc_performance(self, print_func=print_func)
+        report_mc_performance(self.meta, print_func=print_func)
 
     def report_step_performance(
         self,
         *,
         print_func: Callable[[str], None] = print,
     ) -> None:
-        report_mc_step_performance(self, print_func=print_func)
+        report_mc_step_performance(self.meta, print_func=print_func)
 
     @property
     def statistic_traces(self) -> Mapping[str, NDF]:
@@ -314,25 +351,54 @@ def _conclusion_word(succeeded: bool) -> str:
 
 
 def report_mc_performance(
-    result: MCPipelineResult,
+    meta: MCMeta,
     *,
     print_func: Callable[[str], None] = print,
 ) -> None:
     print_func(
-        "MC run concluded "
-        f"{_conclusion_word(result.succeeded)} with {result.it_s:.2f} it/s."
+        f"MC run concluded {_conclusion_word(meta.steps_success)} with {meta.it_s:.2f} it/s."
     )
+    if meta.postproc_elapsed_s:
+        print_func(
+            "Post-processing concluded "
+            f"{_conclusion_word(meta.postproc_success)} in {meta.postproc_total_s:.4f}s."
+        )
 
 
 def report_mc_step_performance(
-    result: MCPipelineResult,
+    meta: MCMeta,
     *,
     print_func: Callable[[str], None] = print,
 ) -> None:
-    step_rates = result.step_it_s
-    for step_name in result.step_elapsed_s:
-        step_succeeded = result.step_failures.get(step_name, 0) == 0
+    step_rates = meta.step_it_s
+    print_func(
+        f"MC run concluded {_conclusion_word(meta.failed_steps == {})} with {meta.it_s:.2f} it/s."
+    )
+    print_func(f"Per-step Report:\n")
+    for step_name in meta.step_elapsed_s:
         print_func(
-            f"{step_name} concluded {_conclusion_word(step_succeeded)} "
-            f"with {step_rates.get(step_name, 0.0):.2f} it/s."
+            f"\t{step_name}: {meta.failed_steps.get(step_name, 0)} faliures, "
+            f"{step_rates.get(step_name, 0.0):.2f} it/s."
         )
+
+    if meta.postproc_elapsed_s:
+        print_func(f"\nPost-processing Report:\n")
+        for step_name, elapsed_s in meta.postproc_elapsed_s.items():
+            step_succeeded = (
+                "Succeeded" if step_name not in meta.failed_postprocs else "Failed"
+            )
+            print_func(f"\t{step_name}: {step_succeeded} in {elapsed_s:.4f}s.")
+
+
+def failed_postproc_names(fails: list[MCFailure]) -> set[str]:
+    """Names of post-loop steps that failed (recorded with the ``-1`` sentinel)."""
+    return {f.step_name for f in fails if f.rep_idx == -1}
+
+
+def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:
+    """Count of failed per-replication steps (recorded with non-negative rep_idx)."""
+    counts: dict[str, int] = {}
+    for f in fails:
+        if f.rep_idx != -1:
+            counts[f.step_name] = counts.get(f.step_name, 0) + 1
+    return counts
