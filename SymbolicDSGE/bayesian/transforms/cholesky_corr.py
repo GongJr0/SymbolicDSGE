@@ -9,7 +9,6 @@ from numpy.typing import NDArray
 from .transform import Transform, TransformMethod
 from ..support import Support
 
-
 NDF = NDArray[np.float64]
 
 

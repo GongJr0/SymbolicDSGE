@@ -25,9 +25,12 @@ def transform_step(
 
     Signature: ``transform_step(name, func, *, store_key=None, **kwargs)``.
 
-    Any callable runs in-process; ``kwargs`` are forwarded to it each
-    replication and the returned array is stored as the step's payload (at
-    ``store_key`` or ``name``). Bundling requires ``func`` to be a
+    Op contract: ``func(*, context, reference, dgp, rep_idx, **kwargs)``; all
+    four are injected every replication (read this rep's data via
+    ``context.require_data()`` / ``context.require_payload(...)``), and any
+    ``kwargs`` passed here arrive as extra keywords. ``func`` returns a 2-D
+    ndarray stored as the step's payload (at ``store_key`` or ``name``).
+    Bundling requires ``func`` to be a
     :class:`~SymbolicDSGE.monte_carlo.custom_op.NumpyCustomFunc` (use
     ``@numpy_operation``); the bundle builder auto-wraps it at serialization.
 

@@ -1005,7 +1005,7 @@ def numpy_operation(func: Callable[..., Any]) -> NumpyCustomFunc:
     documents intent at the definition site and validates/snapshots up front::
 
         @numpy_operation
-        def zscore(*, context, **kwargs):
+        def zscore(*, context, reference, dgp, rep_idx, **kwargs):
             arr = context.require_data().observables
             return (arr - arr.mean(axis=0)) / arr.std(axis=0)
 

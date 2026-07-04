@@ -16,7 +16,6 @@ from SymbolicDSGE._diag_tests.hac_covariance import (
     wooldridge_bandwidth,
 )
 
-
 GOLDEN_R = np.array(
     [
         [1.0, 2.0],

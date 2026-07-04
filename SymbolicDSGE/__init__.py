@@ -4,6 +4,7 @@ from .core import (
     ModelParser,
     Shock,
     linearize_model,
+    SolvedModel,
 )
 from .kalman import KalmanFilter
 from .estimation import Estimator
@@ -14,6 +15,7 @@ __all__ = [
     "ModelConfig",
     "ModelParser",
     "DSGESolver",
+    "SolvedModel",
     "KalmanFilter",
     "Estimator",
     "Shock",

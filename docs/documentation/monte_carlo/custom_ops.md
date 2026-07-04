@@ -66,7 +66,7 @@ Decorator form of `NumpyCustomFunc`. The decorated name becomes a callable `Nump
 from SymbolicDSGE.monte_carlo import numpy_operation
 
 @numpy_operation
-def demean(*, context, **kwargs):
+def demean(*, context, reference, dgp, rep_idx, **kwargs):
     obs = context.require_data().observables
     return obs - obs.mean(axis=0, keepdims=True)
 ```
