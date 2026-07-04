@@ -161,11 +161,14 @@ export function fetchAvailableTraces(
 
 export function validateMCPipeline(
   pipeline: MCPipelineSpec,
-): Promise<{ valid: true; order: string[] }> {
-  return requestJson<{ valid: true; order: string[] }>("/api/mc/validate", {
-    method: "POST",
-    body: JSON.stringify(pipeline),
-  });
+): Promise<{ valid: true; order: string[]; postprocs: string[] }> {
+  return requestJson<{ valid: true; order: string[]; postprocs: string[] }>(
+    "/api/mc/validate",
+    {
+      method: "POST",
+      body: JSON.stringify(pipeline),
+    },
+  );
 }
 
 export function runMCPipeline(

@@ -57,6 +57,33 @@ EdgeSpec.to_dict() -> dict[str, str]
 EdgeSpec.from_dict(data: Mapping[str, Any]) -> EdgeSpec  # @classmethod
 ```
 
+## `PostprocSpec`
+
+```python
+@dataclass
+class PostprocSpec()
+```
+
+One post-loop op. A postproc is a **terminal reduction** over the assembled
+across-rep traces — not a graph node, so it has no `id` and no edges; its inputs
+are trace keys carried in `params`. Postprocs live in `PipelineSpec.postprocs`,
+never in `nodes`.
+
+__Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| name | `#!python str` | Runtime step name (also the artifact key). |
+| step_type | `#!python str` | A post-processing kind. Must be in `POSTPROC_KINDS` (`"kde"`, `"postproc:custom"`). |
+| params | `#!python dict[str, Any]` | JSON-like parameter payload (e.g. the `trace` key a `kde` reads). |
+
+__Methods:__
+
+```python
+PostprocSpec.to_dict() -> dict[str, Any]
+PostprocSpec.from_dict(data: Mapping[str, Any]) -> PostprocSpec  # @classmethod
+```
+
 ## `PipelineSpec`
 
 ```python
@@ -64,14 +91,19 @@ EdgeSpec.from_dict(data: Mapping[str, Any]) -> EdgeSpec  # @classmethod
 class PipelineSpec()
 ```
 
-Serializable graph-form pipeline.
+Serializable pipeline. `nodes`/`edges` are the **per-replication** dependency
+DAG; `postprocs` is the post-loop phase. The two are kept separate — postprocs
+are not graph participants.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| nodes | `#!python list[NodeSpec]` | All graph nodes. |
+| nodes | `#!python list[NodeSpec]` | Per-rep graph nodes (never postprocs). |
 | edges | `#!python list[EdgeSpec]` | Structural producer-consumer edges. |
+| postprocs | `#!python list[PostprocSpec]` | Post-loop ops, run once over the assembled traces. |
+
+`from_dict` rejects a postproc-kind `step_type` appearing in `nodes` (they belong in `postprocs`).
 
 __Methods:__
 
@@ -108,11 +140,17 @@ MCStepKind = Literal[
     "rolling_mean",
     "rolling_std",
     "rolling_var",
-    "custom",
+    "kde",
+    "transform:custom",
+    "postproc:custom",
 ]
 
 STEP_KINDS: frozenset[str]
+
+PostprocStepKind = Literal["kde", "postproc:custom"]
+POSTPROC_KINDS: frozenset[str]
+PER_REP_KINDS: frozenset[str]
 ```
 
-`MCStepKind` is the string-level schema used by portable specs. `STEP_KINDS` is the runtime set used for validation.
+`MCStepKind` is the string-level schema used by portable specs; `STEP_KINDS` is the runtime set used for validation. `POSTPROC_KINDS` (the two post-loop kinds) and `PER_REP_KINDS` (everything else — the actual graph nodes) partition it, and drive the `nodes` vs `postprocs` split.
 

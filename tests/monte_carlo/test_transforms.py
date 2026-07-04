@@ -274,7 +274,7 @@ def test_validate_orders_transform_between_filter_and_terminal() -> None:
             EdgeSpec(source="lg", target="jb"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     assert [node.name for node in ordered] == ["datagen", "log_obs", "normality"]
     # Auto-binding: the terminal inherits `source="payload"` + payload_key=log_obs.
     terminal = ordered[-1]
@@ -312,7 +312,7 @@ def test_chained_transforms_are_topologically_ordered() -> None:
             EdgeSpec(source="b", target="t"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     names = [node.name for node in ordered]
     assert names == ["datagen", "log_obs", "standardize_log", "normality"]
     # Each consumer's payload_key points at its parent's name.
@@ -347,7 +347,7 @@ def test_terminal_with_transform_parent_rejects_fixed_source() -> None:
     # User wired test from transform but still set source=observables — the
     # validator's auto-bind defaults this to "payload", which is the documented
     # behaviour for single-source consumers (no per-leg ambiguity).
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     terminal = ordered[-1]
     assert terminal.params["source"] == "payload"
     assert terminal.params["payload_key"] == "log_obs"
@@ -380,7 +380,7 @@ def test_multi_input_consumer_without_payload_leg_reads_declared_sources() -> No
             EdgeSpec(source="d", target="bp"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     bp = ordered[-1]
     assert bp.params["residual_source"] == "observables"
     assert bp.params["X_source"] == "observables"
@@ -412,7 +412,7 @@ def test_multi_input_consumer_with_explicit_payload_leg_binds_payload_key() -> N
             EdgeSpec(source="d", target="bp"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     bp = ordered[-1]
     assert bp.params["residual_source"] == "payload"
     assert bp.params["residual_payload_key"] == "diff_obs"
@@ -527,7 +527,7 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
             EdgeSpec(source="rvar", target="wvar"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     names = [node.name for node in ordered]
     # standardize before the two rolling steps; both rolling steps before the
     # two terminals. The relative order within a layer follows spec order.
@@ -552,7 +552,7 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
 
     # Catalog-driven compile succeeds with the bound params.
     pipeline = build_pipeline(ordered, dgp=_stub_dgp_with_shocks("g", "z"))
-    assert [step.name for step in pipeline.steps] == names
+    assert [step.name for step in pipeline.per_rep_steps] == names
 
 
 def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> None:
@@ -588,7 +588,7 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> No
             EdgeSpec(source="rm", target="jb"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     jb = next(n for n in ordered if n.name == "normality_on_std")
     # User's explicit payload_key wins over the auto-bind to "rmean".
     assert jb.params["payload_key"] == "standardize"
@@ -665,7 +665,9 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     ]
     # Validation against the restored spec still passes (no drift between the
     # spec's Literal and the catalog at load time).
-    ordered = validate_pipeline_spec(loaded.mc.spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(
+        loaded.mc.spec, has_reference=True, has_dgp=True
+    )
     assert [node.name for node in ordered] == [
         "datagen",
         "standardize",
@@ -696,13 +698,13 @@ def test_build_pipeline_emits_transform_mcstep_with_bound_params() -> None:
             EdgeSpec(source="rm", target="jb"),
         ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     pipeline = build_pipeline(ordered, dgp=_stub_dgp_with_shocks("g", "z"))
-    names = [step.name for step in pipeline.steps]
+    names = [step.name for step in pipeline.per_rep_steps]
     assert names == ["datagen", "rmean", "normality"]
-    rm_step = pipeline.steps[1]
+    rm_step = pipeline.per_rep_steps[1]
     assert rm_step.op_type is OpType.TRANSFORM
     assert rm_step.kwargs["window"] == 3
-    jb_step = pipeline.steps[2]
+    jb_step = pipeline.per_rep_steps[2]
     assert jb_step.kwargs["source"] == "payload"
     assert jb_step.kwargs["payload_key"] == "rmean"

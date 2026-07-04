@@ -15,7 +15,13 @@ from SymbolicDSGE.monte_carlo import (
     validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
-from SymbolicDSGE.monte_carlo.spec import STEP_KINDS, EdgeSpec, NodeSpec, PipelineSpec
+from SymbolicDSGE.monte_carlo.spec import (
+    STEP_KINDS,
+    EdgeSpec,
+    NodeSpec,
+    PipelineSpec,
+    PostprocSpec,
+)
 
 
 def test_factories_stamp_step_type_matching_catalog() -> None:
@@ -155,7 +161,7 @@ def test_validate_orders_steps_and_binds_filter_key() -> None:
         edges=[EdgeSpec("sim", "filter"), EdgeSpec("filter", "test")],
     )
 
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
     assert [node.id for node in ordered] == ["sim", "filter", "test"]
     assert ordered[-1].params["filter_key"] == "renamed_filter"
@@ -184,7 +190,7 @@ def test_validate_binds_multi_source_terminal_from_distinct_producers() -> None:
         ],
     )
 
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     bp = next(node for node in ordered if node.id == "bp")
     assert bp.params["filter_key"] == "filter"  # filter leg bound from the filter
     assert bp.params["x_payload_key"] == "std"  # payload leg bound from transform
@@ -206,7 +212,7 @@ def test_validate_resolves_payload_by_key_without_an_edge() -> None:
         ],
         edges=[EdgeSpec("sim", "std"), EdgeSpec("sim", "jb")],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     assert [node.id for node in ordered] == ["sim", "std", "jb"]
 
 
@@ -222,10 +228,8 @@ def test_validate_orders_payload_key_chain_without_edges() -> None:
         ],
         edges=[EdgeSpec("sim", "tf0")],
     )
-    ordered = [
-        node.id
-        for node in validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    ]
+    ordered_nodes, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered = [node.id for node in ordered_nodes]
     assert ordered.index("tf0") < ordered.index("tf1") < ordered.index("tf2")
 
 
@@ -279,17 +283,17 @@ def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> 
         ],
         edges=[EdgeSpec("sim", "reg")],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
-    pipeline = build_pipeline(ordered, dgp=_stub_dgp("u"))
+    pipeline = build_pipeline(ordered, postprocs, dgp=_stub_dgp("u"))
 
-    assert [s.name for s in pipeline.steps] == ["datagen", "reg"]
-    assert pipeline.steps[0].op_type is OpType.DATAGEN
-    assert pipeline.steps[1].op_type is OpType.REGRESSION
+    assert [s.name for s in pipeline.per_rep_steps] == ["datagen", "reg"]
+    assert pipeline.per_rep_steps[0].op_type is OpType.DATAGEN
+    assert pipeline.per_rep_steps[1].op_type is OpType.REGRESSION
     # simulation got generated shocks injected
-    assert "shocks" in pipeline.steps[0].kwargs
+    assert "shocks" in pipeline.per_rep_steps[0].kwargs
     # OLS regression dropped the conditional alpha kwarg
-    assert "alpha" not in pipeline.steps[1].kwargs
+    assert "alpha" not in pipeline.per_rep_steps[1].kwargs
 
 
 def test_build_pipeline_rejects_unknown_step_type() -> None:
@@ -303,32 +307,39 @@ def test_build_pipeline_rejects_unknown_step_type() -> None:
 # --- POSTPROC (post-loop) kind: ordering, edges, compilation -----------------
 
 
-def test_postproc_is_ordered_last_after_terminals() -> None:
+def test_postprocs_are_a_separate_terminal_list() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
             NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
-            NodeSpec("k", "kde", "kde", {"trace": "test.jb.statistic"}),
         ],
         edges=[EdgeSpec("sim", "jb")],
+        postprocs=[PostprocSpec("kde", "kde", {"trace": "test.jb.statistic"})],
     )
-    ordered = [
-        n.id for n in validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    ]
-    assert ordered == ["sim", "jb", "k"]  # postproc last, no edge needed
+    ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    # The DAG is per-rep only; postprocs are returned separately, not ordered in.
+    assert [n.id for n in ordered] == ["sim", "jb"]
+    assert [pp.name for pp in postprocs] == ["kde"]
 
 
-def test_postproc_rejects_edges() -> None:
-    base = [
-        NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-        NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
-        NodeSpec("k", "kde", "kde", {"trace": "test.jb.statistic"}),
-    ]
-    # Edge into the postproc node (from the datagen, so the terminal-source rule
-    # doesn't fire first) is rejected: postproc is wired by trace key, not edges.
-    into = PipelineSpec(nodes=base, edges=[EdgeSpec("sim", "jb"), EdgeSpec("sim", "k")])
-    with pytest.raises(ValueError, match="reference producers by name, not edges"):
-        validate_pipeline_spec(into, has_reference=True, has_dgp=True)
+def test_from_dict_rejects_postproc_in_nodes() -> None:
+    # A postproc smuggled into `nodes` (rather than `postprocs`) is rejected at
+    # deserialization -- postprocs are not graph nodes.
+    with pytest.raises(ValueError, match="must be listed under 'postprocs'"):
+        PipelineSpec.from_dict(
+            {
+                "nodes": [
+                    {
+                        "id": "sim",
+                        "step_type": "simulation",
+                        "name": "sim",
+                        "params": {},
+                    },
+                    {"id": "k", "step_type": "kde", "name": "k", "params": {}},
+                ],
+                "edges": [],
+            }
+        )
 
 
 def test_kde_catalog_entry_is_postproc_with_trace_field() -> None:
@@ -348,13 +359,17 @@ def test_build_postproc_custom_from_resources() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-            NodeSpec("p", "postproc:custom", "p", {"func_ref": "p", "code": "..."}),
         ],
         edges=[],
+        postprocs=[
+            PostprocSpec("p", "postproc:custom", {"func_ref": "p", "code": "..."})
+        ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    pipeline = build_pipeline(ordered, dgp=_stub_dgp("u"), resources={"p": my_summary})
-    step = {s.name: s for s in pipeline.steps}["p"]
+    ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    pipeline = build_pipeline(
+        ordered, postprocs, dgp=_stub_dgp("u"), resources={"p": my_summary}
+    )
+    step = {s.name: s for s in pipeline.postproc_steps}["p"]
     assert step.op_type is OpType.POSTPROC
     assert step.step_type == "postproc:custom"
     assert "code" not in step.kwargs and "func_ref" not in step.kwargs
@@ -398,17 +413,18 @@ def _kde_spec(trace_params: dict) -> PipelineSpec:
         nodes=[
             NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
             NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
-            NodeSpec("k", "kde", "k", trace_params),
         ],
         edges=[EdgeSpec("sim", "jb")],
+        postprocs=[PostprocSpec("k", "kde", trace_params)],
     )
 
 
 def test_kde_valid_trace_reference_passes() -> None:
-    ordered = validate_pipeline_spec(
+    ordered, postprocs = validate_pipeline_spec(
         _kde_spec({"trace": "test.jb.statistic"}), has_reference=True, has_dgp=True
     )
-    assert [n.id for n in ordered] == ["sim", "jb", "k"]
+    assert [n.id for n in ordered] == ["sim", "jb"]
+    assert [pp.name for pp in postprocs] == ["k"]
 
 
 def test_kde_bogus_trace_reference_raises_listing_available() -> None:
@@ -430,12 +446,15 @@ def test_postproc_custom_trace_refs_not_statically_validated() -> None:
         nodes=[
             NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
             NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
-            NodeSpec("p", "postproc:custom", "p", {"func_ref": "p", "code": "..."}),
         ],
         edges=[EdgeSpec("sim", "jb")],
+        postprocs=[
+            PostprocSpec("p", "postproc:custom", {"func_ref": "p", "code": "..."})
+        ],
     )
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    assert [n.id for n in ordered] == ["sim", "jb", "p"]
+    ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    assert [n.id for n in ordered] == ["sim", "jb"]
+    assert [pp.name for pp in postprocs] == ["p"]
 
 
 def test_kde_trace_field_is_typed_trace() -> None:

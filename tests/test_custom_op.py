@@ -495,7 +495,7 @@ def test_from_source_reports_syntax_errors() -> None:
 
 
 @pandas_operation
-def _summary_table(*, traces, reference, dgp, **kwargs):
+def _summary_table(*, traces, **kwargs):
     return pd.DataFrame({"stat": ["mean"], "value": [float(np.mean(traces["x"]))]})
 
 
@@ -512,7 +512,7 @@ def test_pandas_op_round_trips_through_cloudpickle() -> None:
     restored = cloudpickle.loads(cloudpickle.dumps(_summary_table))
     assert isinstance(restored, PandasCustomFunc)
     assert restored.namespace_kind == "pandas"
-    out = restored(traces={"x": np.array([2.0, 4.0])}, reference=None, dgp=None)
+    out = restored(traces={"x": np.array([2.0, 4.0])})
     assert out.loc[0, "value"] == 3.0
 
 
@@ -522,7 +522,7 @@ def test_numpy_namespace_rejects_pandas_reference() -> None:
         NumpyCustomFunc(_summary_table._func)
 
 
-def _reads_csv(*, traces, reference, dgp, **kwargs):
+def _reads_csv(*, traces, **kwargs):
     return pd.read_csv("x.csv")
 
 
@@ -532,7 +532,7 @@ def test_pandas_io_footgun_is_denied() -> None:
 
 
 _PANDAS_FROM_SOURCE = """@pandas_operation
-def describe(*, traces, reference, dgp, **kwargs):
+def describe(*, traces, **kwargs):
     return pd.DataFrame({"v": [float(np.sum(traces["x"]))]})
 """
 

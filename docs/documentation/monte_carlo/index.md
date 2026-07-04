@@ -15,9 +15,9 @@ The serializable pipeline spec and the runner that consumes it live in the core 
 
 | Export | Purpose |
 | --- | --- |
-| `PipelineSpec` / `NodeSpec` / `EdgeSpec` | Pydantic-free graph specification. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
-| `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against the step-kind sets and catalog metadata; returns the ordered node list when the graph is well-formed. |
-| `build_pipeline(ordered_nodes, *, dgp=None, resources=None)` | Compile validated nodes into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a bundle spec. |
+| `PipelineSpec` / `NodeSpec` / `EdgeSpec` / `PostprocSpec` | Pydantic-free specification. `nodes`/`edges` are the per-rep DAG; `postprocs` the post-loop phase. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
+| `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against the step-kind sets and catalog metadata; returns `(ordered per-rep nodes, postprocs)` when well-formed. |
+| `build_pipeline(ordered, postprocs=(), *, dgp=None, resources=None)` | Compile validated per-rep nodes + postprocs into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a bundle spec. |
 | `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, resources=None)` | One-shot validate + compile + run; returns `MCPipelineResult`. |
 
 ```python

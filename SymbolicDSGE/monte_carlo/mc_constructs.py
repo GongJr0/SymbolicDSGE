@@ -36,7 +36,17 @@ class OpType(StrEnum):
 
 @dataclass(frozen=True)
 class MCData:
-    """Standard data payload generated for one Monte Carlo replication."""
+    """One Monte Carlo replication's data payload.
+
+    Produced by a DATAGEN step and exposed to per-replication ops as
+    ``context.data`` (via ``context.require_data()``). Fields:
+
+    - ``states``: ``(T, n_state)`` latent state matrix, or None.
+    - ``observables``: ``(T, k)`` observable matrix, or None.
+    - ``n_exog``: number of exogenous shocks (-1 if unknown).
+    - ``raw``: mapping of named series (each model variable, plus "_X" = states).
+    - ``observable_names``: column names for ``observables``.
+    """
 
     states: NDF | None = None
     observables: NDF | None = None
@@ -56,6 +66,20 @@ class DataGenReturn:
 
 @dataclass
 class MCContext:
+    """Per-replication state handed to every Monte Carlo op.
+
+    One ``MCContext`` exists per replication; ops read the generated data and
+    prior results from it and write their outputs back. Fields:
+
+    - ``rep_idx``: 0-based replication index.
+    - ``reference`` / ``dgp``: the reference and data-generating ``SolvedModel``s.
+    - ``data``: this replication's :class:`MCData` (None until a DATAGEN step
+      runs; prefer ``require_data()``).
+    - ``payloads``: transform outputs keyed by step name (see
+      ``require_payload()``).
+    - ``results`` / ``regressions``: test / regression results by step name.
+    """
+
     rep_idx: int
     reference: SolvedModel
     dgp: SolvedModel | None
@@ -65,6 +89,7 @@ class MCContext:
     regressions: dict[str, RegressionResult] = field(default_factory=dict)
 
     def require_data(self) -> MCData:
+        """Return ``data``, raising if no DATAGEN step has populated it yet."""
         if self.data is None:
             raise ValueError(
                 "MC context has no generated data. Add a DATAGEN step first."
@@ -72,6 +97,7 @@ class MCContext:
         return self.data
 
     def require_payload(self, key: str) -> Any:
+        """Return the payload stored by transform step ``key``, raising if absent."""
         if key not in self.payloads:
             raise KeyError(f"MC context payload '{key}' is not available.")
         return self.payloads[key]

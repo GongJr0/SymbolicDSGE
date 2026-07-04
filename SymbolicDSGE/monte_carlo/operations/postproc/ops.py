@@ -2,7 +2,9 @@
 
 Post-loop ops run once after the replication loop, over the assembled
 across-replication ``traces`` registry, and return :class:`Summary` / :class:`Raw`
-artifacts. The op contract is ``op(*, traces, reference, dgp, **kwargs)``.
+artifacts. The op contract is ``op(*, traces, **kwargs)`` — post-loop ops see only
+the assembled traces (and their step kwargs), never the per-rep ``reference`` /
+``dgp`` models.
 """
 
 from __future__ import annotations
@@ -13,15 +15,12 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ....core.solved_model import SolvedModel
 from ...postproc import Raw, Summary
 
 
 def run_kde(
     *,
     traces: Mapping[str, NDArray[Any]],
-    reference: SolvedModel,
-    dgp: SolvedModel | None,
     trace: str,
     bandwidth: str | float = "scott",
     grid_points: int = 200,
@@ -38,7 +37,6 @@ def run_kde(
     """
     from scipy.stats import gaussian_kde
 
-    del reference, dgp
     if kernel != "gaussian":
         raise ValueError(
             f"KDE currently supports only the Gaussian kernel, got {kernel!r}."

@@ -5,18 +5,22 @@ tags:
 # MCPipeline
 
 ```python
-class MCPipeline(steps: Sequence[MCStep])
+class MCPipeline(
+    per_rep_steps: Sequence[MCStep],
+    postproc_steps: Sequence[MCStep] = (),
+)
 ```
 
-`MCPipeline` stores the ordered operations executed inside each Monte Carlo replication.
+`MCPipeline` holds two step lists: `per_rep_steps` (the dependency DAG executed inside every replication) and `postproc_steps` (post-loop ops run **once** after the loop, over the assembled across-rep traces). The two are separate because a postproc is a terminal reduction, not a graph node.
 
 __Contract:__
 
 | __Rule__ | __Description__ |
 |:---------|----------------:|
-| One data-generation step | The first step must have `op_type=OpType.DATAGEN`. Later steps cannot generate data once `DATAGEN` is performed.|
-| Unique step names | Names are used as payload and result keys. |
-| Per-replication payloads | Steps may pass results through `MCContext.payloads` inside the same replication. Aggregate summaries are created after all successful replications finish. |
+| One data-generation step | `per_rep_steps[0]` must have `op_type=OpType.DATAGEN`. Later per-rep steps cannot generate data once `DATAGEN` is performed.|
+| Postproc list is post-loop only | `postproc_steps` may contain only `OpType.POSTPROC` steps; per-rep steps may not. |
+| Unique step names | Names are used as payload/result/artifact keys, unique across both lists. |
+| Per-replication payloads | Per-rep steps pass results through `MCContext.payloads` inside the same replication. Aggregate summaries + postprocs run after all successful replications finish. |
 
 __Methods:__
 
@@ -24,7 +28,7 @@ __Methods:__
 MCPipeline.graph -> PipelineGraph
 ```
 
-Return the cached dependency graph inferred from the pipeline's step kwargs. The graph records structural edges used by serialization, including filter dependencies and payload-producing transform/custom steps.
+Return the cached dependency graph inferred from `per_rep_steps` (postprocs are not graph participants). The graph records structural edges used by serialization, including filter dependencies and payload-producing transform/custom steps.
 
 ```python
 MCPipeline.to_spec() -> PipelineSpec

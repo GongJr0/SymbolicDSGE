@@ -1350,7 +1350,7 @@ def test_regression_step_validates_result_type() -> None:
 
 
 def test_pipeline_validates_step_order_and_unique_names() -> None:
-    with pytest.raises(ValueError, match="first step"):
+    with pytest.raises(ValueError, match="first per-rep step"):
         MCPipeline(
             [
                 wald_test_step(

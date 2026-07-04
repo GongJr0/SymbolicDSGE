@@ -397,7 +397,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     }
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json() == {"valid": True, "order": ["sim"]}
+    assert validated.json() == {"valid": True, "order": ["sim"], "postprocs": []}
 
     run = client.post(
         "/api/run/mc",
@@ -446,14 +446,15 @@ _POSTPROC_PIPELINE = {
             "name": "jb",
             "params": {"source": "observables", "column": 0},
         },
+    ],
+    "edges": [{"source": "sim", "target": "jb"}],
+    "postprocs": [
         {
-            "id": "k",
             "step_type": "kde",
             "name": "density",
             "params": {"trace": "test.jb.statistic", "grid_points": 16},
         },
     ],
-    "edges": [{"source": "sim", "target": "jb"}],
 }
 
 
@@ -1056,7 +1057,7 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
         }
     )
 
-    ordered = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
     assert [node.id for node in ordered] == ["sim", "filter", "test"]
     assert ordered[-1].params["filter_key"] == "renamed_filter"

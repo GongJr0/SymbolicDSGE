@@ -21,14 +21,18 @@ def transform_step(
     store_key: str | None = None,
     **kwargs: Any,
 ) -> MCStep:
-    """Wrap a user-supplied callable as an ``OpType.TRANSFORM`` step.
+    """Wrap a user callable as a per-replication ``OpType.TRANSFORM`` step.
 
-    Permissive on purpose: any callable runs in-process (closures, helpers,
-    ``MCData``-returning data ops). Bundling such a step additionally requires
-    the callable to be a
+    Signature: ``transform_step(name, func, *, store_key=None, **kwargs)``.
+
+    Any callable runs in-process; ``kwargs`` are forwarded to it each
+    replication and the returned array is stored as the step's payload (at
+    ``store_key`` or ``name``). Bundling requires ``func`` to be a
     :class:`~SymbolicDSGE.monte_carlo.custom_op.NumpyCustomFunc` (use
-    ``@numpy_operation`` or pass one); the bundle builder enforces and
-    auto-wraps that at serialization time.
+    ``@numpy_operation``); the bundle builder auto-wraps it at serialization.
+
+    Example:
+        >>> transform_step("z", my_op)
     """
     return MCStep(
         name=name,
@@ -40,18 +44,19 @@ def transform_step(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Built-in transforms.                                                         #
-#                                                                              #
-# Each factory binds a transform op into an :class:`MCStep` of op_type         #
-# TRANSFORM. The runner stores the per-rep output ndarray at ``step.name``;    #
-# downstream consumers reference it via ``source="payload"`` plus              #
-# ``payload_key=step.name``, which the graph validator auto-binds when the     #
-# parent edge is a transform.                                                  #
-# --------------------------------------------------------------------------- #
-
-
 def standardize_step(name: str, **kwargs: Any) -> MCStep:
+    """Per-column z-score ``(x - mean) / std`` over each column.
+
+    Signature: ``standardize_step(name, *, source, columns=None, ddof=0)``.
+
+    ``ddof`` picks population (0) vs sample (1) std; zero-variance columns
+    return zeros.
+
+    Example:
+        >>> standardize_step("z", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
@@ -62,6 +67,17 @@ def standardize_step(name: str, **kwargs: Any) -> MCStep:
 
 
 def log_step(name: str, **kwargs: Any) -> MCStep:
+    """Elementwise natural log ``log(x + offset)`` of the series.
+
+    Signature: ``log_step(name, *, source, columns=None, offset=0.0)``.
+
+    ``offset`` is added before the log so inputs that touch zero stay finite.
+
+    Example:
+        >>> log_step("lg", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
@@ -72,6 +88,17 @@ def log_step(name: str, **kwargs: Any) -> MCStep:
 
 
 def log_diff_step(name: str, **kwargs: Any) -> MCStep:
+    """One-period log differences along the time axis (log growth rates).
+
+    Signature: ``log_diff_step(name, *, source, columns=None, offset=0.0)``.
+
+    Output has one fewer row than the input; ``offset`` is added before the log.
+
+    Example:
+        >>> log_diff_step("gr", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
@@ -82,6 +109,17 @@ def log_diff_step(name: str, **kwargs: Any) -> MCStep:
 
 
 def diff_step(name: str, **kwargs: Any) -> MCStep:
+    """Discrete difference along the time axis, applied ``order`` times.
+
+    Signature: ``diff_step(name, *, source, columns=None, order=1)``.
+
+    Output loses ``order`` rows; ``order`` must be at least 1.
+
+    Example:
+        >>> diff_step("d", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
@@ -92,6 +130,18 @@ def diff_step(name: str, **kwargs: Any) -> MCStep:
 
 
 def rolling_mean_step(name: str, **kwargs: Any) -> MCStep:
+    """Trailing rolling mean over a fixed ``window`` of the time axis.
+
+    Signature: ``rolling_mean_step(name, *, source, columns=None, window=10)``.
+
+    Output shape is ``(n - window + 1, k)``; ``window`` must not exceed the
+    series length.
+
+    Example:
+        >>> rolling_mean_step("rm", source="observables", window=20)
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
@@ -102,6 +152,17 @@ def rolling_mean_step(name: str, **kwargs: Any) -> MCStep:
 
 
 def rolling_std_step(name: str, **kwargs: Any) -> MCStep:
+    """Trailing rolling standard deviation over a fixed ``window``.
+
+    Signature: ``rolling_std_step(name, *, source, columns=None, window=10, ddof=0)``.
+
+    Output shape is ``(n - window + 1, k)``; ``ddof`` picks population vs sample.
+
+    Example:
+        >>> rolling_std_step("rs", source="observables", window=20)
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
@@ -112,6 +173,17 @@ def rolling_std_step(name: str, **kwargs: Any) -> MCStep:
 
 
 def rolling_var_step(name: str, **kwargs: Any) -> MCStep:
+    """Trailing rolling variance over a fixed ``window`` of the time axis.
+
+    Signature: ``rolling_var_step(name, *, source, columns=None, window=10, ddof=0)``.
+
+    Output shape is ``(n - window + 1, k)``; ``ddof`` picks population vs sample.
+
+    Example:
+        >>> rolling_var_step("rv", source="observables", window=20)
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
+    """
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,

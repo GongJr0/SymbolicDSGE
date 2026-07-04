@@ -90,8 +90,8 @@ def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
     spec1 = pipe.to_spec()
 
     stub_dgp = cast(SolvedModel, SimpleNamespace())
-    ordered = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
-    rebuilt = build_pipeline(ordered, dgp=stub_dgp)
+    ordered, postprocs = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
+    rebuilt = build_pipeline(ordered, postprocs, dgp=stub_dgp)
 
     spec2 = rebuilt.to_spec()
     assert spec2 == spec1
@@ -117,12 +117,14 @@ def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
 def test_rebuilt_simulation_recovers_live_shocks() -> None:
     pipe = _simulation_pipeline()
     stub_dgp = cast(SolvedModel, SimpleNamespace())
-    ordered = validate_pipeline_spec(pipe.to_spec(), has_reference=True, has_dgp=True)
-    rebuilt = build_pipeline(ordered, dgp=stub_dgp)
+    ordered, postprocs = validate_pipeline_spec(
+        pipe.to_spec(), has_reference=True, has_dgp=True
+    )
+    rebuilt = build_pipeline(ordered, postprocs, dgp=stub_dgp)
 
-    shock = rebuilt.steps[0].kwargs["shocks"]["u"]
+    shock = rebuilt.per_rep_steps[0].kwargs["shocks"]["u"]
     assert isinstance(shock, Shock)
-    assert shock.to_dict() == pipe.steps[0].kwargs["shocks"]["u"].to_dict()
+    assert shock.to_dict() == pipe.per_rep_steps[0].kwargs["shocks"]["u"].to_dict()
 
 
 def test_to_spec_records_raw_data_reference_not_arrays() -> None:
@@ -183,17 +185,18 @@ def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
         [
             raw_data_step("dat", observables=np.zeros((4, 5, 3))),
             jarque_bera_test_step("jb", source="observables"),
-            postproc_step("sum", my_summary, threshold=0.5),
-        ]
+        ],
+        [postproc_step("sum", my_summary, threshold=0.5)],
     )
     spec = pipe.to_spec()
 
-    node = {n.name: n for n in spec.nodes}["sum"]
-    assert node.step_type == "postproc:custom"
+    pp = {p.name: p for p in spec.postprocs}["sum"]
+    assert pp.step_type == "postproc:custom"
     # callable rides a bundle member; op kwargs survive as plain spec params
-    assert node.params["func_ref"] == "sum"
-    assert node.params["threshold"] == 0.5
-    # POSTPROC nodes are referenced by trace key, not edges.
+    assert pp.params["func_ref"] == "sum"
+    assert pp.params["threshold"] == 0.5
+    # postprocs are a separate list, never nodes or edges.
+    assert "sum" not in {n.name for n in spec.nodes}
     assert all(e.source != "sum" and e.target != "sum" for e in spec.edges)
 
 
@@ -210,18 +213,19 @@ def test_to_spec_round_trips_a_postproc_pipeline() -> None:
                 shocks={"u": Shock(T=8, dist="norm", seed=0)},
             ),
             jarque_bera_test_step("jb", source="observables", column=0),
-            kde_step("kde", trace="test.jb.statistic", grid_points=50),
-        ]
+        ],
+        [kde_step("kde", trace="test.jb.statistic", grid_points=50)],
     )
     spec1 = pipe.to_spec()
-    kde_node = {n.name: n for n in spec1.nodes}["kde"]
-    assert kde_node.step_type == "kde"
-    assert kde_node.params["trace"] == "test.jb.statistic"
-    # POSTPROC nodes carry no edges (referenced by trace key, ordered last).
-    assert all(e.target != "kde" and e.source != "kde" for e in spec1.edges)
+    kde_pp = {p.name: p for p in spec1.postprocs}["kde"]
+    assert kde_pp.step_type == "kde"
+    assert kde_pp.params["trace"] == "test.jb.statistic"
+    # postprocs are a separate list, never nodes or edges.
+    assert "kde" not in {n.name for n in spec1.nodes}
 
     stub_dgp = cast(SolvedModel, SimpleNamespace())
-    ordered = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
-    assert [n.id for n in ordered] == ["dgp", "jb", "kde"]
-    rebuilt = build_pipeline(ordered, dgp=stub_dgp)
+    ordered, postprocs = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
+    assert [n.id for n in ordered] == ["dgp", "jb"]
+    assert [p.name for p in postprocs] == ["kde"]
+    rebuilt = build_pipeline(ordered, postprocs, dgp=stub_dgp)
     assert rebuilt.to_spec() == spec1  # fixed point

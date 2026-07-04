@@ -335,7 +335,7 @@ class BundleBuilder:
         cloudpickle members (wrapped as :class:`NumpyCustomFunc` first, which
         enforces the author-side contract and carries the source for audit).
         """
-        for step in pipeline.steps:
+        for step in (*pipeline.per_rep_steps, *pipeline.postproc_steps):
             if step.step_type == "raw_data":
                 arrays = raw_data_arrays(step.kwargs)
                 if not arrays:

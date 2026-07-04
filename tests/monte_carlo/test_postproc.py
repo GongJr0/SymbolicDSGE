@@ -23,8 +23,8 @@ def _run(steps: list[MCStep], *, n_rep: int = 4, fail_fast: bool = True):
         [
             raw_data_step(observables=_observables(n_rep), observable_names=("y", "x")),
             jarque_bera_test_step("jb", source="observables", column=0),
-            *steps,
-        ]
+        ],
+        steps,
     )
     return pipeline.run(
         reference=_REFERENCE, n_rep=n_rep, fail_fast=fail_fast, verbosity=0
@@ -35,18 +35,18 @@ def _postproc(name: str, func: Any, **kwargs: Any) -> MCStep:
     return MCStep(name=name, op_type=OpType.POSTPROC, func=func, kwargs=kwargs)
 
 
-def test_postproc_runs_once_and_wraps_a_bare_scalar() -> None:
+def test_postproc_runs_once_and_stores_bare_scalar() -> None:
     calls: list[int] = []
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         calls.append(1)
         return 0.75
 
     result = _run([_postproc("probe", op)], n_rep=5)
 
     assert len(calls) == 1  # once per run(), not per replication
-    artifact = result.postproc["probe"]
-    assert isinstance(artifact, Summary) and artifact.value == 0.75
+    # The op's return is stored verbatim -- a plain value, no wrapper in-memory.
+    assert result.postproc["probe"] == 0.75
 
 
 def test_no_postproc_yields_empty_bucket() -> None:
@@ -63,11 +63,11 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     n_rep = 6
     pval_keys = ["test.jb_y.pval", "test.jb_x.pval"]
 
-    def selection(*, traces, reference, dgp, expected):
+    def selection(*, traces, expected):
         mat = np.column_stack([traces[k] for k in pval_keys])
         return Raw((mat.argmin(axis=1) == expected).astype(float))
 
-    def pcs(*, traces, reference, dgp, expected):
+    def pcs(*, traces, expected):
         mat = np.column_stack([traces[k] for k in pval_keys])
         return float((mat.argmin(axis=1) == expected).mean())
 
@@ -76,9 +76,11 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
             raw_data_step(observables=_observables(n_rep), observable_names=("y", "x")),
             jarque_bera_test_step("jb_y", source="observables", column=0),
             jarque_bera_test_step("jb_x", source="observables", column=1),
+        ],
+        [
             _postproc("sel", selection, expected=0),
             _postproc("pcs", pcs, expected=0),
-        ]
+        ],
     )
     result = pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=0)
 
@@ -87,18 +89,17 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     indicator = (mat.argmin(axis=1) == 0).astype(float)
     expected_pcs = float(indicator.mean())
 
-    assert result.postproc["pcs"].value == pytest.approx(expected_pcs)
+    # `pcs` returns a plain float; `sel` returns a Raw (both stored verbatim).
+    assert result.postproc["pcs"] == pytest.approx(expected_pcs)
     np.testing.assert_array_equal(result.postproc["sel"].value, indicator)
     # PCS is exactly the across-rep mean = sum / len of the 0/1 selection vector.
-    assert result.postproc["pcs"].value == pytest.approx(
-        indicator.sum() / len(indicator)
-    )
+    assert result.postproc["pcs"] == pytest.approx(indicator.sum() / len(indicator))
 
 
 def test_traces_expose_test_pvals_with_n_successful_length() -> None:
     captured: dict[str, Any] = {}
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         captured["keys"] = set(traces)
         captured["pval"] = traces["test.jb.pval"]
         return Summary(value=float(traces["test.jb.pval"].mean()))
@@ -110,28 +111,34 @@ def test_traces_expose_test_pvals_with_n_successful_length() -> None:
     assert isinstance(result.postproc["probe"], Summary)
 
 
-def test_mapping_return_yields_namespaced_artifacts() -> None:
-    def op(*, traces, reference, dgp):
+def test_mapping_return_is_stored_nested_and_namespaced_on_serialize() -> None:
+    from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
+
+    def op(*, traces):
         return {"sel": Raw(np.zeros(3)), "pcs": Summary(0.4)}
 
     result = _run([_postproc("m", op)])
 
-    assert isinstance(result.postproc["m.sel"], Raw)
-    assert isinstance(result.postproc["m.pcs"], Summary)
-    assert result.postproc["m.pcs"].value == 0.4
+    # In-memory: the op's return (a mapping) is stored verbatim under its name.
+    assert isinstance(result.postproc["m"]["sel"], Raw)
+    assert result.postproc["m"]["pcs"].value == 0.4
+    # On serialize, a mapping fans out into namespaced wire entries.
+    wire = serialize_pipeline_result(result, run_id="t")["postproc"]
+    assert set(wire) == {"m.sel", "m.pcs"}
+    assert wire["m.pcs"]["value"] == 0.4
 
 
-def test_bare_ndarray_wraps_as_raw() -> None:
-    def op(*, traces, reference, dgp):
+def test_bare_ndarray_stored_verbatim() -> None:
+    def op(*, traces):
         return np.arange(3.0)
 
-    artifact = _run([_postproc("r", op)]).postproc["r"]
-    assert isinstance(artifact, Raw)
-    np.testing.assert_array_equal(artifact.value, np.arange(3.0))
+    stored = _run([_postproc("r", op)]).postproc["r"]
+    assert isinstance(stored, np.ndarray)
+    np.testing.assert_array_equal(stored, np.arange(3.0))
 
 
 def test_postproc_failure_respects_fail_fast() -> None:
-    def boom(*, traces, reference, dgp):
+    def boom(*, traces):
         raise RuntimeError("kaboom")
 
     with pytest.raises(RuntimeError, match="kaboom"):
@@ -146,7 +153,7 @@ def test_postproc_failure_respects_fail_fast() -> None:
 def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
     # PCS-style: stack two tests' p-value traces (R x 2), argmin per row, compare
     # to the expected index, mean = correct-selection rate.
-    def pcs(*, traces, reference, dgp, expected):
+    def pcs(*, traces, expected):
         matrix = np.column_stack([traces["test.jb0.pval"], traces["test.jb1.pval"]])
         selected = matrix.argmin(axis=1)
         return Summary(value=float((selected == expected).mean()))
@@ -156,8 +163,8 @@ def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
             raw_data_step(observables=_observables(8), observable_names=("y", "x")),
             jarque_bera_test_step("jb0", source="observables", column=0),
             jarque_bera_test_step("jb1", source="observables", column=1),
-            _postproc("pcs", pcs, expected=0),
-        ]
+        ],
+        [_postproc("pcs", pcs, expected=0)],
     )
     result = pipeline.run(reference=_REFERENCE, n_rep=8, verbosity=0)
 
@@ -168,7 +175,7 @@ def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
 def test_transform_payloads_are_stacked_into_traces() -> None:
     captured: dict[str, Any] = {}
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         captured["has_payload"] = "payload.s" in traces
         captured["shape"] = traces.get("payload.s", np.empty(0)).shape
         return 1.0
@@ -177,8 +184,8 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
         [
             raw_data_step(observables=_observables(5), observable_names=("y", "x")),
             standardize_step("s", source="observables"),
-            _postproc("p", op),
-        ]
+        ],
+        [_postproc("p", op)],
     )
     pipeline.run(reference=_REFERENCE, n_rep=5, verbosity=0)
 
@@ -187,7 +194,7 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
 
 
 def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
-    result = _run([_postproc("probe", lambda *, traces, reference, dgp: 1.0)], n_rep=7)
+    result = _run([_postproc("probe", lambda *, traces: 1.0)], n_rep=7)
     # per-rep steps run 7 times; the postproc runs exactly once.
     assert result.step_counts["jb"] == 7
     assert result.step_counts["probe"] == 1
@@ -202,16 +209,17 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
         [
             raw_data_step(observables=_observables(12), observable_names=("y", "x")),
             jarque_bera_test_step("jb", source="observables", column=0),
-            kde_step("density", trace="test.jb.statistic", grid_points=64),
-        ]
+        ],
+        [kde_step("density", trace="test.jb.statistic", grid_points=64)],
     )
     result = pipeline.run(reference=_REFERENCE, n_rep=12, verbosity=0)
 
-    curve = result.postproc["density.curve"]
+    # kde returns a mapping; stored verbatim, so its entries nest under "density".
+    curve = result.postproc["density"]["curve"]
     assert isinstance(curve, Raw)
     assert curve.value.shape == (64, 2)  # (x, density)
 
-    desc = result.postproc["density.descriptives"]
+    desc = result.postproc["density"]["descriptives"]
     assert isinstance(desc, Summary) and desc.render == "table"
     assert isinstance(desc.value, pd.DataFrame)
     assert list(desc.value["statistic"]) == [
@@ -234,7 +242,7 @@ def test_runtime_traces_match_available_registry() -> None:
 
     captured: dict[str, set] = {}
 
-    def probe(*, traces, reference, dgp):
+    def probe(*, traces):
         captured["keys"] = set(traces)
         return 0.0
 
@@ -245,8 +253,8 @@ def test_runtime_traces_match_available_registry() -> None:
             ),
             jarque_bera_test_step("jb", source="observables", column=0),
             standardize_step("s", source="observables"),
-            postproc_step("probe", probe),
-        ]
+        ],
+        [postproc_step("probe", probe)],
     )
     pipe.run(reference=_REFERENCE, n_rep=5, verbosity=0)
 

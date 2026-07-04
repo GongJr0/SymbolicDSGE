@@ -91,7 +91,7 @@ const POSTPROC_CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
 // Starter source for a custom post-loop op. The pandas namespace applies, so the
 // body may reference `pd` (and `np`); `import` stays banned, like `np`.
 const POSTPROC_CUSTOM_TEMPLATE = `@pandas_operation
-def postproc_op(*, traces, reference, dgp):
+def postproc_op(*, traces):
     """Post-loop summary over the across-rep traces. Runs once after the loop.
 
     \`traces\` maps producer keys (e.g. "test.<name>.pval", "regression.<name>.coef",
@@ -249,7 +249,8 @@ function MCPipelineBuilder({
         pipeline,
         positions: Object.fromEntries(
           nodes.map((node) => [
-            node.id,
+            // Postprocs carry no id in the spec, so key their positions by name.
+            isPostprocNode(node) ? node.data.name : node.id,
             { x: node.position.x, y: node.position.y },
           ]),
         ),
@@ -294,6 +295,9 @@ function MCPipelineBuilder({
       const source = nodes.find((node) => node.id === connection.source);
       const target = nodes.find((node) => node.id === connection.target);
       if (source === undefined || target === undefined) return false;
+      // Postproc ops are a terminal phase referenced by trace key, not edges;
+      // they are never wired into the DAG.
+      if (isPostprocNode(source) || isPostprocNode(target)) return false;
       if (
         [
           "wald",
@@ -395,7 +399,8 @@ function MCPipelineBuilder({
     setBusy(true);
     try {
       const response = await validateMCPipeline(pipeline);
-      setNotice(`Valid dependency graph: ${response.order.length} executable steps.`);
+      const total = response.order.length + response.postprocs.length;
+      setNotice(`Valid dependency graph: ${total} executable steps.`);
       setNoticeError(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -754,15 +759,33 @@ function makeNode(
   };
 }
 
+function isPostprocNode(node: MCFlowNode): boolean {
+  return node.data.catalog.category === "postproc";
+}
+
 function toPipelineSpec(nodes: MCFlowNode[], edges: Edge[]): MCPipelineSpec {
+  const perRep = nodes.filter((node) => !isPostprocNode(node));
+  const postprocs = nodes.filter(isPostprocNode);
+  const perRepIds = new Set(perRep.map((node) => node.id));
   return {
-    nodes: nodes.map((node) => ({
+    // Per-replication DAG nodes only.
+    nodes: perRep.map((node) => ({
       id: node.id,
       step_type: node.data.stepType,
       name: node.data.name,
       params: node.data.params,
     })),
-    edges: edges.map((edge) => ({ source: edge.source, target: edge.target })),
+    // Edges never touch a postproc node (they carry no edges), but filter
+    // defensively so a stale edge can't leak into the spec.
+    edges: edges
+      .filter((edge) => perRepIds.has(edge.source) && perRepIds.has(edge.target))
+      .map((edge) => ({ source: edge.source, target: edge.target })),
+    // Post-loop ops: a separate terminal list, no id, no edges.
+    postprocs: postprocs.map((node) => ({
+      step_type: node.data.stepType,
+      name: node.data.name,
+      params: node.data.params,
+    })),
   };
 }
 
@@ -785,6 +808,27 @@ function restoreNodes(
         params: {
           ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
           ...spec.params,
+        },
+        catalog: item,
+      },
+    });
+  }
+  // Postprocs are a separate spec list with no id; rebuild them as standalone
+  // canvas nodes keyed by name. (`?? []` tolerates a pre-postprocs cached
+  // workspace; any legacy postproc still in `nodes` is re-routed on next save.)
+  for (const pp of workspace.pipeline.postprocs ?? []) {
+    const item = catalog.steps.find((step) => step.step_type === pp.step_type);
+    if (item === undefined) return null;
+    nodes.push({
+      id: crypto.randomUUID(),
+      type: "mcStep",
+      position: workspace.positions[pp.name] ?? { x: 100, y: 320 },
+      data: {
+        stepType: pp.step_type,
+        name: pp.name,
+        params: {
+          ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
+          ...pp.params,
         },
         catalog: item,
       },
