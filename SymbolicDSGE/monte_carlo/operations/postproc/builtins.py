@@ -17,7 +17,7 @@ def postproc_step(
 ) -> MCStep:
     """Wrap a user callable as an ``OpType.POSTPROC`` step.
 
-    Post-loop op contract: ``func(*, traces, reference, dgp, **kwargs)`` returning
+    Post-loop op contract: ``func(*, traces, **kwargs)`` returning
     :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` artifacts (or a
     mapping of them). Bundling additionally requires the callable to be a
     :class:`~SymbolicDSGE.monte_carlo.custom_op.CustomFunc`; the bundle builder

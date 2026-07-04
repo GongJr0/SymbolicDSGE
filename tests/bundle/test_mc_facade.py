@@ -27,13 +27,13 @@ def zscore(*, context, **kwargs):
     return (arr - arr.mean(axis=0)) / arr.std(axis=0)
 
 
-def pval_table(*, traces, reference, dgp):
+def pval_table(*, traces):
     """Top-level pandas post-loop op returning a DataFrame (references `pd`)."""
     pvals = traces["test.jb.pval"]
     return pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})
 
 
-def summary_bundle(*, traces, reference, dgp, threshold):
+def summary_bundle(*, traces, threshold):
     """Post-loop op emitting all three artifact kinds: scalar, array, table."""
     pvals = traces["test.jb.pval"]
     flags = (pvals < threshold).astype(float)
@@ -46,7 +46,7 @@ def summary_bundle(*, traces, reference, dgp, threshold):
     }
 
 
-def selection_rate(*, traces, reference, dgp):
+def selection_rate(*, traces):
     """Top-level postproc op: bare values auto-wrap (scalar -> Summary, array ->
     Raw), so the op body references no captured types."""
     pval = traces["test.jb.pval"]
@@ -215,7 +215,7 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
     # The post-loop op was wrapped under the pandas namespace and round-trips.
     func = loaded.mc.resources["ptab"]
     assert isinstance(func, PandasCustomFunc)
-    out = func(traces={"test.jb.pval": np.array([0.1, 0.2])}, reference=None, dgp=None)
+    out = func(traces={"test.jb.pval": np.array([0.1, 0.2])})
     assert isinstance(out, pd.DataFrame)
     # The DataFrame artifact also lands as a table member.
     assert any(m.kind == "mc_postproc_table" for m in loaded.manifest.members)

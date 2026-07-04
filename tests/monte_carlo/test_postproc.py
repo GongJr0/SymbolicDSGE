@@ -38,7 +38,7 @@ def _postproc(name: str, func: Any, **kwargs: Any) -> MCStep:
 def test_postproc_runs_once_and_stores_bare_scalar() -> None:
     calls: list[int] = []
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         calls.append(1)
         return 0.75
 
@@ -63,11 +63,11 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     n_rep = 6
     pval_keys = ["test.jb_y.pval", "test.jb_x.pval"]
 
-    def selection(*, traces, reference, dgp, expected):
+    def selection(*, traces, expected):
         mat = np.column_stack([traces[k] for k in pval_keys])
         return Raw((mat.argmin(axis=1) == expected).astype(float))
 
-    def pcs(*, traces, reference, dgp, expected):
+    def pcs(*, traces, expected):
         mat = np.column_stack([traces[k] for k in pval_keys])
         return float((mat.argmin(axis=1) == expected).mean())
 
@@ -99,7 +99,7 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
 def test_traces_expose_test_pvals_with_n_successful_length() -> None:
     captured: dict[str, Any] = {}
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         captured["keys"] = set(traces)
         captured["pval"] = traces["test.jb.pval"]
         return Summary(value=float(traces["test.jb.pval"].mean()))
@@ -114,7 +114,7 @@ def test_traces_expose_test_pvals_with_n_successful_length() -> None:
 def test_mapping_return_is_stored_nested_and_namespaced_on_serialize() -> None:
     from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         return {"sel": Raw(np.zeros(3)), "pcs": Summary(0.4)}
 
     result = _run([_postproc("m", op)])
@@ -129,7 +129,7 @@ def test_mapping_return_is_stored_nested_and_namespaced_on_serialize() -> None:
 
 
 def test_bare_ndarray_stored_verbatim() -> None:
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         return np.arange(3.0)
 
     stored = _run([_postproc("r", op)]).postproc["r"]
@@ -138,7 +138,7 @@ def test_bare_ndarray_stored_verbatim() -> None:
 
 
 def test_postproc_failure_respects_fail_fast() -> None:
-    def boom(*, traces, reference, dgp):
+    def boom(*, traces):
         raise RuntimeError("kaboom")
 
     with pytest.raises(RuntimeError, match="kaboom"):
@@ -153,7 +153,7 @@ def test_postproc_failure_respects_fail_fast() -> None:
 def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
     # PCS-style: stack two tests' p-value traces (R x 2), argmin per row, compare
     # to the expected index, mean = correct-selection rate.
-    def pcs(*, traces, reference, dgp, expected):
+    def pcs(*, traces, expected):
         matrix = np.column_stack([traces["test.jb0.pval"], traces["test.jb1.pval"]])
         selected = matrix.argmin(axis=1)
         return Summary(value=float((selected == expected).mean()))
@@ -175,7 +175,7 @@ def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
 def test_transform_payloads_are_stacked_into_traces() -> None:
     captured: dict[str, Any] = {}
 
-    def op(*, traces, reference, dgp):
+    def op(*, traces):
         captured["has_payload"] = "payload.s" in traces
         captured["shape"] = traces.get("payload.s", np.empty(0)).shape
         return 1.0
@@ -194,7 +194,7 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
 
 
 def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
-    result = _run([_postproc("probe", lambda *, traces, reference, dgp: 1.0)], n_rep=7)
+    result = _run([_postproc("probe", lambda *, traces: 1.0)], n_rep=7)
     # per-rep steps run 7 times; the postproc runs exactly once.
     assert result.step_counts["jb"] == 7
     assert result.step_counts["probe"] == 1
@@ -242,7 +242,7 @@ def test_runtime_traces_match_available_registry() -> None:
 
     captured: dict[str, set] = {}
 
-    def probe(*, traces, reference, dgp):
+    def probe(*, traces):
         captured["keys"] = set(traces)
         return 0.0
 

@@ -40,6 +40,10 @@ const ICONS: Record<MCStepType, LucideIcon> = {
 export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {
   const Icon = ICONS[data.stepType] ?? Activity;
   const summary = summarizeParams(data.params);
+  // Postproc ops are a terminal phase referenced by trace key, never wired into
+  // the DAG (see isValidConnection). Render no handles so the UI offers no
+  // grabbable connection points at all.
+  const postproc = data.catalog.category === "postproc";
   const terminal = [
     "wald",
     "ljung_box",
@@ -53,7 +57,7 @@ export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {
   ].includes(data.stepType);
   return (
     <div className={`mc-step-node ${data.stepType}${selected ? " selected" : ""}`}>
-      {data.stepType !== "simulation" && (
+      {!postproc && data.stepType !== "simulation" && (
         <Handle type="target" position={Position.Left} />
       )}
       <div className="mc-step-node-heading">
@@ -62,7 +66,7 @@ export function StepNode({ data, selected }: NodeProps<MCFlowNode>) {
       </div>
       <strong>{data.name}</strong>
       <span className="mc-step-node-summary">{summary}</span>
-      {!terminal && <Handle type="source" position={Position.Right} />}
+      {!postproc && !terminal && <Handle type="source" position={Position.Right} />}
     </div>
   );
 }

@@ -296,8 +296,6 @@ class MCPipeline:
             failed = False
             try:
                 out = step.func(
-                    reference=reference,
-                    dgp=dgp,
                     traces=traces,
                     **dict(step.kwargs),
                 )

@@ -91,7 +91,7 @@ const POSTPROC_CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
 // Starter source for a custom post-loop op. The pandas namespace applies, so the
 // body may reference `pd` (and `np`); `import` stays banned, like `np`.
 const POSTPROC_CUSTOM_TEMPLATE = `@pandas_operation
-def postproc_op(*, traces, reference, dgp):
+def postproc_op(*, traces):
     """Post-loop summary over the across-rep traces. Runs once after the loop.
 
     \`traces\` maps producer keys (e.g. "test.<name>.pval", "regression.<name>.coef",
