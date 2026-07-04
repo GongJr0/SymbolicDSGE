@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 from ...mc_constructs import MCStep, OpType
-from .._docs import with_base_doc
 
 from .ops import (
     run_wald_test,
@@ -15,19 +14,7 @@ from .ops import (
     run_chow_test,
 )
 
-_BASE_DOC = """
-Per-replication Monte Carlo statistical tests.
 
-- name: unique step name; also the trace-key prefix (see output below).
-- Possible inputs (``source``): "observables", "states", "raw", "filter", "payload".
-- Select/trim: ``column``/``columns`` to pick columns, ``burn_in`` to drop leading
-  rows, ``drop_initial`` to drop the initial x0 row.
-- Shared kwargs: ``filter_key="filter"``, ``payload_key=None``, ``alpha=0.05``.
-- Output location: ``traces["test.<name>.statistic" | ".pval" | ".status"]`` (length n_rep).
-"""
-
-
-@with_base_doc(_BASE_DOC)
 def wald_test_step(name: str, **kwargs: Any) -> MCStep:
     """Wald test that a sample moment equals a hypothesized target value.
 
@@ -40,6 +27,8 @@ def wald_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> wald_test_step("mean0", source="observables", target=np.zeros(2))
+
+    See ``operations.tests`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -50,7 +39,6 @@ def wald_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def ljung_box_test_step(name: str, **kwargs: Any) -> MCStep:
     """Ljung-Box test for autocorrelation up to ``lags`` in one series.
 
@@ -60,6 +48,8 @@ def ljung_box_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> ljung_box_test_step("lb", source="observables", column=0)
+
+    See ``operations.tests`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -70,7 +60,6 @@ def ljung_box_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def jarque_bera_test_step(name: str, **kwargs: Any) -> MCStep:
     """Jarque-Bera normality test on a single per-replication series.
 
@@ -80,6 +69,8 @@ def jarque_bera_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> jarque_bera_test_step("jb", source="observables", column=0)
+
+    See ``operations.tests`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -90,7 +81,6 @@ def jarque_bera_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def breusch_pagan_test_step(name: str, **kwargs: Any) -> MCStep:
     """Breusch-Pagan test for heteroskedasticity of regression residuals.
 
@@ -103,6 +93,8 @@ def breusch_pagan_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> breusch_pagan_test_step("bp", residual_source="payload", X_source="states")
+
+    See ``operations.tests`` for the shared selection / output contract.
     """
     return MCStep(
         name=name,
@@ -113,7 +105,6 @@ def breusch_pagan_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def breusch_godfrey_test_step(name: str, **kwargs: Any) -> MCStep:
     """Breusch-Godfrey test for serial correlation of regression residuals.
 
@@ -126,6 +117,8 @@ def breusch_godfrey_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> breusch_godfrey_test_step("bg", residual_source="payload", X_source="states")
+
+    See ``operations.tests`` for the shared selection / output contract.
     """
     return MCStep(
         name=name,
@@ -136,7 +129,6 @@ def breusch_godfrey_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def cusum_test_step(name: str, **kwargs: Any) -> MCStep:
     """CUSUM test for parameter stability of a recursive ``y ~ X`` regression.
 
@@ -148,6 +140,8 @@ def cusum_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> cusum_test_step("cs", y_source="observables", x_source="states")
+
+    See ``operations.tests`` for the shared selection / output contract.
     """
     return MCStep(
         name=name,
@@ -158,7 +152,6 @@ def cusum_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def cusumsq_test_step(name: str, **kwargs: Any) -> MCStep:
     """CUSUM-of-squares test for variance stability of a ``y ~ X`` regression.
 
@@ -169,6 +162,8 @@ def cusumsq_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> cusumsq_test_step("csq", y_source="observables", x_source="states")
+
+    See ``operations.tests`` for the shared selection / output contract.
     """
     return MCStep(
         name=name,
@@ -179,7 +174,6 @@ def cusumsq_test_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def chow_test_step(name: str, **kwargs: Any) -> MCStep:
     """Chow test for a structural break in a ``y ~ X`` regression at ``t_break``.
 
@@ -191,6 +185,8 @@ def chow_test_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> chow_test_step("chow", y_source="observables", x_source="states", t_break=50)
+
+    See ``operations.tests`` for the shared selection / output contract.
     """
     return MCStep(
         name=name,

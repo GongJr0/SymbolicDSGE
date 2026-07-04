@@ -5,17 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from ...mc_constructs import MCStep, OpType
-from .._docs import with_base_doc
 from .ops import run_kde
-
-_BASE_DOC = """
-Post-loop Monte Carlo summaries: run once over the assembled traces.
-
-- Input: the across-replication ``traces`` registry (length-n_rep arrays keyed
-  like "test.<name>.pval", "regression.<name>.coef", "payload.<name>").
-- Output location: ``result.postproc[name]`` holds the op's return verbatim;
-  a returned mapping fans out to "<name>.<key>" entries on serialize.
-"""
 
 
 def postproc_step(
@@ -49,7 +39,6 @@ def postproc_step(
     )
 
 
-@with_base_doc(_BASE_DOC)
 def kde_step(name: str, **kwargs: Any) -> MCStep:
     """Gaussian kernel density estimate of one across-replication trace.
 
@@ -62,6 +51,8 @@ def kde_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> kde_step("density", trace="test.jb.statistic")
+
+    See ``operations.postproc`` for the shared input / output contract.
     """
     return MCStep(
         name=name,

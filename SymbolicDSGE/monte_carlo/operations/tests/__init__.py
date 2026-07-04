@@ -1,3 +1,15 @@
+"""Per-replication Monte Carlo statistical tests.
+
+Shared contract for every ``*_test_step`` factory in this group:
+
+- name: unique step name; also the trace-key prefix (see output below).
+- Possible inputs (``source``): "observables", "states", "raw", "filter", "payload".
+- Select/trim: ``column``/``columns`` to pick columns, ``burn_in`` to drop leading
+  rows, ``drop_initial`` to drop the initial x0 row.
+- Shared kwargs: ``filter_key="filter"``, ``payload_key=None``, ``alpha=0.05``.
+- Output location: ``traces["test.<name>.statistic" | ".pval" | ".status"]`` (length n_rep).
+"""
+
 from .builtins import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 from ...mc_constructs import MCStep, OpType
-from .._docs import with_base_doc
 
 from .ops import (
     run_standardize,
@@ -13,18 +12,6 @@ from .ops import (
     run_rolling_std,
     run_rolling_var,
 )
-
-_BASE_DOC = """
-Per-replication Monte Carlo series transforms.
-
-- name: unique step name; also the payload key (see output below).
-- Possible inputs (``source``): "observables", "states", "raw", "filter", "payload".
-- Select/trim: ``columns`` to pick columns, ``burn_in`` to drop leading rows,
-  ``drop_initial`` to drop the initial x0 row.
-- Shared kwargs: ``filter_key="filter"``, ``payload_key=None``.
-- Output location: stored as the step's payload; downstream steps read it with
-  ``source="payload"`` and it is stacked into ``traces["payload.<name>"]``.
-"""
 
 
 def transform_step(
@@ -57,7 +44,6 @@ def transform_step(
     )
 
 
-@with_base_doc(_BASE_DOC)
 def standardize_step(name: str, **kwargs: Any) -> MCStep:
     """Per-column z-score ``(x - mean) / std`` over each column.
 
@@ -68,6 +54,8 @@ def standardize_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> standardize_step("z", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -78,7 +66,6 @@ def standardize_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def log_step(name: str, **kwargs: Any) -> MCStep:
     """Elementwise natural log ``log(x + offset)`` of the series.
 
@@ -88,6 +75,8 @@ def log_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> log_step("lg", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -98,7 +87,6 @@ def log_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def log_diff_step(name: str, **kwargs: Any) -> MCStep:
     """One-period log differences along the time axis (log growth rates).
 
@@ -108,6 +96,8 @@ def log_diff_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> log_diff_step("gr", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -118,7 +108,6 @@ def log_diff_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def diff_step(name: str, **kwargs: Any) -> MCStep:
     """Discrete difference along the time axis, applied ``order`` times.
 
@@ -128,6 +117,8 @@ def diff_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> diff_step("d", source="observables")
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -138,7 +129,6 @@ def diff_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def rolling_mean_step(name: str, **kwargs: Any) -> MCStep:
     """Trailing rolling mean over a fixed ``window`` of the time axis.
 
@@ -149,6 +139,8 @@ def rolling_mean_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> rolling_mean_step("rm", source="observables", window=20)
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -159,7 +151,6 @@ def rolling_mean_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def rolling_std_step(name: str, **kwargs: Any) -> MCStep:
     """Trailing rolling standard deviation over a fixed ``window``.
 
@@ -169,6 +160,8 @@ def rolling_std_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> rolling_std_step("rs", source="observables", window=20)
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,
@@ -179,7 +172,6 @@ def rolling_std_step(name: str, **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def rolling_var_step(name: str, **kwargs: Any) -> MCStep:
     """Trailing rolling variance over a fixed ``window`` of the time axis.
 
@@ -189,6 +181,8 @@ def rolling_var_step(name: str, **kwargs: Any) -> MCStep:
 
     Example:
         >>> rolling_var_step("rv", source="observables", window=20)
+
+    See ``operations.transforms`` for the shared input / selection / output contract.
     """
     return MCStep(
         name=name,

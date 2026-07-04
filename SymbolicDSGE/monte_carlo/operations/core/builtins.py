@@ -2,22 +2,10 @@ from __future__ import annotations
 from typing import Any
 
 from ...mc_constructs import MCStep, OpType
-from .._docs import with_base_doc
 
 from .ops import simulate_dgp, raw_data_datagen, run_reference_filter
 
-_BASE_DOC = """
-Monte Carlo per-replication data sources and the reference Kalman filter.
 
-- These seed a pipeline: a DATAGEN step (``simulation`` or ``raw_data``) must
-  run first to populate ``context.data`` for that replication.
-- Output location: datagen fills ``context.data`` (states / observables / raw
-  series); the ``filter`` step stores a ``FilterResult`` that downstream steps
-  read via ``source="filter"``.
-"""
-
-
-@with_base_doc(_BASE_DOC)
 def simulation_step(name: str = "datagen", **kwargs: Any) -> MCStep:
     """Simulate one replication's data by driving the DGP model with shocks.
 
@@ -29,6 +17,8 @@ def simulation_step(name: str = "datagen", **kwargs: Any) -> MCStep:
 
     Example:
         >>> simulation_step(T=200)
+
+    See ``operations.core`` for the shared data-source / output contract.
     """
     return MCStep(
         name=name,
@@ -39,7 +29,6 @@ def simulation_step(name: str = "datagen", **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def raw_data_step(name: str = "datagen", **kwargs: Any) -> MCStep:
     """Feed pre-generated arrays as each replication's data (no simulation).
 
@@ -51,6 +40,8 @@ def raw_data_step(name: str = "datagen", **kwargs: Any) -> MCStep:
 
     Example:
         >>> raw_data_step(observables=obs, observable_names=("y", "x"))
+
+    See ``operations.core`` for the shared data-source / output contract.
     """
     return MCStep(
         name=name,
@@ -61,7 +52,6 @@ def raw_data_step(name: str = "datagen", **kwargs: Any) -> MCStep:
     )
 
 
-@with_base_doc(_BASE_DOC)
 def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
     """Kalman-filter each replication's observables with the reference model.
 
@@ -74,6 +64,8 @@ def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
 
     Example:
         >>> reference_filter_step()
+
+    See ``operations.core`` for the shared data-source / output contract.
     """
     return MCStep(
         name=name,
