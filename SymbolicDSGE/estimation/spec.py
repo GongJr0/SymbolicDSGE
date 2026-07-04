@@ -338,9 +338,9 @@ class EstimationSpec:
 class OptimizationResultMeta:
     """Text-only metadata for an :class:`OptimizationResult`.
 
-    The raw ``scipy.optimize.OptimizeResult`` and the flat ``x`` vector aren't
-    carried — ``theta`` covers the same information by name, and ``raw`` is
-    opaque scipy state. Sufficient to repaint the MLE/MAP summary on load.
+    The flat ``x`` vector isn't carried — ``theta`` covers the same point
+    estimate by name. Sufficient to repaint the MLE/MAP summary on load and to
+    rebuild a first-class :class:`OptimizationResult` (``x`` from ``theta``).
     """
 
     kind: str

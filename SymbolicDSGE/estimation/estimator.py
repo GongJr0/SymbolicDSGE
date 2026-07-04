@@ -912,7 +912,6 @@ class Estimator:
             logpost=float64(lpo),
             nfev=int(res.nfev),
             nit=(int(res.nit) if hasattr(res, "nit") and res.nit is not None else None),
-            raw=res,
             optimizer_config=dict(config or {}),
         )
 

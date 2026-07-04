@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import DSGESolver
+from ..estimation.results import MCMCResult, OptimizationResult
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
@@ -39,10 +40,16 @@ from .parquet import (
 
 @dataclass
 class LoadedEstimation:
-    """Estimation artifacts recovered from a bundle."""
+    """Estimation artifacts recovered from a bundle.
+
+    ``result`` is a first-class :class:`OptimizationResult` / :class:`MCMCResult`
+    (rebuilt from the stored metadata + posterior traces), not the on-disk
+    ``*Meta`` shape. ``posterior`` still carries the raw ``samples``/``logpost``
+    columns for callers that want them directly.
+    """
 
     spec: EstimationSpec
-    result: OptimizationResultMeta | MCMCResultMeta | None = None
+    result: OptimizationResult | MCMCResult | None = None
     observed: NDArray[Any] | None = None
     posterior: dict[str, NDArray[Any]] | None = None
 
@@ -165,16 +172,6 @@ def _load_estimation(
         return None
     spec = EstimationSpec.from_json(archive.read_text(spec_members[0].path))
 
-    result: OptimizationResultMeta | MCMCResultMeta | None = None
-    result_members = manifest.members_by_kind("estimation_result")
-    if result_members:
-        payload = json.loads(archive.read_text(result_members[0].path))
-        data = payload["data"]
-        if payload.get("type") == "mcmc":
-            result = MCMCResultMeta.from_dict(data)
-        else:
-            result = OptimizationResultMeta.from_dict(data)
-
     observed: NDArray[Any] | None = None
     data_members = manifest.members_by_kind("estimation_data")
     if data_members:
@@ -182,13 +179,75 @@ def _load_estimation(
             _load_columns(archive, data_members[0]), data_members[0]
         )
 
+    # Load the posterior first: the MCMC result is rebuilt from metadata + these
+    # traces (the optimization result needs no traces).
     posterior: dict[str, NDArray[Any]] | None = None
     trace_members = manifest.members_by_kind("estimation_trace")
     if trace_members:
         posterior = collapse_columns(_load_columns(archive, trace_members[0]))
 
+    result: OptimizationResult | MCMCResult | None = None
+    result_members = manifest.members_by_kind("estimation_result")
+    if result_members:
+        payload = json.loads(archive.read_text(result_members[0].path))
+        data = payload["data"]
+        if payload.get("type") == "mcmc":
+            result = _rebuild_mcmc_result(data, posterior)
+        else:
+            result = _rebuild_optimization_result(data)
+
     return LoadedEstimation(
         spec=spec, result=result, observed=observed, posterior=posterior
+    )
+
+
+def _rebuild_mcmc_result(
+    data: dict[str, Any], posterior: dict[str, NDArray[Any]] | None
+) -> MCMCResult:
+    """Recombine MCMC metadata with its posterior traces into a live result.
+
+    The Meta/trace split is the designed inverse (see ``MCMCResultMeta``): the
+    scalar metadata rides the JSON member, the ``samples``/``logpost`` columns
+    ride the parquet trace member.
+    """
+    meta = MCMCResultMeta.from_dict(data)
+    if posterior is None or "samples" not in posterior or "logpost" not in posterior:
+        raise ValueError(
+            "MCMC bundle result requires an 'estimation_trace' member carrying "
+            "'samples' and 'logpost' columns."
+        )
+    return MCMCResult(
+        param_names=meta.param_names,
+        samples=np.asarray(posterior["samples"], dtype=np.float64),
+        logpost_trace=np.asarray(posterior["logpost"], dtype=np.float64),
+        accept_rate=np.float64(meta.accept_rate),
+        n_draws=meta.n_draws,
+        burn_in=meta.burn_in,
+        thin=meta.thin,
+        sampler_config=dict(meta.sampler_config),
+    )
+
+
+def _rebuild_optimization_result(data: dict[str, Any]) -> OptimizationResult:
+    """Rebuild an MLE/MAP result from its metadata (point estimate, no traces).
+
+    ``x`` is recovered from ``theta`` (same ordering the estimator built it from).
+    """
+    meta = OptimizationResultMeta.from_dict(data)
+    theta = {str(k): np.float64(v) for k, v in meta.theta.items()}
+    return OptimizationResult(
+        kind=meta.kind,
+        x=np.asarray(list(theta.values()), dtype=np.float64),
+        theta=theta,
+        success=meta.success,
+        message=meta.message,
+        fun=np.float64(meta.fun),
+        loglik=np.float64(meta.loglik),
+        logprior=np.float64(meta.logprior),
+        logpost=np.float64(meta.logpost),
+        nfev=meta.nfev,
+        nit=meta.nit,
+        optimizer_config=dict(meta.optimizer_config),
     )
 
 

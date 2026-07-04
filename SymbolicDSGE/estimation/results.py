@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
-from scipy.optimize import OptimizeResult
 
 if TYPE_CHECKING:
     from .spec import MCMCResultMeta, OptimizationResultMeta
@@ -26,7 +25,6 @@ class OptimizationResult:
     logpost: float64
     nfev: int
     nit: int | None
-    raw: OptimizeResult
     #: Call configuration for the ``mle``/``map`` run (optimizer ``method``,
     #: ``bounds``, ``options``) — recorded so the run is reconstructable.
     optimizer_config: dict[str, Any] = field(default_factory=dict)
@@ -34,9 +32,9 @@ class OptimizationResult:
     def to_meta(self) -> "OptimizationResultMeta":
         """Project to the text-only metadata carried in a ``.sdsge`` bundle.
 
-        Drops the flat ``x`` vector and the opaque ``scipy`` ``raw`` state;
-        ``theta`` carries the same point estimate by parameter name. The
-        ``optimizer_config`` (method/bounds/options) is preserved.
+        Drops the flat ``x`` vector; ``theta`` carries the same point estimate
+        by parameter name. The ``optimizer_config`` (method/bounds/options) is
+        preserved.
         """
         from .spec import OptimizationResultMeta
 

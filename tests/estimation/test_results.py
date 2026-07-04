@@ -2,7 +2,6 @@
 import numpy as np
 import pytest
 from numpy import float64
-from scipy.optimize import OptimizeResult
 
 from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
 from SymbolicDSGE.estimation.spec import MCMCResultMeta, OptimizationResultMeta
@@ -216,7 +215,6 @@ def test_optimization_result_to_meta_projects_field_for_field():
         logpost=float64(-3.5),
         nfev=42,
         nit=7,
-        raw=OptimizeResult(),
     )
 
     meta = res.to_meta()
