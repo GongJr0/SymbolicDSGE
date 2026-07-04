@@ -6,7 +6,7 @@ from numpy import float64, ndarray
 
 from ..core.solved_model import SolvedModel
 from .mc_constructs import DataGenReturn, NDF, ShockMapping
-from .operations.core.ops import simulate_dgp
+from .operations.core.ops import simulate
 
 
 class MCReferenceConstruct:
@@ -27,7 +27,7 @@ class MCReferenceConstruct:
         x0: ndarray | None = None,
         observables: bool = True,
     ) -> DataGenReturn:
-        data = simulate_dgp(
+        data = simulate(
             reference=self.model,
             dgp=self.model,
             rep_idx=0,

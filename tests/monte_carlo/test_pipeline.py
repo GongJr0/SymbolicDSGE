@@ -37,7 +37,7 @@ from SymbolicDSGE.monte_carlo.operations.core import (
     reference_filter_step,
     simulation_step,
 )
-from SymbolicDSGE.monte_carlo.operations.core.ops import simulate_dgp
+from SymbolicDSGE.monte_carlo.operations.core.ops import simulate
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
 from SymbolicDSGE.monte_carlo.operations.tests import (
     breusch_godfrey_test_step,
@@ -989,7 +989,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         B=B,
     )
 
-    data = simulate_dgp(
+    data = simulate(
         reference=dgp,
         dgp=dgp,
         rep_idx=0,

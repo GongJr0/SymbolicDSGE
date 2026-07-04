@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,6 +36,9 @@ from .parquet import (
     csv_to_columns,
     from_parquet_columns,
 )
+
+if TYPE_CHECKING:
+    from ..monte_carlo.core import MCPipeline
 
 
 @dataclass
@@ -61,8 +64,10 @@ class LoadedMC:
     ``resources`` reattaches the bulk side-channels the spec references by key:
     each ``raw_data`` ``data_ref`` maps to its restored ``{name: ndarray}`` arrays
     and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
-    Pass it straight to :func:`SymbolicDSGE.monte_carlo.build_pipeline` to rebuild
-    a runnable pipeline.
+    Call :meth:`build_pipeline` to rebuild a runnable :class:`MCPipeline` from
+    ``spec`` + ``resources`` (a ``simulation`` datagen also needs a ``dgp``); the
+    raw ``spec`` stays available for inspection and for pipelines whose models
+    aren't in the bundle.
 
     Recovered run artifacts of a POSTPROC phase: ``postproc_arrays`` (bulk ndarray
     artifacts) and ``postproc_tables`` (tabular/DataFrame artifacts as columnar
@@ -76,6 +81,35 @@ class LoadedMC:
     resources: dict[str, Any] = field(default_factory=dict)
     postproc_arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
     postproc_tables: dict[str, dict[str, list[Any]]] = field(default_factory=dict)
+
+    def build_pipeline(
+        self,
+        *,
+        reference: SolvedModel | None = None,
+        dgp: SolvedModel | None = None,
+    ) -> "MCPipeline":
+        """Rebuild a runnable :class:`MCPipeline` from ``spec`` + ``resources``.
+
+        Every MC pipeline runs against a reference supplied later at
+        ``pipeline.run(reference=...)`` time, so a reference is assumed here. A
+        ``simulation`` datagen needs the model it simulates: the ``dgp`` by
+        default, or the ``reference`` when the step's ``target="reference"`` --
+        pass whichever it targets (needed only to resolve generated shocks; a
+        step with explicit ``shocks`` builds without it). ``raw_data`` pipelines
+        need nothing.
+        """
+        from ..monte_carlo.builder import build_pipeline, validate_pipeline_spec
+
+        ordered, postprocs = validate_pipeline_spec(
+            self.spec, has_reference=True, has_dgp=dgp is not None
+        )
+        return build_pipeline(
+            ordered,
+            postprocs,
+            dgp=dgp,
+            reference=reference,
+            resources=self.resources,
+        )
 
     def wire(self) -> dict[str, Any] | None:
         """Re-merge document + traces into the UI wire shape, when both exist."""
