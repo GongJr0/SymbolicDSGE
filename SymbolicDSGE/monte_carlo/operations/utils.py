@@ -23,8 +23,6 @@ def _clone_or_pass_shocks(
     seed_offset = rep_idx * _resolve_seed_increment(shocks, seed_increment)
     for name, shock in shocks.items():
         if isinstance(shock, Shock):
-            if shock.T != T:
-                raise ValueError(f"Shock '{name}' has T={shock.T}, expected {T}.")
             if shock.shock_arr is not None:
                 raise ValueError(
                     "MC simulation requires generator-style Shock instances."
@@ -35,13 +33,12 @@ def _clone_or_pass_shocks(
                 )
             seed = None if shock.seed is None else int(shock.seed) + seed_offset
             out[name] = Shock(
-                T=shock.T,
                 dist=shock.dist,  # pyright: ignore
                 multivar=shock.multivar,
                 seed=seed,
                 dist_args=shock.dist_args,
                 dist_kwargs=shock.dist_kwargs.copy(),
-            ).shock_generator()
+            ).shock_generator(T)
         else:
             out[name] = shock
     return out

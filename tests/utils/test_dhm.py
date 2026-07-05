@@ -462,7 +462,7 @@ def test_den_haan_marcet_monte_carlo_rejects_non_shock_inputs(solved_test):
     with pytest.raises(TypeError, match="requires Shock instances"):
         dhm.monte_carlo(
             8,
-            {"u": Shock(T=8, dist="norm", seed=3).shock_generator()},
+            {"u": Shock(dist="norm", seed=3).shock_generator(8)},
             n_rep=2,
         )
 
@@ -470,8 +470,8 @@ def test_den_haan_marcet_monte_carlo_rejects_non_shock_inputs(solved_test):
 def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_post82):
     T = 12
     dhm = DenHaanMarcet(solved_post82)
-    grouped = Shock(T=T, dist="norm", multivar=True, seed=11)
-    rate = Shock(T=T, dist="norm", seed=21)
+    grouped = Shock(dist="norm", multivar=True, seed=11)
+    rate = Shock(dist="norm", seed=21)
     base_shocks = {"z,g": grouped, "r": rate}
     kwargs = {
         "equation_idx": [0, 1, 2],
@@ -485,16 +485,16 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     rep0 = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(T=T, dist="norm", multivar=True, seed=11).shock_generator(),
-            "r": Shock(T=T, dist="norm", seed=21).shock_generator(),
+            "z,g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
+            "r": Shock(dist="norm", seed=21).shock_generator(T),
         },
         **kwargs,
     )
     rep1 = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(T=T, dist="norm", multivar=True, seed=12).shock_generator(),
-            "r": Shock(T=T, dist="norm", seed=22).shock_generator(),
+            "z,g": Shock(dist="norm", multivar=True, seed=12).shock_generator(T),
+            "r": Shock(dist="norm", seed=22).shock_generator(T),
         },
         **kwargs,
     )
@@ -527,8 +527,8 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     rep0_expected = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(T=T, dist="norm", multivar=True, seed=11).shock_generator(),
-            "r": Shock(T=T, dist="norm", seed=21).shock_generator(),
+            "z,g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
+            "r": Shock(dist="norm", seed=21).shock_generator(T),
         },
         use_conditional_expectation=True,
         **kwargs,
@@ -536,8 +536,8 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     rep1_expected = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(T=T, dist="norm", multivar=True, seed=12).shock_generator(),
-            "r": Shock(T=T, dist="norm", seed=22).shock_generator(),
+            "z,g": Shock(dist="norm", multivar=True, seed=12).shock_generator(T),
+            "r": Shock(dist="norm", seed=22).shock_generator(T),
         },
         use_conditional_expectation=True,
         **kwargs,

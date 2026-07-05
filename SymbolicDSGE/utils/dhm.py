@@ -1446,10 +1446,6 @@ class DenHaanMarcet:
                 raise TypeError(
                     "Monte Carlo DHM requires Shock instances for every shock specification."
                 )
-            if shock.T != T:
-                raise ValueError(
-                    f"Shock '{name}' has T={shock.T}, but DHM was called with T={T}."
-                )
             if ("," in name) != shock.multivar:
                 raise ValueError(
                     f"Shock '{name}' must set multivar={',' in name} to match its specification."
@@ -1461,14 +1457,13 @@ class DenHaanMarcet:
 
             cloned_seed = None if shock.seed is None else int(shock.seed) + rep_idx
             cloned = Shock(
-                T=shock.T,
                 dist=shock.dist,
                 multivar=shock.multivar,
                 seed=cloned_seed,
                 dist_args=shock.dist_args,
                 dist_kwargs=shock.dist_kwargs.copy(),
             )
-            out[name] = cloned.shock_generator()
+            out[name] = cloned.shock_generator(T)
 
         return out
 

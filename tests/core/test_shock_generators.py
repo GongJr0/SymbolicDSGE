@@ -65,51 +65,50 @@ def test_shock_placement_places_values_in_time_array():
 
 
 def test_shock_class_generator_and_assertions():
-    sh = Shock(T=6, dist="norm", multivar=False, seed=3)
-    gen = sh.shock_generator()
+    sh = Shock(dist="norm", multivar=False, seed=3)
+    gen = sh.shock_generator(6)
     arr = gen(0.5)
     assert arr.shape == (6,)
 
     sh_t = Shock(
-        T=6,
         dist="t",
         multivar=True,
         seed=3,
         dist_kwargs={"loc": [0.0, 0.0], "df": 5.0},
     )
-    t_arr = sh_t.shock_generator()(np.eye(2, dtype=float64))
+    t_arr = sh_t.shock_generator(6)(np.eye(2, dtype=float64))
     assert t_arr.shape == (6, 2)
 
     with pytest.raises(AssertionError, match="scale"):
-        Shock(T=6, dist="norm", dist_kwargs={"scale": 1.0}).shock_generator()
+        Shock(dist="norm", dist_kwargs={"scale": 1.0}).shock_generator(6)
 
 
 def test_shock_class_place_shocks_univariate_and_bounds():
-    sh = Shock(T=5, dist=None, shock_arr=np.zeros(5, dtype=float64))
-    out = sh.place_shocks({1: 2.0, 4: -1.0})
+    sh = Shock(dist=None, shock_arr=np.zeros(5, dtype=float64))
+    out = sh.place_shocks({1: 2.0, 4: -1.0}, 5)
     assert np.array_equal(out, np.array([0.0, 2.0, 0.0, 0.0, -1.0], dtype=float64))
 
     with pytest.raises(IndexError):
-        sh.place_shocks({5: 1.0})
+        sh.place_shocks({5: 1.0}, 5)
 
 
 def test_shock_class_place_shocks_multivariate_and_bounds():
-    sh = Shock(T=4, dist=None, multivar=True)
-    out = sh.place_shocks({(0, 0): 1.0, (2, 1): -0.5})
+    sh = Shock(dist=None, multivar=True)
+    out = sh.place_shocks({(0, 0): 1.0, (2, 1): -0.5}, 4)
     assert out.shape == (4, 2)
     assert out[0, 0] == 1.0
     assert out[2, 1] == -0.5
 
     with pytest.raises(IndexError):
-        sh.place_shocks({(4, 0): 1.0})
+        sh.place_shocks({(4, 0): 1.0}, 4)
     with pytest.raises(IndexError):
-        sh.place_shocks({(0, -1): 1.0})
+        sh.place_shocks({(0, -1): 1.0}, 4)
 
 
 def test_shock_class_dist_resolution_and_custom_dist():
-    sh_norm = Shock(T=2, dist="norm")
-    sh_t = Shock(T=2, dist="t")
-    sh_uni = Shock(T=2, dist="uni")
+    sh_norm = Shock(dist="norm")
+    sh_t = Shock(dist="t")
+    sh_uni = Shock(dist="uni")
     assert sh_norm._get_dist() is not None
     assert sh_t._get_dist() is not None
     assert sh_uni._get_dist() is not None
@@ -119,6 +118,6 @@ def test_shock_class_dist_resolution_and_custom_dist():
         def rvs(size, random_state=None, *args, **kwargs):
             return np.zeros(size, dtype=float64)
 
-    sh_custom = Shock(T=3, dist=CustomDist())  # type: ignore[arg-type]
+    sh_custom = Shock(dist=CustomDist())  # type: ignore[arg-type]
     with pytest.raises(AssertionError, match="valid scipy.stats distribution"):
         sh_custom._get_dist()
