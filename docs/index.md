@@ -11,7 +11,7 @@ hide:
 
 - YAML-based model configuration
 - Parser with a `SymPy` backend
-- `linearsolve` based solver
+- In house first order Klein solver with native kernels
 - IRF path/plot generation
 - Simulation
 - Shock generation interface with support for all `SciPy` distributions

@@ -16,7 +16,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | compiled | `#!python CompiledModel` | The compiled model object that resulted in the current solution. |
-| policy | `#!python linearsolve.model` | Solver backend output (e.g., stability diagnostics, eigenvalues, raw solver objects). |
+| policy | `#!python KleinSolution` | First order solver output containing policy matrices, stability diagnostics, and eigenvalues. |
 | A | `#!python np.ndarray` | The discovered state-transition matrix. |
 | B | `#!python np.ndarray` | The discovered innovation impact matrix. |
 
@@ -184,12 +184,12 @@ SolvedModel.kalman(
 ) -> FilterResult
 ```
 
-1. `None`: Use `y_names` from `KalmanConfig`. If is not specified, use all observables.
+1. `None`: Use all compiled observables in model order.
 2. `None`: Use a zero vector.
 3. `None`: Use `P0.mode` from `KalmanConfig`. If this resolves to `'diag'`, `P0.diag` must be present.
 4. `None`: Use `P0.scale` from `KalmanConfig`. If `P0.scale` is not specified, use '1.0'.
-5. `None`: Use `jitter` from `KalmanConfig`. If `jitter` is not specified, use '0.0'.
-6. `None`: Use `symmetrize` from `KalmanConfig`. If `symmetrize` is not specified, use 'False'.
+5. `None`: Use `0.0`.
+6. `None`: Use `False`.
 
 Run a Kalman Filter application on the observables specified.
 

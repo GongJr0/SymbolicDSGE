@@ -43,7 +43,7 @@ We can see that all variables are converted to `#!python SymPy` objects (symbols
 
 ## Compilation
 
-In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time-dependent variables are separated and equations are written as lambda objectives. Finally, the solver backend `#!python linearsolve` is exposed to a single function representing all model equations.
+In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time dependent variables are separated and equations are written as lambda objectives. The first order solver consumes the compiled residual through the in house Klein pipeline.
 
 If your model is written in nonlinear levels, pass `#!python linearize=True` to `#!python DSGESolver.compile(...)`. If you need the transformed symbolic equations directly, you can also call `#!python SymbolicDSGE.core.linearize_model(...)` yourself before compilation. The example below uses a model that is already written in linearized gap form.
 
@@ -112,7 +112,7 @@ Eigenvalues:  [0.27920118+0.j 0.83000003+0.j 0.84999992+0.j 2.56517116+0.j
  1.18470582+0.j] (1)
 ```
 </div>
-1. Complex numbers are an artifact of `#!python linearsolve`. All relevant matrices are cast to reals with `#!python np.real_if_close`
+1. Complex numbers are an artifact of the ordered Schur solve. All relevant matrices are cast to reals with `#!python np.real_if_close`
 
 ## Inspecting Model Dynamics
 
