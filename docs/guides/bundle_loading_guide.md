@@ -88,21 +88,22 @@ if estimation is not None:
 
 1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-spec-and-result-types) instance — round-trippable to / from JSON via `to_dict()` / `from_dict()`.
 
-The result metadata discriminates by type. For MLE / MAP runs the result is an `OptimizationResultMeta`; for MCMC it is an `MCMCResultMeta` paired with bulk traces in `estimation.posterior`.
+`estimation.result` is the first-class result the run produced — an `OptimizationResult` for MLE / MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata (and, for MCMC, the `posterior` traces), so no manual reconstruction is needed.
 
 ```python
-from SymbolicDSGE.estimation.spec import (
-    MCMCResultMeta,
-    OptimizationResultMeta,
+from SymbolicDSGE.estimation.results import (
+    MCMCResult,
+    OptimizationResult,
 )
 
 result = estimation.result
-if isinstance(result, OptimizationResultMeta):
+if isinstance(result, OptimizationResult):
     print("Point estimate:", result.theta)
     print("Log-posterior:", result.logpost)
-elif isinstance(result, MCMCResultMeta):
+elif isinstance(result, MCMCResult):
     print("Acceptance:", result.accept_rate)
     print("Draws:", result.n_draws, "burn-in:", result.burn_in)
+    print("HPD intervals:", result.hpd_intervals(alpha=0.05))
 ```
 
 Observed data and (when present) MCMC posterior are numpy arrays decoded from the embedded CSV or Parquet member.
@@ -116,25 +117,10 @@ if estimation.posterior is not None:
 ```
 
 1. Shape is `(n_periods, n_observables)` with column order matching `estimation.spec.observables`.
-2. Pair with `result.param_names` for column-to-parameter mapping. The `logpost` key holds the 1-D log-posterior trace.
+2. The same arrays already power `result.samples` / `result.logpost_trace`; `estimation.posterior` exposes them raw for callers who want the columns directly. The `logpost` key holds the 1-D log-posterior trace.
 
-???+ warning "MCMCResult reconstruction"
-    `MCMCResultMeta` carries the scalar slice only. To rebuild a live `MCMCResult` for sampling diagnostics, construct it explicitly:
-
-    ```python
-    from SymbolicDSGE.estimation.results import MCMCResult
-
-    mcmc = MCMCResult(
-        param_names=result.param_names,
-        samples=estimation.posterior["samples"],
-        logpost_trace=estimation.posterior["logpost"],
-        accept_rate=result.accept_rate,
-        n_draws=result.n_draws,
-        burn_in=result.burn_in,
-        thin=result.thin,
-    )
-    mcmc.hpd_intervals(alpha=0.05)
-    ```
+???+ tip "MCMC diagnostics are ready to use"
+    A loaded MCMC `result` is a live `MCMCResult` — the loader already paired the metadata with the `posterior` traces. Call diagnostics on it directly (`result.hpd_intervals(...)`, `result.posterior_traces()`, `result.joint_hpd_set(...)`); there is no rebuild step.
 
 ### Re-run an estimation from a loaded bundle
 

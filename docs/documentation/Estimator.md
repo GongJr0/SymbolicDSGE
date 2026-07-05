@@ -77,8 +77,8 @@ Project the estimator's configuration to a serializable [`EstimationSpec`](./bun
 spec = estimator.to_spec(
     method="map",
     priors={
-        "psi_pi": PriorSpec(distribution="normal", parameters={"loc": 1.5, "scale": 0.25}),
-        "psi_x":  PriorSpec(distribution="normal", parameters={"loc": 0.5, "scale": 0.2}),
+        "psi_pi": PriorSpec(distribution="normal", parameters={"mean": 1.5, "std": 0.25}),
+        "psi_x":  PriorSpec(distribution="normal", parameters={"mean": 0.5, "std": 0.2}),
     },
 )
 ```
@@ -184,7 +184,6 @@ Estimator.mcmc(
 | logpost | `#!python float` | Log-posterior at optimum |
 | nfev | `#!python int` | Objective evaluations |
 | nit | `#!python int | None` | Iterations |
-| raw | `#!python scipy.optimize.OptimizeResult` | Raw scipy output |
 
 ### MCMCResult
 | __Field__ | __Type__ | __Description__ |

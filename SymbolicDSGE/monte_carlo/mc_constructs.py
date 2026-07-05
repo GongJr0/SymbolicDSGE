@@ -356,7 +356,7 @@ def report_mc_performance(
     print_func: Callable[[str], None] = print,
 ) -> None:
     print_func(
-        f"MC run concluded {_conclusion_word(meta.steps_success)} with {meta.it_s:.2f} it/s."
+        f"MC run concluded {_conclusion_word(meta.steps_success)} in {meta.elapsed_s:.2f}s with {meta.it_s:.2f} it/s."
     )
     if meta.postproc_elapsed_s:
         print_func(
@@ -372,13 +372,13 @@ def report_mc_step_performance(
 ) -> None:
     step_rates = meta.step_it_s
     print_func(
-        f"MC run concluded {_conclusion_word(meta.failed_steps == {})} with {meta.it_s:.2f} it/s."
+        f"MC run concluded {_conclusion_word(meta.failed_steps == {})} in {meta.elapsed_s:.2f}s with {meta.it_s:.2f} it/s."
     )
     print_func(f"Per-step Report:\n")
     for step_name in meta.step_elapsed_s:
         print_func(
             f"\t{step_name}: {meta.failed_steps.get(step_name, 0)} faliures, "
-            f"{step_rates.get(step_name, 0.0):.2f} it/s."
+            f"{step_rates.get(step_name, 0.0):.2f} it/s ({meta.step_elapsed_s.get(step_name, 0.0):.2f}s)."
         )
 
     if meta.postproc_elapsed_s:
