@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-from typing import cast
 
 import numpy as np
 import pytest
 
 from SymbolicDSGE.core.shock_generators import Shock
-from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import (
     EdgeSpec,
     MCPipeline,
@@ -89,9 +86,8 @@ def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
     pipe = _simulation_pipeline()
     spec1 = pipe.to_spec()
 
-    stub_dgp = cast(SolvedModel, SimpleNamespace())
     ordered, postprocs = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
-    rebuilt = build_pipeline(ordered, postprocs, dgp=stub_dgp)
+    rebuilt = build_pipeline(ordered, postprocs)
 
     spec2 = rebuilt.to_spec()
     assert spec2 == spec1
@@ -116,11 +112,10 @@ def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
 
 def test_rebuilt_simulation_recovers_live_shocks() -> None:
     pipe = _simulation_pipeline()
-    stub_dgp = cast(SolvedModel, SimpleNamespace())
     ordered, postprocs = validate_pipeline_spec(
         pipe.to_spec(), has_reference=True, has_dgp=True
     )
-    rebuilt = build_pipeline(ordered, postprocs, dgp=stub_dgp)
+    rebuilt = build_pipeline(ordered, postprocs)
 
     shock = rebuilt.per_rep_steps[0].kwargs["shocks"]["u"]
     assert isinstance(shock, Shock)
@@ -223,9 +218,8 @@ def test_to_spec_round_trips_a_postproc_pipeline() -> None:
     # postprocs are a separate list, never nodes or edges.
     assert "kde" not in {n.name for n in spec1.nodes}
 
-    stub_dgp = cast(SolvedModel, SimpleNamespace())
     ordered, postprocs = validate_pipeline_spec(spec1, has_reference=True, has_dgp=True)
     assert [n.id for n in ordered] == ["dgp", "jb"]
     assert [p.name for p in postprocs] == ["kde"]
-    rebuilt = build_pipeline(ordered, postprocs, dgp=stub_dgp)
+    rebuilt = build_pipeline(ordered, postprocs)
     assert rebuilt.to_spec() == spec1  # fixed point

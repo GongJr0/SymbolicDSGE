@@ -97,10 +97,10 @@ def create_app(
                 has_reference=ui_session.solved_model("reference") is not None,
                 has_dgp=ui_session.solved_model("dgp") is not None,
             )
-            dgp = ui_session.solved_model("dgp")
-            assert dgp is not None
+            # Compile as part of validation (surfaces bad params). No model is
+            # needed to build; the models are consumed later at run.
             build_pipeline(
-                ordered, postprocs, dgp=dgp, resources=compile_custom_resources(request)
+                ordered, postprocs, resources=compile_custom_resources(request)
             )
             return {
                 "valid": True,

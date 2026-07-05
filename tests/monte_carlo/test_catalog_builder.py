@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from types import SimpleNamespace
 
 import pytest
-from sympy import Symbol
 
 from SymbolicDSGE.monte_carlo import (
     STEP_CATALOG,
@@ -78,11 +76,6 @@ _FIELD_KEYS = {
     "minimum",
     "when",
 }
-
-
-def _stub_dgp(*targets: str) -> SimpleNamespace:
-    shock_map = {Symbol(f"e_{t}"): Symbol(t) for t in targets}
-    return SimpleNamespace(config=SimpleNamespace(shock_map=shock_map))
 
 
 def test_catalog_payload_shape_and_known_fields() -> None:
@@ -295,7 +288,7 @@ def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> 
     )
     ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
-    pipeline = build_pipeline(ordered, postprocs, dgp=_stub_dgp("u"))
+    pipeline = build_pipeline(ordered, postprocs)
 
     assert [s.name for s in pipeline.per_rep_steps] == ["datagen", "reg"]
     assert pipeline.per_rep_steps[0].op_type is OpType.DATAGEN
@@ -311,7 +304,7 @@ def test_build_pipeline_rejects_unknown_step_type() -> None:
     # bogus kind reaches build_pipeline and must be rejected there.
     node = NodeSpec(id="x", step_type="bogus", name="x", params={})
     with pytest.raises(ValueError, match="Unsupported MC step type"):
-        build_pipeline([node], dgp=_stub_dgp("u"))
+        build_pipeline([node])
 
 
 # --- POSTPROC (post-loop) kind: ordering, edges, compilation -----------------
@@ -376,9 +369,7 @@ def test_build_postproc_custom_from_resources() -> None:
         ],
     )
     ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    pipeline = build_pipeline(
-        ordered, postprocs, dgp=_stub_dgp("u"), resources={"p": my_summary}
-    )
+    pipeline = build_pipeline(ordered, postprocs, resources={"p": my_summary})
     step = {s.name: s for s in pipeline.postproc_steps}["p"]
     assert step.op_type is OpType.POSTPROC
     assert step.step_type == "postproc:custom"

@@ -61,13 +61,15 @@ class LoadedEstimation:
 class LoadedMC:
     """Monte-Carlo pipeline + (optional) run result recovered from a bundle.
 
+    ``pipeline`` is the live, runnable :class:`MCPipeline`, rebuilt eagerly at
+    load from ``spec`` + ``resources``. No model is needed to build it (simulation
+    shocks come from the explicit registry, not a model), so it is ready to run
+    against models supplied at ``pipeline.run(reference=..., dgp=...)`` time. The
+    raw ``spec`` stays available for the UI to consume.
+
     ``resources`` reattaches the bulk side-channels the spec references by key:
     each ``raw_data`` ``data_ref`` maps to its restored ``{name: ndarray}`` arrays
     and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
-    Call :meth:`build_pipeline` to rebuild a runnable :class:`MCPipeline` from
-    ``spec`` + ``resources`` (a ``simulation`` datagen also needs a ``dgp``); the
-    raw ``spec`` stays available for inspection and for pipelines whose models
-    aren't in the bundle.
 
     Recovered run artifacts of a POSTPROC phase: ``postproc_arrays`` (bulk ndarray
     artifacts) and ``postproc_tables`` (tabular/DataFrame artifacts as columnar
@@ -76,40 +78,12 @@ class LoadedMC:
     """
 
     spec: PipelineSpec
+    pipeline: MCPipeline
     document: dict[str, Any] | None = None
     traces: dict[str, NDArray[Any]] | None = None
     resources: dict[str, Any] = field(default_factory=dict)
     postproc_arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
     postproc_tables: dict[str, dict[str, list[Any]]] = field(default_factory=dict)
-
-    def build_pipeline(
-        self,
-        *,
-        reference: SolvedModel | None = None,
-        dgp: SolvedModel | None = None,
-    ) -> "MCPipeline":
-        """Rebuild a runnable :class:`MCPipeline` from ``spec`` + ``resources``.
-
-        Every MC pipeline runs against a reference supplied later at
-        ``pipeline.run(reference=...)`` time, so a reference is assumed here. A
-        ``simulation`` datagen needs the model it simulates: the ``dgp`` by
-        default, or the ``reference`` when the step's ``target="reference"`` --
-        pass whichever it targets (needed only to resolve generated shocks; a
-        step with explicit ``shocks`` builds without it). ``raw_data`` pipelines
-        need nothing.
-        """
-        from ..monte_carlo.builder import build_pipeline, validate_pipeline_spec
-
-        ordered, postprocs = validate_pipeline_spec(
-            self.spec, has_reference=True, has_dgp=dgp is not None
-        )
-        return build_pipeline(
-            ordered,
-            postprocs,
-            dgp=dgp,
-            reference=reference,
-            resources=self.resources,
-        )
 
     def wire(self) -> dict[str, Any] | None:
         """Re-merge document + traces into the UI wire shape, when both exist."""
@@ -286,6 +260,8 @@ def _rebuild_optimization_result(data: dict[str, Any]) -> OptimizationResult:
 
 
 def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
+    from ..monte_carlo.builder import build_pipeline, validate_pipeline_spec
+
     pipeline_members = manifest.members_by_kind("mc_pipeline")
     if not pipeline_members:
         return None
@@ -305,8 +281,18 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
     postproc_tables = _load_mc_postproc_tables(archive, manifest)
     resources = _load_mc_resources(archive, manifest, spec)
 
+    # Build the runnable pipeline eagerly. This needs no model: every step
+    # compiles from its parameters alone. A malformed stored spec raises here, so
+    # ``load_bundle`` fails fast on structure. The model-availability gate is a
+    # run concern: both ``reference`` and ``dgp`` are supplied later at
+    # ``pipeline.run(...)``, so both are declared available here (the pipeline is
+    # runnable once the caller passes the models it needs).
+    ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    pipeline = build_pipeline(ordered, postprocs, resources=resources)
+
     return LoadedMC(
         spec=spec,
+        pipeline=pipeline,
         document=document,
         traces=traces,
         resources=resources,

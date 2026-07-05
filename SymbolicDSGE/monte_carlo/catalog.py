@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Literal, cast
+from typing import Any, Callable, Literal, cast
 
 import numpy as np
 
@@ -41,9 +41,6 @@ from .operations.transforms import (
 )
 from .mc_constructs import MCStep
 
-if TYPE_CHECKING:
-    from ..core.solved_model import SolvedModel
-
 #: Series a diagnostic/regression step may read from an upstream context.
 INPUT_SOURCES = [
     "states",
@@ -59,9 +56,7 @@ INPUT_SOURCES = [
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
 StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
-CompileParams = Callable[
-    [dict[str, Any], "SolvedModel | None", "SolvedModel | None"], dict[str, Any]
-]
+CompileParams = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -140,16 +135,13 @@ class StepDefinition:
             "fields": [spec.to_dict() for spec in self.fields],
         }
 
-    def build(
-        self,
-        name: str,
-        params: dict[str, Any],
-        dgp: SolvedModel | None,
-        reference: SolvedModel | None = None,
-    ) -> MCStep:
-        """Compile cleaned ``params`` into an :class:`MCStep` via the factory."""
+    def build(self, name: str, params: dict[str, Any]) -> MCStep:
+        """Compile cleaned ``params`` into an :class:`MCStep` via the factory.
+
+        No model is consulted: every step compiles purely from its parameters
+        (simulation shocks come from the explicit registry, not a model)."""
         if self.compile_params is not None:
-            params = self.compile_params(params, dgp, reference)
+            params = self.compile_params(params)
         return self.factory(name=name, **params)
 
 
@@ -304,15 +296,10 @@ def _coerce_shock_mapping(value: Any) -> dict[str, Shock]:
     return out
 
 
-def _compile_simulation(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
     # No model is consulted. Shocks are either explicit (a ``{key: Shock}``
     # mapping from library authoring) or come from the explicit registry the
-    # user authored. ``dgp`` / ``reference`` are unused here and kept only to
-    # satisfy the compile signature (removed in a follow-up, see #263).
+    # user authored.
     params = dict(params)
     params["seed_increment"] = _integer_or_keyword(
         params.get("seed_increment", "auto"),
@@ -329,21 +316,13 @@ def _compile_simulation(
     return params
 
 
-def _compile_filter(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_filter(params: dict[str, Any]) -> dict[str, Any]:
     params = dict(params)
     params.pop("filter_key", None)
     return params
 
 
-def _compile_wald(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_wald(params: dict[str, Any]) -> dict[str, Any]:
     params = dict(params)
     kind = str(params.get("kind", "mean"))
     target_key = "target_vector" if kind == "mean" else "target_matrix"
@@ -360,11 +339,7 @@ def _compile_wald(
     return params
 
 
-def _compile_regression(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_regression(params: dict[str, Any]) -> dict[str, Any]:
     return _regression_params(params)
 
 

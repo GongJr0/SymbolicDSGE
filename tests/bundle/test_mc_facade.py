@@ -92,7 +92,7 @@ def test_add_mc_ships_raw_data_member_and_loader_rehydrates(tmp_path) -> None:
     np.testing.assert_allclose(arrays["observables"], expected)
 
     # The loaded spec + resources rebuild an equivalent runnable pipeline.
-    rebuilt = loaded.mc.build_pipeline()
+    rebuilt = loaded.mc.pipeline
     np.testing.assert_allclose(rebuilt.per_rep_steps[0].kwargs["observables"], expected)
     assert [s.step_type for s in rebuilt.per_rep_steps] == ["raw_data", "jarque_bera"]
 
@@ -121,7 +121,7 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     assert isinstance(func, NumpyCustomFunc)  # wrapped + source-carrying
     assert "zscore" in func.source
 
-    rebuilt = loaded.mc.build_pipeline()
+    rebuilt = loaded.mc.pipeline
     z_step = {s.name: s for s in rebuilt.per_rep_steps}["z"]
     assert z_step.step_type == "transform:custom"
     assert callable(z_step.func)
@@ -285,7 +285,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     )
 
     # Rebuild from spec + resources -> equivalent runnable pipeline.
-    rebuilt = loaded.mc.build_pipeline()
+    rebuilt = loaded.mc.pipeline
     assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
         "raw_data",
         "jarque_bera",
