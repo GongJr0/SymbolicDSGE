@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import DSGESolver
+from ..estimation.results import MCMCResult, OptimizationResult
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
@@ -36,13 +37,22 @@ from .parquet import (
     from_parquet_columns,
 )
 
+if TYPE_CHECKING:
+    from ..monte_carlo.core import MCPipeline
+
 
 @dataclass
 class LoadedEstimation:
-    """Estimation artifacts recovered from a bundle."""
+    """Estimation artifacts recovered from a bundle.
+
+    ``result`` is a first-class :class:`OptimizationResult` / :class:`MCMCResult`
+    (rebuilt from the stored metadata + posterior traces), not the on-disk
+    ``*Meta`` shape. ``posterior`` still carries the raw ``samples``/``logpost``
+    columns for callers that want them directly.
+    """
 
     spec: EstimationSpec
-    result: OptimizationResultMeta | MCMCResultMeta | None = None
+    result: OptimizationResult | MCMCResult | None = None
     observed: NDArray[Any] | None = None
     posterior: dict[str, NDArray[Any]] | None = None
 
@@ -54,8 +64,10 @@ class LoadedMC:
     ``resources`` reattaches the bulk side-channels the spec references by key:
     each ``raw_data`` ``data_ref`` maps to its restored ``{name: ndarray}`` arrays
     and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
-    Pass it straight to :func:`SymbolicDSGE.monte_carlo.build_pipeline` to rebuild
-    a runnable pipeline.
+    Call :meth:`build_pipeline` to rebuild a runnable :class:`MCPipeline` from
+    ``spec`` + ``resources`` (a ``simulation`` datagen also needs a ``dgp``); the
+    raw ``spec`` stays available for inspection and for pipelines whose models
+    aren't in the bundle.
 
     Recovered run artifacts of a POSTPROC phase: ``postproc_arrays`` (bulk ndarray
     artifacts) and ``postproc_tables`` (tabular/DataFrame artifacts as columnar
@@ -69,6 +81,35 @@ class LoadedMC:
     resources: dict[str, Any] = field(default_factory=dict)
     postproc_arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
     postproc_tables: dict[str, dict[str, list[Any]]] = field(default_factory=dict)
+
+    def build_pipeline(
+        self,
+        *,
+        reference: SolvedModel | None = None,
+        dgp: SolvedModel | None = None,
+    ) -> "MCPipeline":
+        """Rebuild a runnable :class:`MCPipeline` from ``spec`` + ``resources``.
+
+        Every MC pipeline runs against a reference supplied later at
+        ``pipeline.run(reference=...)`` time, so a reference is assumed here. A
+        ``simulation`` datagen needs the model it simulates: the ``dgp`` by
+        default, or the ``reference`` when the step's ``target="reference"`` --
+        pass whichever it targets (needed only to resolve generated shocks; a
+        step with explicit ``shocks`` builds without it). ``raw_data`` pipelines
+        need nothing.
+        """
+        from ..monte_carlo.builder import build_pipeline, validate_pipeline_spec
+
+        ordered, postprocs = validate_pipeline_spec(
+            self.spec, has_reference=True, has_dgp=dgp is not None
+        )
+        return build_pipeline(
+            ordered,
+            postprocs,
+            dgp=dgp,
+            reference=reference,
+            resources=self.resources,
+        )
 
     def wire(self) -> dict[str, Any] | None:
         """Re-merge document + traces into the UI wire shape, when both exist."""
@@ -165,16 +206,6 @@ def _load_estimation(
         return None
     spec = EstimationSpec.from_json(archive.read_text(spec_members[0].path))
 
-    result: OptimizationResultMeta | MCMCResultMeta | None = None
-    result_members = manifest.members_by_kind("estimation_result")
-    if result_members:
-        payload = json.loads(archive.read_text(result_members[0].path))
-        data = payload["data"]
-        if payload.get("type") == "mcmc":
-            result = MCMCResultMeta.from_dict(data)
-        else:
-            result = OptimizationResultMeta.from_dict(data)
-
     observed: NDArray[Any] | None = None
     data_members = manifest.members_by_kind("estimation_data")
     if data_members:
@@ -182,13 +213,75 @@ def _load_estimation(
             _load_columns(archive, data_members[0]), data_members[0]
         )
 
+    # Load the posterior first: the MCMC result is rebuilt from metadata + these
+    # traces (the optimization result needs no traces).
     posterior: dict[str, NDArray[Any]] | None = None
     trace_members = manifest.members_by_kind("estimation_trace")
     if trace_members:
         posterior = collapse_columns(_load_columns(archive, trace_members[0]))
 
+    result: OptimizationResult | MCMCResult | None = None
+    result_members = manifest.members_by_kind("estimation_result")
+    if result_members:
+        payload = json.loads(archive.read_text(result_members[0].path))
+        data = payload["data"]
+        if payload.get("type") == "mcmc":
+            result = _rebuild_mcmc_result(data, posterior)
+        else:
+            result = _rebuild_optimization_result(data)
+
     return LoadedEstimation(
         spec=spec, result=result, observed=observed, posterior=posterior
+    )
+
+
+def _rebuild_mcmc_result(
+    data: dict[str, Any], posterior: dict[str, NDArray[Any]] | None
+) -> MCMCResult:
+    """Recombine MCMC metadata with its posterior traces into a live result.
+
+    The Meta/trace split is the designed inverse (see ``MCMCResultMeta``): the
+    scalar metadata rides the JSON member, the ``samples``/``logpost`` columns
+    ride the parquet trace member.
+    """
+    meta = MCMCResultMeta.from_dict(data)
+    if posterior is None or "samples" not in posterior or "logpost" not in posterior:
+        raise ValueError(
+            "MCMC bundle result requires an 'estimation_trace' member carrying "
+            "'samples' and 'logpost' columns."
+        )
+    return MCMCResult(
+        param_names=meta.param_names,
+        samples=np.asarray(posterior["samples"], dtype=np.float64),
+        logpost_trace=np.asarray(posterior["logpost"], dtype=np.float64),
+        accept_rate=np.float64(meta.accept_rate),
+        n_draws=meta.n_draws,
+        burn_in=meta.burn_in,
+        thin=meta.thin,
+        sampler_config=dict(meta.sampler_config),
+    )
+
+
+def _rebuild_optimization_result(data: dict[str, Any]) -> OptimizationResult:
+    """Rebuild an MLE/MAP result from its metadata (point estimate, no traces).
+
+    ``x`` is recovered from ``theta`` (same ordering the estimator built it from).
+    """
+    meta = OptimizationResultMeta.from_dict(data)
+    theta = {str(k): np.float64(v) for k, v in meta.theta.items()}
+    return OptimizationResult(
+        kind=meta.kind,
+        x=np.asarray(list(theta.values()), dtype=np.float64),
+        theta=theta,
+        success=meta.success,
+        message=meta.message,
+        fun=np.float64(meta.fun),
+        loglik=np.float64(meta.loglik),
+        logprior=np.float64(meta.logprior),
+        logpost=np.float64(meta.logpost),
+        nfev=meta.nfev,
+        nit=meta.nit,
+        optimizer_config=dict(meta.optimizer_config),
     )
 
 

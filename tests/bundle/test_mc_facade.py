@@ -8,7 +8,7 @@ import pytest
 
 from SymbolicDSGE.bundle import BundleBuilder, build_from
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo import MCPipeline, build_pipeline, validate_pipeline_spec
+from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomOpValidationError,
     NumpyCustomFunc,
@@ -19,6 +19,12 @@ from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
 from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
+
+# Bundling a result that retained per-rep payloads/test-results/contexts warns
+# (those don't travel in a .sdsge). That's expected for every result-bundling
+# test here and is important communication to a real bundler, not test noise, so
+# suppress it at the boundary while leaving the source warning intact.
+pytestmark = pytest.mark.filterwarnings("ignore:MC results were ran with ")
 
 
 def zscore(*, context, **kwargs):
@@ -86,10 +92,7 @@ def test_add_mc_ships_raw_data_member_and_loader_rehydrates(tmp_path) -> None:
     np.testing.assert_allclose(arrays["observables"], expected)
 
     # The loaded spec + resources rebuild an equivalent runnable pipeline.
-    ordered, postprocs = validate_pipeline_spec(
-        loaded.mc.spec, has_reference=True, has_dgp=False
-    )
-    rebuilt = build_pipeline(ordered, postprocs, resources=loaded.mc.resources)
+    rebuilt = loaded.mc.build_pipeline()
     np.testing.assert_allclose(rebuilt.per_rep_steps[0].kwargs["observables"], expected)
     assert [s.step_type for s in rebuilt.per_rep_steps] == ["raw_data", "jarque_bera"]
 
@@ -118,10 +121,7 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     assert isinstance(func, NumpyCustomFunc)  # wrapped + source-carrying
     assert "zscore" in func.source
 
-    ordered, postprocs = validate_pipeline_spec(
-        loaded.mc.spec, has_reference=True, has_dgp=False
-    )
-    rebuilt = build_pipeline(ordered, postprocs, resources=loaded.mc.resources)
+    rebuilt = loaded.mc.build_pipeline()
     z_step = {s.name: s for s in rebuilt.per_rep_steps}["z"]
     assert z_step.step_type == "transform:custom"
     assert callable(z_step.func)
@@ -158,6 +158,29 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     assert (
         wire["postproc"] == serialize_pipeline_result(result, run_id="r1")["postproc"]
     )
+
+
+def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
+    tmp_path,
+) -> None:
+    # A default run retains per-rep payloads / test results, none of which travel
+    # in the bundle. Bundling that result must warn the author so they know to
+    # re-run if the dropped fields matter (the rest of this module suppresses the
+    # warning as expected noise; here we assert it actually fires).
+    observables = np.random.default_rng(0).normal(size=(4, 20, 2))
+    pipe = MCPipeline(
+        [
+            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            jarque_bera_test_step("jb", source="observables", column=0),
+        ],
+    )
+    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+    assert result.meta.test_results_retained is True  # sanity: the run retained
+
+    with pytest.warns(UserWarning, match="not supported in the bundle"):
+        BundleBuilder(created_by="mc-test").add_mc(
+            pipe, result=result, run_id="r1"
+        ).write(tmp_path / "warn.sdsge")
 
 
 def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
@@ -262,10 +285,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     )
 
     # Rebuild from spec + resources -> equivalent runnable pipeline.
-    ordered, postprocs = validate_pipeline_spec(
-        loaded.mc.spec, has_reference=True, has_dgp=False
-    )
-    rebuilt = build_pipeline(ordered, postprocs, resources=loaded.mc.resources)
+    rebuilt = loaded.mc.build_pipeline()
     assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
         "raw_data",
         "jarque_bera",

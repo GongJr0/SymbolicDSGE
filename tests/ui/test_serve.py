@@ -90,10 +90,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
 
 
 def test_emit_wire_optimization_meta_matches_live_result() -> None:
-    from scipy.optimize import OptimizeResult
-
     theta = {"beta": 0.99, "rho": 0.8}
-    raw = OptimizeResult(success=True, x=np.array(list(theta.values())))
     live = OptimizationResult(
         kind="mle",
         x=np.array(list(theta.values())),
@@ -106,7 +103,6 @@ def test_emit_wire_optimization_meta_matches_live_result() -> None:
         logpost=np.float64(-12.3),
         nfev=42,
         nit=15,
-        raw=raw,
     )
     meta = OptimizationResultMeta(
         kind="mle",

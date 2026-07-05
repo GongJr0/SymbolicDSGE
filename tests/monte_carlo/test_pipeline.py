@@ -37,7 +37,7 @@ from SymbolicDSGE.monte_carlo.operations.core import (
     reference_filter_step,
     simulation_step,
 )
-from SymbolicDSGE.monte_carlo.operations.core.ops import simulate_dgp
+from SymbolicDSGE.monte_carlo.operations.core.ops import simulate
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
 from SymbolicDSGE.monte_carlo.operations.tests import (
     breusch_godfrey_test_step,
@@ -823,29 +823,30 @@ def test_pipeline_result_reports_overall_and_step_performance() -> None:
 
     out = pipeline.run(reference=reference, n_rep=2)
 
-    assert out.elapsed_s >= 0.0
-    assert out.it_s > 0.0
-    assert set(out.step_elapsed_s) == {"datagen", "state_mean"}
-    assert out.step_counts == {"datagen": 2, "state_mean": 2}
-    assert out.step_failures == {"datagen": 0, "state_mean": 0}
-    assert set(out.step_it_s) == {"datagen", "state_mean"}
+    assert out.meta.elapsed_s >= 0.0
+    assert out.meta.it_s > 0.0
+    assert set(out.meta.step_elapsed_s) == {"datagen", "state_mean"}
+    assert out.meta.step_counts == {"datagen": 2, "state_mean": 2}
+    assert out.meta.step_failures == {"datagen": 0, "state_mean": 0}
+    assert set(out.meta.step_it_s) == {"datagen", "state_mean"}
 
     lines: list[str] = []
-    report_mc_performance(out, print_func=lines.append)
+    report_mc_performance(out.meta, print_func=lines.append)
     assert lines[0].startswith("MC run concluded successfully with ")
     assert lines[0].endswith(" it/s.")
 
     lines.clear()
     out.report_step_performance(print_func=lines.append)
-    assert len(lines) == 2
-    assert lines[0].startswith("datagen concluded successfully with ")
-    assert lines[0].endswith(" it/s.")
-    assert lines[1].startswith("state_mean concluded successfully with ")
-    assert lines[1].endswith(" it/s.")
+    # Overall header, then an indented it/s line per step. The post-processing
+    # section is suppressed entirely because this pipeline has no postproc steps.
+    assert lines[0].startswith("MC run concluded successfully with ")
+    assert any("datagen" in line and line.endswith(" it/s.") for line in lines)
+    assert any("state_mean" in line and line.endswith(" it/s.") for line in lines)
+    assert not any("Post-processing Report" in line for line in lines)
 
     lines.clear()
-    report_mc_step_performance(out, print_func=lines.append)
-    assert len(lines) == 2
+    report_mc_step_performance(out.meta, print_func=lines.append)
+    assert lines[0].startswith("MC run concluded successfully with ")
 
 
 def test_pipeline_run_verbosity_controls_performance_output(
@@ -875,9 +876,10 @@ def test_pipeline_run_verbosity_controls_performance_output(
 
     pipeline.run(reference=reference, n_rep=2, verbosity=2)
     lines = capsys.readouterr().out.strip().splitlines()
-    assert len(lines) == 2
-    assert lines[0].startswith("datagen concluded successfully with ")
-    assert lines[1].startswith("state_mean concluded successfully with ")
+    assert lines[0].startswith("MC run concluded successfully with ")
+    assert any("datagen" in line and line.endswith(" it/s.") for line in lines)
+    assert any("state_mean" in line and line.endswith(" it/s.") for line in lines)
+    assert not any("Post-processing Report" in line for line in lines)
 
     with pytest.raises(ValueError, match="verbosity"):
         pipeline.run(reference=reference, n_rep=2, verbosity=3)
@@ -987,7 +989,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         B=B,
     )
 
-    data = simulate_dgp(
+    data = simulate(
         reference=dgp,
         dgp=dgp,
         rep_idx=0,
@@ -1396,17 +1398,18 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     assert out.failures[0].rep_idx == 2
     assert out.failures[0].step_name == "datagen"
     assert out.statistic_traces["state_mean"].shape == (2,)
-    assert out.step_counts == {"datagen": 3, "state_mean": 2}
-    assert out.step_failures == {"datagen": 1, "state_mean": 0}
+    assert out.meta.step_counts == {"datagen": 3, "state_mean": 2}
+    assert out.meta.step_failures == {"datagen": 1, "state_mean": 0}
 
     lines: list[str] = []
     out.report_performance(print_func=lines.append)
     assert lines[0].startswith("MC run concluded unsuccessfully with ")
 
     lines.clear()
-    report_mc_step_performance(out, print_func=lines.append)
-    assert lines[0].startswith("datagen concluded unsuccessfully with ")
-    assert lines[1].startswith("state_mean concluded successfully with ")
+    report_mc_step_performance(out.meta, print_func=lines.append)
+    assert lines[0].startswith("MC run concluded unsuccessfully with ")
+    assert any("datagen" in line and line.endswith(" it/s.") for line in lines)
+    assert any("state_mean" in line and line.endswith(" it/s.") for line in lines)
 
 
 def test_mc_operation_utils_validate_seeded_shock_specs() -> None:

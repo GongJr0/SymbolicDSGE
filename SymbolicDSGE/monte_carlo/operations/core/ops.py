@@ -12,11 +12,12 @@ from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
 
 
-def simulate_dgp(
+def simulate(
     *,
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
+    target: Literal["reference", "dgp"] = "dgp",
     T: int,
     shocks: ShockMapping | None = None,
     seed_increment: SeedIncrement = "auto",
@@ -24,9 +25,13 @@ def simulate_dgp(
     x0: ndarray | None = None,
     observables: bool = True,
 ) -> MCData:
-    del reference
-    if dgp is None:
-        raise ValueError("simulate_dgp requires a DGP SolvedModel.")
+    target_valid = target in ("reference", "dgp")
+    if not target_valid:
+        raise ValueError(f"Invalid target '{target}'; must be 'reference' or 'dgp'.")
+    model = reference if target == "reference" else dgp
+    if model is None:
+        raise ValueError(f"simulate requires a {target} SolvedModel.")
+
     sim_shocks = _clone_or_pass_shocks(
         shocks,
         T=T,
@@ -34,7 +39,7 @@ def simulate_dgp(
         seed_increment=seed_increment,
     )
     states = np.ascontiguousarray(
-        dgp._simulate_state_matrix(
+        model._simulate_state_matrix(
             T=T,
             shocks=sim_shocks,
             shock_scale=shock_scale,
@@ -43,15 +48,15 @@ def simulate_dgp(
         dtype=np.float64,
     )
     obs_names = (
-        tuple(getattr(dgp.compiled, "observable_names", ())) if observables else ()
+        tuple(getattr(model.compiled, "observable_names", ())) if observables else ()
     )
     obs_mat = None
     raw: dict[str, np.ndarray] = {
-        name: states[:, dgp.compiled.idx[name]] for name in dgp.compiled.var_names
+        name: states[:, model.compiled.idx[name]] for name in model.compiled.var_names
     }
     raw["_X"] = states
     if obs_names:
-        obs_full = dgp._simulate_observable_matrix(states, drop_initial=False)
+        obs_full = model._simulate_observable_matrix(states, drop_initial=False)
         obs_mat = np.ascontiguousarray(obs_full[1:], dtype=np.float64)
         for i, name in enumerate(obs_names):
             raw[name] = obs_full[:, i]
@@ -59,7 +64,7 @@ def simulate_dgp(
         states=states,
         observables=obs_mat,
         raw=raw,
-        n_exog=int(getattr(dgp.compiled, "n_exog", -1)),
+        n_exog=int(getattr(model.compiled, "n_exog", -1)),
         observable_names=obs_names,
     )
 

@@ -14,6 +14,7 @@ from SymbolicDSGE.monte_carlo import (
     NodeSpec,
     PipelineSpec,
 )
+from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
 from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
@@ -31,6 +32,12 @@ from SymbolicDSGE.monte_carlo.serialize import (
 def _table_result(postproc: dict) -> MCPipelineResult:
     return MCPipelineResult(
         n_rep=3,
+        meta=MCMeta(
+            n_rep=3,
+            payloads_retained=False,
+            test_results_retained=False,
+            contexts_retained=False,
+        ),
         n_successful=3,
         test_summaries={},
         test_results=None,
@@ -44,6 +51,12 @@ def _postproc_result() -> MCPipelineResult:
     """A bare result carrying a scalar Summary plus 1-D and 2-D array artifacts."""
     return MCPipelineResult(
         n_rep=5,
+        meta=MCMeta(
+            n_rep=5,
+            payloads_retained=False,
+            test_results_retained=False,
+            contexts_retained=False,
+        ),
         n_successful=5,
         test_summaries={},
         test_results=None,
@@ -198,6 +211,12 @@ def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
     # hydration rebuilds it as a NaN array of the recorded shape (-> JSON null).
     result = MCPipelineResult(
         n_rep=3,
+        meta=MCMeta(
+            n_rep=3,
+            payloads_retained=False,
+            test_results_retained=False,
+            contexts_retained=False,
+        ),
         n_successful=3,
         test_summaries={},
         test_results=None,

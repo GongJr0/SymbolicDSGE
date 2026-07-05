@@ -59,7 +59,9 @@ INPUT_SOURCES = [
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
 StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
-CompileParams = Callable[[dict[str, Any], "SolvedModel | None"], dict[str, Any]]
+CompileParams = Callable[
+    [dict[str, Any], "SolvedModel | None", "SolvedModel | None"], dict[str, Any]
+]
 
 
 @dataclass(frozen=True)
@@ -139,11 +141,15 @@ class StepDefinition:
         }
 
     def build(
-        self, name: str, params: dict[str, Any], dgp: SolvedModel | None
+        self,
+        name: str,
+        params: dict[str, Any],
+        dgp: SolvedModel | None,
+        reference: SolvedModel | None = None,
     ) -> MCStep:
         """Compile cleaned ``params`` into an :class:`MCStep` via the factory."""
         if self.compile_params is not None:
-            params = self.compile_params(params, dgp)
+            params = self.compile_params(params, dgp, reference)
         return self.factory(name=name, **params)
 
 
@@ -170,11 +176,11 @@ def _integer_or_keyword(
 
 
 def _build_generated_shocks(
-    dgp: SolvedModel | None, params: dict[str, Any]
+    model: SolvedModel | None, params: dict[str, Any]
 ) -> dict[str, Shock] | None:
-    if dgp is None:
+    if model is None:
         raise ValueError(
-            "A solved DGP model is required to generate simulation shocks; pass "
+            "A solved model is required to generate simulation shocks; pass "
             "explicit `shocks` to author a simulation step without one."
         )
     T = int(params["T"])
@@ -186,7 +192,7 @@ def _build_generated_shocks(
     seed = None if seed_value is None else int(seed_value)
     loc = float(params.pop("loc", 0.0))
     df = float(params.pop("df", 5.0))
-    targets = [str(target) for target in dgp.config.shock_map.values()]
+    targets = [str(target) for target in model.config.shock_map.values()]
     if not targets:
         return None
 
@@ -285,7 +291,9 @@ def _coerce_shock_mapping(value: Any) -> dict[str, Shock]:
 
 
 def _compile_simulation(
-    params: dict[str, Any], dgp: SolvedModel | None
+    params: dict[str, Any],
+    dgp: SolvedModel | None,
+    reference: SolvedModel | None = None,
 ) -> dict[str, Any]:
     params = dict(params)
     params["seed_increment"] = _integer_or_keyword(
@@ -300,17 +308,35 @@ def _compile_simulation(
         for key in ("distribution", "seed", "loc", "df"):
             params.pop(key, None)
     else:
-        params["shocks"] = _build_generated_shocks(dgp, params)
+        # Generated shocks come from the model being simulated: the DGP by
+        # default, or the reference when ``target="reference"``.
+        target = str(params.get("target", "dgp"))
+        model = reference if target == "reference" else dgp
+        if model is None:
+            raise ValueError(
+                f"A solved {target} model is required to generate simulation "
+                "shocks; pass explicit `shocks` to author a simulation step "
+                "without one."
+            )
+        params["shocks"] = _build_generated_shocks(model, params)
     return params
 
 
-def _compile_filter(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, Any]:
+def _compile_filter(
+    params: dict[str, Any],
+    dgp: SolvedModel | None,
+    reference: SolvedModel | None = None,
+) -> dict[str, Any]:
     params = dict(params)
     params.pop("filter_key", None)
     return params
 
 
-def _compile_wald(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, Any]:
+def _compile_wald(
+    params: dict[str, Any],
+    dgp: SolvedModel | None,
+    reference: SolvedModel | None = None,
+) -> dict[str, Any]:
     params = dict(params)
     kind = str(params.get("kind", "mean"))
     target_key = "target_vector" if kind == "mean" else "target_matrix"
@@ -328,7 +354,9 @@ def _compile_wald(params: dict[str, Any], dgp: SolvedModel | None) -> dict[str, 
 
 
 def _compile_regression(
-    params: dict[str, Any], dgp: SolvedModel | None
+    params: dict[str, Any],
+    dgp: SolvedModel | None,
+    reference: SolvedModel | None = None,
 ) -> dict[str, Any]:
     return _regression_params(params)
 
@@ -345,13 +373,16 @@ def _source_field(key: str, label: str, default: str = "std_innov") -> FieldSpec
 _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
     StepDefinition(
         step_type="simulation",
-        title="DGP Simulation",
+        title="Simulation",
         default_name="datagen",
-        description="Generate one sample from the DGP model.",
+        description="Generate one sample by simulating a solved model (DGP or reference).",
         op_role="datagen",
         factory=simulation_step,
         compile_params=_compile_simulation,
         fields=(
+            FieldSpec(
+                "target", "Simulate", "select", "dgp", options=("dgp", "reference")
+            ),
             FieldSpec("T", "Periods", "number", 100, required=True, minimum=1),
             FieldSpec("observables", "Observables", "boolean", True),
             FieldSpec("shock_scale", "Shock scale", "number", 1.0),

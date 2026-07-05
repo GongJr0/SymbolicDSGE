@@ -9,7 +9,7 @@ rather than a flat namespace, e.g.::
     from SymbolicDSGE.monte_carlo.operations.core import simulation_step
 
 The underlying ``run_*`` op implementations are internal and live in each
-group's ``ops`` module (e.g. ``operations.core.ops.simulate_dgp``).
+group's ``ops`` module (e.g. ``operations.core.ops.simulate``).
 """
 
 from . import core, postproc, regressions, tests, transforms

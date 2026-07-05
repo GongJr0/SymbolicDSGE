@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+import warnings as w
 
 import numpy as np
 from numpy.typing import NDArray
@@ -268,6 +269,17 @@ class BundleBuilder:
             spec.to_json(indent=2).encode("utf-8"),
         )
         if result is not None:
+            lossy_params = {
+                "retain_payloads": result.meta.payloads_retained,
+                "retain_test_results": result.meta.test_results_retained,
+                "retain_contexts": result.meta.contexts_retained,
+            }
+            if any(lossy_params.values()):
+                w.warn(
+                    f"MC results were ran with {', '.join(f'{k}=True' for k, v in lossy_params.items() if v)}. Payloads, per-rep TestResult objects, and per-rep MCContext objects are not supported in the bundle and will be missing.",
+                    UserWarning,
+                )
+
             document = result_document(result, run_id=run_id)
             self._add(
                 Member(path=_MC_RESULT, kind="mc_result"),

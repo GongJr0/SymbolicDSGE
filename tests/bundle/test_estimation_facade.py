@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from numpy import float64
-from scipy.optimize import OptimizeResult
 from sympy import Symbol
 
 from SymbolicDSGE.bayesian.priors import make_prior
@@ -60,7 +59,6 @@ def _optimization_result() -> OptimizationResult:
         logpost=float64(-1.5),
         nfev=12,
         nit=4,
-        raw=OptimizeResult(),
         optimizer_config={
             "method": "L-BFGS-B",
             "bounds": [[-1.0, 1.0]],

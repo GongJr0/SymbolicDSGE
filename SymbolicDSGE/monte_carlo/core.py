@@ -22,8 +22,11 @@ from .mc_constructs import (
     MCData,
     MCFailure,
     MCPipelineResult,
+    MCMeta,
     MCStep,
     OpType,
+    failed_postproc_names,
+    failed_step_counts,
     report_mc_performance,
     report_mc_step_performance,
 )
@@ -122,10 +125,12 @@ class MCPipeline:
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
         regression_results_by_step: dict[str, list[RegressionResult]] = {}
-        all_steps = (*self.per_rep_steps, *self.postproc_steps)
-        step_elapsed_s: dict[str, float] = {step.name: 0.0 for step in all_steps}
-        step_counts: dict[str, int] = {step.name: 0 for step in all_steps}
-        step_failures: dict[str, int] = {step.name: 0 for step in all_steps}
+        # Per-replication step timings feed the it/s rates. Postproc runs once
+        # after the loop and times itself (see ``_run_postproc``); its runtime is
+        # never folded into the it/s denominator.
+        step_elapsed_s: dict[str, float] = {s.name: 0.0 for s in self.per_rep_steps}
+        step_counts: dict[str, int] = {s.name: 0 for s in self.per_rep_steps}
+        step_failures: dict[str, int] = {s.name: 0 for s in self.per_rep_steps}
 
         # POSTPROC ops don't run per replication — they run once after the loop,
         # over the assembled across-rep traces.
@@ -133,7 +138,7 @@ class MCPipeline:
         postproc_steps = self.postproc_steps
         payload_columns: dict[str, list[np.ndarray]] = {}
 
-        run_start = perf_counter()
+        loop_start = perf_counter()
         for rep_idx in range(n_rep):
             context = MCContext(rep_idx=rep_idx, reference=reference, dgp=dgp)
             failed_step_name: str | None = None
@@ -174,9 +179,14 @@ class MCPipeline:
             if postproc_steps:
                 _accumulate_payload_columns(payload_columns, context.payloads)
 
+        # Stop the replication-loop clock here; it/s is n_rep over the loop
+        # alone. Post-loop aggregation and the once-run postproc phase are timed
+        # separately and never enter the it/s denominator.
+        elapsed_s = perf_counter() - loop_start
+
         test_summaries = _summarize_tests(results_by_step)
         regression_summaries = _summarize_regressions(regression_results_by_step)
-        postproc = self._run_postproc(
+        postproc, postproc_elapsed_s = self._run_postproc(
             postproc_steps,
             test_summaries=test_summaries,
             regression_summaries=regression_summaries,
@@ -185,13 +195,28 @@ class MCPipeline:
             dgp=dgp,
             fail_fast=fail_fast,
             failures=failures,
+        )
+
+        failed_postprocs = failed_postproc_names(failures)
+        failed_steps = failed_step_counts(failures)
+
+        meta = MCMeta(
+            n_rep=n_rep,
+            payloads_retained=retain_payloads,
+            test_results_retained=retain_test_results,
+            contexts_retained=retain_contexts,
+            elapsed_s=elapsed_s,
             step_elapsed_s=step_elapsed_s,
             step_counts=step_counts,
             step_failures=step_failures,
+            postproc_elapsed_s=postproc_elapsed_s,
+            failed_postprocs=failed_postprocs,
+            failed_steps=failed_steps,
         )
-        elapsed_s = perf_counter() - run_start
+
         result = MCPipelineResult(
             n_rep=n_rep,
+            meta=meta,
             n_successful=len(contexts),
             test_summaries=test_summaries,
             test_results=(
@@ -203,16 +228,12 @@ class MCPipeline:
             contexts=tuple(contexts) if retain_contexts else None,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
-            elapsed_s=elapsed_s,
-            step_elapsed_s=step_elapsed_s,
-            step_counts=step_counts,
-            step_failures=step_failures,
             postproc=postproc,
         )
         if verbosity == 1:
-            report_mc_performance(result)
+            report_mc_performance(meta)
         elif verbosity == 2:
-            report_mc_step_performance(result)
+            report_mc_step_performance(meta)
         return result
 
     def _run_step(self, context: MCContext, step: MCStep) -> None:
@@ -268,19 +289,21 @@ class MCPipeline:
         dgp: SolvedModel | None,
         fail_fast: bool,
         failures: list[MCFailure],
-        step_elapsed_s: dict[str, float],
-        step_counts: dict[str, int],
-        step_failures: dict[str, int],
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, float]]:
         """Run POSTPROC ops once over the assembled traces; collect artifacts.
 
-        ``traces`` carries every keyed across-rep ndarray — the test/regression
-        summary traces (shared with the result wire) plus stacked transform
-        payloads. A failing op honors ``fail_fast`` (re-raise) or records an
+        Owns its own timing: returns ``(artifacts, postproc_elapsed_s)`` where
+        the second maps each step name to its wall-clock seconds. ``traces``
+        carries every keyed across-rep ndarray — the test/regression summary
+        traces (shared with the result wire) plus stacked transform payloads. A
+        failing op honors ``fail_fast`` (re-raise) or records an
         :class:`MCFailure` with ``rep_idx=-1`` (post-loop sentinel) and is skipped.
         """
+        postproc_elapsed_s: dict[str, float] = {
+            step.name: 0.0 for step in postproc_steps
+        }
         if not postproc_steps:
-            return {}
+            return {}, postproc_elapsed_s
 
         from .serialize import traces_from_summaries
 
@@ -301,7 +324,6 @@ class MCPipeline:
                 )
             except Exception as exc:
                 failed = True
-                step_failures[step.name] += 1
                 if fail_fast:
                     raise
                 failures.append(
@@ -313,11 +335,10 @@ class MCPipeline:
                     )
                 )
             finally:
-                step_elapsed_s[step.name] += perf_counter() - step_start
-                step_counts[step.name] += 1
+                postproc_elapsed_s[step.name] += perf_counter() - step_start
             if not failed:
                 postproc[step.name] = out
-        return postproc
+        return postproc, postproc_elapsed_s
 
 
 def _payload_to_array(value: object) -> np.ndarray | None:

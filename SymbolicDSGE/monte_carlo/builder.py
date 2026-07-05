@@ -141,8 +141,10 @@ def validate_pipeline_spec(
 
     if not has_reference:
         raise ValueError("A solved reference model is required.")
-    if datagen.step_type == "simulation" and not has_dgp:
-        raise ValueError("A solved DGP model is required by the simulation step.")
+    if datagen.step_type == "simulation":
+        sim_target = str(datagen.params.get("target", "dgp"))
+        if sim_target == "dgp" and not has_dgp:
+            raise ValueError("A solved DGP model is required by the simulation step.")
 
     filter_nodes = [node for node in spec.nodes if node.step_type == "filter"]
     # Ordering deps come from edges *and* key-based payload references (a node
@@ -269,6 +271,7 @@ def build_pipeline(
     postprocs: Sequence[PostprocSpec] = (),
     *,
     dgp: SolvedModel | None = None,
+    reference: SolvedModel | None = None,
     resources: Mapping[str, Any] | None = None,
 ) -> MCPipeline:
     """Compile validated, ordered nodes (+ postprocs) into a runnable pipeline.
@@ -294,7 +297,7 @@ def build_pipeline(
             # ``dgp`` is only dereferenced by simulation shock generation; other
             # steps ignore it, so a DGP-free (e.g. raw_data) pipeline still builds.
             per_rep_steps.append(
-                definition.build(node.name, _clean_params(node.params), dgp)
+                definition.build(node.name, _clean_params(node.params), dgp, reference)
             )
 
     postproc_steps = []
@@ -306,7 +309,7 @@ def build_pipeline(
             if definition is None:
                 raise ValueError(f"Unsupported MC postproc step type: {pp.step_type}")
             postproc_steps.append(
-                definition.build(pp.name, _clean_params(pp.params), dgp)
+                definition.build(pp.name, _clean_params(pp.params), dgp, reference)
             )
     return MCPipeline(per_rep_steps, postproc_steps)
 
@@ -385,8 +388,9 @@ def run_pipeline(
         has_dgp=dgp is not None,
     )
     assert reference is not None
-    assert dgp is not None
-    pipeline = build_pipeline(ordered, postprocs, dgp=dgp, resources=resources)
+    pipeline = build_pipeline(
+        ordered, postprocs, dgp=dgp, reference=reference, resources=resources
+    )
     return pipeline.run(
         reference=reference,
         dgp=dgp,

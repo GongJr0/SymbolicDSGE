@@ -1,18 +1,25 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Literal
 
 from ...mc_constructs import MCStep, OpType
 
-from .ops import simulate_dgp, raw_data_datagen, run_reference_filter
+from .ops import (
+    simulate,
+    raw_data_datagen,
+    run_reference_filter,
+)
 
 
-def simulation_step(name: str = "datagen", **kwargs: Any) -> MCStep:
+def simulation_step(
+    name: str = "datagen",
+    **kwargs: Any,
+) -> MCStep:
     """Simulate one replication's data by driving the DGP model with shocks.
 
-    Signature: ``simulation_step(name="datagen", *, T, shocks=None,
+    Signature: ``simulation_step(name="datagen", *, target="dgp", T, shocks=None,
     seed_increment="auto", shock_scale=1.0, x0=None, observables=True)``.
 
-    Requires a DGP ``SolvedModel``; draws fresh shocks per replication (keyed by
+    Draws fresh shocks per replication (keyed by
     ``rep_idx``) unless ``shocks`` are supplied.
 
     Example:
@@ -23,7 +30,7 @@ def simulation_step(name: str = "datagen", **kwargs: Any) -> MCStep:
     return MCStep(
         name=name,
         op_type=OpType.DATAGEN,
-        func=simulate_dgp,
+        func=simulate,
         kwargs=kwargs,
         step_type="simulation",
     )

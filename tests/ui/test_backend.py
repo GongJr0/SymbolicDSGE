@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 from fastapi.testclient import TestClient
-from scipy.optimize import OptimizeResult
 
 from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
 from SymbolicDSGE.ui.app import create_app
@@ -24,6 +23,7 @@ from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribu
 from SymbolicDSGE._diag_tests.result import MCResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.monte_carlo import MCContext, MCData, MCPipelineResult
+from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
 from SymbolicDSGE.regression.ols import MCRegressionResult, ols
 
 
@@ -281,7 +281,6 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
         logpost=np.float64(-1.25),
         nfev=4,
         nit=2,
-        raw=OptimizeResult(),
     )
     captured: dict[str, object] = {}
 
@@ -1001,6 +1000,12 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
     )
     result = MCPipelineResult(
         n_rep=2,
+        meta=MCMeta(
+            n_rep=2,
+            payloads_retained=False,
+            test_results_retained=False,
+            contexts_retained=False,
+        ),
         n_successful=2,
         test_summaries={"diagnostic": tests},
         test_results=None,

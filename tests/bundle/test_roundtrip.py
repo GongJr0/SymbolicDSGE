@@ -9,6 +9,7 @@ from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import ShockGeneration, SimSpec
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import (
     EstimationParameterSpec,
     EstimationSpec,
@@ -82,7 +83,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     assert loaded.estimation is not None
     assert loaded.estimation.spec.method == "mcmc"
     assert [p.name for p in loaded.estimation.spec.parameters] == ["beta", "sigma"]
-    assert isinstance(loaded.estimation.result, MCMCResultMeta)
+    assert isinstance(loaded.estimation.result, MCMCResult)
     assert loaded.estimation.result.accept_rate == 0.31
     assert loaded.estimation.observed is not None
     np.testing.assert_allclose(loaded.estimation.observed, observed)
