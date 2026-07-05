@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from types import SimpleNamespace
 
 import pytest
-from sympy import Symbol
 
 from SymbolicDSGE.monte_carlo import (
     STEP_CATALOG,
@@ -14,6 +12,7 @@ from SymbolicDSGE.monte_carlo import (
     catalog_payload,
     validate_pipeline_spec,
 )
+from SymbolicDSGE.monte_carlo.catalog import _shocks_from_registry
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
 from SymbolicDSGE.monte_carlo.spec import (
     STEP_KINDS,
@@ -77,11 +76,6 @@ _FIELD_KEYS = {
     "minimum",
     "when",
 }
-
-
-def _stub_dgp(*targets: str) -> SimpleNamespace:
-    shock_map = {Symbol(f"e_{t}"): Symbol(t) for t in targets}
-    return SimpleNamespace(config=SimpleNamespace(shock_map=shock_map))
 
 
 def test_catalog_payload_shape_and_known_fields() -> None:
@@ -268,7 +262,16 @@ def test_validate_requires_reference_and_dgp() -> None:
 def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> None:
     spec = PipelineSpec(
         nodes=[
-            NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            NodeSpec(
+                "sim",
+                "simulation",
+                "datagen",
+                {
+                    "T": 8,
+                    "observables": True,
+                    "shock_registry": [{"vars": ["u"], "dist": "norm"}],
+                },
+            ),
             NodeSpec(
                 "reg",
                 "regression",
@@ -285,12 +288,12 @@ def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> 
     )
     ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
-    pipeline = build_pipeline(ordered, postprocs, dgp=_stub_dgp("u"))
+    pipeline = build_pipeline(ordered, postprocs)
 
     assert [s.name for s in pipeline.per_rep_steps] == ["datagen", "reg"]
     assert pipeline.per_rep_steps[0].op_type is OpType.DATAGEN
     assert pipeline.per_rep_steps[1].op_type is OpType.REGRESSION
-    # simulation got generated shocks injected
+    # simulation compiled the shock registry into a live shocks mapping
     assert "shocks" in pipeline.per_rep_steps[0].kwargs
     # OLS regression dropped the conditional alpha kwarg
     assert "alpha" not in pipeline.per_rep_steps[1].kwargs
@@ -301,7 +304,7 @@ def test_build_pipeline_rejects_unknown_step_type() -> None:
     # bogus kind reaches build_pipeline and must be rejected there.
     node = NodeSpec(id="x", step_type="bogus", name="x", params={})
     with pytest.raises(ValueError, match="Unsupported MC step type"):
-        build_pipeline([node], dgp=_stub_dgp("u"))
+        build_pipeline([node])
 
 
 # --- POSTPROC (post-loop) kind: ordering, edges, compilation -----------------
@@ -366,9 +369,7 @@ def test_build_postproc_custom_from_resources() -> None:
         ],
     )
     ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    pipeline = build_pipeline(
-        ordered, postprocs, dgp=_stub_dgp("u"), resources={"p": my_summary}
-    )
+    pipeline = build_pipeline(ordered, postprocs, resources={"p": my_summary})
     step = {s.name: s for s in pipeline.postproc_steps}["p"]
     assert step.op_type is OpType.POSTPROC
     assert step.step_type == "postproc:custom"
@@ -460,3 +461,69 @@ def test_postproc_custom_trace_refs_not_statically_validated() -> None:
 def test_kde_trace_field_is_typed_trace() -> None:
     trace_field = next(f for f in STEP_CATALOG["kde"].fields if f.key == "trace")
     assert trace_field.type == "trace"
+
+
+# --- shock registry compile -------------------------------------------------
+# The simulation compile hook builds shocks from an explicit registry with no
+# model involved: one entry compiles to one Shock, joint iff it selects more
+# than one variable.
+
+
+def test_registry_norm_univariate_shapes_loc_kwarg() -> None:
+    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "norm", "loc": 0.5}], T=8)
+    assert shocks is not None
+    shock = shocks["u"]
+    assert shock.multivar is False
+    assert shock.dist == "norm"
+    assert shock.dist_kwargs == {"loc": 0.5}
+
+
+def test_registry_norm_multivariate_shapes_mean_kwarg() -> None:
+    shocks = _shocks_from_registry(
+        [{"vars": ["u", "v"], "dist": "norm", "loc": 0.0}], T=8
+    )
+    assert shocks is not None
+    shock = shocks["u,v"]
+    assert shock.multivar is True
+    assert shock.dist_kwargs == {"mean": [0.0, 0.0]}
+
+
+def test_registry_t_carries_df() -> None:
+    shocks = _shocks_from_registry(
+        [{"vars": ["u"], "dist": "t", "loc": 0.0, "df": 7.0}], T=8
+    )
+    assert shocks is not None
+    assert shocks["u"].dist_kwargs == {"loc": 0.0, "df": 7.0}
+
+
+def test_registry_uniform_single_variable_ok() -> None:
+    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "uni"}], T=8)
+    assert shocks is not None
+    assert shocks["u"].multivar is False
+    assert shocks["u"].dist == "uni"
+
+
+def test_registry_uniform_multiple_variables_raises() -> None:
+    with pytest.raises(ValueError, match="univariate"):
+        _shocks_from_registry([{"vars": ["u", "v"], "dist": "uni"}], T=8)
+
+
+def test_registry_empty_compiles_to_none() -> None:
+    assert _shocks_from_registry([], T=8) is None
+
+
+def test_registry_entry_without_variables_raises() -> None:
+    with pytest.raises(ValueError, match="at least one variable"):
+        _shocks_from_registry([{"vars": [], "dist": "norm"}], T=8)
+
+
+def test_registry_duplicate_key_raises() -> None:
+    with pytest.raises(ValueError, match="Duplicate shock entry"):
+        _shocks_from_registry(
+            [{"vars": ["u"], "dist": "norm"}, {"vars": ["u"], "dist": "t"}], T=8
+        )
+
+
+def test_registry_unsupported_distribution_raises() -> None:
+    with pytest.raises(ValueError, match="Unsupported shock distribution"):
+        _shocks_from_registry([{"vars": ["u"], "dist": "cauchy"}], T=8)

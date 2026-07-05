@@ -269,7 +269,7 @@ def test_solved_model_shock_unpack_univariate_callable_and_errors(solved_test):
     assert out[0][0] == solved_test.compiled.idx["u"]
     assert np.array_equal(out[0][1], np.full((4,), 0.50, dtype=np.float64))
 
-    with pytest.raises(ValueError, match="not found in exogenous"):
+    with pytest.raises(ValueError, match="not an exogenous model variable"):
         solved_test._shock_unpack({"Pi": np.ones((4,), dtype=np.float64)})
 
     with pytest.raises(TypeError, match="must be a callable or ndarray"):
@@ -285,6 +285,23 @@ def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
 
     with pytest.raises(TypeError, match="must be a callable or ndarray"):
         solved_test._shock_unpack({"u,v": "bad-shock"})
+
+
+def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
+    # An unknown member of a multivar key is named alongside the entry it came
+    # from, so a typo is traceable to the exact grouped spec.
+    arr = np.zeros((4, 2), dtype=np.float64)
+    with pytest.raises(ValueError, match=r"'Pi'.*entry 'u,Pi'"):
+        solved_test._shock_unpack({"u,Pi": arr})
+
+
+def test_solved_model_shock_unpack_rejects_variable_in_two_entries(solved_test):
+    # 'u' is driven by both a multivar and a univariate entry: each exogenous
+    # variable may appear in at most one entry, caught by the single pass.
+    mv = np.zeros((4, 2), dtype=np.float64)
+    uni = np.zeros((4,), dtype=np.float64)
+    with pytest.raises(ValueError, match=r"'u' is driven by more than one"):
+        solved_test._shock_unpack({"u,v": mv, "u": uni})
 
 
 def test_solved_model_kalman_smoke(solved_post82):

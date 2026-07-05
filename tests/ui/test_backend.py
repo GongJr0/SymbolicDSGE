@@ -387,8 +387,9 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
                 "params": {
                     "T": 8,
                     "observables": True,
-                    "distribution": "norm",
-                    "seed": 10,
+                    "shock_registry": [
+                        {"vars": ["u", "v"], "dist": "norm", "seed": 10}
+                    ],
                 },
             }
         ],
@@ -437,7 +438,11 @@ _POSTPROC_PIPELINE = {
             "id": "sim",
             "step_type": "simulation",
             "name": "datagen",
-            "params": {"T": 8, "observables": True, "distribution": "norm", "seed": 10},
+            "params": {
+                "T": 8,
+                "observables": True,
+                "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 10}],
+            },
         },
         {
             "id": "jb",
@@ -658,7 +663,10 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 20},
+                "params": {
+                    "T": 20,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                },
             },
             {
                 "id": "bp",
@@ -717,7 +725,10 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 20},
+                "params": {
+                    "T": 20,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                },
             },
             {
                 "id": "bg",
@@ -776,7 +787,10 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 30},
+                "params": {
+                    "T": 30,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                },
             },
             {
                 "id": "cs",
@@ -833,7 +847,10 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 30},
+                "params": {
+                    "T": 30,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                },
             },
             {
                 "id": "csq",
@@ -890,7 +907,10 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 30},
+                "params": {
+                    "T": 30,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                },
             },
             {
                 "id": "ch",
@@ -1124,7 +1144,11 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 8, "observables": True, "seed": 1},
+                "params": {
+                    "T": 8,
+                    "observables": True,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 1}],
+                },
             },
             {
                 "id": "z",
@@ -1175,7 +1199,11 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 8, "observables": True, "seed": 1},
+                "params": {
+                    "T": 8,
+                    "observables": True,
+                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 1}],
+                },
             },
             {
                 "id": "z",

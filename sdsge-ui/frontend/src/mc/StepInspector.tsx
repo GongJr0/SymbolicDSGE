@@ -1,10 +1,16 @@
 import Editor from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
-import { Check, TriangleAlert, Trash2 } from "lucide-react";
+import { Check, Plus, TriangleAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { validateCustomOp } from "../api";
 import { registerPythonLsp } from "../lsp/registerPythonLsp";
-import type { MCFieldSpec, MCStepType } from "../types";
+import type {
+  MCFieldSpec,
+  MCStepType,
+  Role,
+  ShockDistribution,
+  ShockRegistryEntry,
+} from "../types";
 import type { MCFlowNode } from "./types";
 
 // Input legs whose value is a dependency source (a "select" with INPUT_SOURCES
@@ -34,6 +40,7 @@ export function StepInspector({
   theme,
   payloadProducers,
   availableTraces,
+  exogByRole,
 }: {
   node: MCFlowNode | null;
   onChange: (node: MCFlowNode) => void;
@@ -41,6 +48,7 @@ export function StepInspector({
   theme: "light" | "dark";
   payloadProducers: string[];
   availableTraces: string[];
+  exogByRole: Record<Role, string[]>;
 }) {
   if (node === null) {
     return (
@@ -58,6 +66,17 @@ export function StepInspector({
         params: { ...node.data.params, [key]: value },
       },
     });
+  };
+
+  // Writing the registry replaces any bundle-serialized `shocks` map so the
+  // backend compiles from the user's explicit entries, not a stale compiled form.
+  const setRegistry = (entries: ShockRegistryEntry[]) => {
+    const params: Record<string, unknown> = {
+      ...node.data.params,
+      shock_registry: entries,
+    };
+    delete params.shocks;
+    onChange({ ...node, data: { ...node.data, params } });
   };
 
   const isCustom =
@@ -106,6 +125,20 @@ export function StepInspector({
             .filter((field) => fieldVisible(field, node.data.params))
             .map((field) => {
               const key = `${node.id}:${field.key}`;
+              if (field.type === "shock_registry") {
+                const targetRole = String(
+                  node.data.params.target ?? "dgp",
+                ) as Role;
+                return (
+                  <ShockRegistryEditor
+                    key={key}
+                    target={targetRole}
+                    exogVars={exogByRole[targetRole] ?? []}
+                    entries={registryFromParams(node.data.params)}
+                    onChange={setRegistry}
+                  />
+                );
+              }
               if (field.type === "select" && SOURCE_LEG_KEYS.has(field.key)) {
                 const payloadKey = LEG_PAYLOAD_KEY[field.key];
                 return (
@@ -134,6 +167,328 @@ export function StepInspector({
       )}
     </div>
   );
+}
+
+const DIST_LABEL: Record<ShockDistribution, string> = {
+  norm: "Normal",
+  t: "Student-t",
+  uni: "Uniform",
+};
+
+// Bespoke shock panel for the simulation step. The checklist is the target
+// model's exogenous variables (offered as options, never assumed); one entry is
+// a free-form shock over the chosen subset. Client-side validation blocks a
+// variable already claimed by another entry and a joint uniform shock.
+function ShockRegistryEditor({
+  target,
+  exogVars,
+  entries,
+  onChange,
+}: {
+  target: Role;
+  exogVars: string[];
+  entries: ShockRegistryEntry[];
+  onChange: (entries: ShockRegistryEntry[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [dist, setDist] = useState<ShockDistribution>("norm");
+  const [loc, setLoc] = useState("0");
+  const [df, setDf] = useState("5");
+  const [seed, setSeed] = useState("");
+  const [error, setError] = useState("");
+  // Index of the entry being edited (null while composing a fresh one). The
+  // entry under edit is excluded from the "used" set so its own variables stay
+  // selectable, and Save replaces it in place instead of appending.
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+
+  const usedVars = new Set(
+    entries.flatMap((entry, index) => (index === editIndex ? [] : entry.vars)),
+  );
+  const multivarUni = dist === "uni" && selected.length > 1;
+  const multivarJoint = dist !== "uni" && selected.length > 1;
+
+  function resetForm() {
+    setEditIndex(null);
+    setSelected([]);
+    setDist("norm");
+    setLoc("0");
+    setDf("5");
+    setSeed("");
+    setError("");
+  }
+
+  function toggleVar(name: string) {
+    setError("");
+    setSelected((current) =>
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name],
+    );
+  }
+
+  // Load an existing entry back into the form for editing.
+  function startEdit(index: number) {
+    const entry = entries[index];
+    setEditIndex(index);
+    setSelected(entry.vars);
+    setDist(entry.dist);
+    setLoc(String(entry.loc));
+    setDf(String(entry.df));
+    setSeed(entry.seed === null ? "" : String(entry.seed));
+    setError("");
+  }
+
+  function commitEntry() {
+    if (selected.length === 0) {
+      setError("Select at least one exogenous variable.");
+      return;
+    }
+    const clash = selected.find((name) => usedVars.has(name));
+    if (clash !== undefined) {
+      setError(`'${clash}' is already used in another shock entry.`);
+      return;
+    }
+    if (dist === "uni" && selected.length > 1) {
+      setError("A uniform shock is univariate; select exactly one variable.");
+      return;
+    }
+    // Order the key by the model's variable order for a stable identity.
+    const vars = exogVars.filter((name) => selected.includes(name));
+    const entry: ShockRegistryEntry = {
+      vars,
+      dist,
+      loc: Number(loc) || 0,
+      df: Number(df) || 5,
+      seed: seed.trim() === "" ? null : Number(seed),
+    };
+    onChange(
+      editIndex === null
+        ? [...entries, entry]
+        : entries.map((current, index) => (index === editIndex ? entry : current)),
+    );
+    resetForm();
+  }
+
+  function removeEntry(index: number) {
+    onChange(entries.filter((_, position) => position !== index));
+    // Keep the edit target consistent with the shrunk list.
+    if (editIndex === index) resetForm();
+    else if (editIndex !== null && index < editIndex) setEditIndex(editIndex - 1);
+  }
+
+  return (
+    <div className="mc-shock-registry">
+      <div className="mc-shock-registry-head">
+        <span className="mc-shock-registry-label">Shocks</span>
+        <span className="mc-shock-registry-target">from {target}</span>
+      </div>
+      {entries.length > 0 ? (
+        <ul className="mc-shock-list">
+          {entries.map((entry, index) => (
+            <li
+              key={entry.vars.join(",")}
+              className={`mc-shock-entry${editIndex === index ? " editing" : ""}`}
+            >
+              <button
+                className="mc-shock-entry-select"
+                title="Edit shock"
+                disabled={exogVars.length === 0}
+                onClick={() => startEdit(index)}
+              >
+                <div className="mc-shock-entry-body">
+                  <strong>
+                    {entry.vars.join(", ")}
+                    {entry.vars.length > 1 && (
+                      <span className="mc-shock-badge">joint</span>
+                    )}
+                  </strong>
+                  <span>{describeEntry(entry)}</span>
+                </div>
+              </button>
+              <button
+                className="icon-button"
+                title="Remove shock"
+                onClick={() => removeEntry(index)}
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mc-shock-empty">
+          No shocks configured; this simulation runs deterministically.
+        </p>
+      )}
+      {exogVars.length === 0 ? (
+        <p className="mc-shock-empty">
+          Load and solve the {target} model to choose its exogenous shocks.
+        </p>
+      ) : (
+        <div className="mc-shock-form">
+          <div className="mc-shock-checklist">
+            {exogVars.map((name) => {
+              const used = usedVars.has(name);
+              return (
+                <label
+                  key={name}
+                  className={`mc-shock-check${used ? " used" : ""}`}
+                  title={used ? "Already used in another shock entry." : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(name)}
+                    disabled={used}
+                    onChange={() => toggleVar(name)}
+                  />
+                  <span>{name}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="mc-shock-fields">
+            <label>
+              Distribution
+              <select
+                value={dist}
+                onChange={(event) => {
+                  setDist(event.target.value as ShockDistribution);
+                  setError("");
+                }}
+              >
+                <option value="norm">Normal</option>
+                <option value="t">Student-t</option>
+                <option value="uni">Uniform</option>
+              </select>
+            </label>
+            <label>
+              Location
+              <input
+                type="number"
+                value={loc}
+                onChange={(event) => setLoc(event.target.value)}
+              />
+            </label>
+            {dist === "t" && (
+              <label>
+                Degrees of freedom
+                <input
+                  type="number"
+                  value={df}
+                  onChange={(event) => setDf(event.target.value)}
+                />
+              </label>
+            )}
+            <label>
+              Seed
+              <input
+                type="number"
+                placeholder="none"
+                value={seed}
+                onChange={(event) => setSeed(event.target.value)}
+              />
+            </label>
+          </div>
+          {multivarUni && (
+            <span className="mc-shock-hint">
+              A uniform shock is univariate; select exactly one variable.
+            </span>
+          )}
+          {multivarJoint && (
+            <span className="mc-shock-hint">
+              This is one joint (multivar) shock over {selected.length} variables.
+              Add a separate entry per variable if you want them independent.
+            </span>
+          )}
+          {error !== "" && <span className="status error mc-shock-error">{error}</span>}
+          <div className="mc-shock-actions">
+            <button
+              className="secondary mc-shock-add"
+              onClick={commitEntry}
+              disabled={selected.length === 0}
+            >
+              {editIndex === null ? <Plus size={13} /> : <Check size={13} />}
+              {editIndex === null ? "Add shock" : "Save shock"}
+            </button>
+            {editIndex !== null && (
+              <button className="secondary" onClick={resetForm}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function describeEntry(entry: ShockRegistryEntry): string {
+  const parts = [DIST_LABEL[entry.dist], `loc ${entry.loc}`];
+  if (entry.dist === "t") parts.push(`df ${entry.df}`);
+  parts.push(entry.seed === null ? "seed none" : `seed ${entry.seed}`);
+  return parts.join(", ");
+}
+
+// Read the registry the panel renders, literally, from the step params. A
+// GUI-authored step carries `shock_registry`; a bundle-serialized step carries
+// the compiled `shocks` map, which we reconstruct one entry per key with no
+// invented info (the key alone gives the variables and joint/multivar status).
+function registryFromParams(
+  params: Record<string, unknown>,
+): ShockRegistryEntry[] {
+  const registry = params.shock_registry;
+  if (Array.isArray(registry) && registry.length > 0) {
+    return registry.map(normalizeEntry);
+  }
+  const shocks = params.shocks;
+  if (shocks !== null && typeof shocks === "object" && !Array.isArray(shocks)) {
+    return Object.entries(shocks as Record<string, unknown>).map(([key, value]) =>
+      entryFromShock(key, (value ?? {}) as Record<string, unknown>),
+    );
+  }
+  return [];
+}
+
+function normalizeEntry(raw: unknown): ShockRegistryEntry {
+  const entry = (raw ?? {}) as Record<string, unknown>;
+  return {
+    vars: Array.isArray(entry.vars) ? entry.vars.map(String) : [],
+    dist: asDist(entry.dist),
+    loc: Number(entry.loc ?? 0),
+    df: Number(entry.df ?? 5),
+    seed:
+      entry.seed === null || entry.seed === undefined ? null : Number(entry.seed),
+  };
+}
+
+// Invert `_shock_for`: recover the registry entry from a serialized Shock dict.
+// `loc` lives under `mean`/`loc` (scalar or per-variable list) by dist and shape.
+function entryFromShock(
+  key: string,
+  dict: Record<string, unknown>,
+): ShockRegistryEntry {
+  const vars = key
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const dist = asDist(dict.dist);
+  const multivar = Boolean(dict.multivar) || vars.length > 1;
+  const kwargs = (dict.dist_kwargs ?? {}) as Record<string, unknown>;
+  const first = (value: unknown) =>
+    Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);
+  const loc =
+    dist === "norm" && multivar ? first(kwargs.mean) : first(kwargs.loc);
+  return {
+    vars,
+    dist,
+    loc,
+    df: dist === "t" ? Number(kwargs.df ?? 5) : 5,
+    seed: dict.seed === null || dict.seed === undefined ? null : Number(dict.seed),
+  };
+}
+
+function asDist(value: unknown): ShockDistribution {
+  return value === "t" || value === "uni" ? value : "norm";
 }
 
 function SourceLegEditor({

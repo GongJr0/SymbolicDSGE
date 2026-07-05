@@ -47,6 +47,7 @@ import type {
   MCPipelineSpec,
   MCStepCatalogItem,
   MCStepCategory,
+  Role,
   SessionSummary,
 } from "../types";
 import { StepInspector } from "./StepInspector";
@@ -235,6 +236,18 @@ function MCPipelineBuilder({
   );
   const modelsReady =
     session?.models.reference?.solved === true && session.models.dgp?.solved === true;
+
+  // Exogenous shock variables per model role, sourced from the loaded model
+  // configs (independent of the pipeline), for the simulation shock checklist.
+  const exogByRole: Record<Role, string[]> = useMemo(
+    () => ({
+      reference: (session?.models.reference?.shock_specs ?? []).map(
+        (spec) => spec.target,
+      ),
+      dgp: (session?.models.dgp?.shock_specs ?? []).map((spec) => spec.target),
+    }),
+    [session],
+  );
 
   const markDirty = useCallback(() => {
     setNotice("");
@@ -508,6 +521,7 @@ function MCPipelineBuilder({
           theme={theme}
           payloadProducers={payloadProducers}
           availableTraces={availableTraces}
+          exogByRole={exogByRole}
         />
       ),
     },

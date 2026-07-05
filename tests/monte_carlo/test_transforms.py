@@ -62,15 +62,6 @@ def _context(observables: np.ndarray) -> MCContext:
     )
 
 
-def _stub_dgp_with_shocks(*targets: str) -> SimpleNamespace:
-    """Mirror catalog tests' fake-DGP shape — `build_pipeline` reads
-    ``dgp.config.shock_map`` for simulation params, nothing else."""
-    from sympy import Symbol
-
-    shock_map = {Symbol(f"e_{t}"): Symbol(t) for t in targets}
-    return SimpleNamespace(config=SimpleNamespace(shock_map=shock_map))
-
-
 # ---- unit tests for the ops ---------------------------------------------
 
 
@@ -550,7 +541,7 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
     assert wvar.params["payload_key"] == "rvar"
 
     # Catalog-driven compile succeeds with the bound params.
-    pipeline = build_pipeline(ordered, dgp=_stub_dgp_with_shocks("g", "z"))
+    pipeline = build_pipeline(ordered)
     assert [step.name for step in pipeline.per_rep_steps] == names
 
 
@@ -698,7 +689,7 @@ def test_build_pipeline_emits_transform_mcstep_with_bound_params() -> None:
         ],
     )
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    pipeline = build_pipeline(ordered, dgp=_stub_dgp_with_shocks("g", "z"))
+    pipeline = build_pipeline(ordered)
     names = [step.name for step in pipeline.per_rep_steps]
     assert names == ["datagen", "rmean", "normality"]
     rm_step = pipeline.per_rep_steps[1]

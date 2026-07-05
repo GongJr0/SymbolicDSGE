@@ -270,18 +270,18 @@ def build_pipeline(
     ordered: Sequence[NodeSpec],
     postprocs: Sequence[PostprocSpec] = (),
     *,
-    dgp: SolvedModel | None = None,
-    reference: SolvedModel | None = None,
     resources: Mapping[str, Any] | None = None,
 ) -> MCPipeline:
     """Compile validated, ordered nodes (+ postprocs) into a runnable pipeline.
 
     ``ordered`` are the per-replication nodes in execution order; ``postprocs``
-    are the post-loop ops (a separate terminal phase). ``resources`` reattaches
-    bulk side-channel data the JSON spec only references by key: a ``raw_data``
-    node's arrays (keyed by its ``data_ref``) and a ``custom`` op's callable
-    (keyed by its ``func_ref``). The bundle loader supplies it; for an all-builtin
-    pipeline it can be omitted.
+    are the post-loop ops (a separate terminal phase). No model is needed: every
+    step compiles purely from its parameters (simulation shocks come from the
+    explicit registry, not a model), so a pipeline builds before any model is on
+    hand. ``resources`` reattaches bulk side-channel data the JSON spec only
+    references by key: a ``raw_data`` node's arrays (keyed by its ``data_ref``)
+    and a ``custom`` op's callable (keyed by its ``func_ref``). The bundle loader
+    supplies it; for an all-builtin pipeline it can be omitted.
     """
     resources = resources or {}
     per_rep_steps = []
@@ -294,10 +294,8 @@ def build_pipeline(
             definition = STEP_CATALOG.get(node.step_type)
             if definition is None:
                 raise ValueError(f"Unsupported MC step type: {node.step_type}")
-            # ``dgp`` is only dereferenced by simulation shock generation; other
-            # steps ignore it, so a DGP-free (e.g. raw_data) pipeline still builds.
             per_rep_steps.append(
-                definition.build(node.name, _clean_params(node.params), dgp, reference)
+                definition.build(node.name, _clean_params(node.params))
             )
 
     postproc_steps = []
@@ -308,9 +306,7 @@ def build_pipeline(
             definition = STEP_CATALOG.get(pp.step_type)
             if definition is None:
                 raise ValueError(f"Unsupported MC postproc step type: {pp.step_type}")
-            postproc_steps.append(
-                definition.build(pp.name, _clean_params(pp.params), dgp, reference)
-            )
+            postproc_steps.append(definition.build(pp.name, _clean_params(pp.params)))
     return MCPipeline(per_rep_steps, postproc_steps)
 
 
@@ -388,9 +384,7 @@ def run_pipeline(
         has_dgp=dgp is not None,
     )
     assert reference is not None
-    pipeline = build_pipeline(
-        ordered, postprocs, dgp=dgp, reference=reference, resources=resources
-    )
+    pipeline = build_pipeline(ordered, postprocs, resources=resources)
     return pipeline.run(
         reference=reference,
         dgp=dgp,

@@ -96,6 +96,7 @@ from SymbolicDSGE import Shock
 
 datagen_step = simulation_step(
     T=T,
+    target="dgp",  # (1)!
     shocks={
         "g,z": Shock(T=T, dist="norm", multivar=True, seed=0),
         "r": Shock(T=T, dist="norm", seed=1),
@@ -103,6 +104,8 @@ datagen_step = simulation_step(
     observables=True,
 )
 ```
+
+1. Can be either `"reference"` or `"dgp"` defaulting to `"dgp"`. This determines which model to simulate.
 
 `simulation_step` takes all `kwarg`s that `SolvedModel.sim` accepts.
 Each MC iteration will trigger a simulation with this specification and passthrough the output data.

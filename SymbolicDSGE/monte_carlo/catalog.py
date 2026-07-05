@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Literal, cast
+from typing import Any, Callable, Literal, cast
 
 import numpy as np
 
@@ -41,9 +41,6 @@ from .operations.transforms import (
 )
 from .mc_constructs import MCStep
 
-if TYPE_CHECKING:
-    from ..core.solved_model import SolvedModel
-
 #: Series a diagnostic/regression step may read from an upstream context.
 INPUT_SOURCES = [
     "states",
@@ -59,9 +56,7 @@ INPUT_SOURCES = [
 FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
 
 StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
-CompileParams = Callable[
-    [dict[str, Any], "SolvedModel | None", "SolvedModel | None"], dict[str, Any]
-]
+CompileParams = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -140,16 +135,13 @@ class StepDefinition:
             "fields": [spec.to_dict() for spec in self.fields],
         }
 
-    def build(
-        self,
-        name: str,
-        params: dict[str, Any],
-        dgp: SolvedModel | None,
-        reference: SolvedModel | None = None,
-    ) -> MCStep:
-        """Compile cleaned ``params`` into an :class:`MCStep` via the factory."""
+    def build(self, name: str, params: dict[str, Any]) -> MCStep:
+        """Compile cleaned ``params`` into an :class:`MCStep` via the factory.
+
+        No model is consulted: every step compiles purely from its parameters
+        (simulation shocks come from the explicit registry, not a model)."""
         if self.compile_params is not None:
-            params = self.compile_params(params, dgp, reference)
+            params = self.compile_params(params)
         return self.factory(name=name, **params)
 
 
@@ -175,56 +167,70 @@ def _integer_or_keyword(
         ) from exc
 
 
-def _build_generated_shocks(
-    model: SolvedModel | None, params: dict[str, Any]
-) -> dict[str, Shock] | None:
-    if model is None:
+def _shock_for(
+    vars_: list[str], dist: str, loc: float, df: float, seed: int | None, T: int
+) -> Shock:
+    """Build one :class:`Shock` for a shock-registry entry.
+
+    ``multivar`` is derived from the selection: a joint shock when more than one
+    variable is chosen. Uniform is univariate only (no joint uniform is
+    implemented), so a ``uni`` entry must select exactly one variable. No model
+    is consulted; the variables are exactly what the user chose.
+    """
+    n = len(vars_)
+    multivar = n > 1
+    if dist == "uni" and multivar:
         raise ValueError(
-            "A solved model is required to generate simulation shocks; pass "
-            "explicit `shocks` to author a simulation step without one."
+            "A 'uni' shock is univariate; select exactly one variable per "
+            "uniform entry (use separate entries for independent uniform shocks)."
         )
-    T = int(params["T"])
-    distribution_value = str(params.pop("distribution", "norm"))
-    if distribution_value not in {"norm", "t", "uni"}:
-        raise ValueError(f"Unsupported shock distribution: {distribution_value}")
-    distribution = cast(Literal["norm", "t", "uni"], distribution_value)
-    seed_value = params.pop("seed", 0)
-    seed = None if seed_value is None else int(seed_value)
-    loc = float(params.pop("loc", 0.0))
-    df = float(params.pop("df", 5.0))
-    targets = [str(target) for target in model.config.shock_map.values()]
-    if not targets:
-        return None
-
-    if distribution in {"norm", "t"} and len(targets) > 1:
-        kwargs: dict[str, Any] = (
-            {"loc": [loc] * len(targets), "df": df}
-            if distribution == "t"
-            else {"mean": [loc] * len(targets)}
+    if dist == "norm":
+        dist_kwargs: dict[str, Any] = {"mean": [loc] * n} if multivar else {"loc": loc}
+    elif dist == "t":
+        dist_kwargs = (
+            {"loc": [loc] * n, "df": df} if multivar else {"loc": loc, "df": df}
         )
-        return {
-            ",".join(targets): Shock(
-                T=T,
-                dist=distribution,
-                multivar=True,
-                seed=seed,
-                dist_kwargs=kwargs,
-            )
-        }
+    elif dist == "uni":
+        dist_kwargs = {"loc": loc}
+    else:
+        raise ValueError(f"Unsupported shock distribution: {dist!r}")
+    return Shock(
+        T=T,
+        dist=cast(Literal["norm", "t", "uni"], dist),
+        multivar=multivar,
+        seed=seed,
+        dist_kwargs=dist_kwargs,
+    )
 
+
+def _shocks_from_registry(
+    registry: list[dict[str, Any]], T: int
+) -> dict[str, Shock] | None:
+    """Compile an explicit shock registry into a ``{key: Shock}`` mapping.
+
+    Each entry is ``{vars, dist, loc, df, seed}``; the key is the joined variable
+    names. No model is read: the variables are the user's explicit selection.
+    """
     shocks: dict[str, Shock] = {}
-    for index, target in enumerate(targets):
-        kwargs = {"loc": loc}
-        if distribution == "t":
-            kwargs["df"] = df
-        shocks[target] = Shock(
-            T=T,
-            dist=distribution,
-            multivar=False,
-            seed=None if seed is None else seed + index,
-            dist_kwargs=kwargs,
+    for entry in registry:
+        vars_ = [str(v) for v in entry.get("vars", ())]
+        if not vars_:
+            raise ValueError(
+                "Each shock registry entry must select at least one variable."
+            )
+        key = ",".join(vars_)
+        if key in shocks:
+            raise ValueError(f"Duplicate shock entry for {key!r} in the registry.")
+        seed_value = entry.get("seed")
+        shocks[key] = _shock_for(
+            vars_,
+            str(entry.get("dist", "norm")),
+            float(entry.get("loc", 0.0)),
+            float(entry.get("df", 5.0)),
+            None if seed_value is None else int(seed_value),
+            T,
         )
-    return shocks
+    return shocks or None
 
 
 _REGRESSION_ALLOWED_BY_KIND: dict[str, set[str]] = {
@@ -290,53 +296,33 @@ def _coerce_shock_mapping(value: Any) -> dict[str, Shock]:
     return out
 
 
-def _compile_simulation(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
+    # No model is consulted. Shocks are either explicit (a ``{key: Shock}``
+    # mapping from library authoring) or come from the explicit registry the
+    # user authored.
     params = dict(params)
     params["seed_increment"] = _integer_or_keyword(
         params.get("seed_increment", "auto"),
         keywords={"auto"},
         field_name="seed_increment",
     )
+    registry = params.pop("shock_registry", None)
     if params.get("shocks") is not None:
-        # Explicit (library-authored or bundle-loaded) shocks: pass them through
-        # instead of generating from the GUI shorthand.
         params["shocks"] = _coerce_shock_mapping(params["shocks"])
-        for key in ("distribution", "seed", "loc", "df"):
-            params.pop(key, None)
-    else:
-        # Generated shocks come from the model being simulated: the DGP by
-        # default, or the reference when ``target="reference"``.
-        target = str(params.get("target", "dgp"))
-        model = reference if target == "reference" else dgp
-        if model is None:
-            raise ValueError(
-                f"A solved {target} model is required to generate simulation "
-                "shocks; pass explicit `shocks` to author a simulation step "
-                "without one."
-            )
-        params["shocks"] = _build_generated_shocks(model, params)
+    elif registry:
+        params["shocks"] = _shocks_from_registry(registry, int(params["T"]))
+    # Empty registry and no explicit shocks -> deterministic sim; the op treats
+    # ``shocks=None`` as a zero shock matrix.
     return params
 
 
-def _compile_filter(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_filter(params: dict[str, Any]) -> dict[str, Any]:
     params = dict(params)
     params.pop("filter_key", None)
     return params
 
 
-def _compile_wald(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_wald(params: dict[str, Any]) -> dict[str, Any]:
     params = dict(params)
     kind = str(params.get("kind", "mean"))
     target_key = "target_vector" if kind == "mean" else "target_matrix"
@@ -353,11 +339,7 @@ def _compile_wald(
     return params
 
 
-def _compile_regression(
-    params: dict[str, Any],
-    dgp: SolvedModel | None,
-    reference: SolvedModel | None = None,
-) -> dict[str, Any]:
+def _compile_regression(params: dict[str, Any]) -> dict[str, Any]:
     return _regression_params(params)
 
 
@@ -387,16 +369,7 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
             FieldSpec("observables", "Observables", "boolean", True),
             FieldSpec("shock_scale", "Shock scale", "number", 1.0),
             FieldSpec("seed_increment", "Seed increment", "text", "auto"),
-            FieldSpec(
-                "distribution",
-                "Distribution",
-                "select",
-                "norm",
-                options=("norm", "t", "uni"),
-            ),
-            FieldSpec("seed", "Initial seed", "number", 0),
-            FieldSpec("loc", "Location", "number", 0.0),
-            FieldSpec("df", "Degrees of freedom", "number", 5.0),
+            FieldSpec("shock_registry", "Shocks", "shock_registry", []),
         ),
     ),
     StepDefinition(
