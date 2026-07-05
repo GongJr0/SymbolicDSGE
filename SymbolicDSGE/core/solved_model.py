@@ -462,17 +462,36 @@ class SolvedModel:
         )
         shock_stds = conf.calibration.shock_std
 
+        # This method is the per-run anchor, so every shock validation lives
+        # here in one pass over the spec. Each entry's variables must be
+        # exogenous, and each exogenous variable may be driven by at most one
+        # entry. A variable shared across two multivar keys (for example "g,z"
+        # and "g,r") is caught here; an exact duplicate key cannot reach this
+        # point because the shocks mapping deduplicates it upstream.
+        exog_names = list(self.compiled.var_names[: self.compiled.n_exog])
+        exog_set = set(exog_names)
+        owner: dict[str, str] = {}
+        for name in shocks:
+            members = [n.strip() for n in name.split(",")] if "," in name else [name]
+            for member in members:
+                if member not in exog_set:
+                    where = f" in entry {name!r}" if "," in name else ""
+                    raise ValueError(
+                        f"Shock variable {member!r}{where} is not an exogenous "
+                        f"model variable. Valid shock variables: {exog_names}."
+                    )
+                if member in owner:
+                    raise ValueError(
+                        f"Shock variable {member!r} is driven by more than one "
+                        f"shock entry ({owner[member]!r} and {name!r}); each "
+                        "exogenous variable may appear in at most one entry."
+                    )
+                owner[member] = name
+
         for name, shock in shocks.items():
             if "," in name:
                 # Multi-Var
                 multi_names = [n.strip() for n in name.split(",")]
-
-                # All names must be exogenous and grouped names must not be re-allocated as univariate shocks
-                assert all(
-                    (n in self.compiled.var_names[: self.compiled.n_exog])
-                    and (n not in shocks)
-                    for n in multi_names
-                )
                 indices = [self.compiled.idx[n] for n in multi_names]
                 perm = np.argsort(indices)
                 multi_names_sorted = [multi_names[i] for i in perm]
@@ -520,11 +539,7 @@ class SolvedModel:
                         f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
                     )
             else:
-                # Uni-Var
-                if name not in self.compiled.var_names[: self.compiled.n_exog]:
-                    raise ValueError(
-                        f"Shock variable {name} not found in exogenous model variables."
-                    )
+                # Uni-Var (target validity already checked in the pass above)
                 idx = self.compiled.idx[name]
                 if callable(shock):
                     sym = reverse_shock_map[name]
