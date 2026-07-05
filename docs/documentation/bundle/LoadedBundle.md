@@ -39,12 +39,12 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | spec | `#!python EstimationSpec` | The text-only run specification. Always present when `LoadedEstimation` is. |
-| result | `#!python OptimizationResultMeta \| MCMCResultMeta \| None` | Result metadata (scalar slice). Discriminated by `"type": "mcmc" \| "optimization"` in the embedded JSON. |
+| result | `#!python OptimizationResult \| MCMCResult \| None` | The reconstructed first-class result — an `OptimizationResult` (MLE/MAP) or `MCMCResult` (MCMC), rebuilt from the stored metadata (plus the `posterior` traces for MCMC). `None` when the bundle carries no estimation result. |
 | observed | `#!python NDArray[np.float64] \| None` | Observed `y` matrix shaped `(n, k)`, reconstructed from the CSV or Parquet member. |
 | posterior | `#!python dict[str, NDArray] \| None` | MCMC posterior columns — `{"samples": (n_draws, n_params), "logpost": (n_draws,)}` by convention. |
 
-???+ note "Pairing metadata with traces"
-    `MCMCResultMeta` carries only the scalar slice. To reconstruct the full sampling diagnostics or repaint the GUI, pair the metadata with `posterior` — both come back as part of the same `LoadedEstimation` so callers don't have to track member paths.
+???+ note "Results come back reconstructed — no re-run needed"
+    `result` is the same first-class object the run produced: the loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces. **If an estimation was bundled with results, you don't need to re-run anything** — read `loaded.estimation.result` (an `OptimizationResult` / `MCMCResult`) directly, with full diagnostics. The raw `posterior` columns stay on `LoadedEstimation.posterior` for callers that want the arrays. Re-running (below) is only for a bundle that stored the spec without a result.
 
 ???+ tip "Re-running a loaded estimation"
     `spec.to_estimator_inputs()` lowers the spec to an [`EstimatorInputs`](index.md#estimation-spec-and-result-types) — `estimated_params`, `theta0`, `priors` (built `Prior` objects), and `bounds` — directly feedable to `#!python DSGESolver.estimate(...)`. The lowering lives in the core library, so a loaded estimation can be re-run without the `[ui]` extra. See the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-an-estimation-from-a-loaded-bundle).

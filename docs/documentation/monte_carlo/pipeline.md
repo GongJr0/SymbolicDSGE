@@ -55,7 +55,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | reference | Reference `SolvedModel` used by reference-side operations such as Kalman filtering. |
-| dgp | Optional DGP `SolvedModel`. Required by `simulation_step`, but not required by `raw_data_step`. |
+| dgp | Optional DGP `SolvedModel`. Required by `simulation_step` when it targets the DGP (`target="dgp"`, the default); not required for `target="reference"` or `raw_data_step`. |
 | n_rep | Number of Monte Carlo replications. |
 | retain_payloads | Store each successful replication's payload dictionary in the result container. |
 | retain_test_results | Store scalar `TestResult` objects from each successful replication. |

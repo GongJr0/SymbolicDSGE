@@ -184,7 +184,6 @@ Estimator.mcmc(
 | logpost | `#!python float` | Log-posterior at optimum |
 | nfev | `#!python int` | Objective evaluations |
 | nit | `#!python int | None` | Iterations |
-| raw | `#!python scipy.optimize.OptimizeResult` | Raw scipy output |
 
 ### MCMCResult
 | __Field__ | __Type__ | __Description__ |

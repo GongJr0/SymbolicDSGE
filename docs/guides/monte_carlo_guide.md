@@ -25,8 +25,7 @@ This demonstration focuses on the first case where two models are present.
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
-from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.monte_carlo.operations.core import (
     reference_filter_step,
     simulation_step,
@@ -65,15 +64,21 @@ We will determine whether the reference model is misspecified relative to the DG
 ## Pipeline Setup
 
 ```python
+from SymbolicDSGE.monte_carlo import MCPipeline
 
 T = 200  # (1)!
 n_obs = len(reference.compiled.observable_names)  # (2)!
 
-pipeline = MCPipeline([...])
+pipeline = MCPipeline(
+    per_rep_steps=[...],  # (3)!
+    postproc_steps=[...],  # (4)!
+    )
 ```
 
 1. Length of each simulated sample.
 2. Number of observables the model(s) have.
+3. Steps here are executed per replication.
+4. This field is reserved for `POSTPROC` steps; these execture once after the replication loop concludes.
 
 `MCPipeline` is used to compile the steps that need to be executed for each repetition.
 Every step of `MCPipeline` must be an `MCStep` object.
@@ -87,6 +92,8 @@ The pipeline will be built using the step-generating functions under `SymbolicDS
 Using the `simulation_step` function, we generate an `MCStep` object that samples the DGP model with a given simulation specification.
 
 ```python
+from SymbolicDSGE import Shock
+
 datagen_step = simulation_step(
     T=T,
     shocks={
@@ -113,8 +120,8 @@ kf_step = reference_filter_step(estimate_R_diag=False)
 
 ### Testing
 
-With filtered outputs, we run two test steps using the `wald_test_step` function.
-One test checks mean equivalence of observables, and the other checks the second moment.
+With filtered outputs, we run a test step using the `wald_test_step` function.
+`kind = "mean"` and `target = np.zeros(n_obs)` tests the first moment of the standardized innovations against a zero vector.
 
 ```python
 
@@ -124,13 +131,6 @@ mean_test_step = wald_test_step(
     target=np.zeros(n_obs),  # (3)!
     kind="mean",  # (4)!
     burn_in=20,  # (5)!
-)
-second_moment_test_step = wald_test_step(
-    "std_innov_second_moment",
-    source="std_innov",
-    target=np.eye(n_obs),
-    kind="second_moment",
-    burn_in=20,
 )
 ```
 
@@ -142,14 +142,132 @@ second_moment_test_step = wald_test_step(
 
 Each test returns a `TestResult` object and the results are aggregated to produce an MC summary.
 
+### Built-in and Custom Transforms
+
+A special wrapper `numpy_operation` is used when defining custom transforms to restrict the namespace availabe. This eliminates some obvious security like `exec` and `eval` on top of restricting what portion of `numpy` is allowed. All custom transforms are parsed as `NumpyCustomFunc` regardless of the decorator. Decorating allows to show intent on the author's side. A custom transform function is defined as follows:
+
+```python
+from SymbolicDSGE.monte_carlo import numpy_operation
+from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+
+@numpy_operation
+def custom_standardize(
+    context: MCContext,  # (1)! 
+    reference: SolvedModel, # (2)!
+    dgp: SolvedModel | None, # (3)!
+    rep_idx: int  # (4)!
+) -> np.ndarray | None:
+    del reference, dgp, rep_idx  # (5)!
+    data: MCData = context.require_data()  # (6)!
+    obs = data.observables
+
+    if obs is not None:
+        return (obs - obs.mean(axis=0)) / obs.std(axis=0)
+    
+    return None
+```
+
+1. `context` is a required argument for all custom transforms. It is used to access the current `MCContext` object at a given replication. `require_data()` and `require_payload()` are the two main methods to access data and payloads.
+2. `reference` is the reference model used in the pipeline. It is a required argument.
+3. `dgp` is the data-generating model used in the pipeline. It is a required argument.
+4. `rep_idx` is the current replication index. It is a required argument.
+5. Unused arguments are deleted both for clarity and to avoid linter warnings.
+6. Refer to [MC Core Containers](../documentation/monte_carlo/core_containers.md) for more information on the `MCData` object and its attributes.
+
+???+ note "Built-in Transforms"
+    There are multiple built-in transforms available in `SymbolicDSGE` and [standardization](../documentation/monte_carlo/operations/transforms/standardize.md) is one of them. All built-in transforms are documented and `standardize_step` is used as an example in this guide.
+
+With a custom function defined, the step can be created using the generic `transform_step` function.
+
+```python
+from SymbolicDSGE.monte_carlo.operations.transforms import transform_step, standardize_step
+
+custom_std = transform_step(
+    "custom_std",  # (1)!
+    func=custom_standardize,  # (2)!
+    store_key=None, # (3)!
+)
+
+builtin_std = standardize_step(
+    "builtin_std",
+    source="innov",  # (4)!
+)
+
+```
+
+1. Name of the step. Used as the key in the payload dictionary when `store_key` is `None`.
+2. The function to be executed. Any callable with the signature of a custom transform can be used here.
+3. The key to store the output of the transform in the payload dictionary. If `None`, the step name is used as the key.
+4. The source of the data to be transformed. In this case, it is the `innov` attribute of the `FilterResult` object returned by the kalman filter.
+
+### Post-Processing
+
+Post-processing is executed separately from the replication loop. The `kde_step` function is the only built-in. However, custom post-processing steps are more permissive than their transform counterparts. These steps are encapsulated by a `pandas_operation` decorator which extends the `numpy_operation` namespace with allowed `pandas` functionality. Post-processing functions do not have access to the per-replication context and data objects. Instead, they receive a flattened `traces` dictionary containing payloads, test results, and regression results.
+
+Access to a given given array follows a `"."` separated path, for example, the custom standardization step (which is a payload) is accessed as `traces["payload.custom_std"]`. Payloads contain whatever the step returned, but test and regression results are structured:
+
+__Test Traces:__
+
+- `"test.{name}.pval"`: Array of p-values for each replication.
+- `"test.{name}.statistic"`: Array of test statistics for each replication.
+- `"test.{name}.status"`: Array of test statuses for each replication.
+
+__Regressions Traces:_
+
+- `"regression.{name}.coef"`: 2D array of regression coefficients for each replication.
+- `"regression.{name}.r2"`: Array of R-squared values for each replication.
+- `"regression.{name}.status"`: Array of regression statuses for each replication.
+
+A custom post-processing function is defined as follows:
+
+```python
+from SymbolicDSGE.monte_carlo import pandas_operation
+
+@pandas_operation
+def get_std_obs_mean(*, traces: dict[str, Any]) -> pd.Series:
+    return traces["payload.custom_std"].mean(axis=0)
+```
+
+To create a step out of this function, we use `postproc_step`:
+
+```python
+from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step, kde_step
+
+custom_postproc = postproc_step(
+    "custom_postproc",  # (1)!
+    func=get_std_obs_mean,  # (2)!
+    store_key=None,  # (3)!
+)
+
+builtin_kde = kde_step(
+    "builtin_kde",
+    trace="payload.builtin_std",  # (4)!
+    grid_points=100,  # (5)!
+)
+
+```
+
+1. Name of the step. Used as the key in the traces dictionary when `store_key` is `None`.
+2. The function to be executed. Any callable with the signature of a custom post-processing function can be used here.
+3. The key to store the output of the post-processing function in the traces dictionary. If `None`, the step name is used as the key.
+4. The trace to be used for the KDE. This is a payload in this case, but it can also be a test or regression result.
+5. The number of grid points to use for the KDE. This is only applicable to the built-in KDE step.
+
+
 ### Complete Pipeline
 
 ```python
-pipeline = MCPipeline([
+pipeline = MCPipeline(
+    per_rep_steps=[
     datagen_step,
     kf_step,
+    custom_std,
+    builtin_std,
     mean_test_step,
-    second_moment_test_step,
+],
+postproc_steps=[
+    custom_postproc,
+    builtin_kde,
 ])
 ```
 
@@ -162,16 +280,33 @@ The `MCPipeline` object explains the procedure that will run per iteration.
 mc = pipeline.run(
     reference=reference,
     dgp=dgp,
-    n_rep=500,
-    retain_payloads=False,
-    retain_test_results=False,
+    n_rep=1000,
+    retain_payloads=False,  # (1)!
+    retain_test_results=False,  # (2)!
+    retain_contexts=False,  # (3)!
+    verbosity=2,  # (4)!
 )
-
-mc.succeeded, mc.n_successful
 ```
 
+1. Whether to keep payloads in the result or discard after the replication loop. Depending on the type of the payload, this can be a large amount of data.
+2. Whether to keep test result objects in the result or discard after the replication loop. Results are automatically aggregated into traces; this shouldn't be enabled unless you need access to the full `TestResult` featureset per replication.
+3. Whether to keep contexts in the result or discard after the replication loop. Contexts are memory-heavy and can cause you to run out of memory for large runs. Proceed with caution if you need to enable this option.
+4. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints throughout for the loop and time elapsed for the post-processing, `2` prints per-step throughput for the loop and time elapsed for the post-processing.
+
 ```bash
->>> (True, 500)
+>>> MC run concluded successfully with 1434.06 it/s.
+Per-step Report:
+
+    datagen: 0 faliures, 3724.37 it/s.
+    filter: 0 faliures, 3529.53 it/s.
+    custom_std: 0 faliures, 20365.73 it/s.
+    builtin_std: 0 faliures, 20673.25 it/s.
+    std_innov_mean: 0 faliures, 25025.34 it/s.
+
+Post-processing Report:
+
+    custom_postproc: Succeeded in 0.0003s.
+    builtin_kde: Succeeded in 1.3634s.
 ```
 
 This returns a `MCPipelineResult` object containing test summaries for each test step executed in the pipeline.
@@ -196,14 +331,12 @@ print(summary.round(4))
 ```
 
 ```bash
->>>                          mean_statistic  mean_pval  rejection_rate  ci_low  \
-std_innov_mean                    5.652      0.363           0.224   0.190   
-std_innov_second_moment        1400.913      0.000           1.000   0.992   
+>>>             mean_statistic  mean_pval  rejection_rate  ci_low  ci_high
+std_innov_mean           2.698      0.555           0.053   0.041    0.069
 
-                         ci_high  
-std_innov_mean             0.263  
-std_innov_second_moment    1.000  
 ```
+
+Regression results are accessed similarly in `MCPipelineResult.regression_summaries`; and post-processing are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
 
 ## Conclusion
 
