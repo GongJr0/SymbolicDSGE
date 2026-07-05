@@ -832,21 +832,21 @@ def test_pipeline_result_reports_overall_and_step_performance() -> None:
 
     lines: list[str] = []
     report_mc_performance(out.meta, print_func=lines.append)
-    assert lines[0].startswith("MC run concluded successfully with ")
-    assert lines[0].endswith(" it/s.")
+    assert lines[0].startswith("MC run concluded successfully in ")
+    assert lines[0].endswith("it/s.")
 
     lines.clear()
     out.report_step_performance(print_func=lines.append)
     # Overall header, then an indented it/s line per step. The post-processing
     # section is suppressed entirely because this pipeline has no postproc steps.
-    assert lines[0].startswith("MC run concluded successfully with ")
-    assert any("datagen" in line and line.endswith(" it/s.") for line in lines)
-    assert any("state_mean" in line and line.endswith(" it/s.") for line in lines)
+    assert lines[0].startswith("MC run concluded successfully in ")
+    assert any("datagen" in line and line.endswith("s).") for line in lines)
+    assert any("state_mean" in line and line.endswith("s).") for line in lines)
     assert not any("Post-processing Report" in line for line in lines)
 
     lines.clear()
     report_mc_step_performance(out.meta, print_func=lines.append)
-    assert lines[0].startswith("MC run concluded successfully with ")
+    assert lines[0].startswith("MC run concluded successfully in ")
 
 
 def test_pipeline_run_verbosity_controls_performance_output(
@@ -869,16 +869,16 @@ def test_pipeline_run_verbosity_controls_performance_output(
     pipeline.run(reference=reference, n_rep=2)
     lines = capsys.readouterr().out.strip().splitlines()
     assert len(lines) == 1
-    assert lines[0].startswith("MC run concluded successfully with ")
+    assert lines[0].startswith("MC run concluded successfully in ")
 
     pipeline.run(reference=reference, n_rep=2, verbosity=0)
     assert capsys.readouterr().out == ""
 
     pipeline.run(reference=reference, n_rep=2, verbosity=2)
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0].startswith("MC run concluded successfully with ")
-    assert any("datagen" in line and line.endswith(" it/s.") for line in lines)
-    assert any("state_mean" in line and line.endswith(" it/s.") for line in lines)
+    assert lines[0].startswith("MC run concluded successfully in ")
+    assert any("datagen" in line and line.endswith("s).") for line in lines)
+    assert any("state_mean" in line and line.endswith("s).") for line in lines)
     assert not any("Post-processing Report" in line for line in lines)
 
     with pytest.raises(ValueError, match="verbosity"):
@@ -1403,13 +1403,13 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
 
     lines: list[str] = []
     out.report_performance(print_func=lines.append)
-    assert lines[0].startswith("MC run concluded unsuccessfully with ")
+    assert lines[0].startswith("MC run concluded unsuccessfully in ")
 
     lines.clear()
     report_mc_step_performance(out.meta, print_func=lines.append)
-    assert lines[0].startswith("MC run concluded unsuccessfully with ")
-    assert any("datagen" in line and line.endswith(" it/s.") for line in lines)
-    assert any("state_mean" in line and line.endswith(" it/s.") for line in lines)
+    assert lines[0].startswith("MC run concluded unsuccessfully in ")
+    assert any("datagen" in line and line.endswith("s).") for line in lines)
+    assert any("state_mean" in line and line.endswith("s).") for line in lines)
 
 
 def test_mc_operation_utils_validate_seeded_shock_specs() -> None:

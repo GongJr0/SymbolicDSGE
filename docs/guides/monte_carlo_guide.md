@@ -294,19 +294,19 @@ mc = pipeline.run(
 4. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints throughout for the loop and time elapsed for the post-processing, `2` prints per-step throughput for the loop and time elapsed for the post-processing.
 
 ```bash
->>> MC run concluded successfully with 1434.06 it/s.
+>>> MC run concluded successfully in 0.72s with 1388.50 it/s.
 Per-step Report:
 
-    datagen: 0 faliures, 3724.37 it/s.
-    filter: 0 faliures, 3529.53 it/s.
-    custom_std: 0 faliures, 20365.73 it/s.
-    builtin_std: 0 faliures, 20673.25 it/s.
-    std_innov_mean: 0 faliures, 25025.34 it/s.
+    datagen: 0 faliures, 3753.78 it/s (0.27s).
+    filter: 0 faliures, 3255.05 it/s (0.31s).
+    custom_std: 0 faliures, 19788.42 it/s (0.05s).
+    builtin_std: 0 faliures, 20658.72 it/s (0.05s).
+    std_innov_mean: 0 faliures, 25211.78 it/s (0.04s).
 
 Post-processing Report:
 
     custom_postproc: Succeeded in 0.0003s.
-    builtin_kde: Succeeded in 1.3634s.
+    builtin_kde: Succeeded in 1.3382s.
 ```
 
 This returns a `MCPipelineResult` object containing test summaries for each test step executed in the pipeline.

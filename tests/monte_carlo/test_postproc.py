@@ -221,7 +221,7 @@ def test_perf_report_separates_postproc_runtime_from_it_s() -> None:
     lines.clear()
     result.report_step_performance(print_func=lines.append)
     assert lines[0].startswith("MC run concluded")
-    assert any("jb" in line and line.endswith(" it/s.") for line in lines)
+    assert any("jb" in line and line.endswith("s).") for line in lines)
     assert any("Post-processing Report" in line for line in lines)
     pp_line = next(line for line in lines if line.strip().startswith("pp:"))
     assert pp_line.endswith("s.") and "it/s" not in pp_line
