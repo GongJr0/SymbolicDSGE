@@ -20,7 +20,7 @@ The container exists so a non-coding collaborator can run an experiment by openi
 | MCMC posterior | CSV or Parquet | `MCMCResult.samples` + `logpost_trace` |
 | Monte Carlo pipeline | JSON | `PipelineSpec.to_json()` |
 | Monte Carlo result + traces | JSON + CSV/Parquet | `MCPipelineResult` |
-| Simulation prefill | Inline (manifest) | `SimSpec` |
+| Simulation prefill | Inline (manifest) | `{role: SimSpec}` |
 
 ???+ note "Authoring formats"
     Bulk numeric members are written as Parquet by default for size. CSV authoring is also supported — `sdsge-compile --csv-only` keeps everything as CSV, and `sdsge-decompile --csv` re-encodes Parquet members back to CSV. The reader is format-agnostic: a hand-zipped CSV-only bundle and a CLI-built Parquet bundle both validate.

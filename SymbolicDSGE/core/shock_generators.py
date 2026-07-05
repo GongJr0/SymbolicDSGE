@@ -485,11 +485,7 @@ class Shock:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
-        """Rebuild a generator-style Shock from :meth:`to_dict` output.
-
-        A legacy ``"T"`` key (from bundles authored before the horizon moved to
-        generation time) is ignored; the horizon is supplied at ``.generate``.
-        """
+        """Rebuild a generator-style Shock from :meth:`to_dict` output."""
         dist = data["dist"]
         if dist not in {"norm", "t", "uni"}:
             raise ValueError(

@@ -150,11 +150,12 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 
 ```python
 BundleBuilder.set_simulation(
+    role: str,
     simulation: SimSpec,
 ) -> BundleBuilder
 ```
 
-Attach the simulation prefill. `SimSpec` rides inline in the manifest rather than as its own member.
+Attach a simulation prefill under `role`. Prefills ride inline in the manifest as a `{role: SimSpec}` map rather than as their own members; call it once per role to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"exp1"`).
 
 &nbsp;
 

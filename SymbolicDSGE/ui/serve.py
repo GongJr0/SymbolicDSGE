@@ -97,8 +97,10 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
         mc_pipeline_dict = loaded.mc.spec.to_dict()
         mc_wire = loaded.mc.wire()
 
-    simulation_dict: dict[str, Any] | None = (
-        loaded.simulation.to_dict() if loaded.simulation is not None else None
+    simulation_dict: dict[str, dict[str, Any]] | None = (
+        {role: spec.to_dict() for role, spec in loaded.simulation.items()}
+        if loaded.simulation is not None
+        else None
     )
 
     return Workspace(

@@ -10,11 +10,14 @@ here rather than as its own member.
 
 from __future__ import annotations
 
+from ..core.shock_generators import Shock
+
 import json
 import posixpath
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_args
+from typing import Any, Literal, get_args, TypedDict
+from numpy import ndarray
 
 #: Bundle format version. Bump on breaking manifest changes; readers reject a
 #: ``sdsge_version`` they do not recognise.
@@ -60,36 +63,17 @@ def format_for_path(path: str) -> str:
         ) from exc
 
 
-@dataclass
-class ShockGeneration:
-    """RNG settings for replayed shock generation (determinism via seed)."""
-
-    dist: str = "norm"
-    seed: int | None = 0
-    loc: float = 0.0
-    df: float = 5.0
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "dist": self.dist,
-            "seed": None if self.seed is None else int(self.seed),
-            "loc": float(self.loc),
-            "df": float(self.df),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> ShockGeneration:
-        seed = data.get("seed", 0)
-        return cls(
-            dist=str(data.get("dist", "norm")),
-            seed=None if seed is None else int(seed),
-            loc=float(data.get("loc", 0.0)),
-            df=float(data.get("df", 5.0)),
-        )
+class ShockParameters(TypedDict):
+    dist: str  # Cannot serialize custom distributions.
+    multivar: bool
+    seed: int | None
+    dist_args: tuple
+    dist_kwargs: dict[str, Any]
+    shock_arr: ndarray | None
 
 
 @dataclass
-class SimSpec:
+class SimSpec(Mapping):
     """Simulation/output-tab prefill (#141).
 
     No simulation results are stored — replaying these specs against the
@@ -97,55 +81,56 @@ class SimSpec:
     Raw shock paths, when present, are carried inline (they are small).
     """
 
-    role: str = "reference"
     T: int = 0
+    x0: list[float] | ndarray | None = None
     observables: bool = True
     shock_scale: float = 1.0
-    shock_generation: ShockGeneration | None = None
-    shock_std: dict[str, float] = field(default_factory=dict)
-    shock_corr: dict[str, float] = field(default_factory=dict)
-    shocks: dict[str, list[float]] | None = None
+    shocks: dict[str, ShockParameters] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "role": self.role,
+        """The JSON-serializable form: shocks stay as their ``Shock.to_dict``."""
+        return {
             "T": int(self.T),
+            "x0": None if self.x0 is None else [float(x) for x in self.x0],
             "observables": bool(self.observables),
             "shock_scale": float(self.shock_scale),
-            "shock_std": {str(k): float(v) for k, v in self.shock_std.items()},
-            "shock_corr": {str(k): float(v) for k, v in self.shock_corr.items()},
+            "shocks": self.shocks,
         }
-        if self.shock_generation is not None:
-            out["shock_generation"] = self.shock_generation.to_dict()
-        if self.shocks is not None:
-            out["shocks"] = {
-                str(k): [float(x) for x in v] for k, v in self.shocks.items()
-            }
+
+    def to_sim_kwargs(self) -> dict[str, Any]:
+        """The ``SolvedModel.sim`` keyword form: shocks as live ``Shock`` objects.
+
+        ``sim`` materializes each ``Shock`` into its horizon-bound draw at the
+        simulation boundary, so this is exactly ``model.sim(**spec)``.
+        """
+        out = self.to_dict()
+        out["shocks"] = (
+            {k: Shock.from_dict(v) for k, v in self.shocks.items()}
+            if self.shocks
+            else None
+        )
         return out
+
+    # Mapping protocol: a SimSpec unpacks straight into ``model.sim(**spec)``.
+    # The view is the materialized sim kwargs, distinct from ``to_dict``'s
+    # JSON-serializable form.
+    def __getitem__(self, key: str) -> Any:
+        return self.to_sim_kwargs()[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.to_sim_kwargs())
+
+    def __len__(self) -> int:
+        return len(self.to_sim_kwargs())
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SimSpec:
-        gen = data.get("shock_generation")
-        shocks = data.get("shocks")
         return cls(
-            role=str(data.get("role", "reference")),
             T=int(data.get("T", 0)),
+            x0=data.get("x0", None),
             observables=bool(data.get("observables", True)),
             shock_scale=float(data.get("shock_scale", 1.0)),
-            shock_generation=(
-                ShockGeneration.from_dict(gen) if gen is not None else None
-            ),
-            shock_std={
-                str(k): float(v) for k, v in dict(data.get("shock_std", {})).items()
-            },
-            shock_corr={
-                str(k): float(v) for k, v in dict(data.get("shock_corr", {})).items()
-            },
-            shocks=(
-                {str(k): [float(x) for x in v] for k, v in dict(shocks).items()}
-                if shocks is not None
-                else None
-            ),
+            shocks=data.get("shocks", None),
         )
 
 
@@ -209,7 +194,7 @@ class Manifest:
     created_at: str | None = None
     sdsge_version: int = SDSGE_FORMAT_VERSION
     members: list[Member] = field(default_factory=list)
-    simulation: SimSpec | None = None
+    simulation: dict[str, SimSpec] | None = None
     checksums: dict[str, str] = field(default_factory=dict)
 
     def members_by_kind(self, kind: str) -> list[Member]:
@@ -230,7 +215,7 @@ class Manifest:
         if self.created_at is not None:
             out["created_at"] = self.created_at
         if self.simulation is not None:
-            out["simulation"] = self.simulation.to_dict()
+            out["simulation"] = {k: v.to_dict() for k, v in self.simulation.items()}
         if self.checksums:
             out["checksums"] = dict(self.checksums)
         return out
@@ -251,7 +236,11 @@ class Manifest:
             ),
             sdsge_version=version,
             members=[Member.from_dict(m) for m in data.get("members", [])],
-            simulation=SimSpec.from_dict(sim) if sim is not None else None,
+            simulation=(
+                {k: SimSpec.from_dict(v) for k, v in sim.items()}
+                if sim is not None
+                else None
+            ),
             checksums={
                 str(k): str(v) for k, v in dict(data.get("checksums", {})).items()
             },

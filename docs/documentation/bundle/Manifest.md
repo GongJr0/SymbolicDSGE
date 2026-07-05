@@ -19,7 +19,7 @@ __Fields:__
 | created_at | `#!python str \| None` | UTC ISO-8601 timestamp set at write time. |
 | sdsge_version | `#!python int` | Format version. Readers reject bundles with `sdsge_version > SDSGE_FORMAT_VERSION`. |
 | members | `#!python list[Member]` | Member inventory. Every archive entry has one. |
-| simulation | `#!python SimSpec \| None` | Inline simulation prefill (no separate member). |
+| simulation | `#!python dict[str, SimSpec] \| None` | Inline simulation prefills keyed by role (no separate member). |
 | checksums | `#!python dict[str, str]` | SHA-256 hex digests keyed by member path. |
 
 __Methods:__
@@ -97,49 +97,52 @@ __Recognized kinds (`MEMBER_KINDS`):__
 
 ```python
 @dataclass
-class SimSpec()
+class SimSpec(Mapping)
 ```
 
-Simulation prefill. The receiver clicks **Run** in the GUI to reproduce the author's intended simulation. Stored inline in `Manifest.simulation`, not as a member.
+Simulation prefill. The receiver clicks **Run** in the GUI to reproduce the author's intended simulation. Prefills are stored inline in `Manifest.simulation` as a `{role: SimSpec}` map (one entry per model slot), not as members.
+
+Its fields are exactly the keyword arguments of [`SolvedModel.sim`](../SolvedModel.md), and `SimSpec` is a `Mapping`, so a prefill unpacks straight into a run:
+
+```python
+model.sim(**spec)   # the spec's Shock params are materialized at the sim boundary
+```
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| role | `#!python str` | Active model slot, typically `"reference"`. |
 | T | `#!python int` | Periods to simulate. |
+| x0 | `#!python list[float] \| None` | Initial state vector; zero vector when `None`. |
 | observables | `#!python bool` | Include observable paths in the output. |
 | shock_scale | `#!python float` | Multiplier applied to all shocks. |
-| shock_generation | `#!python ShockGeneration \| None` | RNG settings; `None` if raw shock paths are supplied instead. |
-| shock_std | `#!python dict[str, float]` | Per-shock standard deviation overrides. |
-| shock_corr | `#!python dict[str, float]` | Pairwise shock correlation overrides keyed by `"a,b"` syntax. |
-| shocks | `#!python dict[str, list[float]] \| None` | Optional raw shock paths inline. |
+| shocks | `#!python dict[str, ShockParameters] \| None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are exogenous variable names, `"a,b"` for a joint shock. |
 
-???+ info "Determinism"
-    Sim results are not stored. Replaying the prefill against the preloaded model reproduces the intended run because numpy `PCG64` + a fixed `ShockGeneration.seed` are deterministic.
+???+ info "Two dict views"
+    `SimSpec.to_dict()` is the JSON form written to the manifest (shocks stay as their `Shock.to_dict()` parameter dicts). The `Mapping` view — `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()` — is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T`-horizon draw, so the run is reproducible under a fixed seed.
 
-## `ShockGeneration`
+## `ShockParameters`
 
 ```python
-@dataclass
-class ShockGeneration()
+class ShockParameters(TypedDict)
 ```
 
-RNG settings for replayed shock generation.
+The serialized form of a `Shock` (its `Shock.to_dict()` output), carried per key in `SimSpec.shocks`. A `Shock` is horizon-independent — the period count `T` comes from the `SimSpec`, not the shock.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | dist | `#!python str` | Distribution name: `"norm"` / `"t"` / `"uni"`. |
+| multivar | `#!python bool` | Joint (multivariate) shock when `True`. |
 | seed | `#!python int \| None` | RNG seed for reproducibility. |
-| loc | `#!python float` | Location parameter. |
-| df | `#!python float` | Degrees of freedom (Student's `t`). |
+| dist_args | `#!python tuple` | Positional distribution arguments. |
+| dist_kwargs | `#!python dict[str, Any]` | Distribution keyword arguments (e.g. `loc`, `df`, `mean`). |
 
 ## Example
 
 ```python
-from SymbolicDSGE.bundle import Manifest, Member, SimSpec, ShockGeneration
+from SymbolicDSGE.bundle import Manifest, Member, SimSpec
 
 manifest = Manifest(
     created_by="experiment-1",
@@ -160,11 +163,20 @@ manifest = Manifest(
             columns=["Infl", "Rate"],
         ),
     ],
-    simulation=SimSpec(
-        role="reference",
-        T=25,
-        shock_generation=ShockGeneration(seed=42),
-    ),
+    simulation={
+        "reference": SimSpec(
+            T=25,
+            shocks={
+                "u": {
+                    "dist": "norm",
+                    "multivar": False,
+                    "seed": 42,
+                    "dist_args": [],
+                    "dist_kwargs": {"loc": 0.0},
+                }
+            },
+        ),
+    },
 )
 
 print(manifest.to_json())

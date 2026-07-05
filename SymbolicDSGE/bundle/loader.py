@@ -103,7 +103,7 @@ class LoadedBundle:
     dgp: SolvedModel | None = None
     estimation: LoadedEstimation | None = None
     mc: LoadedMC | None = None
-    simulation: SimSpec | None = None
+    simulation: dict[str, SimSpec] | None = None
 
 
 def build_from(path: str | Path) -> LoadedBundle:

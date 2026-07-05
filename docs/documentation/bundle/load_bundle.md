@@ -34,7 +34,7 @@ __Behavior:__
     - Estimation specs are parsed back into dataclasses, and bundled results are reconstructed as live `OptimizationResult` or `MCMCResult` objects.
     - Monte Carlo pipeline specs are parsed, resources are restored, and `LoadedMC.pipeline` is rebuilt as a live `MCPipeline`.
     - CSV / Parquet members are dispatched by `Member.format` and decoded into numpy arrays.
-3. Inline `SimSpec` is read from the manifest itself.
+3. Inline `{role: SimSpec}` prefills are read from the manifest itself.
 
 ???+ info "Format Agnostic Reader"
     `load_bundle` dispatches each tabular member on `Member.format`. A hand-zipped CSV-only bundle and a CLI-built Parquet bundle both load through the same path. No `[bundle]` extra is required because `parquet-engine` is a regular dependency.

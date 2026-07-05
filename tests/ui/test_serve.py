@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.bundle.manifest import ShockGeneration, SimSpec
+from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
 from SymbolicDSGE.estimation.spec import (
@@ -68,7 +68,18 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     pipeline = PipelineSpec(
         nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})]
     )
-    sim_spec = SimSpec(role="reference", T=8, shock_generation=ShockGeneration(seed=42))
+    sim_spec = SimSpec(
+        T=8,
+        shocks={
+            "u": {
+                "dist": "norm",
+                "multivar": False,
+                "seed": 42,
+                "dist_args": [],
+                "dist_kwargs": {"loc": 0.0},
+            }
+        },
+    )
 
     return (
         BundleBuilder(created_by="serve-test")
@@ -81,7 +92,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
             posterior=posterior,
         )
         .add_mc(pipeline)
-        .set_simulation(sim_spec)
+        .set_simulation("reference", sim_spec)
         .write(tmp_path / "hydrate.sdsge")
     )
 
@@ -215,8 +226,8 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     assert ws.mc_pipeline is not None
     assert ws.mc is None  # no MC result was attached at build time
     assert ws.simulation is not None
-    assert ws.simulation["T"] == 8
-    assert ws.simulation["shock_generation"]["seed"] == 42
+    assert ws.simulation["reference"]["T"] == 8
+    assert ws.simulation["reference"]["shocks"]["u"]["seed"] == 42
 
 
 # -- serve_from dispatch ---------------------------------------------------

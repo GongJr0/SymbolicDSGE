@@ -22,7 +22,7 @@ __Fields:__
 | dgp | `#!python SolvedModel \| None` | Re-solved DGP model, or `None` if absent. |
 | estimation | `#!python LoadedEstimation \| None` | Estimation artifacts, or `None` if `estimation/` was not in the bundle. |
 | mc | `#!python LoadedMC \| None` | Monte Carlo artifacts, or `None` if `montecarlo/` was not in the bundle. |
-| simulation | `#!python SimSpec \| None` | Simulation prefill, or `None` if not set. |
+| simulation | `#!python dict[str, SimSpec] \| None` | Simulation prefills keyed by role, or `None` if none set. |
 
 ???+ info "Re-solving on load"
     `reference` and `dgp` are reconstructed by re-parsing the embedded YAML and re-running `DSGESolver.compile(**compile_kwargs).solve(**solve_kwargs)` with the kwargs recorded at compile time. The receiver does not need the original parser state.

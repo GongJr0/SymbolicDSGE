@@ -7,7 +7,7 @@ from .manifest import (
     SDSGE_FORMAT_VERSION,
     Manifest,
     Member,
-    ShockGeneration,
+    ShockParameters,
     SimSpec,
 )
 from .parquet import (
@@ -41,7 +41,7 @@ __all__ = [
     "Manifest",
     "Member",
     "SimSpec",
-    "ShockGeneration",
+    "ShockParameters",
     "SDSGE_FORMAT_VERSION",
     # container
     "write_bundle",

@@ -35,16 +35,19 @@ __Methods:__
 ```python
 SolvedModel.sim(
     T: int,
-    shocks: dict[str, Callable | np.ndarray], # (1)!
+    shocks: dict[str, Shock | Callable | np.ndarray] | None = None, # (1)!
     shock_scale: float = 1.0, # (2)!
-    x0: np.ndarray | None = None,
+    x0: list[float] | np.ndarray | None = None,
     observables: bool = False
 ) -> dict[str, np.ndarray[float]]
 ```
 
- 1. The dictionary keys can be populated by:
+ 1. The dictionary values can be populated by:
+   - A [`#!python Shock`](./Shock.md) distribution spec. `Shock` is horizon-independent, so `sim` materializes it into a `T`-period draw at call time (this is what a bundle's `SimSpec` carries, letting you write `#!python model.sim(**spec)`).
    - An array of shocks `(T, 1) | (T,)` when shocks are for a single variable and `(T, K)` when drawing correlated shocks simultaneously.
    - A callable accepting either a shock standard deviation (sigma) or a covariance matrix depending on univariate or multivariate requirements. The callable should return arrays shaped as described above. Per-step generators are not supported.
+
+   When omitted (or `#!python None`), all shocks are zero.
 1. Shocks are drawn from the specified distribution and all elements in the arrays are scaled by this parameter.
 
  Returns the simulated path defined by the given inputs.
@@ -93,7 +96,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | T | Amount of steps to simulate the paths; excluding `x0`. |
-| shocks | Array or callable generator of shocks keyed by their corresponding variable. |
+| shocks | `Shock` spec, array, or callable generator of shocks keyed by their corresponding variable. |
 | shock_scale | Scaling factor for the shocks. |
 | x0 | Initial state of model variables shaped `(n,)`. (`None` defaults to zeroes) |
 | observables | Include observable paths in the output `#!python dict` if `#!python True`. |

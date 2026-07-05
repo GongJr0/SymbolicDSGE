@@ -6,16 +6,16 @@ tags:
 # Bundle Loading Guide
 
 ??? tip "__TL;DR__"
-    Open a `.sdsge` bundle with `load_bundle(...)` and reach every component through the typed `LoadedBundle` fields — the re-solved `SolvedModel`s, the estimation spec / result / observed data / posterior, the Monte Carlo pipeline / result / traces, and the simulation prefill. Loading is deterministic: the policy matrices match the author's.
+    Open a `.sdsge` bundle with `load_bundle(...)` and reach every component through the typed `LoadedBundle` fields: the re-solved `SolvedModel`s, the estimation spec, first class estimation result, observed data, posterior arrays, Monte Carlo pipeline, run output, traces, and the simulation prefill. Loading is deterministic: the policy matrices match the author's.
 
     You can find a demonstration notebook [here](../assets/bundle_loading.ipynb).
 
-This guide walks through opening a `.sdsge` bundle and reaching each library object it carries — the re-solved `SolvedModel`s, the estimation spec / result / observed data / posterior, the Monte Carlo pipeline / result / traces, and the simulation prefill.
+This guide walks through opening a `.sdsge` bundle and reaching each library object it carries: the re-solved `SolvedModel`s, the estimation spec, first class estimation result, observed data, posterior arrays, Monte Carlo pipeline, run output, traces, and the simulation prefill.
 
 We use `experiment-1.sdsge` as produced by the [Bundle Authoring Guide](bundle_authoring_guide.md). Substitute any other bundle path.
 
 ???+ tip "What `load_bundle` actually does"
-    `load_bundle` re-parses every embedded YAML, re-runs `DSGESolver.compile(**compile_kwargs).solve(**solve_kwargs)` with the kwargs recorded at write time, and decodes every tabular member by `Member.format` (CSV or Parquet). Loading is deterministic — the resulting policy matrices match those the author had in hand.
+    `load_bundle` re-parses every embedded YAML, re-runs `DSGESolver.compile(**compile_kwargs).solve(**solve_kwargs)` with the kwargs recorded at write time, decodes every tabular member by `Member.format` (CSV or Parquet), and rebuilds live estimation results and Monte Carlo pipelines when present. Loading is deterministic: the resulting policy matrices match those the author had in hand.
 
 ## Open the bundle
 
@@ -27,7 +27,7 @@ loaded = load_bundle("experiment-1.sdsge") # (1)!
 
 1. `load_bundle` is a top-level re-export of `SymbolicDSGE.bundle.build_from`. Both names are interchangeable.
 
-`loaded` is a [`LoadedBundle`](../documentation/bundle/LoadedBundle.md) — every component is reachable through a typed field.
+`loaded` is a [`LoadedBundle`](../documentation/bundle/LoadedBundle.md). Every component is reachable through a typed field.
 
 ```python
 print("Created by:", loaded.manifest.created_by)
@@ -36,11 +36,11 @@ print("Format version:", loaded.manifest.sdsge_version)
 ```
 
 ???+ info "Manifest provenance"
-    `Manifest.checksums` carries SHA-256 hex digests over each member's bytes — useful for integrity checks before trusting the contents downstream.
+    `Manifest.checksums` carries SHA-256 hex digests over each member's bytes. This is useful for integrity checks before trusting the contents downstream.
 
 ## Reach the re-solved models
 
-`reference` and `dgp` are full `SolvedModel` instances. They behave exactly like models you would have solved in-process — including IRFs, simulation, and Kalman filtering.
+`reference` and `dgp` are full `SolvedModel` instances. They behave exactly like models you would have solved in process, including IRFs, simulation, and Kalman filtering.
 
 ```python
 reference = loaded.reference
@@ -86,9 +86,9 @@ if estimation is not None:
     print("Parameters:", [p.name for p in estimation.spec.parameters])
 ```
 
-1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-spec-and-result-types) instance — round-trippable to / from JSON via `to_dict()` / `from_dict()`.
+1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-spec-and-result-types) instance. It round trips to and from JSON via `to_dict()` / `from_dict()`.
 
-`estimation.result` is the first-class result the run produced — an `OptimizationResult` for MLE / MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata (and, for MCMC, the `posterior` traces), so no manual reconstruction is needed.
+`estimation.result` is the first class result the run produced: an `OptimizationResult` for MLE / MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces, so no manual reconstruction is needed.
 
 ```python
 from SymbolicDSGE.estimation.results import (
@@ -120,11 +120,11 @@ if estimation.posterior is not None:
 2. The same arrays already power `result.samples` / `result.logpost_trace`; `estimation.posterior` exposes them raw for callers who want the columns directly. The `logpost` key holds the 1-D log-posterior trace.
 
 ???+ tip "MCMC diagnostics are ready to use"
-    A loaded MCMC `result` is a live `MCMCResult` — the loader already paired the metadata with the `posterior` traces. Call diagnostics on it directly (`result.hpd_intervals(...)`, `result.posterior_traces()`, `result.joint_hpd_set(...)`); there is no rebuild step.
+    A loaded MCMC `result` is a live `MCMCResult`. The loader already paired the metadata with the `posterior` traces. Call diagnostics on it directly (`result.hpd_intervals(...)`, `result.posterior_traces()`, `result.joint_hpd_set(...)`); there is no rebuild step.
 
 ### Re-run an estimation from a loaded bundle
 
-`EstimationSpec.to_estimator_inputs()` lowers the loaded spec to concrete arguments — `estimated_params`, `theta0`, `bounds`, and `priors` (built `Prior` objects, not specs) — directly feedable to `DSGESolver.estimate(...)`. The lowering lives in the core library, so no `[ui]` extra is required.
+`EstimationSpec.to_estimator_inputs()` lowers the loaded spec to concrete arguments: `estimated_params`, `theta0`, `bounds`, and `priors` as built `Prior` objects. Pass these to `DSGESolver.estimate(...)` when you want to reproduce the run or when a bundle stored the spec without a result. The lowering lives in the core library, so no `[ui]` extra is required.
 
 ```python
 from SymbolicDSGE import DSGESolver
@@ -150,8 +150,8 @@ fresh_result = solver.estimate(
 
 1. Selects `estimate=True` parameters, materializes their initials/bounds, and (for MAP/MCMC) builds a `Prior` object from each `PriorSpec`. Raises if MAP/MCMC parameters lack a prior.
 2. `solver.estimate` forwards `**method_kwargs` to the underlying `mle`/`map`/`mcmc` call. `bounds` is accepted by MLE/MAP but not by MCMC, so we gate it on the method.
-3. The `CompiledModel` reuses the layout `load_bundle` already produced when re-solving the embedded YAML — no need to recompile.
-4. The observed matrix the original run was fit against — already reconstructed by `load_bundle` and stored on `LoadedEstimation.observed`.
+3. The `CompiledModel` reuses the layout `load_bundle` already produced when re-solving the embedded YAML. No recompile is needed.
+4. The observed matrix is the data the original run was fit against. It is already reconstructed by `load_bundle` and stored on `LoadedEstimation.observed`.
 
 ???+ info "Why `to_estimator_inputs` exists"
     The spec is human-authored (or GUI-authored): it carries `PriorSpec` for declarative reasons. The estimator needs built `Prior` objects. `to_estimator_inputs` is the seam where the materialization happens, and where MAP/MCMC's prior-required invariant is enforced.
@@ -160,65 +160,66 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ## Reach the Monte Carlo tab
 
-`LoadedMC.spec` is the [`PipelineSpec`](../documentation/monte_carlo/spec.md) describing the graph. `LoadedMC.resources` carries any side-channel arrays or custom callables referenced by raw-data/custom nodes. When the bundle carries a completed run, `document` holds the trace-free summary and `traces` holds the bulk columns. The convenience method `wire()` re-merges them into the canonical UI shape.
+`LoadedMC.pipeline` is the first class [`MCPipeline`](../documentation/monte_carlo/pipeline.md) rebuilt at load time. `LoadedMC.spec` remains available for archive inspection and UI rendering, and `LoadedMC.resources` holds the side-channel arrays or custom callables that were reattached while rebuilding the pipeline. When the bundle carries a completed run, `document` holds the trace-free summary and `traces` holds the bulk columns. The convenience method `wire()` re-merges those pieces into the canonical UI shape.
 
 ```python
 mc = loaded.mc
 
 if mc is not None:
-    print("Pipeline nodes:", [n.id for n in mc.spec.nodes])
-    print("Pipeline edges:", [(e.source, e.target) for e in mc.spec.edges])
+    print("Runtime steps:", [step.name for step in mc.pipeline.per_rep_steps])
+    print("Stored graph nodes:", [n.id for n in mc.spec.nodes])
 
     if mc.document is not None:
         wire = mc.wire() # (1)!
         print("Run kind:", wire["kind"])
 ```
 
-1. `mc.wire()` returns `None` when either `document` or `traces` is missing — a bundle authored with only the pipeline spec carries neither.
+1. `mc.wire()` returns `None` when either `document` or `traces` is missing. A bundle authored with only the pipeline carries neither.
 
 ### Re-run a Monte Carlo pipeline from a loaded bundle
 
-The pipeline runner lives in the core `monte_carlo` module — a loaded pipeline runs against the loaded models without the `[ui]` extra.
+The loaded pipeline runs against the loaded models without the `[ui]` extra.
 
 ```python
-from SymbolicDSGE.monte_carlo import run_pipeline
-
-mc_result = run_pipeline(
-    loaded.mc.spec, # (1)!
+mc_result = loaded.mc.pipeline.run(
     reference=loaded.reference,
     dgp=loaded.dgp,
     n_rep=500,
+    retain_payloads=False, # (1)!
+    retain_test_results=False,
+    retain_contexts=False,
     fail_fast=True,
-    resources=loaded.mc.resources, # (2)!
+    verbosity=0,
 )
 print("Successful reps:", mc_result.n_successful, "/", mc_result.n_rep)
 ```
 
-1. `run_pipeline` validates the graph against [`STEP_CATALOG`](../documentation/monte_carlo/index.md#step-catalog), compiles each step, and runs it. `validate_pipeline_spec` and `build_pipeline` are also exported when you want the stages separately.
-2. `resources` is required when the stored spec references raw-data arrays or custom operations. It is harmless for specs that do not need side-channel resources.
+1. These retention flags keep the rerun result compact. Summaries and traces are still produced.
 
 ???+ info "Validating without running"
-    `validate_pipeline_spec(loaded.mc.spec, has_reference=loaded.reference is not None, has_dgp=loaded.dgp is not None)` returns the topologically ordered node list when the graph is well-formed and raises with a specific message otherwise — useful to surface validation errors before a long run.
+    `LoadedMC.pipeline` has already been rebuilt from the stored spec. If you still want to inspect the serialized graph directly, `validate_pipeline_spec(loaded.mc.spec, has_reference=loaded.reference is not None, has_dgp=loaded.dgp is not None)` returns `(ordered, postprocs)` when the graph is well formed and raises with a specific message otherwise.
 
 See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and the [`monte_carlo` API reference](../documentation/monte_carlo/index.md) for the core runner exports.
 
 ## Reach the simulation prefill
 
-The `SimSpec` rides inline in the manifest, so it is reachable from `loaded.simulation` directly (no separate member).
+Simulation prefills ride inline in the manifest, so they are reachable from `loaded.simulation` directly (no separate member). It is a `{role: SimSpec}` map, and each `SimSpec` unpacks straight into `SolvedModel.sim`.
 
 ```python
-sim_spec = loaded.simulation
+prefills = loaded.simulation  # dict[str, SimSpec] | None
 
-if sim_spec is not None:
-    print("T:", sim_spec.T)
-    print("Observables flag:", sim_spec.observables)
-    if sim_spec.shock_generation is not None:
-        print("Seed:", sim_spec.shock_generation.seed)
-        print("Distribution:", sim_spec.shock_generation.dist)
+if prefills is not None:
+    for role, spec in prefills.items():
+        print(role, "T:", spec.T, "| shocks:", list((spec.shocks or {}).keys()))
+
+    # A SimSpec is a Mapping over sim's keyword arguments, so replay is a splat.
+    reference_spec = prefills.get("reference")
+    if reference_spec is not None and loaded.reference is not None:
+        result = loaded.reference.sim(**reference_spec)
 ```
 
 ???+ note "Determinism"
-    Replaying `sim_spec` against `loaded.reference` reproduces the author's intended simulation exactly. The bundle stores no simulation outputs — they are reconstructed on demand from `(SolvedModel, seed, shock spec)`.
+    Replaying a `SimSpec` against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects — only each shock's `Shock.to_dict()` parameters. `sim` rebuilds the `Shock` and materializes a `T`-horizon draw, so a fixed seed yields identical paths for author and receiver.
 
 ## Round-trip safety
 
@@ -228,10 +229,10 @@ Two properties to rely on after `load_bundle`:
 2. **Format-version compatibility**: a newer-than-supported bundle raises immediately with a clear message. Older bundles read forward without intervention.
 
 ???+ warning "Reproducing simulations across machines"
-    Deterministic reproduction requires the receiver run the same numpy / SciPy versions on the same platform. The bundle does not pin those — record them externally if exact reproducibility across heterogeneous environments matters.
+    Deterministic reproduction requires the receiver run the same numpy / SciPy versions on the same platform. The bundle does not pin those, so record them externally if exact reproducibility across heterogeneous environments matters.
 
 ## Further steps
 
-- [`sdsge-decompile`](../portable_experiments/sdsge-decompile.md) — extract the same components to disk for inspection or editing.
+- [`sdsge-decompile`](../portable_experiments/sdsge-decompile.md): extract the same components to disk for inspection or editing.
 - [`LoadedBundle` API reference](../documentation/bundle/LoadedBundle.md).
-- [Bundle Authoring Guide](bundle_authoring_guide.md) — the other half of the round-trip.
+- [Bundle Authoring Guide](bundle_authoring_guide.md): the other half of the round trip.

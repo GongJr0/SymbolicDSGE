@@ -97,6 +97,7 @@ from SymbolicDSGE import Shock
 datagen_step = simulation_step(
     T=T,
     target="dgp",  # (1)!
+    seed_increment="auto", # (2)!
     shocks={
         "g,z": Shock(T=T, dist="norm", multivar=True, seed=0),
         "r": Shock(T=T, dist="norm", seed=1),
@@ -106,6 +107,14 @@ datagen_step = simulation_step(
 ```
 
 1. Can be either `"reference"` or `"dgp"` defaulting to `"dgp"`. This determines which model to simulate.
+2. Seed increment is an `int` or `"auto"`. Use this to specify the increment of seeds between replications. `"auto"` guarantees no collisions with one exception. (see below)
+
+???+ note "Seed Collisions"
+    Seeds are calculated per replication as `base_seed + rep_idx * seed_increment`.
+    With `auto` setting `seed_increment` to the number of seeded `Shocks`.
+
+    When using `"auto"` for `seed_increment`, two shock specifications with base seeds $s_1$ and $s_2$ will produce colliding seeds with a set frequency if $s_1 \equiv s_2 \mod (N)$ where $N$ is the number of replications. If this eqivalence holds, collisions are expected every $\mid s_1 - s_2 \mid$ replications. Meaning $s_1 = s_2$ will occur $\lfloor \frac{N}{\mid s_1 - s_2 \mid} \rfloor$ times. 
+    As long as the two `Shock` specifications are not the exact same, this will not yield identical shocks.
 
 `simulation_step` takes all `kwarg`s that `SolvedModel.sim` accepts.
 Each MC iteration will trigger a simulation with this specification and passthrough the output data.

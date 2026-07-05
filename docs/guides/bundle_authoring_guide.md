@@ -127,8 +127,8 @@ from SymbolicDSGE.monte_carlo.operations import (
     tests as t,  # (2)!
 )
 
-gz_shock = Shock(T=200, seed=42, multivar=True, dist="norm")  # (3)!
-r_shock = Shock(T=200, seed=42, multivar=False, dist="norm")
+gz_shock = Shock(seed=42, multivar=True, dist="norm")  # (3)!
+r_shock = Shock(seed=42, multivar=False, dist="norm")
 
 mc_pipeline = MCPipeline([
         c.simulation_step(T=200, shocks={"g,z": gz_shock, "r": r_shock}),
@@ -152,27 +152,25 @@ bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 
 ## Specify a simulation prefill
 
-`SimSpec` rides inline in the manifest. It controls what the GUI's Outputs tab pre-fills when the receiver opens the bundle on `sdsge-ui`.
+Simulation prefills ride inline in the manifest, keyed by role. They control what the GUI's Outputs tab pre-fills when the receiver opens the bundle on `sdsge-ui`. A `SimSpec`'s fields are exactly the keyword arguments of `SolvedModel.sim`, and each shock is stored as its `Shock.to_dict()` parameters (no live `Shock` is serialized).
 
 ```python
-from SymbolicDSGE.bundle import ShockGeneration, SimSpec
+from SymbolicDSGE.bundle import SimSpec
+from SymbolicDSGE.core.shock_generators import Shock
 
 simulation = SimSpec(
-    role="reference",
     T=25,
     observables=True,
     shock_scale=1.0,
-    shock_generation=ShockGeneration(
-        dist="norm",
-        seed=42, # (1)!
-        loc=0.0,
-    ),
+    shocks={
+        "u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0}).to_dict(), # (1)!
+    },
 )
 
-bundle.set_simulation(simulation)
+bundle.set_simulation("reference", simulation)
 ```
 
-1. The seed makes the replayed simulation deterministic — both the bundle author and the receiver produce identical paths when clicking **Run**.
+1. The seed makes the replayed simulation deterministic — both the bundle author and the receiver produce identical paths when clicking **Run**. Because a `Shock` is horizon-independent, `to_dict()` carries no `T`; the period count comes from the `SimSpec`.
 
 ## Add raw data alongside the model
 
