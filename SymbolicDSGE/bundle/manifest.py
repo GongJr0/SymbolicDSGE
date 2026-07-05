@@ -10,14 +10,15 @@ here rather than as its own member.
 
 from __future__ import annotations
 
-from ..core.shock_generators import Shock
-
 import json
 import posixpath
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_args, TypedDict
+from typing import Any, Literal, get_args
+
 from numpy import ndarray
+
+from ..core.shock_generators import Shock, ShockParameters
 
 #: Bundle format version. Bump on breaking manifest changes; readers reject a
 #: ``sdsge_version`` they do not recognise.
@@ -61,15 +62,6 @@ def format_for_path(path: str) -> str:
             f"Cannot infer bundle member format from path {path!r}; "
             f"expected one of {sorted(_FORMAT_BY_EXT)}."
         ) from exc
-
-
-class ShockParameters(TypedDict):
-    dist: str  # Cannot serialize custom distributions.
-    multivar: bool
-    seed: int | None
-    dist_args: tuple
-    dist_kwargs: dict[str, Any]
-    shock_arr: ndarray | None
 
 
 @dataclass

@@ -3,11 +3,11 @@
 from .builder import BundleBuilder
 from .container import BundleArchive, write_bundle
 from .loader import LoadedBundle, LoadedEstimation, LoadedMC, build_from
+from ..core.shock_generators import ShockParameters
 from .manifest import (
     SDSGE_FORMAT_VERSION,
     Manifest,
     Member,
-    ShockParameters,
     SimSpec,
 )
 from .parquet import (

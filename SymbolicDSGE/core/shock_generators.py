@@ -11,7 +11,17 @@ import numpy as np
 from numpy import asarray, ndarray, float64, random, zeros, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
-from typing import Any, Literal, Callable, Mapping, cast, overload
+from typing import Any, Callable, Literal, Mapping, TypedDict, cast, overload
+
+ShockDistribution = Literal["norm", "t", "uni"]
+
+
+class ShockParameters(TypedDict):
+    dist: ShockDistribution
+    multivar: bool
+    seed: int | None
+    dist_args: list[Any]
+    dist_kwargs: dict[str, Any]
 
 
 def abstract_shock_array(
@@ -279,7 +289,7 @@ ShockSpecMulti = dict[tuple[int, int], float]
 class Shock:
     def __init__(
         self,
-        dist: Literal["norm", "t", "uni"] | rv_generic | multi_rv_generic | None = None,
+        dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
         multivar: bool = False,
         seed: int | None = 0,
         dist_args: tuple = (),
@@ -456,7 +466,7 @@ class Shock:
             ), "dist must be a valid scipy.stats distribution or a string identifier."
             return dist
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> ShockParameters:
         """Serialize a generator-style Shock to a JSON-able dict.
 
         Only the generator form is representable: a string ``dist`` identifier
@@ -475,13 +485,13 @@ class Shock:
                 "Cannot serialize a Shock carrying a materialized shock_arr; "
                 "array-backed shocks must be shipped as bulk (parquet) data."
             )
-        return {
-            "dist": self.dist,
-            "multivar": bool(self.multivar),
-            "seed": None if self.seed is None else int(self.seed),
-            "dist_args": [_jsonable(arg) for arg in self.dist_args],
-            "dist_kwargs": {k: _jsonable(v) for k, v in self.dist_kwargs.items()},
-        }
+        return ShockParameters(
+            dist=self.dist,
+            multivar=bool(self.multivar),
+            seed=None if self.seed is None else int(self.seed),
+            dist_args=[_jsonable(arg) for arg in self.dist_args],
+            dist_kwargs={k: _jsonable(v) for k, v in self.dist_kwargs.items()},
+        )
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
@@ -493,7 +503,7 @@ class Shock:
             )
         seed = data.get("seed")
         return cls(
-            dist=cast(Literal["norm", "t", "uni"], dist),
+            dist=cast(ShockDistribution, dist),
             multivar=bool(data.get("multivar", False)),
             seed=None if seed is None else int(seed),
             dist_args=tuple(data.get("dist_args") or ()),

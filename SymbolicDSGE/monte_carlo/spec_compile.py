@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core.shock_generators import Shock
+from ..core.shock_generators import Shock, ShockParameters
 from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ def _recover_simulation(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     return _jsonable_params(params)
 
 
-def _shock_dict(value: Any) -> dict[str, Any]:
+def _shock_dict(value: Any) -> ShockParameters | dict[str, Any]:
     if isinstance(value, Shock):
         return value.to_dict()
     if isinstance(value, Mapping):

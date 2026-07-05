@@ -119,7 +119,7 @@ __Fields:__
 | shocks | `#!python dict[str, ShockParameters] \| None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are exogenous variable names, `"a,b"` for a joint shock. |
 
 ???+ info "Two dict views"
-    `SimSpec.to_dict()` is the JSON form written to the manifest (shocks stay as their `Shock.to_dict()` parameter dicts). The `Mapping` view — `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()` — is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T`-horizon draw, so the run is reproducible under a fixed seed.
+    `SimSpec.to_dict()` is the JSON form written to the manifest, where shocks stay as their `Shock.to_dict()` parameter dicts. The `Mapping` view, via `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()`, is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T` horizon draw, so the run is reproducible under a fixed seed.
 
 ## `ShockParameters`
 
@@ -127,7 +127,7 @@ __Fields:__
 class ShockParameters(TypedDict)
 ```
 
-The serialized form of a `Shock` (its `Shock.to_dict()` output), carried per key in `SimSpec.shocks`. A `Shock` is horizon-independent — the period count `T` comes from the `SimSpec`, not the shock.
+The serialized form of a `Shock` (its `Shock.to_dict()` output), carried per key in `SimSpec.shocks`. A `Shock` is horizon independent. The period count `T` comes from the `SimSpec`, not the shock.
 
 __Fields:__
 
@@ -136,7 +136,7 @@ __Fields:__
 | dist | `#!python str` | Distribution name: `"norm"` / `"t"` / `"uni"`. |
 | multivar | `#!python bool` | Joint (multivariate) shock when `True`. |
 | seed | `#!python int \| None` | RNG seed for reproducibility. |
-| dist_args | `#!python tuple` | Positional distribution arguments. |
+| dist_args | `#!python list[Any]` | Positional distribution arguments in JSON form. |
 | dist_kwargs | `#!python dict[str, Any]` | Distribution keyword arguments (e.g. `loc`, `df`, `mean`). |
 
 ## Example

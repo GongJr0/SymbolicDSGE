@@ -82,7 +82,7 @@ __Returns:__
 ## Serialization
 
 ```python
-Shock.to_dict() -> dict[str, Any]
+Shock.to_dict() -> ShockParameters
 Shock.from_dict(data: Mapping[str, Any]) -> Shock
 ```
 
