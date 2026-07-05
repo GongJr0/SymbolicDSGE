@@ -23,6 +23,9 @@ from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
 from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
+_DHMShock = Shock | Callable[[float | np.ndarray], np.ndarray] | np.ndarray
+_DHMShocks = Mapping[str, _DHMShock]
+
 # Prefer the native residual-path kernel (over the solve's cfunc, no numba
 # residual compile); fall back to the numba residual when the extension is
 # absent (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
@@ -276,9 +279,7 @@ class DenHaanMarcet:
     def one_sample(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
-        ) = None,
+        shocks: _DHMShocks | None = None,
         *,
         focs: Sequence[str] | None = None,
         foc_locals: Mapping[str, str] | None = None,
@@ -431,9 +432,7 @@ class DenHaanMarcet:
         y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
         observable: str | Sequence[str],
         *,
-        shocks: (
-            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
-        ) = None,
+        shocks: _DHMShocks | None = None,
         shock_scale: float = 1.0,
         x0: np.ndarray | None = None,
         instrument_idx: Sequence[int | str] | None = None,
@@ -630,9 +629,7 @@ class DenHaanMarcet:
         y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
         observables: Sequence[str] | None = None,
         *,
-        shocks: (
-            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
-        ) = None,
+        shocks: _DHMShocks | None = None,
         shock_scale: float = 1.0,
         x0: np.ndarray | None = None,
         instrument_idx: Sequence[int | str] | None = None,
@@ -830,16 +827,15 @@ class DenHaanMarcet:
     def _prepare_shock_matrix(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
-        ),
+        shocks: _DHMShocks | None,
         shock_scale: float,
     ) -> np.ndarray:
         shock_mat = np.zeros((T, self.solved.B.shape[1]), dtype=np.float64)
         if shocks is None:
             return shock_mat
 
-        for idx, shock_vals in self.solved._shock_unpack(shocks):
+        normalized = self.solved._materialize_shocks(shocks, T)
+        for idx, shock_vals in self.solved._shock_unpack(normalized):
             shock_vals = np.asarray(shock_vals, dtype=np.float64).reshape(-1)
             if shock_vals.shape[0] != T:
                 raise ValueError(
@@ -985,9 +981,7 @@ class DenHaanMarcet:
         y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
         observables: Sequence[str] | None,
         *,
-        shocks: (
-            Mapping[str, Callable[[float | np.ndarray], np.ndarray] | np.ndarray] | None
-        ),
+        shocks: _DHMShocks | None,
         shock_scale: float,
         state0: np.ndarray,
         instrument_idx: Sequence[int | str] | None,

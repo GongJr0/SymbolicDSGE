@@ -120,6 +120,39 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
     )
 
 
+def test_den_haan_marcet_one_sample_accepts_shock_specs(solved_post82):
+    T = 10
+    dhm = DenHaanMarcet(solved_post82)
+    kwargs = {
+        "equation_idx": [0, 1, 2],
+        "instrument_idx": ["g", "z", "r"],
+        "burn_in": 1,
+    }
+
+    direct = dhm.one_sample(
+        T,
+        shocks={
+            "z,g": Shock(dist="norm", multivar=True, seed=11),
+            "r": Shock(dist="norm", seed=21),
+        },
+        **kwargs,
+    )
+    manual = dhm.one_sample(
+        T,
+        shocks={
+            "z,g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
+            "r": Shock(dist="norm", seed=21).shock_generator(T),
+        },
+        **kwargs,
+    )
+
+    np.testing.assert_allclose(direct.states, manual.states)
+    np.testing.assert_allclose(direct.shock_matrix, manual.shock_matrix)
+    np.testing.assert_allclose(direct.moments, manual.moments)
+    assert direct.statistic == pytest.approx(manual.statistic)
+    assert direct.p_value == pytest.approx(manual.p_value)
+
+
 def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
     solved_test,
 ):
@@ -352,6 +385,51 @@ def test_measurement_moment_test_from_state_path_matches_simulation_path(
     assert path_out.shock_matrix is None
     assert path_out.statistic == pytest.approx(sim_out.statistic)
     assert path_out.p_value == pytest.approx(sim_out.p_value)
+
+
+def test_measurement_moment_test_accepts_shock_specs(solved_test):
+    T = 9
+    dhm = DenHaanMarcet(solved_test)
+    obs_name = solved_test.compiled.observable_names[0]
+    shock_specs = {
+        "u": Shock(dist="norm", seed=3),
+        "v": Shock(dist="norm", seed=4),
+    }
+    sim = solved_test.sim(T, shocks=shock_specs, observables=True)
+    y = sim[obs_name][1:] + np.linspace(0.03, -0.02, T, dtype=np.float64)
+
+    direct = dhm.measurement_moment_test(
+        y,
+        obs_name,
+        shocks=shock_specs,
+        instrument_idx=["u"],
+        include_constant=True,
+        burn_in=1,
+        n_estimated_params=1,
+    )
+    manual = dhm.measurement_moment_test(
+        y,
+        obs_name,
+        shocks={
+            "u": Shock(dist="norm", seed=3).shock_generator(T),
+            "v": Shock(dist="norm", seed=4).shock_generator(T),
+        },
+        instrument_idx=["u"],
+        include_constant=True,
+        burn_in=1,
+        n_estimated_params=1,
+    )
+
+    np.testing.assert_allclose(direct.states, manual.states)
+    np.testing.assert_allclose(direct.shock_matrix, manual.shock_matrix)
+    np.testing.assert_allclose(
+        direct.predicted_measurements,
+        manual.predicted_measurements,
+    )
+    np.testing.assert_allclose(direct.measurement_errors, manual.measurement_errors)
+    np.testing.assert_allclose(direct.moments, manual.moments)
+    assert direct.statistic == pytest.approx(manual.statistic)
+    assert direct.p_value == pytest.approx(manual.p_value)
 
 
 def test_measurement_moment_test_supports_lagged_instruments(solved_test):

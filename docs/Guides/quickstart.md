@@ -155,32 +155,32 @@ array([0.        , 0.64      , 0.54399995, 0.46239991, 0.39303989,
 `#!python SolvedModel` also supplies a `#!python .sim()` method for simulations.
 The method simulates `T` steps given an initial state array and a shock specification.
 
-Shock specifications can take two basic forms.
+Shock specifications can take three basic forms.
 
+- A `#!python Shock` distribution spec
 - A callable returning the complete shock array: `#!python Callable[[float | ndarray], ndarray]`
 - A `#!python np.ndarray` of innovations
 
-Either specification is delivered to `.sim` in a dictionary corresponding to the variable the innovations are meant to effect.
-In case of multiple shocks with correlation the key for the dictionary uses `"g,z"` syntax. In correlated cases, the `Callable` option input should take a covariance matrix while the array option must be of shape `(T, n_correlated_shocks)`. (order should match the dictionary key)
+Any specification is delivered to `.sim` in a dictionary corresponding to the variable the innovations are meant to affect.
+In case of multiple shocks with correlation the key for the dictionary uses `"g,z"` syntax. In correlated cases, `Shock` and callable values receive the model covariance matrix, while array values must have shape `(T, n_correlated_shocks)`.
 
-`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can produce `Callable` generators for both univariate and multivariate shocks. The class has support for all `SciPy` distributions from the `rv_generic` and `multi_rv_generic` hierarchies. Alongside `SciPy` support, custom distributions implementing the `.rvs` method are supported through the pass-through of distribution `args`/`kwargs`.
+`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can be passed directly to `.sim`, which materializes a `T` period draw at simulation time. The class has support for all `SciPy` distributions from the `rv_generic` and `multi_rv_generic` hierarchies. Alongside `SciPy` support, custom distributions implementing the `.rvs` method are supported through distribution `args`/`kwargs`.
 
 ```python
 from SymbolicDSGE import Shock
 
 T = 200
-shock_gen = lambda seed: Shock( # (1)!
-    T=T,
+shock_spec = lambda seed: Shock( # (1)!
     dist="norm",
     multivar=True,
     seed=seed, # (2)!
     dist_kwargs={ # (3)!
         "mean": [0.0, 0.0],
     },
-).shock_generator() # (4)!
+)
 
 sim_shocks = {
-    "g,z": shock_gen(seed=1) # (5)!
+    "g,z": shock_spec(seed=1) # (4)!
 }
 
 ```
@@ -188,10 +188,9 @@ sim_shocks = {
 1. Notice the seed argument to the class being parametrized through a lambda. This step is not necessary for functionality. It saves the code of declaring two instances with different seeds if two shocks share distributions.
 2. Seed is passed through here, the code below would operate the same if we used `seed=1` instead of using a lambda.
 3. The `kwargs` specified here are passed to the distribution object in the backend (to `SciPy`'s `rvs` methods in this case)
-4. `shock_generator` produces the `Callable` object from the parameters given at class initialization. The methods either accept a float `sig` or a covariance matrix `cov` created inside the `.sim` method.
-5. The value in this pair is a standalone function that does not depend on model parameters. Once created it can be reused across simulations; the appropriate `sig` or `cov` is constructed internally from model parameters at simulation time.
+4. The value in this pair is a `Shock` object. `.sim` supplies the horizon and constructs the appropriate standard deviation or covariance from model parameters.
 
-`shock_gen()` returns a callable that `.sim` uses in the simulation loop to produce shocks. With the shocks produced, we can simulate stochastic paths as follows:
+With the shocks specified, we can simulate stochastic paths as follows:
 
 ```python
 import pandas as pd

@@ -43,24 +43,23 @@ SolvedModel.sim(
 ```
 
  1. The dictionary values can be populated by:
-   - A [`#!python Shock`](./Shock.md) distribution spec. `Shock` is horizon-independent, so `sim` materializes it into a `T`-period draw at call time (this is what a bundle's `SimSpec` carries, letting you write `#!python model.sim(**spec)`).
+   - A [`#!python Shock`](./Shock.md) distribution spec. `sim` materializes it into a `T` period draw at call time.
    - An array of shocks `(T, 1) | (T,)` when shocks are for a single variable and `(T, K)` when drawing correlated shocks simultaneously.
-   - A callable accepting either a shock standard deviation (sigma) or a covariance matrix depending on univariate or multivariate requirements. The callable should return arrays shaped as described above. Per-step generators are not supported.
+   - A callable accepting either a shock standard deviation or a covariance matrix depending on univariate or multivariate requirements. The callable should return arrays shaped as described above. Per period generators are not supported.
 
    When omitted (or `#!python None`), all shocks are zero.
-1. Shocks are drawn from the specified distribution and all elements in the arrays are scaled by this parameter.
+2. Shocks are drawn from the specified distribution and all elements in the arrays are scaled by this parameter.
 
  Returns the simulated path defined by the given inputs.
 
 ???+ info "Univariate Shock Syntax"
     A univariate shock is defined as a dictionary entry for the given variable. For example, if a model specifies a variable `x`
     and a shock symbol `e_x`, the dictionary would expect `#!python {"x": ...}` where `...` is populated by a `ndarray` of shape
-    `(T,)` or `(T,1)`, or by a univariate generator callable.
+    `(T,)` or `(T,1)`, a univariate `Shock`, or a univariate generator callable.
 
 ???+ info "Correlated Shock Syntax"
     To define a set of variables with nonzero shock covariance, a shared dictionary entry should be used. For example, a multivariate
-    shock to `x` and `y` should be defined as `#!python {"x,y": ...}` where `...` is populated by a `(T, 2)` array or a multivariate
-    generator callable.
+    shock to `x` and `y` should be defined as `#!python {"x,y": ...}` where `...` is populated by a multivariate `Shock`, a `(T, 2)` array, or a multivariate generator callable.
 
     Details regarding the dictionary key scheme:
 
@@ -70,7 +69,7 @@ SolvedModel.sim(
     - Shock realizations are always aligned with the innovation ordering defined at model configuration or compilation (`B` matrix order).
 
 ??? info "Multivariate Shock Canonicalization and Reproducibility"
-    When multivariate shock generators are used, variables are __internally reordered to a canonical model-defined order before sampling__.
+    When multivariate `Shock` specs or generators are used, variables are __internally reordered to a canonical model-defined order before sampling__.
     This ensures that simulations are __reproducible under a fixed random seed__, regardless of the order in which variables are specified
     in the shock dictionary key (e.g. `"g,z"` vs `"z,g"`).
 
@@ -96,7 +95,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | T | Amount of steps to simulate the paths; excluding `x0`. |
-| shocks | `Shock` spec, array, or callable generator of shocks keyed by their corresponding variable. |
+| shocks | `Shock`, array, or callable shock mapping keyed by exogenous variable name or comma-separated multivariate group. |
 | shock_scale | Scaling factor for the shocks. |
 | x0 | Initial state of model variables shaped `(n,)`. (`None` defaults to zeroes) |
 | observables | Include observable paths in the output `#!python dict` if `#!python True`. |

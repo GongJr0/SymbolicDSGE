@@ -99,25 +99,25 @@ datagen_step = simulation_step(
     target="dgp",  # (1)!
     seed_increment="auto", # (2)!
     shocks={
-        "g,z": Shock(T=T, dist="norm", multivar=True, seed=0),
-        "r": Shock(T=T, dist="norm", seed=1),
+        "g,z": Shock(dist="norm", multivar=True, seed=0),
+        "r": Shock(dist="norm", seed=1),
     },
     observables=True,
 )
 ```
 
-1. Can be either `"reference"` or `"dgp"` defaulting to `"dgp"`. This determines which model to simulate.
-2. Seed increment is an `int` or `"auto"`. Use this to specify the increment of seeds between replications. `"auto"` guarantees no collisions with one exception. (see below)
+1. `target` can be either `"reference"` or `"dgp"` and defaults to `"dgp"`. It selects which model role is simulated.
+2. `seed_increment` is an `int` or `"auto"`. It controls seed offsets between replications for seeded `Shock` objects.
 
 ???+ note "Seed Collisions"
     Seeds are calculated per replication as `base_seed + rep_idx * seed_increment`.
-    With `auto` setting `seed_increment` to the number of seeded `Shocks`.
+    With `"auto"`, `seed_increment` is set to the number of seeded `Shock` objects.
 
-    When using `"auto"` for `seed_increment`, two shock specifications with base seeds $s_1$ and $s_2$ will produce colliding seeds with a set frequency if $s_1 \equiv s_2 \mod (N)$ where $N$ is the number of replications. If this eqivalence holds, collisions are expected every $\mid s_1 - s_2 \mid$ replications. Meaning $s_1 = s_2$ will occur $\lfloor \frac{N}{\mid s_1 - s_2 \mid} \rfloor$ times. 
+    Two shock specifications with base seeds $s_1$ and $s_2$ can collide under `"auto"` if $s_1 \equiv s_2 \mod k$, where $k$ is the number of seeded shock objects.
     As long as the two `Shock` specifications are not the exact same, this will not yield identical shocks.
 
-`simulation_step` takes all `kwarg`s that `SolvedModel.sim` accepts.
-Each MC iteration will trigger a simulation with this specification and passthrough the output data.
+`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` to `SolvedModel.sim(...)`. It adds `target`, which selects the model role, and `seed_increment`, which controls seed offsets across replications for seeded `Shock` objects.
+The `shocks` argument follows the same dictionary convention as `SolvedModel.sim(...)`. Each MC iteration runs the selected model with this specification and passes the output data downstream.
 
 ### Filtering
 
