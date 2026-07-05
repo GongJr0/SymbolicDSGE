@@ -9,38 +9,36 @@ The `monte_carlo` module provides a bounded pipeline for repeated simulation, fi
 ???+ info "Reference and DGP Roles"
     The built-in simulation step draws data from the `dgp` by default, or from the `reference` model when configured with `target="reference"` (a size study, vs. a misspecification study against a distinct DGP). The built-in filtering step then runs `reference.kalman(...)` on the generated observables.
 
-## Spec and runner exports
+## Pipeline and Spec Exports
 
-The serializable pipeline spec and the runner that consumes it live in the core module — no `[ui]` extra is required to validate, compile, or run a pipeline. The same entry points back the GUI and the `.sdsge` bundle.
+The live `MCPipeline` is the normal in-code object. `PipelineSpec` is the portable graph form used by bundle serialization, the GUI backend, and callers that need to validate or compile a stored graph.
 
 | Export | Purpose |
 | --- | --- |
-| `PipelineSpec` / `NodeSpec` / `EdgeSpec` / `PostprocSpec` | Pydantic-free specification. `nodes`/`edges` are the per-rep DAG; `postprocs` the post-loop phase. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
+| `MCPipeline` | Runnable pipeline object. Loaded bundles reconstruct this directly at `LoadedMC.pipeline`. |
+| `PipelineSpec` / `NodeSpec` / `EdgeSpec` / `PostprocSpec` | Plain dataclass specification. `nodes` and `edges` are the per-replication DAG; `postprocs` is the post-loop phase. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
 | `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against the step-kind sets and catalog metadata; returns `(ordered per-rep nodes, postprocs)` when well-formed. |
-| `build_pipeline(ordered, postprocs=(), *, dgp=None, resources=None)` | Compile validated per-rep nodes + postprocs into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a bundle spec. |
-| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, resources=None)` | One-shot validate + compile + run; returns `MCPipelineResult`. |
+| `build_pipeline(ordered, postprocs=(), *, resources=None)` | Compile validated per-rep nodes and postprocs into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a serialized spec. |
+| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, resources=None)` | Validate, compile, and run a `PipelineSpec`; returns `MCPipelineResult`. Use this for explicit spec workflows. |
 
 ```python
 from SymbolicDSGE import load_bundle
-from SymbolicDSGE.monte_carlo import run_pipeline
 
 loaded = load_bundle("experiment-1.sdsge")
-result = run_pipeline(
-    loaded.mc.spec,
+result = loaded.mc.pipeline.run(
     reference=loaded.reference,
     dgp=loaded.dgp,
     n_rep=500,
     fail_fast=True,
-    resources=loaded.mc.resources,
 )
 ```
 
 ???+ tip "Bundle integration"
-    A loaded `LoadedMC.spec` is a `PipelineSpec`; `LoadedMC.resources` carries the side-channel arrays/callables needed by `raw_data` and `custom` nodes. See the [Bundle Loading Guide](../../guides/bundle_loading_guide.md#re-run-a-monte-carlo-pipeline-from-a-loaded-bundle) for the end-to-end flow.
+    A loaded `LoadedMC.pipeline` is a runnable `MCPipeline` rebuilt from the stored spec and resources. `LoadedMC.spec` remains available for UI rendering and archive inspection.
 
 ## Step catalog
 
-`STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_data` and `custom` reattach large arrays or callables through the `resources` seam when a bundled pipeline is loaded.
+`STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_data`, `transform:custom`, and `postproc:custom` reattach large arrays or callables through the `resources` mapping when a serialized pipeline is compiled.
 
 | Name | Purpose |
 | --- | --- |
