@@ -197,7 +197,19 @@ export type MCFieldType =
   | "trace"
   | "number_list"
   | "number_matrix"
-  | "text_list";
+  | "text_list"
+  | "shock_registry";
+
+// One entry in a simulation step's shock registry: an explicit, free-form shock
+// over a chosen set of the target model's exogenous variables. `vars.length > 1`
+// is a joint (multivar) shock; the joined names form the registry key.
+export interface ShockRegistryEntry {
+  vars: string[];
+  dist: ShockDistribution;
+  loc: number;
+  df: number;
+  seed: number | null;
+}
 
 export interface MCFieldSpec {
   key: string;
