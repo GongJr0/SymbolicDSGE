@@ -30,16 +30,17 @@ __Behavior:__
 
 1. Read `manifest.json` and validate `sdsge_version`.
 2. Walk every member declared in the manifest:
-    - YAML models are re-parsed and re-compiled+solved using stored `compile_kwargs` / `solve_kwargs`.
-    - Estimation / MC text members are parsed back into their respective dataclasses.
+    - YAML models are re-parsed, re-compiled, and solved using stored `compile_kwargs` / `solve_kwargs`.
+    - Estimation specs are parsed back into dataclasses, and bundled results are reconstructed as live `OptimizationResult` or `MCMCResult` objects.
+    - Monte Carlo pipeline specs are parsed, resources are restored, and `LoadedMC.pipeline` is rebuilt as a live `MCPipeline`.
     - CSV / Parquet members are dispatched by `Member.format` and decoded into numpy arrays.
-3. Inline `SimSpec` is read from the manifest itself.
+3. Inline `{role: SimSpec}` prefills are read from the manifest itself.
 
-???+ info "Format-agnostic reader"
-    `load_bundle` dispatches each tabular member on `Member.format`. A hand-zipped CSV-only bundle and a CLI-built Parquet bundle both load through the same path. No `[bundle]` extra is required — `parquet-engine` is a regular dependency.
+???+ info "Format Agnostic Reader"
+    `load_bundle` dispatches each tabular member on `Member.format`. A hand-zipped CSV-only bundle and a CLI-built Parquet bundle both load through the same path. No `[bundle]` extra is required because `parquet-engine` is a regular dependency.
 
-???+ warning "Re-solve cost"
-    Loading runs the full parse → compile → solve pipeline once per model member. For large models or scripts that open many bundles in a loop, cache the `LoadedBundle` rather than reopening.
+???+ warning "Model Reconstruction Cost"
+    Loading runs the full parse, compile, and solve pipeline once per model member. For large models or scripts that open many bundles in a loop, cache the `LoadedBundle` rather than reopening.
 
 ## Example
 
@@ -88,7 +89,7 @@ Return a `BundleBuilder` pre-seeded with the model's YAML. Chain estimation / MC
 
 ## See also
 
-- [`BundleBuilder`](BundleBuilder.md) — assemble bundles from code.
-- [`LoadedBundle`](LoadedBundle.md) — the return type.
-- [`sdsge-decompile`](../../portable_experiments/sdsge-decompile.md) — the CLI counterpart.
-- [Bundle Loading Guide](../../guides/bundle_loading_guide.md) — full walkthrough.
+- [`BundleBuilder`](BundleBuilder.md): assemble bundles from code.
+- [`LoadedBundle`](LoadedBundle.md): the return type.
+- [`sdsge-decompile`](../../portable_experiments/sdsge-decompile.md): the CLI counterpart.
+- [Bundle Loading Guide](../../guides/bundle_loading_guide.md): full walkthrough.

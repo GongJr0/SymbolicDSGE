@@ -16,7 +16,7 @@
     │   ├── pipeline.json           # required if montecarlo/ is present
     │   ├── result.json             # optional
     │   └── traces.csv|.parquet     # optional
-    ├── simulation.json             # optional (SimSpec)
+    ├── simulation.json             # optional ({role: SimSpec})
     └── data/*.csv|*.parquet        # optional raw data members
 
 ``sdsge-decompile <file>`` extracts the bundle's members back into a directory
@@ -198,8 +198,9 @@ def compile_directory(
 
     sim_path = source / "simulation.json"
     if sim_path.exists():
-        sim_spec = SimSpec.from_dict(json.loads(sim_path.read_text(encoding="utf-8")))
-        builder.set_simulation(sim_spec)
+        sim_data = json.loads(sim_path.read_text(encoding="utf-8"))
+        for role, spec in sim_data.items():
+            builder.set_simulation(role, SimSpec.from_dict(spec))
 
     return builder.write(out_path)
 
@@ -465,7 +466,11 @@ def decompile_bundle(
     # directory layout.
     if manifest.simulation is not None:
         (out_dir / "simulation.json").write_text(
-            json.dumps(manifest.simulation.to_dict(), indent=2), encoding="utf-8"
+            json.dumps(
+                {role: spec.to_dict() for role, spec in manifest.simulation.items()},
+                indent=2,
+            ),
+            encoding="utf-8",
         )
 
     out_manifest = Manifest(

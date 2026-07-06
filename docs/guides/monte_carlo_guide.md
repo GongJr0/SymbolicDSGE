@@ -97,18 +97,27 @@ from SymbolicDSGE import Shock
 datagen_step = simulation_step(
     T=T,
     target="dgp",  # (1)!
+    seed_increment="auto", # (2)!
     shocks={
-        "g,z": Shock(T=T, dist="norm", multivar=True, seed=0),
-        "r": Shock(T=T, dist="norm", seed=1),
+        "g,z": Shock(dist="norm", multivar=True, seed=0),
+        "r": Shock(dist="norm", seed=1),
     },
     observables=True,
 )
 ```
 
-1. Can be either `"reference"` or `"dgp"` defaulting to `"dgp"`. This determines which model to simulate.
+1. `target` can be either `"reference"` or `"dgp"` and defaults to `"dgp"`. It selects which model role is simulated.
+2. `seed_increment` is an `int` or `"auto"`. It controls seed offsets between replications for seeded `Shock` objects.
 
-`simulation_step` takes all `kwarg`s that `SolvedModel.sim` accepts.
-Each MC iteration will trigger a simulation with this specification and passthrough the output data.
+???+ note "Seed Collisions"
+    Seeds are calculated per replication as `base_seed + rep_idx * seed_increment`.
+    With `"auto"`, `seed_increment` is set to the number of seeded `Shock` objects.
+
+    Two shock specifications with base seeds $s_1$ and $s_2$ can collide under `"auto"` if $s_1 \equiv s_2 \mod k$, where $k$ is the number of seeded shock objects.
+    As long as the two `Shock` specifications are not the exact same, this will not yield identical shocks.
+
+`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` to `SolvedModel.sim(...)`. It adds `target`, which selects the model role, and `seed_increment`, which controls seed offsets across replications for seeded `Shock` objects.
+The `shocks` argument follows the same dictionary convention as `SolvedModel.sim(...)`. Each MC iteration runs the selected model with this specification and passes the output data downstream.
 
 ### Filtering
 

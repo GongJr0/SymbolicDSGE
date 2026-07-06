@@ -11,31 +11,19 @@ tags:
 ???+ warning "Read Model Configuration Guide"
     This guide refers to fields used in model configuration and some parameters relevant to Kalman Filters are part of the model parameter family. Please make sure you've read the [model configuration guide](./model_config_guide.md) before reading this one.
 
-`SymbolicDSGE` uses a single configuration file and appends the Kalman Filter (KF) configuration to the same YAML that carries model information. Although Kalman Filtering can be done in a completely model-detached fashion, there's integration infrastructure provided in the model objects and configurations.
+`SymbolicDSGE` uses a single configuration file and appends the Kalman Filter (KF) configuration to the same YAML that carries model information. Although Kalman Filtering can be done without a model, model objects and configurations provide integration infrastructure.
 
-All KF related configuration entries live under the parent field `kalman:` and are parsed into a `KalmanConfig` object at parse time.
+All KF related configuration entries live under the parent field `kalman:` and are parsed into a `KalmanConfig` object at parse time. The config block accepts `R` and `P0`.
 
 ???+ note "Config Overrides"
-    All configuration fields (except `R:`) can be overridden through function parameters when calling the filter.
+    Runtime filter options and observable subset selection are passed to `SolvedModel.kalman(...)`.
 
 ## Observables
 
-The config uses a tag `y` to define the list of model measurement equations to include in the Kalman Filter.
+The model configuration's `observables` list defines the measurement equations available to the Kalman filter. `kalman.R` is built in that order. A filter call can select a subset through `SolvedModel.kalman(..., observables=...)`; the selected covariance block is sliced from the configured full `R`.
 
-```yaml
-y: ["Infl", "Rate"] # (1)!
-```
-
-1. The listed names are observable names defined in the model configuration
-
-To ensure matrix alignment, names given here will be reordered to match their ordering in the model configuration. You can check the order via `ModelConfig.observables` or `CompiledModel.observable_names` to confirm the positions to expect the output arrays in.
-
-???+ example "Alignment Demonstration"
-    Assume we have three observables and use two of them. In the model config, we defined `#!yaml observables: [obs1, obs2, obs3]` and for the KF configuration, we used `#!yaml y: [obs3, obs1]`.
-
-    The alignment occurs on the positional index of observables as given in the model config. So we re-order to `y: [obs1, obs3]` internally.
-
-    This will reflect in all `ndarray`s outputted from a KF run and it is generally advisable to check alignment or confirm the updated positions of observable arrays to avoid future confusion.
+???+ info "Array Alignment"
+    `DataFrame` inputs are aligned by column name. `ndarray` inputs are interpreted positionally against the selected observables.
 
 ## Measurement Covariance
 
@@ -48,7 +36,7 @@ kalman:
         corr:...
 ```
 
-Then we populate each sub-field with respective parameter names:
+Then we populate each section with respective parameter names. The `std` map must include every observable declared in the model configuration when `R` is supplied. The `corr` map is optional for each observable pair; omitted pairs are treated as zero correlation.
 
 ```yaml
 kalman:
@@ -65,8 +53,8 @@ kalman:
 2. Defined as a parameter and given calibration value in model config.
 3. Defined as a parameter and given calibration value in model config.
 
-???+ info "No Defaults"
-    `SymbolicDSGE` does not fall back to defaults when constructing $R$. As of now, heuristics to infer $R$ are not implemented and any "default" is practically guaranteed to be inaccurate. There are future plans to implement robust $R$ inference pipelines; but the no-default behavior will not change until said implementations are in place.
+???+ info "No Standard Deviation Defaults"
+    `SymbolicDSGE` does not infer measurement standard deviations when constructing $R$. Each configured observable needs an explicit standard deviation parameter.
 
 ???+ note "Runtime Diagonal `R` Estimation"
     `SolvedModel.kalman(...)` also exposes `estimate_R_diag=True` (with optional `R_scale`) to estimate a diagonal `R` by likelihood before filtering. This is a runtime option and does not mutate the configuration.
@@ -74,7 +62,7 @@ kalman:
 
 ## State Covariance
 
-State Covariance ($P$) defines the inter-state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters; but an initial guess $P_0$ is provided through the configuration. As of now, the configuration only allows the creation of diagonally-defined matrices (assumes no correlation) but a full $P_0$ construction will be implemented. Initial guesses are not relevant beyond an (often short) burn-in period; but a well-specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
+State Covariance ($P$) defines the inter state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an initial guess $P_0$ is provided through the configuration. `P0` supports diagonal and scaled identity initialization. Initial guesses are not relevant beyond an often short burn in period, but a well specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
 
 ```yaml
 kalman:
@@ -94,20 +82,11 @@ kalman:
 3. Diagonal entries of the covariance matrix.
 
 ???+ note "Diagonal Values"
-    The `diag` field is directly used as the pre-scaling matrix values. Therefore, entries in the `diag` field correspond to variances instead of standard deviations.
+    The `diag` field is directly used as the matrix values before scaling. Therefore, entries in the `diag` field correspond to variances instead of standard deviations.
 
 ## Filter Options
 
-`SymbolicDSGE` defines two KF options that can be adjusted through the configuration file. These options do not belong to a parent tag and are defined as follows:
-
-```yaml
-kalman:
-    jitter: 1e-10 # (1)!
-    symmetrize: true # (2)!
-```
-
-1. The number specified is added to covariance matrices if their Cholesky decomposition fails.
-2. Covariance matrices are symmetrized if this field is `#!yaml true`. Symmetrization is applied as $(M + M^\top)/2$.
+`jitter` and `symmetrize` are runtime options on `SolvedModel.kalman(...)`. `jitter` is added to covariance matrices if their Cholesky decomposition fails. `symmetrize=True` applies $(M + M^\top)/2$ to covariance matrices during filtering.
 
 # Conclusion
 

@@ -55,7 +55,7 @@ __Fields:__
 | op_role | `#!python Literal["datagen", "filter", "transform", "terminal", "postproc"]` | Graph role. |
 | factory | `#!python Callable[..., MCStep]` | Step factory used by `build(...)`. |
 | fields | `#!python tuple[FieldSpec, ...]` | Declared configurable fields. |
-| compile_params | `#!python Callable \| None` | Optional parameter normalization hook. |
+| compile_params | `#!python Callable \| None` | Optional parameter normalization hook. Simulation compilation uses only explicit `shocks` or `shock_registry` parameters. |
 
 __Properties:__
 
@@ -69,7 +69,7 @@ __Methods:__
 
 ```python
 StepDefinition.catalog_entry() -> dict[str, Any]
-StepDefinition.build(name: str, params: dict[str, Any], dgp: SolvedModel | None) -> MCStep
+StepDefinition.build(name: str, params: dict[str, Any]) -> MCStep
 ```
 
 ## Registry Objects
@@ -91,5 +91,4 @@ catalog_payload() -> dict[str, Any]
 Return a JSON-like payload of catalog entries for UI consumers.
 
 ???+ note "Custom steps"
-    `STEP_CATALOG` only describes built-in operation kinds. Bundle-safe custom operations use the reserved `custom` step kind and are restored through bundle resources rather than through catalog dispatch.
-
+    `STEP_CATALOG` only describes built-in operation kinds. Bundle-safe custom operations use `transform:custom` or `postproc:custom` specs and are restored through bundle resources rather than through catalog dispatch.

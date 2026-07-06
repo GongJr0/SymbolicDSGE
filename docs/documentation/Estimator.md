@@ -60,18 +60,20 @@ Equivalent to `#!python SymbolicDSGE.bayesian.make_prior(...)`.
 ```python
 Estimator.to_spec(
     *,
-    method: str, # (1)!
-    priors: Mapping[str, PriorSpec] | None = None, # (2)!
+    method: str | None = None, # (1)!
+    result: OptimizationResult | MCMCResult | None = None, # (2)!
+    priors: Mapping[str, PriorSpec] | None = None, # (3)!
     observables: Sequence[str] | None = None,
     method_kwargs: Mapping[str, Any] | None = None,
     posterior_point: str = "mean",
 ) -> EstimationSpec
 ```
 
-1. `"mle"`, `"map"`, or `"mcmc"`. An `Estimator` is method-agnostic — the same instance can run any of the three, so the caller supplies the method at projection time.
-2. `PriorSpec` per estimated parameter. Required for `"map"` / `"mcmc"`; omit for `"mle"`. A live `Prior` is an opaque `(distribution, transform)` pair with no stored spec, so priors cannot be reverse-engineered — passing them explicitly is what attaches them faithfully to the spec.
+1. `"mle"`, `"map"`, or `"mcmc"`. Required when `result` is omitted.
+2. Optional live result. When supplied, the method, method kwargs, and bounds are inferred from the result unless explicitly overridden.
+3. `PriorSpec` per estimated parameter. Required for `"map"` / `"mcmc"` when priors cannot be inferred from the live estimator priors.
 
-Project the estimator's configuration to a serializable [`EstimationSpec`](./bundle/index.md#estimation-spec-and-result-types) for bundling. The estimated parameter names, their calibration values as `initial`, and the observables are captured automatically; `priors` and `method` are supplied by the caller.
+Project the estimator's configuration to a serializable [`EstimationSpec`](./bundle/index.md#estimation-spec-and-result-types) for bundling. The estimated parameter names, their calibration values as `initial`, and the observables are captured automatically; `method`, `method_kwargs`, and `bounds` can be supplied directly or inferred from `result`.
 
 ```python
 spec = estimator.to_spec(
@@ -84,17 +86,18 @@ spec = estimator.to_spec(
 ```
 
 ???+ info "Counterpart on the loading side"
-    `#!python loaded.estimation.spec.to_estimator_inputs()` is the inverse — lowers a loaded spec back to concrete arguments for `#!python DSGESolver.estimate(...)`. See [`EstimatorInputs`](./bundle/index.md#estimation-spec-and-result-types).
+    `#!python loaded.estimation.spec.to_estimator_inputs()` is the inverse. It lowers a loaded spec back to concrete arguments for `#!python DSGESolver.estimate(...)`. See [`EstimatorInputs`](./bundle/index.md#estimation-spec-and-result-types).
 
 __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| method | Estimation method recorded on the spec. |
-| priors | `PriorSpec` per estimated parameter; required for `"map"` / `"mcmc"`. |
+| method | Estimation method recorded on the spec. Required when `result` is omitted. |
+| result | Optional live `OptimizationResult` or `MCMCResult` used to infer method, method kwargs, and bounds. |
+| priors | `PriorSpec` per estimated parameter; required for `"map"` / `"mcmc"` when not inferred from live estimator priors. |
 | observables | Override the estimator's observables; defaults to `Estimator.observables`. |
 | method_kwargs | Method-specific kwargs (e.g. optimizer options). |
-| posterior_point | `"mean"`, `"map"`, or `"last"` — how the GUI summarizes an MCMC run. |
+| posterior_point | `"mean"`, `"map"`, or `"last"`. How the GUI summarizes an MCMC run. |
 
 __Returns:__
 
@@ -170,6 +173,8 @@ Estimator.mcmc(
     `MCMCResult.samples` are returned in constrained parameter space (parameter names), not raw unconstrained `theta`.
 
 ## Result Objects
+MLE and MAP return `SymbolicDSGE.OptimizationResult`. The scipy `OptimizeResult` object is used internally by the optimizer and is not returned.
+
 ### OptimizationResult
 | __Field__ | __Type__ | __Description__ |
 |:----------|:--------:|----------------:|
@@ -197,7 +202,7 @@ Estimator.mcmc(
 | thin | `#!python int` | Thinning interval |
 
 ???+ tip "Projecting to bundle metadata"
-    Both result classes expose a `#!python .to_meta()` method that returns the matching `#!python OptimizationResultMeta` / `#!python MCMCResultMeta` for `.sdsge` storage. `MCMCResult` additionally exposes `#!python .posterior_arrays()` returning `#!python {"samples": ..., "logpost": ...}` — the bulk dict the bundle expects as `posterior`. `#!python BundleBuilder.add_estimation(result=...)` accepts the live result directly and calls both for you. See [`BundleBuilder`](./bundle/BundleBuilder.md#bundlebuilderadd_estimation).
+    Both result classes expose a `#!python .to_meta()` method that returns the matching `#!python OptimizationResultMeta` / `#!python MCMCResultMeta` for `.sdsge` storage. `MCMCResult` additionally exposes `#!python .posterior_arrays()` returning `#!python {"samples": ..., "logpost": ...}`, the bulk dict the bundle expects as `posterior`. `#!python BundleBuilder.add_estimation(result=...)` accepts the live result directly and calls both for you. See [`BundleBuilder`](./bundle/BundleBuilder.md#bundlebuilderadd_estimation).
 
 __Methods:__
 

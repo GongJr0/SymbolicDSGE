@@ -168,7 +168,7 @@ def _integer_or_keyword(
 
 
 def _shock_for(
-    vars_: list[str], dist: str, loc: float, df: float, seed: int | None, T: int
+    vars_: list[str], dist: str, loc: float, df: float, seed: int | None
 ) -> Shock:
     """Build one :class:`Shock` for a shock-registry entry.
 
@@ -195,7 +195,6 @@ def _shock_for(
     else:
         raise ValueError(f"Unsupported shock distribution: {dist!r}")
     return Shock(
-        T=T,
         dist=cast(Literal["norm", "t", "uni"], dist),
         multivar=multivar,
         seed=seed,
@@ -204,7 +203,7 @@ def _shock_for(
 
 
 def _shocks_from_registry(
-    registry: list[dict[str, Any]], T: int
+    registry: list[dict[str, Any]],
 ) -> dict[str, Shock] | None:
     """Compile an explicit shock registry into a ``{key: Shock}`` mapping.
 
@@ -228,7 +227,6 @@ def _shocks_from_registry(
             float(entry.get("loc", 0.0)),
             float(entry.get("df", 5.0)),
             None if seed_value is None else int(seed_value),
-            T,
         )
     return shocks or None
 
@@ -310,7 +308,7 @@ def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
     if params.get("shocks") is not None:
         params["shocks"] = _coerce_shock_mapping(params["shocks"])
     elif registry:
-        params["shocks"] = _shocks_from_registry(registry, int(params["T"]))
+        params["shocks"] = _shocks_from_registry(registry)
     # Empty registry and no explicit shocks -> deterministic sim; the op treats
     # ``shocks=None`` as a zero shock matrix.
     return params

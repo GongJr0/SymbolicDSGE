@@ -136,7 +136,7 @@ __Methods:__
 ```python
 DenHaanMarcet.one_sample(
     T: int,
-    shocks: dict[str, Callable | np.ndarray] | None = None, # (1)!
+    shocks: dict[str, Shock | Callable | np.ndarray] | None = None, # (1)!
     *,
     focs: Sequence[str] | None = None, # (2)!
     foc_locals: Mapping[str, str] | None = None, # (3)!
@@ -151,7 +151,7 @@ DenHaanMarcet.one_sample(
 ) -> DenHaanMarcetResult
 ```
 
- 1. Shock specification follows the same conventions as `#!python SolvedModel.sim`, including comma-separated keys for correlated multivariate shocks.
+ 1. Shock specification follows the same conventions as `#!python SolvedModel.sim`, including direct `#!python Shock` specs and comma-separated keys for correlated multivariate shocks.
  2. Per-call custom FOCs override constructor defaults.
  3. Per-call locals are merged on top of constructor-level locals.
  4. Only available when no custom FOCs are supplied.
@@ -284,7 +284,7 @@ DenHaanMarcet.measurement_moment_test(
     y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
     observable: str | Sequence[str],
     *,
-    shocks: dict[str, Callable | np.ndarray] | None = None, # (1)!
+    shocks: dict[str, Shock | Callable | np.ndarray] | None = None, # (1)!
     shock_scale: float = 1.0,
     x0: np.ndarray | None = None,
     instrument_idx: Sequence[int | str] | None = None, # (2)!
@@ -297,7 +297,7 @@ DenHaanMarcet.measurement_moment_test(
 ) -> MeasurementMomentResult | list[MeasurementMomentResult]
 ```
 
- 1. Shock specification follows the same conventions as `#!python SolvedModel.sim`, including comma-separated keys for correlated multivariate shocks.
+ 1. Shock specification follows the same conventions as `#!python SolvedModel.sim`, including direct `#!python Shock` specs and comma-separated keys for correlated multivariate shocks.
  2. Accepts either integer indices or variable names resolved against compiled variable order.
  3. If `#!python True`, the test uses `#!python z_{t-1}` against current measurement errors instead of contemporaneous instruments.
  4. The reported degrees of freedom are adjusted as `#!python m - n_estimated_params`, where `#!python m` is the number of moment conditions.
@@ -401,7 +401,7 @@ DenHaanMarcet.joint_measurement_moment_test(
     y: Mapping[str, Sequence[float] | np.ndarray] | np.ndarray,
     observables: Sequence[str] | None = None,
     *,
-    shocks: dict[str, Callable | np.ndarray] | None = None,
+    shocks: dict[str, Shock | Callable | np.ndarray] | None = None,
     shock_scale: float = 1.0,
     x0: np.ndarray | None = None,
     instrument_idx: Sequence[int | str] | None = None,

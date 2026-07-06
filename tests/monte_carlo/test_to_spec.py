@@ -36,7 +36,7 @@ def _simulation_pipeline() -> MCPipeline:
                 T=8,
                 observables=True,
                 seed_increment="auto",
-                shocks={"u": Shock(T=8, dist="norm", seed=0, dist_kwargs={"loc": 0.0})},
+                shocks={"u": Shock(dist="norm", seed=0, dist_kwargs={"loc": 0.0})},
             ),
             reference_filter_step("filter"),
             standardize_step("s", source="observables"),
@@ -101,7 +101,7 @@ def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
             simulation_step(
                 "dgp",
                 T=8,
-                shocks={"u": Shock(T=8, dist="norm", seed=0).shock_generator()},
+                shocks={"u": Shock(dist="norm", seed=0).shock_generator(8)},
             ),
             jarque_bera_test_step("jb", source="observables"),
         ]
@@ -205,7 +205,7 @@ def test_to_spec_round_trips_a_postproc_pipeline() -> None:
                 T=8,
                 observables=True,
                 seed_increment="auto",
-                shocks={"u": Shock(T=8, dist="norm", seed=0)},
+                shocks={"u": Shock(dist="norm", seed=0)},
             ),
             jarque_bera_test_step("jb", source="observables", column=0),
         ],

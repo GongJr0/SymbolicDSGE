@@ -6,10 +6,17 @@ from SymbolicDSGE.bundle.manifest import (
     SDSGE_FORMAT_VERSION,
     Manifest,
     Member,
-    ShockGeneration,
     SimSpec,
     format_for_path,
 )
+
+_SHOCK = {
+    "dist": "norm",
+    "multivar": False,
+    "seed": 42,
+    "dist_args": [],
+    "dist_kwargs": {"loc": 0.0},
+}
 
 
 def test_member_format_inference() -> None:
@@ -48,9 +55,7 @@ def test_manifest_round_trip() -> None:
                 columns=["Infl", "Rate"],
             ),
         ],
-        simulation=SimSpec(
-            role="reference", T=10, shock_generation=ShockGeneration(seed=42)
-        ),
+        simulation={"reference": SimSpec(T=10, shocks={"u": _SHOCK})},
         checksums={"model/reference.yaml": "abc"},
     )
     restored = Manifest.from_json(manifest.to_json())
@@ -59,8 +64,7 @@ def test_manifest_round_trip() -> None:
     assert restored.model_member("dgp") is None
     assert restored.members_by_kind("estimation_data")[0].columns == ["Infl", "Rate"]
     assert restored.simulation is not None
-    assert restored.simulation.shock_generation is not None
-    assert restored.simulation.shock_generation.seed == 42
+    assert restored.simulation["reference"].shocks["u"]["seed"] == 42
 
 
 def test_manifest_rejects_newer_version() -> None:

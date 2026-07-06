@@ -18,7 +18,7 @@ tags:
 - Shock symbol declarations
 
 This guide contains detailed information about config sections, how they are parsed, and the conventions users are expected to follow for correct parsing.
-The ordering of top-level fields does not matter for the parser. Component order is preserved as a stable tie-breaker in places where the model does not imply a unique order, but variables do not need to be manually arranged for the solver backend. We will start with an empty config and build components to create a valid model in this guide.
+The ordering of top level fields does not matter for the parser. Component order is preserved as a stable fallback in places where the model does not imply a unique order, but variables do not need to be manually arranged for the solver backend. We will start with an empty config and build components to create a valid model in this guide.
 
 To start with, the configuration accepts a `name` field to specify the model's alias. This name is accessible in the parsed model but never used; it remains in the model object as a reference for users.
 
@@ -30,11 +30,9 @@ name: "Test Model"
 
 The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping. At compile time, the solver infers its canonical layout from the model config: variables targeted by `shock_map` form the shocked/exogenous state block, dynamic equations define the remaining state variables, and all other variables are controls. Declaration order is preserved within those inferred groups.
 
-If an explicit compile-time `variable_order`, `n_state`, or `n_exog` is supplied, it is treated as an expectation and sanity-checked against the inferred layout. A mismatch raises before solving.
+If an explicit compile time `variable_order`, `n_state`, or `n_exog` is supplied, it is treated as an expectation and sanity checked against the inferred layout. A mismatch raises before solving.
 
-In addition to variable names, each variable requires an explicit boolean entry in the `constrained` field. Having this toggle allows the constraint equations to be predefined in the config but only used when explicitly enabled.
-
-When using a mapping instead of a list, the preferred linearization method and the parameter corresponding to a variable's steady-state level can be specified. This additional information is only used when linearizing a non-linear model.
+When using a mapping instead of a list, each variable can specify a preferred linearization method and the parameter corresponding to its steady state level. This additional information is only used when linearizing a nonlinear model.
 
 Variables are declared as follows:
 ```yaml
@@ -46,17 +44,11 @@ variables: # as mapping
         linearization: log  # (2)!
         steady_state: r_star # (3)!
     ...
-constrained:
-    g: false
-    z: false
-    r: false
-    x: false
-    Pi: false
 ```
 
 1. Exongenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
 2. Can be one of `log`, `taylor`, or `none`.
-3. Name of the parameter contining the stead-state level. 
+3. Name of the parameter containing the steady state level.
 
 ## Parameters
 
@@ -146,7 +138,7 @@ equations:
 Here, we use these variables and parameters that we defined to create the namespace.
 
 ### Constraints
-The constraints field is available and parsed in `SymbolicDSGE`. However, the constraints are currently not supported in the solver and therefore are not enforced. The `constraint` field takes a `{variable: equation, ...}` style dictionary. The behavior is similar for the `constrained` toggle; it will be parsed and cross-checked with the given equations. However, the solver will not act on the given equations. For correctness, we will leave the field empty in the example config.
+The `constraint` field stores piecewise OBC definitions. It maps a model variable name to one or more `{condition: alternative_expression}` entries. Conditions are parsed as `SymPy` relational expressions, alternatives are parsed as `SymPy` expressions, and both are validated against the model namespace. OBCs are parsed and validated, but the solver does not enforce them.
 
 ```yaml
 equations:
@@ -160,7 +152,10 @@ equations:
         - g(t) = rho_g*g(t-1) + e_g
 
         - z(t) = rho_z*z(t-1) + e_z
-    constraint: {...}
+    constraint:
+        r:
+            r(t) >= 0: 0
+            r(t) <= r_star: r_star
     observables: ...
 ```
 
@@ -192,7 +187,7 @@ equations:
 
 ## Calibration
 The `calibration` field stores values and shock variance specifications to annotate the corresponding values of all model components except the variables.
-The field is a parent containing two sub-fields:
+The field is a parent containing two sections:
 ```yaml
 calibration:
     parameters: ...
@@ -276,6 +271,6 @@ Innovation terms are paired with the relevant (co)variance parameters through th
 ## Conclusion
 With all components defined, the configuration file now fully specifies a solvable symbolic DSGE model. The parser will construct the symbolic state-space representation, apply calibration, and prepare the model for solution and simulation.
 
-For future reference or a ready-made boilerplate, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/POST82.yaml) link to see a test configuration in the `SymbolicDSGE` repository.
+For future reference or a ready to use boilerplate, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/POST82.yaml) link to see a test configuration in the `SymbolicDSGE` repository.
 
 [Download Test Config](../assets/test.yaml){ .md-button download="" }

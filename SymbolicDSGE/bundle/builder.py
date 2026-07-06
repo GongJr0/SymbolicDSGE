@@ -89,7 +89,7 @@ class BundleBuilder:
         self._created_by = created_by or _library_version()
         self._members: list[Member] = []
         self._files: dict[str, bytes] = {}
-        self._simulation: SimSpec | None = None
+        self._simulation: dict[str, SimSpec] = {}
 
     # -- models ---------------------------------------------------------------
 
@@ -373,8 +373,8 @@ class BundleBuilder:
 
     # -- simulation prefill ---------------------------------------------------
 
-    def set_simulation(self, simulation: SimSpec) -> BundleBuilder:
-        self._simulation = simulation
+    def set_simulation(self, role: str, simulation: SimSpec) -> BundleBuilder:
+        self._simulation[role] = simulation
         return self
 
     # -- low-level passthrough ------------------------------------------------
@@ -397,7 +397,7 @@ class BundleBuilder:
             created_by=self._created_by,
             created_at=datetime.now(timezone.utc).isoformat(),
             members=list(self._members),
-            simulation=self._simulation,
+            simulation=self._simulation or None,
             checksums={
                 path: hashlib.sha256(data).hexdigest()
                 for path, data in self._files.items()

@@ -20,7 +20,7 @@ from SymbolicDSGE.bundle.cli import (
     main_decompile,
 )
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.bundle.manifest import ShockGeneration, SimSpec
+from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.core.model_parser import ModelParser
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
@@ -185,24 +185,29 @@ def test_decompile_then_recompile_yields_equivalent_bundle(tmp_path: Path) -> No
     src = _baseline_dir(tmp_path)
     # Add a sim prefill so the inline-in-manifest path is also exercised.
     src_sim = SimSpec(
-        role="reference",
         T=8,
-        shock_generation=ShockGeneration(seed=42),
+        shocks={
+            "u": {
+                "dist": "norm",
+                "multivar": False,
+                "seed": 42,
+                "dist_args": [],
+                "dist_kwargs": {"loc": 0.0},
+            }
+        },
     )
-    pass1 = compile_directory(src, tmp_path / "pass1.sdsge")
-    # Patch the bundle to carry the sim spec via the loader path... actually
-    # easier: write simulation.json into the source dir directly and recompile.
-    _write_text(src / "simulation.json", json.dumps(src_sim.to_dict()))
+    # Write simulation.json (a {role: SimSpec} map) into the source dir and compile.
+    _write_text(src / "simulation.json", json.dumps({"reference": src_sim.to_dict()}))
     pass1 = compile_directory(src, tmp_path / "pass1.sdsge")
     loaded1 = build_from(pass1)
-    assert loaded1.simulation is not None and loaded1.simulation.T == 8
+    assert loaded1.simulation is not None and loaded1.simulation["reference"].T == 8
 
     out_dir = decompile_bundle(pass1, tmp_path / "extracted", also_csv=True)
     assert (out_dir / "simulation.json").exists()  # inline SimSpec extracted
     pass2 = compile_directory(out_dir, tmp_path / "pass2.sdsge")
     loaded2 = build_from(pass2)
 
-    assert loaded2.simulation is not None and loaded2.simulation.T == 8
+    assert loaded2.simulation is not None and loaded2.simulation["reference"].T == 8
     np.testing.assert_allclose(loaded1.estimation.observed, loaded2.estimation.observed)
     assert loaded1.estimation.spec.to_dict() == loaded2.estimation.spec.to_dict()
 

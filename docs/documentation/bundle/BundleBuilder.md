@@ -72,7 +72,7 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| name | Member stem — stored under `data/<name>.csv` or `data/<name>.parquet`. |
+| name | Member stem stored under `data/<name>.csv` or `data/<name>.parquet`. |
 | data | CSV bytes or text. Parquet input should be added through [`add_member`](#bundlebuilderadd_member) instead. |
 | as_parquet | When `True` the CSV is re-encoded as Parquet for size; when `False` it is stored verbatim. |
 
@@ -82,7 +82,7 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 
 ```python
 BundleBuilder.add_estimation(
-    spec: EstimationSpec,
+    source: EstimationSpec | Estimator,
     *,
     result: ( # (1)!
         OptimizationResult
@@ -98,22 +98,22 @@ BundleBuilder.add_estimation(
 ) -> BundleBuilder
 ```
 
-1. Live `#!python OptimizationResult` / `#!python MCMCResult` are auto-projected to their `#!python *Meta` via `#!python result.to_meta()` — no hand construction required.
+1. Live `#!python OptimizationResult` / `#!python MCMCResult` are auto-projected to their `#!python *Meta` via `#!python result.to_meta()`. No hand construction is required.
 2. Auto-supplied from `#!python result.posterior_arrays()` when `#!python result` is a live `#!python MCMCResult` and `#!python posterior` is omitted.
 
-Add the estimation tab. `spec` is always written; the other arguments are conditional. With `as_parquet=False`, `observed` is stored as a semantic-header CSV (using `observable_names` as headers) and `posterior` is stored via mechanical `{name}.{j}` expansion.
+Add the estimation tab. `source` may be an `EstimationSpec` or a live `Estimator`. With `as_parquet=False`, `observed` is stored as a semantic-header CSV using `observable_names` as headers, and `posterior` is stored via mechanical `{name}.{j}` expansion.
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| spec | `EstimationSpec` for the run (method, parameters, observables, kwargs, posterior point). |
-| result | Either a live `OptimizationResult` / `MCMCResult` returned by `Estimator.run(...)`, or its projected `OptimizationResultMeta` / `MCMCResultMeta`. Live results are projected internally. |
+| source | `EstimationSpec` for an explicit archive spec, or a live `Estimator` whose spec will be derived from `result`. |
+| result | Either a live `OptimizationResult` / `MCMCResult` returned by `Estimator.mle(...)`, `Estimator.map(...)`, `Estimator.mcmc(...)`, or `DSGESolver.estimate(...)`, or its projected `OptimizationResultMeta` / `MCMCResultMeta`. Live results are projected internally. |
 | observed | Observed `y` matrix shaped `(n, k)`. |
 | observable_names | List of `k` observable names matching the matrix columns. Stored on the manifest member for semantic-header CSV authoring. |
-| posterior | MCMC posterior columns — typically `{"samples": (n_draws, n_params), "logpost": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key. Auto-filled when `result` is a live `MCMCResult`. |
+| posterior | MCMC posterior columns, typically `{"samples": (n_draws, n_params), "logpost": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key. Auto-filled when `result` is a live `MCMCResult`. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
 
 ???+ tip "Live-result fast path"
-    The shortest authoring path for a real run is `#!python builder.add_estimation(spec, result=estimator.run(...), observed=y)`. The builder calls `#!python result.to_meta()` and (for MCMC) attaches `#!python result.posterior_arrays()` automatically — you only reach for the explicit `*Meta` constructors when serializing a result that did not originate from `#!python Estimator.run(...)`.
+    The shortest authoring path for a real run is `#!python builder.add_estimation(estimator, result=result)`, where `result` is a live `OptimizationResult` or `MCMCResult`. The builder derives the spec from the estimator and result, then calls `#!python result.to_meta()` and, for MCMC, attaches `#!python result.posterior_arrays()` automatically.
 
 ???+ warning "Observable name validation"
     `observable_names` must match the model's `observables` in count **and** order. Mismatch raises at compile time with an actionable message. See [`sdsge-compile` validation](../../portable_experiments/sdsge-compile.md#validation) for the details.
@@ -132,11 +132,11 @@ BundleBuilder.add_mc(
 ) -> BundleBuilder
 ```
 
-Add the Monte Carlo tab. A live `MCPipeline` is compiled to a `PipelineSpec` and any side-channel resources it references are written as bundle members. A hand-authored `PipelineSpec` is written as-is. An attached `result` is split into a trace-free document (JSON) plus a trace member (Parquet by default, CSV when `as_parquet=False`).
+Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The builder serializes it to a `PipelineSpec` and writes any side-channel resources it references as bundle members. A hand-authored `PipelineSpec` is accepted for explicit serialization workflows. An attached `result` is split into a trace-free document plus trace and postproc artifact members.
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| pipeline | Live `MCPipeline` or `PipelineSpec` describing the MC graph. |
+| pipeline | Live `MCPipeline` or `PipelineSpec` describing the MC graph. Bundles loaded back into Python reconstruct a live `LoadedMC.pipeline`. |
 | result | Optional live `MCPipelineResult`; the builder splits the document from the bulk traces internally. |
 | run_id | Identifier embedded in the result document. |
 | as_parquet | When `False` the trace member is written as CSV. |
@@ -150,11 +150,12 @@ Add the Monte Carlo tab. A live `MCPipeline` is compiled to a `PipelineSpec` and
 
 ```python
 BundleBuilder.set_simulation(
+    role: str,
     simulation: SimSpec,
 ) -> BundleBuilder
 ```
 
-Attach the simulation prefill. `SimSpec` rides inline in the manifest rather than as its own member.
+Attach a simulation prefill under `role`. Prefills ride inline in the manifest as a `{role: SimSpec}` map rather than as their own members; call it once per role to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"exp1"`).
 
 &nbsp;
 
@@ -167,7 +168,7 @@ BundleBuilder.add_member(
 ) -> BundleBuilder
 ```
 
-Low-level passthrough — append a pre-encoded member at its declared path. Used by `sdsge-compile` to embed Parquet `data/` files verbatim and to stage pre-split MC result + traces pairs.
+Low-level passthrough. Append a pre-encoded member at its declared path. Used by `sdsge-compile` to embed Parquet `data/` files verbatim and to stage pre-split MC result and traces pairs.
 
 ???+ note "When to use `add_member` directly"
     Prefer the typed `add_*` methods. Reach for `add_member` only when the member bytes are already in their final form and one of the higher-level methods would re-encode them.
@@ -193,7 +194,7 @@ BundleBuilder.build(
 ) -> tuple[Manifest, dict[str, bytes]]
 ```
 
-Return the in-memory `(manifest, files)` pair instead of writing — useful for tests and for callers that handle the I/O themselves.
+Return the in-memory `(manifest, files)` pair instead of writing. Useful for tests and for callers that handle the I/O themselves.
 
 &nbsp;
 
@@ -237,6 +238,6 @@ bundle_path = (
 
 ## See also
 
-- [`sdsge-compile`](../../portable_experiments/sdsge-compile.md) — the CLI equivalent.
-- [Bundle Authoring Guide](../../guides/bundle_authoring_guide.md) — full walkthrough.
-- [`SolvedModel.save_sdsge`](../SolvedModel.md) and [`SolvedModel.to_bundle_builder`](../SolvedModel.md) — convenience wrappers for the model-only case.
+- [`sdsge-compile`](../../portable_experiments/sdsge-compile.md): the CLI equivalent.
+- [Bundle Authoring Guide](../../guides/bundle_authoring_guide.md): full walkthrough.
+- [`SolvedModel.save_sdsge`](../SolvedModel.md) and [`SolvedModel.to_bundle_builder`](../SolvedModel.md): convenience wrappers for the model-only case.

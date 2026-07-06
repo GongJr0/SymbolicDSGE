@@ -11,7 +11,17 @@ import numpy as np
 from numpy import asarray, ndarray, float64, random, zeros, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
-from typing import Any, Literal, Callable, Mapping, cast, overload
+from typing import Any, Callable, Literal, Mapping, TypedDict, cast, overload
+
+ShockDistribution = Literal["norm", "t", "uni"]
+
+
+class ShockParameters(TypedDict):
+    dist: ShockDistribution
+    multivar: bool
+    seed: int | None
+    dist_args: list[Any]
+    dist_kwargs: dict[str, Any]
 
 
 def abstract_shock_array(
@@ -279,16 +289,16 @@ ShockSpecMulti = dict[tuple[int, int], float]
 class Shock:
     def __init__(
         self,
-        T: int,
-        dist: Literal["norm", "t", "uni"] | rv_generic | multi_rv_generic | None = None,
+        dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
         multivar: bool = False,
         seed: int | None = 0,
         dist_args: tuple = (),
         dist_kwargs: dict | None = None,
         shock_arr: ndarray | None = None,
     ) -> None:
-
-        self.T = T
+        # A Shock is a horizon-independent distribution spec: the number of
+        # periods ``T`` is supplied by the caller at generation time, not baked
+        # in here. The simulation is the single authority on its own horizon.
         self.dist = dist
         self.multivar = multivar
         self.seed = seed
@@ -309,7 +319,14 @@ class Shock:
             " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
         )
 
-    def shock_generator(self) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
+    def shock_generator(
+        self, T: int
+    ) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
+        """Build the per-scale draw closure for a ``T``-period horizon.
+
+        ``T`` is supplied by the caller (the simulation), not stored on the
+        Shock; the returned callable takes only the scale argument ``s``.
+        """
         self._assert_generator()
         kwargs = self.dist_kwargs.copy()
 
@@ -317,13 +334,13 @@ class Shock:
         # scipy distribution object (or a string with positional dist_args, which
         # the fast path doesn't model) keeps the scipy ``.rvs`` route.
         if isinstance(self.dist, str) and not self.dist_args:
-            return self._numpy_shock_generator(kwargs)
+            return self._numpy_shock_generator(T, kwargs)
 
         scale_key = "scale"
         if self.multivar:
             scale_key = "shape" if self.dist == "t" else "cov"
         fun = lambda s: abstract_shock_array(
-            self.T,
+            T,
             self.seed,
             self._get_dist(),
             *self.dist_args,
@@ -333,7 +350,7 @@ class Shock:
         return fun
 
     def _numpy_shock_generator(
-        self, kwargs: dict
+        self, T: int, kwargs: dict
     ) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
         """Build the per-scale draw closure for a string family on numpy.
 
@@ -342,7 +359,7 @@ class Shock:
         mirroring the scipy-path contract.
         """
         family = self.dist
-        T, seed, multivar = self.T, self.seed, self.multivar
+        seed, multivar = self.seed, self.multivar
 
         if family == "norm":
             if multivar:
@@ -372,24 +389,25 @@ class Shock:
         raise ValueError(f"Unknown shock distribution family: {family!r}")
 
     @overload
-    def place_shocks(self, shock_spec: ShockSpecUni) -> ndarray: ...
+    def place_shocks(self, shock_spec: ShockSpecUni, T: int) -> ndarray: ...
     @overload
-    def place_shocks(self, shock_spec: ShockSpecMulti) -> ndarray: ...
+    def place_shocks(self, shock_spec: ShockSpecMulti, T: int) -> ndarray: ...
 
     def place_shocks(
         self,
         shock_spec: ShockSpecUni | ShockSpecMulti,
+        T: int,
     ) -> ndarray:
         if self.shock_arr is not None:
-            assert self.shock_arr.shape[0] == self.T, "shock_arr length must match T."
+            assert self.shock_arr.shape[0] == T, "shock_arr length must match T."
 
         if not shock_spec:
             if self.shock_arr is not None:
                 return self.shock_arr
             return (
-                zeros((self.T,), dtype=float64)
+                zeros((T,), dtype=float64)
                 if not self.multivar
-                else zeros((self.T, 0), dtype=float64)
+                else zeros((T, 0), dtype=float64)
             )
 
         if not self.multivar:
@@ -397,16 +415,16 @@ class Shock:
             shock_spec_u = cast(ShockSpecUni, shock_spec)
 
             for k in shock_spec_u.keys():
-                if k < 0 or k >= self.T:
-                    raise IndexError(f"Time index {k} out of bounds for T={self.T}.")
-            return shock_placement(self.T, shock_spec_u, self.shock_arr)
+                if k < 0 or k >= T:
+                    raise IndexError(f"Time index {k} out of bounds for T={T}.")
+            return shock_placement(T, shock_spec_u, self.shock_arr)
 
         # multivar
         shock_spec_m = cast(ShockSpecMulti, shock_spec)
 
         for t, k in shock_spec_m.keys():
-            if t < 0 or t >= self.T:
-                raise IndexError(f"Time index {t} out of bounds for T={self.T}.")
+            if t < 0 or t >= T:
+                raise IndexError(f"Time index {t} out of bounds for T={T}.")
             if k < 0:
                 raise IndexError(f"Shock dimension index {k} must be non-negative.")
 
@@ -414,7 +432,7 @@ class Shock:
             shocks = self.shock_arr
         else:
             K = max(k for (_, k) in shock_spec_m.keys()) + 1
-            shocks = zeros((self.T, K), dtype=float64)
+            shocks = zeros((T, K), dtype=float64)
 
         for (t, k), val in shock_spec_m.items():
             if k >= shocks.shape[1]:
@@ -448,7 +466,7 @@ class Shock:
             ), "dist must be a valid scipy.stats distribution or a string identifier."
             return dist
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> ShockParameters:
         """Serialize a generator-style Shock to a JSON-able dict.
 
         Only the generator form is representable: a string ``dist`` identifier
@@ -467,14 +485,13 @@ class Shock:
                 "Cannot serialize a Shock carrying a materialized shock_arr; "
                 "array-backed shocks must be shipped as bulk (parquet) data."
             )
-        return {
-            "T": int(self.T),
-            "dist": self.dist,
-            "multivar": bool(self.multivar),
-            "seed": None if self.seed is None else int(self.seed),
-            "dist_args": [_jsonable(arg) for arg in self.dist_args],
-            "dist_kwargs": {k: _jsonable(v) for k, v in self.dist_kwargs.items()},
-        }
+        return ShockParameters(
+            dist=self.dist,
+            multivar=bool(self.multivar),
+            seed=None if self.seed is None else int(self.seed),
+            dist_args=[_jsonable(arg) for arg in self.dist_args],
+            dist_kwargs={k: _jsonable(v) for k, v in self.dist_kwargs.items()},
+        )
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
@@ -486,8 +503,7 @@ class Shock:
             )
         seed = data.get("seed")
         return cls(
-            T=int(data["T"]),
-            dist=cast(Literal["norm", "t", "uni"], dist),
+            dist=cast(ShockDistribution, dist),
             multivar=bool(data.get("multivar", False)),
             seed=None if seed is None else int(seed),
             dist_args=tuple(data.get("dist_args") or ()),

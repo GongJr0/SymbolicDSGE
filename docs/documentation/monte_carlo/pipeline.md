@@ -34,7 +34,9 @@ Return the cached dependency graph inferred from `per_rep_steps` (postprocs are 
 MCPipeline.to_spec() -> PipelineSpec
 ```
 
-Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channels are referenced by key: `raw_data` arrays and `custom` callables are written as separate bundle members by `BundleBuilder.add_mc(...)`.
+Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channels are referenced by key: `raw_data` arrays and custom callables are written as separate bundle members by `BundleBuilder.add_mc(...)`.
+
+`PipelineSpec` is the archive and UI representation. A bundle loaded back into Python reconstructs a live `LoadedMC.pipeline`.
 
 ```python
 MCPipeline.run(

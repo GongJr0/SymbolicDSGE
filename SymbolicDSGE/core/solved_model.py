@@ -23,6 +23,8 @@ from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
+from SymbolicDSGE.core.shock_generators import Shock
+
 
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
@@ -114,9 +116,11 @@ class SolvedModel:
     def sim(
         self,
         T: int,
-        shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None = None,
+        shocks: (
+            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
+        ) = None,
         shock_scale: float = 1.0,
-        x0: ndarray | None = None,
+        x0: list[float] | ndarray | None = None,
         observables: bool = False,
     ) -> dict[str, NDF]:
         """
@@ -126,13 +130,18 @@ class SolvedModel:
         T : int
             Number of time periods to simulate.
 
-        shocks : dict[str, Union[Callable[[float], ndarray], ndarray]], optional
-            A dictionary mapping shock variable names to either a callable that generates
+        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
+            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
+            joint (multivar) shock over those variables. Each value may be a
+            :class:`Shock` distribution spec (materialized into a ``T``-horizon
+            draw here), a ``callable`` taking the shock scale and returning a
+            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
+            ``None``, all shocks are zero.
 
         shock_scale : float, optional
             A scaling factor applied to all shocks.
 
-        x0 : ndarray, optional
+        x0 : list[float] | ndarray, optional
             Initial state vector. If None, defaults to zero vector.
 
         observables : bool, optional
@@ -148,7 +157,7 @@ class SolvedModel:
             T=T,
             shocks=shocks,
             shock_scale=shock_scale,
-            x0=x0,
+            x0=asarray(x0, dtype=float64) if x0 is not None else None,
         )
 
         out = {name: X[:, self.compiled.idx[name]] for name in self.compiled.var_names}
@@ -171,17 +180,35 @@ class SolvedModel:
         x0_arr[n_state:] = x0_arr[:n_state] @ np.real_if_close(self.policy.f.T)
         return x0_arr
 
+    @staticmethod
+    def _materialize_shocks(
+        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF],
+        T: int,
+    ) -> dict[str, Callable[[float | NDF], NDF] | NDF]:
+        """Resolve any ``Shock`` specs into their ``T``-horizon draw closures.
+
+        This is the single boundary where a distribution spec becomes a concrete
+        generator, so the validation anchor ``_shock_unpack`` only ever sees
+        callables/arrays. Live callables and raw arrays pass through untouched.
+        """
+        return {
+            name: shock.shock_generator(T) if isinstance(shock, Shock) else shock
+            for name, shock in shocks.items()
+        }
+
     def _simulation_shock_matrix(
         self,
         T: int,
-        shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None = None,
+        shocks: (
+            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
+        ) = None,
         shock_scale: float = 1.0,
     ) -> NDF:
         shock_mat = np.zeros((T, self.B.shape[1]), dtype=float64)
         if shocks is None:
             return shock_mat
 
-        shock_list = self._shock_unpack(shocks)
+        shock_list = self._shock_unpack(self._materialize_shocks(shocks, T))
         for idx, shock_vals in shock_list:
             if shock_vals.shape[0] != T:
                 raise ValueError(
@@ -193,7 +220,9 @@ class SolvedModel:
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: Mapping[str, Union[Callable[[float | NDF], NDF], NDF]] | None = None,
+        shocks: (
+            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: ndarray | None = None,
     ) -> NDF:

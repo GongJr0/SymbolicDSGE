@@ -22,8 +22,6 @@ Unlike a per-replication step, a post-processing op runs **once** after the repl
 func(
     *,
     traces: Mapping[str, np.ndarray],  # across-rep trace keys -> stacked arrays
-    reference: SolvedModel,
-    dgp: SolvedModel | None,
     **kwargs,
 ) -> Summary | Raw | Mapping[str, Any]
 ```
@@ -36,7 +34,7 @@ Import from `SymbolicDSGE.monte_carlo`:
 
 | __Type__ | __Signature__ | __Handling__ |
 |:---------|:--------------|-------------:|
-| `Summary` | `#!python Summary(value, title=None, render="auto")` | Renderable result (scalar / table / small array / DataFrame) — gets its own summary surface. `render` ∈ `{"auto", "table", "scalar", "array"}`. |
+| `Summary` | `#!python Summary(value, title=None, render="auto")` | Renderable result (scalar, table, small array, or DataFrame) with its own summary surface. `render` ∈ `{"auto", "table", "scalar", "array"}`. |
 | `Raw` | `#!python Raw(value: np.ndarray)` | Bulk numeric data kept as data (a trace member), not auto-rendered. |
 
 An op may return a single artifact, a bare value (an `ndarray` becomes `Raw`, anything else becomes `Summary`), or a `Mapping` of named outputs to emit several at once. A single artifact is stored under `store_key or name`; a mapping is stored under `f"{name}.{key}"`.
@@ -51,4 +49,4 @@ __Inputs:__
 | kwargs | Extra keyword arguments forwarded to `func`. |
 
 ???+ note "Bundled custom operations"
-    In-process pipelines may use any callable. A pipeline written to an `.sdsge` bundle requires the callable to be a [`CustomFunc`](../../custom_ops.md); post-loop ops are wrapped under the **pandas** namespace, so a returned DataFrame's builder code may reference `pd` — use [`pandas_operation`](../../custom_ops.md#pandas_operation) (or pass a `PandasCustomFunc`). The bundle builder enforces and auto-wraps this at serialization time.
+    In-process pipelines may use any callable. A pipeline written to an `.sdsge` bundle requires the callable to be a [`CustomFunc`](../../custom_ops.md); post-loop ops are wrapped under the **pandas** namespace, so a returned DataFrame's builder code may reference `pd`. Use [`pandas_operation`](../../custom_ops.md#pandas_operation), or pass a `PandasCustomFunc`. The bundle builder enforces and auto-wraps this at serialization time.

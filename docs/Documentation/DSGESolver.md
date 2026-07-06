@@ -117,6 +117,9 @@ DSGESolver.estimate(
 ???+ note Filter Mode
     Filter mode is inferred internally (`linear` if all selected measurement equations are affine, otherwise `extended`).
 
+???+ note "Point Estimation Result"
+    `method="mle"` and `method="map"` return `SymbolicDSGE.OptimizationResult`, not `scipy.optimize.OptimizeResult`.
+
 __Method kwargs:__
 
 - `#!python method="mle"`: forwarded to `Estimator.mle(...)`
@@ -144,7 +147,7 @@ DSGESolver.estimate_and_solve(
     symmetrize: bool | None = None,
     R: np.ndarray | None = None,
     **method_kwargs: Any,
-) -> tuple[MCMCResult | OptimizerResult, SolvedModel]
+) -> tuple[MCMCResult | OptimizationResult, SolvedModel]
 ```
 
 Runs estimation and then solves the model at the estimated parameter point.

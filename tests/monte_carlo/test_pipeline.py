@@ -926,8 +926,8 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
     reference = _FakeSolvedModel()
     dgp = _FakeSolvedModel(offset=1.0)
     shocks = {
-        "g,z": Shock(T, "norm", multivar=True, seed=0),
-        "r": Shock(T, "norm", multivar=False, seed=1),
+        "g,z": Shock("norm", multivar=True, seed=0),
+        "r": Shock("norm", multivar=False, seed=1),
     }
     pipeline = MCPipeline(
         [
@@ -944,10 +944,10 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
 
     expected_seeds = [(0, 1), (2, 3), (4, 5)]
     for rep_idx, (gz_seed, r_seed) in enumerate(expected_seeds):
-        expected_gz = Shock(T, "norm", multivar=True, seed=gz_seed).shock_generator()(
+        expected_gz = Shock("norm", multivar=True, seed=gz_seed).shock_generator(T)(
             np.eye(2, dtype=np.float64)
         )
-        expected_r = Shock(T, "norm", multivar=False, seed=r_seed).shock_generator()(
+        expected_r = Shock("norm", multivar=False, seed=r_seed).shock_generator(T)(
             np.float64(1.0)
         )
         np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["g,z"], expected_gz)
@@ -1427,36 +1427,29 @@ def test_mc_operation_utils_validate_seeded_shock_specs() -> None:
     assert out["arr"] is arr
     assert out["callable"] is callable_shock
     assert _resolve_seed_increment({"arr": arr}, "auto") == 0
-    assert _resolve_seed_increment({"eps": Shock(2, "norm", seed=5)}, "auto") == 1
-    assert _resolve_seed_increment({"eps": Shock(2, "norm", seed=None)}, "auto") == 0
-    assert _resolve_seed_increment({"eps": Shock(2, "norm", seed=5)}, 4) == 4
+    assert _resolve_seed_increment({"eps": Shock("norm", seed=5)}, "auto") == 1
+    assert _resolve_seed_increment({"eps": Shock("norm", seed=None)}, "auto") == 0
+    assert _resolve_seed_increment({"eps": Shock("norm", seed=5)}, 4) == 4
 
     with pytest.raises(ValueError, match="non-negative"):
-        _resolve_seed_increment({"eps": Shock(2, "norm", seed=5)}, -1)
-    with pytest.raises(ValueError, match="expected 2"):
-        _clone_or_pass_shocks(
-            {"eps": Shock(3, "norm", seed=5)},
-            T=2,
-            rep_idx=0,
-            seed_increment="auto",
-        )
+        _resolve_seed_increment({"eps": Shock("norm", seed=5)}, -1)
     with pytest.raises(ValueError, match="generator-style"):
         _clone_or_pass_shocks(
-            {"eps": Shock(2, "norm", seed=5, shock_arr=np.zeros(2))},
+            {"eps": Shock("norm", seed=5, shock_arr=np.zeros(2))},
             T=2,
             rep_idx=0,
             seed_increment="auto",
         )
     with pytest.raises(ValueError, match="multivar=True"):
         _clone_or_pass_shocks(
-            {"eps,z": Shock(2, "norm", multivar=False, seed=5)},
+            {"eps,z": Shock("norm", multivar=False, seed=5)},
             T=2,
             rep_idx=0,
             seed_increment="auto",
         )
     with pytest.raises(ValueError, match="multivar=False"):
         _clone_or_pass_shocks(
-            {"eps": Shock(2, "norm", multivar=True, seed=5)},
+            {"eps": Shock("norm", multivar=True, seed=5)},
             T=2,
             rep_idx=0,
             seed_increment="auto",

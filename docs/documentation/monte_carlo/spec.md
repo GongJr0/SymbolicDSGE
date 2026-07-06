@@ -5,7 +5,9 @@ tags:
 
 # Pipeline Specification
 
-The graph specification is the portable Monte Carlo representation stored in `.sdsge` bundles and accepted by the core pipeline compiler. It is intentionally pydantic-free and uses plain dataclasses.
+The graph specification is the portable Monte Carlo representation stored in `.sdsge` bundles and accepted by the core pipeline compiler. It uses plain dataclasses rather than pydantic models.
+
+Most in-code workflows should use `MCPipeline` directly. Bundle loading rebuilds a live `LoadedMC.pipeline`; `PipelineSpec` remains available for archive inspection, UI rendering, and explicit compile workflows.
 
 ## `NodeSpec`
 
@@ -65,9 +67,9 @@ class PostprocSpec()
 ```
 
 One post-loop op. A postproc is a **terminal reduction** over the assembled
-across-rep traces — not a graph node, so it has no `id` and no edges; its inputs
-are trace keys carried in `params`. Postprocs live in `PipelineSpec.postprocs`,
-never in `nodes`.
+across-replication traces. It is not a graph node, so it has no `id` and no
+edges; its inputs are trace keys carried in `params`. Postprocs live in
+`PipelineSpec.postprocs`, never in `nodes`.
 
 __Fields:__
 
@@ -91,9 +93,9 @@ PostprocSpec.from_dict(data: Mapping[str, Any]) -> PostprocSpec  # @classmethod
 class PipelineSpec()
 ```
 
-Serializable pipeline. `nodes`/`edges` are the **per-replication** dependency
-DAG; `postprocs` is the post-loop phase. The two are kept separate — postprocs
-are not graph participants.
+Serializable pipeline. `nodes` and `edges` are the **per-replication**
+dependency DAG; `postprocs` is the post-loop phase. The two are kept separate
+because postprocs are not graph participants.
 
 __Fields:__
 
@@ -152,5 +154,4 @@ POSTPROC_KINDS: frozenset[str]
 PER_REP_KINDS: frozenset[str]
 ```
 
-`MCStepKind` is the string-level schema used by portable specs; `STEP_KINDS` is the runtime set used for validation. `POSTPROC_KINDS` (the two post-loop kinds) and `PER_REP_KINDS` (everything else — the actual graph nodes) partition it, and drive the `nodes` vs `postprocs` split.
-
+`MCStepKind` is the string-level schema used by portable specs; `STEP_KINDS` is the runtime set used for validation. `POSTPROC_KINDS` contains the post-loop kinds. `PER_REP_KINDS` contains the graph node kinds. Together they drive the `nodes` vs `postprocs` split.

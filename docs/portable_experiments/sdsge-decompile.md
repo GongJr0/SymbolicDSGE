@@ -51,7 +51,7 @@ The extractor writes each member at its compile-input authoring path, not at its
     Model `Member.options` (e.g. `compile_kwargs`/`solve_kwargs`) are extracted to `<role>.options.json` at the directory root. The compile entry point reads these sidecars on recompile, so the round-trip preserves them.
 
 ???+ note "Inline simulation prefill"
-    The `SimSpec` rides inline in the manifest (it has no member of its own). On decompile it is written to `simulation.json` at the root so the recompile picks it up via the standard directory layout.
+    Simulation prefills ride inline in the manifest as a `{role: SimSpec}` map (they have no member of their own). On decompile the map is written to `simulation.json` at the root so the recompile picks it up via the standard directory layout.
 
 ## `--csv` re-encoding
 

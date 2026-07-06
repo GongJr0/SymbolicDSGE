@@ -34,8 +34,8 @@ __Methods:__
 ???+ note "ParsedConfig"
     `ParsedConfig` is an unpack-able `dataclass` holding `#!python ParsedConfig.model: ModelConfig` and `#!python ParsedConfig.kalman: KalmanConfig`
 
-???+ info "Serialization round-trip"
-    `to_yaml` re-dumps `raw_data`, so the `(t)`/`(t+1)` equation grammar and any `kalman:` block are preserved verbatim; `ModelParser.from_string(...)` re-parses that text back into an equivalent `ParsedConfig`. The Kalman configuration is not serialized as an object — it rides inside the emitted YAML, and the parser re-derives the (model-dependent) measurement-noise machinery on load. This pairing is what the `.sdsge` bundle uses to carry a model's configuration as text.
+???+ info "Serialization Round Trip"
+    `to_yaml` re-dumps `raw_data`, so the `(t)`/`(t+1)` equation grammar and any `kalman:` block are preserved verbatim; `ModelParser.from_string(...)` re-parses that text back into an equivalent `ParsedConfig`. The Kalman configuration is not serialized as an object. It rides inside the emitted YAML, and the parser re-derives the model dependent measurement noise machinery on load. This pairing is what the `.sdsge` bundle uses to carry a model's configuration as text.
 
 ???+ warning "Calibration Completeness"
     Parsing enforces that every declared parameter has a calibration value, and every parameter referenced in shock/Kalman sections is declared and calibrated.

@@ -560,12 +560,11 @@ class UISession:
             else:
                 dist_kwargs = {"mean": [generation.loc] * len(targets)}
             out[key] = Shock(
-                T=T,
                 dist=generation.dist,
                 multivar=True,
                 seed=seed,
                 dist_kwargs=dist_kwargs,
-            ).shock_generator()
+            ).shock_generator(T)
             return out
 
         for i, target in enumerate(targets):
@@ -574,12 +573,11 @@ class UISession:
                 uni_kwargs["df"] = generation.df
             shock_seed = None if seed is None else seed + i
             out[target] = Shock(
-                T=T,
                 dist=generation.dist,
                 multivar=False,
                 seed=shock_seed,
                 dist_kwargs=uni_kwargs,
-            ).shock_generator()
+            ).shock_generator(T)
         return out
 
 

@@ -27,7 +27,7 @@ __Fields:__
 | func | `#!python Callable` | Callable executed by the pipeline. |
 | kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step and passed into `func`. |
 | store_key | `#!python str | None` | Optional payload key. If omitted, `name` is used. |
-| step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, or `"custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
+| step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, `"transform:custom"`, or `"postproc:custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
 
 ???+ note "Factory groups"
     Step factories are organized by operation group:
@@ -90,7 +90,7 @@ class MCContext(
 )
 ```
 
-`MCContext` is the mutable object passed through a single replication. Custom transform, filter, test, and post-processing operations receive it as `context`.
+`MCContext` is the mutable object passed through a single replication. Transform, filter, test, and regression operations receive it as `context`. Postproc operations run after the replication loop and receive the assembled `traces` mapping instead.
 
 __Methods:__
 

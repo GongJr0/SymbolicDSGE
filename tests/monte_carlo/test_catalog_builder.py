@@ -470,7 +470,7 @@ def test_kde_trace_field_is_typed_trace() -> None:
 
 
 def test_registry_norm_univariate_shapes_loc_kwarg() -> None:
-    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "norm", "loc": 0.5}], T=8)
+    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "norm", "loc": 0.5}])
     assert shocks is not None
     shock = shocks["u"]
     assert shock.multivar is False
@@ -479,9 +479,7 @@ def test_registry_norm_univariate_shapes_loc_kwarg() -> None:
 
 
 def test_registry_norm_multivariate_shapes_mean_kwarg() -> None:
-    shocks = _shocks_from_registry(
-        [{"vars": ["u", "v"], "dist": "norm", "loc": 0.0}], T=8
-    )
+    shocks = _shocks_from_registry([{"vars": ["u", "v"], "dist": "norm", "loc": 0.0}])
     assert shocks is not None
     shock = shocks["u,v"]
     assert shock.multivar is True
@@ -490,14 +488,14 @@ def test_registry_norm_multivariate_shapes_mean_kwarg() -> None:
 
 def test_registry_t_carries_df() -> None:
     shocks = _shocks_from_registry(
-        [{"vars": ["u"], "dist": "t", "loc": 0.0, "df": 7.0}], T=8
+        [{"vars": ["u"], "dist": "t", "loc": 0.0, "df": 7.0}]
     )
     assert shocks is not None
     assert shocks["u"].dist_kwargs == {"loc": 0.0, "df": 7.0}
 
 
 def test_registry_uniform_single_variable_ok() -> None:
-    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "uni"}], T=8)
+    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "uni"}])
     assert shocks is not None
     assert shocks["u"].multivar is False
     assert shocks["u"].dist == "uni"
@@ -505,25 +503,25 @@ def test_registry_uniform_single_variable_ok() -> None:
 
 def test_registry_uniform_multiple_variables_raises() -> None:
     with pytest.raises(ValueError, match="univariate"):
-        _shocks_from_registry([{"vars": ["u", "v"], "dist": "uni"}], T=8)
+        _shocks_from_registry([{"vars": ["u", "v"], "dist": "uni"}])
 
 
 def test_registry_empty_compiles_to_none() -> None:
-    assert _shocks_from_registry([], T=8) is None
+    assert _shocks_from_registry([]) is None
 
 
 def test_registry_entry_without_variables_raises() -> None:
     with pytest.raises(ValueError, match="at least one variable"):
-        _shocks_from_registry([{"vars": [], "dist": "norm"}], T=8)
+        _shocks_from_registry([{"vars": [], "dist": "norm"}])
 
 
 def test_registry_duplicate_key_raises() -> None:
     with pytest.raises(ValueError, match="Duplicate shock entry"):
         _shocks_from_registry(
-            [{"vars": ["u"], "dist": "norm"}, {"vars": ["u"], "dist": "t"}], T=8
+            [{"vars": ["u"], "dist": "norm"}, {"vars": ["u"], "dist": "t"}]
         )
 
 
 def test_registry_unsupported_distribution_raises() -> None:
     with pytest.raises(ValueError, match="Unsupported shock distribution"):
-        _shocks_from_registry([{"vars": ["u"], "dist": "cauchy"}], T=8)
+        _shocks_from_registry([{"vars": ["u"], "dist": "cauchy"}])
