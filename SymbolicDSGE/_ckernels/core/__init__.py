@@ -14,5 +14,6 @@ from ._core import (
     second_order as second_order,
     second_order_risk as second_order_risk,
     simulate_linear_states_into as simulate_linear_states_into,
+    simulate_second_order_pruned as simulate_second_order_pruned,
     steady_state_newton as steady_state_newton,
 )
