@@ -6,7 +6,9 @@ from typing import Any, Callable, Mapping, Sequence, cast
 import re
 import warnings
 
-import numba
+from numba.core import types as nb_typ
+from numba.core import errors as nb_err
+
 import numpy as np
 import sympy as sp
 from numba import njit
@@ -1843,11 +1845,11 @@ def vectorized_focs(cur, lag, params):
 
         exec(dedent(func_str), ns)
         foc_func = njit(ns["vectorized_focs"])
-        float_vector = numba.types.Array(numba.float64, 1, "C")
+        float_vector = nb_typ.Array(nb_typ.float64, 1, "C")
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
-                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
             foc_func.compile((float_vector, float_vector, float_vector))
 

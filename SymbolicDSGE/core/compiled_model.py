@@ -6,6 +6,8 @@ import numpy as np
 from numpy import complex128, float64
 from numpy.typing import NDArray
 from numba import njit
+from numba.core import types as nb_typ
+from numba.core import errors as nb_err
 
 from dataclasses import dataclass, asdict
 from functools import cached_property
@@ -60,10 +62,10 @@ class CompiledModel:
     @cached_property
     def _objective_vector_func(self) -> Callable[..., ND]:
         f = build_njit(self.objective_eqs, ResidualLayout.from_compiled(self))
-        complex_vec = numba.types.Array(numba.complex128, 1, "C")
+        complex_vec = nb_typ.Array(nb_typ.complex128, 1, "C")
         with warnings.catch_warnings():
             warnings.filterwarnings(
-                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
             f.compile((complex_vec, complex_vec, complex_vec))
         return cast(Callable, f)
@@ -183,9 +185,9 @@ def vectorized_measurements({params_typed}):
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
-                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
-            f.compile(tuple(numba.float64 for _ in params))  # pyright: ignore
+            f.compile(tuple(nb_typ.float64 for _ in params))  # pyright: ignore
         return cast(Callable, f)
 
     def construct_measurement_vector_func(self) -> Callable[..., ND]:
@@ -250,11 +252,11 @@ def measurement_array(state, params):
 
         exec(dedent(func_str), ns)
         f = njit(ns["measurement_array"])
-        float_vector = numba.types.Array(numba.float64, 1, "C")
+        float_vector = nb_typ.Array(nb_typ.float64, 1, "C")
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
-                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
             f.compile((float_vector, float_vector))  # pyright: ignore
 
@@ -306,11 +308,11 @@ def jacobian_array(state, params):
 
         exec(dedent(func_str), ns)
         f = njit(ns["jacobian_array"])
-        float_vector = numba.types.Array(numba.float64, 1, "C")
+        float_vector = nb_typ.Array(nb_typ.float64, 1, "C")
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
-                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
             f.compile((float_vector, float_vector))  # pyright: ignore
 

@@ -8,8 +8,9 @@ import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
 
-import numba
 from numba import njit
+from numba import types as nb_typ
+from numba.core import errors as nb_err
 
 import pandas as pd
 from scipy.optimize import root
@@ -223,10 +224,10 @@ def jacobian_func({args_str}) -> NDF:
 
         with warnings.catch_warnings():
             warnings.simplefilter(
-                "ignore", category=numba.errors.NumbaExperimentalFeatureWarning
+                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
             jacobian_func.compile(  # pyright: ignore
-                tuple(numba.float64 for _ in arg_names)
+                tuple(nb_typ.float64 for _ in arg_names)
             )
 
         return CompiledModel(
