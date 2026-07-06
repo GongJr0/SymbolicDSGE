@@ -32,6 +32,84 @@ def _obs_scale(x, alpha):
     return x * alpha
 
 
+def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, dict]:
+    hx = np.array([[0.5, 0.1], [0.0, 0.8]], dtype=np.float64)
+    gx = np.array([[2.0, -1.0]], dtype=np.float64)
+    bx = np.array([[1.0], [0.25]], dtype=np.float64)
+    hxx = np.array(
+        [
+            [[0.2, 0.1], [0.1, -0.2]],
+            [[0.0, 0.3], [0.3, 0.1]],
+        ],
+        dtype=np.float64,
+    )
+    gxx = np.array([[[0.4, -0.1], [-0.1, 0.2]]], dtype=np.float64)
+    hss = np.array([0.01, -0.02], dtype=np.float64)
+    gss = np.array([0.03], dtype=np.float64)
+
+    compiled = SimpleNamespace(
+        idx={"e": 0, "k": 1, "c": 2},
+        var_names=["e", "k", "c"],
+        n_exog=1,
+        n_state=2,
+        observable_names=[],
+        config=SimpleNamespace(
+            shock_map={Symbol("eps"): Symbol("e")},
+            calibration=SimpleNamespace(parameters={}, shock_std={}),
+        ),
+    )
+    solved = solved_model_module.SolvedModel(
+        compiled=compiled,
+        policy=SimpleNamespace(
+            p=hx,
+            f=gx,
+            order=2,
+            hxx=hxx,
+            gxx=gxx,
+            hss=hss,
+            gss=gss,
+        ),
+        A=np.eye(3, dtype=np.float64),
+        B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),
+    )
+    data = {
+        "hx": hx,
+        "gx": gx,
+        "bx": bx,
+        "hxx": hxx,
+        "gxx": gxx,
+        "hss": hss,
+        "gss": gss,
+    }
+    return solved, data
+
+
+def _manual_second_order_path(data, shock, x0_state) -> np.ndarray:
+    T = shock.shape[0]
+    expected = np.empty((T + 1, 3), dtype=np.float64)
+    x1 = x0_state.copy()
+    x2 = np.zeros(2, dtype=np.float64)
+    for t in range(T + 1):
+        state = x1 + x2
+        outer = np.outer(x1, x1)
+        expected[t, :2] = state
+        expected[t, 2] = (
+            data["gx"][0] @ state
+            + 0.5 * np.sum(data["gxx"][0] * outer)
+            + 0.5 * data["gss"][0]
+        )
+        if t == T:
+            break
+        x1_next = data["hx"] @ x1 + data["bx"][:, 0] * shock[t]
+        x2_next = (
+            data["hx"] @ x2
+            + 0.5 * np.einsum("ijk,jk->i", data["hxx"], outer)
+            + 0.5 * data["hss"]
+        )
+        x1, x2 = x1_next, x2_next
+    return expected
+
+
 def test_solved_model_sim_shapes_and_keys(solved_test):
     T = 12
     out = solved_test.sim(T)
@@ -107,6 +185,36 @@ def test_solved_model_sim_matches_manual_state_recursion(solved_test):
     np.testing.assert_allclose(out["_X"], expected)
 
 
+def test_solved_model_second_order_sim_matches_pruned_recursion() -> None:
+    T = 3
+    solved, data = _make_second_order_test_model()
+    shock = np.array([0.0, 0.05, -0.02], dtype=np.float64)
+    x0 = np.array([0.2, -0.1, 99.0], dtype=np.float64)
+
+    out = solved.sim(T, shocks={"e": shock}, x0=x0)["_X"]
+    expected = _manual_second_order_path(data, shock, x0[:2])
+
+    np.testing.assert_allclose(out, expected)
+    assert out[0, 2] != x0[2]
+
+
+def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
+    T = 3
+    solved, data = _make_second_order_test_model()
+    shock = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    zero = np.zeros(T, dtype=np.float64)
+
+    out = solved.irf(shocks=["e"], T=T)["_X"]
+    expected = _manual_second_order_path(
+        data,
+        shock,
+        np.zeros(2, dtype=np.float64),
+    ) - _manual_second_order_path(data, zero, np.zeros(2, dtype=np.float64))
+
+    np.testing.assert_allclose(out, expected)
+    np.testing.assert_allclose(out[0], np.zeros(3, dtype=np.float64))
+
+
 def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
     with pytest.raises(ValueError, match="must have length"):
         solved_test.sim(8, shocks={"u": np.ones(7)})
@@ -134,13 +242,14 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
     compiled = SimpleNamespace(
         idx={"g": 0, "x": 1},
         var_names=["g", "x"],
+        n_exog=1,
         n_state=1,
         observable_names=["Obs"],
         config=SimpleNamespace(equations=SimpleNamespace(obs_is_affine={"Obs": False})),
     )
     solved = solved_model_module.SolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64)),
+        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64), order=1),
         A=np.eye(2, dtype=np.float64),
         B=np.zeros((2, 1), dtype=np.float64),
     )

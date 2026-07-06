@@ -28,7 +28,11 @@ from SymbolicDSGE.core.shock_generators import Shock
 
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
-from .simulation import affine_observations_into, simulate_linear_states_into
+from .simulation import (
+    affine_observations_into,
+    simulate_linear_states_into,
+    simulate_second_order_pruned,
+)
 from ..kalman.config import KalmanConfig
 from ..kalman.interface import KalmanInterface, _KFMatrices
 from ..kalman.filter import FilterResult
@@ -62,6 +66,20 @@ class SolvedModel:
     policy: Any
     A: ndarray
     B: ndarray
+
+    def __post_init__(self) -> None:
+        if self.policy is None:
+            object.__setattr__(self, "_simulation_order", None)
+            return
+        try:
+            order = int(self.policy.order)
+        except AttributeError as exc:
+            raise TypeError("SolvedModel policy must expose an integer order.") from exc
+        if order not in SIM_FUNC_DISPATCH:
+            raise ValueError(
+                f"Simulation for solution order {order} is not implemented."
+            )
+        object.__setattr__(self, "_simulation_order", order)
 
     @property
     def config(self) -> ModelConfig:
@@ -172,11 +190,20 @@ class SolvedModel:
 
     def _simulation_initial_state(self, x0: ndarray | None = None) -> NDF:
         n = self.A.shape[0]
+        n_state = self.compiled.n_state
         if x0 is None:
             x0_arr = np.zeros((n,), dtype=float64)
         else:
-            x0_arr = asarray(x0, dtype=float64)
-        n_state = self.compiled.n_state
+            raw = asarray(x0, dtype=float64)
+            if raw.shape[0] == n:
+                x0_arr = raw.copy()
+            elif raw.shape[0] == n_state:
+                x0_arr = np.zeros((n,), dtype=float64)
+                x0_arr[:n_state] = raw
+            else:
+                raise ValueError(
+                    f"x0 must have length {n_state} or {n}, got {raw.shape[0]}."
+                )
         x0_arr[n_state:] = x0_arr[:n_state] @ np.real_if_close(self.policy.f.T)
         return x0_arr
 
@@ -204,7 +231,7 @@ class SolvedModel:
         ) = None,
         shock_scale: float = 1.0,
     ) -> NDF:
-        shock_mat = np.zeros((T, self.B.shape[1]), dtype=float64)
+        shock_mat = np.zeros((T, self.compiled.n_exog), dtype=float64)
         if shocks is None:
             return shock_mat
 
@@ -226,21 +253,10 @@ class SolvedModel:
         shock_scale: float = 1.0,
         x0: ndarray | None = None,
     ) -> NDF:
-        x0_arr = self._simulation_initial_state(x0)
-        shock_mat = self._simulation_shock_matrix(
-            T=T,
-            shocks=shocks,
-            shock_scale=shock_scale,
-        )
-        X = np.empty((T + 1, self.A.shape[0]), dtype=float64)
-        simulate_linear_states_into(
-            asarray(self.A, dtype=float64),
-            asarray(self.B, dtype=float64),
-            x0_arr,
-            shock_mat,
-            X,
-        )
-        return X
+        order = self.__dict__.get("_simulation_order")
+        if order is None:
+            raise ValueError("Cannot simulate a SolvedModel without a policy.")
+        return SIM_FUNC_DISPATCH[order](self, T, shocks, shock_scale, x0)
 
     def _simulate_observable_matrix(
         self,
@@ -306,13 +322,24 @@ class SolvedModel:
             arr[0] = sig
             shock_spec[s] = arr
 
-        return self.sim(
+        out = self.sim(
             T,
             shocks=shock_spec,
             shock_scale=scale,
             x0=np.zeros((self.A.shape[0],), dtype=float64),
             observables=observables,
         )
+        if self.__dict__.get("_simulation_order") != 2:
+            return out
+
+        baseline = self.sim(
+            T,
+            shocks=None,
+            shock_scale=scale,
+            x0=np.zeros((self.A.shape[0],), dtype=float64),
+            observables=observables,
+        )
+        return {key: value - baseline[key] for key, value in out.items()}
 
     def transition_plot(
         self, T: int, shocks: list[str], scale: float = 1.0, observables: bool = False
@@ -831,3 +858,90 @@ class SolvedModel:
         )
 
         return cast("FitResult", interface.fit_to_kf(y))
+
+
+SimFn = Callable[
+    [
+        SolvedModel,
+        int,
+        Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None,
+        float,
+        ndarray | None,
+    ],
+    NDF,
+]
+
+
+def _simulate_order1(
+    model: SolvedModel,
+    T: int,
+    shocks: Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None,
+    shock_scale: float,
+    x0: ndarray | None,
+) -> NDF:
+    x0_arr = model._simulation_initial_state(x0)
+    shock_mat = model._simulation_shock_matrix(
+        T=T,
+        shocks=shocks,
+        shock_scale=shock_scale,
+    )
+    X = np.empty((T + 1, model.A.shape[0]), dtype=float64)
+    simulate_linear_states_into(
+        asarray(model.A, dtype=float64),
+        asarray(model.B, dtype=float64),
+        x0_arr,
+        shock_mat,
+        X,
+    )
+    return X
+
+
+def _policy_array(policy: Any, name: str) -> NDF:
+    value = getattr(policy, name, None)
+    if value is None:
+        raise ValueError(f"Second order simulation requires policy.{name}.")
+    return asarray(value, dtype=float64)
+
+
+def _simulate_order2(
+    model: SolvedModel,
+    T: int,
+    shocks: Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None,
+    shock_scale: float,
+    x0: ndarray | None,
+) -> NDF:
+    n_state = model.compiled.n_state
+    n = model.A.shape[0]
+    ny = n - n_state
+    policy = model.policy
+
+    x0_state = asarray(model._simulation_initial_state(x0)[:n_state], dtype=float64)
+    shock_mat = model._simulation_shock_matrix(
+        T=T,
+        shocks=shocks,
+        shock_scale=shock_scale,
+    )
+
+    x_path, y_path = simulate_second_order_pruned(
+        asarray(np.real_if_close(policy.p), dtype=float64),
+        asarray(np.real_if_close(policy.f), dtype=float64),
+        asarray(model.B[:n_state, :], dtype=float64),
+        _policy_array(policy, "hxx"),
+        _policy_array(policy, "gxx"),
+        _policy_array(policy, "hss"),
+        _policy_array(policy, "gss"),
+        x0_state,
+        shock_mat,
+    )
+
+    X = np.empty((T + 1, n), dtype=float64)
+    X[:, :n_state] = x_path
+    if ny > 0:
+        X[:, n_state:] = y_path
+    return X
+
+
+SIM_FUNC_DISPATCH: dict[int, SimFn] = {
+    1: _simulate_order1,
+    2: _simulate_order2,
+}

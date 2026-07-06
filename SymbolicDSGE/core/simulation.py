@@ -17,23 +17,30 @@ from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 # pin the inferred type to None; the native handle matches the _core.pyi stub.
 _SimulateKernel = Callable[[NDF, NDF, NDF, NDF, NDF], None]
 _AffineKernel = Callable[[NDF, NDF, NDF, int, NDF], None]
+_SecondOrderKernel = Callable[
+    [NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF], tuple[NDF, NDF]
+]
 _simulate_native: _SimulateKernel | None
 _affine_native: _AffineKernel | None
+_simulate_second_order_native: _SecondOrderKernel | None
 
 if FORCE_NUMBA:
     _affine_native = None
     _simulate_native = None
+    _simulate_second_order_native = None
 else:
     try:
         from .._ckernels.core import (
             affine_observations_into as _affine_native,
             simulate_linear_states_into as _simulate_native,
+            simulate_second_order_pruned as _simulate_second_order_native,
         )
     except ImportError:  # pragma: no cover - exercised only without the extension
         if REQUIRE_NATIVE:
             raise
         _affine_native = None
         _simulate_native = None
+        _simulate_second_order_native = None
 
 
 @njit(cache=True)
@@ -80,6 +87,79 @@ def _affine_observations_into_numba(
             for j in range(n):
                 s += C[i, j] * states[state_row, j]
             out[t, i] = s
+
+
+@njit(cache=True)
+def _simulate_second_order_pruned_numba(
+    hx: NDF,
+    gx: NDF,
+    bx: NDF,
+    hxx: NDF,
+    gxx: NDF,
+    hss: NDF,
+    gss: NDF,
+    x0: NDF,
+    shock_mat: NDF,
+) -> tuple[NDF, NDF]:
+    T = shock_mat.shape[0]
+    nx = hx.shape[0]
+    ny = gx.shape[0]
+    n_exog = bx.shape[1]
+
+    x_out = np.empty((T + 1, nx), dtype=np.float64)
+    y_out = np.empty((T + 1, ny), dtype=np.float64)
+    x1_cur = np.empty(nx, dtype=np.float64)
+    x1_next = np.empty(nx, dtype=np.float64)
+    x2_cur = np.empty(nx, dtype=np.float64)
+    x2_next = np.empty(nx, dtype=np.float64)
+    x1_outer = np.empty((nx, nx), dtype=np.float64)
+
+    for i in range(nx):
+        x1_cur[i] = x0[i]
+        x2_cur[i] = 0.0
+
+    for t in range(T + 1):
+        for i in range(nx):
+            x_out[t, i] = x1_cur[i] + x2_cur[i]
+
+        for j in range(nx):
+            for k in range(nx):
+                x1_outer[j, k] = x1_cur[j] * x1_cur[k]
+
+        for i in range(ny):
+            s = 0.5 * gss[i]
+            for j in range(nx):
+                s += gx[i, j] * x_out[t, j]
+            for j in range(nx):
+                for k in range(nx):
+                    s += 0.5 * gxx[i, j, k] * x1_outer[j, k]
+            y_out[t, i] = s
+
+        if t == T:
+            break
+
+        for i in range(nx):
+            s1 = 0.0
+            s2 = 0.5 * hss[i]
+            for j in range(nx):
+                s1 += hx[i, j] * x1_cur[j]
+                s2 += hx[i, j] * x2_cur[j]
+            for j in range(n_exog):
+                s1 += bx[i, j] * shock_mat[t, j]
+            for j in range(nx):
+                for k in range(nx):
+                    s2 += 0.5 * hxx[i, j, k] * x1_outer[j, k]
+            x1_next[i] = s1
+            x2_next[i] = s2
+
+        for i in range(nx):
+            x1_cur[i] = x1_next[i]
+            x2_cur[i] = x2_next[i]
+
+    return x_out, y_out
+
+
+_simulate_second_order_numba: _SecondOrderKernel = _simulate_second_order_pruned_numba
 
 
 def simulate_linear_states_into(
@@ -131,3 +211,30 @@ def affine_observations_into(
         )
     else:
         _affine_observations_into_numba(states, C, d, state_start, out)
+
+
+def simulate_second_order_pruned(
+    hx: NDF,
+    gx: NDF,
+    bx: NDF,
+    hxx: NDF,
+    gxx: NDF,
+    hss: NDF,
+    gss: NDF,
+    x0: NDF,
+    shock_mat: NDF,
+) -> tuple[NDF, NDF]:
+    """Return split state and jump paths from the pruned second order rule."""
+    if _simulate_second_order_native is not None:
+        return _simulate_second_order_native(
+            ascontiguousarray(hx, dtype=float64),
+            ascontiguousarray(gx, dtype=float64),
+            ascontiguousarray(bx, dtype=float64),
+            ascontiguousarray(hxx, dtype=float64),
+            ascontiguousarray(gxx, dtype=float64),
+            ascontiguousarray(hss, dtype=float64),
+            ascontiguousarray(gss, dtype=float64),
+            ascontiguousarray(x0, dtype=float64),
+            ascontiguousarray(shock_mat, dtype=float64),
+        )
+    return _simulate_second_order_numba(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat)

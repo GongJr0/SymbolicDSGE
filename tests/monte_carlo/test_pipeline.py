@@ -984,7 +984,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
     )
     dgp = SolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64)),
+        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64), order=1),
         A=A,
         B=B,
     )

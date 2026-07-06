@@ -197,7 +197,7 @@ def test_solve_order2_wiring():
     # First order path is untouched: KleinSolution, no second-order tensors.
     # (levels model -> the expansion point must be supplied; zeros would fail BK.)
     first = solver.solve(compiled, order=1, steady_state=[0.0, k_ss, c_ss])
-    assert getattr(first.policy, "order", None) is None
+    assert first.policy.order == 1
     assert not hasattr(first.policy, "gxx")
 
 

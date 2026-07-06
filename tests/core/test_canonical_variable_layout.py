@@ -95,7 +95,7 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
     compiled = _compile_misordered_test_model(tmp_path)
     solved = SolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(f=np.zeros((3, 3), dtype=np.float64)),
+        policy=SimpleNamespace(f=np.zeros((3, 3), dtype=np.float64), order=1),
         A=np.eye(len(EXPECTED_CANONICAL_ORDER), dtype=np.float64),
         B=np.vstack(
             [
@@ -121,7 +121,7 @@ def test_simulation_shock_unpack_accepts_shocks_by_canonical_exogenous_names(tmp
     compiled = _compile_misordered_test_model(tmp_path)
     solved = SolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(f=np.zeros((3, 3), dtype=np.float64)),
+        policy=SimpleNamespace(f=np.zeros((3, 3), dtype=np.float64), order=1),
         A=np.eye(len(EXPECTED_CANONICAL_ORDER), dtype=np.float64),
         B=np.vstack(
             [

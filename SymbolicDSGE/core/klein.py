@@ -58,6 +58,7 @@ class KleinSolution:
     f: NDC
     stab: int
     eig: NDC
+    order: int = 1
 
 
 # ---------------------------------------------------------------------------
