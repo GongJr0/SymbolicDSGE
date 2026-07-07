@@ -87,11 +87,50 @@
   stoch_sdsge(:, 3) = y_stoch(idx_c, sim_cols)';
   stoch_dynare_decl = y_stoch(:, 2:end)';
 
+  T_irf = 24;
+  x0_irf_sdsge = [0; k_ss];
+  shock_irf = zeros(T_irf, 1);
+  shock_irf(1) = sig;
+
+  y0_irf = oo_.dr.ys;
+  y0_irf(idx_z) = x0_irf_sdsge(1) / rho;
+  y0_irf(idx_k) = x0_irf_sdsge(2);
+
+  ex_irf = zeros(T_irf + 1, M_.exo_nbr);
+  ex_irf(2, idx_e) = sig;
+  ex_irf_base = zeros(T_irf + 1, M_.exo_nbr);
+
+  try
+      y_irf = simult_(M_, options_, y0_irf, oo_.dr, ex_irf, iorder);
+      y_irf_base = simult_(M_, options_, y0_irf, oo_.dr, ex_irf_base, iorder);
+  catch
+      y_irf = simult_(y0_irf, oo_.dr, ex_irf, iorder);
+      y_irf_base = simult_(y0_irf, oo_.dr, ex_irf_base, iorder);
+  end
+
+  irf_level_sdsge = zeros(T_irf + 1, 3);
+  irf_base_sdsge = zeros(T_irf + 1, 3);
+  sim_cols = 2:(T_irf + 2);
+  irf_level_sdsge(:, 1) = y_irf(idx_z, sim_cols)';
+  irf_level_sdsge(1, 2) = x0_irf_sdsge(2);
+  irf_level_sdsge(2:end, 2) = y_irf(idx_k, sim_cols(1:end-1))';
+  irf_level_sdsge(:, 3) = y_irf(idx_c, sim_cols)';
+  irf_base_sdsge(:, 1) = y_irf_base(idx_z, sim_cols)';
+  irf_base_sdsge(1, 2) = x0_irf_sdsge(2);
+  irf_base_sdsge(2:end, 2) = y_irf_base(idx_k, sim_cols(1:end-1))';
+  irf_base_sdsge(:, 3) = y_irf_base(idx_c, sim_cols)';
+  irf_sdsge = irf_level_sdsge - irf_base_sdsge;
+  irf_dynare_decl = y_irf(:, 2:end)' - y_irf_base(:, 2:end)';
+
   save('-v7', 'rbc_second_order_sim_goldens.mat', ...
        'x0_sdsge', 'shock_det', 'shock_stoch', ...
+       'x0_irf_sdsge', 'shock_irf', ...
        'det_sdsge', 'stoch_sdsge', ...
+       'irf_sdsge', 'irf_level_sdsge', 'irf_base_sdsge', ...
        'det_dynare_decl', 'stoch_dynare_decl', ...
+       'irf_dynare_decl', ...
        'sdsge_columns', 'dynare_decl_columns');
 
   dlmwrite('rbc_second_order_det_sdsge.csv', det_sdsge, 'precision', '%.17g');
   dlmwrite('rbc_second_order_stoch_sdsge.csv', stoch_sdsge, 'precision', '%.17g');
+  dlmwrite('rbc_second_order_irf_sdsge.csv', irf_sdsge, 'precision', '%.17g');
