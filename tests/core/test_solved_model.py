@@ -433,7 +433,7 @@ def test_solved_model_non_affine_measurement_and_jit_cache():
     )
     solved = solved_model_module.SolvedModel(
         compiled=compiled,
-        policy=None,
+        policy=SimpleNamespace(order=1),
         A=np.eye(1, dtype=np.float64),
         B=np.zeros((1, 1), dtype=np.float64),
     )
@@ -477,7 +477,7 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
     )
     solved = solved_model_module.SolvedModel(
         compiled=compiled,
-        policy=None,
+        policy=SimpleNamespace(order=1),
         A=np.eye(1, dtype=np.float64),
         B=np.eye(1, dtype=np.float64),
     )

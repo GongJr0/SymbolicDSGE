@@ -247,8 +247,6 @@ class SolvedModel:
         shock_scale: float = 1.0,
         x0: ndarray | None = None,
     ) -> NDF:
-        if self.policy is None:
-            raise ValueError("Cannot simulate a SolvedModel without a policy.")
         return SIM_FUNC_DISPATCH[self.policy.order](self, T, shocks, shock_scale, x0)
 
     def _simulate_observable_matrix(

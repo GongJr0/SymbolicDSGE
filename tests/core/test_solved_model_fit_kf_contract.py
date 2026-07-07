@@ -11,7 +11,7 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 def _make_solved_model() -> SolvedModel:
     return SolvedModel(
         compiled=SimpleNamespace(var_names=["x"]),
-        policy=None,
+        policy=SimpleNamespace(order=1),
         A=np.zeros((1, 1), dtype=np.float64),
         B=np.zeros((1, 1), dtype=np.float64),
     )
