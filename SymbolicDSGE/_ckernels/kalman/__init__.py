@@ -6,3 +6,4 @@ falls back to its numba kernels.
 """
 
 from ._kalman import kalman_hot_loop as kalman_hot_loop
+from ._kalman import ukf_hot_loop as ukf_hot_loop
