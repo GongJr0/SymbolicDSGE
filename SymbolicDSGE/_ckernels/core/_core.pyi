@@ -32,6 +32,19 @@ def affine_observations_into(
 ) -> None:
     """out[(T, m)] <- d + C @ states[state_start + t]. Mirrors the numba kernel."""
 
+def simulate_second_order_pruned(
+    hx: _F64,
+    gx: _F64,
+    bx: _F64,
+    hxx: _F64,
+    gxx: _F64,
+    hss: _F64,
+    gss: _F64,
+    x0: _F64,
+    shock_mat: _F64,
+) -> tuple[_F64, _F64]:
+    """Pruned second order simulation. Returns split state and jump paths."""
+
 def klein_postprocess(
     s: _C128,
     t: _C128,

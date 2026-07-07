@@ -17,6 +17,13 @@ cdef extern from "core.h" nogil:
     void sdsge_affine_observations(
         const double *states, const double *C, const double *d,
         int64_t state_start, double *out, int64_t T, int64_t m, int64_t n)
+    int64_t sdsge_simulate_second_order_pruned(
+        const double *hx, const double *gx, const double *bx,
+        const double *hxx, const double *gxx,
+        const double *hss, const double *gss,
+        const double *x0, const double *shock,
+        int64_t T, int64_t nx, int64_t ny, int64_t n_exog,
+        double *x_out, double *y_out)
 
 
 cdef extern from "../_common/sdsge_complex.h":
@@ -146,6 +153,85 @@ def affine_observations_into(
         sdsge_affine_observations(
             &states[0, 0], &C[0, 0], &d[0], state_start, &out[0, 0], T, m, n
         )
+
+
+def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
+    """Pruned second order simulation. Returns the split state and jump paths."""
+    cdef double[:, ::1] hxv = np.ascontiguousarray(hx, dtype=np.float64)
+    cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
+    cdef double[:, ::1] bxv = np.ascontiguousarray(bx, dtype=np.float64)
+    cdef double[:, :, ::1] hxxv = np.ascontiguousarray(hxx, dtype=np.float64)
+    cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
+    cdef double[::1] hssv = np.ascontiguousarray(hss, dtype=np.float64)
+    cdef double[::1] gssv = np.ascontiguousarray(gss, dtype=np.float64)
+    cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
+    cdef double[:, ::1] shockv = np.ascontiguousarray(shock_mat, dtype=np.float64)
+
+    cdef int64_t nx = hxv.shape[0]
+    cdef int64_t ny = gxv.shape[0]
+    cdef int64_t n_exog = bxv.shape[1]
+    cdef int64_t T = shockv.shape[0]
+    cdef int64_t err
+
+    cdef const double *gx_ptr = NULL
+    cdef const double *bx_ptr = NULL
+    cdef const double *gxx_ptr = NULL
+    cdef const double *gss_ptr = NULL
+    cdef const double *shock_ptr = NULL
+    cdef double *y_ptr = NULL
+    cdef double[:, ::1] xoutv
+    cdef double[:, ::1] youtv
+    cdef double *x_ptr
+
+    if nx <= 0:
+        raise ValueError("simulate_second_order_pruned requires nx >= 1.")
+    if hxv.shape[1] != nx:
+        raise ValueError("hx must have shape (nx, nx).")
+    if gxv.shape[1] != nx:
+        raise ValueError("gx must have shape (ny, nx).")
+    if bxv.shape[0] != nx:
+        raise ValueError("bx must have shape (nx, n_exog).")
+    if hxxv.shape[0] != nx or hxxv.shape[1] != nx or hxxv.shape[2] != nx:
+        raise ValueError("hxx must have shape (nx, nx, nx).")
+    if gxxv.shape[0] != ny or gxxv.shape[1] != nx or gxxv.shape[2] != nx:
+        raise ValueError("gxx must have shape (ny, nx, nx).")
+    if hssv.shape[0] != nx:
+        raise ValueError("hss must have shape (nx,).")
+    if gssv.shape[0] != ny:
+        raise ValueError("gss must have shape (ny,).")
+    if x0v.shape[0] != nx:
+        raise ValueError("x0 must have shape (nx,).")
+    if shockv.shape[1] != n_exog:
+        raise ValueError("shock_mat must have shape (T, n_exog).")
+
+    x_out = np.empty((T + 1, nx), dtype=np.float64)
+    y_out = np.empty((T + 1, ny), dtype=np.float64)
+    xoutv = x_out
+    youtv = y_out
+    x_ptr = &xoutv[0, 0]
+
+    if ny > 0:
+        gx_ptr = &gxv[0, 0]
+        gxx_ptr = &gxxv[0, 0, 0]
+        gss_ptr = &gssv[0]
+        y_ptr = &youtv[0, 0]
+    if n_exog > 0:
+        bx_ptr = &bxv[0, 0]
+        if T > 0:
+            shock_ptr = &shockv[0, 0]
+
+    with nogil:
+        err = sdsge_simulate_second_order_pruned(
+            &hxv[0, 0], gx_ptr, bx_ptr, &hxxv[0, 0, 0], gxx_ptr,
+            &hssv[0], gss_ptr, &x0v[0], shock_ptr,
+            T, nx, ny, n_exog, x_ptr, y_ptr)
+    if err == -1:
+        raise MemoryError("simulate_second_order_pruned: allocation failed.")
+    if err != 0:
+        raise RuntimeError(
+            f"simulate_second_order_pruned: native kernel failed with code {err}."
+        )
+    return x_out, y_out
 
 
 def klein_postprocess(

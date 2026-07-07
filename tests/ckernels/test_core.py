@@ -10,6 +10,7 @@ import pytest
 from SymbolicDSGE.core.simulation import (
     _affine_observations_into_numba,
     _simulate_linear_states_into_numba,
+    _simulate_second_order_pruned_numba,
 )
 
 core = pytest.importorskip("SymbolicDSGE._ckernels.core")
@@ -49,6 +50,35 @@ def test_affine_matches_numba(m: int, n: int, T: int, start: int) -> None:
     _affine_observations_into_numba(states, C, d, start, ref)
 
     np.testing.assert_allclose(native, ref, rtol=_RTOL, atol=_ATOL)
+
+
+@pytest.mark.parametrize(
+    "nx, ny, n_exog, T",
+    [(1, 1, 1, 1), (2, 1, 1, 4), (3, 2, 2, 7), (2, 0, 1, 5), (2, 1, 0, 5)],
+)
+def test_second_order_pruned_matches_numba(
+    nx: int, ny: int, n_exog: int, T: int
+) -> None:
+    rng = np.random.default_rng(nx * 1000 + ny * 100 + n_exog * 10 + T)
+    hx = np.ascontiguousarray(rng.standard_normal((nx, nx)) * (0.25 / nx))
+    gx = np.ascontiguousarray(rng.standard_normal((ny, nx)))
+    bx = np.ascontiguousarray(rng.standard_normal((nx, n_exog)))
+    hxx = np.ascontiguousarray(rng.standard_normal((nx, nx, nx)) * 0.05)
+    gxx = np.ascontiguousarray(rng.standard_normal((ny, nx, nx)) * 0.05)
+    hss = np.ascontiguousarray(rng.standard_normal(nx) * 0.01)
+    gss = np.ascontiguousarray(rng.standard_normal(ny) * 0.01)
+    x0 = np.ascontiguousarray(rng.standard_normal(nx) * 0.1)
+    shock = np.ascontiguousarray(rng.standard_normal((T, n_exog)) * 0.1)
+
+    native_x, native_y = core.simulate_second_order_pruned(
+        hx, gx, bx, hxx, gxx, hss, gss, x0, shock
+    )
+    ref_x, ref_y = _simulate_second_order_pruned_numba(
+        hx, gx, bx, hxx, gxx, hss, gss, x0, shock
+    )
+
+    np.testing.assert_allclose(native_x, ref_x, rtol=_RTOL, atol=_ATOL)
+    np.testing.assert_allclose(native_y, ref_y, rtol=_RTOL, atol=_ATOL)
 
 
 def test_simulate_known_answer() -> None:
