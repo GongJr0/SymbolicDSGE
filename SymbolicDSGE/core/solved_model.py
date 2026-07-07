@@ -23,6 +23,8 @@ from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
+from SymbolicDSGE.core.klein import KleinSolution
+from SymbolicDSGE.core.second_order import PerturbationSolution
 from SymbolicDSGE.core.shock_generators import Shock
 
 
@@ -63,23 +65,15 @@ class MeasurementSpec(TypedDict):
 @dataclass(frozen=True)
 class SolvedModel:
     compiled: CompiledModel
-    policy: Any
+    policy: KleinSolution | PerturbationSolution
     A: ndarray
     B: ndarray
 
     def __post_init__(self) -> None:
-        if self.policy is None:
-            object.__setattr__(self, "_simulation_order", None)
-            return
-        try:
-            order = int(self.policy.order)
-        except AttributeError as exc:
-            raise TypeError("SolvedModel policy must expose an integer order.") from exc
-        if order not in SIM_FUNC_DISPATCH:
+        if self.policy.order not in SIM_FUNC_DISPATCH:
             raise ValueError(
-                f"Simulation for solution order {order} is not implemented."
+                f"Simulation for solution order {self.policy.order} is not implemented."
             )
-        object.__setattr__(self, "_simulation_order", order)
 
     @property
     def config(self) -> ModelConfig:
@@ -253,10 +247,7 @@ class SolvedModel:
         shock_scale: float = 1.0,
         x0: ndarray | None = None,
     ) -> NDF:
-        order = self.__dict__.get("_simulation_order")
-        if order is None:
-            raise ValueError("Cannot simulate a SolvedModel without a policy.")
-        return SIM_FUNC_DISPATCH[order](self, T, shocks, shock_scale, x0)
+        return SIM_FUNC_DISPATCH[self.policy.order](self, T, shocks, shock_scale, x0)
 
     def _simulate_observable_matrix(
         self,
@@ -329,7 +320,7 @@ class SolvedModel:
             x0=None,
             observables=observables,
         )
-        if self.__dict__.get("_simulation_order") != 2:
+        if self.policy.order != 2:
             return out
 
         baseline = self.sim(

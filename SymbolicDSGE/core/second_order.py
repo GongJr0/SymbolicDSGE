@@ -298,7 +298,7 @@ def _solve_second_order_risk_numpy(
         )
 
     x = -np.linalg.solve(np.hstack([q_g, q_h]), q)
-    return x[:ny], x[ny:]
+    return x[:ny], x[ny:]  # pyright: ignore
 
 
 def first_order_residual(a: NDF, b: NDF, gx: NDF, hx: NDF, n_state: int) -> NDF:
