@@ -68,6 +68,7 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
             gxx=gxx,
             hss=hss,
             gss=gss,
+            steady_state=np.zeros(3, dtype=np.float64),
         ),
         A=np.eye(3, dtype=np.float64),
         B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),

@@ -326,7 +326,7 @@ class SolvedModel:
             T,
             shocks=shock_spec,
             shock_scale=scale,
-            x0=np.zeros((self.A.shape[0],), dtype=float64),
+            x0=None,
             observables=observables,
         )
         if self.__dict__.get("_simulation_order") != 2:
@@ -336,7 +336,7 @@ class SolvedModel:
             T,
             shocks=None,
             shock_scale=scale,
-            x0=np.zeros((self.A.shape[0],), dtype=float64),
+            x0=None,
             observables=observables,
         )
         return {key: value - baseline[key] for key, value in out.items()}
@@ -914,8 +914,14 @@ def _simulate_order2(
     n = model.A.shape[0]
     ny = n - n_state
     policy = model.policy
+    ss = _policy_array(policy, "steady_state")
+    ss_state = ss[:n_state]
 
-    x0_state = asarray(model._simulation_initial_state(x0)[:n_state], dtype=float64)
+    if x0 is None:
+        x0_state = ss_state
+    else:
+        x0_state = model._simulation_initial_state(x0)[:n_state]
+    x0_dev = asarray(x0_state - ss_state, dtype=float64)
     shock_mat = model._simulation_shock_matrix(
         T=T,
         shocks=shocks,
@@ -930,14 +936,14 @@ def _simulate_order2(
         _policy_array(policy, "gxx"),
         _policy_array(policy, "hss"),
         _policy_array(policy, "gss"),
-        x0_state,
+        x0_dev,
         shock_mat,
     )
 
     X = np.empty((T + 1, n), dtype=float64)
-    X[:, :n_state] = x_path
+    X[:, :n_state] = x_path + ss_state
     if ny > 0:
-        X[:, n_state:] = y_path
+        X[:, n_state:] = y_path + ss[n_state:]
     return X
 
 
