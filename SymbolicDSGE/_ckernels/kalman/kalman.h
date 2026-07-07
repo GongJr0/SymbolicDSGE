@@ -136,13 +136,13 @@ typedef struct {
   const f64 *obs;
   const f64 *z0;
   const f64 *P0;
-  const i64 T;
+  i64 T;
 
-  const i64 n_state;
-  const i64 n_ctrl;
-  const i64 n_exog;
-  const i64 n_obs;
-  const i64 n_params;
+  i64 n_state;
+  i64 n_ctrl;
+  i64 n_exog;
+  i64 n_obs;
+  i64 n_params;
 
   f64 alpha;
   f64 beta;
