@@ -6,7 +6,7 @@ from .types import NDF
 import numpy as np
 
 from ...core.shock_generators import Shock
-from ...kalman.filter import FilterResult
+from ...kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..mc_constructs import MCContext, SeedIncrement, ShockMapping
 
 
@@ -89,8 +89,8 @@ def _resolve_context_array(
         arr = context.require_payload(payload_key)
     else:
         filter_result = context.require_payload(filter_key)
-        if not isinstance(filter_result, FilterResult):
-            raise TypeError(f"Payload '{filter_key}' is not a FilterResult.")
+        if not isinstance(filter_result, (FilterRawResult, UnscentedFilterRawResult)):
+            raise TypeError(f"Payload '{filter_key}' is not a raw filter result.")
         arr = getattr(filter_result, source)
 
     out = np.asarray(arr, dtype=np.float64)

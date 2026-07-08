@@ -7,7 +7,7 @@ from numpy import float64, ndarray
 
 
 from ....core.solved_model import SolvedModel
-from ....kalman.filter import FilterResult, UnscentedFilterResult
+from ....kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
 
@@ -141,7 +141,7 @@ def run_reference_filter(
     R: NDF | None = None,
     estimate_R_diag: bool = False,
     R_scale: float = 1.0,
-) -> FilterResult | UnscentedFilterResult:
+) -> FilterRawResult | UnscentedFilterRawResult:
     del dgp, rep_idx
     data = context.require_data()
     if data.observables is None:
@@ -149,7 +149,7 @@ def run_reference_filter(
     obs = observables
     if obs is None and data.observable_names:
         obs = list(data.observable_names)
-    return reference.kalman(
+    return reference._kalman_raw(
         y=data.observables,
         filter_mode=filter_mode,
         observables=obs,

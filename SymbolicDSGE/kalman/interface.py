@@ -4,6 +4,8 @@ from .filter import (
     FilterResult,
     UnscentedFilterRawResult,
     UnscentedFilterResult,
+    _filter_result_from_raw,
+    _unscented_filter_result_from_raw,
 )
 from .config import KalmanConfig
 from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
@@ -212,21 +214,13 @@ class KalmanInterface(KalmanFilter):
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
     ) -> FilterResult:
-        x0, run_args = self._prepare_linear_run(
-            x0=x0,
-            _arg_overrides=_arg_overrides,
+        return _filter_result_from_raw(
+            self.filter_linear_raw(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
         )
-
-        run = self.run(
-            **run_args,
-            x0=x0,
-            jitter=self.jitter,
-            symmetrize=self.symmetrize,
-            return_shocks=self.return_shocks,
-        )
-        if _debug:
-            self._set_debug_info(x0=x0, run_args=run_args)
-        return run
 
     def filter_linear_raw(
         self,
@@ -276,21 +270,13 @@ class KalmanInterface(KalmanFilter):
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
     ) -> FilterResult:
-        x0, run_args = self._prepare_extended_run(
-            x0=x0,
-            _arg_overrides=_arg_overrides,
+        return _filter_result_from_raw(
+            self.filter_extended_raw(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
         )
-
-        run = self.run_extended(
-            **run_args,
-            x0=x0,
-            jitter=self.jitter,
-            symmetrize=self.symmetrize,
-            return_shocks=self.return_shocks,
-        )
-        if _debug:
-            self._set_debug_info(x0=x0, run_args=run_args)
-        return run
 
     def filter_extended_raw(
         self,
@@ -364,23 +350,13 @@ class KalmanInterface(KalmanFilter):
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
     ) -> UnscentedFilterResult:
-        z0, run_args = self._prepare_unscented_run(
-            x0=x0,
-            _arg_overrides=_arg_overrides,
+        return _unscented_filter_result_from_raw(
+            self.filter_unscented_raw(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
         )
-
-        run = self.run_unscented(
-            **run_args,
-            z0=z0,
-            alpha=self.ukf_alpha,
-            beta=self.ukf_beta,
-            kappa=self.ukf_kappa,
-            jitter=float(self.jitter),
-            symmetrize=self.symmetrize,
-        )
-        if _debug:
-            self._set_debug_info(x0=x0, z0=z0, run_args=run_args)
-        return run
 
     def filter_unscented_raw(
         self,
@@ -544,7 +520,7 @@ class KalmanInterface(KalmanFilter):
         def obj(eta: NDF) -> float64:
             R_diag = np.exp(eta)
             R = np.diag(R_diag)
-            result: FilterResult | UnscentedFilterResult = self.filter(
+            result = self.filter_raw(
                 x0=np.zeros((self.A.shape[0],), dtype=float64),
                 _debug=False,
                 _arg_overrides={"R": R},

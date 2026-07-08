@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
-from ..kalman.filter import FilterResult
+from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
 from .mc_constructs import (
@@ -266,8 +266,11 @@ class MCPipeline:
         )
         if step.op_type is OpType.TRANSFORM and isinstance(out, MCData):
             context.data = out
-        if step.op_type is OpType.FILTER and not isinstance(out, FilterResult):
-            raise TypeError("FILTER steps must return FilterResult.")
+        if step.op_type is OpType.FILTER and not isinstance(
+            out,
+            (FilterRawResult, UnscentedFilterRawResult),
+        ):
+            raise TypeError("FILTER steps must return a raw filter result.")
         if step.op_type is OpType.REGRESSION and not isinstance(out, RegressionResult):
             raise TypeError("REGRESSION steps must return RegressionResult.")
         if step.op_type is OpType.REGRESSION:
@@ -345,7 +348,7 @@ def _payload_to_array(value: object) -> np.ndarray | None:
     """A per-rep payload value as a stackable numeric array, else ``None``.
 
     Only numeric ndarray / scalar payloads (e.g. transform outputs) qualify;
-    structured payloads (``MCData`` / ``FilterResult`` / result objects) are
+    structured payloads (``MCData`` / raw filter results / result objects) are
     skipped from the post-loop trace registry.
     """
     if isinstance(value, np.ndarray):

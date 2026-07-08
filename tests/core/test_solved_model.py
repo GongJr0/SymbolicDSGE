@@ -19,7 +19,56 @@ from SymbolicDSGE.core.simulation import (
     affine_observations_into,
     simulate_linear_states_into,
 )
+from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.kalman.interface import KalmanInterface
+
+
+def _raw_filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterRawResult:
+    x = np.zeros((T, n), dtype=np.float64)
+    y = np.zeros((T, m), dtype=np.float64)
+    P = np.zeros((T, n, n), dtype=np.float64)
+    S = np.zeros((T, m, m), dtype=np.float64)
+    return FilterRawResult(
+        x_pred=x,
+        x_filt=x,
+        P_pred=P,
+        P_filt=P,
+        y_pred=y,
+        y_filt=y,
+        innov=y,
+        std_innov=y,
+        S=S,
+        eps_hat=None,
+        loglik=np.float64(0.0),
+    )
+
+
+def _raw_unscented_result(
+    T: int = 3,
+    n_state: int = 1,
+    n_var: int = 1,
+) -> UnscentedFilterRawResult:
+    x = np.zeros((T, n_var), dtype=np.float64)
+    xb = np.zeros((T, n_state), dtype=np.float64)
+    y = np.zeros((T, 2), dtype=np.float64)
+    P = np.zeros((T, 2 * n_state, 2 * n_state), dtype=np.float64)
+    S = np.zeros((T, 2, 2), dtype=np.float64)
+    return UnscentedFilterRawResult(
+        x_pred=x,
+        x_filt=x,
+        x1_pred=xb,
+        x2_pred=xb,
+        x1_filt=xb,
+        x2_filt=xb,
+        P_pred=P,
+        P_filt=P,
+        y_pred=y,
+        y_filt=y,
+        innov=y,
+        std_innov=y,
+        S=S,
+        loglik=np.float64(0.0),
+    )
 
 
 @njit
@@ -462,10 +511,10 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
         def _ML_estimate_R_diag(self, scale_factor=1.0):
             captured["scale_factor"] = scale_factor
 
-        def filter(self, x0=None, _debug=False):
-            captured["filter"] = {"x0": x0, "_debug": _debug}
+        def filter_raw(self, x0=None, _debug=False):
+            captured["filter_raw"] = {"x0": x0, "_debug": _debug}
             self._debug_info = {"debug": True}
-            return "kalman-result"
+            return _raw_filter_result()
 
     compiled = SimpleNamespace(
         calib_params=[alpha],
@@ -495,13 +544,13 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
         _debug=True,
     )
 
-    assert out == "kalman-result"
+    np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
     assert captured["init"]["h_func"] == ("h", ("ObsA", "ObsB"))
     assert captured["init"]["H_jac"] == ("H", ("ObsA", "ObsB"))
     assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
     assert captured["init"]["estimate_R_diag"] is True
     assert captured["scale_factor"] == pytest.approx(2.5)
-    assert captured["filter"] == {"x0": None, "_debug": True}
+    assert captured["filter_raw"] == {"x0": None, "_debug": True}
     assert printed == [({"debug": True},)]
 
 
@@ -514,9 +563,9 @@ def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
             captured["init"] = kwargs
             self._debug_info = None
 
-        def filter(self, x0=None, _debug=False):
-            captured["filter"] = {"x0": x0, "_debug": _debug}
-            return "ukf-result"
+        def filter_raw(self, x0=None, _debug=False):
+            captured["filter_raw"] = {"x0": x0, "_debug": _debug}
+            return _raw_unscented_result()
 
     compiled = SimpleNamespace(
         calib_params=[alpha],
@@ -544,13 +593,13 @@ def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
         x0=np.array([0.1], dtype=np.float64),
     )
 
-    assert out == "ukf-result"
+    np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
     assert captured["init"]["filter_mode"] == "unscented"
     assert captured["init"]["meas_addr"] == 456
     assert captured["init"]["h_func"] is None
     assert captured["init"]["H_jac"] is None
     assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
-    assert np.array_equal(captured["filter"]["x0"], np.array([0.1]))
+    assert np.array_equal(captured["filter_raw"]["x0"], np.array([0.1]))
 
 
 def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):

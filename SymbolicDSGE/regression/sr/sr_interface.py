@@ -3,7 +3,7 @@ from .symbolic_regression import SymbolicRegressor
 from .model_parametrizer import ModelParametrizer
 from .fit_result import FitResult
 
-from ...kalman.filter import FilterResult, UnscentedFilterResult
+from ...kalman.filter import FilterRawResult, UnscentedFilterRawResult
 
 from numpy.typing import NDArray
 from numpy import float64
@@ -40,10 +40,10 @@ class SRInterface:
         eq_subbed = eq_raw.subs(subs_map)
         return eq_subbed
 
-    def get_kf(self, y: NDF | DataFrame) -> FilterResult | UnscentedFilterResult:
+    def get_kf(self, y: NDF | DataFrame) -> FilterRawResult | UnscentedFilterRawResult:
         affine = all(self._model.config.equations.obs_is_affine.values())
         mode = "linear" if affine else "extended"
-        kf = self._model.kalman(
+        kf = self._model._kalman_raw(
             y=y,
             observables=self._model.compiled.observable_names,
             filter_mode=cast(Literal["linear", "extended"], mode),
@@ -55,7 +55,7 @@ class SRInterface:
 
     def fit_to_kf(self, y: NDF | DataFrame) -> FitResult:
 
-        kf: FilterResult | UnscentedFilterResult = self.get_kf(y)
+        kf: FilterRawResult | UnscentedFilterRawResult = self.get_kf(y)
 
         var_idx = self._model.compiled.idx
         var_idx_ls = sorted([var_idx[var] for var in self.selected_var_names])

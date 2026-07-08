@@ -19,7 +19,7 @@ from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.filter import FilterResult
+from SymbolicDSGE.kalman.filter import FilterRawResult
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     MCContext,
@@ -137,12 +137,12 @@ class _FakeSolvedModel:
             )[:, 0]
         return out
 
-    def kalman(self, y, **kwargs):
+    def _kalman_raw(self, y, **kwargs):
         y = np.ascontiguousarray(y, dtype=np.float64)
         self.kalman_calls.append({"y": y.copy(), "kwargs": kwargs})
         n_obs, n_meas = y.shape
         cov = np.zeros((n_obs, n_meas, n_meas), dtype=np.float64)
-        return FilterResult(
+        return FilterRawResult(
             x_pred=y.copy(),
             x_filt=y.copy(),
             P_pred=cov.copy(),
@@ -152,6 +152,7 @@ class _FakeSolvedModel:
             innov=y - y.mean(axis=0),
             std_innov=y + 0.25,
             S=cov.copy(),
+            eps_hat=None,
             loglik=np.float64(0.0),
         )
 
@@ -1490,7 +1491,7 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
     )
     np.testing.assert_allclose(payload, np.arange(2.0, 5.0).reshape(3, 1))
 
-    filt = reference.kalman(observables)
+    filt = reference._kalman_raw(observables)
     context.payloads["filter"] = filt
     np.testing.assert_allclose(
         _resolve_context_array(
@@ -1526,7 +1527,7 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
             drop_initial=False,
         )
     context.payloads["not_filter"] = np.zeros(1, dtype=np.float64)
-    with pytest.raises(TypeError, match="FilterResult"):
+    with pytest.raises(TypeError, match="raw filter result"):
         _resolve_context_array(
             context,
             source="std_innov",

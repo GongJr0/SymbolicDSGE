@@ -39,7 +39,7 @@ def transform(*, context, reference, dgp, rep_idx, **kwargs):
     #   .states (T x k) / .observables (T x m) / .raw (dict) / .observable_names
     data = context.require_data()
     arr = np.asarray(data.observables, dtype=float)
-    # Filter output is NOT MCData -- it's a FilterResult stored as a payload.
+    # Filter output is NOT MCData. It is raw filter output stored as a payload.
     # Read it via `context.require_payload("filter")` (the filter step's name)
     # and pull a channel: .std_innov / .innov / .x_pred / .x_filt / .y_pred /
     # .y_filt. Example:

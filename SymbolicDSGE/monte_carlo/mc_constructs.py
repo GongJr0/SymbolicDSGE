@@ -12,7 +12,7 @@ from .._diag_tests.result import MCResult, TestResult
 from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
-from ..kalman.filter import FilterResult
+from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.enums import RegressionStatus
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
@@ -135,7 +135,7 @@ class FilterOp(Protocol):
         dgp: SolvedModel | None,
         rep_idx: int,
         **kwargs: Any,
-    ) -> FilterResult: ...
+    ) -> FilterRawResult | UnscentedFilterRawResult: ...
 
 
 class TestOp(Protocol):

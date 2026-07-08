@@ -851,7 +851,7 @@ def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch)
     )
     monkeypatch.setattr(
         backend.KalmanFilter,
-        "run_extended",
+        "run_extended_raw",
         lambda **kwargs: SimpleNamespace(loglik=np.float64(-2.0)),
     )
 
@@ -915,7 +915,7 @@ def test_estimate_R_extended_branch_and_final_diag_fallback(monkeypatch):
     )
     monkeypatch.setattr(
         backend.KalmanFilter,
-        "run_extended",
+        "run_extended_raw",
         lambda **kwargs: SimpleNamespace(loglik=np.float64(-3.0)),
     )
 
@@ -979,7 +979,7 @@ def test_estimate_R_linear_branch_uses_kalman_run(monkeypatch):
     )
     monkeypatch.setattr(
         backend.KalmanFilter,
-        "run",
+        "run_raw",
         lambda **kwargs: SimpleNamespace(loglik=np.float64(-4.0)),
     )
 
