@@ -505,6 +505,78 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
     assert printed == [({"debug": True},)]
 
 
+def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
+    alpha = Symbol("alpha")
+    captured = {}
+
+    class _FakeKalmanInterface:
+        def __init__(self, **kwargs):
+            captured["init"] = kwargs
+            self._debug_info = None
+
+        def filter(self, x0=None, _debug=False):
+            captured["filter"] = {"x0": x0, "_debug": _debug}
+            return "ukf-result"
+
+    compiled = SimpleNamespace(
+        calib_params=[alpha],
+        observable_names=["ObsA", "ObsB"],
+        construct_measurement_cfunc=lambda obs: SimpleNamespace(
+            address=456,
+            obs=tuple(obs),
+        ),
+        config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
+        kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
+    )
+    solved = solved_model_module.SolvedModel(
+        compiled=compiled,
+        policy=SimpleNamespace(order=2),
+        A=np.eye(1, dtype=np.float64),
+        B=np.eye(1, dtype=np.float64),
+    )
+
+    monkeypatch.setattr(solved_model_module, "KalmanInterface", _FakeKalmanInterface)
+
+    out = solved.kalman(
+        y=np.zeros((3, 2), dtype=np.float64),
+        filter_mode="unscented",
+        observables=None,
+        x0=np.array([0.1], dtype=np.float64),
+    )
+
+    assert out == "ukf-result"
+    assert captured["init"]["filter_mode"] == "unscented"
+    assert captured["init"]["meas_addr"] == 456
+    assert captured["init"]["h_func"] is None
+    assert captured["init"]["H_jac"] is None
+    assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
+    assert np.array_equal(captured["filter"]["x0"], np.array([0.1]))
+
+
+def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
+    alpha = Symbol("alpha")
+    compiled = SimpleNamespace(
+        calib_params=[alpha],
+        observable_names=["ObsA"],
+        construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
+        config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
+        kalman=SimpleNamespace(y_names=["ObsA"]),
+    )
+    solved = solved_model_module.SolvedModel(
+        compiled=compiled,
+        policy=SimpleNamespace(order=2),
+        A=np.eye(1, dtype=np.float64),
+        B=np.eye(1, dtype=np.float64),
+    )
+
+    with pytest.raises(ValueError, match="return_shocks is not supported"):
+        solved.kalman(
+            y=np.zeros((3, 1), dtype=np.float64),
+            filter_mode="unscented",
+            return_shocks=True,
+        )
+
+
 def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration(
     post82_test_model_path,
 ):

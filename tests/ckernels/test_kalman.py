@@ -5,6 +5,7 @@ Skips when the ``_ckernels.kalman`` extension is not built.
 
 import numpy as np
 import pytest
+from numba import cfunc, types
 
 from SymbolicDSGE.kalman.filter import _kalman_hot_loop
 
@@ -49,6 +50,18 @@ def _make_system(n: int, m: int, k: int, T: int, seed: int):
     y = rng.standard_normal((T, m))
     x0 = rng.standard_normal(n)
     return tuple(_c(z) for z in (A, B, C, d, Q, R, y, x0, P0))
+
+
+_MEAS_SIG = types.void(
+    types.CPointer(types.float64),
+    types.CPointer(types.float64),
+    types.CPointer(types.float64),
+)
+
+
+@cfunc(_MEAS_SIG)
+def _ukf_measure_first_var(model_vars, _params, out):
+    out[0] = model_vars[0]
 
 
 @pytest.mark.parametrize(
@@ -130,3 +143,94 @@ def test_kalman_non_pd_raises() -> None:
         kf.kalman_hot_loop(*args)
     with pytest.raises(np.linalg.LinAlgError):
         _kalman_hot_loop(*args)
+
+
+def test_ukf_returns_projected_model_variable_history() -> None:
+    T = 4
+    hx = _c([[0.55]])
+    gx = _c([[2.0]])
+    bx = _c([[1.0]])
+    hxx = _c([[[0.1]]])
+    gxx = _c([[[0.4]]])
+    hss = _c([0.03])
+    gss = _c([0.2])
+    steady_state = _c([10.0, 20.0])
+    params = _c([])
+    Q = _c([[0.05]])
+    R = _c([[0.25]])
+    obs = _c(np.zeros((T, 1)))
+    z0 = _c([0.1, 0.0])
+    P0 = _c(np.diag([0.2, 0.3]))
+
+    _, _, out = kf.ukf_hot_loop(
+        _ukf_measure_first_var.address,
+        hx,
+        gx,
+        bx,
+        hxx,
+        gxx,
+        hss,
+        gss,
+        steady_state,
+        params,
+        Q,
+        R,
+        obs,
+        z0,
+        P0,
+        1.0,
+        2.0,
+        1.0,
+        1e-12,
+        True,
+        True,
+    )
+    (
+        x1_pred,
+        x2_pred,
+        x1_filt,
+        x2_filt,
+        x_pred,
+        x_filt,
+        P_pred,
+        P_filt,
+        _y_pred,
+        _y_filt,
+        _innov,
+        _std_innov,
+        _S,
+        _loglik,
+    ) = out
+
+    assert x_pred.shape == (T, 2)
+    assert x_filt.shape == (T, 2)
+    np.testing.assert_allclose(
+        x_pred[:, 0],
+        steady_state[0] + x1_pred[:, 0] + x2_pred[:, 0],
+        rtol=_RTOL,
+        atol=_ATOL,
+    )
+    np.testing.assert_allclose(
+        x_filt[:, 0],
+        steady_state[0] + x1_filt[:, 0] + x2_filt[:, 0],
+        rtol=_RTOL,
+        atol=_ATOL,
+    )
+    np.testing.assert_allclose(
+        x_pred[:, 1],
+        steady_state[1]
+        + 0.5 * gss[0]
+        + gx[0, 0] * (x1_pred[:, 0] + x2_pred[:, 0])
+        + 0.5 * gxx[0, 0, 0] * (P_pred[:, 0, 0] + x1_pred[:, 0] ** 2),
+        rtol=_RTOL,
+        atol=_ATOL,
+    )
+    np.testing.assert_allclose(
+        x_filt[:, 1],
+        steady_state[1]
+        + 0.5 * gss[0]
+        + gx[0, 0] * (x1_filt[:, 0] + x2_filt[:, 0])
+        + 0.5 * gxx[0, 0, 0] * (P_filt[:, 0, 0] + x1_filt[:, 0] ** 2),
+        rtol=_RTOL,
+        atol=_ATOL,
+    )

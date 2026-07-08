@@ -39,9 +39,31 @@ _KalmanReturn = Tuple[
     Tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
 ]
 _kalman_hot_loop_native: Callable[..., _KalmanReturn] | None
+_UKFReturn = Tuple[
+    int,
+    Tuple[float64, float64, float64],
+    Tuple[
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        float64,
+    ],
+]
+_ukf_hot_loop_native: Callable[..., _UKFReturn] | None
 
 if FORCE_NUMBA:
     _kalman_hot_loop_native = None
+    _ukf_hot_loop_native = None
 else:
     try:
         from .._ckernels.kalman import kalman_hot_loop as _kalman_hot_loop_native
@@ -49,6 +71,12 @@ else:
         if REQUIRE_NATIVE:
             raise
         _kalman_hot_loop_native = None
+    try:
+        from .._ckernels.kalman import ukf_hot_loop as _ukf_hot_loop_native
+    except ImportError:  # pragma: no cover - exercised only without the extension
+        if REQUIRE_NATIVE:
+            raise
+        _ukf_hot_loop_native = None
 
 
 @dataclass(frozen=True)
@@ -70,12 +98,37 @@ class FilterResult:
     eps_hat: NDF | None = None
 
 
+@dataclass(frozen=True)
+class UnscentedFilterResult:
+    x_pred: NDF
+    x_filt: NDF
+
+    x1_pred: NDF
+    x2_pred: NDF
+    x1_filt: NDF
+    x2_filt: NDF
+
+    P_pred: NDF
+    P_filt: NDF
+
+    y_pred: NDF
+    y_filt: NDF
+
+    innov: NDF
+    std_innov: NDF
+    S: NDF
+
+    loglik: float64
+
+
 def _get_real(mat: NDC | NDF, name: str, tol: float = 1e8) -> NDF:
     """
     Convert a complex matrix to a real matrix if the imaginary parts are negligible.
     """
     res = real_if_close(mat, tol=tol)
     if np.iscomplexobj(res):
+        if res.size == 0:
+            return np.ascontiguousarray(res.real, dtype=float64)
         max_i = np.max(np.abs(res.imag))  # pyright: ignore
         raise ComplexMatrixError(name, max_i)
     return np.ascontiguousarray(res, dtype=float64)
@@ -1072,6 +1125,166 @@ class KalmanFilter:
             std_innov=u,
             S=S,
             eps_hat=eps_hat if (return_shocks and _store_history) else None,
+            loglik=loglik,
+        )
+
+    @staticmethod
+    def run_unscented(
+        meas_addr: int,
+        hx: NDF | NDC,
+        gx: NDF | NDC,
+        bx: NDF | NDC,
+        hxx: NDF | NDC,
+        gxx: NDF | NDC,
+        hss: NDF | NDC,
+        gss: NDF | NDC,
+        steady_state: NDF | NDC,
+        calib_params: NDF | NDC,
+        Q: NDF | NDC,
+        R: NDF | NDC,
+        y: NDF | NDC,
+        z0: NDF | NDC,
+        P0: NDF | NDC,
+        alpha: float = 1.0,
+        beta: float = 2.0,
+        kappa: float = 1.0,
+        symmetrize: bool = True,
+        jitter: float = 0.0,
+        _store_history: bool = True,
+    ) -> UnscentedFilterResult:
+        if _ukf_hot_loop_native is None:
+            raise RuntimeError("Native unscented Kalman filter is not available.")
+        if meas_addr == 0:
+            raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
+
+        hx = _get_real(hx, "hx")
+        bx = _get_real(bx, "bx")
+        hxx = _get_real(hxx, "hxx")
+        hss = _get_real(hss, "hss").reshape(-1)
+        steady_state = _get_real(steady_state, "steady_state").reshape(-1)
+        calib_params = _get_real(calib_params, "calib_params").reshape(-1)
+        Q = _get_real(Q, "Q")
+        R = _get_real(R, "R")
+        y = _get_real(y, "y")
+        z0 = _get_real(z0, "z0").reshape(-1)
+        P0 = _get_real(P0, "P0")
+
+        gx = _get_real(gx, "gx")
+        gxx = _get_real(gxx, "gxx")
+        gss = _get_real(gss, "gss").reshape(-1)
+
+        if hx.ndim != 2 or hx.shape[0] != hx.shape[1]:
+            raise ShapeMismatchError("hx", "(n_state, n_state)", str(hx.shape))
+        n_state = hx.shape[0]
+        n_z = 2 * n_state
+
+        if bx.ndim != 2 or bx.shape[0] != n_state:
+            raise ShapeMismatchError("bx", f"({n_state}, n_exog)", str(bx.shape))
+        n_exog = bx.shape[1]
+
+        if gx.ndim != 2 or gx.shape[1] != n_state:
+            raise ShapeMismatchError("gx", f"(n_ctrl, {n_state})", str(gx.shape))
+        n_ctrl = gx.shape[0]
+        n_var = n_state + n_ctrl
+
+        if hxx.shape != (n_state, n_state, n_state):
+            raise ShapeMismatchError(
+                "hxx",
+                f"({n_state}, {n_state}, {n_state})",
+                str(hxx.shape),
+            )
+        if gxx.shape != (n_ctrl, n_state, n_state):
+            raise ShapeMismatchError(
+                "gxx",
+                f"({n_ctrl}, {n_state}, {n_state})",
+                str(gxx.shape),
+            )
+        if hss.shape != (n_state,):
+            raise ShapeMismatchError("hss", f"({n_state},)", str(hss.shape))
+        if gss.shape != (n_ctrl,):
+            raise ShapeMismatchError("gss", f"({n_ctrl},)", str(gss.shape))
+        if steady_state.shape != (n_var,):
+            raise ShapeMismatchError(
+                "steady_state", f"({n_var},)", str(steady_state.shape)
+            )
+        if Q.shape != (n_exog, n_exog):
+            raise ShapeMismatchError("Q", f"({n_exog}, {n_exog})", str(Q.shape))
+        if y.ndim != 2:
+            raise ShapeMismatchError("y", "(T, n_obs)", str(y.shape))
+        n_obs = y.shape[1]
+        if R.shape != (n_obs, n_obs):
+            raise ShapeMismatchError("R", f"({n_obs}, {n_obs})", str(R.shape))
+        if z0.shape != (n_z,):
+            raise ShapeMismatchError("z0", f"({n_z},)", str(z0.shape))
+        if P0.shape != (n_z, n_z):
+            raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
+
+        if symmetrize:
+            Q = _sym(Q)
+            R = _sym(R)
+            P0 = _sym(P0)
+
+        try:
+            err, err_info, out = _ukf_hot_loop_native(
+                meas_addr,
+                hx,
+                gx,
+                bx,
+                hxx,
+                gxx,
+                hss,
+                gss,
+                steady_state,
+                calib_params,
+                Q,
+                R,
+                y,
+                z0,
+                P0,
+                alpha,
+                beta,
+                kappa,
+                jitter,
+                symmetrize,
+                _store_history,
+            )
+        except linalg.LinAlgError as exc:
+            raise MatrixConditionError(float("inf")) from exc
+        if err != 0:
+            ErrorConstructor = get_error_constructor(ErrorCode(err))
+            raise ErrorConstructor(*err_info)
+
+        (
+            x1_pred,
+            x2_pred,
+            x1_filt,
+            x2_filt,
+            x_pred,
+            x_filt,
+            P_pred,
+            P_filt,
+            y_pred,
+            y_filt,
+            v,
+            u,
+            S,
+            loglik,
+        ) = out
+
+        return UnscentedFilterResult(
+            x_pred=x_pred,
+            x_filt=x_filt,
+            x1_pred=x1_pred,
+            x2_pred=x2_pred,
+            x1_filt=x1_filt,
+            x2_filt=x2_filt,
+            P_pred=P_pred,
+            P_filt=P_filt,
+            y_pred=y_pred,
+            y_filt=y_filt,
+            innov=v,
+            std_innov=u,
+            S=S,
             loglik=loglik,
         )
 
