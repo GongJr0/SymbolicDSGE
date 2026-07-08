@@ -1,14 +1,7 @@
-"""Tests for the c128 residual printer (issue #248).
+"""Tests for the c128 residual printer.
 
-Three layers:
-  1. Arithmetic breadth -- hand-built expressions covering every op path, value-
-     checked against sympy's own lambdify at random (complex) points.
-  2. Derivative correctness -- the reason integer powers use repeated multiply
-     rather than ``**``: the complex-step derivative must be right for a *negative*
-     base.
-  3. Real-model parity -- the emitted residual matches the existing reference both
-     in value and in the Klein complex-step linearization (a, b), and the cfunc
-     form compiles to a callable address.
+The tests cover operation breadth, complex step derivative correctness, real
+model value parity, Klein linearization parity, and cfunc compilation.
 """
 
 from __future__ import annotations
@@ -19,7 +12,7 @@ import sympy as sp
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.klein import _approximate_system_numeric
-from SymbolicDSGE.core.residual_printer import (
+from SymbolicDSGE._symbolic_printers import (
     ResidualLayout,
     build_cfunc,
     build_njit,
@@ -72,7 +65,7 @@ def test_expr_value_parity():
     for expr in exprs:
         run = _run_expr(expr, [x, y])
         for _ in range(15):
-            # Positive-real-dominant keeps log/sqrt/spow on the principal branch.
+            # Positive real dominant inputs keep log and sqrt on the principal branch.
             vals = (
                 rng.uniform(0.5, 2.0) + 1j * rng.uniform(-0.3, 0.3),
                 rng.uniform(0.5, 2.0) + 1j * rng.uniform(-0.3, 0.3),
@@ -92,8 +85,8 @@ def test_expr_value_parity():
     ],
 )
 def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
-    # Repeated-multiply integer powers give the correct complex-step derivative
-    # even where the base is negative -- the branch cut that `**` would hit.
+    # Repeated multiply integer powers give the correct complex step derivative
+    # even where a negative base would hit the branch cut under `**`.
     x = sp.Symbol("x")
     layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0, n_eq=1)
     fn = build_njit([expr_factory(x)], layout)

@@ -1,9 +1,7 @@
-"""Piece A (#248 second order): numba bicomplex ops + the BicomplexOps printer.
+"""Tests for numba bicomplex ops and the BicomplexOps printer.
 
-Two checks:
-  1. the numba bicomplex primitives match the C ``bc256`` oracle (via ``_core``);
-  2. the printer's BicomplexOps backend emits a residual whose bicomplex-step
-     second derivative recovers the analytic Hessian.
+The tests compare numba bicomplex primitives to the C ``bc256`` oracle and
+check that the printer backend recovers analytic Hessians.
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE.core import bicomplex as bcn
-from SymbolicDSGE.core.residual_printer import (
+from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ResidualLayout,
     build_cfunc,

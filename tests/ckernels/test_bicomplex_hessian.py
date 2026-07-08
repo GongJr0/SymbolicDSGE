@@ -14,7 +14,7 @@ import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.residual_printer import (
+from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ResidualLayout,
     build_cfunc,
@@ -22,8 +22,7 @@ from SymbolicDSGE.core.residual_printer import (
 
 
 def test_bicomplex_hessian_polynomial_is_exact():
-    # F = 2*fwd^2 + 3*fwd*cur + cur^3 (1 var). Hessian over z = (fwd, cur):
-    #   d2/dfwd2 = 4, d2/dfwd dcur = 3, d2/dcur2 = 6*cur.  At ss = 1 -> [[4,3],[3,6]].
+    # Hessian over z = (fwd, cur). At ss = 1, it is [[4, 3], [3, 6]].
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = 2 * fwd_x**2 + 3 * fwd_x * cur_x + cur_x**3
     layout = ResidualLayout(
@@ -38,8 +37,7 @@ def test_bicomplex_hessian_polynomial_is_exact():
 
 
 def test_bicomplex_hessian_transcendental():
-    # F = fwd * exp(cur) (1 var). d2/dfwd2 = 0, d2/dfwd dcur = exp(cur),
-    # d2/dcur2 = fwd*exp(cur). At ss = 1 -> [[0, e], [e, e]].
+    # At ss = 1, the Hessian is [[0, e], [e, e]].
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = fwd_x * sp.exp(cur_x)
     layout = ResidualLayout(
@@ -56,8 +54,7 @@ def test_bicomplex_hessian_transcendental():
 
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
 def test_bicomplex_hessian_linear_model_is_zero(path):
-    # A (log-)linear model has an identically-zero residual Hessian. Exercises
-    # the CompiledModel bicomplex-cfunc accessor + real model dims end-to-end.
+    # A log linear model has an identically zero residual Hessian.
     model, kalman = ModelParser(path).get_all()
     compiled = DSGESolver(model, kalman).compile()
     layout = ResidualLayout.from_compiled(compiled)

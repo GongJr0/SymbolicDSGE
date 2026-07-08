@@ -1,12 +1,8 @@
-"""Piece C (#248): the SGU second-order assembly transpile.
+"""Tests for SGU second order assembly.
 
-1. the first-order FOC residual is ~0 -- guards the adapter (block slicing +
-   the -b sign) independently of gxx;
-2. a (log-)linear model has an identically-zero second-order solution -- guards
-   the assembly + solve plumbing;
-3. the RBC g_xx/h_xx match Dynare's ghxx (with the [k,z]->[z,k] reorder and the
-   (1/rho)^m timing map), and the risk correction g_ss/h_ss match ghs2 directly
-   (a constant -> no timing factor) -- the independent-solver check on the math.
+These cover first order residual consistency, zero tensors for a linear model,
+Dynare parity for RBC ``g_xx`` and ``h_xx``, and Dynare parity for the risk
+correction terms.
 """
 
 from __future__ import annotations
@@ -18,7 +14,7 @@ import sympy as sp
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.klein import klein_solve
-from SymbolicDSGE.core.residual_printer import ResidualLayout
+from SymbolicDSGE._symbolic_printers import ResidualLayout
 from SymbolicDSGE.core.second_order import (
     first_order_residual,
     solve_second_order,
@@ -26,7 +22,7 @@ from SymbolicDSGE.core.second_order import (
 )
 
 # Dynare stoch_simul(order=2) on tests/fixtures/models/rbc_second_order.mod,
-# untouched full precision. Rows are DR order [k', z (linear -> 0), c]; the four
+# untouched full precision. Rows are DR order [k', z, c]; the four
 # columns are the state-pair second derivatives in Dynare's state order [k, z],
 # i.e. [kk, kz, zk, zz].
 _DYNARE_GHXX_KPRIME = [
@@ -41,7 +37,7 @@ _DYNARE_GHXX_C = [
     0.004224819272851745,
     0.45842005940556829,
 ]
-# ghs2 (sigma^2 risk correction), DR order [k', z, c] -- for the future gss_hss.
+# ghs2 is the sigma squared risk correction in DR order [k', z, c].
 _DYNARE_GHS2 = [0.0010614857740643515, 0.0, -0.0010614857740643515]
 _DYNARE_SIM_X0 = np.array(
     [0.020000000000000004, 28.631902640387651],
@@ -257,7 +253,8 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(hxx[0], 0.0, atol=1e-6)  # z' is linear
 
     # Risk correction vs ghs2: eta loads the single shock (std sig) on z (state 0);
-    # x' = h(x) + eta @ eps. No timing factor -- g_ss/h_ss are constants.
+    # x' = h(x) + eta @ eps. There is no timing factor because g_ss and h_ss
+    # are constants.
     sig = float(calib[sp.Symbol("sig")])
     eta = np.zeros((n_state, 1), dtype=np.float64)
     eta[0, 0] = sig
