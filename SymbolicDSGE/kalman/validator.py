@@ -10,6 +10,7 @@ NDF = NDArray[np.float64]
 class FilterMode(StrEnum):
     LINEAR = "linear"
     EXTENDED = "extended"
+    UNSCENTED = "unscented"
 
 
 @dataclass(frozen=True)
