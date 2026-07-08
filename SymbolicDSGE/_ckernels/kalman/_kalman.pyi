@@ -61,6 +61,21 @@ def ukf_hot_loop(
 ) -> tuple[
     int,
     tuple[float64, float64, float64],
-    tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
+    tuple[
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        float64,
+    ],
 ]:
     """Run the native second-order UKF hot loop."""

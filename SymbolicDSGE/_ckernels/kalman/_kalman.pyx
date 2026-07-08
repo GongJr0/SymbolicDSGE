@@ -97,6 +97,9 @@ cdef extern from "kalman.h":
         double *x1_filt
         double *x2_filt
 
+        double *x_pred
+        double *x_filt
+
         double *P_pred
         double *P_filt
 
@@ -303,6 +306,8 @@ def ukf_hot_loop(
     x2_pred = np.zeros((hist_T, n_state), dtype=np.float64)
     x1_filt = np.zeros((hist_T, n_state), dtype=np.float64)
     x2_filt = np.zeros((hist_T, n_state), dtype=np.float64)
+    x_pred = np.zeros((hist_T, n_var), dtype=np.float64)
+    x_filt = np.zeros((hist_T, n_var), dtype=np.float64)
     P_pred = np.zeros((hist_T, nz, nz), dtype=np.float64)
     P_filt = np.zeros((hist_T, nz, nz), dtype=np.float64)
     y_pred = np.zeros((hist_T, n_obs), dtype=np.float64)
@@ -316,6 +321,8 @@ def ukf_hot_loop(
     cdef double[:, ::1] x2_pred_mv = x2_pred
     cdef double[:, ::1] x1_filt_mv = x1_filt
     cdef double[:, ::1] x2_filt_mv = x2_filt
+    cdef double[:, ::1] x_pred_mv = x_pred
+    cdef double[:, ::1] x_filt_mv = x_filt
     cdef double[:, :, ::1] P_pred_mv = P_pred
     cdef double[:, :, ::1] P_filt_mv = P_filt
     cdef double[:, ::1] y_pred_mv = y_pred
@@ -364,6 +371,8 @@ def ukf_hot_loop(
     outp.x2_pred = &x2_pred_mv[0, 0] if hist_T > 0 else NULL
     outp.x1_filt = &x1_filt_mv[0, 0] if hist_T > 0 else NULL
     outp.x2_filt = &x2_filt_mv[0, 0] if hist_T > 0 else NULL
+    outp.x_pred = &x_pred_mv[0, 0] if hist_T > 0 else NULL
+    outp.x_filt = &x_filt_mv[0, 0] if hist_T > 0 else NULL
     outp.P_pred = &P_pred_mv[0, 0, 0] if hist_T > 0 else NULL
     outp.P_filt = &P_filt_mv[0, 0, 0] if hist_T > 0 else NULL
     outp.y_pred = &y_pred_mv[0, 0] if hist_T > 0 else NULL
@@ -392,6 +401,8 @@ def ukf_hot_loop(
             x2_pred,
             x1_filt,
             x2_filt,
+            x_pred,
+            x_filt,
             P_pred,
             P_filt,
             y_pred,

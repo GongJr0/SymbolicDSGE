@@ -7,7 +7,7 @@ from numpy import float64, ndarray
 
 
 from ....core.solved_model import SolvedModel
-from ....kalman.filter import FilterResult
+from ....kalman.filter import FilterResult, UnscentedFilterResult
 from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
 
@@ -130,7 +130,7 @@ def run_reference_filter(
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
-    filter_mode: Literal["linear", "extended"] = "linear",
+    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
     x0: NDF | None = None,
     p0_mode: Literal["diag", "eye"] | None = None,
@@ -141,7 +141,16 @@ def run_reference_filter(
     R: NDF | None = None,
     estimate_R_diag: bool = False,
     R_scale: float = 1.0,
-) -> FilterResult:
+) -> FilterResult | UnscentedFilterResult:
+
+    # TODO: Figure out MC payloads to be generated from UKF:
+    # - map to model variables or carry {x1, x2} form?
+    # - Fit to current KF payload setup or split/extend the payload return of filters?
+    if filter_mode == "unscented":
+        raise NotImplementedError(
+            "MC Filtration for Unscented Kalman Filter is not yet implemented."
+        )
+
     del dgp, rep_idx
     data = context.require_data()
     if data.observables is None:

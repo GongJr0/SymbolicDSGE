@@ -431,11 +431,42 @@ static void ukf_cov_update(const f64 *SDSGE_RESTRICT P_pred,
   }
 }
 
-static void ukf_store_state_blocks(const f64 *SDSGE_RESTRICT z,
-                                   f64 *SDSGE_RESTRICT x1,
-                                   f64 *SDSGE_RESTRICT x2, i64 t, i64 ns) {
-  memcpy(x1 + t * ns, z, (size_t)ns * sizeof(f64));
-  memcpy(x2 + t * ns, z + ns, (size_t)ns * sizeof(f64));
+static void ukf_store_history(const ukf_inputs *in,
+                              const f64 *SDSGE_RESTRICT z,
+                              const f64 *SDSGE_RESTRICT P,
+                              f64 *SDSGE_RESTRICT x1,
+                              f64 *SDSGE_RESTRICT x2,
+                              f64 *SDSGE_RESTRICT x, i64 t) {
+  const i64 ns = in->n_state;
+  const i64 nc = in->n_ctrl;
+  const i64 nz = 2 * ns;
+  const i64 nv = ns + nc;
+  const f64 *z1 = z;
+  const f64 *z2 = z + ns;
+  f64 *x1_row = x1 + t * ns;
+  f64 *x2_row = x2 + t * ns;
+  f64 *x_row = x + t * nv;
+
+  memcpy(x1_row, z1, (size_t)ns * sizeof(f64));
+  memcpy(x2_row, z2, (size_t)ns * sizeof(f64));
+
+  for (i64 i = 0; i < ns; ++i)
+    x_row[i] = in->steady_state[i] + z1[i] + z2[i];
+
+  for (i64 i = 0; i < nc; ++i) {
+    f64 s = 0.5 * in->gss[i];
+    const f64 *gx_i = in->gx + i * ns;
+    for (i64 j = 0; j < ns; ++j)
+      s += gx_i[j] * (z1[j] + z2[j]);
+    const f64 *gxx_i = in->gxx + i * ns * ns;
+    for (i64 j = 0; j < ns; ++j) {
+      for (i64 k = 0; k < ns; ++k) {
+        const f64 m2 = P[j * nz + k] + z1[j] * z1[k];
+        s += 0.5 * gxx_i[j * ns + k] * m2;
+      }
+    }
+    x_row[ns + i] = in->steady_state[ns + i] + s;
+  }
 }
 
 i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
@@ -571,15 +602,16 @@ i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
                       sdsge_dot(innov, S_inv_v, no));
 
     if (in->store_history) {
-      ukf_store_state_blocks(z_pred, out->x1_pred, out->x2_pred, t, ns);
-      ukf_store_state_blocks(z_filt, out->x1_filt, out->x2_filt, t, ns);
+      ukf_store_history(in, z_pred, P_pred, out->x1_pred, out->x2_pred,
+                        out->x_pred, t);
+      ukf_store_history(in, z_filt, P_filt, out->x1_filt, out->x2_filt,
+                        out->x_filt, t);
       memcpy(out->P_pred + t * nz * nz, P_pred,
              (size_t)(nz * nz) * sizeof(f64));
       memcpy(out->P_filt + t * nz * nz, P_filt,
              (size_t)(nz * nz) * sizeof(f64));
       memcpy(out->y_pred + t * no, y_pred, (size_t)no * sizeof(f64));
-      ukf_project_vars(in, z_filt, vars_buf);
-      in->meas(vars_buf, in->params, out->y_filt + t * no);
+      in->meas(out->x_filt + t * nv, in->params, out->y_filt + t * no);
       memcpy(out->innov + t * no, innov, (size_t)no * sizeof(f64));
       memcpy(out->std_innov + t * no, std_innov, (size_t)no * sizeof(f64));
       memcpy(out->S + t * no * no, S, (size_t)(no * no) * sizeof(f64));

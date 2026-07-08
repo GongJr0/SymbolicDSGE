@@ -26,6 +26,20 @@ class _KalmanDebugInfo:
     y: NDF | None
     x0: Optional[NDF]
     P0: Optional[NDF]
+    meas_addr: int | None = None
+    hx: NDF | None = None
+    gx: NDF | None = None
+    bx: NDF | None = None
+    hxx: NDF | None = None
+    gxx: NDF | None = None
+    hss: NDF | None = None
+    gss: NDF | None = None
+    steady_state: NDF | None = None
+    calib_params: NDF | None = None
+    z0: NDF | None = None
+    alpha: float | None = None
+    beta: float | None = None
+    kappa: float | None = None
 
 
 @dataclass(frozen=True)

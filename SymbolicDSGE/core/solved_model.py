@@ -37,7 +37,7 @@ from .simulation import (
 )
 from ..kalman.config import KalmanConfig
 from ..kalman.interface import KalmanInterface, _KFMatrices
-from ..kalman.filter import FilterResult
+from ..kalman.filter import FilterResult, UnscentedFilterResult
 
 if TYPE_CHECKING:
     from ..regression.sr.config import TemplateConfig
@@ -755,7 +755,7 @@ class SolvedModel:
     def kalman(
         self,
         y: NDF | pd.DataFrame,
-        filter_mode: Literal["linear", "extended"] = "linear",
+        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         *,
         observables: list[str] | None = None,
         x0: NDF | None = None,
@@ -768,7 +768,7 @@ class SolvedModel:
         estimate_R_diag: bool = False,
         R_scale: float = 1.0,
         _debug: bool = False,
-    ) -> FilterResult:
+    ) -> FilterResult | UnscentedFilterResult:
 
         params = asarray(
             [self.config.calibration.parameters[p] for p in self.compiled.calib_params],
@@ -777,8 +777,9 @@ class SolvedModel:
 
         h_func: Callable[..., NDF] | None = None
         H_jac: Callable[..., NDF] | None = None
+        meas_addr: int | None = None
 
-        if filter_mode == "extended":
+        if filter_mode in {"extended", "unscented"}:
             obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
             if observables is None:
                 selected_obs = list(self.compiled.observable_names)
@@ -786,8 +787,19 @@ class SolvedModel:
                 selected_obs = list(observables)
             selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])
 
+        if filter_mode == "extended":
             h_func = self.compiled.construct_measurement_array_func(selected_obs)
             H_jac = self.compiled.construct_observable_jacobian_array_func(selected_obs)
+        elif filter_mode == "unscented":
+            if return_shocks:
+                raise ValueError(
+                    "return_shocks is not supported for unscented filtering."
+                )
+            if self.policy.order != 2:
+                raise ValueError(
+                    "Unscented Kalman Filter requires a second order solution."
+                )
+            meas_addr = self.compiled.construct_measurement_cfunc(selected_obs).address
 
         ki = KalmanInterface(
             model=self,
@@ -797,6 +809,7 @@ class SolvedModel:
             R=R,
             h_func=h_func,
             H_jac=H_jac,
+            meas_addr=meas_addr,
             calib_params=params,
             p0_mode=p0_mode,
             p0_scale=p0_scale,

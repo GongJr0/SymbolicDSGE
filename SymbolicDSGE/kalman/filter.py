@@ -42,7 +42,22 @@ _kalman_hot_loop_native: Callable[..., _KalmanReturn] | None
 _UKFReturn = Tuple[
     int,
     Tuple[float64, float64, float64],
-    Tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+    Tuple[
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        NDF,
+        float64,
+    ],
 ]
 _ukf_hot_loop_native: Callable[..., _UKFReturn] | None
 
@@ -85,6 +100,9 @@ class FilterResult:
 
 @dataclass(frozen=True)
 class UnscentedFilterResult:
+    x_pred: NDF
+    x_filt: NDF
+
     x1_pred: NDF
     x2_pred: NDF
     x1_filt: NDF
@@ -1241,6 +1259,8 @@ class KalmanFilter:
             x2_pred,
             x1_filt,
             x2_filt,
+            x_pred,
+            x_filt,
             P_pred,
             P_filt,
             y_pred,
@@ -1252,6 +1272,8 @@ class KalmanFilter:
         ) = out
 
         return UnscentedFilterResult(
+            x_pred=x_pred,
+            x_filt=x_filt,
             x1_pred=x1_pred,
             x2_pred=x2_pred,
             x1_filt=x1_filt,

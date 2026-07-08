@@ -89,6 +89,16 @@ def _make_stub_model(
         compiled=compiled,
         config=config,
         kalman_config=kalman_config,
+        policy=SimpleNamespace(
+            order=2,
+            p=np.array([[0.8, 0.1], [0.0, 0.7]], dtype=FLOAT),
+            f=np.array([[0.2, 0.3]], dtype=FLOAT),
+            hxx=np.zeros((2, 2, 2), dtype=FLOAT),
+            gxx=np.zeros((1, 2, 2), dtype=FLOAT),
+            hss=np.array([0.01, 0.02], dtype=FLOAT),
+            gss=np.array([0.03], dtype=FLOAT),
+            steady_state=np.array([1.0, 2.0, 3.0], dtype=FLOAT),
+        ),
     )
     model._build_C_d_from_obs = build_measurement
 
@@ -662,6 +672,67 @@ def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch
     ki.mode = "mystery"
     with pytest.raises(ValueError, match="Unrecognized filter mode"):
         ki.filter()
+
+
+def test_filter_dispatches_unscented_and_populates_debug_info(monkeypatch):
+    ki = KalmanInterface(
+        model=_make_stub_model(),
+        observables=["ObsA"],
+        y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        filter_mode="unscented",
+        meas_addr=123,
+        calib_params=np.array([0.5], dtype=FLOAT),
+        jitter=0.25,
+        symmetrize=False,
+    )
+    captured = {}
+
+    def fake_run_unscented(**kwargs):
+        captured["run_unscented"] = kwargs
+        return "ukf-run"
+
+    monkeypatch.setattr(
+        KalmanInterface, "run_unscented", staticmethod(fake_run_unscented)
+    )
+
+    x0 = np.array([0.2, 0.3, 99.0], dtype=FLOAT)
+    out = ki.filter(x0=x0, _debug=True)
+
+    assert out == "ukf-run"
+    run_args = captured["run_unscented"]
+    assert run_args["meas_addr"] == 123
+    assert np.array_equal(run_args["z0"], np.array([0.2, 0.3, 0.0, 0.0]))
+    assert np.array_equal(run_args["bx"], np.eye(2, dtype=FLOAT))
+    assert np.array_equal(run_args["steady_state"], np.array([1.0, 2.0, 3.0]))
+    assert run_args["alpha"] == pytest.approx(1.0)
+    assert run_args["beta"] == pytest.approx(2.0)
+    assert run_args["kappa"] == pytest.approx(1.0)
+    assert run_args["jitter"] == pytest.approx(0.25)
+    assert run_args["symmetrize"] is False
+    assert ki._debug_info is not None
+    assert ki._debug_info.meas_addr == 123
+    assert np.array_equal(ki._debug_info.z0, np.array([0.2, 0.3, 0.0, 0.0]))
+    assert np.array_equal(ki._debug_info.hx, ki.model.policy.p)
+    assert np.array_equal(ki._debug_info.gx, ki.model.policy.f)
+    assert ki._debug_info.alpha == pytest.approx(1.0)
+
+
+def test_filter_unscented_rejects_return_shocks_and_bad_x0():
+    ki = KalmanInterface(
+        model=_make_stub_model(),
+        observables=["ObsA"],
+        y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        filter_mode="unscented",
+        meas_addr=123,
+        calib_params=np.array([0.5], dtype=FLOAT),
+        return_shocks=True,
+    )
+    with pytest.raises(ValueError, match="return_shocks is not supported"):
+        ki.filter()
+
+    ki.return_shocks = False
+    with pytest.raises(ValueError, match="x0 must have length"):
+        ki.filter(x0=np.array([1.0], dtype=FLOAT))
 
 
 def test_ml_estimate_r_diag_success_path(monkeypatch):

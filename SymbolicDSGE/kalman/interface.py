@@ -1,4 +1,4 @@
-from .filter import KalmanFilter, FilterResult
+from .filter import KalmanFilter, FilterResult, UnscentedFilterResult
 from .config import KalmanConfig
 from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
 from typing import TYPE_CHECKING, Any, Tuple, Literal, Callable
@@ -24,6 +24,7 @@ import pandas as pd
 
 NDF = NDArray[float64]
 Float64Like = float | float64 | int | int64
+FilterOutput = FilterResult | UnscentedFilterResult
 
 
 @dataclass
@@ -53,10 +54,11 @@ class KalmanInterface(KalmanFilter):
         model: "SolvedModel",
         observables: list[str] | None,
         y: NDF | pd.DataFrame,
-        filter_mode: Literal["linear", "extended"] = "linear",
+        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         *,
         h_func: Callable[..., NDF] | None = None,
         H_jac: Callable[..., NDF] | None = None,
+        meas_addr: int | None = None,
         calib_params: NDF | None = None,
         R: NDF | None = None,
         p0_mode: Literal["diag", "eye"] | None = None,
@@ -125,7 +127,11 @@ class KalmanInterface(KalmanFilter):
 
         self.h_func = h_func
         self.H_jac = H_jac
+        self.meas_addr = meas_addr
         self.calib_params = calib_params
+        self.ukf_alpha = 1.0
+        self.ukf_beta = 2.0
+        self.ukf_kappa = 1.0
 
         self._validate_mode_and_inputs()
 
@@ -140,76 +146,177 @@ class KalmanInterface(KalmanFilter):
         x0: NDF | None = None,
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
-    ) -> FilterResult:
+    ) -> FilterOutput:
         if _arg_overrides is None:
             _arg_overrides = {}
 
+        if self.mode == FilterMode.LINEAR:
+            return self.filter_linear(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
+        if self.mode == FilterMode.EXTENDED:
+            return self.filter_extended(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
+        if self.mode == FilterMode.UNSCENTED:
+            return self.filter_unscented(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
+        raise ValueError(f"Unrecognized filter mode: {self.mode}")
+
+    def filter_linear(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> FilterResult:
+        if _arg_overrides is None:
+            _arg_overrides = {}
         if x0 is None:
             x0 = np.zeros((self.A.shape[0],), dtype=float64)
+        base_args = self._linear_validated_args
+        run_args = base_args | _arg_overrides
+        self._validate_linear_extended_run(
+            run_args,
+            x0=x0,
+            probe_measurement=False,
+            arg_overrides=_arg_overrides,
+        )
 
-        if self.mode == FilterMode.LINEAR:
-            base_args = self._linear_validated_args
-        elif self.mode == FilterMode.EXTENDED:
-            base_args = self._extended_validated_args
-        else:
-            raise ValueError(f"Unrecognized filter mode: {self.mode}")
+        run = self.run(
+            **run_args,
+            x0=x0,
+            jitter=self.jitter,
+            symmetrize=self.symmetrize,
+            return_shocks=self.return_shocks,
+        )
+        if _debug:
+            self._set_debug_info(x0=x0, run_args=run_args)
+        return run
 
-        validated_args = base_args | _arg_overrides
+    def filter_extended(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> FilterResult:
+        if _arg_overrides is None:
+            _arg_overrides = {}
+        if x0 is None:
+            x0 = np.zeros((self.A.shape[0],), dtype=float64)
+        base_args = self._extended_validated_args
+        run_args = base_args | _arg_overrides
+        self._validate_linear_extended_run(
+            run_args,
+            x0=x0,
+            probe_measurement=True,
+            arg_overrides=_arg_overrides,
+        )
 
-        # The covariance-sanity checks (symmetry + non-negative diagonals) run on
-        # the model-constant Q/P0/R and dominate per-call validation. Skip them
-        # once they've passed for cached constant matrices; y/x0 and every shape
-        # check still run on each call. A user-supplied or estimated R (and any
-        # explicit override) is not cache-validated and keeps the full checks.
+        run = self.run_extended(
+            **run_args,
+            x0=x0,
+            jitter=self.jitter,
+            symmetrize=self.symmetrize,
+            return_shocks=self.return_shocks,
+        )
+        if _debug:
+            self._set_debug_info(x0=x0, run_args=run_args)
+        return run
+
+    def _validate_linear_extended_run(
+        self,
+        run_args: dict[str, Any],
+        *,
+        x0: NDF,
+        probe_measurement: bool,
+        arg_overrides: dict[str, Any],
+    ) -> None:
         const_validated = (
-            self._cache_record.validated and self._uses_const_R and not _arg_overrides
+            self._cache_record.validated and self._uses_const_R and not arg_overrides
         )
         run_const_checks = not const_validated
         validate_kf_inputs(
-            **validated_args,
+            **run_args,
             x0=x0,
             filter_mode=self.mode,
             check_nonneg_diag=run_const_checks,
             check_symmetry=run_const_checks,
-            probe_measurement=(self.mode == FilterMode.EXTENDED),
-            probe_state=("x0" if x0 is not None else "zeros"),
+            probe_measurement=probe_measurement,
+            probe_state="x0",
         )
-        if run_const_checks and self._uses_const_R and not _arg_overrides:
+        if run_const_checks and self._uses_const_R and not arg_overrides:
             self._cache_record.validated = True
 
-        if self.mode == FilterMode.LINEAR:
+    def filter_unscented(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> UnscentedFilterResult:
+        if _arg_overrides is None:
+            _arg_overrides = {}
+        if self.return_shocks:
+            raise ValueError("return_shocks is not supported for unscented filtering.")
 
-            run = self.run(
-                **base_args | _arg_overrides,
-                # Options
-                jitter=self.jitter,
-                symmetrize=self.symmetrize,
-                return_shocks=self.return_shocks,
-            )
-        elif self.mode == FilterMode.EXTENDED:
-            run = self.run_extended(
-                **base_args | _arg_overrides,
-                # Options
-                jitter=self.jitter,
-                symmetrize=self.symmetrize,
-                return_shocks=self.return_shocks,
-            )
+        z0 = self._build_unscented_z0(x0)
+        base_args = self._unscented_validated_args
+        run_args = base_args | _arg_overrides
+        self._validate_unscented_covariances(run_args, arg_overrides=_arg_overrides)
 
+        run = self.run_unscented(
+            **run_args,
+            z0=z0,
+            alpha=self.ukf_alpha,
+            beta=self.ukf_beta,
+            kappa=self.ukf_kappa,
+            jitter=float(self.jitter),
+            symmetrize=self.symmetrize,
+        )
         if _debug:
-            self._debug_info = _KalmanDebugInfo(
-                A=self.A,
-                B=self.B,
-                C=self.C,
-                d=self.d,
-                h_func=self.h_func,
-                H_jac=self.H_jac,
-                Q=self.Q,
-                R=self.R,
-                y=self.y,
-                x0=x0,
-                P0=self.P0,
-            )
+            self._set_debug_info(x0=x0, z0=z0, run_args=run_args)
         return run
+
+    def _set_debug_info(
+        self,
+        *,
+        x0: NDF | None,
+        run_args: dict[str, Any],
+        z0: NDF | None = None,
+    ) -> None:
+        self._debug_info = _KalmanDebugInfo(
+            A=run_args.get("A", self.A),
+            B=run_args.get("B", self.B),
+            C=run_args.get("C", self.C),
+            d=run_args.get("d", self.d),
+            h_func=run_args.get("h", self.h_func),
+            H_jac=run_args.get("H_jac", self.H_jac),
+            Q=run_args.get("Q", self.Q),
+            R=run_args.get("R", self.R),
+            y=run_args.get("y", self.y),
+            x0=x0,
+            P0=run_args.get("P0", self.P0),
+            meas_addr=run_args.get("meas_addr", self.meas_addr),
+            hx=run_args.get("hx"),
+            gx=run_args.get("gx"),
+            bx=run_args.get("bx"),
+            hxx=run_args.get("hxx"),
+            gxx=run_args.get("gxx"),
+            hss=run_args.get("hss"),
+            gss=run_args.get("gss"),
+            steady_state=run_args.get("steady_state"),
+            calib_params=run_args.get("calib_params", self.calib_params),
+            z0=z0,
+            alpha=self.ukf_alpha if self.mode == FilterMode.UNSCENTED else None,
+            beta=self.ukf_beta if self.mode == FilterMode.UNSCENTED else None,
+            kappa=self.ukf_kappa if self.mode == FilterMode.UNSCENTED else None,
+        )
 
     def _get_symmetrize(self, symmetrize_arg: bool | None) -> bool:
         return bool(symmetrize_arg) if symmetrize_arg is not None else False
@@ -297,7 +404,7 @@ class KalmanInterface(KalmanFilter):
         def obj(eta: NDF) -> float64:
             R_diag = np.exp(eta)
             R = np.diag(R_diag)
-            result: FilterResult = self.filter(
+            result: FilterResult | UnscentedFilterResult = self.filter(
                 x0=np.zeros((self.A.shape[0],), dtype=float64),
                 _debug=False,
                 _arg_overrides={"R": R},
@@ -548,6 +655,80 @@ class KalmanInterface(KalmanFilter):
             #         UserWarning,
             #     )
 
+        elif self.mode == FilterMode.UNSCENTED:
+            if self.meas_addr is None or self.meas_addr == 0:
+                raise ValueError("meas_addr is required for unscented Kalman Filter.")
+            if self.calib_params is None:
+                raise ValueError(
+                    "calib_params is required for unscented Kalman Filter."
+                )
+            if getattr(getattr(self.model, "policy", None), "order", None) != 2:
+                raise ValueError(
+                    "Unscented Kalman Filter requires a second order solution."
+                )
+
+        else:
+            raise ValueError(f"Unrecognized filter mode: {self.mode}")
+
+    @staticmethod
+    def _check_covariance_matrix(name: str, value: NDF) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError(f"{name} must be a numpy ndarray.")
+        if value.ndim != 2 or value.shape[0] != value.shape[1]:
+            raise ValueError(f"{name} must be a square 2D matrix.")
+        if not np.isfinite(value).all():
+            raise ValueError(f"{name} contains non-finite values.")
+        if not np.allclose(value, value.T):
+            raise ValueError(f"{name} must be symmetric.")
+        if np.any(np.diag(value) < 0.0):
+            raise ValueError(f"{name} must have non-negative diagonal entries.")
+
+    def _validate_unscented_covariances(
+        self,
+        run_args: dict[str, Any],
+        *,
+        arg_overrides: dict[str, Any],
+    ) -> None:
+        const_validated = (
+            self._cache_record.validated and self._uses_const_R and not arg_overrides
+        )
+        if const_validated:
+            return
+
+        self._check_covariance_matrix("Q", run_args["Q"])
+        self._check_covariance_matrix("R", run_args["R"])
+        self._check_covariance_matrix("P0", run_args["P0"])
+        if self._uses_const_R and not arg_overrides:
+            self._cache_record.validated = True
+
+    def _build_unscented_z0(self, x0: NDF | None) -> NDF:
+        n_state = self.model.compiled.n_state
+        n_var = len(self.model.compiled.var_names)
+        if x0 is None:
+            x0_state = np.zeros((n_state,), dtype=float64)
+        else:
+            raw = asarray(x0, dtype=float64)
+            if raw.ndim != 1:
+                raise ValueError("x0 must be a 1D array.")
+            if raw.shape[0] == n_state:
+                x0_state = raw.copy()
+            elif raw.shape[0] == n_var:
+                x0_state = raw[:n_state].copy()
+            else:
+                raise ValueError(
+                    f"x0 must have length {n_state} or {n_var}, got {raw.shape[0]}."
+                )
+
+        z0 = np.zeros((2 * n_state,), dtype=float64)
+        z0[:n_state] = x0_state
+        return z0
+
+    def _policy_array(self, name: str) -> NDF:
+        value = getattr(self.model.policy, name, None)
+        if value is None:
+            raise ValueError(f"Unscented filtering requires policy.{name}.")
+        return asarray(np.real_if_close(value), dtype=float64)
+
     @cached_property
     def _obs_idx(self) -> dict[str, int]:
         return {name: i for i, name in enumerate(self.model.compiled.observable_names)}
@@ -598,4 +779,24 @@ class KalmanInterface(KalmanFilter):
             # "x0": x0,  # provided at filter() call time
             # Data
             "y": self.y,
+        }
+
+    @property
+    def _unscented_validated_args(self) -> dict:
+        n_state = self.model.compiled.n_state
+        return {
+            "meas_addr": self.meas_addr,
+            "hx": self._policy_array("p"),
+            "gx": self._policy_array("f"),
+            "bx": asarray(self.B[:n_state, :], dtype=float64),
+            "hxx": self._policy_array("hxx"),
+            "gxx": self._policy_array("gxx"),
+            "hss": self._policy_array("hss"),
+            "gss": self._policy_array("gss"),
+            "steady_state": self._policy_array("steady_state"),
+            "calib_params": self.calib_params,
+            "Q": self.Q,
+            "R": self.R,
+            "y": self.y,
+            "P0": self.P0,
         }

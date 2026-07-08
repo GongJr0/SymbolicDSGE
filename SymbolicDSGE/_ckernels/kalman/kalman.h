@@ -159,6 +159,9 @@ typedef struct {
   f64 *x1_filt; /* (T, n_state) */
   f64 *x2_filt; /* (T, n_state) */
 
+  f64 *x_pred; /* (T, n_state + n_ctrl) */
+  f64 *x_filt; /* (T, n_state + n_ctrl) */
+
   f64 *P_pred; /* (T, 2*n_state, 2*n_state) */
   f64 *P_filt; /* (T, 2*n_state, 2*n_state) */
 
