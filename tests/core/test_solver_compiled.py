@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import ctypes
 import random
 import textwrap
 
@@ -188,6 +189,30 @@ def test_measurement_array_dispatchers_match_scalar_dispatchers(compiled_test):
     assert getattr(array_jac_func, "_symbolicdsge_array_dispatch", False)
     assert np.allclose(array_measure, scalar_measure)
     assert np.allclose(array_jac, scalar_jac)
+
+
+def test_measurement_cfunc_matches_array_dispatcher(compiled_test):
+    c = compiled_test
+    observables = list(reversed(c.observable_names))
+    state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
+    params = np.array(
+        [float64(c.config.calibration.parameters[p]) for p in c.calib_params],
+        dtype=float64,
+    )
+
+    cf = c.construct_measurement_cfunc(observables)
+    assert cf is c.construct_measurement_cfunc(observables)
+
+    out = np.empty((len(c.observable_names),), dtype=float64)
+    ptr = ctypes.POINTER(ctypes.c_double)
+    cf.ctypes(
+        state.ctypes.data_as(ptr),
+        params.ctypes.data_as(ptr),
+        out.ctypes.data_as(ptr),
+    )
+
+    expected = c.construct_measurement_array_func(observables)(state, params)
+    np.testing.assert_allclose(out, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_compile_rejects_unknown_variable_order(parsed_test):

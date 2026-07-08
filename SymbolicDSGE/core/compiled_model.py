@@ -18,8 +18,10 @@ from .config import ModelConfig
 from ..kalman.config import KalmanConfig
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
+    MeasurementLayout,
     ResidualLayout,
     build_cfunc,
+    build_measurement_cfunc,
     build_njit,
 )
 
@@ -218,6 +220,24 @@ def vectorized_measurements({params_typed}):
             raise KeyError(f"Unknown observables not in compiled model: {missing}")
 
         return tuple(sorted(obs, key=lambda name: obs_idx[name]))
+
+    @cached_property
+    def _measurement_cfunc_cache(self) -> dict[tuple[str, ...], Any]:
+        return {}
+
+    def construct_measurement_cfunc(
+        self,
+        observables: list[str] | tuple[str, ...] | None = None,
+    ) -> Any:
+        obs = self._normalize_observables(observables)
+        cache = self._measurement_cfunc_cache
+        if obs in cache:
+            return cache[obs]
+
+        layout = MeasurementLayout.from_compiled(self, obs)
+        exprs = [self.observable_eqs[i] for i in layout.observable_indices]
+        cache[obs] = build_measurement_cfunc(exprs, layout)
+        return cache[obs]
 
     @cached_property
     def _measurement_array_func_cache(self) -> dict[tuple[str, ...], Callable[..., ND]]:
