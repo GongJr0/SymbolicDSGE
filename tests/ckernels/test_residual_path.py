@@ -1,7 +1,7 @@
-"""Parity: native ``residual_path`` (residual @cfunc over a path) vs a per-step
-evaluation of the numba vector residual. This is the Den Haan-Marcet native
-backend -- it reuses the solve's cfunc to build the residuals matrix, avoiding
-the numba residual compile.
+"""Parity: native ``residual_path`` vs per step numba residual evaluation.
+
+This is the Den Haan Marcet native backend. It reuses the solve cfunc to build
+the residuals matrix and avoids a numba residual compile.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import pytest
 
 from SymbolicDSGE._ckernels.core._core import residual_path
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.residual_printer import ResidualLayout, build_cfunc
+from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
 
 
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])

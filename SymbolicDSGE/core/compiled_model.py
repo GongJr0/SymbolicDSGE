@@ -16,7 +16,12 @@ from textwrap import dedent
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
-from .residual_printer import BicomplexOps, ResidualLayout, build_cfunc, build_njit
+from SymbolicDSGE._symbolic_printers import (
+    BicomplexOps,
+    ResidualLayout,
+    build_cfunc,
+    build_njit,
+)
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]

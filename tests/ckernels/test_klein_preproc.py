@@ -1,10 +1,9 @@
-"""Parity: native ``klein_preproc`` vs the numba ``_approximate_system_numeric``.
+"""Parity: native ``klein_preproc`` vs numba ``_approximate_system_numeric``.
 
-The native driver (``_ckernels/core/klein_preproc.c``) runs the complex-step
-first-order sweep in C, calling the printer's residual **cfunc** by address; the
-numba path runs the *same* printer residual through the njit vector func and its
-own complex-step loop. Same step (1e-30) and same arithmetic, so ``a``/``b`` agree
-to machine precision. Both feed the identical ``scipy.ordqz`` + ``klein_postproc``.
+The native driver (``_ckernels/core/klein_preproc.c``) runs the complex step
+first order sweep in C and calls the printer residual cfunc by address. The
+numba path runs the same printer residual through the njit vector function and
+its own complex step loop. Same step, same arithmetic, and same output.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import sympy as sp
 from SymbolicDSGE._ckernels.core._core import klein_preprocess
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.klein import _approximate_system_numeric, klein_solve
-from SymbolicDSGE.core.residual_printer import (
+from SymbolicDSGE._symbolic_printers import (
     ResidualLayout,
     build_cfunc,
     build_njit,
@@ -86,8 +85,8 @@ def test_klein_preproc_log_linear_parity():
 
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
 def test_klein_solve_native_matches_numba(path):
-    # End-to-end: klein_solve through the native preproc (cfunc) vs the numba
-    # fallback (residual_cfunc=None). Same pencil -> same ordqz + postproc.
+    # End to end comparison between native preproc and numba fallback.
+    # The same pencil feeds the same ordqz and postproc code.
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
     cf = compiled.construct_objective_cfunc()
