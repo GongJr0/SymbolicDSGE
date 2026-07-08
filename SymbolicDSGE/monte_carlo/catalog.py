@@ -42,18 +42,25 @@ from .operations.transforms import (
 from .mc_constructs import MCStep
 
 #: Series a diagnostic/regression step may read from an upstream context.
-INPUT_SOURCES = [
-    "states",
-    "observables",
+FILTER_OUTPUT_SOURCES = (
     "x_pred",
     "x_filt",
+    "x1_pred",
+    "x2_pred",
+    "x1_filt",
+    "x2_filt",
     "y_pred",
     "y_filt",
     "innov",
     "std_innov",
+)
+INPUT_SOURCES = [
+    "states",
+    "observables",
+    *FILTER_OUTPUT_SOURCES,
 ]
 #: Sources produced only by a filter step (require an upstream filter link).
-FILTER_SOURCES = {"x_pred", "x_filt", "y_pred", "y_filt", "innov", "std_innov"}
+FILTER_SOURCES = set(FILTER_OUTPUT_SOURCES)
 
 StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
 CompileParams = Callable[[dict[str, Any]], dict[str, Any]]
@@ -384,7 +391,7 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
                 "Mode",
                 "select",
                 "linear",
-                options=("linear", "extended"),
+                options=("linear", "extended", "unscented"),
             ),
             FieldSpec("return_shocks", "Return shocks", "boolean", False),
             FieldSpec("estimate_R_diag", "Estimate R diagonal", "boolean", False),

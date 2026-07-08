@@ -98,25 +98,12 @@ class FilterResult:
     eps_hat: NDF | None = None
 
 
-@dataclass(frozen=True)
-class UnscentedFilterResult:
-    x_pred: NDF
-    x_filt: NDF
-
+@dataclass(frozen=True, kw_only=True)
+class UnscentedFilterResult(FilterResult):
     x1_pred: NDF
     x2_pred: NDF
     x1_filt: NDF
     x2_filt: NDF
-
-    P_pred: NDF
-    P_filt: NDF
-
-    y_pred: NDF
-    y_filt: NDF
-
-    innov: NDF
-    std_innov: NDF
-    S: NDF
 
     loglik: float64
 
@@ -128,7 +115,7 @@ def _get_real(mat: NDC | NDF, name: str, tol: float = 1e8) -> NDF:
     res = real_if_close(mat, tol=tol)
     if np.iscomplexobj(res):
         if res.size == 0:
-            return np.ascontiguousarray(res.real, dtype=float64)
+            return np.ascontiguousarray(res.real, dtype=float64)  # pyright: ignore
         max_i = np.max(np.abs(res.imag))  # pyright: ignore
         raise ComplexMatrixError(name, max_i)
     return np.ascontiguousarray(res, dtype=float64)

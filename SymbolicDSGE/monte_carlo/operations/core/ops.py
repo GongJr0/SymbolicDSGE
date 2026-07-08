@@ -142,15 +142,6 @@ def run_reference_filter(
     estimate_R_diag: bool = False,
     R_scale: float = 1.0,
 ) -> FilterResult | UnscentedFilterResult:
-
-    # TODO: Figure out MC payloads to be generated from UKF:
-    # - map to model variables or carry {x1, x2} form?
-    # - Fit to current KF payload setup or split/extend the payload return of filters?
-    if filter_mode == "unscented":
-        raise NotImplementedError(
-            "MC Filtration for Unscented Kalman Filter is not yet implemented."
-        )
-
     del dgp, rep_idx
     data = context.require_data()
     if data.observables is None:
