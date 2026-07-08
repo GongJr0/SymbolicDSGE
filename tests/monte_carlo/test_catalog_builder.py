@@ -104,6 +104,11 @@ def test_catalog_payload_shape_and_known_fields() -> None:
     wald_fields = {f["key"]: f for f in by_type["wald"]["fields"]}
     assert wald_fields["target_vector"]["when"] == ["mean"]
     assert wald_fields["source"]["options"][0] == "states"
+    assert "x1_pred" in wald_fields["source"]["options"]
+    assert "x2_filt" in wald_fields["source"]["options"]
+
+    filter_fields = {f["key"]: f for f in by_type["filter"]["fields"]}
+    assert "unscented" in filter_fields["filter_mode"]["options"]
 
 
 def test_catalog_entries_carry_selector_category() -> None:
