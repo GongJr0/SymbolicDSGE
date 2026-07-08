@@ -331,11 +331,52 @@ class KalmanInterface(KalmanFilter):
         p0_mode: Literal["diag", "eye"] | None = None,
         p0_scale: Float64Like | None = None,
     ) -> NDF:
+        mode = getattr(self, "mode", FilterMode.LINEAR)
+        if mode == FilterMode.UNSCENTED:
+            return self._build_unscented_P0(p0_mode=p0_mode, p0_scale=p0_scale)
+        return self._build_full_P0(p0_mode=p0_mode, p0_scale=p0_scale)
+
+    def _build_full_P0(
+        self,
+        p0_mode: Literal["diag", "eye"] | None = None,
+        p0_scale: Float64Like | None = None,
+    ) -> NDF:
+        return self._build_named_P0(
+            self.model.compiled.var_names,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            required_scope="model variables",
+        )
+
+    def _build_unscented_P0(
+        self,
+        p0_mode: Literal["diag", "eye"] | None = None,
+        p0_scale: Float64Like | None = None,
+    ) -> NDF:
+        n_state = self.model.compiled.n_state
+        state_vars = self.model.compiled.var_names[:n_state]
+        state_P0 = self._build_named_P0(
+            state_vars,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            required_scope="state variables",
+        )
+
+        out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
+        out[:n_state, :n_state] = state_P0
+        out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
+        return out
+
+    def _build_named_P0(
+        self,
+        vars_ordered: list[str],
+        p0_mode: Literal["diag", "eye"] | None = None,
+        p0_scale: Float64Like | None = None,
+        required_scope: str = "model variables",
+    ) -> NDF:
         conf = self.kalman_config
-        vars_ordered = self.model.compiled.var_names
         n = len(vars_ordered)
 
-        # Branch 0: Has P0 Config
         if (P0 := getattr(conf, "P0", None)) is not None:
             mode = p0_mode if p0_mode is not None else P0.mode
             scale = (
@@ -345,10 +386,9 @@ class KalmanInterface(KalmanFilter):
             )
             if mode == "diag":
                 if (diag_dict := getattr(P0, "diag", None)) is not None:
-                    # Check all variables have value
                     if not all(var in diag_dict for var in vars_ordered):
                         raise ValueError(
-                            "P0 diagonal specification must include all model variables."
+                            f"P0 diagonal specification must include all {required_scope}."
                         )
 
                     mat = np.zeros((n, n), dtype=float64)
@@ -366,7 +406,6 @@ class KalmanInterface(KalmanFilter):
                     f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'."
                 )
 
-        # Branch 1: No P0 Config, Check for overrides
         else:
             if p0_mode is None or p0_scale is None:
                 raise ValueError(

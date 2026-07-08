@@ -53,6 +53,7 @@ def _make_stub_model(
     compiled = SimpleNamespace(
         observable_names=observable_names,
         var_names=var_names,
+        n_state=2,
         n_exog=2,
     )
 
@@ -109,6 +110,7 @@ def _make_shell(model=None, observables=None):
     ki = KalmanInterface.__new__(KalmanInterface)
     ki.model = _make_stub_model() if model is None else model
     ki.observables = ["ObsA", "ObsB"] if observables is None else observables
+    ki.mode = FilterMode.LINEAR
     return ki
 
 
@@ -408,6 +410,75 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
     assert np.array_equal(no_p0._build_P0(p0_mode="eye", p0_scale=3.0), np.eye(3) * 3.0)
     with pytest.raises(ValueError, match="Unrecognized p0_mode"):
         no_p0._build_P0(p0_mode="triangle", p0_scale=2.0)
+
+
+def test_build_unscented_p0_uses_state_block_and_identity_second_block():
+    ki = _make_shell()
+    ki.mode = FilterMode.UNSCENTED
+
+    expected = np.diag([2.0, 6.0, 1.0, 1.0]).astype(FLOAT)
+    assert np.array_equal(ki._build_P0(), expected)
+
+    expected_eye = np.diag([1.5, 1.5, 1.0, 1.0]).astype(FLOAT)
+    assert np.array_equal(
+        ki._build_P0(p0_mode="eye", p0_scale=1.5),
+        expected_eye,
+    )
+
+    state_only_diag = _make_shell(
+        _make_stub_model(
+            kalman_config=SimpleNamespace(
+                y_names=["ObsA"],
+                R=np.array([[1.0]], dtype=FLOAT),
+                jitter=0.0,
+                symmetrize=False,
+                P0=SimpleNamespace(mode="diag", scale=2.0, diag={"u": 1.0, "v": 2.0}),
+                R_builder=None,
+                R_param_names=None,
+            )
+        )
+    )
+    state_only_diag.mode = FilterMode.UNSCENTED
+    assert np.array_equal(
+        state_only_diag._build_P0(),
+        np.diag([2.0, 4.0, 1.0, 1.0]).astype(FLOAT),
+    )
+
+    missing_state_diag = _make_shell(
+        _make_stub_model(
+            kalman_config=SimpleNamespace(
+                y_names=["ObsA"],
+                R=np.array([[1.0]], dtype=FLOAT),
+                jitter=0.0,
+                symmetrize=False,
+                P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "x": 5.0}),
+                R_builder=None,
+                R_param_names=None,
+            )
+        )
+    )
+    missing_state_diag.mode = FilterMode.UNSCENTED
+    with pytest.raises(ValueError, match="must include all state variables"):
+        missing_state_diag._build_P0()
+
+    no_p0 = _make_shell(
+        _make_stub_model(
+            kalman_config=SimpleNamespace(
+                y_names=["ObsA"],
+                R=np.array([[1.0]], dtype=FLOAT),
+                jitter=0.0,
+                symmetrize=False,
+                P0=None,
+                R_builder=None,
+                R_param_names=None,
+            )
+        )
+    )
+    no_p0.mode = FilterMode.UNSCENTED
+    assert np.array_equal(
+        no_p0._build_P0(p0_mode="eye", p0_scale=3.0),
+        np.diag([3.0, 3.0, 1.0, 1.0]).astype(FLOAT),
+    )
 
 
 def test_reorder_obs_uses_defaults_and_aligns_dataframe_and_ndarray_inputs():
