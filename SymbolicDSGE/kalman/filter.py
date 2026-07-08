@@ -19,7 +19,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 
-from typing import Tuple, Callable
+from typing import Tuple, Callable, NamedTuple
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -106,6 +106,74 @@ class UnscentedFilterResult(FilterResult):
     x2_filt: NDF
 
     loglik: float64
+
+
+class FilterRawResult(NamedTuple):
+    x_pred: NDF
+    x_filt: NDF
+    P_pred: NDF
+    P_filt: NDF
+    y_pred: NDF
+    y_filt: NDF
+    innov: NDF
+    std_innov: NDF
+    S: NDF
+    eps_hat: NDF | None
+    loglik: float64
+
+
+class UnscentedFilterRawResult(NamedTuple):
+    x_pred: NDF
+    x_filt: NDF
+    x1_pred: NDF
+    x2_pred: NDF
+    x1_filt: NDF
+    x2_filt: NDF
+    P_pred: NDF
+    P_filt: NDF
+    y_pred: NDF
+    y_filt: NDF
+    innov: NDF
+    std_innov: NDF
+    S: NDF
+    loglik: float64
+
+
+def _filter_result_from_raw(raw: FilterRawResult) -> FilterResult:
+    return FilterResult(
+        x_pred=raw.x_pred,
+        x_filt=raw.x_filt,
+        P_pred=raw.P_pred,
+        P_filt=raw.P_filt,
+        y_pred=raw.y_pred,
+        y_filt=raw.y_filt,
+        innov=raw.innov,
+        std_innov=raw.std_innov,
+        S=raw.S,
+        eps_hat=raw.eps_hat,
+        loglik=raw.loglik,
+    )
+
+
+def _unscented_filter_result_from_raw(
+    raw: UnscentedFilterRawResult,
+) -> UnscentedFilterResult:
+    return UnscentedFilterResult(
+        x_pred=raw.x_pred,
+        x_filt=raw.x_filt,
+        x1_pred=raw.x1_pred,
+        x2_pred=raw.x2_pred,
+        x1_filt=raw.x1_filt,
+        x2_filt=raw.x2_filt,
+        P_pred=raw.P_pred,
+        P_filt=raw.P_filt,
+        y_pred=raw.y_pred,
+        y_filt=raw.y_filt,
+        innov=raw.innov,
+        std_innov=raw.std_innov,
+        S=raw.S,
+        loglik=raw.loglik,
+    )
 
 
 def _get_real(mat: NDC | NDF, name: str, tol: float = 1e8) -> NDF:
@@ -1004,7 +1072,7 @@ class KalmanFilter:
     _shape_validate = staticmethod(_shape_validate)
 
     @staticmethod
-    def run(
+    def run_raw(
         A: NDF | NDC,
         B: NDF | NDC,
         C: NDF | NDC,
@@ -1018,7 +1086,7 @@ class KalmanFilter:
         symmetrize: bool = True,
         jitter: float = 0.0,
         _store_history: bool = True,
-    ) -> FilterResult:
+    ) -> FilterRawResult:
 
         # Get reals if needed
         A = _get_real(A, "A")
@@ -1101,7 +1169,7 @@ class KalmanFilter:
             loglik,
         ) = out
 
-        return FilterResult(
+        return FilterRawResult(
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -1116,7 +1184,41 @@ class KalmanFilter:
         )
 
     @staticmethod
-    def run_unscented(
+    def run(
+        A: NDF | NDC,
+        B: NDF | NDC,
+        C: NDF | NDC,
+        d: NDF | NDC,
+        Q: NDF | NDC,
+        R: NDF | NDC,
+        y: NDF | NDC,
+        x0: NDF | None = None,
+        P0: NDF | None = None,
+        return_shocks: bool = False,
+        symmetrize: bool = True,
+        jitter: float = 0.0,
+        _store_history: bool = True,
+    ) -> FilterResult:
+        return _filter_result_from_raw(
+            KalmanFilter.run_raw(
+                A=A,
+                B=B,
+                C=C,
+                d=d,
+                Q=Q,
+                R=R,
+                y=y,
+                x0=x0,
+                P0=P0,
+                return_shocks=return_shocks,
+                symmetrize=symmetrize,
+                jitter=jitter,
+                _store_history=_store_history,
+            )
+        )
+
+    @staticmethod
+    def run_unscented_raw(
         meas_addr: int,
         hx: NDF | NDC,
         gx: NDF | NDC,
@@ -1138,7 +1240,7 @@ class KalmanFilter:
         symmetrize: bool = True,
         jitter: float = 0.0,
         _store_history: bool = True,
-    ) -> UnscentedFilterResult:
+    ) -> UnscentedFilterRawResult:
         if _ukf_hot_loop_native is None:
             raise RuntimeError("Native unscented Kalman filter is not available.")
         if meas_addr == 0:
@@ -1258,7 +1360,7 @@ class KalmanFilter:
             loglik,
         ) = out
 
-        return UnscentedFilterResult(
+        return UnscentedFilterRawResult(
             x_pred=x_pred,
             x_filt=x_filt,
             x1_pred=x1_pred,
@@ -1276,7 +1378,57 @@ class KalmanFilter:
         )
 
     @staticmethod
-    def run_extended(
+    def run_unscented(
+        meas_addr: int,
+        hx: NDF | NDC,
+        gx: NDF | NDC,
+        bx: NDF | NDC,
+        hxx: NDF | NDC,
+        gxx: NDF | NDC,
+        hss: NDF | NDC,
+        gss: NDF | NDC,
+        steady_state: NDF | NDC,
+        calib_params: NDF | NDC,
+        Q: NDF | NDC,
+        R: NDF | NDC,
+        y: NDF | NDC,
+        z0: NDF | NDC,
+        P0: NDF | NDC,
+        alpha: float = 1.0,
+        beta: float = 2.0,
+        kappa: float = 1.0,
+        symmetrize: bool = True,
+        jitter: float = 0.0,
+        _store_history: bool = True,
+    ) -> UnscentedFilterResult:
+        return _unscented_filter_result_from_raw(
+            KalmanFilter.run_unscented_raw(
+                meas_addr=meas_addr,
+                hx=hx,
+                gx=gx,
+                bx=bx,
+                hxx=hxx,
+                gxx=gxx,
+                hss=hss,
+                gss=gss,
+                steady_state=steady_state,
+                calib_params=calib_params,
+                Q=Q,
+                R=R,
+                y=y,
+                z0=z0,
+                P0=P0,
+                alpha=alpha,
+                beta=beta,
+                kappa=kappa,
+                symmetrize=symmetrize,
+                jitter=jitter,
+                _store_history=_store_history,
+            )
+        )
+
+    @staticmethod
+    def run_extended_raw(
         A: NDF | NDC,
         B: NDF | NDC,
         h: Callable[..., NDF],
@@ -1292,7 +1444,7 @@ class KalmanFilter:
         jitter: float = 0.0,
         compute_y_filt: bool = True,
         _store_history: bool = True,
-    ) -> "FilterResult":
+    ) -> FilterRawResult:
         """
         Extended Kalman Filter with a linear transition and nonlinear measurement:
 
@@ -1447,7 +1599,7 @@ class KalmanFilter:
             loglik,
         ) = out
 
-        return FilterResult(
+        return FilterRawResult(
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -1459,4 +1611,42 @@ class KalmanFilter:
             S=S,
             eps_hat=eps_hat if (return_shocks and _store_history) else None,
             loglik=loglik,
+        )
+
+    @staticmethod
+    def run_extended(
+        A: NDF | NDC,
+        B: NDF | NDC,
+        h: Callable[..., NDF],
+        H_jac: Callable[..., NDF],
+        calib_params: NDF,
+        Q: NDF | NDC,
+        R: NDF | NDC,
+        y: NDF | NDC,
+        x0: NDF | None = None,
+        P0: NDF | None = None,
+        return_shocks: bool = False,
+        symmetrize: bool = True,
+        jitter: float = 0.0,
+        compute_y_filt: bool = True,
+        _store_history: bool = True,
+    ) -> FilterResult:
+        return _filter_result_from_raw(
+            KalmanFilter.run_extended_raw(
+                A=A,
+                B=B,
+                h=h,
+                H_jac=H_jac,
+                calib_params=calib_params,
+                Q=Q,
+                R=R,
+                y=y,
+                x0=x0,
+                P0=P0,
+                return_shocks=return_shocks,
+                symmetrize=symmetrize,
+                jitter=jitter,
+                compute_y_filt=compute_y_filt,
+                _store_history=_store_history,
+            )
         )

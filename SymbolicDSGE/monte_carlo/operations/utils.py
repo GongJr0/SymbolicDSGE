@@ -91,8 +91,6 @@ def _resolve_context_array(
         filter_result = context.require_payload(filter_key)
         if not isinstance(filter_result, FilterResult):
             raise TypeError(f"Payload '{filter_key}' is not a FilterResult.")
-        if not hasattr(filter_result, source):
-            raise ValueError(f"FilterResult has no array source '{source}'.")
         arr = getattr(filter_result, source)
 
     out = np.asarray(arr, dtype=np.float64)

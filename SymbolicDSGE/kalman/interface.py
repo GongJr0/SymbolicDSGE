@@ -1,4 +1,10 @@
-from .filter import KalmanFilter, FilterResult, UnscentedFilterResult
+from .filter import (
+    KalmanFilter,
+    FilterRawResult,
+    FilterResult,
+    UnscentedFilterRawResult,
+    UnscentedFilterResult,
+)
 from .config import KalmanConfig
 from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
 from typing import TYPE_CHECKING, Any, Tuple, Literal, Callable
@@ -25,6 +31,7 @@ import pandas as pd
 NDF = NDArray[float64]
 Float64Like = float | float64 | int | int64
 FilterOutput = FilterResult | UnscentedFilterResult
+RawFilterOutput = FilterRawResult | UnscentedFilterRawResult
 
 
 @dataclass
@@ -170,23 +177,44 @@ class KalmanInterface(KalmanFilter):
             )
         raise ValueError(f"Unrecognized filter mode: {self.mode}")
 
+    def filter_raw(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> RawFilterOutput:
+        if _arg_overrides is None:
+            _arg_overrides = {}
+
+        if self.mode == FilterMode.LINEAR:
+            return self.filter_linear_raw(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
+        if self.mode == FilterMode.EXTENDED:
+            return self.filter_extended_raw(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
+        if self.mode == FilterMode.UNSCENTED:
+            return self.filter_unscented_raw(
+                x0=x0,
+                _debug=_debug,
+                _arg_overrides=_arg_overrides,
+            )
+        raise ValueError(f"Unrecognized filter mode: {self.mode}")
+
     def filter_linear(
         self,
         x0: NDF | None = None,
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
     ) -> FilterResult:
-        if _arg_overrides is None:
-            _arg_overrides = {}
-        if x0 is None:
-            x0 = np.zeros((self.A.shape[0],), dtype=float64)
-        base_args = self._linear_validated_args
-        run_args = base_args | _arg_overrides
-        self._validate_linear_extended_run(
-            run_args,
+        x0, run_args = self._prepare_linear_run(
             x0=x0,
-            probe_measurement=False,
-            arg_overrides=_arg_overrides,
+            _arg_overrides=_arg_overrides,
         )
 
         run = self.run(
@@ -200,23 +228,57 @@ class KalmanInterface(KalmanFilter):
             self._set_debug_info(x0=x0, run_args=run_args)
         return run
 
+    def filter_linear_raw(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> FilterRawResult:
+        x0, run_args = self._prepare_linear_run(
+            x0=x0,
+            _arg_overrides=_arg_overrides,
+        )
+
+        run = self.run_raw(
+            **run_args,
+            x0=x0,
+            jitter=self.jitter,
+            symmetrize=self.symmetrize,
+            return_shocks=self.return_shocks,
+        )
+        if _debug:
+            self._set_debug_info(x0=x0, run_args=run_args)
+        return run
+
+    def _prepare_linear_run(
+        self,
+        *,
+        x0: NDF | None,
+        _arg_overrides: dict[str, Any] | None,
+    ) -> tuple[NDF, dict[str, Any]]:
+        if _arg_overrides is None:
+            _arg_overrides = {}
+        if x0 is None:
+            x0 = np.zeros((self.A.shape[0],), dtype=float64)
+        base_args = self._linear_validated_args
+        run_args = base_args | _arg_overrides
+        self._validate_linear_extended_run(
+            run_args,
+            x0=x0,
+            probe_measurement=False,
+            arg_overrides=_arg_overrides,
+        )
+        return x0, run_args
+
     def filter_extended(
         self,
         x0: NDF | None = None,
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
     ) -> FilterResult:
-        if _arg_overrides is None:
-            _arg_overrides = {}
-        if x0 is None:
-            x0 = np.zeros((self.A.shape[0],), dtype=float64)
-        base_args = self._extended_validated_args
-        run_args = base_args | _arg_overrides
-        self._validate_linear_extended_run(
-            run_args,
+        x0, run_args = self._prepare_extended_run(
             x0=x0,
-            probe_measurement=True,
-            arg_overrides=_arg_overrides,
+            _arg_overrides=_arg_overrides,
         )
 
         run = self.run_extended(
@@ -229,6 +291,48 @@ class KalmanInterface(KalmanFilter):
         if _debug:
             self._set_debug_info(x0=x0, run_args=run_args)
         return run
+
+    def filter_extended_raw(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> FilterRawResult:
+        x0, run_args = self._prepare_extended_run(
+            x0=x0,
+            _arg_overrides=_arg_overrides,
+        )
+
+        run = self.run_extended_raw(
+            **run_args,
+            x0=x0,
+            jitter=self.jitter,
+            symmetrize=self.symmetrize,
+            return_shocks=self.return_shocks,
+        )
+        if _debug:
+            self._set_debug_info(x0=x0, run_args=run_args)
+        return run
+
+    def _prepare_extended_run(
+        self,
+        *,
+        x0: NDF | None,
+        _arg_overrides: dict[str, Any] | None,
+    ) -> tuple[NDF, dict[str, Any]]:
+        if _arg_overrides is None:
+            _arg_overrides = {}
+        if x0 is None:
+            x0 = np.zeros((self.A.shape[0],), dtype=float64)
+        base_args = self._extended_validated_args
+        run_args = base_args | _arg_overrides
+        self._validate_linear_extended_run(
+            run_args,
+            x0=x0,
+            probe_measurement=True,
+            arg_overrides=_arg_overrides,
+        )
+        return x0, run_args
 
     def _validate_linear_extended_run(
         self,
@@ -260,15 +364,10 @@ class KalmanInterface(KalmanFilter):
         _debug: bool = False,
         _arg_overrides: dict[str, Any] | None = None,
     ) -> UnscentedFilterResult:
-        if _arg_overrides is None:
-            _arg_overrides = {}
-        if self.return_shocks:
-            raise ValueError("return_shocks is not supported for unscented filtering.")
-
-        z0 = self._build_unscented_z0(x0)
-        base_args = self._unscented_validated_args
-        run_args = base_args | _arg_overrides
-        self._validate_unscented_covariances(run_args, arg_overrides=_arg_overrides)
+        z0, run_args = self._prepare_unscented_run(
+            x0=x0,
+            _arg_overrides=_arg_overrides,
+        )
 
         run = self.run_unscented(
             **run_args,
@@ -282,6 +381,47 @@ class KalmanInterface(KalmanFilter):
         if _debug:
             self._set_debug_info(x0=x0, z0=z0, run_args=run_args)
         return run
+
+    def filter_unscented_raw(
+        self,
+        x0: NDF | None = None,
+        _debug: bool = False,
+        _arg_overrides: dict[str, Any] | None = None,
+    ) -> UnscentedFilterRawResult:
+        z0, run_args = self._prepare_unscented_run(
+            x0=x0,
+            _arg_overrides=_arg_overrides,
+        )
+
+        run = self.run_unscented_raw(
+            **run_args,
+            z0=z0,
+            alpha=self.ukf_alpha,
+            beta=self.ukf_beta,
+            kappa=self.ukf_kappa,
+            jitter=float(self.jitter),
+            symmetrize=self.symmetrize,
+        )
+        if _debug:
+            self._set_debug_info(x0=x0, z0=z0, run_args=run_args)
+        return run
+
+    def _prepare_unscented_run(
+        self,
+        *,
+        x0: NDF | None,
+        _arg_overrides: dict[str, Any] | None,
+    ) -> tuple[NDF, dict[str, Any]]:
+        if _arg_overrides is None:
+            _arg_overrides = {}
+        if self.return_shocks:
+            raise ValueError("return_shocks is not supported for unscented filtering.")
+
+        z0 = self._build_unscented_z0(x0)
+        base_args = self._unscented_validated_args
+        run_args = base_args | _arg_overrides
+        self._validate_unscented_covariances(run_args, arg_overrides=_arg_overrides)
+        return z0, run_args
 
     def _set_debug_info(
         self,

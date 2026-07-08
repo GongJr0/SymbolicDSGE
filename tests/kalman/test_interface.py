@@ -630,6 +630,45 @@ def test_filter_dispatches_linear_run_and_populates_debug_info(monkeypatch):
     assert np.array_equal(ki._debug_info.x0, np.zeros((3,), dtype=FLOAT))
 
 
+def test_filter_raw_dispatches_linear_run_raw(monkeypatch):
+    ki = KalmanInterface(
+        model=_make_stub_model(),
+        observables=["ObsA"],
+        y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        filter_mode="linear",
+        jitter=0.5,
+        symmetrize=False,
+        return_shocks=True,
+    )
+    captured = {}
+
+    def fake_validate(**kwargs):
+        captured["validate"] = kwargs
+
+    def fake_run_raw(**kwargs):
+        captured["run_raw"] = kwargs
+        return "linear-raw-run"
+
+    monkeypatch.setattr(interface_module, "validate_kf_inputs", fake_validate)
+    monkeypatch.setattr(KalmanInterface, "run_raw", staticmethod(fake_run_raw))
+
+    out = ki.filter_raw(
+        _debug=True,
+        _arg_overrides={"R": np.array([[0.25]], dtype=FLOAT)},
+    )
+
+    assert out == "linear-raw-run"
+    assert np.array_equal(captured["validate"]["x0"], np.zeros((3,), dtype=FLOAT))
+    assert captured["validate"]["filter_mode"] == FilterMode.LINEAR
+    assert captured["validate"]["probe_measurement"] is False
+    assert captured["run_raw"]["jitter"] == pytest.approx(0.5)
+    assert captured["run_raw"]["symmetrize"] is False
+    assert captured["run_raw"]["return_shocks"] is True
+    assert np.array_equal(captured["run_raw"]["R"], np.array([[0.25]], dtype=FLOAT))
+    assert ki._debug_info is not None
+    assert np.array_equal(ki._debug_info.x0, np.zeros((3,), dtype=FLOAT))
+
+
 def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch):
     ki = KalmanInterface(
         model=_make_stub_model(),
