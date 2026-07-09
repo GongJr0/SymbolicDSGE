@@ -8,7 +8,7 @@ tags:
 reference_filter_step(
     name: str = "filter",
     *,
-    filter_mode: Literal["linear", "extended"] = "linear",
+    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
     x0: ndarray | None = None,
     p0_mode: Literal["diag", "eye"] | None = None,

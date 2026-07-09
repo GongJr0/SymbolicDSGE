@@ -1630,12 +1630,14 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
 
     raw = np.arange(12.0, dtype=np.float64).reshape(4, 3)
     np.testing.assert_allclose(
-        _select_raw_rep_array("raw", raw),
+        _select_raw_rep_array("raw", raw, rep_idx=0),
         raw,
     )
     np.testing.assert_allclose(
-        _select_raw_rep_array("vector", np.arange(4.0, dtype=np.float64)),
+        _select_raw_rep_array("vector", np.arange(4.0, dtype=np.float64), rep_idx=0),
         np.arange(4.0, dtype=np.float64).reshape(4, 1),
     )
-    with pytest.raises(ValueError, match="2D array or a 1D vector"):
-        _select_raw_rep_array("cube", np.zeros((1, 2, 3), dtype=np.float64))
+    with pytest.raises(ValueError, match="3D, 2D, or 1D array"):
+        _select_raw_rep_array(
+            "cube", np.zeros((1, 1, 2, 3), dtype=np.float64), rep_idx=0
+        )

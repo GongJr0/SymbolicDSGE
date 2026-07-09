@@ -87,17 +87,17 @@ def raw_model_data_datagen(
 
     state_mat = None
     if states is not None:
-        state_mat = _select_raw_rep_array("states", states)
+        state_mat = _select_raw_rep_array("states", states, rep_idx)
     obs_mat = None
     if observables is not None:
-        obs_mat = _select_raw_rep_array("observables", observables)
+        obs_mat = _select_raw_rep_array("observables", observables, rep_idx)
     raw_payload: dict[str, NDF] = {}
     if state_mat is not None:
         raw_payload["_X"] = state_mat
     if raw is not None:
         raw_payload.update(
             {
-                key: _select_raw_rep_array(f"raw['{key}']", value)
+                key: _select_raw_rep_array(f"raw['{key}']", value, rep_idx)
                 for key, value in raw.items()
             }
         )

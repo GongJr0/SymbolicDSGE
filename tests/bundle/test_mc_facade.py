@@ -194,7 +194,7 @@ def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
 def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
     from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
 
-    observables = np.random.default_rng(3).normal(size=(12, 30, 2))
+    observables = np.random.default_rng(3).normal(size=(4, 30, 2))
     pipe = MCPipeline(
         [
             raw_model_data_step(
@@ -204,7 +204,7 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
         ],
         [kde_step("kde", trace="test.jb.statistic", grid_points=32)],
     )
-    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=12, verbosity=0)
+    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
 
     target = (
         BundleBuilder(created_by="mc-test")

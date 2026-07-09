@@ -139,18 +139,20 @@ With filtered outputs, we run a test step using the `wald_test_step` function.
 
 mean_test_step = wald_test_step(
     "std_innov_mean",  # (1)!
-    source="std_innov",  # (2)!
-    target=np.zeros(n_obs),  # (3)!
-    kind="mean",  # (4)!
-    burn_in=20,  # (5)!
+    source="filter",  # (2)!
+    field="std_innov",  # (3)!
+    target=np.zeros(n_obs),  # (4)!
+    kind="mean",  # (5)!
+    burn_in=20,  # (6)!
 )
 ```
 
 1. Name of the step. (This will be used as the key to access the results)
-2. Data to use when conducting the test. In this case, it is `std_innov` from `FilterResult` objects returned by the kalman filter.
-3. Target to test against. In this case we're testing if the mean of each observable is zero.
-4. Kind of the wald test. Available inputs are: `Literal["mean", "covariance", "second_moment"]`.
-5. Number of periods to discard before running the tests.
+2. Data source to use when conducting the test. In this case, it is the Kalman filter (named `"filter"` by default).
+3. Field in the source's return. `std_innov` is the standardized innovations from the kalman filter's `FilterResult` object.
+4. Target to test against. In this case we're testing if the mean of each observable is zero.
+5. Kind of the wald test. Available inputs are: `Literal["mean", "covariance", "second_moment"]`.
+6. Number of periods to discard before running the tests.
 
 Each test returns a `TestResult` object and the results are aggregated to produce an MC summary.
 
@@ -202,7 +204,8 @@ custom_std = transform_step(
 
 builtin_std = standardize_step(
     "builtin_std",
-    source="innov",  # (4)!
+    source="filter",
+    field="innov",  # (4)!  
 )
 
 ```
@@ -210,7 +213,7 @@ builtin_std = standardize_step(
 1. Name of the step. Used as the key in the payload dictionary when `store_key` is `None`.
 2. The function to be executed. Any callable with the signature of a custom transform can be used here.
 3. The key to store the output of the transform in the payload dictionary. If `None`, the step name is used as the key.
-4. The source of the data to be transformed. In this case, it is the `innov` attribute of the `FilterResult` object returned by the kalman filter.
+4. In this case, the `innov` attribute (raw innovations) of the `FilterResult` object is used.
 
 ### Post-Processing
 
@@ -306,19 +309,19 @@ mc = pipeline.run(
 4. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints throughout for the loop and time elapsed for the post-processing, `2` prints per-step throughput for the loop and time elapsed for the post-processing.
 
 ```bash
->>> MC run concluded successfully in 0.72s with 1388.50 it/s.
+>>> MC run concluded successfully in 0.71s with 1399.44 it/s.
 Per-step Report:
 
-    datagen: 0 faliures, 3753.78 it/s (0.27s).
-    filter: 0 faliures, 3255.05 it/s (0.31s).
-    custom_std: 0 faliures, 19788.42 it/s (0.05s).
-    builtin_std: 0 faliures, 20658.72 it/s (0.05s).
-    std_innov_mean: 0 faliures, 25211.78 it/s (0.04s).
+    datagen: 0 faliures, 3568.51 it/s (0.28s).
+    filter: 0 faliures, 3630.67 it/s (0.28s).
+    custom_std: 0 faliures, 18615.80 it/s (0.05s).
+    builtin_std: 0 faliures, 19841.51 it/s (0.05s).
+    std_innov_mean: 0 faliures, 23918.24 it/s (0.04s).
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0003s.
-    builtin_kde: Succeeded in 1.3382s.
+    custom_postproc: Succeeded in 0.0004s.
+    builtin_kde: Succeeded in 1.3686s.
 ```
 
 This returns a `MCPipelineResult` object containing test summaries for each test step executed in the pipeline.

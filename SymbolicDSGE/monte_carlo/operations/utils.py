@@ -74,11 +74,15 @@ def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
 def _select_raw_rep_array(
     name: str,
     value: NDF,
+    rep_idx: int,
 ) -> NDF:
     arr = np.asarray(value, dtype=np.float64)
     if arr.ndim == 2:
         return arr
     elif arr.ndim == 1:
         return arr.reshape(-1, 1)
+    elif arr.ndim == 3:
+        out: NDF = arr[rep_idx]
+        return out
     else:
-        raise ValueError(f"Raw data for '{name}' must be a 2D array or a 1D vector).")
+        raise ValueError(f"Raw data for '{name}' must be a 3D, 2D, or 1D array).")

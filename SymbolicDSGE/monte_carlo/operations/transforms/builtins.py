@@ -265,6 +265,7 @@ def rolling_std_step(
     burn_in: int = 0,
     drop_initial: bool = False,
     window: int = 10,
+    ddof: int = 0,
 ) -> MCStep:
     """Trailing rolling standard deviation over a fixed ``window``.
 
@@ -286,7 +287,7 @@ def rolling_std_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs={"window": window},
+        step_kwargs={"window": window, "ddof": ddof},
     )
 
 
@@ -299,6 +300,7 @@ def rolling_var_step(
     burn_in: int = 0,
     drop_initial: bool = False,
     window: int = 10,
+    ddof: int = 0,
 ) -> MCStep:
     """Trailing rolling variance over a fixed ``window`` of the time axis.
 
@@ -320,5 +322,5 @@ def rolling_var_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs={"window": window},
+        step_kwargs={"window": window, "ddof": ddof},
     )

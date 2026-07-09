@@ -230,12 +230,12 @@ def test_rolling_window_rejects_window_larger_than_input() -> None:
                 "field": "observables",
                 "window": 5,
             },
-            {"window": 5},
+            {"window": 5, "ddof": 0},
         ),
         (
             rolling_var_step,
             {"source": "datagen", "field": "observables", "window": 5},
-            {"window": 5},
+            {"window": 5, "ddof": 0},
         ),
     ],
 )
