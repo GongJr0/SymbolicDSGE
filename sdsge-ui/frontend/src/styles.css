@@ -2624,6 +2624,15 @@ button.mc-palette-tab.active .mc-palette-tab-count {
   color: #c7d2fe;
 }
 
+/* A shock entry is a transparent clickable row, not a CTA. Keep the generic
+   dark `button` background (a light fill) off it so its own entry background
+   shows and the light entry text keeps its contrast. */
+.theme-dark button.mc-shock-entry-select,
+.theme-dark button.mc-shock-entry-select:disabled {
+  background: transparent;
+  color: inherit;
+}
+
 .theme-dark .mc-summary-tabs button {
   background: transparent;
   color: #94a3b8;

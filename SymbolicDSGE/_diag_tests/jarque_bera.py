@@ -50,7 +50,10 @@ def jb_stat(x: NDF) -> tuple[int, float64]:
     m3 /= n
     m4 /= n
 
-    if m2 <= 0.0:
+    # A non-finite m2 means the input carried NaN/inf (e.g. log of a non-positive
+    # value upstream). `m2 <= 0.0` alone can't catch it: every comparison with NaN
+    # is False, so a NaN would otherwise slip through to an OK/NaN statistic.
+    if not np.isfinite(m2) or m2 <= 0.0:
         return UDEF_VARIANCE, float64(np.nan)
 
     skew = m3 / m2**1.5

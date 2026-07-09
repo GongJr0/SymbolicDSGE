@@ -503,7 +503,10 @@ int sdsge_jb_stat(const f64 *SDSGE_RESTRICT x, i64 n, f64 *SDSGE_RESTRICT out) {
   m3 /= (f64)n;
   m4 /= (f64)n;
 
-  if (m2 <= 0.0) {
+  /* A non-finite m2 means the input carried NaN/inf (e.g. log of a non-positive
+   * value upstream); `m2 <= 0.0` alone can't catch it since every NaN comparison
+   * is false, so it would otherwise fall through to an OK/NaN statistic. */
+  if (!isfinite(m2) || m2 <= 0.0) {
     *out = NAN;
     return DIAG_UDEF_VARIANCE;
   }
