@@ -33,59 +33,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.shock_generators import Shock, ShockParameters
+from .catalog import STEP_CATALOG
 from .mc_constructs import SourceArgs
 from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
 
 if TYPE_CHECKING:
     from .core import MCPipeline
     from .mc_constructs import MCStep
-
-SINGLE_SOURCE_IN = ("source", "field", "columns")
-SINGLE_COLUMN_SOURCE_IN = ("source", "field", "column")
-RESID_SOURCE_IN = ("residuals_source", "residuals_field", "residual_col")
-X_SOURCE_IN = ("X_source", "X_field", "X_columns")
-Y_SOURCE_IN = ("y_source", "y_field", "y_column")
-
-
-_SINGLE_SOURCE_STEPS: dict[str, tuple[str, str, str]] = {
-    "standardize": SINGLE_SOURCE_IN,
-    "log": SINGLE_SOURCE_IN,
-    "log_diff": SINGLE_SOURCE_IN,
-    "diff": SINGLE_SOURCE_IN,
-    "rolling_mean": SINGLE_SOURCE_IN,
-    "rolling_std": SINGLE_SOURCE_IN,
-    "rolling_var": SINGLE_SOURCE_IN,
-    "wald": SINGLE_SOURCE_IN,
-    "ljung_box": SINGLE_COLUMN_SOURCE_IN,
-    "jarque_bera": SINGLE_COLUMN_SOURCE_IN,
-}
-
-_MULTI_SOURCE_STEPS: dict[str, dict[str, tuple[str, str, str]]] = {
-    "breusch_pagan": {
-        "residuals": RESID_SOURCE_IN,
-        "X": X_SOURCE_IN,
-    },
-    "breusch_godfrey": {
-        "residuals": RESID_SOURCE_IN,
-        "X": X_SOURCE_IN,
-    },
-    "cusum": {
-        "y": Y_SOURCE_IN,
-        "X": X_SOURCE_IN,
-    },
-    "cusumsq": {
-        "y": Y_SOURCE_IN,
-        "X": X_SOURCE_IN,
-    },
-    "chow": {
-        "y": Y_SOURCE_IN,
-        "X": X_SOURCE_IN,
-    },
-    "regression": {
-        "y": Y_SOURCE_IN,
-        "X": X_SOURCE_IN,
-    },
-}
 
 
 def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
@@ -163,33 +117,27 @@ def _recover_source_params(
 ) -> dict[str, Any]:
     if step_type is None or not source_args:
         return {}
-    single = _SINGLE_SOURCE_STEPS.get(step_type)
-    if single is not None:
-        if len(source_args) != 1:
-            raise ValueError(f"Step type {step_type!r} must have one source.")
-        source_key, field_key, columns_key = single
-        return _recover_one_source(
-            source_args[0],
-            source_key=source_key,
-            field_key=field_key,
-            columns_key=columns_key,
-        )
-
-    layout = _MULTI_SOURCE_STEPS.get(step_type)
-    if layout is None:
+    definition = STEP_CATALOG.get(step_type)
+    if definition is None or not definition.source_bindings:
         return {}
+    if len(source_args) != len(definition.source_bindings):
+        raise ValueError(
+            f"Step type {step_type!r} has {len(source_args)} source args, "
+            f"expected {len(definition.source_bindings)}."
+        )
     by_arg = {selector.arg: selector for selector in source_args}
     out: dict[str, Any] = {}
-    for arg, selector_layout in layout.items():
-        source_key, field_key, columns_key = selector_layout
-        if arg not in by_arg:
-            raise ValueError(f"Step type {step_type!r} is missing source {arg!r}.")
+    for binding in definition.source_bindings:
+        if binding.arg not in by_arg:
+            raise ValueError(
+                f"Step type {step_type!r} is missing source {binding.arg!r}."
+            )
         out.update(
             _recover_one_source(
-                by_arg[arg],
-                source_key=source_key,
-                field_key=field_key,
-                columns_key=columns_key,
+                by_arg[binding.arg],
+                source_key=binding.source_key,
+                field_key=binding.field_key,
+                columns_key=binding.columns_key,
             )
         )
     return out

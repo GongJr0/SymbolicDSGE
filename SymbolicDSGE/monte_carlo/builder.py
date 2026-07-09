@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from .catalog import (
     DATAGEN_STEP_TYPES,
+    SourceBinding,
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
     TRANSFORM_STEP_TYPES,
@@ -37,16 +38,8 @@ if TYPE_CHECKING:
 #: member).
 _TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"transform:custom"}
 
-#: ``source`` kinds a transform/terminal may legally link from (the structural
-#: parent edge): the root datagen, a filter, or another transform.
+#: ``source`` kinds a transform/terminal may legally link from.
 _ROOT_SOURCE_TYPES = DATAGEN_STEP_TYPES | {"filter"}
-
-_SOURCE_FIELD_KEYS = {
-    "source": "field",
-    "residuals_source": "residuals_field",
-    "y_source": "y_field",
-    "X_source": "X_field",
-}
 
 
 def validate_pipeline_spec(
@@ -212,10 +205,10 @@ def _validate_postproc_trace_refs(
 def _source_dep_ids(node: NodeSpec, name_to_id: Mapping[str, str]) -> set[str]:
     """Producer node ids a node references by explicit source name."""
     out: set[str] = set()
-    for source_key, field_key in _SOURCE_FIELD_KEYS.items():
-        if source_key not in node.params or field_key not in node.params:
+    for binding in _source_bindings(node):
+        if binding.source_key not in node.params:
             continue
-        producer = node.params[source_key]
+        producer = node.params[binding.source_key]
         if producer and producer in name_to_id:
             out.add(name_to_id[producer])
     return out
@@ -409,7 +402,9 @@ def _validate_dependency(node: NodeSpec, prior_names: set[str]) -> None:
     params = node.params
     if node.step_type == "filter":
         return
-    for source_key, field_key in _SOURCE_FIELD_KEYS.items():
+    for binding in _source_bindings(node):
+        source_key = binding.source_key
+        field_key = binding.field_key
         if source_key not in params and field_key not in params:
             continue
         if source_key not in params:
@@ -423,6 +418,13 @@ def _validate_dependency(node: NodeSpec, prior_names: set[str]) -> None:
         producer = str(params[source_key])
         if producer not in prior_names:
             raise ValueError(f"Step '{node.name}' requires prior source '{producer}'.")
+
+
+def _source_bindings(node: NodeSpec) -> tuple[SourceBinding, ...]:
+    definition = STEP_CATALOG.get(node.step_type)
+    if definition is None:
+        return ()
+    return definition.source_bindings
 
 
 def _clean_params(params: Mapping[str, Any]) -> dict[str, Any]:
