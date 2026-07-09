@@ -39,6 +39,7 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
     report_mc_step_performance,
 )
 from SymbolicDSGE.monte_carlo.operations.core import (
+    add_payload_step,
     raw_model_data_step,
     reference_filter_step,
     simulation_step,
@@ -517,6 +518,77 @@ def test_breusch_pagan_pipeline_supports_separate_payload_sources() -> None:
         out.statistic_traces["bp"],
         np.full(2, breusch_pagan(residuals, X).statistic, dtype=np.float64),
     )
+
+
+def test_add_payload_step_registers_1d_payload_for_downstream_steps() -> None:
+    payload = np.asarray([1.0, 2.0, 3.0, 5.0], dtype=np.float64)
+    target = np.asarray([0.0], dtype=np.float64)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(observables=np.zeros((payload.size, 1))),
+            add_payload_step("external", payload),
+            wald_test_step(
+                "payload_mean",
+                source="external",
+                field="payload",
+                target=target,
+                bandwidth=0,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, retain_contexts=True)
+
+    expected = wald_mean_hac(payload.reshape(-1, 1), target, bandwidth=0).statistic
+    np.testing.assert_allclose(
+        out.statistic_traces["payload_mean"],
+        np.full(2, expected, dtype=np.float64),
+    )
+    assert out.payloads is not None
+    np.testing.assert_allclose(out.payloads[0]["external"], payload)
+    assert out.contexts is not None
+    np.testing.assert_allclose(out.contexts[0].require_payload("external"), payload)
+
+
+def test_add_payload_step_registers_2d_payload_with_column_selection() -> None:
+    payload = np.column_stack(
+        [
+            np.asarray([1.0, 2.0, 1.5, 2.5, 3.0], dtype=np.float64),
+            np.asarray([0.5, -0.5, 1.0, -1.0, 0.0], dtype=np.float64),
+        ]
+    )
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(observables=np.zeros((payload.shape[0], 1))),
+            add_payload_step("external", payload),
+            jarque_bera_test_step(
+                "payload_jb",
+                source="external",
+                field="payload",
+                column=1,
+            ),
+        ]
+    )
+
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2)
+
+    expected = jarque_bera(payload[:, 1]).statistic
+    np.testing.assert_allclose(
+        out.statistic_traces["payload_jb"],
+        np.full(2, expected, dtype=np.float64),
+    )
+
+
+def test_add_payload_step_rejects_non_matrix_payloads() -> None:
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(observables=np.zeros((2, 1))),
+            add_payload_step("cube", np.zeros((1, 2, 3), dtype=np.float64)),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Payload must be 1-D, or 2-D"):
+        pipeline.run(reference=_FakeSolvedModel(), n_rep=1)
 
 
 def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> None:
