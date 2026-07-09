@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Callable, Literal, Mapping, Protocol, Union, NamedTuple
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Mapping,
+    Protocol,
+    Union,
+    NamedTuple,
+    Sequence,
+)
 
 import numpy as np
 from numpy import float64
@@ -24,35 +33,54 @@ ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
 SeedIncrement = Union[int, Literal["auto"]]
 
-MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables", "raw")
+
+class MCData(NamedTuple):
+    """One Monte Carlo replication's data payload.
+
+    Produced by a DATAGEN step and exposed to per-replication ops as
+    ``context.data`` (via ``context.require_data()``). Fields:
+
+    - ``states``: ``(T, n_state)`` latent state matrix, or None.
+    - ``observables``: ``(T, k)`` observable matrix, or None.
+    - ``n_exog``: number of exogenous shocks (-1 if unknown).
+    - ``raw``: mapping of named series (each model variable, plus "_X" = states).
+    - ``observable_names``: column names for ``observables``.
+    """
+
+    states: NDF | None = None
+    observables: NDF | None = None
+    n_exog: int = -1
+    raw: Mapping[str, NDF] = {}
+    observable_names: tuple[str, ...] = ()
+
+
+MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")
 DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
-
-FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = FilterRawResult._fields
-UNSCENTED_FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = UnscentedFilterRawResult._fields
-UNSCENTED_ONLY_FILTER_SOURCE_FIELDS: tuple[str, ...] = tuple(
-    field
-    for field in UNSCENTED_FILTER_RAW_SOURCE_FIELDS
-    if field not in FILTER_RAW_SOURCE_FIELDS
-)
+FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = UnscentedFilterRawResult._fields
 FILTER_SOURCE_FIELDS: tuple[str, ...] = (
-    FILTER_RAW_SOURCE_FIELDS + UNSCENTED_ONLY_FILTER_SOURCE_FIELDS
+    "x_pred",
+    "x_filt",
+    "x1_pred",
+    "x2_pred",
+    "x1_filt",
+    "x2_filt",
+    "y_pred",
+    "y_filt",
+    "innov",
+    "std_innov",
+    "eps_hat",
 )
 
-SOURCE_FIELDS: tuple[str, ...] = (
-    MC_DATA_SOURCE_FIELDS
-    + DYNAMIC_SOURCE_FIELDS
-    + FILTER_RAW_SOURCE_FIELDS
-    + UNSCENTED_ONLY_FILTER_SOURCE_FIELDS
-)
-SOURCE_FIELD_INDEX: dict[str, int] = {
-    field: index for index, field in enumerate(SOURCE_FIELDS)
+MC_DATA_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(MC_DATA_SOURCE_FIELDS)
 }
-SOURCE_INDEX_FIELD: tuple[str, ...] = SOURCE_FIELDS
+DYNAMIC_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(DYNAMIC_SOURCE_FIELDS)
+}
+FILTER_RAW_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(FILTER_RAW_SOURCE_FIELDS)
+}
 
-if len(SOURCE_FIELD_INDEX) != len(SOURCE_FIELDS) or len(
-    set(SOURCE_FIELD_INDEX.values())
-) != len(SOURCE_FIELDS):
-    raise RuntimeError("MC source field indices must be unique.")
 
 # Array-valued sources currently exposed to MC operations and the catalogue.
 ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
@@ -79,26 +107,6 @@ class OpType(StrEnum):
     TEST = "test"
     REGRESSION = "regression"
     POSTPROC = "postproc"
-
-
-class MCData(NamedTuple):
-    """One Monte Carlo replication's data payload.
-
-    Produced by a DATAGEN step and exposed to per-replication ops as
-    ``context.data`` (via ``context.require_data()``). Fields:
-
-    - ``states``: ``(T, n_state)`` latent state matrix, or None.
-    - ``observables``: ``(T, k)`` observable matrix, or None.
-    - ``n_exog``: number of exogenous shocks (-1 if unknown).
-    - ``raw``: mapping of named series (each model variable, plus "_X" = states).
-    - ``observable_names``: column names for ``observables``.
-    """
-
-    states: NDF | None = None
-    observables: NDF | None = None
-    n_exog: int = -1
-    raw: Mapping[str, NDF] = field(default_factory=dict)
-    observable_names: tuple[str, ...] = ()
 
 
 @dataclass
@@ -199,12 +207,87 @@ class RegressionOp(Protocol):
     ) -> RegressionResult: ...
 
 
+@dataclass(frozen=True, slots=True)
+class SourceArgs:
+    arg: str
+    source: str
+    field_idx: int
+    columns: Sequence[int] | slice | None = None
+
+    payload_key: str | None = None
+    raw_key: str | None = None
+    burn_in: int = 0
+    drop_initial: bool = False
+
+
+DATA_SOURCE_KEY = "__data__"
+
+
+class _SourceArgSpec(NamedTuple):
+    source_key: str
+    arg: str
+    columns_key: str | None
+    payload_key: str
+
+
+_SOURCE_ARG_SPECS: dict[str, tuple[_SourceArgSpec, ...]] = {
+    "standardize": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "log": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "log_diff": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "diff": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "rolling_mean": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "rolling_std": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "rolling_var": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "wald": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
+    "ljung_box": (_SourceArgSpec("source", "sample", "column", "payload_key"),),
+    "jarque_bera": (_SourceArgSpec("source", "sample", "column", "payload_key"),),
+    "breusch_pagan": (
+        _SourceArgSpec(
+            "residual_source",
+            "residuals",
+            "residual_col",
+            "residual_payload_key",
+        ),
+        _SourceArgSpec("X_source", "X", "X_columns", "x_payload_key"),
+    ),
+    "breusch_godfrey": (
+        _SourceArgSpec(
+            "residual_source",
+            "residuals",
+            "residual_col",
+            "residual_payload_key",
+        ),
+        _SourceArgSpec("X_source", "X", "X_columns", "x_payload_key"),
+    ),
+    "cusum": (
+        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
+        _SourceArgSpec("x_source", "X", "X_columns", "x_payload_key"),
+    ),
+    "cusumsq": (
+        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
+        _SourceArgSpec("x_source", "X", "X_columns", "x_payload_key"),
+    ),
+    "chow": (
+        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
+        _SourceArgSpec("x_source", "X", "X_columns", "x_payload_key"),
+    ),
+    "regression": (
+        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
+        _SourceArgSpec("X_source", "X", "X_columns", "x_payload_key"),
+    ),
+}
+
+
 @dataclass(frozen=True)
 class MCStep:
     name: str
     op_type: OpType
     func: Callable[..., Any]
     kwargs: Mapping[str, Any] = field(default_factory=dict)
+    source_args: tuple[SourceArgs, ...] = ()
+    runner_kwargs: Mapping[str, Any] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
     store_key: str | None = None
     #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
     #: or ``"custom"`` for user-supplied ops. Stamped by the step factories;
@@ -217,7 +300,13 @@ class MCStep:
         if not self.name:
             raise ValueError("MCStep name must be non-empty.")
         object.__setattr__(self, "op_type", OpType(self.op_type))
-        object.__setattr__(self, "kwargs", dict(self.kwargs))
+        kwargs = dict(self.kwargs)
+        source_args, runner_kwargs = _compile_source_args(
+            self.step_type, kwargs, self.source_args
+        )
+        object.__setattr__(self, "kwargs", kwargs)
+        object.__setattr__(self, "source_args", source_args)
+        object.__setattr__(self, "runner_kwargs", runner_kwargs)
         # The pandas namespace is a post-loop-only privilege: a PandasCustomFunc
         # in a per-rep step would reference pandas inside the replication loop,
         # which the looser contract is not meant to sanction.
@@ -234,6 +323,112 @@ class MCStep:
     @property
     def output_key(self) -> str:
         return self.store_key if self.store_key is not None else self.name
+
+
+def _compile_source_args(
+    step_type: str | None,
+    kwargs: dict[str, Any],
+    source_args: SourceArgs | Sequence[SourceArgs] | None,
+) -> tuple[tuple[SourceArgs, ...], dict[str, Any]]:
+    runner_kwargs = dict(kwargs)
+    if source_args:
+        if isinstance(source_args, SourceArgs):
+            return (source_args,), runner_kwargs
+        return tuple(source_args), runner_kwargs
+    specs = _SOURCE_ARG_SPECS.get(step_type or "")
+    if not specs or not any(spec.source_key in kwargs for spec in specs):
+        return (), runner_kwargs
+
+    burn_in = int(kwargs.get("burn_in", 0))
+    if burn_in < 0:
+        raise ValueError("burn_in must be non-negative.")
+    drop_initial = bool(kwargs.get("drop_initial", False))
+    filter_key = str(kwargs.get("filter_key", "filter"))
+
+    runner_kwargs.pop("burn_in", None)
+    runner_kwargs.pop("drop_initial", None)
+    runner_kwargs.pop("filter_key", None)
+
+    compiled: list[SourceArgs] = []
+    for spec in specs:
+        if spec.source_key not in kwargs:
+            continue
+        source_name = str(kwargs[spec.source_key])
+        columns = _normalize_columns(
+            kwargs.get(spec.columns_key) if spec.columns_key is not None else None
+        )
+        payload_key = kwargs.get(spec.payload_key)
+        compiled.append(
+            _compile_one_source_arg(
+                arg=spec.arg,
+                source_name=source_name,
+                filter_key=filter_key,
+                payload_key=str(payload_key) if payload_key is not None else None,
+                columns=columns,
+                burn_in=burn_in,
+                drop_initial=drop_initial,
+            )
+        )
+        runner_kwargs.pop(spec.source_key, None)
+        if spec.columns_key is not None:
+            runner_kwargs.pop(spec.columns_key, None)
+        runner_kwargs.pop(spec.payload_key, None)
+    return tuple(compiled), runner_kwargs
+
+
+def _compile_one_source_arg(
+    *,
+    arg: str,
+    source_name: str,
+    filter_key: str,
+    payload_key: str | None,
+    columns: Sequence[int] | slice | None,
+    burn_in: int,
+    drop_initial: bool,
+) -> SourceArgs:
+    if source_name in MC_DATA_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source=DATA_SOURCE_KEY,
+            field_idx=MC_DATA_FIELD_INDEX[source_name],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=drop_initial,
+        )
+    if source_name in DYNAMIC_FIELD_INDEX:
+        if payload_key is None:
+            raise ValueError("payload_key is required when source='payload'.")
+        return SourceArgs(
+            arg=arg,
+            source=payload_key,
+            field_idx=DYNAMIC_FIELD_INDEX[source_name],
+            columns=columns,
+            payload_key=payload_key,
+            burn_in=burn_in,
+            drop_initial=drop_initial,
+        )
+    if source_name in FILTER_SOURCE_FIELDS:
+        return SourceArgs(
+            arg=arg,
+            source=filter_key,
+            field_idx=FILTER_RAW_FIELD_INDEX[source_name],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=drop_initial,
+        )
+    raise ValueError(f"Unknown MC source field: {source_name!r}.")
+
+
+def _normalize_columns(value: Any) -> Sequence[int] | slice | None:
+    if value is None or isinstance(value, slice):
+        return value
+    if isinstance(value, int):
+        return (value,)
+    if isinstance(value, np.ndarray):
+        return tuple(int(item) for item in value.tolist())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(int(item) for item in value)
+    raise TypeError("Column selectors must be an int, a sequence of ints, or a slice.")
 
 
 @dataclass(frozen=True)

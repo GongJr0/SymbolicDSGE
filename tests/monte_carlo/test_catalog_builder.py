@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
+from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.monte_carlo import (
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
@@ -14,15 +13,18 @@ from SymbolicDSGE.monte_carlo import (
 )
 from SymbolicDSGE.monte_carlo.catalog import _shocks_from_registry
 from SymbolicDSGE.monte_carlo.mc_constructs import (
+    DYNAMIC_FIELD_INDEX,
     DYNAMIC_SOURCE_FIELDS,
+    FILTER_RAW_FIELD_INDEX,
     FILTER_RAW_SOURCE_FIELDS,
+    MCData,
+    MC_DATA_FIELD_INDEX,
     MC_DATA_SOURCE_FIELDS,
-    SOURCE_FIELD_INDEX,
-    SOURCE_FIELDS,
-    SOURCE_INDEX_FIELD,
-    UNSCENTED_FILTER_RAW_SOURCE_FIELDS,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.operations.transforms import (
+    standardize_step,
+    transform_step,
+)
 from SymbolicDSGE.monte_carlo.spec import (
     STEP_KINDS,
     EdgeSpec,
@@ -44,30 +46,33 @@ def test_catalog_keys_are_all_valid_step_kinds() -> None:
     assert set(STEP_CATALOG) <= STEP_KINDS
 
 
-# Source leg -> the payload-key kwarg the binder produces for it. Each step's
-# run op must accept the key for every source leg it declares, else a key-based
-# (or transform-fed) payload arrives as an unexpected kwarg at run time.
-_SOURCE_LEG_TO_PAYLOAD_KEY = {
-    "source": "payload_key",
-    "residual_source": "residual_payload_key",
-    "y_source": "y_payload_key",
-    "X_source": "x_payload_key",
-    "x_source": "x_payload_key",
-}
+def test_source_kwargs_compile_to_runner_args_once() -> None:
+    step = standardize_step(
+        "std",
+        source="payload",
+        payload_key="obs",
+        columns=0,
+        burn_in=2,
+        ddof=1,
+    )
+
+    assert step.kwargs["source"] == "payload"
+    assert dict(step.runner_kwargs) == {"ddof": 1}
+    assert len(step.source_args) == 1
+    selector = step.source_args[0]
+    assert selector.arg == "sample"
+    assert selector.source == "obs"
+    assert selector.field_idx == DYNAMIC_FIELD_INDEX["payload"]
+    assert selector.columns == (0,)
+    assert selector.payload_key == "obs"
+    assert selector.burn_in == 2
 
 
-def test_every_source_leg_op_accepts_its_payload_key() -> None:
-    for step_type, definition in STEP_CATALOG.items():
-        step = definition.factory(name="probe")
-        op_params = set(inspect.signature(step.func).parameters)
-        for field in definition.fields:
-            payload_key = _SOURCE_LEG_TO_PAYLOAD_KEY.get(field.key)
-            if payload_key is None:
-                continue
-            assert payload_key in op_params, (
-                f"'{step_type}' run op does not accept '{payload_key}' for leg "
-                f"'{field.key}'; a key-based payload would be an unexpected kwarg."
-            )
+def test_source_arg_compile_validates_static_selection() -> None:
+    with pytest.raises(ValueError, match="payload_key"):
+        standardize_step("bad_payload", source="payload")
+    with pytest.raises(ValueError, match="burn_in"):
+        standardize_step("bad_burn", source="states", burn_in=-1)
 
 
 def test_transform_step_stamps_custom_kind() -> None:
@@ -121,25 +126,26 @@ def test_catalog_payload_shape_and_known_fields() -> None:
     assert "unscented" in filter_fields["filter_mode"]["options"]
 
 
-def test_source_field_indices_cover_known_sources_once() -> None:
-    expected = (
-        MC_DATA_SOURCE_FIELDS
-        + DYNAMIC_SOURCE_FIELDS
-        + FILTER_RAW_SOURCE_FIELDS
-        + tuple(
-            field
-            for field in UNSCENTED_FILTER_RAW_SOURCE_FIELDS
-            if field not in FILTER_RAW_SOURCE_FIELDS
-        )
+def test_source_field_indices_are_local_to_payload_shape() -> None:
+    assert MC_DATA_SOURCE_FIELDS == ("states", "observables")
+    assert set(MC_DATA_SOURCE_FIELDS) < set(MCData._fields)
+    assert FILTER_RAW_SOURCE_FIELDS[: len(FilterRawResult._fields)] == (
+        FilterRawResult._fields
     )
+    assert FILTER_RAW_SOURCE_FIELDS == UnscentedFilterRawResult._fields
+    for index, field in enumerate(MC_DATA_SOURCE_FIELDS):
+        assert MC_DATA_FIELD_INDEX[field] == index
+    for index, field in enumerate(DYNAMIC_SOURCE_FIELDS):
+        assert DYNAMIC_FIELD_INDEX[field] == index
+    for index, field in enumerate(FILTER_RAW_SOURCE_FIELDS):
+        assert FILTER_RAW_FIELD_INDEX[field] == index
 
-    assert SOURCE_FIELDS == expected
-    assert SOURCE_INDEX_FIELD == SOURCE_FIELDS
-    assert len(SOURCE_FIELD_INDEX) == len(SOURCE_FIELDS)
-    assert len(set(SOURCE_FIELD_INDEX.values())) == len(SOURCE_FIELD_INDEX)
-    assert set(SOURCE_FIELD_INDEX) == set(SOURCE_FIELDS)
-    for index, field in enumerate(SOURCE_INDEX_FIELD):
-        assert SOURCE_FIELD_INDEX[field] == index
+    assert FILTER_RAW_FIELD_INDEX["std_innov"] == FILTER_RAW_SOURCE_FIELDS.index(
+        "std_innov"
+    )
+    assert FILTER_RAW_FIELD_INDEX["x2_filt"] == FILTER_RAW_SOURCE_FIELDS.index(
+        "x2_filt"
+    )
 
 
 def test_catalog_entries_carry_selector_category() -> None:

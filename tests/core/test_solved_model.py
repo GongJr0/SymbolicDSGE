@@ -67,6 +67,7 @@ def _raw_unscented_result(
         innov=y,
         std_innov=y,
         S=S,
+        eps_hat=None,
         loglik=np.float64(0.0),
     )
 

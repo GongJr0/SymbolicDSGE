@@ -74,7 +74,7 @@ def test_run_standardize_zero_centers_and_unit_scales_per_column() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
     )
     np.testing.assert_allclose(out.mean(axis=0), [0.0, 0.0], atol=1e-12)
     np.testing.assert_allclose(out.std(axis=0), [1.0, 1.0], atol=1e-12)
@@ -88,7 +88,7 @@ def test_run_standardize_zero_std_column_returns_zeros_safely() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
     )
     np.testing.assert_allclose(out[:, 0], 0.0)
     assert np.isfinite(out).all()
@@ -101,7 +101,7 @@ def test_run_log_applies_elementwise_with_offset() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         offset=0.0,
     )
     np.testing.assert_allclose(out, [[0.0, 1.0], [2.0, 3.0]])
@@ -114,7 +114,7 @@ def test_run_log_diff_drops_one_row_and_returns_log_returns() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
     )
     np.testing.assert_allclose(out, np.full((3, 1), np.log(2.0)))
 
@@ -126,7 +126,7 @@ def test_run_diff_supports_higher_order() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         order=2,
     )
     # 1st diff: [2, 6, 18]; 2nd diff: [4, 12].
@@ -140,7 +140,7 @@ def test_run_diff_rejects_non_positive_order() -> None:
             reference=_FakeSolvedModel(),
             dgp=None,
             rep_idx=0,
-            source="observables",
+            sample=np.zeros((3, 1), dtype=np.float64),
             order=0,
         )
 
@@ -152,7 +152,7 @@ def test_run_rolling_mean_window_3() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         window=3,
     )
     np.testing.assert_allclose(out, [[1.0], [2.0], [3.0], [4.0]])
@@ -165,7 +165,7 @@ def test_run_rolling_std_and_var_window_3() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         window=3,
     )
     var_out = run_rolling_var(
@@ -173,7 +173,7 @@ def test_run_rolling_std_and_var_window_3() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         window=3,
     )
     np.testing.assert_allclose(std_out**2, var_out)
@@ -187,7 +187,7 @@ def test_rolling_window_rejects_window_larger_than_input() -> None:
             reference=_FakeSolvedModel(),
             dgp=None,
             rep_idx=0,
-            source="observables",
+            sample=obs,
             window=10,
         )
 

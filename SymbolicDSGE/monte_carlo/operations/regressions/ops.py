@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Sequence, Literal
 import numpy as np
 
-from ..types import InpSources
-from ..utils import _resolve_context_array
+from ..types import NDF
 
 from ....core.solved_model import SolvedModel
 from ...mc_constructs import MCContext
@@ -31,45 +30,13 @@ def run_regression(
         "elastic_net",
         "elastic_net_gs",
     ] = "ols",
-    y_source: InpSources,
-    X_source: InpSources,
-    filter_key: str = "filter",
-    y_payload_key: str | None = None,
-    x_payload_key: str | None = None,
-    y_column: Sequence[int] | int | None = None,
-    X_columns: Sequence[int] | slice | None = None,
+    y: NDF,
+    X: NDF,
     intercept: bool = True,
-    burn_in: int = 0,
-    drop_initial: bool = False,
     variables: Sequence[str] | None = None,
     **kind_kwargs: Any,
 ) -> RegressionResult:
-    del reference, dgp, rep_idx
-
-    y_col_idx: Sequence[int] | None
-    if isinstance(y_column, int):
-        y_col_idx = [y_column]
-    else:
-        y_col_idx = y_column
-
-    y = _resolve_context_array(
-        context,
-        source=y_source,
-        filter_key=filter_key,
-        payload_key=y_payload_key,
-        columns=y_col_idx,
-        burn_in=burn_in,
-        drop_initial=drop_initial,
-    )
-    X = _resolve_context_array(
-        context,
-        source=X_source,
-        filter_key=filter_key,
-        payload_key=x_payload_key,
-        columns=X_columns,
-        burn_in=burn_in,
-        drop_initial=drop_initial,
-    )
+    del context, reference, dgp, rep_idx
 
     if y.shape[1] != 1:
         raise ValueError(

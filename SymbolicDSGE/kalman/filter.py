@@ -125,10 +125,6 @@ class FilterRawResult(NamedTuple):
 class UnscentedFilterRawResult(NamedTuple):
     x_pred: NDF
     x_filt: NDF
-    x1_pred: NDF
-    x2_pred: NDF
-    x1_filt: NDF
-    x2_filt: NDF
     P_pred: NDF
     P_filt: NDF
     y_pred: NDF
@@ -136,7 +132,12 @@ class UnscentedFilterRawResult(NamedTuple):
     innov: NDF
     std_innov: NDF
     S: NDF
+    eps_hat: NDF | None
     loglik: float64
+    x1_pred: NDF
+    x2_pred: NDF
+    x1_filt: NDF
+    x2_filt: NDF
 
 
 def _filter_result_from_raw(raw: FilterRawResult) -> FilterResult:
@@ -172,6 +173,7 @@ def _unscented_filter_result_from_raw(
         innov=raw.innov,
         std_innov=raw.std_innov,
         S=raw.S,
+        eps_hat=raw.eps_hat,
         loglik=raw.loglik,
     )
 
@@ -1363,10 +1365,6 @@ class KalmanFilter:
         return UnscentedFilterRawResult(
             x_pred=x_pred,
             x_filt=x_filt,
-            x1_pred=x1_pred,
-            x2_pred=x2_pred,
-            x1_filt=x1_filt,
-            x2_filt=x2_filt,
             P_pred=P_pred,
             P_filt=P_filt,
             y_pred=y_pred,
@@ -1374,7 +1372,12 @@ class KalmanFilter:
             innov=v,
             std_innov=u,
             S=S,
+            eps_hat=None,
             loglik=loglik,
+            x1_pred=x1_pred,
+            x2_pred=x2_pred,
+            x1_filt=x1_filt,
+            x2_filt=x2_filt,
         )
 
     @staticmethod

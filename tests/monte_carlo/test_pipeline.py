@@ -28,6 +28,11 @@ from SymbolicDSGE.monte_carlo import (
     OpType,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import (
+    DATA_SOURCE_KEY,
+    DYNAMIC_FIELD_INDEX,
+    FILTER_RAW_FIELD_INDEX,
+    MC_DATA_FIELD_INDEX,
+    SourceArgs,
     report_mc_performance,
     report_mc_step_performance,
 )
@@ -51,7 +56,7 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
 from SymbolicDSGE.monte_carlo.operations.utils import (
     _clone_or_pass_shocks,
-    _resolve_context_array,
+    _resolve_source_array,
     _resolve_seed_increment,
     _select_raw_rep_array,
 )
@@ -1468,84 +1473,64 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         payloads={"vector": np.arange(5.0, dtype=np.float64)},
     )
 
-    selected = _resolve_context_array(
+    selected = _resolve_source_array(
         context,
-        source="states",
-        filter_key="filter",
-        payload_key=None,
-        columns=[1],
-        burn_in=1,
-        drop_initial=True,
+        SourceArgs(
+            arg="sample",
+            source=DATA_SOURCE_KEY,
+            field_idx=MC_DATA_FIELD_INDEX["states"],
+            columns=[1],
+            burn_in=1,
+            drop_initial=True,
+        ),
     )
     np.testing.assert_allclose(selected, states[2:, [1]])
 
-    payload = _resolve_context_array(
+    payload = _resolve_source_array(
         context,
-        source="payload",
-        filter_key="filter",
-        payload_key="vector",
-        columns=None,
-        burn_in=2,
-        drop_initial=False,
+        SourceArgs(
+            arg="sample",
+            source="vector",
+            field_idx=DYNAMIC_FIELD_INDEX["payload"],
+            burn_in=2,
+        ),
     )
     np.testing.assert_allclose(payload, np.arange(2.0, 5.0).reshape(3, 1))
 
     filt = reference._kalman_raw(observables)
     context.payloads["filter"] = filt
     np.testing.assert_allclose(
-        _resolve_context_array(
+        _resolve_source_array(
             context,
-            source="std_innov",
-            filter_key="filter",
-            payload_key=None,
-            columns=slice(0, 1),
-            burn_in=0,
-            drop_initial=False,
+            SourceArgs(
+                arg="sample",
+                source="filter",
+                field_idx=FILTER_RAW_FIELD_INDEX["std_innov"],
+                columns=slice(0, 1),
+            ),
         ),
         filt.std_innov[:, :1],
     )
 
-    with pytest.raises(ValueError, match="burn_in"):
-        _resolve_context_array(
-            context,
-            source="states",
-            filter_key="filter",
-            payload_key=None,
-            columns=None,
-            burn_in=-1,
-            drop_initial=False,
-        )
-    with pytest.raises(ValueError, match="payload_key"):
-        _resolve_context_array(
-            context,
-            source="payload",
-            filter_key="filter",
-            payload_key=None,
-            columns=None,
-            burn_in=0,
-            drop_initial=False,
-        )
     context.payloads["not_filter"] = np.zeros(1, dtype=np.float64)
     with pytest.raises(TypeError, match="raw filter result"):
-        _resolve_context_array(
+        _resolve_source_array(
             context,
-            source="std_innov",
-            filter_key="not_filter",
-            payload_key=None,
-            columns=None,
-            burn_in=0,
-            drop_initial=False,
+            SourceArgs(
+                arg="sample",
+                source="not_filter",
+                field_idx=FILTER_RAW_FIELD_INDEX["std_innov"],
+            ),
         )
     context.payloads["cube"] = np.zeros((1, 2, 3), dtype=np.float64)
     with pytest.raises(ValueError, match="1D or 2D"):
-        _resolve_context_array(
+        _resolve_source_array(
             context,
-            source="payload",
-            filter_key="filter",
-            payload_key="cube",
-            columns=None,
-            burn_in=0,
-            drop_initial=False,
+            SourceArgs(
+                arg="sample",
+                source="cube",
+                field_idx=DYNAMIC_FIELD_INDEX["payload"],
+            ),
         )
 
     raw = np.arange(24.0, dtype=np.float64).reshape(2, 4, 3)

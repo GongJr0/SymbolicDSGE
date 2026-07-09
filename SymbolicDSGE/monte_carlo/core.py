@@ -29,6 +29,7 @@ from .mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
+from .operations.utils import _resolve_source_array
 
 
 @dataclass(frozen=True)
@@ -236,7 +237,9 @@ class MCPipeline:
         return result
 
     def _run_step(self, context: MCContext, step: MCStep) -> None:
-        kwargs = dict(step.kwargs)
+        kwargs = dict(step.runner_kwargs)
+        for selector in step.source_args:
+            kwargs[selector.arg] = _resolve_source_array(context, selector)
         if step.op_type is OpType.DATAGEN:
             out = step.func(
                 reference=context.reference,
