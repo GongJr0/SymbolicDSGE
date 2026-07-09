@@ -13,6 +13,15 @@ from SymbolicDSGE.monte_carlo import (
     validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.catalog import _shocks_from_registry
+from SymbolicDSGE.monte_carlo.mc_constructs import (
+    DYNAMIC_SOURCE_FIELDS,
+    FILTER_RAW_SOURCE_FIELDS,
+    MC_DATA_SOURCE_FIELDS,
+    SOURCE_FIELD_INDEX,
+    SOURCE_FIELDS,
+    SOURCE_INDEX_FIELD,
+    UNSCENTED_FILTER_RAW_SOURCE_FIELDS,
+)
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
 from SymbolicDSGE.monte_carlo.spec import (
     STEP_KINDS,
@@ -106,9 +115,31 @@ def test_catalog_payload_shape_and_known_fields() -> None:
     assert wald_fields["source"]["options"][0] == "states"
     assert "x1_pred" in wald_fields["source"]["options"]
     assert "x2_filt" in wald_fields["source"]["options"]
+    assert "eps_hat" in wald_fields["source"]["options"]
 
     filter_fields = {f["key"]: f for f in by_type["filter"]["fields"]}
     assert "unscented" in filter_fields["filter_mode"]["options"]
+
+
+def test_source_field_indices_cover_known_sources_once() -> None:
+    expected = (
+        MC_DATA_SOURCE_FIELDS
+        + DYNAMIC_SOURCE_FIELDS
+        + FILTER_RAW_SOURCE_FIELDS
+        + tuple(
+            field
+            for field in UNSCENTED_FILTER_RAW_SOURCE_FIELDS
+            if field not in FILTER_RAW_SOURCE_FIELDS
+        )
+    )
+
+    assert SOURCE_FIELDS == expected
+    assert SOURCE_INDEX_FIELD == SOURCE_FIELDS
+    assert len(SOURCE_FIELD_INDEX) == len(SOURCE_FIELDS)
+    assert len(set(SOURCE_FIELD_INDEX.values())) == len(SOURCE_FIELD_INDEX)
+    assert set(SOURCE_FIELD_INDEX) == set(SOURCE_FIELDS)
+    for index, field in enumerate(SOURCE_INDEX_FIELD):
+        assert SOURCE_FIELD_INDEX[field] == index
 
 
 def test_catalog_entries_carry_selector_category() -> None:

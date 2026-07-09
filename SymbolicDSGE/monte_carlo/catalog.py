@@ -39,28 +39,15 @@ from .operations.transforms import (
     rolling_var_step,
     standardize_step,
 )
-from .mc_constructs import MCStep
+from .mc_constructs import ARRAY_SOURCE_FIELDS, FILTER_SOURCE_FIELDS, MCStep
 
-#: Series a diagnostic/regression step may read from an upstream context.
-FILTER_OUTPUT_SOURCES = (
-    "x_pred",
-    "x_filt",
-    "x1_pred",
-    "x2_pred",
-    "x1_filt",
-    "x2_filt",
-    "y_pred",
-    "y_filt",
-    "innov",
-    "std_innov",
+#: Array-valued sources exposed by the built-in diagnostic and regression ops.
+INPUT_SOURCES = list(ARRAY_SOURCE_FIELDS)
+FILTER_OUTPUT_SOURCES = tuple(
+    source for source in INPUT_SOURCES if source not in {"states", "observables"}
 )
-INPUT_SOURCES = [
-    "states",
-    "observables",
-    *FILTER_OUTPUT_SOURCES,
-]
 #: Sources produced only by a filter step (require an upstream filter link).
-FILTER_SOURCES = set(FILTER_OUTPUT_SOURCES)
+FILTER_SOURCES = set(FILTER_SOURCE_FIELDS)
 
 StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
 CompileParams = Callable[[dict[str, Any]], dict[str, Any]]

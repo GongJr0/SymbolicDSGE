@@ -31,7 +31,6 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
-from SymbolicDSGE.monte_carlo.reference_constructs import MCReferenceConstruct
 from SymbolicDSGE.monte_carlo.operations.core import (
     raw_data_step,
     reference_filter_step,
@@ -1572,37 +1571,3 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
             name="vector",
             allow_vector=False,
         )
-
-
-def test_reference_construct_wraps_model_and_external_generators() -> None:
-    model = _FakeSolvedModel(offset=1.0)
-    construct = MCReferenceConstruct(model, T=3, N=5)
-
-    assert construct.model is model
-    assert construct.T == 3
-    assert construct.N == 5
-    data = construct._data_from_sim(observables=True)
-    assert data.state_mat is not None
-    assert data.obs_mat is not None
-    assert data.n_exog == 1
-    assert data.state_mat.shape == (4, 2)
-    assert data.obs_mat.shape == (3, 1)
-
-    def generator(T: int) -> tuple[np.ndarray, np.ndarray]:
-        return (
-            np.ones((T + 1, 2), dtype=np.float64),
-            np.ones((T, 1), dtype=np.float64) * 2.0,
-        )
-
-    callable_construct = MCReferenceConstruct.DataGeneratingCallable(
-        generator,
-        T=4,
-        N=7,
-    )
-    out = callable_construct()
-    assert callable_construct.func is generator
-    assert callable_construct.T == 4
-    assert callable_construct.N == 7
-    np.testing.assert_allclose(out.state_mat, np.ones((5, 2), dtype=np.float64))
-    np.testing.assert_allclose(out.obs_mat, np.ones((4, 1), dtype=np.float64) * 2.0)
-    assert out.n_exog == -1

@@ -17,7 +17,6 @@ from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
 from .mc_constructs import (
-    DataGenReturn,
     MCContext,
     MCData,
     MCFailure,
@@ -245,12 +244,7 @@ class MCPipeline:
                 rep_idx=context.rep_idx,
                 **kwargs,
             )
-            if isinstance(out, DataGenReturn):
-                out = MCData(
-                    states=out.state_mat,
-                    observables=out.obs_mat,
-                    n_exog=out.n_exog,
-                )
+
             if not isinstance(out, MCData):
                 raise TypeError("DATAGEN steps must return MCData.")
             context.data = out

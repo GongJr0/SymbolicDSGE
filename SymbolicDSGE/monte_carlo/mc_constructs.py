@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Callable, Literal, Mapping, Protocol, Union
+from typing import Any, Callable, Literal, Mapping, Protocol, Union, NamedTuple
 
 import numpy as np
 from numpy import float64
@@ -24,6 +24,53 @@ ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
 SeedIncrement = Union[int, Literal["auto"]]
 
+MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables", "raw")
+DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
+
+FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = FilterRawResult._fields
+UNSCENTED_FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = UnscentedFilterRawResult._fields
+UNSCENTED_ONLY_FILTER_SOURCE_FIELDS: tuple[str, ...] = tuple(
+    field
+    for field in UNSCENTED_FILTER_RAW_SOURCE_FIELDS
+    if field not in FILTER_RAW_SOURCE_FIELDS
+)
+FILTER_SOURCE_FIELDS: tuple[str, ...] = (
+    FILTER_RAW_SOURCE_FIELDS + UNSCENTED_ONLY_FILTER_SOURCE_FIELDS
+)
+
+SOURCE_FIELDS: tuple[str, ...] = (
+    MC_DATA_SOURCE_FIELDS
+    + DYNAMIC_SOURCE_FIELDS
+    + FILTER_RAW_SOURCE_FIELDS
+    + UNSCENTED_ONLY_FILTER_SOURCE_FIELDS
+)
+SOURCE_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(SOURCE_FIELDS)
+}
+SOURCE_INDEX_FIELD: tuple[str, ...] = SOURCE_FIELDS
+
+if len(SOURCE_FIELD_INDEX) != len(SOURCE_FIELDS) or len(
+    set(SOURCE_FIELD_INDEX.values())
+) != len(SOURCE_FIELDS):
+    raise RuntimeError("MC source field indices must be unique.")
+
+# Array-valued sources currently exposed to MC operations and the catalogue.
+ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
+    "states",
+    "observables",
+    "x_pred",
+    "x_filt",
+    "x1_pred",
+    "x2_pred",
+    "x1_filt",
+    "x2_filt",
+    "y_pred",
+    "y_filt",
+    "innov",
+    "std_innov",
+    "eps_hat",
+)
+
 
 class OpType(StrEnum):
     DATAGEN = "datagen"
@@ -34,8 +81,7 @@ class OpType(StrEnum):
     POSTPROC = "postproc"
 
 
-@dataclass(frozen=True)
-class MCData:
+class MCData(NamedTuple):
     """One Monte Carlo replication's data payload.
 
     Produced by a DATAGEN step and exposed to per-replication ops as
@@ -53,15 +99,6 @@ class MCData:
     n_exog: int = -1
     raw: Mapping[str, NDF] = field(default_factory=dict)
     observable_names: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class DataGenReturn:
-    """Legacy simulation-data container kept for compatibility."""
-
-    state_mat: NDF | None
-    obs_mat: NDF | None
-    n_exog: int
 
 
 @dataclass
