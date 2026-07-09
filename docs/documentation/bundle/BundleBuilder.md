@@ -142,7 +142,7 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 | as_parquet | When `False` the trace member is written as CSV. |
 
 ???+ note "MC resources"
-    `raw_data` datagen arrays are written as `mc_raw_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members. These resources are restored on load as `LoadedMC.resources`.
+    `raw_model_data` datagen arrays are written as `mc_raw_model_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members. These resources are restored on load as `LoadedMC.resources`.
 
 &nbsp;
 

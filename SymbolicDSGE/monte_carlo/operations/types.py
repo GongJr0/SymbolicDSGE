@@ -20,5 +20,6 @@ InpSources = Literal[
     "y_filt",
     "innov",
     "std_innov",
+    "eps_hat",
     "payload",
 ]

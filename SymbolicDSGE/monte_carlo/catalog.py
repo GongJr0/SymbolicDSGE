@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, cast
+from typing import Any, Callable, Literal, NamedTuple, cast
 
 import numpy as np
 
@@ -39,28 +39,15 @@ from .operations.transforms import (
     rolling_var_step,
     standardize_step,
 )
-from .mc_constructs import MCStep
+from .mc_constructs import ARRAY_SOURCE_FIELDS, FILTER_SOURCE_FIELDS, MCStep
 
-#: Series a diagnostic/regression step may read from an upstream context.
-FILTER_OUTPUT_SOURCES = (
-    "x_pred",
-    "x_filt",
-    "x1_pred",
-    "x2_pred",
-    "x1_filt",
-    "x2_filt",
-    "y_pred",
-    "y_filt",
-    "innov",
-    "std_innov",
+#: Array-valued sources exposed by the built-in diagnostic and regression ops.
+INPUT_SOURCES = list(ARRAY_SOURCE_FIELDS)
+FILTER_OUTPUT_SOURCES = tuple(
+    source for source in INPUT_SOURCES if source not in {"states", "observables"}
 )
-INPUT_SOURCES = [
-    "states",
-    "observables",
-    *FILTER_OUTPUT_SOURCES,
-]
 #: Sources produced only by a filter step (require an upstream filter link).
-FILTER_SOURCES = set(FILTER_OUTPUT_SOURCES)
+FILTER_SOURCES = set(FILTER_SOURCE_FIELDS)
 
 StepRole = Literal["datagen", "filter", "transform", "terminal", "postproc"]
 CompileParams = Callable[[dict[str, Any]], dict[str, Any]]
@@ -92,6 +79,18 @@ class FieldSpec:
         }
 
 
+class SourceBinding(NamedTuple):
+    arg: str
+    source_key: str
+    field_key: str
+    columns_key: str
+    label: str
+    source_default: str = "datagen"
+    field_default: str = "observables"
+    columns_label: str = "Columns"
+    columns_default: tuple[int, ...] = ()
+
+
 @dataclass(frozen=True)
 class StepDefinition:
     """Everything the library knows about one built-in MC step kind."""
@@ -103,7 +102,16 @@ class StepDefinition:
     op_role: StepRole
     factory: Callable[..., MCStep]
     fields: tuple[FieldSpec, ...] = ()
+    source_bindings: tuple[SourceBinding, ...] = ()
     compile_params: CompileParams | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_bindings:
+            object.__setattr__(
+                self,
+                "fields",
+                (*_source_binding_fields(self.source_bindings), *self.fields),
+            )
 
     @property
     def is_terminal(self) -> bool:
@@ -152,9 +160,7 @@ class StepDefinition:
         return self.factory(name=name, **params)
 
 
-# --------------------------------------------------------------------------- #
 # Parameter-compile helpers (shared by the per-step hooks below).
-# --------------------------------------------------------------------------- #
 
 
 def _integer_or_keyword(
@@ -175,7 +181,12 @@ def _integer_or_keyword(
 
 
 def _shock_for(
-    vars_: list[str], dist: str, loc: float, df: float, seed: int | None
+    vars_: list[str],
+    *,
+    dist: str = "norm",
+    loc: float = 0.0,
+    df: float = 5.0,
+    seed: int | None = None,
 ) -> Shock:
     """Build one :class:`Shock` for a shock-registry entry.
 
@@ -219,7 +230,7 @@ def _shocks_from_registry(
     """
     shocks: dict[str, Shock] = {}
     for entry in registry:
-        vars_ = [str(v) for v in entry.get("vars", ())]
+        vars_ = [str(v) for v in entry["vars"]]
         if not vars_:
             raise ValueError(
                 "Each shock registry entry must select at least one variable."
@@ -227,14 +238,17 @@ def _shocks_from_registry(
         key = ",".join(vars_)
         if key in shocks:
             raise ValueError(f"Duplicate shock entry for {key!r} in the registry.")
-        seed_value = entry.get("seed")
-        shocks[key] = _shock_for(
-            vars_,
-            str(entry.get("dist", "norm")),
-            float(entry.get("loc", 0.0)),
-            float(entry.get("df", 5.0)),
-            None if seed_value is None else int(seed_value),
-        )
+        seed = None
+        if "seed" in entry and entry["seed"] is not None:
+            seed = int(entry["seed"])
+        kwargs: dict[str, Any] = {}
+        if "dist" in entry:
+            kwargs["dist"] = str(entry["dist"])
+        if "loc" in entry:
+            kwargs["loc"] = float(entry["loc"])
+        if "df" in entry:
+            kwargs["df"] = float(entry["df"])
+        shocks[key] = _shock_for(vars_, seed=seed, **kwargs)
     return shocks or None
 
 
@@ -268,10 +282,16 @@ _REGRESSION_CONDITIONAL = {
 
 
 def _regression_params(params: dict[str, Any]) -> dict[str, Any]:
-    kind = str(params.get("kind", "ols"))
-    allowed = _REGRESSION_ALLOWED_BY_KIND.get(kind)
-    if allowed is None:
+    if "kind" not in params:
+        return {
+            key: value
+            for key, value in params.items()
+            if key not in _REGRESSION_CONDITIONAL
+        }
+    kind = str(params["kind"])
+    if kind not in _REGRESSION_ALLOWED_BY_KIND:
         raise ValueError(f"Unsupported regression kind: {kind}")
+    allowed = _REGRESSION_ALLOWED_BY_KIND[kind]
     return {
         key: value
         for key, value in params.items()
@@ -306,13 +326,16 @@ def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
     # mapping from library authoring) or come from the explicit registry the
     # user authored.
     params = dict(params)
-    params["seed_increment"] = _integer_or_keyword(
-        params.get("seed_increment", "auto"),
-        keywords={"auto"},
-        field_name="seed_increment",
-    )
-    registry = params.pop("shock_registry", None)
-    if params.get("shocks") is not None:
+    if "seed_increment" in params:
+        params["seed_increment"] = _integer_or_keyword(
+            params["seed_increment"],
+            keywords={"auto"},
+            field_name="seed_increment",
+        )
+    registry = None
+    if "shock_registry" in params:
+        registry = params.pop("shock_registry")
+    if "shocks" in params and params["shocks"] is not None:
         params["shocks"] = _coerce_shock_mapping(params["shocks"])
     elif registry:
         params["shocks"] = _shocks_from_registry(registry)
@@ -322,25 +345,22 @@ def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compile_filter(params: dict[str, Any]) -> dict[str, Any]:
-    params = dict(params)
-    params.pop("filter_key", None)
-    return params
+    return dict(params)
 
 
 def _compile_wald(params: dict[str, Any]) -> dict[str, Any]:
     params = dict(params)
-    kind = str(params.get("kind", "mean"))
-    target_key = "target_vector" if kind == "mean" else "target_matrix"
-    params["target"] = np.asarray(params.pop(target_key, []), dtype=np.float64)
-    params["bandwidth"] = _integer_or_keyword(
-        params.get("bandwidth", "auto"),
-        keywords={"andrews", "wooldridge", "auto"},
-        field_name="bandwidth",
-    )
-    params.pop(
-        "target_matrix" if target_key == "target_vector" else "target_vector",
-        None,
-    )
+    if "target_vector" in params:
+        params["target"] = np.asarray(params.pop("target_vector"), dtype=np.float64)
+        params.pop("target_matrix", None)
+    elif "target_matrix" in params:
+        params["target"] = np.asarray(params.pop("target_matrix"), dtype=np.float64)
+    if "bandwidth" in params:
+        params["bandwidth"] = _integer_or_keyword(
+            params["bandwidth"],
+            keywords={"andrews", "wooldridge", "auto"},
+            field_name="bandwidth",
+        )
     return params
 
 
@@ -348,13 +368,109 @@ def _compile_regression(params: dict[str, Any]) -> dict[str, Any]:
     return _regression_params(params)
 
 
-# --------------------------------------------------------------------------- #
 # The catalogue.
-# --------------------------------------------------------------------------- #
 
 
-def _source_field(key: str, label: str, default: str = "std_innov") -> FieldSpec:
+def _source_step(key: str, label: str, default: str = "datagen") -> FieldSpec:
+    return FieldSpec(key, label, "text", default, required=True)
+
+
+def _source_field(key: str, label: str, default: str = "observables") -> FieldSpec:
     return FieldSpec(key, label, "select", default, options=tuple(INPUT_SOURCES))
+
+
+def _source_binding_fields(
+    bindings: tuple[SourceBinding, ...],
+) -> tuple[FieldSpec, ...]:
+    fields: list[FieldSpec] = []
+    for binding in bindings:
+        fields.extend(
+            (
+                _source_step(
+                    binding.source_key,
+                    f"{binding.label} step",
+                    binding.source_default,
+                ),
+                _source_field(
+                    binding.field_key,
+                    f"{binding.label} field",
+                    binding.field_default,
+                ),
+                FieldSpec(
+                    binding.columns_key,
+                    binding.columns_label,
+                    "number_list",
+                    list(binding.columns_default),
+                ),
+            )
+        )
+    fields.extend(
+        (
+            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
+            FieldSpec("drop_initial", "Drop initial", "boolean", False),
+        )
+    )
+    return tuple(fields)
+
+
+WALD_SOURCE = SourceBinding(
+    "sample",
+    "source",
+    "field",
+    "columns",
+    "Source",
+    source_default="filter",
+    field_default="std_innov",
+)
+SAMPLE_SOURCE = SourceBinding("sample", "source", "field", "columns", "Source")
+SAMPLE_COLUMN_SOURCE = SourceBinding(
+    "sample", "source", "field", "column", "Source", columns_label="Column"
+)
+RESIDUAL_SOURCE = SourceBinding(
+    "residuals",
+    "residuals_source",
+    "residuals_field",
+    "residual_col",
+    "Residual",
+    columns_label="Residual column",
+    columns_default=(0,),
+)
+X_REGRESSOR_SOURCE = SourceBinding(
+    "X",
+    "X_source",
+    "X_field",
+    "X_columns",
+    "Regressor",
+    columns_label="Regressor columns",
+    columns_default=(0,),
+)
+Y_SOURCE = SourceBinding(
+    "y",
+    "y_source",
+    "y_field",
+    "y_column",
+    "Response",
+    columns_label="Response column",
+    columns_default=(0,),
+)
+X_REGRESSION_SOURCE = SourceBinding(
+    "X",
+    "X_source",
+    "X_field",
+    "X_columns",
+    "Regressor",
+    columns_label="Regressor columns",
+    columns_default=(1,),
+)
+X_DESIGN_SOURCE = SourceBinding(
+    "X",
+    "X_source",
+    "X_field",
+    "X_columns",
+    "Design",
+    columns_label="Design columns",
+    columns_default=(1,),
+)
 
 
 _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
@@ -406,8 +522,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         op_role="terminal",
         factory=wald_test_step,
         compile_params=_compile_wald,
+        source_bindings=(WALD_SOURCE,),
         fields=(
-            _source_field("source", "Source"),
             FieldSpec(
                 "kind",
                 "Moment",
@@ -431,9 +547,6 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
                 required=True,
                 when=("covariance", "second_moment"),
             ),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec(
                 "kernel",
                 "Kernel",
@@ -452,11 +565,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Test one selected series for serial correlation.",
         op_role="terminal",
         factory=ljung_box_test_step,
+        source_bindings=(SAMPLE_COLUMN_SOURCE,),
         fields=(
-            _source_field("source", "Source"),
-            FieldSpec("column", "Column", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("lags", "Lags", "number", 10, minimum=1),
             FieldSpec("alpha", "Alpha", "number", 0.05),
         ),
@@ -468,13 +578,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Test one selected series for normality.",
         op_role="terminal",
         factory=jarque_bera_test_step,
-        fields=(
-            _source_field("source", "Source"),
-            FieldSpec("column", "Column", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("alpha", "Alpha", "number", 0.05),
-        ),
+        source_bindings=(SAMPLE_COLUMN_SOURCE,),
+        fields=(FieldSpec("alpha", "Alpha", "number", 0.05),),
     ),
     StepDefinition(
         step_type="breusch_pagan",
@@ -483,13 +588,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Test residual variance against selected regressors.",
         op_role="terminal",
         factory=breusch_pagan_test_step,
+        source_bindings=(RESIDUAL_SOURCE, X_REGRESSOR_SOURCE),
         fields=(
-            _source_field("residual_source", "Residual source"),
-            _source_field("X_source", "Regressor source", "observables"),
-            FieldSpec("residual_col", "Residual column", "number_list", [0]),
-            FieldSpec("X_columns", "Regressor columns", "number_list", [0]),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("robust", "Robust (Koenker)", "boolean", False),
             FieldSpec("alpha", "Alpha", "number", 0.05),
         ),
@@ -501,13 +601,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Test residuals for serial correlation up to a given lag order.",
         op_role="terminal",
         factory=breusch_godfrey_test_step,
+        source_bindings=(RESIDUAL_SOURCE, X_REGRESSOR_SOURCE),
         fields=(
-            _source_field("residual_source", "Residual source"),
-            _source_field("X_source", "Regressor source", "observables"),
-            FieldSpec("residual_col", "Residual column", "number_list", [0]),
-            FieldSpec("X_columns", "Regressor columns", "number_list", [0]),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("lags", "Lags", "number", 1, minimum=1),
             FieldSpec("alpha", "Alpha", "number", 0.05),
         ),
@@ -519,15 +614,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Test regression coefficients for stability via recursive residuals.",
         op_role="terminal",
         factory=cusum_test_step,
-        fields=(
-            _source_field("y_source", "Response source", "observables"),
-            _source_field("x_source", "Regressor source", "observables"),
-            FieldSpec("y_column", "Response column", "number_list", [0]),
-            FieldSpec("X_columns", "Regressor columns", "number_list", [1]),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("alpha", "Alpha", "number", 0.05),
-        ),
+        source_bindings=(Y_SOURCE, X_REGRESSION_SOURCE),
+        fields=(FieldSpec("alpha", "Alpha", "number", 0.05),),
     ),
     StepDefinition(
         step_type="cusumsq",
@@ -536,15 +624,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Test regression variance stability via squared recursive residuals.",
         op_role="terminal",
         factory=cusumsq_test_step,
-        fields=(
-            _source_field("y_source", "Response source", "observables"),
-            _source_field("x_source", "Regressor source", "observables"),
-            FieldSpec("y_column", "Response column", "number_list", [0]),
-            FieldSpec("X_columns", "Regressor columns", "number_list", [1]),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("alpha", "Alpha", "number", 0.05),
-        ),
+        source_bindings=(Y_SOURCE, X_REGRESSION_SOURCE),
+        fields=(FieldSpec("alpha", "Alpha", "number", 0.05),),
     ),
     StepDefinition(
         step_type="chow",
@@ -556,14 +637,9 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         ),
         op_role="terminal",
         factory=chow_test_step,
+        source_bindings=(Y_SOURCE, X_REGRESSION_SOURCE),
         fields=(
-            _source_field("y_source", "Response source", "observables"),
-            _source_field("x_source", "Regressor source", "observables"),
-            FieldSpec("y_column", "Response column", "number_list", [0]),
-            FieldSpec("X_columns", "Regressor columns", "number_list", [1]),
             FieldSpec("t_break", "Break point", "number", 10, required=True, minimum=1),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("alpha", "Alpha", "number", 0.05),
         ),
     ),
@@ -575,6 +651,7 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         op_role="terminal",
         factory=regression_step,
         compile_params=_compile_regression,
+        source_bindings=(Y_SOURCE, X_DESIGN_SOURCE),
         fields=(
             FieldSpec(
                 "kind",
@@ -591,13 +668,7 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
                     "elastic_net_gs",
                 ),
             ),
-            _source_field("y_source", "Response source", "observables"),
-            _source_field("X_source", "Design source", "observables"),
-            FieldSpec("y_column", "Response column", "number_list", [0]),
-            FieldSpec("X_columns", "Design columns", "number_list", [1]),
             FieldSpec("intercept", "Intercept", "boolean", True),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("variables", "Variable names", "text_list", []),
             FieldSpec(
                 "alpha",
@@ -658,7 +729,7 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
             ),
         ),
     ),
-    # ----- transforms -----
+    # Transforms.
     StepDefinition(
         step_type="standardize",
         title="Standardize",
@@ -669,13 +740,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         ),
         op_role="transform",
         factory=standardize_step,
-        fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
-        ),
+        source_bindings=(SAMPLE_SOURCE,),
+        fields=(FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),),
     ),
     StepDefinition(
         step_type="log",
@@ -684,13 +750,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Elementwise log(x + offset). Offset handles inputs that touch zero.",
         op_role="transform",
         factory=log_step,
-        fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("offset", "Offset", "number", 0.0),
-        ),
+        source_bindings=(SAMPLE_SOURCE,),
+        fields=(FieldSpec("offset", "Offset", "number", 0.0),),
     ),
     StepDefinition(
         step_type="log_diff",
@@ -702,13 +763,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         ),
         op_role="transform",
         factory=log_diff_step,
-        fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("offset", "Offset", "number", 0.0),
-        ),
+        source_bindings=(SAMPLE_SOURCE,),
+        fields=(FieldSpec("offset", "Offset", "number", 0.0),),
     ),
     StepDefinition(
         step_type="diff",
@@ -717,13 +773,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Repeated np.diff along the time axis (order-th difference).",
         op_role="transform",
         factory=diff_step,
-        fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("order", "Order", "number", 1, minimum=1),
-        ),
+        source_bindings=(SAMPLE_SOURCE,),
+        fields=(FieldSpec("order", "Order", "number", 1, minimum=1),),
     ),
     StepDefinition(
         step_type="rolling_mean",
@@ -732,13 +783,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Trailing rolling mean over the time axis.",
         op_role="transform",
         factory=rolling_mean_step,
-        fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
-            FieldSpec("window", "Window", "number", 10, required=True, minimum=1),
-        ),
+        source_bindings=(SAMPLE_SOURCE,),
+        fields=(FieldSpec("window", "Window", "number", 10, required=True, minimum=1),),
     ),
     StepDefinition(
         step_type="rolling_std",
@@ -747,11 +793,8 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Trailing rolling standard deviation over the time axis.",
         op_role="transform",
         factory=rolling_std_step,
+        source_bindings=(SAMPLE_SOURCE,),
         fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("window", "Window", "number", 10, required=True, minimum=1),
             FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
         ),
@@ -763,16 +806,13 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
         description="Trailing rolling variance over the time axis.",
         op_role="transform",
         factory=rolling_var_step,
+        source_bindings=(SAMPLE_SOURCE,),
         fields=(
-            _source_field("source", "Source"),
-            FieldSpec("columns", "Columns", "number_list", []),
-            FieldSpec("burn_in", "Burn-in", "number", 0, minimum=0),
-            FieldSpec("drop_initial", "Drop initial", "boolean", False),
             FieldSpec("window", "Window", "number", 10, required=True, minimum=1),
             FieldSpec("ddof", "Degrees of freedom", "number", 0, minimum=0),
         ),
     ),
-    # ----- post-processing -----
+    # Post-processing.
     StepDefinition(
         step_type="kde",
         title="KDE",
@@ -801,9 +841,9 @@ STEP_CATALOG: dict[str, StepDefinition] = {
 }
 
 #: Step kinds that act as the pipeline's single root datagen. ``simulation`` is
-#: catalogue-driven (GUI-authorable); ``raw_data`` ships pre-computed arrays as a
-#: bundle member and has no GUI ``StepDefinition``.
-DATAGEN_STEP_TYPES: frozenset[str] = frozenset({"simulation", "raw_data"})
+#: catalogue-driven (GUI-authorable); ``raw_model_data`` ships pre-computed
+#: arrays as a bundle member and has no GUI ``StepDefinition``.
+DATAGEN_STEP_TYPES: frozenset[str] = frozenset({"simulation", "raw_model_data"})
 
 #: Step kinds that terminate a branch (tests + regression).
 TERMINAL_STEP_TYPES: frozenset[str] = frozenset(

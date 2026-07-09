@@ -7,8 +7,8 @@ tags:
 
 Custom Monte Carlo operations can run directly from any callable. Bundle-safe custom operations must be wrapped so the function source and accepted globals can travel with the `.sdsge` archive. Two namespaces are available:
 
-- **`NumpyCustomFunc`** / **`numpy_operation`** — the per-replication (default) contract. Its body may reference `numpy` (as `np`), `math`, `statistics`, `operator`, and selected builtins. Use for [custom transforms](operations/transforms/custom.md) and any op that runs inside the replication loop.
-- **`PandasCustomFunc`** / **`pandas_operation`** — the looser post-loop (`OpType.POSTPROC`) contract, whose namespace additionally exposes `pandas` (as `pd`) so a summary op may build a DataFrame. Use for [custom post-processing](operations/postproc/custom.md). A pandas-enabled op used inside the replication loop is rejected when the pipeline is built.
+- **`NumpyCustomFunc`** / **`numpy_operation`**: the per replication contract. Its body may reference `numpy` (as `np`), `math`, `statistics`, `operator`, and selected builtins. Use for [custom transforms](operations/transforms/custom.md) and any op that runs inside the replication loop.
+- **`PandasCustomFunc`** / **`pandas_operation`**: the looser post-loop (`OpType.POSTPROC`) contract, whose namespace additionally exposes `pandas` (as `pd`) so a summary op may build a DataFrame. Use for [custom post-processing](operations/postproc/custom.md). A pandas-enabled op used inside the replication loop is rejected when the pipeline is built.
 
 ## `NumpyCustomFunc`
 

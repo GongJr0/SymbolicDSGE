@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -13,11 +13,10 @@ if TYPE_CHECKING:
 
 from .._diag_tests.result import MCResult, TestResult
 from ..core.solved_model import SolvedModel
-from ..kalman.filter import FilterResult
+from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
 from .mc_constructs import (
-    DataGenReturn,
     MCContext,
     MCData,
     MCFailure,
@@ -25,11 +24,15 @@ from .mc_constructs import (
     MCMeta,
     MCStep,
     OpType,
+    SOURCE_KIND_DATA,
+    SOURCE_KIND_FILTER,
+    SOURCE_KIND_PAYLOAD,
     failed_postproc_names,
     failed_step_counts,
     report_mc_performance,
     report_mc_step_performance,
 )
+from .operations.utils import _resolve_source_array
 
 
 @dataclass(frozen=True)
@@ -37,7 +40,7 @@ class MCPipeline:
     #: Per-replication steps: the dependency DAG, a single DATAGEN root first.
     per_rep_steps: tuple[MCStep, ...]
     #: Post-loop ops, run once after the loop over the assembled across-rep
-    #: traces. A terminal phase -- not part of the graph.
+    #: traces. This is a terminal phase, not part of the graph.
     postproc_steps: tuple[MCStep, ...]
 
     def __init__(
@@ -48,6 +51,7 @@ class MCPipeline:
         rep_tuple = tuple(per_rep_steps)
         postproc_tuple = tuple(postproc_steps)
         self._validate_steps(rep_tuple, postproc_tuple)
+        rep_tuple = self._bind_source_args(rep_tuple)
         object.__setattr__(self, "per_rep_steps", rep_tuple)
         object.__setattr__(self, "postproc_steps", postproc_tuple)
 
@@ -79,9 +83,44 @@ class MCPipeline:
                     f"is {step.op_type}."
                 )
 
+    @staticmethod
+    def _bind_source_args(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
+        index_by_name: dict[str, int] = {}
+        canonical_name: dict[str, str] = {}
+        for index, step in enumerate(per_rep_steps):
+            index_by_name[step.name] = index
+            canonical_name[step.name] = step.name
+            index_by_name[step.output_key] = index
+            canonical_name[step.output_key] = step.name
+        bound_steps: list[MCStep] = []
+        for step_index, step in enumerate(per_rep_steps):
+            bound_args = []
+            for selector in step.source_args:
+                producer = selector.source_step
+                if producer not in index_by_name:
+                    raise ValueError(
+                        f"Step {step.name!r} depends on unknown producer {producer!r}."
+                    )
+                source_idx = index_by_name[producer]
+                producer_step = per_rep_steps[source_idx]
+                producer = canonical_name[producer]
+                if source_idx >= step_index:
+                    raise ValueError(
+                        f"Step {step.name!r} depends on {producer!r}, which does not "
+                        "appear earlier in the pipeline."
+                    )
+                _validate_source_producer(step, selector, producer_step)
+                bound_args.append(
+                    replace(selector, source_step=producer, source_idx=source_idx)
+                )
+            if tuple(bound_args) != step.source_args:
+                step = replace(step, source_args=tuple(bound_args))
+            bound_steps.append(step)
+        return tuple(bound_steps)
+
     @cached_property
     def graph(self) -> "PipelineGraph":
-        """The pipeline's dependency DAG, resolved from the steps' kwargs.
+        """The pipeline's dependency DAG, resolved from compiled source args.
 
         Built once and cached. Owns the graph structure (parents/children/leaves/
         typed input edges) that serialization and validation read instead of
@@ -96,7 +135,7 @@ class MCPipeline:
 
         The inverse of :func:`build_pipeline`: lets a pipeline authored with
         plain library objects be stored in a bundle without touching the spec
-        DTOs. Bulk side-channels (``raw_data`` arrays, custom-op blobs) are
+        DTOs. Bulk side-channels (``raw_model_data`` arrays, custom-op blobs) are
         referenced by key and written as bundle members by the bundle builder.
         """
         from .spec_compile import pipeline_to_spec
@@ -121,6 +160,7 @@ class MCPipeline:
             raise ValueError("verbosity must be 0, 1, or 2.")
 
         contexts: list[MCContext] = []
+        n_successful = 0
         payload_traces: list[Mapping[str, object]] = []
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
@@ -132,7 +172,7 @@ class MCPipeline:
         step_counts: dict[str, int] = {s.name: 0 for s in self.per_rep_steps}
         step_failures: dict[str, int] = {s.name: 0 for s in self.per_rep_steps}
 
-        # POSTPROC ops don't run per replication — they run once after the loop,
+        # POSTPROC ops don't run per replication. They run once after the loop,
         # over the assembled across-rep traces.
         rep_steps = self.per_rep_steps
         postproc_steps = self.postproc_steps
@@ -167,7 +207,9 @@ class MCPipeline:
                 )
                 continue
 
-            contexts.append(context)
+            n_successful += 1
+            if retain_contexts:
+                contexts.append(context)
             if retain_payloads:
                 payload_traces.append(dict(context.payloads))
             for name, test_result in context.results.items():
@@ -217,7 +259,7 @@ class MCPipeline:
         result = MCPipelineResult(
             n_rep=n_rep,
             meta=meta,
-            n_successful=len(contexts),
+            n_successful=n_successful,
             test_summaries=test_summaries,
             test_results=(
                 {name: tuple(values) for name, values in results_by_step.items()}
@@ -238,6 +280,8 @@ class MCPipeline:
 
     def _run_step(self, context: MCContext, step: MCStep) -> None:
         kwargs = dict(step.kwargs)
+        for selector in step.source_args:
+            kwargs[selector.arg] = _resolve_source_array(context, selector)
         if step.op_type is OpType.DATAGEN:
             out = step.func(
                 reference=context.reference,
@@ -245,15 +289,11 @@ class MCPipeline:
                 rep_idx=context.rep_idx,
                 **kwargs,
             )
-            if isinstance(out, DataGenReturn):
-                out = MCData(
-                    states=out.state_mat,
-                    observables=out.obs_mat,
-                    n_exog=out.n_exog,
-                )
+
             if not isinstance(out, MCData):
                 raise TypeError("DATAGEN steps must return MCData.")
             context.data = out
+            context.payload_slots.append(out)
             context.payloads[step.output_key] = out
             return
 
@@ -266,8 +306,11 @@ class MCPipeline:
         )
         if step.op_type is OpType.TRANSFORM and isinstance(out, MCData):
             context.data = out
-        if step.op_type is OpType.FILTER and not isinstance(out, FilterResult):
-            raise TypeError("FILTER steps must return FilterResult.")
+        if step.op_type is OpType.FILTER and not isinstance(
+            out,
+            (FilterRawResult, UnscentedFilterRawResult),
+        ):
+            raise TypeError("FILTER steps must return a raw filter result.")
         if step.op_type is OpType.REGRESSION and not isinstance(out, RegressionResult):
             raise TypeError("REGRESSION steps must return RegressionResult.")
         if step.op_type is OpType.REGRESSION:
@@ -276,6 +319,7 @@ class MCPipeline:
             if not isinstance(out, TestResult):
                 raise TypeError("TEST steps must return TestResult.")
             context.results[step.name] = out
+        context.payload_slots.append(_source_slot(step, out))
         context.payloads[step.output_key] = out
 
     def _run_postproc(
@@ -294,7 +338,7 @@ class MCPipeline:
 
         Owns its own timing: returns ``(artifacts, postproc_elapsed_s)`` where
         the second maps each step name to its wall-clock seconds. ``traces``
-        carries every keyed across-rep ndarray — the test/regression summary
+        carries every keyed across-rep ndarray: the test/regression summary
         traces (shared with the result wire) plus stacked transform payloads. A
         failing op honors ``fail_fast`` (re-raise) or records an
         :class:`MCFailure` with ``rep_idx=-1`` (post-loop sentinel) and is skipped.
@@ -341,11 +385,52 @@ class MCPipeline:
         return postproc, postproc_elapsed_s
 
 
+def _validate_source_producer(
+    consumer: MCStep,
+    selector: Any,
+    producer: MCStep,
+) -> None:
+    if selector.source_kind == SOURCE_KIND_DATA:
+        expected = OpType.DATAGEN
+    elif selector.source_kind == SOURCE_KIND_PAYLOAD:
+        expected = OpType.TRANSFORM
+    elif selector.source_kind == SOURCE_KIND_FILTER:
+        expected = OpType.FILTER
+    else:
+        raise ValueError(
+            f"Step {consumer.name!r} has unknown source kind {selector.source_kind}."
+        )
+    if producer.op_type is not expected:
+        raise ValueError(
+            f"Step {consumer.name!r} reads field {selector.field!r} from "
+            f"{producer.name!r}, but that producer is {producer.op_type.value!r}."
+        )
+
+
+def _source_slot(step: MCStep, out: Any) -> Any:
+    if step.op_type is OpType.TRANSFORM:
+        if isinstance(out, MCData):
+            return (out,)
+        return (_source_array(out),)
+    return out
+
+
+def _source_array(value: Any) -> np.ndarray:
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim == 1:
+        return arr.reshape(-1, 1)
+    if arr.ndim != 2:
+        raise ValueError(
+            f"Transform payloads used as sources must be 1D or 2D, got shape {arr.shape}."
+        )
+    return arr
+
+
 def _payload_to_array(value: object) -> np.ndarray | None:
     """A per-rep payload value as a stackable numeric array, else ``None``.
 
     Only numeric ndarray / scalar payloads (e.g. transform outputs) qualify;
-    structured payloads (``MCData`` / ``FilterResult`` / result objects) are
+    structured payloads (``MCData`` / raw filter results / result objects) are
     skipped from the post-loop trace registry.
     """
     if isinstance(value, np.ndarray):

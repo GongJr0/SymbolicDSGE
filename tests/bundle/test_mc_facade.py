@@ -14,7 +14,7 @@ from SymbolicDSGE.monte_carlo.custom_op import (
     NumpyCustomFunc,
     PandasCustomFunc,
 )
-from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
 from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
@@ -60,24 +60,23 @@ def selection_rate(*, traces):
     return {"rate": float(indicator.mean()), "flags": indicator}
 
 
-def _raw_data_pipeline() -> MCPipeline:
+def _raw_model_data_pipeline() -> MCPipeline:
     rng = np.random.default_rng(0)
     observables = rng.normal(size=(3, 20, 2))  # n_rep, T, k
     return MCPipeline(
         [
-            raw_data_step(
+            raw_model_data_step(
                 "dat",
                 observables=observables,
-                n_exog=1,
                 observable_names=("y", "x"),
             ),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ]
     )
 
 
-def test_add_mc_ships_raw_data_member_and_loader_rehydrates(tmp_path) -> None:
-    pipe = _raw_data_pipeline()
+def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> None:
+    pipe = _raw_model_data_pipeline()
     expected = np.asarray(pipe.per_rep_steps[0].kwargs["observables"], dtype=np.float64)
 
     target = (
@@ -87,23 +86,28 @@ def test_add_mc_ships_raw_data_member_and_loader_rehydrates(tmp_path) -> None:
     loaded = build_from(target)
     assert loaded.mc is not None
     # The parquet side-channel member exists and rehydrated under data_ref.
-    assert any(m.kind == "mc_raw_data" for m in loaded.manifest.members)
+    assert any(m.kind == "mc_raw_model_data" for m in loaded.manifest.members)
     arrays = loaded.mc.resources["dat"]
     np.testing.assert_allclose(arrays["observables"], expected)
 
     # The loaded spec + resources rebuild an equivalent runnable pipeline.
     rebuilt = loaded.mc.pipeline
     np.testing.assert_allclose(rebuilt.per_rep_steps[0].kwargs["observables"], expected)
-    assert [s.step_type for s in rebuilt.per_rep_steps] == ["raw_data", "jarque_bera"]
+    assert [s.step_type for s in rebuilt.per_rep_steps] == [
+        "raw_model_data",
+        "jarque_bera",
+    ]
 
 
 def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     observables = np.random.default_rng(1).normal(size=(2, 15, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
-            transform_step("z", zscore, source="observables"),
-            jarque_bera_test_step("jb", source="payload", payload_key="z"),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            transform_step("z", zscore, source="dat", field="observables"),
+            jarque_bera_test_step("jb", source="z", field="payload"),
         ]
     )
 
@@ -131,8 +135,10 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     observables = np.random.default_rng(2).normal(size=(4, 20, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [postproc_step("post", selection_rate)],
     )
@@ -170,8 +176,10 @@ def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
     observables = np.random.default_rng(0).normal(size=(4, 20, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
     )
     result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
@@ -186,15 +194,17 @@ def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
 def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
     from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
 
-    observables = np.random.default_rng(3).normal(size=(12, 30, 2))
+    observables = np.random.default_rng(3).normal(size=(4, 30, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [kde_step("kde", trace="test.jb.statistic", grid_points=32)],
     )
-    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=12, verbosity=0)
+    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
 
     target = (
         BundleBuilder(created_by="mc-test")
@@ -220,8 +230,10 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
     observables = np.random.default_rng(5).normal(size=(6, 20, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [postproc_step("ptab", pval_table)],  # plain func -> auto-wrapped at ship
     )
@@ -251,8 +263,10 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     observables = np.random.default_rng(7).normal(size=(8, 25, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [postproc_step("sum", summary_bundle, threshold=0.5)],
     )
@@ -287,7 +301,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     # Rebuild from spec + resources -> equivalent runnable pipeline.
     rebuilt = loaded.mc.pipeline
     assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
-        "raw_data",
+        "raw_model_data",
         "jarque_bera",
         "postproc:custom",
     ]
@@ -307,14 +321,14 @@ def test_pandas_wrapper_rejected_outside_postproc() -> None:
     # A PandasCustomFunc on a per-rep transform is rejected at pipeline build.
     wrapped = PandasCustomFunc(pval_table)
     with pytest.raises((ValueError, CustomOpValidationError), match="POSTPROC"):
-        transform_step("bad", wrapped, source="observables")
+        transform_step("bad", wrapped, source="dat", field="observables")
 
 
 def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=np.zeros((2, 5, 2))),
-            transform_step("z", lambda **_: None, source="observables"),
+            raw_model_data_step("dat", observables=np.zeros((2, 5, 2))),
+            transform_step("z", lambda **_: None, source="dat", field="observables"),
         ]
     )
     with pytest.raises(Exception, match="[Ll]ambda"):
@@ -323,9 +337,9 @@ def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:
 
 def test_add_mc_still_accepts_a_plain_pipeline_spec(tmp_path) -> None:
     # The explicit spec path is unchanged: no side-channel members emitted.
-    spec = _raw_data_pipeline().to_spec()
+    spec = _raw_model_data_pipeline().to_spec()
     builder = BundleBuilder().add_mc(spec)
     manifest, _files = builder.build()
     kinds = {m.kind for m in manifest.members}
     assert "mc_pipeline" in kinds
-    assert "mc_raw_data" not in kinds
+    assert "mc_raw_model_data" not in kinds

@@ -42,7 +42,7 @@ from ..monte_carlo.serialize import (
     result_traces,
 )
 from ..monte_carlo.spec import PipelineSpec
-from ..monte_carlo.spec_compile import raw_data_arrays
+from ..monte_carlo.spec_compile import raw_model_data_arrays
 from .container import write_bundle
 from .manifest import Manifest, Member, SimSpec
 from .parquet import (
@@ -65,7 +65,7 @@ _MC_PIPELINE = "montecarlo/pipeline.json"
 _MC_RESULT = "montecarlo/result.json"
 _MC_TRACE_PARQUET = "montecarlo/traces.parquet"
 _MC_TRACE_CSV = "montecarlo/traces.csv"
-_MC_RAW_DATA = "montecarlo/data/{ref}.parquet"
+_MC_RAW_MODEL_DATA = "montecarlo/data/{ref}.parquet"
 _MC_CUSTOM_OP = "montecarlo/custom/{ref}.pkl"
 _MC_POSTPROC = "montecarlo/postproc/{ref}.parquet"
 _MC_POSTPROC_TABLE = "montecarlo/postproc/table/{ref}.parquet"
@@ -91,7 +91,7 @@ class BundleBuilder:
         self._files: dict[str, bytes] = {}
         self._simulation: dict[str, SimSpec] = {}
 
-    # -- models ---------------------------------------------------------------
+    # Models
 
     def add_model(
         self,
@@ -118,7 +118,7 @@ class BundleBuilder:
         )
         return self
 
-    # -- raw data -------------------------------------------------------------
+    # Raw data
 
     def add_raw_data(
         self,
@@ -140,7 +140,7 @@ class BundleBuilder:
             self._add(Member(path=f"data/{name}.csv", kind="raw_data"), text)
         return self
 
-    # -- estimation -----------------------------------------------------------
+    # Estimation
 
     def add_estimation(
         self,
@@ -162,11 +162,11 @@ class BundleBuilder:
 
         Two entry shapes:
 
-        - ``add_estimation(estimator, result=run)`` — the high-level path. The
+        - ``add_estimation(estimator, result=run)``: the high-level path. The
           spec is built from the estimator and the live ``result`` (method,
           ``method_kwargs``, bounds, priors, and observed ``y`` all flattened
           for you); MCMC posteriors are pulled from the result automatically.
-        - ``add_estimation(spec, result=..., observed=..., ...)`` — the explicit
+        - ``add_estimation(spec, result=..., observed=..., ...)``: the explicit
           path for a hand-authored :class:`EstimationSpec`.
 
         ``result`` accepts a live ``OptimizationResult``/``MCMCResult`` (projected
@@ -234,7 +234,7 @@ class BundleBuilder:
             self._add(Member(path=path, kind="estimation_trace"), data)
         return self
 
-    # -- monte carlo ----------------------------------------------------------
+    # Monte Carlo
 
     def add_mc(
         self,
@@ -246,17 +246,18 @@ class BundleBuilder:
     ) -> BundleBuilder:
         """Add the MC tab from a live :class:`MCPipeline` or a :class:`PipelineSpec`.
 
-        ``add_mc(pipeline)`` — the high-level path. A live pipeline is compiled to
+        ``add_mc(pipeline)``: the high-level path. A live pipeline is compiled to
         its graph spec via :meth:`MCPipeline.to_spec`, and its bulk side-channels
-        are shipped as their own members: ``raw_data`` datagen arrays as Parquet,
-        and ``custom`` ops as cloudpickle blobs (each callable is enforced/wrapped
-        as a :class:`NumpyCustomFunc` so its source travels for receiver audit).
+        are shipped as their own members: ``raw_model_data`` datagen arrays as
+        Parquet, and ``custom`` ops as cloudpickle blobs (each callable is
+        enforced/wrapped as a :class:`NumpyCustomFunc` so its source travels for
+        receiver audit).
 
-        ``add_mc(spec)`` — the explicit path for a hand-authored spec (any
-        ``raw_data``/``custom`` members must be staged separately).
+        ``add_mc(spec)``: the explicit path for a hand-authored spec (any
+        ``raw_model_data``/``custom`` members must be staged separately).
 
         Optionally records a run ``result`` (split into a trace-free document + a
-        trace member); ``as_parquet=False`` writes traces as CSV — the
+        trace member); ``as_parquet=False`` writes traces as CSV. The
         format-agnostic loader reads either.
         """
         if isinstance(pipeline, MCPipeline):
@@ -305,7 +306,7 @@ class BundleBuilder:
         (:func:`frame_to_json` + :func:`to_parquet`) rather than the float
         shape-manifest one; column/dtype/index metadata lives in the result
         document, the artifact name in the member options. An empty (0-row) table
-        carries no parquet rows and is skipped — the loader rebuilds its columns.
+        carries no parquet rows and is skipped. The loader rebuilds its columns.
         """
         for index, (name, columns) in enumerate(result_postproc_tables(result).items()):
             payload = frame_to_json(columns)
@@ -324,10 +325,9 @@ class BundleBuilder:
         """Ship bulk POSTPROC ndarray artifacts as shape-manifest parquet members.
 
         Each artifact is an arbitrary-shape payload (e.g. a KDE ``N x 2`` curve),
-        so — unlike the uniform-length ``mc_trace`` columns — they cannot share
-        one column block; each rides its own member with its shape recorded in the
-        member options for restore. Scalar artifacts stay inline in the result
-        document.
+        so they cannot share the uniform-length ``mc_trace`` column block. Each
+        rides its own member with its shape recorded in the member options for restore.
+        Scalar artifacts stay inline in the result document.
         """
         for index, (name, arr) in enumerate(result_postproc_arrays(result).items()):
             data, _ = arrays_to_parquet({_POSTPROC_COL: arr})
@@ -343,20 +343,20 @@ class BundleBuilder:
     def _add_mc_resources(self, pipeline: MCPipeline) -> None:
         """Ship the bulk side-channels a live pipeline references by key.
 
-        ``raw_data`` datagens become Parquet array members; ``custom`` ops become
-        cloudpickle members (wrapped as :class:`NumpyCustomFunc` first, which
-        enforces the author-side contract and carries the source for audit).
+        ``raw_model_data`` datagens become Parquet array members; ``custom`` ops
+        become cloudpickle members (wrapped as :class:`NumpyCustomFunc` first,
+        which enforces the author-side contract and carries the source for audit).
         """
         for step in (*pipeline.per_rep_steps, *pipeline.postproc_steps):
-            if step.step_type == "raw_data":
-                arrays = raw_data_arrays(step.kwargs)
+            if step.step_type == "raw_model_data":
+                arrays = raw_model_data_arrays(step.kwargs)
                 if not arrays:
                     continue
                 data, _ = arrays_to_parquet(arrays)
                 self._add(
                     Member(
-                        path=_MC_RAW_DATA.format(ref=step.name),
-                        kind="mc_raw_data",
+                        path=_MC_RAW_MODEL_DATA.format(ref=step.name),
+                        kind="mc_raw_model_data",
                         options={"ref": step.name},
                     ),
                     data,
@@ -371,26 +371,26 @@ class BundleBuilder:
                     _custom_op_blob(step),
                 )
 
-    # -- simulation prefill ---------------------------------------------------
+    # Simulation prefill
 
     def set_simulation(self, role: str, simulation: SimSpec) -> BundleBuilder:
         self._simulation[role] = simulation
         return self
 
-    # -- low-level passthrough ------------------------------------------------
+    # Low-level passthrough
 
     def add_member(self, member: Member, data: bytes) -> BundleBuilder:
         """Append a pre-encoded member at its declared path.
 
-        Public seam for callers that already hold the final member bytes —
-        e.g. the ``sdsge-compile`` CLI copying a Parquet ``data/`` file through
+        Public seam for callers that already hold the final member bytes, for
+        example the ``sdsge-compile`` CLI copying a Parquet ``data/`` file through
         verbatim, or staging a pre-split MC result + traces pair. The
         higher-level ``add_*`` methods would otherwise re-encode.
         """
         self._add(member, data)
         return self
 
-    # -- emit -----------------------------------------------------------------
+    # Emit
 
     def manifest(self) -> Manifest:
         return Manifest(
@@ -411,7 +411,7 @@ class BundleBuilder:
         write_bundle(path, self.manifest(), self._files)
         return Path(path)
 
-    # -- internals ------------------------------------------------------------
+    # Internals
 
     def _add(self, member: Member, data: bytes) -> None:
         if member.path in self._files:
@@ -470,7 +470,7 @@ def _observed_to_csv(matrix: NDArray[Any], names: list[str] | None) -> bytes:
 
     Uses ``names`` as the header row when provided (paired with
     ``Member.columns`` so the loader can stack semantic-header CSVs back into
-    the matrix). Falls back to mechanical ``y.{j}`` headers — round-trips
+    the matrix). Falls back to mechanical ``y.{j}`` headers. Round-trips
     through :func:`SymbolicDSGE.bundle.parquet.collapse_columns` the same way
     Parquet observed data does.
     """

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from SymbolicDSGE.monte_carlo import MCPipeline
@@ -20,7 +21,12 @@ def test_linear_pipeline_graph_root_leaf_and_edges() -> None:
         [
             simulation_step("dgp", T=8),
             reference_filter_step("filter"),
-            wald_test_step("w", source="std_innov"),
+            wald_test_step(
+                "w",
+                source="filter",
+                field="std_innov",
+                target=np.zeros(1, dtype=np.float64),
+            ),
         ]
     )
     g = pipe.graph
@@ -35,19 +41,9 @@ def test_linear_pipeline_graph_root_leaf_and_edges() -> None:
     assert g.edges() == [("dgp", "filter"), ("filter", "w")]
 
 
-def test_op_default_channel_is_resolved_from_catalog() -> None:
-    # `wald_test_step("w")` carries no `source`; its catalogue default is
-    # "std_innov", which must resolve to the filter producer.
-    pipe = MCPipeline(
-        [
-            simulation_step("dgp", T=8),
-            reference_filter_step("filter"),
-            wald_test_step("w"),
-        ]
-    )
-    edge = pipe.graph.nodes["w"].inputs[0]
-    assert edge.channel == "std_innov"
-    assert edge.producer == "filter"
+def test_source_is_required_for_source_consumers() -> None:
+    with pytest.raises(TypeError, match="source"):
+        wald_test_step("w")
 
 
 def test_branching_filter_has_two_children() -> None:
@@ -55,8 +51,13 @@ def test_branching_filter_has_two_children() -> None:
         [
             simulation_step("dgp", T=8),
             reference_filter_step("filter"),
-            wald_test_step("w", source="std_innov"),
-            jarque_bera_test_step("jb", source="innov"),
+            wald_test_step(
+                "w",
+                source="filter",
+                field="std_innov",
+                target=np.zeros(1, dtype=np.float64),
+            ),
+            jarque_bera_test_step("jb", source="filter", field="innov"),
         ]
     )
     g = pipe.graph
@@ -68,9 +69,9 @@ def test_transform_chain_resolves_payload_producers() -> None:
     pipe = MCPipeline(
         [
             simulation_step("dgp", T=8),
-            standardize_step("s1", source="observables"),
-            standardize_step("s2", source="payload", payload_key="s1"),
-            jarque_bera_test_step("jb", source="payload", payload_key="s2"),
+            standardize_step("s1", source="dgp", field="observables"),
+            standardize_step("s2", source="s1", field="payload"),
+            jarque_bera_test_step("jb", source="s2", field="payload"),
         ]
     )
     g = pipe.graph
@@ -87,15 +88,19 @@ def test_multi_input_step_records_both_producers() -> None:
             simulation_step("dgp", T=8),
             reference_filter_step("filter"),
             breusch_pagan_test_step(
-                "bp", residual_source="std_innov", X_source="observables"
+                "bp",
+                residuals_source="filter",
+                residuals_field="std_innov",
+                X_source="dgp",
+                X_field="observables",
             ),
         ]
     )
     bp = pipe.graph.nodes["bp"]
     assert set(bp.parents) == {"filter", "dgp"}
     channels = {e.role: (e.producer, e.channel) for e in bp.inputs}
-    assert channels["residual_source"] == ("filter", "std_innov")
-    assert channels["X_source"] == ("dgp", "observables")
+    assert channels["residuals"] == ("filter", "std_innov")
+    assert channels["X"] == ("dgp", "observables")
     # the filter producer is preferred as the structural edge
     assert bp.primary_parent == "filter"
 
@@ -106,23 +111,21 @@ def test_graph_is_cached() -> None:
 
 
 def test_unknown_payload_producer_raises() -> None:
-    pipe = MCPipeline(
-        [
-            simulation_step("dgp", T=8),
-            jarque_bera_test_step("jb", source="payload", payload_key="ghost"),
-        ]
-    )
     with pytest.raises(ValueError, match="unknown producer 'ghost'"):
-        _ = pipe.graph
+        MCPipeline(
+            [
+                simulation_step("dgp", T=8),
+                jarque_bera_test_step("jb", source="ghost", field="payload"),
+            ]
+        )
 
 
 def test_forward_reference_raises() -> None:
-    pipe = MCPipeline(
-        [
-            simulation_step("dgp", T=8),
-            jarque_bera_test_step("jb", source="payload", payload_key="s1"),
-            standardize_step("s1", source="observables"),
-        ]
-    )
     with pytest.raises(ValueError, match="does not appear earlier"):
-        _ = pipe.graph
+        MCPipeline(
+            [
+                simulation_step("dgp", T=8),
+                jarque_bera_test_step("jb", source="s1", field="payload"),
+                standardize_step("s1", source="dgp", field="observables"),
+            ]
+        )

@@ -38,14 +38,14 @@ result = loaded.mc.pipeline.run(
 
 ## Step catalog
 
-`STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_data`, `transform:custom`, and `postproc:custom` reattach large arrays or callables through the `resources` mapping when a serialized pipeline is compiled.
+`STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_model_data`, `transform:custom`, and `postproc:custom` reattach large arrays or callables through the `resources` mapping when a serialized pipeline is compiled.
 
 | Name | Purpose |
 | --- | --- |
 | `STEP_CATALOG` | Mapping from `step_type` (string) to `StepDefinition`. |
-| `StepDefinition` | Per-step metadata: human label, parameter `FieldSpec` list, operation role, category, factory, and optional parameter compile hook. |
+| `StepDefinition` | Per-step metadata: human label, parameter `FieldSpec` list, source-input bindings, operation role, category, factory, and optional parameter compile hook. |
 | `FieldSpec` | One parameter on a step: name, type, default, validation hints. Drives the GUI form generation. |
-| `DATAGEN_STEP_TYPES` | Catalog-local step-kind set for valid datagen roots: `"simulation"` and `"raw_data"`. |
+| `DATAGEN_STEP_TYPES` | Catalog-local step-kind set for valid datagen roots: `"simulation"` and `"raw_model_data"`. |
 | `TRANSFORM_STEP_TYPES` | Catalog-local step-kind set for catalog-backed transforms. |
 | `TERMINAL_STEP_TYPES` | Catalog-local step-kind set for test/regression summaries. Terminal steps cannot link forward. |
 | `POSTPROC_STEP_TYPES` | Catalog-local step-kind set for post-loop ops (e.g. `kde`) run once after the replication loop. |

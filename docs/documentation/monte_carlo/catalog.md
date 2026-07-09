@@ -35,6 +35,28 @@ __Methods:__
 FieldSpec.to_dict() -> dict[str, Any]
 ```
 
+## `SourceBinding`
+
+```python
+class SourceBinding(NamedTuple)
+```
+
+One upstream-input binding of a step: the producer, field, and column selectors a step reads from another node. A `StepDefinition` expands its `source_bindings` into the corresponding `FieldSpec` form entries at construction.
+
+__Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| arg | `#!python str` | Runner keyword the selected array populates, such as `"sample"`, `"y"`, or `"X"`. |
+| source_key | `#!python str` | Parameter key that holds the producer step name. |
+| field_key | `#!python str` | Parameter key that holds the producer field. |
+| columns_key | `#!python str` | Parameter key that holds the column selector. |
+| label | `#!python str` | Label prefix for the generated step and field entries. |
+| source_default | `#!python str` | Default producer step name. |
+| field_default | `#!python str` | Default producer field. |
+| columns_label | `#!python str` | Label for the generated columns field. |
+| columns_default | `#!python tuple[int, ...]` | Default column selection. |
+
 ## `StepDefinition`
 
 ```python
@@ -54,7 +76,8 @@ __Fields:__
 | description | `#!python str` | Short user-facing description. |
 | op_role | `#!python Literal["datagen", "filter", "transform", "terminal", "postproc"]` | Graph role. |
 | factory | `#!python Callable[..., MCStep]` | Step factory used by `build(...)`. |
-| fields | `#!python tuple[FieldSpec, ...]` | Declared configurable fields. |
+| fields | `#!python tuple[FieldSpec, ...]` | Declared configurable fields. Any `source_bindings` are prepended here at construction. |
+| source_bindings | `#!python tuple[SourceBinding, ...]` | Upstream-input bindings, expanded into `fields` as source, field, and column selectors. |
 | compile_params | `#!python Callable \| None` | Optional parameter normalization hook. Simulation compilation uses only explicit `shocks` or `shock_registry` parameters. |
 
 __Properties:__
@@ -81,8 +104,9 @@ StepDefinition.build(name: str, params: dict[str, Any]) -> MCStep
 | `TRANSFORM_STEP_TYPES` | `#!python frozenset[str]` | Built-in transform kinds. |
 | `TERMINAL_STEP_TYPES` | `#!python frozenset[str]` | Test and regression terminal kinds. |
 | `POSTPROC_STEP_TYPES` | `#!python frozenset[str]` | Post-loop kinds run once after the replication loop (e.g. `kde`). |
-| `INPUT_SOURCES` | `#!python list[str]` | Source channels diagnostic/regression steps may read. |
-| `FILTER_SOURCES` | `#!python set[str]` | Source channels produced by the filter step. |
+| `INPUT_SOURCES` | `#!python list[str]` | Array field names exposed in catalog forms. |
+| `FILTER_OUTPUT_SOURCES` | `#!python tuple[str, ...]` | Catalog fields produced by filter steps. |
+| `FILTER_SOURCES` | `#!python set[str]` | Filter field names used when resolving graph parents. |
 
 ```python
 catalog_payload() -> dict[str, Any]

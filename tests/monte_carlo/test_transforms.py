@@ -74,7 +74,7 @@ def test_run_standardize_zero_centers_and_unit_scales_per_column() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
     )
     np.testing.assert_allclose(out.mean(axis=0), [0.0, 0.0], atol=1e-12)
     np.testing.assert_allclose(out.std(axis=0), [1.0, 1.0], atol=1e-12)
@@ -88,7 +88,7 @@ def test_run_standardize_zero_std_column_returns_zeros_safely() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
     )
     np.testing.assert_allclose(out[:, 0], 0.0)
     assert np.isfinite(out).all()
@@ -101,7 +101,7 @@ def test_run_log_applies_elementwise_with_offset() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         offset=0.0,
     )
     np.testing.assert_allclose(out, [[0.0, 1.0], [2.0, 3.0]])
@@ -114,7 +114,7 @@ def test_run_log_diff_drops_one_row_and_returns_log_returns() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
     )
     np.testing.assert_allclose(out, np.full((3, 1), np.log(2.0)))
 
@@ -126,7 +126,7 @@ def test_run_diff_supports_higher_order() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         order=2,
     )
     # 1st diff: [2, 6, 18]; 2nd diff: [4, 12].
@@ -140,7 +140,7 @@ def test_run_diff_rejects_non_positive_order() -> None:
             reference=_FakeSolvedModel(),
             dgp=None,
             rep_idx=0,
-            source="observables",
+            sample=np.zeros((3, 1), dtype=np.float64),
             order=0,
         )
 
@@ -152,7 +152,7 @@ def test_run_rolling_mean_window_3() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         window=3,
     )
     np.testing.assert_allclose(out, [[1.0], [2.0], [3.0], [4.0]])
@@ -165,7 +165,7 @@ def test_run_rolling_std_and_var_window_3() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         window=3,
     )
     var_out = run_rolling_var(
@@ -173,7 +173,7 @@ def test_run_rolling_std_and_var_window_3() -> None:
         reference=_FakeSolvedModel(),
         dgp=None,
         rep_idx=0,
-        source="observables",
+        sample=obs,
         window=3,
     )
     np.testing.assert_allclose(std_out**2, var_out)
@@ -187,7 +187,7 @@ def test_rolling_window_rejects_window_larger_than_input() -> None:
             reference=_FakeSolvedModel(),
             dgp=None,
             rep_idx=0,
-            source="observables",
+            sample=obs,
             window=10,
         )
 
@@ -196,24 +196,57 @@ def test_rolling_window_rejects_window_larger_than_input() -> None:
 
 
 @pytest.mark.parametrize(
-    "factory, expected_kwargs",
+    "factory, kwargs, expected_runner_kwargs",
     [
-        (standardize_step, {"source": "observables"}),
-        (log_step, {"source": "observables", "offset": 1.0}),
-        (log_diff_step, {"source": "observables"}),
-        (diff_step, {"source": "observables", "order": 1}),
-        (rolling_mean_step, {"source": "observables", "window": 5}),
-        (rolling_std_step, {"source": "observables", "window": 5, "ddof": 1}),
-        (rolling_var_step, {"source": "observables", "window": 5}),
+        (
+            standardize_step,
+            {"source": "datagen", "field": "observables"},
+            {"ddof": 0},
+        ),
+        (
+            log_step,
+            {"source": "datagen", "field": "observables", "offset": 1.0},
+            {"offset": 1.0},
+        ),
+        (
+            log_diff_step,
+            {"source": "datagen", "field": "observables"},
+            {"offset": 0.0},
+        ),
+        (
+            diff_step,
+            {"source": "datagen", "field": "observables", "order": 1},
+            {"order": 1},
+        ),
+        (
+            rolling_mean_step,
+            {"source": "datagen", "field": "observables", "window": 5},
+            {"window": 5},
+        ),
+        (
+            rolling_std_step,
+            {
+                "source": "datagen",
+                "field": "observables",
+                "window": 5,
+            },
+            {"window": 5, "ddof": 0},
+        ),
+        (
+            rolling_var_step,
+            {"source": "datagen", "field": "observables", "window": 5},
+            {"window": 5, "ddof": 0},
+        ),
     ],
 )
 def test_transform_factories_produce_transform_mcstep(
-    factory: object, expected_kwargs: dict
+    factory: object, kwargs: dict, expected_runner_kwargs: dict
 ) -> None:
-    step = factory("step_a", **expected_kwargs)  # type: ignore[operator]
+    step = factory("step_a", **kwargs)  # type: ignore[operator]
     assert step.op_type is OpType.TRANSFORM
     assert step.name == "step_a"
-    assert dict(step.kwargs) == expected_kwargs
+    assert dict(step.kwargs) == expected_runner_kwargs
+    assert len(step.source_args) == 1
 
 
 def test_transform_step_types_set_matches_catalog() -> None:
@@ -250,13 +283,13 @@ def test_validate_orders_transform_between_filter_and_terminal() -> None:
                 id="lg",
                 step_type="log",
                 name="log_obs",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="jb",
                 step_type="jarque_bera",
                 name="normality",
-                params={},
+                params={"source": "log_obs", "field": "payload"},
             ),
         ],
         edges=[
@@ -266,10 +299,9 @@ def test_validate_orders_transform_between_filter_and_terminal() -> None:
     )
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     assert [node.name for node in ordered] == ["datagen", "log_obs", "normality"]
-    # Auto-binding: the terminal inherits `source="payload"` + payload_key=log_obs.
     terminal = ordered[-1]
-    assert terminal.params["source"] == "payload"
-    assert terminal.params["payload_key"] == "log_obs"
+    assert terminal.params["source"] == "log_obs"
+    assert terminal.params["field"] == "payload"
 
 
 def test_chained_transforms_are_topologically_ordered() -> None:
@@ -281,19 +313,19 @@ def test_chained_transforms_are_topologically_ordered() -> None:
                 id="b",
                 step_type="standardize",
                 name="standardize_log",
-                params={"source": "payload"},
+                params={"source": "log_obs", "field": "payload"},
             ),
             NodeSpec(
                 id="a",
                 step_type="log",
                 name="log_obs",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="t",
                 step_type="jarque_bera",
                 name="normality",
-                params={"source": "payload"},
+                params={"source": "standardize_log", "field": "payload"},
             ),
         ],
         edges=[
@@ -305,14 +337,15 @@ def test_chained_transforms_are_topologically_ordered() -> None:
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     names = [node.name for node in ordered]
     assert names == ["datagen", "log_obs", "standardize_log", "normality"]
-    # Each consumer's payload_key points at its parent's name.
     standardize = next(n for n in ordered if n.name == "standardize_log")
     terminal = ordered[-1]
-    assert standardize.params["payload_key"] == "log_obs"
-    assert terminal.params["payload_key"] == "standardize_log"
+    assert standardize.params["source"] == "log_obs"
+    assert standardize.params["field"] == "payload"
+    assert terminal.params["source"] == "standardize_log"
+    assert terminal.params["field"] == "payload"
 
 
-def test_terminal_with_transform_parent_rejects_fixed_source() -> None:
+def test_terminal_with_transform_parent_keeps_explicit_source() -> None:
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -320,13 +353,13 @@ def test_terminal_with_transform_parent_rejects_fixed_source() -> None:
                 id="lg",
                 step_type="log",
                 name="log_obs",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="jb",
                 step_type="jarque_bera",
                 name="normality",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
         ],
         edges=[
@@ -334,18 +367,15 @@ def test_terminal_with_transform_parent_rejects_fixed_source() -> None:
             EdgeSpec(source="lg", target="jb"),
         ],
     )
-    # User wired test from transform but still set source=observables — the
-    # validator's auto-bind defaults this to "payload", which is the documented
-    # behaviour for single-source consumers (no per-leg ambiguity).
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     terminal = ordered[-1]
-    assert terminal.params["source"] == "payload"
-    assert terminal.params["payload_key"] == "log_obs"
+    assert terminal.params["source"] == "datagen"
+    assert terminal.params["field"] == "observables"
 
 
 def test_multi_input_consumer_without_payload_leg_reads_declared_sources() -> None:
     # A multi-input node may sit downstream of a transform without consuming its
-    # payload — it just reads the sources its legs declare (no forced payload).
+    # payload. It reads the sources its legs declare.
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -353,15 +383,17 @@ def test_multi_input_consumer_without_payload_leg_reads_declared_sources() -> No
                 id="d",
                 step_type="diff",
                 name="diff_obs",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="bp",
                 step_type="breusch_pagan",
                 name="bp",
                 params={
-                    "residual_source": "observables",
-                    "X_source": "observables",
+                    "residuals_source": "datagen",
+                    "residuals_field": "observables",
+                    "X_source": "datagen",
+                    "X_field": "observables",
                 },
             ),
         ],
@@ -372,12 +404,13 @@ def test_multi_input_consumer_without_payload_leg_reads_declared_sources() -> No
     )
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     bp = ordered[-1]
-    assert bp.params["residual_source"] == "observables"
-    assert bp.params["X_source"] == "observables"
-    assert "residual_payload_key" not in bp.params
+    assert bp.params["residuals_source"] == "datagen"
+    assert bp.params["residuals_field"] == "observables"
+    assert bp.params["X_source"] == "datagen"
+    assert bp.params["X_field"] == "observables"
 
 
-def test_multi_input_consumer_with_explicit_payload_leg_binds_payload_key() -> None:
+def test_multi_input_consumer_with_explicit_payload_source() -> None:
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -385,15 +418,17 @@ def test_multi_input_consumer_with_explicit_payload_leg_binds_payload_key() -> N
                 id="d",
                 step_type="diff",
                 name="diff_obs",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="bp",
                 step_type="breusch_pagan",
                 name="bp",
                 params={
-                    "residual_source": "payload",
-                    "X_source": "observables",
+                    "residuals_source": "diff_obs",
+                    "residuals_field": "payload",
+                    "X_source": "datagen",
+                    "X_field": "observables",
                 },
             ),
         ],
@@ -404,14 +439,13 @@ def test_multi_input_consumer_with_explicit_payload_leg_binds_payload_key() -> N
     )
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     bp = ordered[-1]
-    assert bp.params["residual_source"] == "payload"
-    assert bp.params["residual_payload_key"] == "diff_obs"
-    assert bp.params["X_source"] == "observables"
+    assert bp.params["residuals_source"] == "diff_obs"
+    assert bp.params["residuals_field"] == "payload"
+    assert bp.params["X_source"] == "datagen"
+    assert bp.params["X_field"] == "observables"
 
 
-def test_payload_source_with_dangling_key_is_rejected() -> None:
-    # A payload leg now resolves by key; a key naming no prior producer is the
-    # error (rather than "requires a transform parent edge").
+def test_payload_source_with_dangling_producer_is_rejected() -> None:
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -419,12 +453,12 @@ def test_payload_source_with_dangling_key_is_rejected() -> None:
                 id="jb",
                 step_type="jarque_bera",
                 name="normality",
-                params={"source": "payload", "payload_key": "nonexistent"},
+                params={"source": "nonexistent", "field": "payload"},
             ),
         ],
         edges=[EdgeSpec(source="sim", target="jb")],
     )
-    with pytest.raises(ValueError, match="requires prior payload"):
+    with pytest.raises(ValueError, match="requires prior source"):
         validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
 
@@ -436,13 +470,13 @@ def test_transform_cannot_link_from_terminal() -> None:
                 id="jb",
                 step_type="jarque_bera",
                 name="normality",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="lg",
                 step_type="log",
                 name="log_after",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
         ],
         edges=[
@@ -457,13 +491,11 @@ def test_transform_cannot_link_from_terminal() -> None:
 def test_transform_fans_out_to_multiple_downstream_chains() -> None:
     """One transform feeds two independent downstream chains.
 
-    Shape: Sim -> Standardize -> {RollingMean -> Wald(avg),
-                                  RollingVar  -> Wald(var)}
+    Shape: Sim to Standardize to {RollingMean to Wald(avg),
+                                  RollingVar to Wald(var)}
 
     Each consumer takes Standardize as its single parent; Standardize has two
-    outgoing edges. Both downstream chains auto-bind to the transform whose
-    output they actually read (their immediate parent), and Standardize's
-    payload remains available for both branches.
+    outgoing edges. Each downstream step names the producer it reads from.
     """
     spec = PipelineSpec(
         nodes=[
@@ -472,19 +504,19 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
                 id="std",
                 step_type="standardize",
                 name="standardize",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="rmean",
                 step_type="rolling_mean",
                 name="rmean",
-                params={"window": 3},
+                params={"source": "standardize", "field": "payload", "window": 3},
             ),
             NodeSpec(
                 id="rvar",
                 step_type="rolling_var",
                 name="rvar",
-                params={"window": 3},
+                params={"source": "standardize", "field": "payload", "window": 3},
             ),
             NodeSpec(
                 id="wmean",
@@ -492,6 +524,8 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
                 name="wald_mean",
                 params={
                     "kind": "mean",
+                    "source": "rmean",
+                    "field": "payload",
                     "target_vector": [0.0],
                     "burn_in": 0,
                     "alpha": 0.05,
@@ -503,6 +537,8 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
                 name="wald_var",
                 params={
                     "kind": "mean",
+                    "source": "rvar",
+                    "field": "payload",
                     "target_vector": [1.0],
                     "burn_in": 0,
                     "alpha": 0.05,
@@ -526,29 +562,29 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
     assert set(names[2:4]) == {"rmean", "rvar"}
     assert set(names[4:6]) == {"wald_mean", "wald_var"}
 
-    # Each rolling step's source resolves to standardize's payload.
+    # Each rolling step's source is standardize's payload.
     rmean = next(n for n in ordered if n.name == "rmean")
     rvar = next(n for n in ordered if n.name == "rvar")
-    assert rmean.params["source"] == "payload"
-    assert rmean.params["payload_key"] == "standardize"
-    assert rvar.params["source"] == "payload"
-    assert rvar.params["payload_key"] == "standardize"
+    assert rmean.params["source"] == "standardize"
+    assert rmean.params["field"] == "payload"
+    assert rvar.params["source"] == "standardize"
+    assert rvar.params["field"] == "payload"
 
-    # Each Wald binds to its immediate rolling parent, not to standardize.
+    # Each Wald reads its immediate rolling parent, not standardize.
     wmean = next(n for n in ordered if n.name == "wald_mean")
     wvar = next(n for n in ordered if n.name == "wald_var")
-    assert wmean.params["payload_key"] == "rmean"
-    assert wvar.params["payload_key"] == "rvar"
+    assert wmean.params["source"] == "rmean"
+    assert wmean.params["field"] == "payload"
+    assert wvar.params["source"] == "rvar"
+    assert wvar.params["field"] == "payload"
 
     # Catalog-driven compile succeeds with the bound params.
     pipeline = build_pipeline(ordered)
     assert [step.name for step in pipeline.per_rep_steps] == names
 
 
-def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> None:
-    """A consumer can opt out of the auto-bind and reference any earlier
-    transform's payload by name. The `payload_key` then identifies the data
-    source instead of the immediate parent's output."""
+def test_terminal_can_read_an_earlier_transform_via_explicit_source() -> None:
+    """A consumer can reference any earlier transform's payload by name."""
     spec = PipelineSpec(
         nodes=[
             _sim_node(),
@@ -556,20 +592,20 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> No
                 id="std",
                 step_type="standardize",
                 name="standardize",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="rm",
                 step_type="rolling_mean",
                 name="rmean",
-                params={"window": 3},
+                params={"source": "standardize", "field": "payload", "window": 3},
             ),
             NodeSpec(
                 id="jb",
                 step_type="jarque_bera",
                 name="normality_on_std",
                 # Override: read standardize directly, not rmean.
-                params={"source": "payload", "payload_key": "standardize"},
+                params={"source": "standardize", "field": "payload"},
             ),
         ],
         edges=[
@@ -580,21 +616,21 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_payload_key() -> No
     )
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     jb = next(n for n in ordered if n.name == "normality_on_std")
-    # User's explicit payload_key wins over the auto-bind to "rmean".
-    assert jb.params["payload_key"] == "standardize"
+    assert jb.params["source"] == "standardize"
+    assert jb.params["field"] == "payload"
 
 
 def test_step_kinds_match_catalog() -> None:
     """Every GUI-catalog step kind must be a valid spec `STEP_KIND`; drift would
     silently reject perfectly valid bundles at load time. `STEP_KINDS` may be a
-    strict superset: serialization-only datagens (e.g. ``raw_data``) are valid
+    strict superset: serialization-only datagens (e.g. ``raw_model_data``) are valid
     spec kinds but carry no GUI-authorable `StepDefinition`."""
     from SymbolicDSGE.monte_carlo.catalog import STEP_CATALOG
     from SymbolicDSGE.monte_carlo.spec import STEP_KINDS
 
     assert frozenset(STEP_CATALOG.keys()) <= STEP_KINDS
     assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {
-        "raw_data",
+        "raw_model_data",
         "transform:custom",
         "postproc:custom",
     }
@@ -615,19 +651,24 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
                 id="std",
                 step_type="standardize",
                 name="standardize",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
             NodeSpec(
                 id="rm",
                 step_type="rolling_mean",
                 name="rmean",
-                params={"window": 3},
+                params={"source": "standardize", "field": "payload", "window": 3},
             ),
             NodeSpec(
                 id="wm",
                 step_type="wald",
                 name="wald_mean",
-                params={"kind": "mean", "target_vector": [0.0]},
+                params={
+                    "kind": "mean",
+                    "source": "rmean",
+                    "field": "payload",
+                    "target_vector": [0.0],
+                },
             ),
         ],
         edges=[
@@ -674,13 +715,13 @@ def test_build_pipeline_emits_transform_mcstep_with_bound_params() -> None:
                 id="rm",
                 step_type="rolling_mean",
                 name="rmean",
-                params={"source": "observables", "window": 3},
+                params={"source": "datagen", "field": "observables", "window": 3},
             ),
             NodeSpec(
                 id="jb",
                 step_type="jarque_bera",
                 name="normality",
-                params={},
+                params={"source": "rmean", "field": "payload"},
             ),
         ],
         edges=[
@@ -696,5 +737,4 @@ def test_build_pipeline_emits_transform_mcstep_with_bound_params() -> None:
     assert rm_step.op_type is OpType.TRANSFORM
     assert rm_step.kwargs["window"] == 3
     jb_step = pipeline.per_rep_steps[2]
-    assert jb_step.kwargs["source"] == "payload"
-    assert jb_step.kwargs["payload_key"] == "rmean"
+    assert jb_step.source_args[0].source_step == "rmean"

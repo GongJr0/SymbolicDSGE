@@ -9,22 +9,20 @@ compile hooks expect, so ``to_spec`` is a fixed point under a rebuild.
 
 Recovery is mostly pass-through. The cases that need inverting a compile hook:
 
-- **simulation** — live :class:`Shock` objects are serialized via
+- **simulation**: live :class:`Shock` objects are serialized via
   :meth:`Shock.to_dict`; the dual-form ``_compile_simulation`` rebuilds them.
-- **wald** — the materialized ``target`` ndarray is inverted to the
+- **wald**: the materialized ``target`` ndarray is inverted to the
   ``target_vector`` / ``target_matrix`` field the GUI/spec form carries.
-- **raw_data** — bulk arrays cannot ride the JSON spec, so the node records a
+- **raw_model_data**: bulk arrays cannot ride the JSON spec, so the node records a
   ``data_ref`` (the bundle member key), the array ``data_shapes``, and the scalar
   metadata; the bundle builder writes the parquet member from
-  :func:`raw_data_arrays`.
-- **custom** — the user callable cannot ride the JSON spec either, so the node
+  :func:`raw_model_data_arrays`.
+- **custom**: the user callable cannot ride the JSON spec either, so the node
   records a ``func_ref`` (the bundle member key) alongside its plain kwargs; the
   bundle builder writes the cloudpickle member and ``build_pipeline`` reattaches
   the callable from the loaded resources.
 
-Binder-derived dependency keys (``filter_key`` / ``*_payload_key``) are dropped:
-``validate_pipeline_spec`` re-derives them from the edges, so emitting them would
-break idempotency.
+Source dependencies are emitted as explicit ``source`` and ``field`` parameters.
 """
 
 from __future__ import annotations
@@ -35,16 +33,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.shock_generators import Shock, ShockParameters
+from .catalog import STEP_CATALOG
+from .mc_constructs import SourceArgs
 from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
 
 if TYPE_CHECKING:
     from .core import MCPipeline
     from .mc_constructs import MCStep
-
-#: Dependency keys re-derived from edges on rebuild, so dropped from the spec.
-#: ``filter_key`` is re-bound from the filter edge; the ``*_payload_key`` keys are
-#: kept because payloads are referenced by key (no edge to re-derive them from).
-_BINDER_KEYS = ("filter_key",)
 
 
 def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
@@ -71,8 +66,8 @@ def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
     return PipelineSpec(nodes=nodes, edges=edges, postprocs=postprocs)
 
 
-def raw_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
-    """The named bulk arrays a ``raw_data`` datagen ships.
+def raw_model_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
+    """The named bulk arrays a ``raw_model_data`` datagen ships.
 
     ``states`` / ``observables`` keep their names; entries of ``raw`` are
     namespaced ``raw:<key>``. Shared with the bundle builder, which feeds them to
@@ -80,10 +75,10 @@ def raw_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
     """
     out: dict[str, NDArray[Any]] = {}
     for key in ("states", "observables"):
-        value = kwargs.get(key)
+        value = kwargs[key]
         if value is not None:
             out[key] = np.asarray(value, dtype=np.float64)
-    raw = kwargs.get("raw")
+    raw = kwargs["raw"]
     if raw:
         for name, value in raw.items():
             out[f"raw:{name}"] = np.asarray(value, dtype=np.float64)
@@ -101,8 +96,8 @@ def _step_type(step: "MCStep") -> str:
 
 def _recover_params(step: "MCStep") -> dict[str, Any]:
     step_type = step.step_type
-    if step_type == "raw_data":
-        return _recover_raw_data(step)
+    if step_type == "raw_model_data":
+        return _recover_raw_model_data(step)
     if step_type == "simulation":
         params = _recover_simulation(step.kwargs)
     elif step_type == "wald":
@@ -112,14 +107,65 @@ def _recover_params(step: "MCStep") -> dict[str, Any]:
         params["func_ref"] = step.name
     else:
         params = _jsonable_params(dict(step.kwargs))
-    for key in _BINDER_KEYS:
-        params.pop(key, None)
+    params.update(_recover_source_params(step_type, step.source_args))
     return params
+
+
+def _recover_source_params(
+    step_type: str | None,
+    source_args: tuple[SourceArgs, ...],
+) -> dict[str, Any]:
+    if step_type is None or not source_args:
+        return {}
+    definition = STEP_CATALOG.get(step_type)
+    if definition is None or not definition.source_bindings:
+        return {}
+    if len(source_args) != len(definition.source_bindings):
+        raise ValueError(
+            f"Step type {step_type!r} has {len(source_args)} source args, "
+            f"expected {len(definition.source_bindings)}."
+        )
+    by_arg = {selector.arg: selector for selector in source_args}
+    out: dict[str, Any] = {}
+    for binding in definition.source_bindings:
+        if binding.arg not in by_arg:
+            raise ValueError(
+                f"Step type {step_type!r} is missing source {binding.arg!r}."
+            )
+        out.update(
+            _recover_one_source(
+                by_arg[binding.arg],
+                source_key=binding.source_key,
+                field_key=binding.field_key,
+                columns_key=binding.columns_key,
+            )
+        )
+    return out
+
+
+def _recover_one_source(
+    selector: SourceArgs,
+    *,
+    source_key: str,
+    field_key: str,
+    columns_key: str,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    out[source_key] = selector.source_step
+    out[field_key] = selector.field
+
+    if selector.columns is not None:
+        out[columns_key] = _jsonable(selector.columns)
+    if selector.burn_in:
+        out["burn_in"] = selector.burn_in
+    if selector.drop_initial:
+        out["drop_initial"] = selector.drop_initial
+    return out
 
 
 def _recover_simulation(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     params = dict(kwargs)
-    shocks = params.get("shocks")
+    shocks = params["shocks"]
     if shocks is not None:
         params["shocks"] = {key: _shock_dict(value) for key, value in shocks.items()}
     return _jsonable_params(params)
@@ -150,19 +196,25 @@ def _shock_dict(value: Any) -> ShockParameters | dict[str, Any]:
 def _recover_wald(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     params = dict(kwargs)
     if "target" in params:
-        kind = str(params.get("kind", "mean"))
         target = np.asarray(params.pop("target"), dtype=np.float64)
-        key = "target_vector" if kind == "mean" else "target_matrix"
+        if "kind" in params:
+            kind = str(params["kind"])
+            key = "target_vector" if kind == "mean" else "target_matrix"
+        elif target.ndim <= 1:
+            key = "target_vector"
+        else:
+            raise ValueError("Wald matrix targets must store the Wald kind.")
         params[key] = target.tolist()
     return _jsonable_params(params)
 
 
-def _recover_raw_data(step: "MCStep") -> dict[str, Any]:
+def _recover_raw_model_data(step: "MCStep") -> dict[str, Any]:
     kwargs = step.kwargs
-    shapes = {name: list(arr.shape) for name, arr in raw_data_arrays(kwargs).items()}
+    shapes = {
+        name: list(arr.shape) for name, arr in raw_model_data_arrays(kwargs).items()
+    }
     return {
-        "n_exog": int(kwargs.get("n_exog", -1)),
-        "observable_names": [str(n) for n in kwargs.get("observable_names") or ()],
+        "observable_names": [str(n) for n in kwargs["observable_names"] or ()],
         "data_ref": step.name,
         "data_shapes": shapes,
     }

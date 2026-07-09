@@ -7,7 +7,7 @@ from numpy import float64, ndarray
 
 
 from ....core.solved_model import SolvedModel
-from ....kalman.filter import FilterResult, UnscentedFilterResult
+from ....kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
 
@@ -64,61 +64,47 @@ def simulate(
         states=states,
         observables=obs_mat,
         raw=raw,
-        n_exog=int(getattr(model.compiled, "n_exog", -1)),
+        n_exog=model.compiled.n_exog,
         observable_names=obs_names,
     )
 
 
-def raw_data_datagen(
+def raw_model_data_datagen(
     *,
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
     states: NDF | None = None,
     observables: NDF | None = None,
-    n_exog: int = -1,
     raw: Mapping[str, NDF] | None = None,
     observable_names: Sequence[str] = (),
 ) -> MCData:
     del reference, dgp
     if states is None and observables is None:
-        raise ValueError("raw_data_datagen requires states, observables, or both.")
+        raise ValueError(
+            "raw_model_data_datagen requires states, observables, or both."
+        )
 
     state_mat = None
     if states is not None:
-        state_mat = _select_raw_rep_array(
-            states,
-            rep_idx=rep_idx,
-            name="states",
-            allow_vector=False,
-        )
+        state_mat = _select_raw_rep_array("states", states, rep_idx)
     obs_mat = None
     if observables is not None:
-        obs_mat = _select_raw_rep_array(
-            observables,
-            rep_idx=rep_idx,
-            name="observables",
-            allow_vector=True,
-        )
+        obs_mat = _select_raw_rep_array("observables", observables, rep_idx)
     raw_payload: dict[str, NDF] = {}
     if state_mat is not None:
         raw_payload["_X"] = state_mat
     if raw is not None:
         raw_payload.update(
             {
-                key: _select_raw_rep_array(
-                    value,
-                    rep_idx=rep_idx,
-                    name=f"raw['{key}']",
-                    allow_vector=True,
-                )
+                key: _select_raw_rep_array(f"raw['{key}']", value, rep_idx)
                 for key, value in raw.items()
             }
         )
     return MCData(
         states=state_mat,
         observables=obs_mat,
-        n_exog=int(n_exog),
+        n_exog=-1,
         raw=raw_payload,
         observable_names=tuple(observable_names),
     )
@@ -141,7 +127,7 @@ def run_reference_filter(
     R: NDF | None = None,
     estimate_R_diag: bool = False,
     R_scale: float = 1.0,
-) -> FilterResult | UnscentedFilterResult:
+) -> FilterRawResult | UnscentedFilterRawResult:
     del dgp, rep_idx
     data = context.require_data()
     if data.observables is None:
@@ -149,7 +135,7 @@ def run_reference_filter(
     obs = observables
     if obs is None and data.observable_names:
         obs = list(data.observable_names)
-    return reference.kalman(
+    return reference._kalman_raw(
         y=data.observables,
         filter_mode=filter_mode,
         observables=obs,
@@ -163,3 +149,19 @@ def run_reference_filter(
         estimate_R_diag=estimate_R_diag,
         R_scale=R_scale,
     )
+
+
+def add_payload(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    value: NDF | Sequence[float] | Sequence[Sequence[float]],
+) -> NDF:
+    del context, reference, dgp, rep_idx
+
+    out = np.asarray(value, dtype=np.float64)
+    if not out.ndim in (1, 2):
+        raise ValueError(f"Payload must be 1-D, or 2-D; got {out.ndim}-D.")
+    return out

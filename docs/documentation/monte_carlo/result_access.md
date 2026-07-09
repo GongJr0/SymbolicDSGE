@@ -20,16 +20,15 @@ __Summary Fields and Methods:__
 | pval_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the rejection rate. |
 | statistic_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the mean test statistic. |
 
-If `retain_test_results=True`, `MCPipelineResult.test_results` stores scalar per-replication `TestResult` objects keyed by test step name.
+If `retain_test_results=True`, `MCPipelineResult.test_results` stores scalar per replication `TestResult` objects keyed by test step name.
 
 __Performance Reporting:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| `report_mc_performance(result)` | Print the aggregate pipeline throughput report. |
-| `report_mc_step_performance(result)` | Print one throughput report line per pipeline step. |
-| `MCPipelineResult.report_performance()` | Method form of `report_mc_performance(...)`. |
-| `MCPipelineResult.report_step_performance()` | Method form of `report_mc_step_performance(...)`. |
+| `MCPipelineResult.report_performance()` | Print the aggregate pipeline throughput report. |
+| `MCPipelineResult.report_step_performance()` | Print one throughput report line per pipeline step. |
+| `MCPipelineResult.meta` | `MCMeta` object containing elapsed time, step timings, failure counts, and throughput properties. |
 
 ???+ warning "Retention and Memory Use"
-    `retain_contexts=True` and `retain_payloads=True` can store large arrays from every successful replication. For large Monte Carlo runs, prefer retaining aggregate summaries and scalar test results unless full per-replication payloads are needed for debugging or downstream analysis.
+    `retain_contexts=True` and `retain_payloads=True` can store large arrays from every successful replication. For large Monte Carlo runs, prefer retaining aggregate summaries and scalar test results unless full per replication payloads are needed for debugging or downstream analysis.

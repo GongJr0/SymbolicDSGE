@@ -1,18 +1,31 @@
 from __future__ import annotations
-from typing import Any, Literal
 
+from typing import Any, Callable, Mapping, Sequence, Literal
+from numpy import float64
+from numpy.typing import NDArray
+
+from ....core.shock_generators import Shock
 from ...mc_constructs import MCStep, OpType
-
 from .ops import (
     simulate,
-    raw_data_datagen,
+    raw_model_data_datagen,
     run_reference_filter,
+    add_payload,
 )
+
+NDF = NDArray[float64]
 
 
 def simulation_step(
     name: str = "datagen",
-    **kwargs: Any,
+    target: str = "dgp",
+    *,
+    T: int,
+    shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+    seed_increment: int | Literal["auto"] = "auto",
+    shock_scale: float = 1.0,
+    x0: list[float] | NDF | None = None,
+    observables: bool = True,
 ) -> MCStep:
     """Simulate one replication's data by driving the DGP model with shocks.
 
@@ -27,39 +40,63 @@ def simulation_step(
 
     See ``operations.core`` for the shared data-source / output contract.
     """
+    step_kwargs = dict(
+        target=target,
+        T=T,
+        shocks=shocks,
+        seed_increment=seed_increment,
+        shock_scale=shock_scale,
+        x0=x0,
+        observables=observables,
+    )
+
     return MCStep(
         name=name,
         op_type=OpType.DATAGEN,
         func=simulate,
-        kwargs=kwargs,
+        kwargs=step_kwargs,
         step_type="simulation",
     )
 
 
-def raw_data_step(name: str = "datagen", **kwargs: Any) -> MCStep:
+def raw_model_data_step(
+    name: str = "datagen",
+    *,
+    states: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
+    observables: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
+    raw: Mapping[str, NDF] | None = None,
+    observable_names: Sequence[str] = (),
+) -> MCStep:
     """Feed pre-generated arrays as each replication's data (no simulation).
 
-    Signature: ``raw_data_step(name="datagen", *, states=None, observables=None,
-    n_exog=-1, raw=None, observable_names=())``.
+    Signature: ``raw_model_data_step(name="datagen", *, states=None, observables=None,
+    raw=None, observable_names=())``.
 
     Provide ``states``, ``observables``, or both; a leading replication axis is
     indexed by ``rep_idx`` (a 2-D array is reused across replications).
 
     Example:
-        >>> raw_data_step(observables=obs, observable_names=("y", "x"))
+        >>> raw_model_data_step(observables=obs, observable_names=("y", "x"))
 
     See ``operations.core`` for the shared data-source / output contract.
     """
     return MCStep(
         name=name,
         op_type=OpType.DATAGEN,
-        func=raw_data_datagen,
-        kwargs=kwargs,
-        step_type="raw_data",
+        func=raw_model_data_datagen,
+        kwargs={
+            "states": states,
+            "observables": observables,
+            "raw": raw,
+            "observable_names": observable_names,
+        },
+        step_type="raw_model_data",
     )
 
 
-def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
+def reference_filter_step(
+    name: str = "filter", **step_kwargs: dict[str, Any]
+) -> MCStep:
     """Kalman-filter each replication's observables with the reference model.
 
     Signature: ``reference_filter_step(name="filter", *, filter_mode="linear",
@@ -67,7 +104,7 @@ def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
     return_shocks=False, ...)``.
 
     Requires generated observables (run a DATAGEN step first); the resulting
-    ``FilterResult`` is read downstream via ``source="filter"``.
+    Raw filter output is read downstream with ``source=name, field=field``.
 
     Example:
         >>> reference_filter_step()
@@ -78,6 +115,25 @@ def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
         name=name,
         op_type=OpType.FILTER,
         func=run_reference_filter,
-        kwargs=kwargs,
+        kwargs=step_kwargs,
         step_type="filter",
+    )
+
+
+def add_payload_step(
+    name: str,
+    payload: NDF | Sequence[float] | Sequence[Sequence[float]],
+) -> MCStep:
+    """Add a replication-specific payload to the context.
+
+    Signature: ``add_payload(name, payload)``.
+
+    The ``payload`` is stored in ``context.payload[name]`` for that replication.
+    """
+    return MCStep(
+        name=name,
+        op_type=OpType.TRANSFORM,
+        func=add_payload,
+        kwargs={"value": payload},
+        step_type="payload",
     )

@@ -386,7 +386,7 @@ def evaluate_loglik(
             prepared_run.zero_state,
             calib_params,
         )
-        result = KalmanFilter.run(
+        result = KalmanFilter.run_raw(
             A=sol.A,
             B=sol.B,
             C=C,
@@ -404,7 +404,7 @@ def evaluate_loglik(
         return float64(result.loglik)
 
     if prepared_run.mode == "extended":
-        result = KalmanFilter.run_extended(
+        result = KalmanFilter.run_extended_raw(
             A=sol.A,
             B=sol.B,
             h=prepared_run.measurement_func,
@@ -481,7 +481,7 @@ def estimate_R_diag(
 
         def obj(eta: NDF) -> float64:
             R = np.diag(np.exp(eta))
-            run = KalmanFilter.run(
+            run = KalmanFilter.run_raw(
                 A=sol.A,
                 B=sol.B,
                 C=C,
@@ -502,7 +502,7 @@ def estimate_R_diag(
 
         def obj(eta: NDF) -> float64:
             R = np.diag(np.exp(eta))
-            run = KalmanFilter.run_extended(
+            run = KalmanFilter.run_extended_raw(
                 A=sol.A,
                 B=sol.B,
                 h=prepared.measurement_func,
@@ -699,7 +699,7 @@ def estimate_R(
 
     def loglik_for_R(R: NDF) -> float64:
         if prepared.mode == "linear":
-            run = KalmanFilter.run(
+            run = KalmanFilter.run_raw(
                 A=sol.A,
                 B=sol.B,
                 C=C,
@@ -716,7 +716,7 @@ def estimate_R(
             )
             return float64(run.loglik)
 
-        run = KalmanFilter.run_extended(
+        run = KalmanFilter.run_extended_raw(
             A=sol.A,
             B=sol.B,
             h=prepared.measurement_func,

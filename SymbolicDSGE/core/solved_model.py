@@ -37,7 +37,14 @@ from .simulation import (
 )
 from ..kalman.config import KalmanConfig
 from ..kalman.interface import KalmanInterface, _KFMatrices
-from ..kalman.filter import FilterResult, UnscentedFilterResult
+from ..kalman.filter import (
+    FilterRawResult,
+    FilterResult,
+    UnscentedFilterRawResult,
+    UnscentedFilterResult,
+    _filter_result_from_raw,
+    _unscented_filter_result_from_raw,
+)
 
 if TYPE_CHECKING:
     from ..regression.sr.config import TemplateConfig
@@ -128,9 +135,7 @@ class SolvedModel:
     def sim(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
-        ) = None,
+        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
         x0: list[float] | ndarray | None = None,
         observables: bool = False,
@@ -769,7 +774,42 @@ class SolvedModel:
         R_scale: float = 1.0,
         _debug: bool = False,
     ) -> FilterResult | UnscentedFilterResult:
+        raw = self._kalman_raw(
+            y=y,
+            filter_mode=filter_mode,
+            observables=observables,
+            x0=x0,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+            return_shocks=return_shocks,
+            R=R,
+            estimate_R_diag=estimate_R_diag,
+            R_scale=R_scale,
+            _debug=_debug,
+        )
+        if isinstance(raw, UnscentedFilterRawResult):
+            return _unscented_filter_result_from_raw(raw)
+        return _filter_result_from_raw(raw)
 
+    def _kalman_raw(
+        self,
+        y: NDF | pd.DataFrame,
+        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+        *,
+        observables: list[str] | None = None,
+        x0: NDF | None = None,
+        p0_mode: Literal["diag", "eye"] | None = None,
+        p0_scale: float | float64 | None = None,
+        jitter: float | float64 | None = None,
+        symmetrize: bool | None = None,
+        return_shocks: bool = False,
+        R: NDF | None = None,
+        estimate_R_diag: bool = False,
+        R_scale: float = 1.0,
+        _debug: bool = False,
+    ) -> FilterRawResult | UnscentedFilterRawResult:
         params = asarray(
             [self.config.calibration.parameters[p] for p in self.compiled.calib_params],
             dtype=float64,
@@ -821,7 +861,7 @@ class SolvedModel:
         if estimate_R_diag:
             ki._ML_estimate_R_diag(scale_factor=R_scale)
 
-        run = ki.filter(x0=x0, _debug=_debug)
+        run = ki.filter_raw(x0=x0, _debug=_debug)
         if _debug:
             print(ki._debug_info)
         return run

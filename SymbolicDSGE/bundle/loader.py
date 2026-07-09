@@ -68,8 +68,8 @@ class LoadedMC:
     raw ``spec`` stays available for the UI to consume.
 
     ``resources`` reattaches the bulk side-channels the spec references by key:
-    each ``raw_data`` ``data_ref`` maps to its restored ``{name: ndarray}`` arrays
-    and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
+    each ``raw_model_data`` ``data_ref`` maps to its restored ``{name: ndarray}``
+    arrays and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
 
     Recovered run artifacts of a POSTPROC phase: ``postproc_arrays`` (bulk ndarray
     artifacts) and ``postproc_tables`` (tabular/DataFrame artifacts as columnar
@@ -342,7 +342,7 @@ def _load_mc_resources(
 ) -> dict[str, Any]:
     """Restore the bulk side-channels referenced by the MC spec.
 
-    ``raw_data`` parquet members are reshaped using the ``data_shapes`` recorded
+    ``raw_model_data`` parquet members are reshaped using the ``data_shapes`` recorded
     on their spec node; ``custom`` op members are unpickled. Keyed by the node's
     ``data_ref`` / ``func_ref`` so :func:`build_pipeline` can reattach them.
     """
@@ -351,9 +351,9 @@ def _load_mc_resources(
     shapes_by_ref = {
         node.params["data_ref"]: node.params.get("data_shapes", {})
         for node in spec.nodes
-        if node.step_type == "raw_data" and "data_ref" in node.params
+        if node.step_type == "raw_model_data" and "data_ref" in node.params
     }
-    for member in manifest.members_by_kind("mc_raw_data"):
+    for member in manifest.members_by_kind("mc_raw_model_data"):
         ref = str(member.options.get("ref", ""))
         shapes = shapes_by_ref.get(ref, {})
         resources[ref] = arrays_from_parquet(archive.read(member.path), shapes)

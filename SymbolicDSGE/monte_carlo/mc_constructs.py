@@ -1,8 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from enum import StrEnum
-from typing import Any, Callable, Literal, Mapping, Protocol, Union
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Mapping,
+    NamedTuple,
+    Protocol,
+    Sequence,
+    Union,
+)
 
 import numpy as np
 from numpy import float64
@@ -12,7 +21,7 @@ from .._diag_tests.result import MCResult, TestResult
 from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
-from ..kalman.filter import FilterResult
+from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.enums import RegressionStatus
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
@@ -20,22 +29,14 @@ from .custom_op import PandasCustomFunc
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
+ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
+CompiledColumnSelector = Sequence[int] | slice | None
 ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
 SeedIncrement = Union[int, Literal["auto"]]
 
 
-class OpType(StrEnum):
-    DATAGEN = "datagen"
-    TRANSFORM = "transform"
-    FILTER = "filter"
-    TEST = "test"
-    REGRESSION = "regression"
-    POSTPROC = "postproc"
-
-
-@dataclass(frozen=True)
-class MCData:
+class MCData(NamedTuple):
     """One Monte Carlo replication's data payload.
 
     Produced by a DATAGEN step and exposed to per-replication ops as
@@ -51,17 +52,63 @@ class MCData:
     states: NDF | None = None
     observables: NDF | None = None
     n_exog: int = -1
-    raw: Mapping[str, NDF] = field(default_factory=dict)
+    raw: Mapping[str, NDF] = {}
     observable_names: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class DataGenReturn:
-    """Legacy simulation-data container kept for compatibility."""
+MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")
+DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
+FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = UnscentedFilterRawResult._fields
+FILTER_SOURCE_FIELDS: tuple[str, ...] = (
+    "x_pred",
+    "x_filt",
+    "x1_pred",
+    "x2_pred",
+    "x1_filt",
+    "x2_filt",
+    "y_pred",
+    "y_filt",
+    "innov",
+    "std_innov",
+    "eps_hat",
+)
 
-    state_mat: NDF | None
-    obs_mat: NDF | None
-    n_exog: int
+MC_DATA_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(MC_DATA_SOURCE_FIELDS)
+}
+DYNAMIC_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(DYNAMIC_SOURCE_FIELDS)
+}
+FILTER_RAW_FIELD_INDEX: dict[str, int] = {
+    field: index for index, field in enumerate(FILTER_RAW_SOURCE_FIELDS)
+}
+
+
+# Array-valued sources currently exposed to MC operations and the catalogue.
+ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
+    "states",
+    "observables",
+    "x_pred",
+    "x_filt",
+    "x1_pred",
+    "x2_pred",
+    "x1_filt",
+    "x2_filt",
+    "y_pred",
+    "y_filt",
+    "innov",
+    "std_innov",
+    "eps_hat",
+)
+
+
+class OpType(StrEnum):
+    DATAGEN = "datagen"
+    TRANSFORM = "transform"
+    FILTER = "filter"
+    TEST = "test"
+    REGRESSION = "regression"
+    POSTPROC = "postproc"
 
 
 @dataclass
@@ -84,9 +131,10 @@ class MCContext:
     reference: SolvedModel
     dgp: SolvedModel | None
     data: MCData | None = None
-    payloads: dict[str, Any] = field(default_factory=dict)
-    results: dict[str, TestResult] = field(default_factory=dict)
-    regressions: dict[str, RegressionResult] = field(default_factory=dict)
+    payload_slots: list[Any] = dataclass_field(default_factory=list)
+    payloads: dict[str, Any] = dataclass_field(default_factory=dict)
+    results: dict[str, TestResult] = dataclass_field(default_factory=dict)
+    regressions: dict[str, RegressionResult] = dataclass_field(default_factory=dict)
 
     def require_data(self) -> MCData:
         """Return ``data``, raising if no DATAGEN step has populated it yet."""
@@ -135,7 +183,7 @@ class FilterOp(Protocol):
         dgp: SolvedModel | None,
         rep_idx: int,
         **kwargs: Any,
-    ) -> FilterResult: ...
+    ) -> FilterRawResult | UnscentedFilterRawResult: ...
 
 
 class TestOp(Protocol):
@@ -162,12 +210,51 @@ class RegressionOp(Protocol):
     ) -> RegressionResult: ...
 
 
+SOURCE_KIND_DATA = 0
+SOURCE_KIND_PAYLOAD = 1
+SOURCE_KIND_FILTER = 2
+
+
+@dataclass(frozen=True, slots=True)
+class SourceArgs:
+    arg: str
+    source_step: str
+    source_idx: int
+    source_kind: int
+    field: str
+    field_idx: int
+    columns: ColumnSelector = None
+    column_selector: Sequence[int] | slice = dataclass_field(
+        default_factory=lambda: slice(None)
+    )
+    row_start: int = 0
+
+    burn_in: int = 0
+    drop_initial: bool = False
+
+    def __post_init__(self) -> None:
+        columns = _normalize_columns(self.columns)
+        row_start = int(self.burn_in)
+        if row_start < 0:
+            raise ValueError("burn_in must be non-negative.")
+        if self.drop_initial and row_start == 0:
+            row_start = 1
+        object.__setattr__(self, "columns", columns)
+        object.__setattr__(
+            self,
+            "column_selector",
+            columns if columns is not None else slice(None),
+        )
+        object.__setattr__(self, "row_start", row_start)
+
+
 @dataclass(frozen=True)
 class MCStep:
     name: str
     op_type: OpType
     func: Callable[..., Any]
-    kwargs: Mapping[str, Any] = field(default_factory=dict)
+    kwargs: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    source_args: tuple[SourceArgs, ...] = ()
     store_key: str | None = None
     #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
     #: or ``"custom"`` for user-supplied ops. Stamped by the step factories;
@@ -181,6 +268,7 @@ class MCStep:
             raise ValueError("MCStep name must be non-empty.")
         object.__setattr__(self, "op_type", OpType(self.op_type))
         object.__setattr__(self, "kwargs", dict(self.kwargs))
+        object.__setattr__(self, "source_args", tuple(self.source_args))
         # The pandas namespace is a post-loop-only privilege: a PandasCustomFunc
         # in a per-rep step would reference pandas inside the replication loop,
         # which the looser contract is not meant to sanction.
@@ -197,6 +285,72 @@ class MCStep:
     @property
     def output_key(self) -> str:
         return self.store_key if self.store_key is not None else self.name
+
+
+def _compile_source_args(
+    *,
+    arg: str,
+    source: str,
+    field: str,
+    columns: ColumnSelector = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+) -> SourceArgs:
+    source_step = str(source)
+    if not source_step:
+        raise ValueError("source must be non-empty.")
+    source_field = str(field)
+    if source_field in MC_DATA_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_DATA,
+            field=source_field,
+            field_idx=MC_DATA_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+    if source_field in FILTER_RAW_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_FILTER,
+            field=source_field,
+            field_idx=FILTER_RAW_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+
+    if source_field in DYNAMIC_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_PAYLOAD,
+            field=source_field,
+            field_idx=DYNAMIC_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+
+    raise ValueError(f"Unknown MC source field: {source_field!r}.")
+
+
+def _normalize_columns(value: ColumnSelector) -> CompiledColumnSelector:
+    if value is None or isinstance(value, slice):
+        return value
+    if isinstance(value, int):
+        return (value,)
+    if isinstance(value, np.ndarray):
+        return tuple(int(item) for item in value.tolist())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(int(item) for item in value)
+    raise TypeError("Column selectors must be an int, a sequence of ints, or a slice.")
 
 
 @dataclass(frozen=True)
@@ -219,15 +373,15 @@ class MCMeta:
     #: Post-loop aggregation and postproc are excluded (see ``postproc_elapsed_s``).
     elapsed_s: float = 0.0
     #: Per-replication step timings (postproc excluded; see ``postproc_elapsed_s``).
-    step_elapsed_s: Mapping[str, float] = field(default_factory=dict)
-    step_counts: Mapping[str, int] = field(default_factory=dict)
-    step_failures: Mapping[str, int] = field(default_factory=dict)
+    step_elapsed_s: Mapping[str, float] = dataclass_field(default_factory=dict)
+    step_counts: Mapping[str, int] = dataclass_field(default_factory=dict)
+    step_failures: Mapping[str, int] = dataclass_field(default_factory=dict)
     #: Wall-clock seconds per post-loop (``OpType.POSTPROC``) step. Postproc runs
     #: once, so it is reported as runtime only, never folded into the it/s rates.
-    postproc_elapsed_s: Mapping[str, float] = field(default_factory=dict)
+    postproc_elapsed_s: Mapping[str, float] = dataclass_field(default_factory=dict)
 
-    failed_steps: dict[str, int] = field(default_factory=dict)
-    failed_postprocs: set[str] = field(default_factory=set)
+    failed_steps: dict[str, int] = dataclass_field(default_factory=dict)
+    failed_postprocs: set[str] = dataclass_field(default_factory=set)
 
     @property
     def it_s(self) -> float:
@@ -237,7 +391,7 @@ class MCMeta:
     def step_it_s(self) -> Mapping[str, float]:
         return {
             name: _iterations_per_second(
-                self.step_counts.get(name, 0),
+                self.step_counts[name],
                 elapsed_s,
             )
             for name, elapsed_s in self.step_elapsed_s.items()
@@ -269,12 +423,14 @@ class MCPipelineResult:
     payloads: tuple[Mapping[str, Any], ...] | None
     contexts: tuple[MCContext, ...] | None
     failures: tuple[MCFailure, ...] = ()
-    regression_summaries: Mapping[str, MCRegressionResult] = field(default_factory=dict)
+    regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
+        default_factory=dict
+    )
 
     #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name (or
     #: ``"<step>.<key>"`` for multi-artifact ops). Values are
     #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
-    postproc: Mapping[str, Any] = field(default_factory=dict)
+    postproc: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
@@ -377,8 +533,8 @@ def report_mc_step_performance(
     print_func(f"Per-step Report:\n")
     for step_name in meta.step_elapsed_s:
         print_func(
-            f"\t{step_name}: {meta.failed_steps.get(step_name, 0)} faliures, "
-            f"{step_rates.get(step_name, 0.0):.2f} it/s ({meta.step_elapsed_s.get(step_name, 0.0):.2f}s)."
+            f"\t{step_name}: {meta.step_failures[step_name]} faliures, "
+            f"{step_rates[step_name]:.2f} it/s ({meta.step_elapsed_s[step_name]:.2f}s)."
         )
 
     if meta.postproc_elapsed_s:

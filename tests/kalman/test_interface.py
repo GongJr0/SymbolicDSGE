@@ -10,6 +10,7 @@ import pytest
 from sympy import Symbol
 
 import SymbolicDSGE.kalman.interface as interface_module
+from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.kalman.interface import KalmanInterface
 from SymbolicDSGE.kalman.validator import FilterMode
 
@@ -22,6 +23,55 @@ SIG_V = Symbol("sig_v")
 RHO_UV = Symbol("rho_uv")
 MEAS_A = Symbol("meas_a")
 MEAS_B = Symbol("meas_b")
+
+
+def _raw_filter_result(T: int = 2, n: int = 3, m: int = 1) -> FilterRawResult:
+    x = np.zeros((T, n), dtype=FLOAT)
+    y = np.zeros((T, m), dtype=FLOAT)
+    P = np.zeros((T, n, n), dtype=FLOAT)
+    S = np.zeros((T, m, m), dtype=FLOAT)
+    return FilterRawResult(
+        x_pred=x,
+        x_filt=x,
+        P_pred=P,
+        P_filt=P,
+        y_pred=y,
+        y_filt=y,
+        innov=y,
+        std_innov=y,
+        S=S,
+        eps_hat=None,
+        loglik=FLOAT(0.0),
+    )
+
+
+def _raw_unscented_result(
+    T: int = 2,
+    n_state: int = 2,
+    n_var: int = 3,
+) -> UnscentedFilterRawResult:
+    x = np.zeros((T, n_var), dtype=FLOAT)
+    xb = np.zeros((T, n_state), dtype=FLOAT)
+    y = np.zeros((T, 1), dtype=FLOAT)
+    P = np.zeros((T, 2 * n_state, 2 * n_state), dtype=FLOAT)
+    S = np.zeros((T, 1, 1), dtype=FLOAT)
+    return UnscentedFilterRawResult(
+        x_pred=x,
+        x_filt=x,
+        x1_pred=xb,
+        x2_pred=xb,
+        x1_filt=xb,
+        x2_filt=xb,
+        P_pred=P,
+        P_filt=P,
+        y_pred=y,
+        y_filt=y,
+        innov=y,
+        std_innov=y,
+        S=S,
+        eps_hat=None,
+        loglik=FLOAT(0.0),
+    )
 
 
 def _make_stub_model(
@@ -605,27 +655,66 @@ def test_filter_dispatches_linear_run_and_populates_debug_info(monkeypatch):
     def fake_validate(**kwargs):
         captured["validate"] = kwargs
 
-    def fake_run(**kwargs):
-        captured["run"] = kwargs
-        return "linear-run"
+    def fake_run_raw(**kwargs):
+        captured["run_raw"] = kwargs
+        return _raw_filter_result()
 
     monkeypatch.setattr(interface_module, "validate_kf_inputs", fake_validate)
-    monkeypatch.setattr(KalmanInterface, "run", staticmethod(fake_run))
+    monkeypatch.setattr(KalmanInterface, "run_raw", staticmethod(fake_run_raw))
 
     out = ki.filter(
         _debug=True,
         _arg_overrides={"R": np.array([[0.25]], dtype=FLOAT)},
     )
 
-    assert out == "linear-run"
+    np.testing.assert_allclose(out.x_pred, np.zeros((2, 3), dtype=FLOAT))
     assert np.array_equal(captured["validate"]["x0"], np.zeros((3,), dtype=FLOAT))
     assert captured["validate"]["filter_mode"] == FilterMode.LINEAR
     assert captured["validate"]["probe_measurement"] is False
     assert np.array_equal(captured["validate"]["R"], np.array([[0.25]], dtype=FLOAT))
-    assert captured["run"]["jitter"] == pytest.approx(0.5)
-    assert captured["run"]["symmetrize"] is False
-    assert captured["run"]["return_shocks"] is True
-    assert np.array_equal(captured["run"]["R"], np.array([[0.25]], dtype=FLOAT))
+    assert captured["run_raw"]["jitter"] == pytest.approx(0.5)
+    assert captured["run_raw"]["symmetrize"] is False
+    assert captured["run_raw"]["return_shocks"] is True
+    assert np.array_equal(captured["run_raw"]["R"], np.array([[0.25]], dtype=FLOAT))
+    assert ki._debug_info is not None
+    assert np.array_equal(ki._debug_info.x0, np.zeros((3,), dtype=FLOAT))
+
+
+def test_filter_raw_dispatches_linear_run_raw(monkeypatch):
+    ki = KalmanInterface(
+        model=_make_stub_model(),
+        observables=["ObsA"],
+        y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        filter_mode="linear",
+        jitter=0.5,
+        symmetrize=False,
+        return_shocks=True,
+    )
+    captured = {}
+
+    def fake_validate(**kwargs):
+        captured["validate"] = kwargs
+
+    def fake_run_raw(**kwargs):
+        captured["run_raw"] = kwargs
+        return _raw_filter_result()
+
+    monkeypatch.setattr(interface_module, "validate_kf_inputs", fake_validate)
+    monkeypatch.setattr(KalmanInterface, "run_raw", staticmethod(fake_run_raw))
+
+    out = ki.filter_raw(
+        _debug=True,
+        _arg_overrides={"R": np.array([[0.25]], dtype=FLOAT)},
+    )
+
+    assert isinstance(out, FilterRawResult)
+    assert np.array_equal(captured["validate"]["x0"], np.zeros((3,), dtype=FLOAT))
+    assert captured["validate"]["filter_mode"] == FilterMode.LINEAR
+    assert captured["validate"]["probe_measurement"] is False
+    assert captured["run_raw"]["jitter"] == pytest.approx(0.5)
+    assert captured["run_raw"]["symmetrize"] is False
+    assert captured["run_raw"]["return_shocks"] is True
+    assert np.array_equal(captured["run_raw"]["R"], np.array([[0.25]], dtype=FLOAT))
     assert ki._debug_info is not None
     assert np.array_equal(ki._debug_info.x0, np.zeros((3,), dtype=FLOAT))
 
@@ -645,27 +734,27 @@ def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch
     def fake_validate(**kwargs):
         captured["validate"] = kwargs
 
-    def fake_run_extended(**kwargs):
-        captured["run_extended"] = kwargs
-        return "extended-run"
+    def fake_run_extended_raw(**kwargs):
+        captured["run_extended_raw"] = kwargs
+        return _raw_filter_result()
 
     monkeypatch.setattr(interface_module, "validate_kf_inputs", fake_validate)
     monkeypatch.setattr(
-        KalmanInterface, "run_extended", staticmethod(fake_run_extended)
+        KalmanInterface, "run_extended_raw", staticmethod(fake_run_extended_raw)
     )
 
     out = ki.filter(x0=np.ones((3,), dtype=FLOAT))
 
-    assert out == "extended-run"
+    np.testing.assert_allclose(out.x_pred, np.zeros((2, 3), dtype=FLOAT))
     assert captured["validate"]["filter_mode"] == FilterMode.EXTENDED
     assert captured["validate"]["probe_measurement"] is True
     assert np.array_equal(captured["validate"]["x0"], np.ones((3,), dtype=FLOAT))
     assert "C" not in captured["validate"]
     assert "d" not in captured["validate"]
-    assert captured["run_extended"]["h"] is ki.h_func
-    assert captured["run_extended"]["H_jac"] is ki.H_jac
+    assert captured["run_extended_raw"]["h"] is ki.h_func
+    assert captured["run_extended_raw"]["H_jac"] is ki.H_jac
     assert np.array_equal(
-        captured["run_extended"]["calib_params"],
+        captured["run_extended_raw"]["calib_params"],
         np.array([0.5], dtype=FLOAT),
     )
 
@@ -687,19 +776,19 @@ def test_filter_dispatches_unscented_and_populates_debug_info(monkeypatch):
     )
     captured = {}
 
-    def fake_run_unscented(**kwargs):
-        captured["run_unscented"] = kwargs
-        return "ukf-run"
+    def fake_run_unscented_raw(**kwargs):
+        captured["run_unscented_raw"] = kwargs
+        return _raw_unscented_result()
 
     monkeypatch.setattr(
-        KalmanInterface, "run_unscented", staticmethod(fake_run_unscented)
+        KalmanInterface, "run_unscented_raw", staticmethod(fake_run_unscented_raw)
     )
 
     x0 = np.array([0.2, 0.3, 99.0], dtype=FLOAT)
     out = ki.filter(x0=x0, _debug=True)
 
-    assert out == "ukf-run"
-    run_args = captured["run_unscented"]
+    np.testing.assert_allclose(out.x_pred, np.zeros((2, 3), dtype=FLOAT))
+    run_args = captured["run_unscented_raw"]
     assert run_args["meas_addr"] == 123
     assert np.array_equal(run_args["z0"], np.array([0.2, 0.3, 0.0, 0.0]))
     assert np.array_equal(run_args["bx"], np.eye(2, dtype=FLOAT))
@@ -744,7 +833,7 @@ def test_ml_estimate_r_diag_success_path(monkeypatch):
     captured = {"filter_calls": []}
     printed = []
 
-    def fake_filter(self, x0=None, _debug=False, _arg_overrides=None):
+    def fake_filter_raw(self, x0=None, _debug=False, _arg_overrides=None):
         captured["filter_calls"].append(
             {
                 "x0": x0.copy(),
@@ -765,7 +854,7 @@ def test_ml_estimate_r_diag_success_path(monkeypatch):
             fun=-4.5,
         )
 
-    monkeypatch.setattr(KalmanInterface, "filter", fake_filter)
+    monkeypatch.setattr(KalmanInterface, "filter_raw", fake_filter_raw)
     monkeypatch.setattr(interface_module.optimize, "minimize", fake_minimize)
     monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
 
@@ -805,7 +894,7 @@ def test_ml_estimate_r_diag_warning_path(monkeypatch):
     )
     printed = []
 
-    def fake_filter(self, x0=None, _debug=False, _arg_overrides=None):
+    def fake_filter_raw(self, x0=None, _debug=False, _arg_overrides=None):
         return SimpleNamespace(loglik=-float(np.trace(_arg_overrides["R"])))
 
     def fake_minimize(obj, x0, bounds, method):
@@ -817,7 +906,7 @@ def test_ml_estimate_r_diag_warning_path(monkeypatch):
             message="stalled",
         )
 
-    monkeypatch.setattr(KalmanInterface, "filter", fake_filter)
+    monkeypatch.setattr(KalmanInterface, "filter_raw", fake_filter_raw)
     monkeypatch.setattr(interface_module.optimize, "minimize", fake_minimize)
     monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
 
@@ -841,11 +930,11 @@ def test_filter_uses_current_self_r_after_validated_args_access(monkeypatch):
 
     captured = {}
 
-    def fake_run(*, R, **kwargs):
+    def fake_run_raw(*, R, **kwargs):
         captured["R"] = R.copy()
-        return SimpleNamespace(loglik=np.float64(0.0))
+        return _raw_filter_result()
 
-    monkeypatch.setattr(KalmanInterface, "run", staticmethod(fake_run))
+    monkeypatch.setattr(KalmanInterface, "run_raw", staticmethod(fake_run_raw))
 
     ki.filter(x0=np.zeros((3,), dtype=FLOAT))
 

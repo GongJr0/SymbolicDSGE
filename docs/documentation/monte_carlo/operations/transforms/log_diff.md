@@ -8,7 +8,13 @@ tags:
 ```python
 log_diff_step(
     name: str,
-    **kwargs: Any,
+    *,
+    source: str,
+    field: str,
+    columns: int | Sequence[int] | slice | ndarray | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    offset: float = 0.0,
 ) -> MCStep
 ```
 
@@ -24,13 +30,11 @@ __Key Parameters:__
 
 | __Name__ | __Default__ | __Description__ |
 |:---------|:-----------:|----------------:|
-| source | required | Input source channel. |
-| filter_key | `"filter"` | Filter result key when reading filter output. |
-| payload_key | `None` | Producer payload key when `source="payload"`. |
+| source | required | Producer step name. |
+| field | required | Producer field. Use `states` or `observables` for data steps, a filter output field for filter steps, or `payload` for transform steps. |
 | columns | `None` | Optional column subset. |
 | burn_in | `0` | Rows dropped before transformation. |
-| drop_initial | `False` | Drop the initial state row for state inputs. |
+| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | offset | `0.0` | Constant added before taking logs. |
 
-The output is stored in the step payload and can be consumed downstream with `source="payload"`.
-
+The output is stored in the step payload and can be consumed downstream with `source` set to this step name and `field="payload"`.

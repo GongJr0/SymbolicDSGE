@@ -15,7 +15,7 @@ from SymbolicDSGE.monte_carlo import (
     PipelineSpec,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
-from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
@@ -74,17 +74,21 @@ def _postproc_result() -> MCPipelineResult:
 def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
     rng = np.random.default_rng(0)
     T = 60
-    x = rng.normal(size=(n_rep, T))
-    y = 2.0 * x + rng.normal(size=(n_rep, T))
-    observables = np.stack([y, x], axis=-1)  # (n_rep, T, 2): col 0 = y, col 1 = x
+    x = rng.normal(size=T)
+    y = 2.0 * x + rng.normal(size=T)
+    observables = np.column_stack([y, x])
     pipeline = MCPipeline(
         [
-            raw_data_step(observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            raw_model_data_step(observables=observables, observable_names=("y", "x")),
+            jarque_bera_test_step(
+                "jb", source="datagen", field="observables", column=0
+            ),
             regression_step(
                 "ols",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1],
                 variables=["x"],
@@ -306,7 +310,7 @@ def test_pipeline_spec_round_trips() -> None:
                 id="n1",
                 step_type="jarque_bera",
                 name="jb",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
         ],
         edges=[EdgeSpec(source="n0", target="n1")],

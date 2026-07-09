@@ -34,7 +34,7 @@ Return the cached dependency graph inferred from `per_rep_steps` (postprocs are 
 MCPipeline.to_spec() -> PipelineSpec
 ```
 
-Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channels are referenced by key: `raw_data` arrays and custom callables are written as separate bundle members by `BundleBuilder.add_mc(...)`.
+Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channels are referenced by key: `raw_model_data` arrays and custom callables are written as separate bundle members by `BundleBuilder.add_mc(...)`.
 
 `PipelineSpec` is the archive and UI representation. A bundle loaded back into Python reconstructs a live `LoadedMC.pipeline`.
 
@@ -57,7 +57,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | reference | Reference `SolvedModel` used by reference-side operations such as Kalman filtering. |
-| dgp | Optional DGP `SolvedModel`. Required by `simulation_step` when it targets the DGP (`target="dgp"`, the default); not required for `target="reference"` or `raw_data_step`. |
+| dgp | Optional DGP `SolvedModel`. Required by `simulation_step` when it targets the DGP (`target="dgp"`, the default); not required for `target="reference"` or `raw_model_data_step`. |
 | n_rep | Number of Monte Carlo replications. |
 | retain_payloads | Store each successful replication's payload dictionary in the result container. |
 | retain_test_results | Store scalar `TestResult` objects from each successful replication. |

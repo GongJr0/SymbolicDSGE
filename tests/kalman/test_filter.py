@@ -11,9 +11,11 @@ from SymbolicDSGE.kalman.config import make_R
 from SymbolicDSGE.kalman.errors import ErrorCode, get_error_constructor
 from SymbolicDSGE.kalman.filter import (
     ComplexMatrixError,
+    FilterRawResult,
     KalmanFilter,
     MatrixConditionError,
     ShapeMismatchError,
+    UnscentedFilterRawResult,
 )
 
 
@@ -141,6 +143,47 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     assert np.allclose(out.P_filt, np.transpose(out.P_filt, (0, 2, 1)))
 
 
+def test_run_raw_linear_matches_public_result():
+    A, B, C, d, Q, R = _linear_system_1d()
+    y = np.zeros((5, 1), dtype=float64)
+    x0 = np.array([2.0], dtype=float64)
+    P0 = np.array([[1.0]], dtype=float64)
+
+    raw = KalmanFilter.run_raw(
+        A,
+        B,
+        C,
+        d,
+        Q,
+        R,
+        y,
+        x0=x0,
+        P0=P0,
+        return_shocks=True,
+    )
+    public = KalmanFilter.run(
+        A,
+        B,
+        C,
+        d,
+        Q,
+        R,
+        y,
+        x0=x0,
+        P0=P0,
+        return_shocks=True,
+    )
+
+    assert isinstance(raw, FilterRawResult)
+    assert raw.eps_hat is not None
+    np.testing.assert_allclose(raw.x_pred, public.x_pred)
+    np.testing.assert_allclose(raw.x_filt, public.x_filt)
+    np.testing.assert_allclose(raw.innov, public.innov)
+    np.testing.assert_allclose(raw.std_innov, public.std_innov)
+    np.testing.assert_allclose(raw.S, public.S)
+    assert raw.loglik == pytest.approx(public.loglik)
+
+
 def test_run_linear_can_skip_history_storage_for_loglik_only_path():
     A, B, C, d, Q, R = _linear_system_1d()
     y = np.zeros((5, 1), dtype=float64)
@@ -249,6 +292,23 @@ def test_run_unscented_outputs_shapes_and_projected_fields():
     np.testing.assert_allclose(out.P_filt, np.transpose(out.P_filt, (0, 2, 1)))
 
 
+def test_run_raw_unscented_matches_public_result():
+    pytest.importorskip("SymbolicDSGE._ckernels.kalman")
+    kwargs = _ukf_system_1d()
+
+    raw = KalmanFilter.run_unscented_raw(**kwargs)
+    public = KalmanFilter.run_unscented(**kwargs)
+
+    assert isinstance(raw, UnscentedFilterRawResult)
+    np.testing.assert_allclose(raw.x_pred, public.x_pred)
+    np.testing.assert_allclose(raw.x_filt, public.x_filt)
+    np.testing.assert_allclose(raw.x1_pred, public.x1_pred)
+    np.testing.assert_allclose(raw.x2_pred, public.x2_pred)
+    np.testing.assert_allclose(raw.y_pred, public.y_pred)
+    np.testing.assert_allclose(raw.y_filt, public.y_filt)
+    assert raw.loglik == pytest.approx(public.loglik)
+
+
 def test_run_unscented_can_skip_history_storage_for_loglik_only_path():
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
     kwargs = _ukf_system_1d()
@@ -323,6 +383,52 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
     assert np.allclose(extended.y_pred, linear.y_pred)
     assert np.allclose(extended.P_filt, linear.P_filt)
     assert np.allclose(extended.loglik, linear.loglik)
+
+
+def test_run_raw_extended_matches_public_result():
+    A, B, _, _, Q, R = _linear_system_1d()
+    y = np.zeros((5, 1), dtype=float64)
+    x0 = np.array([1.5], dtype=float64)
+    P0 = np.array([[0.7]], dtype=float64)
+    calib = np.array([0.0], dtype=float64)
+
+    def h_scalar(x, bias):
+        return np.array([x + bias], dtype=float64)
+
+    def H_scalar(x, bias):
+        return np.array([[1.0]], dtype=float64)
+
+    raw = KalmanFilter.run_extended_raw(
+        A,
+        B,
+        h_scalar,
+        H_scalar,
+        calib,
+        Q,
+        R,
+        y,
+        x0=x0,
+        P0=P0,
+    )
+    public = KalmanFilter.run_extended(
+        A,
+        B,
+        h_scalar,
+        H_scalar,
+        calib,
+        Q,
+        R,
+        y,
+        x0=x0,
+        P0=P0,
+    )
+
+    assert isinstance(raw, FilterRawResult)
+    np.testing.assert_allclose(raw.x_pred, public.x_pred)
+    np.testing.assert_allclose(raw.x_filt, public.x_filt)
+    np.testing.assert_allclose(raw.y_pred, public.y_pred)
+    np.testing.assert_allclose(raw.innov, public.innov)
+    assert raw.loglik == pytest.approx(public.loglik)
 
 
 def test_run_extended_can_skip_history_storage_for_loglik_only_path():

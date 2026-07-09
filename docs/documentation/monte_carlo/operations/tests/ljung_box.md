@@ -9,20 +9,9 @@ tags:
 ljung_box_test_step(
     name: str,
     *,
-    source: Literal[
-        "states",
-        "observables",
-        "x_pred",
-        "x_filt",
-        "y_pred",
-        "y_filt",
-        "innov",
-        "std_innov",
-        "payload",
-    ],
-    filter_key: str = "filter",
-    payload_key: str | None = None,
-    column: Sequence[int] | int | None = None,
+    source: str,
+    field: str,
+    column: int | Sequence[int] | slice | ndarray | None = None,
     burn_in: int = 0,
     drop_initial: bool = False,
     lags: int = 10,
@@ -30,17 +19,19 @@ ljung_box_test_step(
 ) -> MCStep
 ```
 
-`ljung_box_test_step` wraps `run_ljung_box_test(...)`. It selects a 1D array from generated data, a `FilterResult`, or a named payload, then runs the Ljung-Box test for autocorrelation up to the specified number of lags.
+`ljung_box_test_step` wraps `run_ljung_box_test(...)`. It selects one series from a producer step and runs the Ljung-Box test for autocorrelation up to the specified number of lags.
 
 ???+ warning "Lag Handling"
-    - If `lags` is greater than the length of the input array minus `burn_in`, the test will run up to the maximum possible lag.
-    - There is no automatic lag selection heuristic, if `lags` isn't specified, the default value of `10` is used regardless of the input array length.
+    If `lags` is greater than the selected sample length, the test runs up to the maximum possible lag. There is no automatic lag selection heuristic.
 
-__Sources:__
+__Inputs:__
 
-| __Source__ | __Description__ |
-|:-----------|----------------:|
-| `states` | Use `context.data.states`. Set `drop_initial=True` to remove the initial state row. |
-| `observables` | Use `context.data.observables`. |
-| `x_pred`, `x_filt`, `y_pred`, `y_filt`, `innov`, `std_innov` | Read arrays from the `FilterResult` stored under `filter_key`. |
-| `payload` | Read an array-like object from `context.payloads[payload_key]`. |
+| __Name__ | __Default__ | __Description__ |
+|:---------|:-----------:|----------------:|
+| source | required | Producer step name. |
+| field | required | Producer field. Use `states` or `observables` for data steps, a filter output field for filter steps, or `payload` for transform steps. |
+| column | `None` | Column selector. It must resolve to one series. |
+| burn_in | `0` | Rows dropped before the test. |
+| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
+| lags | `10` | Maximum autocorrelation lag. |
+| alpha | `0.05` | Test size. |

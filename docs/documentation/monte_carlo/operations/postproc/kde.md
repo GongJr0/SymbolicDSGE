@@ -16,8 +16,8 @@ kde_step(
 
 It reads `traces[trace]` (a stacked across-replication array), estimates its density on a uniform grid spanning the finite data range, and emits two artifacts keyed under the step name:
 
-- `#!python "<name>.curve"` — a `Raw` `N x 2` array of `(x, density)` for plotting;
-- `#!python "<name>.descriptives"` — a `Summary` table of the trace's moments and quantiles (`count`, `mean`, `std`, `min`, `q25`, `median`, `q75`, `max`).
+- `#!python "<name>.curve"`: a `Raw` `N x 2` array of `(x, density)` for plotting.
+- `#!python "<name>.descriptives"`: a `Summary` table of the trace's moments and quantiles (`count`, `mean`, `std`, `min`, `q25`, `median`, `q75`, `max`).
 
 __Key Parameters:__
 

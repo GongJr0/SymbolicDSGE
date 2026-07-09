@@ -448,7 +448,7 @@ _POSTPROC_PIPELINE = {
             "id": "jb",
             "step_type": "jarque_bera",
             "name": "jb",
-            "params": {"source": "observables", "column": 0},
+            "params": {"source": "datagen", "field": "observables", "column": 0},
         },
     ],
     "edges": [{"source": "sim", "target": "jb"}],
@@ -541,7 +541,8 @@ def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
                 "step_type": "ljung_box",
                 "name": "a",
                 "params": {
-                    "source": "states",
+                    "source": "datagen",
+                    "field": "states",
                     "column": [0],
                     "lags": 1,
                 },
@@ -551,7 +552,8 @@ def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
                 "step_type": "ljung_box",
                 "name": "b",
                 "params": {
-                    "source": "states",
+                    "source": "datagen",
+                    "field": "states",
                     "column": [1],
                     "lags": 1,
                 },
@@ -615,7 +617,8 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
                 "step_type": "jarque_bera",
                 "name": "normality",
                 "params": {
-                    "source": "states",
+                    "source": "datagen",
+                    "field": "states",
                     "column": [0],
                     "burn_in": 1,
                     "alpha": 0.1,
@@ -673,8 +676,10 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "step_type": "breusch_pagan",
                 "name": "heteroskedasticity",
                 "params": {
-                    "residual_source": "states",
-                    "X_source": "states",
+                    "residuals_source": "datagen",
+                    "residuals_field": "states",
+                    "X_source": "datagen",
+                    "X_field": "states",
                     "residual_col": [0],
                     "X_columns": [1],
                     "burn_in": 1,
@@ -735,8 +740,10 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "step_type": "breusch_godfrey",
                 "name": "serial_correlation",
                 "params": {
-                    "residual_source": "states",
-                    "X_source": "states",
+                    "residuals_source": "datagen",
+                    "residuals_field": "states",
+                    "X_source": "datagen",
+                    "X_field": "states",
                     "residual_col": [0],
                     "X_columns": [1],
                     "burn_in": 1,
@@ -797,8 +804,10 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "step_type": "cusum",
                 "name": "stability",
                 "params": {
-                    "y_source": "states",
-                    "x_source": "states",
+                    "y_source": "datagen",
+                    "y_field": "states",
+                    "X_source": "datagen",
+                    "X_field": "states",
                     "y_column": [0],
                     "X_columns": [1],
                     "burn_in": 1,
@@ -857,8 +866,10 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "step_type": "cusumsq",
                 "name": "variance_stability",
                 "params": {
-                    "y_source": "states",
-                    "x_source": "states",
+                    "y_source": "datagen",
+                    "y_field": "states",
+                    "X_source": "datagen",
+                    "X_field": "states",
                     "y_column": [0],
                     "X_columns": [1],
                     "burn_in": 1,
@@ -917,8 +928,10 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "step_type": "chow",
                 "name": "structural_break",
                 "params": {
-                    "y_source": "states",
-                    "x_source": "states",
+                    "y_source": "datagen",
+                    "y_field": "states",
+                    "X_source": "datagen",
+                    "X_field": "states",
                     "y_column": [0],
                     "X_columns": [1],
                     "t_break": 10,
@@ -1068,8 +1081,10 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
                     "step_type": "breusch_pagan",
                     "name": "diagnostic",
                     "params": {
-                        "residual_source": "std_innov",
-                        "X_source": "observables",
+                        "residuals_source": "renamed_filter",
+                        "residuals_field": "std_innov",
+                        "X_source": "datagen",
+                        "X_field": "observables",
                         "residual_col": [0],
                         "X_columns": [0],
                     },
@@ -1085,18 +1100,12 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
     assert [node.id for node in ordered] == ["sim", "filter", "test"]
-    assert ordered[-1].params["filter_key"] == "renamed_filter"
+    assert ordered[-1].params["residuals_source"] == "renamed_filter"
 
-    direct = spec.model_copy(
-        update={
-            "edges": [
-                spec.edges[0],
-                spec.edges[1].model_copy(update={"source": "sim"}),
-            ]
-        }
-    )
-    with np.testing.assert_raises_regex(ValueError, "must link from a filter"):
-        validate_pipeline_spec(direct, has_reference=True, has_dgp=True)
+    missing = spec.model_copy(deep=True)
+    missing.nodes[-1].params["residuals_source"] = "missing_filter"
+    with np.testing.assert_raises_regex(ValueError, "requires prior source"):
+        validate_pipeline_spec(missing, has_reference=True, has_dgp=True)
 
 
 _UI_CUSTOM_OP = """@numpy_operation
@@ -1154,13 +1163,17 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "id": "z",
                 "step_type": "transform:custom",
                 "name": "zscore",
-                "params": {"code": _UI_CUSTOM_OP},
+                "params": {
+                    "code": _UI_CUSTOM_OP,
+                    "source": "datagen",
+                    "field": "observables",
+                },
             },
             {
                 "id": "jb",
                 "step_type": "jarque_bera",
                 "name": "jb",
-                "params": {"source": "payload", "column": [0]},
+                "params": {"source": "zscore", "field": "payload", "column": [0]},
             },
         ],
         "edges": [

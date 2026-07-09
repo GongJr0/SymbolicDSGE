@@ -10,7 +10,7 @@ transform_step(
     func: Callable[..., Any],
     *,
     store_key: str | None = None,
-    **kwargs: Any,
+    **step_kwargs: Any,
 ) -> MCStep
 ```
 
@@ -25,11 +25,11 @@ func(
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
-    **kwargs,
+    **step_kwargs,
 ) -> Any
 ```
 
-If the callable returns an `MCData` object, the pipeline replaces `context.data` with that return value. The return value is stored in `context.payloads[store_key or name]`.
+If the callable returns an `MCData` object, the pipeline replaces `context.data` with that return value. The return value is stored in `context.payloads[store_key or name]`; numeric array returns can be consumed downstream with `source` set to the step name or `store_key`, and `field="payload"`.
 
 __Inputs:__
 
@@ -38,7 +38,7 @@ __Inputs:__
 | name | Runtime step name and default payload key. |
 | func | Callable to execute for each replication. |
 | store_key | Optional override for the payload key. |
-| kwargs | Extra keyword arguments forwarded to `func`. |
+| step_kwargs | Extra keyword arguments forwarded to `func`. |
 
 ???+ note "Bundled custom operations"
     In-process pipelines may use any callable. A pipeline written to an `.sdsge` bundle requires the callable to be a [`NumpyCustomFunc`](../../custom_ops.md#numpycustomfunc), usually via the [`numpy_operation`](../../custom_ops.md#numpy_operation) decorator. The bundle stores the callable as a side-channel resource and the portable spec references it by key.
