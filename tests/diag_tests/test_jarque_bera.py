@@ -33,6 +33,30 @@ def test_jb_stat_handles_empty_input() -> None:
     assert np.isnan(statistic)
 
 
+def test_jb_stat_rejects_non_finite_input() -> None:
+    # A NaN/inf in the series (e.g. log of a non-positive value upstream) makes
+    # the variance non-finite. `m2 <= 0.0` alone can't catch it -- every NaN
+    # comparison is False -- so the kernel must guard isfinite rather than fall
+    # through to an OK result carrying a NaN statistic.
+    base = np.linspace(-2.0, 2.0, 50, dtype=np.float64)
+    for bad in (np.nan, np.inf, -np.inf):
+        x = base.copy()
+        x[3] = bad
+        status, statistic = jb_stat(x)
+        assert status == TestStatus.UDEF_VARIANCE
+        assert np.isnan(statistic)
+
+
+def test_jarque_bera_flags_non_finite_series_instead_of_ok() -> None:
+    x = np.linspace(-2.0, 2.0, 100, dtype=np.float64)
+    x[10] = np.nan
+
+    out = jarque_bera(x)
+
+    assert out.status is TestStatus.UDEF_VARIANCE
+    assert np.isnan(out.statistic)
+
+
 def test_jarque_bera_returns_lookup_backed_test_result() -> None:
     x = np.linspace(-2.0, 2.0, 100, dtype=np.float64)
 

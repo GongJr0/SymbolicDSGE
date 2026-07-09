@@ -380,3 +380,18 @@ def test_jb_stat_status_paths():
             assert np.isnan(nstat) and np.isnan(rstat)
         else:
             assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)
+
+
+def test_jb_stat_non_finite_input_reports_undefined_variance():
+    """A NaN/inf in the series (e.g. log of a non-positive value upstream) makes
+    the variance non-finite. `m2 <= 0.0` can't catch it, so both backends must
+    guard isfinite and flag UDEF_VARIANCE (-3) rather than return OK with a NaN
+    statistic."""
+    base = np.linspace(-2.0, 2.0, 50, dtype=np.float64)
+    for bad in (np.nan, np.inf, -np.inf):
+        x = np.ascontiguousarray(base.copy())
+        x[3] = bad
+        ns, nstat = diag.jb_stat(x)
+        rs, rstat = jit_jb_stat(x)
+        assert ns == rs == -3
+        assert np.isnan(nstat) and np.isnan(rstat)

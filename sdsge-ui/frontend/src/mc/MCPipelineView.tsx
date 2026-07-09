@@ -61,7 +61,7 @@ import {
   saveMCWorkspace,
 } from "./persistence";
 import type { MCPersistedWorkspace } from "./persistence";
-import type { MCFlowNode } from "./types";
+import type { MCFlowNode, MCProducer } from "./types";
 
 const nodeTypes = { mcStep: StepNode };
 
@@ -191,11 +191,24 @@ function MCPipelineBuilder({
   }, [setEdges, setNodes]);
 
   const selectedNode = nodes.find((node) => node.id === selectedId) ?? null;
-  // Every transform/custom step produces a payload addressable by its name — the
-  // registry a consumer picks from when a leg reads "payload".
-  const payloadProducers = nodes
-    .filter((node) => node.data.catalog.category === "transforms")
-    .map((node) => node.data.name);
+  // A step may only read from its graph ancestors — producers reachable by
+  // walking edges backward — so the flow arrows actually gate the source
+  // dropdown. Without this, a step wired to one transform could still pick an
+  // unrelated branch. Terminals (tests/regressions/postprocs) can't be sources.
+  const ancestorIds = useMemo(
+    () =>
+      selectedId === null
+        ? new Set<string>()
+        : collectAncestorIds(selectedId, edges),
+    [selectedId, edges],
+  );
+  const producers: MCProducer[] = nodes
+    .filter((node) => ancestorIds.has(node.id))
+    .map((node) => {
+      const kind = sourceProducerKind(node);
+      return kind === null ? null : { name: node.data.name, kind };
+    })
+    .filter((entry): entry is MCProducer => entry !== null);
   const pipeline = useMemo(() => toPipelineSpec(nodes, edges), [nodes, edges]);
 
   // The producible across-rep traces a POSTPROC op can consume. Refreshed from
@@ -519,7 +532,7 @@ function MCPipelineBuilder({
           onChange={updateNode}
           onDelete={deleteNode}
           theme={theme}
-          payloadProducers={payloadProducers}
+          producers={producers}
           availableTraces={availableTraces}
           exogByRole={exogByRole}
         />
@@ -659,6 +672,39 @@ function producerKind(stepType: string | undefined): string {
   if (stepType === "simulation" || stepType === "raw_model_data") return "datagen";
   if (stepType === "filter") return "filter";
   return "transform";
+}
+
+// The source-leg producer kind of a node, or null when it can't be a source
+// (tests/regressions/postprocs). Unlike `producerKind`, this distinguishes
+// non-producers rather than defaulting them to "transform".
+function sourceProducerKind(node: MCFlowNode): MCProducer["kind"] | null {
+  const stepType: string = node.data.stepType;
+  if (stepType === "simulation" || stepType === "raw_model_data") return "datagen";
+  if (stepType === "filter") return "filter";
+  if (node.data.catalog.category === "transforms") return "transform";
+  return null;
+}
+
+// Node ids reachable by walking edges backward from `nodeId` (its ancestors) —
+// the only producers a step may legally read from. The filter's implicit read of
+// the datagen still comes through as an edge on the canvas, so a test wired to
+// the filter sees both the filter and the datagen behind it.
+function collectAncestorIds(nodeId: string, edges: Edge[]): Set<string> {
+  const parentsByTarget = new Map<string, string[]>();
+  for (const edge of edges) {
+    const parents = parentsByTarget.get(edge.target);
+    if (parents) parents.push(edge.source);
+    else parentsByTarget.set(edge.target, [edge.source]);
+  }
+  const ancestors = new Set<string>();
+  const stack = [...(parentsByTarget.get(nodeId) ?? [])];
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    if (ancestors.has(current)) continue;
+    ancestors.add(current);
+    for (const parent of parentsByTarget.get(current) ?? []) stack.push(parent);
+  }
+  return ancestors;
 }
 
 function producerColor(stepType: string | undefined): string {

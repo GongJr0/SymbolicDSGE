@@ -1,7 +1,7 @@
 import Editor from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { Check, Plus, TriangleAlert, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { validateCustomOp } from "../api";
 import { registerPythonLsp } from "../lsp/registerPythonLsp";
 import type {
@@ -11,34 +11,43 @@ import type {
   ShockDistribution,
   ShockRegistryEntry,
 } from "../types";
-import type { MCFlowNode } from "./types";
+import type { MCFlowNode, MCProducer } from "./types";
 
-// Input legs whose value is a dependency source (a "select" with INPUT_SOURCES
-// options). A leg set to "payload" reads a producer's output by key.
-const SOURCE_LEG_KEYS = new Set([
-  "source",
-  "residual_source",
-  "y_source",
-  "X_source",
-  "x_source",
-]);
+// The two data-step channels; every other catalog source-field option is a
+// filter channel. A transform producer instead exposes a single "payload".
+const DATA_CHANNELS = ["states", "observables"];
 
-// Source leg -> the param naming that leg's payload producer (mirrors the
-// backend's _LEG_TO_PAYLOAD_KEY).
-const LEG_PAYLOAD_KEY: Record<string, string> = {
-  source: "payload_key",
-  residual_source: "residual_payload_key",
-  y_source: "y_payload_key",
-  X_source: "x_payload_key",
-  x_source: "x_payload_key",
-};
+// A binding's source field key: `source` or a `<leg>_source`. Its channel
+// select follows immediately in the catalog (`field` / `<leg>_field`), then an
+// optional columns list.
+function isSourceKey(key: string): boolean {
+  return key === "source" || key.endsWith("_source");
+}
+
+// The channels a consumer may read from a producer of the given kind. Driven by
+// the catalog's own source-field options (INPUT_SOURCES) so the filter channel
+// set can't drift, with "payload" added for transform producers.
+function channelOptionsFor(
+  kind: MCProducer["kind"] | undefined,
+  catalogOptions: string[],
+): string[] {
+  if (kind === "datagen") {
+    return catalogOptions.filter((option) => DATA_CHANNELS.includes(option));
+  }
+  if (kind === "filter") {
+    return catalogOptions.filter((option) => !DATA_CHANNELS.includes(option));
+  }
+  if (kind === "transform") return ["payload"];
+  // No producer selected yet: offer everything so the field stays editable.
+  return [...catalogOptions, "payload"];
+}
 
 export function StepInspector({
   node,
   onChange,
   onDelete,
   theme,
-  payloadProducers,
+  producers,
   availableTraces,
   exogByRole,
 }: {
@@ -46,7 +55,7 @@ export function StepInspector({
   onChange: (node: MCFlowNode) => void;
   onDelete: (id: string) => void;
   theme: "light" | "dark";
-  payloadProducers: string[];
+  producers: MCProducer[];
   availableTraces: string[];
   exogByRole: Record<Role, string[]>;
 }) {
@@ -68,6 +77,18 @@ export function StepInspector({
     });
   };
 
+  // Apply several param changes in one node update (a source-leg change may set
+  // both the producer and its channel together).
+  const updateParams = (patch: Record<string, unknown>) => {
+    onChange({
+      ...node,
+      data: {
+        ...node.data,
+        params: { ...node.data.params, ...patch },
+      },
+    });
+  };
+
   // Writing the registry replaces any bundle-serialized `shocks` map so the
   // backend compiles from the user's explicit entries, not a stale compiled form.
   const setRegistry = (entries: ShockRegistryEntry[]) => {
@@ -82,7 +103,60 @@ export function StepInspector({
   const isCustom =
     node.data.stepType === "transform:custom" ||
     node.data.stepType === "postproc:custom";
-  const producers = payloadProducers.filter((name) => name !== node.data.name);
+
+  // Render the step's fields, folding each source binding (a `<leg>_source`
+  // text field, its `<leg>_field` channel select, and an optional columns list)
+  // into a single source-leg widget. The catalog emits those three
+  // consecutively, so we consume them together and render the rest generically.
+  const step = node;
+  const renderFields = (fields: MCFieldSpec[]): ReactNode[] => {
+    const items: ReactNode[] = [];
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      const key = `${step.id}:${field.key}`;
+      if (field.type === "shock_registry") {
+        const targetRole = String(step.data.params.target ?? "dgp") as Role;
+        items.push(
+          <ShockRegistryEditor
+            key={key}
+            target={targetRole}
+            exogVars={exogByRole[targetRole] ?? []}
+            entries={registryFromParams(step.data.params)}
+            onChange={setRegistry}
+          />,
+        );
+        continue;
+      }
+      const channel = fields[i + 1];
+      if (isSourceKey(field.key) && field.type === "text" && channel?.type === "select") {
+        const columns = fields[i + 2];
+        const hasColumns = columns?.type === "number_list";
+        items.push(
+          <SourceLeg
+            key={key}
+            sourceField={field}
+            channelField={channel}
+            columnsField={hasColumns ? columns : undefined}
+            params={step.data.params}
+            producers={producers}
+            onUpdate={updateParams}
+          />,
+        );
+        i += hasColumns ? 2 : 1;
+        continue;
+      }
+      items.push(
+        <FieldEditor
+          key={key}
+          field={field}
+          value={step.data.params[field.key] ?? field.default}
+          availableTraces={availableTraces}
+          onChange={(value) => updateParam(field.key, value)}
+        />,
+      );
+    }
+    return items;
+  };
 
   return (
     <div className="mc-inspector">
@@ -121,48 +195,11 @@ export function StepInspector({
         />
       ) : (
         <div className="mc-inspector-fields">
-          {node.data.catalog.fields
-            .filter((field) => fieldVisible(field, node.data.params))
-            .map((field) => {
-              const key = `${node.id}:${field.key}`;
-              if (field.type === "shock_registry") {
-                const targetRole = String(
-                  node.data.params.target ?? "dgp",
-                ) as Role;
-                return (
-                  <ShockRegistryEditor
-                    key={key}
-                    target={targetRole}
-                    exogVars={exogByRole[targetRole] ?? []}
-                    entries={registryFromParams(node.data.params)}
-                    onChange={setRegistry}
-                  />
-                );
-              }
-              if (field.type === "select" && SOURCE_LEG_KEYS.has(field.key)) {
-                const payloadKey = LEG_PAYLOAD_KEY[field.key];
-                return (
-                  <SourceLegEditor
-                    key={key}
-                    field={field}
-                    channel={String(node.data.params[field.key] ?? field.default ?? "")}
-                    producer={String(node.data.params[payloadKey] ?? "")}
-                    producers={producers}
-                    onChannelChange={(value) => updateParam(field.key, value)}
-                    onProducerChange={(value) => updateParam(payloadKey, value)}
-                  />
-                );
-              }
-              return (
-                <FieldEditor
-                  key={key}
-                  field={field}
-                  value={node.data.params[field.key] ?? field.default}
-                  availableTraces={availableTraces}
-                  onChange={(value) => updateParam(field.key, value)}
-                />
-              );
-            })}
+          {renderFields(
+            node.data.catalog.fields.filter((field) =>
+              fieldVisible(field, node.data.params),
+            ),
+          )}
         </div>
       )}
     </div>
@@ -491,52 +528,86 @@ function asDist(value: unknown): ShockDistribution {
   return value === "t" || value === "uni" ? value : "norm";
 }
 
-function SourceLegEditor({
-  field,
-  channel,
-  producer,
+// One source binding: which producer step to read (a dropdown of the pipeline's
+// producers) and which of its channels (kind-aware: datagen -> states/observables,
+// filter -> filter channels, transform -> payload), plus an optional column list.
+function SourceLeg({
+  sourceField,
+  channelField,
+  columnsField,
+  params,
   producers,
-  onChannelChange,
-  onProducerChange,
+  onUpdate,
 }: {
-  field: MCFieldSpec;
-  channel: string;
-  producer: string;
-  producers: string[];
-  onChannelChange: (value: string) => void;
-  onProducerChange: (value: string) => void;
+  sourceField: MCFieldSpec;
+  channelField: MCFieldSpec;
+  columnsField?: MCFieldSpec;
+  params: Record<string, unknown>;
+  producers: MCProducer[];
+  onUpdate: (patch: Record<string, unknown>) => void;
 }) {
-  // "payload" is always selectable; picking it reveals a producer key dropdown.
-  const options = field.options.includes("payload")
-    ? field.options
-    : [...field.options, "payload"];
+  const sourceValue = String(params[sourceField.key] ?? sourceField.default ?? "");
+  const channelValue = String(params[channelField.key] ?? channelField.default ?? "");
+  const selected = producers.find((producer) => producer.name === sourceValue);
+  const channels = channelOptionsFor(selected?.kind, channelField.options);
+  // Keep a stale/unknown selection visible instead of silently dropping it.
+  const channelOptions =
+    channelValue && !channels.includes(channelValue)
+      ? [channelValue, ...channels]
+      : channels;
+  const producerNames = producers.map((producer) => producer.name);
+  const sourceOptions =
+    sourceValue && !producerNames.includes(sourceValue)
+      ? [sourceValue, ...producerNames]
+      : producerNames;
+
+  const onSourceChange = (value: string) => {
+    const kind = producers.find((producer) => producer.name === value)?.kind;
+    const nextChannels = channelOptionsFor(kind, channelField.options);
+    const patch: Record<string, unknown> = { [sourceField.key]: value };
+    // If the current channel isn't valid for the newly chosen producer's kind,
+    // snap it to the first valid channel so the leg stays consistent.
+    if (nextChannels.length > 0 && !nextChannels.includes(channelValue)) {
+      patch[channelField.key] = nextChannels[0];
+    }
+    onUpdate(patch);
+  };
+
   return (
     <div className="mc-source-leg">
       <label>
-        {field.label}
-        <select value={channel} onChange={(event) => onChannelChange(event.target.value)}>
-          {options.map((option) => (
+        {sourceField.label}
+        <select value={sourceValue} onChange={(event) => onSourceChange(event.target.value)}>
+          <option value="">— select step —</option>
+          {sourceOptions.map((name) => {
+            const kind = producers.find((producer) => producer.name === name)?.kind;
+            return (
+              <option key={name} value={name}>
+                {kind ? `${name} · ${kind}` : name}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      <label>
+        {channelField.label}
+        <select
+          value={channelValue}
+          onChange={(event) => onUpdate({ [channelField.key]: event.target.value })}
+        >
+          {channelOptions.map((option) => (
             <option key={option} value={option}>
               {option}
             </option>
           ))}
         </select>
       </label>
-      {channel === "payload" && (
-        <label className="mc-payload-producer">
-          Payload from
-          <select
-            value={producer}
-            onChange={(event) => onProducerChange(event.target.value)}
-          >
-            <option value="">— select producer —</option>
-            {producers.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {columnsField && (
+        <DraftListEditor
+          field={columnsField}
+          value={params[columnsField.key] ?? columnsField.default}
+          onChange={(value) => onUpdate({ [columnsField.key]: value })}
+        />
       )}
     </div>
   );
