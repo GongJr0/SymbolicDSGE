@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, Literal
 from numpy import float64
 from numpy.typing import NDArray
 
@@ -22,7 +22,7 @@ def simulation_step(
     *,
     T: int,
     shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
-    seed_increment: int | str = "auto",
+    seed_increment: int | Literal["auto"] = "auto",
     shock_scale: float = 1.0,
     x0: list[float] | NDF | None = None,
     observables: bool = True,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, Callable
+from numpy import float64
+from numpy.typing import NDArray
+
 from ...mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
+from ...._diag_tests.result import TestResult
 
 from .ops import (
     run_wald_test,
@@ -14,10 +18,12 @@ from .ops import (
     run_chow_test,
 )
 
+NDF = NDArray[float64]
+
 
 def _single_source_test_step(
     name: str,
-    func: Any,
+    func: Callable[..., TestResult],
     step_type: str,
     *,
     source: str,
@@ -49,7 +55,7 @@ def _single_source_test_step(
 
 def _two_source_test_step(
     name: str,
-    func: Any,
+    func: Callable[..., TestResult],
     step_type: str,
     *,
     first_source: str,
@@ -100,7 +106,11 @@ def wald_test_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    kind: Literal["mean", "covariance", "second_moment"] = "mean",
+    target: NDF,
+    kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
+    bandwidth: int | Literal["andrews", "wooldridge", "auto"] | None = "auto",
+    alpha: float = 0.05,
 ) -> MCStep:
     """Wald test that a sample moment equals a hypothesized target value.
 
@@ -125,7 +135,13 @@ def wald_test_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={
+            "kind": kind,
+            "target": target,
+            "kernel": kernel,
+            "bandwidth": bandwidth,
+            "alpha": alpha,
+        },
     )
 
 
@@ -137,7 +153,8 @@ def ljung_box_test_step(
     column: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    lags: int = 10,
+    alpha: float = 0.05,
 ) -> MCStep:
     """Ljung-Box test for autocorrelation up to ``lags`` in one series.
 
@@ -159,7 +176,7 @@ def ljung_box_test_step(
         columns=column,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"lags": lags, "alpha": alpha},
     )
 
 
@@ -171,7 +188,7 @@ def jarque_bera_test_step(
     column: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    alpha: float = 0.05,
 ) -> MCStep:
     """Jarque-Bera normality test on a single per-replication series.
 
@@ -193,7 +210,7 @@ def jarque_bera_test_step(
         columns=column,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"alpha": alpha},
     )
 
 
@@ -208,7 +225,8 @@ def breusch_pagan_test_step(
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    robust: bool = False,
+    alpha: float = 0.05,
 ) -> MCStep:
     """Breusch-Pagan test for heteroskedasticity of regression residuals.
 
@@ -238,7 +256,7 @@ def breusch_pagan_test_step(
         second_columns=X_columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"robust": robust, "alpha": alpha},
     )
 
 
@@ -253,7 +271,8 @@ def breusch_godfrey_test_step(
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    lags: int = 1,
+    alpha: float = 0.05,
 ) -> MCStep:
     """Breusch-Godfrey test for serial correlation of regression residuals.
 
@@ -283,7 +302,7 @@ def breusch_godfrey_test_step(
         second_columns=X_columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"lags": lags, "alpha": alpha},
     )
 
 
@@ -298,7 +317,7 @@ def cusum_test_step(
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    alpha: float = 0.05,
 ) -> MCStep:
     """CUSUM test for parameter stability of a recursive ``y ~ X`` regression.
 
@@ -326,7 +345,7 @@ def cusum_test_step(
         second_columns=X_columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"alpha": alpha},
     )
 
 
@@ -341,7 +360,7 @@ def cusumsq_test_step(
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    alpha: float = 0.05,
 ) -> MCStep:
     """CUSUM-of-squares test for variance stability of a ``y ~ X`` regression.
 
@@ -368,7 +387,7 @@ def cusumsq_test_step(
         second_columns=X_columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"alpha": alpha},
     )
 
 
@@ -383,7 +402,8 @@ def chow_test_step(
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    t_break: int = 10,
+    alpha: float = 0.05,
 ) -> MCStep:
     """Chow test for a structural break in a ``y ~ X`` regression at ``t_break``.
 
@@ -412,5 +432,5 @@ def chow_test_step(
         second_columns=X_columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"t_break": t_break, "alpha": alpha},
     )

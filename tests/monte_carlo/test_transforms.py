@@ -198,13 +198,21 @@ def test_rolling_window_rejects_window_larger_than_input() -> None:
 @pytest.mark.parametrize(
     "factory, kwargs, expected_runner_kwargs",
     [
-        (standardize_step, {"source": "datagen", "field": "observables"}, {}),
+        (
+            standardize_step,
+            {"source": "datagen", "field": "observables"},
+            {"ddof": 0},
+        ),
         (
             log_step,
             {"source": "datagen", "field": "observables", "offset": 1.0},
             {"offset": 1.0},
         ),
-        (log_diff_step, {"source": "datagen", "field": "observables"}, {}),
+        (
+            log_diff_step,
+            {"source": "datagen", "field": "observables"},
+            {"offset": 0.0},
+        ),
         (
             diff_step,
             {"source": "datagen", "field": "observables", "order": 1},
@@ -221,9 +229,8 @@ def test_rolling_window_rejects_window_larger_than_input() -> None:
                 "source": "datagen",
                 "field": "observables",
                 "window": 5,
-                "ddof": 1,
             },
-            {"window": 5, "ddof": 1},
+            {"window": 5},
         ),
         (
             rolling_var_step,

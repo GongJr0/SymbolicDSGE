@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from ...mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
 from .ops import run_regression
 
@@ -16,7 +16,12 @@ def regression_step(
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    kind: Literal[
+        "ols", "ridge", "lasso", "elastic_net", "ridge_gs", "lasso_gs", "elastic_net_gs"
+    ] = "ols",
+    intercept: bool = True,
+    variables: list[str] | None = None,
+    **kind_kwargs: Any,
 ) -> MCStep:
     """Fit a per-replication regression of ``y`` on ``X``.
 
@@ -57,7 +62,12 @@ def regression_step(
         name=name,
         op_type=OpType.REGRESSION,
         func=run_regression,
-        kwargs=step_kwargs,
+        kwargs={
+            "kind": kind,
+            "intercept": intercept,
+            "variables": variables,
+            **kind_kwargs,
+        },
         source_args=source_args,
         step_type="regression",
     )

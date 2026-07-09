@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from SymbolicDSGE.monte_carlo import MCPipeline
@@ -20,7 +21,12 @@ def test_linear_pipeline_graph_root_leaf_and_edges() -> None:
         [
             simulation_step("dgp", T=8),
             reference_filter_step("filter"),
-            wald_test_step("w", source="filter", field="std_innov"),
+            wald_test_step(
+                "w",
+                source="filter",
+                field="std_innov",
+                target=np.zeros(1, dtype=np.float64),
+            ),
         ]
     )
     g = pipe.graph
@@ -45,7 +51,12 @@ def test_branching_filter_has_two_children() -> None:
         [
             simulation_step("dgp", T=8),
             reference_filter_step("filter"),
-            wald_test_step("w", source="filter", field="std_innov"),
+            wald_test_step(
+                "w",
+                source="filter",
+                field="std_innov",
+                target=np.zeros(1, dtype=np.float64),
+            ),
             jarque_bera_test_step("jb", source="filter", field="innov"),
         ]
     )

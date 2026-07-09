@@ -92,7 +92,7 @@ def standardize_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    ddof: int = 0,
 ) -> MCStep:
     """Per-column z-score ``(x - mean) / std`` over each column.
 
@@ -115,7 +115,7 @@ def standardize_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"ddof": ddof},
     )
 
 
@@ -127,7 +127,7 @@ def log_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    offset: float = 0.0,
 ) -> MCStep:
     """Elementwise natural log ``log(x + offset)`` of the series.
 
@@ -149,7 +149,7 @@ def log_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"offset": offset},
     )
 
 
@@ -161,7 +161,7 @@ def log_diff_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    offset: float = 0.0,
 ) -> MCStep:
     """One-period log differences along the time axis (log growth rates).
 
@@ -183,7 +183,7 @@ def log_diff_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"offset": offset},
     )
 
 
@@ -195,7 +195,7 @@ def diff_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    order: int = 1,
 ) -> MCStep:
     """Discrete difference along the time axis, applied ``order`` times.
 
@@ -217,7 +217,7 @@ def diff_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"order": order},
     )
 
 
@@ -229,7 +229,7 @@ def rolling_mean_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    window: int = 10,
 ) -> MCStep:
     """Trailing rolling mean over a fixed ``window`` of the time axis.
 
@@ -252,7 +252,7 @@ def rolling_mean_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"window": window},
     )
 
 
@@ -264,7 +264,7 @@ def rolling_std_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    window: int = 10,
 ) -> MCStep:
     """Trailing rolling standard deviation over a fixed ``window``.
 
@@ -286,7 +286,7 @@ def rolling_std_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"window": window},
     )
 
 
@@ -298,7 +298,7 @@ def rolling_var_step(
     columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
-    **step_kwargs: Any,
+    window: int = 10,
 ) -> MCStep:
     """Trailing rolling variance over a fixed ``window`` of the time axis.
 
@@ -320,5 +320,5 @@ def rolling_var_step(
         columns=columns,
         burn_in=burn_in,
         drop_initial=drop_initial,
-        step_kwargs=step_kwargs,
+        step_kwargs={"window": window},
     )
