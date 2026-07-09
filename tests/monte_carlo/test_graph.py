@@ -36,7 +36,7 @@ def test_linear_pipeline_graph_root_leaf_and_edges() -> None:
 
 
 def test_source_is_required_for_source_consumers() -> None:
-    with pytest.raises(ValueError, match="source is required"):
+    with pytest.raises(TypeError, match="source"):
         wald_test_step("w")
 
 

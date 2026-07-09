@@ -24,6 +24,9 @@ from .mc_constructs import (
     MCMeta,
     MCStep,
     OpType,
+    SOURCE_KIND_DATA,
+    SOURCE_KIND_FILTER,
+    SOURCE_KIND_PAYLOAD,
     failed_postproc_names,
     failed_step_counts,
     report_mc_performance,
@@ -82,7 +85,6 @@ class MCPipeline:
 
     @staticmethod
     def _bind_source_args(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
-        root_name = per_rep_steps[0].name
         index_by_name: dict[str, int] = {}
         canonical_name: dict[str, str] = {}
         for index, step in enumerate(per_rep_steps):
@@ -100,12 +102,14 @@ class MCPipeline:
                         f"Step {step.name!r} depends on unknown producer {producer!r}."
                     )
                 source_idx = index_by_name[producer]
+                producer_step = per_rep_steps[source_idx]
                 producer = canonical_name[producer]
                 if source_idx >= step_index:
                     raise ValueError(
                         f"Step {step.name!r} depends on {producer!r}, which does not "
                         "appear earlier in the pipeline."
                     )
+                _validate_source_producer(step, selector, producer_step)
                 bound_args.append(
                     replace(selector, source_step=producer, source_idx=source_idx)
                 )
@@ -312,7 +316,7 @@ class MCPipeline:
             if not isinstance(out, TestResult):
                 raise TypeError("TEST steps must return TestResult.")
             context.results[step.name] = out
-        context.payload_slots.append(out)
+        context.payload_slots.append(_source_slot(step, out))
         context.payloads[step.output_key] = out
 
     def _run_postproc(
@@ -376,6 +380,47 @@ class MCPipeline:
             if not failed:
                 postproc[step.name] = out
         return postproc, postproc_elapsed_s
+
+
+def _validate_source_producer(
+    consumer: MCStep,
+    selector: Any,
+    producer: MCStep,
+) -> None:
+    if selector.source_kind == SOURCE_KIND_DATA:
+        expected = OpType.DATAGEN
+    elif selector.source_kind == SOURCE_KIND_PAYLOAD:
+        expected = OpType.TRANSFORM
+    elif selector.source_kind == SOURCE_KIND_FILTER:
+        expected = OpType.FILTER
+    else:
+        raise ValueError(
+            f"Step {consumer.name!r} has unknown source kind {selector.source_kind}."
+        )
+    if producer.op_type is not expected:
+        raise ValueError(
+            f"Step {consumer.name!r} reads field {selector.field!r} from "
+            f"{producer.name!r}, but that producer is {producer.op_type.value!r}."
+        )
+
+
+def _source_slot(step: MCStep, out: Any) -> Any:
+    if step.op_type is OpType.TRANSFORM:
+        if isinstance(out, MCData):
+            return (out,)
+        return (_source_array(out),)
+    return out
+
+
+def _source_array(value: Any) -> np.ndarray:
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim == 1:
+        return arr.reshape(-1, 1)
+    if arr.ndim != 2:
+        raise ValueError(
+            f"Transform payloads used as sources must be 1D or 2D, got shape {arr.shape}."
+        )
+    return arr
 
 
 def _payload_to_array(value: object) -> np.ndarray | None:

@@ -102,7 +102,7 @@ def test_source_kwargs_compile_to_runner_args_once() -> None:
 
 
 def test_source_arg_compile_validates_static_selection() -> None:
-    with pytest.raises(ValueError, match="field is required"):
+    with pytest.raises(TypeError, match="field"):
         standardize_step("bad_string", source="observables")
     with pytest.raises(ValueError, match="source must be non-empty"):
         standardize_step("bad_payload", source="", field="payload")

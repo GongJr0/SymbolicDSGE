@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from enum import StrEnum
 from typing import (
     Any,
@@ -29,6 +29,8 @@ from .custom_op import PandasCustomFunc
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]
+ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
+CompiledColumnSelector = Sequence[int] | slice | None
 ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
 SeedIncrement = Union[int, Literal["auto"]]
@@ -129,10 +131,10 @@ class MCContext:
     reference: SolvedModel
     dgp: SolvedModel | None
     data: MCData | None = None
-    payload_slots: list[Any] = field(default_factory=list)
-    payloads: dict[str, Any] = field(default_factory=dict)
-    results: dict[str, TestResult] = field(default_factory=dict)
-    regressions: dict[str, RegressionResult] = field(default_factory=dict)
+    payload_slots: list[Any] = dataclass_field(default_factory=list)
+    payloads: dict[str, Any] = dataclass_field(default_factory=dict)
+    results: dict[str, TestResult] = dataclass_field(default_factory=dict)
+    regressions: dict[str, RegressionResult] = dataclass_field(default_factory=dict)
 
     def require_data(self) -> MCData:
         """Return ``data``, raising if no DATAGEN step has populated it yet."""
@@ -221,10 +223,29 @@ class SourceArgs:
     source_kind: int
     field: str
     field_idx: int
-    columns: Sequence[int] | slice | None = None
+    columns: ColumnSelector = None
+    column_selector: Sequence[int] | slice = dataclass_field(
+        default_factory=lambda: slice(None)
+    )
+    row_start: int = 0
 
     burn_in: int = 0
     drop_initial: bool = False
+
+    def __post_init__(self) -> None:
+        columns = _normalize_columns(self.columns)
+        row_start = int(self.burn_in)
+        if row_start < 0:
+            raise ValueError("burn_in must be non-negative.")
+        if self.drop_initial and row_start == 0:
+            row_start = 1
+        object.__setattr__(self, "columns", columns)
+        object.__setattr__(
+            self,
+            "column_selector",
+            columns if columns is not None else slice(None),
+        )
+        object.__setattr__(self, "row_start", row_start)
 
 
 @dataclass(frozen=True)
@@ -232,7 +253,7 @@ class MCStep:
     name: str
     op_type: OpType
     func: Callable[..., Any]
-    kwargs: Mapping[str, Any] = field(default_factory=dict)
+    kwargs: Mapping[str, Any] = dataclass_field(default_factory=dict)
     source_args: tuple[SourceArgs, ...] = ()
     store_key: str | None = None
     #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
@@ -271,7 +292,7 @@ def _compile_source_args(
     arg: str,
     source: str,
     field: str,
-    columns: Sequence[int] | slice | None = None,
+    columns: ColumnSelector = None,
     burn_in: int = 0,
     drop_initial: bool = False,
 ) -> SourceArgs:
@@ -279,9 +300,6 @@ def _compile_source_args(
     if not source_step:
         raise ValueError("source must be non-empty.")
     source_field = str(field)
-    burn_in = int(burn_in)
-    if burn_in < 0:
-        raise ValueError("burn_in must be non-negative.")
     if source_field in MC_DATA_FIELD_INDEX:
         return SourceArgs(
             arg=arg,
@@ -290,18 +308,6 @@ def _compile_source_args(
             source_kind=SOURCE_KIND_DATA,
             field=source_field,
             field_idx=MC_DATA_FIELD_INDEX[source_field],
-            columns=columns,
-            burn_in=burn_in,
-            drop_initial=bool(drop_initial),
-        )
-    if source_field in DYNAMIC_FIELD_INDEX:
-        return SourceArgs(
-            arg=arg,
-            source_step=source_step,
-            source_idx=-1,
-            source_kind=SOURCE_KIND_PAYLOAD,
-            field=source_field,
-            field_idx=DYNAMIC_FIELD_INDEX[source_field],
             columns=columns,
             burn_in=burn_in,
             drop_initial=bool(drop_initial),
@@ -318,48 +324,24 @@ def _compile_source_args(
             burn_in=burn_in,
             drop_initial=bool(drop_initial),
         )
+
+    if source_field in DYNAMIC_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_PAYLOAD,
+            field=source_field,
+            field_idx=DYNAMIC_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+
     raise ValueError(f"Unknown MC source field: {source_field!r}.")
 
 
-def _pop_source_controls(kwargs: dict[str, Any]) -> tuple[int, bool]:
-    burn_in = int(kwargs.pop("burn_in", 0))
-    if burn_in < 0:
-        raise ValueError("burn_in must be non-negative.")
-    return burn_in, bool(kwargs.pop("drop_initial", False))
-
-
-def _pop_source_arg(
-    kwargs: dict[str, Any],
-    *,
-    source_key: str,
-    field_key: str,
-    arg: str,
-    columns_key: str | None,
-    burn_in: int,
-    drop_initial: bool,
-) -> SourceArgs:
-    if source_key not in kwargs:
-        raise ValueError(f"{source_key} is required.")
-    if field_key not in kwargs:
-        raise ValueError(f"{field_key} is required.")
-    source = str(kwargs.pop(source_key))
-    field = str(kwargs.pop(field_key))
-    columns = (
-        _normalize_columns(kwargs.pop(columns_key, None))
-        if columns_key is not None
-        else None
-    )
-    return _compile_source_args(
-        arg=arg,
-        source=source,
-        field=field,
-        columns=columns,
-        burn_in=burn_in,
-        drop_initial=drop_initial,
-    )
-
-
-def _normalize_columns(value: Any) -> Sequence[int] | slice | None:
+def _normalize_columns(value: ColumnSelector) -> CompiledColumnSelector:
     if value is None or isinstance(value, slice):
         return value
     if isinstance(value, int):
@@ -391,15 +373,15 @@ class MCMeta:
     #: Post-loop aggregation and postproc are excluded (see ``postproc_elapsed_s``).
     elapsed_s: float = 0.0
     #: Per-replication step timings (postproc excluded; see ``postproc_elapsed_s``).
-    step_elapsed_s: Mapping[str, float] = field(default_factory=dict)
-    step_counts: Mapping[str, int] = field(default_factory=dict)
-    step_failures: Mapping[str, int] = field(default_factory=dict)
+    step_elapsed_s: Mapping[str, float] = dataclass_field(default_factory=dict)
+    step_counts: Mapping[str, int] = dataclass_field(default_factory=dict)
+    step_failures: Mapping[str, int] = dataclass_field(default_factory=dict)
     #: Wall-clock seconds per post-loop (``OpType.POSTPROC``) step. Postproc runs
     #: once, so it is reported as runtime only, never folded into the it/s rates.
-    postproc_elapsed_s: Mapping[str, float] = field(default_factory=dict)
+    postproc_elapsed_s: Mapping[str, float] = dataclass_field(default_factory=dict)
 
-    failed_steps: dict[str, int] = field(default_factory=dict)
-    failed_postprocs: set[str] = field(default_factory=set)
+    failed_steps: dict[str, int] = dataclass_field(default_factory=dict)
+    failed_postprocs: set[str] = dataclass_field(default_factory=set)
 
     @property
     def it_s(self) -> float:
@@ -441,12 +423,14 @@ class MCPipelineResult:
     payloads: tuple[Mapping[str, Any], ...] | None
     contexts: tuple[MCContext, ...] | None
     failures: tuple[MCFailure, ...] = ()
-    regression_summaries: Mapping[str, MCRegressionResult] = field(default_factory=dict)
+    regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
+        default_factory=dict
+    )
 
     #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name (or
     #: ``"<step>.<key>"`` for multi-artifact ops). Values are
     #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
-    postproc: Mapping[str, Any] = field(default_factory=dict)
+    postproc: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:

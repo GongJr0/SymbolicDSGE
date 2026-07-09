@@ -1531,7 +1531,7 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         data=MCData(states=states, observables=observables),
         payload_slots=[
             MCData(states=states, observables=observables),
-            np.arange(5.0, dtype=np.float64),
+            (np.arange(5.0, dtype=np.float64).reshape(-1, 1),),
         ],
         payloads={"vector": np.arange(5.0, dtype=np.float64)},
     )
@@ -1550,7 +1550,7 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
             drop_initial=True,
         ),
     )
-    np.testing.assert_allclose(selected, states[2:, [1]])
+    np.testing.assert_allclose(selected, states[1:, [1]])
 
     payload = _resolve_source_array(
         context,
@@ -1586,8 +1586,8 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
     )
 
     context.payloads["cube"] = np.zeros((1, 2, 3), dtype=np.float64)
-    context.payload_slots.append(context.payloads["cube"])
-    with pytest.raises(ValueError, match="1D or 2D"):
+    context.payload_slots.append((context.payloads["cube"],))
+    np.testing.assert_allclose(
         _resolve_source_array(
             context,
             SourceArgs(
@@ -1598,7 +1598,9 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
                 field="payload",
                 field_idx=DYNAMIC_FIELD_INDEX["payload"],
             ),
-        )
+        ),
+        context.payloads["cube"],
+    )
 
     raw = np.arange(24.0, dtype=np.float64).reshape(2, 4, 3)
     np.testing.assert_allclose(

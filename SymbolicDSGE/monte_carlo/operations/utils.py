@@ -7,13 +7,9 @@ import numpy as np
 
 from ...core.shock_generators import Shock
 from ..mc_constructs import (
-    MC_DATA_FIELD_INDEX,
     MCContext,
     SeedIncrement,
     ShockMapping,
-    SOURCE_KIND_DATA,
-    SOURCE_KIND_FILTER,
-    SOURCE_KIND_PAYLOAD,
     SourceArgs,
 )
 
@@ -69,41 +65,12 @@ def _resolve_seed_increment(
 
 
 def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
-    payload = context.payload_slots[selector.source_idx]
-    arr: Any
-    if selector.source_kind == SOURCE_KIND_DATA:
-        data = payload
-        if selector.field_idx == MC_DATA_FIELD_INDEX["states"]:
-            arr = data.states
-            if arr is None:
-                raise ValueError("MC context has no generated states.")
-            if selector.drop_initial:
-                arr = arr[1:]
-        elif selector.field_idx == MC_DATA_FIELD_INDEX["observables"]:
-            arr = data.observables
-            if arr is None:
-                raise ValueError("MC context has no generated observables.")
-        else:
-            arr = data[selector.field_idx]
-    elif selector.source_kind == SOURCE_KIND_PAYLOAD:
-        arr = payload
-    elif selector.source_kind == SOURCE_KIND_FILTER:
-        arr = payload[selector.field_idx]
-    else:
-        raise ValueError(f"Unknown MC source kind: {selector.source_kind}.")
-
+    arr = context.payload_slots[selector.source_idx][selector.field_idx]
     out = np.asarray(arr, dtype=np.float64)
-    if out.ndim == 1:
-        out = out.reshape(-1, 1)
-    if out.ndim != 2:
-        raise ValueError(f"Selected MC array must be 1D or 2D, got shape {out.shape}.")
-    if selector.columns is not None:
-        out = out[:, selector.columns]
-        if out.ndim == 1:
-            out = out.reshape(-1, 1)
-    if selector.burn_in:
-        out = out[selector.burn_in :]
-    return np.ascontiguousarray(out, dtype=np.float64)
+    return np.ascontiguousarray(
+        out[selector.row_start :, selector.column_selector],
+        dtype=np.float64,
+    )
 
 
 def _select_raw_rep_array(

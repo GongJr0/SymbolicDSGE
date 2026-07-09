@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 from typing import Any
-from ...mc_constructs import MCStep, OpType, _pop_source_arg, _pop_source_controls
+from ...mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
 from .ops import run_regression
 
 
-def regression_step(name: str, **kwargs: Any) -> MCStep:
+def regression_step(
+    name: str,
+    *,
+    y_source: str,
+    y_field: str,
+    X_source: str,
+    X_field: str,
+    y_column: ColumnSelector = None,
+    X_columns: ColumnSelector = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+    **step_kwargs: Any,
+) -> MCStep:
     """Fit a per-replication regression of ``y`` on ``X``.
 
     Signature: ``regression_step(name, *, y_source, y_field, X_source, X_field, kind="ols",
@@ -23,24 +35,20 @@ def regression_step(name: str, **kwargs: Any) -> MCStep:
 
     See ``operations.regressions`` for the shared input / selection / output contract.
     """
-    params = dict(kwargs)
-    burn_in, drop_initial = _pop_source_controls(params)
     source_args = (
-        _pop_source_arg(
-            params,
-            source_key="y_source",
-            field_key="y_field",
+        _compile_source_args(
             arg="y",
-            columns_key="y_column",
+            source=y_source,
+            field=y_field,
+            columns=y_column,
             burn_in=burn_in,
             drop_initial=drop_initial,
         ),
-        _pop_source_arg(
-            params,
-            source_key="X_source",
-            field_key="X_field",
+        _compile_source_args(
             arg="X",
-            columns_key="X_columns",
+            source=X_source,
+            field=X_field,
+            columns=X_columns,
             burn_in=burn_in,
             drop_initial=drop_initial,
         ),
@@ -49,7 +57,7 @@ def regression_step(name: str, **kwargs: Any) -> MCStep:
         name=name,
         op_type=OpType.REGRESSION,
         func=run_regression,
-        kwargs=params,
+        kwargs=step_kwargs,
         source_args=source_args,
         step_type="regression",
     )

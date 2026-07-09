@@ -40,44 +40,50 @@ if TYPE_CHECKING:
     from .core import MCPipeline
     from .mc_constructs import MCStep
 
+SINGLE_SOURCE_IN = ("source", "field", "columns")
+SINGLE_COLUMN_SOURCE_IN = ("source", "field", "column")
+RESID_SOURCE_IN = ("residuals_source", "residuals_field", "residual_col")
+X_SOURCE_IN = ("X_source", "X_field", "X_columns")
+Y_SOURCE_IN = ("y_source", "y_field", "y_column")
+
+
 _SINGLE_SOURCE_STEPS: dict[str, tuple[str, str, str]] = {
-    "standardize": ("source", "field", "columns"),
-    "log": ("source", "field", "columns"),
-    "log_diff": ("source", "field", "columns"),
-    "diff": ("source", "field", "columns"),
-    "rolling_mean": ("source", "field", "columns"),
-    "rolling_std": ("source", "field", "columns"),
-    "rolling_var": ("source", "field", "columns"),
-    "transform:custom": ("source", "field", "columns"),
-    "wald": ("source", "field", "columns"),
-    "ljung_box": ("source", "field", "column"),
-    "jarque_bera": ("source", "field", "column"),
+    "standardize": SINGLE_SOURCE_IN,
+    "log": SINGLE_SOURCE_IN,
+    "log_diff": SINGLE_SOURCE_IN,
+    "diff": SINGLE_SOURCE_IN,
+    "rolling_mean": SINGLE_SOURCE_IN,
+    "rolling_std": SINGLE_SOURCE_IN,
+    "rolling_var": SINGLE_SOURCE_IN,
+    "wald": SINGLE_SOURCE_IN,
+    "ljung_box": SINGLE_COLUMN_SOURCE_IN,
+    "jarque_bera": SINGLE_COLUMN_SOURCE_IN,
 }
 
 _MULTI_SOURCE_STEPS: dict[str, dict[str, tuple[str, str, str]]] = {
     "breusch_pagan": {
-        "residuals": ("residuals_source", "residuals_field", "residual_col"),
-        "X": ("X_source", "X_field", "X_columns"),
+        "residuals": RESID_SOURCE_IN,
+        "X": X_SOURCE_IN,
     },
     "breusch_godfrey": {
-        "residuals": ("residuals_source", "residuals_field", "residual_col"),
-        "X": ("X_source", "X_field", "X_columns"),
+        "residuals": RESID_SOURCE_IN,
+        "X": X_SOURCE_IN,
     },
     "cusum": {
-        "y": ("y_source", "y_field", "y_column"),
-        "X": ("X_source", "X_field", "X_columns"),
+        "y": Y_SOURCE_IN,
+        "X": X_SOURCE_IN,
     },
     "cusumsq": {
-        "y": ("y_source", "y_field", "y_column"),
-        "X": ("X_source", "X_field", "X_columns"),
+        "y": Y_SOURCE_IN,
+        "X": X_SOURCE_IN,
     },
     "chow": {
-        "y": ("y_source", "y_field", "y_column"),
-        "X": ("X_source", "X_field", "X_columns"),
+        "y": Y_SOURCE_IN,
+        "X": X_SOURCE_IN,
     },
     "regression": {
-        "y": ("y_source", "y_field", "y_column"),
-        "X": ("X_source", "X_field", "X_columns"),
+        "y": Y_SOURCE_IN,
+        "X": X_SOURCE_IN,
     },
 }
 

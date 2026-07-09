@@ -158,7 +158,7 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     pipe = MCPipeline(
         [
             raw_data_step("dat", observables=np.zeros((4, 5, 3))),
-            transform_step("tf", lambda **_: None, source="dat", field="observables"),
+            transform_step("tf", lambda **_: None),
         ]
     )
     spec = pipe.to_spec()
@@ -167,9 +167,9 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     assert tf.step_type == "transform:custom"
     # the callable rides a separate bundle member; the spec only references it
     assert tf.params["func_ref"] == "tf"
-    assert tf.params["source"] == "dat"
-    assert tf.params["field"] == "observables"
-    assert {(e.source, e.target) for e in spec.edges} == {("dat", "tf")}
+    assert "source" not in tf.params
+    assert "field" not in tf.params
+    assert {(e.source, e.target) for e in spec.edges} == set()
 
 
 def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
