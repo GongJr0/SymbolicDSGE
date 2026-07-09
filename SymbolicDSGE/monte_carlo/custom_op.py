@@ -4,8 +4,7 @@
 plain ``def``-style numerical function at definition time so it can later be
 shipped inside a ``.sdsge`` bundle alongside its source for receiver-side audit.
 
-Authoring contract
-------------------
+Authoring contract:
 
 A function passed to :class:`NumpyCustomFunc` must:
 
@@ -21,8 +20,7 @@ A function passed to :class:`NumpyCustomFunc` must:
 Globals referenced by the function are snapshotted into
 :attr:`NumpyCustomFunc.captured_globals` and travel with the wrapper.
 
-Threat model
-------------
+Threat model:
 
 This is **author-side hygiene**, not a sandbox. A :class:`NumpyCustomFunc`
 serialized into a ``.sdsge`` bundle and loaded on another machine executes as
@@ -53,7 +51,7 @@ import numpy as np
 SAFE_NAMESPACE_VERSION = 1
 
 
-# ---- Safe namespace ------------------------------------------------------
+# Safe namespace.
 
 
 #: Builtin names callable from a custom op body. Conservative — additions need
@@ -255,7 +253,7 @@ def _pandas_namespace() -> dict[str, Any]:
     }
 
 
-# ---- Exception -----------------------------------------------------------
+# Exception.
 
 
 class CustomOpValidationError(ValueError):
@@ -266,7 +264,7 @@ class CustomOpValidationError(ValueError):
     """
 
 
-# ---- Source extraction ---------------------------------------------------
+# Source extraction.
 
 
 def _extract_source(func: Callable[..., Any]) -> str:
@@ -292,7 +290,7 @@ def _extract_source(func: Callable[..., Any]) -> str:
     return textwrap.dedent(raw)
 
 
-# ---- AST validation ------------------------------------------------------
+# AST validation.
 
 
 _OPERATION_MARKERS: frozenset[str] = frozenset({"numpy_operation", "pandas_operation"})
@@ -351,7 +349,7 @@ class _Validator(ast.NodeVisitor):
         self._global_loads: dict[str, ast.AST] = {}
         self._attribute_loads: list[tuple[str, tuple[str, ...]]] = []
 
-    # ----- public surface for the caller -----
+    # Public surface for the caller.
 
     @property
     def global_loads(self) -> Mapping[str, ast.AST]:
@@ -379,7 +377,7 @@ class _Validator(ast.NodeVisitor):
         for stmt in tree.body:
             self.visit(stmt)
 
-    # ----- helpers -----
+    # Helpers.
 
     def _is_local(self, name: str) -> bool:
         if name in self._function_locals:
@@ -408,7 +406,7 @@ class _Validator(ast.NodeVisitor):
     def _fail(self, message: str) -> None:
         raise CustomOpValidationError(f"{self._func_name!r}: {message}")
 
-    # ----- banned constructs -----
+    # Banned constructs.
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         self._fail("`import` is not allowed inside a custom op body.")
@@ -451,7 +449,7 @@ class _Validator(ast.NodeVisitor):
     def visit_YieldFrom(self, node: ast.YieldFrom) -> None:  # noqa: N802
         self._fail("`yield from` is not allowed (generators are not supported).")
 
-    # ----- binding sites -----
+    # Binding sites.
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         # Walk RHS first so a self-referential binding isn't shadowed.
@@ -543,7 +541,7 @@ class _Validator(ast.NodeVisitor):
     visit_GeneratorExp = _visit_comprehension
     visit_DictComp = _visit_comprehension
 
-    # ----- load-context references -----
+    # Load-context references.
 
     def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
         if isinstance(node.ctx, ast.Load) and not self._is_local(node.id):
@@ -561,7 +559,7 @@ class _Validator(ast.NodeVisitor):
             self.visit(node.value)
 
 
-# ---- Globals capture -----------------------------------------------------
+# Globals capture.
 
 
 _SAFE_SCALAR_TYPES: tuple[type, ...] = (
@@ -704,7 +702,7 @@ def _validate_value_recursive(
     )
 
 
-# ---- The wrapper ---------------------------------------------------------
+# The wrapper.
 
 
 class CustomFunc:
@@ -839,7 +837,7 @@ class CustomFunc:
         self._safe_namespace_version = SAFE_NAMESPACE_VERSION
         self._namespace_kind = namespace_kind
 
-    # ----- read-only accessors -----
+    # Read-only accessors.
 
     @property
     def name(self) -> str:
@@ -866,7 +864,7 @@ class CustomFunc:
         """Which namespace this op was validated under (``"numpy"``/``"pandas"``)."""
         return self._namespace_kind
 
-    # ----- alternate constructor -----
+    # Alternate constructor.
 
     @classmethod
     def from_source(cls, source: str) -> "CustomFunc":
@@ -954,7 +952,7 @@ class CustomFunc:
         instance._namespace_kind = namespace_kind
         return instance
 
-    # ----- runtime surface -----
+    # Runtime surface.
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._func(*args, **kwargs)

@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 
 from .catalog import (
     DATAGEN_STEP_TYPES,
-    FILTER_SOURCES,
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
     TRANSFORM_STEP_TYPES,
@@ -42,22 +41,11 @@ _TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"transform:custom"}
 #: parent edge): the root datagen, a filter, or another transform.
 _ROOT_SOURCE_TYPES = DATAGEN_STEP_TYPES | {"filter"}
 
-_DEPENDENCY_SOURCE_KEYS = (
-    "source",
-    "residual_source",
-    "y_source",
-    "X_source",
-    "x_source",
-)
-#: Source leg -> the param naming that leg's payload producer. A leg set to
-#: ``"payload"`` reads the producer named by this key (key-based reference); no
-#: edge to the producer is required.
-_LEG_TO_PAYLOAD_KEY = {
-    "source": "payload_key",
-    "residual_source": "residual_payload_key",
-    "y_source": "y_payload_key",
-    "X_source": "x_payload_key",
-    "x_source": "x_payload_key",
+_SOURCE_FIELD_KEYS = {
+    "source": "field",
+    "residuals_source": "residuals_field",
+    "y_source": "y_field",
+    "X_source": "X_field",
 }
 
 
@@ -71,8 +59,7 @@ def validate_pipeline_spec(
 
     Enforces unique ids/names (across nodes *and* postprocs), well-formed edges,
     exactly one datagen (``simulation`` or ``raw_data``), and the terminal/filter
-    linking rules, then orders the per-rep steps (by edges *and* key-based payload
-    references) and binds each leg's producer key. Postprocs are a terminal phase:
+    linking rules, then orders the per-rep steps. Postprocs are a terminal phase:
     they carry no edges and are validated only for trace references.
     """
     nodes = {node.id: node for node in spec.nodes}
@@ -132,10 +119,6 @@ def validate_pipeline_spec(
     for node in spec.nodes:
         if node.id == datagen.id:
             continue
-        # Dependencies are no longer all edges: a node may read the datagen
-        # globally (no edge), reference a producer's payload by key (no edge), or
-        # link from several producers. Unresolved sources are caught when binding
-        # (filter_key / payload_key) rather than by an edge count here.
         if node.step_type in TERMINAL_STEP_TYPES and outgoing[node.id]:
             raise ValueError(f"Terminal step '{node.name}' cannot link forward.")
 
@@ -147,11 +130,10 @@ def validate_pipeline_spec(
             raise ValueError("A solved DGP model is required by the simulation step.")
 
     filter_nodes = [node for node in spec.nodes if node.step_type == "filter"]
-    # Ordering deps come from edges *and* key-based payload references (a node
-    # may name a producer via ``*_payload_key`` without drawing an edge to it).
+    # Ordering deps come from edges and explicit source step references.
     name_to_id = {node.name: node.id for node in spec.nodes}
     dep_ids = {
-        node.id: set(incoming[node.id]) | _payload_dep_ids(node, name_to_id)
+        node.id: set(incoming[node.id]) | _source_dep_ids(node, name_to_id)
         for node in spec.nodes
     }
     transform_nodes = _topological_transforms(
@@ -220,13 +202,13 @@ def _validate_postproc_trace_refs(
                 )
 
 
-def _payload_dep_ids(node: NodeSpec, name_to_id: Mapping[str, str]) -> set[str]:
-    """Producer node ids a node references via key-based payload legs."""
+def _source_dep_ids(node: NodeSpec, name_to_id: Mapping[str, str]) -> set[str]:
+    """Producer node ids a node references by explicit source name."""
     out: set[str] = set()
-    for source_key, payload_key in _LEG_TO_PAYLOAD_KEY.items():
-        if node.params.get(source_key) != "payload":
+    for source_key, field_key in _SOURCE_FIELD_KEYS.items():
+        if source_key not in node.params or field_key not in node.params:
             continue
-        producer = node.params.get(payload_key)
+        producer = node.params.get(source_key)
         if producer and producer in name_to_id:
             out.add(name_to_id[producer])
     return out
@@ -241,8 +223,8 @@ def _topological_transforms(
     """Order transform nodes so each comes after all of its producers.
 
     Transforms can chain, and a transform/custom op may depend on several
-    producers — via edges and/or key-based payload references. We Kahn-walk the
-    subset, placing a node only once every dependency is already ordered.
+    producers. We Kahn-walk the subset, placing a node only once every
+    dependency is already ordered.
     """
     remaining = list(transforms)
     ordered: list[NodeSpec] = []
@@ -409,130 +391,32 @@ def _bind_graph_dependency(
     parents: list[NodeSpec],
     datagen: NodeSpec,
 ) -> NodeSpec:
-    """Bind a node's leg-level keys from its (possibly several) parents.
-
-    Each input leg reads a *channel* (the leg's source value) from a *producer*
-    (a parent edge). Producers bind by channel kind: a ``payload`` leg takes its
-    key from a transform/custom parent; a filter-source leg (``std_innov`` / ...)
-    takes ``filter_key`` from a filter parent. Datagen channels (``states`` /
-    ``observables``) read the root globally and need no key. This is what lets a
-    node consume, say, a custom op's payload on one leg and a filter source on
-    another.
-    """
+    """Validate graph-level requirements that do not mutate source params."""
     params = dict(node.params)
     if node.step_type == "filter":
         if not _datagen_has_observables(datagen):
             raise ValueError("Filter steps require the datagen to produce observables.")
-        return replace(node, params=params)
-    if node.step_type in _TRANSFORM_KINDS or node.step_type in TERMINAL_STEP_TYPES:
-        transform_parents = [p for p in parents if p.step_type in _TRANSFORM_KINDS]
-        # ``_bind_consumer_payload`` keeps the single-transform-parent convenience
-        # (default a lone ``source`` leg to the payload, fill missing payload keys).
-        _bind_consumer_payload(
-            node, transform_parents[0] if transform_parents else None, params
-        )
-        _bind_filter_key(node, parents, params)
     return replace(node, params=params)
-
-
-def _bind_filter_key(
-    node: NodeSpec, parents: list[NodeSpec], params: dict[str, Any]
-) -> None:
-    """Bind ``filter_key`` when a leg reads a filter source.
-
-    The filter's output lives in ``context.payloads`` regardless of which leg's
-    edge carries it, so bind to a filter parent when present. Multiple filters
-    are disambiguated by linking from the intended one (first wins here; explicit
-    ``filter_key`` is respected)."""
-    if "filter_key" in params:
-        return
-    if not any(source in FILTER_SOURCES for source in _sources(params)):
-        return
-    filters = [p for p in parents if p.step_type == "filter"]
-    if not filters:
-        raise ValueError(
-            f"Step '{node.name}' uses filter output and must link from a filter."
-        )
-    params["filter_key"] = filters[0].name
-
-
-def _bind_consumer_payload(
-    node: NodeSpec,
-    parent: NodeSpec | None,
-    params: dict[str, Any],
-) -> None:
-    """Resolve payload legs to their producer.
-
-    A leg set to ``source="payload"`` reads a producer's output by key. The key
-    is taken from (in order):
-
-      * an explicit ``*_payload_key`` already in ``params`` — *key-based
-        selection*; no edge to the producer is required;
-      * otherwise a transform/custom **parent edge** (the convenience used when a
-        producer is wired directly).
-
-    As a further convenience, a lone ``source`` leg linked from a transform
-    parent defaults to that transform's payload. Legs left without a producer are
-    reported by :func:`_validate_dependency`.
-    """
-    has_transform_parent = parent is not None and parent.step_type in _TRANSFORM_KINDS
-    payload_legs = [
-        (source_key, payload_key)
-        for source_key, payload_key in _LEG_TO_PAYLOAD_KEY.items()
-        if params.get(source_key) == "payload"
-    ]
-    if payload_legs:
-        if has_transform_parent:
-            assert parent is not None
-            for _, payload_key in payload_legs:
-                params.setdefault(payload_key, parent.name)
-        return
-
-    # No explicit payload leg: a single-source consumer wired from a transform
-    # defaults that leg to the transform's payload.
-    if has_transform_parent and _declared_source_fields(node, params) == ["source"]:
-        assert parent is not None
-        params["source"] = "payload"
-        params["payload_key"] = parent.name
-
-
-def _declared_source_fields(node: NodeSpec, params: Mapping[str, Any]) -> list[str]:
-    """The node's source-leg field keys, in declaration order."""
-    definition = STEP_CATALOG.get(node.step_type)
-    if definition is not None:
-        return [
-            field.key for field in definition.fields if field.key in _LEG_TO_PAYLOAD_KEY
-        ]
-    return [key for key in _LEG_TO_PAYLOAD_KEY if key in params]
 
 
 def _validate_dependency(node: NodeSpec, prior_names: set[str]) -> None:
     params = node.params
     if node.step_type == "filter":
         return
-    if any(source in FILTER_SOURCES for source in _sources(params)):
-        filter_key = str(params.get("filter_key", "filter"))
-        if filter_key not in prior_names:
-            raise ValueError(
-                f"Step '{node.name}' requires prior filter payload '{filter_key}'."
-            )
-    for source_key, payload_key in _LEG_TO_PAYLOAD_KEY.items():
-        if params.get(source_key) != "payload":
+    for source_key, field_key in _SOURCE_FIELD_KEYS.items():
+        if source_key not in params and field_key not in params:
             continue
-        producer = params.get(payload_key)
-        if not producer:
+        if source_key not in params:
             raise ValueError(
-                f"Step '{node.name}' leg '{source_key}' reads a payload but no "
-                "producer is selected."
+                f"Step '{node.name}' declares '{field_key}' without '{source_key}'."
             )
-        if str(producer) not in prior_names:
-            raise ValueError(f"Step '{node.name}' requires prior payload '{producer}'.")
-
-
-def _sources(params: Mapping[str, Any]) -> list[Any]:
-    return [
-        params[key] for key in _DEPENDENCY_SOURCE_KEYS if params.get(key) is not None
-    ]
+        if field_key not in params:
+            raise ValueError(
+                f"Step '{node.name}' declares '{source_key}' without '{field_key}'."
+            )
+        producer = str(params[source_key])
+        if producer not in prior_names:
+            raise ValueError(f"Step '{node.name}' requires prior source '{producer}'.")
 
 
 def _clean_params(params: Mapping[str, Any]) -> dict[str, Any]:

@@ -7,10 +7,10 @@ from typing import (
     Callable,
     Literal,
     Mapping,
-    Protocol,
-    Union,
     NamedTuple,
+    Protocol,
     Sequence,
+    Union,
 )
 
 import numpy as np
@@ -129,6 +129,7 @@ class MCContext:
     reference: SolvedModel
     dgp: SolvedModel | None
     data: MCData | None = None
+    payload_slots: list[Any] = field(default_factory=list)
     payloads: dict[str, Any] = field(default_factory=dict)
     results: dict[str, TestResult] = field(default_factory=dict)
     regressions: dict[str, RegressionResult] = field(default_factory=dict)
@@ -207,75 +208,23 @@ class RegressionOp(Protocol):
     ) -> RegressionResult: ...
 
 
+SOURCE_KIND_DATA = 0
+SOURCE_KIND_PAYLOAD = 1
+SOURCE_KIND_FILTER = 2
+
+
 @dataclass(frozen=True, slots=True)
 class SourceArgs:
     arg: str
-    source: str
+    source_step: str
+    source_idx: int
+    source_kind: int
+    field: str
     field_idx: int
     columns: Sequence[int] | slice | None = None
 
-    payload_key: str | None = None
-    raw_key: str | None = None
     burn_in: int = 0
     drop_initial: bool = False
-
-
-DATA_SOURCE_KEY = "__data__"
-
-
-class _SourceArgSpec(NamedTuple):
-    source_key: str
-    arg: str
-    columns_key: str | None
-    payload_key: str
-
-
-_SOURCE_ARG_SPECS: dict[str, tuple[_SourceArgSpec, ...]] = {
-    "standardize": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "log": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "log_diff": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "diff": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "rolling_mean": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "rolling_std": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "rolling_var": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "wald": (_SourceArgSpec("source", "sample", "columns", "payload_key"),),
-    "ljung_box": (_SourceArgSpec("source", "sample", "column", "payload_key"),),
-    "jarque_bera": (_SourceArgSpec("source", "sample", "column", "payload_key"),),
-    "breusch_pagan": (
-        _SourceArgSpec(
-            "residual_source",
-            "residuals",
-            "residual_col",
-            "residual_payload_key",
-        ),
-        _SourceArgSpec("X_source", "X", "X_columns", "x_payload_key"),
-    ),
-    "breusch_godfrey": (
-        _SourceArgSpec(
-            "residual_source",
-            "residuals",
-            "residual_col",
-            "residual_payload_key",
-        ),
-        _SourceArgSpec("X_source", "X", "X_columns", "x_payload_key"),
-    ),
-    "cusum": (
-        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
-        _SourceArgSpec("x_source", "X", "X_columns", "x_payload_key"),
-    ),
-    "cusumsq": (
-        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
-        _SourceArgSpec("x_source", "X", "X_columns", "x_payload_key"),
-    ),
-    "chow": (
-        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
-        _SourceArgSpec("x_source", "X", "X_columns", "x_payload_key"),
-    ),
-    "regression": (
-        _SourceArgSpec("y_source", "y", "y_column", "y_payload_key"),
-        _SourceArgSpec("X_source", "X", "X_columns", "x_payload_key"),
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -285,9 +234,6 @@ class MCStep:
     func: Callable[..., Any]
     kwargs: Mapping[str, Any] = field(default_factory=dict)
     source_args: tuple[SourceArgs, ...] = ()
-    runner_kwargs: Mapping[str, Any] = field(
-        default_factory=dict, init=False, repr=False, compare=False
-    )
     store_key: str | None = None
     #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
     #: or ``"custom"`` for user-supplied ops. Stamped by the step factories;
@@ -300,13 +246,8 @@ class MCStep:
         if not self.name:
             raise ValueError("MCStep name must be non-empty.")
         object.__setattr__(self, "op_type", OpType(self.op_type))
-        kwargs = dict(self.kwargs)
-        source_args, runner_kwargs = _compile_source_args(
-            self.step_type, kwargs, self.source_args
-        )
-        object.__setattr__(self, "kwargs", kwargs)
-        object.__setattr__(self, "source_args", source_args)
-        object.__setattr__(self, "runner_kwargs", runner_kwargs)
+        object.__setattr__(self, "kwargs", dict(self.kwargs))
+        object.__setattr__(self, "source_args", tuple(self.source_args))
         # The pandas namespace is a post-loop-only privilege: a PandasCustomFunc
         # in a per-rep step would reference pandas inside the replication loop,
         # which the looser contract is not meant to sanction.
@@ -326,97 +267,96 @@ class MCStep:
 
 
 def _compile_source_args(
-    step_type: str | None,
-    kwargs: dict[str, Any],
-    source_args: SourceArgs | Sequence[SourceArgs] | None,
-) -> tuple[tuple[SourceArgs, ...], dict[str, Any]]:
-    runner_kwargs = dict(kwargs)
-    if source_args:
-        if isinstance(source_args, SourceArgs):
-            return (source_args,), runner_kwargs
-        return tuple(source_args), runner_kwargs
-    specs = _SOURCE_ARG_SPECS.get(step_type or "")
-    if not specs or not any(spec.source_key in kwargs for spec in specs):
-        return (), runner_kwargs
-
-    burn_in = int(kwargs.get("burn_in", 0))
-    if burn_in < 0:
-        raise ValueError("burn_in must be non-negative.")
-    drop_initial = bool(kwargs.get("drop_initial", False))
-    filter_key = str(kwargs.get("filter_key", "filter"))
-
-    runner_kwargs.pop("burn_in", None)
-    runner_kwargs.pop("drop_initial", None)
-    runner_kwargs.pop("filter_key", None)
-
-    compiled: list[SourceArgs] = []
-    for spec in specs:
-        if spec.source_key not in kwargs:
-            continue
-        source_name = str(kwargs[spec.source_key])
-        columns = _normalize_columns(
-            kwargs.get(spec.columns_key) if spec.columns_key is not None else None
-        )
-        payload_key = kwargs.get(spec.payload_key)
-        compiled.append(
-            _compile_one_source_arg(
-                arg=spec.arg,
-                source_name=source_name,
-                filter_key=filter_key,
-                payload_key=str(payload_key) if payload_key is not None else None,
-                columns=columns,
-                burn_in=burn_in,
-                drop_initial=drop_initial,
-            )
-        )
-        runner_kwargs.pop(spec.source_key, None)
-        if spec.columns_key is not None:
-            runner_kwargs.pop(spec.columns_key, None)
-        runner_kwargs.pop(spec.payload_key, None)
-    return tuple(compiled), runner_kwargs
-
-
-def _compile_one_source_arg(
     *,
     arg: str,
-    source_name: str,
-    filter_key: str,
-    payload_key: str | None,
-    columns: Sequence[int] | slice | None,
+    source: str,
+    field: str,
+    columns: Sequence[int] | slice | None = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+) -> SourceArgs:
+    source_step = str(source)
+    if not source_step:
+        raise ValueError("source must be non-empty.")
+    source_field = str(field)
+    burn_in = int(burn_in)
+    if burn_in < 0:
+        raise ValueError("burn_in must be non-negative.")
+    if source_field in MC_DATA_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_DATA,
+            field=source_field,
+            field_idx=MC_DATA_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+    if source_field in DYNAMIC_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_PAYLOAD,
+            field=source_field,
+            field_idx=DYNAMIC_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+    if source_field in FILTER_RAW_FIELD_INDEX:
+        return SourceArgs(
+            arg=arg,
+            source_step=source_step,
+            source_idx=-1,
+            source_kind=SOURCE_KIND_FILTER,
+            field=source_field,
+            field_idx=FILTER_RAW_FIELD_INDEX[source_field],
+            columns=columns,
+            burn_in=burn_in,
+            drop_initial=bool(drop_initial),
+        )
+    raise ValueError(f"Unknown MC source field: {source_field!r}.")
+
+
+def _pop_source_controls(kwargs: dict[str, Any]) -> tuple[int, bool]:
+    burn_in = int(kwargs.pop("burn_in", 0))
+    if burn_in < 0:
+        raise ValueError("burn_in must be non-negative.")
+    return burn_in, bool(kwargs.pop("drop_initial", False))
+
+
+def _pop_source_arg(
+    kwargs: dict[str, Any],
+    *,
+    source_key: str,
+    field_key: str,
+    arg: str,
+    columns_key: str | None,
     burn_in: int,
     drop_initial: bool,
 ) -> SourceArgs:
-    if source_name in MC_DATA_FIELD_INDEX:
-        return SourceArgs(
-            arg=arg,
-            source=DATA_SOURCE_KEY,
-            field_idx=MC_DATA_FIELD_INDEX[source_name],
-            columns=columns,
-            burn_in=burn_in,
-            drop_initial=drop_initial,
-        )
-    if source_name in DYNAMIC_FIELD_INDEX:
-        if payload_key is None:
-            raise ValueError("payload_key is required when source='payload'.")
-        return SourceArgs(
-            arg=arg,
-            source=payload_key,
-            field_idx=DYNAMIC_FIELD_INDEX[source_name],
-            columns=columns,
-            payload_key=payload_key,
-            burn_in=burn_in,
-            drop_initial=drop_initial,
-        )
-    if source_name in FILTER_SOURCE_FIELDS:
-        return SourceArgs(
-            arg=arg,
-            source=filter_key,
-            field_idx=FILTER_RAW_FIELD_INDEX[source_name],
-            columns=columns,
-            burn_in=burn_in,
-            drop_initial=drop_initial,
-        )
-    raise ValueError(f"Unknown MC source field: {source_name!r}.")
+    if source_key not in kwargs:
+        raise ValueError(f"{source_key} is required.")
+    if field_key not in kwargs:
+        raise ValueError(f"{field_key} is required.")
+    source = str(kwargs.pop(source_key))
+    field = str(kwargs.pop(field_key))
+    columns = (
+        _normalize_columns(kwargs.pop(columns_key, None))
+        if columns_key is not None
+        else None
+    )
+    return _compile_source_args(
+        arg=arg,
+        source=source,
+        field=field,
+        columns=columns,
+        burn_in=burn_in,
+        drop_initial=drop_initial,
+    )
 
 
 def _normalize_columns(value: Any) -> Sequence[int] | slice | None:

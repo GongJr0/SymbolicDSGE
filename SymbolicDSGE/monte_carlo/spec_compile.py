@@ -22,9 +22,7 @@ Recovery is mostly pass-through. The cases that need inverting a compile hook:
   bundle builder writes the cloudpickle member and ``build_pipeline`` reattaches
   the callable from the loaded resources.
 
-Binder-derived dependency keys (``filter_key`` / ``*_payload_key``) are dropped:
-``validate_pipeline_spec`` re-derives them from the edges, so emitting them would
-break idempotency.
+Source dependencies are emitted as explicit ``source`` and ``field`` parameters.
 """
 
 from __future__ import annotations
@@ -35,16 +33,53 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.shock_generators import Shock, ShockParameters
+from .mc_constructs import SourceArgs
 from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
 
 if TYPE_CHECKING:
     from .core import MCPipeline
     from .mc_constructs import MCStep
 
-#: Dependency keys re-derived from edges on rebuild, so dropped from the spec.
-#: ``filter_key`` is re-bound from the filter edge; the ``*_payload_key`` keys are
-#: kept because payloads are referenced by key (no edge to re-derive them from).
-_BINDER_KEYS = ("filter_key",)
+_SINGLE_SOURCE_STEPS: dict[str, tuple[str, str, str]] = {
+    "standardize": ("source", "field", "columns"),
+    "log": ("source", "field", "columns"),
+    "log_diff": ("source", "field", "columns"),
+    "diff": ("source", "field", "columns"),
+    "rolling_mean": ("source", "field", "columns"),
+    "rolling_std": ("source", "field", "columns"),
+    "rolling_var": ("source", "field", "columns"),
+    "transform:custom": ("source", "field", "columns"),
+    "wald": ("source", "field", "columns"),
+    "ljung_box": ("source", "field", "column"),
+    "jarque_bera": ("source", "field", "column"),
+}
+
+_MULTI_SOURCE_STEPS: dict[str, dict[str, tuple[str, str, str]]] = {
+    "breusch_pagan": {
+        "residuals": ("residuals_source", "residuals_field", "residual_col"),
+        "X": ("X_source", "X_field", "X_columns"),
+    },
+    "breusch_godfrey": {
+        "residuals": ("residuals_source", "residuals_field", "residual_col"),
+        "X": ("X_source", "X_field", "X_columns"),
+    },
+    "cusum": {
+        "y": ("y_source", "y_field", "y_column"),
+        "X": ("X_source", "X_field", "X_columns"),
+    },
+    "cusumsq": {
+        "y": ("y_source", "y_field", "y_column"),
+        "X": ("X_source", "X_field", "X_columns"),
+    },
+    "chow": {
+        "y": ("y_source", "y_field", "y_column"),
+        "X": ("X_source", "X_field", "X_columns"),
+    },
+    "regression": {
+        "y": ("y_source", "y_field", "y_column"),
+        "X": ("X_source", "X_field", "X_columns"),
+    },
+}
 
 
 def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
@@ -112,9 +147,66 @@ def _recover_params(step: "MCStep") -> dict[str, Any]:
         params["func_ref"] = step.name
     else:
         params = _jsonable_params(dict(step.kwargs))
-    for key in _BINDER_KEYS:
-        params.pop(key, None)
+    params.update(_recover_source_params(step_type, step.source_args))
     return params
+
+
+def _recover_source_params(
+    step_type: str | None,
+    source_args: tuple[SourceArgs, ...],
+) -> dict[str, Any]:
+    if step_type is None or not source_args:
+        return {}
+    single = _SINGLE_SOURCE_STEPS.get(step_type)
+    if single is not None:
+        if len(source_args) != 1:
+            raise ValueError(f"Step type {step_type!r} must have one source.")
+        source_key, field_key, columns_key = single
+        return _recover_one_source(
+            source_args[0],
+            source_key=source_key,
+            field_key=field_key,
+            columns_key=columns_key,
+        )
+
+    layout = _MULTI_SOURCE_STEPS.get(step_type)
+    if layout is None:
+        return {}
+    by_arg = {selector.arg: selector for selector in source_args}
+    out: dict[str, Any] = {}
+    for arg, selector_layout in layout.items():
+        source_key, field_key, columns_key = selector_layout
+        if arg not in by_arg:
+            raise ValueError(f"Step type {step_type!r} is missing source {arg!r}.")
+        out.update(
+            _recover_one_source(
+                by_arg[arg],
+                source_key=source_key,
+                field_key=field_key,
+                columns_key=columns_key,
+            )
+        )
+    return out
+
+
+def _recover_one_source(
+    selector: SourceArgs,
+    *,
+    source_key: str,
+    field_key: str,
+    columns_key: str,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    out[source_key] = selector.source_step
+    out[field_key] = selector.field
+
+    if selector.columns is not None:
+        out[columns_key] = _jsonable(selector.columns)
+    if selector.burn_in:
+        out["burn_in"] = selector.burn_in
+    if selector.drop_initial:
+        out["drop_initial"] = selector.drop_initial
+    return out
 
 
 def _recover_simulation(kwargs: Mapping[str, Any]) -> dict[str, Any]:

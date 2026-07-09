@@ -46,7 +46,7 @@ def transform(*, context, reference, dgp, rep_idx, **kwargs):
     #   fr = context.require_payload("filter")
     #   arr = np.asarray(fr.std_innov, dtype=float)
     # Return a 2-D ndarray (T x k). It is stored under this step's name, so a
-    # downstream step can read it with source="payload".
+    # downstream step can read it with source="<this step name>", field="payload".
     return (arr - arr.mean(axis=0)) / arr.std(axis=0)
 '''
 

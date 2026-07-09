@@ -51,7 +51,7 @@ MCStepKind = Literal[
 STEP_KINDS: frozenset[str] = frozenset(get_args(MCStepKind))
 
 #: Post-loop step kinds. A postproc is a *terminal reduction* over the assembled
-#: across-rep traces, not a graph node -- it lives in ``PipelineSpec.postprocs``,
+#: across-rep traces, not a graph node. It lives in ``PipelineSpec.postprocs``,
 #: never in ``nodes``. Keep in sync with ``catalog.POSTPROC_STEP_TYPES`` + the
 #: custom postproc kind (guarded by the catalog parity test).
 PostprocStepKind = Literal["kde", "postproc:custom"]
@@ -105,7 +105,7 @@ class EdgeSpec:
 @dataclass
 class PostprocSpec:
     """A post-loop op: a named, typed, parameterized terminal reduction over the
-    assembled across-rep traces. Deliberately *not* a graph node -- it has no
+    assembled across-rep traces. Deliberately *not* a graph node. It has no
     ``id`` and no edges; its inputs are trace keys carried in ``params``.
     """
 
@@ -137,7 +137,7 @@ class PipelineSpec:
     nodes: list[NodeSpec]
     edges: list[EdgeSpec] = field(default_factory=list)
     #: Post-loop ops, run once over the assembled traces. Kept separate from the
-    #: per-rep DAG (``nodes``/``edges``) -- they are not graph participants.
+    #: per-rep DAG (``nodes``/``edges``). They are not graph participants.
     postprocs: list[PostprocSpec] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

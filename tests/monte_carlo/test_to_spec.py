@@ -39,11 +39,12 @@ def _simulation_pipeline() -> MCPipeline:
                 shocks={"u": Shock(dist="norm", seed=0, dist_kwargs={"loc": 0.0})},
             ),
             reference_filter_step("filter"),
-            standardize_step("s", source="observables"),
-            jarque_bera_test_step("jb", source="payload", payload_key="s"),
+            standardize_step("s", source="dgp", field="observables"),
+            jarque_bera_test_step("jb", source="s", field="payload"),
             wald_test_step(
                 "w",
-                source="std_innov",
+                source="filter",
+                field="std_innov",
                 kind="mean",
                 target=np.array([0.0]),
                 bandwidth=4,
@@ -70,10 +71,10 @@ def test_to_spec_structure_and_edges() -> None:
     }
 
     by_name = {n.name: n for n in spec.nodes}
-    # payload references are kept (the producer is named by key, not an edge)
-    assert by_name["jb"].params["payload_key"] == "s"
-    # filter_key stays edge-derived (re-bound from the filter edge on rebuild)
-    assert "filter_key" not in by_name["w"].params
+    assert by_name["jb"].params["source"] == "s"
+    assert by_name["jb"].params["field"] == "payload"
+    assert by_name["w"].params["source"] == "filter"
+    assert by_name["w"].params["field"] == "std_innov"
     # wald target ndarray is inverted to the spec's target_vector field
     assert by_name["w"].params["target_vector"] == [0.0]
     assert "target" not in by_name["w"].params
@@ -103,7 +104,7 @@ def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
                 T=8,
                 shocks={"u": Shock(dist="norm", seed=0).shock_generator(8)},
             ),
-            jarque_bera_test_step("jb", source="observables"),
+            jarque_bera_test_step("jb", source="dgp", field="observables"),
         ]
     )
     with pytest.raises(TypeError, match="shock generator"):
@@ -134,7 +135,7 @@ def test_to_spec_records_raw_data_reference_not_arrays() -> None:
                 n_exog=1,
                 observable_names=("a", "b", "c"),
             ),
-            jarque_bera_test_step("jb", source="observables"),
+            jarque_bera_test_step("jb", source="dat", field="observables"),
         ]
     )
     spec = pipe.to_spec()
@@ -157,7 +158,7 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     pipe = MCPipeline(
         [
             raw_data_step("dat", observables=np.zeros((4, 5, 3))),
-            transform_step("tf", lambda **_: None, source="observables"),
+            transform_step("tf", lambda **_: None, source="dat", field="observables"),
         ]
     )
     spec = pipe.to_spec()
@@ -166,7 +167,8 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     assert tf.step_type == "transform:custom"
     # the callable rides a separate bundle member; the spec only references it
     assert tf.params["func_ref"] == "tf"
-    assert tf.params["source"] == "observables"
+    assert tf.params["source"] == "dat"
+    assert tf.params["field"] == "observables"
     assert {(e.source, e.target) for e in spec.edges} == {("dat", "tf")}
 
 
@@ -179,7 +181,7 @@ def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
     pipe = MCPipeline(
         [
             raw_data_step("dat", observables=np.zeros((4, 5, 3))),
-            jarque_bera_test_step("jb", source="observables"),
+            jarque_bera_test_step("jb", source="dat", field="observables"),
         ],
         [postproc_step("sum", my_summary, threshold=0.5)],
     )
@@ -207,7 +209,7 @@ def test_to_spec_round_trips_a_postproc_pipeline() -> None:
                 seed_increment="auto",
                 shocks={"u": Shock(dist="norm", seed=0)},
             ),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            jarque_bera_test_step("jb", source="dgp", field="observables", column=0),
         ],
         [kde_step("kde", trace="test.jb.statistic", grid_points=50)],
     )

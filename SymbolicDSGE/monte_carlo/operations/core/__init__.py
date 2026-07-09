@@ -6,7 +6,7 @@ Shared contract for the factories in this group:
   run first to populate ``context.data`` for that replication.
 - Output location: datagen fills ``context.data`` (states / observables / raw
   series); the ``filter`` step stores raw filter output that downstream steps
-  read via ``source="filter"``.
+  read with ``source="<filter step>", field="<field>"``.
 """
 
 from .builtins import (

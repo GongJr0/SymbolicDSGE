@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import numpy as np
 
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.monte_carlo import (
@@ -38,8 +39,42 @@ def test_factories_stamp_step_type_matching_catalog() -> None:
     # Every catalog factory must stamp the same step_type as its catalog key,
     # so a live MCPipeline can be compiled back to a PipelineSpec losslessly.
     for step_type, definition in STEP_CATALOG.items():
-        step = definition.factory(name="probe")
+        step = definition.factory(name="probe", **_factory_probe_kwargs(step_type))
         assert step.step_type == step_type
+
+
+def _factory_probe_kwargs(step_type: str) -> dict:
+    if step_type == "simulation":
+        return {"T": 1}
+    if step_type == "wald":
+        return {"source": "filter", "field": "std_innov", "target": np.zeros(1)}
+    if step_type in {"ljung_box", "jarque_bera"}:
+        return {"source": "datagen", "field": "observables"}
+    if step_type in {"breusch_pagan", "breusch_godfrey"}:
+        return {
+            "residuals_source": "datagen",
+            "residuals_field": "observables",
+            "X_source": "datagen",
+            "X_field": "observables",
+        }
+    if step_type in {"cusum", "cusumsq", "chow", "regression"}:
+        return {
+            "y_source": "datagen",
+            "y_field": "observables",
+            "X_source": "datagen",
+            "X_field": "observables",
+        }
+    if step_type in {
+        "standardize",
+        "log",
+        "log_diff",
+        "diff",
+        "rolling_mean",
+        "rolling_std",
+        "rolling_var",
+    }:
+        return {"source": "datagen", "field": "observables"}
+    return {}
 
 
 def test_catalog_keys_are_all_valid_step_kinds() -> None:
@@ -49,30 +84,30 @@ def test_catalog_keys_are_all_valid_step_kinds() -> None:
 def test_source_kwargs_compile_to_runner_args_once() -> None:
     step = standardize_step(
         "std",
-        source="payload",
-        payload_key="obs",
+        source="obs",
+        field="payload",
         columns=0,
         burn_in=2,
         ddof=1,
     )
 
-    assert step.kwargs["source"] == "payload"
-    assert dict(step.runner_kwargs) == {"ddof": 1}
+    assert dict(step.kwargs) == {"ddof": 1}
     assert len(step.source_args) == 1
     selector = step.source_args[0]
     assert selector.arg == "sample"
-    assert selector.source == "obs"
+    assert selector.source_step == "obs"
     assert selector.field_idx == DYNAMIC_FIELD_INDEX["payload"]
     assert selector.columns == (0,)
-    assert selector.payload_key == "obs"
     assert selector.burn_in == 2
 
 
 def test_source_arg_compile_validates_static_selection() -> None:
-    with pytest.raises(ValueError, match="payload_key"):
-        standardize_step("bad_payload", source="payload")
+    with pytest.raises(ValueError, match="field is required"):
+        standardize_step("bad_string", source="observables")
+    with pytest.raises(ValueError, match="source must be non-empty"):
+        standardize_step("bad_payload", source="", field="payload")
     with pytest.raises(ValueError, match="burn_in"):
-        standardize_step("bad_burn", source="states", burn_in=-1)
+        standardize_step("bad_burn", source="datagen", field="states", burn_in=-1)
 
 
 def test_transform_step_stamps_custom_kind() -> None:
@@ -117,10 +152,10 @@ def test_catalog_payload_shape_and_known_fields() -> None:
 
     wald_fields = {f["key"]: f for f in by_type["wald"]["fields"]}
     assert wald_fields["target_vector"]["when"] == ["mean"]
-    assert wald_fields["source"]["options"][0] == "states"
-    assert "x1_pred" in wald_fields["source"]["options"]
-    assert "x2_filt" in wald_fields["source"]["options"]
-    assert "eps_hat" in wald_fields["source"]["options"]
+    assert wald_fields["field"]["options"][0] == "states"
+    assert "x1_pred" in wald_fields["field"]["options"]
+    assert "x2_filt" in wald_fields["field"]["options"]
+    assert "eps_hat" in wald_fields["field"]["options"]
 
     filter_fields = {f["key"]: f for f in by_type["filter"]["fields"]}
     assert "unscented" in filter_fields["filter_mode"]["options"]
@@ -182,7 +217,7 @@ def test_terminal_step_types_derived_from_catalog() -> None:
     )
 
 
-def test_validate_orders_steps_and_binds_filter_key() -> None:
+def test_validate_orders_steps_with_explicit_filter_source() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
@@ -191,7 +226,12 @@ def test_validate_orders_steps_and_binds_filter_key() -> None:
                 "test",
                 "breusch_pagan",
                 "diagnostic",
-                {"residual_source": "std_innov", "X_source": "observables"},
+                {
+                    "residuals_source": "renamed_filter",
+                    "residuals_field": "std_innov",
+                    "X_source": "datagen",
+                    "X_field": "observables",
+                },
             ),
         ],
         edges=[EdgeSpec("sim", "filter"), EdgeSpec("filter", "test")],
@@ -200,7 +240,7 @@ def test_validate_orders_steps_and_binds_filter_key() -> None:
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
     assert [node.id for node in ordered] == ["sim", "filter", "test"]
-    assert ordered[-1].params["filter_key"] == "renamed_filter"
+    assert ordered[-1].params["residuals_source"] == "renamed_filter"
 
 
 def test_validate_binds_multi_source_terminal_from_distinct_producers() -> None:
@@ -210,12 +250,22 @@ def test_validate_binds_multi_source_terminal_from_distinct_producers() -> None:
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
             NodeSpec("filter", "filter", "filter", {}),
-            NodeSpec("std", "standardize", "std", {"source": "observables"}),
+            NodeSpec(
+                "std",
+                "standardize",
+                "std",
+                {"source": "datagen", "field": "observables"},
+            ),
             NodeSpec(
                 "bp",
                 "breusch_pagan",
                 "bp",
-                {"residual_source": "std_innov", "X_source": "payload"},
+                {
+                    "residuals_source": "filter",
+                    "residuals_field": "std_innov",
+                    "X_source": "std",
+                    "X_field": "payload",
+                },
             ),
         ],
         edges=[
@@ -228,22 +278,27 @@ def test_validate_binds_multi_source_terminal_from_distinct_producers() -> None:
 
     ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
     bp = next(node for node in ordered if node.id == "bp")
-    assert bp.params["filter_key"] == "filter"  # filter leg bound from the filter
-    assert bp.params["x_payload_key"] == "std"  # payload leg bound from transform
+    assert bp.params["residuals_source"] == "filter"
+    assert bp.params["X_source"] == "std"
 
 
-def test_validate_resolves_payload_by_key_without_an_edge() -> None:
-    # A terminal selects a transform's payload by key (payload_key) with no edge
-    # linking them; ordering + validation resolve it from the reference.
+def test_validate_resolves_payload_source_without_an_edge() -> None:
+    # A terminal selects a transform's payload by producer name with no edge
+    # linking them; ordering and validation resolve it from the source reference.
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-            NodeSpec("std", "standardize", "std", {"source": "observables"}),
+            NodeSpec(
+                "std",
+                "standardize",
+                "std",
+                {"source": "datagen", "field": "observables"},
+            ),
             NodeSpec(
                 "jb",
                 "jarque_bera",
                 "jb",
-                {"source": "payload", "payload_key": "std"},
+                {"source": "std", "field": "payload"},
             ),
         ],
         edges=[EdgeSpec("sim", "std"), EdgeSpec("sim", "jb")],
@@ -252,15 +307,20 @@ def test_validate_resolves_payload_by_key_without_an_edge() -> None:
     assert [node.id for node in ordered] == ["sim", "std", "jb"]
 
 
-def test_validate_orders_payload_key_chain_without_edges() -> None:
+def test_validate_orders_payload_source_chain_without_edges() -> None:
     # Transform chain wired purely by key: tf2 reads tf1's payload, tf1 reads
-    # tf0's payload. Ordering must place tf0 -> tf1 -> tf2 from the references.
+    # tf0's payload. Ordering must place tf0, tf1, then tf2 from the references.
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-            NodeSpec("tf2", "log", "tf2", {"source": "payload", "payload_key": "tf1"}),
-            NodeSpec("tf1", "log", "tf1", {"source": "payload", "payload_key": "tf0"}),
-            NodeSpec("tf0", "standardize", "tf0", {"source": "observables"}),
+            NodeSpec("tf2", "log", "tf2", {"source": "tf1", "field": "payload"}),
+            NodeSpec("tf1", "log", "tf1", {"source": "tf0", "field": "payload"}),
+            NodeSpec(
+                "tf0",
+                "standardize",
+                "tf0",
+                {"source": "datagen", "field": "observables"},
+            ),
         ],
         edges=[EdgeSpec("sim", "tf0")],
     )
@@ -273,11 +333,13 @@ def test_validate_rejects_payload_leg_without_producer() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-            NodeSpec("jb", "jarque_bera", "jb", {"source": "payload"}),
+            NodeSpec(
+                "jb", "jarque_bera", "jb", {"source": "ghost", "field": "payload"}
+            ),
         ],
         edges=[EdgeSpec("sim", "jb")],
     )
-    with pytest.raises(ValueError, match="no .*producer is selected"):
+    with pytest.raises(ValueError, match="requires prior source"):
         validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
 
@@ -285,11 +347,13 @@ def test_validate_rejects_filter_source_without_filter_link() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-            NodeSpec("test", "ljung_box", "lb", {"source": "std_innov"}),
+            NodeSpec(
+                "test", "ljung_box", "lb", {"source": "filter", "field": "std_innov"}
+            ),
         ],
         edges=[EdgeSpec("sim", "test")],
     )
-    with pytest.raises(ValueError, match="must link from a filter"):
+    with pytest.raises(ValueError, match="requires prior source"):
         validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
 
 
@@ -320,9 +384,12 @@ def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> 
                 "reg",
                 {
                     "kind": "ols",
-                    "y_source": "observables",
-                    "X_source": "observables",
-                    "alpha": 0.9,  # conditional kwarg, invalid for OLS -> dropped
+                    "y_source": "datagen",
+                    "y_field": "observables",
+                    "X_source": "datagen",
+                    "X_field": "observables",
+                    # conditional kwarg, invalid for OLS, dropped
+                    "alpha": 0.9,
                 },
             ),
         ],
@@ -356,7 +423,12 @@ def test_postprocs_are_a_separate_terminal_list() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "datagen", {"T": 8, "observables": True}),
-            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec(
+                "jb",
+                "jarque_bera",
+                "jb",
+                {"source": "datagen", "field": "observables", "column": 0},
+            ),
         ],
         edges=[EdgeSpec("sim", "jb")],
         postprocs=[PostprocSpec("kde", "kde", {"trace": "test.jb.statistic"})],
@@ -369,7 +441,7 @@ def test_postprocs_are_a_separate_terminal_list() -> None:
 
 def test_from_dict_rejects_postproc_in_nodes() -> None:
     # A postproc smuggled into `nodes` (rather than `postprocs`) is rejected at
-    # deserialization -- postprocs are not graph nodes.
+    # deserialization. Postprocs are not graph nodes.
     with pytest.raises(ValueError, match="must be listed under 'postprocs'"):
         PipelineSpec.from_dict(
             {
@@ -428,13 +500,28 @@ def test_available_traces_enumerates_producer_keys() -> None:
         nodes=[
             NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
             NodeSpec("f", "filter", "f", {}),
-            NodeSpec("s", "standardize", "s", {"source": "observables"}),
-            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec(
+                "s",
+                "standardize",
+                "s",
+                {"source": "sim", "field": "observables"},
+            ),
+            NodeSpec(
+                "jb",
+                "jarque_bera",
+                "jb",
+                {"source": "sim", "field": "observables", "column": 0},
+            ),
             NodeSpec(
                 "reg",
                 "regression",
                 "reg",
-                {"y_source": "observables", "X_source": "observables"},
+                {
+                    "y_source": "sim",
+                    "y_field": "observables",
+                    "X_source": "sim",
+                    "X_field": "observables",
+                },
             ),
         ],
         edges=[],
@@ -455,7 +542,12 @@ def _kde_spec(trace_params: dict) -> PipelineSpec:
     return PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
-            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec(
+                "jb",
+                "jarque_bera",
+                "jb",
+                {"source": "sim", "field": "observables", "column": 0},
+            ),
         ],
         edges=[EdgeSpec("sim", "jb")],
         postprocs=[PostprocSpec("k", "kde", trace_params)],
@@ -488,7 +580,12 @@ def test_postproc_custom_trace_refs_not_statically_validated() -> None:
     spec = PipelineSpec(
         nodes=[
             NodeSpec("sim", "simulation", "sim", {"T": 8, "observables": True}),
-            NodeSpec("jb", "jarque_bera", "jb", {"source": "observables", "column": 0}),
+            NodeSpec(
+                "jb",
+                "jarque_bera",
+                "jb",
+                {"source": "sim", "field": "observables", "column": 0},
+            ),
         ],
         edges=[EdgeSpec("sim", "jb")],
         postprocs=[

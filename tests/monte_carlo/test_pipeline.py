@@ -28,10 +28,12 @@ from SymbolicDSGE.monte_carlo import (
     OpType,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import (
-    DATA_SOURCE_KEY,
     DYNAMIC_FIELD_INDEX,
     FILTER_RAW_FIELD_INDEX,
     MC_DATA_FIELD_INDEX,
+    SOURCE_KIND_DATA,
+    SOURCE_KIND_FILTER,
+    SOURCE_KIND_PAYLOAD,
     SourceArgs,
     report_mc_performance,
     report_mc_step_performance,
@@ -193,7 +195,8 @@ def test_raw_data_pipeline_runs_without_dgp_and_aggregates_wald_results() -> Non
             raw_data_step(states=states, n_exog=0),
             wald_test_step(
                 "state_mean",
-                source="states",
+                source="datagen",
+                field="states",
                 target=target,
                 bandwidth=0,
             ),
@@ -231,7 +234,8 @@ def test_raw_data_pipeline_accepts_observables_without_states() -> None:
             raw_data_step(observables=observables, observable_names=("obs",)),
             wald_test_step(
                 "obs_mean",
-                source="observables",
+                source="datagen",
+                field="observables",
                 target=target,
                 bandwidth=0,
             ),
@@ -274,7 +278,8 @@ def test_ljung_box_pipeline_selects_column_and_aggregates_results() -> None:
             raw_data_step(observables=observables, observable_names=("a", "b")),
             ljung_box_test_step(
                 "lb_b",
-                source="observables",
+                source="datagen",
+                field="observables",
                 column=[1],
                 lags=2,
                 alpha=0.1,
@@ -303,7 +308,8 @@ def test_ljung_box_pipeline_rejects_multi_column_inputs() -> None:
             raw_data_step(observables=observables, observable_names=("a", "b")),
             ljung_box_test_step(
                 "lb",
-                source="observables",
+                source="datagen",
+                field="observables",
                 lags=1,
             ),
         ]
@@ -327,7 +333,8 @@ def test_jarque_bera_pipeline_selects_column_and_aggregates_results() -> None:
             raw_data_step(observables=observables, observable_names=("a", "b")),
             jarque_bera_test_step(
                 "jb_a",
-                source="observables",
+                source="datagen",
+                field="observables",
                 column=0,
                 alpha=0.1,
             ),
@@ -354,7 +361,7 @@ def test_jarque_bera_pipeline_rejects_multi_column_inputs() -> None:
     pipeline = MCPipeline(
         [
             raw_data_step(observables=observables),
-            jarque_bera_test_step("jb", source="observables"),
+            jarque_bera_test_step("jb", source="datagen", field="observables"),
         ]
     )
 
@@ -375,7 +382,8 @@ def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None
             raw_data_step(observables=observables),
             jarque_bera_test_step(
                 "jb",
-                source="observables",
+                source="datagen",
+                field="observables",
                 burn_in=observables.shape[1],
             ),
         ]
@@ -408,15 +416,19 @@ def test_breusch_pagan_pipeline_selects_columns_and_aggregates_results() -> None
             raw_data_step(observables=observables),
             breusch_pagan_test_step(
                 "bp",
-                residual_source="observables",
-                X_source="observables",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
             ),
             breusch_pagan_test_step(
                 "robust_bp",
-                residual_source="observables",
-                X_source="observables",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
                 robust=True,
@@ -454,8 +466,10 @@ def test_breusch_pagan_pipeline_supports_separate_residual_and_regressor_sources
             raw_data_step(states=states, observables=observables),
             breusch_pagan_test_step(
                 "bp",
-                residual_source="observables",
-                X_source="states",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="states",
                 residual_col=0,
                 X_columns=[0, 1],
             ),
@@ -489,10 +503,10 @@ def test_breusch_pagan_pipeline_supports_separate_payload_sources() -> None:
             transform_step("regressor_payload", regressor_payload),
             breusch_pagan_test_step(
                 "bp",
-                residual_source="payload",
-                X_source="payload",
-                residual_payload_key="residual_payload",
-                x_payload_key="regressor_payload",
+                residuals_source="residual_payload",
+                residuals_field="payload",
+                X_source="regressor_payload",
+                X_field="payload",
             ),
         ]
     )
@@ -515,8 +529,10 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> Non
                 raw_data_step(observables=observables),
                 breusch_pagan_test_step(
                     "bp",
-                    residual_source="observables",
-                    X_source="observables",
+                    residuals_source="datagen",
+                    residuals_field="observables",
+                    X_source="datagen",
+                    X_field="observables",
                     X_columns=[1, 2],
                 ),
             ]
@@ -528,8 +544,10 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> Non
                 raw_data_step(observables=observables),
                 breusch_pagan_test_step(
                     "bp",
-                    residual_source="observables",
-                    X_source="observables",
+                    residuals_source="datagen",
+                    residuals_field="observables",
+                    X_source="datagen",
+                    X_field="observables",
                     residual_col=0,
                     X_columns=[],
                 ),
@@ -545,8 +563,10 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> Non
                 ),
                 breusch_pagan_test_step(
                     "bp",
-                    residual_source="observables",
-                    X_source="states",
+                    residuals_source="datagen",
+                    residuals_field="observables",
+                    X_source="datagen",
+                    X_field="states",
                     residual_col=0,
                     X_columns=[0, 1],
                 ),
@@ -562,8 +582,10 @@ def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples() -> No
             raw_data_step(observables=observables),
             breusch_pagan_test_step(
                 "bp",
-                residual_source="observables",
-                X_source="observables",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
                 burn_in=observables.shape[1],
@@ -589,8 +611,10 @@ def test_breusch_godfrey_pipeline_selects_columns_and_aggregates_results() -> No
             raw_data_step(observables=observables),
             breusch_godfrey_test_step(
                 "bg",
-                residual_source="observables",
-                X_source="observables",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
                 lags=2,
@@ -619,8 +643,10 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs() -> N
                 raw_data_step(observables=observables),
                 breusch_godfrey_test_step(
                     "bg",
-                    residual_source="observables",
-                    X_source="observables",
+                    residuals_source="datagen",
+                    residuals_field="observables",
+                    X_source="datagen",
+                    X_field="observables",
                     X_columns=[1, 2],
                 ),
             ]
@@ -635,8 +661,10 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs() -> N
                 ),
                 breusch_godfrey_test_step(
                     "bg",
-                    residual_source="observables",
-                    X_source="states",
+                    residuals_source="datagen",
+                    residuals_field="observables",
+                    X_source="datagen",
+                    X_field="states",
                     residual_col=0,
                     X_columns=[0, 1],
                 ),
@@ -652,8 +680,10 @@ def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples() -> 
             raw_data_step(observables=observables),
             breusch_godfrey_test_step(
                 "bg",
-                residual_source="observables",
-                X_source="observables",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
                 burn_in=observables.shape[1],
@@ -680,8 +710,10 @@ def test_cusum_pipeline_aggregates_results_with_nan_df() -> None:
             raw_data_step(observables=observables),
             cusum_test_step(
                 "cs",
-                y_source="observables",
-                x_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1, 2],
             ),
@@ -711,8 +743,10 @@ def test_cusumsq_pipeline_aggregates_results() -> None:
             raw_data_step(observables=observables),
             cusumsq_test_step(
                 "csq",
-                y_source="observables",
-                x_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1, 2],
             ),
@@ -743,8 +777,10 @@ def test_chow_pipeline_aggregates_results() -> None:
             raw_data_step(observables=observables),
             chow_test_step(
                 "ch",
-                y_source="observables",
-                x_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1, 2],
                 t_break=30,
@@ -771,7 +807,8 @@ def test_raw_data_pipeline_rejects_empty_raw_data() -> None:
             raw_data_step(),
             wald_test_step(
                 "obs_mean",
-                source="observables",
+                source="datagen",
+                field="observables",
                 target=np.zeros(1, dtype=np.float64),
                 bandwidth=0,
             ),
@@ -790,7 +827,8 @@ def test_pipeline_retention_controls_drop_payload_and_result_traces() -> None:
             raw_data_step(states=states, n_exog=0),
             wald_test_step(
                 "state_mean",
-                source="states",
+                source="datagen",
+                field="states",
                 target=np.zeros(2, dtype=np.float64),
                 bandwidth=0,
             ),
@@ -819,7 +857,8 @@ def test_pipeline_result_reports_overall_and_step_performance() -> None:
             raw_data_step(states=states, n_exog=0),
             wald_test_step(
                 "state_mean",
-                source="states",
+                source="datagen",
+                field="states",
                 target=np.zeros(2, dtype=np.float64),
                 bandwidth=0,
             ),
@@ -864,7 +903,8 @@ def test_pipeline_run_verbosity_controls_performance_output(
             raw_data_step(states=states, n_exog=0),
             wald_test_step(
                 "state_mean",
-                source="states",
+                source="datagen",
+                field="states",
                 target=np.zeros(2, dtype=np.float64),
                 bandwidth=0,
             ),
@@ -899,7 +939,8 @@ def test_sim_filter_wald_pipeline_uses_reference_filter_payload() -> None:
             reference_filter_step(),
             wald_test_step(
                 "std_innov_mean",
-                source="std_innov",
+                source="filter",
+                field="std_innov",
                 target=np.zeros(1, dtype=np.float64),
                 bandwidth=0,
             ),
@@ -1068,8 +1109,10 @@ def test_regression_step_runs_ols_and_stores_result_payload() -> None:
             raw_data_step(observables=observables, observable_names=("y", "x")),
             regression_step(
                 "ols",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1],
                 variables=["x"],
@@ -1114,8 +1157,10 @@ def test_regression_summary_does_not_depend_on_payload_retention() -> None:
             raw_data_step(observables=observables, observable_names=("y", "x")),
             regression_step(
                 "ols",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1],
                 variables=["x"],
@@ -1147,8 +1192,10 @@ def test_regression_step_runs_ridge_kind_and_aggregates_summary() -> None:
             regression_step(
                 "ridge",
                 kind="ridge",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1],
                 variables=["x"],
@@ -1191,8 +1238,10 @@ def test_regression_step_runs_lasso_kind_and_aggregates_summary() -> None:
             regression_step(
                 "lasso",
                 kind="lasso",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1, 2, 3],
                 intercept=False,
@@ -1228,8 +1277,10 @@ def test_regression_step_runs_elastic_net_kind_and_aggregates_summary() -> None:
             regression_step(
                 "elastic_net",
                 kind="elastic_net",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1, 2, 3],
                 intercept=False,
@@ -1266,8 +1317,10 @@ def test_regression_step_runs_elastic_net_grid_search_kind() -> None:
             regression_step(
                 "elastic_net_gs",
                 kind="elastic_net_gs",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1, 2],
                 intercept=False,
@@ -1303,8 +1356,10 @@ def test_regression_step_requires_single_response_column() -> None:
             raw_data_step(observables=observables),
             regression_step(
                 "ols",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=[0, 1],
                 X_columns=[2],
             ),
@@ -1324,8 +1379,10 @@ def test_regression_step_requires_matching_row_counts() -> None:
             raw_data_step(states=states, observables=observables),
             regression_step(
                 "ols",
-                y_source="observables",
-                X_source="states",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="states",
                 y_column=0,
                 X_columns=[0],
             ),
@@ -1362,7 +1419,8 @@ def test_pipeline_validates_step_order_and_unique_names() -> None:
             [
                 wald_test_step(
                     "state_mean",
-                    source="states",
+                    source="datagen",
+                    field="states",
                     target=np.zeros(2, dtype=np.float64),
                 )
             ]
@@ -1389,7 +1447,8 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
             raw_data_step(states=states, n_exog=0),
             wald_test_step(
                 "state_mean",
-                source="states",
+                source="datagen",
+                field="states",
                 target=np.zeros(2, dtype=np.float64),
                 bandwidth=0,
             ),
@@ -1470,6 +1529,10 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         reference=reference,
         dgp=None,
         data=MCData(states=states, observables=observables),
+        payload_slots=[
+            MCData(states=states, observables=observables),
+            np.arange(5.0, dtype=np.float64),
+        ],
         payloads={"vector": np.arange(5.0, dtype=np.float64)},
     )
 
@@ -1477,7 +1540,10 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         context,
         SourceArgs(
             arg="sample",
-            source=DATA_SOURCE_KEY,
+            source_step="datagen",
+            source_idx=0,
+            source_kind=SOURCE_KIND_DATA,
+            field="states",
             field_idx=MC_DATA_FIELD_INDEX["states"],
             columns=[1],
             burn_in=1,
@@ -1490,7 +1556,10 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         context,
         SourceArgs(
             arg="sample",
-            source="vector",
+            source_step="vector",
+            source_idx=1,
+            source_kind=SOURCE_KIND_PAYLOAD,
+            field="payload",
             field_idx=DYNAMIC_FIELD_INDEX["payload"],
             burn_in=2,
         ),
@@ -1499,12 +1568,16 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
 
     filt = reference._kalman_raw(observables)
     context.payloads["filter"] = filt
+    context.payload_slots.append(filt)
     np.testing.assert_allclose(
         _resolve_source_array(
             context,
             SourceArgs(
                 arg="sample",
-                source="filter",
+                source_step="filter",
+                source_idx=2,
+                source_kind=SOURCE_KIND_FILTER,
+                field="std_innov",
                 field_idx=FILTER_RAW_FIELD_INDEX["std_innov"],
                 columns=slice(0, 1),
             ),
@@ -1512,23 +1585,17 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         filt.std_innov[:, :1],
     )
 
-    context.payloads["not_filter"] = np.zeros(1, dtype=np.float64)
-    with pytest.raises(TypeError, match="raw filter result"):
-        _resolve_source_array(
-            context,
-            SourceArgs(
-                arg="sample",
-                source="not_filter",
-                field_idx=FILTER_RAW_FIELD_INDEX["std_innov"],
-            ),
-        )
     context.payloads["cube"] = np.zeros((1, 2, 3), dtype=np.float64)
+    context.payload_slots.append(context.payloads["cube"])
     with pytest.raises(ValueError, match="1D or 2D"):
         _resolve_source_array(
             context,
             SourceArgs(
                 arg="sample",
-                source="cube",
+                source_step="cube",
+                source_idx=3,
+                source_kind=SOURCE_KIND_PAYLOAD,
+                field="payload",
                 field_idx=DYNAMIC_FIELD_INDEX["payload"],
             ),
         )

@@ -67,7 +67,7 @@ def reference_filter_step(name: str = "filter", **kwargs: Any) -> MCStep:
     return_shocks=False, ...)``.
 
     Requires generated observables (run a DATAGEN step first); the resulting
-    Raw filter output is read downstream via ``source="filter"``.
+    Raw filter output is read downstream with ``source=name, field=field``.
 
     Example:
         >>> reference_filter_step()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -37,7 +37,7 @@ class MCPipeline:
     #: Per-replication steps: the dependency DAG, a single DATAGEN root first.
     per_rep_steps: tuple[MCStep, ...]
     #: Post-loop ops, run once after the loop over the assembled across-rep
-    #: traces. A terminal phase -- not part of the graph.
+    #: traces. This is a terminal phase, not part of the graph.
     postproc_steps: tuple[MCStep, ...]
 
     def __init__(
@@ -48,6 +48,7 @@ class MCPipeline:
         rep_tuple = tuple(per_rep_steps)
         postproc_tuple = tuple(postproc_steps)
         self._validate_steps(rep_tuple, postproc_tuple)
+        rep_tuple = self._bind_source_args(rep_tuple)
         object.__setattr__(self, "per_rep_steps", rep_tuple)
         object.__setattr__(self, "postproc_steps", postproc_tuple)
 
@@ -79,9 +80,43 @@ class MCPipeline:
                     f"is {step.op_type}."
                 )
 
+    @staticmethod
+    def _bind_source_args(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
+        root_name = per_rep_steps[0].name
+        index_by_name: dict[str, int] = {}
+        canonical_name: dict[str, str] = {}
+        for index, step in enumerate(per_rep_steps):
+            index_by_name[step.name] = index
+            canonical_name[step.name] = step.name
+            index_by_name[step.output_key] = index
+            canonical_name[step.output_key] = step.name
+        bound_steps: list[MCStep] = []
+        for step_index, step in enumerate(per_rep_steps):
+            bound_args = []
+            for selector in step.source_args:
+                producer = selector.source_step
+                if producer not in index_by_name:
+                    raise ValueError(
+                        f"Step {step.name!r} depends on unknown producer {producer!r}."
+                    )
+                source_idx = index_by_name[producer]
+                producer = canonical_name[producer]
+                if source_idx >= step_index:
+                    raise ValueError(
+                        f"Step {step.name!r} depends on {producer!r}, which does not "
+                        "appear earlier in the pipeline."
+                    )
+                bound_args.append(
+                    replace(selector, source_step=producer, source_idx=source_idx)
+                )
+            if tuple(bound_args) != step.source_args:
+                step = replace(step, source_args=tuple(bound_args))
+            bound_steps.append(step)
+        return tuple(bound_steps)
+
     @cached_property
     def graph(self) -> "PipelineGraph":
-        """The pipeline's dependency DAG, resolved from the steps' kwargs.
+        """The pipeline's dependency DAG, resolved from compiled source args.
 
         Built once and cached. Owns the graph structure (parents/children/leaves/
         typed input edges) that serialization and validation read instead of
@@ -237,7 +272,7 @@ class MCPipeline:
         return result
 
     def _run_step(self, context: MCContext, step: MCStep) -> None:
-        kwargs = dict(step.runner_kwargs)
+        kwargs = dict(step.kwargs)
         for selector in step.source_args:
             kwargs[selector.arg] = _resolve_source_array(context, selector)
         if step.op_type is OpType.DATAGEN:
@@ -251,6 +286,7 @@ class MCPipeline:
             if not isinstance(out, MCData):
                 raise TypeError("DATAGEN steps must return MCData.")
             context.data = out
+            context.payload_slots.append(out)
             context.payloads[step.output_key] = out
             return
 
@@ -276,6 +312,7 @@ class MCPipeline:
             if not isinstance(out, TestResult):
                 raise TypeError("TEST steps must return TestResult.")
             context.results[step.name] = out
+        context.payload_slots.append(out)
         context.payloads[step.output_key] = out
 
     def _run_postproc(

@@ -80,11 +80,15 @@ def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
     pipeline = MCPipeline(
         [
             raw_data_step(observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            jarque_bera_test_step(
+                "jb", source="datagen", field="observables", column=0
+            ),
             regression_step(
                 "ols",
-                y_source="observables",
-                X_source="observables",
+                y_source="datagen",
+                y_field="observables",
+                X_source="datagen",
+                X_field="observables",
                 y_column=0,
                 X_columns=[1],
                 variables=["x"],
@@ -306,7 +310,7 @@ def test_pipeline_spec_round_trips() -> None:
                 id="n1",
                 step_type="jarque_bera",
                 name="jb",
-                params={"source": "observables"},
+                params={"source": "datagen", "field": "observables"},
             ),
         ],
         edges=[EdgeSpec(source="n0", target="n1")],

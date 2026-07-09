@@ -6,14 +6,14 @@ from .types import NDF
 import numpy as np
 
 from ...core.shock_generators import Shock
-from ...kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..mc_constructs import (
-    DATA_SOURCE_KEY,
-    DYNAMIC_FIELD_INDEX,
     MC_DATA_FIELD_INDEX,
     MCContext,
     SeedIncrement,
     ShockMapping,
+    SOURCE_KIND_DATA,
+    SOURCE_KIND_FILTER,
+    SOURCE_KIND_PAYLOAD,
     SourceArgs,
 )
 
@@ -69,9 +69,10 @@ def _resolve_seed_increment(
 
 
 def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
+    payload = context.payload_slots[selector.source_idx]
     arr: Any
-    if selector.source == DATA_SOURCE_KEY:
-        data = context.require_data()
+    if selector.source_kind == SOURCE_KIND_DATA:
+        data = payload
         if selector.field_idx == MC_DATA_FIELD_INDEX["states"]:
             arr = data.states
             if arr is None:
@@ -82,25 +83,14 @@ def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
             arr = data.observables
             if arr is None:
                 raise ValueError("MC context has no generated observables.")
-        elif selector.field_idx == MC_DATA_FIELD_INDEX["raw"]:
-            if selector.raw_key is None:
-                raise ValueError("raw_key is required when source='raw'.")
-            arr = data.raw[selector.raw_key]
         else:
             arr = data[selector.field_idx]
-    elif selector.field_idx == DYNAMIC_FIELD_INDEX["payload"]:
-        arr = context.require_payload(selector.source)
+    elif selector.source_kind == SOURCE_KIND_PAYLOAD:
+        arr = payload
+    elif selector.source_kind == SOURCE_KIND_FILTER:
+        arr = payload[selector.field_idx]
     else:
-        filter_result = context.require_payload(selector.source)
-        if not isinstance(filter_result, (FilterRawResult, UnscentedFilterRawResult)):
-            raise TypeError(f"Payload '{selector.source}' is not a raw filter result.")
-        try:
-            arr = filter_result[selector.field_idx]
-        except IndexError as exc:
-            raise ValueError(
-                f"Filter payload '{selector.source}' does not expose field index "
-                f"{selector.field_idx}."
-            ) from exc
+        raise ValueError(f"Unknown MC source kind: {selector.source_kind}.")
 
     out = np.asarray(arr, dtype=np.float64)
     if out.ndim == 1:

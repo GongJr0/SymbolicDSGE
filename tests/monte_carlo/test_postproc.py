@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo import MCPipeline, MCStep, OpType, Raw, Summary
+from SymbolicDSGE.monte_carlo import (
+    MCPipeline,
+    MCStep,
+    OpType,
+    Raw,
+    Summary,
+)
 from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.operations.transforms import standardize_step
@@ -22,7 +28,9 @@ def _run(steps: list[MCStep], *, n_rep: int = 4, fail_fast: bool = True):
     pipeline = MCPipeline(
         [
             raw_data_step(observables=_observables(n_rep), observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            jarque_bera_test_step(
+                "jb", source="datagen", field="observables", column=0
+            ),
         ],
         steps,
     )
@@ -74,8 +82,12 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     pipeline = MCPipeline(
         [
             raw_data_step(observables=_observables(n_rep), observable_names=("y", "x")),
-            jarque_bera_test_step("jb_y", source="observables", column=0),
-            jarque_bera_test_step("jb_x", source="observables", column=1),
+            jarque_bera_test_step(
+                "jb_y", source="datagen", field="observables", column=0
+            ),
+            jarque_bera_test_step(
+                "jb_x", source="datagen", field="observables", column=1
+            ),
         ],
         [
             _postproc("sel", selection, expected=0),
@@ -161,8 +173,12 @@ def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
     pipeline = MCPipeline(
         [
             raw_data_step(observables=_observables(8), observable_names=("y", "x")),
-            jarque_bera_test_step("jb0", source="observables", column=0),
-            jarque_bera_test_step("jb1", source="observables", column=1),
+            jarque_bera_test_step(
+                "jb0", source="datagen", field="observables", column=0
+            ),
+            jarque_bera_test_step(
+                "jb1", source="datagen", field="observables", column=1
+            ),
         ],
         [_postproc("pcs", pcs, expected=0)],
     )
@@ -183,7 +199,7 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
     pipeline = MCPipeline(
         [
             raw_data_step(observables=_observables(5), observable_names=("y", "x")),
-            standardize_step("s", source="observables"),
+            standardize_step("s", source="datagen", field="observables"),
         ],
         [_postproc("p", op)],
     )
@@ -235,7 +251,9 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
     pipeline = MCPipeline(
         [
             raw_data_step(observables=_observables(12), observable_names=("y", "x")),
-            jarque_bera_test_step("jb", source="observables", column=0),
+            jarque_bera_test_step(
+                "jb", source="datagen", field="observables", column=0
+            ),
         ],
         [kde_step("density", trace="test.jb.statistic", grid_points=64)],
     )
@@ -278,8 +296,8 @@ def test_runtime_traces_match_available_registry() -> None:
             raw_data_step(
                 "dat", observables=_observables(5), observable_names=("y", "x")
             ),
-            jarque_bera_test_step("jb", source="observables", column=0),
-            standardize_step("s", source="observables"),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
+            standardize_step("s", source="dat", field="observables"),
         ],
         [postproc_step("probe", probe)],
     )
