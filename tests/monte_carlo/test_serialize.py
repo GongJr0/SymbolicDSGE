@@ -15,7 +15,7 @@ from SymbolicDSGE.monte_carlo import (
     PipelineSpec,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
-from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
@@ -79,7 +79,7 @@ def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
     observables = np.stack([y, x], axis=-1)  # (n_rep, T, 2): col 0 = y, col 1 = x
     pipeline = MCPipeline(
         [
-            raw_data_step(observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(observables=observables, observable_names=("y", "x")),
             jarque_bera_test_step(
                 "jb", source="datagen", field="observables", column=0
             ),

@@ -121,10 +121,10 @@ def raw_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
     """
     out: dict[str, NDArray[Any]] = {}
     for key in ("states", "observables"):
-        value = kwargs.get(key)
+        value = kwargs[key]
         if value is not None:
             out[key] = np.asarray(value, dtype=np.float64)
-    raw = kwargs.get("raw")
+    raw = kwargs["raw"]
     if raw:
         for name, value in raw.items():
             out[f"raw:{name}"] = np.asarray(value, dtype=np.float64)
@@ -217,7 +217,7 @@ def _recover_one_source(
 
 def _recover_simulation(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     params = dict(kwargs)
-    shocks = params.get("shocks")
+    shocks = params["shocks"]
     if shocks is not None:
         params["shocks"] = {key: _shock_dict(value) for key, value in shocks.items()}
     return _jsonable_params(params)
@@ -248,9 +248,14 @@ def _shock_dict(value: Any) -> ShockParameters | dict[str, Any]:
 def _recover_wald(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     params = dict(kwargs)
     if "target" in params:
-        kind = str(params.get("kind", "mean"))
         target = np.asarray(params.pop("target"), dtype=np.float64)
-        key = "target_vector" if kind == "mean" else "target_matrix"
+        if "kind" in params:
+            kind = str(params["kind"])
+            key = "target_vector" if kind == "mean" else "target_matrix"
+        elif target.ndim <= 1:
+            key = "target_vector"
+        else:
+            raise ValueError("Wald matrix targets must store the Wald kind.")
         params[key] = target.tolist()
     return _jsonable_params(params)
 
@@ -259,8 +264,7 @@ def _recover_raw_data(step: "MCStep") -> dict[str, Any]:
     kwargs = step.kwargs
     shapes = {name: list(arr.shape) for name, arr in raw_data_arrays(kwargs).items()}
     return {
-        "n_exog": int(kwargs.get("n_exog", -1)),
-        "observable_names": [str(n) for n in kwargs.get("observable_names") or ()],
+        "observable_names": [str(n) for n in kwargs["observable_names"] or ()],
         "data_ref": step.name,
         "data_shapes": shapes,
     }

@@ -20,7 +20,7 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| role | `#!python str` | Consumer leg such as `"source"`, `"residual_source"`, `"y_source"`, or `"X_source"`. |
+| role | `#!python str` | Consumer leg such as `"sample"`, `"residuals"`, `"y"`, or `"X"`. |
 | producer | `#!python str` | Upstream step name. |
 | channel | `#!python str` | Channel read from the producer, such as `"observables"`, `"std_innov"`, or `"payload"`. |
 
@@ -81,6 +81,5 @@ __Properties:__
 |:---------|:--------:|----------------:|
 | leaves | `#!python tuple[PipelineNode, ...]` | Nodes with no downstream consumers. |
 
-???+ warning "Custom source channels"
-    Graph resolution understands the built-in source conventions. Custom operations can still run in-process, but bundle-safe graph serialization requires the step to declare a supported `step_type` and source payload convention.
-
+???+ warning "Custom sources"
+    Graph resolution reads `MCStep.source_args`. Custom operations can still run in process, but custom source dependencies are not inferred from arbitrary kwargs.

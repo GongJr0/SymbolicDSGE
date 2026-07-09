@@ -64,7 +64,7 @@ def simulate(
         states=states,
         observables=obs_mat,
         raw=raw,
-        n_exog=int(getattr(model.compiled, "n_exog", -1)),
+        n_exog=model.compiled.n_exog,
         observable_names=obs_names,
     )
 
@@ -76,7 +76,6 @@ def raw_data_datagen(
     rep_idx: int,
     states: NDF | None = None,
     observables: NDF | None = None,
-    n_exog: int = -1,
     raw: Mapping[str, NDF] | None = None,
     observable_names: Sequence[str] = (),
 ) -> MCData:
@@ -118,7 +117,7 @@ def raw_data_datagen(
     return MCData(
         states=state_mat,
         observables=obs_mat,
-        n_exog=int(n_exog),
+        n_exog=-1,
         raw=raw_payload,
         observable_names=tuple(observable_names),
     )
@@ -163,3 +162,19 @@ def run_reference_filter(
         estimate_R_diag=estimate_R_diag,
         R_scale=R_scale,
     )
+
+
+def add_payload(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    value: NDF | Sequence[float] | Sequence[Sequence[float]],
+) -> NDF:
+    del context, reference, dgp, rep_idx
+
+    out = np.ascontiguousarray(value, dtype=np.float64)
+    if not out.ndim in (1, 2):
+        raise ValueError(f"Payload must be 1-D, or 2-D; got {out.ndim}-D.")
+    return out

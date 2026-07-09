@@ -18,13 +18,12 @@ regression_step(
         "elastic_net",
         "elastic_net_gs",
     ] = "ols",
-    y_source: InpSources,
-    X_source: InpSources,
-    filter_key: str = "filter",
-    y_payload_key: str | None = None,
-    x_payload_key: str | None = None,
-    y_column: Sequence[int] | int | None = None,
-    X_columns: Sequence[int] | slice | None = None,
+    y_source: str,
+    y_field: str,
+    X_source: str,
+    X_field: str,
+    y_column: int | Sequence[int] | slice | ndarray | None = None,
+    X_columns: int | Sequence[int] | slice | ndarray | None = None,
     intercept: bool = True,
     burn_in: int = 0,
     drop_initial: bool = False,
@@ -33,7 +32,7 @@ regression_step(
 ) -> MCStep
 ```
 
-`regression_step` conducts a regression of `y_source` on `X_source` and stores the regression summary in `MCPipelineResult.regression_summaries` under the key `name`. The regression is conducted separately for each replication, and summary statistics are stored as traces across replications.
+`regression_step` conducts a regression of `y` on `X` in each replication and stores the aggregate summary in `MCPipelineResult.regression_summaries[name]`.
 
 __Kind Dispatch:__
 
@@ -48,16 +47,24 @@ __Kind Dispatch:__
 | `"elastic_net_gs"` | `#!python ElasticNetResult` | `start`, `stop`, `num`, `l1_ratio` |
 
 ???+ warning "Target must be 1D"
-    `regression_step` does not support multivariate targets. Multiple target values are to be regressed on the same set of regressors, separate `regression_step` components should be appended to the pipeline for each target variable.
+    `y_source` and `y_field` must resolve to one column. Add separate `regression_step` components for multiple targets.
 
 ???+ note "Forwarded Regression Arguments"
     `kind_kwargs` are passed directly to the selected regression function. Grid-search kinds also accept the underlying regression options such as `criterion`, `max_iter`, and `tol` when supported by that method.
 
-__Sources:__
+__Inputs:__
 
-| __Source__ | __Description__ |
-|:-----------|----------------:|
-| `states` | Use `context.data.states`. Set `drop_initial=True` to remove the initial state row. |
-| `observables` | Use `context.data.observables`. |
-| `x_pred`, `x_filt`, `y_pred`, `y_filt`, `innov`, `std_innov` | Read arrays from the `FilterResult` stored under `filter_key`. |
-| `payload` | Read an array-like object from `context.payloads[payload_key]`. |
+| __Name__ | __Default__ | __Description__ |
+|:---------|:-----------:|----------------:|
+| kind | `"ols"` | Regression estimator. |
+| y_source | required | Producer step for the response. |
+| y_field | required | Response producer field. |
+| X_source | required | Producer step for regressors. |
+| X_field | required | Regressor producer field. |
+| y_column | `None` | Response column selector. It must resolve to one series. |
+| X_columns | `None` | Optional regressor column subset. |
+| intercept | `True` | Add an intercept column. |
+| burn_in | `0` | Rows dropped from both inputs before fitting. |
+| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
+| variables | `None` | Optional names for design columns. |
+| kind_kwargs | none | Extra estimator arguments, such as `alpha`, `l1_ratio`, or grid settings. |

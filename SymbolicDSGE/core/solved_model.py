@@ -135,9 +135,7 @@ class SolvedModel:
     def sim(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
-        ) = None,
+        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
         x0: list[float] | ndarray | None = None,
         observables: bool = False,

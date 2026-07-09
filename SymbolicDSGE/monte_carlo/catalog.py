@@ -160,7 +160,12 @@ def _integer_or_keyword(
 
 
 def _shock_for(
-    vars_: list[str], dist: str, loc: float, df: float, seed: int | None
+    vars_: list[str],
+    *,
+    dist: str = "norm",
+    loc: float = 0.0,
+    df: float = 5.0,
+    seed: int | None = None,
 ) -> Shock:
     """Build one :class:`Shock` for a shock-registry entry.
 
@@ -204,7 +209,7 @@ def _shocks_from_registry(
     """
     shocks: dict[str, Shock] = {}
     for entry in registry:
-        vars_ = [str(v) for v in entry.get("vars", ())]
+        vars_ = [str(v) for v in entry["vars"]]
         if not vars_:
             raise ValueError(
                 "Each shock registry entry must select at least one variable."
@@ -212,14 +217,17 @@ def _shocks_from_registry(
         key = ",".join(vars_)
         if key in shocks:
             raise ValueError(f"Duplicate shock entry for {key!r} in the registry.")
-        seed_value = entry.get("seed")
-        shocks[key] = _shock_for(
-            vars_,
-            str(entry.get("dist", "norm")),
-            float(entry.get("loc", 0.0)),
-            float(entry.get("df", 5.0)),
-            None if seed_value is None else int(seed_value),
-        )
+        seed = None
+        if "seed" in entry and entry["seed"] is not None:
+            seed = int(entry["seed"])
+        kwargs: dict[str, Any] = {}
+        if "dist" in entry:
+            kwargs["dist"] = str(entry["dist"])
+        if "loc" in entry:
+            kwargs["loc"] = float(entry["loc"])
+        if "df" in entry:
+            kwargs["df"] = float(entry["df"])
+        shocks[key] = _shock_for(vars_, seed=seed, **kwargs)
     return shocks or None
 
 
@@ -253,10 +261,16 @@ _REGRESSION_CONDITIONAL = {
 
 
 def _regression_params(params: dict[str, Any]) -> dict[str, Any]:
-    kind = str(params.get("kind", "ols"))
-    allowed = _REGRESSION_ALLOWED_BY_KIND.get(kind)
-    if allowed is None:
+    if "kind" not in params:
+        return {
+            key: value
+            for key, value in params.items()
+            if key not in _REGRESSION_CONDITIONAL
+        }
+    kind = str(params["kind"])
+    if kind not in _REGRESSION_ALLOWED_BY_KIND:
         raise ValueError(f"Unsupported regression kind: {kind}")
+    allowed = _REGRESSION_ALLOWED_BY_KIND[kind]
     return {
         key: value
         for key, value in params.items()
@@ -291,13 +305,16 @@ def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
     # mapping from library authoring) or come from the explicit registry the
     # user authored.
     params = dict(params)
-    params["seed_increment"] = _integer_or_keyword(
-        params.get("seed_increment", "auto"),
-        keywords={"auto"},
-        field_name="seed_increment",
-    )
-    registry = params.pop("shock_registry", None)
-    if params.get("shocks") is not None:
+    if "seed_increment" in params:
+        params["seed_increment"] = _integer_or_keyword(
+            params["seed_increment"],
+            keywords={"auto"},
+            field_name="seed_increment",
+        )
+    registry = None
+    if "shock_registry" in params:
+        registry = params.pop("shock_registry")
+    if "shocks" in params and params["shocks"] is not None:
         params["shocks"] = _coerce_shock_mapping(params["shocks"])
     elif registry:
         params["shocks"] = _shocks_from_registry(registry)
@@ -312,18 +329,17 @@ def _compile_filter(params: dict[str, Any]) -> dict[str, Any]:
 
 def _compile_wald(params: dict[str, Any]) -> dict[str, Any]:
     params = dict(params)
-    kind = str(params.get("kind", "mean"))
-    target_key = "target_vector" if kind == "mean" else "target_matrix"
-    params["target"] = np.asarray(params.pop(target_key, []), dtype=np.float64)
-    params["bandwidth"] = _integer_or_keyword(
-        params.get("bandwidth", "auto"),
-        keywords={"andrews", "wooldridge", "auto"},
-        field_name="bandwidth",
-    )
-    params.pop(
-        "target_matrix" if target_key == "target_vector" else "target_vector",
-        None,
-    )
+    if "target_vector" in params:
+        params["target"] = np.asarray(params.pop("target_vector"), dtype=np.float64)
+        params.pop("target_matrix", None)
+    elif "target_matrix" in params:
+        params["target"] = np.asarray(params.pop("target_matrix"), dtype=np.float64)
+    if "bandwidth" in params:
+        params["bandwidth"] = _integer_or_keyword(
+            params["bandwidth"],
+            keywords={"andrews", "wooldridge", "auto"},
+            field_name="bandwidth",
+        )
     return params
 
 

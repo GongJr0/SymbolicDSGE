@@ -391,7 +391,7 @@ class MCMeta:
     def step_it_s(self) -> Mapping[str, float]:
         return {
             name: _iterations_per_second(
-                self.step_counts.get(name, 0),
+                self.step_counts[name],
                 elapsed_s,
             )
             for name, elapsed_s in self.step_elapsed_s.items()
@@ -533,8 +533,8 @@ def report_mc_step_performance(
     print_func(f"Per-step Report:\n")
     for step_name in meta.step_elapsed_s:
         print_func(
-            f"\t{step_name}: {meta.failed_steps.get(step_name, 0)} faliures, "
-            f"{step_rates.get(step_name, 0.0):.2f} it/s ({meta.step_elapsed_s.get(step_name, 0.0):.2f}s)."
+            f"\t{step_name}: {meta.step_failures[step_name]} faliures, "
+            f"{step_rates[step_name]:.2f} it/s ({meta.step_elapsed_s[step_name]:.2f}s)."
         )
 
     if meta.postproc_elapsed_s:

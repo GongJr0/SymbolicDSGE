@@ -81,8 +81,9 @@ StepDefinition.build(name: str, params: dict[str, Any]) -> MCStep
 | `TRANSFORM_STEP_TYPES` | `#!python frozenset[str]` | Built-in transform kinds. |
 | `TERMINAL_STEP_TYPES` | `#!python frozenset[str]` | Test and regression terminal kinds. |
 | `POSTPROC_STEP_TYPES` | `#!python frozenset[str]` | Post-loop kinds run once after the replication loop (e.g. `kde`). |
-| `INPUT_SOURCES` | `#!python list[str]` | Source channels diagnostic/regression steps may read. |
-| `FILTER_SOURCES` | `#!python set[str]` | Source channels produced by the filter step. |
+| `INPUT_SOURCES` | `#!python list[str]` | Array field names exposed in catalog forms. |
+| `FILTER_OUTPUT_SOURCES` | `#!python tuple[str, ...]` | Catalog fields produced by filter steps. |
+| `FILTER_SOURCES` | `#!python set[str]` | Filter field names used when resolving graph parents. |
 
 ```python
 catalog_payload() -> dict[str, Any]

@@ -14,7 +14,7 @@ from SymbolicDSGE.monte_carlo import (
     validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.operations.core import (
-    raw_data_step,
+    raw_model_data_step,
     reference_filter_step,
     simulation_step,
 )
@@ -128,11 +128,10 @@ def test_to_spec_records_raw_data_reference_not_arrays() -> None:
     observables = np.zeros((4, 5, 3))
     pipe = MCPipeline(
         [
-            raw_data_step(
+            raw_model_data_step(
                 "dat",
                 states=states,
                 observables=observables,
-                n_exog=1,
                 observable_names=("a", "b", "c"),
             ),
             jarque_bera_test_step("jb", source="dat", field="observables"),
@@ -157,7 +156,7 @@ def test_to_spec_records_raw_data_reference_not_arrays() -> None:
 def test_to_spec_emits_custom_with_func_ref() -> None:
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=np.zeros((4, 5, 3))),
+            raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
             transform_step("tf", lambda **_: None),
         ]
     )
@@ -180,7 +179,7 @@ def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
 
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=np.zeros((4, 5, 3))),
+            raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
             jarque_bera_test_step("jb", source="dat", field="observables"),
         ],
         [postproc_step("sum", my_summary, threshold=0.5)],

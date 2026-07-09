@@ -8,22 +8,11 @@ tags:
 wald_test_step(
     name: str,
     *,
-    source: Literal[
-        "states",
-        "observables",
-        "x_pred",
-        "x_filt",
-        "y_pred",
-        "y_filt",
-        "innov",
-        "std_innov",
-        "payload",
-    ],
+    source: str,
+    field: str,
     target: ndarray,
     kind: Literal["mean", "covariance", "second_moment"] = "mean",
-    filter_key: str = "filter",
-    payload_key: str | None = None,
-    columns: Sequence[int] | slice | None = None,
+    columns: int | Sequence[int] | slice | ndarray | None = None,
     burn_in: int = 0,
     drop_initial: bool = False,
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
@@ -32,16 +21,22 @@ wald_test_step(
 ) -> MCStep
 ```
 
-`wald_test_step` wraps `run_wald_test(...)`. It selects a 1D or 2D array from generated data, a `FilterResult`, or a named payload, then runs the requested HAC Wald diagnostic.
+`wald_test_step` wraps `run_wald_test(...)`. It selects a 1D or 2D array from a producer step and runs the requested HAC Wald diagnostic.
 
-__Sources:__
+__Inputs:__
 
-| __Source__ | __Description__ |
-|:-----------|----------------:|
-| `states` | Use `context.data.states`. Set `drop_initial=True` to remove the initial state row. |
-| `observables` | Use `context.data.observables`. |
-| `x_pred`, `x_filt`, `y_pred`, `y_filt`, `innov`, `std_innov` | Read arrays from the `FilterResult` stored under `filter_key`. |
-| `payload` | Read an array-like object from `context.payloads[payload_key]`. |
+| __Name__ | __Default__ | __Description__ |
+|:---------|:-----------:|----------------:|
+| source | required | Producer step name. |
+| field | required | Producer field. Use `states` or `observables` for data steps, a filter output field for filter steps, or `payload` for transform steps. |
+| target | required | Hypothesized moment value. |
+| kind | `"mean"` | Moment tested against `target`. |
+| columns | `None` | Optional column subset. |
+| burn_in | `0` | Rows dropped before the test. |
+| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
+| kernel | `"bartlett"` | HAC kernel. |
+| bandwidth | `"auto"` | HAC bandwidth selector or explicit integer. |
+| alpha | `0.05` | Test size. |
 
 __Kinds:__
 

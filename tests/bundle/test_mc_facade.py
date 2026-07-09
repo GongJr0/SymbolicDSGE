@@ -14,7 +14,7 @@ from SymbolicDSGE.monte_carlo.custom_op import (
     NumpyCustomFunc,
     PandasCustomFunc,
 )
-from SymbolicDSGE.monte_carlo.operations.core import raw_data_step
+from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
 from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
 from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
@@ -65,10 +65,9 @@ def _raw_data_pipeline() -> MCPipeline:
     observables = rng.normal(size=(3, 20, 2))  # n_rep, T, k
     return MCPipeline(
         [
-            raw_data_step(
+            raw_model_data_step(
                 "dat",
                 observables=observables,
-                n_exog=1,
                 observable_names=("y", "x"),
             ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
@@ -101,7 +100,9 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     observables = np.random.default_rng(1).normal(size=(2, 15, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
             transform_step("z", zscore, source="dat", field="observables"),
             jarque_bera_test_step("jb", source="z", field="payload"),
         ]
@@ -131,7 +132,9 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     observables = np.random.default_rng(2).normal(size=(4, 20, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [postproc_step("post", selection_rate)],
@@ -170,7 +173,9 @@ def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
     observables = np.random.default_rng(0).normal(size=(4, 20, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
     )
@@ -189,7 +194,9 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
     observables = np.random.default_rng(3).normal(size=(12, 30, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [kde_step("kde", trace="test.jb.statistic", grid_points=32)],
@@ -220,7 +227,9 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
     observables = np.random.default_rng(5).normal(size=(6, 20, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [postproc_step("ptab", pval_table)],  # plain func -> auto-wrapped at ship
@@ -251,7 +260,9 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     observables = np.random.default_rng(7).normal(size=(8, 25, 2))
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=observables, observable_names=("y", "x")),
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
         [postproc_step("sum", summary_bundle, threshold=0.5)],
@@ -313,7 +324,7 @@ def test_pandas_wrapper_rejected_outside_postproc() -> None:
 def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:
     pipe = MCPipeline(
         [
-            raw_data_step("dat", observables=np.zeros((2, 5, 2))),
+            raw_model_data_step("dat", observables=np.zeros((2, 5, 2))),
             transform_step("z", lambda **_: None, source="dat", field="observables"),
         ]
     )

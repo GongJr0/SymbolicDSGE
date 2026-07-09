@@ -23,7 +23,7 @@ from .catalog import (
 )
 from .core import MCPipeline
 from .mc_constructs import MCPipelineResult
-from .operations.core import raw_data_step
+from .operations.core import raw_model_data_step
 from .operations.postproc import postproc_step
 from .operations.transforms import transform_step
 from .spec import NodeSpec, PipelineSpec, PostprocSpec
@@ -125,8 +125,10 @@ def validate_pipeline_spec(
     if not has_reference:
         raise ValueError("A solved reference model is required.")
     if datagen.step_type == "simulation":
-        sim_target = str(datagen.params.get("target", "dgp"))
-        if sim_target == "dgp" and not has_dgp:
+        target_is_dgp = (
+            "target" not in datagen.params or str(datagen.params["target"]) == "dgp"
+        )
+        if target_is_dgp and not has_dgp:
             raise ValueError("A solved DGP model is required by the simulation step.")
 
     filter_nodes = [node for node in spec.nodes if node.step_type == "filter"]
@@ -188,7 +190,12 @@ def _validate_postproc_trace_refs(
         for field in definition.fields:
             if field.type != "trace":
                 continue
-            ref = node.params.get(field.key)
+            if field.key not in node.params:
+                raise ValueError(
+                    f"POSTPROC step '{node.name}' must select a trace for "
+                    f"'{field.key}' (available: {sorted(available)})."
+                )
+            ref = node.params[field.key]
             if not ref:
                 raise ValueError(
                     f"POSTPROC step '{node.name}' must select a trace for "
@@ -208,7 +215,7 @@ def _source_dep_ids(node: NodeSpec, name_to_id: Mapping[str, str]) -> set[str]:
     for source_key, field_key in _SOURCE_FIELD_KEYS.items():
         if source_key not in node.params or field_key not in node.params:
             continue
-        producer = node.params.get(source_key)
+        producer = node.params[source_key]
         if producer and producer in name_to_id:
             out.add(name_to_id[producer])
     return out
@@ -315,11 +322,10 @@ def _build_raw_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
     }
     if raw:
         kwargs["raw"] = raw
-    if "n_exog" in params:
-        kwargs["n_exog"] = params["n_exog"]
-    if params.get("observable_names"):
-        kwargs["observable_names"] = tuple(params["observable_names"])
-    return raw_data_step(node.name, **kwargs)
+    observable_names = params["observable_names"]
+    if observable_names:
+        kwargs["observable_names"] = tuple(observable_names)
+    return raw_model_data_step(node.name, **kwargs)
 
 
 def _build_custom(
@@ -382,8 +388,8 @@ def run_pipeline(
 def _datagen_has_observables(datagen: NodeSpec) -> bool:
     """Whether the root datagen produces observables a filter can consume."""
     if datagen.step_type == "raw_data":
-        return "observables" in dict(datagen.params.get("data_shapes", {}))
-    return bool(datagen.params.get("observables", True))
+        return "observables" in dict(datagen.params["data_shapes"])
+    return "observables" not in datagen.params or bool(datagen.params["observables"])
 
 
 def _bind_graph_dependency(
