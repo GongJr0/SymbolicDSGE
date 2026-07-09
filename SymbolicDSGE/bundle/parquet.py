@@ -72,7 +72,7 @@ def arrays_to_parquet(
 ) -> tuple[bytes, dict[str, list[int]]]:
     """Serialize named N-D float arrays to Parquet bytes + a shape manifest.
 
-    Built for the ``raw_data`` datagen: its states / observables / raw arrays are
+    Built for the ``raw_model_data`` datagen: its states / observables / raw arrays are
     bulk data that cannot ride the JSON pipeline spec. Each array is flattened to
     2-D ``(-1, last_dim)`` (1-D stays 1-D) so :func:`trace_to_json` can expand it
     into columns, and its original shape is recorded in the returned manifest so
@@ -189,10 +189,11 @@ def frame_to_json(columns: Mapping[str, Sequence[Any]]) -> bytes:
     """Encode a columnar table (mixed numeric / string / bool) to NDJSON.
 
     Sibling of :func:`trace_to_json` for tabular POSTPROC artifacts (#181): each
-    value is a 1-D sequence of *scalar* cells (no 2-D expansion — table cells are
-    already scalar), and columns may be non-numeric. All columns must share
-    length; non-finite floats and ``None`` become JSON ``null``. Decode with
-    :func:`from_parquet_columns` (no :func:`collapse_columns` needed).
+    value is a 1-D sequence of *scalar* cells. No 2-D expansion is performed
+    because table cells are already scalar, and columns may be non-numeric. All
+    columns must share length. Non-finite floats and ``None`` become JSON
+    ``null``. Decode with :func:`from_parquet_columns`; no
+    :func:`collapse_columns` needed.
     """
     if not columns:
         return b""

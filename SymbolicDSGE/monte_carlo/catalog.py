@@ -822,9 +822,9 @@ STEP_CATALOG: dict[str, StepDefinition] = {
 }
 
 #: Step kinds that act as the pipeline's single root datagen. ``simulation`` is
-#: catalogue-driven (GUI-authorable); ``raw_data`` ships pre-computed arrays as a
-#: bundle member and has no GUI ``StepDefinition``.
-DATAGEN_STEP_TYPES: frozenset[str] = frozenset({"simulation", "raw_data"})
+#: catalogue-driven (GUI-authorable); ``raw_model_data`` ships pre-computed
+#: arrays as a bundle member and has no GUI ``StepDefinition``.
+DATAGEN_STEP_TYPES: frozenset[str] = frozenset({"simulation", "raw_model_data"})
 
 #: Step kinds that terminate a branch (tests + regression).
 TERMINAL_STEP_TYPES: frozenset[str] = frozenset(

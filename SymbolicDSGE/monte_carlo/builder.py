@@ -6,7 +6,7 @@ pydantic-free core dataclasses (:class:`NodeSpec`/:class:`PipelineSpec`); the UI
 keeps thin wrappers that convert its request models via ``to_core()``.
 
 Compilation is driven entirely by :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG`
-— there is no per-step branching here.
+There is no per-step branching here.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def validate_pipeline_spec(
     """Validate the pipeline and return ``(ordered per-rep nodes, postprocs)``.
 
     Enforces unique ids/names (across nodes *and* postprocs), well-formed edges,
-    exactly one datagen (``simulation`` or ``raw_data``), and the terminal/filter
+    exactly one datagen (``simulation`` or ``raw_model_data``), and the terminal/filter
     linking rules, then orders the per-rep steps. Postprocs are a terminal phase:
     they carry no edges and are validated only for trace references.
     """
@@ -268,15 +268,15 @@ def build_pipeline(
     step compiles purely from its parameters (simulation shocks come from the
     explicit registry, not a model), so a pipeline builds before any model is on
     hand. ``resources`` reattaches bulk side-channel data the JSON spec only
-    references by key: a ``raw_data`` node's arrays (keyed by its ``data_ref``)
+    references by key: a ``raw_model_data`` node's arrays (keyed by its ``data_ref``)
     and a ``custom`` op's callable (keyed by its ``func_ref``). The bundle loader
     supplies it; for an all-builtin pipeline it can be omitted.
     """
     resources = resources or {}
     per_rep_steps = []
     for node in ordered:
-        if node.step_type == "raw_data":
-            per_rep_steps.append(_build_raw_data(node, resources))
+        if node.step_type == "raw_model_data":
+            per_rep_steps.append(_build_raw_model_data(node, resources))
         elif node.step_type == "transform:custom":
             per_rep_steps.append(_build_custom(node, resources, transform_step))
         else:
@@ -299,15 +299,15 @@ def build_pipeline(
     return MCPipeline(per_rep_steps, postproc_steps)
 
 
-def _build_raw_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
-    """Rehydrate a ``raw_data`` datagen, injecting its arrays from resources."""
+def _build_raw_model_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
+    """Rehydrate a ``raw_model_data`` datagen, injecting its arrays from resources."""
     params = dict(node.params)
     ref = params.pop("data_ref", node.name)
     params.pop("data_shapes", None)
     arrays = resources.get(ref)
     if arrays is None:
         raise ValueError(
-            f"raw_data step '{node.name}' references data '{ref}' that is not "
+            f"raw_model_data step '{node.name}' references data '{ref}' that is not "
             "present in the supplied resources."
         )
     kwargs: dict[str, Any] = {}
@@ -364,7 +364,7 @@ def run_pipeline(
     """Validate, compile, and run ``spec`` against the reference and DGP models.
 
     ``resources`` reattaches bulk side-channels the spec references by key
-    (``raw_data`` arrays, ``custom`` callables); see :func:`build_pipeline`.
+    (``raw_model_data`` arrays, ``custom`` callables); see :func:`build_pipeline`.
     """
     ordered, postprocs = validate_pipeline_spec(
         spec,
@@ -387,7 +387,7 @@ def run_pipeline(
 
 def _datagen_has_observables(datagen: NodeSpec) -> bool:
     """Whether the root datagen produces observables a filter can consume."""
-    if datagen.step_type == "raw_data":
+    if datagen.step_type == "raw_model_data":
         return "observables" in dict(datagen.params["data_shapes"])
     return "observables" not in datagen.params or bool(datagen.params["observables"])
 

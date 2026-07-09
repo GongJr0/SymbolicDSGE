@@ -2,7 +2,7 @@
 tags:
     - doc
 ---
-# Raw Data
+# Raw Model Data
 
 ```python
 raw_model_data_step(
@@ -15,7 +15,7 @@ raw_model_data_step(
 ) -> MCStep
 ```
 
-`raw_model_data_step` wraps `raw_data_datagen(...)`. It does not require a DGP model.
+`raw_model_data_step` wraps `raw_model_data_datagen(...)`. It does not require a DGP model.
 
 __Accepted Shapes:__
 
@@ -26,4 +26,4 @@ __Accepted Shapes:__
 | raw values | `(T,)`, `(T, n)`, or `(n_rep, T, n)` | Extra raw arrays are selected with the same convention as observables. |
 
 ???+ note "State and observable payloads"
-    `raw_model_data_step` accepts state data, observable data, or both. A reference filter step requires observables, while downstream steps use the raw data step name as `source` and `field="states"` or `field="observables"`.
+    `raw_model_data_step` accepts state data, observable data, or both. A reference filter step requires observables, while downstream steps use the raw model data step name as `source` and `field="states"` or `field="observables"`.

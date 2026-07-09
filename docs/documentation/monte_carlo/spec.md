@@ -117,14 +117,14 @@ PipelineSpec.from_json(text: str) -> PipelineSpec  # @classmethod
 ```
 
 ???+ info "Resources"
-    Large arrays and custom callables are not embedded directly in `PipelineSpec`. `raw_data` nodes reference restored arrays through `data_ref`, and `custom` nodes reference restored callables through `func_ref`. Bundle loading exposes those objects through `LoadedMC.resources`.
+    Large arrays and custom callables are not embedded directly in `PipelineSpec`. `raw_model_data` nodes reference restored arrays through `data_ref`, and `custom` nodes reference restored callables through `func_ref`. Bundle loading exposes those objects through `LoadedMC.resources`.
 
 ## `MCStepKind` and `STEP_KINDS`
 
 ```python
 MCStepKind = Literal[
     "simulation",
-    "raw_data",
+    "raw_model_data",
     "filter",
     "wald",
     "ljung_box",

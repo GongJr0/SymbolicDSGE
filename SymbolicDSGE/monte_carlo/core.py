@@ -135,7 +135,7 @@ class MCPipeline:
 
         The inverse of :func:`build_pipeline`: lets a pipeline authored with
         plain library objects be stored in a bundle without touching the spec
-        DTOs. Bulk side-channels (``raw_data`` arrays, custom-op blobs) are
+        DTOs. Bulk side-channels (``raw_model_data`` arrays, custom-op blobs) are
         referenced by key and written as bundle members by the bundle builder.
         """
         from .spec_compile import pipeline_to_spec
@@ -160,6 +160,7 @@ class MCPipeline:
             raise ValueError("verbosity must be 0, 1, or 2.")
 
         contexts: list[MCContext] = []
+        n_successful = 0
         payload_traces: list[Mapping[str, object]] = []
         failures: list[MCFailure] = []
         results_by_step: dict[str, list[TestResult]] = {}
@@ -171,7 +172,7 @@ class MCPipeline:
         step_counts: dict[str, int] = {s.name: 0 for s in self.per_rep_steps}
         step_failures: dict[str, int] = {s.name: 0 for s in self.per_rep_steps}
 
-        # POSTPROC ops don't run per replication — they run once after the loop,
+        # POSTPROC ops don't run per replication. They run once after the loop,
         # over the assembled across-rep traces.
         rep_steps = self.per_rep_steps
         postproc_steps = self.postproc_steps
@@ -206,7 +207,9 @@ class MCPipeline:
                 )
                 continue
 
-            contexts.append(context)
+            n_successful += 1
+            if retain_contexts:
+                contexts.append(context)
             if retain_payloads:
                 payload_traces.append(dict(context.payloads))
             for name, test_result in context.results.items():
@@ -256,7 +259,7 @@ class MCPipeline:
         result = MCPipelineResult(
             n_rep=n_rep,
             meta=meta,
-            n_successful=len(contexts),
+            n_successful=n_successful,
             test_summaries=test_summaries,
             test_results=(
                 {name: tuple(values) for name, values in results_by_step.items()}
@@ -335,7 +338,7 @@ class MCPipeline:
 
         Owns its own timing: returns ``(artifacts, postproc_elapsed_s)`` where
         the second maps each step name to its wall-clock seconds. ``traces``
-        carries every keyed across-rep ndarray — the test/regression summary
+        carries every keyed across-rep ndarray: the test/regression summary
         traces (shared with the result wire) plus stacked transform payloads. A
         failing op honors ``fail_fast`` (re-raise) or records an
         :class:`MCFailure` with ``rep_idx=-1`` (post-loop sentinel) and is skipped.

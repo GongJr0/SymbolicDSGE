@@ -85,7 +85,7 @@ __Recognized kinds (`MEMBER_KINDS`):__
 | `mc_pipeline` | `PipelineSpec` JSON. |
 | `mc_result` | Trace-free MC run document (JSON). |
 | `mc_trace` | MC trace columns (CSV or Parquet). |
-| `mc_raw_data` | Raw-data arrays referenced by MC `raw_data` nodes. |
+| `mc_raw_model_data` | Raw model data arrays referenced by MC `raw_model_data` nodes. |
 | `mc_custom_op` | Bundle-safe custom operation referenced by `transform:custom` or `postproc:custom` specs. |
 | `mc_postproc` | Bulk postproc ndarray artifact. |
 | `mc_postproc_table` | Tabular postproc artifact. |

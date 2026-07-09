@@ -2,7 +2,7 @@
 
 Shared contract for the factories in this group:
 
-- These seed a pipeline: a DATAGEN step (``simulation`` or ``raw_data``) must
+- These seed a pipeline: a DATAGEN step (``simulation`` or ``raw_model_data``) must
   run first to populate ``context.data`` for that replication.
 - Output location: datagen fills ``context.data`` (states / observables / raw
   series); the ``filter`` step stores raw filter output that downstream steps

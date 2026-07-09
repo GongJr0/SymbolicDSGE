@@ -656,7 +656,7 @@ const EDGE_COLOR_BY_KIND: Record<string, string> = Object.fromEntries(
 );
 
 function producerKind(stepType: string | undefined): string {
-  if (stepType === "simulation" || stepType === "raw_data") return "datagen";
+  if (stepType === "simulation" || stepType === "raw_model_data") return "datagen";
   if (stepType === "filter") return "filter";
   return "transform";
 }

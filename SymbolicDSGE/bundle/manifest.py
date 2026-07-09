@@ -1,6 +1,6 @@
 """``.sdsge`` manifest schema (the bundle index).
 
-Stdlib dataclasses only — the bundle layer lives in the core library (no ``[ui]``
+Stdlib dataclasses only. The bundle layer lives in the core library (no ``[ui]``
 extra), so it stays pydantic-free. The manifest is stored as ``manifest.json`` at
 the archive root and enumerates every member with its ``kind`` and ``format`` so a
 reader can dispatch each one (format-agnostic: a hand-zipped CSV bundle and a
@@ -34,7 +34,7 @@ MemberKind = Literal[
     "mc_pipeline",
     "mc_result",
     "mc_trace",
-    "mc_raw_data",
+    "mc_raw_model_data",
     "mc_custom_op",
     "mc_postproc",
     "mc_postproc_table",
@@ -68,7 +68,7 @@ def format_for_path(path: str) -> str:
 class SimSpec(Mapping):
     """Simulation/output-tab prefill (#141).
 
-    No simulation results are stored — replaying these specs against the
+    No simulation results are stored. Replaying these specs against the
     preloaded model reproduces the intended run (numpy PCG64 + fixed seed).
     Raw shock paths, when present, are carried inline (they are small).
     """
@@ -130,7 +130,7 @@ class SimSpec(Mapping):
 class Member:
     """One archive entry described in the manifest.
 
-    ``options`` carries kind-specific metadata — for ``model_config`` it holds the
+    ``options`` carries kind-specific metadata. For ``model_config`` it holds the
     ``compile_kwargs``/``solve_kwargs`` needed to rebuild the ``SolvedModel``.
     """
 

@@ -69,7 +69,7 @@ def simulate(
     )
 
 
-def raw_data_datagen(
+def raw_model_data_datagen(
     *,
     reference: SolvedModel,
     dgp: SolvedModel | None,
@@ -81,7 +81,9 @@ def raw_data_datagen(
 ) -> MCData:
     del reference, dgp
     if states is None and observables is None:
-        raise ValueError("raw_data_datagen requires states, observables, or both.")
+        raise ValueError(
+            "raw_model_data_datagen requires states, observables, or both."
+        )
 
     state_mat = None
     if states is not None:

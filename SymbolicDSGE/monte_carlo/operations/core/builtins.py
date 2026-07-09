@@ -8,7 +8,7 @@ from ....core.shock_generators import Shock
 from ...mc_constructs import MCStep, OpType
 from .ops import (
     simulate,
-    raw_data_datagen,
+    raw_model_data_datagen,
     run_reference_filter,
     add_payload,
 )
@@ -83,14 +83,14 @@ def raw_model_data_step(
     return MCStep(
         name=name,
         op_type=OpType.DATAGEN,
-        func=raw_data_datagen,
+        func=raw_model_data_datagen,
         kwargs={
             "states": states,
             "observables": observables,
             "raw": raw,
             "observable_names": observable_names,
         },
-        step_type="raw_data",
+        step_type="raw_model_data",
     )
 
 

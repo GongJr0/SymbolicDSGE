@@ -1,6 +1,6 @@
 """Serializable Monte Carlo pipeline specification (graph form).
 
-Stdlib dataclasses — the core ``monte_carlo`` module must stay pydantic-free
+Stdlib dataclasses. The core ``monte_carlo`` module must stay pydantic-free
 (pydantic is only present transitively under the ``[ui]`` extra). The UI keeps its
 pydantic request models and converts via :meth:`PipelineSpec.from_dict`. This is the
 text representation a ``.sdsge`` bundle stores for the MC pipeline.
@@ -16,7 +16,7 @@ from typing import Any, Literal, get_args
 MCStepKind = Literal[
     # datagen / filter
     "simulation",
-    "raw_data",
+    "raw_model_data",
     "filter",
     # terminal: tests
     "wald",
@@ -46,7 +46,7 @@ MCStepKind = Literal[
 ]
 
 #: Authoritative set of valid step-type strings. Must agree with the keys of
-#: :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG` — there's a regression
+#: :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG`. There's a regression
 #: test in ``tests/monte_carlo/test_catalog_builder.py`` that enforces parity.
 STEP_KINDS: frozenset[str] = frozenset(get_args(MCStepKind))
 

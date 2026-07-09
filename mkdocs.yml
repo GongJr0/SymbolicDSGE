@@ -203,7 +203,7 @@ nav:
           - Operations:
               - Core:
                   - DGP Simulation: documentation/monte_carlo/operations/core/simulation.md
-                  - Raw Data: documentation/monte_carlo/operations/core/raw_data.md
+                  - Raw Model Data: documentation/monte_carlo/operations/core/raw_model_data.md
                   - Reference Filtering: documentation/monte_carlo/operations/core/filter.md
               - Tests:
                   - Wald Tests: documentation/monte_carlo/operations/tests/wald.md

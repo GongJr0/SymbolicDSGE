@@ -123,7 +123,7 @@ def test_rebuilt_simulation_recovers_live_shocks() -> None:
     assert shock.to_dict() == pipe.per_rep_steps[0].kwargs["shocks"]["u"].to_dict()
 
 
-def test_to_spec_records_raw_data_reference_not_arrays() -> None:
+def test_to_spec_records_raw_model_data_reference_not_arrays() -> None:
     states = np.zeros((4, 5, 2))
     observables = np.zeros((4, 5, 3))
     pipe = MCPipeline(
@@ -140,7 +140,7 @@ def test_to_spec_records_raw_data_reference_not_arrays() -> None:
     spec = pipe.to_spec()
 
     dat = spec.nodes[0]
-    assert dat.step_type == "raw_data"
+    assert dat.step_type == "raw_model_data"
     assert dat.params["data_ref"] == "dat"
     assert dat.params["data_shapes"] == {
         "states": [4, 5, 2],

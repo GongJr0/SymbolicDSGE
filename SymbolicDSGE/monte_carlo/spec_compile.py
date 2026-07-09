@@ -9,15 +9,15 @@ compile hooks expect, so ``to_spec`` is a fixed point under a rebuild.
 
 Recovery is mostly pass-through. The cases that need inverting a compile hook:
 
-- **simulation** — live :class:`Shock` objects are serialized via
+- **simulation**: live :class:`Shock` objects are serialized via
   :meth:`Shock.to_dict`; the dual-form ``_compile_simulation`` rebuilds them.
-- **wald** — the materialized ``target`` ndarray is inverted to the
+- **wald**: the materialized ``target`` ndarray is inverted to the
   ``target_vector`` / ``target_matrix`` field the GUI/spec form carries.
-- **raw_data** — bulk arrays cannot ride the JSON spec, so the node records a
+- **raw_model_data**: bulk arrays cannot ride the JSON spec, so the node records a
   ``data_ref`` (the bundle member key), the array ``data_shapes``, and the scalar
   metadata; the bundle builder writes the parquet member from
-  :func:`raw_data_arrays`.
-- **custom** — the user callable cannot ride the JSON spec either, so the node
+  :func:`raw_model_data_arrays`.
+- **custom**: the user callable cannot ride the JSON spec either, so the node
   records a ``func_ref`` (the bundle member key) alongside its plain kwargs; the
   bundle builder writes the cloudpickle member and ``build_pipeline`` reattaches
   the callable from the loaded resources.
@@ -112,8 +112,8 @@ def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
     return PipelineSpec(nodes=nodes, edges=edges, postprocs=postprocs)
 
 
-def raw_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
-    """The named bulk arrays a ``raw_data`` datagen ships.
+def raw_model_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
+    """The named bulk arrays a ``raw_model_data`` datagen ships.
 
     ``states`` / ``observables`` keep their names; entries of ``raw`` are
     namespaced ``raw:<key>``. Shared with the bundle builder, which feeds them to
@@ -142,8 +142,8 @@ def _step_type(step: "MCStep") -> str:
 
 def _recover_params(step: "MCStep") -> dict[str, Any]:
     step_type = step.step_type
-    if step_type == "raw_data":
-        return _recover_raw_data(step)
+    if step_type == "raw_model_data":
+        return _recover_raw_model_data(step)
     if step_type == "simulation":
         params = _recover_simulation(step.kwargs)
     elif step_type == "wald":
@@ -260,9 +260,11 @@ def _recover_wald(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     return _jsonable_params(params)
 
 
-def _recover_raw_data(step: "MCStep") -> dict[str, Any]:
+def _recover_raw_model_data(step: "MCStep") -> dict[str, Any]:
     kwargs = step.kwargs
-    shapes = {name: list(arr.shape) for name, arr in raw_data_arrays(kwargs).items()}
+    shapes = {
+        name: list(arr.shape) for name, arr in raw_model_data_arrays(kwargs).items()
+    }
     return {
         "observable_names": [str(n) for n in kwargs["observable_names"] or ()],
         "data_ref": step.name,

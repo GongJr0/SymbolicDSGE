@@ -187,7 +187,7 @@ def _batched_states() -> np.ndarray:
     return np.stack([base, base + np.array([0.25, -0.5], dtype=np.float64)])
 
 
-def test_raw_data_pipeline_runs_without_dgp_and_aggregates_wald_results() -> None:
+def test_raw_model_data_pipeline_runs_without_dgp_and_aggregates_wald_results() -> None:
     reference = _FakeSolvedModel()
     states = _batched_states()
     target = np.zeros(2, dtype=np.float64)
@@ -226,7 +226,7 @@ def test_raw_data_pipeline_runs_without_dgp_and_aggregates_wald_results() -> Non
     assert out.contexts[0].dgp is None
 
 
-def test_raw_data_pipeline_accepts_observables_without_states() -> None:
+def test_raw_model_data_pipeline_accepts_observables_without_states() -> None:
     reference = _FakeSolvedModel()
     observables = _batched_states()[:, :, :1]
     target = np.zeros(1, dtype=np.float64)
@@ -872,7 +872,7 @@ def test_chow_pipeline_aggregates_results() -> None:
     assert out.test_summaries["ch"].df == (2, 60 - 2 * 2)
 
 
-def test_raw_data_pipeline_rejects_empty_raw_data() -> None:
+def test_raw_model_data_pipeline_rejects_empty_raw_model_data() -> None:
     reference = _FakeSolvedModel()
     pipeline = MCPipeline(
         [

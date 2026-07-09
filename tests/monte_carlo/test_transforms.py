@@ -623,14 +623,14 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_source() -> None:
 def test_step_kinds_match_catalog() -> None:
     """Every GUI-catalog step kind must be a valid spec `STEP_KIND`; drift would
     silently reject perfectly valid bundles at load time. `STEP_KINDS` may be a
-    strict superset: serialization-only datagens (e.g. ``raw_data``) are valid
+    strict superset: serialization-only datagens (e.g. ``raw_model_data``) are valid
     spec kinds but carry no GUI-authorable `StepDefinition`."""
     from SymbolicDSGE.monte_carlo.catalog import STEP_CATALOG
     from SymbolicDSGE.monte_carlo.spec import STEP_KINDS
 
     assert frozenset(STEP_CATALOG.keys()) <= STEP_KINDS
     assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {
-        "raw_data",
+        "raw_model_data",
         "transform:custom",
         "postproc:custom",
     }
