@@ -54,7 +54,7 @@ def run_regression(
             f"Got {len(variables)} names for {X.shape[1]} columns."
         )
 
-    y_vec = np.ascontiguousarray(y[:, 0], dtype=np.float64)
+    y_vec = y[:, 0]
     variable_names = list(variables) if variables is not None else None
 
     fun: Callable[..., RegressionResult]

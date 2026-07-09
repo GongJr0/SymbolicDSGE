@@ -129,10 +129,9 @@ def run_breusch_pagan_test(
             f"of rows. Got residuals={residuals.shape[0]} and X={X.shape[0]}."
         )
 
-    residual_vec = np.ascontiguousarray(residuals[:, 0], dtype=np.float64)
     if robust:
-        return robust_breusch_pagan(residual_vec, X, alpha=alpha, _auto_pval=False)
-    return breusch_pagan(residual_vec, X, alpha=alpha, _auto_pval=False)
+        return robust_breusch_pagan(residuals[:, 0], X, alpha=alpha, _auto_pval=False)
+    return breusch_pagan(residuals[:, 0], X, alpha=alpha, _auto_pval=False)
 
 
 def run_breusch_godfrey_test(
@@ -159,8 +158,7 @@ def run_breusch_godfrey_test(
             f"of rows. Got residuals={residuals.shape[0]} and X={X.shape[0]}."
         )
 
-    residual_vec = np.ascontiguousarray(residuals[:, 0], dtype=np.float64)
-    return breusch_godfrey(residual_vec, X, lags=lags, alpha=alpha, _auto_pval=False)
+    return breusch_godfrey(residuals[:, 0], X, lags=lags, alpha=alpha, _auto_pval=False)
 
 
 def run_cusum_test(

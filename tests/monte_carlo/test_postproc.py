@@ -15,13 +15,17 @@ from SymbolicDSGE.monte_carlo import (
 )
 from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
 from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
-from SymbolicDSGE.monte_carlo.operations.transforms import standardize_step
+from SymbolicDSGE.monte_carlo.operations.transforms import (
+    standardize_step,
+    transform_step,
+)
 
 _REFERENCE = cast(SolvedModel, object())
 
 
 def _observables(n_rep: int = 4, T: int = 40, k: int = 2, seed: int = 0) -> np.ndarray:
-    return np.random.default_rng(seed).normal(size=(n_rep, T, k))
+    del n_rep
+    return np.random.default_rng(seed).normal(size=(T, k))
 
 
 def _run(steps: list[MCStep], *, n_rep: int = 4, fail_fast: bool = True):
@@ -256,16 +260,17 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
 
     from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
 
+    def varying_payload(*, rep_idx, **_: object) -> np.ndarray:
+        return np.asarray([float(rep_idx)], dtype=np.float64)
+
     pipeline = MCPipeline(
         [
             raw_model_data_step(
                 observables=_observables(12), observable_names=("y", "x")
             ),
-            jarque_bera_test_step(
-                "jb", source="datagen", field="observables", column=0
-            ),
+            transform_step("varying", varying_payload),
         ],
-        [kde_step("density", trace="test.jb.statistic", grid_points=64)],
+        [kde_step("density", trace="payload.varying", grid_points=64)],
     )
     result = pipeline.run(reference=_REFERENCE, n_rep=12, verbosity=0)
 

@@ -183,8 +183,7 @@ def _quadratic_sample() -> np.ndarray:
 
 
 def _batched_states() -> np.ndarray:
-    base = _quadratic_sample()
-    return np.stack([base, base + np.array([0.25, -0.5], dtype=np.float64)])
+    return _quadratic_sample()
 
 
 def test_raw_model_data_pipeline_runs_without_dgp_and_aggregates_wald_results() -> None:
@@ -206,10 +205,8 @@ def test_raw_model_data_pipeline_runs_without_dgp_and_aggregates_wald_results() 
 
     out = pipeline.run(reference=reference, n_rep=2, retain_contexts=True)
 
-    expected = np.asarray(
-        [wald_mean_hac(states[i], target, bandwidth=0).statistic for i in range(2)],
-        dtype=np.float64,
-    )
+    statistic = wald_mean_hac(states, target, bandwidth=0).statistic
+    expected = np.full(2, statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["state_mean"], expected)
     assert out.test_summaries["state_mean"].n == 2
     assert out.test_results is not None
@@ -228,7 +225,7 @@ def test_raw_model_data_pipeline_runs_without_dgp_and_aggregates_wald_results() 
 
 def test_raw_model_data_pipeline_accepts_observables_without_states() -> None:
     reference = _FakeSolvedModel()
-    observables = _batched_states()[:, :, :1]
+    observables = _batched_states()[:, :1]
     target = np.zeros(1, dtype=np.float64)
     pipeline = MCPipeline(
         [
@@ -245,18 +242,13 @@ def test_raw_model_data_pipeline_accepts_observables_without_states() -> None:
 
     out = pipeline.run(reference=reference, n_rep=2, retain_contexts=True)
 
-    expected = np.asarray(
-        [
-            wald_mean_hac(observables[i], target, bandwidth=0).statistic
-            for i in range(2)
-        ],
-        dtype=np.float64,
-    )
+    statistic = wald_mean_hac(observables, target, bandwidth=0).statistic
+    expected = np.full(2, statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["obs_mean"], expected)
     assert out.contexts is not None
     assert out.contexts[0].data is not None
     assert out.contexts[0].data.states is None
-    np.testing.assert_allclose(out.contexts[0].data.observables, observables[0])
+    np.testing.assert_allclose(out.contexts[0].data.observables, observables)
 
 
 def test_ljung_box_pipeline_selects_column_and_aggregates_results() -> None:
@@ -267,13 +259,7 @@ def test_ljung_box_pipeline_selects_column_and_aggregates_results() -> None:
             np.array([0.0, 1.0, 0.5, -1.0, 2.0], dtype=np.float64),
         ]
     )
-    second = np.column_stack(
-        [
-            np.array([2.0, 1.0, 3.0, 0.0, 4.0], dtype=np.float64),
-            np.array([1.5, -0.5, 0.0, 2.5, 1.0], dtype=np.float64),
-        ]
-    )
-    observables = np.stack([first, second])
+    observables = first
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=("a", "b")),
@@ -290,10 +276,8 @@ def test_ljung_box_pipeline_selects_column_and_aggregates_results() -> None:
 
     out = pipeline.run(reference=reference, n_rep=2)
 
-    expected = np.asarray(
-        [ljung_box(observables[i, :, 1], L=2, alpha=0.1).statistic for i in range(2)],
-        dtype=np.float64,
-    )
+    statistic = ljung_box(observables[:, 1], L=2, alpha=0.1).statistic
+    expected = np.full(2, statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["lb_b"], expected)
     assert out.test_summaries["lb_b"].n == 2
     assert out.test_summaries["lb_b"].df == np.float64(2.0)
@@ -328,7 +312,7 @@ def test_jarque_bera_pipeline_selects_column_and_aggregates_results() -> None:
             np.linspace(1.0, 4.0, 12, dtype=np.float64),
         ]
     )
-    observables = np.stack([base, base + np.array([0.5, -0.25])])
+    observables = base
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=("a", "b")),
@@ -344,10 +328,8 @@ def test_jarque_bera_pipeline_selects_column_and_aggregates_results() -> None:
 
     out = pipeline.run(reference=reference, n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [jarque_bera(observables[i, :, 0], alpha=0.1).statistic for i in range(2)],
-        dtype=np.float64,
-    )
+    statistic = jarque_bera(observables[:, 0], alpha=0.1).statistic
+    expected = np.full(2, statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["jb_a"], expected)
     assert out.succeeded
     assert out.test_summaries["jb_a"].df == 12
@@ -372,12 +354,7 @@ def test_jarque_bera_pipeline_rejects_multi_column_inputs() -> None:
 
 def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None:
     reference = _FakeSolvedModel()
-    observables = np.stack(
-        [
-            np.arange(6.0, dtype=np.float64).reshape(-1, 1),
-            np.arange(6.0, 12.0, dtype=np.float64).reshape(-1, 1),
-        ]
-    )
+    observables = np.arange(6.0, dtype=np.float64).reshape(-1, 1)
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -385,7 +362,7 @@ def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None
                 "jb",
                 source="datagen",
                 field="observables",
-                burn_in=observables.shape[1],
+                burn_in=observables.shape[0],
             ),
         ]
     )
@@ -409,9 +386,9 @@ def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples() -> None
 
 def test_breusch_pagan_pipeline_selects_columns_and_aggregates_results() -> None:
     rng = np.random.default_rng(512)
-    X = rng.normal(size=(2, 40, 2))
-    eps = rng.normal(scale=np.exp(0.4 * X[:, :, 0]))
-    observables = np.concatenate((eps[:, :, None], X), axis=2)
+    X = rng.normal(size=(40, 2))
+    eps = rng.normal(scale=np.exp(0.4 * X[:, 0]))
+    observables = np.column_stack((eps, X))
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -439,13 +416,9 @@ def test_breusch_pagan_pipeline_selects_columns_and_aggregates_results() -> None
 
     out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [breusch_pagan(eps[i], X[i]).statistic for i in range(2)],
-        dtype=np.float64,
-    )
-    robust_expected = np.asarray(
-        [robust_breusch_pagan(eps[i], X[i]).statistic for i in range(2)],
-        dtype=np.float64,
+    expected = np.full(2, breusch_pagan(eps, X).statistic, dtype=np.float64)
+    robust_expected = np.full(
+        2, robust_breusch_pagan(eps, X).statistic, dtype=np.float64
     )
     np.testing.assert_allclose(out.statistic_traces["bp"], expected)
     np.testing.assert_allclose(out.statistic_traces["robust_bp"], robust_expected)
@@ -459,9 +432,9 @@ def test_breusch_pagan_pipeline_supports_separate_residual_and_regressor_sources
     None
 ):
     rng = np.random.default_rng(128)
-    states = rng.normal(size=(2, 30, 2))
-    residuals = rng.normal(scale=np.exp(0.4 * states[:, :, 0]))
-    observables = residuals[:, :, None]
+    states = rng.normal(size=(30, 2))
+    residuals = rng.normal(scale=np.exp(0.4 * states[:, 0]))
+    observables = residuals[:, None]
     pipeline = MCPipeline(
         [
             raw_model_data_step(states=states, observables=observables),
@@ -479,10 +452,7 @@ def test_breusch_pagan_pipeline_supports_separate_residual_and_regressor_sources
 
     out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [breusch_pagan(residuals[i], states[i]).statistic for i in range(2)],
-        dtype=np.float64,
-    )
+    expected = np.full(2, breusch_pagan(residuals, states).statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["bp"], expected)
 
 
@@ -648,7 +618,7 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> Non
 
 def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples() -> None:
     base = np.arange(30.0, dtype=np.float64).reshape(10, 3)
-    observables = np.stack((base, base + 0.5))
+    observables = base
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -660,7 +630,7 @@ def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples() -> No
                 X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
-                burn_in=observables.shape[1],
+                burn_in=observables.shape[0],
             ),
         ]
     )
@@ -675,9 +645,9 @@ def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples() -> No
 
 def test_breusch_godfrey_pipeline_selects_columns_and_aggregates_results() -> None:
     rng = np.random.default_rng(512)
-    X = rng.normal(size=(2, 40, 2))
-    eps = rng.normal(size=(2, 40))
-    observables = np.concatenate((eps[:, :, None], X), axis=2)
+    X = rng.normal(size=(40, 2))
+    eps = rng.normal(size=40)
+    observables = np.column_stack((eps, X))
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -696,10 +666,7 @@ def test_breusch_godfrey_pipeline_selects_columns_and_aggregates_results() -> No
 
     out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [breusch_godfrey(eps[i], X[i], lags=2).statistic for i in range(2)],
-        dtype=np.float64,
-    )
+    expected = np.full(2, breusch_godfrey(eps, X, lags=2).statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["bg"], expected)
     assert out.test_summaries["bg"].df == 2
     assert out.test_status_traces["bg"] == (TestStatus.OK, TestStatus.OK)
@@ -746,7 +713,7 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs() -> N
 
 def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples() -> None:
     base = np.arange(30.0, dtype=np.float64).reshape(10, 3)
-    observables = np.stack((base, base + 0.5))
+    observables = base
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -758,7 +725,7 @@ def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples() -> 
                 X_field="observables",
                 residual_col=0,
                 X_columns=[1, 2],
-                burn_in=observables.shape[1],
+                burn_in=observables.shape[0],
             ),
         ]
     )
@@ -773,10 +740,10 @@ def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples() -> 
 
 def test_cusum_pipeline_aggregates_results_with_nan_df() -> None:
     rng = np.random.default_rng(7)
-    X = rng.normal(size=(2, 60, 2))
-    X[:, :, 0] = 1.0  # constant column for a well-posed recursion
-    y = X @ np.array([0.5, -0.3]) + rng.normal(size=(2, 60))
-    observables = np.concatenate((y[:, :, None], X), axis=2)
+    X = rng.normal(size=(60, 2))
+    X[:, 0] = 1.0  # constant column for a well-posed recursion
+    y = X @ np.array([0.5, -0.3]) + rng.normal(size=60)
+    observables = np.column_stack((y, X))
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -794,9 +761,7 @@ def test_cusum_pipeline_aggregates_results_with_nan_df() -> None:
 
     out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [cusum(y[i], X[i]).statistic for i in range(2)], dtype=np.float64
-    )
+    expected = np.full(2, cusum(y, X).statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["cs"], expected)
     assert out.test_status_traces["cs"] == (TestStatus.OK, TestStatus.OK)
     # CUSUM is parameter-free: the NaN df placeholder must survive aggregation
@@ -806,10 +771,10 @@ def test_cusum_pipeline_aggregates_results_with_nan_df() -> None:
 
 def test_cusumsq_pipeline_aggregates_results() -> None:
     rng = np.random.default_rng(7)
-    X = rng.normal(size=(2, 60, 2))
-    X[:, :, 0] = 1.0  # constant column for a well-posed recursion
-    y = X @ np.array([0.5, -0.3]) + rng.normal(size=(2, 60))
-    observables = np.concatenate((y[:, :, None], X), axis=2)
+    X = rng.normal(size=(60, 2))
+    X[:, 0] = 1.0  # constant column for a well-posed recursion
+    y = X @ np.array([0.5, -0.3]) + rng.normal(size=60)
+    observables = np.column_stack((y, X))
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -827,9 +792,7 @@ def test_cusumsq_pipeline_aggregates_results() -> None:
 
     out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [cusumsq_test(y[i], X[i]).statistic for i in range(2)], dtype=np.float64
-    )
+    expected = np.full(2, cusumsq_test(y, X).statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["csq"], expected)
     assert out.test_status_traces["csq"] == (TestStatus.OK, TestStatus.OK)
     # CUSUMSQ is parameterized by the recursive-residual count n = T - p, which
@@ -840,10 +803,10 @@ def test_cusumsq_pipeline_aggregates_results() -> None:
 
 def test_chow_pipeline_aggregates_results() -> None:
     rng = np.random.default_rng(7)
-    X = rng.normal(size=(2, 60, 2))
-    X[:, :, 0] = 1.0  # constant column for a well-posed partition
-    y = X @ np.array([0.5, -0.3]) + rng.normal(size=(2, 60))
-    observables = np.concatenate((y[:, :, None], X), axis=2)
+    X = rng.normal(size=(60, 2))
+    X[:, 0] = 1.0  # constant column for a well-posed partition
+    y = X @ np.array([0.5, -0.3]) + rng.normal(size=60)
+    observables = np.column_stack((y, X))
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables),
@@ -862,9 +825,7 @@ def test_chow_pipeline_aggregates_results() -> None:
 
     out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, verbosity=0)
 
-    expected = np.asarray(
-        [chow(y[i], X[i], t_break=30).statistic for i in range(2)], dtype=np.float64
-    )
+    expected = np.full(2, chow(y, X, t_break=30).statistic, dtype=np.float64)
     np.testing.assert_allclose(out.statistic_traces["ch"], expected)
     assert out.test_status_traces["ch"] == (TestStatus.OK, TestStatus.OK)
     # Chow uses an F reference with df = (p, T - 2p), identical across
@@ -1133,7 +1094,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
 
 def test_transform_step_returning_mcdata_updates_downstream_data() -> None:
     reference = _FakeSolvedModel()
-    observables = _batched_states()[:, :, :1]
+    observables = _batched_states()[:, :1]
 
     def add_observation_noise(
         *,
@@ -1163,10 +1124,10 @@ def test_transform_step_returning_mcdata_updates_downstream_data() -> None:
 
     out = pipeline.run(reference=reference, n_rep=2, retain_contexts=True)
 
-    np.testing.assert_allclose(reference.kalman_calls[0]["y"], observables[0] + 1.0)
+    np.testing.assert_allclose(reference.kalman_calls[0]["y"], observables + 1.0)
     assert out.contexts is not None
     assert out.contexts[0].data is not None
-    np.testing.assert_allclose(out.contexts[0].data.observables, observables[0] + 1.0)
+    np.testing.assert_allclose(out.contexts[0].data.observables, observables + 1.0)
     assert out.payloads is not None
     assert isinstance(out.payloads[0]["add_noise"], MCData)
 
@@ -1218,12 +1179,7 @@ def test_regression_summary_does_not_depend_on_payload_retention() -> None:
     reference = _FakeSolvedModel()
     x = np.arange(1.0, 7.0, dtype=np.float64)
     y = 3.0 * x
-    observables = np.stack(
-        [
-            np.column_stack([y, x]),
-            np.column_stack([y + x, x]),
-        ]
-    )
+    observables = np.column_stack([y, x])
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=("y", "x")),
@@ -1246,7 +1202,7 @@ def test_regression_summary_does_not_depend_on_payload_retention() -> None:
     assert out.test_summaries == {}
     np.testing.assert_allclose(
         out.coefficient_traces["ols"],
-        np.array([[0.0, 3.0], [0.0, 4.0]], dtype=np.float64),
+        np.array([[0.0, 3.0], [0.0, 3.0]], dtype=np.float64),
         atol=1e-12,
     )
     assert out.regression_summaries["ols"].n_rep == 2
@@ -1514,15 +1470,30 @@ def test_pipeline_validates_step_order_and_unique_names() -> None:
 def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     reference = _FakeSolvedModel()
     states = _batched_states()
+    target = np.zeros(2, dtype=np.float64)
+
+    def fail_on_third_rep(**kwargs):
+        if kwargs["rep_idx"] == 2:
+            raise RuntimeError("third replication failed")
+        return wald_mean_hac(kwargs["sample"], target, bandwidth=0)
+
     pipeline = MCPipeline(
         [
             raw_model_data_step(states=states),
-            wald_test_step(
-                "state_mean",
-                source="datagen",
-                field="states",
-                target=np.zeros(2, dtype=np.float64),
-                bandwidth=0,
+            MCStep(
+                name="state_mean",
+                op_type=OpType.TEST,
+                func=fail_on_third_rep,
+                source_args=(
+                    SourceArgs(
+                        arg="sample",
+                        source_step="datagen",
+                        source_idx=-1,
+                        source_kind=SOURCE_KIND_DATA,
+                        field="states",
+                        field_idx=MC_DATA_FIELD_INDEX["states"],
+                    ),
+                ),
             ),
         ]
     )
@@ -1532,10 +1503,10 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     assert out.n_successful == 2
     assert len(out.failures) == 1
     assert out.failures[0].rep_idx == 2
-    assert out.failures[0].step_name == "datagen"
+    assert out.failures[0].step_name == "state_mean"
     assert out.statistic_traces["state_mean"].shape == (2,)
-    assert out.meta.step_counts == {"datagen": 3, "state_mean": 2}
-    assert out.meta.step_failures == {"datagen": 1, "state_mean": 0}
+    assert out.meta.step_counts == {"datagen": 3, "state_mean": 3}
+    assert out.meta.step_failures == {"datagen": 0, "state_mean": 1}
 
     lines: list[str] = []
     out.report_performance(print_func=lines.append)
@@ -1657,43 +1628,14 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         filt.std_innov[:, :1],
     )
 
-    context.payloads["cube"] = np.zeros((1, 2, 3), dtype=np.float64)
-    context.payload_slots.append((context.payloads["cube"],))
+    raw = np.arange(12.0, dtype=np.float64).reshape(4, 3)
     np.testing.assert_allclose(
-        _resolve_source_array(
-            context,
-            SourceArgs(
-                arg="sample",
-                source_step="cube",
-                source_idx=3,
-                source_kind=SOURCE_KIND_PAYLOAD,
-                field="payload",
-                field_idx=DYNAMIC_FIELD_INDEX["payload"],
-            ),
-        ),
-        context.payloads["cube"],
-    )
-
-    raw = np.arange(24.0, dtype=np.float64).reshape(2, 4, 3)
-    np.testing.assert_allclose(
-        _select_raw_rep_array(raw, rep_idx=1, name="raw", allow_vector=False),
-        raw[1],
+        _select_raw_rep_array("raw", raw),
+        raw,
     )
     np.testing.assert_allclose(
-        _select_raw_rep_array(
-            np.arange(4.0, dtype=np.float64),
-            rep_idx=0,
-            name="vector",
-            allow_vector=True,
-        ),
+        _select_raw_rep_array("vector", np.arange(4.0, dtype=np.float64)),
         np.arange(4.0, dtype=np.float64).reshape(4, 1),
     )
-    with pytest.raises(IndexError, match="rep_idx=2"):
-        _select_raw_rep_array(raw, rep_idx=2, name="raw", allow_vector=False)
-    with pytest.raises(ValueError, match="2D or 3D"):
-        _select_raw_rep_array(
-            np.arange(4.0, dtype=np.float64),
-            rep_idx=0,
-            name="vector",
-            allow_vector=False,
-        )
+    with pytest.raises(ValueError, match="2D array or a 1D vector"):
+        _select_raw_rep_array("cube", np.zeros((1, 2, 3), dtype=np.float64))

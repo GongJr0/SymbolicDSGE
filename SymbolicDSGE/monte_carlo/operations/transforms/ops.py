@@ -46,7 +46,7 @@ def run_log(
     """``log(x + offset)`` per element. ``offset`` lets users handle zeros."""
     del context, reference, dgp, rep_idx
     arr = sample
-    return np.ascontiguousarray(np.log(arr + float(offset)), dtype=np.float64)
+    return np.log(arr + offset)
 
 
 def run_log_diff(
@@ -65,8 +65,8 @@ def run_log_diff(
     """
     del context, reference, dgp, rep_idx
     arr = sample
-    logged = np.log(arr + float(offset))
-    return np.ascontiguousarray(np.diff(logged, axis=0), dtype=np.float64)
+    logged = np.log(arr + offset)
+    return np.diff(logged, axis=0)
 
 
 def run_diff(
@@ -83,7 +83,7 @@ def run_diff(
     if order < 1:
         raise ValueError("diff order must be at least 1.")
     arr = sample
-    return np.ascontiguousarray(np.diff(arr, n=int(order), axis=0), dtype=np.float64)
+    return np.diff(arr, n=order, axis=0)
 
 
 def _rolling_window_view(arr: NDF, window: int) -> NDF:
@@ -113,8 +113,8 @@ def run_rolling_mean(
     """
     del context, reference, dgp, rep_idx
     arr = sample
-    view = _rolling_window_view(arr, int(window))
-    return np.ascontiguousarray(view.mean(axis=-1), dtype=np.float64)
+    out: NDF = _rolling_window_view(arr, window).mean(axis=-1)
+    return out
 
 
 def run_rolling_std(
@@ -130,8 +130,8 @@ def run_rolling_std(
     """Trailing rolling standard deviation over the time axis."""
     del context, reference, dgp, rep_idx
     arr = sample
-    view = _rolling_window_view(arr, int(window))
-    return np.ascontiguousarray(view.std(axis=-1, ddof=int(ddof)), dtype=np.float64)
+    out: NDF = _rolling_window_view(arr, window).std(axis=-1, ddof=ddof)
+    return out
 
 
 def run_rolling_var(
@@ -147,5 +147,5 @@ def run_rolling_var(
     """Trailing rolling variance over the time axis."""
     del context, reference, dgp, rep_idx
     arr = sample
-    view = _rolling_window_view(arr, int(window))
-    return np.ascontiguousarray(view.var(axis=-1, ddof=int(ddof)), dtype=np.float64)
+    out: NDF = _rolling_window_view(arr, window).var(axis=-1, ddof=ddof)
+    return out

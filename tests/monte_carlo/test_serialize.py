@@ -74,9 +74,9 @@ def _postproc_result() -> MCPipelineResult:
 def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
     rng = np.random.default_rng(0)
     T = 60
-    x = rng.normal(size=(n_rep, T))
-    y = 2.0 * x + rng.normal(size=(n_rep, T))
-    observables = np.stack([y, x], axis=-1)  # (n_rep, T, 2): col 0 = y, col 1 = x
+    x = rng.normal(size=T)
+    y = 2.0 * x + rng.normal(size=T)
+    observables = np.column_stack([y, x])
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=("y", "x")),

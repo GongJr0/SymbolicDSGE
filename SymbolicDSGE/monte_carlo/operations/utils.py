@@ -65,36 +65,20 @@ def _resolve_seed_increment(
 
 
 def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
-    arr = context.payload_slots[selector.source_idx][selector.field_idx]
-    out = np.asarray(arr, dtype=np.float64)
-    return np.ascontiguousarray(
-        out[selector.row_start :, selector.column_selector],
-        dtype=np.float64,
-    )
+    out: NDF = context.payload_slots[selector.source_idx][selector.field_idx][
+        selector.row_start :, selector.column_selector
+    ]
+    return out
 
 
 def _select_raw_rep_array(
-    value: NDF,
-    *,
-    rep_idx: int,
     name: str,
-    allow_vector: bool,
+    value: NDF,
 ) -> NDF:
     arr = np.asarray(value, dtype=np.float64)
-    if arr.ndim == 3:
-        if rep_idx >= arr.shape[0]:
-            raise IndexError(
-                f"{name} has {arr.shape[0]} replications, cannot select rep_idx={rep_idx}."
-            )
-        out = arr[rep_idx]
-    elif arr.ndim == 2:
-        out = arr
-    elif allow_vector and arr.ndim == 1:
-        out = arr.reshape(-1, 1)
+    if arr.ndim == 2:
+        return arr
+    elif arr.ndim == 1:
+        return arr.reshape(-1, 1)
     else:
-        expected = "1D, 2D, or 3D" if allow_vector else "2D or 3D"
-        raise ValueError(f"{name} must be {expected}, got shape {arr.shape}.")
-
-    if out.ndim != 2:
-        raise ValueError(f"{name} must resolve to a 2D array, got shape {out.shape}.")
-    return np.ascontiguousarray(out, dtype=np.float64)
+        raise ValueError(f"Raw data for '{name}' must be a 2D array or a 1D vector).")
