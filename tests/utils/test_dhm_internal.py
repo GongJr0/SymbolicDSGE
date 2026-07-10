@@ -15,7 +15,7 @@ from SymbolicDSGE.utils.dhm import DenHaanMarcet
 def solved_test():
     model, kalman = ModelParser("MODELS/test.yaml").get_all()
     solver = DSGESolver(model, kalman)
-    compiled = solver.compile(n_state=3, n_exog=2)
+    compiled = solver.compile()
     return solver.solve(compiled)
 
 

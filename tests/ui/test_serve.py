@@ -36,7 +36,7 @@ def _solved_test_model() -> SolvedModel:
     parser = ModelParser.from_string(_MODEL_YAML)
     model, kalman = parser.get_all()
     solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile(n_state=3, n_exog=2))
+    return solver.solve(solver.compile())
 
 
 def _estimation_spec() -> EstimationSpec:
@@ -83,7 +83,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
 
     return (
         BundleBuilder(created_by="serve-test")
-        .add_model("reference", _MODEL_YAML, compile_kwargs={"n_state": 3, "n_exog": 2})
+        .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
             _estimation_spec(),
             result=result_meta,

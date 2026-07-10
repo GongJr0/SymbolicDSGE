@@ -48,7 +48,7 @@ def _baseline_dir(tmp_path: Path, *, with_estimation: bool = True) -> Path:
     _write_text(src / "reference.yaml", _MODEL_YAML)
     _write_text(
         src / "reference.options.json",
-        json.dumps({"compile_kwargs": {"n_state": 3, "n_exog": 2}}),
+        json.dumps({"compile_kwargs": {"linearize": False}}),
     )
     if with_estimation:
         spec = {

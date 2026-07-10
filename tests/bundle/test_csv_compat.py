@@ -136,7 +136,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
 
     target = (
         BundleBuilder(created_by="csv-test")
-        .add_model("reference", _MODEL_YAML, compile_kwargs={"n_state": 3, "n_exog": 2})
+        .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
             _estimation_spec(),
             result=result_meta,

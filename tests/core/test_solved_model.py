@@ -632,7 +632,7 @@ def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration(
 ):
     model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
-    compiled = solver.compile(n_state=3, n_exog=3)
+    compiled = solver.compile()
 
     compiled.config.calibration.parameters[Symbol("meas_infl")] = 2.0
     compiled.config.calibration.parameters[Symbol("meas_rate")] = 3.0

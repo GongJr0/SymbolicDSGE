@@ -221,9 +221,7 @@ def test_compile_rejects_unknown_variable_order(parsed_test):
 
     with pytest.raises(ValueError, match="do not exist"):
         solver.compile(
-            variable_order=[*model.variables.variables, sp.Function("ghost")],
-            n_state=3,
-            n_exog=2,
+            variable_order=[*model.variables.variables, sp.Function("ghost")]
         )
 
 
@@ -233,9 +231,7 @@ def test_compile_rejects_unknown_param_order(parsed_test):
 
     with pytest.raises(ValueError, match="unknown parameters"):
         solver.compile(
-            params_order=[*(p.name for p in model.parameters), "ghost_param"],
-            n_state=3,
-            n_exog=2,
+            params_order=[*(p.name for p in model.parameters), "ghost_param"]
         )
 
 
@@ -260,7 +256,7 @@ def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
 
     solver = DSGESolver(bad, kalman)
     with pytest.raises(ValueError, match="bad time offsets"):
-        solver.compile(n_state=3, n_exog=2)
+        solver.compile()
 
 
 def test_compile_can_linearize_model_on_the_fly(tmp_path):
@@ -270,11 +266,11 @@ def test_compile_can_linearize_model_on_the_fly(tmp_path):
     model, kalman = ModelParser(path).get_all()
     solver = DSGESolver(model, kalman)
 
-    compiled_from_flag = solver.compile(n_state=3, n_exog=2, linearize=True)
+    compiled_from_flag = solver.compile(linearize=True)
     compiled_explicit = DSGESolver(
         linearize_model(model),
         kalman,
-    ).compile(n_state=3, n_exog=2)
+    ).compile()
 
     assert model.symbolically_linearized is False
     assert compiled_from_flag.config is not model
@@ -312,7 +308,7 @@ def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_
 
     model, kalman = ModelParser(out).get_all()
     solver = DSGESolver(model, kalman)
-    compiled = solver.compile(n_state=3, n_exog=3)
+    compiled = solver.compile()
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0

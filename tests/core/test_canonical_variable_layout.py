@@ -143,18 +143,6 @@ def test_simulation_shock_unpack_accepts_shocks_by_canonical_exogenous_names(tmp
     np.testing.assert_allclose(unpacked[1][1], np.array([3.0, 4.0]))
 
 
-def test_compile_rejects_layout_count_overrides_that_disagree(tmp_path):
-    path = _write_misordered_test_model(tmp_path)
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
-
-    with pytest.raises(ValueError, match="n_exog=.*inferred"):
-        solver.compile(n_state=3, n_exog=1)
-
-    with pytest.raises(ValueError, match="n_state=.*inferred"):
-        solver.compile(n_state=2, n_exog=2)
-
-
 def test_compile_rejects_explicit_order_with_wrong_state_groups(tmp_path):
     path = _write_misordered_test_model(tmp_path)
     model, kalman = ModelParser(path).get_all()
@@ -163,6 +151,4 @@ def test_compile_rejects_explicit_order_with_wrong_state_groups(tmp_path):
     with pytest.raises(ValueError, match="first n_exog variables"):
         solver.compile(
             variable_order=["Pi", "x", "r_star", "u", "v", "r"],
-            n_state=3,
-            n_exog=2,
         )
