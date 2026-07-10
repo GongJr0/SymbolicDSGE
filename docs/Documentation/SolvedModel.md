@@ -27,7 +27,7 @@ __Properties:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | config | `#!python ModelConfig` | Parsed model configuration object. |
-| kalman_config | `#!python KalmanConfig \| None` | Parsed Kalman Filter configuration object. |
+| kalman_config | `#!python KalmanConfig | None` | Parsed Kalman Filter configuration object. |
 
 
 __Methods:__

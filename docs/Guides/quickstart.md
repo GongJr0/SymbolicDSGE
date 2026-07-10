@@ -52,8 +52,9 @@ from SymbolicDSGE import DSGESolver
 
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
-    params_order=None, # (1)!
-    linearize=False, # (2)!
+    variable_order = None, # (1)!
+    params_order=None, # (2)!
+    linearize=False, # (3)!
 )
 
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)))
@@ -62,11 +63,12 @@ print("Equations as passed to the solver: \n", compiled.equations)
 
 ```
 
-1. `#!python None | list[str]`. `#!python None` uses the parameter order in the config file.
-2. Set to `#!python True` to symbolically linearize the model config before compiling it.
+1. `#!python None | list[sp.Function | str]`. `#!python None` uses the variable order in the config file. Custom orders must declare `[*exog, *state, *control]` in that order. If groups are not contiguous or a different order is used, the compiler will raise a validation error. Within groups, any order is accepted.
+2. `#!python None | list[str]`. `#!python None` uses the parameter order in the config file.
+3. Set to `#!python True` to symbolically linearize the model config before compiling it.
 
 At compilation, the equations are transformed as shown in the code output:
-```
+```text
 Equations with symbols removed:
  -beta*fwd_Pi + cur_Pi - cur_x*kappa - cur_z
 -cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
@@ -89,6 +91,7 @@ Equations as passed to the solver:
     Alternatively, you can import `SymbolicDSGE.linearize_model` to use the syntax `lin_config = linearize_model(my_config)`. 
 
 ## Solution
+
 The solution step takes steady-state values and optionally parameter calibrations to provide a `#!python SolvedModel`.
 
 ```python
@@ -97,7 +100,7 @@ from numpy import float64, array
 sol = solver.solve(
     compiled,
     parameters=None, # (1)!
-    steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
+    steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 print("Is stable: ", sol.policy.stab == 0)  # (2)!
 print("Eigenvalues: ", sol.policy.eig)
@@ -105,6 +108,7 @@ print("Eigenvalues: ", sol.policy.eig)
 
 1. `#!python None | dict[str, float]`. `#!python None` uses the values in `#!python ModelConfig.calibration`
 2. stable if `#!python sol.policy.stab == 0`
+
 <div class="annotate" markdown>
 ```
 Is stable:  True
@@ -141,7 +145,7 @@ irf_dict["z"] # (3)!
 This produces the outputs:
 ![transition_plot output](../img/qs_transition.png "transition_plot output")
 
-```
+```text
 array([0.        , 0.64      , 0.54399995, 0.46239991, 0.39303989,
        0.33408388, 0.28397127, 0.24137556, 0.2051692 , 0.17439381,
        0.14823472, 0.1259995 , 0.10709957, 0.09103462, 0.07737942,
@@ -197,7 +201,7 @@ import pandas as pd
 
 sim_data = sol.sim(
     T=T,
-    x0=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),  # (1)!
+    x0=[0.0, 0.0, 0.0, 0.0, 0.0],  # (1)!
     shocks=sim_shocks,
     shock_scale=1.0,
     observables=True,
@@ -244,6 +248,7 @@ for i, (var, path) in enumerate(sim_data.items()):
 plt.suptitle(f"Simulation over {T} periods with stochastic shocks", fontsize=16)
 plt.tight_layout()
 ```
+
 ![Simulation Plots](../img/qs_sim.png "Simulated Paths")
 
 ## Further Steps
@@ -255,6 +260,5 @@ This guide covers the basic capabilities and usage of `SymbolicDSGE`. Further to
 - `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed)
 
 If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](../assets/guide_notebook.ipynb) link to the file.
-
 
 [Download Guide Notebook](../assets/guide_notebook.ipynb){ .md-button download="" }

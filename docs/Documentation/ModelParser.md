@@ -14,7 +14,7 @@ __Parameters:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| config_path | `#!python str \| pathlib.Path` | Path to the YAML config file. |
+| config_path | `#!python str | pathlib.Path` | Path to the YAML config file. |
 | raw_data | `#!python dict[str, Any]` | The authored YAML mapping, retained for canonical re-emission. |
 | parsed | `#!python ParsedConfig` | Parsed model/kalman config pair populated at initialization. |
 

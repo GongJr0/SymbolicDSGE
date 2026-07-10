@@ -38,7 +38,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | config | `#!python ModelConfig` | Model config that was compiled. |
-| kalman | `#!python KalmanConfig \| None` | Parsed Kalman config attached at compile time. |
+| kalman | `#!python KalmanConfig | None` | Parsed Kalman config attached at compile time. |
 | cur_syms | `#!python list[sympy.Symbol]` | Symbolized current-period state vector (`cur_*` symbols). |
 | layout | `#!python VariableLayout` | Config-declared and compiler-inferred variable layout metadata. |
 | var_names | `#!python list[str]` | Variables in compiled canonical order. |
