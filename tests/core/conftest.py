@@ -33,12 +33,12 @@ def solver_post82(parsed_post82: ParsedConfig) -> DSGESolver:
 
 @pytest.fixture(scope="module")
 def compiled_test(solver_test: DSGESolver) -> CompiledModel:
-    return solver_test.compile(n_state=3, n_exog=2)
+    return solver_test.compile()
 
 
 @pytest.fixture(scope="module")
 def compiled_post82(solver_post82: DSGESolver) -> CompiledModel:
-    return solver_post82.compile(n_state=3, n_exog=3)
+    return solver_post82.compile()
 
 
 @pytest.fixture(scope="module")

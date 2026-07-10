@@ -23,7 +23,7 @@ __Fields:__
 | equations | `#!python Equations` | `dataclass` containing model, constraint, observable equations, observable affinity flags, and observable Jacobian. |
 | calibration | `#!python Calib` | `dataclass` of parameter calibrations plus shock standard deviation and correlation parameter mappings. |
 | symbolically_linearized | `#!python bool` | Whether the config has already been symbolically linearized. |
-| source_yaml | `#!python str \| None` | Source YAML text retained for bundle round trips. |
+| source_yaml | `#!python str | None` | Source YAML text retained for bundle round trips. |
 
 ## `Variables`
 
@@ -39,7 +39,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | variables | `#!python list[sp.Function]` | Variables as functions of time. |
-| steady_state | `#!python FunctionGetterDict[Function, Expr \| None]` | Steady state expression per variable, or `None`. |
+| steady_state | `#!python FunctionGetterDict[Function, Expr | None]` | Steady state expression per variable, or `None`. |
 | linearization | `#!python FunctionGetterDict[Function, LinearizationMethod]` | Linearization method per variable. |
 
 ## `Equations`
@@ -56,7 +56,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | model | `#!python list[sp.Eq]` | Model equations. |
-| constraint | `#!python SymbolGetterDict[Symbol, dict[Relational \| And \| Or \| Not, Expr]]` | Piecewise OBC map keyed by constrained variable. Each variable may carry multiple condition entries, each paired with an alternative expression. |
+| constraint | `#!python SymbolGetterDict[Symbol, dict[Relational | And | Or | Not, Expr]]` | Piecewise OBC map keyed by constrained variable. Each variable may carry multiple condition entries, each paired with an alternative expression. |
 | observable | `#!python SymbolGetterDict[Symbol, Expr]` | Observable equations. |
 | obs_is_affine | `#!python SymbolGetterDict[Symbol, bool]` | Whether each observable equation is affine in current state variables. |
 | obs_jacobian | `#!python Matrix` | Observable Jacobian with respect to current state variables. |

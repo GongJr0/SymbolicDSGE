@@ -227,7 +227,7 @@ __Test Traces:__
 - `"test.{name}.statistic"`: Array of test statistics for each replication.
 - `"test.{name}.status"`: Array of test statuses for each replication.
 
-__Regressions Traces:_
+__Regressions Traces:__
 
 - `"regression.{name}.coef"`: 2D array of regression coefficients for each replication.
 - `"regression.{name}.r2"`: Array of R-squared values for each replication.
@@ -267,7 +267,6 @@ builtin_kde = kde_step(
 3. The key to store the output of the post-processing function in the traces dictionary. If `None`, the step name is used as the key.
 4. The trace to be used for the KDE. This is a payload in this case, but it can also be a test or regression result.
 5. The number of grid points to use for the KDE. This is only applicable to the built-in KDE step.
-
 
 ### Complete Pipeline
 

@@ -65,7 +65,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
         "/api/model/solve",
         json={
             "role": "reference",
-            "compile_kwargs": {"n_state": 3, "n_exog": 2},
+            "compile_kwargs": {},
         },
     )
     assert solved.status_code == 200
@@ -260,7 +260,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
         "/api/model/solve",
         json={
             "role": "reference",
-            "compile_kwargs": {"n_state": 3, "n_exog": 2},
+            "compile_kwargs": {},
         },
     )
     assert solved.status_code == 200
@@ -350,7 +350,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -427,7 +427,7 @@ def _solve_reference(client: TestClient) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -524,7 +524,7 @@ def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -600,7 +600,7 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -656,7 +656,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -720,7 +720,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -784,7 +784,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -846,7 +846,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -908,7 +908,7 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -971,7 +971,7 @@ def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -1144,7 +1144,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
         )
         client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
 
     pipeline = {
@@ -1203,7 +1203,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
         )
         client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {"n_state": 3, "n_exog": 2}},
+            json={"role": role, "compile_kwargs": {}},
         )
 
     pipeline = {

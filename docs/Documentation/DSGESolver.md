@@ -24,8 +24,6 @@ __Methods:__
 DSGESolver.compile(
     *,
     variable_order: list[sp.Function | str] | None = None,
-    n_state: int | None = None,
-    n_exog: int | None = None,
     params_order: list[str] | None = None,
     linearize: bool = False,
 ) -> CompiledModel
@@ -43,8 +41,6 @@ Produces a `#!python CompiledModel` object using the inferred canonical variable
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | variable_order | Optional expected variable order. If supplied, it must agree with the config-derived state/exogenous grouping. |
-| n_state | Optional expected number of state variables. Raises if it disagrees with inference. |
-| n_exog | Optional expected number of shocked/exogenous state variables. Raises if it disagrees with inference. |
 | params_order | Custom ordering of model parameters if desired. |
 | linearize | Apply symbolic linearization to a copied model config before compilation. |
 

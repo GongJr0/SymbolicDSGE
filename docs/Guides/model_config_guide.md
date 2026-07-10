@@ -35,6 +35,7 @@ If an explicit compile time `variable_order`, `n_state`, or `n_exog` is supplied
 When using a mapping instead of a list, each variable can specify a preferred linearization method and the parameter corresponding to its steady state level. This additional information is only used when linearizing a nonlinear model.
 
 Variables are declared as follows:
+
 ```yaml
 variables: [g, z, r, Pi, x]  # as list
 variables: # as mapping
@@ -62,6 +63,7 @@ Common examples of parameters are:
 
 Ordering of the parameters does not matter in the configuration file.
 The `parameters` field is again declared as a list.
+
 ```yaml
 parameters: [beta, kappa, tau_inv,
              psi_pi, psi_x, rho_r,
@@ -95,6 +97,7 @@ Shock realizations are only injected when the user selects them at simulation ti
 ## Observables
 
 Observables map model units to real life variables via equations. For the `observables` field we only declare the names we desire to use as observable variables.
+
 ```yaml
 observables: [Infl, Rate]
 ```
@@ -102,17 +105,20 @@ observables: [Infl, Rate]
 ## Equations
 
 Equations contain the bulk of model dynamics. In `SymbolicDSGE` the field is used as a parent to model equations, constraints, and observable equations. We declare the necessary fields:
+
 ```yaml
 equations:
     model: ...
     constraint: ...
     observables: ...
 ```
+
 The equations field treats all variables as a function of time; to refer to past, current, and future observations we use `#!python x(t-1)`, `#!python x(t)`, and `#!python x(t+1)` respectively.
 
 ### Model Equations
 
 This field contains the state-space definition. Multiple equations are supplied to form all necessary interactions.
+
 ```yaml
 equations:
     model:
@@ -138,6 +144,7 @@ equations:
 Here, we use these variables and parameters that we defined to create the namespace.
 
 ### Constraints
+
 The `constraint` field stores piecewise OBC definitions. It maps a model variable name to one or more `{condition: alternative_expression}` entries. Conditions are parsed as `SymPy` relational expressions, alternatives are parsed as `SymPy` expressions, and both are validated against the model namespace. OBCs are parsed and validated, but the solver does not enforce them.
 
 ```yaml
@@ -160,6 +167,7 @@ equations:
 ```
 
 ### Observables
+
 This field contains the mappings of model variables to real-life observed variables. In our example, we defined two observables in the namespace; and we will define the equations to construct them here. Observable equations can be constructed from any parameter/variable combinations. If a constant is required as a scaling factor or an offset, it should be declared as a parameter (to ensure `#! SymPy` parses correctly). As a note, observable equations are expected to correspond to current time. Observable equations must be functions of current state variables. (no `t+1` terms)
 
 ```yaml
@@ -184,10 +192,11 @@ equations:
 1. Annualized inflation from quarterly gap
 2. Annualized nominal rate from quarterly gap.
 
-
 ## Calibration
+
 The `calibration` field stores values and shock variance specifications to annotate the corresponding values of all model components except the variables.
 The field is a parent containing two sections:
+
 ```yaml
 calibration:
     parameters: ...
@@ -195,8 +204,10 @@ calibration:
 ```
 
 ### Parameters
+
 This section is used to define the known values of model parameters.
 All parameters defined in the namespace must (for now) have a value entry here.
+
 ```yaml
 calibration:
     parameters:
@@ -223,6 +234,7 @@ calibration:
 ```
 
 ### Shocks
+
 The shocks section maps shock (co)variances to the corresponding terms in model equations. Shock terms that are defined but not included in this field will use default values.
 
 - Innovations without a specified standard deviation will assume `1.0`
@@ -264,11 +276,13 @@ calibration:
         corr:
             e_g, e_z: rho_gz
 ```
+
 1. This parameter will be used for linearization as declared, but it is not reserved for that purpose.
 
 Innovation terms are paired with the relevant (co)variance parameters through the `std` and `corr` fields of the configuration.
 
 ## Conclusion
+
 With all components defined, the configuration file now fully specifies a solvable symbolic DSGE model. The parser will construct the symbolic state-space representation, apply calibration, and prepare the model for solution and simulation.
 
 For future reference or a ready to use boilerplate, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/POST82.yaml) link to see a test configuration in the `SymbolicDSGE` repository.

@@ -54,7 +54,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         .add_model(
             "reference",
             _MODEL_YAML,
-            compile_kwargs={"n_state": 3, "n_exog": 2},
+            compile_kwargs={},
         )
         .add_estimation(
             _estimation_spec(),

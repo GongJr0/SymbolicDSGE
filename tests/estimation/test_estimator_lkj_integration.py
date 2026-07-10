@@ -17,7 +17,7 @@ from SymbolicDSGE.estimation import Estimator
 def dense_lkj_bundle(dense_lkj_test_model_path):
     model, kalman = ModelParser(dense_lkj_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
-    compiled = solver.compile(n_state=3, n_exog=3)
+    compiled = solver.compile()
 
     steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
     solved = solver.solve(compiled=compiled, steady_state=steady)

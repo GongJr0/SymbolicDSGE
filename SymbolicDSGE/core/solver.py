@@ -59,8 +59,6 @@ class DSGESolver:
         self,
         *,
         variable_order: Sequence[Function | str] | None = None,
-        n_state: int | None = None,
-        n_exog: int | None = None,
         params_order: list[str] | None = None,
         linearize: bool = False,
     ) -> CompiledModel:
@@ -81,47 +79,9 @@ class DSGESolver:
         shifted = [self._offset_lags(o, t) for o in obj]
 
         name_to_func = {v.__name__: v for v in ordered_variables}
-        inferred_layout = self._infer_variable_layout(conf)
-        resolved_n_exog = self._resolve_layout_count(
-            provided=n_exog,
-            inferred=inferred_layout.n_exog,
-            name="n_exog",
-        )
-        resolved_n_state = self._resolve_layout_count(
-            provided=n_state,
-            inferred=inferred_layout.n_state,
-            name="n_state",
-        )
 
-        if variable_order is None:
-            var_order = list(inferred_layout.canonical_names)
-        else:
-            var_order = [self._coerce_variable_name(v) for v in variable_order]
-            self._validate_explicit_variable_order(
-                var_order=var_order,
-                inferred_layout=inferred_layout,
-                n_exog=resolved_n_exog,
-                n_state=resolved_n_state,
-            )
-
-        missing = [v for v in var_order if v not in name_to_func]
-        if missing:
-            raise ValueError(
-                f"The following variables in var_order do not exist in the model: {missing}"
-            )
-        if len(set(var_order)) != len(var_order):
-            raise ValueError("variable_order contains duplicate variables.")
-
-        layout = VariableLayout(
-            declared_names=inferred_layout.declared_names,
-            canonical_names=tuple(var_order),
-            exo_state_names=tuple(var_order[:resolved_n_exog]),
-            endo_state_names=tuple(var_order[resolved_n_exog:resolved_n_state]),
-            control_names=tuple(var_order[resolved_n_state:]),
-            n_exog=resolved_n_exog,
-            n_state=resolved_n_state,
-            idx={name: i for i, name in enumerate(var_order)},
-        )
+        layout = self._infer_variable_layout(conf, variable_order)
+        var_order = list(layout.canonical_names)
 
         var_funcs = [name_to_func[name] for name in var_order]
         idx = dict(layout.idx)
@@ -260,23 +220,11 @@ def jacobian_func({args_str}) -> NDF:
             return str(var.func.__name__)
         return str(var)
 
-    @staticmethod
-    def _resolve_layout_count(
-        *,
-        provided: int | None,
-        inferred: int,
-        name: str,
-    ) -> int:
-        if provided is None:
-            return inferred
-        provided_int = int(provided)
-        if provided_int != inferred:
-            raise ValueError(
-                f"{name}={provided_int} does not match inferred {name}={inferred}."
-            )
-        return provided_int
-
-    def _infer_variable_layout(self, conf: ModelConfig) -> VariableLayout:
+    def _infer_variable_layout(
+        self,
+        conf: ModelConfig,
+        variable_order: Sequence[Function | str] | None = None,
+    ) -> VariableLayout:
         declared_names = tuple(v.__name__ for v in conf.variables.variables)
         declared_set = set(declared_names)
         t = self.t
@@ -324,16 +272,29 @@ def jacobian_func({args_str}) -> NDF:
         control_names = tuple(
             name for name in declared_names if name not in set(state_names)
         )
-        canonical_names = (*state_names, *control_names)
+        n_exog = len(exo_state_names)
+        n_state = len(state_names)
+
+        if variable_order is None:
+            canonical_names: tuple[str, ...] = (*state_names, *control_names)
+        else:
+            canonical_names = self._resolve_variable_order(
+                variable_order,
+                declared_names=declared_names,
+                exo_state_names=exo_state_names,
+                endo_state_names=endo_state_names,
+                n_exog=n_exog,
+                n_state=n_state,
+            )
 
         return VariableLayout(
             declared_names=declared_names,
             canonical_names=canonical_names,
-            exo_state_names=exo_state_names,
-            endo_state_names=endo_state_names,
-            control_names=control_names,
-            n_exog=len(exo_state_names),
-            n_state=len(state_names),
+            exo_state_names=tuple(canonical_names[:n_exog]),
+            endo_state_names=tuple(canonical_names[n_exog:n_state]),
+            control_names=tuple(canonical_names[n_state:]),
+            n_exog=n_exog,
+            n_state=n_state,
             idx={name: i for i, name in enumerate(canonical_names)},
         )
 
@@ -358,14 +319,24 @@ def jacobian_func({args_str}) -> NDF:
         return None
 
     @staticmethod
-    def _validate_explicit_variable_order(
+    def _resolve_variable_order(
+        variable_order: Sequence[Function | str],
         *,
-        var_order: Sequence[str],
-        inferred_layout: VariableLayout,
+        declared_names: tuple[str, ...],
+        exo_state_names: tuple[str, ...],
+        endo_state_names: tuple[str, ...],
         n_exog: int,
         n_state: int,
-    ) -> None:
-        declared = set(inferred_layout.declared_names)
+    ) -> tuple[str, ...]:
+        """Coerce, validate, and return an explicit ``variable_order``.
+
+        The order must name every model variable exactly once and stay compatible
+        with the inferred state layout: its first ``n_exog`` entries are the shocked
+        states and its first ``n_state`` entries are the states. The controls and the
+        within-block ordering are free.
+        """
+        var_order = [DSGESolver._coerce_variable_name(v) for v in variable_order]
+        declared = set(declared_names)
         unknown = [name for name in var_order if name not in declared]
         if unknown:
             raise ValueError(
@@ -376,25 +347,21 @@ def jacobian_func({args_str}) -> NDF:
         if set(var_order) != declared:
             raise ValueError("variable_order must contain every model variable.")
 
-        expected_exo = set(inferred_layout.exo_state_names)
-        got_exo = set(var_order[:n_exog])
-        if got_exo != expected_exo:
+        if set(var_order[:n_exog]) != set(exo_state_names):
             raise ValueError(
                 "variable_order is incompatible with inferred state layout. "
                 f"Expected first n_exog variables to be shocked states "
-                f"{list(inferred_layout.exo_state_names)}."
+                f"{list(exo_state_names)}."
             )
 
-        expected_states = set(
-            (*inferred_layout.exo_state_names, *inferred_layout.endo_state_names)
-        )
-        got_states = set(var_order[:n_state])
-        if got_states != expected_states:
+        expected_states = (*exo_state_names, *endo_state_names)
+        if set(var_order[:n_state]) != set(expected_states):
             raise ValueError(
                 "variable_order is incompatible with inferred state layout. "
                 f"Expected first n_state variables to be states "
-                f"{list((*inferred_layout.exo_state_names, *inferred_layout.endo_state_names))}."
+                f"{list(expected_states)}."
             )
+        return tuple(var_order)
 
     def solve(
         self,
@@ -625,7 +592,9 @@ def jacobian_func({args_str}) -> NDF:
         stds = np.empty(n_exog, dtype=float64)
         for i, innov in enumerate(innovations):
             sig_sym = shock_std.get(innov)
-            stds[i] = float(params[sig_sym]) if sig_sym in params else 1.0
+            stds[i] = (
+                float(params[sig_sym]) if sig_sym in params else 1.0  # pyright: ignore
+            )
         corr = np.eye(n_exog, dtype=float64)
         for i in range(n_exog):
             for j in range(i + 1, n_exog):

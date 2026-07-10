@@ -30,7 +30,7 @@ def _solve_test_model() -> SolvedModel:
     parser = ModelParser(_MODEL_PATH)
     model, kalman = parser.get_all()
     solver = DSGESolver(model, kalman)
-    compiled = solver.compile(n_state=3, n_exog=2)
+    compiled = solver.compile()
     return solver.solve(compiled)
 
 
@@ -56,7 +56,7 @@ def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path) -> None:
     solved = _solve_test_model()
     target = solved.save_sdsge(
         tmp_path / "model.sdsge",
-        compile_kwargs={"n_state": 3, "n_exog": 2},
+        compile_kwargs={},
     )
     loaded = load_bundle(target)
     assert isinstance(loaded, LoadedBundle)
@@ -67,9 +67,7 @@ def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path) -> None:
 
 def test_to_bundle_builder_returns_chainable_builder(tmp_path: Path) -> None:
     solved = _solve_test_model()
-    builder = solved.to_bundle_builder(
-        compile_kwargs={"n_state": 3, "n_exog": 2}, created_by="api-test"
-    )
+    builder = solved.to_bundle_builder(compile_kwargs={}, created_by="api-test")
     assert isinstance(builder, BundleBuilder)
     target = builder.write(tmp_path / "chained.sdsge")
     loaded = load_bundle(target)
@@ -83,7 +81,7 @@ def test_save_sdsge_yaml_text_override_takes_precedence(tmp_path: Path) -> None:
     target = solved.save_sdsge(
         tmp_path / "override.sdsge",
         yaml_text=override,
-        compile_kwargs={"n_state": 3, "n_exog": 2},
+        compile_kwargs={},
     )
     loaded = load_bundle(target)
     assert loaded.manifest.model_member("reference") is not None

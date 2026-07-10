@@ -280,7 +280,7 @@ def test_linearize_model_marks_copy_and_solver_compiles_and_solves(tmp_path):
     assert [v.__name__ for v in linearized.variables.variables] == ["a", "k"]
 
     solver = DSGESolver(linearized, kalman)
-    compiled = solver.compile(n_state=2, n_exog=1)
+    compiled = solver.compile()
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0
@@ -294,7 +294,7 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
     model, kalman = ModelParser(path).get_all()
     linearized = linearize_model(model)
     solver = DSGESolver(linearized, kalman)
-    compiled = solver.compile(n_state=2, n_exog=1)
+    compiled = solver.compile()
 
     params = {
         p.name: float(linearized.calibration.parameters[p])
@@ -350,8 +350,8 @@ def test_linearizer_matches_hand_linearized_solution_matrices(tmp_path):
     nonlinear_solver = DSGESolver(auto_linearized, nonlinear_kalman)
     hand_solver = DSGESolver(hand_model, hand_kalman)
 
-    nonlinear_compiled = nonlinear_solver.compile(n_state=3, n_exog=2)
-    hand_compiled = hand_solver.compile(n_state=3, n_exog=2)
+    nonlinear_compiled = nonlinear_solver.compile()
+    hand_compiled = hand_solver.compile()
 
     nonlinear_solved = nonlinear_solver.solve(nonlinear_compiled)
     hand_solved = hand_solver.solve(hand_compiled)

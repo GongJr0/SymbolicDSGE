@@ -680,7 +680,7 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
 
     target = (
         BundleBuilder(created_by="tx-test")
-        .add_model("reference", yaml_text, compile_kwargs={"n_state": 3, "n_exog": 2})
+        .add_model("reference", yaml_text, compile_kwargs={})
         .add_mc(pipeline)
         .write(tmp_path / "tx.sdsge")
     )
