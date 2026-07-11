@@ -1531,7 +1531,9 @@ class DenHaanMarcet:
                     require_time_vars=False,
                 )
                 alias_fun = sp.Function(name)
-                defs[name] = _FocLocalDef(kind="function", symbol=alias_fun, expr=rhs)
+                defs[name] = _FocLocalDef(
+                    kind="function", symbol=alias_fun, expr=rhs  # pyright: ignore
+                )
                 local_dict[name] = alias_fun
                 continue
 
@@ -1612,7 +1614,7 @@ class DenHaanMarcet:
                 f"for example '{expr.__name__}(t)'."
             )
         if isinstance(expr, Eq):
-            expr = sp.simplify(expr.lhs - expr.rhs)
+            expr = sp.simplify(expr.lhs - expr.rhs)  # pyright: ignore
         if not isinstance(expr, Expr):
             raise TypeError(f"FOC is not a valid SymPy expression: {foc!r}")
         return expr
@@ -1644,7 +1646,7 @@ class DenHaanMarcet:
                             raise ValueError(
                                 f"FOC local '{alias_fun.__name__}' must be called with a single time argument."
                             )
-                        replacements[call] = sp.simplify(
+                        replacements[call] = sp.simplify(  # pyright: ignore
                             local_def.expr.subs(self._t, call.args[0])
                         )
 
@@ -1704,15 +1706,15 @@ class DenHaanMarcet:
         for sym in expr.free_symbols:
             if sym == self._t:
                 continue
-            if sym.name in param_syms:
+            if sym.name in param_syms:  # pyright: ignore
                 continue
-            if sym.name in shock_syms:
+            if sym.name in shock_syms:  # pyright: ignore
                 raise ValueError(
                     "Shock innovations are not supported in DHM FOC strings. "
                     "Use state-process variables or the equation_idx fallback instead."
                 )
             raise KeyError(
-                f"Unknown symbol '{sym.name}' in FOC. "
+                f"Unknown symbol '{sym.name}' in FOC. "  # pyright: ignore
                 f"Expected a calibrated parameter or a time-indexed model variable."
             )
 
@@ -1753,13 +1755,13 @@ class DenHaanMarcet:
         subs_map: dict[Expr, Expr] = {}
         for name, cur_sym, lag_sym in zip(var_order, cur_syms, lag_syms):
             func = var_funcs[name]
-            subs_map[func(self._t)] = cur_sym
-            subs_map[func(self._t - 1)] = lag_sym
+            subs_map[func(self._t)] = cur_sym  # pyright: ignore
+            subs_map[func(self._t - 1)] = lag_sym  # pyright: ignore
 
         compiled_exprs: list[Expr] = []
         allowed_syms = set(param_syms).union(cur_syms).union(lag_syms)
         for expr in foc_exprs:
-            compiled = sp.simplify(expr.subs(subs_map))
+            compiled = sp.simplify(expr.subs(subs_map))  # pyright: ignore
             if compiled.atoms(AppliedUndef):
                 raise ValueError(
                     "Failed to normalize all model variables in the provided FOCs."
@@ -1808,7 +1810,9 @@ def vectorized_focs(cur, lag, params):
             warnings.filterwarnings(
                 "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
-            foc_func.compile((float_vector, float_vector, float_vector))
+            foc_func.compile(
+                (float_vector, float_vector, float_vector)
+            )  # pyright: ignore
 
         return cast(
             Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray], foc_func
