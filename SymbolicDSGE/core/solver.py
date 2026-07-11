@@ -1,7 +1,7 @@
 import warnings
 import sympy as sp
 from sympy import Symbol, Function, Expr
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from textwrap import dedent
 
 import numpy as np
@@ -13,33 +13,19 @@ from numba import types as nb_typ
 from numba.core import errors as nb_err
 
 import pandas as pd
-from scipy.optimize import root
 
-from .klein import klein_solve
 from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout
 from .linearization import linearize_model
 from .solved_model import SolvedModel
-from .second_order import (
-    PerturbationSolution,
-    solve_second_order,
-    solve_second_order_risk,
+from .solver_backend import PerturbationSolution, klein_solve
+from .._ckernels.core import (
+    second_order,
+    second_order_risk,
+    bicomplex_hessian,
+    klein_preprocess,
+    steady_state_newton,
 )
-
-# Second-order needs the native bicomplex-Hessian / complex-step drivers; there is
-# no numba fallback for the Hessian sweep (order=2 raises if the extension is absent).
-# The steady-state Newton is native-preferred with a scipy.optimize.root fallback.
-_bicomplex_hessian: Callable[..., Any] | None
-_klein_preprocess: Callable[..., Any] | None
-_steady_state_newton: Callable[..., Any] | None
-try:
-    from .._ckernels.core import bicomplex_hessian as _bicomplex_hessian
-    from .._ckernels.core import klein_preprocess as _klein_preprocess
-    from .._ckernels.core import steady_state_newton as _steady_state_newton
-except ImportError:  # pragma: no cover - exercised only without the extension
-    _bicomplex_hessian = None
-    _klein_preprocess = None
-    _steady_state_newton = None
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
@@ -406,11 +392,10 @@ def jacobian_func({args_str}) -> NDF:
             else np.zeros(len(compiled.var_names), dtype=float64)
         )
         sol = klein_solve(
-            compiled.construct_objective_vector_func(),
+            compiled.construct_objective_cfunc(),
             param_vec,
             ss,
             compiled.n_state,
-            residual_cfunc=compiled.construct_objective_cfunc(),
         )
         if sol.stab != 0:
             raise ValueError(
@@ -464,14 +449,9 @@ def jacobian_func({args_str}) -> NDF:
         state, runs the Klein first order, sweeps the bicomplex Hessian, and
         assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss`` risk correction into a
         :class:`PerturbationSolution`. Requires the native extension."""
-        if _bicomplex_hessian is None or _klein_preprocess is None:
-            raise RuntimeError(
-                "order=2 requires the native _ckernels extension (bicomplex Hessian "
-                "sweep); it is not available in this build."
-            )
+
         n_eq = len(compiled.var_names)
         n_state = compiled.n_state
-        eq = compiled.construct_objective_vector_func()
         cf = compiled.construct_objective_cfunc()
         cf_bc = compiled.construct_objective_cfunc_bicomplex()
 
@@ -480,20 +460,20 @@ def jacobian_func({args_str}) -> NDF:
             if given_ss is not None
             else self._resolve_config_steady_state(compiled)
         )
-        ss = self._checked_steady_state(eq, cf, param_vec, seed)
+        ss = self._checked_steady_state(cf, param_vec, seed)
 
-        sol = klein_solve(eq, param_vec, ss, n_state, residual_cfunc=cf)
+        sol = klein_solve(cf, param_vec, ss, n_state)
         if sol.stab != 0:
             raise ValueError(
                 f"Klein stability/uniqueness condition violated (stab={sol.stab})."
             )
         gx, hx = np.real(sol.f), np.real(sol.p)
 
-        a, b = _klein_preprocess(cf.address, ss, param_vec, n_eq, False)
-        f_xx = _bicomplex_hessian(cf_bc.address, ss, param_vec, n_eq)
-        gxx, hxx = solve_second_order(a, b, f_xx, gx, hx, n_state)
+        a, b = klein_preprocess(cf.address, ss, param_vec, n_eq, False)
+        f_xx = bicomplex_hessian(cf_bc.address, ss, param_vec, n_eq)
+        gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
         eta = self._build_eta(compiled)
-        gss, hss = solve_second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+        gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
 
         pert = PerturbationSolution(
             p=sol.p,
@@ -532,33 +512,15 @@ def jacobian_func({args_str}) -> NDF:
         return ss
 
     @staticmethod
-    def _checked_steady_state(
-        eq: Callable[..., NDArray], cf: Any, param_vec: NDF, seed: NDF
-    ) -> NDF:
+    def _checked_steady_state(cf: Any, param_vec: NDF, seed: NDF) -> NDF:
         """Solve ``F(ss, ss) = 0`` from ``seed`` and cross-check against it: a
         configured steady state that disagrees with the solved one (beyond
         tolerance) is a modeling error, so raise rather than expand at a bad point.
-
-        Prefers the native Newton (``klein_preproc`` Jacobian + f64 LU); falls back
-        to ``scipy.optimize.root`` when the extension is absent."""
+        """
         seed = np.ascontiguousarray(seed, dtype=float64)
-        if _steady_state_newton is not None and cf is not None:
-            ss, _iters = _steady_state_newton(cf.address, seed, param_vec)
-            solved = np.asarray(ss, dtype=float64)
-        else:
-            par_c = param_vec.astype(complex128)
+        ss, _ = steady_state_newton(cf.address, seed, param_vec)
+        solved = np.asarray(ss, dtype=float64)
 
-            def residual(x: NDF) -> NDF:
-                xc = np.ascontiguousarray(x.astype(complex128))
-                return np.real(eq(xc, xc, par_c)).astype(float64)
-
-            result = root(residual, seed, method="hybr")
-            if not result.success:
-                raise ValueError(
-                    "Steady-state solve did not converge from the configured seed "
-                    f"{np.asarray(seed)}: {result.message}"
-                )
-            solved = np.asarray(result.x, dtype=float64)
         if not np.allclose(solved, seed, rtol=1e-6, atol=1e-8):
             diff = float(np.max(np.abs(solved - seed)))
             raise ValueError(

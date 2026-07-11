@@ -36,7 +36,7 @@ def test_residual_path_matches_reference(path):
     got = residual_path(cf.address, cur, fwd, par, n_eq)
     assert got.shape == (n_steps, n_eq)
 
-    eq = compiled.construct_objective_vector_func()
+    eq = compiled.equations
     want = np.empty((n_steps, n_eq), dtype=np.float64)
     for t in range(n_steps):
         want[t] = eq(fwd[t], cur[t], par).real

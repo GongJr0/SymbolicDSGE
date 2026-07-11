@@ -187,7 +187,7 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
         ],
         dtype=np.complex128,
     )
-    objective = solved_test.compiled.construct_objective_vector_func()
+    objective = solved_test.compiled.equations
     manual = np.empty((T, 1), dtype=np.float64)
     for t in range(T):
         manual[t, 0] = objective(

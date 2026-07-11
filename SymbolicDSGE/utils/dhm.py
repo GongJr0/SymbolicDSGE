@@ -23,24 +23,13 @@ from sympy.parsing.sympy_parser import (
 
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
-from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
 _DHMShock = Shock | Callable[[float | np.ndarray], np.ndarray] | np.ndarray
 _DHMShocks = Mapping[str, _DHMShock]
 
-# Prefer the native residual-path kernel (over the solve's cfunc, no numba
-# residual compile); fall back to the numba residual when the extension is
-# absent (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
-_residual_path_native: Callable[..., Any] | None
-if FORCE_NUMBA:
-    _residual_path_native = None
-else:
-    try:
-        from .._ckernels.core import residual_path as _residual_path_native
-    except ImportError:  # pragma: no cover - exercised only without the extension
-        if REQUIRE_NATIVE:
-            raise
-        _residual_path_native = None
+# Native residual-path kernel (mandatory; over the solve's cfunc). The numba
+# residual reference now lives in tests/_oracles/core.py as a parity oracle.
+from .._ckernels.core import residual_path as _residual_path_native
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 _FOC_CACHE: dict[
@@ -195,30 +184,6 @@ def _build_forward_moments(
                 out_col += 1
 
     return moments, residuals, instruments
-
-
-@njit
-def _forward_residuals_numba(
-    cur_states: np.ndarray,
-    fwd_states: np.ndarray,
-    params: np.ndarray,
-    objective_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
-    n_eq: int,
-) -> np.ndarray:
-    # Numba fallback for the native ``residual_path``: evaluate the numba vector
-    # residual over the path into a real (n_steps x n_eq) matrix.
-    n_steps = cur_states.shape[0]
-    n_var = cur_states.shape[1]
-    residuals = np.empty((n_steps, n_eq), dtype=np.float64)
-    cur = np.empty((n_var,), dtype=np.complex128)
-    fwd = np.empty((n_var,), dtype=np.complex128)
-    for t in range(n_steps):
-        cur[:] = cur_states[t]
-        fwd[:] = fwd_states[t]
-        residual_vec = objective_fn(fwd, cur, params)
-        for k in range(n_eq):
-            residuals[t, k] = residual_vec[k].real
-    return residuals
 
 
 @njit
@@ -879,16 +844,10 @@ class DenHaanMarcet:
         cur_c = np.ascontiguousarray(current_states, dtype=np.complex128)
         fwd_c = np.ascontiguousarray(forward_states, dtype=np.complex128)
 
-        if _residual_path_native is not None:
-            cfunc = compiled.construct_objective_cfunc()
-            return cast(
-                np.ndarray,
-                _residual_path_native(cfunc.address, cur_c, fwd_c, par_c, n_eq),
-            )
-        objective = compiled.construct_objective_vector_func()
+        cfunc = compiled.construct_objective_cfunc()
         return cast(
             np.ndarray,
-            _forward_residuals_numba(cur_c, fwd_c, par_c, objective, n_eq),
+            _residual_path_native(cfunc.address, cur_c, fwd_c, par_c, n_eq),
         )
 
     def _evaluate_state_path(

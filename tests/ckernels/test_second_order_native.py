@@ -19,8 +19,8 @@ from SymbolicDSGE._ckernels.core._core import (
     second_order_risk,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.klein import klein_solve
-from SymbolicDSGE.core.second_order import (
+from SymbolicDSGE.core.solver_backend import klein_solve
+from _oracles.core import (
     _solve_second_order_numpy,
     _solve_second_order_risk_numpy,
 )
@@ -35,14 +35,13 @@ def _drive(path):
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
-    eq = compiled.construct_objective_vector_func()
 
     # Config steady state, resolved at run time (RBC -> [0, k_ss, c_ss];
     # deviation-form models -> 0). No file I/O at collection time.
     ss = DSGESolver._resolve_config_steady_state(compiled)
 
     a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
-    sol = klein_solve(eq, par, ss, n_state, residual_cfunc=cf)
+    sol = klein_solve(cf, par, ss, n_state)
     gx, hx = np.real(sol.f), np.real(sol.p)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
     eta = DSGESolver._build_eta(compiled)

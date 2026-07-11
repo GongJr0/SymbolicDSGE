@@ -23,14 +23,12 @@ from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
-from SymbolicDSGE.core.klein import KleinSolution
-from SymbolicDSGE.core.second_order import PerturbationSolution
-from SymbolicDSGE.core.shock_generators import Shock
-
+from .shock_generators import Shock
+from .solver_backend import KleinSolution, PerturbationSolution
 
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
-from .simulation import (
+from .._ckernels.core import (
     affine_observations_into,
     simulate_linear_states_into,
     simulate_second_order_pruned,

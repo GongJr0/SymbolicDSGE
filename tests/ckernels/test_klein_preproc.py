@@ -14,7 +14,7 @@ import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import klein_preprocess
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.klein import _approximate_system_numeric, klein_solve
+from _oracles.core import _approximate_system_numeric
 from SymbolicDSGE._symbolic_printers import (
     ResidualLayout,
     build_cfunc,
@@ -45,7 +45,7 @@ def test_klein_preproc_parity(path):
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
     cf = build_cfunc(compiled.objective_eqs, layout)  # hold: keeps .address valid
-    eq_func = compiled.construct_objective_vector_func()
+    eq_func = build_njit(compiled.objective_eqs, layout)
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = _params(compiled)
@@ -81,23 +81,3 @@ def test_klein_preproc_log_linear_parity():
 
     np.testing.assert_allclose(a, a_ref, rtol=RTOL, atol=ATOL)
     np.testing.assert_allclose(b, b_ref, rtol=RTOL, atol=ATOL)
-
-
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_klein_solve_native_matches_numba(path):
-    # End to end comparison between native preproc and numba fallback.
-    # The same pencil feeds the same ordqz and postproc code.
-    compiled = _compiled(path)
-    layout = ResidualLayout.from_compiled(compiled)
-    cf = compiled.construct_objective_cfunc()
-    eq = compiled.construct_objective_vector_func()
-    ss = np.zeros(layout.n_var, dtype=np.float64)
-    par = _params(compiled)
-
-    native = klein_solve(eq, par, ss, compiled.n_state, residual_cfunc=cf)
-    numba = klein_solve(eq, par, ss, compiled.n_state, residual_cfunc=None)
-
-    assert native.stab == numba.stab
-    np.testing.assert_allclose(native.p, numba.p, rtol=1e-9, atol=1e-11)
-    np.testing.assert_allclose(native.f, numba.f, rtol=1e-9, atol=1e-11)
-    np.testing.assert_allclose(native.eig, numba.eig, rtol=1e-9, atol=1e-11)

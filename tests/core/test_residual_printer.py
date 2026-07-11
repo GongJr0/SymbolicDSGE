@@ -11,7 +11,8 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.klein import _approximate_system_numeric
+from SymbolicDSGE._ckernels.core import klein_preprocess
+from _oracles.core import _approximate_system_numeric
 from SymbolicDSGE._symbolic_printers import (
     ResidualLayout,
     build_cfunc,
@@ -132,12 +133,14 @@ def test_printer_linearization_matches_reference(path):
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
     fn = build_njit(compiled.objective_eqs, layout)
-    ref = compiled.construct_objective_vector_func()
+    cf = build_cfunc(compiled.objective_eqs, layout)  # hold: keeps .address valid
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = _param_vector(compiled, np.float64)
 
-    a_ref, b_ref = _approximate_system_numeric(ref, ss, par, False)
+    # Native cfunc linearization (klein_preproc complex-step) is the reference;
+    # the printer's njit residual complex-stepped through the oracle must match.
+    a_ref, b_ref = klein_preprocess(cf.address, ss, par, layout.n_eq, False)
     a_new, b_new = _approximate_system_numeric(fn, ss, par, False)
 
     np.testing.assert_allclose(a_new, a_ref, rtol=1e-10, atol=1e-12)

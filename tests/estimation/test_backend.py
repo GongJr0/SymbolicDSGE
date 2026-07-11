@@ -200,13 +200,13 @@ def test_build_C_d_matches_affine_measurement_function(post82_bundle):
     compiled = post82_bundle["compiled"]
     params = backend.extract_base_params(compiled)
     param_vec = backend.build_calib_param_vector(compiled, params)
-    h_func = compiled.construct_measurement_vector_func()
+    h_func = compiled.construct_measurement_array_func(compiled.observable_names)
 
     obs = ["Infl", "Rate"]
     C, d = backend.build_C_d(compiled, params, obs)
     state = np.zeros((len(compiled.cur_syms),), dtype=np.float64)
 
-    y_func = np.asarray(h_func(*state, *param_vec), dtype=np.float64)
+    y_func = np.asarray(h_func(state, param_vec), dtype=np.float64)
     obs_idx = [compiled.observable_names.index(name) for name in obs]
 
     assert np.allclose(C @ state + d, y_func[obs_idx])
@@ -242,50 +242,6 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
 
     ll = est.loglik(est.theta0())
     assert np.isfinite(ll)
-
-
-def test_run_extended_array_dispatch_matches_scalar_dispatch(post82_bundle):
-    compiled = post82_bundle["compiled"]
-    solved = post82_bundle["solved"]
-    params = backend.extract_base_params(compiled)
-    obs, y_reordered = backend.reorder_observables(
-        compiled, compiled.kalman, list(compiled.observable_names), post82_bundle["y"]
-    )
-    calib_params = backend.build_calib_param_vector(compiled, params)
-    Q = backend.build_Q(compiled, params)
-    R = backend.resolve_R(compiled, compiled.kalman, obs, None)
-
-    scalar = KalmanFilter.run_extended(
-        A=solved.A,
-        B=solved.B,
-        h=compiled.construct_measurement_vector_func(),
-        H_jac=compiled.observable_jacobian,
-        calib_params=calib_params,
-        Q=Q,
-        R=R,
-        y=y_reordered,
-        compute_y_filt=True,
-    )
-
-    h_array = compiled.construct_measurement_array_func(obs)
-    H_array = compiled.construct_observable_jacobian_array_func(obs)
-    array = KalmanFilter.run_extended(
-        A=solved.A,
-        B=solved.B,
-        h=h_array,
-        H_jac=H_array,
-        calib_params=calib_params,
-        Q=Q,
-        R=R,
-        y=y_reordered,
-        compute_y_filt=True,
-    )
-
-    assert getattr(h_array, "_symbolicdsge_array_dispatch", False)
-    assert getattr(H_array, "_symbolicdsge_array_dispatch", False)
-    assert np.allclose(array.loglik, scalar.loglik)
-    assert np.allclose(array.x_filt, scalar.x_filt)
-    assert np.allclose(array.y_pred, scalar.y_pred)
 
 
 def test_build_P0_branches():

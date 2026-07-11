@@ -13,11 +13,13 @@ from sympy import Symbol
 
 import SymbolicDSGE.core.solved_model as solved_model_module
 from SymbolicDSGE import DSGESolver, ModelParser
-from SymbolicDSGE.core.simulation import (
-    _affine_observations_into_numba,
-    _simulate_linear_states_into_numba,
+from SymbolicDSGE._ckernels.core import (
     affine_observations_into,
     simulate_linear_states_into,
+)
+from _oracles.core import (
+    _affine_observations_into_numba,
+    _simulate_linear_states_into_numba,
 )
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.kalman.interface import KalmanInterface

@@ -13,13 +13,13 @@ import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.klein import klein_solve
+from SymbolicDSGE.core.solver_backend import klein_solve
 from SymbolicDSGE._symbolic_printers import ResidualLayout
-from SymbolicDSGE.core.second_order import (
-    first_order_residual,
-    solve_second_order,
-    solve_second_order_risk,
+from SymbolicDSGE._ckernels.core import (
+    second_order,
+    second_order_risk,
 )
+from _oracles.core import first_order_residual
 
 # Dynare stoch_simul(order=2) on tests/fixtures/models/rbc_second_order.mod,
 # untouched full precision. Rows are DR order [k', z, c]; the four
@@ -166,10 +166,9 @@ def _drive(path):
     )
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
-    eq = compiled.construct_objective_vector_func()
 
     a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
-    sol = klein_solve(eq, par, ss, n_state, residual_cfunc=cf)
+    sol = klein_solve(cf, par, ss, n_state)
     gx, hx = np.real(sol.f), np.real(sol.p)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
     return a, b, f_xx, gx, hx, n_state
@@ -192,7 +191,7 @@ def test_first_order_foc_holds(path):
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
 def test_linear_model_has_zero_second_order(path):
     a, b, f_xx, gx, hx, n_state = _drive(path)
-    gxx, hxx = solve_second_order(a, b, f_xx, gx, hx, n_state)
+    gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
 
     nx = n_state
     ny = gx.shape[0]
@@ -225,7 +224,7 @@ def test_rbc_second_order_matches_dynare():
 
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
-    eq = compiled.construct_objective_vector_func()
+    eq = compiled.equations
 
     # Steady state actually clears the residual.
     resid = eq(
@@ -234,11 +233,11 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
 
     a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
-    sol = klein_solve(eq, par, ss, n_state, residual_cfunc=cf)
+    sol = klein_solve(cf, par, ss, n_state)
     assert sol.stab == 0
     gx, hx = np.real(sol.f), np.real(sol.p)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
-    gxx, hxx = solve_second_order(a, b, f_xx, gx, hx, n_state)
+    gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
 
     # gxx[0] = c (the single control); hxx[1] = k' (state index 1); hxx[0] = z'.
     np.testing.assert_allclose(
@@ -258,7 +257,7 @@ def test_rbc_second_order_matches_dynare():
     sig = float(calib[sp.Symbol("sig")])
     eta = np.zeros((n_state, 1), dtype=np.float64)
     eta[0, 0] = sig
-    gss, hss = solve_second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+    gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
     # ours [g_ss(c); h_ss(z', k')] -> Dynare DR order [k', z, c]
     np.testing.assert_allclose(
         [hss[1], hss[0], gss[0]], _DYNARE_GHS2, rtol=1e-4, atol=1e-8

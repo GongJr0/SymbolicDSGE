@@ -1,5 +1,4 @@
 import warnings
-import numba
 from sympy import Symbol, Expr
 
 import numpy as np
@@ -22,8 +21,8 @@ from SymbolicDSGE._symbolic_printers import (
     ResidualLayout,
     build_cfunc,
     build_measurement_cfunc,
-    build_njit,
 )
+from .._ckernels.core import residual_eval
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -65,22 +64,6 @@ class CompiledModel:
 
     n_state: int
     n_exog: int
-
-    @cached_property
-    def _objective_vector_func(self) -> Callable[..., ND]:
-        f = build_njit(self.objective_eqs, ResidualLayout.from_compiled(self))
-        complex_vec = nb_typ.Array(nb_typ.complex128, 1, "C")
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
-            )
-            f.compile((complex_vec, complex_vec, complex_vec))
-        return cast(Callable, f)
-
-    def construct_objective_vector_func(self) -> Callable[..., ND]:
-        # Building the vectorized objective function triggers Numba compilation.
-        # Cache the dispatcher so solve/approximation can reuse the same kernel.
-        return self._objective_vector_func
 
     @cached_property
     def _objective_cfunc(self) -> Any:
@@ -135,7 +118,13 @@ class CompiledModel:
                 f"Parameter vector length {par_vec.shape[0]} != {len(self.calib_params)}"
             )
 
-        return self.construct_objective_vector_func()(fwd_arr, cur_arr, par_vec)
+        return residual_eval(
+            self.construct_objective_cfunc().address,
+            fwd_arr,
+            cur_arr,
+            par_vec,
+            len(self.objective_eqs),
+        )
 
     def build_affine_measurement_matrices(
         self,
@@ -163,45 +152,6 @@ class CompiledModel:
             np.ascontiguousarray(C_full, dtype=float64),
             np.ascontiguousarray(d_full, dtype=float64),
         )
-
-    @cached_property
-    def _measurement_vector_func(self) -> Callable[..., ND]:
-        params = list(map(str, [*self.var_names, *self.calib_params]))
-        params_typed = ", ".join(f"{p}: float64" for p in params)
-        arg_names = ", ".join(params)
-
-        lines = [
-            f"out[{i}] = func_{i}({arg_names})"
-            for i in range(len(self.observable_funcs))
-        ]
-        body = "\n    ".join(lines)
-
-        func_str = f"""
-def vectorized_measurements({params_typed}):
-    out = np.zeros(({len(self.observable_funcs)},), dtype=np.float64)
-    {body}
-    return out
-"""
-
-        ns = {"np": np, "float64": float64}
-        for i, fn in enumerate(self.observable_funcs):
-            ns[f"func_{i}"] = fn
-
-        exec(dedent(func_str), ns)
-        f = njit(ns["vectorized_measurements"])
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
-            )
-            f.compile(tuple(nb_typ.float64 for _ in params))  # pyright: ignore
-        return cast(Callable, f)
-
-    def construct_measurement_vector_func(self) -> Callable[..., ND]:
-        # Building the vectorized measurement function triggers Numba compilation.
-        # Cache the dispatcher so extended-mode likelihood evaluation does not
-        # rebuild and recompile it on every call.
-        return self._measurement_vector_func
 
     def _normalize_observables(
         self,
