@@ -1810,9 +1810,9 @@ def vectorized_focs(cur, lag, params):
             warnings.filterwarnings(
                 "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
-            foc_func.compile(
+            foc_func.compile(  # pyright: ignore
                 (float_vector, float_vector, float_vector)
-            )  # pyright: ignore
+            )
 
         return cast(
             Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray], foc_func
