@@ -27,9 +27,7 @@ from ..core.solved_model import SolvedModel
 _DHMShock = Shock | Callable[[float | np.ndarray], np.ndarray] | np.ndarray
 _DHMShocks = Mapping[str, _DHMShock]
 
-# Native residual-path kernel (mandatory; over the solve's cfunc). The numba
-# residual reference now lives in tests/_oracles/core.py as a parity oracle.
-from .._ckernels.core import residual_path as _residual_path_native
+from .._ckernels.core import residual_path
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 _FOC_CACHE: dict[
@@ -847,7 +845,7 @@ class DenHaanMarcet:
         cfunc = compiled.construct_objective_cfunc()
         return cast(
             np.ndarray,
-            _residual_path_native(cfunc.address, cur_c, fwd_c, par_c, n_eq),
+            residual_path(cfunc.address, cur_c, fwd_c, par_c, n_eq),
         )
 
     def _evaluate_state_path(
@@ -1412,7 +1410,7 @@ class DenHaanMarcet:
 
             cloned_seed = None if shock.seed is None else int(shock.seed) + rep_idx
             cloned = Shock(
-                dist=shock.dist,
+                dist=shock.dist,  # pyright: ignore
                 multivar=shock.multivar,
                 seed=cloned_seed,
                 dist_args=shock.dist_args,
