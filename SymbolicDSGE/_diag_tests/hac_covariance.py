@@ -2,11 +2,9 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from numba import njit
+from typing import Literal
 
-from typing import Literal, cast
-
-from ._native import native as _native
+from .._ckernels.diag import hac_estimator_matmul
 
 NDF = NDArray[float64]
 
@@ -94,92 +92,11 @@ def andrews_bandwidth_matrix(
     return int(np.median(np.asarray(Ls)))
 
 
-@njit(cache=True)
-def _kernel_weight(j: int, L: int, kernel_id: int) -> float64:
-    """Lag-window weight w(j; L) for the selected kernel.
-
-    A single branch over the integer kernel id (rather than a passed-in callable)
-    so the jitted HAC estimator can be ``cache=True`` and the whole thing maps
-    onto a plain C ``switch`` for the native port. All three closed forms are
-    math.h-expressible.
-    """
-    x: float64 = float64(j) / (float64(L) + 1.0)
-
-    if kernel_id == _BARTLETT:
-        if j > L:
-            return float64(0.0)
-        return float64(1.0 - x)
-
-    if kernel_id == _PARZEN:
-        if x > 1.0:
-            return float64(0.0)
-        if x <= 0.5:
-            return float64(1.0 - 6.0 * x**2 + 6.0 * x**3)
-        return float64(2.0 * (1.0 - x) ** 3)
-
-    # _QS
-    if abs(x) <= 1e-8:
-        return float64(1.0)
-    outer = 25.0 / (12.0 * np.pi**2 * x**2)
-    arg = 6.0 * np.pi * x / 5.0
-    inner = np.sin(arg) / arg - np.cos(arg)
-    return float64(outer * inner)
-
-
-# HAC covariance estimation using the selected kernel and bandwidth. Now that the
-# kernel is chosen by integer id (no jitted-callable argument), this can be
-# ``cache=True``: the on-disk cache keys on the stable (array, int, int)
-# signature instead of a dispatcher weakref that dies with the process.
-@njit(cache=True)
-def jit_hac_estimator_matmul(
-    r: NDF,
-    kernel_id: int,
-    L: int,  # Bandwidth
-) -> NDF:
-    n = r.shape[0]
-    p = r.shape[1]
-    S = np.zeros((p, p), dtype=float64)
-    L = min(L, n - 1)
-
-    S += r.T @ r / n  # Gamma 0
-
-    for j in range(1, L + 1):
-        w_j = _kernel_weight(j, L, kernel_id)
-        if w_j == 0.0:
-            continue
-        gamma_j = r[j:].T @ r[:-j] / n
-        S += w_j * (gamma_j + gamma_j.T)  # Add symmetric contribution
-    return S
-
-
-# Only used when nopython is disabled on kernel dispatch.
-# For testing and maintaining functionality in cases where numba isn't supported.
-def py_hac_estimator(
-    r: NDF,
-    kernel_id: int,
-    L: int,  # Bandwidth
-) -> NDF:
-    n, p = r.shape
-    S = np.zeros((p, p), dtype=float64)
-    L = min(L, n - 1)
-
-    S += r.T @ r / n  # Gamma 0
-
-    for j in range(1, L + 1):
-        w_j = _kernel_weight.py_func(j, L, kernel_id)
-        if w_j == 0.0:
-            continue
-        gamma_j = r[j:].T @ r[:-j] / n
-        S += w_j * (gamma_j + gamma_j.T)  # Add symmetric contribution
-    return S
-
-
 def hac_covariance(
     r: NDF,
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
     bandwidth: int | Literal["wooldridge", "andrews", "auto"] | None = None,
     center: bool = False,
-    nopython: bool = True,
 ) -> NDF:
     r = np.ascontiguousarray(r, dtype=np.float64)
 
@@ -225,15 +142,4 @@ def hac_covariance(
         raise ValueError(f"Invalid bandwidth specification: {bandwidth}")
 
     L = min(L, n - 1)
-
-    if nopython:
-        if _native is not None:
-            return cast(
-                NDF,
-                _native.hac_estimator_matmul(
-                    np.ascontiguousarray(r, dtype=np.float64), kernel_id, L
-                ),
-            )
-        return cast(NDF, jit_hac_estimator_matmul(r, kernel_id, L))
-
-    return py_hac_estimator(r, kernel_id, L)
+    return hac_estimator_matmul(r, kernel_id, L)

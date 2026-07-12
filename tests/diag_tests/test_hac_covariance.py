@@ -5,14 +5,10 @@ import pytest
 
 from SymbolicDSGE._diag_tests.hac_covariance import (
     _BARTLETT,
-    _PARZEN,
     _QS,
-    _kernel_weight,
     andrews_bandwidth,
     andrews_bandwidth_matrix,
     hac_covariance,
-    jit_hac_estimator_matmul,
-    py_hac_estimator,
     wooldridge_bandwidth,
 )
 
@@ -53,17 +49,14 @@ GOLDEN_HAC_CENTERED = {
 
 
 @pytest.mark.parametrize("kernel", ["bartlett", "parzen", "qs"])
-@pytest.mark.parametrize("nopython", [False, True])
-def test_hac_covariance_matches_golden_output_for_all_kernels_and_backends(
+def test_hac_covariance_matches_golden_output_for_all_kernels(
     kernel: str,
-    nopython: bool,
 ) -> None:
     out = hac_covariance(
         GOLDEN_R,
         kernel=kernel,
         bandwidth=2,
         center=True,
-        nopython=nopython,
     )
 
     np.testing.assert_allclose(out, GOLDEN_HAC_CENTERED[kernel], rtol=1e-14, atol=1e-14)
@@ -88,7 +81,7 @@ def test_andrews_bandwidth_matrix_handles_negative_rhat_columns() -> None:
     r = np.column_stack([series])
 
     assert andrews_bandwidth_matrix(r, kernel_id=_QS) == 1
-    out = hac_covariance(r, kernel="qs", bandwidth="auto", nopython=False)
+    out = hac_covariance(r, kernel="qs", bandwidth="auto")
 
     assert out.shape == (1, 1)
     assert np.isfinite(out).all()
@@ -118,57 +111,29 @@ def test_hac_covariance_raises_on_bad_bandwidth() -> None:
         hac_covariance(GOLDEN_R, bandwidth="bad")
 
 
-def test_kernel_weight_covers_boundary_branches() -> None:
-    w = _kernel_weight.py_func
-
-    assert w(3, 2, _BARTLETT) == np.float64(0.0)
-    assert w(1, 2, _BARTLETT) == pytest.approx(2.0 / 3.0)
-
-    assert w(4, 2, _PARZEN) == np.float64(0.0)
-    assert w(1, 3, _PARZEN) == pytest.approx(1.0 - 6.0 * 0.25**2 + 6.0 * 0.25**3)
-    assert w(2, 2, _PARZEN) == pytest.approx(2.0 * (1.0 / 3.0) ** 3)
-
-    assert w(0, 2, _QS) == pytest.approx(1.0)
-    assert np.isfinite(w(1, 2, _QS))
-
-
 def test_hac_covariance_covers_auto_and_explicit_selection_branches() -> None:
     out_wooldridge = hac_covariance(
         GOLDEN_R,
         kernel="bartlett",
         bandwidth="wooldridge",
-        nopython=False,
     )
     out_andrews = hac_covariance(
         GOLDEN_R,
         kernel="parzen",
         bandwidth="andrews",
-        nopython=False,
     )
     out_none = hac_covariance(
         GOLDEN_R,
         kernel="bartlett",
         bandwidth=None,
-        nopython=False,
     )
     wide = np.tile(GOLDEN_R[:, :1], (1, 9))
-    out_wide = hac_covariance(wide, kernel="bartlett", bandwidth=1, nopython=True)
+    out_wide = hac_covariance(wide, kernel="bartlett", bandwidth=1)
 
     assert out_wooldridge.shape == (2, 2)
     assert out_andrews.shape == (2, 2)
     assert out_none.shape == (2, 2)
     assert out_wide.shape == (9, 9)
-    np.testing.assert_allclose(
-        py_hac_estimator(GOLDEN_R, _BARTLETT, 0),
-        GOLDEN_R.T @ GOLDEN_R / GOLDEN_R.shape[0],
-    )
-
-
-def test_hac_jit_matmul_python_path_matches_py_estimator() -> None:
-    expected = py_hac_estimator(GOLDEN_R, _BARTLETT, 2)
-    matmul_out = jit_hac_estimator_matmul.py_func(GOLDEN_R, _BARTLETT, 2)
-
-    np.testing.assert_allclose(matmul_out, expected)
 
 
 def test_andrews_bandwidth_matrix_validates_shape_and_accepts_vectors() -> None:

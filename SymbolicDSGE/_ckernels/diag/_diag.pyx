@@ -71,114 +71,139 @@ cdef extern from "diag_wald.h":
 FALLBACK = DIAG_FALLBACK
 
 
-def bg_stat(double[::1] eps, double[:, ::1] X, int64_t lags):
+def bg_stat(eps, X, int64_t lags):
     """Breusch-Godfrey LM statistic. Returns (status, stat)."""
-    cdef int64_t n = eps.shape[0]
-    cdef int64_t K = X.shape[1]
+    cdef double[::1] eps_mv = np.ascontiguousarray(eps, dtype=np.float64)
+    cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
+
+    cdef int64_t n = eps_mv.shape[0]
+    cdef int64_t K = X_mv.shape[1]
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_bg_stat(&eps[0], &X[0, 0], n, K, lags, &stat)
+        status = sdsge_bg_stat(&eps_mv[0], &X_mv[0, 0], n, K, lags, &stat)
     return status, stat
 
 
-def bp_aux(double[::1] eps, double[:, ::1] X_aug):
+def bp_aux(eps, X_aug):
     """Breusch-Pagan auxiliary regression. Returns (status, rss, tss)."""
-    cdef int64_t n = X_aug.shape[0]
-    cdef int64_t p = X_aug.shape[1]
+    cdef double[::1] eps_mv = np.ascontiguousarray(eps, dtype=np.float64)
+    cdef double[:, ::1] X_aug_mv = np.ascontiguousarray(X_aug, dtype=np.float64)
+
+    cdef int64_t n = X_aug_mv.shape[0]
+    cdef int64_t p = X_aug_mv.shape[1]
     cdef double rss = 0.0
     cdef double tss = 0.0
     cdef int status
     with nogil:
-        status = sdsge_bp_aux(&eps[0], &X_aug[0, 0], n, p, &rss, &tss)
+        status = sdsge_bp_aux(&eps_mv[0], &X_aug_mv[0, 0], n, p, &rss, &tss)
     return status, rss, tss
 
 
-def chow_stat(double[::1] y, double[:, ::1] X, int64_t t_break):
+def chow_stat(y, X, int64_t t_break):
     """Chow break-point F statistic. Returns (status, stat)."""
-    cdef int64_t T = X.shape[0]
-    cdef int64_t p = X.shape[1]
+    cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
+
+    cdef int64_t T = X_mv.shape[0]
+    cdef int64_t p = X_mv.shape[1]
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_chow_stat(&y[0], &X[0, 0], T, p, t_break, &stat)
+        status = sdsge_chow_stat(&y_mv[0], &X_mv[0, 0], T, p, t_break, &stat)
     return status, stat
 
 
-def recursive_residuals(double[::1] y, double[:, ::1] X):
+def recursive_residuals(y, X):
     """Brown-Durbin-Evans recursive residuals. Returns (status, w)."""
-    cdef int64_t T = X.shape[0]
-    cdef int64_t p = X.shape[1]
+    cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
+
+    cdef int64_t T = X_mv.shape[0]
+    cdef int64_t p = X_mv.shape[1]
     cdef int64_t w_len = T - p if T > p else 0
     w = np.empty(w_len, dtype=np.float64)
     cdef double[::1] w_mv = w
     cdef double *w_ptr = &w_mv[0] if w_len > 0 else NULL
     cdef int status
     with nogil:
-        status = sdsge_recursive_residuals(&y[0], &X[0, 0], T, p, w_ptr)
+        status = sdsge_recursive_residuals(&y_mv[0], &X_mv[0, 0], T, p, w_ptr)
     return status, w
 
 
-def cusum_series(double[::1] y, double[:, ::1] X):
+def cusum_series(y, X):
     """Standardized CUSUM series. Returns (status, series)."""
-    cdef int64_t T = X.shape[0]
-    cdef int64_t p = X.shape[1]
+    cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
+
+    cdef int64_t T = X_mv.shape[0]
+    cdef int64_t p = X_mv.shape[1]
     cdef int64_t s_len = T - p if T > p else 0
     series = np.empty(s_len, dtype=np.float64)
     cdef double[::1] s_mv = series
     cdef double *s_ptr = &s_mv[0] if s_len > 0 else NULL
     cdef int status
     with nogil:
-        status = sdsge_cusum_series(&y[0], &X[0, 0], T, p, s_ptr)
+        status = sdsge_cusum_series(&y_mv[0], &X_mv[0, 0], T, p, s_ptr)
     return status, series
 
 
-def cusum_stat(double[::1] y, double[:, ::1] X):
+def cusum_stat(y, X):
     """CUSUM statistic. Returns (status, stat)."""
-    cdef int64_t T = X.shape[0]
-    cdef int64_t p = X.shape[1]
+    cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
+
+    cdef int64_t T = X_mv.shape[0]
+    cdef int64_t p = X_mv.shape[1]
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_cusum_stat(&y[0], &X[0, 0], T, p, &stat)
+        status = sdsge_cusum_stat(&y_mv[0], &X_mv[0, 0], T, p, &stat)
     return status, stat
 
 
-def cusumsq_stat(double[::1] y, double[:, ::1] X):
+def cusumsq_stat(y, X):
     """CUSUM-of-squares statistic. Returns (status, n, stat)."""
-    cdef int64_t T = X.shape[0]
-    cdef int64_t p = X.shape[1]
+    cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
+
+    cdef int64_t T = X_mv.shape[0]
+    cdef int64_t p = X_mv.shape[1]
     cdef int64_t n = 0
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_cusumsq_stat(&y[0], &X[0, 0], T, p, &n, &stat)
+        status = sdsge_cusumsq_stat(&y_mv[0], &X_mv[0, 0], T, p, &n, &stat)
     return status, n, stat
 
 
-def jb_stat(double[::1] x):
+def jb_stat(x):
     """Jarque-Bera normality statistic. Returns (status, stat)."""
-    cdef int64_t n = x.shape[0]
+    cdef double[::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
+
+    cdef int64_t n = x_mv.shape[0]
     cdef double stat = 0.0
     cdef int status
-    cdef double *x_ptr = &x[0] if n > 0 else NULL
+    cdef double *x_ptr = &x_mv[0] if n > 0 else NULL
     with nogil:
         status = sdsge_jb_stat(x_ptr, n, &stat)
-    return status, stat
+    return status, np.float64(stat)
 
 
-def acorr(double[::1] x, int64_t L):
+def acorr(x, int64_t L):
     """Autocorrelation of x up to lag L. Returns (status, out(L+1)).
 
     Mirrors the numba ``acorr`` (no L/n clamping here); ``out`` is length L+1 and
     z_scratch is length n. status is DIAG_UDEF_VARIANCE for a constant series.
     """
+    cdef double[::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
+
     cdef int64_t n = x.shape[0]
     out = np.empty(L + 1, dtype=np.float64)
     z = np.empty(n, dtype=np.float64)
     cdef double[::1] out_mv = out
     cdef double[::1] z_mv = z
-    cdef double *x_ptr = &x[0] if n > 0 else NULL
+    cdef double *x_ptr = &x_mv[0] if n > 0 else NULL
     cdef double *z_ptr = &z_mv[0] if n > 0 else NULL
     cdef int status
     with nogil:
@@ -186,70 +211,78 @@ def acorr(double[::1] x, int64_t L):
     return status, out
 
 
-def lb_stat(double[::1] x, int64_t L):
+def lb_stat(x, int64_t L):
     """Ljung-Box statistic for x up to lag L. Returns (status, stat).
 
     The kernel clamps L to n-1 and validates n/L internally; the two length-n
     scratch buffers cover the clamped lag (L_eff <= n-1, so L_eff+1 <= n).
     """
-    cdef int64_t n = x.shape[0]
+    cdef double[::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
+
+    cdef int64_t n = x_mv.shape[0]
     cdef double stat = 0.0
     cdef int status
     z = np.empty(n, dtype=np.float64)
     rho = np.empty(n, dtype=np.float64)
     cdef double[::1] z_mv = z
     cdef double[::1] rho_mv = rho
-    cdef double *x_ptr = &x[0] if n > 0 else NULL
+    cdef double *x_ptr = &x_mv[0] if n > 0 else NULL
     cdef double *z_ptr = &z_mv[0] if n > 0 else NULL
     cdef double *rho_ptr = &rho_mv[0] if n > 0 else NULL
     with nogil:
         status = sdsge_lb_stat(x_ptr, n, L, z_ptr, rho_ptr, &stat)
-    return status, stat
+    return status, np.float64(stat)
 
 
-def hac_estimator_matmul(double[:, ::1] r, int kernel_id, int64_t L):
+def hac_estimator_matmul(r, int kernel_id, int64_t L):
     """HAC long-run covariance (Gamma_0 + sum_j w_j(Gamma_j + Gamma_j')) / n.
 
     Full-estimator parity with the numba ``jit_hac_estimator_matmul``: same
     inputs (centered moment array, integer kernel id, bandwidth) and the same
     (p, p) output -- no separate Gamma_0/scaling codepath on the caller side.
     """
-    cdef int64_t n = r.shape[0]
-    cdef int64_t p = r.shape[1]
+    cdef double[:, ::1] r_mv = np.ascontiguousarray(r, dtype=np.float64)
+    cdef int64_t n = r_mv.shape[0]
+    cdef int64_t p = r_mv.shape[1]
     omega = np.empty((p, p), dtype=np.float64)
     gamma = np.empty((p, p), dtype=np.float64)
     cdef double[:, ::1] out_mv = omega
     cdef double[:, ::1] gamma_mv = gamma
     with nogil:
-        sdsge_hac_estimator_matmul(&r[0, 0], <KernelID>kernel_id, L, n, p,
+        sdsge_hac_estimator_matmul(&r_mv[0, 0], <KernelID>kernel_id, L, n, p,
                                    &gamma_mv[0, 0], &out_mv[0, 0])
     return omega
 
 
-def fill_mean_ax0(double[:, ::1] x):
+def fill_mean_ax0(x):
     """Column means of x over axis 0. Returns mean(p)."""
-    cdef int64_t n = x.shape[0]
-    cdef int64_t p = x.shape[1]
+    cdef double[:, ::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
+
+    cdef int64_t n = x_mv.shape[0]
+    cdef int64_t p = x_mv.shape[1]
     mean = np.empty(p, dtype=np.float64)
     cdef double[::1] mean_mv = mean
     with nogil:
-        sdsge_fill_mean_ax0(&x[0, 0], n, p, &mean_mv[0])
+        sdsge_fill_mean_ax0(&x_mv[0, 0], n, p, &mean_mv[0])
     return mean
 
 
-def fill_centered_ax0(double[:, ::1] x, double[::1] mean):
+def fill_centered_ax0(x, mean):
     """x with its column means subtracted. Returns centered(n, p)."""
+    cdef double[:, ::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
+    cdef double[::1] mean_mv = np.ascontiguousarray(mean, dtype=np.float64)
+
     cdef int64_t n = x.shape[0]
     cdef int64_t p = x.shape[1]
     centered = np.empty((n, p), dtype=np.float64)
     cdef double[:, ::1] centered_mv = centered
     with nogil:
-        sdsge_fill_centered_ax0(&x[0, 0], &mean[0], n, p, &centered_mv[0, 0])
+        sdsge_fill_centered_ax0(&x_mv[0, 0], &mean_mv[0], n, p, &centered_mv[0, 0])
     return centered
 
 
-def wald_stat_from_mean_and_cov(double[::1] mean, double[::1] target,
-                                double[:, ::1] omega, int64_t n):
+def wald_stat_from_mean_and_cov(mean, target,
+                                omega, int64_t n):
     """Wald statistic n * dev^T omega^-1 dev with dev = mean - target.
 
     Returns (status, stat). status is DIAG_OK, or FALLBACK when omega is not
@@ -258,42 +291,51 @@ def wald_stat_from_mean_and_cov(double[::1] mean, double[::1] target,
     cdef int64_t p = mean.shape[0]
     cdef double stat = 0.0
     cdef int status
+
+    cdef double[::1] mean_mv = np.ascontiguousarray(mean, dtype=np.float64)
+    cdef double[::1] target_mv = np.ascontiguousarray(target, dtype=np.float64)
+    cdef double[:, ::1] omega_mv = np.ascontiguousarray(omega, dtype=np.float64)
+
     dev = np.empty(p, dtype=np.float64)
     chol = np.empty((p, p), dtype=np.float64)
     cdef double[::1] dev_mv = dev
     cdef double[:, ::1] chol_mv = chol
     with nogil:
         status = sdsge_wald_stat_from_mean_and_cov(
-            &mean[0], &target[0], &omega[0, 0], n, p,
+            &mean_mv[0], &target_mv[0], &omega_mv[0, 0], n, p,
             &dev_mv[0], &chol_mv[0, 0], &stat)
     return status, stat
 
 
-def symmetric_outer_prod_2dim(double[:, ::1] x):
+def symmetric_outer_prod_2dim(x):
     """Per-row vech of the outer product x_t x_t'. Returns (status, out(n, q))."""
-    cdef int64_t n = x.shape[0]
-    cdef int64_t p = x.shape[1]
+    cdef double[:, ::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
+
+    cdef int64_t n = x_mv.shape[0]
+    cdef int64_t p = x_mv.shape[1]
     cdef int64_t q = p * (p + 1) // 2
     out = np.empty((n, q), dtype=np.float64)
     cdef double[:, ::1] out_mv = out
     cdef int status
     with nogil:
-        status = sdsge_symmetric_outer_prod_2dim(&x[0, 0], n, p, q, &out_mv[0, 0])
+        status = sdsge_symmetric_outer_prod_2dim(&x_mv[0, 0], n, p, q, &out_mv[0, 0])
     return status, out
 
 
-def fill_symmetric_target_vec(double[:, ::1] target, double atol, double rtol):
+def fill_symmetric_target_vec(target, double atol, double rtol):
     """Pack the upper triangle of a symmetric target into a vech vector.
 
     Returns (status, vec(q)); status is DIAG_BAD_SHAPE if the matrix is not
     symmetric within (atol, rtol).
     """
-    cdef int64_t p = target.shape[0]
+    cdef double[:, ::1] target_mv = np.ascontiguousarray(target, dtype=np.float64)
+
+    cdef int64_t p = target_mv.shape[0]
     cdef int64_t q = p * (p + 1) // 2
     vec = np.empty(q, dtype=np.float64)
     cdef double[::1] vec_mv = vec
     cdef int status
     with nogil:
-        status = sdsge_fill_symmetric_target_vec(&target[0, 0], atol, rtol, p,
+        status = sdsge_fill_symmetric_target_vec(&target_mv[0, 0], atol, rtol, p,
                                                  &vec_mv[0])
     return status, vec

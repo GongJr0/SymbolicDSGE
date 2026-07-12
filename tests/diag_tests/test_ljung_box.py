@@ -4,17 +4,19 @@ import numpy as np
 import pytest
 from scipy.stats import chi2
 
-import SymbolicDSGE._diag_tests.ljung_box as ljung_module
+import _oracles.diag as diag_oracle
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.ljung_box import (
-    BAD_LAG,
     BAD_SHAPE,
+    ljung_box,
+)
+from _oracles.diag import (
+    BAD_LAG,
     INSUFFICIENT_SAMPLES,
     OK,
     UDEF_VARIANCE,
     acorr,
     lb_stat,
-    ljung_box,
 )
 from SymbolicDSGE._diag_tests.status import TestStatus
 
@@ -61,7 +63,7 @@ def test_acorr_python_vectorized_branch_matches_manual_autocorrelation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     x = np.array([1.0, 2.0, 0.0, 4.0, 3.0], dtype=np.float64)
-    monkeypatch.setattr(ljung_module, "LOOP_LIMIT_N", 1)
+    monkeypatch.setattr(diag_oracle, "LOOP_LIMIT_N", 1)
 
     err, out = acorr.py_func(x, 2)
 

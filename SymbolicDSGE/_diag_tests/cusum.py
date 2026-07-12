@@ -20,7 +20,11 @@ from .cusum_utils import OK, NDF, recursive_residuals
 
 from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
-from ._native import native as _native, DIAG_FALLBACK
+from .._ckernels.diag import (
+    cusum_series as _native_cusum_series,
+    cusum_stat as _native_cusum_stat,
+    FALLBACK as DIAG_FALLBACK,
+)
 
 if TYPE_CHECKING:
     import optype.numpy as onp
@@ -197,8 +201,8 @@ class CusumDist(rv_frozen):
 # Test Code
 def cusum_series(y: NDF, X: NDF) -> tuple[int, NDF]:
     """Standardized CUSUM series; native fast path, numba fallback."""
-    if _native is not None and y.shape[0] == X.shape[0]:
-        status, series = _native.cusum_series(
+    if y.shape[0] == X.shape[0]:
+        status, series = _native_cusum_series(
             np.ascontiguousarray(y, dtype=np.float64),
             np.ascontiguousarray(X, dtype=np.float64),
         )
@@ -228,8 +232,8 @@ def _cusum_series_numba(y: NDF, X: NDF) -> tuple[int, NDF]:
 
 def cusum_stat(y: NDF, X: NDF) -> tuple[int, float64]:
     """CUSUM statistic; native fast path, numba fallback."""
-    if _native is not None and y.shape[0] == X.shape[0]:
-        status, stat = _native.cusum_stat(
+    if y.shape[0] == X.shape[0]:
+        status, stat = _native_cusum_stat(
             np.ascontiguousarray(y, dtype=np.float64),
             np.ascontiguousarray(X, dtype=np.float64),
         )
