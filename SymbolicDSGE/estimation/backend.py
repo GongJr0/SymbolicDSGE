@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence, cast
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -10,9 +10,12 @@ from numpy import asarray, float64
 from numpy.typing import NDArray
 from scipy import optimize
 from sympy import Symbol
-from numba import njit
 
 from .._ckernels.core import measurement_eval, jacobian_eval
+from .._ckernels.estimation import (
+    cov_from_unconstrained,
+    unconstrained_from_corr_chol,
+)
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..core.compiled_model import CompiledModel
@@ -528,23 +531,6 @@ def estimate_R_diag(
     return np.diag(np.exp(opt.x))
 
 
-@njit(cache=True)
-def _corr_chol_from_unconstrained_backend(z: NDF, K: int) -> NDF:
-    cpc: NDF = np.tanh(z)
-    L: NDF = np.zeros((K, K), dtype=float64)
-    L[0, 0] = 1.0
-    idx: int = 0
-    for k in range(1, K):
-        rem: float64 = float64(1.0)
-        for j in range(k):
-            v = float64(np.sqrt(max(rem, 1e-14)))
-            L[k, j] = float64(cpc[idx] * v)
-            rem = float64(rem - L[k, j] * L[k, j])
-            idx += 1
-        L[k, k] = float64(np.sqrt(max(rem, 1e-14)))
-    return L
-
-
 def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
     """Map unconstrained z in R^(K(K-1)/2) -> valid corr Cholesky factor."""
     expected = (K * (K - 1)) // 2
@@ -552,28 +538,9 @@ def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
         raise ValueError(
             f"Expected {expected} unconstrained CPC elements, got {z.shape[0]}."
         )
-    return cast(NDF, _corr_chol_from_unconstrained_backend(z, K))
-
-
-@njit(cache=True)
-def _unconstrained_from_corr_chol_backend(L: NDF) -> NDF:
-    K = L.shape[0]
-    n_cpc = (K * (K - 1)) // 2
-    z = np.empty((n_cpc,), dtype=float64)
-    idx = 0
-    for k in range(1, K):
-        rem = float64(1.0)
-        for j in range(k):
-            v = float64(np.sqrt(max(rem, 1e-14)))
-            cpc = float64(L[k, j] / v) if v > 0.0 else float64(0.0)
-            if cpc < (-1.0 + 1e-14):
-                cpc = float64(-1.0 + 1e-14)
-            elif cpc > (1.0 - 1e-14):
-                cpc = float64(1.0 - 1e-14)
-            z[idx] = float64(np.arctanh(cpc))
-            rem = float64(rem - L[k, j] * L[k, j])
-            idx += 1
-    return z
+    # std = ones -> the returned covariance is the correlation; L is its factor.
+    _, L = cov_from_unconstrained(z, np.ones(K, dtype=float64))
+    return L
 
 
 def _unconstrained_from_corr_chol(L: NDF) -> NDF:
@@ -590,7 +557,7 @@ def _unconstrained_from_corr_chol(L: NDF) -> NDF:
             raise ValueError(
                 "Each row of a correlation Cholesky factor must have unit norm."
             )
-    return cast(NDF, _unconstrained_from_corr_chol_backend(L))
+    return unconstrained_from_corr_chol(L)
 
 
 def _unconstrained_from_corr(corr: NDF) -> NDF:
@@ -608,26 +575,14 @@ def _unconstrained_from_corr(corr: NDF) -> NDF:
     return _unconstrained_from_corr_chol(L)
 
 
-@njit(cache=True)
-def _R_from_unconstrained_backend(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
-    log_std = u[:K]
-    z = u[K:]
-    std = np.exp(log_std).astype(float64)
-    Lcorr: NDF = _corr_chol_from_unconstrained_backend(z.astype(float64), K)
-    LcorrT: NDF = np.ascontiguousarray(Lcorr.T)
-    corr: NDF = Lcorr @ LcorrT
-    std_col = std.reshape((K, 1))
-    std_row = std.reshape((1, K))
-    R = corr * std_col * std_row
-    return (R.astype(float64), std, Lcorr)
-
-
 def _R_from_unconstrained(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
     """u = [log stds (K), unconstrained CPC values] -> (R, stds, Lcorr)."""
     n_cpc = (K * (K - 1)) // 2
     if u.shape[0] != K + n_cpc:
         raise ValueError(f"Expected length {K + n_cpc}, got {u.shape[0]}.")
-    return cast(tuple[NDF, NDF, NDF], _R_from_unconstrained_backend(u, K))
+    std = np.exp(u[:K]).astype(float64)
+    R, Lcorr = cov_from_unconstrained(u[K:], std)
+    return R, std, Lcorr
 
 
 def estimate_R(

@@ -11,6 +11,8 @@ path" (out-of-support / unknown code), matching the numba kernel.
 
 from libc.stdint cimport int64_t
 
+import numpy as np
+
 
 cdef extern from "prior_program.h":
     void sdsge_dist_logpdf(int64_t code, double *params, double x,
@@ -30,6 +32,10 @@ cdef extern from "prior_program.h":
         int64_t *matrix_indices, int64_t *matrix_dims, int64_t *matrix_lengths,
         double *matrix_etas, double *matrix_log_constants, int64_t n_blocks,
         int64_t max_matrix_len) nogil
+    void sdsge_cov_from_unconstrained(double *z, double *std, int64_t K,
+                                      double *scratch_M, double *out) nogil
+    void sdsge_unconstrained_from_corr_chol(double *L, int64_t K,
+                                            double *out_z) nogil
 
 
 def dist_logpdf(int64_t code, double[::1] params, double x):
@@ -105,3 +111,42 @@ def logprior_program(double[::1] theta,
                                      mi, md, ml, me, mlc, n_blocks,
                                      max_matrix_len)
     return out
+
+
+def cov_from_unconstrained(z, std):
+    """Unconstrained CPC values + stds -> (K x K covariance, K x K correlation
+    Cholesky factor L). ``K`` is taken from ``std``; ``z`` has length K(K-1)/2
+    (empty for K == 1). ``L`` is lower-triangular (upper stays zero)."""
+    z = np.ascontiguousarray(z, dtype=np.float64)
+    std = np.ascontiguousarray(std, dtype=np.float64)
+    cdef int64_t K = std.shape[0]
+    cdef double[::1] z_mv = z
+    cdef double[::1] std_mv = std
+    # L zero-initialized: the kernel writes only the lower triangle + diagonal.
+    L = np.zeros((K, K), dtype=np.float64)
+    out = np.empty((K, K), dtype=np.float64)
+    cdef double[:, ::1] L_mv = L
+    cdef double[:, ::1] out_mv = out
+    cdef double *zp = &z_mv[0] if z_mv.shape[0] > 0 else NULL
+    cdef double *sp = &std_mv[0] if K > 0 else NULL
+    cdef double *lp = &L_mv[0, 0] if K > 0 else NULL
+    cdef double *op = &out_mv[0, 0] if K > 0 else NULL
+    with nogil:
+        sdsge_cov_from_unconstrained(zp, sp, K, lp, op)
+    return out, L
+
+
+def unconstrained_from_corr_chol(L):
+    """Correlation Cholesky factor (K x K) -> unconstrained CPC values of length
+    K(K-1)/2 (empty for K == 1). Inverse of the Cholesky stage above."""
+    L = np.ascontiguousarray(L, dtype=np.float64)
+    cdef int64_t K = L.shape[0]
+    cdef int64_t n_cpc = (K * (K - 1)) // 2
+    cdef double[:, ::1] L_mv = L
+    out_z = np.empty((n_cpc,), dtype=np.float64)
+    cdef double[::1] out_mv = out_z
+    cdef double *lp = &L_mv[0, 0] if K > 0 else NULL
+    cdef double *op = &out_mv[0] if n_cpc > 0 else NULL
+    with nogil:
+        sdsge_unconstrained_from_corr_chol(lp, K, op)
+    return out_z

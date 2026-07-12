@@ -273,3 +273,60 @@ f64 sdsge_logprior_program(
 
   return lp;
 }
+
+/* Unconstrained (z, std) -> full covariance. Builds the correlation Cholesky
+ * factor row by row from the unconstrained CPC values z (tanh + stick-breaking
+ * remainder), then forms cov = diag(std) (L L^T) diag(std). ``scratch_M`` holds
+ * L (K*K, row-major); ``out`` receives the K*K covariance (row-major). */
+void sdsge_cov_from_unconstrained(const f64 *SDSGE_RESTRICT z,
+                                  const f64 *SDSGE_RESTRICT std, const i64 K,
+                                  f64 *SDSGE_RESTRICT L,
+                                  f64 *SDSGE_RESTRICT out) {
+  i64 idx = 0;
+  for (i64 i = 0; i < K; ++i) {
+    const i64 ri = i * K;
+    const f64 si = std[i];
+
+    f64 rem = 1.0;
+    for (i64 j = 0; j < i; ++j) {
+      const f64 v = sqrt(max_f64(1e-14, rem)) * tanh(z[idx++]);
+      L[ri + j] = v;
+      rem -= v * v;
+    }
+    L[ri + i] = sqrt(max_f64(1e-14, rem));
+
+    for (i64 j = 0; j < i; ++j) {
+      const i64 rj = j * K;
+      f64 s = 0.0;
+      for (i64 c = 0; c <= j; ++c)
+        s += L[ri + c] * L[rj + c];
+      const f64 v = si * std[j] * s;
+      out[ri + j] = v;
+      out[rj + i] = v;
+    }
+    out[ri + i] = si * si;
+  }
+}
+
+/* Inverse of the Cholesky stage of sdsge_cov_from_unconstrained: correlation
+ * Cholesky factor L (K*K, row-major) -> unconstrained CPC values out_z
+ * (length K(K-1)/2). Recovers each partial correlation as L[k,j] / sqrt(rem),
+ * clamps to the open unit interval, and applies atanh. */
+void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L, const i64 K,
+                                        f64 *SDSGE_RESTRICT out_z) {
+  i64 idx = 0;
+  for (i64 k = 1; k < K; ++k) {
+    const i64 rk = k * K;
+    f64 rem = 1.0;
+    for (i64 j = 0; j < k; ++j) {
+      const f64 v = sqrt(max_f64(1e-14, rem));
+      f64 cpc = L[rk + j] / v;
+      if (cpc < -1.0 + 1e-14)
+        cpc = -1.0 + 1e-14;
+      else if (cpc > 1.0 - 1e-14)
+        cpc = 1.0 - 1e-14;
+      out_z[idx++] = atanh(cpc);
+      rem -= L[rk + j] * L[rk + j];
+    }
+  }
+}

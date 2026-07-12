@@ -79,4 +79,17 @@ f64 sdsge_logprior_program(
     i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
     f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, i64 max_matrix_len);
 
+/* Unconstrained (z, std) -> full covariance via the correlation Cholesky factor.
+ * scratch_M is K*K workspace for L; out receives the K*K covariance (row-major). */
+void sdsge_cov_from_unconstrained(const f64 *SDSGE_RESTRICT z,
+                                  const f64 *SDSGE_RESTRICT std, const i64 K,
+                                  f64 *SDSGE_RESTRICT scratch_M,
+                                  f64 *SDSGE_RESTRICT out);
+
+/* Inverse of the Cholesky stage: correlation Cholesky factor L (K*K, row-major)
+ * -> unconstrained CPC values out_z (length K(K-1)/2), via the stick-breaking
+ * remainder and atanh. */
+void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L, const i64 K,
+                                        f64 *SDSGE_RESTRICT out_z);
+
 #endif /* SDSGE_PRIOR_PROGRAM_H */

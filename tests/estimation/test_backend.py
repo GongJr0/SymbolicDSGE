@@ -722,16 +722,16 @@ def test_build_R_from_config_params_error_branches():
         )
 
 
-def test_backend_numba_helpers_and_validation_error_paths():
+def test_backend_corr_cov_helpers_and_validation_error_paths():
     z = np.array([0.2, -0.1, 0.3], dtype=np.float64)
-    L = backend._corr_chol_from_unconstrained_backend.py_func(z, 3)
+    L = backend._corr_chol_from_unconstrained(z, 3)
     assert L.shape == (3, 3)
     assert np.allclose(np.diag(L @ L.T), np.ones(3), atol=1e-10)
 
-    z_back = backend._unconstrained_from_corr_chol_backend.py_func(L)
+    z_back = backend._unconstrained_from_corr_chol(L)
     assert np.allclose(z_back, z, atol=1e-10, rtol=0.0)
 
-    R, std, Lcorr = backend._R_from_unconstrained_backend.py_func(
+    R, std, Lcorr = backend._R_from_unconstrained(
         np.array([np.log(0.5), np.log(0.8), 0.2], dtype=np.float64),
         2,
     )
@@ -773,11 +773,14 @@ def test_backend_numba_helpers_and_validation_error_paths():
         backend._R_from_unconstrained(np.array([0.0, 0.0], dtype=np.float64), K=2)
 
 
-def test_unconstrained_from_corr_chol_backend_clips_extreme_cpc_values():
-    z_pos = backend._unconstrained_from_corr_chol_backend.py_func(
+def test_unconstrained_from_corr_chol_clips_extreme_cpc_values():
+    # The native kernel clamps partial correlations to the open unit interval.
+    # Feed factors whose rows exceed unit norm (bypassing the validating wrapper)
+    # so the raw clamp path is exercised directly.
+    z_pos = backend.unconstrained_from_corr_chol(
         np.array([[1.0, 0.0], [1.1, 0.1]], dtype=np.float64)
     )
-    z_neg = backend._unconstrained_from_corr_chol_backend.py_func(
+    z_neg = backend.unconstrained_from_corr_chol(
         np.array([[1.0, 0.0], [-1.1, 0.1]], dtype=np.float64)
     )
     assert np.isfinite(z_pos[0])

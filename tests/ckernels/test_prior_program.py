@@ -12,11 +12,13 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.estimation import (
+    cov_from_unconstrained as native_cov_from_unconstrained,
     dist_logpdf as native_dist_logpdf,
     lkj_chol_logjac as native_lkj_logjac,
     lkj_chol_logpdf_from_z as native_lkj_logpdf,
     logprior_program as native_program,
     transform_inverse_and_logjac as native_transform,
+    unconstrained_from_corr_chol as native_unconstrained_from_corr_chol,
 )
 from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.bayesian.distributions.distribution_dispatch import get_distribution
@@ -32,11 +34,14 @@ from SymbolicDSGE.estimation.prior_program import (
     _pack_transform,
 )
 from _oracles.estimation import (
+    _corr_chol_from_unconstrained,
     _dist_logpdf,
     _evaluate_logprior_program,
     _lkj_chol_logjac,
     _lkj_chol_logpdf_from_z,
+    _R_from_unconstrained,
     _transform_inverse_and_logjac,
+    _unconstrained_from_corr_chol,
 )
 
 RTOL = 1e-12
@@ -254,3 +259,37 @@ def test_logprior_program_out_of_support_is_nan():
     native, numba = _call_both(theta, scalar_indices, packed, _empty_block_arrays())
     _agree(native, numba)
     assert np.isnan(float(native))
+
+
+@pytest.mark.parametrize("K", [1, 2, 3, 5])
+def test_cov_from_unconstrained_parity(K):
+    rng = np.random.default_rng(K)
+    n_cpc = K * (K - 1) // 2
+    z = rng.standard_normal(n_cpc)
+    std = np.exp(0.3 * rng.standard_normal(K))
+
+    cov, L = native_cov_from_unconstrained(z, std)
+
+    # Oracle covariance + correlation Cholesky from u = [log std, z].
+    u = np.concatenate([np.log(std), z])
+    R_ref, _, Lcorr_ref = _R_from_unconstrained(u, K)
+    L_ref = _corr_chol_from_unconstrained(np.ascontiguousarray(z), K)
+
+    np.testing.assert_allclose(cov, R_ref, rtol=RTOL, atol=ATOL)
+    np.testing.assert_allclose(L, L_ref, rtol=RTOL, atol=ATOL)
+    np.testing.assert_allclose(L, Lcorr_ref, rtol=RTOL, atol=ATOL)
+
+
+@pytest.mark.parametrize("K", [1, 2, 3, 5])
+def test_unconstrained_from_corr_chol_parity(K):
+    rng = np.random.default_rng(100 + K)
+    n_cpc = K * (K - 1) // 2
+    z = rng.standard_normal(n_cpc)
+    L = _corr_chol_from_unconstrained(np.ascontiguousarray(z), K)
+
+    z_native = native_unconstrained_from_corr_chol(L)
+    z_ref = _unconstrained_from_corr_chol(np.ascontiguousarray(L))
+
+    np.testing.assert_allclose(z_native, z_ref, rtol=RTOL, atol=ATOL)
+    # Round-trip recovers the original unconstrained values.
+    np.testing.assert_allclose(z_native, z, rtol=1e-10, atol=1e-10)
