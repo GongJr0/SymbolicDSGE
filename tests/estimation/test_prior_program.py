@@ -11,19 +11,21 @@ from SymbolicDSGE.estimation.prior_program import (
     N_DIST_PARAMS,
     N_TRANSFORM_PARAMS,
     TransformCode,
+    _pack_distribution,
+    _pack_transform,
+    build_packed_logprior,
+)
+from _oracles.estimation import (
     _dist_logpdf,
     _evaluate_logprior_program,
     _lkj_chol_logjac,
     _lkj_chol_logpdf_from_z,
     _log_sigmoid_scalar,
-    _pack_distribution,
-    _pack_transform,
     _sigmoid_scalar,
     _softplus_scalar,
     _std_norm_cdf,
     _std_norm_logpdf,
     _transform_inverse_and_logjac,
-    build_packed_logprior,
 )
 
 
@@ -319,26 +321,20 @@ def test_packed_logprior_matches_cache_identity_and_rejects_unsupported_specs():
 
 
 def test_prior_program_scalar_transform_helpers_cover_all_branches():
-    assert _softplus_scalar.py_func(np.float64(2.0)) == pytest.approx(
-        np.log1p(np.exp(2.0))
-    )
-    assert _softplus_scalar.py_func(np.float64(-2.0)) == pytest.approx(
-        np.log1p(np.exp(-2.0))
-    )
-    assert _log_sigmoid_scalar.py_func(np.float64(2.0)) == pytest.approx(
+    assert _softplus_scalar(np.float64(2.0)) == pytest.approx(np.log1p(np.exp(2.0)))
+    assert _softplus_scalar(np.float64(-2.0)) == pytest.approx(np.log1p(np.exp(-2.0)))
+    assert _log_sigmoid_scalar(np.float64(2.0)) == pytest.approx(
         -np.log1p(np.exp(-2.0))
     )
-    assert _log_sigmoid_scalar.py_func(np.float64(-2.0)) == pytest.approx(
+    assert _log_sigmoid_scalar(np.float64(-2.0)) == pytest.approx(
         -2.0 - np.log1p(np.exp(-2.0))
     )
-    assert _sigmoid_scalar.py_func(np.float64(2.0)) == pytest.approx(
-        1.0 / (1.0 + np.exp(-2.0))
-    )
-    assert _sigmoid_scalar.py_func(np.float64(-2.0)) == pytest.approx(
+    assert _sigmoid_scalar(np.float64(2.0)) == pytest.approx(1.0 / (1.0 + np.exp(-2.0)))
+    assert _sigmoid_scalar(np.float64(-2.0)) == pytest.approx(
         np.exp(-2.0) / (1.0 + np.exp(-2.0))
     )
-    assert _std_norm_cdf.py_func(np.float64(0.0)) == pytest.approx(0.5)
-    assert _std_norm_logpdf.py_func(np.float64(0.0)) == pytest.approx(
+    assert _std_norm_cdf(np.float64(0.0)) == pytest.approx(0.5)
+    assert _std_norm_logpdf(np.float64(0.0)) == pytest.approx(
         -0.5 * np.log(2.0 * np.pi)
     )
 
@@ -354,7 +350,7 @@ def test_prior_program_scalar_transform_helpers_cover_all_branches():
         TransformCode.LOWER_BOUNDED,
         TransformCode.UPPER_BOUNDED,
     ):
-        x, logjac = _transform_inverse_and_logjac.py_func(
+        x, logjac = _transform_inverse_and_logjac(
             code,
             params,
             np.float64(0.25),
@@ -362,7 +358,7 @@ def test_prior_program_scalar_transform_helpers_cover_all_branches():
         assert np.isfinite(x)
         assert np.isfinite(logjac)
 
-    x, logjac = _transform_inverse_and_logjac.py_func(
+    x, logjac = _transform_inverse_and_logjac(
         999,
         params,
         np.float64(0.25),
@@ -424,7 +420,7 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
     for prior in scalar_priors.values():
         code, params = _pack_distribution(prior.dist)
         assert code is not None
-        out = _dist_logpdf.py_func(
+        out = _dist_logpdf(
             code,
             np.asarray(params, dtype=np.float64),
             np.float64(valid_x[code]),
@@ -443,7 +439,7 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
         (999, [0.0] * N_DIST_PARAMS, 0.0),
     ):
         assert np.isnan(
-            _dist_logpdf.py_func(
+            _dist_logpdf(
                 code,
                 np.asarray(params, dtype=np.float64),
                 np.float64(bad_x),
@@ -454,10 +450,10 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
 def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
     z = np.array([0.25, -0.15, 0.45], dtype=np.float64)
 
-    assert np.isfinite(_lkj_chol_logjac.py_func(z, 3, z.size))
-    assert np.isnan(_lkj_chol_logjac.py_func(z[:1], 3, 1))
+    assert np.isfinite(_lkj_chol_logjac(z, 3, z.size))
+    assert np.isnan(_lkj_chol_logjac(z[:1], 3, 1))
     assert np.isfinite(
-        _lkj_chol_logpdf_from_z.py_func(
+        _lkj_chol_logpdf_from_z(
             z,
             3,
             z.size,
@@ -466,7 +462,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
         )
     )
     assert np.isnan(
-        _lkj_chol_logpdf_from_z.py_func(
+        _lkj_chol_logpdf_from_z(
             z[:1],
             3,
             1,
@@ -487,7 +483,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
     empty_m = np.empty((0, 0), dtype=np.int64)
 
     assert np.isfinite(
-        _evaluate_logprior_program.py_func(
+        _evaluate_logprior_program(
             theta,
             scalar_indices,
             scalar_dist_codes,
@@ -502,7 +498,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
         )
     )
     assert np.isnan(
-        _evaluate_logprior_program.py_func(
+        _evaluate_logprior_program(
             np.array([-0.25], dtype=np.float64),
             scalar_indices,
             np.array([DistCode.LOG_NORMAL], dtype=np.int64),
@@ -517,7 +513,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
         )
     )
     assert np.isnan(
-        _evaluate_logprior_program.py_func(
+        _evaluate_logprior_program(
             theta,
             scalar_indices,
             scalar_dist_codes,
@@ -533,7 +529,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
     )
 
     assert np.isnan(
-        _evaluate_logprior_program.py_func(
+        _evaluate_logprior_program(
             np.array([0.1], dtype=np.float64),
             np.empty((0,), dtype=np.int64),
             np.empty((0,), dtype=np.int64),
@@ -549,7 +545,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
     )
 
     assert np.isfinite(
-        _evaluate_logprior_program.py_func(
+        _evaluate_logprior_program(
             np.array([0.25, -0.15, 0.45], dtype=np.float64),
             np.empty((0,), dtype=np.int64),
             np.empty((0,), dtype=np.int64),
