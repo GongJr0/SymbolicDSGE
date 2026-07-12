@@ -98,27 +98,53 @@ typedef struct {
  * NULL / zero-length; eps_hat is written only when return_shocks &&
  * store_history. loglik is always written. */
 typedef struct {
-  f64 *x_pred;    /* (T, n) */
-  f64 *x_filt;    /* (T, n) */
-  f64 *P_pred;    /* (T, n, n) */
-  f64 *P_filt;    /* (T, n, n) */
-  f64 *y_pred;    /* (T, m) */
-  f64 *y_filt;    /* (T, m) */
-  f64 *innov;     /* (T, m)  innovations v */
-  f64 *std_innov; /* (T, m)  L^-1 v */
-  f64 *S;         /* (T, m, m) innovation covariances */
-  f64 *eps_hat;   /* (T, k) or NULL */
-  f64 *loglik;    /* scalar out */
+  f64 *x_pred, *x_filt;   /* (T, n) */
+  f64 *P_pred, *P_filt;   /* (T, n, n) */
+  f64 *y_pred, *y_filt;   /* (T, m) */
+  f64 *innov, *std_innov; /* (T, m)  innovations v */
+  f64 *S;                 /* (T, m, m) innovation covariances */
+  f64 *eps_hat;           /* (T, k) or NULL */
+  f64 *loglik;            /* scalar out */
 } kf_outputs;
 
 /* Run the linear Kalman filter. Returns KF_OK, KF_ERR_MATRIX_CONDITION (non-PD
  * innovation covariance), or KF_ERR_ALLOC (scratch allocation failed). */
 int kf_hot_loop(const kf_inputs *in, kf_outputs *out);
 
-/* Unscented Kalman Filter */
-
+/* Function Ptr for Non-Linear Measurement Function */
 typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT x,
                         const f64 *SDSGE_RESTRICT params, f64 *out);
+
+/* Extended Kalman Filter */
+typedef struct {
+  meas_fn meas;
+  meas_fn jac;
+  const f64 *A, *B;
+  const f64 *calib_params;
+  const f64 *Q, *R, *y;
+  const f64 *x0; /* (n,)   initial state mean */
+  const f64 *P0; /* (n, n) initial state covariance (pre-symmetrized) */
+  i64 T, n, m, k, n_par;
+  f64 jitter;
+  int symmetrize, compute_y_filt, return_shocks, store_history;
+} ekf_inputs;
+
+typedef struct {
+  f64 *x_pred, *x_filt;   /* (hT, n) */
+  f64 *P_pred, *P_filt;   /* (hT, n, n) */
+  f64 *y_pred, *y_filt;   /* (hT, m) */
+  f64 *innov, *std_innov; /* (hT, m) */
+  f64 *S;                 /* (hT, m, m) */
+  f64 *eps_hat;           /* (shock_hT, k) */
+  f64 *loglik;            /* scalar out */
+} ekf_outputs;
+
+/* Run the extended Kalman filter: linear transition, nonlinear measurement via
+ * the meas/jac cfunc pointers (relinearized each step). Returns KF_OK,
+ * KF_ERR_MATRIX_CONDITION (non-PD innovation covariance), or KF_ERR_ALLOC. */
+int ekf_hot_loop(const ekf_inputs *in, ekf_outputs *out);
+
+/* Unscented Kalman Filter */
 
 typedef struct {
   meas_fn meas;

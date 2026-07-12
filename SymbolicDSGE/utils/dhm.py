@@ -23,24 +23,11 @@ from sympy.parsing.sympy_parser import (
 
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
-from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
 _DHMShock = Shock | Callable[[float | np.ndarray], np.ndarray] | np.ndarray
 _DHMShocks = Mapping[str, _DHMShock]
 
-# Prefer the native residual-path kernel (over the solve's cfunc, no numba
-# residual compile); fall back to the numba residual when the extension is
-# absent (ALWAYS_USE_NUMBA / NEVER_USE_NUMBA override -- see _native_dispatch).
-_residual_path_native: Callable[..., Any] | None
-if FORCE_NUMBA:
-    _residual_path_native = None
-else:
-    try:
-        from .._ckernels.core import residual_path as _residual_path_native
-    except ImportError:  # pragma: no cover - exercised only without the extension
-        if REQUIRE_NATIVE:
-            raise
-        _residual_path_native = None
+from .._ckernels.core import residual_path
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 _FOC_CACHE: dict[
@@ -195,30 +182,6 @@ def _build_forward_moments(
                 out_col += 1
 
     return moments, residuals, instruments
-
-
-@njit
-def _forward_residuals_numba(
-    cur_states: np.ndarray,
-    fwd_states: np.ndarray,
-    params: np.ndarray,
-    objective_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
-    n_eq: int,
-) -> np.ndarray:
-    # Numba fallback for the native ``residual_path``: evaluate the numba vector
-    # residual over the path into a real (n_steps x n_eq) matrix.
-    n_steps = cur_states.shape[0]
-    n_var = cur_states.shape[1]
-    residuals = np.empty((n_steps, n_eq), dtype=np.float64)
-    cur = np.empty((n_var,), dtype=np.complex128)
-    fwd = np.empty((n_var,), dtype=np.complex128)
-    for t in range(n_steps):
-        cur[:] = cur_states[t]
-        fwd[:] = fwd_states[t]
-        residual_vec = objective_fn(fwd, cur, params)
-        for k in range(n_eq):
-            residuals[t, k] = residual_vec[k].real
-    return residuals
 
 
 @njit
@@ -870,25 +833,21 @@ class DenHaanMarcet:
         """Real residual matrix ``(n_steps, n_eq_all)`` over the state path.
 
         Uses the native ``residual_path`` kernel driven by the solve's residual
-        @cfunc when the extension is present -- reusing that cached cfunc, so it
-        never triggers the numba residual compile -- else the numba fallback.
+        @cfunc, reusing that cached cfunc so it never triggers a numba residual
+        compile. Inputs are coerced to contiguous complex128 inside the kernel.
         """
         compiled = self.solved.compiled
         n_eq = len(compiled.objective_eqs)
-        par_c = np.ascontiguousarray(self._param_vector_complex(), dtype=np.complex128)
-        cur_c = np.ascontiguousarray(current_states, dtype=np.complex128)
-        fwd_c = np.ascontiguousarray(forward_states, dtype=np.complex128)
-
-        if _residual_path_native is not None:
-            cfunc = compiled.construct_objective_cfunc()
-            return cast(
-                np.ndarray,
-                _residual_path_native(cfunc.address, cur_c, fwd_c, par_c, n_eq),
-            )
-        objective = compiled.construct_objective_vector_func()
+        cfunc = compiled.construct_objective_cfunc()
         return cast(
             np.ndarray,
-            _forward_residuals_numba(cur_c, fwd_c, par_c, objective, n_eq),
+            residual_path(
+                cfunc.address,
+                current_states,
+                forward_states,
+                self._param_vector_complex(),
+                n_eq,
+            ),
         )
 
     def _evaluate_state_path(
@@ -1453,7 +1412,7 @@ class DenHaanMarcet:
 
             cloned_seed = None if shock.seed is None else int(shock.seed) + rep_idx
             cloned = Shock(
-                dist=shock.dist,
+                dist=shock.dist,  # pyright: ignore
                 multivar=shock.multivar,
                 seed=cloned_seed,
                 dist_args=shock.dist_args,
@@ -1574,7 +1533,9 @@ class DenHaanMarcet:
                     require_time_vars=False,
                 )
                 alias_fun = sp.Function(name)
-                defs[name] = _FocLocalDef(kind="function", symbol=alias_fun, expr=rhs)
+                defs[name] = _FocLocalDef(
+                    kind="function", symbol=alias_fun, expr=rhs  # pyright: ignore
+                )
                 local_dict[name] = alias_fun
                 continue
 
@@ -1655,7 +1616,7 @@ class DenHaanMarcet:
                 f"for example '{expr.__name__}(t)'."
             )
         if isinstance(expr, Eq):
-            expr = sp.simplify(expr.lhs - expr.rhs)
+            expr = sp.simplify(expr.lhs - expr.rhs)  # pyright: ignore
         if not isinstance(expr, Expr):
             raise TypeError(f"FOC is not a valid SymPy expression: {foc!r}")
         return expr
@@ -1687,7 +1648,7 @@ class DenHaanMarcet:
                             raise ValueError(
                                 f"FOC local '{alias_fun.__name__}' must be called with a single time argument."
                             )
-                        replacements[call] = sp.simplify(
+                        replacements[call] = sp.simplify(  # pyright: ignore
                             local_def.expr.subs(self._t, call.args[0])
                         )
 
@@ -1747,15 +1708,15 @@ class DenHaanMarcet:
         for sym in expr.free_symbols:
             if sym == self._t:
                 continue
-            if sym.name in param_syms:
+            if sym.name in param_syms:  # pyright: ignore
                 continue
-            if sym.name in shock_syms:
+            if sym.name in shock_syms:  # pyright: ignore
                 raise ValueError(
                     "Shock innovations are not supported in DHM FOC strings. "
                     "Use state-process variables or the equation_idx fallback instead."
                 )
             raise KeyError(
-                f"Unknown symbol '{sym.name}' in FOC. "
+                f"Unknown symbol '{sym.name}' in FOC. "  # pyright: ignore
                 f"Expected a calibrated parameter or a time-indexed model variable."
             )
 
@@ -1796,13 +1757,13 @@ class DenHaanMarcet:
         subs_map: dict[Expr, Expr] = {}
         for name, cur_sym, lag_sym in zip(var_order, cur_syms, lag_syms):
             func = var_funcs[name]
-            subs_map[func(self._t)] = cur_sym
-            subs_map[func(self._t - 1)] = lag_sym
+            subs_map[func(self._t)] = cur_sym  # pyright: ignore
+            subs_map[func(self._t - 1)] = lag_sym  # pyright: ignore
 
         compiled_exprs: list[Expr] = []
         allowed_syms = set(param_syms).union(cur_syms).union(lag_syms)
         for expr in foc_exprs:
-            compiled = sp.simplify(expr.subs(subs_map))
+            compiled = sp.simplify(expr.subs(subs_map))  # pyright: ignore
             if compiled.atoms(AppliedUndef):
                 raise ValueError(
                     "Failed to normalize all model variables in the provided FOCs."
@@ -1851,7 +1812,9 @@ def vectorized_focs(cur, lag, params):
             warnings.filterwarnings(
                 "ignore", category=nb_err.NumbaExperimentalFeatureWarning
             )
-            foc_func.compile((float_vector, float_vector, float_vector))
+            foc_func.compile(  # pyright: ignore
+                (float_vector, float_vector, float_vector)
+            )
 
         return cast(
             Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray], foc_func

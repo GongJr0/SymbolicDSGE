@@ -5,19 +5,21 @@ import builtins
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
-from numba import njit
 import numpy as np
 import pandas as pd
 import pytest
+import sympy as sp
 from sympy import Symbol
 
 import SymbolicDSGE.core.solved_model as solved_model_module
 from SymbolicDSGE import DSGESolver, ModelParser
-from SymbolicDSGE.core.simulation import (
-    _affine_observations_into_numba,
-    _simulate_linear_states_into_numba,
+from SymbolicDSGE._ckernels.core import (
     affine_observations_into,
     simulate_linear_states_into,
+)
+from _oracles.core import (
+    _affine_observations_into_numba,
+    _simulate_linear_states_into_numba,
 )
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.kalman.interface import KalmanInterface
@@ -70,16 +72,6 @@ def _raw_unscented_result(
         eps_hat=None,
         loglik=np.float64(0.0),
     )
-
-
-@njit
-def _obs_shift(x, alpha):
-    return x + alpha
-
-
-@njit
-def _obs_scale(x, alpha):
-    return x * alpha
 
 
 def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, dict]:
@@ -472,32 +464,40 @@ def test_solved_model_kalman_smoke(solved_post82):
     assert out is not None
 
 
-def test_solved_model_non_affine_measurement_and_jit_cache():
-    alpha = Symbol("alpha")
-    compiled = SimpleNamespace(
-        observable_funcs=[_obs_shift, _obs_scale],
-        observable_names=["ObsShift", "ObsScale"],
-        calib_params=[alpha],
-        cur_syms=[Symbol("x")],
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 2.0})),
-    )
-    solved = solved_model_module.SolvedModel(
-        compiled=compiled,
-        policy=SimpleNamespace(order=1),
-        A=np.eye(1, dtype=np.float64),
-        B=np.zeros((1, 1), dtype=np.float64),
-    )
-    state = np.array([[1.0], [2.0], [3.0]], dtype=np.float64)
+def test_solved_model_non_affine_measurement_matches_reference(solved_test):
+    # Native measurement-path cfunc must match an independent sympy.lambdify eval
+    # of the observable exprs, with output columns remapped to y_names order.
+    solved = solved_test
+    compiled = solved.compiled
+    n_var = len(compiled.cur_syms)
+    rng = np.random.default_rng(0)
+    state = rng.normal(size=(4, n_var)).astype(np.float64)
 
-    f1 = solved._make_jit_measurement(2)
-    f2 = solved._make_jit_measurement(2)
-    out = solved._non_affine_measurement(["ObsScale", "ObsShift"], state)
+    # Reversed so the sorted-cfunc columns must be remapped back to y_names order.
+    y_names = list(reversed(compiled.observable_names))
 
-    assert f1 is f2
-    assert np.allclose(
-        out,
-        np.array([[2.0, 3.0], [4.0, 4.0], [6.0, 5.0]], dtype=np.float64),
+    args = [*compiled.cur_syms, *compiled.calib_params]
+    par = np.array(
+        [
+            np.float64(compiled.config.calibration.parameters[p])
+            for p in compiled.calib_params
+        ],
+        dtype=np.float64,
     )
+    obs_lambd = {
+        name: sp.lambdify(args, compiled.observable_eqs[i], "numpy")
+        for i, name in enumerate(compiled.observable_names)
+    }
+
+    got = solved._non_affine_measurement(y_names, state)
+
+    expected = np.empty((state.shape[0], len(y_names)), dtype=np.float64)
+    for j, name in enumerate(y_names):
+        f = obs_lambd[name]
+        for t in range(state.shape[0]):
+            expected[t, j] = f(*state[t], *par)
+
+    assert np.allclose(got, expected)
 
 
 def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
@@ -520,8 +520,8 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
     compiled = SimpleNamespace(
         calib_params=[alpha],
         observable_names=["ObsA", "ObsB"],
-        construct_measurement_array_func=lambda obs: ("h", tuple(obs)),
-        construct_observable_jacobian_array_func=lambda obs: ("H", tuple(obs)),
+        construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
+        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
     )
@@ -546,8 +546,8 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
     )
 
     np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
-    assert captured["init"]["h_func"] == ("h", ("ObsA", "ObsB"))
-    assert captured["init"]["H_jac"] == ("H", ("ObsA", "ObsB"))
+    assert captured["init"]["meas_addr"] == 456
+    assert captured["init"]["jac_addr"] == 789
     assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
     assert captured["init"]["estimate_R_diag"] is True
     assert captured["scale_factor"] == pytest.approx(2.5)
@@ -575,6 +575,7 @@ def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
             address=456,
             obs=tuple(obs),
         ),
+        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
     )
@@ -597,8 +598,6 @@ def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
     np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
     assert captured["init"]["filter_mode"] == "unscented"
     assert captured["init"]["meas_addr"] == 456
-    assert captured["init"]["h_func"] is None
-    assert captured["init"]["H_jac"] is None
     assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
     assert np.array_equal(captured["filter_raw"]["x0"], np.array([0.1]))
 
@@ -609,6 +608,7 @@ def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
         calib_params=[alpha],
         observable_names=["ObsA"],
         construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
+        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsA"]),
     )

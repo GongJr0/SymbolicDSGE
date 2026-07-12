@@ -1,9 +1,15 @@
 from .hac_covariance import hac_covariance
-from .moment_calculation_utils import jit_fill_centered, jit_fill_mean_ax0
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from .status import TestStatus
-from ._native import native as _native, DIAG_FALLBACK
+from .._ckernels.diag import (
+    FALLBACK as DIAG_FALLBACK,
+    fill_centered_ax0,
+    fill_mean_ax0,
+    fill_symmetric_target_vec,
+    symmetric_outer_prod_2dim,
+    wald_stat_from_mean_and_cov,
+)
 from ..regression.solvers import _gram_is_pd
 import numpy as np
 from numpy import float64, int64
@@ -80,121 +86,44 @@ def _wald_stat(
     the callers, so the native path is only gated on the extension being present.
     """
     q = mean.shape[0]
-    if _native is not None:
-        status, stat = _native.wald_stat_from_mean_and_cov(
-            np.ascontiguousarray(mean, dtype=float64),
-            np.ascontiguousarray(target, dtype=float64),
-            np.ascontiguousarray(omega, dtype=float64),
-            n,
-        )
-        if status != DIAG_FALLBACK:
-            return int64(status), float64(stat), int64(q)
+    status, stat = wald_stat_from_mean_and_cov(mean, target, omega, n)
+    if status != DIAG_FALLBACK:
+        return int64(status), float64(stat), int64(q)
     nb_err, nb_stat, nb_df = jit_wald_stat_from_mean_and_cov(mean, target, omega, n)
     return int64(nb_err), float64(nb_stat), int64(nb_df)
 
 
 def _fill_symmetric_target_vec(target: NDF) -> tuple[int64, NDF]:
-    """Pack a symmetric target into its vech vector; native or numba.
+    """Pack a symmetric target into its vech vector.
 
-    No fallback path: the kernel is a pure copy that returns BAD_SHAPE only on a
-    genuinely asymmetric target (a hard error the caller raises on), so the native
-    branch is used whenever the extension is present.
+    Pure copy that returns BAD_SHAPE only on a genuinely asymmetric target (a hard
+    error the caller raises on).
     """
-    if _native is not None:
-        status, vec = _native.fill_symmetric_target_vec(
-            np.ascontiguousarray(target, dtype=float64),
-            SYMMETRY_ATOL,
-            SYMMETRY_RTOL,
-        )
-        return int64(status), vec
-    p = target.shape[0]
-    out = np.empty(p * (p + 1) // 2, dtype=float64)
-    err = jit_fill_symmetric_target_vec(target, out)
-    return int64(err), out
+    status, vec = fill_symmetric_target_vec(
+        np.ascontiguousarray(target, dtype=float64),
+        SYMMETRY_ATOL,
+        SYMMETRY_RTOL,
+    )
+    return int64(status), vec
 
 
 def _symmetric_outer_prod(x: NDF) -> tuple[int64, NDF]:
-    """Per-row vech of the outer product x_t x_t'; native or numba."""
-    n, p = x.shape
-    if _native is not None:
-        status, out = _native.symmetric_outer_prod_2dim(
-            np.ascontiguousarray(x, dtype=float64)
-        )
-        return int64(status), out
-    out = np.empty((n, p * (p + 1) // 2), dtype=float64)
-    err = jit_symmetric_outer_prod_2dim(x, out)
-    return int64(err), out
+    """Per-row vech of the outer product x_t x_t'."""
+    status, out = symmetric_outer_prod_2dim(x)
+    return int64(status), out
 
 
 def _fill_mean_ax0(x: NDF) -> NDF:
-    """Column means of x over axis 0; native or numba (no JIT cost when native)."""
-    if _native is not None:
-        return cast(NDF, _native.fill_mean_ax0(np.ascontiguousarray(x, dtype=float64)))
-    mean = np.empty(x.shape[1], dtype=float64)
-    jit_fill_mean_ax0(x, mean)
-    return mean
+    """Column means of x over axis 0."""
+    return fill_mean_ax0(x)
 
 
 def _fill_centered_ax0(x: NDF, mean: NDF) -> NDF:
-    """x with its column means subtracted; native or numba."""
-    if _native is not None:
-        return cast(
-            NDF,
-            _native.fill_centered_ax0(
-                np.ascontiguousarray(x, dtype=float64),
-                np.ascontiguousarray(mean, dtype=float64),
-            ),
-        )
-    centered = np.empty_like(x)
-    jit_fill_centered(x, mean, centered)
-    return centered
-
-
-@njit(cache=True)
-def jit_symmetric_outer_prod_2dim(x: NDF, out: NDF) -> int64:
-    n = x.shape[0]
-    p = x.shape[1]
-    q = p * (p + 1) // 2
-
-    if out.shape[0] != n or out.shape[1] != q:
-        return ERR_BAD_SHAPE
-
-    for t in range(n):
-        k = 0
-        for i in range(p):
-            x_i = x[t, i]
-            for j in range(i, p):
-                out[t, k] = x_i * x[t, j]
-                k += 1
-    return OK
-
-
-@njit(cache=True)
-def jit_fill_symmetric_target_vec(
-    target: NDF,
-    out: NDF,
-    atol: float64 = SYMMETRY_ATOL,
-    rtol: float64 = SYMMETRY_RTOL,
-) -> int64:
-    p = target.shape[0]
-    q = p * (p + 1) // 2
-
-    if target.shape[1] != p or out.shape[0] != q:
-        return ERR_BAD_SHAPE
-
-    k = 0
-    for i in range(p):
-        for j in range(i, p):
-            a = target[i, j]
-            b = target[j, i]
-            if a != b:
-                diff = abs(a - b)
-                if not np.isfinite(diff) or diff > atol + rtol * abs(b):
-                    return ERR_BAD_SHAPE
-            out[k] = a
-            k += 1
-
-    return OK
+    """x with its column means subtracted."""
+    return fill_centered_ax0(
+        np.ascontiguousarray(x, dtype=float64),
+        np.ascontiguousarray(mean, dtype=float64),
+    )
 
 
 # ---- Preconfigured Mean and Covariance Tests ---
@@ -242,7 +171,6 @@ def wald_mean_hac(
         kernel=kernel,
         bandwidth=bandwidth,
         center=False,
-        nopython=True,
     )
     out: tuple[int64, float64, int64] = _wald_stat(
         mean_buffer,
@@ -321,7 +249,6 @@ def wald_covariance_hac(
         kernel=kernel,
         bandwidth=bandwidth,
         center=False,
-        nopython=True,
     )
 
     out: tuple[int64, float64, int64] = _wald_stat(
@@ -398,7 +325,6 @@ def wald_second_moment_hac(
         kernel=kernel,
         bandwidth=bandwidth,
         center=False,
-        nopython=True,
     )
 
     out: tuple[int64, float64, int64] = _wald_stat(

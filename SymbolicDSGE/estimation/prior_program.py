@@ -2,15 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-import math
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 import numpy as np
-from numba import njit
 from numpy import float64
 from numpy.typing import NDArray
-
-from .._native_dispatch import FORCE_NUMBA, REQUIRE_NATIVE
 
 from ..bayesian.distributions.beta import Beta
 from ..bayesian.distributions.gamma import Gamma
@@ -37,20 +33,7 @@ from ..bayesian.transforms.upper_bounded import UpperBoundedTransform
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
 
-# Prefer the compiled native log-prior kernel; fall back to the numba kernel
-# below when the extension is not built. ALWAYS_USE_NUMBA / NEVER_USE_NUMBA
-# override the default (see SymbolicDSGE._native_dispatch). Declared explicitly so
-# the FORCE_NUMBA branch (which binds None) doesn't pin the type to None.
-_logprior_program_native: Callable[..., float] | None
-if FORCE_NUMBA:
-    _logprior_program_native = None
-else:
-    try:
-        from .._ckernels.estimation import logprior_program as _logprior_program_native
-    except ImportError:  # pragma: no cover - exercised only without the extension
-        if REQUIRE_NATIVE:
-            raise
-        _logprior_program_native = None
+from .._ckernels.estimation import logprior_program
 
 
 class DistCode(IntEnum):
@@ -121,25 +104,9 @@ class PackedLogPrior:
         )
 
     def logpdf(self, theta: NDF) -> float64:
-        if _logprior_program_native is not None:
-            return float64(
-                _logprior_program_native(
-                    np.ascontiguousarray(theta, dtype=float64),
-                    self.scalar_indices,
-                    self.scalar_dist_codes,
-                    self.scalar_transform_codes,
-                    self.scalar_dist_params,
-                    self.scalar_transform_params,
-                    self.matrix_indices,
-                    self.matrix_dims,
-                    self.matrix_lengths,
-                    self.matrix_etas,
-                    self.matrix_log_constants,
-                )
-            )
         return float64(
-            _evaluate_logprior_program(
-                theta,
+            logprior_program(
+                np.ascontiguousarray(theta, dtype=float64),
                 self.scalar_indices,
                 self.scalar_dist_codes,
                 self.scalar_transform_codes,
@@ -323,249 +290,3 @@ def _pack_transform(transform: Any) -> tuple[int | None, list[float]]:
         params[0] = float(transform.high)
         return TransformCode.UPPER_BOUNDED, params
     return None, params
-
-
-@njit(cache=True)
-def _softplus_scalar(x: float64) -> float64:
-    if x > 0.0:
-        return float64(x + math.log1p(math.exp(-float(x))))
-    return float64(math.log1p(math.exp(float(x))))
-
-
-@njit(cache=True)
-def _log_sigmoid_scalar(x: float64) -> float64:
-    if x > 0.0:
-        return float64(-math.log1p(math.exp(-float(x))))
-    return float64(x - math.log1p(math.exp(float(x))))
-
-
-@njit(cache=True)
-def _sigmoid_scalar(x: float64) -> float64:
-    if x >= 0.0:
-        exp_neg = math.exp(-float(x))
-        return float64(1.0 / (1.0 + exp_neg))
-    exp_pos = math.exp(float(x))
-    return float64(exp_pos / (1.0 + exp_pos))
-
-
-@njit(cache=True)
-def _std_norm_cdf(x: float64) -> float64:
-    return float64(0.5 * (1.0 + math.erf(float(x) / math.sqrt(2.0))))
-
-
-@njit(cache=True)
-def _std_norm_logpdf(x: float64) -> float64:
-    return float64(-0.5 * x * x - 0.5 * math.log(2.0 * math.pi))
-
-
-@njit(cache=True)
-def _transform_inverse_and_logjac(
-    code: int,
-    params: NDF,
-    z: float64,
-) -> tuple[float64, float64]:
-    if code == TransformCode.IDENTITY:
-        return z, float64(0.0)
-    if code == TransformCode.LOG:
-        return float64(math.exp(float(z))), z
-    if code == TransformCode.SOFTPLUS:
-        return _softplus_scalar(z), _log_sigmoid_scalar(z)
-    if code == TransformCode.LOGIT:
-        return _sigmoid_scalar(z), float64(
-            _log_sigmoid_scalar(z) + _log_sigmoid_scalar(-z)
-        )
-    if code == TransformCode.PROBIT:
-        return _std_norm_cdf(z), _std_norm_logpdf(z)
-    if code == TransformCode.AFFINE_LOGIT:
-        low = params[0]
-        span = params[2]
-        sig = _sigmoid_scalar(z)
-        x = float64(low + span * sig)
-        logjac = float64(
-            math.log(float(span)) + _log_sigmoid_scalar(z) + _log_sigmoid_scalar(-z)
-        )
-        return x, logjac
-    if code == TransformCode.AFFINE_PROBIT:
-        low = params[0]
-        span = params[2]
-        cdf = _std_norm_cdf(z)
-        return float64(low + span * cdf), float64(
-            math.log(float(span)) + _std_norm_logpdf(z)
-        )
-    if code == TransformCode.LOWER_BOUNDED:
-        return float64(params[0] + math.exp(float(z))), z
-    if code == TransformCode.UPPER_BOUNDED:
-        return float64(params[0] - math.exp(float(z))), z
-    return float64(np.nan), float64(np.nan)
-
-
-@njit(cache=True)
-def _dist_logpdf(code: int, params: NDF, x: float64) -> float64:
-    if code == DistCode.NORMAL:
-        mean = params[0]
-        var = params[1]
-        return float64(
-            -0.5 * math.log(2.0 * math.pi * float(var)) - 0.5 * ((x - mean) ** 2) / var
-        )
-    if code == DistCode.LOG_NORMAL:
-        if x <= 0.0:
-            return float64(np.nan)
-        meanlog = params[0]
-        stdlog = params[1]
-        return float64(
-            -math.log(float(stdlog))
-            - math.log(float(x))
-            - 0.5 * math.log(2.0 * math.pi)
-            - 0.5 * ((math.log(float(x)) - meanlog) / stdlog) ** 2
-        )
-    if code == DistCode.HALF_NORMAL:
-        if x < 0.0:
-            return float64(np.nan)
-        std = params[0]
-        return float64(
-            0.5 * math.log(2.0 / math.pi) - math.log(float(std)) - 0.5 * (x / std) ** 2
-        )
-    if code == DistCode.TRUNC_NORMAL:
-        mean = params[0]
-        std = params[1]
-        low = params[2]
-        high = params[3]
-        log_norm = params[4]
-        if x < low or x > high:
-            return float64(np.nan)
-        z = float64((x - mean) / std)
-        return float64(-0.5 * z * z - log_norm)
-    if code == DistCode.HALF_CAUCHY:
-        if x < 0.0:
-            return float64(np.nan)
-        gamma = params[0]
-        centered = x / gamma
-        return float64(
-            math.log(2.0 / math.pi)
-            - math.log(float(gamma))
-            - math.log1p(float(centered * centered))
-        )
-    if code == DistCode.BETA:
-        if x < 0.0 or x > 1.0:
-            return float64(np.nan)
-        a = params[0]
-        b = params[1]
-        log_norm = params[2]
-        out = float64(0.0)
-        if a != 1.0:
-            out += float64((a - 1.0) * math.log(float(x)))
-        if b != 1.0:
-            out += float64((b - 1.0) * math.log1p(float(-x)))
-        return float64(out - log_norm)
-    if code == DistCode.GAMMA:
-        if x < 0.0:
-            return float64(np.nan)
-        a = params[0]
-        theta = params[1]
-        log_norm = params[2]
-        out = float64(0.0)
-        if a != 1.0:
-            out += float64((a - 1.0) * math.log(float(x)))
-        return float64(out - x / theta - log_norm)
-    if code == DistCode.INV_GAMMA:
-        if x <= 0.0:
-            return float64(np.nan)
-        a = params[0]
-        beta = params[1]
-        log_prefactor = params[2]
-        return float64(log_prefactor - (a + 1.0) * math.log(float(x)) - beta / x)
-    if code == DistCode.UNIFORM:
-        low = params[0]
-        high = params[1]
-        width = params[2]
-        if x < low or x > high:
-            return float64(np.nan)
-        return float64(-math.log(float(width)))
-    return float64(np.nan)
-
-
-@njit(cache=True)
-def _lkj_chol_logjac(z: NDF, dim: int, length: int) -> float64:
-    total = float64(0.0)
-    idx = 0
-    for k in range(1, dim):
-        rem = float64(1.0)
-        for _ in range(k):
-            if idx >= length:
-                return float64(np.nan)
-            cpc_i = float64(math.tanh(float(z[idx])))
-            total += float64(0.5 * math.log(max(float(rem), 1e-300)))
-            total += float64(math.log1p(float(-(cpc_i * cpc_i))))
-            rem = float64(rem * (1.0 - cpc_i * cpc_i))
-            idx += 1
-    return total
-
-
-@njit(cache=True)
-def _lkj_chol_logpdf_from_z(
-    z: NDF,
-    dim: int,
-    length: int,
-    eta: float64,
-    log_constant: float64,
-) -> float64:
-    log_kernel = float64(0.0)
-    idx = 0
-    for i in range(1, dim):
-        rem = float64(1.0)
-        for _ in range(i):
-            if idx >= length:
-                return float64(np.nan)
-            cpc_i = float64(math.tanh(float(z[idx])))
-            rem = float64(rem * (1.0 - cpc_i * cpc_i))
-            idx += 1
-        diag = float64(math.sqrt(max(float(rem), 1e-14)))
-        exponent = float64(dim - i + 2.0 * eta - 3.0)
-        log_kernel += float64(exponent * math.log(float(diag)))
-    return float64(log_constant + log_kernel + _lkj_chol_logjac(z, dim, length))
-
-
-@njit(cache=True)
-def _evaluate_logprior_program(
-    theta: NDF,
-    scalar_indices: NDI,
-    scalar_dist_codes: NDI,
-    scalar_transform_codes: NDI,
-    scalar_dist_params: NDF,
-    scalar_transform_params: NDF,
-    matrix_indices: NDI,
-    matrix_dims: NDI,
-    matrix_lengths: NDI,
-    matrix_etas: NDF,
-    matrix_log_constants: NDF,
-) -> float64:
-    lp = float64(0.0)
-    for i in range(scalar_indices.shape[0]):
-        z = float64(theta[scalar_indices[i]])
-        x, logjac = _transform_inverse_and_logjac(
-            int(scalar_transform_codes[i]), scalar_transform_params[i], z
-        )
-        if np.isnan(x) or np.isnan(logjac):
-            return float64(np.nan)
-        logp = _dist_logpdf(int(scalar_dist_codes[i]), scalar_dist_params[i], x)
-        if np.isnan(logp):
-            return float64(np.nan)
-        lp += float64(logp + logjac)
-
-    for block_idx in range(matrix_dims.shape[0]):
-        length = int(matrix_lengths[block_idx])
-        z_block = np.empty((length,), dtype=float64)
-        for j in range(length):
-            z_block[j] = float64(theta[matrix_indices[block_idx, j]])
-        block_lp = _lkj_chol_logpdf_from_z(
-            z_block,
-            int(matrix_dims[block_idx]),
-            length,
-            float64(matrix_etas[block_idx]),
-            float64(matrix_log_constants[block_idx]),
-        )
-        if np.isnan(block_lp):
-            return float64(np.nan)
-        lp += block_lp
-
-    return lp

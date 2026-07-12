@@ -1,8 +1,9 @@
 import numpy as np
 from numpy.typing import NDArray
-from typing import Optional, Callable, Any, Literal
+from typing import Optional, Literal
 from dataclasses import dataclass
 from enum import StrEnum
+from .._ckernels.core import measurement_eval, jacobian_eval
 
 NDF = NDArray[np.float64]
 
@@ -19,14 +20,13 @@ class _KalmanDebugInfo:
     B: NDF
     C: NDF | None
     d: NDF | None
-    h_func: Callable[..., NDF] | None
-    H_jac: Callable[..., NDF] | None
     Q: NDF
     R: NDF
     y: NDF | None
     x0: Optional[NDF]
     P0: Optional[NDF]
     meas_addr: int | None = None
+    jac_addr: int | None = None
     hx: NDF | None = None
     gx: NDF | None = None
     bx: NDF | None = None
@@ -52,20 +52,6 @@ class KFValidationContext:
     T: int
 
 
-def _is_numba_array_dispatch(func: Callable[..., Any]) -> bool:
-    return bool(getattr(func, "_symbolicdsge_array_dispatch", False))
-
-
-def _call_extended_probe(
-    func: Callable[..., Any],
-    state: NDF,
-    calib_params: NDF,
-) -> Any:
-    if _is_numba_array_dispatch(func):
-        return func(state, calib_params)
-    return func(*state, *calib_params)
-
-
 def validate_kf_inputs(
     *,
     filter_mode: "FilterMode",
@@ -80,9 +66,9 @@ def validate_kf_inputs(
     # --- linear-only measurement ---
     C: Optional[NDF] = None,
     d: Optional[NDF] = None,
-    # --- extended-only measurement ---
-    h: Optional[Callable[..., Any]] = None,
-    H_jac: Optional[Callable[..., Any]] = None,
+    # --- ukf/extended measurement ---
+    meas_addr: Optional[int] = None,
+    jac_addr: Optional[int] = None,
     calib_params: Optional[NDF] = None,
     # --- general checks ---
     check_symmetry: bool = True,
@@ -175,12 +161,8 @@ def validate_kf_inputs(
                 )
 
     elif filter_mode == FilterMode.EXTENDED:
-        if h is None or H_jac is None:
-            raise ValueError("Extended mode requires h and H.")
-        if not callable(h):
-            raise TypeError(f"h must be callable, got {type(h).__name__}.")
-        if not callable(H_jac):
-            raise TypeError(f"H_jac must be callable, got {type(H_jac).__name__}.")
+        if (not meas_addr) or (not jac_addr):
+            raise ValueError("Extended mode requires meas_addr and jac_addr.")
 
         # In extended mode, m is inferred from y (and must match R)
         m = int(m_y)
@@ -196,8 +178,8 @@ def validate_kf_inputs(
                     "calib_params must be provided for probing in extended mode."
                 )
 
-            y_hat = _call_extended_probe(h, x_probe, calib_params)
-            H_hat = _call_extended_probe(H_jac, x_probe, calib_params)
+            y_hat = measurement_eval(meas_addr, x_probe, calib_params, m)
+            H_hat = jacobian_eval(jac_addr, x_probe, calib_params, m, n)
 
             y_hat_arr = np.asarray(y_hat)
             H_hat_arr = np.asarray(H_hat)

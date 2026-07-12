@@ -12,6 +12,29 @@ from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.config import KalmanConfig, P0Config
 from SymbolicDSGE.kalman.filter import KalmanFilter
 
+from numba import cfunc, types
+
+# Real (zero) measurement/jacobian @cfuncs for the PreparedFilterRun fixtures: the
+# linear R-estimation branch evaluates them via build_C_d_from_cfunc, so the
+# addresses must be callable (not dummy ints). Two observables, all zeros.
+_R_MEAS_SIG = types.void(
+    types.CPointer(types.float64),
+    types.CPointer(types.float64),
+    types.CPointer(types.float64),
+)
+
+
+@cfunc(_R_MEAS_SIG)
+def _r_zero_meas(vars, params, out):
+    out[0] = 0.0
+    out[1] = 0.0
+
+
+@cfunc(_R_MEAS_SIG)
+def _r_zero_jac(vars, params, out):
+    out[0] = 0.0
+    out[1] = 0.0
+
 
 class _ConstPrior:
     def __init__(self, value: float):
@@ -189,9 +212,17 @@ def test_build_C_d_matches_solved_model_helper(post82_bundle):
     compiled = post82_bundle["compiled"]
     solved = post82_bundle["solved"]
     params = backend.extract_base_params(compiled)
+    param_vec = backend.build_calib_param_vector(compiled, params)
 
-    C1, d1 = backend.build_C_d(compiled, params, ["Infl", "Rate"])
-    C2, d2 = solved._build_C_d_from_obs(["Infl", "Rate"])
+    obs = ["Infl", "Rate"]
+    zero_state = np.zeros((len(compiled.cur_syms),), dtype=np.float64)
+    meas_addr = compiled.construct_measurement_cfunc(obs).address
+    jac_addr = compiled.construct_observable_jacobian_cfunc(obs).address
+
+    C1, d1 = backend.build_C_d_from_cfunc(
+        meas_addr, jac_addr, zero_state, param_vec, len(obs)
+    )
+    C2, d2 = solved._build_C_d_from_obs(obs)
     assert np.allclose(C1, C2)
     assert np.allclose(d1, d2)
 
@@ -200,13 +231,13 @@ def test_build_C_d_matches_affine_measurement_function(post82_bundle):
     compiled = post82_bundle["compiled"]
     params = backend.extract_base_params(compiled)
     param_vec = backend.build_calib_param_vector(compiled, params)
-    h_func = compiled.construct_measurement_vector_func()
+    h_func = compiled.construct_measurement_array_func(compiled.observable_names)
 
     obs = ["Infl", "Rate"]
-    C, d = backend.build_C_d(compiled, params, obs)
+    C, d = compiled.build_affine_measurement_matrices(params, obs)
     state = np.zeros((len(compiled.cur_syms),), dtype=np.float64)
 
-    y_func = np.asarray(h_func(*state, *param_vec), dtype=np.float64)
+    y_func = np.asarray(h_func(state, param_vec), dtype=np.float64)
     obs_idx = [compiled.observable_names.index(name) for name in obs]
 
     assert np.allclose(C @ state + d, y_func[obs_idx])
@@ -242,50 +273,6 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
 
     ll = est.loglik(est.theta0())
     assert np.isfinite(ll)
-
-
-def test_run_extended_array_dispatch_matches_scalar_dispatch(post82_bundle):
-    compiled = post82_bundle["compiled"]
-    solved = post82_bundle["solved"]
-    params = backend.extract_base_params(compiled)
-    obs, y_reordered = backend.reorder_observables(
-        compiled, compiled.kalman, list(compiled.observable_names), post82_bundle["y"]
-    )
-    calib_params = backend.build_calib_param_vector(compiled, params)
-    Q = backend.build_Q(compiled, params)
-    R = backend.resolve_R(compiled, compiled.kalman, obs, None)
-
-    scalar = KalmanFilter.run_extended(
-        A=solved.A,
-        B=solved.B,
-        h=compiled.construct_measurement_vector_func(),
-        H_jac=compiled.observable_jacobian,
-        calib_params=calib_params,
-        Q=Q,
-        R=R,
-        y=y_reordered,
-        compute_y_filt=True,
-    )
-
-    h_array = compiled.construct_measurement_array_func(obs)
-    H_array = compiled.construct_observable_jacobian_array_func(obs)
-    array = KalmanFilter.run_extended(
-        A=solved.A,
-        B=solved.B,
-        h=h_array,
-        H_jac=H_array,
-        calib_params=calib_params,
-        Q=Q,
-        R=R,
-        y=y_reordered,
-        compute_y_filt=True,
-    )
-
-    assert getattr(h_array, "_symbolicdsge_array_dispatch", False)
-    assert getattr(H_array, "_symbolicdsge_array_dispatch", False)
-    assert np.allclose(array.loglik, scalar.loglik)
-    assert np.allclose(array.x_filt, scalar.x_filt)
-    assert np.allclose(array.y_pred, scalar.y_pred)
 
 
 def test_build_P0_branches():
@@ -406,7 +393,7 @@ def test_build_R_from_config_params_raises_on_missing_param(post82_bundle):
         )
 
 
-def test_evaluate_loglik_linear_and_extended_match_model_kalman(post82_bundle):
+def test_evaluate_loglik_linear_matches_model_kalman(post82_bundle):
     solver = post82_bundle["solver"]
     compiled = post82_bundle["compiled"]
     solved = post82_bundle["solved"]
@@ -435,6 +422,15 @@ def test_evaluate_loglik_linear_and_extended_match_model_kalman(post82_bundle):
         observables=["Infl", "Rate"],
     ).loglik
     assert np.allclose(ll_backend_lin, ll_model_lin, rtol=1e-10, atol=1e-10)
+
+
+def test_evaluate_loglik_extended_matches_model_kalman(post82_bundle):
+    solver = post82_bundle["solver"]
+    compiled = post82_bundle["compiled"]
+    solved = post82_bundle["solved"]
+    steady = post82_bundle["steady"]
+    y = post82_bundle["y"]
+    params = backend.extract_base_params(compiled)
 
     ll_backend_ext = backend.evaluate_loglik(
         solver=solver,
@@ -794,8 +790,8 @@ def test_estimate_R_diag_falls_back_when_solver_raises(monkeypatch):
         observables=["a", "b"],
         y_reordered=y_reordered,
         mode="linear",
-        measurement_func=lambda x, p: np.zeros(2, dtype=np.float64),
-        measurement_jac=lambda x, p: np.eye(2, dtype=np.float64),
+        meas_addr=_r_zero_meas.address,
+        jac_addr=_r_zero_jac.address,
         zero_state=np.zeros((1,), dtype=np.float64),
         P0=None,
         kf_jitter=np.float64(0.0),
@@ -835,8 +831,8 @@ def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch)
         observables=["a", "b"],
         y_reordered=y_reordered,
         mode="extended",
-        measurement_func=lambda x, p: np.zeros(2, dtype=np.float64),
-        measurement_jac=lambda x, p: np.eye(2, dtype=np.float64),
+        meas_addr=_r_zero_meas.address,
+        jac_addr=_r_zero_jac.address,
         zero_state=np.zeros((1,), dtype=np.float64),
         P0=None,
         kf_jitter=np.float64(0.0),
@@ -899,8 +895,8 @@ def test_estimate_R_extended_branch_and_final_diag_fallback(monkeypatch):
         observables=["a", "b"],
         y_reordered=y_reordered,
         mode="extended",
-        measurement_func=lambda x, p: np.zeros(2, dtype=np.float64),
-        measurement_jac=lambda x, p: np.eye(2, dtype=np.float64),
+        meas_addr=_r_zero_meas.address,
+        jac_addr=_r_zero_jac.address,
         zero_state=np.zeros((1,), dtype=np.float64),
         P0=None,
         kf_jitter=np.float64(0.0),
@@ -963,8 +959,8 @@ def test_estimate_R_linear_branch_uses_kalman_run(monkeypatch):
         observables=["a", "b"],
         y_reordered=y_reordered,
         mode="linear",
-        measurement_func=lambda x, p: np.array([0.0, 0.0], dtype=np.float64),
-        measurement_jac=lambda x, p: np.eye(2, dtype=np.float64),
+        meas_addr=_r_zero_meas.address,
+        jac_addr=_r_zero_jac.address,
         zero_state=np.zeros((1,), dtype=np.float64),
         P0=None,
         kf_jitter=np.float64(0.0),
@@ -1021,8 +1017,8 @@ def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
         observables=["a", "b"],
         y_reordered=y_reordered,
         mode="extended",
-        measurement_func=lambda x, p: np.zeros(2, dtype=np.float64),
-        measurement_jac=lambda x, p: np.eye(2, dtype=np.float64),
+        meas_addr=_r_zero_meas.address,
+        jac_addr=_r_zero_jac.address,
         zero_state=np.zeros((1,), dtype=np.float64),
         P0=None,
         kf_jitter=np.float64(0.0),

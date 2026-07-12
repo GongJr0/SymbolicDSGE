@@ -4,7 +4,8 @@ from scipy.stats import chi2
 from scipy.stats import jarque_bera as scipy_jarque_bera
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
-from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera, jb_stat
+from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
+from _oracles.diag import jb_stat
 from SymbolicDSGE._diag_tests.jb_lookup import (
     JB_N_GRID,
     JB_PVAL_GRID,

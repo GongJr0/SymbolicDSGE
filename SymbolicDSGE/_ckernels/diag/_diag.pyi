@@ -37,13 +37,13 @@ def cusum_stat(y: _F64, X: _F64) -> tuple[int, float]:
 def cusumsq_stat(y: _F64, X: _F64) -> tuple[int, int, float]:
     """CUSUM-of-squares statistic. Returns (status, n, stat)."""
 
-def jb_stat(x: _F64) -> tuple[int, float]:
+def jb_stat(x: _F64) -> tuple[int, float64]:
     """Jarque-Bera normality statistic. Returns (status, stat)."""
 
 def acorr(x: _F64, L: int) -> tuple[int, _F64]:
     """Autocorrelation of x up to lag L. Returns (status, out(L+1))."""
 
-def lb_stat(x: _F64, L: int) -> tuple[int, float]:
+def lb_stat(x: _F64, L: int) -> tuple[int, float64]:
     """Ljung-Box statistic for x up to lag L. Returns (status, stat)."""
 
 def fill_mean_ax0(x: _F64) -> _F64:

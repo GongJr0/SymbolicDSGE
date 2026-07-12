@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence, cast
+from typing import Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -12,6 +12,7 @@ from scipy import optimize
 from sympy import Symbol
 from numba import njit
 
+from .._ckernels.core import measurement_eval, jacobian_eval
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..core.compiled_model import CompiledModel
@@ -28,8 +29,8 @@ class PreparedFilterRun:
     observables: list[str]
     y_reordered: NDF
     mode: str
-    measurement_func: Callable[[NDF, NDF], NDF]
-    measurement_jac: Callable[[NDF, NDF], NDF]
+    meas_addr: int
+    jac_addr: int
     zero_state: NDF
     P0: NDF | None
     kf_jitter: float64
@@ -188,28 +189,17 @@ def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
     return (stds * stds.T).multiply_elementwise(corr)
 
 
-def build_C_d(
-    compiled: CompiledModel,
-    params: Mapping[str, float64],
-    observables: list[str],
-) -> tuple[NDF, NDF]:
-    return compiled.build_affine_measurement_matrices(params, observables)
-
-
-def build_C_d_from_dispatchers(
-    measurement_func: Callable[[NDF, NDF], NDF],
-    measurement_jac: Callable[[NDF, NDF], NDF],
+def build_C_d_from_cfunc(
+    meas_addr: int,
+    jac_addr: int,
     zero_state: NDF,
     calib_params: NDF,
+    n_obs: int,
 ) -> tuple[NDF, NDF]:
-    d = np.asarray(measurement_func(zero_state, calib_params), dtype=float64).reshape(
-        -1
-    )
-    C = np.asarray(measurement_jac(zero_state, calib_params), dtype=float64)
-    return (
-        np.ascontiguousarray(C, dtype=float64),
-        np.ascontiguousarray(d, dtype=float64),
-    )
+    n_var = zero_state.shape[0]
+    d = measurement_eval(meas_addr, zero_state, calib_params, n_obs)
+    C = jacobian_eval(jac_addr, zero_state, calib_params, n_obs, n_var)
+    return C, d
 
 
 def build_P0(
@@ -298,8 +288,8 @@ def prepare_filter_run(
         observables=obs,
         y_reordered=y_reordered,
         mode=mode,
-        measurement_func=compiled.construct_measurement_array_func(obs),
-        measurement_jac=compiled.construct_observable_jacobian_array_func(obs),
+        meas_addr=compiled.construct_measurement_cfunc(obs).address,
+        jac_addr=compiled.construct_observable_jacobian_cfunc(obs).address,
         zero_state=np.zeros((len(compiled.cur_syms),), dtype=float64),
         P0=P0,
         kf_jitter=kf_jitter,
@@ -380,11 +370,12 @@ def evaluate_loglik(
     calib_params = build_calib_param_vector(compiled, params)
 
     if prepared_run.mode == "linear":
-        C, d = build_C_d_from_dispatchers(
-            prepared_run.measurement_func,
-            prepared_run.measurement_jac,
+        C, d = build_C_d_from_cfunc(
+            prepared_run.meas_addr,
+            prepared_run.jac_addr,
             prepared_run.zero_state,
             calib_params,
+            prepared_run.y_reordered.shape[1],
         )
         result = KalmanFilter.run_raw(
             A=sol.A,
@@ -405,10 +396,10 @@ def evaluate_loglik(
 
     if prepared_run.mode == "extended":
         result = KalmanFilter.run_extended_raw(
+            meas_addr=prepared_run.meas_addr,
+            jac_addr=prepared_run.jac_addr,
             A=sol.A,
             B=sol.B,
-            h=prepared_run.measurement_func,
-            H_jac=prepared_run.measurement_jac,
             calib_params=calib_params,
             Q=Q,
             R=R_mat,
@@ -472,11 +463,12 @@ def estimate_R_diag(
     calib_params = build_calib_param_vector(compiled, params)
 
     if prepared.mode == "linear":
-        C, d = build_C_d_from_dispatchers(
-            prepared.measurement_func,
-            prepared.measurement_jac,
+        C, d = build_C_d_from_cfunc(
+            prepared.meas_addr,
+            prepared.jac_addr,
             prepared.zero_state,
             calib_params,
+            prepared.y_reordered.shape[1],
         )
 
         def obj(eta: NDF) -> float64:
@@ -505,8 +497,8 @@ def estimate_R_diag(
             run = KalmanFilter.run_extended_raw(
                 A=sol.A,
                 B=sol.B,
-                h=prepared.measurement_func,
-                H_jac=prepared.measurement_jac,
+                meas_addr=prepared.meas_addr,
+                jac_addr=prepared.jac_addr,
                 calib_params=calib_params,
                 Q=Q,
                 R=R,
@@ -690,15 +682,15 @@ def estimate_R(
     calib_params = build_calib_param_vector(compiled, params)
 
     if prepared.mode == "linear":
-        C, d = build_C_d_from_dispatchers(
-            prepared.measurement_func,
-            prepared.measurement_jac,
+        C, d = build_C_d_from_cfunc(
+            prepared.meas_addr,
+            prepared.jac_addr,
             prepared.zero_state,
             calib_params,
+            prepared.y_reordered.shape[1],
         )
 
-    def loglik_for_R(R: NDF) -> float64:
-        if prepared.mode == "linear":
+        def loglik_for_R(R: NDF) -> float64:
             run = KalmanFilter.run_raw(
                 A=sol.A,
                 B=sol.B,
@@ -716,24 +708,28 @@ def estimate_R(
             )
             return float64(run.loglik)
 
-        run = KalmanFilter.run_extended_raw(
-            A=sol.A,
-            B=sol.B,
-            h=prepared.measurement_func,
-            H_jac=prepared.measurement_jac,
-            calib_params=calib_params,
-            Q=Q,
-            R=R,
-            y=prepared.y_reordered,
-            x0=x0,
-            P0=prepared.P0,
-            jitter=float(prepared.kf_jitter),
-            symmetrize=prepared.kf_sym,
-            return_shocks=False,
-            compute_y_filt=False,
-            _store_history=False,
-        )
-        return float64(run.loglik)
+    else:
+
+        def loglik_for_R(R: NDF) -> float64:
+            run = KalmanFilter.run_extended_raw(
+                A=sol.A,
+                B=sol.B,
+                meas_addr=prepared.meas_addr,
+                jac_addr=prepared.jac_addr,
+                calib_params=calib_params,
+                Q=Q,
+                R=R,
+                y=prepared.y_reordered,
+                x0=x0,
+                P0=prepared.P0,
+                jitter=float(prepared.kf_jitter),
+                symmetrize=prepared.kf_sym,
+                return_shocks=False,
+                compute_y_filt=False,
+                _store_history=False,
+            )
+
+            return float64(run.loglik)
 
     def nlogpost(u: NDF) -> float64:
         try:

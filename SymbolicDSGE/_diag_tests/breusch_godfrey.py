@@ -11,7 +11,7 @@ from ..regression.solvers import chol_solve, lstsq_solve
 from .status import TestStatus
 from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
-from ._native import native as _native, DIAG_FALLBACK
+from .._ckernels.diag import bg_stat as _native_bg_stat, FALLBACK as DIAG_FALLBACK
 
 NDF = NDArray[float64]
 
@@ -66,8 +66,8 @@ def bg_stat(eps: NDF, X: NDF, lags: int) -> tuple[int, float64]:
     returns ``DIAG_FALLBACK`` and we recompute through the numba kernel (which
     has the lstsq fallback).
     """
-    if _native is not None and eps.size > lags and X.shape[0] == eps.size:
-        status, stat = _native.bg_stat(
+    if eps.size > lags and X.shape[0] == eps.size:
+        status, stat = _native_bg_stat(
             np.ascontiguousarray(eps, dtype=np.float64),
             np.ascontiguousarray(X, dtype=np.float64),
             lags,

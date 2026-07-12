@@ -15,7 +15,10 @@ from SymbolicDSGE._diag_tests.result import TestResult
 
 from .cusum_utils import recursive_residuals
 from .status import TestStatus
-from ._native import native as _native, DIAG_FALLBACK
+from .._ckernels.diag import (
+    cusumsq_stat as _native_cusumsq_stat,
+    FALLBACK as DIAG_FALLBACK,
+)
 
 if TYPE_CHECKING:
     import optype.numpy as onp
@@ -28,8 +31,8 @@ OK = int(TestStatus.OK)
 
 def _cusumsq_stat(y: NDF, X: NDF) -> tuple[int, int, float64]:
     """CUSUM-of-squares statistic; native fast path, numba fallback."""
-    if _native is not None and y.shape[0] == X.shape[0]:
-        status, n, stat = _native.cusumsq_stat(
+    if y.shape[0] == X.shape[0]:
+        status, n, stat = _native_cusumsq_stat(
             np.ascontiguousarray(y, dtype=np.float64),
             np.ascontiguousarray(X, dtype=np.float64),
         )

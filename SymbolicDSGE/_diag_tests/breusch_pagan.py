@@ -10,7 +10,7 @@ from ..regression.solvers import chol_solve, lstsq_solve
 from .distributions import PvalMethod, ReferenceDistribution
 from .result import TestResult
 from .status import TestStatus
-from ._native import native as _native, DIAG_FALLBACK
+from .._ckernels.diag import bp_aux as _bp_aux_native, FALLBACK as DIAG_FALLBACK
 
 OK = int(TestStatus.OK)
 LINALG = int(TestStatus.LINALG)
@@ -71,12 +71,12 @@ def _robust_bp_stat_numba(eps: NDF, X: NDF) -> tuple[int, float64]:
 def _native_bp_aux(eps: NDF, X: NDF) -> tuple[int, float64, float64] | None:
     """Run the native auxiliary regression, or None to defer to numba.
 
-    Returns None when the extension is absent or the design is rank-deficient
-    (``DIAG_FALLBACK``); otherwise the (status, rss, tss) triple.
+    Returns None when the design is rank-deficient (``DIAG_FALLBACK``); otherwise
+    the (status, rss, tss) triple.
     """
-    if _native is None or eps.shape[0] != X.shape[0]:
+    if eps.shape[0] != X.shape[0]:
         return None
-    status, rss, tss = _native.bp_aux(
+    status, rss, tss = _bp_aux_native(
         np.ascontiguousarray(eps, dtype=np.float64),
         np.ascontiguousarray(X, dtype=np.float64),
     )

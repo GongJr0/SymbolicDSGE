@@ -7,7 +7,7 @@ a compiler); runs in CI where wheels are compiled.
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core.simulation import (
+from _oracles.core import (
     _affine_observations_into_numba,
     _simulate_linear_states_into_numba,
     _simulate_second_order_pruned_numba,

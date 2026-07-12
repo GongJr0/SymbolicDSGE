@@ -159,8 +159,8 @@ from SymbolicDSGE._diag_tests.hac_covariance import (  # noqa: E402
     _BARTLETT,
     _PARZEN,
     _QS,
-    jit_hac_estimator_matmul,
 )
+from _oracles.diag import jit_hac_estimator_matmul  # noqa: E402
 
 # Golden HAC long-run covariances for the centered design below at bandwidth 2,
 # mirroring tests/diag_tests/test_hac_covariance.py::GOLDEN_HAC_CENTERED. These
@@ -221,9 +221,11 @@ def test_hac_estimator_parity(kernel_id, shape, lags):
 # ---------------------------------------------------------------- Wald helpers
 
 from SymbolicDSGE._diag_tests.wald_test import (  # noqa: E402
+    jit_wald_stat_from_mean_and_cov,
+)
+from _oracles.diag import (  # noqa: E402
     jit_fill_symmetric_target_vec,
     jit_symmetric_outer_prod_2dim,
-    jit_wald_stat_from_mean_and_cov,
 )
 
 
@@ -280,7 +282,7 @@ def test_fill_symmetric_target_vec_parity():
     assert diag.fill_symmetric_target_vec(asym, 1e-8, 1e-5)[0] != 0
 
 
-from SymbolicDSGE._diag_tests.moment_calculation_utils import (  # noqa: E402
+from _oracles.diag import (  # noqa: E402
     jit_fill_centered,
     jit_fill_mean_ax0,
 )
@@ -306,7 +308,7 @@ def test_fill_mean_and_centered_parity(shape):
 
 # ---------------------------------------------------------------- Ljung-Box
 
-from SymbolicDSGE._diag_tests.ljung_box import (  # noqa: E402
+from _oracles.diag import (  # noqa: E402
     BAD_LAG,
     INSUFFICIENT_SAMPLES,
     UDEF_VARIANCE,
@@ -350,7 +352,7 @@ def test_lb_stat_status_paths():
 
 # ---------------------------------------------------------------- Jarque-Bera
 
-from SymbolicDSGE._diag_tests.jarque_bera import jb_stat as jit_jb_stat  # noqa: E402
+from _oracles.diag import jb_stat as jit_jb_stat  # noqa: E402
 
 
 @pytest.mark.parametrize("n", [10, 50, 200])

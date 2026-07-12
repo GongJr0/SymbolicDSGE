@@ -1,9 +1,9 @@
 """Parity tests: native packed log-prior kernels vs the numba reference.
 
 The native C kernels in ``_ckernels/estimation`` must match the compiled numba
-helpers in ``SymbolicDSGE.estimation.prior_program`` bit-for-bit (up to libm).
-The compiled njit kernels are the oracle -- not their ``.py_func`` forms, which
-raise on ``math.log`` domain errors where numba/C return -inf/nan.
+oracle in ``tests/_oracles/estimation`` bit-for-bit (up to libm). The compiled
+njit kernels are the oracle -- not their ``.py_func`` forms, which raise on
+``math.log`` domain errors where numba/C return -inf/nan.
 """
 
 from __future__ import annotations
@@ -28,12 +28,14 @@ from SymbolicDSGE.estimation.prior_program import (
     N_DIST_PARAMS,
     N_TRANSFORM_PARAMS,
     TransformCode,
+    _pack_distribution,
+    _pack_transform,
+)
+from _oracles.estimation import (
     _dist_logpdf,
     _evaluate_logprior_program,
     _lkj_chol_logjac,
     _lkj_chol_logpdf_from_z,
-    _pack_distribution,
-    _pack_transform,
     _transform_inverse_and_logjac,
 )
 

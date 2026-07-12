@@ -4,13 +4,48 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from numba import cfunc, types
+
 from SymbolicDSGE.kalman.validator import (
     FilterMode,
     KFValidationContext,
-    _call_extended_probe,
-    _is_numba_array_dispatch,
     validate_kf_inputs,
 )
+
+_MEAS_SIG = types.void(
+    types.CPointer(types.float64),
+    types.CPointer(types.float64),
+    types.CPointer(types.float64),
+)
+
+
+@cfunc(_MEAS_SIG)
+def _ext_meas(x, p, out):
+    out[0] = x[0] + p[0]
+    out[1] = x[1] + p[0]
+
+
+@cfunc(_MEAS_SIG)
+def _ext_jac(x, p, out):
+    # row-major (m=2, n=2) identity jacobian
+    out[0] = 1.0
+    out[1] = 0.0
+    out[2] = 0.0
+    out[3] = 1.0
+
+
+@cfunc(_MEAS_SIG)
+def _ext_meas_inf(x, p, out):
+    out[0] = np.inf
+    out[1] = 0.0
+
+
+@cfunc(_MEAS_SIG)
+def _ext_jac_nan(x, p, out):
+    out[0] = 1.0
+    out[1] = 0.0
+    out[2] = np.nan
+    out[3] = 1.0
 
 
 def _linear_inputs():
@@ -36,29 +71,9 @@ def _extended_inputs():
         "y": np.zeros((4, 2), dtype=np.float64),
         "x0": np.array([1.0, 2.0], dtype=np.float64),
         "calib_params": np.array([0.5], dtype=np.float64),
-        "h": lambda x0, x1, p0: np.array([x0 + p0, x1 + p0], dtype=np.float64),
-        "H_jac": lambda x0, x1, p0: np.array(
-            [[1.0, 0.0], [0.0, 1.0]], dtype=np.float64
-        ),
+        "meas_addr": _ext_meas.address,
+        "jac_addr": _ext_jac.address,
     }
-
-
-def test_extended_probe_uses_scalar_and_array_dispatch_paths():
-    def scalar_probe(x0, x1, p0):
-        return x0 + x1 + p0
-
-    def array_probe(state, calib_params):
-        return state.sum() + calib_params.sum()
-
-    setattr(array_probe, "_symbolicdsge_array_dispatch", True)
-
-    state = np.array([1.0, 2.0], dtype=np.float64)
-    calib = np.array([3.0], dtype=np.float64)
-
-    assert not _is_numba_array_dispatch(scalar_probe)
-    assert _is_numba_array_dispatch(array_probe)
-    assert _call_extended_probe(scalar_probe, state, calib) == pytest.approx(6.0)
-    assert _call_extended_probe(array_probe, state, calib) == pytest.approx(6.0)
 
 
 @pytest.mark.parametrize(
@@ -136,67 +151,29 @@ def test_validate_kf_inputs_rejects_bad_linear_measurement_inputs(
     ("mutator", "exc_type", "match"),
     [
         (
-            lambda kw: kw.update({"h": None}),
+            lambda kw: kw.update({"meas_addr": None}),
             ValueError,
-            "Extended mode requires h and H",
+            "Extended mode requires meas_addr and jac_addr",
         ),
-        (lambda kw: kw.update({"h": 1.0}), TypeError, "h must be callable"),
-        (lambda kw: kw.update({"H_jac": 1.0}), TypeError, "H_jac must be callable"),
+        (
+            lambda kw: kw.update({"jac_addr": None}),
+            ValueError,
+            "Extended mode requires meas_addr and jac_addr",
+        ),
         (
             lambda kw: kw.update({"calib_params": None}),
             ValueError,
             "calib_params must be provided",
         ),
         (
-            lambda kw: kw.update({"h": lambda x0, x1, p0: 1.0}),
+            lambda kw: kw.update({"meas_addr": _ext_meas_inf.address}),
             ValueError,
-            "returned a scalar",
+            "non-finite",
         ),
         (
-            lambda kw: kw.update(
-                {"h": lambda x0, x1, p0: np.array([1.0], dtype=np.float64)}
-            ),
+            lambda kw: kw.update({"jac_addr": _ext_jac_nan.address}),
             ValueError,
-            "must return shape \\(2,\\)",
-        ),
-        (
-            lambda kw: kw.update(
-                {"h": lambda x0, x1, p0: np.zeros((2, 2), dtype=np.float64)}
-            ),
-            ValueError,
-            "must return shape \\(2,\\) or \\(2,1\\)/\\(1,2\\)",
-        ),
-        (
-            lambda kw: kw.update(
-                {"h": lambda x0, x1, p0: np.zeros((1, 2, 1), dtype=np.float64)}
-            ),
-            ValueError,
-            "vector-like output",
-        ),
-        (
-            lambda kw: kw.update(
-                {"H_jac": lambda x0, x1, p0: np.ones((1, 2), dtype=np.float64)}
-            ),
-            ValueError,
-            "H_jac must return shape",
-        ),
-        (
-            lambda kw: kw.update(
-                {"h": lambda x0, x1, p0: np.array([np.inf, 0.0], dtype=np.float64)}
-            ),
-            ValueError,
-            "h_func produced non-finite",
-        ),
-        (
-            lambda kw: kw.update(
-                {
-                    "H_jac": lambda x0, x1, p0: np.array(
-                        [[1.0, 0.0], [np.nan, 1.0]], dtype=np.float64
-                    )
-                }
-            ),
-            ValueError,
-            "H_jac produced non-finite",
+            "non-finite",
         ),
     ],
 )
@@ -313,15 +290,8 @@ def test_validate_kf_inputs_accepts_valid_linear_and_extended_inputs():
 
 
 def test_validate_kf_inputs_extended_zero_probe_state_branch():
-    captured = {}
-    kwargs = _extended_inputs()
-
-    def h(x0, x1, p0):
-        captured["state"] = (x0, x1)
-        return np.array([x0 + p0, x1 + p0], dtype=np.float64)
-
-    kwargs["h"] = h
-    out = validate_kf_inputs(**kwargs, probe_state="zeros")
+    # probe_state="zeros" probes the measurement cfunc at the zero state instead
+    # of x0; a valid measurement still yields the expected context.
+    out = validate_kf_inputs(**_extended_inputs(), probe_state="zeros")
 
     assert out == KFValidationContext(n_state=2, n_obs=2, n_shock=1, T=4)
-    assert captured["state"] == (0.0, 0.0)

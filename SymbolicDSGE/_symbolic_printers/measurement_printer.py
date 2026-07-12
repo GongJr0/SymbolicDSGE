@@ -55,7 +55,7 @@ class F64Ops(OpTable):
         return f"math.sqrt({a})"
 
 
-@dataclass
+@dataclass(slots=True)
 class MeasurementLayout:
     """Maps measurement symbols to native buffer slots."""
 
@@ -112,8 +112,13 @@ class MeasurementLayout:
 
 
 class MeasurementPrinter(ExpressionPrinter):
-    allocated_dtype = "np.float64"
-    context_name = "measurement"
+    @property
+    def allocated_dtype(self) -> str:
+        return "np.float64"
+
+    @property
+    def context_name(self) -> str:
+        return "measurement"
 
 
 def build_measurement_cfunc(

@@ -41,6 +41,24 @@ def _ukf_measurement(model_vars, params, out):
     out[0] = model_vars[0] + params[0] * model_vars[1]
 
 
+# 1-D linear measurement h(x) = x and its (constant) jacobian, as @cfuncs for the
+# EKF address-based API. The linear measurement lets the EKF be checked against
+# the exact linear Kalman filter.
+@cfunc(_UKF_MEAS_SIG)
+def _ekf_lin_meas(x, params, out):
+    out[0] = x[0]
+
+
+@cfunc(_UKF_MEAS_SIG)
+def _ekf_lin_jac(x, params, out):
+    out[0] = 1.0
+
+
+@cfunc(_UKF_MEAS_SIG)
+def _ekf_bias_meas(x, params, out):
+    out[0] = x[0] + params[0]
+
+
 def _ukf_system_1d():
     return {
         "meas_addr": _ukf_measurement.address,
@@ -366,10 +384,10 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
 
     linear = KalmanFilter.run(A, B, C, d, Q, R, y, x0=x0, P0=P0)
     extended = KalmanFilter.run_extended(
-        A,
-        B,
-        h=lambda x: np.array([x], dtype=float64),
-        H_jac=lambda x: np.array([[1.0]], dtype=float64),
+        meas_addr=_ekf_lin_meas.address,
+        jac_addr=_ekf_lin_jac.address,
+        A=A,
+        B=B,
         calib_params=calib,
         Q=Q,
         R=R,
@@ -392,17 +410,11 @@ def test_run_raw_extended_matches_public_result():
     P0 = np.array([[0.7]], dtype=float64)
     calib = np.array([0.0], dtype=float64)
 
-    def h_scalar(x, bias):
-        return np.array([x + bias], dtype=float64)
-
-    def H_scalar(x, bias):
-        return np.array([[1.0]], dtype=float64)
-
     raw = KalmanFilter.run_extended_raw(
+        _ekf_bias_meas.address,
+        _ekf_lin_jac.address,
         A,
         B,
-        h_scalar,
-        H_scalar,
         calib,
         Q,
         R,
@@ -411,10 +423,10 @@ def test_run_raw_extended_matches_public_result():
         P0=P0,
     )
     public = KalmanFilter.run_extended(
+        _ekf_bias_meas.address,
+        _ekf_lin_jac.address,
         A,
         B,
-        h_scalar,
-        H_scalar,
         calib,
         Q,
         R,
@@ -437,10 +449,10 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
     calib = np.array([], dtype=float64)
 
     kwargs = dict(
+        meas_addr=_ekf_lin_meas.address,
+        jac_addr=_ekf_lin_jac.address,
         A=A,
         B=B,
-        h=lambda x: np.array([x], dtype=float64),
-        H_jac=lambda x: np.array([[1.0]], dtype=float64),
         calib_params=calib,
         Q=Q,
         R=R,
@@ -468,10 +480,10 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
     y = np.zeros((4, 1), dtype=float64)
     calib = np.array([], dtype=float64)
     out_true = KalmanFilter.run_extended(
-        A,
-        B,
-        h=lambda x: np.array([x], dtype=float64),
-        H_jac=lambda x: np.array([[1.0]], dtype=float64),
+        meas_addr=_ekf_lin_meas.address,
+        jac_addr=_ekf_lin_jac.address,
+        A=A,
+        B=B,
         calib_params=calib,
         Q=Q,
         R=R,
@@ -481,10 +493,10 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
     )
 
     out = KalmanFilter.run_extended(
-        A,
-        B,
-        h=lambda x: np.array([x], dtype=float64),
-        H_jac=lambda x: np.array([[1.0]], dtype=float64),
+        meas_addr=_ekf_lin_meas.address,
+        jac_addr=_ekf_lin_jac.address,
+        A=A,
+        B=B,
         calib_params=calib,
         Q=Q,
         R=R,

@@ -22,7 +22,7 @@ def _rbc():
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
-    eq = compiled.construct_objective_vector_func()
+    eq = compiled.equations
     # var order [z, k, c]; deterministic ss is (0, k_ss, c_ss).
     true_ss = np.array(
         [0.0, float(calib[sp.Symbol("k_ss")]), float(calib[sp.Symbol("c_ss")])]

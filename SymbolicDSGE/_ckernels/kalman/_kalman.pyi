@@ -31,10 +31,32 @@ def kalman_hot_loop(
     store_history: bool = ...,
 ) -> tuple[
     int,
-    tuple[float64, float64, float64],
     tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
 ]:
     """Run the linear Kalman filter; mirrors numba ``_kalman_hot_loop``."""
+
+def ekf_hot_loop(
+    meas_addr: int,
+    jac_addr: int,
+    A: _F64,
+    B: _F64,
+    calib_params: _F64,
+    Q: _F64,
+    R: _F64,
+    y: _F64,
+    x0: _F64,
+    P0: _F64,
+    symmetrize: bool,
+    jitter: float,
+    compute_y_filt: bool = ...,
+    return_shocks: bool = ...,
+    store_history: bool = ...,
+) -> tuple[
+    int,
+    tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
+]:
+    """Run the native extended Kalman filter (nonlinear measurement via the
+    meas/jac @cfunc addresses)."""
 
 def ukf_hot_loop(
     meas_addr: int,
@@ -60,7 +82,6 @@ def ukf_hot_loop(
     store_history: bool = ...,
 ) -> tuple[
     int,
-    tuple[float64, float64, float64],
     tuple[
         _F64,
         _F64,

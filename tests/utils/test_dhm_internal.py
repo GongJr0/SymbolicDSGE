@@ -9,6 +9,7 @@ from numba import njit
 from SymbolicDSGE import DSGESolver, ModelParser
 import SymbolicDSGE.utils.dhm as dhm_module
 from SymbolicDSGE.utils.dhm import DenHaanMarcet
+from _oracles.core import _forward_residuals_numba
 
 
 @pytest.fixture(scope="module")
@@ -61,7 +62,7 @@ def test_low_level_state_and_moment_builders_match_manual_construction():
     forward_states = np.array([[5.0, 6.0], [7.0, 8.0]], dtype=np.float64)
     params = np.array([1.0], dtype=np.complex128)
 
-    residuals_full = dhm_module._forward_residuals_numba(
+    residuals_full = _forward_residuals_numba(
         current_states.astype(np.complex128),
         forward_states.astype(np.complex128),
         params,

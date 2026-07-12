@@ -3,9 +3,9 @@
 The native kernels carry no inspectable type information (the type checker never
 parses ``_core.pyx`` nor introspects the compiled object), so these signatures
 exist solely to give the LSP and mypy the shapes of the exported functions. They
-must stay in sync with ``_core.pyx`` / ``core.c`` and the numba reference in
-``SymbolicDSGE.core.simulation``; the parity tests guard the runtime behavior,
-not this stub.
+must stay in sync with ``_core.pyx`` / ``core.c`` and the reference oracles in
+``tests/_oracles/core.py``; the parity tests guard the runtime behavior, not this
+stub.
 """
 
 from numpy import complex128, float64
@@ -51,7 +51,7 @@ def klein_postprocess(
     z: _C128,
     n_states: int,
 ) -> tuple[_C128, _C128, int, _C128]:
-    """(f, p, stab, eig) from the ordered Schur factors. Mirrors the numba path."""
+    """(f, p, stab, eig) from the ordered Schur factors."""
 
 def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
     """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
@@ -107,6 +107,44 @@ def residual_path(
     n_eq: int,
 ) -> _F64:
     """Real residual matrix (n_steps, n_eq) from a residual @cfunc over a path."""
+
+def residual_eval(
+    residual_addr: int,
+    fwd: _C128,
+    cur: _C128,
+    params: _C128,
+    n_eq: int,
+) -> _C128:
+    """Complex residual vector (n_eq,) from a residual @cfunc address at a single
+    (fwd, cur, par) point. Native twin of the old numba objective vector func."""
+
+def measurement_eval(
+    meas_addr: int,
+    vars: _F64,
+    par: _F64,
+    n_obs: int,
+) -> _F64:
+    """Measurement vector (n_obs,) from a measurement @cfunc address at a single
+    (vars, par) point. Native twin of the old numba observable funcs."""
+
+def jacobian_eval(
+    jac_addr: int,
+    vars: _F64,
+    par: _F64,
+    n_obs: int,
+    n_var: int,
+) -> _F64:
+    """Observable jacobian (n_obs, n_var) from a jacobian @cfunc address at a
+    single (vars, par) point."""
+
+def measurement_path(
+    meas_addr: int,
+    states: _F64,
+    par: _F64,
+    n_obs: int,
+) -> _F64:
+    """Measurement matrix (T, n_obs) from a measurement @cfunc over a (T, n_var)
+    state path."""
 
 def bicomplex_hessian(
     residual_addr: int,

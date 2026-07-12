@@ -6,9 +6,17 @@ importing this module raises ``ImportError`` and the consumer
 """
 
 from ._prior_program import (
-    dist_logpdf as dist_logpdf,
-    lkj_chol_logjac as lkj_chol_logjac,
-    lkj_chol_logpdf_from_z as lkj_chol_logpdf_from_z,
-    logprior_program as logprior_program,
-    transform_inverse_and_logjac as transform_inverse_and_logjac,
+    dist_logpdf,
+    lkj_chol_logjac,
+    lkj_chol_logpdf_from_z,
+    logprior_program,
+    transform_inverse_and_logjac,
 )
+
+__all__ = [
+    "dist_logpdf",
+    "lkj_chol_logjac",
+    "lkj_chol_logpdf_from_z",
+    "logprior_program",
+    "transform_inverse_and_logjac",
+]

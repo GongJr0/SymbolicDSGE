@@ -10,7 +10,7 @@ from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
-from ._native import native as _native, DIAG_FALLBACK
+from .._ckernels.diag import chow_stat as _native_chow_stat, FALLBACK as DIAG_FALLBACK
 
 NDF = NDArray[float64]
 
@@ -29,8 +29,8 @@ def _chow_stat(y: NDF, X: NDF, t_break: int) -> tuple[int, float64]:
     is rank-deficient, in which case the numba kernel (with its lstsq fallback)
     recomputes the statistic.
     """
-    if _native is not None and y.size == X.shape[0]:
-        status, stat = _native.chow_stat(
+    if y.size == X.shape[0]:
+        status, stat = _native_chow_stat(
             np.ascontiguousarray(y, dtype=np.float64),
             np.ascontiguousarray(X, dtype=np.float64),
             t_break,

@@ -14,7 +14,7 @@ import pytest
 from scipy.linalg import ordqz
 
 from SymbolicDSGE._ckernels.core import klein_postprocess as native_kp
-from SymbolicDSGE.core.klein import _klein_postprocess_numba as numba_kp
+from _oracles.core import _klein_postprocess_numba as numba_kp
 
 RTOL = 1e-8
 ATOL = 1e-10

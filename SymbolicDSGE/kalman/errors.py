@@ -17,8 +17,14 @@ class ShapeMismatchError(Exception):
 
 
 class MatrixConditionError(Exception):
-    def __init__(self, *args: Any) -> None:
-        message = f"Matrix(s) is ill-conditioned. Condition number(s): {args}."
+    def __init__(self) -> None:
+        message = f"Matrix(s) is ill-conditioned."
+        super().__init__(message)
+
+
+class MemoryAllocationError(Exception):
+    def __init__(self) -> None:
+        message = "Memory allocation failed. (Possibly due to insufficient memory.)"
         super().__init__(message)
 
 
@@ -28,6 +34,7 @@ class ErrorCode(IntEnum):
     SHAPE_MISMATCH = -2
     MATRIX_CONDITION = -3
     LINALG_ERROR = -4
+    ALLOC_ERROR = -5
 
 
 def get_error_constructor(code: ErrorCode) -> type[Exception]:
@@ -39,5 +46,7 @@ def get_error_constructor(code: ErrorCode) -> type[Exception]:
         return MatrixConditionError
     elif code == ErrorCode.LINALG_ERROR:
         return np.linalg.LinAlgError
+    elif code == ErrorCode.ALLOC_ERROR:
+        return MemoryAllocationError
     else:
         raise ValueError(f"Unknown error code: {code}")

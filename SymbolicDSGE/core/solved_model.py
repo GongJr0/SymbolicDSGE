@@ -10,28 +10,25 @@ from typing import (
     Mapping,
     cast,
 )
-import textwrap
 
 
 import numpy as np
 from numpy import ndarray, float64, asarray
 from numpy.typing import NDArray
 
-from numba import njit
 import pandas as pd
 from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
-from SymbolicDSGE.core.klein import KleinSolution
-from SymbolicDSGE.core.second_order import PerturbationSolution
-from SymbolicDSGE.core.shock_generators import Shock
-
+from .shock_generators import Shock
+from .solver_backend import KleinSolution, PerturbationSolution
 
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
-from .simulation import (
+from .._ckernels.core import (
     affine_observations_into,
+    measurement_path,
     simulate_linear_states_into,
     simulate_second_order_pruned,
 )
@@ -52,7 +49,6 @@ if TYPE_CHECKING:
     from ..regression.sr.model_defaults import PySRParams
     from ..regression.sr.model_parametrizer import ModelParametrizer
 
-_JIT_CACHE: dict[int, Callable] = {}
 ND = NDArray
 NDF = NDArray[float64]
 
@@ -699,63 +695,27 @@ class SolvedModel:
             y_names,
         )
 
-    @staticmethod
-    def _make_jit_measurement(K: int):  # type: ignore # (Types getting misinterpreted with no static known arg count)
-        f = _JIT_CACHE.get(K)
-        if f is not None:
-            return f
-
-        # build source code with explicit call func(r[0],...,r[K-1])
-        args = ", ".join([f"r[{j}]" for j in range(K)])
-        src = f"""
-        def _jit_measurement(func, args_mat):
-            n_obs = args_mat.shape[0]
-            out = np.empty(n_obs, dtype=np.float64)
-            for i in range(n_obs):
-                r = args_mat[i]
-                out[i] = func({args})
-            return out
-        """
-        src = textwrap.dedent(src)
-        ns = {"np": np}
-        exec(src, ns)
-        f = njit(ns["_jit_measurement"])
-        _JIT_CACHE[K] = f
-        return f
-
     def _non_affine_measurement(
         self,
         y_names: list[str],
         state: NDF,
     ) -> NDF:
-        obs_funcs = self.compiled.observable_funcs
-
-        # Arguments in form [*cur_vars, *params]
+        # ``state`` is (T, n_var) in cur_syms canonical order (checked at compile).
         params = self.compiled.config.calibration.parameters
-        param_vals = [
-            float64(params[p]) for p in self.compiled.calib_params
-        ]  # Ensure dtype + order
-
-        # Assume state is in canonical order of cur_syms (Checked at compile time)
-        n_obs = len(y_names)
-        T = state.shape[0]
-        args_mat = np.empty(
-            (T, len(self.compiled.cur_syms) + len(param_vals)), dtype=float64
+        param_vals = np.array(
+            [float64(params[p]) for p in self.compiled.calib_params],
+            dtype=float64,
         )
-        param_block = np.ones((T, len(param_vals)), dtype=float64) * np.array(
-            param_vals, dtype=float64
-        )
-        args_mat[:, : state.shape[1]] = state
-        args_mat[:, state.shape[1] :] = param_block
 
-        K = args_mat.shape[1]
-        _jit_measurement = self._make_jit_measurement(K)
+        # The measurement cfunc emits observables sorted by model index; map its
+        # output columns back to the caller's y_names order.
+        obs_sorted = self.compiled._normalize_observables(y_names)
+        meas_addr = self.compiled.construct_measurement_cfunc(y_names).address
+        raw = measurement_path(meas_addr, state, param_vals, len(obs_sorted))
 
-        out = np.empty((T, n_obs), dtype=float64)
-        for i, y in enumerate(y_names):
-            func = obs_funcs[self.compiled.observable_names.index(y)]
-            out[:, i] = _jit_measurement(func, args_mat)  # pyright: ignore
-        return out
+        pos = {name: j for j, name in enumerate(obs_sorted)}
+        perm = [pos[name] for name in y_names]
+        return raw[:, perm]
 
     def kalman(
         self,
@@ -815,9 +775,8 @@ class SolvedModel:
             dtype=float64,
         )
 
-        h_func: Callable[..., NDF] | None = None
-        H_jac: Callable[..., NDF] | None = None
         meas_addr: int | None = None
+        jac_addr: int | None = None
 
         if filter_mode in {"extended", "unscented"}:
             obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
@@ -827,10 +786,12 @@ class SolvedModel:
                 selected_obs = list(observables)
             selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])
 
-        if filter_mode == "extended":
-            h_func = self.compiled.construct_measurement_array_func(selected_obs)
-            H_jac = self.compiled.construct_observable_jacobian_array_func(selected_obs)
-        elif filter_mode == "unscented":
+            meas_addr = self.compiled.construct_measurement_cfunc(selected_obs).address
+            jac_addr = self.compiled.construct_observable_jacobian_cfunc(
+                selected_obs
+            ).address
+
+        if filter_mode == "unscented":
             if return_shocks:
                 raise ValueError(
                     "return_shocks is not supported for unscented filtering."
@@ -839,17 +800,14 @@ class SolvedModel:
                 raise ValueError(
                     "Unscented Kalman Filter requires a second order solution."
                 )
-            meas_addr = self.compiled.construct_measurement_cfunc(selected_obs).address
-
         ki = KalmanInterface(
             model=self,
             filter_mode=filter_mode,
             observables=observables,
             y=y,
             R=R,
-            h_func=h_func,
-            H_jac=H_jac,
             meas_addr=meas_addr,
+            jac_addr=jac_addr,
             calib_params=params,
             p0_mode=p0_mode,
             p0_scale=p0_scale,
