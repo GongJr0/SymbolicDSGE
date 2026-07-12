@@ -1,3 +1,5 @@
+import warnings
+
 import sympy as sp
 from sympy import Symbol, Function, Expr
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -295,6 +297,7 @@ class DSGESolver:
         parameters: dict[str, float] | None = None,
         steady_state: list[float] | ndarray | dict[str, float] | None = None,
         order: int = 1,
+        raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
         """Solve the model to first (``order=1``) or second (``order=2``) order.
 
@@ -303,6 +306,10 @@ class DSGESolver:
         sigma^2 risk correction (policy is a ``PerturbationSolution``); it requires
         the native extension and a nonlinear steady state (see ``_solve_second_order``).
         The state-space ``A``/``B`` are the first-order transition in both cases.
+
+        When ``raise_on_bk_violation`` is ``False`` a Klein stability/uniqueness
+        failure warns instead of raising, so batch callers (e.g. an estimation
+        search) can tally the failure and continue.
         """
         if order not in (1, 2):
             raise ValueError(f"order must be 1 or 2, got {order}.")
@@ -323,7 +330,9 @@ class DSGESolver:
         given_ss = self._coerce_steady_state(steady_state, compiled)
 
         if order == 2:
-            return self._solve_second_order(compiled, param_vec, given_ss)
+            return self._solve_second_order(
+                compiled, param_vec, given_ss, raise_on_bk_violation
+            )
 
         ss = (
             given_ss
@@ -336,10 +345,9 @@ class DSGESolver:
             ss,
             compiled.n_state,
         )
-        if sol.stab != 0:
-            raise ValueError(
-                f"Klein stability/uniqueness condition violated (stab={sol.stab})."
-            )
+        self._raise_or_warn_stability_error(
+            sol.stab, should_raise=raise_on_bk_violation
+        )
         A, B = self._assemble_state_space(sol, compiled)
         return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
 
@@ -381,8 +389,22 @@ class DSGESolver:
         B = real_if_close(np.vstack([B_state, f @ B_state]))
         return A, B
 
+    @staticmethod
+    def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
+        """Raise or warn on a Klein stability/uniqueness violation."""
+        if stab == 0:
+            return
+        msg = f"Klein stability/uniqueness condition violated (stab={stab})."
+        if should_raise:
+            raise ValueError(msg)
+        warnings.warn(msg, UserWarning, stacklevel=2)
+
     def _solve_second_order(
-        self, compiled: CompiledModel, param_vec: NDF, given_ss: NDF | None
+        self,
+        compiled: CompiledModel,
+        param_vec: NDF,
+        given_ss: NDF | None,
+        raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
         """Second-order (SGU) solve. Resolves + validates the nonlinear steady
         state, runs the Klein first order, sweeps the bicomplex Hessian, and
@@ -402,10 +424,9 @@ class DSGESolver:
         ss = self._checked_steady_state(cf, param_vec, seed)
 
         sol = klein_solve(cf, param_vec, ss, n_state)
-        if sol.stab != 0:
-            raise ValueError(
-                f"Klein stability/uniqueness condition violated (stab={sol.stab})."
-            )
+        self._raise_or_warn_stability_error(
+            sol.stab, should_raise=raise_on_bk_violation
+        )
         gx, hx = np.real(sol.f), np.real(sol.p)
 
         a, b = klein_preprocess(cf.address, ss, param_vec, n_eq, False)
