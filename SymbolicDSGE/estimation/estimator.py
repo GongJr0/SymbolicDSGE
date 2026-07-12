@@ -32,17 +32,20 @@ class _MatrixPriorBlock(NamedTuple):
     """Minimal per-matrix LKJ metadata.
 
     ``positions`` is an ``(n_members, 2)`` int array of ``(row, col)`` targets in
-    the correlation matrix, parallel to ``member_names`` and ``theta_indices``.
-    Resolution yields a partial block (``theta_indices`` empty, ``prior`` ``None``);
-    it is completed via ``_replace`` once the theta layout is known.
+    the correlation matrix, parallel to ``member_names``. The block's members
+    occupy a contiguous theta run, so ``theta_slice`` (a plain ``slice``) covers
+    them all: ``theta[theta_slice]`` is the block's unconstrained z with no gather.
+    Resolution yields a partial block (``theta_slice`` empty, ``prior`` ``None``);
+    it is completed via ``_replace`` once the theta layout is known. The reserved
+    matrix key ("R_corr"/"Q_corr") is the dict key the block is stored under in
+    ``_matrix_blocks``, so it is not repeated on the block itself.
     """
 
-    key: _MatrixPriorKey
     dim: int
     labels: list[str]
     member_names: list[str]
     positions: NDArray[np.int64]
-    theta_indices: NDArray[np.int64]
+    theta_slice: slice
     prior: Prior | None
 
 
@@ -295,7 +298,7 @@ class Estimator:
         corr_param_map: Mapping[frozenset[str], str | None],
     ) -> _MatrixPriorBlock:
         """Resolve the named std/correlation parameters for one matrix into a
-        partial :class:`_MatrixPriorBlock` (``theta_indices`` empty, ``prior``
+        partial :class:`_MatrixPriorBlock` (``theta_slice`` empty, ``prior``
         ``None``). Validates a unique named variance per diagonal and that no
         parameter name is reused. Missing off-diagonal pairs are simply absent
         from ``positions``/``member_names``; the caller derives and reports them
@@ -335,12 +338,11 @@ class Estimator:
                 positions.append((row, col))
 
         return _MatrixPriorBlock(
-            key=key,
             dim=dim,
             labels=list(labels),
             member_names=member_names,
             positions=np.asarray(positions, dtype=np.int64).reshape(-1, 2),
-            theta_indices=np.empty(0, dtype=np.int64),
+            theta_slice=slice(0, 0),
             prior=None,
         )
 
@@ -484,11 +486,18 @@ class Estimator:
                     f"correlation dimension is {block.dim}."
                 )
 
-            theta_indices = np.asarray(
-                [self._param_index[name] for name in block.member_names],
-                dtype=np.int64,
+            indices = [self._param_index[name] for name in block.member_names]
+            start = indices[0]
+            stop = start + len(indices)
+            if indices != list(range(start, stop)):
+                raise ValueError(
+                    f"LKJChol prior on {key} expects its correlation members to "
+                    f"occupy a contiguous theta range; got scattered indices "
+                    f"{indices} for {block.member_names}."
+                )
+            blocks[key] = block._replace(
+                theta_slice=slice(start, stop), prior=lkj_prior
             )
-            blocks[key] = block._replace(theta_indices=theta_indices, prior=lkj_prior)
             claimed_names.update(block.member_names)
 
         return blocks
@@ -509,8 +518,8 @@ class Estimator:
             return backend._unconstrained_from_corr(corr)
         except ValueError as exc:
             raise ValueError(
-                f"Correlation values for the {block.key} block do not form a valid "
-                f"positive-definite correlation matrix over {block.labels}: {exc}"
+                f"Correlation values do not form a valid positive-definite "
+                f"correlation matrix over {block.labels}: {exc}"
             ) from exc
 
     @staticmethod
@@ -675,10 +684,10 @@ class Estimator:
         out = np.empty_like(vals, dtype=float64)
         handled = np.zeros((len(self.param_names),), dtype=bool)
         for block in self._matrix_blocks.values():
-            corr_vals = np.asarray(vals[block.theta_indices], dtype=float64)
+            corr_vals = np.asarray(vals[block.theta_slice], dtype=float64)
             corr = self._corr_from_member_values(block, corr_vals)
-            out[block.theta_indices] = self._block_cpc_from_corr(block, corr)
-            handled[block.theta_indices] = True
+            out[block.theta_slice] = self._block_cpc_from_corr(block, corr)
+            handled[block.theta_slice] = True
 
         for i, name in enumerate(self.param_names):
             if handled[i]:
@@ -699,12 +708,12 @@ class Estimator:
         full = dict(self._base_params)
         handled = np.zeros((len(self.param_names),), dtype=bool)
         for block in self._matrix_blocks.values():
-            theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
+            theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
             corr, _ = self._block_corr_from_theta(block, theta_block)
             member_vals = corr[block.positions[:, 0], block.positions[:, 1]]
             for name, val in zip(block.member_names, member_vals):
                 full[name] = float64(val)
-            handled[block.theta_indices] = True
+            handled[block.theta_slice] = True
 
         for i, name in enumerate(self.param_names):
             if handled[i]:
@@ -764,7 +773,7 @@ class Estimator:
             return float64(0.0)
         lp = float64(0.0)
         for block in self._matrix_blocks.values():
-            theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
+            theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
             lp += float64(block.prior.logpdf(theta_block))  # type: ignore[union-attr]
 
         for name, prior in self.priors.items():

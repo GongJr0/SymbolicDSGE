@@ -237,7 +237,7 @@ def _evaluate_logprior_program(
     scalar_transform_codes: NDI,
     scalar_dist_params: NDF,
     scalar_transform_params: NDF,
-    matrix_indices: NDI,
+    matrix_offsets: NDI,
     matrix_dims: NDI,
     matrix_lengths: NDI,
     matrix_etas: NDF,
@@ -258,9 +258,10 @@ def _evaluate_logprior_program(
 
     for block_idx in range(matrix_dims.shape[0]):
         length = int(matrix_lengths[block_idx])
+        offset = int(matrix_offsets[block_idx])
         z_block = np.empty((length,), dtype=float64)
         for j in range(length):
-            z_block[j] = float64(theta[matrix_indices[block_idx, j]])
+            z_block[j] = float64(theta[offset + j])
         block_lp = _lkj_chol_logpdf_from_z(
             z_block,
             int(matrix_dims[block_idx]),

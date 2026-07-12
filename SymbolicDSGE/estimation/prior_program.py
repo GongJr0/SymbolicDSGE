@@ -86,7 +86,7 @@ class PackedLogPrior:
     scalar_transform_codes: NDI
     scalar_dist_params: NDF
     scalar_transform_params: NDF
-    matrix_indices: NDI
+    matrix_offsets: NDI
     matrix_dims: NDI
     matrix_lengths: NDI
     matrix_etas: NDF
@@ -112,7 +112,7 @@ class PackedLogPrior:
                 self.scalar_transform_codes,
                 self.scalar_dist_params,
                 self.scalar_transform_params,
-                self.matrix_indices,
+                self.matrix_offsets,
                 self.matrix_dims,
                 self.matrix_lengths,
                 self.matrix_etas,
@@ -137,7 +137,7 @@ def build_packed_logprior(
     scalar_dist_params: list[list[float]] = []
     scalar_transform_params: list[list[float]] = []
 
-    matrix_rows: list[list[int]] = []
+    matrix_offsets: list[int] = []
     matrix_dims: list[int] = []
     matrix_lengths: list[int] = []
     matrix_etas: list[float] = []
@@ -153,9 +153,10 @@ def build_packed_logprior(
             ):
                 return None
             dim = int(block.dim)
-            matrix_rows.append([int(idx) for idx in block.theta_indices])
+            sl = block.theta_slice
+            matrix_offsets.append(int(sl.start))
             matrix_dims.append(dim)
-            matrix_lengths.append(len(matrix_rows[-1]))
+            matrix_lengths.append(int(sl.stop - sl.start))
             eta = float(getattr(prior.dist, "_eta"))
             matrix_etas.append(eta)
             matrix_log_constants.append(float(_log_lkj_normalizer_C(dim, eta)))
@@ -180,10 +181,6 @@ def build_packed_logprior(
         scalar_transform_params.append(transform_params)
 
     n_scalar = len(scalar_indices)
-    max_matrix_len = max((len(row) for row in matrix_rows), default=0)
-    matrix_index_array = np.full((len(matrix_rows), max_matrix_len), -1, dtype=np.int64)
-    for row_idx, row in enumerate(matrix_rows):
-        matrix_index_array[row_idx, : len(row)] = np.asarray(row, dtype=np.int64)
 
     return PackedLogPrior(
         scalar_indices=np.asarray(scalar_indices, dtype=np.int64),
@@ -197,7 +194,7 @@ def build_packed_logprior(
             scalar_transform_params if n_scalar else np.empty((0, N_TRANSFORM_PARAMS)),
             dtype=float64,
         ).reshape(n_scalar, N_TRANSFORM_PARAMS),
-        matrix_indices=matrix_index_array,
+        matrix_offsets=np.asarray(matrix_offsets, dtype=np.int64),
         matrix_dims=np.asarray(matrix_dims, dtype=np.int64),
         matrix_lengths=np.asarray(matrix_lengths, dtype=np.int64),
         matrix_etas=np.asarray(matrix_etas, dtype=float64),

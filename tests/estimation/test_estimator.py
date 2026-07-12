@@ -1066,12 +1066,11 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     )
 
     res_dim1 = _MatrixPriorBlock(
-        key="R_corr",
         dim=1,
         labels=["A"],
         member_names=[],
         positions=np.empty((0, 2), dtype=np.int64),
-        theta_indices=np.empty(0, dtype=np.int64),
+        theta_slice=slice(0, 0),
         prior=None,
     )
     est_base.priors = {"R_corr": object()}
@@ -1087,12 +1086,11 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         est_base._build_matrix_prior_blocks()
 
     res_short = _MatrixPriorBlock(
-        key="R_corr",
         dim=3,
         labels=["A", "B", "C"],
         member_names=["rho_ba", "rho_ca"],
         positions=np.array([[1, 0], [2, 0]], dtype=np.int64),
-        theta_indices=np.empty(0, dtype=np.int64),
+        theta_slice=slice(0, 0),
         prior=None,
     )
     est_base.priors = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
@@ -1126,12 +1124,11 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         corr_param_map={frozenset(("B", "A")): "meas_rho_ab"},
     )
     q_resolution = _MatrixPriorBlock(
-        key="Q_corr",
         dim=2,
         labels=["u", "v"],
         member_names=["meas_rho_ab"],
         positions=np.array([[1, 0]], dtype=np.int64),
-        theta_indices=np.empty(0, dtype=np.int64),
+        theta_slice=slice(0, 0),
         prior=None,
     )
     est.priors = {

@@ -202,7 +202,7 @@ def test_packed_lkj_block_unit_matches_python_golden():
     theta = np.asarray([0.25, -0.15, 0.45], dtype=np.float64)
     block = SimpleNamespace(
         dim=3,
-        theta_indices=np.asarray([0, 1, 2], dtype=np.int64),
+        theta_slice=slice(0, 3),
     )
     expected = 0.5643752975616161
 
@@ -254,7 +254,7 @@ def test_packed_logprior_matches_cache_identity_and_rejects_unsupported_specs():
         }
     )
 
-    block = SimpleNamespace(dim=2, theta_indices=np.asarray([0], dtype=np.int64))
+    block = SimpleNamespace(dim=2, theta_slice=slice(0, 1))
     assert (
         build_packed_logprior(
             priors={"corr": object()},
@@ -480,7 +480,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
     scalar_transform_params = np.zeros((1, N_TRANSFORM_PARAMS), dtype=np.float64)
     empty_i = np.empty((0,), dtype=np.int64)
     empty_f = np.empty((0,), dtype=np.float64)
-    empty_m = np.empty((0, 0), dtype=np.int64)
+    empty_m = np.empty((0,), dtype=np.int64)
 
     assert np.isfinite(
         _evaluate_logprior_program(
@@ -536,7 +536,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
             np.empty((0,), dtype=np.int64),
             np.empty((0, N_DIST_PARAMS), dtype=np.float64),
             np.empty((0, N_TRANSFORM_PARAMS), dtype=np.float64),
-            np.array([[0]], dtype=np.int64),
+            np.array([0], dtype=np.int64),
             np.array([3], dtype=np.int64),
             np.array([1], dtype=np.int64),
             np.array([1.5], dtype=np.float64),
@@ -552,7 +552,7 @@ def test_prior_program_lkj_and_evaluator_python_paths_cover_nan_branches():
             np.empty((0,), dtype=np.int64),
             np.empty((0, N_DIST_PARAMS), dtype=np.float64),
             np.empty((0, N_TRANSFORM_PARAMS), dtype=np.float64),
-            np.array([[0, 1, 2]], dtype=np.int64),
+            np.array([0], dtype=np.int64),
             np.array([3], dtype=np.int64),
             np.array([3], dtype=np.int64),
             np.array([1.5], dtype=np.float64),

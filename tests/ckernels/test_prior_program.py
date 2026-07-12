@@ -152,7 +152,7 @@ def test_lkj_length_too_short_is_nan(dim=4):
 
 def _empty_block_arrays():
     return dict(
-        matrix_indices=np.empty((0, 0), dtype=np.int64),
+        matrix_offsets=np.empty((0,), dtype=np.int64),
         matrix_dims=np.empty((0,), dtype=np.int64),
         matrix_lengths=np.empty((0,), dtype=np.int64),
         matrix_etas=np.empty((0,), dtype=np.float64),
@@ -197,7 +197,7 @@ def _call_both(theta, scalar_indices, packed, block):
         packed["scalar_transform_codes"],
         packed["scalar_dist_params"],
         packed["scalar_transform_params"],
-        block["matrix_indices"],
+        block["matrix_offsets"],
         block["matrix_dims"],
         block["matrix_lengths"],
         block["matrix_etas"],
@@ -233,7 +233,7 @@ def test_logprior_program_with_lkj_block_parity():
     dim = 3
     length = dim * (dim - 1) // 2  # 3
     block = dict(
-        matrix_indices=np.array([[2, 3, 4]], dtype=np.int64),
+        matrix_offsets=np.array([2], dtype=np.int64),
         matrix_dims=np.array([dim], dtype=np.int64),
         matrix_lengths=np.array([length], dtype=np.int64),
         matrix_etas=np.array([2.0], dtype=np.float64),

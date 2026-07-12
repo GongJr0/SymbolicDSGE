@@ -29,9 +29,9 @@ cdef extern from "prior_program.h":
         double *theta, int64_t *scalar_indices, int64_t *scalar_dist_codes,
         int64_t *scalar_transform_codes, double *scalar_dist_params,
         double *scalar_transform_params, int64_t n_scalar,
-        int64_t *matrix_indices, int64_t *matrix_dims, int64_t *matrix_lengths,
-        double *matrix_etas, double *matrix_log_constants, int64_t n_blocks,
-        int64_t max_matrix_len) nogil
+        int64_t *matrix_offsets, int64_t *matrix_dims, int64_t *matrix_lengths,
+        double *matrix_etas, double *matrix_log_constants,
+        int64_t n_blocks) nogil
     void sdsge_cov_from_unconstrained(double *z, double *std, int64_t K,
                                       double *scratch_M, double *out) nogil
     void sdsge_unconstrained_from_corr_chol(double *L, int64_t K,
@@ -81,17 +81,17 @@ def logprior_program(double[::1] theta,
                      int64_t[::1] scalar_transform_codes,
                      double[:, ::1] scalar_dist_params,
                      double[:, ::1] scalar_transform_params,
-                     int64_t[:, ::1] matrix_indices,
+                     int64_t[::1] matrix_offsets,
                      int64_t[::1] matrix_dims,
                      int64_t[::1] matrix_lengths,
                      double[::1] matrix_etas,
                      double[::1] matrix_log_constants):
-    """Full packed log-prior. Returns the scalar logprior (NaN -> numba fallback)."""
+    """Full packed log-prior. Returns the scalar logprior (NaN -> numba fallback).
+
+    Each block's z is the contiguous theta run starting at ``matrix_offsets[b]``
+    of length ``matrix_lengths[b]``, read straight off ``theta`` in the kernel."""
     cdef int64_t n_scalar = scalar_indices.shape[0]
     cdef int64_t n_blocks = matrix_dims.shape[0]
-    cdef int64_t max_matrix_len = (
-        matrix_indices.shape[1] if matrix_indices.shape[0] > 0 else 0
-    )
 
     cdef double *theta_p = &theta[0] if theta.shape[0] > 0 else NULL
     cdef int64_t *si = &scalar_indices[0] if n_scalar > 0 else NULL
@@ -99,7 +99,7 @@ def logprior_program(double[::1] theta,
     cdef int64_t *stc = &scalar_transform_codes[0] if n_scalar > 0 else NULL
     cdef double *sdp = &scalar_dist_params[0, 0] if n_scalar > 0 else NULL
     cdef double *stp = &scalar_transform_params[0, 0] if n_scalar > 0 else NULL
-    cdef int64_t *mi = &matrix_indices[0, 0] if n_blocks > 0 else NULL
+    cdef int64_t *mo = &matrix_offsets[0] if n_blocks > 0 else NULL
     cdef int64_t *md = &matrix_dims[0] if n_blocks > 0 else NULL
     cdef int64_t *ml = &matrix_lengths[0] if n_blocks > 0 else NULL
     cdef double *me = &matrix_etas[0] if n_blocks > 0 else NULL
@@ -108,8 +108,7 @@ def logprior_program(double[::1] theta,
     cdef double out
     with nogil:
         out = sdsge_logprior_program(theta_p, si, sdc, stc, sdp, stp, n_scalar,
-                                     mi, md, ml, me, mlc, n_blocks,
-                                     max_matrix_len)
+                                     mo, md, ml, me, mlc, n_blocks)
     return out
 
 

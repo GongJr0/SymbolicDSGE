@@ -28,7 +28,7 @@ def logprior_program(
     scalar_transform_codes: _I64,
     scalar_dist_params: _F64,
     scalar_transform_params: _F64,
-    matrix_indices: _I64,
+    matrix_offsets: _I64,
     matrix_dims: _I64,
     matrix_lengths: _I64,
     matrix_etas: _F64,

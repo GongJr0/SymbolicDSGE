@@ -67,17 +67,18 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
                                   f64 *SDSGE_RESTRICT out_logpdf);
 
 /* Full packed log-prior (per-replication hot path). scalar_*_params are
- * row-major n_scalar x stride; matrix_indices is row-major n_blocks x
- * max_matrix_len. Returns the scalar logprior, or NaN if any term is NaN. */
+ * row-major n_scalar x stride; each block's z is the contiguous theta run
+ * theta[matrix_offsets[b] .. +matrix_lengths[b]). Returns the scalar logprior,
+ * or NaN if any term is NaN. */
 f64 sdsge_logprior_program(
     f64 *SDSGE_RESTRICT theta, i64 *SDSGE_RESTRICT scalar_indices,
     i64 *SDSGE_RESTRICT scalar_dist_codes,
     i64 *SDSGE_RESTRICT scalar_transform_codes,
     f64 *SDSGE_RESTRICT scalar_dist_params,
     f64 *SDSGE_RESTRICT scalar_transform_params, i64 n_scalar,
-    i64 *SDSGE_RESTRICT matrix_indices, i64 *SDSGE_RESTRICT matrix_dims,
+    i64 *SDSGE_RESTRICT matrix_offsets, i64 *SDSGE_RESTRICT matrix_dims,
     i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
-    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, i64 max_matrix_len);
+    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks);
 
 /* Unconstrained (z, std) -> full covariance via the correlation Cholesky factor.
  * scratch_M is K*K workspace for L; out receives the K*K covariance (row-major). */
