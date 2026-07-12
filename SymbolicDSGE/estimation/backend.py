@@ -364,6 +364,7 @@ def evaluate_loglik(
         compiled=compiled,
         parameters={k: float(v) for k, v in params.items()},
         steady_state=steady_state,
+        raise_on_bk_violation=False,
     )
     Q = build_Q(compiled, params)
     R_mat = resolve_R(compiled, compiled.kalman, prepared_run.observables, R)
