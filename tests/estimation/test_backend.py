@@ -134,26 +134,6 @@ def test_reorder_observables_dataframe_and_ndarray_paths():
     assert np.allclose(y_arr, np.array([[20.0, 10.0], [40.0, 30.0]], dtype=np.float64))
 
 
-def test_infer_filter_mode_affine_vs_non_affine():
-    compiled_aff = SimpleNamespace(
-        kalman=None,
-        observable_names=["Infl", "Rate"],
-        config=SimpleNamespace(
-            equations=SimpleNamespace(obs_is_affine={"Infl": True, "Rate": True})
-        ),
-    )
-    compiled_mix = SimpleNamespace(
-        kalman=None,
-        observable_names=["Infl", "Rate"],
-        config=SimpleNamespace(
-            equations=SimpleNamespace(obs_is_affine={"Infl": True, "Rate": False})
-        ),
-    )
-
-    assert backend.infer_filter_mode(compiled_aff, ["Infl", "Rate"]) == "linear"
-    assert backend.infer_filter_mode(compiled_mix, ["Infl", "Rate"]) == "extended"
-
-
 @pytest.mark.parametrize(
     "observables,y,match",
     [
@@ -526,6 +506,7 @@ def test_estimate_R_diag_returns_positive_diagonal(post82_bundle):
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -560,6 +541,7 @@ def test_estimate_R_tries_map_then_falls_back_to_mle(post82_bundle, monkeypatch)
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -593,6 +575,7 @@ def test_estimate_R_stops_after_successful_map(post82_bundle, monkeypatch):
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -620,6 +603,7 @@ def test_estimate_R_falls_back_to_diag_when_solve_raises(post82_bundle, monkeypa
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -817,6 +801,7 @@ def test_estimate_R_diag_falls_back_when_solver_raises(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -880,6 +865,7 @@ def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch)
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -944,6 +930,7 @@ def test_estimate_R_extended_branch_and_final_diag_fallback(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -1002,6 +989,7 @@ def test_estimate_R_linear_branch_uses_kalman_run(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -1058,6 +1046,7 @@ def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,

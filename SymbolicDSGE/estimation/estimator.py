@@ -98,6 +98,7 @@ class Estimator:
         compiled: CompiledModel,
         y: NDF | pd.DataFrame,
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: Sequence[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: NDF | dict[str, float] | None = None,
@@ -115,7 +116,7 @@ class Estimator:
 
         self.y = y
         self.observables = observables
-        self.filter_mode = backend.infer_filter_mode(compiled, observables)
+        self.filter_mode = filter_mode
 
         self._input_priors = dict(priors) if priors is not None else None
 
@@ -141,7 +142,6 @@ class Estimator:
                 jitter=jitter,
                 symmetrize=symmetrize,
             )
-            self.filter_mode = self._prepared_filter.mode
 
         self._base_params = backend.extract_base_params(compiled)
         default_params = list(self._base_params.keys())

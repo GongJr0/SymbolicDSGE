@@ -538,6 +538,7 @@ class DSGESolver:
         compiled: CompiledModel,
         y: NDArray | pd.DataFrame,
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
@@ -556,6 +557,7 @@ class DSGESolver:
             compiled=compiled,
             y=y,
             observables=observables,
+            filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
             steady_state=(
@@ -589,6 +591,7 @@ class DSGESolver:
         method: str = "mle",
         theta0: NDArray | Mapping[str, float] | None = None,
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
@@ -604,6 +607,7 @@ class DSGESolver:
             compiled=compiled,
             y=y,
             observables=observables,
+            filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
             steady_state=(
@@ -633,6 +637,7 @@ class DSGESolver:
                 compiled=compiled,
                 y=y,
                 params=est.theta_to_params(init),
+                filter_mode=est.filter_mode,
                 observables=observables,
                 steady_state=(
                     asarray(steady_state, dtype=float64)
@@ -664,6 +669,7 @@ class DSGESolver:
         theta0: NDArray | Mapping[str, float] | None = None,
         posterior_point: str = "mean",
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
@@ -685,6 +691,7 @@ class DSGESolver:
             compiled=compiled,
             y=y,
             observables=observables,
+            filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
             steady_state=steady_state,
@@ -711,6 +718,7 @@ class DSGESolver:
                 compiled=compiled,
                 y=y,
                 params=est.theta_to_params(init),
+                filter_mode=est.filter_mode,
                 observables=observables,
                 steady_state=steady_state,
                 x0=x0,
