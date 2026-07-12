@@ -399,9 +399,9 @@ class KalmanFilter:
             raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
 
         if symmetrize:
-            Q_real = _sym(Q)
-            R_real = _sym(R)
-            P0_real = _sym(P0)
+            Q_real = _sym(Q)  # pyright: ignore
+            R_real = _sym(R)  # pyright: ignore
+            P0_real = _sym(P0)  # pyright: ignore
 
         err, out = ukf_hot_loop(
             meas_addr,
