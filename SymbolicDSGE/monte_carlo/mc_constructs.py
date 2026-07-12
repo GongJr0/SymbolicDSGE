@@ -58,7 +58,11 @@ class MCData(NamedTuple):
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")
 DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
-FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = UnscentedFilterRawResult._fields
+# The array-valued filter outputs, in tuple order. ``status`` is a scalar error
+# code carried on the raw result, not a selectable source, so it is excluded.
+FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = tuple(
+    field for field in UnscentedFilterRawResult._fields if field != "status"
+)
 FILTER_SOURCE_FIELDS: tuple[str, ...] = (
     "x_pred",
     "x_filt",

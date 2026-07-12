@@ -31,6 +31,7 @@ def _raw_filter_result(T: int = 2, n: int = 3, m: int = 1) -> FilterRawResult:
     P = np.zeros((T, n, n), dtype=FLOAT)
     S = np.zeros((T, m, m), dtype=FLOAT)
     return FilterRawResult(
+        status=0,
         x_pred=x,
         x_filt=x,
         P_pred=P,
@@ -56,6 +57,7 @@ def _raw_unscented_result(
     P = np.zeros((T, 2 * n_state, 2 * n_state), dtype=FLOAT)
     S = np.zeros((T, 1, 1), dtype=FLOAT)
     return UnscentedFilterRawResult(
+        status=0,
         x_pred=x,
         x_filt=x,
         x1_pred=xb,

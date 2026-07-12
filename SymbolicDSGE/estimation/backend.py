@@ -391,6 +391,7 @@ def evaluate_loglik(
             symmetrize=prepared_run.kf_sym,
             return_shocks=False,
             _store_history=False,
+            _raise_on_error=False,
         )
         return float64(result.loglik)
 
@@ -411,6 +412,7 @@ def evaluate_loglik(
             return_shocks=False,
             compute_y_filt=False,
             _store_history=False,
+            _raise_on_error=False,
         )
         return float64(result.loglik)
 

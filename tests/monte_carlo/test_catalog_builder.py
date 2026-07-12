@@ -164,10 +164,15 @@ def test_catalog_payload_shape_and_known_fields() -> None:
 def test_source_field_indices_are_local_to_payload_shape() -> None:
     assert MC_DATA_SOURCE_FIELDS == ("states", "observables")
     assert set(MC_DATA_SOURCE_FIELDS) < set(MCData._fields)
-    assert FILTER_RAW_SOURCE_FIELDS[: len(FilterRawResult._fields)] == (
-        FilterRawResult._fields
+    # ``status`` is a scalar error code, not a selectable array source, so it is
+    # excluded from the source-field set. The array fields keep their tuple order,
+    # and the linear array fields remain a positional prefix of the unscented set.
+    linear_array_fields = tuple(f for f in FilterRawResult._fields if f != "status")
+    unscented_array_fields = tuple(
+        f for f in UnscentedFilterRawResult._fields if f != "status"
     )
-    assert FILTER_RAW_SOURCE_FIELDS == UnscentedFilterRawResult._fields
+    assert FILTER_RAW_SOURCE_FIELDS[: len(linear_array_fields)] == linear_array_fields
+    assert FILTER_RAW_SOURCE_FIELDS == unscented_array_fields
     for index, field in enumerate(MC_DATA_SOURCE_FIELDS):
         assert MC_DATA_FIELD_INDEX[field] == index
     for index, field in enumerate(DYNAMIC_SOURCE_FIELDS):

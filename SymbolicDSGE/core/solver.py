@@ -511,60 +511,6 @@ class DSGESolver:
         eta[:n_exog, :] = np.linalg.cholesky(cov)
         return eta
 
-    @staticmethod
-    def _validate_prior_initial_guess(
-        *,
-        priors: Mapping[str, Any] | None,
-        initial_params: Mapping[str, float64],
-    ) -> None:
-        if priors is None:
-            return
-
-        invalid: list[str] = []
-        for name, prior in priors.items():
-            if name not in initial_params:
-                continue
-            val = float64(initial_params[name])
-            try:
-                if hasattr(prior, "transform"):
-                    z = float64(getattr(prior, "transform").safe_forward(val))
-                else:
-                    z = val
-                prior.logpdf(z)
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - exact exception type is prior-dependent
-                invalid.append(f"{name}={val} ({type(exc).__name__}: {exc})")
-
-        if invalid:
-            msg = (
-                "Initial calibration values are incompatible with the provided priors "
-                "or their transforms: " + ", ".join(invalid)
-            )
-            raise ValueError(msg)
-
-    @staticmethod
-    def _theta0_to_array(
-        est: "Estimator", theta0: NDArray | Mapping[str, float] | None
-    ) -> NDArray:
-        if theta0 is None:
-            return est.theta0()
-
-        if isinstance(theta0, Mapping):
-            missing = [name for name in est.param_names if name not in theta0]
-            if missing:
-                raise ValueError(
-                    f"theta0 dictionary is missing estimated parameters: {missing}"
-                )
-            unknown = [k for k in theta0.keys() if k not in est.param_names]
-            if unknown:
-                raise ValueError(f"theta0 dictionary has unknown parameters: {unknown}")
-            return est.params_to_theta(
-                {name: float64(theta0[name]) for name in est.param_names}
-            )
-
-        return asarray(theta0, dtype=float64)
-
     def _estimator(
         self,
         *,
@@ -652,11 +598,7 @@ class DSGESolver:
             R=R,
         )
 
-        init = self._theta0_to_array(est, theta0)
-        self._validate_prior_initial_guess(
-            priors=est.priors,
-            initial_params=est.theta_to_params(init),
-        )
+        init = est.resolve_theta0(theta0)
         if (
             R is None
             and hasattr(compiled, "var_names")
@@ -733,11 +675,8 @@ class DSGESolver:
             R=R,
         )
 
-        init = self._theta0_to_array(est, theta0)
-        self._validate_prior_initial_guess(
-            priors=est.priors,
-            initial_params=est.theta_to_params(init),
-        )
+        init = est.resolve_theta0(theta0)
+
         if (
             R is None
             and hasattr(compiled, "var_names")

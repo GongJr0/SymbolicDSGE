@@ -152,6 +152,7 @@ def ekf_reference(
         P_prev = P_filt
 
     return FilterRawResult(
+        status=0,
         x_pred=x_pred_h,
         x_filt=x_filt_h,
         P_pred=P_pred_h,
