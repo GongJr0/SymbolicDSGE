@@ -109,26 +109,34 @@ def test_construct_measurement_array_dispatchers_are_cached(compiled_test):
     ) is c.construct_observable_jacobian_array_func(obs)
 
 
-def test_measurement_array_dispatchers_match_scalar_dispatchers(compiled_test):
+def test_measurement_array_dispatchers_match_lambdify_reference(compiled_test):
+    # The native measurement/jacobian cfuncs must agree with an independent
+    # sympy.lambdify evaluation of the stored observable exprs (the reference the
+    # printer replaced).
     c = compiled_test
     state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
     params = np.array(
         [float64(c.config.calibration.parameters[p]) for p in c.calib_params],
         dtype=float64,
     )
+    n_var = len(c.cur_syms)
+    args = [*c.cur_syms, *c.calib_params]
 
-    scalar_measure = np.asarray(
-        [fn(*state, *params) for fn in c.observable_funcs], dtype=float64
+    meas_ref = [sp.lambdify(args, e, "numpy") for e in c.observable_eqs]
+    scalar_measure = np.asarray([f(*state, *params) for f in meas_ref], dtype=float64)
+
+    jac_ref = [sp.lambdify(args, e, "numpy") for e in c.observable_jacobian_eqs]
+    scalar_jac = np.asarray(
+        [f(*state, *params) for f in jac_ref], dtype=float64
+    ).reshape(len(c.observable_names), n_var)
+
+    array_measure = c.construct_measurement_array_func(c.observable_names)(
+        state, params
     )
-    array_measure_func = c.construct_measurement_array_func(c.observable_names)
-    array_measure = array_measure_func(state, params)
+    array_jac = c.construct_observable_jacobian_array_func(c.observable_names)(
+        state, params
+    )
 
-    scalar_jac = np.asarray(c.observable_jacobian(*state, *params), dtype=float64)
-    array_jac_func = c.construct_observable_jacobian_array_func(c.observable_names)
-    array_jac = array_jac_func(state, params)
-
-    assert getattr(array_measure_func, "_symbolicdsge_array_dispatch", False)
-    assert getattr(array_jac_func, "_symbolicdsge_array_dispatch", False)
     assert np.allclose(array_measure, scalar_measure)
     assert np.allclose(array_jac, scalar_jac)
 

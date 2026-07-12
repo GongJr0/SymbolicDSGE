@@ -131,8 +131,8 @@ class ExpressionPrinter(ABC):
         num: list[Any] = []
         den: list[Any] = []
         for f in sp.Mul.make_args(rest):
-            if f.is_Pow and f.exp.is_Integer and f.exp.is_negative:
-                den.append(sp.Pow(f.base, -f.exp))
+            if f.is_Pow and f.exp.is_Integer and f.exp.is_negative:  # pyright: ignore
+                den.append(sp.Pow(f.base, -f.exp))  # pyright: ignore
             else:
                 num.append(f)
 

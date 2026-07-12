@@ -26,7 +26,7 @@ from numpy import asarray, float64, int64
 from numpy.typing import NDArray
 from scipy import optimize
 
-from sympy import Symbol
+from sympy import Symbol, jacobi_normalized
 
 import pandas as pd
 
@@ -65,9 +65,8 @@ class KalmanInterface(KalmanFilter):
         y: NDF | pd.DataFrame,
         filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         *,
-        h_func: Callable[..., NDF] | None = None,
-        H_jac: Callable[..., NDF] | None = None,
         meas_addr: int | None = None,
+        jac_addr: int | None = None,
         calib_params: NDF | None = None,
         R: NDF | None = None,
         p0_mode: Literal["diag", "eye"] | None = None,
@@ -134,9 +133,8 @@ class KalmanInterface(KalmanFilter):
         else:
             self.R = self._initial_R_diag_guess()
 
-        self.h_func = h_func
-        self.H_jac = H_jac
         self.meas_addr = meas_addr
+        self.jac_addr = jac_addr
         self.calib_params = calib_params
         self.ukf_alpha = 1.0
         self.ukf_beta = 2.0
@@ -411,14 +409,13 @@ class KalmanInterface(KalmanFilter):
             B=run_args.get("B", self.B),
             C=run_args.get("C", self.C),
             d=run_args.get("d", self.d),
-            h_func=run_args.get("h", self.h_func),
-            H_jac=run_args.get("H_jac", self.H_jac),
             Q=run_args.get("Q", self.Q),
             R=run_args.get("R", self.R),
             y=run_args.get("y", self.y),
             x0=x0,
             P0=run_args.get("P0", self.P0),
             meas_addr=run_args.get("meas_addr", self.meas_addr),
+            jac_addr=run_args.get("jac_addr", self.jac_addr),
             hx=run_args.get("hx"),
             gx=run_args.get("gx"),
             bx=run_args.get("bx"),
@@ -754,22 +751,12 @@ class KalmanInterface(KalmanFilter):
                 raise ValueError(
                     "C and d matrices are required for linear Kalman Filter."
                 )
-            # if (self.h_func is not None) or (self.H_jac is not None):
-            #     warnings.warn(
-            #         "h_func and H_jac are ignored in linear filter mode.",
-            #         UserWarning,
-            #     )
 
         elif self.mode == FilterMode.EXTENDED:
-            if (self.h_func is None) or (self.H_jac is None):
+            if (self.meas_addr is None) or (self.jac_addr is None):
                 raise ValueError(
-                    "h_func and H_jac are required for extended Kalman Filter."
+                    "meas_addr and jac_addr are required for extended Kalman Filter."
                 )
-            # if (self.C is not None) or (self.d is not None):
-            #     warnings.warn(
-            #         "C and d matrices are ignored in extended filter mode.",
-            #         UserWarning,
-            #     )
 
         elif self.mode == FilterMode.UNSCENTED:
             if self.meas_addr is None or self.meas_addr == 0:
@@ -882,11 +869,12 @@ class KalmanInterface(KalmanFilter):
     @property
     def _extended_validated_args(self) -> dict:
         return {
+            # Measurement addresses
+            "meas_addr": self.meas_addr,
+            "jac_addr": self.jac_addr,
             # State Space Definition
             "A": self.A,
             "B": self.B,
-            "h": self.h_func,
-            "H_jac": self.H_jac,
             "calib_params": self.calib_params,
             "Q": self.Q,
             "R": self.R,

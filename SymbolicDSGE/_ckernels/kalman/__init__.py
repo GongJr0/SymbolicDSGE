@@ -5,7 +5,8 @@ this module raises ``ImportError`` and the consumer (``SymbolicDSGE.kalman``)
 falls back to its numba kernels.
 """
 
+from ._kalman import ekf_hot_loop
 from ._kalman import kalman_hot_loop
 from ._kalman import ukf_hot_loop
 
-__all__ = ["kalman_hot_loop", "ukf_hot_loop"]
+__all__ = ["ekf_hot_loop", "kalman_hot_loop", "ukf_hot_loop"]

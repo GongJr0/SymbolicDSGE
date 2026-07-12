@@ -116,6 +116,12 @@ cdef extern from "bicomplex_hessian.h" nogil:
         double *hessian)
 
 
+# Measurement / observable-jacobian @cfunc (build_measurement_cfunc, real ABI):
+# ``void(vars*, par*, out*)``. Held Python-side; called here by ``.address``, nogil.
+ctypedef void (*sdsge_measurement_fn)(
+    double *vars, double *par, double *out) noexcept nogil
+
+
 def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):
     """out[(T+1, n)] <- linear state recursion. ``out`` is the caller's
     C-contiguous f64 output buffer, written in place; inputs are coerced."""
@@ -441,26 +447,27 @@ def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
     return gss, hss
 
 
-def residual_path(
-    size_t residual_addr,
-    double complex[:, ::1] cur_states,
-    double complex[:, ::1] fwd_states,
-    double complex[::1] params,
-    int64_t n_eq,
-):
+def residual_path(size_t residual_addr, cur_states, fwd_states, params, int64_t n_eq):
     """Real residual matrix ``(n_steps, n_eq)`` from a residual @cfunc
     (``build_cfunc``) evaluated over a simulated path. Native backend for the
     Den Haan-Marcet moment builder -- reuses the solve's cfunc, so it never
-    triggers the numba residual compile.
+    triggers the numba residual compile. Inputs are coerced to contiguous
+    complex128 here.
     """
-    cdef int64_t n_steps = cur_states.shape[0]
-    cdef int64_t n_var = cur_states.shape[1]
+    cdef double complex[:, ::1] curv = np.ascontiguousarray(
+        cur_states, dtype=np.complex128)
+    cdef double complex[:, ::1] fwdv = np.ascontiguousarray(
+        fwd_states, dtype=np.complex128)
+    cdef double complex[::1] parv = np.ascontiguousarray(
+        params, dtype=np.complex128).reshape(-1)
+    cdef int64_t n_steps = curv.shape[0]
+    cdef int64_t n_var = curv.shape[1]
     residuals = np.empty((n_steps, n_eq), dtype=np.float64)
     cdef double[:, ::1] rv = residuals
 
-    cdef c128 *cur_ptr = <c128 *>&cur_states[0, 0] if n_steps > 0 else NULL
-    cdef c128 *fwd_ptr = <c128 *>&fwd_states[0, 0] if n_steps > 0 else NULL
-    cdef c128 *par_ptr = <c128 *>&params[0] if params.shape[0] > 0 else NULL
+    cdef c128 *cur_ptr = <c128 *>&curv[0, 0] if n_steps > 0 else NULL
+    cdef c128 *fwd_ptr = <c128 *>&fwdv[0, 0] if n_steps > 0 else NULL
+    cdef c128 *par_ptr = <c128 *>&parv[0] if parv.shape[0] > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     cdef int64_t err
     with nogil:
@@ -471,24 +478,83 @@ def residual_path(
     return residuals
 
 
-def residual_eval(
-    size_t residual_addr,
-    double complex[::1] fwd,
-    double complex[::1] cur,
-    double complex[::1] params,
-    int64_t n_eq,
-):
+def measurement_eval(size_t meas_addr, vars, par, int64_t n_obs):
+    """Measurement vector ``h(vars, par)`` of length ``n_obs`` from a measurement
+    @cfunc (``build_measurement_cfunc``) given its ``.address``. Single point;
+    inputs are coerced to contiguous float64.
+    """
+    cdef double[::1] vv = np.ascontiguousarray(vars, dtype=np.float64)
+    cdef double[::1] pv = np.ascontiguousarray(par, dtype=np.float64)
+    out = np.empty((n_obs,), dtype=np.float64)
+    cdef double[::1] ov = out
+
+    cdef double *vars_ptr = &vv[0] if vv.shape[0] > 0 else NULL
+    cdef double *par_ptr = &pv[0] if pv.shape[0] > 0 else NULL
+    cdef double *out_ptr = &ov[0] if n_obs > 0 else NULL
+    cdef sdsge_measurement_fn fn = <sdsge_measurement_fn><void*>meas_addr
+    with nogil:
+        fn(vars_ptr, par_ptr, out_ptr)
+    return out
+
+
+def jacobian_eval(size_t jac_addr, vars, par, int64_t n_obs, int64_t n_var):
+    """Observable jacobian ``dh/dvars`` (n_obs, n_var) from a jacobian @cfunc
+    (``build_measurement_cfunc`` over the flattened jacobian exprs) by ``.address``.
+    Single point; the cfunc writes the row-major (obs, var) flat buffer.
+    """
+    cdef double[::1] vv = np.ascontiguousarray(vars, dtype=np.float64)
+    cdef double[::1] pv = np.ascontiguousarray(par, dtype=np.float64)
+    out = np.empty((n_obs, n_var), dtype=np.float64)
+    cdef double[:, ::1] ov = out
+
+    cdef double *vars_ptr = &vv[0] if vv.shape[0] > 0 else NULL
+    cdef double *par_ptr = &pv[0] if pv.shape[0] > 0 else NULL
+    cdef double *out_ptr = &ov[0, 0] if (n_obs * n_var) > 0 else NULL
+    cdef sdsge_measurement_fn fn = <sdsge_measurement_fn><void*>jac_addr
+    with nogil:
+        fn(vars_ptr, par_ptr, out_ptr)
+    return out
+
+
+def measurement_path(size_t meas_addr, states, par, int64_t n_obs):
+    """Measurement matrix ``(T, n_obs)`` from a measurement @cfunc over a state
+    path. ``states`` is ``(T, n_var)`` in cur-variable order; coerced to
+    contiguous float64.
+    """
+    cdef double[:, ::1] sv = np.ascontiguousarray(states, dtype=np.float64)
+    cdef double[::1] pv = np.ascontiguousarray(par, dtype=np.float64)
+    cdef int64_t T = sv.shape[0]
+    out = np.empty((T, n_obs), dtype=np.float64)
+    cdef double[:, ::1] ov = out
+
+    cdef double *par_ptr = &pv[0] if pv.shape[0] > 0 else NULL
+    cdef sdsge_measurement_fn fn = <sdsge_measurement_fn><void*>meas_addr
+    cdef int64_t tt
+    if n_obs > 0 and T > 0:
+        with nogil:
+            for tt in range(T):
+                fn(&sv[tt, 0], par_ptr, &ov[tt, 0])
+    return out
+
+
+def residual_eval(size_t residual_addr, fwd, cur, params, int64_t n_eq):
     """Complex residual vector ``F(fwd, cur, par)`` of length ``n_eq`` from a
     residual @cfunc (``build_cfunc``) given its ``.address``. Single-point native
     evaluation -- the path ``CompiledModel.equations`` takes instead of the numba
-    vector kernel. Inputs are the caller's C-contiguous complex128 arrays.
+    vector kernel. Inputs are coerced to contiguous complex128 here.
     """
+    cdef double complex[::1] fwdv = np.ascontiguousarray(
+        fwd, dtype=np.complex128).reshape(-1)
+    cdef double complex[::1] curv = np.ascontiguousarray(
+        cur, dtype=np.complex128).reshape(-1)
+    cdef double complex[::1] parv = np.ascontiguousarray(
+        params, dtype=np.complex128).reshape(-1)
     out = np.empty((n_eq,), dtype=np.complex128)
     cdef double complex[::1] ov = out
 
-    cdef c128 *fwd_ptr = <c128 *>&fwd[0] if fwd.shape[0] > 0 else NULL
-    cdef c128 *cur_ptr = <c128 *>&cur[0] if cur.shape[0] > 0 else NULL
-    cdef c128 *par_ptr = <c128 *>&params[0] if params.shape[0] > 0 else NULL
+    cdef c128 *fwd_ptr = <c128 *>&fwdv[0] if fwdv.shape[0] > 0 else NULL
+    cdef c128 *cur_ptr = <c128 *>&curv[0] if curv.shape[0] > 0 else NULL
+    cdef c128 *par_ptr = <c128 *>&parv[0] if parv.shape[0] > 0 else NULL
     cdef c128 *out_ptr = <c128 *>&ov[0] if n_eq > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     with nogil:

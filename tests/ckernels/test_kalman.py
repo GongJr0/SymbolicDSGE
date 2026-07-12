@@ -1,4 +1,4 @@
-"""Parity tests for the native linear Kalman hot loop vs the numba reference.
+"""Parity tests for the native linear Kalman hot loop vs the numpy oracle.
 
 Skips when the ``_ckernels.kalman`` extension is not built.
 """
@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 from numba import cfunc, types
 
-from SymbolicDSGE.kalman.filter import _kalman_hot_loop
+from SymbolicDSGE.kalman.errors import ErrorCode
+from _oracles.kalman import kf_reference
 
 kf = pytest.importorskip("SymbolicDSGE._ckernels.kalman")
 
@@ -70,7 +71,7 @@ def _ukf_measure_first_var(model_vars, _params, out):
 @pytest.mark.parametrize("symmetrize", [True, False])
 @pytest.mark.parametrize("return_shocks", [True, False])
 @pytest.mark.parametrize("store_history", [True, False])
-def test_kalman_matches_numba(
+def test_kalman_matches_oracle(
     n: int,
     m: int,
     k: int,
@@ -100,8 +101,8 @@ def test_kalman_matches_numba(
         store_history,
     )
 
-    _, _, out_ref = _kalman_hot_loop(*args)
-    _, _, out_native = kf.kalman_hot_loop(*args)
+    out_ref = kf_reference(*args)
+    _status, out_native = kf.kalman_hot_loop(*args)
 
     for i, name in enumerate(_HIST):
         np.testing.assert_allclose(
@@ -117,9 +118,10 @@ def test_kalman_matches_numba(
     )
 
 
-def test_kalman_non_pd_raises() -> None:
+def test_kalman_non_pd_returns_error_code() -> None:
     # m=1 with a negative R forces S = C P_pred C^T + R < 0, so the Cholesky
-    # fails -> both paths raise LinAlgError (-> MatrixConditionError upstream).
+    # fails. The native hot loop returns the MATRIX_CONDITION status code (the
+    # caller maps it to MatrixConditionError); it does not raise here.
     n, m, k, T = 1, 1, 1, 5
     rng = np.random.default_rng(0)
     args = (
@@ -139,10 +141,8 @@ def test_kalman_non_pd_raises() -> None:
         False,
         True,
     )
-    with pytest.raises(np.linalg.LinAlgError):
-        kf.kalman_hot_loop(*args)
-    with pytest.raises(np.linalg.LinAlgError):
-        _kalman_hot_loop(*args)
+    status, _ = kf.kalman_hot_loop(*args)
+    assert status == ErrorCode.MATRIX_CONDITION
 
 
 def test_ukf_returns_projected_model_variable_history() -> None:
@@ -162,7 +162,7 @@ def test_ukf_returns_projected_model_variable_history() -> None:
     z0 = _c([0.1, 0.0])
     P0 = _c(np.diag([0.2, 0.3]))
 
-    _, _, out = kf.ukf_hot_loop(
+    _, out = kf.ukf_hot_loop(
         _ukf_measure_first_var.address,
         hx,
         gx,

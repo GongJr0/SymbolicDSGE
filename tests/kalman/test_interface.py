@@ -223,8 +223,8 @@ def test_interface_init_extended_skips_linear_measurement_builder():
         observables=["ObsA"],
         y=np.array([[1.0], [2.0]], dtype=FLOAT),
         filter_mode="extended",
-        h_func=lambda u, v, x, alpha: np.array([x + alpha], dtype=FLOAT),
-        H_jac=lambda u, v, x, alpha: np.array([[0.0, 0.0, 1.0]], dtype=FLOAT),
+        meas_addr=1,
+        jac_addr=1,
         calib_params=np.array([0.5], dtype=FLOAT),
     )
 
@@ -617,20 +617,16 @@ def test_validate_mode_and_kalman_config_property_error_paths():
     linear.mode = FilterMode.LINEAR
     linear.C = None
     linear.d = np.zeros((1,), dtype=FLOAT)
-    linear.h_func = None
-    linear.H_jac = None
 
     with pytest.raises(ValueError, match="C and d matrices are required"):
         linear._validate_mode_and_inputs()
 
     extended = _make_shell()
     extended.mode = FilterMode.EXTENDED
-    extended.C = np.zeros((1, 3), dtype=FLOAT)
-    extended.d = np.zeros((1,), dtype=FLOAT)
-    extended.h_func = None
-    extended.H_jac = lambda *args: np.ones((1, 3), dtype=FLOAT)
+    extended.meas_addr = None
+    extended.jac_addr = 1
 
-    with pytest.raises(ValueError, match="h_func and H_jac are required"):
+    with pytest.raises(ValueError, match="meas_addr and jac_addr are required"):
         extended._validate_mode_and_inputs()
 
     no_config = _make_shell(_make_stub_model(kalman_config=None))
@@ -725,8 +721,8 @@ def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch
         observables=["ObsA"],
         y=np.array([[1.0], [2.0]], dtype=FLOAT),
         filter_mode="extended",
-        h_func=lambda u, v, x, alpha: np.array([x + alpha], dtype=FLOAT),
-        H_jac=lambda u, v, x, alpha: np.array([[0.0, 0.0, 1.0]], dtype=FLOAT),
+        meas_addr=111,
+        jac_addr=222,
         calib_params=np.array([0.5], dtype=FLOAT),
     )
     captured = {}
@@ -751,8 +747,8 @@ def test_filter_dispatches_extended_and_rejects_unknown_runtime_mode(monkeypatch
     assert np.array_equal(captured["validate"]["x0"], np.ones((3,), dtype=FLOAT))
     assert "C" not in captured["validate"]
     assert "d" not in captured["validate"]
-    assert captured["run_extended_raw"]["h"] is ki.h_func
-    assert captured["run_extended_raw"]["H_jac"] is ki.H_jac
+    assert captured["run_extended_raw"]["meas_addr"] == ki.meas_addr
+    assert captured["run_extended_raw"]["jac_addr"] == ki.jac_addr
     assert np.array_equal(
         captured["run_extended_raw"]["calib_params"],
         np.array([0.5], dtype=FLOAT),

@@ -280,6 +280,150 @@ int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
   return status;
 }
 
+int ekf_hot_loop(const ekf_inputs *in, ekf_outputs *out) {
+  const i64 n = in->n, m = in->m, k = in->k, T = in->T;
+
+  /* One scratch arena carved into every per-step buffer (allocated once). Same
+   * layout as the linear filter, plus a per-step measurement jacobian H_buf(m,n)
+   * since the EKF relinearizes each step. y_filt is written straight into the
+   * output (only when compute_y_filt), so it needs no scratch vector. */
+  const i64 total =
+      2 * n + 6 * m /* vectors + triangular-solve scratch */
+      + 6 * n * n   /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+      + 2 * m * m   /* S_buf, L */
+      + 4 * n * m   /* PCt, K, temp_nm, H_buf */
+      + m * n       /* temp_mn */
+      + n * k       /* temp_nk */
+      + 2 * k * m;  /* M, temp_km */
+  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
+  if (arena == NULL)
+    return KF_ERR_ALLOC;
+
+  f64 *p = arena;
+  f64 *x_pred_buf = p;
+  p += n;
+  f64 *x_filt_buf = p;
+  p += n;
+  f64 *y_pred_buf = p;
+  p += m;
+  f64 *v_buf = p;
+  p += m;
+  f64 *u_buf = p;
+  p += m;
+  f64 *S_inv_v = p;
+  p += m;
+  f64 *solve_f = p;
+  p += m;
+  f64 *solve_b = p;
+  p += m;
+  f64 *P_pred_buf = p;
+  p += n * n;
+  f64 *P_filt_buf = p;
+  p += n * n;
+  f64 *KC = p;
+  p += n * n;
+  f64 *I_minus_KC = p;
+  p += n * n;
+  f64 *temp_nn = p;
+  p += n * n;
+  f64 *BQBT = p;
+  p += n * n;
+  f64 *S_buf = p;
+  p += m * m;
+  f64 *L = p;
+  p += m * m;
+  f64 *PCt = p;
+  p += n * m;
+  f64 *K = p;
+  p += n * m;
+  f64 *temp_nm = p;
+  p += n * m;
+  f64 *H_buf = p;
+  p += m * n;
+  f64 *temp_mn = p;
+  p += m * n;
+  f64 *temp_nk = p;
+  p += n * k;
+  f64 *M = p;
+  p += k * m;
+  f64 *temp_km = p;
+  p += k * m;
+
+  kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
+
+  const f64 const_term = (f64)m * log(TWO_PI);
+  f64 loglik = 0.0;
+
+  const f64 *x_prev = in->x0;
+  const f64 *P_prev = in->P0;
+  int status = KF_OK;
+
+  for (i64 t = 0; t < T; ++t) {
+    sdsge_matvec(in->A, x_prev, x_pred_buf, n, n);
+    kf_predict_cov(in->A, P_prev, BQBT, temp_nn, P_pred_buf, n);
+    if (in->symmetrize)
+      sdsge_sym_inplace(P_pred_buf, n);
+
+    /* Nonlinear measurement + relinearization at the predicted state:
+     * y_pred := h(x_pred, params);  H_buf := dh/dx(x_pred, params), (m, n). */
+    in->meas(x_pred_buf, in->calib_params, y_pred_buf);
+    in->jac(x_pred_buf, in->calib_params, H_buf);
+
+    kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
+    kf_measurement_cov(H_buf, P_pred_buf, in->R, temp_mn, S_buf, n, m);
+    if (in->symmetrize)
+      sdsge_sym_inplace(S_buf, m);
+
+    if (sdsge_chol(S_buf, in->jitter, L, m) != SDSGE_OK) {
+      status = KF_ERR_MATRIX_CONDITION;
+      break;
+    }
+
+    sdsge_forward_subst(L, v_buf, u_buf, m);
+    sdsge_backward_subst_chol_t(L, u_buf, S_inv_v, m);
+
+    kf_pc_t(P_pred_buf, H_buf, PCt, n, m);
+    kf_gain_from_pc_t(L, PCt, solve_f, solve_b, K, n, m);
+
+    kf_state_update(x_pred_buf, K, v_buf, x_filt_buf, n, m);
+    kf_joseph_cov(K, H_buf, P_pred_buf, in->R, KC, I_minus_KC, temp_nn, temp_nm,
+                  P_filt_buf, n, m);
+    if (in->symmetrize)
+      sdsge_sym_inplace(P_filt_buf, n);
+
+    loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, m) +
+                      sdsge_dot(v_buf, S_inv_v, m));
+
+    if (in->return_shocks && in->store_history) {
+      /* H_buf changes each step, so rebuild the shock projection per step. */
+      kf_build_shock_projection(in->B, H_buf, in->Q, temp_km, M, n, k, m);
+      sdsge_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
+    }
+
+    if (in->store_history) {
+      memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));
+      memcpy(out->x_filt + t * n, x_filt_buf, (size_t)n * sizeof(f64));
+      memcpy(out->P_pred + t * n * n, P_pred_buf,
+             (size_t)(n * n) * sizeof(f64));
+      memcpy(out->P_filt + t * n * n, P_filt_buf,
+             (size_t)(n * n) * sizeof(f64));
+      memcpy(out->y_pred + t * m, y_pred_buf, (size_t)m * sizeof(f64));
+      if (in->compute_y_filt)
+        in->meas(x_filt_buf, in->calib_params, out->y_filt + t * m);
+      memcpy(out->innov + t * m, v_buf, (size_t)m * sizeof(f64));
+      memcpy(out->std_innov + t * m, u_buf, (size_t)m * sizeof(f64));
+      memcpy(out->S + t * m * m, S_buf, (size_t)(m * m) * sizeof(f64));
+    }
+
+    x_prev = x_filt_buf;
+    P_prev = P_filt_buf;
+  }
+
+  *out->loglik = loglik;
+  free(arena);
+  return status;
+}
+
 static void ukf_build_sigma_points(const f64 *SDSGE_RESTRICT mean,
                                    const f64 *SDSGE_RESTRICT chol,
                                    f64 gamma, f64 *SDSGE_RESTRICT sigma,

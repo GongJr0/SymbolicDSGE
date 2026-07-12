@@ -833,19 +833,21 @@ class DenHaanMarcet:
         """Real residual matrix ``(n_steps, n_eq_all)`` over the state path.
 
         Uses the native ``residual_path`` kernel driven by the solve's residual
-        @cfunc when the extension is present -- reusing that cached cfunc, so it
-        never triggers the numba residual compile -- else the numba fallback.
+        @cfunc, reusing that cached cfunc so it never triggers a numba residual
+        compile. Inputs are coerced to contiguous complex128 inside the kernel.
         """
         compiled = self.solved.compiled
         n_eq = len(compiled.objective_eqs)
-        par_c = np.ascontiguousarray(self._param_vector_complex(), dtype=np.complex128)
-        cur_c = np.ascontiguousarray(current_states, dtype=np.complex128)
-        fwd_c = np.ascontiguousarray(forward_states, dtype=np.complex128)
-
         cfunc = compiled.construct_objective_cfunc()
         return cast(
             np.ndarray,
-            residual_path(cfunc.address, cur_c, fwd_c, par_c, n_eq),
+            residual_path(
+                cfunc.address,
+                current_states,
+                forward_states,
+                self._param_vector_complex(),
+                n_eq,
+            ),
         )
 
     def _evaluate_state_path(

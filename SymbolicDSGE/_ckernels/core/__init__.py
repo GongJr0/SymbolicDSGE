@@ -8,8 +8,11 @@ built, importing this module (and the library) raises ``ImportError``.
 from ._core import (
     affine_observations_into,
     bicomplex_hessian,
+    jacobian_eval,
     klein_postprocess,
     klein_preprocess,
+    measurement_eval,
+    measurement_path,
     residual_eval,
     residual_path,
     second_order,
@@ -22,8 +25,11 @@ from ._core import (
 __all__ = [
     "affine_observations_into",
     "bicomplex_hessian",
+    "jacobian_eval",
     "klein_postprocess",
     "klein_preprocess",
+    "measurement_eval",
+    "measurement_path",
     "residual_eval",
     "residual_path",
     "second_order",

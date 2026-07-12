@@ -1,16 +1,10 @@
-import warnings
 import sympy as sp
 from sympy import Symbol, Function, Expr
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
-from textwrap import dedent
 
 import numpy as np
 from numpy import float64, complex128, asarray, ndarray, real_if_close
 from numpy.typing import NDArray
-
-from numba import njit
-from numba import types as nb_typ
-from numba.core import errors as nb_err
 
 import pandas as pd
 
@@ -109,72 +103,19 @@ class DSGESolver:
             self._offset_lags(expr, t) for expr in conf.equations.observable.values()
         ]
         observable_exprs = [sp.simplify(expr.subs(subs_map)) for expr in shifted_obs]
-        observable_funcs = [
-            njit(sp.lambdify([*cur_syms, *params], expr, modules="numpy"))
-            for expr in observable_exprs
-        ]
-
-        if observable_exprs:
-            symbolic_jacobian = sp.Matrix(
+        symbolic_jacobian = (
+            sp.Matrix(
                 [
                     [sp.diff(expr, cur_sym) for cur_sym in cur_syms]
                     for expr in observable_exprs
                 ]
             )
-        else:
-            symbolic_jacobian = sp.zeros(0, len(cur_syms))
-
-        jac_scalars = list(symbolic_jacobian)  # pyright: ignore
-        jac_scalar_funcs = tuple(
-            njit(sp.lambdify([*cur_syms, *params], scalar, modules="numpy"))
-            for scalar in jac_scalars
+            if observable_exprs
+            else sp.zeros(0, len(cur_syms))
         )
-
-        n_obs, n_vars = symbolic_jacobian.shape
-
-        arg_names = [f"var{i}" for i in range(len(cur_syms))] + [
-            f"param{i}" for i in range(len(params))
-        ]
-        args_str = ", ".join(f"{name}: float64" for name in arg_names)
-        call_args_str = ", ".join(arg_names)
-
-        func_bindings = "\n".join(
-            f"    f{k} = jac_scalar_funcs[{k}]" for k in range(len(jac_scalar_funcs))
-        )
-
-        body_lines = []
-        k = 0
-        for i in range(n_obs):
-            for j in range(n_vars):
-                body_lines.append(f"    J[{i}, {j}] = f{k}({call_args_str})")
-                k += 1
-
-        jac_str = dedent(
-            f"""
-def jacobian_func({args_str}) -> NDF:
-    J = np.empty(({n_obs}, {n_vars}), dtype=float64)
-{func_bindings}
-{chr(10).join(body_lines)}
-    return J
-"""
-        )
-
-        ns: dict[str, Any] = {
-            "jac_scalar_funcs": jac_scalar_funcs,
-            "np": np,
-            "float64": float64,
-            "NDF": NDF,
-        }
-        exec(jac_str, ns)
-        jacobian_func = njit(ns["jacobian_func"])
-
-        with warnings.catch_warnings():
-            warnings.simplefilter(
-                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
-            )
-            jacobian_func.compile(  # pyright: ignore
-                tuple(nb_typ.float64 for _ in arg_names)
-            )
+        # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
+        # demand via CompiledModel.construct_observable_jacobian_cfunc.
+        observable_jacobian_eqs = list(symbolic_jacobian)
 
         return CompiledModel(
             config=conf,
@@ -187,9 +128,7 @@ def jacobian_func({args_str}) -> NDF:
             objective_eqs=compiled_numeric,
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
-            observable_funcs=observable_funcs,
-            observable_jacobian=jacobian_func,
-            observable_jacobian_funcs=jac_scalar_funcs,
+            observable_jacobian_eqs=observable_jacobian_eqs,
             n_state=layout.n_state,
             n_exog=layout.n_exog,
         )

@@ -1,17 +1,12 @@
-import warnings
 from sympy import Symbol, Expr
 
 import numpy as np
 from numpy import complex128, float64
 from numpy.typing import NDArray
-from numba import njit
-from numba.core import types as nb_typ
-from numba.core import errors as nb_err
 
 from dataclasses import dataclass, asdict
 from functools import cached_property
-from typing import Callable, Any, Mapping, cast
-from textwrap import dedent
+from typing import Callable, Any, Mapping
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
@@ -22,7 +17,7 @@ from SymbolicDSGE._symbolic_printers import (
     build_cfunc,
     build_measurement_cfunc,
 )
-from .._ckernels.core import residual_eval
+from .._ckernels.core import jacobian_eval, measurement_eval, residual_eval
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -58,9 +53,9 @@ class CompiledModel:
 
     observable_names: list[str]
     observable_eqs: list[Expr]
-    observable_funcs: list[Callable]
-    observable_jacobian: Callable[..., ND]
-    observable_jacobian_funcs: tuple[Callable, ...]
+    # Flat row-major (n_obs, n_var) symbolic jacobian d(observable)/d(cur_var);
+    # printed to a native cfunc on demand (construct_observable_jacobian_cfunc).
+    observable_jacobian_eqs: list[Expr]
 
     n_state: int
     n_exog: int
@@ -85,12 +80,10 @@ class CompiledModel:
     def construct_objective_cfunc_bicomplex(self) -> Any:
         return self._objective_cfunc_bicomplex
 
-    def _coerce_param_vector(
-        self,
-        par: Mapping[Any, Any] | Any,
-        *,
-        dtype: Any,
-    ) -> ND:
+    def _coerce_param_vector(self, par: Mapping[Any, Any] | Any) -> ND:
+        # Resolve a name/Symbol-keyed mapping into calib_params order. dtype and
+        # contiguity are the native boundary's job (the Cython shims cast), so this
+        # only produces the ordered numeric vector.
         if isinstance(par, Mapping):
             vals = []
             for p in self.calib_params:
@@ -100,9 +93,9 @@ class CompiledModel:
                     vals.append(par[p.name])
                 else:
                     raise KeyError(f"Missing parameter '{p.name}'.")
-            return np.ascontiguousarray(np.asarray(vals, dtype=dtype).reshape(-1))
+            return np.asarray(vals)
 
-        return np.ascontiguousarray(np.asarray(par, dtype=dtype).reshape(-1))
+        return np.asarray(par)
 
     def equations(
         self,
@@ -110,9 +103,7 @@ class CompiledModel:
         cur: Any,
         par: Mapping[str, float] | Any,
     ) -> ND:
-        fwd_arr = np.ascontiguousarray(np.asarray(fwd, dtype=complex128).reshape(-1))
-        cur_arr = np.ascontiguousarray(np.asarray(cur, dtype=complex128).reshape(-1))
-        par_vec = self._coerce_param_vector(par, dtype=complex128)
+        par_vec = self._coerce_param_vector(par)
         if par_vec.shape[0] != len(self.calib_params):
             raise ValueError(
                 f"Parameter vector length {par_vec.shape[0]} != {len(self.calib_params)}"
@@ -120,8 +111,8 @@ class CompiledModel:
 
         return residual_eval(
             self.construct_objective_cfunc().address,
-            fwd_arr,
-            cur_arr,
+            fwd,
+            cur,
             par_vec,
             len(self.objective_eqs),
         )
@@ -131,27 +122,20 @@ class CompiledModel:
         params: Mapping[Any, Any] | Any,
         observables: list[str],
     ) -> tuple[NDF, NDF]:
-        param_vec = self._coerce_param_vector(params, dtype=float64)
+        param_vec = self._coerce_param_vector(params)
         if param_vec.shape[0] != len(self.calib_params):
             raise ValueError(
                 f"Parameter vector length {param_vec.shape[0]} != {len(self.calib_params)}"
             )
 
         zero_state = np.zeros((len(self.cur_syms),), dtype=float64)
-        d_full = np.asarray(
-            self.construct_measurement_array_func(observables)(zero_state, param_vec),
-            dtype=float64,
-        ).reshape(-1)
-        C_full = np.asarray(
-            self.construct_observable_jacobian_array_func(observables)(
-                zero_state, param_vec
-            ),
-            dtype=float64,
-        )
-        return (
-            np.ascontiguousarray(C_full, dtype=float64),
-            np.ascontiguousarray(d_full, dtype=float64),
-        )
+        meas_addr = self.construct_measurement_cfunc(observables).address
+        jac_addr = self.construct_observable_jacobian_cfunc(observables).address
+        n_obs = len(observables)
+
+        d = measurement_eval(meas_addr, zero_state, param_vec, n_obs)
+        C = jacobian_eval(jac_addr, zero_state, param_vec, n_obs, len(self.cur_syms))
+        return C, d
 
     def _normalize_observables(
         self,
@@ -190,6 +174,37 @@ class CompiledModel:
         return cache[obs]
 
     @cached_property
+    def _observable_jacobian_cfunc_cache(self) -> dict[tuple[str, ...], Any]:
+        return {}
+
+    def construct_observable_jacobian_cfunc(
+        self,
+        observables: list[str] | tuple[str, ...] | None = None,
+    ) -> Any:
+        obs = self._normalize_observables(observables)
+        cache = self._observable_jacobian_cfunc_cache
+        if obs in cache:
+            return cache[obs]
+
+        base = MeasurementLayout.from_compiled(self, obs)
+        n_var = base.n_var
+        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
+        # Flat row-major (obs, var) jacobian exprs for the selected observables.
+        exprs = [
+            self.observable_jacobian_eqs[obs_idx[name] * n_var + j]
+            for name in obs
+            for j in range(n_var)
+        ]
+        layout = MeasurementLayout(
+            slot=base.slot,
+            n_var=n_var,
+            n_par=base.n_par,
+            n_obs=len(exprs),
+        )
+        cache[obs] = build_measurement_cfunc(exprs, layout)
+        return cache[obs]
+
+    @cached_property
     def _measurement_array_func_cache(self) -> dict[tuple[str, ...], Callable[..., ND]]:
         return {}
 
@@ -202,42 +217,14 @@ class CompiledModel:
         if obs in cache:
             return cache[obs]
 
-        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
-        selected_funcs = [self.observable_funcs[obs_idx[name]] for name in obs]
-        call_args = ", ".join(
-            [
-                *(f"state[{i}]" for i in range(len(self.cur_syms))),
-                *(f"params[{i}]" for i in range(len(self.calib_params))),
-            ]
-        )
-        body = "\n    ".join(
-            f"out[{i}] = func_{i}({call_args})" for i in range(len(selected_funcs))
-        )
+        addr = self.construct_measurement_cfunc(obs).address
+        n_obs = len(obs)
 
-        func_str = f"""
-def measurement_array(state, params):
-    out = np.empty(({len(selected_funcs)},), dtype=np.float64)
-    {body}
-    return out
-"""
+        def measurement_array(state: ND, params: ND) -> ND:
+            return measurement_eval(addr, state, params, n_obs)
 
-        ns: dict[str, Any] = {"np": np}
-        for i, fn in enumerate(selected_funcs):
-            ns[f"func_{i}"] = fn
-
-        exec(dedent(func_str), ns)
-        f = njit(ns["measurement_array"])
-        float_vector = nb_typ.Array(nb_typ.float64, 1, "C")
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
-            )
-            f.compile((float_vector, float_vector))  # pyright: ignore
-
-        setattr(f, "_symbolicdsge_array_dispatch", True)
-        cache[obs] = cast(Callable, f)
-        return cache[obs]
+        cache[obs] = measurement_array
+        return measurement_array
 
     @cached_property
     def _observable_jacobian_array_func_cache(
@@ -254,46 +241,15 @@ def measurement_array(state, params):
         if obs in cache:
             return cache[obs]
 
-        obs_idx = {name: i for i, name in enumerate(self.observable_names)}
-        n_vars = len(self.cur_syms)
-        call_args = ", ".join(
-            [
-                *(f"state[{i}]" for i in range(n_vars)),
-                *(f"params[{i}]" for i in range(len(self.calib_params))),
-            ]
-        )
+        addr = self.construct_observable_jacobian_cfunc(obs).address
+        n_obs = len(obs)
+        n_var = len(self.cur_syms)
 
-        ns: dict[str, Any] = {"np": np, "float64": float64}
-        body_lines: list[str] = []
-        func_k = 0
-        for i, name in enumerate(obs):
-            row = obs_idx[name]
-            for j in range(n_vars):
-                scalar_idx = row * n_vars + j
-                ns[f"jac_func_{func_k}"] = self.observable_jacobian_funcs[scalar_idx]
-                body_lines.append(f"    J[{i}, {j}] = jac_func_{func_k}({call_args})")
-                func_k += 1
+        def jacobian_array(state: ND, params: ND) -> ND:
+            return jacobian_eval(addr, state, params, n_obs, n_var)
 
-        func_str = f"""
-def jacobian_array(state, params):
-    J = np.empty(({len(obs)}, {n_vars}), dtype=float64)
-{chr(10).join(body_lines)}
-    return J
-"""
-
-        exec(dedent(func_str), ns)
-        f = njit(ns["jacobian_array"])
-        float_vector = nb_typ.Array(nb_typ.float64, 1, "C")
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=nb_err.NumbaExperimentalFeatureWarning
-            )
-            f.compile((float_vector, float_vector))  # pyright: ignore
-
-        setattr(f, "_symbolicdsge_array_dispatch", True)
-        cache[obs] = cast(Callable, f)
-        return cache[obs]
+        cache[obs] = jacobian_array
+        return jacobian_array
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -132,8 +132,13 @@ class ResidualLayout:
 
 
 class ResidualPrinter(ExpressionPrinter):
-    allocated_dtype = "np.complex128"
-    context_name = "residual"
+    @property
+    def allocated_dtype(self) -> str:
+        return "np.complex128"
+
+    @property
+    def context_name(self) -> str:
+        return "residual"
 
 
 def build_njit(

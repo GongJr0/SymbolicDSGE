@@ -118,6 +118,34 @@ def residual_eval(
     """Complex residual vector (n_eq,) from a residual @cfunc address at a single
     (fwd, cur, par) point. Native twin of the old numba objective vector func."""
 
+def measurement_eval(
+    meas_addr: int,
+    vars: _F64,
+    par: _F64,
+    n_obs: int,
+) -> _F64:
+    """Measurement vector (n_obs,) from a measurement @cfunc address at a single
+    (vars, par) point. Native twin of the old numba observable funcs."""
+
+def jacobian_eval(
+    jac_addr: int,
+    vars: _F64,
+    par: _F64,
+    n_obs: int,
+    n_var: int,
+) -> _F64:
+    """Observable jacobian (n_obs, n_var) from a jacobian @cfunc address at a
+    single (vars, par) point."""
+
+def measurement_path(
+    meas_addr: int,
+    states: _F64,
+    par: _F64,
+    n_obs: int,
+) -> _F64:
+    """Measurement matrix (T, n_obs) from a measurement @cfunc over a (T, n_var)
+    state path."""
+
 def bicomplex_hessian(
     residual_addr: int,
     steady_state: _F64,
