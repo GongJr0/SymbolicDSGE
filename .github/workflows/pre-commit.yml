@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     env:
       PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
 
@@ -96,16 +97,26 @@ jobs:
           echo "Autofix hooks changed these files:"
           git diff --name-only
 
-      - name: Commit and push autofix changes
+      - name: Open a PR with the autofix changes
         if: ${{ steps.autofix.outputs.changed == 'true' && github.event_name != 'pull_request' }}
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # A PAT (or GitHub App token) lets the resulting PR trigger CI so it can
+          # satisfy the branch's required status checks; the default GITHUB_TOKEN
+          # opens the PR but its events do not start further workflow runs.
+          token: ${{ secrets.CI_BOT_TOKEN || github.token }}
+          commit-message: "ci: apply pre-commit fixes"
+          branch: ci/pre-commit-fixes
+          delete-branch: true
+          base: ${{ github.ref_name }}
+          title: "ci: apply pre-commit fixes"
+          body: |
+            Automated pre-commit autofixes (`black-jupyter`, `end-of-file-fixer`,
+            `trailing-whitespace`) that could not be pushed directly to
+            `${{ github.ref_name }}` because it is ruleset-protected. Proposed
+            here for review/merge.
 
-          git add -u
-          git commit -m "ci: apply pre-commit fixes"
-          git push
+            Source commit: ${{ github.sha }}
 
       - name: Commit and push autofix changes to pull request
         if: ${{ steps.autofix.outputs.changed == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
