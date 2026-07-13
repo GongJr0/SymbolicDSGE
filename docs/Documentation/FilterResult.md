@@ -44,3 +44,23 @@ __Fields:__
     $$
 
     Where $K_t$ (kalman gain) is the dampening factor calculated at time $t$ and $v_t$ are innovations calculated. Therefore, in very simplistic terms, $K$ defines how much of the residual between predicted/observed $y$ are inferred to be noise/measurement error.
+
+&nbsp;
+
+# UnscentedFilterResult
+
+```python
+@dataclass(frozen=True)
+class UnscentedFilterResult(FilterResult)
+```
+
+Returned by `#!python SolvedModel.kalman(filter_mode="unscented")` and `#!python KalmanFilter.run_unscented(...)`. Extends `FilterResult` with the first- and second-order components of the unscented state estimate. All `FilterResult` fields are present; `#!python eps_hat` is `#!python None`, since shock recovery (`return_shocks`) is not supported for the UKF.
+
+__Additional Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| x1_pred | `#!python ndarray` | First-order component of the predicted state over time. |
+| x2_pred | `#!python ndarray` | Second-order component of the predicted state over time. |
+| x1_filt | `#!python ndarray` | First-order component of the filtered state over time. |
+| x2_filt | `#!python ndarray` | Second-order component of the filtered state over time. |

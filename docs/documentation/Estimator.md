@@ -21,6 +21,7 @@ Estimator(
     compiled: CompiledModel, # (2)!
     y: np.ndarray | pd.DataFrame, # (3)!
     observables: list[str] | None = None,
+    filter_mode: str = "linear", # (6)!
     estimated_params: Sequence[str] | None = None,
     priors: Mapping[str, Prior] | None = None, # (4)!
     steady_state: np.ndarray | dict[str, float] | None = None,
@@ -38,6 +39,7 @@ Estimator(
 3. Measurement data for Kalman likelihood.
 4. Required for `map(...)` and `mcmc(...)`.
 5. Optional observation covariance override. If omitted through solver entrypoints, `R` can be inferred before estimation.
+6. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
 
 ## Utility
 ```python
