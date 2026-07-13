@@ -115,33 +115,38 @@ The estimation process is carried out by `DSGESolver.estimate()` and `DSGESolver
 ```python
 res, sol = solver.estimate_and_solve(
     compiled=compiled,
-    y=observed, # (1)!
-    observables=["Infl", "Rate"], # (2)!
-    method="mcmc", # (3)!
+    filter_mode="linear", # (1)!
+    y=observed, # (2)!
+    observables=["Infl", "Rate"], # (3)!
+    method="mcmc", # (4)!
     priors=prior_spec,
     steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
-    posterior_point='mean', # (4)!
-    n_draws=100_000, # (5)!
-    burn_in=10_000, # (6)!
-    thin=1, # (7)!
-    update_R_in_iterations=False, # (8)!
+    posterior_point='mean', # (5)!
+    n_draws=100_000, # (6)!
+    burn_in=10_000, # (7)!
+    thin=1, # (8)!
+    update_R_in_iterations=False, # (9)!
 )
 ```
 
-1. Observed data we want to calibrate against
-2. Which observables to use from the model specification. If not specified, all observables will be used. Number columns in `y` must match the number of observables in the model specification.
-3. Chosen from `{'mle', 'map', 'mcmc'}`.
-4. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
-5. Effective sample size (retained draws).
-6. Burn-in iterations.
-7. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
-8. If parameters of R are being estimated, setting this to `True` will re-compute the R matrix using the current sample's parameters.
+1. Mode of the Kalman Filter used to compute the likelihood. Chosen from `{'linear', 'extended', 'unscented'}`.
+2. Observed data we want to calibrate against
+3. Which observables to use from the model specification. If not specified, all observables will be used. Number columns in `y` must match the number of observables in the model specification.
+4. Chosen from `{'mle', 'map', 'mcmc'}`.
+5. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
+6. Effective sample size (retained draws).
+7. Burn-in iterations.
+8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
+9. If parameters of R are being estimated, setting this to `True` will re-compute the R matrix using the current sample's parameters.
    Otherwise, R will be estimated once before the run begins and will be kept static throughout the run.
 
 ```text
-MCMC sampling concluded in 83.00 seconds with 1325.22 iterations per second.
+MCMC sampling concluded in 65.16 seconds with 1688.13 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
+???+ note "Filter Mode Selection"
+    Filter modes increase in capability and complexity as follows: `linear` < `extended` < `unscented`. Linear doesn't support any non-linearities in the model (transitions and measurements). Extended allows for non-linearities in measurements, but not in transitions. Unscented, which is by far the slowest,
+    requires a non-linear (`order>=2`) solution and supports non-linearities in both transitions and measurements. In general, it is recommended to use the simplest possible filter mode that is compatible with a given model. (Note that `extended` on a linear model is equivalent to `linear` but slower.)
 
 ???+ note "Draw Count Calculation"
     `n_draws` directly lets you specify the Effective Sample Size (ESS) you want to retain. Given `n_draws`, `burn_in`, and `thin`, the total number of draws an estimation routine will perform is `n_draws * thin + burn_in`.
