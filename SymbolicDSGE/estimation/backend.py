@@ -103,7 +103,9 @@ def reorder_observables(
         missing_cols = [n for n in obs_given if n not in y.columns]
         if missing_cols:
             raise ValueError(f"DataFrame is missing observable columns: {missing_cols}")
-        y_reordered = y.loc[:, obs_canonical].to_numpy(dtype=float64)
+        # copy=True: pandas can hand back a read-only view under copy-on-write,
+        # which the UKF hot loop (writable memoryview) rejects.
+        y_reordered = y.loc[:, obs_canonical].to_numpy(dtype=float64, copy=True)
     else:
         y_arr = asarray(y, dtype=float64)
         if y_arr.ndim != 2:
@@ -187,13 +189,16 @@ def build_C_d_from_cfunc(
     return C, d
 
 
-def build_P0(
-    compiled: CompiledModel,
+def _build_named_P0(
+    var_names: Sequence[str],
     kalman: KalmanConfig | None,
     p0_mode: str | None,
     p0_scale: float | float64 | None,
 ) -> NDF | None:
-    n = len(compiled.var_names)
+    """Build a P0 covariance over exactly ``var_names`` (eye/diag from config or
+    overrides). Returns ``None`` when no P0 is configured or requested, matching
+    the filter's 'use its own default' contract."""
+    n = len(var_names)
     if kalman is None and p0_mode is None:
         return None
 
@@ -213,13 +218,45 @@ def build_P0(
         if diag is None:
             raise ValueError("P0 diag mode requires diagonal entries.")
         mat = np.zeros((n, n), dtype=float64)
-        for i, var in enumerate(compiled.var_names):
+        for i, var in enumerate(var_names):
             if var not in diag:
                 raise ValueError(f"Missing P0 diagonal entry for variable '{var}'.")
             mat[i, i] = float64(diag[var]) * scale
         return mat
 
     raise ValueError(f"Unrecognized p0_mode: {mode}")
+
+
+def build_P0(
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    p0_mode: str | None,
+    p0_scale: float | float64 | None,
+) -> NDF | None:
+    """P0 over all model variables (the linear/extended state space)."""
+    return _build_named_P0(compiled.var_names, kalman, p0_mode, p0_scale)
+
+
+def build_unscented_P0(
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    p0_mode: str | None,
+    p0_scale: float | float64 | None,
+) -> NDF | None:
+    """Augmented ``(2*n_state, 2*n_state)`` block-diagonal P0 for unscented
+    filtering: the state-variable P0 in the top-left block, an identity in the
+    bottom-right (the second-order augmentation channel), zeros off-diagonal.
+    Returns ``None`` when no state P0 is configured, matching :func:`build_P0`."""
+    n_state = compiled.n_state
+    state_P0 = _build_named_P0(
+        list(compiled.var_names[:n_state]), kalman, p0_mode, p0_scale
+    )
+    if state_P0 is None:
+        return None
+    out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
+    out[:n_state, :n_state] = state_P0
+    out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
+    return out
 
 
 def resolve_filter_options(
@@ -266,7 +303,10 @@ def prepare_filter_run(
     kalman = compiled.kalman
     obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
     mode = filter_mode
-    P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
+    if mode == "unscented":
+        P0 = build_unscented_P0(compiled, kalman, p0_mode, p0_scale)
+    else:
+        P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
     kf_jitter, kf_sym = resolve_filter_options(kalman, jitter, symmetrize)
 
     return PreparedFilterRun(
@@ -314,6 +354,33 @@ def build_R_from_config_params(
     return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
 
+def _get_solution(
+    *,
+    solver: DSGESolver,
+    compiled: CompiledModel,
+    params: Mapping[str, float64],
+    mode: str,
+    steady_state: NDF | dict[str, float] | None,
+    raise_on_bk_violation: bool = True,
+) -> Any:
+    """Solve the model to the order the filter mode requires.
+
+    Unscented filtering consumes the second-order policy tensors (``order=2``);
+    the linear and extended filters use the first-order ``A``/``B`` (``order=1``).
+    The single ``mode -> order`` authority, so it cannot drift from the field
+    reads in :func:`_prepare_filter_loglik`. ``raise_on_bk_violation`` reaches the
+    solver unchanged: ``False`` for the warning-counted search path, ``True`` for
+    the one-shot R estimators (which catch the raise and fall back to diagonal R).
+    """
+    return solver.solve(
+        compiled=compiled,
+        order=2 if mode == "unscented" else 1,
+        parameters={k: float(v) for k, v in params.items()},
+        steady_state=steady_state,
+        raise_on_bk_violation=raise_on_bk_violation,
+    )
+
+
 def _prepare_filter_loglik(
     *,
     sol: Any,
@@ -334,15 +401,11 @@ def _prepare_filter_loglik(
     """
     mode = prepared.mode
     common: dict[str, Any] = dict(
-        A=sol.A,
-        B=sol.B,
         Q=Q,
         y=prepared.y_reordered,
-        x0=x0,
         P0=prepared.P0,
         jitter=float(prepared.kf_jitter),
         symmetrize=prepared.kf_sym,
-        return_shocks=False,
         _store_history=False,
         _raise_on_error=raise_on_error,
     )
@@ -356,14 +419,50 @@ def _prepare_filter_loglik(
             prepared.y_reordered.shape[1],
         )
         run_filter = KalmanFilter.run_raw
-        mode_args: dict[str, Any] = {"C": C, "d": d}
+        mode_args: dict[str, Any] = {
+            "A": sol.A,
+            "B": sol.B,
+            "C": C,
+            "d": d,
+            "x0": x0,
+            "return_shocks": False,
+        }
     elif mode == "extended":
         run_filter = KalmanFilter.run_extended_raw
         mode_args = {
+            "A": sol.A,
+            "B": sol.B,
             "meas_addr": prepared.meas_addr,
             "jac_addr": prepared.jac_addr,
             "calib_params": calib_params,
             "compute_y_filt": False,
+            "x0": x0,
+            "return_shocks": False,
+        }
+    elif mode == "unscented":
+        # hx is (n_state, n_state); recover n_state from it so bx and the
+        # augmented z0 don't need `compiled` threaded in.
+        n_state = sol.policy.p.shape[0]
+        if x0 is None:
+            x0_state = np.zeros((n_state,), dtype=float64)
+        else:
+            raw = asarray(x0, dtype=float64)
+            x0_state = raw[:n_state] if raw.shape[0] != n_state else raw
+        z0 = np.zeros((2 * n_state,), dtype=float64)
+        z0[:n_state] = x0_state
+        run_filter = KalmanFilter.run_unscented_raw
+        mode_args = {
+            "meas_addr": prepared.meas_addr,
+            "hx": sol.policy.p,
+            "gx": sol.policy.f,
+            "bx": asarray(sol.B[:n_state, :], dtype=float64),
+            "hxx": sol.policy.hxx,
+            "gxx": sol.policy.gxx,
+            "hss": sol.policy.hss,
+            "gss": sol.policy.gss,
+            "steady_state": sol.policy.steady_state,
+            "calib_params": calib_params,
+            "z0": z0,
         }
     else:
         raise ValueError(f"Unrecognized filter_mode: {mode!r}")
@@ -406,9 +505,11 @@ def evaluate_loglik(
             symmetrize=symmetrize,
         )
     )
-    sol = solver.solve(
+    sol = _get_solution(
+        solver=solver,
         compiled=compiled,
-        parameters={k: float(v) for k, v in params.items()},
+        params=params,
+        mode=prepared_run.mode,
         steady_state=steady_state,
         raise_on_bk_violation=False,
     )
@@ -460,9 +561,11 @@ def estimate_R_diag(
         )
     )
     try:
-        sol = solver.solve(
+        sol = _get_solution(
+            solver=solver,
             compiled=compiled,
-            parameters={k: float(v) for k, v in params.items()},
+            params=params,
+            mode=prepared.mode,
             steady_state=steady_state,
         )
     except BaseException:
@@ -591,9 +694,11 @@ def estimate_R(
     )
     u0 = np.concatenate([log_std0, np.zeros((n_cpc,), dtype=float64)])
     try:
-        sol = solver.solve(
+        sol = _get_solution(
+            solver=solver,
             compiled=compiled,
-            parameters={k: float(v) for k, v in params.items()},
+            params=params,
+            mode=prepared.mode,
             steady_state=steady_state,
         )
     except BaseException:

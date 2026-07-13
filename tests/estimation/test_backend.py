@@ -1056,3 +1056,70 @@ def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
         symmetrize=None,
     )
     assert np.allclose(R, expected)
+
+
+@pytest.fixture(scope="module")
+def rbc_ukf_bundle():
+    """Second-order RBC with a minimal one-observable Kalman config, solved to
+    order 2. The observed series is pure RNG around the consumption steady state;
+    parity only compares two filter implementations on the same data, so it need
+    not be model-consistent."""
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "models"
+        / "rbc_second_order.yaml"
+    )
+    model, _ = ModelParser(path).get_all()
+    kalman = KalmanConfig(
+        R=np.array([[0.01]], dtype=np.float64),
+        P0=P0Config(mode="eye", scale=0.1, diag=None),
+    )
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled, order=2)
+
+    # ndarray (not a single-column DataFrame): pandas hands back a read-only
+    # view for one column under copy-on-write, which ``ukf_hot_loop`` rejects on
+    # the standalone interface path. Same values reach both filters either way.
+    c_ss = float(model.calibration.parameters[Symbol("c_ss")])
+    rng = np.random.default_rng(20260713)
+    y = (c_ss + rng.normal(0.0, 0.05, size=(6, 1))).astype(np.float64)
+    return {"solver": solver, "compiled": compiled, "solved": solved, "y": y}
+
+
+def test_evaluate_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
+    """End-to-end UKF estimation parity: one ``Estimator.loglik`` at the
+    calibration point (unscented) must equal ``SolvedModel.kalman`` unscented on
+    the same data. Exercises the whole new path in one estimation: the
+    ``order=2`` solve, the augmented ``build_unscented_P0``, and the seam's
+    unscented branch (``bx``/``z0``/policy tensors -> ``run_unscented_raw``)."""
+    solver = rbc_ukf_bundle["solver"]
+    compiled = rbc_ukf_bundle["compiled"]
+    solved = rbc_ukf_bundle["solved"]
+    y = rbc_ukf_bundle["y"]
+
+    est = Estimator(
+        solver=solver,
+        compiled=compiled,
+        y=y,
+        observables=["c_obs"],
+        filter_mode="unscented",
+        estimated_params=["rho"],
+        symmetrize=True,
+    )
+    ll_est = float(est.loglik(est.theta0()))
+
+    ll_ref = float(
+        solved.kalman(
+            y=y,
+            filter_mode="unscented",
+            observables=["c_obs"],
+            symmetrize=True,
+        ).loglik
+    )
+
+    assert np.isfinite(ll_est)
+    assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)

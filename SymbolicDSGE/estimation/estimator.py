@@ -142,6 +142,11 @@ class Estimator:
                 jitter=jitter,
                 symmetrize=symmetrize,
             )
+            # Drop the original observations at the boundary: reorder_observables
+            # (inside prepare_filter_run) already produced the canonical, writable
+            # ndarray the filter runs on, so no DataFrame or read-only
+            # copy-on-write view is dragged into the backend on every eval.
+            self.y = self._prepared_filter.y_reordered
 
         self._base_params = backend.extract_base_params(compiled)
         default_params = list(self._base_params.keys())
