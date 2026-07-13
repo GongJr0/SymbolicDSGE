@@ -101,7 +101,7 @@ sol = solver.solve(compiled, ...)
 sol.serve(open_browser=True)
 ```
 
-Although SymbolicDSGE is still a fast-moving project; the UI effectively supports all features with the exception of integration with the `[sr]` extra as of `v1.4.2`. Symbolic Regression requires extensive configuration and templating, therefore it's presence as a GUI component is not planned for the future.
+Although SymbolicDSGE is still a fast-moving project; the UI effectively supports all features with the exception of integration with the `[sr]` extra as of `v1.4.2`. Symbolic Regression requires extensive configuration and templating posing unique difficulties in a no-code environment. Therefore, it's presence as a GUI component is not planned for the future.
 
 ### Read the Docs
 
