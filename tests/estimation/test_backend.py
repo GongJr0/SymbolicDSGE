@@ -134,26 +134,6 @@ def test_reorder_observables_dataframe_and_ndarray_paths():
     assert np.allclose(y_arr, np.array([[20.0, 10.0], [40.0, 30.0]], dtype=np.float64))
 
 
-def test_infer_filter_mode_affine_vs_non_affine():
-    compiled_aff = SimpleNamespace(
-        kalman=None,
-        observable_names=["Infl", "Rate"],
-        config=SimpleNamespace(
-            equations=SimpleNamespace(obs_is_affine={"Infl": True, "Rate": True})
-        ),
-    )
-    compiled_mix = SimpleNamespace(
-        kalman=None,
-        observable_names=["Infl", "Rate"],
-        config=SimpleNamespace(
-            equations=SimpleNamespace(obs_is_affine={"Infl": True, "Rate": False})
-        ),
-    )
-
-    assert backend.infer_filter_mode(compiled_aff, ["Infl", "Rate"]) == "linear"
-    assert backend.infer_filter_mode(compiled_mix, ["Infl", "Rate"]) == "extended"
-
-
 @pytest.mark.parametrize(
     "observables,y,match",
     [
@@ -526,6 +506,7 @@ def test_estimate_R_diag_returns_positive_diagonal(post82_bundle):
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -560,6 +541,7 @@ def test_estimate_R_tries_map_then_falls_back_to_mle(post82_bundle, monkeypatch)
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -593,6 +575,7 @@ def test_estimate_R_stops_after_successful_map(post82_bundle, monkeypatch):
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -620,6 +603,7 @@ def test_estimate_R_falls_back_to_diag_when_solve_raises(post82_bundle, monkeypa
         compiled=compiled,
         y=y,
         params=params,
+        filter_mode="linear",
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
@@ -722,16 +706,16 @@ def test_build_R_from_config_params_error_branches():
         )
 
 
-def test_backend_numba_helpers_and_validation_error_paths():
+def test_backend_corr_cov_helpers_and_validation_error_paths():
     z = np.array([0.2, -0.1, 0.3], dtype=np.float64)
-    L = backend._corr_chol_from_unconstrained_backend.py_func(z, 3)
+    L = backend._corr_chol_from_unconstrained(z, 3)
     assert L.shape == (3, 3)
     assert np.allclose(np.diag(L @ L.T), np.ones(3), atol=1e-10)
 
-    z_back = backend._unconstrained_from_corr_chol_backend.py_func(L)
+    z_back = backend._unconstrained_from_corr_chol(L)
     assert np.allclose(z_back, z, atol=1e-10, rtol=0.0)
 
-    R, std, Lcorr = backend._R_from_unconstrained_backend.py_func(
+    R, std, Lcorr = backend._R_from_unconstrained(
         np.array([np.log(0.5), np.log(0.8), 0.2], dtype=np.float64),
         2,
     )
@@ -773,11 +757,14 @@ def test_backend_numba_helpers_and_validation_error_paths():
         backend._R_from_unconstrained(np.array([0.0, 0.0], dtype=np.float64), K=2)
 
 
-def test_unconstrained_from_corr_chol_backend_clips_extreme_cpc_values():
-    z_pos = backend._unconstrained_from_corr_chol_backend.py_func(
+def test_unconstrained_from_corr_chol_clips_extreme_cpc_values():
+    # The native kernel clamps partial correlations to the open unit interval.
+    # Feed factors whose rows exceed unit norm (bypassing the validating wrapper)
+    # so the raw clamp path is exercised directly.
+    z_pos = backend.unconstrained_from_corr_chol(
         np.array([[1.0, 0.0], [1.1, 0.1]], dtype=np.float64)
     )
-    z_neg = backend._unconstrained_from_corr_chol_backend.py_func(
+    z_neg = backend.unconstrained_from_corr_chol(
         np.array([[1.0, 0.0], [-1.1, 0.1]], dtype=np.float64)
     )
     assert np.isfinite(z_pos[0])
@@ -814,6 +801,7 @@ def test_estimate_R_diag_falls_back_when_solver_raises(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -877,6 +865,7 @@ def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch)
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -941,6 +930,7 @@ def test_estimate_R_extended_branch_and_final_diag_fallback(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -999,6 +989,7 @@ def test_estimate_R_linear_branch_uses_kalman_run(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -1055,6 +1046,7 @@ def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
         compiled=SimpleNamespace(),
         y=y_reordered,
         params={},
+        filter_mode="linear",
         observables=["a", "b"],
         steady_state=None,
         x0=None,
@@ -1064,3 +1056,70 @@ def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
         symmetrize=None,
     )
     assert np.allclose(R, expected)
+
+
+@pytest.fixture(scope="module")
+def rbc_ukf_bundle():
+    """Second-order RBC with a minimal one-observable Kalman config, solved to
+    order 2. The observed series is pure RNG around the consumption steady state;
+    parity only compares two filter implementations on the same data, so it need
+    not be model-consistent."""
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "models"
+        / "rbc_second_order.yaml"
+    )
+    model, _ = ModelParser(path).get_all()
+    kalman = KalmanConfig(
+        R=np.array([[0.01]], dtype=np.float64),
+        P0=P0Config(mode="eye", scale=0.1, diag=None),
+    )
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled, order=2)
+
+    # ndarray (not a single-column DataFrame): pandas hands back a read-only
+    # view for one column under copy-on-write, which ``ukf_hot_loop`` rejects on
+    # the standalone interface path. Same values reach both filters either way.
+    c_ss = float(model.calibration.parameters[Symbol("c_ss")])
+    rng = np.random.default_rng(20260713)
+    y = (c_ss + rng.normal(0.0, 0.05, size=(6, 1))).astype(np.float64)
+    return {"solver": solver, "compiled": compiled, "solved": solved, "y": y}
+
+
+def test_evaluate_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
+    """End-to-end UKF estimation parity: one ``Estimator.loglik`` at the
+    calibration point (unscented) must equal ``SolvedModel.kalman`` unscented on
+    the same data. Exercises the whole new path in one estimation: the
+    ``order=2`` solve, the augmented ``build_unscented_P0``, and the seam's
+    unscented branch (``bx``/``z0``/policy tensors -> ``run_unscented_raw``)."""
+    solver = rbc_ukf_bundle["solver"]
+    compiled = rbc_ukf_bundle["compiled"]
+    solved = rbc_ukf_bundle["solved"]
+    y = rbc_ukf_bundle["y"]
+
+    est = Estimator(
+        solver=solver,
+        compiled=compiled,
+        y=y,
+        observables=["c_obs"],
+        filter_mode="unscented",
+        estimated_params=["rho"],
+        symmetrize=True,
+    )
+    ll_est = float(est.loglik(est.theta0()))
+
+    ll_ref = float(
+        solved.kalman(
+            y=y,
+            filter_mode="unscented",
+            observables=["c_obs"],
+            symmetrize=True,
+        ).loglik
+    )
+
+    assert np.isfinite(ll_est)
+    assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)

@@ -28,9 +28,11 @@ def logprior_program(
     scalar_transform_codes: _I64,
     scalar_dist_params: _F64,
     scalar_transform_params: _F64,
-    matrix_indices: _I64,
+    matrix_offsets: _I64,
     matrix_dims: _I64,
     matrix_lengths: _I64,
     matrix_etas: _F64,
     matrix_log_constants: _F64,
 ) -> float: ...
+def cov_from_unconstrained(z: _F64, std: _F64) -> tuple[_F64, _F64]: ...
+def unconstrained_from_corr_chol(L: _F64) -> _F64: ...

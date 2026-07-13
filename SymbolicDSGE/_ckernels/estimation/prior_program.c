@@ -1,6 +1,5 @@
 #include "prior_program.h"
 #include <math.h>
-#include <stdlib.h>
 
 f64 sdsge_softplus_scalar(f64 x) {
   if (x > 0.0) {
@@ -218,16 +217,18 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
 /* Packed log-prior driver: the per-replication hot path. Mirrors the numba
  * _evaluate_logprior_program -- sums the scalar terms (inverse-transform z -> x,
  * then dist logpdf + transform log-jacobian) and the LKJ matrix blocks, and
- * short-circuits to NaN the moment any term is NaN. */
+ * short-circuits to NaN the moment any term is NaN. Each block's unconstrained
+ * z occupies a contiguous run theta[offset .. offset+length), so the block is
+ * read straight off theta by base-pointer offset (no gather, no scratch). */
 f64 sdsge_logprior_program(
     f64 *SDSGE_RESTRICT theta, i64 *SDSGE_RESTRICT scalar_indices,
     i64 *SDSGE_RESTRICT scalar_dist_codes,
     i64 *SDSGE_RESTRICT scalar_transform_codes,
     f64 *SDSGE_RESTRICT scalar_dist_params,
     f64 *SDSGE_RESTRICT scalar_transform_params, i64 n_scalar,
-    i64 *SDSGE_RESTRICT matrix_indices, i64 *SDSGE_RESTRICT matrix_dims,
+    i64 *SDSGE_RESTRICT matrix_offsets, i64 *SDSGE_RESTRICT matrix_dims,
     i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
-    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, i64 max_matrix_len) {
+    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks) {
   f64 lp = 0.0;
 
   for (i64 i = 0; i < n_scalar; ++i) {
@@ -248,28 +249,73 @@ f64 sdsge_logprior_program(
     lp += logp + logjac;
   }
 
-  if (n_blocks > 0) {
-    f64 *z_block = (f64 *)malloc((size_t)max_matrix_len * sizeof(f64));
-    if (z_block == NULL) {
+  for (i64 b = 0; b < n_blocks; ++b) {
+    f64 block_lp;
+    sdsge_lkj_chol_logpdf_from_z(theta + matrix_offsets[b], matrix_dims[b],
+                                 matrix_lengths[b], matrix_etas[b],
+                                 matrix_log_constants[b], &block_lp);
+    if (isnan(block_lp)) {
       return NAN;
     }
-    for (i64 b = 0; b < n_blocks; ++b) {
-      i64 length = matrix_lengths[b];
-      for (i64 j = 0; j < length; ++j) {
-        z_block[j] = theta[matrix_indices[b * max_matrix_len + j]];
-      }
-      f64 block_lp;
-      sdsge_lkj_chol_logpdf_from_z(z_block, matrix_dims[b], length,
-                                   matrix_etas[b], matrix_log_constants[b],
-                                   &block_lp);
-      if (isnan(block_lp)) {
-        free(z_block);
-        return NAN;
-      }
-      lp += block_lp;
-    }
-    free(z_block);
+    lp += block_lp;
   }
 
   return lp;
+}
+
+/* Unconstrained (z, std) -> full covariance. Builds the correlation Cholesky
+ * factor row by row from the unconstrained CPC values z (tanh + stick-breaking
+ * remainder), then forms cov = diag(std) (L L^T) diag(std). ``scratch_M`` holds
+ * L (K*K, row-major); ``out`` receives the K*K covariance (row-major). */
+void sdsge_cov_from_unconstrained(const f64 *SDSGE_RESTRICT z,
+                                  const f64 *SDSGE_RESTRICT std, const i64 K,
+                                  f64 *SDSGE_RESTRICT L,
+                                  f64 *SDSGE_RESTRICT out) {
+  i64 idx = 0;
+  for (i64 i = 0; i < K; ++i) {
+    const i64 ri = i * K;
+    const f64 si = std[i];
+
+    f64 rem = 1.0;
+    for (i64 j = 0; j < i; ++j) {
+      const f64 v = sqrt(max_f64(1e-14, rem)) * tanh(z[idx++]);
+      L[ri + j] = v;
+      rem -= v * v;
+    }
+    L[ri + i] = sqrt(max_f64(1e-14, rem));
+
+    for (i64 j = 0; j < i; ++j) {
+      const i64 rj = j * K;
+      f64 s = 0.0;
+      for (i64 c = 0; c <= j; ++c)
+        s += L[ri + c] * L[rj + c];
+      const f64 v = si * std[j] * s;
+      out[ri + j] = v;
+      out[rj + i] = v;
+    }
+    out[ri + i] = si * si;
+  }
+}
+
+/* Inverse of the Cholesky stage of sdsge_cov_from_unconstrained: correlation
+ * Cholesky factor L (K*K, row-major) -> unconstrained CPC values out_z
+ * (length K(K-1)/2). Recovers each partial correlation as L[k,j] / sqrt(rem),
+ * clamps to the open unit interval, and applies atanh. */
+void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L, const i64 K,
+                                        f64 *SDSGE_RESTRICT out_z) {
+  i64 idx = 0;
+  for (i64 k = 1; k < K; ++k) {
+    const i64 rk = k * K;
+    f64 rem = 1.0;
+    for (i64 j = 0; j < k; ++j) {
+      const f64 v = sqrt(max_f64(1e-14, rem));
+      f64 cpc = L[rk + j] / v;
+      if (cpc < -1.0 + 1e-14)
+        cpc = -1.0 + 1e-14;
+      else if (cpc > 1.0 - 1e-14)
+        cpc = 1.0 - 1e-14;
+      out_z[idx++] = atanh(cpc);
+      rem -= L[rk + j] * L[rk + j];
+    }
+  }
 }

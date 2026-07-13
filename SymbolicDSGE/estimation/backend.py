@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence, cast
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -10,9 +10,12 @@ from numpy import asarray, float64
 from numpy.typing import NDArray
 from scipy import optimize
 from sympy import Symbol
-from numba import njit
 
 from .._ckernels.core import measurement_eval, jacobian_eval
+from .._ckernels.estimation import (
+    cov_from_unconstrained,
+    unconstrained_from_corr_chol,
+)
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..core.compiled_model import CompiledModel
@@ -100,7 +103,9 @@ def reorder_observables(
         missing_cols = [n for n in obs_given if n not in y.columns]
         if missing_cols:
             raise ValueError(f"DataFrame is missing observable columns: {missing_cols}")
-        y_reordered = y.loc[:, obs_canonical].to_numpy(dtype=float64)
+        # copy=True: pandas can hand back a read-only view under copy-on-write,
+        # which the UKF hot loop (writable memoryview) rejects.
+        y_reordered = y.loc[:, obs_canonical].to_numpy(dtype=float64, copy=True)
     else:
         y_arr = asarray(y, dtype=float64)
         if y_arr.ndim != 2:
@@ -119,24 +124,6 @@ def reorder_observables(
         raise ValueError("Observation data contains NaN values.")
 
     return obs_canonical, y_reordered
-
-
-def infer_filter_mode(
-    compiled: CompiledModel,
-    observables: list[str] | None,
-) -> str:
-    canon = getattr(compiled, "observable_names", [])
-    if observables is None:
-        obs = list(canon)
-    else:
-        obs = list(observables)
-
-    eqs = getattr(getattr(compiled, "config", None), "equations", None)
-    if eqs is None or not hasattr(eqs, "obs_is_affine") or len(obs) == 0:
-        return "linear"
-    is_affine = eqs.obs_is_affine
-    all_affine = all(bool(is_affine[name]) for name in obs)
-    return "linear" if all_affine else "extended"
 
 
 def build_Q(compiled: CompiledModel, params: Mapping[str, float64]) -> NDF:
@@ -202,13 +189,16 @@ def build_C_d_from_cfunc(
     return C, d
 
 
-def build_P0(
-    compiled: CompiledModel,
+def _build_named_P0(
+    var_names: Sequence[str],
     kalman: KalmanConfig | None,
     p0_mode: str | None,
     p0_scale: float | float64 | None,
 ) -> NDF | None:
-    n = len(compiled.var_names)
+    """Build a P0 covariance over exactly ``var_names`` (eye/diag from config or
+    overrides). Returns ``None`` when no P0 is configured or requested, matching
+    the filter's 'use its own default' contract."""
+    n = len(var_names)
     if kalman is None and p0_mode is None:
         return None
 
@@ -228,13 +218,45 @@ def build_P0(
         if diag is None:
             raise ValueError("P0 diag mode requires diagonal entries.")
         mat = np.zeros((n, n), dtype=float64)
-        for i, var in enumerate(compiled.var_names):
+        for i, var in enumerate(var_names):
             if var not in diag:
                 raise ValueError(f"Missing P0 diagonal entry for variable '{var}'.")
             mat[i, i] = float64(diag[var]) * scale
         return mat
 
     raise ValueError(f"Unrecognized p0_mode: {mode}")
+
+
+def build_P0(
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    p0_mode: str | None,
+    p0_scale: float | float64 | None,
+) -> NDF | None:
+    """P0 over all model variables (the linear/extended state space)."""
+    return _build_named_P0(compiled.var_names, kalman, p0_mode, p0_scale)
+
+
+def build_unscented_P0(
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    p0_mode: str | None,
+    p0_scale: float | float64 | None,
+) -> NDF | None:
+    """Augmented ``(2*n_state, 2*n_state)`` block-diagonal P0 for unscented
+    filtering: the state-variable P0 in the top-left block, an identity in the
+    bottom-right (the second-order augmentation channel), zeros off-diagonal.
+    Returns ``None`` when no state P0 is configured, matching :func:`build_P0`."""
+    n_state = compiled.n_state
+    state_P0 = _build_named_P0(
+        list(compiled.var_names[:n_state]), kalman, p0_mode, p0_scale
+    )
+    if state_P0 is None:
+        return None
+    out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
+    out[:n_state, :n_state] = state_P0
+    out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
+    return out
 
 
 def resolve_filter_options(
@@ -272,7 +294,7 @@ def prepare_filter_run(
     compiled: CompiledModel,
     y: NDF | pd.DataFrame,
     observables: list[str] | None,
-    filter_mode: str | None,
+    filter_mode: str,
     p0_mode: str | None,
     p0_scale: float | float64 | None,
     jitter: float | float64 | None,
@@ -280,8 +302,11 @@ def prepare_filter_run(
 ) -> PreparedFilterRun:
     kalman = compiled.kalman
     obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
-    mode = infer_filter_mode(compiled, obs) if filter_mode is None else filter_mode
-    P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
+    mode = filter_mode
+    if mode == "unscented":
+        P0 = build_unscented_P0(compiled, kalman, p0_mode, p0_scale)
+    else:
+        P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
     kf_jitter, kf_sym = resolve_filter_options(kalman, jitter, symmetrize)
 
     return PreparedFilterRun(
@@ -329,13 +354,133 @@ def build_R_from_config_params(
     return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
 
+def _get_solution(
+    *,
+    solver: DSGESolver,
+    compiled: CompiledModel,
+    params: Mapping[str, float64],
+    mode: str,
+    steady_state: NDF | dict[str, float] | None,
+    raise_on_bk_violation: bool = True,
+) -> Any:
+    """Solve the model to the order the filter mode requires.
+
+    Unscented filtering consumes the second-order policy tensors (``order=2``);
+    the linear and extended filters use the first-order ``A``/``B`` (``order=1``).
+    The single ``mode -> order`` authority, so it cannot drift from the field
+    reads in :func:`_prepare_filter_loglik`. ``raise_on_bk_violation`` reaches the
+    solver unchanged: ``False`` for the warning-counted search path, ``True`` for
+    the one-shot R estimators (which catch the raise and fall back to diagonal R).
+    """
+    return solver.solve(
+        compiled=compiled,
+        order=2 if mode == "unscented" else 1,
+        parameters={k: float(v) for k, v in params.items()},
+        steady_state=steady_state,
+        raise_on_bk_violation=raise_on_bk_violation,
+    )
+
+
+def _prepare_filter_loglik(
+    *,
+    sol: Any,
+    prepared: PreparedFilterRun,
+    Q: NDF,
+    calib_params: NDF,
+    x0: NDF | None,
+    raise_on_error: bool,
+) -> Callable[[NDF], float64]:
+    """Bind a prepared filter run to a closure ``R -> loglik``.
+
+    The single filter-mode dispatch: builds the linear measurement ``(C, d)``
+    once (hoisted out of any R-optimization loop), picks the matching
+    ``KalmanFilter`` entry point, and raises on an unknown mode. The returned
+    closure runs that filter for a given ``R`` and returns its log-likelihood.
+    ``raise_on_error`` reaches the filter unchanged: ``False`` for the
+    warning-counted search path, ``True`` for the one-shot R estimators.
+    """
+    mode = prepared.mode
+    common: dict[str, Any] = dict(
+        Q=Q,
+        y=prepared.y_reordered,
+        P0=prepared.P0,
+        jitter=float(prepared.kf_jitter),
+        symmetrize=prepared.kf_sym,
+        _store_history=False,
+        _raise_on_error=raise_on_error,
+    )
+    run_filter: Callable[..., Any]
+    if mode == "linear":
+        C, d = build_C_d_from_cfunc(
+            prepared.meas_addr,
+            prepared.jac_addr,
+            prepared.zero_state,
+            calib_params,
+            prepared.y_reordered.shape[1],
+        )
+        run_filter = KalmanFilter.run_raw
+        mode_args: dict[str, Any] = {
+            "A": sol.A,
+            "B": sol.B,
+            "C": C,
+            "d": d,
+            "x0": x0,
+            "return_shocks": False,
+        }
+    elif mode == "extended":
+        run_filter = KalmanFilter.run_extended_raw
+        mode_args = {
+            "A": sol.A,
+            "B": sol.B,
+            "meas_addr": prepared.meas_addr,
+            "jac_addr": prepared.jac_addr,
+            "calib_params": calib_params,
+            "compute_y_filt": False,
+            "x0": x0,
+            "return_shocks": False,
+        }
+    elif mode == "unscented":
+        # hx is (n_state, n_state); recover n_state from it so bx and the
+        # augmented z0 don't need `compiled` threaded in.
+        n_state = sol.policy.p.shape[0]
+        if x0 is None:
+            x0_state = np.zeros((n_state,), dtype=float64)
+        else:
+            raw = asarray(x0, dtype=float64)
+            x0_state = raw[:n_state] if raw.shape[0] != n_state else raw
+        z0 = np.zeros((2 * n_state,), dtype=float64)
+        z0[:n_state] = x0_state
+        run_filter = KalmanFilter.run_unscented_raw
+        mode_args = {
+            "meas_addr": prepared.meas_addr,
+            "hx": sol.policy.p,
+            "gx": sol.policy.f,
+            "bx": asarray(sol.B[:n_state, :], dtype=float64),
+            "hxx": sol.policy.hxx,
+            "gxx": sol.policy.gxx,
+            "hss": sol.policy.hss,
+            "gss": sol.policy.gss,
+            "steady_state": sol.policy.steady_state,
+            "calib_params": calib_params,
+            "z0": z0,
+        }
+    else:
+        raise ValueError(f"Unrecognized filter_mode: {mode!r}")
+
+    def loglik_of_R(R: NDF) -> float64:
+        run = run_filter(R=R, **mode_args, **common)
+        return float64(run.loglik)
+
+    return loglik_of_R
+
+
 def evaluate_loglik(
     *,
     solver: DSGESolver,
     compiled: CompiledModel,
     y: NDF | pd.DataFrame,
     params: Mapping[str, float64],
-    filter_mode: str | None,
+    filter_mode: str,
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
     x0: NDF | None,
@@ -360,61 +505,26 @@ def evaluate_loglik(
             symmetrize=symmetrize,
         )
     )
-    sol = solver.solve(
+    sol = _get_solution(
+        solver=solver,
         compiled=compiled,
-        parameters={k: float(v) for k, v in params.items()},
+        params=params,
+        mode=prepared_run.mode,
         steady_state=steady_state,
+        raise_on_bk_violation=False,
     )
     Q = build_Q(compiled, params)
     R_mat = resolve_R(compiled, compiled.kalman, prepared_run.observables, R)
     calib_params = build_calib_param_vector(compiled, params)
-
-    if prepared_run.mode == "linear":
-        C, d = build_C_d_from_cfunc(
-            prepared_run.meas_addr,
-            prepared_run.jac_addr,
-            prepared_run.zero_state,
-            calib_params,
-            prepared_run.y_reordered.shape[1],
-        )
-        result = KalmanFilter.run_raw(
-            A=sol.A,
-            B=sol.B,
-            C=C,
-            d=d,
-            Q=Q,
-            R=R_mat,
-            y=prepared_run.y_reordered,
-            x0=x0,
-            P0=prepared_run.P0,
-            jitter=float(prepared_run.kf_jitter),
-            symmetrize=prepared_run.kf_sym,
-            return_shocks=False,
-            _store_history=False,
-        )
-        return float64(result.loglik)
-
-    if prepared_run.mode == "extended":
-        result = KalmanFilter.run_extended_raw(
-            meas_addr=prepared_run.meas_addr,
-            jac_addr=prepared_run.jac_addr,
-            A=sol.A,
-            B=sol.B,
-            calib_params=calib_params,
-            Q=Q,
-            R=R_mat,
-            y=prepared_run.y_reordered,
-            x0=x0,
-            P0=prepared_run.P0,
-            jitter=float(prepared_run.kf_jitter),
-            symmetrize=prepared_run.kf_sym,
-            return_shocks=False,
-            compute_y_filt=False,
-            _store_history=False,
-        )
-        return float64(result.loglik)
-
-    raise ValueError(f"Unrecognized filter_mode: {prepared_run.mode}")
+    loglik_of_R = _prepare_filter_loglik(
+        sol=sol,
+        prepared=prepared_run,
+        Q=Q,
+        calib_params=calib_params,
+        x0=x0,
+        raise_on_error=False,
+    )
+    return loglik_of_R(R_mat)
 
 
 def estimate_R_diag(
@@ -423,6 +533,7 @@ def estimate_R_diag(
     compiled: CompiledModel,
     y: NDF | pd.DataFrame,
     params: Mapping[str, float64],
+    filter_mode: str,
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
     x0: NDF | None,
@@ -435,7 +546,7 @@ def estimate_R_diag(
         compiled=compiled,
         y=y,
         observables=observables,
-        filter_mode=None,
+        filter_mode=filter_mode,
         p0_mode=p0_mode,
         p0_scale=p0_scale,
         jitter=jitter,
@@ -450,9 +561,11 @@ def estimate_R_diag(
         )
     )
     try:
-        sol = solver.solve(
+        sol = _get_solution(
+            solver=solver,
             compiled=compiled,
-            parameters={k: float(v) for k, v in params.items()},
+            params=params,
+            mode=prepared.mode,
             steady_state=steady_state,
         )
     except BaseException:
@@ -461,57 +574,17 @@ def estimate_R_diag(
     Q = build_Q(compiled, params)
     bounds = [(-30.0, 10.0)] * m
     calib_params = build_calib_param_vector(compiled, params)
+    loglik_of_R = _prepare_filter_loglik(
+        sol=sol,
+        prepared=prepared,
+        Q=Q,
+        calib_params=calib_params,
+        x0=x0,
+        raise_on_error=True,
+    )
 
-    if prepared.mode == "linear":
-        C, d = build_C_d_from_cfunc(
-            prepared.meas_addr,
-            prepared.jac_addr,
-            prepared.zero_state,
-            calib_params,
-            prepared.y_reordered.shape[1],
-        )
-
-        def obj(eta: NDF) -> float64:
-            R = np.diag(np.exp(eta))
-            run = KalmanFilter.run_raw(
-                A=sol.A,
-                B=sol.B,
-                C=C,
-                d=d,
-                Q=Q,
-                R=R,
-                y=prepared.y_reordered,
-                x0=x0,
-                P0=prepared.P0,
-                jitter=float(prepared.kf_jitter),
-                symmetrize=prepared.kf_sym,
-                return_shocks=False,
-                _store_history=False,
-            )
-            return float64(-run.loglik)
-
-    else:
-
-        def obj(eta: NDF) -> float64:
-            R = np.diag(np.exp(eta))
-            run = KalmanFilter.run_extended_raw(
-                A=sol.A,
-                B=sol.B,
-                meas_addr=prepared.meas_addr,
-                jac_addr=prepared.jac_addr,
-                calib_params=calib_params,
-                Q=Q,
-                R=R,
-                y=prepared.y_reordered,
-                x0=x0,
-                P0=prepared.P0,
-                jitter=float(prepared.kf_jitter),
-                symmetrize=prepared.kf_sym,
-                return_shocks=False,
-                compute_y_filt=False,
-                _store_history=False,
-            )
-            return float64(-run.loglik)
+    def obj(eta: NDF) -> float64:
+        return float64(-loglik_of_R(np.diag(np.exp(eta))))
 
     opt = optimize.minimize(
         obj,
@@ -525,23 +598,6 @@ def estimate_R_diag(
     return np.diag(np.exp(opt.x))
 
 
-@njit(cache=True)
-def _corr_chol_from_unconstrained_backend(z: NDF, K: int) -> NDF:
-    cpc: NDF = np.tanh(z)
-    L: NDF = np.zeros((K, K), dtype=float64)
-    L[0, 0] = 1.0
-    idx: int = 0
-    for k in range(1, K):
-        rem: float64 = float64(1.0)
-        for j in range(k):
-            v = float64(np.sqrt(max(rem, 1e-14)))
-            L[k, j] = float64(cpc[idx] * v)
-            rem = float64(rem - L[k, j] * L[k, j])
-            idx += 1
-        L[k, k] = float64(np.sqrt(max(rem, 1e-14)))
-    return L
-
-
 def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
     """Map unconstrained z in R^(K(K-1)/2) -> valid corr Cholesky factor."""
     expected = (K * (K - 1)) // 2
@@ -549,28 +605,9 @@ def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
         raise ValueError(
             f"Expected {expected} unconstrained CPC elements, got {z.shape[0]}."
         )
-    return cast(NDF, _corr_chol_from_unconstrained_backend(z, K))
-
-
-@njit(cache=True)
-def _unconstrained_from_corr_chol_backend(L: NDF) -> NDF:
-    K = L.shape[0]
-    n_cpc = (K * (K - 1)) // 2
-    z = np.empty((n_cpc,), dtype=float64)
-    idx = 0
-    for k in range(1, K):
-        rem = float64(1.0)
-        for j in range(k):
-            v = float64(np.sqrt(max(rem, 1e-14)))
-            cpc = float64(L[k, j] / v) if v > 0.0 else float64(0.0)
-            if cpc < (-1.0 + 1e-14):
-                cpc = float64(-1.0 + 1e-14)
-            elif cpc > (1.0 - 1e-14):
-                cpc = float64(1.0 - 1e-14)
-            z[idx] = float64(np.arctanh(cpc))
-            rem = float64(rem - L[k, j] * L[k, j])
-            idx += 1
-    return z
+    # std = ones -> the returned covariance is the correlation; L is its factor.
+    _, L = cov_from_unconstrained(z, np.ones(K, dtype=float64))
+    return L
 
 
 def _unconstrained_from_corr_chol(L: NDF) -> NDF:
@@ -587,7 +624,7 @@ def _unconstrained_from_corr_chol(L: NDF) -> NDF:
             raise ValueError(
                 "Each row of a correlation Cholesky factor must have unit norm."
             )
-    return cast(NDF, _unconstrained_from_corr_chol_backend(L))
+    return unconstrained_from_corr_chol(L)
 
 
 def _unconstrained_from_corr(corr: NDF) -> NDF:
@@ -605,26 +642,14 @@ def _unconstrained_from_corr(corr: NDF) -> NDF:
     return _unconstrained_from_corr_chol(L)
 
 
-@njit(cache=True)
-def _R_from_unconstrained_backend(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
-    log_std = u[:K]
-    z = u[K:]
-    std = np.exp(log_std).astype(float64)
-    Lcorr: NDF = _corr_chol_from_unconstrained_backend(z.astype(float64), K)
-    LcorrT: NDF = np.ascontiguousarray(Lcorr.T)
-    corr: NDF = Lcorr @ LcorrT
-    std_col = std.reshape((K, 1))
-    std_row = std.reshape((1, K))
-    R = corr * std_col * std_row
-    return (R.astype(float64), std, Lcorr)
-
-
 def _R_from_unconstrained(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
     """u = [log stds (K), unconstrained CPC values] -> (R, stds, Lcorr)."""
     n_cpc = (K * (K - 1)) // 2
     if u.shape[0] != K + n_cpc:
         raise ValueError(f"Expected length {K + n_cpc}, got {u.shape[0]}.")
-    return cast(tuple[NDF, NDF, NDF], _R_from_unconstrained_backend(u, K))
+    std = np.exp(u[:K]).astype(float64)
+    R, Lcorr = cov_from_unconstrained(u[K:], std)
+    return R, std, Lcorr
 
 
 def estimate_R(
@@ -633,6 +658,7 @@ def estimate_R(
     compiled: CompiledModel,
     y: NDF | pd.DataFrame,
     params: Mapping[str, float64],
+    filter_mode: str,
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
     x0: NDF | None,
@@ -650,7 +676,7 @@ def estimate_R(
         compiled=compiled,
         y=y,
         observables=observables,
-        filter_mode=None,
+        filter_mode=filter_mode,
         p0_mode=p0_mode,
         p0_scale=p0_scale,
         jitter=jitter,
@@ -668,9 +694,11 @@ def estimate_R(
     )
     u0 = np.concatenate([log_std0, np.zeros((n_cpc,), dtype=float64)])
     try:
-        sol = solver.solve(
+        sol = _get_solution(
+            solver=solver,
             compiled=compiled,
-            parameters={k: float(v) for k, v in params.items()},
+            params=params,
+            mode=prepared.mode,
             steady_state=steady_state,
         )
     except BaseException:
@@ -680,56 +708,14 @@ def estimate_R(
     bounds: list[tuple[float, float]] = [(-30.0, 10.0)] * m + [(-5.0, 5.0)] * n_cpc
     lkj = LKJChol(eta=float(lkj_eta), K=m, random_state=None)
     calib_params = build_calib_param_vector(compiled, params)
-
-    if prepared.mode == "linear":
-        C, d = build_C_d_from_cfunc(
-            prepared.meas_addr,
-            prepared.jac_addr,
-            prepared.zero_state,
-            calib_params,
-            prepared.y_reordered.shape[1],
-        )
-
-        def loglik_for_R(R: NDF) -> float64:
-            run = KalmanFilter.run_raw(
-                A=sol.A,
-                B=sol.B,
-                C=C,
-                d=d,
-                Q=Q,
-                R=R,
-                y=prepared.y_reordered,
-                x0=x0,
-                P0=prepared.P0,
-                jitter=float(prepared.kf_jitter),
-                symmetrize=prepared.kf_sym,
-                return_shocks=False,
-                _store_history=False,
-            )
-            return float64(run.loglik)
-
-    else:
-
-        def loglik_for_R(R: NDF) -> float64:
-            run = KalmanFilter.run_extended_raw(
-                A=sol.A,
-                B=sol.B,
-                meas_addr=prepared.meas_addr,
-                jac_addr=prepared.jac_addr,
-                calib_params=calib_params,
-                Q=Q,
-                R=R,
-                y=prepared.y_reordered,
-                x0=x0,
-                P0=prepared.P0,
-                jitter=float(prepared.kf_jitter),
-                symmetrize=prepared.kf_sym,
-                return_shocks=False,
-                compute_y_filt=False,
-                _store_history=False,
-            )
-
-            return float64(run.loglik)
+    loglik_for_R = _prepare_filter_loglik(
+        sol=sol,
+        prepared=prepared,
+        Q=Q,
+        calib_params=calib_params,
+        x0=x0,
+        raise_on_error=True,
+    )
 
     def nlogpost(u: NDF) -> float64:
         try:

@@ -29,7 +29,7 @@ cdef extern from "kalman.h":
         double *d
         double *Q
         double *R
-        double *y
+        const double *y
         double *x0
         double *P0
         int symmetrize
@@ -66,7 +66,7 @@ cdef extern from "kalman.h":
         double *calib_params
         double *Q
         double *R
-        double *y
+        const double *y
         double *x0
         double *P0
         int64_t T
@@ -111,7 +111,7 @@ cdef extern from "kalman.h":
         double *params
         double *Q
         double *R
-        double *obs
+        const double *obs
         double *z0
         double *P0
         int64_t T
@@ -190,7 +190,7 @@ def kalman_hot_loop(
 
     cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
-    cdef double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef const double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
 
     cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
     cdef double[:, ::1] P0v = np.ascontiguousarray(P0, dtype=np.float64)
@@ -314,7 +314,7 @@ def ekf_hot_loop(
     cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
 
-    cdef double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
+    cdef const double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
 
     cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
     cdef double[:, ::1] P0v = np.ascontiguousarray(P0, dtype=np.float64)
@@ -446,7 +446,7 @@ def ukf_hot_loop(
     cdef double[::1] paramsv = np.ascontiguousarray(params, dtype=np.float64)
     cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
-    cdef double[:, ::1] obsv = np.ascontiguousarray(obs, dtype=np.float64)
+    cdef const double[:, ::1] obsv = np.ascontiguousarray(obs, dtype=np.float64)
     cdef double[::1] z0v = np.ascontiguousarray(z0, dtype=np.float64)
     cdef double[:, ::1] P0v = np.ascontiguousarray(P0, dtype=np.float64)
 

@@ -29,6 +29,7 @@ def _make_filter_result() -> FilterRawResult:
     y_pred = np.array([[4.0, 40.0], [5.0, 50.0], [6.0, 60.0]], dtype=np.float64)
     innov = np.array([[7.0, 70.0], [8.0, 80.0], [9.0, 90.0]], dtype=np.float64)
     return FilterRawResult(
+        status=0,
         x_pred=x_pred,
         x_filt=x_pred.copy(),
         P_pred=zeros_state,

@@ -1,4 +1,5 @@
 # type: ignore
+import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -16,7 +17,7 @@ from SymbolicDSGE.bayesian.transforms import (
     CholeskyCorrTransform,
 )
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
-from SymbolicDSGE.estimation.estimator import MissingConfigError, _MatrixPriorResolution
+from SymbolicDSGE.estimation.estimator import MissingConfigError, _MatrixPriorBlock
 
 
 class _QuadraticPrior:
@@ -406,9 +407,9 @@ def test_safe_loglik_invalidates_system_exit(monkeypatch):
     assert np.isneginf(val)
 
 
-def test_safe_loglik_invalidates_stdout_warning_signal(monkeypatch):
+def test_safe_loglik_invalidates_warning_signal(monkeypatch):
     def _warn_only(**kwargs):
-        print("Warning: unstable candidate")
+        warnings.warn("unstable candidate", RuntimeWarning)
         return float64(0.0)
 
     monkeypatch.setattr(est_backend, "evaluate_loglik", _warn_only)
@@ -852,7 +853,6 @@ def test_cov_to_corr_and_matrix_resolution_error_branches():
     with pytest.raises(ValueError, match="named variance parameter"):
         est._build_matrix_resolution(
             key="R_corr",
-            matrix_name="R",
             labels=["a"],
             std_param_map={},
             corr_param_map={},
@@ -861,7 +861,6 @@ def test_cov_to_corr_and_matrix_resolution_error_branches():
     with pytest.raises(ValueError, match="unique named variance parameter"):
         est._build_matrix_resolution(
             key="R_corr",
-            matrix_name="R",
             labels=["a", "b"],
             std_param_map={"a": "sig", "b": "sig"},
             corr_param_map={frozenset(("b", "a")): "rho_ab"},
@@ -870,7 +869,6 @@ def test_cov_to_corr_and_matrix_resolution_error_branches():
     with pytest.raises(ValueError, match="unique named parameter per correlation pair"):
         est._build_matrix_resolution(
             key="R_corr",
-            matrix_name="R",
             labels=["a", "b", "c"],
             std_param_map={"a": "sig_a", "b": "sig_b", "c": "sig_c"},
             corr_param_map={
@@ -957,10 +955,8 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
     with pytest.raises(KeyError, match="unknown parameter"):
         est.logprior(np.array([0.0], dtype=np.float64))
 
-    assert est._count_stdout_warning_signals("Warning: one\nok\nWarning: two") == 2
-
     def _warn(th):
-        print("Warning: unstable")
+        warnings.warn("unstable", RuntimeWarning)
         return float64(0.0)
 
     est._logpost_with_overrides = _warn
@@ -1052,8 +1048,15 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         y=np.zeros((3, 1), dtype=np.float64),
         estimated_params=["sig1"],
     )
-    resolution = est._resolve_Q()
-    assert resolution.missing_pairs == [("e2", "e1")]
+    block = est._resolve_Q()
+    present = {(int(r), int(c)) for r, c in block.positions}
+    missing = [
+        (block.labels[row], block.labels[col])
+        for row in range(1, block.dim)
+        for col in range(row)
+        if (row, col) not in present
+    ]
+    assert missing == [("e2", "e1")]
 
     est_base = Estimator(
         solver=SimpleNamespace(),
@@ -1062,24 +1065,13 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         estimated_params=["a"],
     )
 
-    res_dim1 = _MatrixPriorResolution(
-        key="R_corr",
-        matrix_name="R",
+    res_dim1 = _MatrixPriorBlock(
         dim=1,
         labels=["A"],
-        std_names=["sig_a"],
         member_names=[],
-        pair_positions=[],
-        missing_pairs=[],
-        param_tags={
-            "sig_a": est_base._build_matrix_resolution(
-                key="R_corr",
-                matrix_name="R",
-                labels=["A"],
-                std_param_map={"A": "sig_a"},
-                corr_param_map={},
-            ).param_tags["sig_a"]
-        },
+        positions=np.empty((0, 2), dtype=np.int64),
+        theta_slice=slice(0, 0),
+        prior=None,
     )
     est_base.priors = {"R_corr": object()}
     monkeypatch.setattr(
@@ -1093,28 +1085,13 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     with pytest.raises(ValueError, match="dimension at least 2"):
         est_base._build_matrix_prior_blocks()
 
-    res_short = _MatrixPriorResolution(
-        key="R_corr",
-        matrix_name="R",
+    res_short = _MatrixPriorBlock(
         dim=3,
         labels=["A", "B", "C"],
-        std_names=["sig_a", "sig_b", "sig_c"],
         member_names=["rho_ba", "rho_ca"],
-        pair_positions=[(1, 0), (2, 0)],
-        missing_pairs=[],
-        param_tags={
-            "sig_a": est_base._build_matrix_resolution(
-                key="R_corr",
-                matrix_name="R",
-                labels=["A", "B", "C"],
-                std_param_map={"A": "sig_a", "B": "sig_b", "C": "sig_c"},
-                corr_param_map={
-                    frozenset(("B", "A")): "rho_ba",
-                    frozenset(("C", "A")): "rho_ca",
-                    frozenset(("C", "B")): "rho_cb",
-                },
-            ).param_tags["sig_a"],
-        },
+        positions=np.array([[1, 0], [2, 0]], dtype=np.int64),
+        theta_slice=slice(0, 0),
+        prior=None,
     )
     est_base.priors = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     monkeypatch.setattr(est_base, "_resolve_R", lambda params=None: res_short)
@@ -1123,7 +1100,6 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
 
     res_missing = est_base._build_matrix_resolution(
         key="R_corr",
-        matrix_name="R",
         labels=["A", "B"],
         std_param_map={"A": "sig_a", "B": "sig_b"},
         corr_param_map={frozenset(("B", "A")): "rho_ba"},
@@ -1143,21 +1119,17 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
     )
     r_resolution = est._build_matrix_resolution(
         key="R_corr",
-        matrix_name="R",
         labels=["A", "B"],
         std_param_map={"A": "meas_a", "B": "meas_b"},
         corr_param_map={frozenset(("B", "A")): "meas_rho_ab"},
     )
-    q_resolution = _MatrixPriorResolution(
-        key="Q_corr",
-        matrix_name="Q",
+    q_resolution = _MatrixPriorBlock(
         dim=2,
         labels=["u", "v"],
-        std_names=["sig_u", "sig_v"],
         member_names=["meas_rho_ab"],
-        pair_positions=[(1, 0)],
-        missing_pairs=[],
-        param_tags={"meas_rho_ab": r_resolution.param_tags["meas_rho_ab"]},
+        positions=np.array([[1, 0]], dtype=np.int64),
+        theta_slice=slice(0, 0),
+        prior=None,
     )
     est.priors = {
         "R_corr": LKJChol(eta=2.0, K=2, random_state=None),

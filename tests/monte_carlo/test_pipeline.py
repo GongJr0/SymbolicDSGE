@@ -150,6 +150,7 @@ class _FakeSolvedModel:
         n_obs, n_meas = y.shape
         cov = np.zeros((n_obs, n_meas, n_meas), dtype=np.float64)
         return FilterRawResult(
+            status=0,
             x_pred=y.copy(),
             x_filt=y.copy(),
             P_pred=cov.copy(),

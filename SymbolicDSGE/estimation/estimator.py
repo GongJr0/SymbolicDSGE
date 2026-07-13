@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import io
 import warnings
-from contextlib import redirect_stdout
-from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Callable, Literal, Mapping, Sequence, cast
+from typing import Any, Callable, Literal, Mapping, NamedTuple, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -31,36 +28,25 @@ _MatrixName = Literal["R", "Q"]
 _MatrixPriorKey = Literal["R_corr", "Q_corr"]
 
 
-@dataclass(frozen=True)
-class _MatrixParamTag:
-    matrix_name: _MatrixName
-    idx: int | tuple[int, int]
+class _MatrixPriorBlock(NamedTuple):
+    """Minimal per-matrix LKJ metadata.
 
+    ``positions`` is an ``(n_members, 2)`` int array of ``(row, col)`` targets in
+    the correlation matrix, parallel to ``member_names``. The block's members
+    occupy a contiguous theta run, so ``theta_slice`` (a plain ``slice``) covers
+    them all: ``theta[theta_slice]`` is the block's unconstrained z with no gather.
+    Resolution yields a partial block (``theta_slice`` empty, ``prior`` ``None``);
+    it is completed via ``_replace`` once the theta layout is known. The reserved
+    matrix key ("R_corr"/"Q_corr") is the dict key the block is stored under in
+    ``_matrix_blocks``, so it is not repeated on the block itself.
+    """
 
-@dataclass(frozen=True)
-class _MatrixPriorResolution:
-    key: _MatrixPriorKey
-    matrix_name: _MatrixName
-    dim: int
-    labels: list[str]
-    std_names: list[str]
-    member_names: list[str]
-    pair_positions: list[tuple[int, int]]
-    missing_pairs: list[tuple[str, str]]
-    param_tags: dict[str, _MatrixParamTag]
-
-
-@dataclass(frozen=True)
-class _MatrixPriorBlock:
-    key: _MatrixPriorKey
-    matrix_name: _MatrixName
     dim: int
     labels: list[str]
     member_names: list[str]
-    pair_positions: list[tuple[int, int]]
-    theta_indices: NDArray[np.int64]
-    prior: Prior
-    param_tags: dict[str, _MatrixParamTag]
+    positions: NDArray[np.int64]
+    theta_slice: slice
+    prior: Prior | None
 
 
 class MissingConfigError(Exception):
@@ -112,6 +98,7 @@ class Estimator:
         compiled: CompiledModel,
         y: NDF | pd.DataFrame,
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: Sequence[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: NDF | dict[str, float] | None = None,
@@ -129,7 +116,7 @@ class Estimator:
 
         self.y = y
         self.observables = observables
-        self.filter_mode = backend.infer_filter_mode(compiled, observables)
+        self.filter_mode = filter_mode
 
         self._input_priors = dict(priors) if priors is not None else None
 
@@ -155,7 +142,11 @@ class Estimator:
                 jitter=jitter,
                 symmetrize=symmetrize,
             )
-            self.filter_mode = self._prepared_filter.mode
+            # Drop the original observations at the boundary: reorder_observables
+            # (inside prepare_filter_run) already produced the canonical, writable
+            # ndarray the filter runs on, so no DataFrame or read-only
+            # copy-on-write view is dragged into the backend on every eval.
+            self.y = self._prepared_filter.y_reordered
 
         self._base_params = backend.extract_base_params(compiled)
         default_params = list(self._base_params.keys())
@@ -230,10 +221,8 @@ class Estimator:
         for name in requested_names_raw:
             if name in self._reserved_matrix_keys():
                 matrix_name = self._matrix_name_for_reserved_key(name)
-                resolution = (
-                    self._resolve_R() if matrix_name == "R" else self._resolve_Q()
-                )
-                members = resolution.member_names
+                block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+                members = block.member_names
             else:
                 members = [name]
 
@@ -309,67 +298,62 @@ class Estimator:
         self,
         *,
         key: _MatrixPriorKey,
-        matrix_name: _MatrixName,
         labels: list[str],
         std_param_map: Mapping[str, str | None],
         corr_param_map: Mapping[frozenset[str], str | None],
-    ) -> _MatrixPriorResolution:
+    ) -> _MatrixPriorBlock:
+        """Resolve the named std/correlation parameters for one matrix into a
+        partial :class:`_MatrixPriorBlock` (``theta_slice`` empty, ``prior``
+        ``None``). Validates a unique named variance per diagonal and that no
+        parameter name is reused. Missing off-diagonal pairs are simply absent
+        from ``positions``/``member_names``; the caller derives and reports them
+        against the expected dense set."""
         dim = len(labels)
-        std_names: list[str] = []
+        used_names: set[str] = set()
         member_names: list[str] = []
-        pair_positions: list[tuple[int, int]] = []
-        missing_pairs: list[tuple[str, str]] = []
-        param_tags: dict[str, _MatrixParamTag] = {}
+        positions: list[tuple[int, int]] = []
 
-        for idx, label in enumerate(labels):
+        for label in labels:
             std_name = std_param_map.get(label)
             if std_name is None:
                 raise ValueError(
                     f"LKJChol prior on {key} requires a named variance parameter for "
                     f"{key}[{label}, {label}]."
                 )
-            if std_name in param_tags:
+            if std_name in used_names:
                 raise ValueError(
                     f"LKJChol prior on {key} requires a unique named variance parameter per "
                     f"diagonal entry. Parameter '{std_name}' is reused."
                 )
-            std_names.append(std_name)
-            param_tags[std_name] = _MatrixParamTag(matrix_name=matrix_name, idx=idx)
+            used_names.add(std_name)
 
         for row in range(1, dim):
             for col in range(row):
                 pair = (labels[row], labels[col])
                 corr_name = corr_param_map.get(frozenset(pair))
                 if corr_name is None:
-                    missing_pairs.append(pair)
                     continue
-                if corr_name in param_tags:
+                if corr_name in used_names:
                     raise ValueError(
                         f"LKJChol prior on {key} requires a unique named parameter per correlation pair. "
                         f"Parameter '{corr_name}' is reused."
                     )
-                param_tags[corr_name] = _MatrixParamTag(
-                    matrix_name=matrix_name,
-                    idx=(row, col),
-                )
+                used_names.add(corr_name)
                 member_names.append(corr_name)
-                pair_positions.append((row, col))
+                positions.append((row, col))
 
-        return _MatrixPriorResolution(
-            key=key,
-            matrix_name=matrix_name,
+        return _MatrixPriorBlock(
             dim=dim,
             labels=list(labels),
-            std_names=std_names,
             member_names=member_names,
-            pair_positions=pair_positions,
-            missing_pairs=missing_pairs,
-            param_tags=param_tags,
+            positions=np.asarray(positions, dtype=np.int64).reshape(-1, 2),
+            theta_slice=slice(0, 0),
+            prior=None,
         )
 
     def _resolve_R(
         self, params: Mapping[str, float] | None = None
-    ) -> _MatrixPriorResolution:
+    ) -> _MatrixPriorBlock:
         if self.kalman is None:
             raise MissingConfigError(
                 "LKJChol prior on R_corr requires a Kalman configuration with symbolic R metadata. "
@@ -388,7 +372,6 @@ class Estimator:
             )
         return self._build_matrix_resolution(
             key="R_corr",
-            matrix_name="R",
             labels=labels,
             std_param_map=std_param_map,
             corr_param_map=corr_param_map,
@@ -396,7 +379,7 @@ class Estimator:
 
     def _resolve_Q(
         self, params: Mapping[str, float] | None = None
-    ) -> _MatrixPriorResolution:
+    ) -> _MatrixPriorBlock:
         Q_cov = backend.build_Q(self.compiled, self._base_params)
         self._cov_to_corr(Q_cov, "Q")
 
@@ -428,7 +411,6 @@ class Estimator:
 
         return self._build_matrix_resolution(
             key="Q_corr",
-            matrix_name="Q",
             labels=labels,
             std_param_map=std_param_map,
             corr_param_map=corr_param_map,
@@ -446,35 +428,36 @@ class Estimator:
 
             lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
             matrix_name = self._matrix_name_for_reserved_key(key)
-            resolution = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
-            if resolution.dim < 2:
+            block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+            if block.dim < 2:
                 raise ValueError(
                     f"LKJChol prior on {key} requires a matrix of dimension at least 2."
                 )
-            if resolution.missing_pairs:
+            present = {(int(r), int(c)) for r, c in block.positions}
+            missing_pairs = [
+                (block.labels[row], block.labels[col])
+                for row in range(1, block.dim)
+                for col in range(row)
+                if (row, col) not in present
+            ]
+            if missing_pairs:
                 raise ValueError(
-                    self._dense_matrix_error(
-                        key, resolution.matrix_name, resolution.missing_pairs
-                    )
+                    self._dense_matrix_error(key, matrix_name, missing_pairs)
                 )
 
-            expected = (resolution.dim * (resolution.dim - 1)) // 2
-            if len(resolution.member_names) != expected:
+            expected = (block.dim * (block.dim - 1)) // 2
+            if len(block.member_names) != expected:
                 expected_pairs = [
-                    (resolution.labels[row], resolution.labels[col])
-                    for row in range(1, resolution.dim)
+                    (block.labels[row], block.labels[col])
+                    for row in range(1, block.dim)
                     for col in range(row)
                 ]
                 raise ValueError(
-                    self._dense_matrix_error(
-                        key, resolution.matrix_name, expected_pairs
-                    )
+                    self._dense_matrix_error(key, matrix_name, expected_pairs)
                 )
 
             missing_estimated = [
-                name
-                for name in resolution.member_names
-                if name not in self._param_index
+                name for name in block.member_names if name not in self._param_index
             ]
             if missing_estimated:
                 raise ValueError(
@@ -484,7 +467,7 @@ class Estimator:
 
             scalar_conflicts = [
                 name
-                for name in resolution.member_names
+                for name in block.member_names
                 if self._input_priors is not None
                 and name in self._input_priors
                 and name not in self._reserved_matrix_keys()
@@ -495,46 +478,43 @@ class Estimator:
                     f"correlation members: {scalar_conflicts}."
                 )
 
-            overlap = sorted(claimed_names.intersection(resolution.member_names))
+            overlap = sorted(claimed_names.intersection(block.member_names))
             if overlap:
                 raise ValueError(
                     f"Matrix priors on R and Q cannot share member parameters. Overlap: {overlap}."
                 )
 
             prior_dim = int(getattr(lkj_prior.dist, "_K", -1))
-            if prior_dim != resolution.dim:
+            if prior_dim != block.dim:
                 raise ValueError(
                     f"LKJChol prior on {key} has K={prior_dim}, but the resolved {key} "
-                    f"correlation dimension is {resolution.dim}."
+                    f"correlation dimension is {block.dim}."
                 )
 
-            theta_indices = np.asarray(
-                [self._param_index[name] for name in resolution.member_names],
-                dtype=np.int64,
+            indices = [self._param_index[name] for name in block.member_names]
+            start = indices[0]
+            stop = start + len(indices)
+            if indices != list(range(start, stop)):
+                raise ValueError(
+                    f"LKJChol prior on {key} expects its correlation members to "
+                    f"occupy a contiguous theta range; got scattered indices "
+                    f"{indices} for {block.member_names}."
+                )
+            blocks[key] = block._replace(
+                theta_slice=slice(start, stop), prior=lkj_prior
             )
-            blocks[key] = _MatrixPriorBlock(
-                key=key,
-                matrix_name=resolution.matrix_name,
-                dim=resolution.dim,
-                labels=resolution.labels,
-                member_names=resolution.member_names,
-                pair_positions=resolution.pair_positions,
-                theta_indices=theta_indices,
-                prior=lkj_prior,
-                param_tags=resolution.param_tags,
-            )
-            claimed_names.update(resolution.member_names)
+            claimed_names.update(block.member_names)
 
         return blocks
 
     @staticmethod
     def _corr_from_member_values(block: _MatrixPriorBlock, values: NDF) -> NDF:
         corr = np.eye(block.dim, dtype=float64)
-        for idx, name in enumerate(block.member_names):
-            row, col = cast(tuple[int, int], block.param_tags[name].idx)
-            corr_ij = float64(values[idx])
-            corr[row, col] = corr_ij
-            corr[col, row] = corr_ij
+        rows = block.positions[:, 0]
+        cols = block.positions[:, 1]
+        vals = np.asarray(values, dtype=float64)
+        corr[rows, cols] = vals
+        corr[cols, rows] = vals
         return corr
 
     @staticmethod
@@ -543,8 +523,8 @@ class Estimator:
             return backend._unconstrained_from_corr(corr)
         except ValueError as exc:
             raise ValueError(
-                f"Correlation values for the {block.key} block do not form a valid "
-                f"positive-definite correlation matrix over {block.labels}: {exc}"
+                f"Correlation values do not form a valid positive-definite "
+                f"correlation matrix over {block.labels}: {exc}"
             ) from exc
 
     @staticmethod
@@ -601,7 +581,7 @@ class Estimator:
                     scalar_priors[name] = prior.to_spec()
 
         matrix_priors = {
-            target: block.prior.to_spec()
+            target: block.prior.to_spec()  # type: ignore[union-attr]
             for target, block in self._matrix_blocks.items()
         }
 
@@ -638,6 +618,56 @@ class Estimator:
         )
         return self.params_to_theta(constrained)
 
+    def resolve_theta0(self, theta0: NDF | Mapping[str, float] | None) -> NDF:
+        """Coerce a user ``theta0`` to the unconstrained theta vector.
+
+        ``None`` seeds from the model calibration (:meth:`theta0`); a mapping is
+        validated against the estimated parameter names and converted through
+        :meth:`params_to_theta`; an array is taken as-is.
+        """
+        if theta0 is None:
+            return self.theta0()
+        if isinstance(theta0, Mapping):
+            missing = [name for name in self.param_names if name not in theta0]
+            if missing:
+                raise ValueError(
+                    f"theta0 dictionary is missing estimated parameters: {missing}"
+                )
+            unknown = [key for key in theta0 if key not in self.param_names]
+            if unknown:
+                raise ValueError(f"theta0 dictionary has unknown parameters: {unknown}")
+            return self.params_to_theta(
+                {name: float64(theta0[name]) for name in self.param_names}
+            )
+        return asarray(theta0, dtype=float64)
+
+    def _validate_prior_initial_guess(self, theta: NDF) -> None:
+        """Fail fast when the initial guess sits outside the priors' support or
+        breaks a prior transform. No-op when no priors are set."""
+        if self.priors is None:
+            return
+        params = self.theta_to_params(theta)
+        invalid: list[str] = []
+        for name, prior in self.priors.items():
+            if name not in params:
+                continue
+            val = float64(params[name])
+            try:
+                if hasattr(prior, "transform"):
+                    z = float64(
+                        cast(Transform, getattr(prior, "transform")).safe_forward(val)
+                    )
+                else:
+                    z = val
+                prior.logpdf(z)
+            except Exception as exc:  # pragma: no cover - exact type is prior-dependent
+                invalid.append(f"{name}={val} ({type(exc).__name__}: {exc})")
+        if invalid:
+            raise ValueError(
+                "Initial calibration values are incompatible with the provided "
+                "priors or their transforms: " + ", ".join(invalid)
+            )
+
     def params_to_theta(self, params: Mapping[str, float] | NDF) -> NDF:
         if isinstance(params, Mapping):
             missing = [name for name in self.param_names if name not in params]
@@ -659,10 +689,10 @@ class Estimator:
         out = np.empty_like(vals, dtype=float64)
         handled = np.zeros((len(self.param_names),), dtype=bool)
         for block in self._matrix_blocks.values():
-            corr_vals = np.asarray(vals[block.theta_indices], dtype=float64)
+            corr_vals = np.asarray(vals[block.theta_slice], dtype=float64)
             corr = self._corr_from_member_values(block, corr_vals)
-            out[block.theta_indices] = self._block_cpc_from_corr(block, corr)
-            handled[block.theta_indices] = True
+            out[block.theta_slice] = self._block_cpc_from_corr(block, corr)
+            handled[block.theta_slice] = True
 
         for i, name in enumerate(self.param_names):
             if handled[i]:
@@ -683,12 +713,12 @@ class Estimator:
         full = dict(self._base_params)
         handled = np.zeros((len(self.param_names),), dtype=bool)
         for block in self._matrix_blocks.values():
-            theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
+            theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
             corr, _ = self._block_corr_from_theta(block, theta_block)
-            for name in block.member_names:
-                row, col = cast(tuple[int, int], block.param_tags[name].idx)
-                full[name] = float64(corr[row, col])
-            handled[block.theta_indices] = True
+            member_vals = corr[block.positions[:, 0], block.positions[:, 1]]
+            for name, val in zip(block.member_names, member_vals):
+                full[name] = float64(val)
+            handled[block.theta_slice] = True
 
         for i, name in enumerate(self.param_names):
             if handled[i]:
@@ -748,8 +778,8 @@ class Estimator:
             return float64(0.0)
         lp = float64(0.0)
         for block in self._matrix_blocks.values():
-            theta_block = np.asarray(theta[block.theta_indices], dtype=float64)
-            lp += float64(block.prior.logpdf(theta_block))
+            theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
+            lp += float64(block.prior.logpdf(theta_block))  # type: ignore[union-attr]
 
         for name, prior in self.priors.items():
             if name in self._matrix_blocks or name in self._matrix_member_names:
@@ -805,24 +835,27 @@ class Estimator:
             self._loglik_from_params(params, R_override) + self.logprior(theta)
         )
 
-    @staticmethod
-    def _count_stdout_warning_signals(text: str) -> int:
-        return sum(
-            1 for line in text.splitlines() if line.strip().startswith("Warning")
-        )
-
     def _eval_with_warning_capture(
         self, fn: Callable[[NDF], float64], theta: NDF
     ) -> tuple[float64, int]:
-        stream = io.StringIO()
-        with warnings.catch_warnings(record=True) as caught:
+        # A misconfigured model can emit a warning on every evaluation; left to
+        # print, thousands of them flood the console and can take an IPython
+        # kernel down on its output-buffer limit. Intercept at the source: a
+        # counting ``showwarning`` tallies each warning and discards it, so
+        # nothing is printed and nothing is retained (O(1) memory, no per-eval
+        # buffer scan). stderr is deliberately left alone -- genuine errors there
+        # halt the evaluation and are caught by the callers.
+        signals = 0
+
+        def _count(*_args: Any, **_kwargs: Any) -> None:
+            nonlocal signals
+            signals += 1
+
+        with warnings.catch_warnings():
             warnings.simplefilter("always")
-            with redirect_stdout(stream):
-                val = float64(fn(theta))
-        n_signals = int(
-            len(caught) + self._count_stdout_warning_signals(stream.getvalue())
-        )
-        return val, n_signals
+            warnings.showwarning = _count
+            val = float64(fn(theta))
+        return val, int(signals)
 
     def _reset_search_warning_count(self) -> None:
         self._warning_signal_count = 0
@@ -918,13 +951,13 @@ class Estimator:
     def mle(
         self,
         *,
-        theta0: NDF | None = None,
+        theta0: NDF | Mapping[str, float] | None = None,
         bounds: Sequence[tuple[float, float]] | None = None,
         method: str = "L-BFGS-B",
         options: Mapping[str, Any] | None = None,
     ) -> OptimizationResult:
         self._reset_search_warning_count()
-        init = self.theta0() if theta0 is None else asarray(theta0, dtype=float64)
+        init = self.resolve_theta0(theta0)
 
         def obj(theta: NDF) -> float64:
             ll = self._safe_loglik(theta)
@@ -958,7 +991,7 @@ class Estimator:
     def map(
         self,
         *,
-        theta0: NDF | None = None,
+        theta0: NDF | Mapping[str, float] | None = None,
         bounds: Sequence[tuple[float, float]] | None = None,
         method: str = "L-BFGS-B",
         options: Mapping[str, Any] | None = None,
@@ -967,7 +1000,8 @@ class Estimator:
             raise ValueError("MAP requires priors. No priors were provided.")
 
         self._reset_search_warning_count()
-        init = self.theta0() if theta0 is None else asarray(theta0, dtype=float64)
+        init = self.resolve_theta0(theta0)
+        self._validate_prior_initial_guess(init)
 
         def obj(theta: NDF) -> float64:
             lp = self._safe_logpost(theta)
@@ -1004,7 +1038,7 @@ class Estimator:
         n_draws: int,
         burn_in: int = 1000,
         thin: int = 1,
-        theta0: NDF | None = None,
+        theta0: NDF | Mapping[str, float] | None = None,
         random_state: int | np.random.Generator | None = None,
         adapt: bool = True,
         adapt_start: int = 100,
@@ -1029,7 +1063,8 @@ class Estimator:
             else np.random.default_rng(random_state)
         )
 
-        current = self.theta0() if theta0 is None else asarray(theta0, dtype=float64)
+        current = self.resolve_theta0(theta0)
+        self._validate_prior_initial_guess(current)
         d = current.shape[0]
         if d == 0:
             raise ValueError("No estimated parameters were provided.")

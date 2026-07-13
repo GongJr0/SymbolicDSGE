@@ -485,7 +485,7 @@ def test_adaptive_r_block_stays_well_conditioned_under_dynamic_updates(
     runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
     assert not runtime_warnings
 
-    r_idx = est._matrix_blocks["R_corr"].theta_indices
+    r_idx = est._matrix_blocks["R_corr"].theta_slice
     max_abs_r = np.max(np.abs(history[:, r_idx]), axis=0)
     min_eig = np.min(np.linalg.eigvalsh(0.5 * (cov + cov.T)))
 

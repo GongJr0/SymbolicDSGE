@@ -237,7 +237,7 @@ def _evaluate_logprior_program(
     scalar_transform_codes: NDI,
     scalar_dist_params: NDF,
     scalar_transform_params: NDF,
-    matrix_indices: NDI,
+    matrix_offsets: NDI,
     matrix_dims: NDI,
     matrix_lengths: NDI,
     matrix_etas: NDF,
@@ -258,9 +258,10 @@ def _evaluate_logprior_program(
 
     for block_idx in range(matrix_dims.shape[0]):
         length = int(matrix_lengths[block_idx])
+        offset = int(matrix_offsets[block_idx])
         z_block = np.empty((length,), dtype=float64)
         for j in range(length):
-            z_block[j] = float64(theta[matrix_indices[block_idx, j]])
+            z_block[j] = float64(theta[offset + j])
         block_lp = _lkj_chol_logpdf_from_z(
             z_block,
             int(matrix_dims[block_idx]),
@@ -273,3 +274,59 @@ def _evaluate_logprior_program(
         lp += block_lp
 
     return lp
+
+
+# Correlation / covariance reparameterization references. Numba oracles for the
+# native ``cov_from_unconstrained`` (Cholesky factor L + covariance) and
+# ``unconstrained_from_corr_chol`` (its inverse). Relocated from
+# ``SymbolicDSGE.estimation.backend`` when those transforms went native-only.
+@njit(cache=True)
+def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
+    cpc: NDF = np.tanh(z)
+    L: NDF = np.zeros((K, K), dtype=float64)
+    L[0, 0] = 1.0
+    idx: int = 0
+    for k in range(1, K):
+        rem: float64 = float64(1.0)
+        for j in range(k):
+            v = float64(np.sqrt(max(rem, 1e-14)))
+            L[k, j] = float64(cpc[idx] * v)
+            rem = float64(rem - L[k, j] * L[k, j])
+            idx += 1
+        L[k, k] = float64(np.sqrt(max(rem, 1e-14)))
+    return L
+
+
+@njit(cache=True)
+def _unconstrained_from_corr_chol(L: NDF) -> NDF:
+    K = L.shape[0]
+    n_cpc = (K * (K - 1)) // 2
+    z = np.empty((n_cpc,), dtype=float64)
+    idx = 0
+    for k in range(1, K):
+        rem = float64(1.0)
+        for j in range(k):
+            v = float64(np.sqrt(max(rem, 1e-14)))
+            cpc = float64(L[k, j] / v) if v > 0.0 else float64(0.0)
+            if cpc < (-1.0 + 1e-14):
+                cpc = float64(-1.0 + 1e-14)
+            elif cpc > (1.0 - 1e-14):
+                cpc = float64(1.0 - 1e-14)
+            z[idx] = float64(np.arctanh(cpc))
+            rem = float64(rem - L[k, j] * L[k, j])
+            idx += 1
+    return z
+
+
+@njit(cache=True)
+def _R_from_unconstrained(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
+    log_std = u[:K]
+    z = u[K:]
+    std = np.exp(log_std).astype(float64)
+    Lcorr: NDF = _corr_chol_from_unconstrained(z.astype(float64), K)
+    LcorrT: NDF = np.ascontiguousarray(Lcorr.T)
+    corr: NDF = Lcorr @ LcorrT
+    std_col = std.reshape((K, 1))
+    std_row = std.reshape((1, K))
+    R = corr * std_col * std_row
+    return (R.astype(float64), std, Lcorr)

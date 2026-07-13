@@ -66,6 +66,7 @@ class FilterRawResult(NamedTuple):
     S: NDF
     eps_hat: NDF | None
     loglik: float64
+    status: int
 
 
 class UnscentedFilterRawResult(NamedTuple):
@@ -84,6 +85,7 @@ class UnscentedFilterRawResult(NamedTuple):
     x2_pred: NDF
     x1_filt: NDF
     x2_filt: NDF
+    status: int
 
 
 def _filter_result_from_raw(raw: FilterRawResult) -> FilterResult:
@@ -186,6 +188,7 @@ class KalmanFilter:
         symmetrize: bool = True,
         jitter: float = 0.0,
         _store_history: bool = True,
+        _raise_on_error: bool = True,
     ) -> FilterRawResult:
 
         # Get reals if needed
@@ -244,7 +247,7 @@ class KalmanFilter:
             return_shocks,
             _store_history,
         )
-        if err != 0:
+        if err != 0 and _raise_on_error:
             ErrorConstructor = get_error_constructor(ErrorCode(err))
             raise ErrorConstructor()
         (
@@ -262,6 +265,7 @@ class KalmanFilter:
         ) = out
 
         return FilterRawResult(
+            status=err,
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -332,6 +336,7 @@ class KalmanFilter:
         symmetrize: bool = True,
         jitter: float = 0.0,
         _store_history: bool = True,
+        _raise_on_error: bool = True,
     ) -> UnscentedFilterRawResult:
         if meas_addr == 0:
             raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
@@ -426,7 +431,7 @@ class KalmanFilter:
             symmetrize,
             _store_history,
         )
-        if err != 0:
+        if err != 0 and _raise_on_error:
             ErrorConstructor = get_error_constructor(ErrorCode(err))
             raise ErrorConstructor()
 
@@ -448,6 +453,7 @@ class KalmanFilter:
         ) = out
 
         return UnscentedFilterRawResult(
+            status=err,
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -532,6 +538,7 @@ class KalmanFilter:
         jitter: float = 0.0,
         compute_y_filt: bool = True,
         _store_history: bool = True,
+        _raise_on_error: bool = True,
     ) -> FilterRawResult:
         """
         Extended Kalman Filter with a linear transition and nonlinear measurement:
@@ -643,7 +650,7 @@ class KalmanFilter:
             _store_history,
         )
 
-        if err != 0:
+        if err != 0 and _raise_on_error:
             ErrorConstructor = get_error_constructor(ErrorCode(err))
             raise ErrorConstructor()
         (
@@ -661,6 +668,7 @@ class KalmanFilter:
         ) = out
 
         return FilterRawResult(
+            status=err,
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,

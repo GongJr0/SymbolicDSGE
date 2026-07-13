@@ -1,3 +1,5 @@
+import warnings
+
 import sympy as sp
 from sympy import Symbol, Function, Expr
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -295,6 +297,7 @@ class DSGESolver:
         parameters: dict[str, float] | None = None,
         steady_state: list[float] | ndarray | dict[str, float] | None = None,
         order: int = 1,
+        raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
         """Solve the model to first (``order=1``) or second (``order=2``) order.
 
@@ -303,6 +306,10 @@ class DSGESolver:
         sigma^2 risk correction (policy is a ``PerturbationSolution``); it requires
         the native extension and a nonlinear steady state (see ``_solve_second_order``).
         The state-space ``A``/``B`` are the first-order transition in both cases.
+
+        When ``raise_on_bk_violation`` is ``False`` a Klein stability/uniqueness
+        failure warns instead of raising, so batch callers (e.g. an estimation
+        search) can tally the failure and continue.
         """
         if order not in (1, 2):
             raise ValueError(f"order must be 1 or 2, got {order}.")
@@ -323,7 +330,9 @@ class DSGESolver:
         given_ss = self._coerce_steady_state(steady_state, compiled)
 
         if order == 2:
-            return self._solve_second_order(compiled, param_vec, given_ss)
+            return self._solve_second_order(
+                compiled, param_vec, given_ss, raise_on_bk_violation
+            )
 
         ss = (
             given_ss
@@ -336,10 +345,9 @@ class DSGESolver:
             ss,
             compiled.n_state,
         )
-        if sol.stab != 0:
-            raise ValueError(
-                f"Klein stability/uniqueness condition violated (stab={sol.stab})."
-            )
+        self._raise_or_warn_stability_error(
+            sol.stab, should_raise=raise_on_bk_violation
+        )
         A, B = self._assemble_state_space(sol, compiled)
         return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
 
@@ -381,8 +389,22 @@ class DSGESolver:
         B = real_if_close(np.vstack([B_state, f @ B_state]))
         return A, B
 
+    @staticmethod
+    def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
+        """Raise or warn on a Klein stability/uniqueness violation."""
+        if stab == 0:
+            return
+        msg = f"Klein stability/uniqueness condition violated (stab={stab})."
+        if should_raise:
+            raise ValueError(msg)
+        warnings.warn(msg, UserWarning, stacklevel=2)
+
     def _solve_second_order(
-        self, compiled: CompiledModel, param_vec: NDF, given_ss: NDF | None
+        self,
+        compiled: CompiledModel,
+        param_vec: NDF,
+        given_ss: NDF | None,
+        raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
         """Second-order (SGU) solve. Resolves + validates the nonlinear steady
         state, runs the Klein first order, sweeps the bicomplex Hessian, and
@@ -402,10 +424,9 @@ class DSGESolver:
         ss = self._checked_steady_state(cf, param_vec, seed)
 
         sol = klein_solve(cf, param_vec, ss, n_state)
-        if sol.stab != 0:
-            raise ValueError(
-                f"Klein stability/uniqueness condition violated (stab={sol.stab})."
-            )
+        self._raise_or_warn_stability_error(
+            sol.stab, should_raise=raise_on_bk_violation
+        )
         gx, hx = np.real(sol.f), np.real(sol.p)
 
         a, b = klein_preprocess(cf.address, ss, param_vec, n_eq, False)
@@ -511,66 +532,13 @@ class DSGESolver:
         eta[:n_exog, :] = np.linalg.cholesky(cov)
         return eta
 
-    @staticmethod
-    def _validate_prior_initial_guess(
-        *,
-        priors: Mapping[str, Any] | None,
-        initial_params: Mapping[str, float64],
-    ) -> None:
-        if priors is None:
-            return
-
-        invalid: list[str] = []
-        for name, prior in priors.items():
-            if name not in initial_params:
-                continue
-            val = float64(initial_params[name])
-            try:
-                if hasattr(prior, "transform"):
-                    z = float64(getattr(prior, "transform").safe_forward(val))
-                else:
-                    z = val
-                prior.logpdf(z)
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - exact exception type is prior-dependent
-                invalid.append(f"{name}={val} ({type(exc).__name__}: {exc})")
-
-        if invalid:
-            msg = (
-                "Initial calibration values are incompatible with the provided priors "
-                "or their transforms: " + ", ".join(invalid)
-            )
-            raise ValueError(msg)
-
-    @staticmethod
-    def _theta0_to_array(
-        est: "Estimator", theta0: NDArray | Mapping[str, float] | None
-    ) -> NDArray:
-        if theta0 is None:
-            return est.theta0()
-
-        if isinstance(theta0, Mapping):
-            missing = [name for name in est.param_names if name not in theta0]
-            if missing:
-                raise ValueError(
-                    f"theta0 dictionary is missing estimated parameters: {missing}"
-                )
-            unknown = [k for k in theta0.keys() if k not in est.param_names]
-            if unknown:
-                raise ValueError(f"theta0 dictionary has unknown parameters: {unknown}")
-            return est.params_to_theta(
-                {name: float64(theta0[name]) for name in est.param_names}
-            )
-
-        return asarray(theta0, dtype=float64)
-
     def _estimator(
         self,
         *,
         compiled: CompiledModel,
         y: NDArray | pd.DataFrame,
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
@@ -589,6 +557,7 @@ class DSGESolver:
             compiled=compiled,
             y=y,
             observables=observables,
+            filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
             steady_state=(
@@ -622,6 +591,7 @@ class DSGESolver:
         method: str = "mle",
         theta0: NDArray | Mapping[str, float] | None = None,
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
@@ -637,6 +607,7 @@ class DSGESolver:
             compiled=compiled,
             y=y,
             observables=observables,
+            filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
             steady_state=(
@@ -652,11 +623,7 @@ class DSGESolver:
             R=R,
         )
 
-        init = self._theta0_to_array(est, theta0)
-        self._validate_prior_initial_guess(
-            priors=est.priors,
-            initial_params=est.theta_to_params(init),
-        )
+        init = est.resolve_theta0(theta0)
         if (
             R is None
             and hasattr(compiled, "var_names")
@@ -670,6 +637,7 @@ class DSGESolver:
                 compiled=compiled,
                 y=y,
                 params=est.theta_to_params(init),
+                filter_mode=est.filter_mode,
                 observables=observables,
                 steady_state=(
                     asarray(steady_state, dtype=float64)
@@ -701,6 +669,7 @@ class DSGESolver:
         theta0: NDArray | Mapping[str, float] | None = None,
         posterior_point: str = "mean",
         observables: list[str] | None = None,
+        filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
@@ -722,6 +691,7 @@ class DSGESolver:
             compiled=compiled,
             y=y,
             observables=observables,
+            filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
             steady_state=steady_state,
@@ -733,11 +703,8 @@ class DSGESolver:
             R=R,
         )
 
-        init = self._theta0_to_array(est, theta0)
-        self._validate_prior_initial_guess(
-            priors=est.priors,
-            initial_params=est.theta_to_params(init),
-        )
+        init = est.resolve_theta0(theta0)
+
         if (
             R is None
             and hasattr(compiled, "var_names")
@@ -751,6 +718,7 @@ class DSGESolver:
                 compiled=compiled,
                 y=y,
                 params=est.theta_to_params(init),
+                filter_mode=est.filter_mode,
                 observables=observables,
                 steady_state=steady_state,
                 x0=x0,
