@@ -743,10 +743,3 @@ class ModelParser:
                 "Config references parameter(s) not declared in `parameters`: "
                 + ", ".join(unknown)
             )
-
-        missing_ref = sorted(referenced - calibrated)
-        if missing_ref:
-            raise ValueError(
-                "Config references parameter(s) without calibration values: "
-                + ", ".join(missing_ref)
-            )

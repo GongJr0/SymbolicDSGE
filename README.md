@@ -12,11 +12,11 @@
 <hr>
 
 <div align="center">
-  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/tests-badge.svg" alt="tests"></a>
+  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/badges/tests-badge.svg" alt="tests"></a>
   &nbsp;
-  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/pre-commit-badge.svg" alt="pre-commit"></a>
+  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/badges/pre-commit-badge.svg" alt="pre-commit"></a>
   &nbsp;
-  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/main/coverage/coverage-badge.svg" alt="coverage"></a>
+  <a href="https://github.com/GongJr0/SymbolicDSGE/actions"><img src="https://raw.githubusercontent.com/GongJr0/SymbolicDSGE/badges/coverage-badge.svg" alt="coverage"></a>
   <a href="https://pepy.tech/projects/symbolicdsge"><img src="https://static.pepy.tech/personalized-badge/symbolicdsge?period=total&units=INTERNATIONAL_SYSTEM&left_color=GREY&right_color=ORANGE&left_text=downloads" alt="PyPI Downloads"></a>
 </div>
 <div align="center">

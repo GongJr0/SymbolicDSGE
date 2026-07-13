@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "coverage/*.svg"
   pull_request:
   workflow_dispatch:
 
@@ -136,26 +134,17 @@ jobs:
 
       - name: Generate passing pre-commit badge
         if: ${{ github.event_name == 'push' }}
-        run: >
-          curl -fsSL -o coverage/pre-commit-badge.svg
-          "https://img.shields.io/badge/pre--commit-passing-2e7d32?style=flat&labelColor=333333"
-
-      - name: Commit passing pre-commit badge
-        if: ${{ github.event_name == 'push' }}
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p "$RUNNER_TEMP/badges"
+          curl -fsSL -o "$RUNNER_TEMP/badges/pre-commit-badge.svg" \
+            "https://img.shields.io/badge/pre--commit-passing-2e7d32?style=flat&labelColor=333333"
 
-          git add coverage/pre-commit-badge.svg
-
-          if git diff --cached --quiet; then
-            echo "No pre-commit badge changes to commit."
-            exit 0
-          fi
-
-          git commit -m "ci: update pre-commit badge"
-          git push
+      - name: Publish pre-commit badge
+        if: ${{ github.event_name == 'push' }}
+        uses: ./.github/actions/publish-badges
+        with:
+          source-dir: ${{ runner.temp }}/badges
 
   pre_commit_failed_badge:
     runs-on: ubuntu-latest
@@ -167,29 +156,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.ref_name }}
 
       - name: Generate failing pre-commit badge
-        uses: emibcn/badge-action@v2
-        with:
-          label: pre-commit
-          status: failing
-          color: red
-          path: coverage/pre-commit-badge.svg
-
-      - name: Commit failing pre-commit badge
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p "$RUNNER_TEMP/badges"
+          curl -fsSL -o "$RUNNER_TEMP/badges/pre-commit-badge.svg" \
+            "https://img.shields.io/badge/pre--commit-failing-c62828?style=flat&labelColor=333333"
 
-          git add coverage/pre-commit-badge.svg
-
-          if git diff --cached --quiet; then
-            echo "No pre-commit badge changes to commit."
-            exit 0
-          fi
-
-          git commit -m "ci: update failing pre-commit badge"
-          git push
+      - name: Publish pre-commit badge
+        uses: ./.github/actions/publish-badges
+        with:
+          source-dir: ${{ runner.temp }}/badges

@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "coverage/*.svg"
   pull_request:
   workflow_dispatch:
 
@@ -97,7 +95,7 @@ jobs:
           if [ "$SR_CHANGED" != "true" ]; then
             PYTEST_MARKERS=(-m "not sr")
           fi
-          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
+          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" -n auto --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
           EXIT=$?
           set -e
           # juliacall's C-extension finalizers can segfault during interpreter
@@ -127,34 +125,20 @@ jobs:
               fh.write(f"percent={rounded}\n")
           PY
 
-      - name: Generate coverage badge
-        run: >
-          curl -fsSL -o coverage/coverage-badge.svg
-          "https://img.shields.io/badge/coverage-${{ steps.cov.outputs.percent }}%25-2e7d32?style=flat&labelColor=333333"
-
-      - name: Generate tests badge
-        run: >
-          curl -fsSL -o coverage/tests-badge.svg
-          "https://img.shields.io/badge/tests-passing-2e7d32?style=flat&labelColor=333333"
-
-      - name: Commit updated badges
-        if: ${{ github.event_name == 'push' }}
+      - name: Generate badges
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p "$RUNNER_TEMP/badges"
+          curl -fsSL -o "$RUNNER_TEMP/badges/coverage-badge.svg" \
+            "https://img.shields.io/badge/coverage-${{ steps.cov.outputs.percent }}%25-2e7d32?style=flat&labelColor=333333"
+          curl -fsSL -o "$RUNNER_TEMP/badges/tests-badge.svg" \
+            "https://img.shields.io/badge/tests-passing-2e7d32?style=flat&labelColor=333333"
 
-          git add coverage/*.svg
-
-          if git diff --cached --quiet; then
-            echo "No badge changes to commit."
-            exit 0
-          fi
-
-          git commit -m "ci: update badges"
-
-          if ! git pull --rebase origin "${GITHUB_REF_NAME}" || ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
-            echo "::warning::Badge push skipped due to non-fast-forward or rebase conflict."
-          fi
+      - name: Publish badges
+        if: ${{ github.event_name == 'push' }}
+        uses: ./.github/actions/publish-badges
+        with:
+          source-dir: ${{ runner.temp }}/badges
 
   test_failed_badge:
     runs-on: ubuntu-latest
@@ -168,27 +152,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Generate failing tests badge
-        uses: emibcn/badge-action@v2
-        with:
-          label: tests
-          status: failing
-          color: red
-          path: coverage/tests-badge.svg
-
-      - name: Commit failing badge
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p "$RUNNER_TEMP/badges"
+          curl -fsSL -o "$RUNNER_TEMP/badges/tests-badge.svg" \
+            "https://img.shields.io/badge/tests-failing-c62828?style=flat&labelColor=333333"
 
-          git add coverage/tests-badge.svg
-
-          if git diff --cached --quiet; then
-            echo "No badge changes to commit."
-            exit 0
-          fi
-
-          git commit -m "ci: update failing badge"
-
-          if ! git pull --rebase origin "${GITHUB_REF_NAME}" || ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
-            echo "::warning::Badge push skipped due to non-fast-forward or rebase conflict."
-          fi
+      - name: Publish badges
+        uses: ./.github/actions/publish-badges
+        with:
+          source-dir: ${{ runner.temp }}/badges
