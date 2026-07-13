@@ -94,6 +94,7 @@ DSGESolver.estimate(
     method: str = "mle",
     theta0: np.ndarray | Mapping[str, float] | None = None, # (1)!
     observables: list[str] | None = None,
+    filter_mode: str = "linear", # (3)!
     estimated_params: list[str] | None = None,
     priors: Mapping[str, Any] | None = None,
     steady_state: np.ndarray | dict[str, float] | None = None,
@@ -109,9 +110,10 @@ DSGESolver.estimate(
 
 1. If `#!python theta0` is passed as a dictionary, it is reordered internally to the estimator's canonical parameter order.
 2. If `#!python R` is not supplied, the estimator attempts to infer `R` from data before optimization/sampling (MAP on full `R`, with MLE fallback on failure).
+3. Filter algorithm for the likelihood: `#!python "linear"` (affine measurements), `#!python "extended"` (EKF, nonlinear measurements), or `#!python "unscented"` (UKF).
 
-???+ note Filter Mode
-    Filter mode is inferred internally (`linear` if all selected measurement equations are affine, otherwise `extended`).
+???+ note "Filter Mode"
+    `#!python filter_mode` is an explicit choice and is no longer inferred. Use `#!python "linear"` when all selected measurement equations are affine, `#!python "extended"` for nonlinear measurements, and `#!python "unscented"` to run the UKF. The `#!python "unscented"` mode solves the model to second order internally and is the only mode that consumes the perturbation policy tensors.
 
 ???+ note "Point Estimation Result"
     `method="mle"` and `method="map"` return `SymbolicDSGE.OptimizationResult`, not `scipy.optimize.OptimizeResult`.
@@ -133,6 +135,7 @@ DSGESolver.estimate_and_solve(
     theta0: np.ndarray | Mapping[str, float] | None = None,
     posterior_point: str = "mean",
     observables: list[str] | None = None,
+    filter_mode: str = "linear",
     estimated_params: list[str] | None = None,
     priors: Mapping[str, Any] | None = None,
     steady_state: np.ndarray | dict[str, float] | None = None,

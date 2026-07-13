@@ -106,3 +106,41 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python FilterResult` | `#!python dataclass` containing outputs and diagnostics of the filter run. |
+
+&nbsp;
+
+```python
+KalmanFilter.run_unscented(
+    meas_addr: int,
+    hx: np.ndarray[float64 | complex128],
+    gx: np.ndarray[float64 | complex128],
+    bx: np.ndarray[float64 | complex128],
+    hxx: np.ndarray[float64 | complex128],
+    gxx: np.ndarray[float64 | complex128],
+    hss: np.ndarray[float64 | complex128],
+    gss: np.ndarray[float64 | complex128],
+    steady_state: np.ndarray[float64 | complex128],
+    calib_params: np.ndarray[float64 | complex128],
+    Q: np.ndarray[float64 | complex128],
+    R: np.ndarray[float64 | complex128],
+    y: np.ndarray[float64 | complex128],
+    z0: np.ndarray[float64 | complex128], # (1)!
+    P0: np.ndarray[float64 | complex128], # (2)!
+    alpha: float = 1.0,
+    beta: float = 2.0,
+    kappa: float = 1.0,
+    symmetrize: bool = True,
+    jitter: float = 0.0,
+) -> UnscentedFilterResult
+```
+
+1. Augmented initial state of length `#!python 2 * n_state`.
+2. Covariance of the augmented state, shape `#!python (2 * n_state, 2 * n_state)`.
+
+Apply an unscented Kalman Filter (UKF) against a second-order model solution. The state/control policy tensors (`#!python hx`, `#!python gx`, `#!python bx`, `#!python hxx`, `#!python gxx`, `#!python hss`, `#!python gss`) and `#!python steady_state` come from an `#!python order=2` solve; the measurement is propagated through the sigma points via `#!python meas_addr`, so no observation Jacobian is required. `#!python alpha`, `#!python beta`, and `#!python kappa` are the sigma-point tuning parameters. `#!python return_shocks` is not supported.
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python UnscentedFilterResult` | `#!python dataclass` containing outputs and diagnostics of the UKF run. |

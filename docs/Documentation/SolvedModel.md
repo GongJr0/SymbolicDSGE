@@ -169,7 +169,7 @@ __Returns:__
 ```python
 SolvedModel.kalman(
     y: ndarray | DataFrame,
-    filter_mode: Literal['linear', 'extended'] = 'linear',
+    filter_mode: Literal['linear', 'extended', 'unscented'] = 'linear',
     *,
     observables: list[str] | None = None, # (1)!
     x0: ndarray | None = None, # (2)!
@@ -181,7 +181,7 @@ SolvedModel.kalman(
     estimate_R_diag: bool = False,
     R_scale: float = 1.0,
     _debug: bool = False
-) -> FilterResult
+) -> FilterResult | UnscentedFilterResult
 ```
 
 1. `None`: Use all compiled observables in model order.
@@ -201,7 +201,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | y | observations to filter. |
-| filter_mode | `"linear"` for affine measurements, `"extended"` for nonlinear measurements. |
+| filter_mode | `"linear"` for affine measurements, `"extended"` (EKF) for nonlinear measurements, or `"unscented"` (UKF), which runs against the model's second-order solution. `"unscented"` does not support `return_shocks`. Returns an `UnscentedFilterResult` instead of a `FilterResult`. |
 | observables | Name of corresponding model measurements. |
 | x0 | Initial state vector. |
 | p0_mode | Generation strategy for $P_0$. `diag` uses values given in the config (`#!python diag_mat * scale`) and `eye` uses (`#!python np.eye(n) * scale`) |
