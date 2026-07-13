@@ -1123,3 +1123,31 @@ def test_evaluate_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
 
     assert np.isfinite(ll_est)
     assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)
+
+
+def test_evaluate_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
+    """A full n_var x0 exercises the seam's z0 slicing branch (raw[:n_state])."""
+    solver = rbc_ukf_bundle["solver"]
+    compiled = rbc_ukf_bundle["compiled"]
+    y = rbc_ukf_bundle["y"]
+    params = backend.extract_base_params(compiled)
+
+    x0 = np.zeros(
+        (len(compiled.var_names),), dtype=np.float64
+    )  # length n_var > n_state
+    ll = backend.evaluate_loglik(
+        solver=solver,
+        compiled=compiled,
+        y=y,
+        params=params,
+        filter_mode="unscented",
+        observables=["c_obs"],
+        steady_state=None,
+        x0=x0,
+        p0_mode=None,
+        p0_scale=None,
+        jitter=None,
+        symmetrize=True,
+        R=None,
+    )
+    assert np.isfinite(ll)

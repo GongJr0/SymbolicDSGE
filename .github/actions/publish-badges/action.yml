@@ -1,0 +1,67 @@
+name: Publish badges
+description: >
+  Copy SVG badges onto the orphan `badges` branch and push them. The `badges`
+  branch holds only badge SVGs and shares no history with `main`, so it sits
+  outside `main`'s rulesets (required status checks / non-fast-forward) and this
+  push is never declined. Real git errors surface (the step fails) instead of
+  being masked, so a broken badge push is visible rather than silently stale.
+
+  Only the badges present in `source-dir` are overwritten; any others already on
+  the branch (e.g. a sibling workflow's badge) are preserved. A push that loses a
+  race with a concurrent workflow re-fetches and retries, so both survive.
+
+inputs:
+  source-dir:
+    description: Directory containing the *.svg badges to publish.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -uo pipefail
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        published=0
+        for attempt in 1 2 3 4 5; do
+          work="$RUNNER_TEMP/badges-worktree-$$-$attempt"
+
+          # Start from the current remote badges branch (or an orphan on first run).
+          if git fetch origin badges:refs/remotes/origin/badges 2>/dev/null; then
+            git worktree add "$work" -B badges origin/badges || { sleep 2; continue; }
+          else
+            echo "No remote 'badges' branch yet; creating an orphan one."
+            git worktree add --detach "$work" || { sleep 2; continue; }
+            git -C "$work" checkout --orphan badges
+            git -C "$work" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          # Overwrite only this run's badges on top of the freshly-fetched branch.
+          cp "${{ inputs.source-dir }}"/*.svg "$work"/
+          git -C "$work" add ./*.svg
+
+          if git -C "$work" diff --cached --quiet; then
+            echo "No badge changes to commit."
+            git worktree remove --force "$work" 2>/dev/null || true
+            published=1
+            break
+          fi
+
+          git -C "$work" commit -m "ci: update badges"
+          if git -C "$work" push origin badges; then
+            git worktree remove --force "$work" 2>/dev/null || true
+            published=1
+            break
+          fi
+
+          echo "Badge push lost a race with a concurrent run; re-fetching and retrying ($attempt/5)."
+          git worktree remove --force "$work" 2>/dev/null || true
+          sleep "$((attempt * 2))"
+        done
+
+        if [ "$published" -ne 1 ]; then
+          echo "::error::Failed to publish badges to the 'badges' branch after 5 attempts."
+          exit 1
+        fi

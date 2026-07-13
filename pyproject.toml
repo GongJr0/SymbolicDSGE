@@ -75,6 +75,7 @@ dev = [
     "httpx2>=2.5.0",
     "setuptools>=82.0.1",
     "cython-lint>=0.21.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -100,6 +101,17 @@ python_files = ["test_*.py"]
 addopts = "--import-mode=importlib"
 markers = [
     "sr: tests that require the optional symbolic-regression dependency",
+]
+
+[tool.coverage.report]
+# numba compiles @njit / @cfunc bodies to machine code, so coverage.py cannot
+# trace lines inside them while JIT is active (which the runtime requires for
+# dynamic cfunc generation). Excluding the decorated functions keeps the metric
+# on line-traceable code; the native kernels are validated by their parity
+# oracles and functional tests, not by line coverage.
+exclude_also = [
+    '^\s*@njit',
+    '^\s*@cfunc',
 ]
 
 [tool.cibuildwheel]
