@@ -4,7 +4,7 @@ import math
 import numpy as np
 import pytest
 from numpy import float64
-from scipy.special import betaln, ndtr, ndtri
+from scipy.special import betaln, ndtr
 
 from SymbolicDSGE.bayesian.distributions import (
     Beta,
@@ -13,11 +13,6 @@ from SymbolicDSGE.bayesian.distributions import (
     LogNormal,
     TruncNormal,
     Uniform,
-)
-from SymbolicDSGE.bayesian.distributions._as241 import (
-    erfinv_from_as241,
-    horner,
-    ndtri_as241,
 )
 from SymbolicDSGE.bayesian.distributions.beta import (
     _grad_logpdf_scalar as beta_grad_logpdf_scalar,
@@ -66,7 +61,6 @@ from SymbolicDSGE.bayesian.distributions.trunc_norm import (
     _grad_logpdf_vectorized as truncnorm_grad_logpdf_vectorized,
     _logpdf_scalar as truncnorm_logpdf_scalar,
     _logpdf_vectorized as truncnorm_logpdf_vectorized,
-    _rvs as truncnorm_rvs,
 )
 from SymbolicDSGE.bayesian.distributions.uniform import (
     _grad_logpdf_scalar as uniform_grad_logpdf_scalar,
@@ -189,25 +183,6 @@ def test_distribution_helper_functions_cover_scalar_vector_and_rng_branches():
     assert dummy.is_valid(float64(0.4))
     assert not dummy.is_valid(float64(2.0))
     assert isinstance(dummy._rng(1), np.random.Generator)
-
-
-def test_as241_helpers_cover_all_branches():
-    coeffs = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-    assert horner.py_func(coeffs, float64(2.0)) == pytest.approx(17.0)
-
-    assert np.isneginf(ndtri_as241.py_func(float64(0.0)))
-    assert np.isposinf(ndtri_as241.py_func(float64(1.0)))
-    assert ndtri_as241.py_func(float64(0.5)) == pytest.approx(0.0, abs=1e-12)
-    assert ndtri_as241.py_func(float64(0.9)) == pytest.approx(
-        float(ndtri(0.9)), rel=1e-6
-    )
-    assert ndtri_as241.py_func(float64(1e-8)) == pytest.approx(
-        float(ndtri(1e-8)), rel=1e-5
-    )
-
-    y = float64(0.25)
-    expected = ndtri_as241.py_func(float64(0.5 * (y + 1.0)) / np.sqrt(2.0))
-    assert erfinv_from_as241.py_func(y) == pytest.approx(expected)
 
 
 def test_uniform_distribution_helper_and_property_branches():
@@ -420,14 +395,7 @@ def test_truncnormal_helper_and_property_branches():
         ),
         np.asarray(dist.grad_logpdf(np.array([-0.2, 0.1], dtype=np.float64))),
     )
-    draws = truncnorm_rvs.py_func(
-        float64(0.2),
-        float64(0.7),
-        float64((-1.0 - 0.2) / 0.7),
-        float64((1.0 - 0.2) / 0.7),
-        (4,),
-        np.random.default_rng(1),
-    )
+    draws = dist.rvs((4,), np.random.default_rng(1))
     assert draws.shape == (4,)
     assert np.all((-1.0 <= draws) & (draws <= 1.0))
 
