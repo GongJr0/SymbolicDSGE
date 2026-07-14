@@ -65,6 +65,9 @@ cdef extern from "diag_wald.h":
     int sdsge_fill_symmetric_target_vec(const double *target, double atol,
                                         double rtol, int64_t p,
                                         double *out) nogil
+cdef extern from "diag_cusum.h":
+    double sdsge_cusum_sf(double a) nogil
+    void sdsge_cusum_sf_into(const double *a, int64_t n, double *out) nogil
 
 # Re-exported so the Python dispatch layer can recognise the "retry in numba"
 # signal without hard-coding the magic number.
@@ -160,6 +163,29 @@ def cusum_stat(y, X):
     with nogil:
         status = sdsge_cusum_stat(&y_mv[0], &X_mv[0, 0], T, p, &stat)
     return status, stat
+
+
+def cusum_sf(a):
+    """Clamped Durbin CUSUM survival function. Scalar in float64 out."""
+    cdef double aa = <double> a
+    cdef double out
+    with nogil:
+        out = sdsge_cusum_sf(aa)
+    return np.float64(out)
+
+
+def cusum_sf_arr(a):
+    """Elementwise CUSUM sf; returns a new float64 array shaped like ``a``."""
+    arr = np.ascontiguousarray(a, dtype=np.float64)
+    out = np.empty_like(arr)
+    cdef int64_t n = arr.size
+    if n == 0:
+        return out
+    cdef double[::1] av = arr.reshape(-1)
+    cdef double[::1] ov = out.reshape(-1)
+    with nogil:
+        sdsge_cusum_sf_into(&av[0], n, &ov[0])
+    return out
 
 
 def cusumsq_stat(y, X):

@@ -28,6 +28,12 @@ def chow_stat(y: _F64, X: _F64, t_break: int) -> tuple[int, float]:
 def recursive_residuals(y: _F64, X: _F64) -> tuple[int, _F64]:
     """Brown-Durbin-Evans recursive residuals. Returns (status, w)."""
 
+def cusum_sf(a: float | float64) -> float64:
+    """CUSUM survival function. Returns sf(a)."""
+
+def cusum_sf_arr(a: _F64) -> _F64:
+    """CUSUM survival function. Returns sf(a) in out."""
+
 def cusum_series(y: _F64, X: _F64) -> tuple[int, _F64]:
     """Standardized CUSUM series. Returns (status, series)."""
 
