@@ -31,7 +31,7 @@ def _native_dims_ok(n: int, p: int) -> bool:
     return bool(use_scalar_path(n, p))
 
 
-@njit(cache=True)
+@njit
 def l2_grid_search(
     X: NDF,
     y: NDF,
