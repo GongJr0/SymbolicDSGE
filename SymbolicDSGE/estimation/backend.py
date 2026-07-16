@@ -126,7 +126,12 @@ def reorder_observables(
     return obs_canonical, y_reordered
 
 
-def build_Q(compiled: CompiledModel, params: Mapping[str, float64]) -> NDF:
+def build_Q(
+    compiled: CompiledModel,
+    params: Mapping[str, float64],
+    *,
+    corr: NDF | None = None,
+) -> NDF:
     shock_map = compiled.config.shock_map
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
@@ -138,16 +143,23 @@ def build_Q(compiled: CompiledModel, params: Mapping[str, float64]) -> NDF:
     shocks = [rev[exo] for exo in exogs]
 
     stds = asarray([float64(params[shock_std[s].name]) for s in shocks], dtype=float64)
-    corr = np.eye(len(exogs), dtype=float64)
 
-    n = len(stds)
-    for i in range(n):
-        for j in range(i + 1, n):
-            pair = frozenset({shocks[i], shocks[j]})
-            corr_sym = shock_corr.get(pair, None)
-            corr_ij = float64(params[corr_sym.name]) if corr_sym is not None else 0.0
-            corr[i, j] = corr_ij
-            corr[j, i] = corr_ij
+    # When an LKJ block already materialized the shock correlation matrix (in exog
+    # order) it is passed in directly, so we skip the name-keyed re-gather. Without
+    # a block the correlations live in ``params`` as named scalars (fixed
+    # calibration or plain estimated params) and are assembled here.
+    if corr is None:
+        corr = np.eye(len(exogs), dtype=float64)
+        n = len(stds)
+        for i in range(n):
+            for j in range(i + 1, n):
+                pair = frozenset({shocks[i], shocks[j]})
+                corr_sym = shock_corr.get(pair, None)
+                corr_ij = (
+                    float64(params[corr_sym.name]) if corr_sym is not None else 0.0
+                )
+                corr[i, j] = corr_ij
+                corr[j, i] = corr_ij
     return np.outer(stds, stds) * corr
 
 
@@ -490,6 +502,7 @@ def evaluate_loglik(
     symmetrize: bool | None,
     R: NDF | None,
     prepared: PreparedFilterRun | None = None,
+    q_corr: NDF | None = None,
 ) -> float64:
     prepared_run = (
         prepared
@@ -513,7 +526,7 @@ def evaluate_loglik(
         steady_state=steady_state,
         raise_on_bk_violation=False,
     )
-    Q = build_Q(compiled, params)
+    Q = build_Q(compiled, params, corr=q_corr)
     R_mat = resolve_R(compiled, compiled.kalman, prepared_run.observables, R)
     calib_params = build_calib_param_vector(compiled, params)
     loglik_of_R = _prepare_filter_loglik(
