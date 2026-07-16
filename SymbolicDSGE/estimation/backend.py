@@ -16,7 +16,6 @@ from .._ckernels.estimation import (
     cov_from_unconstrained,
     unconstrained_from_corr_chol,
 )
-from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..core.compiled_model import CompiledModel
 from ..core.config import SymbolGetterDict
@@ -653,125 +652,6 @@ def _unconstrained_from_corr(corr: NDF) -> NDF:
     except np.linalg.LinAlgError as exc:
         raise ValueError("Correlation matrix must be positive definite.") from exc
     return _unconstrained_from_corr_chol(L)
-
-
-def _R_from_unconstrained(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
-    """u = [log stds (K), unconstrained CPC values] -> (R, stds, Lcorr)."""
-    n_cpc = (K * (K - 1)) // 2
-    if u.shape[0] != K + n_cpc:
-        raise ValueError(f"Expected length {K + n_cpc}, got {u.shape[0]}.")
-    std = np.exp(u[:K]).astype(float64)
-    R, Lcorr = cov_from_unconstrained(u[K:], std)
-    return R, std, Lcorr
-
-
-def estimate_R(
-    *,
-    solver: DSGESolver,
-    compiled: CompiledModel,
-    y: NDF | pd.DataFrame,
-    params: Mapping[str, float64],
-    filter_mode: str,
-    observables: list[str] | None,
-    steady_state: NDF | dict[str, float] | None,
-    x0: NDF | None,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
-    jitter: float | float64 | None,
-    symmetrize: bool | None,
-    lkj_eta: float = 2.0,
-) -> NDF:
-    """
-    Estimate full measurement covariance R with MAP first (LKJ prior on correlation),
-    then fallback to plain MLE if MAP optimization fails.
-    """
-    prepared = prepare_filter_run(
-        compiled=compiled,
-        y=y,
-        observables=observables,
-        filter_mode=filter_mode,
-        p0_mode=p0_mode,
-        p0_scale=p0_scale,
-        jitter=jitter,
-        symmetrize=symmetrize,
-    )
-    m = prepared.y_reordered.shape[1]
-    n_cpc = (m * (m - 1)) // 2
-
-    eps = float64(1e-9)
-    log_std0 = np.log(
-        np.asarray(
-            [max(0.1 * np.var(prepared.y_reordered[:, i]), eps) for i in range(m)],
-            dtype=float64,
-        )
-    )
-    u0 = np.concatenate([log_std0, np.zeros((n_cpc,), dtype=float64)])
-    try:
-        sol = _get_solution(
-            solver=solver,
-            compiled=compiled,
-            params=params,
-            mode=prepared.mode,
-            steady_state=steady_state,
-        )
-    except BaseException:
-        return np.diag(np.exp(log_std0))
-
-    Q = build_Q(compiled, params)
-    bounds: list[tuple[float, float]] = [(-30.0, 10.0)] * m + [(-5.0, 5.0)] * n_cpc
-    lkj = LKJChol(eta=float(lkj_eta), K=m, random_state=None)
-    calib_params = build_calib_param_vector(compiled, params)
-    loglik_for_R = _prepare_filter_loglik(
-        sol=sol,
-        prepared=prepared,
-        Q=Q,
-        calib_params=calib_params,
-        x0=x0,
-        raise_on_error=True,
-    )
-
-    def nlogpost(u: NDF) -> float64:
-        try:
-            R, _std, Lcorr = _R_from_unconstrained(asarray(u, dtype=float64), m)
-            ll = loglik_for_R(R)
-            lp_corr = float64(lkj.logpdf(Lcorr))
-            # Weak scale regularization in log-space.
-            lp_scale = float64(-0.5 * np.sum((u[:m] / 2.0) ** 2))
-            val = ll + lp_corr + lp_scale
-            return float64(-val) if np.isfinite(val) else float64(np.inf)
-        except BaseException:
-            return float64(np.inf)
-
-    def nloglik(u: NDF) -> float64:
-        try:
-            R, _std, _Lcorr = _R_from_unconstrained(asarray(u, dtype=float64), m)
-            ll = loglik_for_R(R)
-            return float64(-ll) if np.isfinite(ll) else float64(np.inf)
-        except BaseException:
-            return float64(np.inf)
-
-    map_opt = optimize.minimize(
-        nlogpost,
-        x0=u0,
-        bounds=bounds,
-        method="L-BFGS-B",
-    )
-    if bool(map_opt.success):
-        R_map, _, _ = _R_from_unconstrained(asarray(map_opt.x, dtype=float64), m)
-        return R_map
-
-    mle_opt = optimize.minimize(
-        nloglik,
-        x0=u0,
-        bounds=bounds,
-        method="L-BFGS-B",
-    )
-    if bool(mle_opt.success):
-        R_mle, _, _ = _R_from_unconstrained(asarray(mle_opt.x, dtype=float64), m)
-        return R_mle
-
-    # Final fallback: diagonal estimate from initial variance heuristic.
-    return np.diag(np.exp(log_std0))
 
 
 def evaluate_logprior(
