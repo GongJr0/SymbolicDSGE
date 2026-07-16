@@ -8,6 +8,8 @@ are exactly double/int64_t, so the extern is declared with those.
 
 from libc.stdint cimport int64_t
 
+from scipy.linalg.cython_lapack cimport zgges
+
 import numpy as np
 
 cdef extern from "core.h" nogil:
@@ -327,6 +329,79 @@ def klein_preprocess(
     if err != 0:
         raise MemoryError("klein_preprocess: allocation failed.")
     return a, b
+
+
+cdef bint _klein_ouc(double complex *alpha, double complex *beta) noexcept nogil:
+    """Klein 'outside unit circle' selctg for zgges: select |alpha/beta| > 1.
+
+    Division-safe magnitude compare (|alpha| > |beta|), matching
+    ``scipy.linalg.ordqz(..., sort="ouc")``. beta == 0 (infinite generalized
+    eigenvalue) selects true, as it must.
+    """
+    cdef double aa = alpha[0].real * alpha[0].real + alpha[0].imag * alpha[0].imag
+    cdef double bb = beta[0].real * beta[0].real + beta[0].imag * beta[0].imag
+    return aa > bb
+
+
+def klein_qz(a, b):
+    """Native generalized Schur (QZ) with the Klein 'ouc' ordering, via LAPACK
+    ``zgges`` (called through the scipy ``cython_lapack`` pointer, no build-time
+    LAPACK link). Returns ``(s, t, z)`` == ``scipy.linalg.ordqz(a, b,
+    sort="ouc", output="complex")`` indices ``[0, 1, 5]``: ordered Schur factors
+    ``S``/``T`` and right Schur vectors ``Z``, ready for ``klein_postprocess``.
+    """
+    a_f = np.asfortranarray(a, dtype=np.complex128)
+    b_f = np.asfortranarray(b, dtype=np.complex128)
+    cdef int n = a_f.shape[0]
+    if a_f.shape[1] != n or b_f.shape[0] != n or b_f.shape[1] != n:
+        raise ValueError("klein_qz requires square, identically shaped a and b.")
+    if n == 0:
+        return a_f, b_f, np.zeros((0, 0), dtype=np.complex128)
+
+    vsl = np.zeros((n, n), dtype=np.complex128, order="F")
+    vsr = np.zeros((n, n), dtype=np.complex128, order="F")
+    alpha = np.zeros(n, dtype=np.complex128)
+    beta = np.zeros(n, dtype=np.complex128)
+    rwork = np.zeros(8 * n, dtype=np.float64)
+    bwork = np.zeros(n, dtype=np.int32)
+
+    cdef double complex[::1, :] av = a_f
+    cdef double complex[::1, :] bv = b_f
+    cdef double complex[::1, :] vslv = vsl
+    cdef double complex[::1, :] vsrv = vsr
+    cdef double complex[::1] alphav = alpha
+    cdef double complex[::1] betav = beta
+    cdef double[::1] rworkv = rwork
+    cdef int[::1] bworkv = bwork
+
+    cdef char jobvsl = b"V"
+    cdef char jobvsr = b"V"
+    cdef char sort = b"S"
+    cdef int sdim = 0
+    cdef int info = 0
+    cdef int lwork = -1
+    cdef double complex wq = 0
+
+    # Workspace query (lwork = -1): zgges writes the optimal size to wq.
+    with nogil:
+        zgges(&jobvsl, &jobvsr, &sort, &_klein_ouc, &n,
+              &av[0, 0], &n, &bv[0, 0], &n, &sdim,
+              &alphav[0], &betav[0], &vslv[0, 0], &n, &vsrv[0, 0], &n,
+              &wq, &lwork, &rworkv[0], <bint *>&bworkv[0], &info)
+    lwork = <int>wq.real
+    if lwork < 1:
+        lwork = 1
+    work = np.zeros(lwork, dtype=np.complex128)
+    cdef double complex[::1] workv = work
+
+    with nogil:
+        zgges(&jobvsl, &jobvsr, &sort, &_klein_ouc, &n,
+              &av[0, 0], &n, &bv[0, 0], &n, &sdim,
+              &alphav[0], &betav[0], &vslv[0, 0], &n, &vsrv[0, 0], &n,
+              &workv[0], &lwork, &rworkv[0], <bint *>&bworkv[0], &info)
+    if info != 0:
+        raise RuntimeError(f"zgges failed with info={info}.")
+    return a_f, b_f, vsr
 
 
 def steady_state_newton(
