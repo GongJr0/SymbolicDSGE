@@ -5,21 +5,10 @@ from typing import TYPE_CHECKING, Any, TypeAlias, cast, overload
 import numpy as np
 from numpy import float64, int64
 from numpy.typing import NDArray
+from numba import njit
 
 from scipy.stats import chi2
 from scipy.stats._distn_infrastructure import rv_frozen
-
-# The interpolation kernels are pure table lookups (no rank-deficiency path), so
-# this module is hard-native: the constant tables below are mirrored in
-# _ckernels/diag/jb_lookup.c and the parity tests pin the two copies together.
-from .._ckernels.diag import (
-    jb_find_hilo_ascending as _find_hilo_ascending,
-    jb_find_hilo_descending as _find_hilo_descending,
-    jb_isf_interp as _isf_interp,
-    jb_isf_interp_arr as _isf_interp_array,
-    jb_pval_interp as _pval_interp,
-    jb_pval_interp_arr as _pval_interp_array,
-)
 
 if TYPE_CHECKING:
     import optype.numpy as onp
@@ -99,11 +88,130 @@ JB_SMALL_N_CRITICAL_VALUES: NDF = np.ascontiguousarray(
     ], dtype=np.float64)
 )
 # fmt: on
-# The lookup/interpolation kernels (``_find_hilo_ascending`` /
-# ``_find_hilo_descending`` / ``_isf_interp`` / ``_pval_interp`` and the ``_array``
-# forms) are imported from the native ``_ckernels.diag`` extension at the top of
-# this module. The tables above are kept only for the small-N boundary check in
-# ``JarqueBeraDist`` and the parity tests; the kernels read their own C copies.
+@njit(cache=True)
+def _find_hilo_ascending(val: int | float64, arr: np.ndarray) -> tuple[int, int]:
+    idx = np.searchsorted(arr, val)
+
+    length = arr.shape[0]
+
+    if idx == 0:
+        return 0, 0
+    elif idx == length:
+        return length - 1, length - 1
+    elif arr[idx] == val:
+        return int(idx), int(idx)
+    else:
+        return int(idx - 1), int(idx)
+
+
+@njit(cache=True)
+def _find_hilo_descending(val: float64, arr: NDF) -> tuple[int, int]:
+    idx = np.searchsorted(-arr, -val)
+
+    length = arr.shape[0]
+
+    if idx == 0:
+        return 0, 0
+    elif idx == length:
+        return length - 1, length - 1
+    elif arr[idx] == val:
+        return int(idx), int(idx)
+    else:
+        return int(idx - 1), int(idx)
+
+
+@njit(cache=True)
+def _isf_interp(n: int, p: float64) -> float64:
+    if np.isnan(p):
+        return float64(np.nan)
+    if p <= 0.0:
+        return float64(np.inf)
+    if p >= 1.0:
+        return float64(0.0)
+
+    n_lo, n_hi = _find_hilo_ascending(n, JB_N_GRID)
+    p_lo, p_hi = _find_hilo_ascending(p, JB_PVAL_GRID)
+
+    if n_lo == n_hi and p_lo == p_hi:
+        return float64(JB_SMALL_N_CRITICAL_VALUES[p_lo, n_lo])
+
+    elif n_lo == n_hi:
+        w_p = (p - JB_PVAL_GRID[p_lo]) / (JB_PVAL_GRID[p_hi] - JB_PVAL_GRID[p_lo])
+        return float64(
+            (1 - w_p) * JB_SMALL_N_CRITICAL_VALUES[p_lo, n_lo]
+            + w_p * JB_SMALL_N_CRITICAL_VALUES[p_hi, n_lo]
+        )
+
+    elif p_lo == p_hi:
+        w_n = (n - JB_N_GRID[n_lo]) / (JB_N_GRID[n_hi] - JB_N_GRID[n_lo])
+        return float64(
+            (1 - w_n) * JB_SMALL_N_CRITICAL_VALUES[p_lo, n_lo]
+            + w_n * JB_SMALL_N_CRITICAL_VALUES[p_lo, n_hi]
+        )
+
+    else:
+        w_n = (n - JB_N_GRID[n_lo]) / (JB_N_GRID[n_hi] - JB_N_GRID[n_lo])
+        w_p = (p - JB_PVAL_GRID[p_lo]) / (JB_PVAL_GRID[p_hi] - JB_PVAL_GRID[p_lo])
+
+        val_lo = (1 - w_n) * JB_SMALL_N_CRITICAL_VALUES[
+            p_lo, n_lo
+        ] + w_n * JB_SMALL_N_CRITICAL_VALUES[p_lo, n_hi]
+        val_hi = (1 - w_n) * JB_SMALL_N_CRITICAL_VALUES[
+            p_hi, n_lo
+        ] + w_n * JB_SMALL_N_CRITICAL_VALUES[p_hi, n_hi]
+
+        return float64((1 - w_p) * val_lo + w_p * val_hi)
+
+
+@njit(cache=True)
+def _pval_interp(n: int, x: float64) -> float64:
+    if np.isnan(x):
+        return float64(np.nan)
+    if x <= 0.0:
+        return float64(1.0)
+    if np.isinf(x):
+        return float64(0.0)
+
+    n_lo, n_hi = _find_hilo_ascending(n, JB_N_GRID)
+
+    lo_cv = JB_SMALL_N_CRITICAL_VALUES[:, n_lo]
+    hi_cv = JB_SMALL_N_CRITICAL_VALUES[:, n_hi]
+
+    if n_lo == n_hi:
+        p_lo, p_hi = _find_hilo_descending(x, lo_cv)
+
+        if p_lo == p_hi:
+            return float64(JB_PVAL_GRID[p_lo])
+        else:
+            w_p = (x - lo_cv[p_lo]) / (lo_cv[p_hi] - lo_cv[p_lo])
+            return float64((1 - w_p) * JB_PVAL_GRID[p_lo] + w_p * JB_PVAL_GRID[p_hi])
+    else:
+        w_n = (n - JB_N_GRID[n_lo]) / (JB_N_GRID[n_hi] - JB_N_GRID[n_lo])
+        cv = (1 - w_n) * lo_cv + w_n * hi_cv
+
+        p_lo, p_hi = _find_hilo_descending(x, cv)
+
+        if p_lo == p_hi:
+            return float64(JB_PVAL_GRID[p_lo])
+        else:
+            w_p = (x - cv[p_lo]) / (cv[p_hi] - cv[p_lo])
+            return float64((1 - w_p) * JB_PVAL_GRID[p_lo] + w_p * JB_PVAL_GRID[p_hi])
+
+
+@njit(cache=True)
+def _isf_interp_array(n: int, p: NDF) -> NDF:
+    out = np.empty_like(p)
+    for i in range(p.size):
+        out[i] = _isf_interp(n, p[i])
+    return out
+
+
+@njit(cache=True)
+def _pval_interp_array(n: int, x: NDF) -> NDF:
+    out = np.empty_like(x)
+    for i in range(x.size):
+        out[i] = _pval_interp(n, x[i])
+    return out
 
 
 def _as_distribution_output(value: Any) -> DistributionOutput:
