@@ -9,11 +9,12 @@ from typing import Any, Callable, Iterator
 
 from sympy.core.symbol import AppliedUndef
 import yaml
+import numpy as np
 import sympy as sp
 from sympy import Matrix, Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
 from sympy.parsing.sympy_parser import standard_transformations, convert_xor
-from numpy import float64, array, ndarray
+from numpy import float64, ndarray
 
 from .config import (
     ModelConfig,
@@ -26,6 +27,27 @@ from .config import (
 )
 from ..kalman.config import KalmanConfig, P0Config
 from .linearization import LinearizationMethod
+
+
+def make_R(
+    y_order: list[Symbol],
+    std: dict[Symbol, float64],
+    corr: dict[frozenset, float64],
+) -> ndarray:
+    n = len(y_order)
+
+    sig_vec = np.array([std[y] for y in y_order], dtype=float64)
+
+    rho = np.eye(n, dtype=float64)
+    for pair, rho_ij in corr.items():
+        a, b = tuple(pair)  # pair is a frozenset[Symbol]
+        i = y_order.index(a)
+        j = y_order.index(b)
+        rho[i, j] = rho_ij
+        rho[j, i] = rho_ij
+
+    return np.outer(sig_vec, sig_vec) * rho
+
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
@@ -608,10 +630,9 @@ class ModelParser:
         P0_scale = float64(P0.get("scale", 1.0))
         P0_diag = P0.get("diag", None)
 
-        R_symbolic: Matrix | None
+        R: ndarray | None
         r_param_symbols: list[Symbol] | None
         R_param_names: list[str] | None
-        _R_builder: Callable[..., ndarray] | None
 
         R_data = kalman_data.get("R")
         if R_data:
@@ -645,21 +666,9 @@ class ModelParser:
                     pair = frozenset((obs_names[i], obs_names[j]))
                     R_corr_param_map.setdefault(pair, None)
 
-            n_obs = len(y_order)
-            R_symbolic = Matrix.zeros(n_obs, n_obs)
-            for i in range(n_obs):
-                yi = y_order[i]
-                sig_i = obs_sig_sym[yi]
-                for j in range(n_obs):
-                    yj = y_order[j]
-                    sig_j = obs_sig_sym[yj]
-                    if i == j:
-                        rho_ij = sp.Integer(1)
-                    else:
-                        rho_ij = obs_corr_sym.get(frozenset((yi, yj)), sp.Integer(0))
-                    R_symbolic[i, j] = sp.simplify(  # pyright: ignore
-                        sig_i * sig_j * rho_ij
-                    )
+            std_vals = {y: parameters[obs_sig_sym[y]] for y in y_order}
+            corr_vals = {pair: parameters[sym] for pair, sym in obs_corr_sym.items()}
+            R = make_R(y_order, std_vals, corr_vals)
 
             r_param_symbols_local: list[Symbol] = []
             seen: set[Symbol] = set()
@@ -676,23 +685,12 @@ class ModelParser:
 
             r_param_symbols = r_param_symbols_local
 
-            raw_builder = sp.lambdify(r_param_symbols, R_symbolic, modules="numpy")
-
-            def _R_builder_impl(*vals: Any) -> ndarray:
-                return array(raw_builder(*vals), dtype=float64)
-
-            _R_builder = _R_builder_impl
-            r_param_values = [parameters[sym] for sym in r_param_symbols]
-            R = _R_builder(*r_param_values)
             R_param_names = [sym.name for sym in r_param_symbols]
         else:
             R = None
-            R_symbolic = None
-            r_param_symbols = None
             R_param_names = None
             R_std_param_map = None
             R_corr_param_map = {}
-            _R_builder = None
 
         P0_cfg = P0Config(
             mode=P0_mode,
@@ -703,10 +701,7 @@ class ModelParser:
         return KalmanConfig(
             R=R,
             P0=P0_cfg,
-            R_symbolic=R_symbolic,
-            R_param_symbols=r_param_symbols,
             R_param_names=R_param_names,
-            R_builder=_R_builder,
             R_std_param_map=R_std_param_map,
             R_corr_param_map=R_corr_param_map,
         )
