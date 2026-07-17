@@ -66,11 +66,6 @@ def klein_preprocess(
     """Complex-step (a, b) from a residual @cfunc address. Native twin of
     ``klein._approximate_system_numeric``."""
 
-def klein_qz(a: _F64 | _C128, b: _F64 | _C128) -> tuple[_C128, _C128, _C128]:
-    """Ordered generalized Schur (QZ) with the Klein 'ouc' ordering via LAPACK
-    zgges. Returns (s, t, z) == scipy.linalg.ordqz(a, b, sort='ouc',
-    output='complex')[0, 1, 5]."""
-
 def steady_state_newton(
     residual_addr: int,
     seed: _F64,

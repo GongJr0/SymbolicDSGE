@@ -22,8 +22,6 @@ from ..regression.enums import RegressionStatus
 from ..regression.solvers import chol_solve, lstsq_solve
 from .._ckernels.diag import (
     cusum_series as _native_cusum_series,
-    cusum_sf,
-    cusum_sf_arr,
     cusum_stat as _native_cusum_stat,
     FALLBACK as DIAG_FALLBACK,
 )
@@ -122,6 +120,14 @@ def _a_from_alpha(
 
 # Reference distribution
 @njit(cache=True)
+def _alpha_from_a_array(a: NDF) -> NDF:
+    out = np.empty_like(a)
+    for i in range(a.size):
+        out[i] = _alpha_from_a(a[i])
+    return out
+
+
+@njit(cache=True)
 def _a_from_alpha_array(alpha: NDF) -> NDF:
     out = np.empty_like(alpha)
     for i in range(alpha.size):
@@ -166,10 +172,9 @@ class CusumDist(rv_frozen):
     @overload
     def sf(self, x: onp.ToFloatND, /) -> NDF: ...
     def sf(self, x: Any, /) -> DistributionOutput:  # pyright: ignore
-        # The native diag_cusum kernel already clamps Durbin's series to <= 1
-        # (it can exceed 1 for small statistics); dispatch only branches
-        # scalar vs array.
-        return _dispatch(x, cusum_sf, cusum_sf_arr)
+        # Durbin's series can exceed 1 for small statistics; clamp so the
+        # survival function always returns a valid probability.
+        return np.minimum(1.0, _dispatch(x, _alpha_from_a, _alpha_from_a_array))
 
     @overload
     def cdf(self, x: onp.ToFloat, /) -> DistributionOutput: ...

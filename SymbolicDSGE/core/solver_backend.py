@@ -6,11 +6,11 @@ from typing import Any
 import numpy as np
 from numpy import complex128, float64
 from numpy.typing import NDArray
+from scipy.linalg import ordqz
 
 from .._ckernels.core import (
     klein_postprocess,
     klein_preprocess,
-    klein_qz,
 )
 
 NDF = NDArray[float64]
@@ -80,10 +80,9 @@ def klein_solve(
     a, b = klein_preprocess(
         residual_cfunc.address, steady_state, params, n_eq, log_linear
     )
-    # Native QZ (LAPACK zgges via the scipy cython_lapack pointer, ordered by the
-    # Klein 'ouc' criterion) — bit-for-bit equal to the former
-    # ordqz(a, b, sort="ouc", output="complex")[0, 1, 5].
-    s, t, z = klein_qz(a, b)
+    s, t, _, _, _, z = ordqz(a, b, sort="ouc", output="complex")
+    # ordqz output="complex" is complex128 at runtime; scipy types it as the
+    # generic complexfloating, so pin it to the kernel's complex128 contract.
     f, p, stab, eig = klein_postprocess(
         np.asarray(s, dtype=complex128),
         np.asarray(t, dtype=complex128),
