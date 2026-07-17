@@ -65,6 +65,20 @@ cdef extern from "diag_wald.h":
     int sdsge_fill_symmetric_target_vec(const double *target, double atol,
                                         double rtol, int64_t p,
                                         double *out) nogil
+cdef extern from "diag_cusum.h":
+    double sdsge_cusum_sf(double a) nogil
+    void sdsge_cusum_sf_into(const double *a, int64_t n, double *out) nogil
+cdef extern from "jb_lookup.h":
+    void sdsge_jb_find_hilo_ascending(double val, const double *arr, int64_t n,
+                                      int64_t *lo, int64_t *hi) nogil
+    void sdsge_jb_find_hilo_descending(double val, const double *arr, int64_t n,
+                                       int64_t *lo, int64_t *hi) nogil
+    double sdsge_jb_isf_interp(int64_t n, double p) nogil
+    double sdsge_jb_pval_interp(int64_t n, double x) nogil
+    void sdsge_jb_isf_interp_into(int64_t n, const double *p, int64_t m,
+                                  double *out) nogil
+    void sdsge_jb_pval_interp_into(int64_t n, const double *x, int64_t m,
+                                   double *out) nogil
 
 # Re-exported so the Python dispatch layer can recognise the "retry in numba"
 # signal without hard-coding the magic number.
@@ -160,6 +174,29 @@ def cusum_stat(y, X):
     with nogil:
         status = sdsge_cusum_stat(&y_mv[0], &X_mv[0, 0], T, p, &stat)
     return status, stat
+
+
+def cusum_sf(a):
+    """Clamped Durbin CUSUM survival function. Scalar in float64 out."""
+    cdef double aa = <double> a
+    cdef double out
+    with nogil:
+        out = sdsge_cusum_sf(aa)
+    return np.float64(out)
+
+
+def cusum_sf_arr(a):
+    """Elementwise CUSUM sf; returns a new float64 array shaped like ``a``."""
+    arr = np.ascontiguousarray(a, dtype=np.float64)
+    out = np.empty_like(arr)
+    cdef int64_t n = arr.size
+    if n == 0:
+        return out
+    cdef double[::1] av = arr.reshape(-1)
+    cdef double[::1] ov = out.reshape(-1)
+    with nogil:
+        sdsge_cusum_sf_into(&av[0], n, &ov[0])
+    return out
 
 
 def cusumsq_stat(y, X):
@@ -339,3 +376,71 @@ def fill_symmetric_target_vec(target, double atol, double rtol):
         status = sdsge_fill_symmetric_target_vec(&target_mv[0, 0], atol, rtol, p,
                                                  &vec_mv[0])
     return status, vec
+
+
+def jb_find_hilo_ascending(val, arr):
+    """Bracket ``val`` in the ascending grid ``arr``. Returns (lo, hi)."""
+    cdef double[::1] a_mv = np.ascontiguousarray(arr, dtype=np.float64)
+    cdef int64_t n = a_mv.shape[0]
+    cdef double v = <double> val
+    cdef int64_t lo = 0, hi = 0
+    cdef double *a_ptr = &a_mv[0] if n > 0 else NULL
+    with nogil:
+        sdsge_jb_find_hilo_ascending(v, a_ptr, n, &lo, &hi)
+    return int(lo), int(hi)
+
+
+def jb_find_hilo_descending(val, arr):
+    """Bracket ``val`` in the descending array ``arr``. Returns (lo, hi)."""
+    cdef double[::1] a_mv = np.ascontiguousarray(arr, dtype=np.float64)
+    cdef int64_t n = a_mv.shape[0]
+    cdef double v = <double> val
+    cdef int64_t lo = 0, hi = 0
+    cdef double *a_ptr = &a_mv[0] if n > 0 else NULL
+    with nogil:
+        sdsge_jb_find_hilo_descending(v, a_ptr, n, &lo, &hi)
+    return int(lo), int(hi)
+
+
+def jb_isf_interp(int64_t n, double p):
+    """Small-N Jarque-Bera inverse survival function. Returns float64."""
+    cdef double out
+    with nogil:
+        out = sdsge_jb_isf_interp(n, p)
+    return np.float64(out)
+
+
+def jb_pval_interp(int64_t n, double x):
+    """Small-N Jarque-Bera survival function. Returns float64."""
+    cdef double out
+    with nogil:
+        out = sdsge_jb_pval_interp(n, x)
+    return np.float64(out)
+
+
+def jb_isf_interp_arr(int64_t n, p):
+    """Elementwise ``jb_isf_interp``; new float64 array shaped like ``p``."""
+    arr = np.ascontiguousarray(p, dtype=np.float64)
+    out = np.empty_like(arr)
+    cdef int64_t m = arr.size
+    if m == 0:
+        return out
+    cdef double[::1] pv = arr.reshape(-1)
+    cdef double[::1] ov = out.reshape(-1)
+    with nogil:
+        sdsge_jb_isf_interp_into(n, &pv[0], m, &ov[0])
+    return out
+
+
+def jb_pval_interp_arr(int64_t n, x):
+    """Elementwise ``jb_pval_interp``; new float64 array shaped like ``x``."""
+    arr = np.ascontiguousarray(x, dtype=np.float64)
+    out = np.empty_like(arr)
+    cdef int64_t m = arr.size
+    if m == 0:
+        return out
+    cdef double[::1] xv = arr.reshape(-1)
+    cdef double[::1] ov = out.reshape(-1)
+    with nogil:
+        sdsge_jb_pval_interp_into(n, &xv[0], m, &ov[0])
+    return out

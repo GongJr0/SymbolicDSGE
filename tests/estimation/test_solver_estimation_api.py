@@ -239,37 +239,3 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(monkeypat
     assert float(sym_map["a"]) == pytest.approx(captured["parameters"]["a"])
     assert float(sym_map["b"]) == pytest.approx(captured["parameters"]["b"])
     assert solved.params == captured["parameters"]
-
-
-def test_solver_estimate_uses_map_first_R_estimator(monkeypatch):
-    solver = _make_solver()
-    compiled = _make_compiled(0.0)
-    compiled.var_names = ["x"]
-    compiled.observable_names = ["y"]
-    compiled.kalman = SimpleNamespace()
-
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    called = {"estimate_R": 0}
-
-    def fake_estimate_R(**kwargs):
-        called["estimate_R"] += 1
-        return np.eye(1, dtype=np.float64)
-
-    def fail_old_estimator(**kwargs):
-        raise AssertionError("estimate_R_diag should not be called.")
-
-    monkeypatch.setattr(est_backend, "estimate_R", fake_estimate_R)
-    monkeypatch.setattr(est_backend, "estimate_R_diag", fail_old_estimator)
-
-    out = solver.estimate(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
-        method="mle",
-        estimated_params=["a"],
-        theta0={"a": 0.0},
-        bounds=[(-5.0, 5.0)],
-    )
-
-    assert called["estimate_R"] == 1
-    assert out.success

@@ -397,3 +397,37 @@ def test_jb_stat_non_finite_input_reports_undefined_variance():
         rs, rstat = jit_jb_stat(x)
         assert ns == rs == -3
         assert np.isnan(nstat) and np.isnan(rstat)
+
+
+def test_cusum_sf_matches_oracle():
+    """Native clamped Durbin CUSUM survival function vs the numba oracle.
+
+    The oracle is the raw (unclamped) Durbin formula; the native kernel folds in
+    the ``min(1, .)`` clamp, so the reference is ``min(1, oracle)`` -- exercising
+    both the rational math and the clamp branch (small ``a`` gives raw > 1).
+    """
+    from _oracles.diag import (
+        cusum_alpha_from_a as oracle_raw,
+        cusum_alpha_from_a_array as oracle_raw_arr,
+    )
+
+    # a is the (non-negative) CUSUM statistic; sweep small (raw > 1, clamped) to
+    # large tail.
+    a_vals = np.array(
+        [0.0, 0.1, 0.3, 0.5, 0.7, 1.0, 1.358, 1.5, 2.0, 3.0, 5.0], dtype=np.float64
+    )
+    for a in a_vals:
+        expected = min(1.0, float(oracle_raw(np.float64(a))))
+        assert diag.cusum_sf(a) == pytest.approx(expected, rel=1e-12, abs=0.0)
+
+    # Vectorized path: elementwise agreement + shape preservation on a
+    # non-contiguous 2-D view. The native kernel ravels internally, so it takes
+    # n-D; the oracle array form is 1-D, so it gets the flattened view.
+    view = a_vals[:10].reshape(2, 5)[::-1]
+    got = diag.cusum_sf_arr(view)
+    ref = np.minimum(1.0, oracle_raw_arr(np.ascontiguousarray(view).ravel())).reshape(
+        view.shape
+    )
+    np.testing.assert_allclose(got, ref, rtol=1e-12, atol=0.0)
+    assert got.shape == (2, 5)
+    assert diag.cusum_sf_arr(np.empty(0, dtype=np.float64)).shape == (0,)

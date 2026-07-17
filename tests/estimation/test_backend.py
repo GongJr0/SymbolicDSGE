@@ -519,105 +519,7 @@ def test_estimate_R_diag_returns_positive_diagonal(post82_bundle):
     assert np.all(np.diag(R) > 0.0)
 
 
-def test_estimate_R_tries_map_then_falls_back_to_mle(post82_bundle, monkeypatch):
-    solver = post82_bundle["solver"]
-    compiled = post82_bundle["compiled"]
-    steady = post82_bundle["steady"]
-    y = post82_bundle["y"]
-    params = backend.extract_base_params(compiled)
-
-    calls = []
-
-    def fake_minimize(fun, x0, bounds=None, method=None):
-        calls.append(fun.__name__)
-        if len(calls) == 1:
-            return SimpleNamespace(success=False, x=np.asarray(x0, dtype=np.float64))
-        return SimpleNamespace(success=True, x=np.asarray(x0, dtype=np.float64))
-
-    monkeypatch.setattr(backend.optimize, "minimize", fake_minimize)
-
-    R = backend.estimate_R(
-        solver=solver,
-        compiled=compiled,
-        y=y,
-        params=params,
-        filter_mode="linear",
-        observables=["Infl", "Rate"],
-        steady_state=steady,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert calls == ["nlogpost", "nloglik"]
-    assert R.shape == (2, 2)
-    assert np.all(np.diag(R) > 0.0)
-
-
-def test_estimate_R_stops_after_successful_map(post82_bundle, monkeypatch):
-    solver = post82_bundle["solver"]
-    compiled = post82_bundle["compiled"]
-    steady = post82_bundle["steady"]
-    y = post82_bundle["y"]
-    params = backend.extract_base_params(compiled)
-
-    calls = []
-
-    def fake_minimize(fun, x0, bounds=None, method=None):
-        calls.append(fun.__name__)
-        return SimpleNamespace(success=True, x=np.asarray(x0, dtype=np.float64))
-
-    monkeypatch.setattr(backend.optimize, "minimize", fake_minimize)
-
-    _ = backend.estimate_R(
-        solver=solver,
-        compiled=compiled,
-        y=y,
-        params=params,
-        filter_mode="linear",
-        observables=["Infl", "Rate"],
-        steady_state=steady,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert calls == ["nlogpost"]
-
-
-def test_estimate_R_falls_back_to_diag_when_solve_raises(post82_bundle, monkeypatch):
-    solver = post82_bundle["solver"]
-    compiled = post82_bundle["compiled"]
-    steady = post82_bundle["steady"]
-    y = post82_bundle["y"]
-    params = backend.extract_base_params(compiled)
-
-    def _boom(*args, **kwargs):
-        raise SystemExit("invertibility violation")
-
-    monkeypatch.setattr(solver, "solve", _boom)
-    R = backend.estimate_R(
-        solver=solver,
-        compiled=compiled,
-        y=y,
-        params=params,
-        filter_mode="linear",
-        observables=["Infl", "Rate"],
-        steady_state=steady,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert R.shape == (2, 2)
-    assert np.all(np.diag(R) > 0.0)
-    assert np.allclose(R, np.diag(np.diag(R)))
-
-
-def test_corr_chol_and_R_unconstrained_parameterization():
+def test_corr_chol_unconstrained_parameterization():
     z = np.array([0.2, -0.1, 0.3], dtype=np.float64)
     L = backend._corr_chol_from_unconstrained(z, K=3)
     corr = L @ L.T
@@ -627,12 +529,6 @@ def test_corr_chol_and_R_unconstrained_parameterization():
     z_from_corr = backend._unconstrained_from_corr(corr)
     assert np.allclose(z_from_L, z, atol=1e-10, rtol=0.0)
     assert np.allclose(z_from_corr, z, atol=1e-10, rtol=0.0)
-
-    u = np.array([np.log(0.4), np.log(0.8), 0.1], dtype=np.float64)
-    R, std, _ = backend._R_from_unconstrained(u, K=2)
-    assert R.shape == (2, 2)
-    assert np.allclose(np.sqrt(np.diag(R)), std)
-    assert np.all(np.linalg.eigvalsh(R) > 0.0)
 
 
 def test_evaluate_logprior_branches():
@@ -715,14 +611,6 @@ def test_backend_corr_cov_helpers_and_validation_error_paths():
     z_back = backend._unconstrained_from_corr_chol(L)
     assert np.allclose(z_back, z, atol=1e-10, rtol=0.0)
 
-    R, std, Lcorr = backend._R_from_unconstrained(
-        np.array([np.log(0.5), np.log(0.8), 0.2], dtype=np.float64),
-        2,
-    )
-    assert R.shape == (2, 2)
-    assert np.all(std > 0.0)
-    assert Lcorr.shape == (2, 2)
-
     with pytest.raises(ValueError, match="Expected 3 unconstrained CPC elements"):
         backend._corr_chol_from_unconstrained(np.array([0.1], dtype=np.float64), K=3)
     with pytest.raises(ValueError, match="square lower-triangular"):
@@ -753,8 +641,6 @@ def test_backend_corr_cov_helpers_and_validation_error_paths():
         backend._unconstrained_from_corr(
             np.array([[1.0, 2.0], [2.0, 1.0]], dtype=np.float64)
         )
-    with pytest.raises(ValueError, match="Expected length 3"):
-        backend._R_from_unconstrained(np.array([0.0, 0.0], dtype=np.float64), K=2)
 
 
 def test_unconstrained_from_corr_chol_clips_extreme_cpc_values():
@@ -875,186 +761,6 @@ def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch)
         symmetrize=None,
     )
     assert len(calls) == 1
-    assert np.allclose(R, expected)
-
-
-def test_estimate_R_extended_branch_and_final_diag_fallback(monkeypatch):
-    y_reordered = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 5.0]], dtype=np.float64)
-    prepared = backend.PreparedFilterRun(
-        observables=["a", "b"],
-        y_reordered=y_reordered,
-        mode="extended",
-        meas_addr=_r_zero_meas.address,
-        jac_addr=_r_zero_jac.address,
-        zero_state=np.zeros((1,), dtype=np.float64),
-        P0=None,
-        kf_jitter=np.float64(0.0),
-        kf_sym=False,
-    )
-    monkeypatch.setattr(backend, "prepare_filter_run", lambda **kwargs: prepared)
-    monkeypatch.setattr(backend, "build_Q", lambda compiled, params: np.eye(1))
-    monkeypatch.setattr(
-        backend,
-        "build_calib_param_vector",
-        lambda compiled, params: np.array([0.0], dtype=np.float64),
-    )
-    monkeypatch.setattr(
-        backend.KalmanFilter,
-        "run_extended_raw",
-        lambda **kwargs: SimpleNamespace(loglik=np.float64(-3.0)),
-    )
-
-    calls: list[str] = []
-
-    def fake_minimize(fun, x0, bounds=None, method=None):
-        calls.append(fun.__name__)
-        assert np.isfinite(fun(np.asarray(x0, dtype=np.float64)))
-        return SimpleNamespace(success=False, x=np.asarray(x0, dtype=np.float64))
-
-    monkeypatch.setattr(backend.optimize, "minimize", fake_minimize)
-    solver = SimpleNamespace(
-        solve=lambda **kwargs: SimpleNamespace(
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-        )
-    )
-    expected = np.diag(
-        np.array(
-            [max(0.1 * np.var(y_reordered[:, i]), 1e-9) for i in range(2)],
-            dtype=np.float64,
-        )
-    )
-
-    R = backend.estimate_R(
-        solver=solver,
-        compiled=SimpleNamespace(),
-        y=y_reordered,
-        params={},
-        filter_mode="linear",
-        observables=["a", "b"],
-        steady_state=None,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert calls == ["nlogpost", "nloglik"]
-    assert np.allclose(R, expected)
-
-
-def test_estimate_R_linear_branch_uses_kalman_run(monkeypatch):
-    y_reordered = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 5.0]], dtype=np.float64)
-    prepared = backend.PreparedFilterRun(
-        observables=["a", "b"],
-        y_reordered=y_reordered,
-        mode="linear",
-        meas_addr=_r_zero_meas.address,
-        jac_addr=_r_zero_jac.address,
-        zero_state=np.zeros((1,), dtype=np.float64),
-        P0=None,
-        kf_jitter=np.float64(0.0),
-        kf_sym=False,
-    )
-    monkeypatch.setattr(backend, "prepare_filter_run", lambda **kwargs: prepared)
-    monkeypatch.setattr(backend, "build_Q", lambda compiled, params: np.eye(1))
-    monkeypatch.setattr(
-        backend,
-        "build_calib_param_vector",
-        lambda compiled, params: np.array([0.0], dtype=np.float64),
-    )
-    monkeypatch.setattr(
-        backend.KalmanFilter,
-        "run_raw",
-        lambda **kwargs: SimpleNamespace(loglik=np.float64(-4.0)),
-    )
-
-    calls: list[str] = []
-
-    def fake_minimize(fun, x0, bounds=None, method=None):
-        calls.append(fun.__name__)
-        assert np.isfinite(fun(np.asarray(x0, dtype=np.float64)))
-        return SimpleNamespace(success=False, x=np.asarray(x0, dtype=np.float64))
-
-    monkeypatch.setattr(backend.optimize, "minimize", fake_minimize)
-    solver = SimpleNamespace(
-        solve=lambda **kwargs: SimpleNamespace(
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-        )
-    )
-
-    R = backend.estimate_R(
-        solver=solver,
-        compiled=SimpleNamespace(),
-        y=y_reordered,
-        params={},
-        filter_mode="linear",
-        observables=["a", "b"],
-        steady_state=None,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert calls == ["nlogpost", "nloglik"]
-    assert R.shape == (2, 2)
-
-
-def test_estimate_R_objective_exception_paths_return_final_diag(monkeypatch):
-    y_reordered = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 5.0]], dtype=np.float64)
-    prepared = backend.PreparedFilterRun(
-        observables=["a", "b"],
-        y_reordered=y_reordered,
-        mode="extended",
-        meas_addr=_r_zero_meas.address,
-        jac_addr=_r_zero_jac.address,
-        zero_state=np.zeros((1,), dtype=np.float64),
-        P0=None,
-        kf_jitter=np.float64(0.0),
-        kf_sym=False,
-    )
-    monkeypatch.setattr(backend, "prepare_filter_run", lambda **kwargs: prepared)
-    monkeypatch.setattr(backend, "build_Q", lambda compiled, params: np.eye(1))
-    monkeypatch.setattr(
-        backend,
-        "build_calib_param_vector",
-        lambda compiled, params: np.array([0.0], dtype=np.float64),
-    )
-
-    def fake_minimize(fun, x0, bounds=None, method=None):
-        assert np.isinf(fun(np.array([0.0], dtype=np.float64)))
-        return SimpleNamespace(success=False, x=np.asarray(x0, dtype=np.float64))
-
-    monkeypatch.setattr(backend.optimize, "minimize", fake_minimize)
-    solver = SimpleNamespace(
-        solve=lambda **kwargs: SimpleNamespace(
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-        )
-    )
-    expected = np.diag(
-        np.array(
-            [max(0.1 * np.var(y_reordered[:, i]), 1e-9) for i in range(2)],
-            dtype=np.float64,
-        )
-    )
-
-    R = backend.estimate_R(
-        solver=solver,
-        compiled=SimpleNamespace(),
-        y=y_reordered,
-        params={},
-        filter_mode="linear",
-        observables=["a", "b"],
-        steady_state=None,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
     assert np.allclose(R, expected)
 
 

@@ -702,7 +702,14 @@ class Estimator:
             )
         return out
 
-    def theta_to_params(self, theta: NDF) -> dict[str, float64]:
+    def _resolve_theta(self, theta: NDF) -> tuple[dict[str, float64], dict[str, NDF]]:
+        """Single materialization site for a theta draw.
+
+        Returns the named parameter dict (the boundary view every caller expects)
+        alongside the matrix blocks it built on the way — keyed by reserved matrix
+        key ("Q_corr"/"R_corr"). The hot path takes the matrices straight to the
+        Q/R assembly instead of re-gathering them from the named scalars.
+        """
         theta = asarray(theta, dtype=float64)
         if theta.ndim != 1:
             raise ValueError("theta must be a 1D array.")
@@ -711,10 +718,12 @@ class Estimator:
                 f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
             )
         full = dict(self._base_params)
+        matrices: dict[str, NDF] = {}
         handled = np.zeros((len(self.param_names),), dtype=bool)
-        for block in self._matrix_blocks.values():
+        for key, block in self._matrix_blocks.items():
             theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
             corr, _ = self._block_corr_from_theta(block, theta_block)
+            matrices[key] = corr
             member_vals = corr[block.positions[:, 0], block.positions[:, 1]]
             for name, val in zip(block.member_names, member_vals):
                 full[name] = float64(val)
@@ -726,10 +735,17 @@ class Estimator:
             full[name] = float64(
                 self._param_transforms[name].safe_inverse(float64(theta[i]))
             )
-        return full
+        return full, matrices
+
+    def theta_to_params(self, theta: NDF) -> dict[str, float64]:
+        return self._resolve_theta(theta)[0]
 
     def _loglik_from_params(
-        self, params: Mapping[str, float64], R_override: NDF | None = None
+        self,
+        params: Mapping[str, float64],
+        R_override: NDF | None = None,
+        *,
+        q_corr: NDF | None = None,
     ) -> float64:
         return backend.evaluate_loglik(
             solver=self.solver,
@@ -746,6 +762,7 @@ class Estimator:
             symmetrize=self.symmetrize,
             R=(self.R if R_override is None else R_override),
             prepared=self._prepared_filter,
+            q_corr=q_corr,
         )
 
     def _effective_observables(self) -> list[str]:
@@ -770,8 +787,8 @@ class Estimator:
         return sorted(obs_given, key=lambda n: canon_idx[n])
 
     def loglik(self, theta: NDF) -> float64:
-        params = self.theta_to_params(theta)
-        return self._loglik_from_params(params)
+        params, matrices = self._resolve_theta(theta)
+        return self._loglik_from_params(params, q_corr=matrices.get("Q_corr"))
 
     def _logprior_python(self, theta: NDF) -> float64:
         if self.priors is None:
@@ -825,14 +842,16 @@ class Estimator:
         *,
         params_override: Mapping[str, float64] | None = None,
         R_override: NDF | None = None,
+        q_corr: NDF | None = None,
     ) -> float64:
-        params = (
-            params_override
-            if params_override is not None
-            else self.theta_to_params(theta)
-        )
+        if params_override is not None:
+            params = params_override
+        else:
+            params, matrices = self._resolve_theta(theta)
+            q_corr = matrices.get("Q_corr")
         return float64(
-            self._loglik_from_params(params, R_override) + self.logprior(theta)
+            self._loglik_from_params(params, R_override, q_corr=q_corr)
+            + self.logprior(theta)
         )
 
     def _eval_with_warning_capture(
@@ -1088,7 +1107,7 @@ class Estimator:
             if not dynamic_R_enabled:
                 return self._safe_logpost(theta)
             try:
-                params = self.theta_to_params(theta)
+                params, matrices = self._resolve_theta(theta)
                 R_iter = backend.build_R_from_config_params(
                     compiled=self.compiled,
                     kalman=self.compiled.kalman,
@@ -1100,6 +1119,7 @@ class Estimator:
                         th,
                         params_override=params,
                         R_override=R_iter,
+                        q_corr=matrices.get("Q_corr"),
                     ),
                     theta,
                 )
