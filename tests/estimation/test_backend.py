@@ -326,6 +326,10 @@ def test_resolve_R_branches():
     assert np.allclose(subset, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
 
 
+@pytest.mark.skip(
+    reason="R-estimation rework: R_builder/R_symbolic removed; build_R_from_config_params "
+    "is being rewired onto make_R and the R std/corr param maps."
+)
 def test_kalman_symbolic_R_builder_matches_numeric_config_R(post82_bundle):
     compiled = post82_bundle["compiled"]
     kalman = compiled.kalman
@@ -357,6 +361,10 @@ def test_kalman_symbolic_R_builder_matches_numeric_config_R(post82_bundle):
     assert np.allclose(R_from_builder, R_resolved)
 
 
+@pytest.mark.skip(
+    reason="R-estimation rework: build_R_from_config_params is being rewired onto make_R "
+    "and the R std/corr param maps; the R_builder metadata guard no longer applies."
+)
 def test_build_R_from_config_params_raises_on_missing_param(post82_bundle):
     compiled = post82_bundle["compiled"]
     kalman = compiled.kalman

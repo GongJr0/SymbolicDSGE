@@ -1,11 +1,7 @@
 from dataclasses import dataclass
 from numpy.typing import NDArray
-
-from sympy import Symbol, Matrix
-from numpy import float64, array, eye, outer
-from typing import Callable
-
-from ..core.config import PairGetterDict, SymbolGetterDict
+from numpy import float64, array, eye, outer, ndarray
+from sympy import Symbol
 
 
 @dataclass(frozen=True)
@@ -19,19 +15,22 @@ class P0Config:
 class KalmanConfig:
     R: NDArray | None
     P0: P0Config
-    R_symbolic: Matrix | None = None
-    R_param_symbols: list[Symbol] | None = None
     R_param_names: list[str] | None = None
-    R_builder: Callable[..., NDArray] | None = None
     R_std_param_map: dict[str, str] | None = None
     R_corr_param_map: dict[frozenset[str], str | None] | None = None
 
 
 def make_R(
     y_order: list[Symbol],
-    std: SymbolGetterDict[Symbol, float64],
-    corr: PairGetterDict[float64],
-) -> NDArray:
+    std: dict[Symbol, float64],
+    corr: dict[frozenset, float64],
+) -> ndarray:
+    """Assemble a measurement covariance ``R = outer(sig, sig) * rho``.
+
+    ``std`` maps each observable symbol to its standard deviation; ``corr`` maps
+    each specified observable pair (a ``frozenset`` of two symbols) to its
+    correlation. Unspecified pairs default to zero and the diagonal to one.
+    """
     n = len(y_order)
 
     sig_vec = array([std[y] for y in y_order], dtype=float64)

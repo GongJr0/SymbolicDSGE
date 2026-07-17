@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
+import numpy as np
 import pytest
 import sympy as sp
 import yaml
@@ -32,6 +33,114 @@ def test_parsed_config_is_iterable(parsed_post82):
     assert model.name == "NK_LS_POST82"
     assert kalman is not None
     assert kalman.R is not None
+
+
+def test_kalman_R_built_numerically_from_calibration(parsed_post82):
+    # R is now assembled directly from calibration values at parse time (no
+    # sympy Matrix / lambdify). POST82 calibrates every measurement std to 1 and
+    # every measurement correlation to 0, so R collapses to the identity.
+    _, kalman = parsed_post82
+
+    assert isinstance(kalman.R, np.ndarray)
+    assert kalman.R.dtype == np.float64
+    np.testing.assert_allclose(kalman.R, np.eye(3, dtype=np.float64))
+
+    # Surviving metadata: the name->position maps that drive R reconstruction.
+    assert kalman.R_std_param_map == {
+        "OutGap": "meas_outgap",
+        "Infl": "meas_infl",
+        "Rate": "meas_rate",
+    }
+    assert kalman.R_corr_param_map == {
+        frozenset({"Infl", "Rate"}): "meas_rho_ir",
+        frozenset({"OutGap", "Infl"}): "meas_rho_gi",
+        frozenset({"OutGap", "Rate"}): "meas_rho_gr",
+    }
+    assert set(kalman.R_param_names) == {
+        "meas_outgap",
+        "meas_infl",
+        "meas_rate",
+        "meas_rho_ir",
+        "meas_rho_gi",
+        "meas_rho_gr",
+    }
+
+    # The lambdify-era fields are gone from the config.
+    assert not hasattr(kalman, "R_builder")
+    assert not hasattr(kalman, "R_symbolic")
+    assert not hasattr(kalman, "R_param_symbols")
+
+
+_R_ARITHMETIC_MODEL = """
+name: RTEST
+variables:
+  x: {steady_state: null}
+  y: {steady_state: null}
+  z: {steady_state: null}
+parameters: [rho, sig, sig_x, sig_y, sig_z, rho_xy]
+shock_map:
+  e_x: x
+  e_y: y
+  e_z: z
+observables: [x_obs, y_obs, z_obs]
+equations:
+  model:
+    - x(t+1) = rho * x(t) + e_x
+    - y(t+1) = rho * y(t) + e_y
+    - z(t+1) = rho * z(t) + e_z
+  constraint: {}
+  observables:
+    x_obs: x(t)
+    y_obs: y(t)
+    z_obs: z(t)
+calibration:
+  parameters:
+    rho: 0.9
+    sig: 0.1
+    sig_x: 2.0
+    sig_y: 3.0
+    sig_z: 4.0
+    rho_xy: 0.5
+  shocks:
+    std:
+      e_x: sig
+      e_y: sig
+      e_z: sig
+    corr: {}
+kalman:
+  R:
+    std:
+      x_obs: sig_x
+      y_obs: sig_y
+      z_obs: sig_z
+    corr:
+      x_obs, y_obs: rho_xy
+"""
+
+
+def test_kalman_R_arithmetic_covers_offdiag_and_missing_corr():
+    # Non-trivial stds with a single specified correlation: exercises both the
+    # sig_i * sig_j * rho off-diagonal (x_obs, y_obs) and the missing-pair -> 0
+    # default (any pair involving z_obs).
+    _, kalman = ModelParser.from_string(_R_ARITHMETIC_MODEL).get_all()
+
+    expected = np.array(
+        [
+            [4.0, 3.0, 0.0],  # sig_x^2, sig_x*sig_y*rho_xy, 0
+            [3.0, 9.0, 0.0],  # symmetric, sig_y^2, 0
+            [0.0, 0.0, 16.0],  # 0, 0, sig_z^2
+        ],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(kalman.R, expected)
+
+    # Unspecified pairs are recorded as None, not dropped.
+    assert kalman.R_corr_param_map == {
+        frozenset({"x_obs", "y_obs"}): "rho_xy",
+        frozenset({"x_obs", "z_obs"}): None,
+        frozenset({"y_obs", "z_obs"}): None,
+    }
+    assert set(kalman.R_param_names) == {"sig_x", "sig_y", "sig_z", "rho_xy"}
 
 
 def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
