@@ -28,6 +28,12 @@ def chow_stat(y: _F64, X: _F64, t_break: int) -> tuple[int, float]:
 def recursive_residuals(y: _F64, X: _F64) -> tuple[int, _F64]:
     """Brown-Durbin-Evans recursive residuals. Returns (status, w)."""
 
+def cusum_sf(a: float | float64) -> float64:
+    """CUSUM survival function. Returns sf(a)."""
+
+def cusum_sf_arr(a: _F64) -> _F64:
+    """CUSUM survival function. Returns sf(a) in out."""
+
 def cusum_series(y: _F64, X: _F64) -> tuple[int, _F64]:
     """Standardized CUSUM series. Returns (status, series)."""
 
@@ -39,6 +45,24 @@ def cusumsq_stat(y: _F64, X: _F64) -> tuple[int, int, float]:
 
 def jb_stat(x: _F64) -> tuple[int, float64]:
     """Jarque-Bera normality statistic. Returns (status, stat)."""
+
+def jb_find_hilo_ascending(val: float | float64, arr: _F64) -> tuple[int, int]:
+    """Bracket val in the ascending grid arr. Returns (lo, hi)."""
+
+def jb_find_hilo_descending(val: float | float64, arr: _F64) -> tuple[int, int]:
+    """Bracket val in the descending array arr. Returns (lo, hi)."""
+
+def jb_isf_interp(n: int, p: float | float64) -> float64:
+    """Small-N Jarque-Bera inverse survival function. Returns the critical value."""
+
+def jb_pval_interp(n: int, x: float | float64) -> float64:
+    """Small-N Jarque-Bera survival function. Returns the p-value."""
+
+def jb_isf_interp_arr(n: int, p: _F64) -> _F64:
+    """Elementwise jb_isf_interp over p. Returns a new array shaped like p."""
+
+def jb_pval_interp_arr(n: int, x: _F64) -> _F64:
+    """Elementwise jb_pval_interp over x. Returns a new array shaped like x."""
 
 def acorr(x: _F64, L: int) -> tuple[int, _F64]:
     """Autocorrelation of x up to lag L. Returns (status, out(L+1))."""

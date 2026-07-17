@@ -624,32 +624,6 @@ class DSGESolver:
         )
 
         init = est.resolve_theta0(theta0)
-        if (
-            R is None
-            and hasattr(compiled, "var_names")
-            and hasattr(compiled, "observable_names")
-            and hasattr(compiled, "kalman")
-        ):
-            from ..estimation import backend as est_backend
-
-            est.R = est_backend.estimate_R(
-                solver=self,
-                compiled=compiled,
-                y=y,
-                params=est.theta_to_params(init),
-                filter_mode=est.filter_mode,
-                observables=observables,
-                steady_state=(
-                    asarray(steady_state, dtype=float64)
-                    if isinstance(steady_state, list)
-                    else steady_state
-                ),
-                x0=x0,
-                p0_mode=p0_mode,
-                p0_scale=p0_scale,
-                jitter=jitter,
-                symmetrize=symmetrize,
-            )
 
         method_norm = method.lower()
         if method_norm == "mle":
@@ -704,29 +678,6 @@ class DSGESolver:
         )
 
         init = est.resolve_theta0(theta0)
-
-        if (
-            R is None
-            and hasattr(compiled, "var_names")
-            and hasattr(compiled, "observable_names")
-            and hasattr(compiled, "kalman")
-        ):
-            from ..estimation import backend as est_backend
-
-            est.R = est_backend.estimate_R(
-                solver=self,
-                compiled=compiled,
-                y=y,
-                params=est.theta_to_params(init),
-                filter_mode=est.filter_mode,
-                observables=observables,
-                steady_state=steady_state,
-                x0=x0,
-                p0_mode=p0_mode,
-                p0_scale=p0_scale,
-                jitter=jitter,
-                symmetrize=symmetrize,
-            )
 
         method_norm = method.lower()
         result: Any

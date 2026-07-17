@@ -6,8 +6,8 @@ from .distribution import (
     VecF64,
     _std_norm_cdf_scalar,
 )
-from ._as241 import ndtri_as241
 from ..support import OutOfSupportError, Support
+from ..._ckernels.distributions import ndtri_as241_into
 
 import math
 import numpy as np
@@ -58,28 +58,6 @@ def _grad_logpdf_scalar(x: float64, mean: float64, std: float64) -> float64:
 @njit(cache=True)
 def _grad_logpdf_vectorized(x: VecF64, mean: float64, std: float64) -> VecF64:
     return (-(x - mean) / std**2).astype(float64)
-
-
-@njit(cache=True)
-def _rvs(
-    mean: float64,
-    std: float64,
-    a: float64,
-    b: float64,
-    size: tuple[int, ...],
-    rng: np.random.Generator,
-) -> VecF64:
-    u = rng.uniform(size=size).astype(float64)
-    u_flat = u.ravel()
-    size_flat = u_flat.shape[0]
-    Fa = _std_norm_cdf_scalar(a)
-    Fb = _std_norm_cdf_scalar(b)
-
-    z = np.empty((size_flat,), dtype=float64)
-    for i in range(size_flat):
-        z[i] = ndtri_as241(Fa + u_flat[i] * (Fb - Fa))
-
-    return (mean + std * z).reshape(size)
 
 
 class TruncNormal(Distribution[float64, VecF64]):
@@ -173,7 +151,13 @@ class TruncNormal(Distribution[float64, VecF64]):
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._mean, self._std, self._a, self._b, size, rng))
+        # Inverse-transform sampling: only the uniform draw is rng-bound; the
+        # quantile map runs through the native AS 241 kernel.
+        u = rng.uniform(size=size).astype(float64)
+        Fa = _std_norm_cdf_scalar(self._a)
+        Fb = _std_norm_cdf_scalar(self._b)
+        z = ndtri_as241_into(Fa + u * (Fb - Fa))
+        return self._mean + self._std * z
 
     def __repr__(self) -> str:
         return self.__class__.__name__
