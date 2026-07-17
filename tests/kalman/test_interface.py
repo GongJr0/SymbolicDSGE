@@ -330,67 +330,60 @@ def test_build_q_defaults_missing_shock_correlation_to_zero():
     )
 
 
-def test_build_constant_r_uses_builder_and_validates_builder_contract():
-    builder_calls = []
-
-    def builder(meas_a, meas_b):
-        builder_calls.append((meas_a, meas_b))
-        return np.array([[meas_a, 0.5], [0.5, meas_b]], dtype=FLOAT)
-
-    builder_conf = SimpleNamespace(
+def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
+    # Named R: the interface assembles the constant R from the CURRENT calibration
+    # via the std/corr param maps (make_R), then subsets to included observables.
+    # make_R treats the std params as standard deviations, so the diagonal is
+    # sig**2 and the off-diagonal is sig_i * sig_j * corr.
+    named_conf = SimpleNamespace(
         y_names=["ObsA", "ObsB"],
         R=None,
         jitter=0.0,
         symmetrize=False,
         P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-        R_builder=builder,
-        R_param_names=["meas_a", "meas_b"],
+        R_std_param_map={"ObsA": "meas_a", "ObsB": "meas_b"},
+        R_corr_param_map={frozenset({"ObsA", "ObsB"}): "meas_rho"},
     )
-    ki = _make_shell(_make_stub_model(kalman_config=builder_conf), observables=["ObsB"])
+    model = _make_stub_model(
+        kalman_config=named_conf,
+        params={Symbol("meas_rho"): 0.1},
+    )
+    # std meas_a=4, meas_b=9, corr meas_rho=0.1 ->
+    #   [[16, 3.6], [3.6, 81]]; subset to [ObsB] -> [[81]].
+    ki_full = _make_shell(model, observables=["ObsA", "ObsB"])
+    assert np.allclose(
+        ki_full._build_constant_R(None),
+        np.array([[16.0, 3.6], [3.6, 81.0]], dtype=FLOAT),
+    )
+    ki_sub = _make_shell(model, observables=["ObsB"])
+    assert np.allclose(ki_sub._build_constant_R(None), np.array([[81.0]], dtype=FLOAT))
 
-    assert np.array_equal(ki._build_constant_R(None), np.array([[9.0]], dtype=FLOAT))
-    assert builder_calls == [(4.0, 9.0)]
-
+    # A std/corr param that is absent from calibration is a hard error.
     missing_param_conf = SimpleNamespace(
-        y_names=["ObsA"],
+        y_names=["ObsA", "ObsB"],
         R=None,
         jitter=0.0,
         symmetrize=False,
         P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-        R_builder=lambda meas_a: np.array([[meas_a]], dtype=FLOAT),
-        R_param_names=["missing_param"],
+        R_std_param_map={"ObsA": "not_calibrated", "ObsB": "meas_b"},
+        R_corr_param_map={},
     )
     missing_param_ki = _make_shell(
         _make_stub_model(kalman_config=missing_param_conf),
         observables=["ObsA"],
     )
-    with pytest.raises(KeyError, match="Missing R-builder parameter"):
+    with pytest.raises(KeyError, match="Missing R parameter"):
         missing_param_ki._build_constant_R(None)
 
-    bad_shape_conf = SimpleNamespace(
-        y_names=["ObsA"],
-        R=None,
-        jitter=0.0,
-        symmetrize=False,
-        P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-        R_builder=lambda meas_a, meas_b: np.array([[meas_a]], dtype=FLOAT),
-        R_param_names=["meas_a", "meas_b"],
-    )
-    bad_shape_ki = _make_shell(
-        _make_stub_model(kalman_config=bad_shape_conf),
-        observables=["ObsA"],
-    )
-    with pytest.raises(ValueError, match="R builder returned shape"):
-        bad_shape_ki._build_constant_R(None)
-
+    # No param maps and no static R -> nothing to build from.
     no_r_conf = SimpleNamespace(
         y_names=["ObsA"],
         R=None,
         jitter=0.0,
         symmetrize=False,
         P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-        R_builder=None,
-        R_param_names=None,
+        R_std_param_map=None,
+        R_corr_param_map=None,
     )
     no_r_ki = _make_shell(
         _make_stub_model(kalman_config=no_r_conf), observables=["ObsA"]

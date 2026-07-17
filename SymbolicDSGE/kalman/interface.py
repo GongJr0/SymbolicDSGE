@@ -7,7 +7,7 @@ from .filter import (
     _filter_result_from_raw,
     _unscented_filter_result_from_raw,
 )
-from .config import KalmanConfig
+from .config import KalmanConfig, make_R
 from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
 from typing import TYPE_CHECKING, Any, Tuple, Literal, Callable
 import warnings
@@ -457,29 +457,33 @@ class KalmanInterface(KalmanFilter):
 
         conf = self.kalman_config
 
-        builder = getattr(conf, "R_builder", None)
-        arg_names = getattr(conf, "R_param_names", None)
-        if builder is not None and arg_names is not None:
+        std_map = getattr(conf, "R_std_param_map", None)
+        corr_map = getattr(conf, "R_corr_param_map", None)
+        if std_map is not None:
+            # Assemble the constant R from the CURRENT calibration (which may have
+            # moved since parse, e.g. a re-solved model). The name->position maps
+            # fix the layout at parse; only the values are read live here.
             calib = self.model.config.calibration.parameters
             params_by_name = {
                 (k if isinstance(k, str) else k.name): float64(v)
                 for k, v in calib.items()
             }
 
-            vals = []
-            for name in arg_names:
+            def _param(name: str) -> float64:
                 if name not in params_by_name:
-                    raise KeyError(
-                        f"Missing R-builder parameter '{name}' in calibration."
-                    )
-                vals.append(params_by_name[name])
+                    raise KeyError(f"Missing R parameter '{name}' in calibration.")
+                return params_by_name[name]
 
-            R_full = asarray(builder(*vals), dtype=float64)
-            n_all = len(self.model.compiled.observable_names)
-            if R_full.shape != (n_all, n_all):
-                raise ValueError(
-                    f"R builder returned shape {R_full.shape}, expected ({n_all}, {n_all})."
-                )
+            all_obs = self.model.compiled.observable_names
+            y_syms = [Symbol(name) for name in all_obs]
+            std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
+            corr_vals = {
+                frozenset(Symbol(n) for n in pair): _param(param_name)
+                for pair, param_name in (corr_map or {}).items()
+                if param_name is not None
+            }
+
+            R_full = make_R(y_syms, std_vals, corr_vals)
 
             obs_idx = self._obs_idx
             mat_idx = [obs_idx[name] for name in self.observables]

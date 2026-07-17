@@ -9,7 +9,6 @@ from typing import Any, Callable, Iterator
 
 from sympy.core.symbol import AppliedUndef
 import yaml
-import numpy as np
 import sympy as sp
 from sympy import Matrix, Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
@@ -25,28 +24,8 @@ from .config import (
     PairGetterDict,
     FunctionGetterDict,
 )
-from ..kalman.config import KalmanConfig, P0Config
+from ..kalman.config import KalmanConfig, P0Config, make_R
 from .linearization import LinearizationMethod
-
-
-def make_R(
-    y_order: list[Symbol],
-    std: dict[Symbol, float64],
-    corr: dict[frozenset, float64],
-) -> ndarray:
-    n = len(y_order)
-
-    sig_vec = np.array([std[y] for y in y_order], dtype=float64)
-
-    rho = np.eye(n, dtype=float64)
-    for pair, rho_ij in corr.items():
-        a, b = tuple(pair)  # pair is a frozenset[Symbol]
-        i = y_order.index(a)
-        j = y_order.index(b)
-        rho[i, j] = rho_ij
-        rho[j, i] = rho_ij
-
-    return np.outer(sig_vec, sig_vec) * rho
 
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
