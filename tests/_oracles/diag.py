@@ -12,6 +12,7 @@ counterpart and are a live code path, not a test reference.
 
 from __future__ import annotations
 
+from math import erf, erfc, exp, sqrt
 from typing import TypeAlias
 
 import numpy as np
@@ -266,3 +267,35 @@ def jit_fill_symmetric_target_vec(
             k += 1
 
     return _OK_I64
+
+
+# --- cusum: Durbin reference distribution, survival-function chain ------------
+# Independent reimplementation of the CusumDist sf kernels in
+# SymbolicDSGE/_diag_tests/cusum.py; the parity tests pin the native
+# diag_cusum.c against these.
+_CUSUM_SQRT_2 = sqrt(2.0)
+
+
+@njit(cache=True)
+def _cusum_cdf(x: float64) -> float64:
+    return float64(0.5 * (1.0 + erf(x / _CUSUM_SQRT_2)))
+
+
+@njit(cache=True)
+def _cusum_sf(x: float64) -> float64:
+    return float64(0.5 * erfc(x / _CUSUM_SQRT_2))
+
+
+@njit(cache=True)
+def cusum_alpha_from_a(a: float64) -> float64:
+    return float64(
+        2.0 * (_cusum_sf(float64(2.0 * a)) + exp(-4.0 * a * a) * _cusum_cdf(a))
+    )
+
+
+@njit(cache=True)
+def cusum_alpha_from_a_array(a: NDF) -> NDF:
+    out = np.empty_like(a)
+    for i in range(a.size):
+        out[i] = cusum_alpha_from_a(a[i])
+    return out
