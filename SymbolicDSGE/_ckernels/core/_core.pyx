@@ -8,7 +8,7 @@ are exactly double/int64_t, so the extern is declared with those.
 
 from libc.stdint cimport int64_t
 
-from scipy.linalg.cython_lapack cimport zgges
+from scipy.linalg.cython_lapack cimport zgges, zselect2
 
 import numpy as np
 
@@ -384,7 +384,7 @@ def klein_qz(a, b):
 
     # Workspace query (lwork = -1): zgges writes the optimal size to wq.
     with nogil:
-        zgges(&jobvsl, &jobvsr, &sort, &_klein_ouc, &n,
+        zgges(&jobvsl, &jobvsr, &sort, <zselect2*>&_klein_ouc, &n,
               &av[0, 0], &n, &bv[0, 0], &n, &sdim,
               &alphav[0], &betav[0], &vslv[0, 0], &n, &vsrv[0, 0], &n,
               &wq, &lwork, &rworkv[0], <bint *>&bworkv[0], &info)
@@ -395,7 +395,7 @@ def klein_qz(a, b):
     cdef double complex[::1] workv = work
 
     with nogil:
-        zgges(&jobvsl, &jobvsr, &sort, &_klein_ouc, &n,
+        zgges(&jobvsl, &jobvsr, &sort, <zselect2*>&_klein_ouc, &n,
               &av[0, 0], &n, &bv[0, 0], &n, &sdim,
               &alphav[0], &betav[0], &vslv[0, 0], &n, &vsrv[0, 0], &n,
               &workv[0], &lwork, &rworkv[0], <bint *>&bworkv[0], &info)
