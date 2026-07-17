@@ -131,8 +131,8 @@ def _make_stub_model(
                 scale=2.0,
                 diag={"u": 1.0, "v": 3.0, "x": 5.0},
             ),
-            R_builder=None,
-            R_param_names=None,
+            R_std_param_map=None,
+            R_corr_param_map=None,
         )
 
     model = SimpleNamespace(
@@ -244,8 +244,8 @@ def test_interface_init_estimate_r_diag_uses_data_variance_not_config():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         ),
         observables=["ObsB", "ObsA"],
@@ -295,8 +295,8 @@ def test_get_symmetrize_and_jitter_cover_overrides_and_defaults():
                 jitter=None,
                 symmetrize=None,
                 P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -405,8 +405,8 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "v": 2.0}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -421,8 +421,8 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -437,34 +437,13 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="triangle", scale=1.0, diag={}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
     with pytest.raises(ValueError, match="Unrecognized P0 mode"):
         bad_mode._build_P0()
-
-    no_p0 = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=None,
-                R_builder=None,
-                R_param_names=None,
-            )
-        )
-    )
-    with pytest.raises(ValueError, match="Both p0_mode and p0_scale must be provided"):
-        no_p0._build_P0()
-    with pytest.raises(ValueError, match="must be provided in configuration"):
-        no_p0._build_P0(p0_mode="diag", p0_scale=2.0)
-    assert np.array_equal(no_p0._build_P0(p0_mode="eye", p0_scale=3.0), np.eye(3) * 3.0)
-    with pytest.raises(ValueError, match="Unrecognized p0_mode"):
-        no_p0._build_P0(p0_mode="triangle", p0_scale=2.0)
 
 
 def test_build_unscented_p0_uses_state_block_and_identity_second_block():
@@ -488,8 +467,8 @@ def test_build_unscented_p0_uses_state_block_and_identity_second_block():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=2.0, diag={"u": 1.0, "v": 2.0}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -507,8 +486,8 @@ def test_build_unscented_p0_uses_state_block_and_identity_second_block():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "x": 5.0}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -516,22 +495,22 @@ def test_build_unscented_p0_uses_state_block_and_identity_second_block():
     with pytest.raises(ValueError, match="must include all state variables"):
         missing_state_diag._build_P0()
 
-    no_p0 = _make_shell(
+    eye_override = _make_shell(
         _make_stub_model(
             kalman_config=SimpleNamespace(
                 y_names=["ObsA"],
                 R=np.array([[1.0]], dtype=FLOAT),
                 jitter=0.0,
                 symmetrize=False,
-                P0=None,
-                R_builder=None,
-                R_param_names=None,
+                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
-    no_p0.mode = FilterMode.UNSCENTED
+    eye_override.mode = FilterMode.UNSCENTED
     assert np.array_equal(
-        no_p0._build_P0(p0_mode="eye", p0_scale=3.0),
+        eye_override._build_P0(p0_mode="eye", p0_scale=3.0),
         np.diag([3.0, 3.0, 1.0, 1.0]).astype(FLOAT),
     )
 
@@ -559,8 +538,8 @@ def test_reorder_obs_uses_defaults_and_aligns_dataframe_and_ndarray_inputs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -876,8 +855,8 @@ def test_ml_estimate_r_diag_warning_path(monkeypatch):
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         ),
         observables=["ObsA", "ObsB"],

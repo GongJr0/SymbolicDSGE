@@ -457,8 +457,8 @@ class KalmanInterface(KalmanFilter):
 
         conf = self.kalman_config
 
-        std_map = getattr(conf, "R_std_param_map", None)
-        corr_map = getattr(conf, "R_corr_param_map", None)
+        std_map = conf.R_std_param_map
+        corr_map = conf.R_corr_param_map
         if std_map is not None:
             # Assemble the constant R from the CURRENT calibration (which may have
             # moved since parse, e.g. a re-solved model). The name->position maps
@@ -489,7 +489,7 @@ class KalmanInterface(KalmanFilter):
             mat_idx = [obs_idx[name] for name in self.observables]
             return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
-        R = getattr(conf, "R", None)
+        R = conf.R
         if R is None:
             raise ValueError("Constant R matrix not specified in configuration.")
 
@@ -601,52 +601,29 @@ class KalmanInterface(KalmanFilter):
         conf = self.kalman_config
         n = len(vars_ordered)
 
-        if (P0 := getattr(conf, "P0", None)) is not None:
-            mode = p0_mode if p0_mode is not None else P0.mode
-            scale = (
-                float64(p0_scale)
-                if p0_scale is not None
-                else float64(getattr(P0, "scale", 1.0))
-            )
-            if mode == "diag":
-                if (diag_dict := getattr(P0, "diag", None)) is not None:
-                    if not all(var in diag_dict for var in vars_ordered):
-                        raise ValueError(
-                            f"P0 diagonal specification must include all {required_scope}."
-                        )
-
-                    mat = np.zeros((n, n), dtype=float64)
-                    for i, var in enumerate(vars_ordered):
-                        mat[i, i] = float64(diag_dict.get(var, 1.0)) * scale
-                    return mat
-                else:
+        # KalmanConfig.P0 is a required field, so it is always present here; the
+        # p0_mode/p0_scale arguments override its mode/scale but never replace it.
+        P0 = conf.P0
+        mode = p0_mode if p0_mode is not None else P0.mode
+        scale = float64(p0_scale) if p0_scale is not None else float64(P0.scale)
+        if mode == "diag":
+            diag_dict = P0.diag
+            if diag_dict is not None:
+                if not all(var in diag_dict for var in vars_ordered):
                     raise ValueError(
-                        "P0 diagonal specification missing in configuration."
+                        f"P0 diagonal specification must include all {required_scope}."
                     )
-            elif mode == "eye":
-                return np.eye(n, dtype=float64) * scale
-            else:
-                raise ValueError(
-                    f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'."
-                )
 
+                mat = np.zeros((n, n), dtype=float64)
+                for i, var in enumerate(vars_ordered):
+                    mat[i, i] = float64(diag_dict.get(var, 1.0)) * scale
+                return mat
+            else:
+                raise ValueError("P0 diagonal specification missing in configuration.")
+        elif mode == "eye":
+            return np.eye(n, dtype=float64) * scale
         else:
-            if p0_mode is None or p0_scale is None:
-                raise ValueError(
-                    "P0 configuration not found in KalmanConfig. "
-                    "Both p0_mode and p0_scale must be provided as overrides."
-                )
-
-            if p0_mode == "diag":
-                raise ValueError(
-                    "P0 diagonal specification must be provided in configuration when p0_mode is 'diag'."
-                )
-            elif p0_mode == "eye":
-                return np.eye(n, dtype=float64) * float64(p0_scale)
-            else:
-                raise ValueError(
-                    f"Unrecognized p0_mode: {p0_mode}. Expected 'diag' or 'eye'."
-                )
+            raise ValueError(f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'.")
 
     def _build_Q(self) -> NDF:
         params = self.model_config.calibration.parameters

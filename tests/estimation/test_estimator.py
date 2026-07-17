@@ -887,15 +887,17 @@ def test_resolve_r_and_effective_observables_error_paths():
         ),
         calib_params=[a],
         observable_names=["y"],
+        kalman=None,
     )
-    est_no_kalman = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_no_kalman,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
+    # A Kalman configuration is now non-negotiable: the estimator fails fast at
+    # construction rather than lazily when the R block is resolved.
     with pytest.raises(MissingConfigError, match="Kalman configuration"):
-        est_no_kalman._resolve_R()
+        Estimator(
+            solver=SimpleNamespace(),
+            compiled=compiled_no_kalman,
+            y=np.zeros((3, 1), dtype=np.float64),
+            estimated_params=["a"],
+        )
 
     est_missing_meta = Estimator(
         solver=SimpleNamespace(),
@@ -904,7 +906,12 @@ def test_resolve_r_and_effective_observables_error_paths():
                 calibration=SimpleNamespace(parameters={a: float64(0.0)})
             ),
             calib_params=[a],
-            kalman=SimpleNamespace(y_names=["y"], R=np.eye(1, dtype=np.float64)),
+            kalman=SimpleNamespace(
+                y_names=["y"],
+                R=np.eye(1, dtype=np.float64),
+                R_std_param_map=None,
+                R_corr_param_map=None,
+            ),
             observable_names=["y"],
         ),
         y=np.zeros((3, 1), dtype=np.float64),
@@ -1170,14 +1177,17 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
 
 
 def test_effective_observables_logprior_base_branch_and_logpost(monkeypatch):
-    compiled_no_kalman = SimpleNamespace(
+    compiled_obs = SimpleNamespace(
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
         calib_params=[],
         observable_names=["y1", "y2"],
+        kalman=SimpleNamespace(
+            R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
+        ),
     )
     est_obs = Estimator(
         solver=SimpleNamespace(),
-        compiled=compiled_no_kalman,
+        compiled=compiled_obs,
         y=np.zeros((2, 2), dtype=np.float64),
         estimated_params=[],
     )

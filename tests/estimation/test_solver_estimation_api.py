@@ -42,6 +42,9 @@ def _make_compiled(a0: float = 0.0):
             calibration=SimpleNamespace(parameters={a: float64(a0)}),
         ),
         calib_params=[a],
+        kalman=SimpleNamespace(
+            R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
+        ),
     )
 
 
@@ -53,6 +56,9 @@ def _make_compiled_two(a0: float = 0.0, b0: float = 3.0):
             calibration=SimpleNamespace(parameters={a: float64(a0), b: float64(b0)}),
         ),
         calib_params=[a, b],
+        kalman=SimpleNamespace(
+            R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
+        ),
     )
 
 

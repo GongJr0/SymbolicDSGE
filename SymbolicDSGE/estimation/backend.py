@@ -20,7 +20,7 @@ from ..bayesian.priors import Prior
 from ..core.compiled_model import CompiledModel
 from ..core.config import SymbolGetterDict
 from ..core.solver import DSGESolver
-from ..kalman.config import KalmanConfig
+from ..kalman.config import KalmanConfig, make_R
 from ..kalman.filter import KalmanFilter
 
 NDF = NDArray[np.float64]
@@ -342,25 +342,27 @@ def build_R_from_config_params(
 ) -> NDF:
     if kalman is None:
         raise ValueError("KalmanConfig is required to build R from config parameters.")
-    builder = getattr(kalman, "R_builder", None)
-    arg_names = getattr(kalman, "R_param_names", None)
-    if builder is None or arg_names is None:
-        raise ValueError("KalmanConfig does not expose symbolic R builder metadata.")
+    std_map = kalman.R_std_param_map
+    corr_map = kalman.R_corr_param_map
+    if std_map is None:
+        raise ValueError("KalmanConfig does not expose named R parameter metadata.")
 
-    vals = []
-    for name in arg_names:
+    def _param(name: str) -> float64:
         if name not in params:
-            raise KeyError(f"Missing R-builder parameter '{name}' in params.")
-        vals.append(float64(params[name]))
+            raise KeyError(f"Missing R parameter '{name}' in params.")
+        return float64(params[name])
 
-    R_full = asarray(builder(*vals), dtype=float64)
-    n_all = len(compiled.observable_names)
-    if R_full.shape != (n_all, n_all):
-        raise ValueError(
-            f"R builder returned shape {R_full.shape}, expected ({n_all}, {n_all})."
-        )
+    all_obs = compiled.observable_names
+    y_syms = [Symbol(name) for name in all_obs]
+    std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
+    corr_vals = {
+        frozenset(Symbol(n) for n in pair): _param(param_name)
+        for pair, param_name in (corr_map or {}).items()
+        if param_name is not None
+    }
+    R_full = make_R(y_syms, std_vals, corr_vals)
 
-    obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
+    obs_idx = {name: i for i, name in enumerate(all_obs)}
     mat_idx = [obs_idx[name] for name in observables]
     return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 

@@ -112,7 +112,13 @@ class Estimator:
         self.solver = solver
         self.compiled = compiled
 
-        self.kalman = getattr(compiled, "kalman", None)
+        kalman = compiled.kalman
+        if kalman is None:
+            raise MissingConfigError(
+                "Estimation requires a Kalman configuration; the compiled model has none. "
+                "The likelihood is a Kalman filter loglik and cannot be formed without it."
+            )
+        self.kalman = kalman
 
         self.y = y
         self.observables = observables
@@ -354,18 +360,12 @@ class Estimator:
     def _resolve_R(
         self, params: Mapping[str, float] | None = None
     ) -> _MatrixPriorBlock:
-        if self.kalman is None:
-            raise MissingConfigError(
-                "LKJChol prior on R_corr requires a Kalman configuration with symbolic R metadata. "
-                "Outside estimation, measurement correlations may fall back to their defaults, "
-                "but estimation needs a named parameterized R specification in the config DSL."
-            )
         labels = self._effective_observables()
         R_cov = backend.resolve_R(self.compiled, self.kalman, labels, None)
         self._cov_to_corr(R_cov, "R")
 
-        std_param_map = getattr(self.kalman, "R_std_param_map", None)
-        corr_param_map = getattr(self.kalman, "R_corr_param_map", None)
+        std_param_map = self.kalman.R_std_param_map
+        corr_param_map = self.kalman.R_corr_param_map
         if std_param_map is None or corr_param_map is None:
             raise ValueError(
                 "LKJChol prior on R_corr requires parser-generated R std/correlation metadata."

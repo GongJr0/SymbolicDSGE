@@ -590,20 +590,20 @@ def test_build_R_from_config_params_error_branches():
             params=params,
         )
 
-    with pytest.raises(ValueError, match="symbolic R builder metadata"):
+    with pytest.raises(ValueError, match="named R parameter metadata"):
         backend.build_R_from_config_params(
             compiled=compiled,
-            kalman=SimpleNamespace(R_builder=None, R_param_names=None),
+            kalman=SimpleNamespace(R_std_param_map=None, R_corr_param_map=None),
             observables=["a", "b"],
             params=params,
         )
 
-    with pytest.raises(ValueError, match="returned shape"):
+    with pytest.raises(KeyError, match="Missing R parameter"):
         backend.build_R_from_config_params(
             compiled=compiled,
             kalman=SimpleNamespace(
-                R_builder=lambda *vals: np.eye(3, dtype=np.float64),
-                R_param_names=["sig_a", "sig_b"],
+                R_std_param_map={"a": "sig_a", "b": "not_in_params"},
+                R_corr_param_map={},
             ),
             observables=["a", "b"],
             params=params,
