@@ -734,7 +734,6 @@ class Estimator:
     def _loglik_from_params(
         self,
         params: Mapping[str, float64],
-        R_override: NDF | None = None,
         *,
         q_corr: NDF | None = None,
     ) -> float64:
@@ -752,7 +751,7 @@ class Estimator:
             p0_scale=self.p0_scale,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
-            R=(self.R if R_override is None else R_override),
+            R=self.R,
             prepared=self._prepared_filter,
             q_corr=q_corr,
         )
@@ -807,21 +806,12 @@ class Estimator:
     def logpost(self, theta: NDF) -> float64:
         return float64(self.loglik(theta) + self.logprior(theta))
 
-    def _logpost_with_overrides(
-        self,
-        theta: NDF,
-        *,
-        params_override: Mapping[str, float64] | None = None,
-        R_override: NDF | None = None,
-        q_corr: NDF | None = None,
-    ) -> float64:
-        if params_override is not None:
-            params = params_override
-        else:
-            params, matrices = self._resolve_theta(theta)
-            q_corr = matrices.get("Q_corr")
+    def _logpost(self, theta: NDF) -> float64:
+        # Single ``_resolve_theta`` pass shared by the loglik and the Q
+        # correlation block (cheaper than ``logpost``, which resolves twice).
+        params, matrices = self._resolve_theta(theta)
         return float64(
-            self._loglik_from_params(params, R_override, q_corr=q_corr)
+            self._loglik_from_params(params, q_corr=matrices.get("Q_corr"))
             + self.logprior(theta)
         )
 
@@ -875,9 +865,7 @@ class Estimator:
 
     def _safe_logpost(self, theta: NDF) -> float64:
         try:
-            lp, n_signals = self._eval_with_warning_capture(
-                lambda th: self._logpost_with_overrides(th), theta
-            )
+            lp, n_signals = self._eval_with_warning_capture(self._logpost, theta)
             self._warning_signal_count += n_signals
             if n_signals > 0 or not np.isfinite(lp):
                 return float64(-np.inf)
@@ -1035,7 +1023,6 @@ class Estimator:
         adapt_interval: int = 25,
         proposal_scale: float = 0.1,
         adapt_epsilon: float = 1e-8,
-        update_R_in_iterations: bool = False,
     ) -> MCMCResult:
         if n_draws <= 0:
             raise ValueError("n_draws must be positive.")
@@ -1063,45 +1050,7 @@ class Estimator:
         cov = (float64(proposal_scale) ** 2) * np.eye(d, dtype=float64)
         scale = float64((2.38**2) / d)
 
-        dynamic_R_enabled = False
-        dynamic_obs: list[str] | None = None
-        kalman = getattr(self.compiled, "kalman", None)
-        if update_R_in_iterations and kalman is not None:
-            r_param_names = list(getattr(kalman, "R_param_names", None) or [])
-            if getattr(kalman, "R_builder", None) is not None and any(
-                n in self._param_index for n in r_param_names
-            ):
-                dynamic_R_enabled = True
-                dynamic_obs = self._prepared_filter.observables
-
-        def _safe_logpost_chain(theta: NDF) -> float64:
-            if not dynamic_R_enabled:
-                return self._safe_logpost(theta)
-            try:
-                params, matrices = self._resolve_theta(theta)
-                R_iter = backend.build_R_from_config_params(
-                    compiled=self.compiled,
-                    kalman=self.compiled.kalman,
-                    observables=cast(list[str], dynamic_obs),
-                    params=params,
-                )
-                lp, n_signals = self._eval_with_warning_capture(
-                    lambda th: self._logpost_with_overrides(
-                        th,
-                        params_override=params,
-                        R_override=R_iter,
-                        q_corr=matrices.get("Q_corr"),
-                    ),
-                    theta,
-                )
-                self._warning_signal_count += n_signals
-                if n_signals > 0 or not np.isfinite(lp):
-                    return float64(-np.inf)
-                return float64(lp)
-            except BaseException:
-                return float64(-np.inf)
-
-        cur_lp = _safe_logpost_chain(current)
+        cur_lp = self._safe_logpost(current)
         accepted = 0
 
         history = np.empty((total_steps, d), dtype=float64)
@@ -1115,7 +1064,7 @@ class Estimator:
 
         for t in range(total_steps):
             prop = rng.multivariate_normal(current, cov)
-            prop_lp = _safe_logpost_chain(prop)
+            prop_lp = self._safe_logpost(prop)
 
             if np.isfinite(prop_lp):
                 log_alpha = prop_lp - cur_lp
@@ -1175,7 +1124,6 @@ class Estimator:
                 "adapt_interval": int(adapt_interval),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
-                "update_R_in_iterations": bool(update_R_in_iterations),
                 "random_state": (
                     int(random_state)
                     if isinstance(random_state, (int, np.integer))

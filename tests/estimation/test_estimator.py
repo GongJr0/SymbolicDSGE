@@ -294,7 +294,6 @@ def test_mcmc_records_sampler_config(monkeypatch):
         "adapt_interval",
         "proposal_scale",
         "adapt_epsilon",
-        "update_R_in_iterations",
         "random_state",
     }
     # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
@@ -708,103 +707,6 @@ def test_loglik_overrides_parameters_per_candidate(monkeypatch):
     assert seen[1] == pytest.approx(np.exp(1.0))
 
 
-def test_mcmc_update_R_in_iterations_rebuilds_R_when_relevant_params_estimated(
-    monkeypatch,
-):
-    compiled = _stub_compiled_with_r()
-    build_calls = {"n": 0}
-    seen_R = []
-
-    def _build_R(**kwargs):
-        build_calls["n"] += 1
-        a_val = float(kwargs["params"]["a"])
-        return np.array([[a_val]], dtype=np.float64)
-
-    def _capture_loglik(**kwargs):
-        seen_R.append(np.asarray(kwargs["R"], dtype=np.float64))
-        return float64(0.0)
-
-    monkeypatch.setattr(est_backend, "build_R_from_config_params", _build_R)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _capture_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    _ = est.mcmc(
-        n_draws=10,
-        burn_in=5,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
-    assert build_calls["n"] > 1
-    assert len(seen_R) > 1
-
-
-def test_mcmc_update_R_in_iterations_false_does_not_rebuild(monkeypatch):
-    compiled = _stub_compiled_with_r()
-
-    def _build_R(**kwargs):
-        raise AssertionError(
-            "R rebuild should not be called when update flag is false."
-        )
-
-    monkeypatch.setattr(est_backend, "build_R_from_config_params", _build_R)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", lambda **kwargs: float64(0.0))
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    _ = est.mcmc(
-        n_draws=5,
-        burn_in=3,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=False,
-    )
-
-
-def test_mcmc_update_R_in_iterations_skips_when_R_params_not_estimated(monkeypatch):
-    compiled = _stub_compiled_with_r()
-
-    def _build_R(**kwargs):
-        raise AssertionError(
-            "R rebuild should not be called without relevant estimated params."
-        )
-
-    monkeypatch.setattr(est_backend, "build_R_from_config_params", _build_R)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", lambda **kwargs: float64(0.0))
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["meas"],
-        priors={"meas": _QuadraticPrior(mean=1.0, weight=1.0)},
-    )
-    _ = est.mcmc(
-        n_draws=5,
-        burn_in=3,
-        thin=1,
-        theta0=np.array([1.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
-
-
 def test_estimator_constructor_and_lkj_prior_validation_error_branches():
     with pytest.raises(ValueError, match="Unknown estimated parameters"):
         Estimator(
@@ -1000,10 +902,10 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
         warnings.warn("unstable", RuntimeWarning)
         return float64(0.0)
 
-    est._logpost_with_overrides = _warn
+    est._logpost = _warn
     assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
 
-    est._logpost_with_overrides = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
+    est._logpost = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
     assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
 
     est.logprior = lambda th: float64(np.inf)
@@ -1247,7 +1149,7 @@ def test_logprior_base_branch_and_logpost(monkeypatch):
     )
 
 
-def test_mle_map_dynamic_r_and_adaptation_branches(monkeypatch):
+def test_mle_map_and_adaptation_branches(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
     est = Estimator(
@@ -1275,57 +1177,6 @@ def test_mle_map_dynamic_r_and_adaptation_branches(monkeypatch):
     monkeypatch.setattr(est_backend.optimize, "minimize", fake_minimize)
     _ = est.mle(theta0=np.array([0.0], dtype=np.float64))
     _ = est.map(theta0=np.array([0.0], dtype=np.float64))
-
-    compiled_r = _stub_compiled_with_r()
-    monkeypatch.setattr(
-        est_backend,
-        "build_R_from_config_params",
-        lambda **kwargs: np.array([[float(kwargs["params"]["a"])]], dtype=np.float64),
-    )
-
-    def _warn_logpost(th, *, params_override=None, R_override=None):
-        print("Warning: dynamic R unstable")
-        return float64(0.0)
-
-    est_warn = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_r,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    est_warn._logpost_with_overrides = _warn_logpost
-    _ = est_warn.mcmc(
-        n_draws=1,
-        burn_in=1,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
-
-    est_err = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_r,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    monkeypatch.setattr(
-        est_backend,
-        "build_R_from_config_params",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
-    _ = est_err.mcmc(
-        n_draws=1,
-        burn_in=1,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
 
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
     est_adapt = Estimator(
