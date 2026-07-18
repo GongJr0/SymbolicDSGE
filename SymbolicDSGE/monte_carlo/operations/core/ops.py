@@ -125,8 +125,6 @@ def run_reference_filter(
     symmetrize: bool | None = None,
     return_shocks: bool = False,
     R: NDF | None = None,
-    estimate_R_diag: bool = False,
-    R_scale: float = 1.0,
 ) -> FilterRawResult | UnscentedFilterRawResult:
     del dgp, rep_idx
     data = context.require_data()
@@ -146,8 +144,6 @@ def run_reference_filter(
         symmetrize=symmetrize,
         return_shocks=return_shocks,
         R=R,
-        estimate_R_diag=estimate_R_diag,
-        R_scale=R_scale,
     )
 
 

@@ -20,7 +20,7 @@ from ..bayesian.priors import Prior
 from ..core.compiled_model import CompiledModel
 from ..core.config import SymbolGetterDict
 from ..core.solver import DSGESolver
-from ..kalman.config import KalmanConfig
+from ..kalman.config import KalmanConfig, make_R
 from ..kalman.filter import KalmanFilter
 
 NDF = NDArray[np.float64]
@@ -39,13 +39,9 @@ class PreparedFilterRun:
     kf_sym: bool
 
 
-def _name_of(p: str | Symbol) -> str:
-    return p if isinstance(p, str) else p.name
-
-
 def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:
     params = compiled.config.calibration.parameters
-    return {_name_of(k): float64(v) for k, v in params.items()}
+    return {str(k): float64(v) for k, v in params.items()}
 
 
 def build_full_params(
@@ -69,13 +65,12 @@ def build_calib_param_vector(
     compiled: CompiledModel,
     params: Mapping[str, float64],
 ) -> NDF:
-    names = [_name_of(p) for p in compiled.calib_params]
+    names = [str(p) for p in compiled.calib_params]
     return asarray([float64(params[name]) for name in names], dtype=float64)
 
 
 def reorder_observables(
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: list[str] | None,
     y: NDF | pd.DataFrame,
 ) -> tuple[list[str], NDF]:
@@ -123,6 +118,39 @@ def reorder_observables(
         raise ValueError("Observation data contains NaN values.")
 
     return obs_canonical, y_reordered
+
+
+def build_R(
+    compiled: CompiledModel,
+    kalman: KalmanConfig,
+    observables: list[str],
+    params: Mapping[str, float64],
+    *,
+    R_override: NDF | None = None,
+) -> NDF:
+    """Assemble the measurement covariance for a likelihood eval, mirroring
+    :func:`build_Q`. Priority: a user-supplied ``R_override`` wins (validated to
+    the observable count); else, if the config carries parser-generated
+    std/correlation maps, R is rebuilt from the current ``params`` every eval
+    exactly as Q is; else a fixed ``kalman.R`` (a directly-configured constant
+    with no named params) is sliced to the observables as-is."""
+    if R_override is not None:
+        R = asarray(R_override, dtype=float64)
+        m = len(observables)
+        if R.shape != (m, m):
+            raise ValueError(f"Provided R has shape {R.shape}, expected ({m}, {m}).")
+        return R
+
+    if kalman.R_std_param_map is not None:
+        return build_R_from_config_params(
+            compiled=compiled, kalman=kalman, observables=observables, params=params
+        )
+
+    if kalman.R is None:
+        raise ValueError("R is not available. Provide `R` or a KalmanConfig with R.")
+    obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
+    mat_idx = [obs_idx[name] for name in observables]
+    return asarray(kalman.R[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
 
 def build_Q(
@@ -271,33 +299,12 @@ def build_unscented_P0(
 
 
 def resolve_filter_options(
-    kalman: KalmanConfig | None,
     jitter: float | float64 | None,
     symmetrize: bool | None,
 ) -> tuple[float64, bool]:
     kf_jitter = float64(0.0) if jitter is None else float64(jitter)
     kf_sym = False if symmetrize is None else bool(symmetrize)
     return kf_jitter, kf_sym
-
-
-def resolve_R(
-    compiled: CompiledModel,
-    kalman: KalmanConfig | None,
-    observables: list[str],
-    R: NDF | None,
-) -> NDF:
-    m = len(observables)
-    if R is not None:
-        if R.shape != (m, m):
-            raise ValueError(f"Provided R has shape {R.shape}, expected ({m}, {m}).")
-        return asarray(R, dtype=float64)
-
-    if kalman is None or kalman.R is None:
-        raise ValueError("R is not available. Provide `R` or a KalmanConfig with R.")
-
-    obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
-    mat_idx = [obs_idx[name] for name in observables]
-    return asarray(kalman.R[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
 
 def prepare_filter_run(
@@ -312,13 +319,13 @@ def prepare_filter_run(
     symmetrize: bool | None,
 ) -> PreparedFilterRun:
     kalman = compiled.kalman
-    obs, y_reordered = reorder_observables(compiled, kalman, observables, y)
+    obs, y_reordered = reorder_observables(compiled, observables, y)
     mode = filter_mode
     if mode == "unscented":
         P0 = build_unscented_P0(compiled, kalman, p0_mode, p0_scale)
     else:
         P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
-    kf_jitter, kf_sym = resolve_filter_options(kalman, jitter, symmetrize)
+    kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
 
     return PreparedFilterRun(
         observables=obs,
@@ -342,25 +349,27 @@ def build_R_from_config_params(
 ) -> NDF:
     if kalman is None:
         raise ValueError("KalmanConfig is required to build R from config parameters.")
-    builder = getattr(kalman, "R_builder", None)
-    arg_names = getattr(kalman, "R_param_names", None)
-    if builder is None or arg_names is None:
-        raise ValueError("KalmanConfig does not expose symbolic R builder metadata.")
+    std_map = kalman.R_std_param_map
+    corr_map = kalman.R_corr_param_map
+    if std_map is None:
+        raise ValueError("KalmanConfig does not expose named R parameter metadata.")
 
-    vals = []
-    for name in arg_names:
+    def _param(name: str) -> float64:
         if name not in params:
-            raise KeyError(f"Missing R-builder parameter '{name}' in params.")
-        vals.append(float64(params[name]))
+            raise KeyError(f"Missing R parameter '{name}' in params.")
+        return float64(params[name])
 
-    R_full = asarray(builder(*vals), dtype=float64)
-    n_all = len(compiled.observable_names)
-    if R_full.shape != (n_all, n_all):
-        raise ValueError(
-            f"R builder returned shape {R_full.shape}, expected ({n_all}, {n_all})."
-        )
+    all_obs = compiled.observable_names
+    y_syms = [Symbol(name) for name in all_obs]
+    std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
+    corr_vals = {
+        frozenset(Symbol(n) for n in pair): _param(param_name)
+        for pair, param_name in (corr_map or {}).items()
+        if param_name is not None
+    }
+    R_full = make_R(y_syms, std_vals, corr_vals)
 
-    obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
+    obs_idx = {name: i for i, name in enumerate(all_obs)}
     mat_idx = [obs_idx[name] for name in observables]
     return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
@@ -489,6 +498,7 @@ def evaluate_loglik(
     *,
     solver: DSGESolver,
     compiled: CompiledModel,
+    kalman: KalmanConfig,
     y: NDF | pd.DataFrame,
     params: Mapping[str, float64],
     filter_mode: str,
@@ -526,7 +536,7 @@ def evaluate_loglik(
         raise_on_bk_violation=False,
     )
     Q = build_Q(compiled, params, corr=q_corr)
-    R_mat = resolve_R(compiled, compiled.kalman, prepared_run.observables, R)
+    R_mat = build_R(compiled, kalman, prepared_run.observables, params, R_override=R)
     calib_params = build_calib_param_vector(compiled, params)
     loglik_of_R = _prepare_filter_loglik(
         sol=sol,
@@ -537,77 +547,6 @@ def evaluate_loglik(
         raise_on_error=False,
     )
     return loglik_of_R(R_mat)
-
-
-def estimate_R_diag(
-    *,
-    solver: DSGESolver,
-    compiled: CompiledModel,
-    y: NDF | pd.DataFrame,
-    params: Mapping[str, float64],
-    filter_mode: str,
-    observables: list[str] | None,
-    steady_state: NDF | dict[str, float] | None,
-    x0: NDF | None,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
-    jitter: float | float64 | None,
-    symmetrize: bool | None,
-) -> NDF:
-    prepared = prepare_filter_run(
-        compiled=compiled,
-        y=y,
-        observables=observables,
-        filter_mode=filter_mode,
-        p0_mode=p0_mode,
-        p0_scale=p0_scale,
-        jitter=jitter,
-        symmetrize=symmetrize,
-    )
-    m = prepared.y_reordered.shape[1]
-    eps = float64(1e-9)
-    eta0 = np.log(
-        np.asarray(
-            [max(0.1 * np.var(prepared.y_reordered[:, i]), eps) for i in range(m)],
-            dtype=float64,
-        )
-    )
-    try:
-        sol = _get_solution(
-            solver=solver,
-            compiled=compiled,
-            params=params,
-            mode=prepared.mode,
-            steady_state=steady_state,
-        )
-    except BaseException:
-        return np.diag(np.exp(eta0))
-
-    Q = build_Q(compiled, params)
-    bounds = [(-30.0, 10.0)] * m
-    calib_params = build_calib_param_vector(compiled, params)
-    loglik_of_R = _prepare_filter_loglik(
-        sol=sol,
-        prepared=prepared,
-        Q=Q,
-        calib_params=calib_params,
-        x0=x0,
-        raise_on_error=True,
-    )
-
-    def obj(eta: NDF) -> float64:
-        return float64(-loglik_of_R(np.diag(np.exp(eta))))
-
-    opt = optimize.minimize(
-        obj,
-        x0=eta0,
-        bounds=bounds,
-        method="L-BFGS-B",
-    )
-    if not bool(opt.success):
-        return np.diag(np.exp(eta0))
-
-    return np.diag(np.exp(opt.x))
 
 
 def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:

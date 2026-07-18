@@ -117,7 +117,9 @@ class MCMCResult:
         mass = float64(1.0 - alpha)
         return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
 
-    def hpd_intervals(self, alpha: float = 0.05) -> dict[str, tuple[float64, float64]]:
+    def hpd_intervals(
+        self, alpha: float = 0.05, n_digits: int = 3
+    ) -> dict[str, tuple[float64, float64]]:
         """
         Compute marginal highest-posterior-density intervals for each parameter.
 
@@ -140,10 +142,12 @@ class MCMCResult:
                 start = int(np.argmin(widths))
                 low = float64(col[start])
                 high = float64(col[start + window - 1])
-            out[name] = (low, high)
+            out[name] = (low.round(n_digits), high.round(n_digits))
         return out
 
-    def joint_hpd_set(self, alpha: float = 0.05) -> tuple[NDF, NDF, float64, NDI]:
+    def joint_hpd_set(
+        self, alpha: float = 0.05, n_digits: int = 3
+    ) -> tuple[NDF, NDF, float64, NDI]:
         """
         Compute an empirical joint HPD set for the full parameter vector.
 
@@ -167,13 +171,13 @@ class MCMCResult:
         mask = np.asarray(self.logpost_trace >= threshold, dtype=bool)
         idx = np.flatnonzero(mask).astype(np.int64, copy=False)
         return (
-            np.asarray(self.samples[idx, :], dtype=float64),
-            np.asarray(self.logpost_trace[idx], dtype=float64),
+            np.asarray(self.samples[idx, :], dtype=float64).round(n_digits),
+            np.asarray(self.logpost_trace[idx], dtype=float64).round(n_digits),
             threshold,
             idx,
         )
 
-    def posterior_kde_plot(self) -> None:
+    def posterior_kde_plot(self, grid_points: int = 1000) -> None:
         from scipy.stats import gaussian_kde
         import matplotlib.pyplot as plt
 
@@ -190,7 +194,7 @@ class MCMCResult:
             col = np.asarray(self.samples[:, i], dtype=float64)
             kde = gaussian_kde(col)
             x_min, x_max = col.min(), col.max()
-            x_grid = np.linspace(x_min, x_max, 1000)
+            x_grid = np.linspace(x_min, x_max, grid_points)
             ax[i].plot(x_grid, kde(x_grid))
             ax[i].set_title(name)
         plt.tight_layout()

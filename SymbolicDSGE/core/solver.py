@@ -117,7 +117,7 @@ class DSGESolver:
         )
         # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
         # demand via CompiledModel.construct_observable_jacobian_cfunc.
-        observable_jacobian_eqs = list(symbolic_jacobian)
+        observable_jacobian_eqs = list(symbolic_jacobian)  # pyright: ignore
 
         return CompiledModel(
             config=conf,

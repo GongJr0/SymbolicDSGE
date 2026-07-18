@@ -29,16 +29,43 @@ class _QuadraticPrior:
         return float64(-self.weight * (float64(x) - self.mean) ** 2)
 
 
+def _with_filter_prep(compiled):
+    """Complete a stub with the surface Estimator's construction-time filter prep
+    needs. ``Estimator.__init__`` builds the filter run unconditionally now (the
+    old duck-typed guard is gone), so every stub must satisfy
+    ``prepare_filter_run``. These tests fake ``evaluate_loglik``, so the cfunc
+    addresses and P0 are never evaluated; they only have to exist."""
+    if not hasattr(compiled, "observable_names"):
+        compiled.observable_names = ["y"]
+    if not hasattr(compiled, "var_names"):
+        compiled.var_names = [
+            Symbol(f"s{i}") for i in range(len(compiled.observable_names))
+        ]
+    if not hasattr(compiled, "cur_syms"):
+        compiled.cur_syms = list(compiled.var_names)
+    compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
+    compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
+        address=0
+    )
+    if getattr(compiled.kalman, "P0", None) is None:
+        compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+    if not hasattr(compiled.kalman, "R_param_names"):
+        compiled.kalman.R_param_names = None
+    return compiled
+
+
 def _stub_compiled():
     a = Symbol("a")
     calibration = SimpleNamespace(parameters={a: float64(0.0)})
     config = SimpleNamespace(calibration=calibration)
     kalman = SimpleNamespace(y_names=["y"])
-    return SimpleNamespace(
-        config=config,
-        calib_params=[a],
-        kalman=kalman,
-        observable_names=["y"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[a],
+            kalman=kalman,
+            observable_names=["y"],
+        )
     )
 
 
@@ -52,11 +79,13 @@ def _stub_compiled_with_r():
         R_builder=lambda *vals: np.array([[vals[0]]], dtype=np.float64),
         y_names=["y"],
     )
-    return SimpleNamespace(
-        config=config,
-        calib_params=[a, meas],
-        kalman=kalman,
-        observable_names=["y"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[a, meas],
+            kalman=kalman,
+            observable_names=["y"],
+        )
     )
 
 
@@ -97,11 +126,13 @@ def _stub_compiled_with_dense_r_block():
         R_corr_param_map={frozenset(("A", "B")): "meas_rho_ab"},
         y_names=["A", "B"],
     )
-    return SimpleNamespace(
-        config=config,
-        calib_params=[meas_a, meas_b, meas_rho_ab],
-        kalman=kalman,
-        observable_names=["A", "B"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[meas_a, meas_b, meas_rho_ab],
+            kalman=kalman,
+            observable_names=["A", "B"],
+        )
     )
 
 
@@ -136,13 +167,15 @@ def _stub_compiled_with_sparse_q_block():
         calibration=calibration,
         shock_map={e1: x1, e2: x2, e3: x3},
     )
-    return SimpleNamespace(
-        config=config,
-        calib_params=[sig1, sig2, sig3, rho12],
-        kalman=SimpleNamespace(y_names=["y"]),
-        observable_names=["y"],
-        var_names=[x1, x2, x3],
-        n_exog=3,
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[sig1, sig2, sig3, rho12],
+            kalman=SimpleNamespace(y_names=["y"]),
+            observable_names=["y"],
+            var_names=[x1, x2, x3],
+            n_exog=3,
+        )
     )
 
 
@@ -261,7 +294,6 @@ def test_mcmc_records_sampler_config(monkeypatch):
         "adapt_interval",
         "proposal_scale",
         "adapt_epsilon",
-        "update_R_in_iterations",
         "random_state",
     }
     # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
@@ -675,103 +707,6 @@ def test_loglik_overrides_parameters_per_candidate(monkeypatch):
     assert seen[1] == pytest.approx(np.exp(1.0))
 
 
-def test_mcmc_update_R_in_iterations_rebuilds_R_when_relevant_params_estimated(
-    monkeypatch,
-):
-    compiled = _stub_compiled_with_r()
-    build_calls = {"n": 0}
-    seen_R = []
-
-    def _build_R(**kwargs):
-        build_calls["n"] += 1
-        a_val = float(kwargs["params"]["a"])
-        return np.array([[a_val]], dtype=np.float64)
-
-    def _capture_loglik(**kwargs):
-        seen_R.append(np.asarray(kwargs["R"], dtype=np.float64))
-        return float64(0.0)
-
-    monkeypatch.setattr(est_backend, "build_R_from_config_params", _build_R)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _capture_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    _ = est.mcmc(
-        n_draws=10,
-        burn_in=5,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
-    assert build_calls["n"] > 1
-    assert len(seen_R) > 1
-
-
-def test_mcmc_update_R_in_iterations_false_does_not_rebuild(monkeypatch):
-    compiled = _stub_compiled_with_r()
-
-    def _build_R(**kwargs):
-        raise AssertionError(
-            "R rebuild should not be called when update flag is false."
-        )
-
-    monkeypatch.setattr(est_backend, "build_R_from_config_params", _build_R)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", lambda **kwargs: float64(0.0))
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    _ = est.mcmc(
-        n_draws=5,
-        burn_in=3,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=False,
-    )
-
-
-def test_mcmc_update_R_in_iterations_skips_when_R_params_not_estimated(monkeypatch):
-    compiled = _stub_compiled_with_r()
-
-    def _build_R(**kwargs):
-        raise AssertionError(
-            "R rebuild should not be called without relevant estimated params."
-        )
-
-    monkeypatch.setattr(est_backend, "build_R_from_config_params", _build_R)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", lambda **kwargs: float64(0.0))
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["meas"],
-        priors={"meas": _QuadraticPrior(mean=1.0, weight=1.0)},
-    )
-    _ = est.mcmc(
-        n_draws=5,
-        burn_in=3,
-        thin=1,
-        theta0=np.array([1.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
-
-
 def test_estimator_constructor_and_lkj_prior_validation_error_branches():
     with pytest.raises(ValueError, match="Unknown estimated parameters"):
         Estimator(
@@ -887,25 +822,34 @@ def test_resolve_r_and_effective_observables_error_paths():
         ),
         calib_params=[a],
         observable_names=["y"],
+        kalman=None,
     )
-    est_no_kalman = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_no_kalman,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
+    # A Kalman configuration is now non-negotiable: the estimator fails fast at
+    # construction rather than lazily when the R block is resolved.
     with pytest.raises(MissingConfigError, match="Kalman configuration"):
-        est_no_kalman._resolve_R()
+        Estimator(
+            solver=SimpleNamespace(),
+            compiled=compiled_no_kalman,
+            y=np.zeros((3, 1), dtype=np.float64),
+            estimated_params=["a"],
+        )
 
     est_missing_meta = Estimator(
         solver=SimpleNamespace(),
-        compiled=SimpleNamespace(
-            config=SimpleNamespace(
-                calibration=SimpleNamespace(parameters={a: float64(0.0)})
-            ),
-            calib_params=[a],
-            kalman=SimpleNamespace(y_names=["y"], R=np.eye(1, dtype=np.float64)),
-            observable_names=["y"],
+        compiled=_with_filter_prep(
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    calibration=SimpleNamespace(parameters={a: float64(0.0)})
+                ),
+                calib_params=[a],
+                kalman=SimpleNamespace(
+                    y_names=["y"],
+                    R=np.eye(1, dtype=np.float64),
+                    R_std_param_map=None,
+                    R_corr_param_map=None,
+                ),
+                observable_names=["y"],
+            )
         ),
         y=np.zeros((3, 1), dtype=np.float64),
         estimated_params=["a"],
@@ -913,16 +857,15 @@ def test_resolve_r_and_effective_observables_error_paths():
     with pytest.raises(ValueError, match="parser-generated R std/correlation metadata"):
         est_missing_meta._resolve_R()
 
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    est._prepared_filter = None
-    est.observables = ["ghost"]
+    # Unknown observables are now rejected at construction by the filter prep.
     with pytest.raises(ValueError, match="Unknown observables"):
-        est._effective_observables()
+        Estimator(
+            solver=SimpleNamespace(),
+            compiled=_stub_compiled(),
+            y=np.zeros((3, 1), dtype=np.float64),
+            observables=["ghost"],
+            estimated_params=["a"],
+        )
 
 
 def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
@@ -959,10 +902,10 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
         warnings.warn("unstable", RuntimeWarning)
         return float64(0.0)
 
-    est._logpost_with_overrides = _warn
+    est._logpost = _warn
     assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
 
-    est._logpost_with_overrides = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
+    est._logpost = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
     assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
 
     est.logprior = lambda th: float64(np.inf)
@@ -1034,13 +977,15 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         shock_std=SymbolGetterDict({e1: sig1, e2: sig2}),
         shock_corr={},
     )
-    compiled = SimpleNamespace(
-        config=SimpleNamespace(calibration=calibration, shock_map={e1: x1, e2: x2}),
-        calib_params=[sig1, sig2],
-        kalman=SimpleNamespace(y_names=["y"]),
-        observable_names=["y"],
-        var_names=[x1, x2],
-        n_exog=2,
+    compiled = _with_filter_prep(
+        SimpleNamespace(
+            config=SimpleNamespace(calibration=calibration, shock_map={e1: x1, e2: x2}),
+            calib_params=[sig1, sig2],
+            kalman=SimpleNamespace(y_names=["y"]),
+            observable_names=["y"],
+            var_names=[x1, x2],
+            n_exog=2,
+        )
     )
     est = Estimator(
         solver=SimpleNamespace(),
@@ -1169,32 +1114,7 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         good_est._block_cpc_from_corr(good_block, bad_corr)
 
 
-def test_effective_observables_logprior_base_branch_and_logpost(monkeypatch):
-    compiled_no_kalman = SimpleNamespace(
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
-        calib_params=[],
-        observable_names=["y1", "y2"],
-    )
-    est_obs = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_no_kalman,
-        y=np.zeros((2, 2), dtype=np.float64),
-        estimated_params=[],
-    )
-    est_obs._prepared_filter = None
-    est_obs.observables = None
-    assert est_obs._effective_observables() == ["y1", "y2"]
-
-    est_prepared = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((2, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    est_prepared._prepared_filter = SimpleNamespace(observables=["y"])
-    est_prepared.observables = ["other"]
-    assert est_prepared._effective_observables() == ["y"]
-
+def test_logprior_base_branch_and_logpost(monkeypatch):
     prior = Estimator.make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
@@ -1229,7 +1149,7 @@ def test_effective_observables_logprior_base_branch_and_logpost(monkeypatch):
     )
 
 
-def test_mle_map_dynamic_r_and_adaptation_branches(monkeypatch):
+def test_mle_map_and_adaptation_branches(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
     est = Estimator(
@@ -1257,57 +1177,6 @@ def test_mle_map_dynamic_r_and_adaptation_branches(monkeypatch):
     monkeypatch.setattr(est_backend.optimize, "minimize", fake_minimize)
     _ = est.mle(theta0=np.array([0.0], dtype=np.float64))
     _ = est.map(theta0=np.array([0.0], dtype=np.float64))
-
-    compiled_r = _stub_compiled_with_r()
-    monkeypatch.setattr(
-        est_backend,
-        "build_R_from_config_params",
-        lambda **kwargs: np.array([[float(kwargs["params"]["a"])]], dtype=np.float64),
-    )
-
-    def _warn_logpost(th, *, params_override=None, R_override=None):
-        print("Warning: dynamic R unstable")
-        return float64(0.0)
-
-    est_warn = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_r,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    est_warn._logpost_with_overrides = _warn_logpost
-    _ = est_warn.mcmc(
-        n_draws=1,
-        burn_in=1,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
-
-    est_err = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_r,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-    monkeypatch.setattr(
-        est_backend,
-        "build_R_from_config_params",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
-    _ = est_err.mcmc(
-        n_draws=1,
-        burn_in=1,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-        update_R_in_iterations=True,
-    )
 
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
     est_adapt = Estimator(

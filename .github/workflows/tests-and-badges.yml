@@ -85,6 +85,26 @@ jobs:
         if: steps.sr_diff.outputs.sr_changed == 'true'
         run: uv sync --frozen --all-extras
 
+      - name: Pre-warm Julia depot
+        # First `import pysr` triggers juliapkg to install Julia and precompile
+        # SymbolicRegression.jl into the depot. Doing that once here, in a single
+        # process, populates the depot so the parallel `sr` tests only read it.
+        # Without this, several xdist workers race to precompile into the same
+        # cold depot at once and deadlock on the precompile lock (the CI hang;
+        # local passes because its depot is already warm).
+        if: steps.sr_diff.outputs.sr_changed == 'true'
+        run: |
+          uv run python - <<'PY'
+          import numpy as np
+          from pysr import PySRRegressor
+
+          rng = np.random.default_rng(0)
+          X = rng.normal(size=(20, 2))
+          y = 2.0 * X[:, 0] + X[:, 1]
+          PySRRegressor(niterations=1, progress=False).fit(X, y)
+          print("Julia depot warmed.")
+          PY
+
       - name: Run tests with coverage
         shell: bash
         env:
@@ -95,7 +115,7 @@ jobs:
           if [ "$SR_CHANGED" != "true" ]; then
             PYTEST_MARKERS=(-m "not sr")
           fi
-          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" -n auto --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
+          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" -n auto --dist loadgroup --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
           EXIT=$?
           set -e
           # juliacall's C-extension finalizers can segfault during interpreter

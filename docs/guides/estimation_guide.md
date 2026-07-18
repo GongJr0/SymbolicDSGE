@@ -9,16 +9,15 @@ tags:
     Refer to [this](../assets/param_estimation.ipynb) notebook for an example parameter estimation workflow.
 
 ???+ warning "Read the Quickstart Guide"
-    This guide only handles the estimation process and is written assuming the reader have some familiarity for the core DSGE API (i.e. `DSGESolver`, `SolvedModel` etc.). It is strongly recommended to at least have read the [Quickstart Guide](./quickstart.md) before working with parameter estimation.
+    This guide only handles the estimation process and is written assuming the reader has some familiarity with the core DSGE API (i.e. `DSGESolver`, `SolvedModel` etc.). It is strongly recommended to at least have read the [Quickstart Guide](./quickstart.md) before working with parameter estimation.
 
-This guide walks through the parameter estimation workflow of `SymbolicDSGE` using an example setup and a MCMC sampling based Bayesian Estimation setup.
+This guide walks through the parameter estimation workflow of `SymbolicDSGE` using an example setup and an MCMC sampling based Bayesian Estimation setup.
 
 We will cover:
 
 - How priors are built (and why transforms matter)
 - How to run MCMC through `DSGESolver.estimate_and_solve(...)`
 - What outputs to expect from the process
-- How static-`R` vs dynamic-`R` updates change fit diagnostics
 
 ## Parse Configs and Compile
 
@@ -63,7 +62,7 @@ For example, in order to optimize in an unbounded search space $\R = (-\infty, \
 as long as we specify a `Transform` that maps the distribution support $(a, b) \mapsto \R$. We then rely on the `Transform` objects to apply a "Change of Variables" to produce the unbounded search input. The `Transform` will also be responsible for inverting the optimizer output into the parameter space ($\R \mapsto (a,b)$) we wish to search over. To give a concrete example, a logit transform for example would map $(0,1) \mapsto\R$ in the forward direction. In this scenario the inverse logit would precisely do the opposite $ inv(Z) \to X, \, X \in (0,1) $.
 
 ??? info "Change of Variables Details"
-    All transformations except `Identity` (which returns the input itself as output) are examples of the procedute defined in calculus as [Change of Variables](https://en.wikipedia.org/wiki/Change_of_variables). We deal with a specific [subset](https://en.wikipedia.org/wiki/Probability_density_function#Function_of_random_variables_and_change_of_variables_in_the_probability_density_function) of this procedure relating to probability density functions (PDFs). Below we will show how applying/inverting a transform function blindly results in inaccurate conversions and try to outline an intuition for the process. We will try to make it as easy to reason about as possible and some details can get skipped.
+    All transformations except `Identity` (which returns the input itself as output) are examples of the procedure defined in calculus as [Change of Variables](https://en.wikipedia.org/wiki/Change_of_variables). We deal with a specific [subset](https://en.wikipedia.org/wiki/Probability_density_function#Function_of_random_variables_and_change_of_variables_in_the_probability_density_function) of this procedure relating to probability density functions (PDFs). Below we will show how applying/inverting a transform function blindly results in inaccurate conversions and try to outline an intuition for the process. We will try to make it as easy to reason about as possible and some details can get skipped.
 
     A random variable $Z \in\R$ can follow any distribution $f_z(Z)\in\R$. However after applying any transformation $Z \to X$ such that $Z \neq X$; we can intuitively (and mathematically) agree that the distribution $f_z(X)$ no longer accurately describes the density of the transformed variable $X$.
 
@@ -125,25 +124,23 @@ res, sol = solver.estimate_and_solve(
     n_draws=100_000, # (6)!
     burn_in=10_000, # (7)!
     thin=1, # (8)!
-    update_R_in_iterations=False, # (9)!
 )
 ```
 
 1. Mode of the Kalman Filter used to compute the likelihood. Chosen from `{'linear', 'extended', 'unscented'}`.
 2. Observed data we want to calibrate against
-3. Which observables to use from the model specification. If not specified, all observables will be used. Number columns in `y` must match the number of observables in the model specification.
+3. Which observables to use from the model specification. If not specified, all observables will be used. Number of columns in `y` must match the number of observables in the model specification.
 4. Chosen from `{'mle', 'map', 'mcmc'}`.
 5. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
 6. Effective sample size (retained draws).
 7. Burn-in iterations.
 8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
-9. If parameters of R are being estimated, setting this to `True` will re-compute the R matrix using the current sample's parameters.
-   Otherwise, R will be estimated once before the run begins and will be kept static throughout the run.
 
 ```text
-MCMC sampling concluded in 65.16 seconds with 1688.13 iterations per second.
+MCMC sampling concluded in 71.61 seconds with 1536.00 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
+
 ???+ note "Filter Mode Selection"
     Filter modes increase in capability and complexity as follows: `linear` < `extended` < `unscented`. Linear doesn't support any non-linearities in the model (transitions and measurements). Extended allows for non-linearities in measurements, but not in transitions. Unscented, which is by far the slowest,
     requires a non-linear (`order>=2`) solution and supports non-linearities in both transitions and measurements. In general, it is recommended to use the simplest possible filter mode that is compatible with a given model. (Note that `extended` on a linear model is equivalent to `linear` but slower.)
@@ -183,50 +180,84 @@ pd.Series(
 2. Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)
 
 ```text
-beta                0.970
-rho_r               0.834
-rho_g               0.853
-rho_z               0.865
-psi_pi              2.960
-psi_x               0.329
-kappa               0.414
-tau_inv             0.627
-rho_gz              0.020
-meas_rho_ir         0.010
-sig_r               0.140
-sig_g               0.138
-sig_z               0.660
-meas_infl           0.009
-meas_rate          -0.010
-loglik           -296.908
-accept_rate         0.227
+beta                0.969
+rho_r               0.775
+rho_g               0.828
+rho_z               0.889
+psi_pi              4.142
+psi_x               0.364
+kappa               0.363
+tau_inv             0.414
+rho_gz              0.085
+meas_rho_ir         0.005
+sig_r               0.032
+sig_g               0.063
+sig_z               0.674
+meas_infl           1.427
+meas_rate           0.002
+loglik           -266.964
+accept_rate         0.233
 n_draws        100000.000
 burn_in         10000.000
 thin                1.000
 dtype: float64
 ```
 
-## Fit Diagnostics
+## Fit Diagnostics (MCMC)
 
-In this section we will compare the filtered and predicted states coming from a Kalman Filter (KF) ran on:
+MCMC sampling produces distributions instead of point estimates. Therefore, indications of estimation quality are visible not only through the specific point estimate (and the likelihood of that point), but also through the behavior of the sampled distribution. `MCMCResult` provides a few methods to visualize some of the common points of inspection when deciding whether the estimation was sufficiently well-behaved.
 
-1. A model using static $R$ to estimate parameters
-2. The same model using dynamic $R$ to estimate parameters
+### Highest Posterior Density (HPD) Intervals
 
-Both predicted measurements `y_pred` and filtered measurements `y_filt` will be compared against the actual observed data used in estimation.
-Afterwards, a simulation using identical shock arrays for static and dynamic estimated models will be compared against the actual data.
+HPD intervals are akin to regular confidence intervals, but are computed from the posterior distribution. The HPD interval is the smallest interval in a trace containing the specified probability mass. Computing the bounds of the HPD interval tells us where the mass is concentrated; multimodal distributions for example can present themselves as a wide HPD interval due to multiple high-mass regions. The HPD interval can be computed using the `MCMCResult.hpd_intervals` method:
 
-Static `R` fit:
+```python
+res.hpd_intervals(alpha=0.05, n_digits=3) # (1)!
+```
 
-![Static R filtered fit](../img/estimation_static_r_fit.png "Static R filtered fit")
+1. `alpha` is the probability mass outside the interval. For example, `alpha=0.05` means we want to compute the 95% HPD interval. `n_digits` is the number of digits to round the output to.
 
-Dynamic `R` fit:
+```text
+{'beta': (np.float64(0.943), np.float64(0.99)),
+ 'rho_r': (np.float64(0.725), np.float64(0.82)),
+ 'rho_g': (np.float64(0.762), np.float64(0.891)),
+ 'rho_z': (np.float64(0.854), np.float64(0.924)),
+ 'psi_pi': (np.float64(3.122), np.float64(5.171)),
+ 'psi_x': (np.float64(0.159), np.float64(0.611)),
+ 'kappa': (np.float64(0.218), np.float64(0.512)),
+ 'tau_inv': (np.float64(0.216), np.float64(0.631)),
+ 'rho_gz': (np.float64(-0.326), np.float64(0.543)),
+ 'meas_rho_ir': (np.float64(-0.843), np.float64(0.843)),
+ 'sig_r': (np.float64(0.01), np.float64(0.057)),
+ 'sig_g': (np.float64(0.011), np.float64(0.122)),
+ 'sig_z': (np.float64(0.491), np.float64(0.875)),
+ 'meas_infl': (np.float64(1.209), np.float64(1.629)),
+ 'meas_rate': (np.float64(-0.118), np.float64(0.118))}
+```
 
-![Dynamic R filtered fit](../img/estimation_dynamic_r_fit.png "Dynamic R filtered fit")
+### Posterior Density Estimation
 
-Simulation vs actual (both solutions):
+Each estimated parameter comprises a sampled distribution which can be treated as a marginal posterior distribution. The `MCMCResult.posterior_kde_plot` method uses standard Gaussian Kernel Density Estimation to visualize the posterior distributions of each parameter to scan for abnormalities such as multimodality, skewness, or other.
 
-![Simulation vs actual](../img/estimation_sim_vs_actual.png "Simulation vs actual")
+```python
+res.posterior_kde_plot(grid_points=100) # (1)!
+```
+
+1. `grid_points` is the number of points to use in the KDE grid. More points yield a smoother curve, but take longer to compute. It's not recommended to use more than 1000 points, density estimation is computationally expensive and runtime can challenge the entire estimation process.
+
+![Posterior KDE Plot](../img/post_kde.png "Posterior KDE Plot")
+
+### Log-Posterior Trace
+
+The log-posterior trace is a "time series" of the log-posterior, showing the log-likelihood of each sample drawn in-order. Inspecting this can tell us whether the sampling process was non-convergent, or whether the chain got stuck in a local optimum for a long time. The `MCMCResult.logpost_trace_plot` method can be used to visualize the log-posterior trace.
+
+```python
+res.logpost_trace_plot() # (1)!
+```
+
+1. The method produces a plot from the `MCMCResult.logpost_trace` array with no parameters required.
+
+![Log-Posterior Trace Plot](../img/lp_trace.png "Log-Posterior Trace Plot")
 
 ## Practical Notes
 

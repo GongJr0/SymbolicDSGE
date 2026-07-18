@@ -1,7 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-import builtins
 from types import SimpleNamespace
 
 import numpy as np
@@ -131,8 +130,8 @@ def _make_stub_model(
                 scale=2.0,
                 diag={"u": 1.0, "v": 3.0, "x": 5.0},
             ),
-            R_builder=None,
-            R_param_names=None,
+            R_std_param_map=None,
+            R_corr_param_map=None,
         )
 
     model = SimpleNamespace(
@@ -234,31 +233,6 @@ def test_interface_init_extended_skips_linear_measurement_builder():
     assert ki.d is None
 
 
-def test_interface_init_estimate_r_diag_uses_data_variance_not_config():
-    y = np.array([[10.0, 1.0], [20.0, 2.0]], dtype=FLOAT)
-    ki = KalmanInterface(
-        model=_make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsB", "ObsA"],
-                R=None,
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
-            )
-        ),
-        observables=["ObsB", "ObsA"],
-        y=y,
-        estimate_R_diag=True,
-    )
-
-    assert np.array_equal(
-        ki.R,
-        np.diag([0.025, 2.5]).astype(FLOAT),
-    )
-
-
 def test_interface_init_accepts_user_r_override():
     user_R = np.array([[0.75]], dtype=FLOAT)
     ki = KalmanInterface(
@@ -295,8 +269,8 @@ def test_get_symmetrize_and_jitter_cover_overrides_and_defaults():
                 jitter=None,
                 symmetrize=None,
                 P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -405,8 +379,8 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "v": 2.0}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -421,8 +395,8 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -437,34 +411,13 @@ def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="triangle", scale=1.0, diag={}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
     with pytest.raises(ValueError, match="Unrecognized P0 mode"):
         bad_mode._build_P0()
-
-    no_p0 = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=None,
-                R_builder=None,
-                R_param_names=None,
-            )
-        )
-    )
-    with pytest.raises(ValueError, match="Both p0_mode and p0_scale must be provided"):
-        no_p0._build_P0()
-    with pytest.raises(ValueError, match="must be provided in configuration"):
-        no_p0._build_P0(p0_mode="diag", p0_scale=2.0)
-    assert np.array_equal(no_p0._build_P0(p0_mode="eye", p0_scale=3.0), np.eye(3) * 3.0)
-    with pytest.raises(ValueError, match="Unrecognized p0_mode"):
-        no_p0._build_P0(p0_mode="triangle", p0_scale=2.0)
 
 
 def test_build_unscented_p0_uses_state_block_and_identity_second_block():
@@ -488,8 +441,8 @@ def test_build_unscented_p0_uses_state_block_and_identity_second_block():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=2.0, diag={"u": 1.0, "v": 2.0}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -507,8 +460,8 @@ def test_build_unscented_p0_uses_state_block_and_identity_second_block():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "x": 5.0}),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -516,22 +469,22 @@ def test_build_unscented_p0_uses_state_block_and_identity_second_block():
     with pytest.raises(ValueError, match="must include all state variables"):
         missing_state_diag._build_P0()
 
-    no_p0 = _make_shell(
+    eye_override = _make_shell(
         _make_stub_model(
             kalman_config=SimpleNamespace(
                 y_names=["ObsA"],
                 R=np.array([[1.0]], dtype=FLOAT),
                 jitter=0.0,
                 symmetrize=False,
-                P0=None,
-                R_builder=None,
-                R_param_names=None,
+                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
-    no_p0.mode = FilterMode.UNSCENTED
+    eye_override.mode = FilterMode.UNSCENTED
     assert np.array_equal(
-        no_p0._build_P0(p0_mode="eye", p0_scale=3.0),
+        eye_override._build_P0(p0_mode="eye", p0_scale=3.0),
         np.diag([3.0, 3.0, 1.0, 1.0]).astype(FLOAT),
     )
 
@@ -559,8 +512,8 @@ def test_reorder_obs_uses_defaults_and_aligns_dataframe_and_ndarray_inputs():
                 jitter=0.0,
                 symmetrize=False,
                 P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
+                R_std_param_map=None,
+                R_corr_param_map=None,
             )
         )
     )
@@ -813,101 +766,6 @@ def test_filter_unscented_rejects_return_shocks_and_bad_x0():
     ki.return_shocks = False
     with pytest.raises(ValueError, match="x0 must have length"):
         ki.filter(x0=np.array([1.0], dtype=FLOAT))
-
-
-def test_ml_estimate_r_diag_success_path(monkeypatch):
-    ki = KalmanInterface(
-        model=_make_stub_model(),
-        observables=["ObsA", "ObsB"],
-        y=np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]], dtype=FLOAT),
-    )
-    captured = {"filter_calls": []}
-    printed = []
-
-    def fake_filter_raw(self, x0=None, _debug=False, _arg_overrides=None):
-        captured["filter_calls"].append(
-            {
-                "x0": x0.copy(),
-                "_debug": _debug,
-                "R": _arg_overrides["R"].copy(),
-            }
-        )
-        return SimpleNamespace(loglik=-float(np.trace(_arg_overrides["R"])))
-
-    def fake_minimize(obj, x0, bounds, method):
-        captured["x0"] = x0.copy()
-        captured["bounds"] = bounds
-        captured["method"] = method
-        captured["objective_at_x0"] = obj(x0)
-        return SimpleNamespace(
-            success=True,
-            x=np.log(np.array([0.3, 0.7], dtype=FLOAT)),
-            fun=-4.5,
-        )
-
-    monkeypatch.setattr(KalmanInterface, "filter_raw", fake_filter_raw)
-    monkeypatch.setattr(interface_module.optimize, "minimize", fake_minimize)
-    monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
-
-    ki._ML_estimate_R_diag(scale_factor=1.5)
-
-    assert captured["method"] == "L-BFGS-B"
-    assert captured["bounds"] == [(-30, 10), (-30, 10)]
-    assert captured["objective_at_x0"] > 0.0
-    assert len(captured["filter_calls"]) == 1
-    assert np.array_equal(
-        captured["filter_calls"][0]["x0"],
-        np.zeros((3,), dtype=FLOAT),
-    )
-    assert np.allclose(
-        ki.R,
-        np.diag([0.45, 1.05]).astype(FLOAT),
-    )
-    assert printed and "optimization successful" in printed[0][0]
-
-
-def test_ml_estimate_r_diag_warning_path(monkeypatch):
-    diag_R = np.diag([4.0, 9.0]).astype(FLOAT)
-    ki = KalmanInterface(
-        model=_make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA", "ObsB"],
-                R=diag_R,
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_builder=None,
-                R_param_names=None,
-            )
-        ),
-        observables=["ObsA", "ObsB"],
-        y=np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT),
-    )
-    printed = []
-
-    def fake_filter_raw(self, x0=None, _debug=False, _arg_overrides=None):
-        return SimpleNamespace(loglik=-float(np.trace(_arg_overrides["R"])))
-
-    def fake_minimize(obj, x0, bounds, method):
-        obj(x0)
-        return SimpleNamespace(
-            success=False,
-            x=np.log(np.array([4.0, 9.0], dtype=FLOAT)),
-            fun=-1.0,
-            message="stalled",
-        )
-
-    monkeypatch.setattr(KalmanInterface, "filter_raw", fake_filter_raw)
-    monkeypatch.setattr(interface_module.optimize, "minimize", fake_minimize)
-    monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
-
-    with pytest.warns(UserWarning, match="did not converge"):
-        ki._ML_estimate_R_diag(scale_factor=2.0)
-
-    expected = np.diag([0.05, 5.0]).astype(FLOAT)
-    assert np.allclose(ki.R, expected)
-    assert len(printed) == 1
-    assert "Using initial diagonal R guess" in printed[0][0]
 
 
 def test_filter_uses_current_self_r_after_validated_args_access(monkeypatch):

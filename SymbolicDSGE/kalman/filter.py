@@ -2,7 +2,6 @@ from .._ckernels.kalman import kalman_hot_loop, ukf_hot_loop, ekf_hot_loop
 from .errors import (
     ErrorCode,
     ComplexMatrixError,
-    MatrixConditionError,
     ShapeMismatchError,
     get_error_constructor,
 )
@@ -14,7 +13,6 @@ from numpy import (
     complex128,
     eye,
     zeros,
-    linalg,
     real_if_close,
 )
 from numpy.typing import NDArray

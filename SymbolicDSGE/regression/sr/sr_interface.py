@@ -47,7 +47,6 @@ class SRInterface:
             y=y,
             observables=self._model.compiled.observable_names,
             filter_mode=cast(Literal["linear", "extended"], mode),
-            estimate_R_diag=False,
             return_shocks=False,
             _debug=False,
         )

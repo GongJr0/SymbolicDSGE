@@ -1,6 +1,4 @@
 # type: ignore
-import warnings
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,7 +7,6 @@ from sympy import Symbol
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
-import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.estimation import Estimator
 
 
@@ -136,55 +133,6 @@ def _notebook_like_prior_spec() -> dict[str, object]:
     }
 
 
-def _run_dynamic_r_adaptive_chain(est: Estimator, *, steps: int, seed: int):
-    current = est.theta0()
-    d = current.shape[0]
-    cov = (0.1**2) * np.eye(d, dtype=np.float64)
-    scale = (2.38**2) / d
-    history = np.empty((steps, d), dtype=np.float64)
-    rng = np.random.default_rng(seed)
-    dynamic_obs = est._effective_observables()
-
-    def _safe_logpost_chain(theta: np.ndarray) -> np.float64:
-        try:
-            params = est.theta_to_params(theta)
-            R_iter = est_backend.build_R_from_config_params(
-                compiled=est.compiled,
-                kalman=est.compiled.kalman,
-                observables=dynamic_obs,
-                params=params,
-            )
-            lp, n_signals = est._eval_with_warning_capture(
-                lambda th: est._logpost_with_overrides(
-                    th,
-                    params_override=params,
-                    R_override=R_iter,
-                ),
-                theta,
-            )
-            est._warning_signal_count += n_signals
-            if n_signals > 0 or not np.isfinite(lp):
-                return np.float64(-np.inf)
-            return np.float64(lp)
-        except BaseException:
-            return np.float64(-np.inf)
-
-    cur_lp = _safe_logpost_chain(current)
-    for t in range(steps):
-        prop = rng.multivariate_normal(current, cov, check_valid="warn")
-        prop_lp = _safe_logpost_chain(prop)
-        if np.isfinite(prop_lp) and np.log(rng.random()) < (prop_lp - cur_lp):
-            current = prop
-            cur_lp = prop_lp
-        history[t] = current
-        if t >= 100 and (t + 1) % 25 == 0:
-            emp = np.cov(history[: t + 1].T, ddof=1)
-            cov = scale * (
-                np.asarray(emp, dtype=np.float64) + 1e-8 * np.eye(d, dtype=np.float64)
-            )
-    return current, history, cov
-
-
 def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden(
     dense_lkj_bundle,
 ):
@@ -205,8 +153,8 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
     )
 
     expected_logprior = -3.677756133346315
-    expected_loglik = -89.36502293741962
-    expected_logpost = -93.04277907076594
+    expected_loglik = -89.32084071241567
+    expected_logpost = -92.99859684576199
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(
@@ -224,134 +172,6 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
     assert float(est.logpost(theta)) == pytest.approx(
         expected_logpost, rel=1e-13, abs=1e-13
     )
-
-
-@pytest.mark.skip(
-    reason="R-estimation rework: R is now static unless explicitly targeted; the "
-    "update_R_in_iterations dynamic-R path and its pinned golden values are being reworked."
-)
-def test_seeded_mcmc_output_is_unchanged_by_packed_logprior(dense_lkj_bundle):
-    prior_spec = _notebook_like_prior_spec()
-    estimator_kwargs = {
-        "solver": dense_lkj_bundle["solver"],
-        "compiled": dense_lkj_bundle["compiled"],
-        "y": dense_lkj_bundle["y"],
-        "steady_state": dense_lkj_bundle["steady"],
-        "estimated_params": list(prior_spec.keys()),
-        "priors": prior_spec,
-    }
-    py_est = Estimator(**estimator_kwargs)
-    fast_est = Estimator(**estimator_kwargs)
-    py_est._packed_logprior = None
-
-    mcmc_kwargs = {
-        "n_draws": 4,
-        "burn_in": 3,
-        "thin": 1,
-        "random_state": 20260514,
-        "adapt": False,
-        "proposal_scale": 0.03,
-        "update_R_in_iterations": True,
-    }
-    py_out = py_est.mcmc(**mcmc_kwargs)
-    fast_out = fast_est.mcmc(**mcmc_kwargs)
-
-    expected_samples = np.asarray(
-        [
-            [
-                0.9722788490944664,
-                0.8385181297289465,
-                0.8326100862288526,
-                0.8598170308065666,
-                1.8517072756747124,
-                0.26936606575372635,
-                0.5661907724543085,
-                1.7787251193982609,
-                0.2386719271508857,
-                0.17505842082271406,
-                0.17876050420656922,
-                0.6789734114069728,
-                -0.0004710042864448793,
-                -0.0014058872143055178,
-                0.08751338729542235,
-            ],
-            [
-                0.9723940904867348,
-                0.8323050546877759,
-                0.8300687154618204,
-                0.8606827345325954,
-                1.807972943982433,
-                0.256805941791019,
-                0.5661734018326098,
-                1.7070842554964387,
-                0.23236807567820428,
-                0.16801195362701535,
-                0.1818855913012291,
-                0.6936644013044216,
-                0.006538316562136784,
-                0.03655168248699781,
-                0.12274007888660263,
-            ],
-            [
-                0.9719231902434429,
-                0.8337738358666533,
-                0.8333052437168955,
-                0.8610069205371012,
-                1.8606881878280164,
-                0.2619928822327988,
-                0.5486651185647973,
-                1.7419756612342272,
-                0.2546777303992511,
-                0.17717921407193218,
-                0.17614663838311484,
-                0.6756188960870789,
-                -0.012557728176324509,
-                0.024686247648120802,
-                0.11548964952702162,
-            ],
-            [
-                0.9720244529291886,
-                0.8329297034604359,
-                0.8294118045806201,
-                0.8606168798037788,
-                1.8701427668950312,
-                0.24573616885655347,
-                0.5554386108553453,
-                1.765071341820583,
-                0.24289569753039042,
-                0.1732404134364854,
-                0.1764071901730661,
-                0.6797729999463173,
-                -0.009886294940591785,
-                0.008945837745324613,
-                0.10588893108287337,
-            ],
-        ],
-        dtype=np.float64,
-    )
-    expected_logpost = np.asarray(
-        [
-            -89.11289967831583,
-            -89.56901008775299,
-            -89.61414761105306,
-            -89.43170424781582,
-        ],
-        dtype=np.float64,
-    )
-
-    np.testing.assert_allclose(py_out.samples, expected_samples, rtol=0.0, atol=1e-14)
-    np.testing.assert_allclose(fast_out.samples, expected_samples, rtol=0.0, atol=1e-14)
-    np.testing.assert_allclose(
-        py_out.logpost_trace, expected_logpost, rtol=0.0, atol=1e-12
-    )
-    np.testing.assert_allclose(
-        fast_out.logpost_trace,
-        expected_logpost,
-        rtol=0.0,
-        atol=1e-12,
-    )
-    assert fast_out.accept_rate == pytest.approx(py_out.accept_rate)
-    assert fast_out.accept_rate == pytest.approx(0.8571428571428571)
 
 
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
@@ -378,7 +198,9 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
 
     assert np.isfinite(ll0)
     assert np.isfinite(ll1)
-    assert ll1 == pytest.approx(ll0)
+    # R now travels the likelihood (build_R rebuilds it from params every eval),
+    # so perturbing the R correlations changes the loglik.
+    assert ll1 != pytest.approx(ll0)
 
     out = est.mcmc(
         n_draws=8,
@@ -387,7 +209,6 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         random_state=123,
         adapt=False,
         proposal_scale=0.08,
-        update_R_in_iterations=True,
     )
 
     assert out.param_names == ["meas_rho_gi", "meas_rho_gr", "meas_rho_ir"]
@@ -463,51 +284,3 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
     assert out.param_names == ["rho_gz", "rho_gr_shock", "rho_zr_shock"]
     assert out.samples.shape == (8, 3)
     _assert_valid_corr_draws(out.samples)
-
-
-@pytest.mark.skip(
-    reason="R-estimation rework: R is now static unless explicitly targeted; the "
-    "update_R_in_iterations dynamic-R path is being reworked."
-)
-def test_adaptive_r_block_stays_well_conditioned_under_dynamic_updates(
-    dense_lkj_bundle,
-):
-    prior_spec = _notebook_like_prior_spec()
-    est = Estimator(
-        solver=dense_lkj_bundle["solver"],
-        compiled=dense_lkj_bundle["compiled"],
-        y=dense_lkj_bundle["y"],
-        steady_state=dense_lkj_bundle["steady"],
-        estimated_params=list(prior_spec.keys()),
-        priors=prior_spec,
-    )
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        current, history, cov = _run_dynamic_r_adaptive_chain(
-            est,
-            steps=8000,
-            seed=123,
-        )
-
-    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
-    assert not runtime_warnings
-
-    r_idx = est._matrix_blocks["R_corr"].theta_slice
-    max_abs_r = np.max(np.abs(history[:, r_idx]), axis=0)
-    min_eig = np.min(np.linalg.eigvalsh(0.5 * (cov + cov.T)))
-
-    assert np.all(max_abs_r < 10.0)
-    assert min_eig > 1e-8
-    _assert_valid_corr_draws(
-        np.asarray(
-            [
-                [
-                    est.theta_to_params(current)["meas_rho_gi"],
-                    est.theta_to_params(current)["meas_rho_gr"],
-                    est.theta_to_params(current)["meas_rho_ir"],
-                ]
-            ],
-            dtype=np.float64,
-        )
-    )

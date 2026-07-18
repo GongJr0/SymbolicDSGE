@@ -7,12 +7,12 @@ from numba import cfunc, njit, types
 from numpy import float64
 
 import SymbolicDSGE.kalman.filter as filter_module
-from SymbolicDSGE.kalman.errors import ErrorCode
-from SymbolicDSGE.kalman.filter import (
-    KalmanFilter,
+from SymbolicDSGE.kalman.errors import (
+    ErrorCode,
     MatrixConditionError,
     ShapeMismatchError,
 )
+from SymbolicDSGE.kalman.filter import KalmanFilter
 from _oracles.kalman import ekf_reference
 
 

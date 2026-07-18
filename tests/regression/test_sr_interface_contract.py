@@ -134,7 +134,6 @@ def test_get_kf_selects_linear_or_extended_mode(monkeypatch):
     assert linear_out is not None
     assert linear_calls["kwargs"]["filter_mode"] == "linear"
     assert linear_calls["kwargs"]["observables"] == ["pi", "y"]
-    assert linear_calls["kwargs"]["estimate_R_diag"] is False
     assert linear_calls["kwargs"]["return_shocks"] is False
     assert linear_calls["kwargs"]["_debug"] is False
 

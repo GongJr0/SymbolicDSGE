@@ -17,8 +17,6 @@ reference_filter_step(
     symmetrize: bool | None = None,
     return_shocks: bool = False,
     R: ndarray | None = None,
-    estimate_R_diag: bool = False,
-    R_scale: float = 1.0,
 ) -> MCStep
 ```
 
@@ -40,8 +38,6 @@ __Inputs:__
 | symmetrize | `None` | Symmetrization override. |
 | return_shocks | `False` | Return shock estimates when supported by the selected filter mode. |
 | R | `None` | Measurement error covariance override. |
-| estimate_R_diag | `False` | Estimate diagonal measurement error covariance from data. |
-| R_scale | `1.0` | Scale applied to measurement error covariance. |
 
 __Downstream Fields:__
 

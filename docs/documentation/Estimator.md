@@ -38,7 +38,7 @@ Estimator(
 2. Compiled model from `DSGESolver.compile(...)`.
 3. Measurement data for Kalman likelihood.
 4. Required for `map(...)` and `mcmc(...)`.
-5. Optional observation covariance override. If omitted through solver entrypoints, `R` can be inferred before estimation.
+5. Optional constant observation-covariance override. If omitted, `R` comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
 6. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
 
 ## Utility
@@ -158,7 +158,6 @@ Estimator.mcmc(
     adapt_interval: int = 25,
     proposal_scale: float = 0.1,
     adapt_epsilon: float = 1e-8,
-    update_R_in_iterations: bool = False, # (5)!
 ) -> MCMCResult
 ```
 
@@ -166,7 +165,6 @@ Estimator.mcmc(
 2. Number of initial iterations discarded.
 3. Retain every `thin`-th iteration after burn-in.
 4. Adaptive covariance updates are performed during burn-in only.
-5. Rebuild `R` from current parameter draw when symbolic `R` metadata is available and relevant parameters are being estimated.
 
 ???+ note "Thinning Semantics"
     Thinning is applied after burn-in using `(t - burn_in) % thin == 0`.
