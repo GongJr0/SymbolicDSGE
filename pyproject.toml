@@ -45,7 +45,7 @@ sr = [
     "pysr>=1.5.10",
 ]
 ui = [
-    "fastapi>=0.138.1",
+    "fastapi>=0.139.2",
     "uvicorn[standard]>=0.51.0",
 ]
 
