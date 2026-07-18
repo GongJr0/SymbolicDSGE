@@ -98,8 +98,8 @@ def test_name_extract_and_builders_basic():
         calib_params=[b, a],
     )
 
-    assert backend._name_of(a) == "a"
-    assert backend._name_of("x") == "x"
+    assert str(a) == "a"
+    assert str("x") == "x"
 
     base = backend.extract_base_params(compiled)
     assert base == {"a": pytest.approx(1.5), "b": pytest.approx(2.5)}

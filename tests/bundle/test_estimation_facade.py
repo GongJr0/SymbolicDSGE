@@ -15,16 +15,41 @@ from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
 
 
+def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
+    """Complete a stub with the surface Estimator's construction-time filter prep
+    needs. ``Estimator.__init__`` builds the filter run unconditionally now (the
+    old duck-typed guard is gone), so every stub must satisfy
+    ``prepare_filter_run``. These tests fake ``evaluate_loglik``, so the cfunc
+    addresses and P0 are never evaluated; they only have to exist."""
+    if not hasattr(compiled, "observable_names"):
+        compiled.observable_names = ["y"]
+    if not hasattr(compiled, "var_names"):
+        compiled.var_names = [
+            Symbol(f"s{i}") for i in range(len(compiled.observable_names))
+        ]
+    if not hasattr(compiled, "cur_syms"):
+        compiled.cur_syms = list(compiled.var_names)
+    compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
+    compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
+        address=0
+    )
+    if getattr(compiled.kalman, "P0", None) is None:
+        compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+    return compiled
+
+
 def _stub_compiled() -> SimpleNamespace:
     a = Symbol("a")
     calibration = SimpleNamespace(parameters={a: float64(0.3)})
     config = SimpleNamespace(calibration=calibration)
     kalman = SimpleNamespace(y_names=["y"])
-    return SimpleNamespace(
-        config=config,
-        calib_params=[a],
-        kalman=kalman,
-        observable_names=["y"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[a],
+            kalman=kalman,
+            observable_names=["y"],
+        )
     )
 
 

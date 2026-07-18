@@ -29,16 +29,41 @@ class _QuadraticPrior:
         return float64(-self.weight * (float64(x) - self.mean) ** 2)
 
 
+def _with_filter_prep(compiled):
+    """Complete a stub with the surface Estimator's construction-time filter prep
+    needs. ``Estimator.__init__`` builds the filter run unconditionally now (the
+    old duck-typed guard is gone), so every stub must satisfy
+    ``prepare_filter_run``. These tests fake ``evaluate_loglik``, so the cfunc
+    addresses and P0 are never evaluated; they only have to exist."""
+    if not hasattr(compiled, "observable_names"):
+        compiled.observable_names = ["y"]
+    if not hasattr(compiled, "var_names"):
+        compiled.var_names = [
+            Symbol(f"s{i}") for i in range(len(compiled.observable_names))
+        ]
+    if not hasattr(compiled, "cur_syms"):
+        compiled.cur_syms = list(compiled.var_names)
+    compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
+    compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
+        address=0
+    )
+    if getattr(compiled.kalman, "P0", None) is None:
+        compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+    return compiled
+
+
 def _stub_compiled():
     a = Symbol("a")
     calibration = SimpleNamespace(parameters={a: float64(0.0)})
     config = SimpleNamespace(calibration=calibration)
     kalman = SimpleNamespace(y_names=["y"])
-    return SimpleNamespace(
-        config=config,
-        calib_params=[a],
-        kalman=kalman,
-        observable_names=["y"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[a],
+            kalman=kalman,
+            observable_names=["y"],
+        )
     )
 
 
@@ -52,11 +77,13 @@ def _stub_compiled_with_r():
         R_builder=lambda *vals: np.array([[vals[0]]], dtype=np.float64),
         y_names=["y"],
     )
-    return SimpleNamespace(
-        config=config,
-        calib_params=[a, meas],
-        kalman=kalman,
-        observable_names=["y"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[a, meas],
+            kalman=kalman,
+            observable_names=["y"],
+        )
     )
 
 
@@ -97,11 +124,13 @@ def _stub_compiled_with_dense_r_block():
         R_corr_param_map={frozenset(("A", "B")): "meas_rho_ab"},
         y_names=["A", "B"],
     )
-    return SimpleNamespace(
-        config=config,
-        calib_params=[meas_a, meas_b, meas_rho_ab],
-        kalman=kalman,
-        observable_names=["A", "B"],
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[meas_a, meas_b, meas_rho_ab],
+            kalman=kalman,
+            observable_names=["A", "B"],
+        )
     )
 
 
@@ -136,13 +165,15 @@ def _stub_compiled_with_sparse_q_block():
         calibration=calibration,
         shock_map={e1: x1, e2: x2, e3: x3},
     )
-    return SimpleNamespace(
-        config=config,
-        calib_params=[sig1, sig2, sig3, rho12],
-        kalman=SimpleNamespace(y_names=["y"]),
-        observable_names=["y"],
-        var_names=[x1, x2, x3],
-        n_exog=3,
+    return _with_filter_prep(
+        SimpleNamespace(
+            config=config,
+            calib_params=[sig1, sig2, sig3, rho12],
+            kalman=SimpleNamespace(y_names=["y"]),
+            observable_names=["y"],
+            var_names=[x1, x2, x3],
+            n_exog=3,
+        )
     )
 
 
@@ -901,18 +932,20 @@ def test_resolve_r_and_effective_observables_error_paths():
 
     est_missing_meta = Estimator(
         solver=SimpleNamespace(),
-        compiled=SimpleNamespace(
-            config=SimpleNamespace(
-                calibration=SimpleNamespace(parameters={a: float64(0.0)})
-            ),
-            calib_params=[a],
-            kalman=SimpleNamespace(
-                y_names=["y"],
-                R=np.eye(1, dtype=np.float64),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            ),
-            observable_names=["y"],
+        compiled=_with_filter_prep(
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    calibration=SimpleNamespace(parameters={a: float64(0.0)})
+                ),
+                calib_params=[a],
+                kalman=SimpleNamespace(
+                    y_names=["y"],
+                    R=np.eye(1, dtype=np.float64),
+                    R_std_param_map=None,
+                    R_corr_param_map=None,
+                ),
+                observable_names=["y"],
+            )
         ),
         y=np.zeros((3, 1), dtype=np.float64),
         estimated_params=["a"],
@@ -1041,13 +1074,15 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         shock_std=SymbolGetterDict({e1: sig1, e2: sig2}),
         shock_corr={},
     )
-    compiled = SimpleNamespace(
-        config=SimpleNamespace(calibration=calibration, shock_map={e1: x1, e2: x2}),
-        calib_params=[sig1, sig2],
-        kalman=SimpleNamespace(y_names=["y"]),
-        observable_names=["y"],
-        var_names=[x1, x2],
-        n_exog=2,
+    compiled = _with_filter_prep(
+        SimpleNamespace(
+            config=SimpleNamespace(calibration=calibration, shock_map={e1: x1, e2: x2}),
+            calib_params=[sig1, sig2],
+            kalman=SimpleNamespace(y_names=["y"]),
+            observable_names=["y"],
+            var_names=[x1, x2],
+            n_exog=2,
+        )
     )
     est = Estimator(
         solver=SimpleNamespace(),
@@ -1177,13 +1212,15 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
 
 
 def test_effective_observables_logprior_base_branch_and_logpost(monkeypatch):
-    compiled_obs = SimpleNamespace(
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
-        calib_params=[],
-        observable_names=["y1", "y2"],
-        kalman=SimpleNamespace(
-            R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
-        ),
+    compiled_obs = _with_filter_prep(
+        SimpleNamespace(
+            config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
+            calib_params=[],
+            observable_names=["y1", "y2"],
+            kalman=SimpleNamespace(
+                R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
+            ),
+        )
     )
     est_obs = Estimator(
         solver=SimpleNamespace(),

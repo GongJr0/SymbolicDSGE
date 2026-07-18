@@ -79,8 +79,8 @@ class Estimator:
             transform_kwargs=transform_kwargs,
         )
 
-    @staticmethod
-    def _reserved_matrix_keys() -> tuple[_MatrixPriorKey, _MatrixPriorKey]:
+    @property
+    def _reserved_matrix_keys(self) -> tuple[_MatrixPriorKey, _MatrixPriorKey]:
         return ("R_corr", "Q_corr")
 
     @staticmethod
@@ -120,10 +120,8 @@ class Estimator:
             )
         self.kalman = kalman
 
-        self.y = y
         self.observables = observables
         self.filter_mode = filter_mode
-
         self._input_priors = dict(priors) if priors is not None else None
 
         self.steady_state = steady_state
@@ -133,37 +131,42 @@ class Estimator:
         self.jitter = jitter
         self.symmetrize = symmetrize
         self.R = R
-        self._prepared_filter = None
-        if all(
-            hasattr(compiled, attr)
-            for attr in ("observable_names", "cur_syms", "calib_params", "kalman")
-        ):
-            self._prepared_filter = backend.prepare_filter_run(
-                compiled=compiled,
-                y=y,
-                observables=observables,
-                filter_mode=self.filter_mode,
-                p0_mode=p0_mode,
-                p0_scale=p0_scale,
-                jitter=jitter,
-                symmetrize=symmetrize,
-            )
-            # Drop the original observations at the boundary: reorder_observables
-            # (inside prepare_filter_run) already produced the canonical, writable
-            # ndarray the filter runs on, so no DataFrame or read-only
-            # copy-on-write view is dragged into the backend on every eval.
-            self.y = self._prepared_filter.y_reordered
+
+        self._prepared_filter = backend.prepare_filter_run(
+            compiled=compiled,
+            y=y,
+            observables=observables,
+            filter_mode=self.filter_mode,
+            p0_mode=p0_mode,
+            p0_scale=p0_scale,
+            jitter=jitter,
+            symmetrize=symmetrize,
+        )
+        self.y = self._prepared_filter.y_reordered  # Don't use user order directly.
 
         self._base_params = backend.extract_base_params(compiled)
+
         default_params = list(self._base_params.keys())
         requested_names_raw = self._requested_param_keys(estimated_params)
-        allowed_names = set(default_params).union(self._reserved_matrix_keys())
+        allowed_names = set(default_params).union(self._reserved_matrix_keys)
         unknown = [p for p in requested_names_raw if p not in allowed_names]
         if unknown:
             raise ValueError(
                 f"Unknown estimated parameters {unknown}. "
                 f"Known calibration parameters: {default_params}"
             )
+
+        r_is_target = ("R_corr" in requested_names_raw) or any(
+            name
+            for name in requested_names_raw
+            if name in (self.kalman.R_param_names or [])
+        )
+
+        if r_is_target and self.R is not None:
+            raise ValueError(
+                "R cannot be supplied as a constant when 'R_corr' or any of its members are an estimation target."
+            )
+
         self.priors = self._select_active_priors(requested_names_raw)
         self.param_names = self._expand_requested_params(requested_names_raw)
         self._param_index = {name: i for i, name in enumerate(self.param_names)}
@@ -201,7 +204,7 @@ class Estimator:
         if estimated_params is None:
             if self._input_priors is not None:
                 return list(self._input_priors.keys())
-            return [backend._name_of(p) for p in self.compiled.calib_params]
+            return [str(p) for p in self.compiled.calib_params]
         return list(estimated_params)
 
     def _select_active_priors(
@@ -225,7 +228,7 @@ class Estimator:
         expanded: list[str] = []
         owner: dict[str, str] = {}
         for name in requested_names_raw:
-            if name in self._reserved_matrix_keys():
+            if name in self._reserved_matrix_keys:
                 matrix_name = self._matrix_name_for_reserved_key(name)
                 block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
                 members = block.member_names
@@ -360,7 +363,7 @@ class Estimator:
     def _resolve_R(
         self, params: Mapping[str, float] | None = None
     ) -> _MatrixPriorBlock:
-        labels = self._effective_observables()
+        labels = self._prepared_filter.observables
         R_cov = backend.resolve_R(self.compiled, self.kalman, labels, None)
         self._cov_to_corr(R_cov, "R")
 
@@ -386,13 +389,8 @@ class Estimator:
         shock_map = self.compiled.config.shock_map
         shock_std = self.compiled.config.calibration.shock_std
         shock_corr = self.compiled.config.calibration.shock_corr
-        exogs = [
-            backend._name_of(v) for v in self.compiled.var_names[: self.compiled.n_exog]
-        ]
-        rev = {
-            backend._name_of(exo): backend._name_of(shock)
-            for shock, exo in shock_map.items()
-        }
+        exogs = [str(v) for v in self.compiled.var_names[: self.compiled.n_exog]]
+        rev = {str(exo): str(shock) for shock, exo in shock_map.items()}
         labels = [rev[exo] for exo in exogs]
         std_param_map: dict[str, str | None] = {}
         corr_param_map: dict[frozenset[str], str | None] = {}
@@ -422,7 +420,7 @@ class Estimator:
 
         blocks: dict[str, _MatrixPriorBlock] = {}
         claimed_names: set[str] = set()
-        for key in self._reserved_matrix_keys():
+        for key in self._reserved_matrix_keys:
             if key not in self.priors:
                 continue
 
@@ -470,7 +468,7 @@ class Estimator:
                 for name in block.member_names
                 if self._input_priors is not None
                 and name in self._input_priors
-                and name not in self._reserved_matrix_keys()
+                and name not in self._reserved_matrix_keys
             ]
             if scalar_conflicts:
                 raise ValueError(
@@ -764,27 +762,6 @@ class Estimator:
             prepared=self._prepared_filter,
             q_corr=q_corr,
         )
-
-    def _effective_observables(self) -> list[str]:
-        canon = list(self.compiled.observable_names)
-        canon_idx = {name: i for i, name in enumerate(canon)}
-        prepared = self._prepared_filter
-
-        if self.observables is None:
-            if prepared is not None:
-                obs_given = list(prepared.observables)
-            else:
-                obs_given = list(canon)
-        else:
-            if prepared is not None:
-                obs_given = list(prepared.observables)
-            else:
-                obs_given = list(self.observables)
-
-        missing = [n for n in obs_given if n not in canon_idx]
-        if missing:
-            raise ValueError(f"Unknown observables not in compiled model: {missing}")
-        return sorted(obs_given, key=lambda n: canon_idx[n])
 
     def loglik(self, theta: NDF) -> float64:
         params, matrices = self._resolve_theta(theta)
@@ -1101,7 +1078,7 @@ class Estimator:
                 n in self._param_index for n in r_param_names
             ):
                 dynamic_R_enabled = True
-                dynamic_obs = self._effective_observables()
+                dynamic_obs = self._prepared_filter.observables
 
         def _safe_logpost_chain(theta: NDF) -> float64:
             if not dynamic_R_enabled:

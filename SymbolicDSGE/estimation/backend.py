@@ -39,13 +39,9 @@ class PreparedFilterRun:
     kf_sym: bool
 
 
-def _name_of(p: str | Symbol) -> str:
-    return p if isinstance(p, str) else p.name
-
-
 def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:
     params = compiled.config.calibration.parameters
-    return {_name_of(k): float64(v) for k, v in params.items()}
+    return {str(k): float64(v) for k, v in params.items()}
 
 
 def build_full_params(
@@ -69,7 +65,7 @@ def build_calib_param_vector(
     compiled: CompiledModel,
     params: Mapping[str, float64],
 ) -> NDF:
-    names = [_name_of(p) for p in compiled.calib_params]
+    names = [str(p) for p in compiled.calib_params]
     return asarray([float64(params[name]) for name in names], dtype=float64)
 
 
