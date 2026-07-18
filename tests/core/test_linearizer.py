@@ -303,6 +303,7 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
     loglik = est_backend.evaluate_loglik(
         solver=solver,
         compiled=compiled,
+        kalman=compiled.kalman,
         y=np.zeros((6, 1), dtype=np.float64),
         params=params,
         filter_mode="linear",

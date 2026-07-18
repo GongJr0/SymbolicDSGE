@@ -143,7 +143,7 @@ def _run_dynamic_r_adaptive_chain(est: Estimator, *, steps: int, seed: int):
     scale = (2.38**2) / d
     history = np.empty((steps, d), dtype=np.float64)
     rng = np.random.default_rng(seed)
-    dynamic_obs = est._effective_observables()
+    dynamic_obs = est._prepared_filter.observables
 
     def _safe_logpost_chain(theta: np.ndarray) -> np.float64:
         try:
@@ -205,8 +205,8 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
     )
 
     expected_logprior = -3.677756133346315
-    expected_loglik = -89.36502293741962
-    expected_logpost = -93.04277907076594
+    expected_loglik = -89.32084071241567
+    expected_logpost = -92.99859684576199
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(
@@ -378,7 +378,9 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
 
     assert np.isfinite(ll0)
     assert np.isfinite(ll1)
-    assert ll1 == pytest.approx(ll0)
+    # R now travels the likelihood (build_R rebuilds it from params every eval),
+    # so perturbing the R correlations changes the loglik.
+    assert ll1 != pytest.approx(ll0)
 
     out = est.mcmc(
         n_draws=8,
@@ -387,7 +389,6 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         random_state=123,
         adapt=False,
         proposal_scale=0.08,
-        update_R_in_iterations=True,
     )
 
     assert out.param_names == ["meas_rho_gi", "meas_rho_gr", "meas_rho_ir"]

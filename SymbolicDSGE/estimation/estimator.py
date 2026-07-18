@@ -360,13 +360,8 @@ class Estimator:
             prior=None,
         )
 
-    def _resolve_R(
-        self, params: Mapping[str, float] | None = None
-    ) -> _MatrixPriorBlock:
+    def _resolve_R(self) -> _MatrixPriorBlock:
         labels = self._prepared_filter.observables
-        R_cov = backend.resolve_R(self.compiled, self.kalman, labels, None)
-        self._cov_to_corr(R_cov, "R")
-
         std_param_map = self.kalman.R_std_param_map
         corr_param_map = self.kalman.R_corr_param_map
         if std_param_map is None or corr_param_map is None:
@@ -380,9 +375,7 @@ class Estimator:
             corr_param_map=corr_param_map,
         )
 
-    def _resolve_Q(
-        self, params: Mapping[str, float] | None = None
-    ) -> _MatrixPriorBlock:
+    def _resolve_Q(self) -> _MatrixPriorBlock:
         Q_cov = backend.build_Q(self.compiled, self._base_params)
         self._cov_to_corr(Q_cov, "Q")
 
@@ -748,6 +741,7 @@ class Estimator:
         return backend.evaluate_loglik(
             solver=self.solver,
             compiled=self.compiled,
+            kalman=self.kalman,
             y=self.y,
             params=params,
             filter_mode=self.filter_mode,

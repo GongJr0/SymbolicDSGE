@@ -119,17 +119,14 @@ def test_name_extract_and_builders_basic():
 
 def test_reorder_observables_dataframe_and_ndarray_paths():
     compiled = SimpleNamespace(observable_names=["Infl", "Rate"])
-    kalman = SimpleNamespace(y_names=["Rate", "Infl"])
 
     df = pd.DataFrame({"Rate": [1.0, 2.0], "Infl": [3.0, 4.0]})
-    obs, y_df = backend.reorder_observables(compiled, kalman, None, df)
+    obs, y_df = backend.reorder_observables(compiled, None, df)
     assert obs == ["Infl", "Rate"]
     assert np.allclose(y_df, np.array([[3.0, 1.0], [4.0, 2.0]], dtype=np.float64))
 
     arr = np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float64)  # [Rate, Infl]
-    obs_arr, y_arr = backend.reorder_observables(
-        compiled, kalman, ["Rate", "Infl"], arr
-    )
+    obs_arr, y_arr = backend.reorder_observables(compiled, ["Rate", "Infl"], arr)
     assert obs_arr == ["Infl", "Rate"]
     assert np.allclose(y_arr, np.array([[20.0, 10.0], [40.0, 30.0]], dtype=np.float64))
 
@@ -148,21 +145,20 @@ def test_reorder_observables_dataframe_and_ndarray_paths():
 def test_reorder_observables_errors(observables, y, match):
     compiled = SimpleNamespace(observable_names=["Infl", "Rate"])
     with pytest.raises(ValueError, match=match):
-        backend.reorder_observables(compiled, None, observables, y)
+        backend.reorder_observables(compiled, observables, y)
 
 
 def test_reorder_observables_uses_compiled_default_and_validates_dataframe_columns():
     compiled = SimpleNamespace(observable_names=["Infl", "Rate"])
     df = pd.DataFrame({"Infl": [1.0], "Rate": [2.0]})
 
-    obs, y = backend.reorder_observables(compiled, None, None, df)
+    obs, y = backend.reorder_observables(compiled, None, df)
     assert obs == ["Infl", "Rate"]
     assert np.allclose(y, np.array([[1.0, 2.0]], dtype=np.float64))
 
     with pytest.raises(ValueError, match="missing observable columns"):
         backend.reorder_observables(
             compiled,
-            None,
             None,
             pd.DataFrame({"Infl": [1.0]}),
         )
@@ -283,47 +279,52 @@ def test_build_P0_branches():
         backend.build_P0(compiled, None, "unknown", 1.0)
 
 
-def test_resolve_R_branches():
+def test_build_R_override_and_config_branches():
     compiled = SimpleNamespace(observable_names=["Infl", "Rate", "Out"])
+    kalman = KalmanConfig(
+        R=None,
+        P0=P0Config(mode="eye", scale=1.0, diag=None),
+        R_std_param_map={"Infl": "s_i", "Rate": "s_r", "Out": "s_o"},
+        R_corr_param_map={},
+    )
 
-    with pytest.raises(ValueError, match="R is not available"):
-        backend.resolve_R(
-            compiled=compiled,
-            kalman=None,
-            observables=["Infl", "Rate"],
-            R=None,
-        )
-
+    # An override wins, but its shape must match the observable count.
     with pytest.raises(ValueError, match="Provided R has shape"):
-        backend.resolve_R(
-            compiled=compiled,
-            kalman=None,
-            observables=["Infl", "Rate"],
-            R=np.eye(3, dtype=np.float64),
+        backend.build_R(
+            compiled,
+            kalman,
+            ["Infl", "Rate"],
+            {},
+            R_override=np.eye(3, dtype=np.float64),
         )
 
     R_ok = np.array([[1.0, 0.1], [0.1, 2.0]], dtype=np.float64)
-    out_direct = backend.resolve_R(
-        compiled=compiled,
-        kalman=None,
-        observables=["Infl", "Rate"],
-        R=R_ok,
+    out_override = backend.build_R(
+        compiled, kalman, ["Infl", "Rate"], {}, R_override=R_ok
     )
-    assert np.allclose(out_direct, R_ok)
+    assert np.allclose(out_override, R_ok)
 
-    kalman = KalmanConfig(
+    # No override: R is rebuilt from params via the std/corr maps and sliced to
+    # the requested observable order (diag from s_i/s_r/s_o, no correlations).
+    params = {"s_i": 1.0, "s_r": 2.0, "s_o": 3.0}
+    out_config = backend.build_R(compiled, kalman, ["Rate", "Infl"], params)
+    assert np.allclose(out_config, np.array([[4.0, 0.0], [0.0, 1.0]], dtype=np.float64))
+
+    # A directly-configured constant R with no named-param maps is sliced as-is
+    # (nothing to rebuild from params), preserving observable order.
+    const_kalman = KalmanConfig(
         R=np.array(
             [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
         ),
         P0=P0Config(mode="eye", scale=1.0, diag=None),
     )
-    subset = backend.resolve_R(
-        compiled=compiled,
-        kalman=kalman,
-        observables=["Rate", "Infl"],
-        R=None,
-    )
-    assert np.allclose(subset, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
+    out_const = backend.build_R(compiled, const_kalman, ["Rate", "Infl"], {})
+    assert np.allclose(out_const, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
+
+    # No override, no maps, no constant R: genuinely unavailable.
+    empty_kalman = KalmanConfig(R=None, P0=P0Config(mode="eye", scale=1.0, diag=None))
+    with pytest.raises(ValueError, match="R is not available"):
+        backend.build_R(compiled, empty_kalman, ["Infl", "Rate"], {})
 
 
 @pytest.mark.skip(
@@ -392,6 +393,7 @@ def test_evaluate_loglik_linear_matches_model_kalman(post82_bundle):
     ll_backend_lin = backend.evaluate_loglik(
         solver=solver,
         compiled=compiled,
+        kalman=compiled.kalman,
         y=y,
         params=params,
         filter_mode="linear",
@@ -423,6 +425,7 @@ def test_evaluate_loglik_extended_matches_model_kalman(post82_bundle):
     ll_backend_ext = backend.evaluate_loglik(
         solver=solver,
         compiled=compiled,
+        kalman=compiled.kalman,
         y=y,
         params=params,
         filter_mode="extended",
@@ -454,6 +457,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         backend.evaluate_loglik(
             solver=solver,
             compiled=compiled,
+            kalman=compiled.kalman,
             y=y,
             params=params,
             filter_mode="bad_mode",
@@ -472,6 +476,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
     ll_direct = backend.evaluate_loglik(
         solver=solver,
         compiled=compiled,
+        kalman=compiled.kalman,
         y=y,
         params=params,
         filter_mode="linear",
@@ -487,6 +492,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
     ll_config = backend.evaluate_loglik(
         solver=solver,
         compiled=compiled,
+        kalman=compiled.kalman,
         y=y,
         params=params,
         filter_mode="linear",
@@ -561,21 +567,9 @@ def test_build_Q_symbolic_matches_numeric_Q(post82_bundle):
 
 
 def test_resolve_filter_options_prefers_defaults_and_honors_overrides():
-    kalman = KalmanConfig(
-        R=np.eye(1, dtype=np.float64),
-        P0=P0Config(mode="eye", scale=1.0, diag=None),
-    )
-
-    # jitter/symmetrize are call-site concerns now; the config never feeds them.
-    assert backend.resolve_filter_options(None, None, None) == pytest.approx(
-        (0.0, False)
-    )
-    assert backend.resolve_filter_options(kalman, None, None) == pytest.approx(
-        (0.0, False)
-    )
-    assert backend.resolve_filter_options(kalman, 0.5, True) == pytest.approx(
-        (0.5, True)
-    )
+    # jitter/symmetrize are call-site concerns; defaulted when unset, else honored.
+    assert backend.resolve_filter_options(None, None) == pytest.approx((0.0, False))
+    assert backend.resolve_filter_options(0.5, True) == pytest.approx((0.5, True))
 
 
 def test_build_R_from_config_params_error_branches():
@@ -852,6 +846,7 @@ def test_evaluate_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
     ll = backend.evaluate_loglik(
         solver=solver,
         compiled=compiled,
+        kalman=compiled.kalman,
         y=y,
         params=params,
         filter_mode="unscented",

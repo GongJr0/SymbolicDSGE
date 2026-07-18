@@ -35,6 +35,8 @@ def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
     )
     if getattr(compiled.kalman, "P0", None) is None:
         compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+    if not hasattr(compiled.kalman, "R_param_names"):
+        compiled.kalman.R_param_names = None
     return compiled
 
 

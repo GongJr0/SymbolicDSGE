@@ -49,6 +49,8 @@ def _with_filter_prep(compiled):
     )
     if getattr(compiled.kalman, "P0", None) is None:
         compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+    if not hasattr(compiled.kalman, "R_param_names"):
+        compiled.kalman.R_param_names = None
     return compiled
 
 
@@ -953,16 +955,15 @@ def test_resolve_r_and_effective_observables_error_paths():
     with pytest.raises(ValueError, match="parser-generated R std/correlation metadata"):
         est_missing_meta._resolve_R()
 
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    est._prepared_filter = None
-    est.observables = ["ghost"]
+    # Unknown observables are now rejected at construction by the filter prep.
     with pytest.raises(ValueError, match="Unknown observables"):
-        est._effective_observables()
+        Estimator(
+            solver=SimpleNamespace(),
+            compiled=_stub_compiled(),
+            y=np.zeros((3, 1), dtype=np.float64),
+            observables=["ghost"],
+            estimated_params=["a"],
+        )
 
 
 def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
@@ -1211,37 +1212,7 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         good_est._block_cpc_from_corr(good_block, bad_corr)
 
 
-def test_effective_observables_logprior_base_branch_and_logpost(monkeypatch):
-    compiled_obs = _with_filter_prep(
-        SimpleNamespace(
-            config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
-            calib_params=[],
-            observable_names=["y1", "y2"],
-            kalman=SimpleNamespace(
-                R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
-            ),
-        )
-    )
-    est_obs = Estimator(
-        solver=SimpleNamespace(),
-        compiled=compiled_obs,
-        y=np.zeros((2, 2), dtype=np.float64),
-        estimated_params=[],
-    )
-    est_obs._prepared_filter = None
-    est_obs.observables = None
-    assert est_obs._effective_observables() == ["y1", "y2"]
-
-    est_prepared = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((2, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    est_prepared._prepared_filter = SimpleNamespace(observables=["y"])
-    est_prepared.observables = ["other"]
-    assert est_prepared._effective_observables() == ["y"]
-
+def test_logprior_base_branch_and_logpost(monkeypatch):
     prior = Estimator.make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
