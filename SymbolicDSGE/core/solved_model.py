@@ -730,8 +730,6 @@ class SolvedModel:
         symmetrize: bool | None = None,
         return_shocks: bool = False,
         R: NDF | None = None,
-        estimate_R_diag: bool = False,
-        R_scale: float = 1.0,
         _debug: bool = False,
     ) -> FilterResult | UnscentedFilterResult:
         raw = self._kalman_raw(
@@ -745,8 +743,6 @@ class SolvedModel:
             symmetrize=symmetrize,
             return_shocks=return_shocks,
             R=R,
-            estimate_R_diag=estimate_R_diag,
-            R_scale=R_scale,
             _debug=_debug,
         )
         if isinstance(raw, UnscentedFilterRawResult):
@@ -766,8 +762,6 @@ class SolvedModel:
         symmetrize: bool | None = None,
         return_shocks: bool = False,
         R: NDF | None = None,
-        estimate_R_diag: bool = False,
-        R_scale: float = 1.0,
         _debug: bool = False,
     ) -> FilterRawResult | UnscentedFilterRawResult:
         params = asarray(
@@ -814,10 +808,7 @@ class SolvedModel:
             jitter=jitter,
             symmetrize=symmetrize,
             return_shocks=return_shocks,
-            estimate_R_diag=estimate_R_diag,
         )
-        if estimate_R_diag:
-            ki._ML_estimate_R_diag(scale_factor=R_scale)
 
         run = ki.filter_raw(x0=x0, _debug=_debug)
         if _debug:

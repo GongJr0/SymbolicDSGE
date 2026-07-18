@@ -8,13 +8,16 @@ from numpy import float64
 from sympy import Symbol
 
 from SymbolicDSGE.kalman.config import make_R
-from SymbolicDSGE.kalman.errors import ErrorCode, get_error_constructor
-from SymbolicDSGE.kalman.filter import (
+from SymbolicDSGE.kalman.errors import (
     ComplexMatrixError,
-    FilterRawResult,
-    KalmanFilter,
+    ErrorCode,
     MatrixConditionError,
     ShapeMismatchError,
+    get_error_constructor,
+)
+from SymbolicDSGE.kalman.filter import (
+    FilterRawResult,
+    KalmanFilter,
     UnscentedFilterRawResult,
 )
 

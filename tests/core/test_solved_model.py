@@ -511,9 +511,6 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
             captured["init"] = kwargs
             self._debug_info = None
 
-        def _ML_estimate_R_diag(self, scale_factor=1.0):
-            captured["scale_factor"] = scale_factor
-
         def filter_raw(self, x0=None, _debug=False):
             captured["filter_raw"] = {"x0": x0, "_debug": _debug}
             self._debug_info = {"debug": True}
@@ -542,8 +539,6 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
         y=np.zeros((3, 2), dtype=np.float64),
         filter_mode="extended",
         observables=None,
-        estimate_R_diag=True,
-        R_scale=2.5,
         _debug=True,
     )
 
@@ -551,8 +546,6 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
     assert captured["init"]["meas_addr"] == 456
     assert captured["init"]["jac_addr"] == 789
     assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
-    assert captured["init"]["estimate_R_diag"] is True
-    assert captured["scale_factor"] == pytest.approx(2.5)
     assert captured["filter_raw"] == {"x0": None, "_debug": True}
     assert printed == [({"debug": True},)]
 

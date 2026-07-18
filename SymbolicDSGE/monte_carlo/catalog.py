@@ -510,8 +510,6 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
                 options=("linear", "extended", "unscented"),
             ),
             FieldSpec("return_shocks", "Return shocks", "boolean", False),
-            FieldSpec("estimate_R_diag", "Estimate R diagonal", "boolean", False),
-            FieldSpec("R_scale", "R scale", "number", 1.0),
         ),
     ),
     StepDefinition(

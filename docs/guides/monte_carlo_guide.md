@@ -125,7 +125,7 @@ The first step after datagen is filtering the reference model using a Kalman fil
 `reference_filter_step` is a pre-built function configuring the `SolvedModel.kalman` filter to be called per iteration for this purpose.
 
 ```python
-kf_step = reference_filter_step(estimate_R_diag=False)
+kf_step = reference_filter_step()
 ```
 
 `reference_filter_step` accepts all `SolvedModel.kalman` kwargs similar to the simulation step function.

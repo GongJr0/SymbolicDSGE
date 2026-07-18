@@ -9,8 +9,7 @@ from .filter import (
 )
 from .config import KalmanConfig, make_R
 from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
-from typing import TYPE_CHECKING, Any, Tuple, Literal, Callable
-import warnings
+from typing import TYPE_CHECKING, Any, Tuple, Literal
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -24,9 +23,8 @@ from functools import cached_property
 import numpy as np
 from numpy import asarray, float64, int64
 from numpy.typing import NDArray
-from scipy import optimize
 
-from sympy import Symbol, jacobi_normalized
+from sympy import Symbol
 
 import pandas as pd
 
@@ -74,12 +72,10 @@ class KalmanInterface(KalmanFilter):
         jitter: Float64Like | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
-        estimate_R_diag: bool = False,
     ) -> None:
 
         self.model = model
         self.mode = FilterMode(filter_mode)
-        self.estimate_R_diag = bool(estimate_R_diag)
 
         obs, y = self._reorder_obs(observables, y)
         if obs is None:
@@ -96,7 +92,6 @@ class KalmanInterface(KalmanFilter):
         # revisits a parameter vector) skips the rebuild. The key carries every
         # dependency; the calibration fingerprint turns a parameter change into a
         # cache miss, so estimation that varies parameters stays correct.
-        self._uses_const_R = R is None and not self.estimate_R_diag
         cache_key = (
             self.mode,
             tuple(self.observables),
@@ -122,16 +117,17 @@ class KalmanInterface(KalmanFilter):
         self.C, self.d = record.C, record.d
         self.Q = record.Q
         self.P0 = record.P0
+
+        self._uses_const_R = R is None
+
         if self._uses_const_R:
             # Fill R lazily so a key first seen with a user/estimated R still
             # gets a constant R when later reused on the default path.
             if record.R_const is None:
                 record.R_const = self._build_constant_R(None)
             self.R = record.R_const
-        elif R is not None:
-            self.R = self._build_constant_R(R)
         else:
-            self.R = self._initial_R_diag_guess()
+            self.R = self._build_constant_R(R)
 
         self.meas_addr = meas_addr
         self.jac_addr = jac_addr
@@ -498,57 +494,6 @@ class KalmanInterface(KalmanFilter):
         mat_idx = [obs_idx[name] for name in self.observables]
         R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
         return R_subset
-
-    def _initial_R_diag_guess(self, eps: float64 = float64(1e-6)) -> NDF:
-        diag = np.asarray(
-            [
-                np.maximum(0.1 * np.var(self.y[:, i]), eps)
-                for i in range(self.y.shape[1])
-            ],
-            dtype=float64,
-        )
-        return np.diag(diag).astype(float64)
-
-    def _ML_estimate_R_diag(
-        self,
-        scale_factor: float = 1.0,
-    ) -> None:
-        n = len(self.observables)
-        R_0 = self._initial_R_diag_guess()
-        eta_0: NDF = np.log(np.diag(R_0))
-        bounds = [(-30, 10)] * n  # e^(-30) ~ 9e-14, e^(10) ~ 22026
-
-        def obj(eta: NDF) -> float64:
-            R_diag = np.exp(eta)
-            R = np.diag(R_diag)
-            result = self.filter_raw(
-                x0=np.zeros((self.A.shape[0],), dtype=float64),
-                _debug=False,
-                _arg_overrides={"R": R},
-            )
-
-            return np.float64(-1.0 * result.loglik)
-
-        opt = optimize.minimize(
-            obj,
-            x0=eta_0,
-            bounds=bounds,
-            method="L-BFGS-B",
-        )
-        if not opt.success:
-            warnings.warn(
-                f"R estimation optimization did not converge: {opt.message}",
-                UserWarning,
-            )
-            self.R = R_0 * scale_factor
-            print(f"Using initial diagonal R guess:\n {self.R}")
-            return
-
-        estimated_R = np.diag(np.exp(opt.x)) * scale_factor
-        print(
-            f"R estimation optimization successful.\nUsing estimated R matrix:\n {estimated_R}\nLog-likelihood: {-opt.fun}"
-        )
-        self.R = estimated_R
 
     def _build_P0(
         self,

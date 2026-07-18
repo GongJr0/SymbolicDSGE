@@ -178,8 +178,7 @@ SolvedModel.kalman(
     jitter: float | None = None, # (5)!
     symmetrize: bool | None = None, # (6)!
     return_shocks: bool = False,
-    estimate_R_diag: bool = False,
-    R_scale: float = 1.0,
+    R: ndarray | None = None,
     _debug: bool = False
 ) -> FilterResult | UnscentedFilterResult
 ```
@@ -209,8 +208,7 @@ __Inputs:__
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
-| estimate_R_diag | If `True`, estimate a diagonal `R` by MLE before running the filter. |
-| R_scale | Post-estimation multiplicative scaling applied to `R` when `estimate_R_diag=True`. |
+| R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
 | _debug | Print debug information about filter inputs if `True`. |
 
 __Returns:__

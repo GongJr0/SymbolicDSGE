@@ -29,9 +29,6 @@ def simulation_step(
 ) -> MCStep:
     """Simulate one replication's data by driving the DGP model with shocks.
 
-    Signature: ``simulation_step(name="datagen", *, target="dgp", T, shocks=None,
-    seed_increment="auto", shock_scale=1.0, x0=None, observables=True)``.
-
     Draws fresh shocks per replication (keyed by
     ``rep_idx``) unless ``shocks`` are supplied.
 
@@ -69,9 +66,6 @@ def raw_model_data_step(
 ) -> MCStep:
     """Feed pre-generated arrays as each replication's data (no simulation).
 
-    Signature: ``raw_model_data_step(name="datagen", *, states=None, observables=None,
-    raw=None, observable_names=())``.
-
     Provide ``states``, ``observables``, or both; a leading replication axis is
     indexed by ``rep_idx`` (a 2-D array is reused across replications).
 
@@ -95,13 +89,19 @@ def raw_model_data_step(
 
 
 def reference_filter_step(
-    name: str = "filter", **step_kwargs: dict[str, Any]
+    name: str = "filter",
+    *,
+    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+    observables: list[str] | None = None,
+    x0: list[float] | NDF | None = None,
+    R: NDF | None = None,
+    p0_mode: Literal["diag", "eye"] | None = None,
+    p0_scale: float | float64 | None = None,
+    jitter: float | float64 | None = None,
+    symmetrize: bool | None = None,
+    return_shocks: bool = False,
 ) -> MCStep:
     """Kalman-filter each replication's observables with the reference model.
-
-    Signature: ``reference_filter_step(name="filter", *, filter_mode="linear",
-    observables=None, x0=None, R=None, estimate_R_diag=False, R_scale=1.0,
-    return_shocks=False, ...)``.
 
     Requires generated observables (run a DATAGEN step first); the resulting
     Raw filter output is read downstream with ``source=name, field=field``.
@@ -115,7 +115,17 @@ def reference_filter_step(
         name=name,
         op_type=OpType.FILTER,
         func=run_reference_filter,
-        kwargs=step_kwargs,
+        kwargs={
+            "filter_mode": filter_mode,
+            "observables": observables,
+            "x0": x0,
+            "R": R,
+            "p0_mode": p0_mode,
+            "p0_scale": p0_scale,
+            "jitter": jitter,
+            "symmetrize": symmetrize,
+            "return_shocks": return_shocks,
+        },
         step_type="filter",
     )
 
@@ -125,8 +135,6 @@ def add_payload_step(
     payload: NDF | Sequence[float] | Sequence[Sequence[float]],
 ) -> MCStep:
     """Add a replication-specific payload to the context.
-
-    Signature: ``add_payload(name, payload)``.
 
     The ``payload`` is stored in ``context.payload[name]`` for that replication.
     """

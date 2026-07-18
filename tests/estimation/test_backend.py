@@ -12,29 +12,6 @@ from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.config import KalmanConfig, P0Config
 from SymbolicDSGE.kalman.filter import KalmanFilter
 
-from numba import cfunc, types
-
-# Real (zero) measurement/jacobian @cfuncs for the PreparedFilterRun fixtures: the
-# linear R-estimation branch evaluates them via build_C_d_from_cfunc, so the
-# addresses must be callable (not dummy ints). Two observables, all zeros.
-_R_MEAS_SIG = types.void(
-    types.CPointer(types.float64),
-    types.CPointer(types.float64),
-    types.CPointer(types.float64),
-)
-
-
-@cfunc(_R_MEAS_SIG)
-def _r_zero_meas(vars, params, out):
-    out[0] = 0.0
-    out[1] = 0.0
-
-
-@cfunc(_R_MEAS_SIG)
-def _r_zero_jac(vars, params, out):
-    out[0] = 0.0
-    out[1] = 0.0
-
 
 class _ConstPrior:
     def __init__(self, value: float):
@@ -508,31 +485,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
     assert not np.isclose(ll_direct, ll_config)
 
 
-def test_estimate_R_diag_returns_positive_diagonal(post82_bundle):
-    solver = post82_bundle["solver"]
-    compiled = post82_bundle["compiled"]
-    steady = post82_bundle["steady"]
-    y = post82_bundle["y"]
-    params = backend.extract_base_params(compiled)
-
-    R = backend.estimate_R_diag(
-        solver=solver,
-        compiled=compiled,
-        y=y,
-        params=params,
-        filter_mode="linear",
-        observables=["Infl", "Rate"],
-        steady_state=steady,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert R.shape == (2, 2)
-    assert np.all(np.diag(R) > 0.0)
-
-
 def test_corr_chol_unconstrained_parameterization():
     z = np.array([0.2, -0.1, 0.3], dtype=np.float64)
     L = backend._corr_chol_from_unconstrained(z, K=3)
@@ -657,113 +609,6 @@ def test_unconstrained_from_corr_chol_clips_extreme_cpc_values():
     )
     assert np.isfinite(z_pos[0])
     assert np.isfinite(z_neg[0])
-
-
-def test_estimate_R_diag_falls_back_when_solver_raises(monkeypatch):
-    y_reordered = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 6.0]], dtype=np.float64)
-    prepared = backend.PreparedFilterRun(
-        observables=["a", "b"],
-        y_reordered=y_reordered,
-        mode="linear",
-        meas_addr=_r_zero_meas.address,
-        jac_addr=_r_zero_jac.address,
-        zero_state=np.zeros((1,), dtype=np.float64),
-        P0=None,
-        kf_jitter=np.float64(0.0),
-        kf_sym=False,
-    )
-    monkeypatch.setattr(backend, "prepare_filter_run", lambda **kwargs: prepared)
-
-    solver = SimpleNamespace(
-        solve=lambda **kwargs: (_ for _ in ()).throw(SystemExit("bad system"))
-    )
-    expected = np.diag(
-        np.array(
-            [max(0.1 * np.var(y_reordered[:, i]), 1e-9) for i in range(2)],
-            dtype=np.float64,
-        )
-    )
-
-    R = backend.estimate_R_diag(
-        solver=solver,
-        compiled=SimpleNamespace(),
-        y=y_reordered,
-        params={},
-        filter_mode="linear",
-        observables=["a", "b"],
-        steady_state=None,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert np.allclose(R, expected)
-
-
-def test_estimate_R_diag_extended_branch_and_failed_opt_return_diag(monkeypatch):
-    y_reordered = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 5.0]], dtype=np.float64)
-    prepared = backend.PreparedFilterRun(
-        observables=["a", "b"],
-        y_reordered=y_reordered,
-        mode="extended",
-        meas_addr=_r_zero_meas.address,
-        jac_addr=_r_zero_jac.address,
-        zero_state=np.zeros((1,), dtype=np.float64),
-        P0=None,
-        kf_jitter=np.float64(0.0),
-        kf_sym=False,
-    )
-    monkeypatch.setattr(backend, "prepare_filter_run", lambda **kwargs: prepared)
-    monkeypatch.setattr(backend, "build_Q", lambda compiled, params: np.eye(1))
-    monkeypatch.setattr(
-        backend,
-        "build_calib_param_vector",
-        lambda compiled, params: np.array([0.0], dtype=np.float64),
-    )
-    monkeypatch.setattr(
-        backend.KalmanFilter,
-        "run_extended_raw",
-        lambda **kwargs: SimpleNamespace(loglik=np.float64(-2.0)),
-    )
-
-    calls: list[float] = []
-
-    def fake_minimize(fun, x0, bounds=None, method=None):
-        calls.append(float(fun(np.asarray(x0, dtype=np.float64))))
-        return SimpleNamespace(success=False, x=np.asarray(x0, dtype=np.float64))
-
-    monkeypatch.setattr(backend.optimize, "minimize", fake_minimize)
-
-    solver = SimpleNamespace(
-        solve=lambda **kwargs: SimpleNamespace(
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-        )
-    )
-    expected = np.diag(
-        np.array(
-            [max(0.1 * np.var(y_reordered[:, i]), 1e-9) for i in range(2)],
-            dtype=np.float64,
-        )
-    )
-
-    R = backend.estimate_R_diag(
-        solver=solver,
-        compiled=SimpleNamespace(),
-        y=y_reordered,
-        params={},
-        filter_mode="linear",
-        observables=["a", "b"],
-        steady_state=None,
-        x0=None,
-        p0_mode=None,
-        p0_scale=None,
-        jitter=None,
-        symmetrize=None,
-    )
-    assert len(calls) == 1
-    assert np.allclose(R, expected)
 
 
 @pytest.fixture(scope="module")

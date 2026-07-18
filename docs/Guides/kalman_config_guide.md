@@ -9,11 +9,9 @@ tags:
     You can see an example config [here](../assets/test.yaml).
 
 ???+ warning "Read Model Configuration Guide"
-    This guide refers to fields used in model configuration and some parameters relevant to Kalman Filters are part of the model parameter family. Please make sure you've read the [model configuration guide](./model_config_guide.md) before reading this one.
+    This guide refers to fields used in model configuration and some parameters relevant to Kalman Filters are part of the model parameter family. Make sure you've read the [model configuration guide](./model_config_guide.md) before reading this one.
 
-`SymbolicDSGE` uses a single configuration file and appends the Kalman Filter (KF) configuration to the same YAML that carries model information. Although Kalman Filtering can be done without a model, model objects and configurations provide integration infrastructure.
-
-All KF related configuration entries live under the parent field `kalman:` and are parsed into a `KalmanConfig` object at parse time. The config block accepts `R` and `P0`.
+`SymbolicDSGE` uses a single configuration file and appends the Kalman Filter (KF) configuration to the same YAML that carries model information. All KF related configuration entries live under the parent field `kalman:` and are parsed into a `KalmanConfig` object at parse time. The config block accepts `R` and `P0`.
 
 ???+ note "Config Overrides"
     Runtime filter options and observable subset selection are passed to `SolvedModel.kalman(...)`.
@@ -56,13 +54,10 @@ kalman:
 ???+ info "No Standard Deviation Defaults"
     `SymbolicDSGE` does not infer measurement standard deviations when constructing $R$. Each configured observable needs an explicit standard deviation parameter.
 
-???+ note "Runtime Diagonal `R` Estimation"
-    `SolvedModel.kalman(...)` also exposes `estimate_R_diag=True` (with optional `R_scale`) to estimate a diagonal `R` by likelihood before filtering. This is a runtime option and does not mutate the configuration.
-
 
 ## State Covariance
 
-State Covariance ($P$) defines the inter state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an initial guess $P_0$ is provided through the configuration. `P0` supports diagonal and scaled identity initialization. Initial guesses are not relevant beyond an often short burn in period, but a well specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
+State Covariance ($P$) defines the inter-state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an initial guess $P_0$ is provided through the configuration. `P0` supports diagonal and scaled identity initialization. Initial guesses are not relevant beyond an often short burn in period, but a well specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
 
 ```yaml
 kalman:
@@ -88,7 +83,7 @@ kalman:
 
 `jitter` and `symmetrize` are runtime options on `SolvedModel.kalman(...)`. `jitter` is added to covariance matrices if their Cholesky decomposition fails. `symmetrize=True` applies $(M + M^\top)/2$ to covariance matrices during filtering.
 
-# Conclusion
+## Conclusion
 
 The configuration fields above provide all KF necessary information that can't (or shouldn't) be inferred from the model state. This config field is only relevant to `#!python SolvedModel.kalman`. If you've read to this point and want to check a complete configuration file including `kalman` and model configurations, you can visit [this](https://github.com/GongJr0/SymbolicDSGE/blob/main/MODELS/POST82.yaml) link.
 

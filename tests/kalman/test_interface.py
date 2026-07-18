@@ -1,7 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-import builtins
 from types import SimpleNamespace
 
 import numpy as np
@@ -232,31 +231,6 @@ def test_interface_init_extended_skips_linear_measurement_builder():
 
     assert ki.C is None
     assert ki.d is None
-
-
-def test_interface_init_estimate_r_diag_uses_data_variance_not_config():
-    y = np.array([[10.0, 1.0], [20.0, 2.0]], dtype=FLOAT)
-    ki = KalmanInterface(
-        model=_make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsB", "ObsA"],
-                R=None,
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        ),
-        observables=["ObsB", "ObsA"],
-        y=y,
-        estimate_R_diag=True,
-    )
-
-    assert np.array_equal(
-        ki.R,
-        np.diag([0.025, 2.5]).astype(FLOAT),
-    )
 
 
 def test_interface_init_accepts_user_r_override():
@@ -792,101 +766,6 @@ def test_filter_unscented_rejects_return_shocks_and_bad_x0():
     ki.return_shocks = False
     with pytest.raises(ValueError, match="x0 must have length"):
         ki.filter(x0=np.array([1.0], dtype=FLOAT))
-
-
-def test_ml_estimate_r_diag_success_path(monkeypatch):
-    ki = KalmanInterface(
-        model=_make_stub_model(),
-        observables=["ObsA", "ObsB"],
-        y=np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]], dtype=FLOAT),
-    )
-    captured = {"filter_calls": []}
-    printed = []
-
-    def fake_filter_raw(self, x0=None, _debug=False, _arg_overrides=None):
-        captured["filter_calls"].append(
-            {
-                "x0": x0.copy(),
-                "_debug": _debug,
-                "R": _arg_overrides["R"].copy(),
-            }
-        )
-        return SimpleNamespace(loglik=-float(np.trace(_arg_overrides["R"])))
-
-    def fake_minimize(obj, x0, bounds, method):
-        captured["x0"] = x0.copy()
-        captured["bounds"] = bounds
-        captured["method"] = method
-        captured["objective_at_x0"] = obj(x0)
-        return SimpleNamespace(
-            success=True,
-            x=np.log(np.array([0.3, 0.7], dtype=FLOAT)),
-            fun=-4.5,
-        )
-
-    monkeypatch.setattr(KalmanInterface, "filter_raw", fake_filter_raw)
-    monkeypatch.setattr(interface_module.optimize, "minimize", fake_minimize)
-    monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
-
-    ki._ML_estimate_R_diag(scale_factor=1.5)
-
-    assert captured["method"] == "L-BFGS-B"
-    assert captured["bounds"] == [(-30, 10), (-30, 10)]
-    assert captured["objective_at_x0"] > 0.0
-    assert len(captured["filter_calls"]) == 1
-    assert np.array_equal(
-        captured["filter_calls"][0]["x0"],
-        np.zeros((3,), dtype=FLOAT),
-    )
-    assert np.allclose(
-        ki.R,
-        np.diag([0.45, 1.05]).astype(FLOAT),
-    )
-    assert printed and "optimization successful" in printed[0][0]
-
-
-def test_ml_estimate_r_diag_warning_path(monkeypatch):
-    diag_R = np.diag([4.0, 9.0]).astype(FLOAT)
-    ki = KalmanInterface(
-        model=_make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA", "ObsB"],
-                R=diag_R,
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        ),
-        observables=["ObsA", "ObsB"],
-        y=np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT),
-    )
-    printed = []
-
-    def fake_filter_raw(self, x0=None, _debug=False, _arg_overrides=None):
-        return SimpleNamespace(loglik=-float(np.trace(_arg_overrides["R"])))
-
-    def fake_minimize(obj, x0, bounds, method):
-        obj(x0)
-        return SimpleNamespace(
-            success=False,
-            x=np.log(np.array([4.0, 9.0], dtype=FLOAT)),
-            fun=-1.0,
-            message="stalled",
-        )
-
-    monkeypatch.setattr(KalmanInterface, "filter_raw", fake_filter_raw)
-    monkeypatch.setattr(interface_module.optimize, "minimize", fake_minimize)
-    monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
-
-    with pytest.warns(UserWarning, match="did not converge"):
-        ki._ML_estimate_R_diag(scale_factor=2.0)
-
-    expected = np.diag([0.05, 5.0]).astype(FLOAT)
-    assert np.allclose(ki.R, expected)
-    assert len(printed) == 1
-    assert "Using initial diagonal R guess" in printed[0][0]
 
 
 def test_filter_uses_current_self_r_after_validated_args_access(monkeypatch):
