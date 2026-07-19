@@ -1,0 +1,36 @@
+#ifndef SDSGE_TRANSFORMS_H
+#define SDSGE_TRANSFORMS_H
+
+#include "../_common/sdsge_common.h"
+
+/* LOG TRANSFORM */
+
+void sdsge_log_fwd(const f64 *x, f64 *y);
+void sdsge_log_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                       i64 n);
+
+void sdsge_log_inv(const f64 *y, f64 *x);
+void sdsge_log_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                       i64 n);
+
+void sdsge_log_grad_fwd(const f64 *x, f64 *y);
+void sdsge_log_grad_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                            i64 n);
+
+void sdsge_log_grad_inv(const f64 *y, f64 *x);
+void sdsge_log_grad_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                            i64 n);
+
+void sdsge_log_ldet_abs_jac_fwd(const f64 *x, f64 *y);
+void sdsge_log_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                    f64 *SDSGE_RESTRICT y, i64 n);
+
+void sdsge_log_ldet_abs_jac_inv(const f64 *y, f64 *x);
+void sdsge_log_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                    f64 *SDSGE_RESTRICT x, i64 n);
+
+void sdsge_log_grad_ldet_abs_jac_inv(const f64 *y, f64 *x);
+void sdsge_log_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                         f64 *SDSGE_RESTRICT x, i64 n);
+
+#endif /* SDSGE_TRANSFORMS_H */

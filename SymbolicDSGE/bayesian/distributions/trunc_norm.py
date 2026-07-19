@@ -7,7 +7,7 @@ from .distribution import (
     _std_norm_cdf_scalar,
 )
 from ..support import OutOfSupportError, Support
-from ..._ckernels.bayesian.distributions import ndtri_as241_into
+from ..._ckernels.distributions import ndtri_as241_into
 
 import math
 import numpy as np
