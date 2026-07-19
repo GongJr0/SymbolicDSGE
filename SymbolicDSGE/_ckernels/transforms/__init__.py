@@ -31,6 +31,14 @@ from ._transforms import (
     aff_logit_ldet_abs_jac_fwd,
     aff_logit_ldet_abs_jac_inv,
     aff_logit_grad_ldet_abs_jac_inv,
+    # affine probit
+    aff_probit_fwd,
+    aff_probit_inv,
+    aff_probit_grad_fwd,
+    aff_probit_grad_inv,
+    aff_probit_ldet_abs_jac_fwd,
+    aff_probit_ldet_abs_jac_inv,
+    aff_probit_grad_ldet_abs_jac_inv,
 )
 
 __all__ = [
@@ -62,4 +70,11 @@ __all__ = [
     "aff_logit_ldet_abs_jac_fwd",
     "aff_logit_ldet_abs_jac_inv",
     "aff_logit_grad_ldet_abs_jac_inv",
+    "aff_probit_fwd",
+    "aff_probit_inv",
+    "aff_probit_grad_fwd",
+    "aff_probit_grad_inv",
+    "aff_probit_ldet_abs_jac_fwd",
+    "aff_probit_ldet_abs_jac_inv",
+    "aff_probit_grad_ldet_abs_jac_inv",
 ]

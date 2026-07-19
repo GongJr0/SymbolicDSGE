@@ -77,27 +77,33 @@ def test_empty_array_roundtrips_without_calling_kernel() -> None:
         assert out.shape == (0,)
 
 
-# The affine logit maps carry a (low, high) pair, so they need their own case
-# list and argument plumbing. grad_ldet_abs_jac_inv drops the pair (the log-span
-# term differentiates away), so it is called y-only like the plain transforms.
+# The affine maps carry a (low, high) pair, so they need their own case list and
+# argument plumbing. grad_ldet_abs_jac_inv drops the pair (the log-span term
+# differentiates away), so it is called y-only like the plain transforms.
 _AFF_LOW, _AFF_HIGH = -2.0, 3.0
 _AFF_FWD_DOM = np.array([-2.0 + 1e-4, -1.5, -0.5, 0.5, 1.5, 2.5, 3.0 - 1e-4])
 
+_AFF_FAMILY = (
+    ("{n}_fwd", _AFF_FWD_DOM, True),
+    ("{n}_grad_fwd", _AFF_FWD_DOM, True),
+    ("{n}_ldet_abs_jac_fwd", _AFF_FWD_DOM, True),
+    ("{n}_inv", _REAL_DOM, True),
+    ("{n}_grad_inv", _REAL_DOM, True),
+    ("{n}_ldet_abs_jac_inv", _REAL_DOM, True),
+    ("{n}_grad_ldet_abs_jac_inv", _REAL_DOM, False),
+)
+
 _AFF_CASES: list[tuple[str, np.ndarray, bool]] = [
-    ("aff_logit_fwd", _AFF_FWD_DOM, True),
-    ("aff_logit_grad_fwd", _AFF_FWD_DOM, True),
-    ("aff_logit_ldet_abs_jac_fwd", _AFF_FWD_DOM, True),
-    ("aff_logit_inv", _REAL_DOM, True),
-    ("aff_logit_grad_inv", _REAL_DOM, True),
-    ("aff_logit_ldet_abs_jac_inv", _REAL_DOM, True),
-    ("aff_logit_grad_ldet_abs_jac_inv", _REAL_DOM, False),
+    (t.format(n=_name), _dom, _bounds)
+    for _name in ("aff_logit", "aff_probit")
+    for (t, _dom, _bounds) in _AFF_FAMILY
 ]
 
 
 @pytest.mark.parametrize(
     "fn_name, grid, needs_bounds", _AFF_CASES, ids=[c[0] for c in _AFF_CASES]
 )
-def test_affine_logit_kernel_parity(
+def test_affine_kernel_parity(
     fn_name: str, grid: np.ndarray, needs_bounds: bool
 ) -> None:
     native_fn = getattr(native, fn_name)
