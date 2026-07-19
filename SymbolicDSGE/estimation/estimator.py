@@ -15,6 +15,7 @@ from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..bayesian.transforms.cholesky_corr import CholeskyCorrTransform
 from ..bayesian.transforms.identity import Identity
+from ..bayesian.transforms.log import LogTransform
 from ..bayesian.transforms.transform import Transform
 from ..core.compiled_model import CompiledModel
 from ..core.solver import DSGESolver
@@ -174,18 +175,31 @@ class Estimator:
             for block in self._matrix_blocks.values()
             for name in block.member_names
         }
+        self._spd_std_members, self._spd_corr_members = self._spd_member_names()
         identity = Identity()
         self._param_transforms: dict[str, Transform] = {}
         for name in self.param_names:
             tr: Transform = identity
-            if (
-                name not in self._matrix_member_names
-                and self.priors is not None
-                and name in self.priors
-            ):
+            is_block_member = name in self._matrix_member_names
+            prior_transform: Transform | None = None
+            if not is_block_member and self.priors is not None and name in self.priors:
                 prior_obj = self.priors[name]
                 if hasattr(prior_obj, "transform"):
-                    tr = cast(Transform, getattr(prior_obj, "transform"))
+                    prior_transform = cast(Transform, getattr(prior_obj, "transform"))
+            if prior_transform is not None:
+                # An explicit prior owns the parameter's constraint; respect the
+                # transform the prior author chose over any role-based default.
+                tr = prior_transform
+            elif not is_block_member and name in self._spd_std_members:
+                # A variance parameter estimated without a prior would otherwise
+                # take the identity transform and be free to walk negative,
+                # producing a non-SPD diagonal. Constrain it to (0, inf) so the
+                # objective only ever sees positive variances.
+                tr = LogTransform()
+            # NOTE: scalar correlation members (``self._spd_corr_members``) still
+            # fall through to identity here; their (-1, 1) tanh constraint and the
+            # joint-SPD safety check land in the follow-up slice alongside
+            # ungating the CPC block build for the prior-free (MLE) path.
             self._param_transforms[name] = tr
         self._packed_logprior: PackedLogPrior | None = build_packed_logprior(
             priors=self.priors,
@@ -194,6 +208,37 @@ class Estimator:
             matrix_member_names=self._matrix_member_names,
         )
         self._warning_signal_count = 0
+
+    def _spd_member_names(self) -> tuple[set[str], set[str]]:
+        """Names of the SPD-relevant std (diagonal) and correlation (off-diagonal)
+        parameters across the R and Q matrices, read straight from the parser's
+        name maps.
+
+        The two roles are kept separate because they need different constraining
+        transforms: a variance wants a positivity map, a correlation a (-1, 1)
+        map. Membership is deliberately independent of whether a prior exists, so
+        this drives the transform defaults on the prior-free (MLE) path, not just
+        the prior-gated CPC block.
+        """
+        std_members: set[str] = set()
+        corr_members: set[str] = set()
+
+        r_std_map = getattr(self.kalman, "R_std_param_map", None) or {}
+        std_members.update(v for v in r_std_map.values() if v is not None)
+        r_corr_map = getattr(self.kalman, "R_corr_param_map", None) or {}
+        corr_members.update(v for v in r_corr_map.values() if v is not None)
+
+        calibration = self.compiled.config.calibration
+        shock_std = getattr(calibration, "shock_std", None) or {}
+        for sym in shock_std.values():
+            if sym is not None:
+                std_members.add(sym.name)
+        shock_corr = getattr(calibration, "shock_corr", None) or {}
+        for sym in shock_corr.values():
+            if sym is not None:
+                corr_members.add(sym.name)
+
+        return std_members, corr_members
 
     def _requested_param_keys(
         self,
