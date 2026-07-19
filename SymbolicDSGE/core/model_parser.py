@@ -593,10 +593,17 @@ class ModelParser:
         if mode == "diag":
             if diag is None:
                 raise ValueError("P0 diagonal specification missing in configuration.")
-            if not set(declared_var_names) == set(diag):
+            declared_set = set(declared_var_names)
+            diag_set = set(diag)
+            if declared_set != diag_set:
+                missing = sorted(declared_set - diag_set)
+                unknown = sorted(diag_set - declared_set)
                 raise ValueError(
-                    "P0 diagonal specification must include all model variables."
+                    "P0 diagonal specification must list exactly the model variables; "
+                    f"missing {missing}, unknown {unknown}."
                 )
+            if any(v < 0 for v in diag.values()):
+                raise ValueError("P0 diagonal entries must be non-negative.")
         elif mode != "eye":
             raise ValueError(f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'.")
 
