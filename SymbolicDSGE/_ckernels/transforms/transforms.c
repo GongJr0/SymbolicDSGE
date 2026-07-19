@@ -1,4 +1,5 @@
 #include "transforms.h"
+#include "../_common/as241.h"
 #include <math.h>
 
 /* LOG TRANSFORM */
@@ -142,5 +143,94 @@ void sdsge_logit_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
                                            f64 *SDSGE_RESTRICT x, i64 n) {
   for (i64 i = 0; i < n; i++) {
     x[i] = 1.0 - 2.0 / (1.0 + exp(-y[i]));
+  }
+}
+
+/* PROBIT TRANSFORM */
+
+/* 1/sqrt(2*pi), for the standard-normal pdf. */
+#define SDSGE_INV_SQRT_2PI 0.3989422804014327
+
+/* Standard-normal pdf and CDF. The forward map's inverse-CDF (ndtri) is
+   Wichura AS 241 from _common; these two mirror the scipy norm.pdf / norm.cdf
+   the reference ProbitTransform used. */
+static inline f64 sdsge_std_norm_pdf(f64 z) {
+  return SDSGE_INV_SQRT_2PI * exp(-0.5 * z * z);
+}
+
+static inline f64 sdsge_std_norm_cdf(f64 z) { return 0.5 * erfc(-z / SQRT2); }
+
+void sdsge_probit_fwd(const f64 *x, f64 *y) { *y = sdsge_ndtri_as241(*x); }
+
+void sdsge_probit_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                          i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = sdsge_ndtri_as241(x[i]);
+  }
+}
+
+void sdsge_probit_inv(const f64 *y, f64 *x) { *x = sdsge_std_norm_cdf(*y); }
+
+void sdsge_probit_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                          i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = sdsge_std_norm_cdf(y[i]);
+  }
+}
+
+void sdsge_probit_grad_fwd(const f64 *x, f64 *y) {
+  f64 p = sdsge_ndtri_as241(*x);
+  *y = 1.0 / sdsge_std_norm_pdf(p);
+}
+
+void sdsge_probit_grad_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                               f64 *SDSGE_RESTRICT y, i64 n) {
+  f64 p;
+  for (i64 i = 0; i < n; i++) {
+    p = sdsge_ndtri_as241(x[i]);
+    y[i] = 1.0 / sdsge_std_norm_pdf(p);
+  }
+}
+
+void sdsge_probit_grad_inv(const f64 *y, f64 *x) { *x = sdsge_std_norm_pdf(*y); }
+
+void sdsge_probit_grad_inv_arr(const f64 *SDSGE_RESTRICT y,
+                               f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = sdsge_std_norm_pdf(y[i]);
+  }
+}
+
+void sdsge_probit_ldet_abs_jac_fwd(const f64 *x, f64 *y) {
+  f64 p = sdsge_ndtri_as241(*x);
+  *y = -log(sdsge_std_norm_pdf(p));
+}
+
+void sdsge_probit_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                       f64 *SDSGE_RESTRICT y, i64 n) {
+  f64 p;
+  for (i64 i = 0; i < n; i++) {
+    p = sdsge_ndtri_as241(x[i]);
+    y[i] = -log(sdsge_std_norm_pdf(p));
+  }
+}
+
+void sdsge_probit_ldet_abs_jac_inv(const f64 *y, f64 *x) {
+  *x = log(sdsge_std_norm_pdf(*y));
+}
+
+void sdsge_probit_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                       f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = log(sdsge_std_norm_pdf(y[i]));
+  }
+}
+
+void sdsge_probit_grad_ldet_abs_jac_inv(const f64 *y, f64 *x) { *x = -*y; }
+
+void sdsge_probit_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                            f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = -y[i];
   }
 }

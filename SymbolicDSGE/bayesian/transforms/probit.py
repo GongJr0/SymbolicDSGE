@@ -1,12 +1,20 @@
 from .transform import Transform, TransformMethod
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from scipy.stats import norm
+from ..._ckernels.transforms import (
+    probit_fwd,
+    probit_inv,
+    probit_grad_fwd,
+    probit_grad_inv,
+    probit_ldet_abs_jac_fwd,
+    probit_ldet_abs_jac_inv,
+    probit_grad_ldet_abs_jac_inv,
+)
 
 
 class ProbitTransform(Transform):
@@ -22,7 +30,7 @@ class ProbitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(norm.ppf(x))
+        return probit_fwd(x)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -30,7 +38,7 @@ class ProbitTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(norm.cdf(y))
+        return probit_inv(y)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -38,7 +46,7 @@ class ProbitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(1.0 / norm.pdf(norm.ppf(x)))
+        return probit_grad_fwd(x)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -46,7 +54,7 @@ class ProbitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(norm.pdf(y))
+        return probit_grad_inv(y)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -56,7 +64,7 @@ class ProbitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        return -np.log(norm.pdf(norm.ppf(x)))
+        return probit_ldet_abs_jac_fwd(x)
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -66,7 +74,7 @@ class ProbitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        return np.log(norm.pdf(y))
+        return probit_ldet_abs_jac_inv(y)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -78,7 +86,7 @@ class ProbitTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        return float64(-y)
+        return probit_grad_ldet_abs_jac_inv(y)
 
     @property
     def support(self) -> Support:

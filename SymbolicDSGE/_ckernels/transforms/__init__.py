@@ -15,6 +15,14 @@ from ._transforms import (
     logit_ldet_abs_jac_fwd,
     logit_ldet_abs_jac_inv,
     logit_grad_ldet_abs_jac_inv,
+    # probit
+    probit_fwd,
+    probit_inv,
+    probit_grad_fwd,
+    probit_grad_inv,
+    probit_ldet_abs_jac_fwd,
+    probit_ldet_abs_jac_inv,
+    probit_grad_ldet_abs_jac_inv,
 )
 
 __all__ = [
@@ -32,4 +40,11 @@ __all__ = [
     "logit_ldet_abs_jac_fwd",
     "logit_ldet_abs_jac_inv",
     "logit_grad_ldet_abs_jac_inv",
+    "probit_fwd",
+    "probit_inv",
+    "probit_grad_fwd",
+    "probit_grad_inv",
+    "probit_ldet_abs_jac_fwd",
+    "probit_ldet_abs_jac_inv",
+    "probit_grad_ldet_abs_jac_inv",
 ]

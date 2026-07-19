@@ -1,0 +1,77 @@
+"""Parity tests: native ``_ckernels.transforms`` kernels vs the independent
+numpy/scipy oracle in ``tests/_oracles/transforms``.
+
+Each of the seven maps (fwd, inv, grad_fwd, grad_inv, ldet_abs_jac_fwd/inv,
+grad_ldet_abs_jac_inv) is checked for every transform (log, logit, probit) on
+both the vectorized path and the scalar path. The scalar path additionally
+asserts the kernel returns ``np.float64`` (not a bare Python ``float``): the
+distributions dispatch on ``isinstance(x, float64)`` misroutes a Python float
+into the vectorized njit kernel, so a bare-float regression here breaks callers
+silently. probit rides on AS 241 vs scipy's inverse-normal, so the tolerance is
+relative rather than bit-exact.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+native = pytest.importorskip("SymbolicDSGE._ckernels.transforms")
+
+from _oracles import transforms as oracle
+
+RTOL = 1e-12
+ATOL = 1e-12
+
+# Per-transform input domains. ``fwd``-family maps consume the transform's
+# constrained support; ``inv``-family maps consume the unconstrained real line.
+_LOG_FWD_DOM = np.array([1e-3, 0.1, 0.5, 1.0, 2.0, 10.0, 100.0])
+_LOG_INV_DOM = np.array([-5.0, -1.0, 0.0, 1.0, 5.0])
+_UNIT_DOM = np.array([1e-4, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 1.0 - 1e-4])
+_REAL_DOM = np.array([-6.0, -2.0, -0.5, 0.0, 0.5, 2.0, 6.0])
+
+_FWD_FAMILY = ("{n}_fwd", "{n}_grad_fwd", "{n}_ldet_abs_jac_fwd")
+_INV_FAMILY = (
+    "{n}_inv",
+    "{n}_grad_inv",
+    "{n}_ldet_abs_jac_inv",
+    "{n}_grad_ldet_abs_jac_inv",
+)
+
+_CASES: list[tuple[str, np.ndarray]] = []
+for _name, _fwd_dom, _inv_dom in (
+    ("log", _LOG_FWD_DOM, _LOG_INV_DOM),
+    ("logit", _UNIT_DOM, _REAL_DOM),
+    ("probit", _UNIT_DOM, _REAL_DOM),
+):
+    _CASES += [(t.format(n=_name), _fwd_dom) for t in _FWD_FAMILY]
+    _CASES += [(t.format(n=_name), _inv_dom) for t in _INV_FAMILY]
+
+
+@pytest.mark.parametrize("fn_name, grid", _CASES, ids=[c[0] for c in _CASES])
+def test_transform_kernel_parity(fn_name: str, grid: np.ndarray) -> None:
+    native_fn = getattr(native, fn_name)
+    oracle_fn = getattr(oracle, fn_name)
+
+    # vectorized path
+    got = np.asarray(native_fn(grid), dtype=float)
+    exp = np.asarray(oracle_fn(grid), dtype=float)
+    np.testing.assert_allclose(got, exp, rtol=RTOL, atol=ATOL)
+
+    # scalar path + dtype fidelity (must be np.float64, never a bare float)
+    for v in grid:
+        s = native_fn(np.float64(v))
+        assert isinstance(
+            s, np.float64
+        ), f"{fn_name}({v!r}) returned {type(s).__name__}, expected numpy.float64"
+        np.testing.assert_allclose(
+            float(s), float(np.asarray(oracle_fn(np.float64(v)))), rtol=RTOL, atol=ATOL
+        )
+
+
+def test_empty_array_roundtrips_without_calling_kernel() -> None:
+    # The n == 0 guard returns the empty allocation without dereferencing &v[0].
+    for fn_name, _ in _CASES:
+        out = getattr(native, fn_name)(np.array([], dtype=np.float64))
+        assert isinstance(out, np.ndarray)
+        assert out.shape == (0,)
