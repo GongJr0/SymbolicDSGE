@@ -186,3 +186,91 @@ def aff_probit_ldet_abs_jac_inv(y, low, high):
 
 def aff_probit_grad_ldet_abs_jac_inv(y):
     return -np.asarray(y, dtype=float64)
+
+
+# --- softplus ((0, inf) <-> R) ----------------------------------------------
+def softplus_fwd(x):
+    return np.log(np.expm1(x))
+
+
+def softplus_inv(y):
+    return np.logaddexp(float64(0.0), np.asarray(y, dtype=float64))
+
+
+def softplus_grad_fwd(x):
+    return 1.0 + 1.0 / np.expm1(np.asarray(x, dtype=float64))
+
+
+def softplus_grad_inv(y):
+    return _sigmoid(y)
+
+
+def softplus_ldet_abs_jac_fwd(x):
+    x = np.asarray(x, dtype=float64)
+    return x - np.log(np.expm1(x))
+
+
+def softplus_ldet_abs_jac_inv(y):
+    return -np.logaddexp(float64(0.0), -np.asarray(y, dtype=float64))
+
+
+def softplus_grad_ldet_abs_jac_inv(y):
+    return 1.0 - _sigmoid(y)
+
+
+# --- lower bounded ((low, inf) <-> R) ---------------------------------------
+def lower_fwd(x, low):
+    return np.log(np.asarray(x, dtype=float64) - low)
+
+
+def lower_inv(y, low):
+    return low + np.exp(y)
+
+
+def lower_grad_fwd(x, low):
+    return 1.0 / (np.asarray(x, dtype=float64) - low)
+
+
+def lower_grad_inv(y):
+    return np.exp(y)
+
+
+def lower_ldet_abs_jac_fwd(x, low):
+    return -np.log(np.asarray(x, dtype=float64) - low)
+
+
+def lower_ldet_abs_jac_inv(y):
+    return np.asarray(y, dtype=float64)
+
+
+def lower_grad_ldet_abs_jac_inv(y):
+    return np.ones_like(np.asarray(y, dtype=float64))
+
+
+# --- upper bounded ((-inf, high) <-> R) -------------------------------------
+def upper_fwd(x, high):
+    return np.log(high - np.asarray(x, dtype=float64))
+
+
+def upper_inv(y, high):
+    return high - np.exp(y)
+
+
+def upper_grad_fwd(x, high):
+    return -1.0 / (high - np.asarray(x, dtype=float64))
+
+
+def upper_grad_inv(y):
+    return -np.exp(y)
+
+
+def upper_ldet_abs_jac_fwd(x, high):
+    return -np.log(high - np.asarray(x, dtype=float64))
+
+
+def upper_ldet_abs_jac_inv(y):
+    return np.asarray(y, dtype=float64)
+
+
+def upper_grad_ldet_abs_jac_inv(y):
+    return np.ones_like(np.asarray(y, dtype=float64))

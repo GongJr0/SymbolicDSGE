@@ -424,8 +424,12 @@ def test_transform_direct_methods_and_error_branches(
     assert np.isfinite(transform.log_det_abs_jacobian_inverse(float64(y)))
     assert np.isfinite(transform.grad_log_det_abs_jacobian_inverse(float64(y)))
 
+    # Out-of-support inputs are rejected by the safe_ layer, not the raw direct
+    # kernels. Transforms with unbounded inverse output (log/lower/upper) rely on
+    # safe_inverse to guard; those with bounded inverse output (affine) saturate
+    # to a finite value even on the raw path.
     if should_raise:
         with pytest.raises(OutOfSupportError):
-            transform.inverse(y_invalid)
+            transform.safe_inverse(y_invalid)
     else:
         assert np.isfinite(transform.inverse(y_invalid))

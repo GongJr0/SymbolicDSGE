@@ -354,8 +354,9 @@ void sdsge_aff_probit_fwd(const f64 *x, f64 *y, const f64 *a, const f64 *b) {
   sdsge_probit_fwd(&z, y);
 }
 
-void sdsge_aff_probit_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
-                              i64 n, const f64 *a, const f64 *b) {
+void sdsge_aff_probit_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                              f64 *SDSGE_RESTRICT y, i64 n, const f64 *a,
+                              const f64 *b) {
   f64 z;
   for (i64 i = 0; i < n; i++) {
     sdsge_affine_to_unit(&x[i], &z, a, b);
@@ -369,8 +370,9 @@ void sdsge_aff_probit_inv(const f64 *y, f64 *x, const f64 *a, const f64 *b) {
   sdsge_unit_to_affine(&z, x, a, b);
 }
 
-void sdsge_aff_probit_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
-                              i64 n, const f64 *a, const f64 *b) {
+void sdsge_aff_probit_inv_arr(const f64 *SDSGE_RESTRICT y,
+                              f64 *SDSGE_RESTRICT x, i64 n, const f64 *a,
+                              const f64 *b) {
   f64 z;
   for (i64 i = 0; i < n; i++) {
     sdsge_probit_inv(&y[i], &z);
@@ -454,5 +456,232 @@ void sdsge_aff_probit_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
                                                 f64 *SDSGE_RESTRICT x, i64 n) {
   for (i64 i = 0; i < n; i++) {
     sdsge_probit_grad_ldet_abs_jac_inv(&y[i], &x[i]);
+  }
+}
+
+/* SOFTPLUS TRANSFORM */
+
+static inline f64 sdsge_softplus_val(f64 y) {
+  return y > 0.0 ? y + log1p(exp(-y)) : log1p(exp(y));
+}
+
+void sdsge_softplus_fwd(const f64 *x, f64 *y) { *y = log(expm1(*x)); }
+
+void sdsge_softplus_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                            i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = log(expm1(x[i]));
+  }
+}
+
+void sdsge_softplus_inv(const f64 *y, f64 *x) { *x = sdsge_softplus_val(*y); }
+
+void sdsge_softplus_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                            i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = sdsge_softplus_val(y[i]);
+  }
+}
+
+void sdsge_softplus_grad_fwd(const f64 *x, f64 *y) {
+  *y = 1.0 + 1.0 / expm1(*x);
+}
+
+void sdsge_softplus_grad_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                 f64 *SDSGE_RESTRICT y, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = 1.0 + 1.0 / expm1(x[i]);
+  }
+}
+
+void sdsge_softplus_grad_inv(const f64 *y, f64 *x) {
+  *x = 1.0 / (1.0 + exp(-*y));
+}
+
+void sdsge_softplus_grad_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                 f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = 1.0 / (1.0 + exp(-y[i]));
+  }
+}
+
+void sdsge_softplus_ldet_abs_jac_fwd(const f64 *x, f64 *y) {
+  *y = *x - log(expm1(*x));
+}
+
+void sdsge_softplus_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                         f64 *SDSGE_RESTRICT y, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = x[i] - log(expm1(x[i]));
+  }
+}
+
+void sdsge_softplus_ldet_abs_jac_inv(const f64 *y, f64 *x) {
+  *x = -sdsge_softplus_val(-*y);
+}
+
+void sdsge_softplus_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                         f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = -sdsge_softplus_val(-y[i]);
+  }
+}
+
+void sdsge_softplus_grad_ldet_abs_jac_inv(const f64 *y, f64 *x) {
+  *x = 1.0 - 1.0 / (1.0 + exp(-*y));
+}
+
+void sdsge_softplus_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                              f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = 1.0 - 1.0 / (1.0 + exp(-y[i]));
+  }
+}
+
+/* LOWER BOUNDED TRANSFORM */
+
+void sdsge_lower_fwd(const f64 *x, f64 *y, const f64 *low) {
+  *y = log(*x - *low);
+}
+
+void sdsge_lower_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                         i64 n, const f64 *low) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = log(x[i] - *low);
+  }
+}
+
+void sdsge_lower_inv(const f64 *y, f64 *x, const f64 *low) {
+  *x = *low + exp(*y);
+}
+
+void sdsge_lower_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                         i64 n, const f64 *low) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = *low + exp(y[i]);
+  }
+}
+
+void sdsge_lower_grad_fwd(const f64 *x, f64 *y, const f64 *low) {
+  *y = 1.0 / (*x - *low);
+}
+
+void sdsge_lower_grad_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                              f64 *SDSGE_RESTRICT y, i64 n, const f64 *low) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = 1.0 / (x[i] - *low);
+  }
+}
+
+void sdsge_lower_grad_inv(const f64 *y, f64 *x) { *x = exp(*y); }
+
+void sdsge_lower_grad_inv_arr(const f64 *SDSGE_RESTRICT y,
+                              f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = exp(y[i]);
+  }
+}
+
+void sdsge_lower_ldet_abs_jac_fwd(const f64 *x, f64 *y, const f64 *low) {
+  *y = -log(*x - *low);
+}
+
+void sdsge_lower_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                      f64 *SDSGE_RESTRICT y, i64 n,
+                                      const f64 *low) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = -log(x[i] - *low);
+  }
+}
+
+void sdsge_lower_ldet_abs_jac_inv(const f64 *y, f64 *x) { *x = *y; }
+
+void sdsge_lower_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                      f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = y[i];
+  }
+}
+
+void sdsge_lower_grad_ldet_abs_jac_inv(const f64 *y, f64 *x) { *x = 1.0; }
+
+void sdsge_lower_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                           f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = 1.0;
+  }
+}
+
+/* UPPER BOUNDED TRANSFORM */
+
+void sdsge_upper_fwd(const f64 *x, f64 *y, const f64 *high) {
+  *y = log(*high - *x);
+}
+
+void sdsge_upper_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                         i64 n, const f64 *high) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = log(*high - x[i]);
+  }
+}
+
+void sdsge_upper_inv(const f64 *y, f64 *x, const f64 *high) {
+  *x = *high - exp(*y);
+}
+
+void sdsge_upper_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                         i64 n, const f64 *high) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = *high - exp(y[i]);
+  }
+}
+
+void sdsge_upper_grad_fwd(const f64 *x, f64 *y, const f64 *high) {
+  *y = -1.0 / (*high - *x);
+}
+
+void sdsge_upper_grad_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                              f64 *SDSGE_RESTRICT y, i64 n, const f64 *high) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = -1.0 / (*high - x[i]);
+  }
+}
+
+void sdsge_upper_grad_inv(const f64 *y, f64 *x) { *x = -exp(*y); }
+
+void sdsge_upper_grad_inv_arr(const f64 *SDSGE_RESTRICT y,
+                              f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = -exp(y[i]);
+  }
+}
+
+void sdsge_upper_ldet_abs_jac_fwd(const f64 *x, f64 *y, const f64 *high) {
+  *y = -log(*high - *x);
+}
+
+void sdsge_upper_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                      f64 *SDSGE_RESTRICT y, i64 n,
+                                      const f64 *high) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = -log(*high - x[i]);
+  }
+}
+
+void sdsge_upper_ldet_abs_jac_inv(const f64 *y, f64 *x) { *x = *y; }
+
+void sdsge_upper_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                      f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = y[i];
+  }
+}
+
+void sdsge_upper_grad_ldet_abs_jac_inv(const f64 *y, f64 *x) { *x = 1.0; }
+
+void sdsge_upper_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                           f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = 1.0;
   }
 }

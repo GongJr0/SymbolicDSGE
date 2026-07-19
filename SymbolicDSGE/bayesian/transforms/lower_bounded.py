@@ -1,14 +1,23 @@
 from .transform import Transform, TransformMethod
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
+from ..._ckernels.transforms import (
+    lower_fwd,
+    lower_inv,
+    lower_grad_fwd,
+    lower_grad_inv,
+    lower_ldet_abs_jac_fwd,
+    lower_ldet_abs_jac_inv,
+    lower_grad_ldet_abs_jac_inv,
+)
+
 
 class LowerBoundedTransform(Transform):
-
     def __init__(self, low: float64):
         self.low = float64(low)
 
@@ -18,19 +27,13 @@ class LowerBoundedTransform(Transform):
     def to_spec(self) -> tuple[str, dict[str, float]]:
         return TransformMethod.LOWER_BOUNDED.value, {"low": float(self.low)}
 
-    def _x_minus_low(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return x - self.low
-
     @overload
     def forward(self, x: float64) -> float64: ...
     @overload
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return np.log(self._x_minus_low(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return lower_fwd(x, self.low)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -38,10 +41,7 @@ class LowerBoundedTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return self.low + np.exp(y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return lower_inv(y, self.low)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -49,11 +49,7 @@ class LowerBoundedTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = 1 / (x - low)
-        if self.support.contains(x):
-            return float64(1.0) / self._x_minus_low(x)
-        else:
-            raise OutOfSupportError(x, self.support)
+        return lower_grad_fwd(x, self.low)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -61,11 +57,7 @@ class LowerBoundedTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dx/dy = exp(y)
-        if self.maps_to.contains(y):
-            return np.exp(y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return lower_grad_inv(y)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -75,11 +67,7 @@ class LowerBoundedTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(x - low)
-        if self.support.contains(x):
-            return -np.log(self._x_minus_low(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return lower_ldet_abs_jac_fwd(x, self.low)
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -89,11 +77,7 @@ class LowerBoundedTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dx/dy| = log(exp(y)) = y
-        if self.maps_to.contains(y):
-            return y
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return lower_ldet_abs_jac_inv(y)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -105,11 +89,7 @@ class LowerBoundedTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # d/dy log|dx/dy| = d/dy y = 1
-        if self.maps_to.contains(y):
-            return float64(1.0)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return lower_grad_ldet_abs_jac_inv(y)
 
     @property
     def support(self) -> Support:
