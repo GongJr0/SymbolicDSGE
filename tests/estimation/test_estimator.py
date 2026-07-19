@@ -9,6 +9,7 @@ from scipy.optimize import OptimizeResult
 from sympy import Matrix, Symbol
 
 import SymbolicDSGE.estimation.backend as est_backend
+import SymbolicDSGE.estimation.estimator as est_estimator
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bayesian.priors import Prior
@@ -47,8 +48,10 @@ def _with_filter_prep(compiled):
     compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
         address=0
     )
+    if not hasattr(compiled, "n_state"):
+        compiled.n_state = len(compiled.var_names)
     if getattr(compiled.kalman, "P0", None) is None:
-        compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+        compiled.kalman.P0 = np.eye(len(compiled.var_names), dtype=np.float64)
     if not hasattr(compiled.kalman, "R_param_names"):
         compiled.kalman.R_param_names = None
     return compiled
@@ -1174,7 +1177,7 @@ def test_mle_map_and_adaptation_branches(monkeypatch):
     monkeypatch.setattr(
         est_backend, "evaluate_loglik", lambda **kwargs: float64(np.nan)
     )
-    monkeypatch.setattr(est_backend.optimize, "minimize", fake_minimize)
+    monkeypatch.setattr(est_estimator.optimize, "minimize", fake_minimize)
     _ = est.mle(theta0=np.array([0.0], dtype=np.float64))
     _ = est.map(theta0=np.array([0.0], dtype=np.float64))
 

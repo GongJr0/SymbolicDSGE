@@ -53,8 +53,10 @@ def _with_filter_prep(compiled):
     compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
         address=0
     )
+    if not hasattr(compiled, "n_state"):
+        compiled.n_state = len(compiled.var_names)
     if getattr(compiled.kalman, "P0", None) is None:
-        compiled.kalman.P0 = SimpleNamespace(mode="eye", scale=1.0, diag=None)
+        compiled.kalman.P0 = np.eye(len(compiled.var_names), dtype=np.float64)
     if not hasattr(compiled.kalman, "R_param_names"):
         compiled.kalman.R_param_names = None
     return compiled

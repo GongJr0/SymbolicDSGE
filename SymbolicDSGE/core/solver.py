@@ -1,4 +1,5 @@
 import warnings
+from dataclasses import replace
 
 import sympy as sp
 from sympy import Symbol, Function, Expr
@@ -67,6 +68,15 @@ class DSGESolver:
 
         var_funcs = [name_to_func[name] for name in var_order]
         idx = dict(layout.idx)
+
+        # P0 was assembled in declared variable order at parse time; permute it
+        # into canonical order so it aligns with the compiled state vector. P0 is
+        # diagonal, so this is a lossless entry permutation (a no-op when the
+        # declared order already matches canonical).
+        if kalman_conf is not None:
+            declared_idx = {name: i for i, name in enumerate(layout.declared_names)}
+            perm = [declared_idx[name] for name in layout.canonical_names]
+            kalman_conf = replace(kalman_conf, P0=kalman_conf.P0[np.ix_(perm, perm)])
 
         for i, obj in enumerate(shifted):
             bad = self._bad_time_offsets(obj, var_funcs, t)
@@ -543,8 +553,7 @@ class DSGESolver:
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
-        p0_mode: str | None = None,
-        p0_scale: float | float64 | None = None,
+        P0: NDArray | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
         R: NDArray | None = None,
@@ -566,8 +575,7 @@ class DSGESolver:
                 else steady_state
             ),
             x0=x0,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
+            P0=P0,
             jitter=jitter,
             symmetrize=symmetrize,
             R=R,
@@ -596,8 +604,7 @@ class DSGESolver:
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
-        p0_mode: str | None = None,
-        p0_scale: float | float64 | None = None,
+        P0: NDArray | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
         R: NDArray | None = None,
@@ -616,8 +623,7 @@ class DSGESolver:
                 else steady_state
             ),
             x0=x0,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
+            P0=P0,
             jitter=jitter,
             symmetrize=symmetrize,
             R=R,
@@ -648,8 +654,7 @@ class DSGESolver:
         priors: Mapping[str, Any] | None = None,
         steady_state: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
-        p0_mode: str | None = None,
-        p0_scale: float | float64 | None = None,
+        P0: NDArray | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
         R: NDArray | None = None,
@@ -670,8 +675,7 @@ class DSGESolver:
             priors=priors,
             steady_state=steady_state,
             x0=x0,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
+            P0=P0,
             jitter=jitter,
             symmetrize=symmetrize,
             R=R,

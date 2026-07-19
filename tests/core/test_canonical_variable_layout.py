@@ -26,7 +26,6 @@ def _write_misordered_test_model(tmp_path):
     data["kalman"] = {
         "P0": {
             "mode": "diag",
-            "scale": 1.0,
             "diag": {
                 "u": 1.0,
                 "v": 2.0,
@@ -111,8 +110,10 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
         ki._build_Q(),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
+    # P0 is permuted from declared to canonical order at compile time; the diag
+    # values (u:1, v:2, r:3, Pi:4, x:5, r_star:6) land in canonical order.
     np.testing.assert_allclose(
-        ki._build_P0(),
+        compiled.kalman.P0,
         np.diag([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).astype(np.float64),
     )
 

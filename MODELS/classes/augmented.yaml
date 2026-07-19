@@ -61,7 +61,6 @@ kalman:
       OutGap, Rate: meas_rho_gr
   P0:
     mode: diag
-    scale: 1.0
     diag:
       g: 1.0
       z: 1.0

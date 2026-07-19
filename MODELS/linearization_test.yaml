@@ -116,7 +116,6 @@ kalman:
       OutGap, Rate: meas_rho_gr
   P0:
     mode: diag # "diag" | "eye"
-    scale: 1.0
     diag:
     # = 'eye' if all = 1.0
       g: 1.0

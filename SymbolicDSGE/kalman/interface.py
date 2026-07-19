@@ -50,7 +50,6 @@ class _KFMatrices:
     C: NDF | None
     d: NDF | None
     Q: NDF
-    P0: NDF
     R_const: NDF | None = None
     validated: bool = False
 
@@ -67,15 +66,24 @@ class KalmanInterface(KalmanFilter):
         jac_addr: int | None = None,
         calib_params: NDF | None = None,
         R: NDF | None = None,
-        p0_mode: Literal["diag", "eye"] | None = None,
-        p0_scale: Float64Like | None = None,
+        P0: NDF | None = None,
         jitter: Float64Like | None = None,
         symmetrize: bool | None = None,
         return_shocks: bool = False,
     ) -> None:
 
         self.model = model
+        kf_cfg = model.kalman_config
+        if kf_cfg is None:
+            raise ValueError("A Kalman filter configuration is required for filtering.")
+        self._kalman = kf_cfg
+
         self.mode = FilterMode(filter_mode)
+        self.P0 = _resolve_P0(
+            self.mode,
+            model.compiled.n_state,
+            P0 if P0 is not None else self._kalman.P0,
+        )
 
         obs, y = self._reorder_obs(observables, y)
         if obs is None:
@@ -95,8 +103,6 @@ class KalmanInterface(KalmanFilter):
         cache_key = (
             self.mode,
             tuple(self.observables),
-            p0_mode,
-            None if p0_scale is None else float(p0_scale),
             model._calibration_fingerprint(),
         )
         record = model._kf_cache_get(cache_key)
@@ -105,18 +111,12 @@ class KalmanInterface(KalmanFilter):
                 C, d = self._get_C_d()
             else:
                 C, d = None, None
-            record = _KFMatrices(
-                C=C,
-                d=d,
-                Q=self._build_Q(),
-                P0=self._build_P0(p0_mode=p0_mode, p0_scale=p0_scale),
-            )
+            record = _KFMatrices(C=C, d=d, Q=self._build_Q())
             model._kf_cache_put(cache_key, record)
         self._cache_record = record
 
         self.C, self.d = record.C, record.d
         self.Q = record.Q
-        self.P0 = record.P0
 
         self._uses_const_R = R is None
 
@@ -495,81 +495,6 @@ class KalmanInterface(KalmanFilter):
         R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
         return R_subset
 
-    def _build_P0(
-        self,
-        p0_mode: Literal["diag", "eye"] | None = None,
-        p0_scale: Float64Like | None = None,
-    ) -> NDF:
-        mode = getattr(self, "mode", FilterMode.LINEAR)
-        if mode == FilterMode.UNSCENTED:
-            return self._build_unscented_P0(p0_mode=p0_mode, p0_scale=p0_scale)
-        return self._build_full_P0(p0_mode=p0_mode, p0_scale=p0_scale)
-
-    def _build_full_P0(
-        self,
-        p0_mode: Literal["diag", "eye"] | None = None,
-        p0_scale: Float64Like | None = None,
-    ) -> NDF:
-        return self._build_named_P0(
-            self.model.compiled.var_names,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
-            required_scope="model variables",
-        )
-
-    def _build_unscented_P0(
-        self,
-        p0_mode: Literal["diag", "eye"] | None = None,
-        p0_scale: Float64Like | None = None,
-    ) -> NDF:
-        n_state = self.model.compiled.n_state
-        state_vars = self.model.compiled.var_names[:n_state]
-        state_P0 = self._build_named_P0(
-            state_vars,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
-            required_scope="state variables",
-        )
-
-        out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
-        out[:n_state, :n_state] = state_P0
-        out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
-        return out
-
-    def _build_named_P0(
-        self,
-        vars_ordered: list[str],
-        p0_mode: Literal["diag", "eye"] | None = None,
-        p0_scale: Float64Like | None = None,
-        required_scope: str = "model variables",
-    ) -> NDF:
-        conf = self.kalman_config
-        n = len(vars_ordered)
-
-        # KalmanConfig.P0 is a required field, so it is always present here; the
-        # p0_mode/p0_scale arguments override its mode/scale but never replace it.
-        P0 = conf.P0
-        mode = p0_mode if p0_mode is not None else P0.mode
-        scale = float64(p0_scale) if p0_scale is not None else float64(P0.scale)
-        if mode == "diag":
-            diag_dict = P0.diag
-            if diag_dict is not None:
-                if not all(var in diag_dict for var in vars_ordered):
-                    raise ValueError(
-                        f"P0 diagonal specification must include all {required_scope}."
-                    )
-
-                mat = np.zeros((n, n), dtype=float64)
-                for i, var in enumerate(vars_ordered):
-                    mat[i, i] = float64(diag_dict.get(var, 1.0)) * scale
-                return mat
-            else:
-                raise ValueError("P0 diagonal specification missing in configuration.")
-        elif mode == "eye":
-            return np.eye(n, dtype=float64) * scale
-        else:
-            raise ValueError(f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'.")
-
     def _build_Q(self) -> NDF:
         params = self.model_config.calibration.parameters
         shock_map = self.model.config.shock_map
@@ -768,12 +693,7 @@ class KalmanInterface(KalmanFilter):
 
     @cached_property
     def kalman_config(self) -> KalmanConfig:
-        config = self.model.kalman_config
-        if config is None:
-            raise ValueError(
-                "Kalman Filter configuration with the R matrix is required."
-            )
-        return config
+        return self._kalman
 
     @property
     def _linear_validated_args(self) -> dict:
@@ -830,3 +750,13 @@ class KalmanInterface(KalmanFilter):
             "y": self.y,
             "P0": self.P0,
         }
+
+
+def _resolve_P0(mode: FilterMode, n_state: int, P0: NDF) -> NDF:
+    if mode != FilterMode.UNSCENTED:
+        return P0
+
+    out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
+    out[:n_state, :n_state] = P0[:n_state, :n_state]
+    out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
+    return out

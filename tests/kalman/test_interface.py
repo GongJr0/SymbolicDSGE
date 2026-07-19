@@ -125,11 +125,7 @@ def _make_stub_model(
             R=np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT),
             jitter=0.125,
             symmetrize=True,
-            P0=SimpleNamespace(
-                mode="diag",
-                scale=2.0,
-                diag={"u": 1.0, "v": 3.0, "x": 5.0},
-            ),
+            P0=np.diag([2.0, 6.0, 10.0]).astype(FLOAT),
             R_std_param_map=None,
             R_corr_param_map=None,
         )
@@ -172,6 +168,8 @@ def _make_shell(model=None, observables=None):
     ki.model = _make_stub_model() if model is None else model
     ki.observables = ["ObsA", "ObsB"] if observables is None else observables
     ki.mode = FilterMode.LINEAR
+    # __init__ resolves and stashes the config; mirror that for the bare shell.
+    ki._kalman = ki.model.kalman_config
     return ki
 
 
@@ -268,7 +266,7 @@ def test_get_symmetrize_and_jitter_cover_overrides_and_defaults():
                 R=np.array([[1.0]], dtype=FLOAT),
                 jitter=None,
                 symmetrize=None,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
+                P0=np.eye(3, dtype=FLOAT),
                 R_std_param_map=None,
                 R_corr_param_map=None,
             )
@@ -366,126 +364,21 @@ def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
         no_r_ki._build_constant_R(None)
 
 
-def test_build_p0_supports_diag_and_eye_and_reports_invalid_configs():
-    ki = _make_shell()
-    assert np.array_equal(ki._build_P0(), np.diag([2.0, 6.0, 10.0]).astype(FLOAT))
-    assert np.array_equal(ki._build_P0(p0_mode="eye", p0_scale=1.5), np.eye(3) * 1.5)
-
-    missing_diag_value = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "v": 2.0}),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
-    with pytest.raises(ValueError, match="must include all model variables"):
-        missing_diag_value._build_P0()
-
-    missing_diag_spec = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="diag", scale=1.0, diag=None),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
-    with pytest.raises(ValueError, match="P0 diagonal specification missing"):
-        missing_diag_spec._build_P0()
-
-    bad_mode = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="triangle", scale=1.0, diag={}),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
-    with pytest.raises(ValueError, match="Unrecognized P0 mode"):
-        bad_mode._build_P0()
+def test_resolve_p0_passes_through_for_linear_and_extended():
+    # P0 is now a static ndarray on the config (canonical order); the linear and
+    # extended paths use it verbatim. Construction/validation live at parse time.
+    P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)
+    assert np.array_equal(interface_module._resolve_P0(FilterMode.LINEAR, 2, P0), P0)
+    assert np.array_equal(interface_module._resolve_P0(FilterMode.EXTENDED, 2, P0), P0)
 
 
-def test_build_unscented_p0_uses_state_block_and_identity_second_block():
-    ki = _make_shell()
-    ki.mode = FilterMode.UNSCENTED
-
-    expected = np.diag([2.0, 6.0, 1.0, 1.0]).astype(FLOAT)
-    assert np.array_equal(ki._build_P0(), expected)
-
-    expected_eye = np.diag([1.5, 1.5, 1.0, 1.0]).astype(FLOAT)
+def test_resolve_p0_embeds_state_block_with_identity_for_unscented():
+    # Unscented embedding is a runtime structural step: blkdiag(P0_state, I),
+    # taking the top-left n_state block of the full-variable P0.
+    P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)  # 3 model vars, n_state=2
     assert np.array_equal(
-        ki._build_P0(p0_mode="eye", p0_scale=1.5),
-        expected_eye,
-    )
-
-    state_only_diag = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="diag", scale=2.0, diag={"u": 1.0, "v": 2.0}),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
-    state_only_diag.mode = FilterMode.UNSCENTED
-    assert np.array_equal(
-        state_only_diag._build_P0(),
-        np.diag([2.0, 4.0, 1.0, 1.0]).astype(FLOAT),
-    )
-
-    missing_state_diag = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="diag", scale=1.0, diag={"u": 1.0, "x": 5.0}),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
-    missing_state_diag.mode = FilterMode.UNSCENTED
-    with pytest.raises(ValueError, match="must include all state variables"):
-        missing_state_diag._build_P0()
-
-    eye_override = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=0.0,
-                symmetrize=False,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
-    eye_override.mode = FilterMode.UNSCENTED
-    assert np.array_equal(
-        eye_override._build_P0(p0_mode="eye", p0_scale=3.0),
-        np.diag([3.0, 3.0, 1.0, 1.0]).astype(FLOAT),
+        interface_module._resolve_P0(FilterMode.UNSCENTED, 2, P0),
+        np.diag([2.0, 6.0, 1.0, 1.0]).astype(FLOAT),
     )
 
 
@@ -511,7 +404,7 @@ def test_reorder_obs_uses_defaults_and_aligns_dataframe_and_ndarray_inputs():
                 R=np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT),
                 jitter=0.0,
                 symmetrize=False,
-                P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
+                P0=np.eye(3, dtype=FLOAT),
                 R_std_param_map=None,
                 R_corr_param_map=None,
             )
@@ -577,11 +470,15 @@ def test_validate_mode_and_kalman_config_property_error_paths():
     with pytest.raises(ValueError, match="meas_addr and jac_addr are required"):
         extended._validate_mode_and_inputs()
 
-    no_config = _make_shell(_make_stub_model(kalman_config=None))
+    # A missing Kalman config is now rejected at construction, not on property access.
     with pytest.raises(
-        ValueError, match="Kalman Filter configuration with the R matrix is required"
+        ValueError, match="A Kalman filter configuration is required for filtering"
     ):
-        _ = no_config.kalman_config
+        KalmanInterface(
+            model=_make_stub_model(kalman_config=None),
+            observables=["ObsA"],
+            y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        )
 
 
 def test_filter_dispatches_linear_run_and_populates_debug_info(monkeypatch):

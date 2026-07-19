@@ -37,10 +37,8 @@ def test_kalman_config_round_trips_via_reparse() -> None:
     k1 = rebuilt.get_all().kalman
     assert k0 is not None and k1 is not None
 
-    # Authored fields survive verbatim.
-    assert k1.P0.mode == k0.P0.mode
-    assert k1.P0.scale == k0.P0.scale
-    assert k1.P0.diag == k0.P0.diag
+    # Authored P0 (a static diagonal ndarray) survives verbatim.
+    np.testing.assert_array_equal(k1.P0, k0.P0)
 
     # Derived R machinery is rebuilt by the parser, not serialized.
     assert k1.R_param_names == k0.R_param_names
