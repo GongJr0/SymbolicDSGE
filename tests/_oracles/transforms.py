@@ -116,3 +116,39 @@ def probit_ldet_abs_jac_inv(y):
 
 def probit_grad_ldet_abs_jac_inv(y):
     return -np.asarray(y, dtype=float64)
+
+
+# --- affine logit ((low, high) -> R via a unit-logit) -----------------------
+def aff_logit_fwd(x, low, high):
+    z = (np.asarray(x, dtype=float64) - low) / (high - low)
+    return np.log(z / (1.0 - z))
+
+
+def aff_logit_inv(y, low, high):
+    return _sigmoid(y) * (high - low) + low
+
+
+def aff_logit_grad_fwd(x, low, high):
+    span = high - low
+    z = (np.asarray(x, dtype=float64) - low) / span
+    return 1.0 / (span * z * (1.0 - z))
+
+
+def aff_logit_grad_inv(y, low, high):
+    p = _sigmoid(y)
+    return (high - low) * p * (1.0 - p)
+
+
+def aff_logit_ldet_abs_jac_fwd(x, low, high):
+    span = high - low
+    z = (np.asarray(x, dtype=float64) - low) / span
+    return -np.log(span) - np.log(z) - np.log(1.0 - z)
+
+
+def aff_logit_ldet_abs_jac_inv(y, low, high):
+    y = np.asarray(y, dtype=float64)
+    return np.log(high - low) - y - 2.0 * np.log(1.0 + np.exp(-y))
+
+
+def aff_logit_grad_ldet_abs_jac_inv(y):
+    return 1.0 - 2.0 * _sigmoid(y)

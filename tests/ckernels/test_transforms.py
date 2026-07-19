@@ -75,3 +75,53 @@ def test_empty_array_roundtrips_without_calling_kernel() -> None:
         out = getattr(native, fn_name)(np.array([], dtype=np.float64))
         assert isinstance(out, np.ndarray)
         assert out.shape == (0,)
+
+
+# The affine logit maps carry a (low, high) pair, so they need their own case
+# list and argument plumbing. grad_ldet_abs_jac_inv drops the pair (the log-span
+# term differentiates away), so it is called y-only like the plain transforms.
+_AFF_LOW, _AFF_HIGH = -2.0, 3.0
+_AFF_FWD_DOM = np.array([-2.0 + 1e-4, -1.5, -0.5, 0.5, 1.5, 2.5, 3.0 - 1e-4])
+
+_AFF_CASES: list[tuple[str, np.ndarray, bool]] = [
+    ("aff_logit_fwd", _AFF_FWD_DOM, True),
+    ("aff_logit_grad_fwd", _AFF_FWD_DOM, True),
+    ("aff_logit_ldet_abs_jac_fwd", _AFF_FWD_DOM, True),
+    ("aff_logit_inv", _REAL_DOM, True),
+    ("aff_logit_grad_inv", _REAL_DOM, True),
+    ("aff_logit_ldet_abs_jac_inv", _REAL_DOM, True),
+    ("aff_logit_grad_ldet_abs_jac_inv", _REAL_DOM, False),
+]
+
+
+@pytest.mark.parametrize(
+    "fn_name, grid, needs_bounds", _AFF_CASES, ids=[c[0] for c in _AFF_CASES]
+)
+def test_affine_logit_kernel_parity(
+    fn_name: str, grid: np.ndarray, needs_bounds: bool
+) -> None:
+    native_fn = getattr(native, fn_name)
+    oracle_fn = getattr(oracle, fn_name)
+    args = (_AFF_LOW, _AFF_HIGH) if needs_bounds else ()
+
+    # vectorized path
+    got = np.asarray(native_fn(grid, *args), dtype=float)
+    exp = np.asarray(oracle_fn(grid, *args), dtype=float)
+    np.testing.assert_allclose(got, exp, rtol=RTOL, atol=ATOL)
+
+    # empty-array guard
+    empty = native_fn(np.array([], dtype=np.float64), *args)
+    assert isinstance(empty, np.ndarray) and empty.shape == (0,)
+
+    # scalar path + dtype fidelity (must be np.float64, never a bare float)
+    for v in grid:
+        s = native_fn(np.float64(v), *args)
+        assert isinstance(
+            s, np.float64
+        ), f"{fn_name}({v!r}) returned {type(s).__name__}, expected numpy.float64"
+        np.testing.assert_allclose(
+            float(s),
+            float(np.asarray(oracle_fn(np.float64(v), *args))),
+            rtol=RTOL,
+            atol=ATOL,
+        )

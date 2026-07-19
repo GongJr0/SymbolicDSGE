@@ -192,7 +192,9 @@ void sdsge_probit_grad_fwd_arr(const f64 *SDSGE_RESTRICT x,
   }
 }
 
-void sdsge_probit_grad_inv(const f64 *y, f64 *x) { *x = sdsge_std_norm_pdf(*y); }
+void sdsge_probit_grad_inv(const f64 *y, f64 *x) {
+  *x = sdsge_std_norm_pdf(*y);
+}
 
 void sdsge_probit_grad_inv_arr(const f64 *SDSGE_RESTRICT y,
                                f64 *SDSGE_RESTRICT x, i64 n) {
@@ -232,5 +234,115 @@ void sdsge_probit_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
                                             f64 *SDSGE_RESTRICT x, i64 n) {
   for (i64 i = 0; i < n; i++) {
     x[i] = -y[i];
+  }
+}
+
+/* AFFINE LOGIT TRANSFORM */
+void sdsge_aff_logit_fwd(const f64 *x, f64 *y, const f64 *a, const f64 *b) {
+  f64 z;
+  sdsge_affine_to_unit(x, &z, a, b);
+  sdsge_logit_fwd(&z, y);
+}
+
+void sdsge_aff_logit_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                             i64 n, const f64 *a, const f64 *b) {
+  f64 z;
+  for (i64 i = 0; i < n; i++) {
+    sdsge_affine_to_unit(&x[i], &z, a, b);
+    sdsge_logit_fwd(&z, &y[i]);
+  }
+}
+
+void sdsge_aff_logit_inv(const f64 *y, f64 *x, const f64 *a, const f64 *b) {
+  f64 z;
+  sdsge_logit_inv(y, &z);
+  sdsge_unit_to_affine(&z, x, a, b);
+}
+
+void sdsge_aff_logit_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                             i64 n, const f64 *a, const f64 *b) {
+  f64 z;
+  for (i64 i = 0; i < n; i++) {
+    sdsge_logit_inv(&y[i], &z);
+    sdsge_unit_to_affine(&z, &x[i], a, b);
+  }
+}
+
+void sdsge_aff_logit_grad_fwd(const f64 *x, f64 *y, const f64 *a,
+                              const f64 *b) {
+  f64 z;
+  sdsge_affine_to_unit(x, &z, a, b);
+  sdsge_logit_grad_fwd(&z, y);
+  *y /= (*b - *a);
+}
+
+void sdsge_aff_logit_grad_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                  f64 *SDSGE_RESTRICT y, i64 n, const f64 *a,
+                                  const f64 *b) {
+  f64 z;
+  for (i64 i = 0; i < n; i++) {
+    sdsge_affine_to_unit(&x[i], &z, a, b);
+    sdsge_logit_grad_fwd(&z, &y[i]);
+    y[i] /= (*b - *a);
+  }
+}
+
+void sdsge_aff_logit_grad_inv(const f64 *y, f64 *x, const f64 *a,
+                              const f64 *b) {
+  sdsge_logit_grad_inv(y, x);
+  *x *= (*b - *a);
+}
+
+void sdsge_aff_logit_grad_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                  f64 *SDSGE_RESTRICT x, i64 n, const f64 *a,
+                                  const f64 *b) {
+  for (i64 i = 0; i < n; i++) {
+    sdsge_logit_grad_inv(&y[i], &x[i]);
+    x[i] *= (*b - *a);
+  }
+}
+
+void sdsge_aff_logit_ldet_abs_jac_fwd(const f64 *x, f64 *y, const f64 *a,
+                                      const f64 *b) {
+  f64 z;
+  sdsge_affine_to_unit(x, &z, a, b);
+  sdsge_logit_ldet_abs_jac_fwd(&z, y);
+  *y -= log(*b - *a);
+}
+
+void sdsge_aff_logit_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                          f64 *SDSGE_RESTRICT y, i64 n,
+                                          const f64 *a, const f64 *b) {
+  f64 z;
+  for (i64 i = 0; i < n; i++) {
+    sdsge_affine_to_unit(&x[i], &z, a, b);
+    sdsge_logit_ldet_abs_jac_fwd(&z, &y[i]);
+    y[i] -= log(*b - *a);
+  }
+}
+
+void sdsge_aff_logit_ldet_abs_jac_inv(const f64 *y, f64 *x, const f64 *a,
+                                      const f64 *b) {
+  sdsge_logit_ldet_abs_jac_inv(y, x);
+  *x += log(*b - *a);
+}
+
+void sdsge_aff_logit_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                          f64 *SDSGE_RESTRICT x, i64 n,
+                                          const f64 *a, const f64 *b) {
+  for (i64 i = 0; i < n; i++) {
+    sdsge_logit_ldet_abs_jac_inv(&y[i], &x[i]);
+    x[i] += log(*b - *a);
+  }
+}
+
+void sdsge_aff_logit_grad_ldet_abs_jac_inv(const f64 *y, f64 *x) {
+  sdsge_logit_grad_ldet_abs_jac_inv(y, x);
+}
+
+void sdsge_aff_logit_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                               f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    sdsge_logit_grad_ldet_abs_jac_inv(&y[i], &x[i]);
   }
 }
