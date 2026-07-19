@@ -54,16 +54,14 @@ kalman:
 ???+ info "No Standard Deviation Defaults"
     `SymbolicDSGE` does not infer measurement standard deviations when constructing $R$. Each configured observable needs an explicit standard deviation parameter.
 
-
 ## State Covariance
 
-State Covariance ($P$) defines the inter-state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an initial guess $P_0$ is provided through the configuration. `P0` supports diagonal and scaled identity initialization. Initial guesses are not relevant beyond an often short burn in period, but a well specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
+State Covariance ($P$) defines the inter-state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an optional initial guess $P_0$ is provided through the configuration. `P0` supports diagonal matrices and identity initialization. `P0` defaults to an identity matrix if not specified. Initial guesses are not relevant beyond an often short burn in period, but a well specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
 
 ```yaml
 kalman:
     P0:
         mode: diag # (1)!
-        scale: 10.0 # (2)!
         diag: # (3)!
             g: 1.0
             z: 1.0
@@ -72,12 +70,11 @@ kalman:
             x: 1.0
 ```
 
-1. `P0` construction mode. `#!python "eye"` uses $I_n \times \operatorname{scale}$ while `#!python "diag"` constructs the matrix from below defined diagonal values before scaling by `scale`.
-2. Scaling factor of P0.
-3. Diagonal entries of the covariance matrix.
+1. `P0` construction mode. `#!python "eye"` uses $I_n$ while `#!python "diag"` constructs the matrix from below defined diagonal values. 
+2. Diagonal entries of the covariance matrix.
 
 ???+ note "Diagonal Values"
-    The `diag` field is directly used as the matrix values before scaling. Therefore, entries in the `diag` field correspond to variances instead of standard deviations.
+    The `diag` field is directly used as the matrix values. Therefore, entries in the `diag` field correspond to variances instead of standard deviations.
 
 ## Filter Options
 

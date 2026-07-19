@@ -11,12 +11,11 @@ reference_filter_step(
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
     x0: ndarray | None = None,
-    p0_mode: Literal["diag", "eye"] | None = None,
-    p0_scale: float | None = None,
+    P0: ndarray | None = None,
+    R: ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool | None = None,
     return_shocks: bool = False,
-    R: ndarray | None = None,
 ) -> MCStep
 ```
 
@@ -32,12 +31,11 @@ __Inputs:__
 | filter_mode | `"linear"` | Filter mode: `"linear"`, `"extended"`, or `"unscented"`. |
 | observables | `None` | Observable names passed to `reference.kalman(...)`. |
 | x0 | `None` | Initial state override. |
-| p0_mode | `None` | Initial covariance construction mode. |
-| p0_scale | `None` | Initial covariance scale override. |
+| P0 | `None` | Initial state covariance override. `None` uses the `P0` matrix from the reference model's `KalmanConfig`. |
+| R | `None` | Measurement error covariance override. |
 | jitter | `None` | Filter jitter override. |
 | symmetrize | `None` | Symmetrization override. |
 | return_shocks | `False` | Return shock estimates when supported by the selected filter mode. |
-| R | `None` | Measurement error covariance override. |
 
 __Downstream Fields:__
 
