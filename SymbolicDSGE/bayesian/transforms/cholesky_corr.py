@@ -8,6 +8,10 @@ from numpy.typing import NDArray
 
 from .transform import Transform, TransformMethod
 from ..support import Support
+from ..._ckernels.estimation import (
+    cov_from_unconstrained,
+    unconstrained_from_corr_chol,
+)
 
 NDF = NDArray[np.float64]
 
@@ -97,19 +101,11 @@ class CholeskyCorrTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        # The CPC (unconstrained z) <-> correlation-Cholesky-factor recursion is
+        # already native in ``_ckernels.estimation``; delegate rather than keep a
+        # numpy copy. Validation of the input factor stays here.
         L = _validate_corr_chol(np.asarray(x, dtype=float64), self._K)
-        z = np.empty(((self._K * (self._K - 1)) // 2,), dtype=float64)
-        idx = 0
-        for k in range(1, self._K):
-            rem = float64(1.0)
-            for j in range(k):
-                v = float64(np.sqrt(max(rem, 1e-14)))
-                cpc = float64(L[k, j] / v) if v > 0.0 else float64(0.0)
-                cpc = float64(np.clip(cpc, -1.0 + 1e-14, 1.0 - 1e-14))
-                z[idx] = float64(np.arctanh(cpc))
-                rem = float64(rem - L[k, j] * L[k, j])
-                idx += 1
-        return z
+        return unconstrained_from_corr_chol(L)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -117,19 +113,11 @@ class CholeskyCorrTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        # std = ones -> the returned covariance is the correlation and its factor
+        # L is the correlation Cholesky factor (native, shared with the estimator
+        # hot path via backend._corr_chol_from_unconstrained).
         z, _ = _coerce_z(y, self._K)
-        cpc = np.tanh(z).astype(float64, copy=False)
-        L = np.zeros((self._K, self._K), dtype=float64)
-        L[0, 0] = 1.0
-        idx = 0
-        for k in range(1, self._K):
-            rem = float64(1.0)
-            for j in range(k):
-                v = float64(np.sqrt(max(rem, 1e-14)))
-                L[k, j] = float64(cpc[idx] * v)
-                rem = float64(rem - L[k, j] * L[k, j])
-                idx += 1
-            L[k, k] = float64(np.sqrt(max(rem, 1e-14)))
+        _, L = cov_from_unconstrained(z, np.ones(self._K, dtype=float64))
         return L
 
     @overload
