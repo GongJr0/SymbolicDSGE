@@ -173,11 +173,10 @@ SolvedModel.kalman(
     *,
     observables: list[str] | None = None, # (1)!
     x0: ndarray | None = None, # (2)!
-    p0_mode: Literal['diag', 'eye'] | None = None, # (3)!
-    p0_scale: float | None = None, # (4)!
-    jitter: float | None = None, # (5)!
-    symmetrize: bool | None = None, # (6)!
+    jitter: float | None = None, # (3)!
+    symmetrize: bool | None = None, # (4)!
     return_shocks: bool = False,
+    P0: ndarray | None = None, # (5)!
     R: ndarray | None = None,
     _debug: bool = False
 ) -> FilterResult | UnscentedFilterResult
@@ -185,10 +184,9 @@ SolvedModel.kalman(
 
 1. `None`: Use all compiled observables in model order.
 2. `None`: Use a zero vector.
-3. `None`: Use `P0.mode` from `KalmanConfig`. If this resolves to `'diag'`, `P0.diag` must be present.
-4. `None`: Use `P0.scale` from `KalmanConfig`. If `P0.scale` is not specified, use '1.0'.
-5. `None`: Use `0.0`.
-6. `None`: Use `False`.
+3. `None`: Use `0.0`.
+4. `None`: Use `False`.
+5. `None`: Use `P0` from `KalmanConfig` (the parsed diagonal matrix).
 
 Run a Kalman Filter application on the observables specified.
 
@@ -203,11 +201,10 @@ __Inputs:__
 | filter_mode | `"linear"` for affine measurements, `"extended"` (EKF) for nonlinear measurements, or `"unscented"` (UKF), which runs against the model's second-order solution. `"unscented"` does not support `return_shocks`. Returns an `UnscentedFilterResult` instead of a `FilterResult`. |
 | observables | Name of corresponding model measurements. |
 | x0 | Initial state vector. |
-| p0_mode | Generation strategy for $P_0$. `diag` uses values given in the config (`#!python diag_mat * scale`) and `eye` uses (`#!python np.eye(n) * scale`) |
-| p0_scale | Scaling factor for the $P_0$ matrix. |
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
+| P0 | Initial state covariance override. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically. |
 | R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
 | _debug | Print debug information about filter inputs if `True`. |
 

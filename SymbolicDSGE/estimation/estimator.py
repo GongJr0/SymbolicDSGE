@@ -103,11 +103,10 @@ class Estimator:
         priors: Mapping[str, Any] | None = None,
         steady_state: NDF | dict[str, float] | None = None,
         x0: NDF | None = None,
-        p0_mode: str | None = None,
-        p0_scale: float | float64 | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
         R: NDF | None = None,
+        P0: NDF | None = None,
     ) -> None:
         self.solver = solver
         self.compiled = compiled
@@ -126,21 +125,20 @@ class Estimator:
 
         self.steady_state = steady_state
         self.x0 = x0
-        self.p0_mode = p0_mode
-        self.p0_scale = p0_scale
         self.jitter = jitter
         self.symmetrize = symmetrize
         self.R = R
+        self.P0 = P0
 
         self._prepared_filter = backend.prepare_filter_run(
             compiled=compiled,
+            kalman=self.kalman,
             y=y,
             observables=observables,
             filter_mode=self.filter_mode,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
             jitter=jitter,
             symmetrize=symmetrize,
+            P0=P0,
         )
         self.y = self._prepared_filter.y_reordered  # Don't use user order directly.
 
@@ -747,11 +745,10 @@ class Estimator:
             observables=self.observables,
             steady_state=self.steady_state,
             x0=self.x0,
-            p0_mode=self.p0_mode,
-            p0_scale=self.p0_scale,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
             R=self.R,
+            P0=self.P0,
             prepared=self._prepared_filter,
             q_corr=q_corr,
         )

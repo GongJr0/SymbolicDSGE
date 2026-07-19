@@ -1,20 +1,13 @@
 from dataclasses import dataclass
 from numpy.typing import NDArray
-from numpy import float64, array, eye, outer, ndarray
+from numpy import float64, array, eye, zeros, outer, ndarray
 from sympy import Symbol
-
-
-@dataclass(frozen=True)
-class P0Config:
-    mode: str
-    scale: float
-    diag: dict[str, float] | None
 
 
 @dataclass(frozen=True)
 class KalmanConfig:
     R: NDArray | None
-    P0: P0Config
+    P0: NDArray
     R_param_names: list[str] | None = None
     R_std_param_map: dict[str, str] | None = None
     R_corr_param_map: dict[frozenset[str], str | None] | None = None
@@ -44,6 +37,27 @@ def make_R(
         rho[j, i] = rho_ij
 
     return outer(sig_vec, sig_vec) * rho
+
+
+def make_diag_P0(
+    diag: dict[str, float], ordered_var_names: list[str]
+) -> NDArray[float64]:
+    n = len(ordered_var_names)
+    P0 = zeros((n, n), dtype=float64)
+
+    for i, var_name in enumerate(ordered_var_names):
+        P0[i, i] = diag[var_name]
+    return P0
+
+
+def make_P0(
+    mode: str, diag: dict[str, float] | None, ordered_var_names: list[str]
+) -> NDArray[float64]:
+    if mode == "diag" and diag:
+        return make_diag_P0(diag, ordered_var_names)
+    else:
+        n = len(ordered_var_names)
+        return eye(n, dtype=float64)
 
 
 @dataclass(frozen=True)

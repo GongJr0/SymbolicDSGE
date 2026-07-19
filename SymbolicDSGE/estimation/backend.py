@@ -8,7 +8,6 @@ import pandas as pd
 import sympy as sp
 from numpy import asarray, float64
 from numpy.typing import NDArray
-from scipy import optimize
 from sympy import Symbol
 
 from .._ckernels.core import measurement_eval, jacobian_eval
@@ -22,6 +21,8 @@ from ..core.config import SymbolGetterDict
 from ..core.solver import DSGESolver
 from ..kalman.config import KalmanConfig, make_R
 from ..kalman.filter import KalmanFilter
+from ..kalman.interface import _resolve_P0
+from ..kalman.validator import FilterMode
 
 NDF = NDArray[np.float64]
 
@@ -228,76 +229,6 @@ def build_C_d_from_cfunc(
     return C, d
 
 
-def _build_named_P0(
-    var_names: Sequence[str],
-    kalman: KalmanConfig | None,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
-) -> NDF | None:
-    """Build a P0 covariance over exactly ``var_names`` (eye/diag from config or
-    overrides). Returns ``None`` when no P0 is configured or requested, matching
-    the filter's 'use its own default' contract."""
-    n = len(var_names)
-    if kalman is None and p0_mode is None:
-        return None
-
-    if kalman is None:
-        mode = p0_mode
-        scale = float64(1.0 if p0_scale is None else p0_scale)
-        diag = None
-    else:
-        mode = p0_mode if p0_mode is not None else kalman.P0.mode
-        scale = float64(kalman.P0.scale) if p0_scale is None else float64(p0_scale)
-        diag = kalman.P0.diag
-
-    if mode == "eye":
-        return np.eye(n, dtype=float64) * scale
-
-    if mode == "diag":
-        if diag is None:
-            raise ValueError("P0 diag mode requires diagonal entries.")
-        mat = np.zeros((n, n), dtype=float64)
-        for i, var in enumerate(var_names):
-            if var not in diag:
-                raise ValueError(f"Missing P0 diagonal entry for variable '{var}'.")
-            mat[i, i] = float64(diag[var]) * scale
-        return mat
-
-    raise ValueError(f"Unrecognized p0_mode: {mode}")
-
-
-def build_P0(
-    compiled: CompiledModel,
-    kalman: KalmanConfig | None,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
-) -> NDF | None:
-    """P0 over all model variables (the linear/extended state space)."""
-    return _build_named_P0(compiled.var_names, kalman, p0_mode, p0_scale)
-
-
-def build_unscented_P0(
-    compiled: CompiledModel,
-    kalman: KalmanConfig | None,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
-) -> NDF | None:
-    """Augmented ``(2*n_state, 2*n_state)`` block-diagonal P0 for unscented
-    filtering: the state-variable P0 in the top-left block, an identity in the
-    bottom-right (the second-order augmentation channel), zeros off-diagonal.
-    Returns ``None`` when no state P0 is configured, matching :func:`build_P0`."""
-    n_state = compiled.n_state
-    state_P0 = _build_named_P0(
-        list(compiled.var_names[:n_state]), kalman, p0_mode, p0_scale
-    )
-    if state_P0 is None:
-        return None
-    out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
-    out[:n_state, :n_state] = state_P0
-    out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
-    return out
-
-
 def resolve_filter_options(
     jitter: float | float64 | None,
     symmetrize: bool | None,
@@ -310,21 +241,17 @@ def resolve_filter_options(
 def prepare_filter_run(
     *,
     compiled: CompiledModel,
+    kalman: KalmanConfig,
     y: NDF | pd.DataFrame,
     observables: list[str] | None,
     filter_mode: str,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
     jitter: float | float64 | None,
     symmetrize: bool | None,
+    P0: NDF | None = None,
 ) -> PreparedFilterRun:
-    kalman = compiled.kalman
     obs, y_reordered = reorder_observables(compiled, observables, y)
     mode = filter_mode
-    if mode == "unscented":
-        P0 = build_unscented_P0(compiled, kalman, p0_mode, p0_scale)
-    else:
-        P0 = build_P0(compiled, kalman, p0_mode, p0_scale)
+
     kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
 
     return PreparedFilterRun(
@@ -334,7 +261,11 @@ def prepare_filter_run(
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         jac_addr=compiled.construct_observable_jacobian_cfunc(obs).address,
         zero_state=np.zeros((len(compiled.cur_syms),), dtype=float64),
-        P0=P0,
+        P0=_resolve_P0(
+            FilterMode(mode),
+            compiled.n_state,
+            kalman.P0 if P0 is None else P0,
+        ),
         kf_jitter=kf_jitter,
         kf_sym=kf_sym,
     )
@@ -505,11 +436,10 @@ def evaluate_loglik(
     observables: list[str] | None,
     steady_state: NDF | dict[str, float] | None,
     x0: NDF | None,
-    p0_mode: str | None,
-    p0_scale: float | float64 | None,
     jitter: float | float64 | None,
     symmetrize: bool | None,
     R: NDF | None,
+    P0: NDF | None = None,
     prepared: PreparedFilterRun | None = None,
     q_corr: NDF | None = None,
 ) -> float64:
@@ -518,13 +448,13 @@ def evaluate_loglik(
         if prepared is not None
         else prepare_filter_run(
             compiled=compiled,
+            kalman=kalman,
             y=y,
             observables=observables,
             filter_mode=filter_mode,
-            p0_mode=p0_mode,
-            p0_scale=p0_scale,
             jitter=jitter,
             symmetrize=symmetrize,
+            P0=P0,
         )
     )
     sol = _get_solution(

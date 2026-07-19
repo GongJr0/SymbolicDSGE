@@ -9,7 +9,7 @@ from sympy import Symbol
 from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
-from SymbolicDSGE.kalman.config import KalmanConfig, P0Config
+from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.kalman.filter import KalmanFilter
 
 
@@ -228,39 +228,11 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
     assert np.isfinite(ll)
 
 
-def test_build_P0_branches():
-    compiled = SimpleNamespace(var_names=["g", "z"])
-
-    assert backend.build_P0(compiled, None, None, None) is None
-
-    eye = backend.build_P0(compiled, None, "eye", 2.0)
-    assert np.allclose(eye, 2.0 * np.eye(2))
-
-    kalman = KalmanConfig(
-        R=np.eye(1, dtype=np.float64),
-        P0=P0Config(mode="diag", scale=3.0, diag={"g": 1.0, "z": 2.0}),
-    )
-    p0 = backend.build_P0(compiled, kalman, None, None)
-    assert np.allclose(p0, np.diag([3.0, 6.0]))
-
-    bad_kalman = KalmanConfig(
-        R=np.eye(1, dtype=np.float64),
-        P0=P0Config(mode="diag", scale=1.0, diag={"g": 1.0}),
-    )
-    with pytest.raises(ValueError, match="Missing P0 diagonal entry"):
-        backend.build_P0(compiled, bad_kalman, None, None)
-
-    with pytest.raises(ValueError, match="requires diagonal entries"):
-        backend.build_P0(compiled, None, "diag", 1.0)
-    with pytest.raises(ValueError, match="Unrecognized p0_mode"):
-        backend.build_P0(compiled, None, "unknown", 1.0)
-
-
 def test_build_R_override_and_config_branches():
     compiled = SimpleNamespace(observable_names=["Infl", "Rate", "Out"])
     kalman = KalmanConfig(
         R=None,
-        P0=P0Config(mode="eye", scale=1.0, diag=None),
+        P0=np.eye(1, dtype=np.float64),
         R_std_param_map={"Infl": "s_i", "Rate": "s_r", "Out": "s_o"},
         R_corr_param_map={},
     )
@@ -293,13 +265,13 @@ def test_build_R_override_and_config_branches():
         R=np.array(
             [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
         ),
-        P0=P0Config(mode="eye", scale=1.0, diag=None),
+        P0=np.eye(1, dtype=np.float64),
     )
     out_const = backend.build_R(compiled, const_kalman, ["Rate", "Infl"], {})
     assert np.allclose(out_const, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
 
     # No override, no maps, no constant R: genuinely unavailable.
-    empty_kalman = KalmanConfig(R=None, P0=P0Config(mode="eye", scale=1.0, diag=None))
+    empty_kalman = KalmanConfig(R=None, P0=np.eye(1, dtype=np.float64))
     with pytest.raises(ValueError, match="R is not available"):
         backend.build_R(compiled, empty_kalman, ["Infl", "Rate"], {})
 
@@ -377,8 +349,6 @@ def test_evaluate_loglik_linear_matches_model_kalman(post82_bundle):
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
-        p0_mode=None,
-        p0_scale=None,
         jitter=None,
         symmetrize=None,
         R=None,
@@ -409,8 +379,6 @@ def test_evaluate_loglik_extended_matches_model_kalman(post82_bundle):
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
-        p0_mode=None,
-        p0_scale=None,
         jitter=None,
         symmetrize=None,
         R=None,
@@ -430,7 +398,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
     y = post82_bundle["y"]
     params = backend.extract_base_params(compiled)
 
-    with pytest.raises(ValueError, match="Unrecognized filter_mode"):
+    with pytest.raises(ValueError, match="is not a valid FilterMode"):
         backend.evaluate_loglik(
             solver=solver,
             compiled=compiled,
@@ -441,8 +409,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
             observables=["Infl", "Rate"],
             steady_state=steady,
             x0=None,
-            p0_mode=None,
-            p0_scale=None,
             jitter=None,
             symmetrize=None,
             R=None,
@@ -460,8 +426,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
-        p0_mode=None,
-        p0_scale=None,
         jitter=None,
         symmetrize=None,
         R=scaled_R,
@@ -476,8 +440,6 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         observables=["Infl", "Rate"],
         steady_state=steady,
         x0=None,
-        p0_mode=None,
-        p0_scale=None,
         jitter=None,
         symmetrize=None,
         R=None,
@@ -626,9 +588,10 @@ def rbc_ukf_bundle():
         / "rbc_second_order.yaml"
     )
     model, _ = ModelParser(path).get_all()
+    n_var = len(model.variables.variables)
     kalman = KalmanConfig(
         R=np.array([[0.01]], dtype=np.float64),
-        P0=P0Config(mode="eye", scale=0.1, diag=None),
+        P0=(0.1 * np.eye(n_var)).astype(np.float64),
     )
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
@@ -698,8 +661,6 @@ def test_evaluate_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
         observables=["c_obs"],
         steady_state=None,
         x0=x0,
-        p0_mode=None,
-        p0_scale=None,
         jitter=None,
         symmetrize=True,
         R=None,

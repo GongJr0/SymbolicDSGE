@@ -143,6 +143,73 @@ def test_kalman_R_arithmetic_covers_offdiag_and_missing_corr():
     assert set(kalman.R_param_names) == {"sig_x", "sig_y", "sig_z", "rho_xy"}
 
 
+def _p0_model_dict(p0: dict) -> dict:
+    """A minimal two-variable (x, y) model carrying a `kalman.P0` block."""
+    return {
+        "name": "P0TEST",
+        "variables": {"x": {"steady_state": None}, "y": {"steady_state": None}},
+        "parameters": ["rho", "sig"],
+        "shock_map": {"e_x": "x", "e_y": "y"},
+        "observables": ["x_obs", "y_obs"],
+        "equations": {
+            "model": ["x(t+1) = rho * x(t) + e_x", "y(t+1) = rho * y(t) + e_y"],
+            "constraint": {},
+            "observables": {"x_obs": "x(t)", "y_obs": "y(t)"},
+        },
+        "calibration": {
+            "parameters": {"rho": 0.9, "sig": 0.1},
+            "shocks": {"std": {"e_x": "sig", "e_y": "sig"}, "corr": {}},
+        },
+        "kalman": {"P0": p0},
+    }
+
+
+def test_validate_P0_accepts_exact_diag_and_eye():
+    ModelParser._validate_P0("diag", {"a": 1.0, "b": 2.0}, ["a", "b"])
+    ModelParser._validate_P0("eye", None, ["a", "b"])
+
+
+@pytest.mark.parametrize(
+    "mode, diag, declared, match",
+    [
+        ("diag", None, ["a"], "missing in configuration"),
+        ("diag", {"a": 1.0}, ["a", "b"], r"missing \['b'\], unknown \[\]"),
+        (
+            "diag",
+            {"a": 1.0, "b": 2.0, "c": 3.0},
+            ["a", "b"],
+            r"missing \[\], unknown \['c'\]",
+        ),
+        ("diag", {"a": 1.0, "x": 2.0}, ["a", "b"], r"missing \['b'\], unknown \['x'\]"),
+        ("diag", {"a": -1.0, "b": 2.0}, ["a", "b"], "must be non-negative"),
+        ("triangle", {}, ["a"], "Unrecognized P0 mode"),
+    ],
+)
+def test_validate_P0_rejects_bad_specs(mode, diag, declared, match):
+    with pytest.raises(ValueError, match=match):
+        ModelParser._validate_P0(mode, diag, declared)
+
+
+def test_parse_builds_p0_ndarray_in_declared_order():
+    text = yaml.safe_dump(
+        _p0_model_dict({"mode": "diag", "diag": {"x": 1.0, "y": 2.0}})
+    )
+    _, kalman = ModelParser.from_string(text).get_all()
+    np.testing.assert_array_equal(kalman.P0, np.diag([1.0, 2.0]).astype(np.float64))
+
+
+def test_parse_defaults_p0_to_identity_for_eye_mode():
+    text = yaml.safe_dump(_p0_model_dict({"mode": "eye"}))
+    _, kalman = ModelParser.from_string(text).get_all()
+    np.testing.assert_array_equal(kalman.P0, np.eye(2, dtype=np.float64))
+
+
+def test_parse_rejects_incomplete_p0_diag():
+    text = yaml.safe_dump(_p0_model_dict({"mode": "diag", "diag": {"x": 1.0}}))
+    with pytest.raises(ValueError, match=r"missing \['y'\], unknown \[\]"):
+        ModelParser.from_string(text)
+
+
 def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)

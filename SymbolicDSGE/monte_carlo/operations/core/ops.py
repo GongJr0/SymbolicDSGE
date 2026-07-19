@@ -119,11 +119,10 @@ def run_reference_filter(
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
     x0: NDF | None = None,
-    p0_mode: Literal["diag", "eye"] | None = None,
-    p0_scale: float | float64 | None = None,
     jitter: float | float64 | None = None,
     symmetrize: bool | None = None,
     return_shocks: bool = False,
+    P0: NDF | None = None,
     R: NDF | None = None,
 ) -> FilterRawResult | UnscentedFilterRawResult:
     del dgp, rep_idx
@@ -138,11 +137,10 @@ def run_reference_filter(
         filter_mode=filter_mode,
         observables=obs,
         x0=x0,
-        p0_mode=p0_mode,
-        p0_scale=p0_scale,
         jitter=jitter,
         symmetrize=symmetrize,
         return_shocks=return_shocks,
+        P0=P0,
         R=R,
     )
 

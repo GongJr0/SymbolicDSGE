@@ -16,7 +16,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | R | `#!python NDArray | None` | Numeric observation noise covariance matrix built from config parameters. |
-| P0 | `#!python P0Config` | `dataclass` storing the mode and values of the initial $P$ state. |
+| P0 | `#!python NDArray` | Diagonal initial-state covariance $P_0$ as a numeric matrix, built at parse time from the YAML `mode`/`diag` fields and stored in canonical (compiled) variable order. |
 | R_symbolic | `#!python sympy.Matrix | None` | Symbolic expression of the configured full `R` matrix. |
 | R_param_symbols | `#!python list[sympy.Symbol] | None` | Symbols required to build `R_symbolic`. |
 | R_param_names | `#!python list[str] | None` | Parameter names (ordered) passed to `R_builder`. |
@@ -27,21 +27,5 @@ __Fields:__
 ??? info "Symbolic `R` Metadata"
     `R_symbolic`/`R_builder` are used by estimation pipelines (e.g. iterative MCMC updates) to rebuild `R` from the current parameter draw when needed.
 
-
-```python
-@dataclass(frozen=True)
-class P0Config()
-```
-
-`P0Config` stores the required parameters to construct the initial $P$ state.
-
 ???+ info "P0 Shape"
-    `P0Config` supports diagonal and scaled identity initialization. It does not carry correlation fields.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| mode | `#!python str` | P0 creation mode. `diag` uses given diagonal values, `eye` uses an identity matrix of the appropriate shape. |
-| scale | `#!python float` | Scaling factor of the P0 matrix. (`#!python P0 = P0 * scale`)  |
-| diag | `#!python dict[str, float] | None` | Variable names and their diagonals (variances, not standard deviation) in the $P$ matrix. |
+    `P0` is resolved to a numeric diagonal matrix at parse time. The YAML `kalman.P0` block accepts `mode` (`diag` uses the given `diag` values, `eye` uses an identity of the appropriate shape) and, for `diag` mode, a `diag` map of variable names to variances (not standard deviations). It carries no correlation fields.

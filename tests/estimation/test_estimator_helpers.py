@@ -67,10 +67,3 @@ def test_method_kwargs_from_result_branches():
         _opt_result(method="L-BFGS-B", options={"maxiter": 5})
     )
     assert opt == {"method": "L-BFGS-B", "options": {"maxiter": 5}}
-
-
-def test_build_unscented_p0_returns_none_without_config():
-    # No kalman config and no p0 override -> the state-block P0 is None, so the
-    # augmented builder returns None too (matching build_P0).
-    compiled = type("C", (), {"n_state": 2, "var_names": ["a", "b", "c"]})()
-    assert backend.build_unscented_P0(compiled, None, None, None) is None

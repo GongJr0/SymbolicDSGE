@@ -11,6 +11,7 @@ import sympy as sp
 import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
 from SymbolicDSGE.core.linearization import Linearizer
+from SymbolicDSGE.kalman.config import KalmanConfig
 
 
 def _write_yaml(path: Path, text: str) -> Path:
@@ -104,7 +105,6 @@ def _mixed_methods_nonlinear_yaml() -> str:
             corr: {}
           P0:
             mode: eye
-            scale: 1.0
             diag: {}
         """
     )
@@ -151,7 +151,6 @@ def _mixed_methods_hand_linearized_yaml() -> str:
             corr: {}
           P0:
             mode: eye
-            scale: 1.0
             diag: {}
         """
     )
@@ -291,8 +290,11 @@ def test_linearize_model_marks_copy_and_solver_compiles_and_solves(tmp_path):
 def test_linearized_model_supports_likelihood_evaluation(tmp_path):
     path = _write_yaml(tmp_path / "nonlinear_loglik.yaml", _nonlinear_model_yaml())
 
-    model, kalman = ModelParser(path).get_all()
+    model, _ = ModelParser(path).get_all()
     linearized = linearize_model(model)
+    # The nonlinear fixture has no `kalman:` block, so supply a config directly:
+    # 2 model variables (a, k) -> P0 is 2x2, 1 observable (AObs) -> R is 1x1.
+    kalman = KalmanConfig(R=np.eye(1, dtype=np.float64), P0=np.eye(2, dtype=np.float64))
     solver = DSGESolver(linearized, kalman)
     compiled = solver.compile()
 
@@ -310,8 +312,6 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
         observables=["AObs"],
         steady_state=np.zeros((2,), dtype=np.float64),
         x0=None,
-        p0_mode=None,
-        p0_scale=None,
         jitter=None,
         symmetrize=None,
         R=np.eye(1, dtype=np.float64),

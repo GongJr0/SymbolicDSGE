@@ -24,9 +24,8 @@ from .config import (
     PairGetterDict,
     FunctionGetterDict,
 )
-from ..kalman.config import KalmanConfig, P0Config, make_R
+from ..kalman.config import KalmanConfig, make_R, make_P0
 from .linearization import LinearizationMethod
-
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
@@ -53,7 +52,7 @@ _ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "observables"})
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
 _ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
 _ALLOWED_KALMAN_KEYS = frozenset({"P0", "R"})
-_ALLOWED_P0_KEYS = frozenset({"mode", "scale", "diag"})
+_ALLOWED_P0_KEYS = frozenset({"mode", "diag"})
 _ALLOWED_R_KEYS = frozenset({"std", "corr"})
 
 
@@ -199,9 +198,7 @@ class ModelParser:
             symbolically_linearized=False,
         )
 
-        kalman_cfg = self._parse_kalman_if_present(
-            data, _LOCALS, parameters, observables
-        )
+        kalman_cfg = self._parse_kalman_if_present(data, _LOCALS, parameters)
         return data, ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
 
     def to_yaml(
@@ -230,9 +227,6 @@ class ModelParser:
         for key in ("parameters", "variables", "observables"):
             if isinstance(data_out.get(key), list):
                 data_out[key] = InlineList(data_out[key])
-        kalman = data_out.get("kalman")
-        if isinstance(kalman, dict) and isinstance(kalman.get("y"), list):
-            kalman["y"] = InlineList(kalman["y"])
 
         yaml.add_representer(InlineList, _list_representer)
         buffer = StringIO()
@@ -591,11 +585,33 @@ class ModelParser:
         return shock_std, shock_corr
 
     @staticmethod
+    def _validate_P0(
+        mode: str,
+        diag: dict[str, float] | None,
+        declared_var_names: list[str],
+    ) -> None:
+        if mode == "diag":
+            if diag is None:
+                raise ValueError("P0 diagonal specification missing in configuration.")
+            declared_set = set(declared_var_names)
+            diag_set = set(diag)
+            if declared_set != diag_set:
+                missing = sorted(declared_set - diag_set)
+                unknown = sorted(diag_set - declared_set)
+                raise ValueError(
+                    "P0 diagonal specification must list exactly the model variables; "
+                    f"missing {missing}, unknown {unknown}."
+                )
+            if any(v < 0 for v in diag.values()):
+                raise ValueError("P0 diagonal entries must be non-negative.")
+        elif mode != "eye":
+            raise ValueError(f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'.")
+
+    @staticmethod
     def _parse_kalman_if_present(
         data: dict[str, Any],
         _LOCALS: dict[str, Any],
         parameters: SymbolGetterDict[Symbol, float64],
-        observables: list[Symbol],
     ) -> KalmanConfig | None:
         kalman_data = data.get("kalman")
         if not kalman_data:
@@ -604,10 +620,12 @@ class ModelParser:
         y_order = [_LOCALS[o] for o in data["observables"]]
         obs_names = [o.name for o in y_order]
 
-        P0 = kalman_data.get("P0", {}) or {}
-        P0_mode = P0.get("mode", "diag")
-        P0_scale = float64(P0.get("scale", 1.0))
-        P0_diag = P0.get("diag", None)
+        declared_var_names, _ = ModelParser._coerce_variable_data(data)
+
+        P0_cfg = kalman_data.get("P0", {}) or {}
+        P0_mode = P0_cfg.get("mode", "eye")
+        P0_diag = P0_cfg.get("diag", None)
+        ModelParser._validate_P0(P0_mode, P0_diag, declared_var_names)
 
         R: ndarray | None
         r_param_symbols: list[Symbol] | None
@@ -671,15 +689,11 @@ class ModelParser:
             R_std_param_map = None
             R_corr_param_map = {}
 
-        P0_cfg = P0Config(
-            mode=P0_mode,
-            scale=P0_scale,
-            diag=P0_diag,
-        )
+        P0 = make_P0(P0_mode, P0_diag, declared_var_names)
 
         return KalmanConfig(
             R=R,
-            P0=P0_cfg,
+            P0=P0,
             R_param_names=R_param_names,
             R_std_param_map=R_std_param_map,
             R_corr_param_map=R_corr_param_map,
