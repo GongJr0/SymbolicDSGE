@@ -685,3 +685,93 @@ void sdsge_upper_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
     x[i] = 1.0;
   }
 }
+
+/* TANH TRANSFORM */
+
+/* log(2), for the stable log-sech^2 below. */
+#define SDSGE_LN2 0.6931471805599453
+
+/* log(sech^2(y)) = log(1 - tanh^2(y)), written to avoid both the 1 - tanh^2
+   cancellation as tanh -> +-1 and the cosh overflow for large |y|. */
+static inline f64 sdsge_log_sech2(f64 y) {
+  f64 ay = fabs(y);
+  return 2.0 * (SDSGE_LN2 - ay - log1p(exp(-2.0 * ay)));
+}
+
+void sdsge_tanh_fwd(const f64 *x, f64 *y) { *y = atanh(*x); }
+
+void sdsge_tanh_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                        i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = atanh(x[i]);
+  }
+}
+
+void sdsge_tanh_inv(const f64 *y, f64 *x) { *x = tanh(*y); }
+
+void sdsge_tanh_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                        i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = tanh(y[i]);
+  }
+}
+
+/* dy/dx = 1 / (1 - x^2), factored as (1-x)(1+x) to keep precision near +-1. */
+void sdsge_tanh_grad_fwd(const f64 *x, f64 *y) {
+  *y = 1.0 / ((1.0 - *x) * (1.0 + *x));
+}
+
+void sdsge_tanh_grad_fwd_arr(const f64 *SDSGE_RESTRICT x, f64 *SDSGE_RESTRICT y,
+                             i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = 1.0 / ((1.0 - x[i]) * (1.0 + x[i]));
+  }
+}
+
+/* dx/dy = 1 - tanh^2(y) = sech^2(y); 1/cosh^2 avoids the cancellation. */
+void sdsge_tanh_grad_inv(const f64 *y, f64 *x) {
+  f64 c = cosh(*y);
+  *x = 1.0 / (c * c);
+}
+
+void sdsge_tanh_grad_inv_arr(const f64 *SDSGE_RESTRICT y, f64 *SDSGE_RESTRICT x,
+                             i64 n) {
+  f64 c;
+  for (i64 i = 0; i < n; i++) {
+    c = cosh(y[i]);
+    x[i] = 1.0 / (c * c);
+  }
+}
+
+void sdsge_tanh_ldet_abs_jac_fwd(const f64 *x, f64 *y) {
+  *y = -log((1.0 - *x) * (1.0 + *x));
+}
+
+void sdsge_tanh_ldet_abs_jac_fwd_arr(const f64 *SDSGE_RESTRICT x,
+                                     f64 *SDSGE_RESTRICT y, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    y[i] = -log((1.0 - x[i]) * (1.0 + x[i]));
+  }
+}
+
+void sdsge_tanh_ldet_abs_jac_inv(const f64 *y, f64 *x) {
+  *x = sdsge_log_sech2(*y);
+}
+
+void sdsge_tanh_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                     f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = sdsge_log_sech2(y[i]);
+  }
+}
+
+void sdsge_tanh_grad_ldet_abs_jac_inv(const f64 *y, f64 *x) {
+  *x = -2.0 * tanh(*y);
+}
+
+void sdsge_tanh_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
+                                          f64 *SDSGE_RESTRICT x, i64 n) {
+  for (i64 i = 0; i < n; i++) {
+    x[i] = -2.0 * tanh(y[i]);
+  }
+}

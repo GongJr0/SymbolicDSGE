@@ -30,6 +30,7 @@ _LOG_INV_DOM = np.array([-5.0, -1.0, 0.0, 1.0, 5.0])
 _UNIT_DOM = np.array([1e-4, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 1.0 - 1e-4])
 _REAL_DOM = np.array([-6.0, -2.0, -0.5, 0.0, 0.5, 2.0, 6.0])
 _POS_DOM = np.array([1e-3, 0.1, 0.5, 1.0, 2.0, 10.0])
+_CORR_DOM = np.array([-1.0 + 1e-4, -0.9, -0.5, -0.1, 0.1, 0.5, 0.9, 1.0 - 1e-4])
 
 _FWD_FAMILY = ("{n}_fwd", "{n}_grad_fwd", "{n}_ldet_abs_jac_fwd")
 _INV_FAMILY = (
@@ -45,6 +46,7 @@ for _name, _fwd_dom, _inv_dom in (
     ("logit", _UNIT_DOM, _REAL_DOM),
     ("probit", _UNIT_DOM, _REAL_DOM),
     ("softplus", _POS_DOM, _REAL_DOM),
+    ("tanh", _CORR_DOM, _REAL_DOM),
 ):
     _CASES += [(t.format(n=_name), _fwd_dom) for t in _FWD_FAMILY]
     _CASES += [(t.format(n=_name), _inv_dom) for t in _INV_FAMILY]

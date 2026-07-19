@@ -274,3 +274,36 @@ def upper_ldet_abs_jac_inv(y):
 
 def upper_grad_ldet_abs_jac_inv(y):
     return np.ones_like(np.asarray(y, dtype=float64))
+
+
+# --- tanh ((-1, 1) <-> R) ---------------------------------------------------
+# grad_inv / ldj_inv use 1/cosh^2 and -2*log(cosh) rather than 1 - tanh^2 to
+# avoid the cancellation as tanh -> +-1 (matches the kernel's stable forms).
+def tanh_fwd(x):
+    return np.arctanh(x)
+
+
+def tanh_inv(y):
+    return np.tanh(y)
+
+
+def tanh_grad_fwd(x):
+    x = np.asarray(x, dtype=float64)
+    return 1.0 / ((1.0 - x) * (1.0 + x))
+
+
+def tanh_grad_inv(y):
+    return 1.0 / np.cosh(np.asarray(y, dtype=float64)) ** 2
+
+
+def tanh_ldet_abs_jac_fwd(x):
+    x = np.asarray(x, dtype=float64)
+    return -np.log((1.0 - x) * (1.0 + x))
+
+
+def tanh_ldet_abs_jac_inv(y):
+    return -2.0 * np.log(np.cosh(np.asarray(y, dtype=float64)))
+
+
+def tanh_grad_ldet_abs_jac_inv(y):
+    return -2.0 * np.tanh(y)

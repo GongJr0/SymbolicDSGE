@@ -17,6 +17,7 @@ class TransformMethod(StrEnum):
     SOFTPLUS = "softplus"  # (0, inf)  via x=softplus(y)  (sampler-friendly alternative)
     LOGIT = "logit"  # (0, 1)    via y=log(x/(1-x))
     PROBIT = "probit"  # (0, 1)    via y=Phi^{-1}(x)
+    TANH = "tanh"  # (-1, 1)   via y=tanh^{-1}(x)
 
     AFFINE_LOGIT = "affine_logit"  # (low, high) via x=low+(high-low)*sigmoid(y)
     AFFINE_PROBIT = "affine_probit"  # (low, high) via x=low+(high-low)*Phi(y)

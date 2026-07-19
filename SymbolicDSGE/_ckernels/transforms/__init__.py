@@ -63,6 +63,14 @@ from ._transforms import (
     upper_ldet_abs_jac_fwd,
     upper_ldet_abs_jac_inv,
     upper_grad_ldet_abs_jac_inv,
+    # tanh
+    tanh_fwd,
+    tanh_inv,
+    tanh_grad_fwd,
+    tanh_grad_inv,
+    tanh_ldet_abs_jac_fwd,
+    tanh_ldet_abs_jac_inv,
+    tanh_grad_ldet_abs_jac_inv,
 )
 
 __all__ = [
@@ -122,4 +130,11 @@ __all__ = [
     "upper_ldet_abs_jac_fwd",
     "upper_ldet_abs_jac_inv",
     "upper_grad_ldet_abs_jac_inv",
+    "tanh_fwd",
+    "tanh_inv",
+    "tanh_grad_fwd",
+    "tanh_grad_inv",
+    "tanh_ldet_abs_jac_fwd",
+    "tanh_ldet_abs_jac_inv",
+    "tanh_grad_ldet_abs_jac_inv",
 ]

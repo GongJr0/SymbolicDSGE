@@ -8,6 +8,7 @@ from .probit import ProbitTransform
 from .lower_bounded import LowerBoundedTransform
 from .upper_bounded import UpperBoundedTransform
 from .softplus import SoftplusTransform
+from .tanh import TanhTransform
 from .transform_dispatch import get_transform
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "LowerBoundedTransform",
     "UpperBoundedTransform",
     "SoftplusTransform",
+    "TanhTransform",
     "get_transform",
 ]

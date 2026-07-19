@@ -14,6 +14,7 @@ from SymbolicDSGE.bayesian.transforms import (
     LowerBoundedTransform,
     ProbitTransform,
     SoftplusTransform,
+    TanhTransform,
     UpperBoundedTransform,
     get_transform,
 )
@@ -72,6 +73,13 @@ from SymbolicDSGE.bayesian.transforms.transform import Transform, TransformMetho
             float64(0.4),
             np.array([-0.3, 0.4, 1.2]),
             float64(2.1),
+        ),
+        (
+            "tanh",
+            TanhTransform(),
+            float64(0.4),
+            np.array([-0.6, 0.4, 0.8]),
+            float64(1.5),
         ),
     ],
     ids=lambda case: case[0],
@@ -191,6 +199,7 @@ def test_transform_dispatch_for_all_registered_methods():
         TransformMethod.AFFINE_PROBIT: AffineProbitTransform,
         TransformMethod.LOWER_BOUNDED: LowerBoundedTransform,
         TransformMethod.UPPER_BOUNDED: UpperBoundedTransform,
+        TransformMethod.TANH: TanhTransform,
         TransformMethod.CHOLESKY_CORR: CholeskyCorrTransform,
     }
     for method, klass in expected.items():
@@ -410,6 +419,7 @@ def test_cholesky_corr_transform_scalar_and_validation_error_branches():
             float64(np.inf),
             False,
         ),
+        (TanhTransform(), float64(0.5), float64(np.inf), False),
     ],
 )
 def test_transform_direct_methods_and_error_branches(
