@@ -16,6 +16,9 @@ from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms import (
     AffineLogitTransform,
     CholeskyCorrTransform,
+    Identity,
+    LogTransform,
+    TanhTransform,
 )
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
 from SymbolicDSGE.estimation.estimator import MissingConfigError, _MatrixPriorBlock
@@ -1012,6 +1015,9 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         y=np.zeros((3, 1), dtype=np.float64),
         estimated_params=["a"],
     )
+    # These branches drive _build_matrix_prior_blocks directly with monkeypatched
+    # resolutions; mark R_corr as a requested block so the loop runs over it.
+    est_base._requested_reserved_keys = ("R_corr",)
 
     res_dim1 = _MatrixPriorBlock(
         dim=1,
@@ -1083,6 +1089,7 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
         "Q_corr": LKJChol(eta=2.0, K=2, random_state=None),
     }
+    est._requested_reserved_keys = ("R_corr", "Q_corr")
     monkeypatch.setattr(est, "_resolve_R", lambda params=None: r_resolution)
     monkeypatch.setattr(est, "_resolve_Q", lambda params=None: q_resolution)
     with pytest.raises(ValueError, match="cannot share member parameters"):
@@ -1115,6 +1122,62 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
     bad_corr = np.array([[1.0, 1.2], [1.2, 1.0]], dtype=np.float64)
     with pytest.raises(ValueError, match="do not form a valid"):
         good_est._block_cpc_from_corr(good_block, bad_corr)
+
+
+def test_mle_std_member_without_prior_gets_log_transform():
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled_with_dense_r_block(),
+        y=np.zeros((4, 2), dtype=np.float64),
+        estimated_params=["meas_a"],
+    )
+    # A variance estimated prior-free is positivity-constrained by role.
+    assert isinstance(est._param_transforms["meas_a"], LogTransform)
+
+
+def test_mle_isolated_scalar_corr_without_prior_gets_tanh_transform():
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled_with_sparse_q_block(),
+        y=np.zeros((3, 1), dtype=np.float64),
+        estimated_params=["rho12"],
+    )
+    # rho12 is the sole named Q correlation (e1, e2): sparse and isolated, so it
+    # stays a standalone scalar tanh rather than folding into a block.
+    assert "Q_corr" not in est._matrix_blocks
+    assert isinstance(est._param_transforms["rho12"], TanhTransform)
+
+
+def test_mle_full_dense_corr_set_promotes_to_cpc_block():
+    est = Estimator(
+        solver=SimpleNamespace(),
+        compiled=_stub_compiled_with_dense_r_block(),
+        y=np.zeros((4, 2), dtype=np.float64),
+        estimated_params=["meas_rho_ab"],
+    )
+    # The dense R correlation set folds into an R_corr CPC block instead of a
+    # standalone scalar; its member is block-handled (scalar transform unused).
+    assert "R_corr" in est._matrix_blocks
+    assert "meas_rho_ab" in est._matrix_blocks["R_corr"].member_names
+    assert isinstance(est._param_transforms["meas_rho_ab"], Identity)
+
+
+def test_spd_std_member_rejects_conflicting_prior_transform():
+    # An Identity-transform prior on a variance would map onto R, not (0, inf),
+    # breaking the shared theta<->param map; rejected once, at construction.
+    prior = Estimator.make_prior(
+        distribution="normal",
+        parameters={"mean": 0.0, "std": 1.0},
+        transform="identity",
+    )
+    with pytest.raises(ValueError, match="requires a constraint to"):
+        Estimator(
+            solver=SimpleNamespace(),
+            compiled=_stub_compiled_with_dense_r_block(),
+            y=np.zeros((4, 2), dtype=np.float64),
+            estimated_params=["meas_a"],
+            priors={"meas_a": prior},
+        )
 
 
 def test_logprior_base_branch_and_logpost(monkeypatch):
