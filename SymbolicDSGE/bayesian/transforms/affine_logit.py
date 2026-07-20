@@ -1,12 +1,20 @@
-from scipy.special import expit
 from .transform import Transform, TransformMethod
-from ._affine_helpers import affine_to_unit, unit_to_affine
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
+
+from ..._ckernels.transforms import (
+    aff_logit_fwd,
+    aff_logit_inv,
+    aff_logit_grad_fwd,
+    aff_logit_grad_inv,
+    aff_logit_ldet_abs_jac_fwd,
+    aff_logit_ldet_abs_jac_inv,
+    aff_logit_grad_ldet_abs_jac_inv,
+)
 
 
 class AffineLogitTransform(Transform):
@@ -33,8 +41,7 @@ class AffineLogitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        z = affine_to_unit(x, self.low, self.high)
-        return np.log(z / (1 - z))
+        return aff_logit_fwd(x, self.low, self.high)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -42,8 +49,7 @@ class AffineLogitTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        z = float64(1.0) / (float64(1.0) + np.exp(-y))
-        return unit_to_affine(z, self.low, self.high)
+        return aff_logit_inv(y, self.low, self.high)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -51,9 +57,7 @@ class AffineLogitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = 1 / ((high-low) * z * (1 - z)), with z = (x-low)/(high-low)
-        z = affine_to_unit(x, self.low, self.high)
-        return float64(1.0) / (self._span * z * (1 - z))
+        return aff_logit_grad_fwd(x, self.low, self.high)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -61,9 +65,7 @@ class AffineLogitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dx/dy = (high-low) * sigmoid(y) * (1 - sigmoid(y))
-        z = float64(1.0) / (float64(1.0) + np.exp(-y))
-        return self._span * z * (1 - z)
+        return aff_logit_grad_inv(y, self.low, self.high)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -73,9 +75,7 @@ class AffineLogitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(high-low) - log(z) - log(1-z)
-        z = affine_to_unit(x, self.low, self.high)
-        return float64(-np.log(self._span) - np.log(z) - np.log(1 - z))
+        return aff_logit_ldet_abs_jac_fwd(x, self.low, self.high)
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -85,12 +85,7 @@ class AffineLogitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dx/dy| = log(high-low) + log(sigmoid(y)(1-sigmoid(y)))
-        #            = log(high-low) - y - 2*log(1 + exp(-y))
-        if self.maps_to.contains(y):
-            return float64(np.log(self._span) - y - 2.0 * np.log1p(np.exp(-y)))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return aff_logit_ldet_abs_jac_inv(y, self.low, self.high)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -102,14 +97,7 @@ class AffineLogitTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return float64(1 - 2 * expit(y))
-        else:
-            raise OutOfSupportError(y, self.maps_to)
-
-    @property
-    def _span(self) -> float64:
-        return float64(self.high - self.low)
+        return aff_logit_grad_ldet_abs_jac_inv(y)
 
     @property
     def support(self) -> Support:

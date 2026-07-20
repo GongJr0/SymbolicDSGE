@@ -174,6 +174,34 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
     )
 
 
+def test_mle_interacting_scalar_corrs_without_prior_hit_spd_gate(dense_lkj_bundle):
+    # Two of the three dense Q correlations, estimated prior-free as standalone
+    # scalars, share shock e_g. That is not a full dense set (no promotion) and a
+    # per-parameter tanh cannot guarantee joint SPD, so it fails fast toward Q_corr.
+    with pytest.raises(ValueError, match="joint positive-definiteness"):
+        Estimator(
+            solver=dense_lkj_bundle["solver"],
+            compiled=dense_lkj_bundle["compiled"],
+            y=dense_lkj_bundle["y"],
+            steady_state=dense_lkj_bundle["steady"],
+            estimated_params=["rho_gz", "rho_gr_shock"],
+        )
+
+
+def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
+    # All three dense Q correlations estimated prior-free fold into a Q_corr CPC
+    # block (SPD by construction) instead of tripping the gate.
+    est = Estimator(
+        solver=dense_lkj_bundle["solver"],
+        compiled=dense_lkj_bundle["compiled"],
+        y=dense_lkj_bundle["y"],
+        steady_state=dense_lkj_bundle["steady"],
+        estimated_params=["rho_gz", "rho_gr_shock", "rho_zr_shock"],
+    )
+    assert "Q_corr" in est._matrix_blocks
+    assert np.isfinite(est.loglik(est.theta0()))
+
+
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
     prior_spec = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     est = Estimator(

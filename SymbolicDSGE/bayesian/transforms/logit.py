@@ -1,12 +1,20 @@
 from .transform import Transform, TransformMethod
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from scipy.special import expit
+from ..._ckernels.transforms import (
+    logit_fwd,
+    logit_inv,
+    logit_grad_fwd,
+    logit_grad_inv,
+    logit_ldet_abs_jac_fwd,
+    logit_ldet_abs_jac_inv,
+    logit_grad_ldet_abs_jac_inv,
+)
 
 
 class LogitTransform(Transform):
@@ -22,7 +30,7 @@ class LogitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(np.log(x / (1 - x)))
+        return logit_fwd(x)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -30,7 +38,7 @@ class LogitTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(1 / (1 + np.exp(-y)))
+        return logit_inv(y)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -38,7 +46,7 @@ class LogitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        return float64(1 / (x * (1 - x)))
+        return logit_grad_fwd(x)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -46,8 +54,7 @@ class LogitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        p = self.inverse(y)
-        return float64(p * (1 - p))
+        return logit_grad_inv(y)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -57,7 +64,7 @@ class LogitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        return float64(-np.log(x) - np.log(1 - x))
+        return logit_ldet_abs_jac_fwd(x)
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -67,7 +74,7 @@ class LogitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        return float64(-y - 2 * np.log(1 + np.exp(-y)))
+        return logit_ldet_abs_jac_inv(y)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -79,7 +86,7 @@ class LogitTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        return float64(1 - 2 * expit(y))
+        return logit_grad_ldet_abs_jac_inv(y)
 
     @property
     def support(self) -> Support:

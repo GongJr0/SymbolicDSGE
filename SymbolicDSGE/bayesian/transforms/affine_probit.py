@@ -1,17 +1,23 @@
 from .transform import Transform, TransformMethod
-from ._affine_helpers import affine_to_unit, unit_to_affine
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from scipy.stats import norm
+from ..._ckernels.transforms import (
+    aff_probit_fwd,
+    aff_probit_inv,
+    aff_probit_grad_fwd,
+    aff_probit_grad_inv,
+    aff_probit_ldet_abs_jac_fwd,
+    aff_probit_ldet_abs_jac_inv,
+    aff_probit_grad_ldet_abs_jac_inv,
+)
 
 
 class AffineProbitTransform(Transform):
-
     def __init__(self, low: float64, high: float64):
         low = float64(low)
         high = float64(high)
@@ -35,8 +41,7 @@ class AffineProbitTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        z = affine_to_unit(x, self.low, self.high)
-        return float64(norm.ppf(z))
+        return aff_probit_fwd(x, self.low, self.high)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -44,8 +49,7 @@ class AffineProbitTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        z = float64(norm.cdf(y))
-        return unit_to_affine(z, self.low, self.high)
+        return aff_probit_inv(y, self.low, self.high)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -53,10 +57,7 @@ class AffineProbitTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = 1 / ((high-low) * phi(y)), where y = Phi^{-1}(z) and z = (x-low)/(high-low)
-        z = affine_to_unit(x, self.low, self.high)
-        y = float64(norm.ppf(z))
-        return float64(1.0 / (self._span * float64(norm.pdf(y))))
+        return aff_probit_grad_fwd(x, self.low, self.high)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -64,8 +65,7 @@ class AffineProbitTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dx/dy = (high-low) * phi(y)
-        return float64(self._span * norm.pdf(y))
+        return aff_probit_grad_inv(y, self.low, self.high)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -75,10 +75,7 @@ class AffineProbitTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(high-low) - log(phi(y))
-        z = affine_to_unit(x, self.low, self.high)
-        y = norm.ppf(z)
-        return float64(-np.log(self._span) - float64(norm.logpdf(y)))
+        return aff_probit_ldet_abs_jac_fwd(x, self.low, self.high)
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -88,8 +85,7 @@ class AffineProbitTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dx/dy| = log(high-low) + log(phi(y))
-        return float64(np.log(self._span) + float64(norm.logpdf(y)))
+        return aff_probit_ldet_abs_jac_inv(y, self.low, self.high)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -101,12 +97,7 @@ class AffineProbitTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # d/dy log|dx/dy| = d/dy log(phi(y)) = -y
-        return float64(-y)
-
-    @property
-    def _span(self) -> float64:
-        return float64(self.high - self.low)
+        return aff_probit_grad_ldet_abs_jac_inv(y)
 
     @property
     def support(self) -> Support:

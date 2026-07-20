@@ -1,14 +1,23 @@
 from .transform import Transform, TransformMethod
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
+from ..._ckernels.transforms import (
+    upper_fwd,
+    upper_inv,
+    upper_grad_fwd,
+    upper_grad_inv,
+    upper_ldet_abs_jac_fwd,
+    upper_ldet_abs_jac_inv,
+    upper_grad_ldet_abs_jac_inv,
+)
+
 
 class UpperBoundedTransform(Transform):
-
     def __init__(self, high: float64):
         self.high = float64(high)
 
@@ -18,22 +27,13 @@ class UpperBoundedTransform(Transform):
     def to_spec(self) -> tuple[str, dict[str, float]]:
         return TransformMethod.UPPER_BOUNDED.value, {"high": float(self.high)}
 
-    # ---- private helper ----
-    def _high_minus_x(
-        self, x: float64 | NDArray[float64]
-    ) -> float64 | NDArray[float64]:
-        return self.high - x
-
     @overload
     def forward(self, x: float64) -> float64: ...
     @overload
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return np.log(self._high_minus_x(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return upper_fwd(x, self.high)
 
     @overload
     def inverse(self, y: float64) -> float64: ...
@@ -41,10 +41,7 @@ class UpperBoundedTransform(Transform):
     def inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.maps_to.contains(y):
-            return self.high - np.exp(y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return upper_inv(y, self.high)
 
     @overload
     def grad_forward(self, x: float64) -> float64: ...
@@ -52,11 +49,7 @@ class UpperBoundedTransform(Transform):
     def grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dy/dx = -1 / (high - x)
-        if self.support.contains(x):
-            return -float64(1.0) / self._high_minus_x(x)
-        else:
-            raise OutOfSupportError(x, self.support)
+        return upper_grad_fwd(x, self.high)
 
     @overload
     def grad_inverse(self, y: float64) -> float64: ...
@@ -64,11 +57,7 @@ class UpperBoundedTransform(Transform):
     def grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_inverse(self, y: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        # dx/dy = -exp(y)
-        if self.maps_to.contains(y):
-            return -np.exp(y)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return upper_grad_inv(y)
 
     @overload
     def log_det_abs_jacobian_forward(self, x: float64) -> float64: ...
@@ -78,11 +67,7 @@ class UpperBoundedTransform(Transform):
     def log_det_abs_jacobian_forward(
         self, x: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dy/dx| = -log(high - x)
-        if self.support.contains(x):
-            return -np.log(self._high_minus_x(x))
-        else:
-            raise OutOfSupportError(x, self.support)
+        return upper_ldet_abs_jac_fwd(x, self.high)
 
     @overload
     def log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -92,11 +77,7 @@ class UpperBoundedTransform(Transform):
     def log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # log|dx/dy| = log(exp(y)) = y
-        if self.maps_to.contains(y):
-            return y
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return upper_ldet_abs_jac_inv(y)
 
     @overload
     def grad_log_det_abs_jacobian_inverse(self, y: float64) -> float64: ...
@@ -108,11 +89,7 @@ class UpperBoundedTransform(Transform):
     def grad_log_det_abs_jacobian_inverse(
         self, y: float64 | NDArray[float64]
     ) -> float64 | NDArray[float64]:
-        # grad_y log|dx/dy| = grad_y y = 1
-        if self.maps_to.contains(y):
-            return float64(1.0)
-        else:
-            raise OutOfSupportError(y, self.maps_to)
+        return upper_grad_ldet_abs_jac_inv(y)
 
     @property
     def support(self) -> Support:

@@ -15,6 +15,8 @@ from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..bayesian.transforms.cholesky_corr import CholeskyCorrTransform
 from ..bayesian.transforms.identity import Identity
+from ..bayesian.transforms.log import LogTransform
+from ..bayesian.transforms.tanh import TanhTransform
 from ..bayesian.transforms.transform import Transform
 from ..core.compiled_model import CompiledModel
 from ..core.solver import DSGESolver
@@ -154,6 +156,10 @@ class Estimator:
                 f"Known calibration parameters: {default_params}"
             )
 
+        # A fully-estimated dense correlation set is the reserved key by another
+        # name; fold it so those correlations take the CPC block, not scalar tanh.
+        requested_names_raw = self._promote_full_dense_corr_sets(requested_names_raw)
+
         r_is_target = ("R_corr" in requested_names_raw) or any(
             name
             for name in requested_names_raw
@@ -165,6 +171,12 @@ class Estimator:
                 "R cannot be supplied as a constant when 'R_corr' or any of its members are an estimation target."
             )
 
+        # A reserved matrix key requested for estimation builds a CPC (Cholesky)
+        # correlation block whether or not an LKJ prior is attached; the prior is
+        # optional density on top of the reparameterization.
+        self._requested_reserved_keys: tuple[_MatrixPriorKey, ...] = tuple(
+            k for k in self._reserved_matrix_keys if k in requested_names_raw
+        )
         self.priors = self._select_active_priors(requested_names_raw)
         self.param_names = self._expand_requested_params(requested_names_raw)
         self._param_index = {name: i for i, name in enumerate(self.param_names)}
@@ -174,19 +186,42 @@ class Estimator:
             for block in self._matrix_blocks.values()
             for name in block.member_names
         }
+        self._spd_std_members, self._spd_corr_members = self._spd_member_names()
+        self._corr_pairs = self._corr_pairs_by_name()
         identity = Identity()
+        # Support the constraining transform must map onto, so loglik and
+        # logprior share one theta<->param map.
+        std_support = (float64(0.0), float64(np.inf))
+        corr_support = (float64(-1.0), float64(1.0))
         self._param_transforms: dict[str, Transform] = {}
         for name in self.param_names:
-            tr: Transform = identity
-            if (
-                name not in self._matrix_member_names
-                and self.priors is not None
-                and name in self.priors
-            ):
-                prior_obj = self.priors[name]
-                if hasattr(prior_obj, "transform"):
-                    tr = cast(Transform, getattr(prior_obj, "transform"))
-            self._param_transforms[name] = tr
+            if name in self._matrix_member_names:
+                # Correlation member of a CPC block: the block owns its
+                # reparameterization (CholeskyCorr), so this scalar transform is
+                # never consulted.
+                self._param_transforms[name] = identity
+                continue
+            if name in self._spd_std_members:
+                # A variance is positivity-constrained by its role in Q/R,
+                # authoritatively. A conflicting prior transform is rejected.
+                self._param_transforms[name] = self._role_transform_for(
+                    name, LogTransform(), std_support
+                )
+                continue
+            if name in self._spd_corr_members:
+                # A correlation estimated as a standalone scalar (not via a block):
+                # tanh into (-1, 1). The joint-SPD gate governs only the prior-free
+                # role default. An explicit prior is the user's deliberate choice
+                # (its transform still bounds it, and non-SPD draws fall to -inf),
+                has_prior = self.priors is not None and name in self.priors
+                if not has_prior:
+                    self._assert_scalar_corr_spd_safe(name)
+                self._param_transforms[name] = self._role_transform_for(
+                    name, TanhTransform(), corr_support
+                )
+                continue
+            # Plain calibration parameter: honor an explicit prior transform.
+            self._param_transforms[name] = self._prior_transform_or(name, identity)
         self._packed_logprior: PackedLogPrior | None = build_packed_logprior(
             priors=self.priors,
             param_index=self._param_index,
@@ -194,6 +229,185 @@ class Estimator:
             matrix_member_names=self._matrix_member_names,
         )
         self._warning_signal_count = 0
+
+    def _spd_member_names(self) -> tuple[set[str], set[str]]:
+        """Names of the SPD-relevant std (diagonal) and correlation (off-diagonal)
+        parameters across the R and Q matrices, read straight from the parser's
+        name maps.
+
+        The two roles are kept separate because they need different constraining
+        transforms: a variance wants a positivity map, a correlation a (-1, 1)
+        map. Membership is deliberately independent of whether a prior exists, so
+        this drives the transform defaults on the prior-free (MLE) path, not just
+        the prior-gated CPC block.
+        """
+        std_members: set[str] = set()
+        corr_members: set[str] = set()
+        observed = self._active_observable_names()
+        active_shocks = self._active_shock_names()
+
+        r_std_map = getattr(self.kalman, "R_std_param_map", None) or {}
+        for obs, v in r_std_map.items():
+            if v is not None and (observed is None or str(obs) in observed):
+                std_members.add(v)
+        r_corr_map = getattr(self.kalman, "R_corr_param_map", None) or {}
+        for pair, v in r_corr_map.items():
+            if v is not None and (
+                observed is None or {str(x) for x in pair} <= observed
+            ):
+                corr_members.add(v)
+
+        calibration = self.compiled.config.calibration
+        shock_std = getattr(calibration, "shock_std", None) or {}
+        for shock, sym in shock_std.items():
+            if sym is not None and (
+                active_shocks is None or str(shock) in active_shocks
+            ):
+                std_members.add(sym.name)
+        shock_corr = getattr(calibration, "shock_corr", None) or {}
+        for pair, sym in shock_corr.items():
+            if sym is not None and (
+                active_shocks is None or {str(s) for s in pair} <= active_shocks
+            ):
+                corr_members.add(sym.name)
+
+        return std_members, corr_members
+
+    def _active_observable_names(self) -> set[str] | None:
+        """Observable labels actually in the R matrix, or ``None`` if unavailable
+        (then no filtering is applied). Correlations/variances of unobserved
+        variables never enter R, so they are not SPD-relevant."""
+        obs = getattr(self._prepared_filter, "observables", None)
+        if obs is None:
+            return None
+        return {str(o) for o in obs}
+
+    def _active_shock_names(self) -> set[str] | None:
+        compiled = self.compiled
+        try:
+            shock_map = compiled.config.shock_map
+            exogs = [str(v) for v in compiled.var_names[: compiled.n_exog]]
+            rev = {str(exo): str(shock) for shock, exo in shock_map.items()}
+            return {rev[e] for e in exogs if e in rev}
+        except Exception:
+            return None
+
+    def _promote_full_dense_corr_sets(self, requested: Sequence[str]) -> list[str]:
+        """Fold a fully-estimated *dense* correlation set into its reserved key.
+
+        When every off-diagonal correlation of R or Q is a dense named set and all
+        of its members are requested individually (e.g. the estimate-all default),
+        that is the same estimation target as the reserved key. Promoting it here
+        routes those correlations to the SPD-by-construction CPC block instead of
+        per-scalar tanh, and groups them into one contiguous theta run.
+        """
+        result = list(requested)
+        for key in self._reserved_matrix_keys:
+            if key in result:
+                continue
+            matrix_name = self._matrix_name_for_reserved_key(key)
+            try:
+                block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+            except Exception:
+                continue
+            if block.dim < 2:
+                continue
+            expected = (block.dim * (block.dim - 1)) // 2
+            members = set(block.member_names)
+            dense = len(block.member_names) == expected
+            if not (dense and members and members.issubset(result)):
+                continue
+            folded: list[str] = []
+            inserted = False
+            for name in result:
+                if name in members:
+                    if not inserted:
+                        folded.append(key)
+                        inserted = True
+                    continue
+                folded.append(name)
+            result = folded
+        return result
+
+    def _corr_pairs_by_name(self) -> dict[str, tuple[str, frozenset[str]]]:
+        """Map each named correlation parameter to ``(matrix_key, {var_a, var_b})``,
+        for the joint-SPD safety gate on standalone scalar correlations."""
+        out: dict[str, tuple[str, frozenset[str]]] = {}
+        observed = self._active_observable_names()
+        active_shocks = self._active_shock_names()
+        r_corr_map = getattr(self.kalman, "R_corr_param_map", None) or {}
+        for pair, nm in r_corr_map.items():
+            vars_ = frozenset(str(v) for v in pair)
+            if nm is not None and (observed is None or vars_ <= observed):
+                out[nm] = ("R_corr", vars_)
+        shock_corr = getattr(self.compiled.config.calibration, "shock_corr", None) or {}
+        for pair, sym in shock_corr.items():
+            vars_ = frozenset(str(s) for s in pair)
+            if sym is not None and (active_shocks is None or vars_ <= active_shocks):
+                out[sym.name] = ("Q_corr", vars_)
+        return out
+
+    def _prior_transform_or(self, name: str, default: Transform) -> Transform:
+        """The transform an explicit prior on ``name`` carries, else ``default``."""
+        if self.priors is not None and name in self.priors:
+            prior_obj = self.priors[name]
+            if hasattr(prior_obj, "transform"):
+                return cast(Transform, getattr(prior_obj, "transform"))
+        return default
+
+    def _role_transform_for(
+        self,
+        name: str,
+        default: Transform,
+        role_support: tuple[float64, float64],
+    ) -> Transform:
+        """Role-authoritative constraining transform for an SPD member.
+
+        With no prior on the member, returns the role default (Log for a
+        variance, Tanh for a correlation). With a prior, the prior's transform is
+        honored only if it constrains to the same domain.
+        """
+        low, high = role_support
+        if self.priors is not None and name in self.priors:
+            prior_obj = self.priors[name]
+            if hasattr(prior_obj, "transform"):
+                tr = cast(Transform, getattr(prior_obj, "transform"))
+                sup = tr.support
+                if not (sup.low == low and sup.high == high):
+                    raise ValueError(
+                        f"Prior on SPD parameter '{name}' uses a transform constraining "
+                        f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
+                        f"requires a constraint to ({low}, {high}). Supply a prior whose "
+                        f"transform matches that domain, or drop the prior to take the "
+                        f"role default."
+                    )
+                return tr
+        return default
+
+    def _assert_scalar_corr_spd_safe(self, name: str) -> None:
+        """Fail fast when estimating ``name`` as a standalone scalar correlation
+        can't guarantee a joint-SPD matrix.
+        """
+        info = self._corr_pairs.get(name)
+        if info is None:
+            return
+        matrix_key, pair = info
+        for other_name, (other_key, other_pair) in self._corr_pairs.items():
+            if other_name == name or other_key != matrix_key:
+                continue
+            if not (pair & other_pair):
+                continue
+            estimated = other_name in self._param_index
+            fixed_nonzero = float(self._base_params.get(other_name, 0.0)) != 0.0
+            if estimated or fixed_nonzero:
+                shared = ", ".join(sorted(pair & other_pair))
+                raise ValueError(
+                    f"Correlation '{name}' is estimated as a standalone scalar, but "
+                    f"variable(s) [{shared}] also carry another estimated or nonzero "
+                    f"correlation ('{other_name}') in the same matrix, so a per-parameter "
+                    f"tanh cannot guarantee joint positive-definiteness. Estimate the whole "
+                    f"correlation block via '{matrix_key}' (Cholesky reparameterization) instead."
+                )
 
     def _requested_param_keys(
         self,
@@ -406,22 +620,18 @@ class Estimator:
         )
 
     def _build_matrix_prior_blocks(self) -> dict[str, _MatrixPriorBlock]:
-        if self.priors is None:
-            return {}
-
+        # A reserved key requested for estimation builds a dense CPC correlation
+        # block regardless of priors -- this is the SPD-by-construction Cholesky
+        # reparameterization. An LKJChol prior, when present, is validated and
+        # attached as optional density; without one the block carries prior=None
+        # (pure reparameterization, e.g. the MLE path).
         blocks: dict[str, _MatrixPriorBlock] = {}
         claimed_names: set[str] = set()
-        for key in self._reserved_matrix_keys:
-            if key not in self.priors:
-                continue
-
-            lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
+        for key in self._requested_reserved_keys:
             matrix_name = self._matrix_name_for_reserved_key(key)
             block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
             if block.dim < 2:
-                raise ValueError(
-                    f"LKJChol prior on {key} requires a matrix of dimension at least 2."
-                )
+                raise ValueError(f"{key} requires a matrix of dimension at least 2.")
             present = {(int(r), int(c)) for r, c in block.positions}
             missing_pairs = [
                 (block.labels[row], block.labels[col])
@@ -450,34 +660,14 @@ class Estimator:
             ]
             if missing_estimated:
                 raise ValueError(
-                    f"LKJChol prior on {key} requires all correlation members to be estimated. "
+                    f"{key} requires all correlation members to be estimated. "
                     f"Missing from estimated_params: {missing_estimated}."
-                )
-
-            scalar_conflicts = [
-                name
-                for name in block.member_names
-                if self._input_priors is not None
-                and name in self._input_priors
-                and name not in self._reserved_matrix_keys
-            ]
-            if scalar_conflicts:
-                raise ValueError(
-                    f"LKJChol prior on {key} cannot be combined with scalar priors on the same "
-                    f"correlation members: {scalar_conflicts}."
                 )
 
             overlap = sorted(claimed_names.intersection(block.member_names))
             if overlap:
                 raise ValueError(
-                    f"Matrix priors on R and Q cannot share member parameters. Overlap: {overlap}."
-                )
-
-            prior_dim = int(getattr(lkj_prior.dist, "_K", -1))
-            if prior_dim != block.dim:
-                raise ValueError(
-                    f"LKJChol prior on {key} has K={prior_dim}, but the resolved {key} "
-                    f"correlation dimension is {block.dim}."
+                    f"Correlation blocks on R and Q cannot share member parameters. Overlap: {overlap}."
                 )
 
             indices = [self._param_index[name] for name in block.member_names]
@@ -485,10 +675,33 @@ class Estimator:
             stop = start + len(indices)
             if indices != list(range(start, stop)):
                 raise ValueError(
-                    f"LKJChol prior on {key} expects its correlation members to "
-                    f"occupy a contiguous theta range; got scattered indices "
-                    f"{indices} for {block.member_names}."
+                    f"{key} expects its correlation members to occupy a contiguous "
+                    f"theta range; got scattered indices {indices} for "
+                    f"{block.member_names}."
                 )
+
+            lkj_prior = None
+            if self.priors is not None and key in self.priors:
+                lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
+                scalar_conflicts = [
+                    name
+                    for name in block.member_names
+                    if self._input_priors is not None
+                    and name in self._input_priors
+                    and name not in self._reserved_matrix_keys
+                ]
+                if scalar_conflicts:
+                    raise ValueError(
+                        f"LKJChol prior on {key} cannot be combined with scalar priors on the same "
+                        f"correlation members: {scalar_conflicts}."
+                    )
+                prior_dim = int(getattr(lkj_prior.dist, "_K", -1))
+                if prior_dim != block.dim:
+                    raise ValueError(
+                        f"LKJChol prior on {key} has K={prior_dim}, but the resolved {key} "
+                        f"correlation dimension is {block.dim}."
+                    )
+
             blocks[key] = block._replace(
                 theta_slice=slice(start, stop), prior=lkj_prior
             )
@@ -570,8 +783,9 @@ class Estimator:
                     scalar_priors[name] = prior.to_spec()
 
         matrix_priors = {
-            target: block.prior.to_spec()  # type: ignore[union-attr]
+            target: block.prior.to_spec()
             for target, block in self._matrix_blocks.items()
+            if block.prior is not None
         }
 
         if method_kwargs is not None:
@@ -762,8 +976,12 @@ class Estimator:
             return float64(0.0)
         lp = float64(0.0)
         for block in self._matrix_blocks.values():
+            if block.prior is None:
+                # Prior-free block (pure CPC reparameterization) contributes no
+                # density -- a flat prior over the correlation manifold.
+                continue
             theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
-            lp += float64(block.prior.logpdf(theta_block))  # type: ignore[union-attr]
+            lp += float64(block.prior.logpdf(theta_block))
 
         for name, prior in self.priors.items():
             if name in self._matrix_blocks or name in self._matrix_member_names:
