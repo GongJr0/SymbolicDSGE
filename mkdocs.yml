@@ -252,6 +252,7 @@ nav:
               - AffineProbit: documentation/prior_spec/transforms/affine_probit.md
               - LowerBounded: documentation/prior_spec/transforms/lower_bounded.md
               - UpperBounded: documentation/prior_spec/transforms/upper_bounded.md
+              - Tanh: documentation/prior_spec/transforms/tanh.md
       - Utilities:
           - FRED: documentation/utilities/FRED.md
           - KalmanFilter: documentation/utilities/KalmanFilter.md

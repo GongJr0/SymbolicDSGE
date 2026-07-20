@@ -77,6 +77,7 @@ Dispatched `transform` values accepted by `make_prior(...)`:
 | `AFFINE_PROBIT` | `"affine_probit"` | `low`, `high` |
 | `LOWER_BOUNDED` | `"lower_bounded"` | `low` |
 | `UPPER_BOUNDED` | `"upper_bounded"` | `high` |
+| `TANH` | `"tanh"` | none |
 
 Additional `TransformMethod` enum members currently not dispatched by `make_prior(...)`:
 
