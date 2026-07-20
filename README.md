@@ -118,7 +118,6 @@ Suggestions for improving or extending the documentation are welcome as issues.
 ```python
 from SymbolicDSGE import ModelParser
 from SymbolicDSGE import DSGESolver
-from numpy import float64, array
 
 # Read the YAML config (Equations, Measurements, Parameters, Optional Filter Spec)
 parsed = ModelParser("<path-to-config>.yaml").get_all()
@@ -126,15 +125,9 @@ model, kalman = parsed
 
 # Compile the model
 solver = DSGESolver(model, kalman)
-compiled = solver.compile(
-    variable_order=None,
-    params_order=None,
-    n_state=3,
-    n_exog=2,
-    linearize=False,
-)
+compiled = solver.compile()
+
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)), "\n")
-print("Equations as passed to the solver: \n", compiled.equations)
 ```
 ```text
 >>> Equations with symbols removed:
@@ -143,17 +136,13 @@ print("Equations as passed to the solver: \n", compiled.equations)
 -cur_r*rho_r - e_R + fwd_r + (rho_r - 1)*(fwd_Pi*psi_pi + fwd_x*psi_x)
 -cur_g*rho_g - e_g + fwd_g
 -cur_z*rho_z - e_z + fwd_z
-
-
-Equations as passed to the solver:
- <function DSGESolver.compile.<locals>.equations at 0x0000012D16AB5B20>
 ```
 ```python
 # Solve the compiled model
 sol = solver.solve(
     compiled,
     parameters=None,
-    steady_state=array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=float64),
+    steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 print("Is stable: ", sol.policy.stab == 0)
 print("Eigenvalues: ", sol.policy.eig)
