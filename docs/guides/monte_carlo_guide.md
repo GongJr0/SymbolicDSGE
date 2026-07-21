@@ -33,12 +33,12 @@ from SymbolicDSGE.monte_carlo.operations.core import (
 from SymbolicDSGE.monte_carlo.operations.tests import wald_test_step
 
 model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
-steady_state = np.zeros(5, dtype=np.float64)  # (2)!
+ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
 
 # Solve the reference model
 solver = DSGESolver(model, kalman)
 compiled = solver.compile()
-reference = solver.solve(compiled, steady_state=steady_state)
+reference = solver.solve(compiled, ss_seed=ss_seed)
 
 # Change parameters and re-compile to get the DGP model
 dgp_params = {str(k): v for k, v in model.calibration.parameters.items()} # (3)!
@@ -49,7 +49,7 @@ dgp_params["rho_z"] = 0.75 # AR persistence param
 dgp = solver.solve(
     compiled,
     parameters=dgp_params,
-    steady_state=steady_state,
+    ss_seed=ss_seed,
 )
 
 ```

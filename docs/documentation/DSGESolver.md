@@ -59,7 +59,7 @@ __Returns:__
 DSGESolver.solve(
     compiled: CompiledModel,
     parameters: dict[str, float] = None,
-    steady_state: ndarray[float] | dict[str, float] = None
+    ss_seed: ndarray[float] | dict[str, float] = None
 ) -> SolvedModel
 ```
 
@@ -71,7 +71,7 @@ Solves the given compiled model and returns a `#!python SolvedModel` object.
 |:---------|----------------:|
 | compiled | The `#!python CompiledModel` to solve. |
 | parameters | parameter values as dict to override the calibration config. |
-| steady_state | model variables' steady state. Defaults to zeroes. (often used in gap models) |
+| ss_seed | Newton seed for the steady state, in canonical variable order. Priority: explicit `ss_seed` > the model's configured symbolic steady state > zeros. A gap model seeds at 0 and converges in one step; a level model that declares its steady state in the config seeds itself. |
 
  &nbsp;
 
@@ -97,7 +97,7 @@ DSGESolver.estimate(
     filter_mode: str = "linear", # (3)!
     estimated_params: list[str] | None = None,
     priors: Mapping[str, Any] | None = None,
-    steady_state: np.ndarray | dict[str, float] | None = None,
+    ss_seed: np.ndarray | dict[str, float] | None = None,
     x0: np.ndarray | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
@@ -137,7 +137,7 @@ DSGESolver.estimate_and_solve(
     filter_mode: str = "linear",
     estimated_params: list[str] | None = None,
     priors: Mapping[str, Any] | None = None,
-    steady_state: np.ndarray | dict[str, float] | None = None,
+    ss_seed: np.ndarray | dict[str, float] | None = None,
     x0: np.ndarray | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,

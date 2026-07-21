@@ -100,7 +100,7 @@ from numpy import float64, array
 sol = solver.solve(
     compiled,
     parameters=None, # (1)!
-    steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
+    ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 print("Is stable: ", sol.policy.stab == 0)  # (2)!
 print("Eigenvalues: ", sol.policy.eig)
