@@ -120,6 +120,53 @@ static inline const f64 *sdsge_build_cov(const sdsge_cov_spec *spec,
   return out;
 }
 
+static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
+  const i64 n = b->dims.n_var;
+  klein_preproc(b->residual, b->steady_state, b->calib_vec, n, b->dims.n_par, n,
+                b->log_linear, s->a_real, s->b_real);
+  sdsge_widen_colmajor(s->a_real, s->s, n);
+  sdsge_widen_colmajor(s->b_real, s->t, n);
+  if (klein_qz(b->zgges, n, s->s, s->t, s->z) != KLEIN_QZ_OK) {
+    return 1;
+  }
+  sdsge_transpose_sq(s->s, n);
+  sdsge_transpose_sq(s->t, n);
+  sdsge_transpose_sq(s->z, n);
+  klein_postproc(s->s, s->t, s->z, b->dims.n_state, b->dims.n_ctrl, s->f, s->p,
+                 &s->stab, s->eig);
+  if (s->stab != 0) {
+    return 1;
+  }
+  sdsge_assemble_state_space(s->p, s->f, b->dims.n_state, b->dims.n_ctrl,
+                             b->dims.n_exog, s->A, s->B);
+  return 0;
+}
+
+/* Fold the log-prior into a computed loglik. Non-finite loglik or logprior ->
+ * the -inf sentinel; has_priors == 0 returns loglik as-is. */
+static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
+                               const f64 *SDSGE_RESTRICT theta, f64 ll,
+                               int has_priors) {
+  if (!isfinite(ll)) {
+    return -INFINITY;
+  }
+  if (!has_priors) {
+    return ll;
+  }
+  const sdsge_prior_tables *pr = &b->prior;
+  const f64 lp = sdsge_logprior_program(
+      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
+      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
+      (f64 *)pr->scalar_transform_params, pr->n_scalar,
+      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
+      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
+      (f64 *)pr->matrix_log_constants, pr->n_blocks);
+  if (!isfinite(lp)) {
+    return -INFINITY;
+  }
+  return ll + lp;
+}
+
 /* Linear measurement (C, d) from the meas / jac cfuncs at the linearization
  * point. C is n_obs*n_var, d is n_obs. */
 static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
@@ -132,39 +179,21 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                      int has_priors) {
   sdsge_obj_common *b = &ctx->base;
   sdsge_solve1 *s = &ctx->solve;
-  const i64 n = b->dims.n_var;
 
   sdsge_fill_params(b, theta);
-
   const f64 *Q =
       sdsge_build_cov(&b->q_spec, theta, b->params, b->std_q, b->corr_q, b->Q);
   const f64 *R =
       sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
 
-  klein_preproc(b->residual, b->steady_state, b->calib_vec, n, b->dims.n_par, n,
-                b->log_linear, s->a_real, s->b_real);
-  sdsge_widen_colmajor(s->a_real, s->s, n);
-  sdsge_widen_colmajor(s->b_real, s->t, n);
-  if (klein_qz(b->zgges, n, s->s, s->t, s->z) != KLEIN_QZ_OK) {
+  if (sdsge_solve1_run(b, s)) {
     b->bk_violations++;
     return -INFINITY;
   }
-  sdsge_transpose_sq(s->s, n);
-  sdsge_transpose_sq(s->t, n);
-  sdsge_transpose_sq(s->z, n);
-  klein_postproc(s->s, s->t, s->z, b->dims.n_state, b->dims.n_ctrl, s->f, s->p,
-                 &s->stab, s->eig);
-  if (s->stab != 0) {
-    b->bk_violations++;
-    return -INFINITY;
-  }
-  sdsge_assemble_state_space(s->p, s->f, b->dims.n_state, b->dims.n_ctrl,
-                             b->dims.n_exog, s->A, s->B);
-
   sdsge_build_measurement(ctx);
 
   f64 ll = 0.0;
-  kf_inputs in = {.n = n,
+  kf_inputs in = {.n = b->dims.n_var,
                   .m = b->dims.n_obs,
                   .k = b->dims.n_exog,
                   .T = b->dims.T,
@@ -181,26 +210,55 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                   .jitter = b->jitter,
                   .return_shocks = 0,
                   .store_history = 0};
-
   kf_outputs out = {.loglik = &ll};
-  if (kf_hot_loop(&in, &out) != KF_OK || !isfinite(ll)) {
+  if (kf_hot_loop(&in, &out) != KF_OK) {
+    return -INFINITY;
+  }
+  return sdsge_add_lp(b, theta, ll, has_priors);
+}
+
+f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
+                       int has_priors) {
+  sdsge_obj_common *b = &ctx->base;
+  sdsge_solve1 *s = &ctx->solve;
+
+  sdsge_fill_params(b, theta);
+  const f64 *Q =
+      sdsge_build_cov(&b->q_spec, theta, b->params, b->std_q, b->corr_q, b->Q);
+  const f64 *R =
+      sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
+
+  if (sdsge_solve1_run(b, s)) {
+    b->bk_violations++;
     return -INFINITY;
   }
 
-  if (!has_priors) {
-    return ll;
-  }
-
-  const sdsge_prior_tables *pr = &b->prior;
-  const f64 lp = sdsge_logprior_program(
-      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
-      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
-      (f64 *)pr->scalar_transform_params, pr->n_scalar,
-      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
-      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks);
-  if (!isfinite(lp)) {
+  /* No precomputed (C, d): the EKF relinearizes each step via the meas / jac
+   * cfuncs at the running state estimate. */
+  f64 ll = 0.0;
+  ekf_inputs in = {.meas = b->meas,
+                   .jac = b->jac,
+                   .A = s->A,
+                   .B = s->B,
+                   .calib_params = b->calib_vec,
+                   .Q = Q,
+                   .R = R,
+                   .y = b->y,
+                   .x0 = b->x0,
+                   .P0 = b->P0,
+                   .T = b->dims.T,
+                   .n = b->dims.n_var,
+                   .m = b->dims.n_obs,
+                   .k = b->dims.n_exog,
+                   .n_par = b->dims.n_par,
+                   .jitter = b->jitter,
+                   .symmetrize = b->symmetrize,
+                   .compute_y_filt = 0,
+                   .return_shocks = 0,
+                   .store_history = 0};
+  ekf_outputs out = {.loglik = &ll};
+  if (ekf_hot_loop(&in, &out) != KF_OK) {
     return -INFINITY;
   }
-  return ll + lp;
+  return sdsge_add_lp(b, theta, ll, has_priors);
 }

@@ -180,10 +180,9 @@ void sdsge_init_calib(f64 *SDSGE_RESTRICT calib_vec,
 /* Per-flavor objective: theta -> loglik (+ logprior if has_priors). */
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                      int has_priors);
+f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
+                       int has_priors);
 /*
- * f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT
- * theta, int has_priors);
- *
  * f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const f64 *SDSGE_RESTRICT
  * theta, int has_priors);
  * */
