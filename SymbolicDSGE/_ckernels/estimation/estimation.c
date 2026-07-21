@@ -38,8 +38,9 @@ static inline void sdsge_fill_params(sdsge_obj_common *base,
 }
 
 /* Real pencil (row-major) -> complex Schur input (column-major), widened. */
-static inline void sdsge_widen_colmajor(const f64 *SDSGE_RESTRICT a,
-                                        c128 *SDSGE_RESTRICT s, const i64 n) {
+static inline void sdsge_to_complex_colmajor(const f64 *SDSGE_RESTRICT a,
+                                             c128 *SDSGE_RESTRICT s,
+                                             const i64 n) {
   for (i64 i = 0; i < n; ++i) {
     for (i64 j = 0; j < n; ++j) {
       s[j * n + i] = c128_from_real(a[i * n + j]);
@@ -47,8 +48,15 @@ static inline void sdsge_widen_colmajor(const f64 *SDSGE_RESTRICT a,
   }
 }
 
-/* In-place square transpose (column-major <-> row-major). klein_qz emits the
- * Schur factors column-major (LAPACK), but klein_postproc reads row-major. */
+/* Real part of a contiguous complex buffer. */
+static inline void sdsge_real_part(const c128 *SDSGE_RESTRICT src,
+                                   f64 *SDSGE_RESTRICT dst, const i64 len) {
+  for (i64 k = 0; k < len; ++k) {
+    dst[k] = c128_real(src[k]);
+  }
+}
+
+/* In-place square transpose (column-major <-> row-major). */
 static inline void sdsge_transpose_sq(c128 *SDSGE_RESTRICT m, const i64 n) {
   for (i64 i = 0; i < n; ++i) {
     for (i64 j = i + 1; j < n; ++j) {
@@ -56,6 +64,24 @@ static inline void sdsge_transpose_sq(c128 *SDSGE_RESTRICT m, const i64 n) {
       m[i * n + j] = m[j * n + i];
       m[j * n + i] = tmp;
     }
+  }
+}
+
+static inline void sdsge_bx_from_B(const f64 *SDSGE_RESTRICT B,
+                                   const i64 n_state, const i64 n_exog,
+                                   f64 *SDSGE_RESTRICT out) {
+  /* out = B[:n_state, :] */
+  for (i64 k = 0; k < n_state * n_exog; ++k) {
+    out[k] = B[k];
+  }
+}
+
+static inline void sdsge_z0_from_x0(const f64 *SDSGE_RESTRICT x0,
+                                    const i64 n_state, f64 *SDSGE_RESTRICT z0) {
+  /* z0 = [x0; 0] */
+  for (i64 i = 0; i < n_state; ++i) {
+    z0[i] = x0[i];
+    z0[n_state + i] = 0.0;
   }
 }
 
@@ -124,8 +150,8 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
   const i64 n = b->dims.n_var;
   klein_preproc(b->residual, b->steady_state, b->calib_vec, n, b->dims.n_par, n,
                 b->log_linear, s->a_real, s->b_real);
-  sdsge_widen_colmajor(s->a_real, s->s, n);
-  sdsge_widen_colmajor(s->b_real, s->t, n);
+  sdsge_to_complex_colmajor(s->a_real, s->s, n);
+  sdsge_to_complex_colmajor(s->b_real, s->t, n);
   if (klein_qz(b->zgges, n, s->s, s->t, s->z) != KLEIN_QZ_OK) {
     return 1;
   }
