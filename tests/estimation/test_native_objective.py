@@ -24,7 +24,7 @@ def bundle(post82_test_model_path):
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, steady_state=steady)
+    solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
     std_map = model.calibration.shock_std

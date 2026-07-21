@@ -38,7 +38,7 @@ def _drive(path):
 
     # Config steady state, resolved at run time (RBC -> [0, k_ss, c_ss];
     # deviation-form models -> 0). No file I/O at collection time.
-    ss = DSGESolver._resolve_config_steady_state(compiled)
+    ss = DSGESolver._resolve_ss_seed(None, compiled)
 
     a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
     sol = klein_solve(cf, par, ss, n_state)

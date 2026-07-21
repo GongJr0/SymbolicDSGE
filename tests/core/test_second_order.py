@@ -298,7 +298,7 @@ def test_solve_order2_wiring():
     )
     # First order path is untouched: KleinSolution, no second-order tensors.
     # (levels model -> the expansion point must be supplied; zeros would fail BK.)
-    first = solver.solve(compiled, order=1, steady_state=[0.0, k_ss, c_ss])
+    first = solver.solve(compiled, order=1, ss_seed=[0.0, k_ss, c_ss])
     assert first.policy.order == 1
     assert not hasattr(first.policy, "gxx")
 
@@ -342,13 +342,3 @@ def test_rbc_second_order_irf_matches_dynare():
     out = solved.irf(["z"], T=_DYNARE_IRF.shape[0] - 1)["_X"]
 
     np.testing.assert_allclose(out, _DYNARE_IRF, rtol=2e-6, atol=2e-6)
-
-
-def test_solve_order2_rejects_inconsistent_steady_state():
-    """A steady_state= that does not clear F(ss, ss) is rejected rather than used
-    as a bad expansion point."""
-    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    with pytest.raises(ValueError, match="disagrees with the numerically solved"):
-        solver.solve(compiled, order=2, steady_state=[0.0, 1.0, 1.0])

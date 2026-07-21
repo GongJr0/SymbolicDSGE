@@ -142,7 +142,7 @@ class EstimationSpec:
     matrix_priors: dict[str, PriorSpec] = field(default_factory=dict)
     observables: list[str] | None = None
     method_kwargs: dict[str, Any] = field(default_factory=dict)
-    steady_state: list[float] | None = None
+    ss_seed: list[float] | None = None
     posterior_point: str = "mean"
 
     def __post_init__(self) -> None:
@@ -177,8 +177,8 @@ class EstimationSpec:
             }
         if self.observables is not None:
             out["observables"] = list(self.observables)
-        if self.steady_state is not None:
-            out["steady_state"] = [float(x) for x in self.steady_state]
+        if self.ss_seed is not None:
+            out["ss_seed"] = [float(x) for x in self.ss_seed]
         return out
 
     @classmethod
@@ -198,9 +198,9 @@ class EstimationSpec:
                 else None
             ),
             method_kwargs=dict(data.get("method_kwargs", {})),
-            steady_state=(
-                [float(x) for x in data["steady_state"]]
-                if data.get("steady_state") is not None
+            ss_seed=(
+                [float(x) for x in data["ss_seed"]]
+                if data.get("ss_seed") is not None
                 else None
             ),
             posterior_point=str(data.get("posterior_point", "mean")),
@@ -218,7 +218,7 @@ class EstimationSpec:
         matrix_priors: Mapping[str, PriorSpec] | None = None,
         observables: Sequence[str] | None = None,
         method_kwargs: Mapping[str, Any] | None = None,
-        steady_state: Sequence[float] | None = None,
+        ss_seed: Sequence[float] | None = None,
         posterior_point: str = "mean",
     ) -> EstimationSpec:
         """Build a spec from estimation *targets* alone, mirroring
@@ -260,9 +260,7 @@ class EstimationSpec:
             matrix_priors=dict(matrix_priors or {}),
             observables=list(observables) if observables is not None else None,
             method_kwargs=dict(method_kwargs or {}),
-            steady_state=(
-                [float(x) for x in steady_state] if steady_state is not None else None
-            ),
+            ss_seed=([float(x) for x in ss_seed] if ss_seed is not None else None),
             posterior_point=posterior_point,
         )
 

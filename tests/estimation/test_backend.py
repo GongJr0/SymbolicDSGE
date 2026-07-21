@@ -28,7 +28,7 @@ def post82_bundle(post82_test_model_path):
     compiled = solver.compile()
 
     steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, steady_state=steady)
+    solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
     std_map = model.calibration.shock_std
@@ -206,7 +206,7 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
         compiled=compiled,
         y=post82_bundle["y"],
         observables=["Infl", "Rate"],
-        steady_state=post82_bundle["steady"],
+        ss_seed=post82_bundle["steady"],
     )
 
     monkeypatch.setattr(
@@ -347,7 +347,7 @@ def test_evaluate_loglik_linear_matches_model_kalman(post82_bundle):
         params=params,
         filter_mode="linear",
         observables=["Infl", "Rate"],
-        steady_state=steady,
+        ss_seed=steady,
         x0=None,
         jitter=None,
         symmetrize=None,
@@ -377,7 +377,7 @@ def test_evaluate_loglik_extended_matches_model_kalman(post82_bundle):
         params=params,
         filter_mode="extended",
         observables=["Infl", "Rate"],
-        steady_state=steady,
+        ss_seed=steady,
         x0=None,
         jitter=None,
         symmetrize=None,
@@ -407,7 +407,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
             params=params,
             filter_mode="bad_mode",
             observables=["Infl", "Rate"],
-            steady_state=steady,
+            ss_seed=steady,
             x0=None,
             jitter=None,
             symmetrize=None,
@@ -424,7 +424,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         params=params,
         filter_mode="linear",
         observables=["Infl", "Rate"],
-        steady_state=steady,
+        ss_seed=steady,
         x0=None,
         jitter=None,
         symmetrize=None,
@@ -438,7 +438,7 @@ def test_evaluate_loglik_respects_R_override_and_mode_validation(post82_bundle):
         params=params,
         filter_mode="linear",
         observables=["Infl", "Rate"],
-        steady_state=steady,
+        ss_seed=steady,
         x0=None,
         jitter=None,
         symmetrize=None,
@@ -659,7 +659,7 @@ def test_evaluate_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
         params=params,
         filter_mode="unscented",
         observables=["c_obs"],
-        steady_state=None,
+        ss_seed=None,
         x0=x0,
         jitter=None,
         symmetrize=True,

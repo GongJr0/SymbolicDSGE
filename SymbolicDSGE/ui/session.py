@@ -315,7 +315,7 @@ class UISession:
             "observables",
             "posterior_point",
             "priors",
-            "steady_state",
+            "ss_seed",
             "theta0",
             "y",
         }
@@ -335,7 +335,7 @@ class UISession:
             "observables": observables,
             "estimated_params": names,
             "priors": priors,
-            "steady_state": request.steady_state,
+            "ss_seed": request.ss_seed,
             **kwargs,
         }
         solved = False

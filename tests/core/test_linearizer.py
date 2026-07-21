@@ -310,7 +310,7 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
         params=params,
         filter_mode="linear",
         observables=["AObs"],
-        steady_state=np.zeros((2,), dtype=np.float64),
+        ss_seed=np.zeros((2,), dtype=np.float64),
         x0=None,
         jitter=None,
         symmetrize=None,

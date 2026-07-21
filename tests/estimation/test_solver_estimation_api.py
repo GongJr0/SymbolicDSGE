@@ -134,7 +134,7 @@ def test_solver_estimate_and_solve_mle(monkeypatch):
 
     captured = {}
 
-    def fake_solve(compiled, *, parameters=None, steady_state=None):
+    def fake_solve(compiled, *, parameters=None, ss_seed=None):
         captured["parameters"] = parameters
         return SimpleNamespace(params=parameters)
 
@@ -219,7 +219,7 @@ def test_solver_estimate_and_solve_mcmc(monkeypatch):
 
     captured = {}
 
-    def fake_solve(compiled, *, parameters=None, steady_state=None):
+    def fake_solve(compiled, *, parameters=None, ss_seed=None):
         captured["parameters"] = parameters
         return SimpleNamespace(params=parameters)
 
@@ -249,7 +249,7 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(monkeypat
 
     captured = {}
 
-    def fake_solve(compiled, *, parameters=None, steady_state=None):
+    def fake_solve(compiled, *, parameters=None, ss_seed=None):
         captured["parameters"] = parameters
         return SimpleNamespace(params=parameters)
 

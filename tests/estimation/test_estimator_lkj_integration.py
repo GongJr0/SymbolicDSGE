@@ -17,7 +17,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     compiled = solver.compile()
 
     steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, steady_state=steady)
+    solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
     std_map = model.calibration.shock_std
@@ -141,7 +141,7 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
-        steady_state=dense_lkj_bundle["steady"],
+        ss_seed=dense_lkj_bundle["steady"],
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )
@@ -183,7 +183,7 @@ def test_mle_interacting_scalar_corrs_without_prior_hit_spd_gate(dense_lkj_bundl
             solver=dense_lkj_bundle["solver"],
             compiled=dense_lkj_bundle["compiled"],
             y=dense_lkj_bundle["y"],
-            steady_state=dense_lkj_bundle["steady"],
+            ss_seed=dense_lkj_bundle["steady"],
             estimated_params=["rho_gz", "rho_gr_shock"],
         )
 
@@ -195,7 +195,7 @@ def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
-        steady_state=dense_lkj_bundle["steady"],
+        ss_seed=dense_lkj_bundle["steady"],
         estimated_params=["rho_gz", "rho_gr_shock", "rho_zr_shock"],
     )
     assert "Q_corr" in est._matrix_blocks
@@ -208,7 +208,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
-        steady_state=dense_lkj_bundle["steady"],
+        ss_seed=dense_lkj_bundle["steady"],
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )
@@ -251,7 +251,7 @@ def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
-        steady_state=dense_lkj_bundle["steady"],
+        ss_seed=dense_lkj_bundle["steady"],
         estimated_params=["R_corr"],
         priors={"R_corr": LKJChol(eta=2.0, K=3, random_state=None)},
     )
@@ -280,7 +280,7 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
-        steady_state=dense_lkj_bundle["steady"],
+        ss_seed=dense_lkj_bundle["steady"],
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )

@@ -311,7 +311,7 @@ def _get_solution(
     compiled: CompiledModel,
     params: Mapping[str, float64],
     mode: str,
-    steady_state: NDF | dict[str, float] | None,
+    ss_seed: NDF | dict[str, float] | None,
     raise_on_bk_violation: bool = True,
 ) -> Any:
     """Solve the model to the order the filter mode requires.
@@ -327,7 +327,7 @@ def _get_solution(
         compiled=compiled,
         order=2 if mode == "unscented" else 1,
         parameters={k: float(v) for k, v in params.items()},
-        steady_state=steady_state,
+        ss_seed=ss_seed,
         raise_on_bk_violation=raise_on_bk_violation,
     )
 
@@ -434,7 +434,7 @@ def evaluate_loglik(
     params: Mapping[str, float64],
     filter_mode: str,
     observables: list[str] | None,
-    steady_state: NDF | dict[str, float] | None,
+    ss_seed: NDF | dict[str, float] | None,
     x0: NDF | None,
     jitter: float | float64 | None,
     symmetrize: bool | None,
@@ -462,7 +462,7 @@ def evaluate_loglik(
         compiled=compiled,
         params=params,
         mode=prepared_run.mode,
-        steady_state=steady_state,
+        ss_seed=ss_seed,
         raise_on_bk_violation=False,
     )
     Q = build_Q(compiled, params, corr=q_corr)

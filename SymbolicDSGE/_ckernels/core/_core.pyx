@@ -421,8 +421,8 @@ def klein_qz(a, b):
 
 def steady_state_newton(
     size_t residual_addr,
-    double[::1] seed,
-    double[::1] params,
+    seed,
+    params,
     int64_t max_iter=50,
     double tol=1e-12,
 ):
@@ -434,11 +434,15 @@ def steady_state_newton(
     cdef int64_t n_var = seed.shape[0]
     cdef int64_t n_par = params.shape[0]
 
+    cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
+    cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+
+    cdef const double *seed_ptr = &seedv[0] if n_var > 0 else NULL
+    cdef const double *par_ptr = &parv[0] if n_par > 0 else NULL
+
     ss = np.empty(n_var, dtype=np.float64)
     cdef double[::1] ssv = ss
 
-    cdef const double *seed_ptr = &seed[0] if n_var > 0 else NULL
-    cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
     cdef double *ss_ptr = &ssv[0] if n_var > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     cdef int64_t iters = 0
