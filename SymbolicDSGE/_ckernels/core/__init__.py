@@ -6,6 +6,7 @@ built, importing this module (and the library) raises ``ImportError``.
 """
 
 from ._core import (
+    assemble_state_space,
     affine_observations_into,
     bicomplex_hessian,
     jacobian_eval,
@@ -24,6 +25,7 @@ from ._core import (
 )
 
 __all__ = [
+    "assemble_state_space",
     "affine_observations_into",
     "bicomplex_hessian",
     "jacobian_eval",

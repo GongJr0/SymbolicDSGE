@@ -13,7 +13,18 @@ from cpython.pycapsule cimport PyCapsule_GetName, PyCapsule_GetPointer
 import numpy as np
 import scipy.linalg.cython_lapack as _cython_lapack
 
+
+cdef extern from "../_common/sdsge_complex.h":
+    ctypedef struct c128:
+        double re
+        double im
+    c128 c128_sqrt(c128 a)
+
+
 cdef extern from "core.h" nogil:
+    void sdsge_assemble_state_space(
+        const c128 *p, const c128 *f, const int64_t n_state, int64_t n_control,
+        const int64_t n_exog, double *A, double *B)
     void sdsge_simulate_linear_states(
         const double *A, const double *B, const double *x0,
         const double *shock, double *out, int64_t T, int64_t n, int64_t k)
@@ -27,13 +38,6 @@ cdef extern from "core.h" nogil:
         const double *x0, const double *shock,
         int64_t T, int64_t nx, int64_t ny, int64_t n_exog,
         double *x_out, double *y_out)
-
-
-cdef extern from "../_common/sdsge_complex.h":
-    ctypedef struct c128:
-        double re
-        double im
-    c128 c128_sqrt(c128 a)
 
 
 cdef extern from "klein_postproc.h" nogil:
@@ -145,6 +149,30 @@ cdef extern from "bicomplex_hessian.h" nogil:
 # ``void(vars*, par*, out*)``. Held Python-side; called here by ``.address``, nogil.
 ctypedef void (*sdsge_measurement_fn)(
     double *vars, double *par, double *out) noexcept nogil
+
+
+def assemble_state_space(p, f, n_state, n_control, n_exog):
+    """State-space matrices ``(A, B)`` from a solution ``(p, f)``. """
+    cdef double complex[:, ::1] pv = np.ascontiguousarray(p, dtype=np.complex128)
+    cdef double complex[:, ::1] fv = np.ascontiguousarray(f, dtype=np.complex128)
+
+    n = n_state + n_control
+    cdef int64_t n_s = <int64_t>n_state
+    cdef int64_t n_c = <int64_t>(n - n_state)
+    cdef int64_t n_e = <int64_t>n_exog
+
+    A = np.empty((n, n), dtype=np.float64)
+    B = np.empty((n, n_exog), dtype=np.float64)
+
+    cdef double[:, ::1] Av = A
+    cdef double[:, ::1] Bv = B
+
+    with nogil:
+        sdsge_assemble_state_space(
+            <c128 *>&pv[0, 0], <c128 *>&fv[0, 0], n_s, n_c, n_e,
+            &Av[0, 0], &Bv[0, 0]
+        )
+    return A, B
 
 
 def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):

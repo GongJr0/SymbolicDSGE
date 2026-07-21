@@ -17,41 +17,6 @@ typedef enum {
   SDSGE_FILTER_UNSCENTED = 2
 } sdsge_filter_mode;
 
-/* corr(K*K) := I, then off-diagonal pairs corr[i,j]=corr[j,i]=params[slot]. */
-static inline void sdsge_assemble_corr(const i64 *SDSGE_RESTRICT pair_i,
-                                       const i64 *SDSGE_RESTRICT pair_j,
-                                       const i64 *SDSGE_RESTRICT pair_slot,
-                                       i64 n_pairs,
-                                       const f64 *SDSGE_RESTRICT params, i64 K,
-                                       f64 *SDSGE_RESTRICT corr) {
-  for (i64 r = 0; r < K; ++r) {
-    for (i64 c = 0; c < K; ++c) {
-      corr[r * K + c] = (r == c) ? 1.0 : 0.0;
-    }
-  }
-  for (i64 p = 0; p < n_pairs; ++p) {
-    const i64 i = pair_i[p];
-    const i64 j = pair_j[p];
-    const f64 v = params[pair_slot[p]];
-    corr[i * K + j] = v;
-    corr[j * K + i] = v;
-  }
-}
-
-/* out(K*K) := outer(std, std) * corr, with std[k] = params[std_slots[k]]. */
-static inline void sdsge_cov_from_std_corr(const i64 *SDSGE_RESTRICT std_slots,
-                                           const f64 *SDSGE_RESTRICT params,
-                                           const f64 *SDSGE_RESTRICT corr,
-                                           i64 K, f64 *SDSGE_RESTRICT out) {
-  for (i64 i = 0; i < K; ++i) {
-    const f64 si = params[std_slots[i]];
-    for (i64 j = 0; j < K; ++j) {
-      const f64 sj = params[std_slots[j]];
-      out[i * K + j] = si * sj * corr[i * K + j];
-    }
-  }
-}
-
 /* Q or R covariance build spec. */
 typedef struct {
   int is_constant;
@@ -173,45 +138,11 @@ typedef struct {
   f64 *R;         /* n_obs*n_obs */
   f64 *corr_q;    /* n_exog*n_exog */
   f64 *corr_r;    /* n_obs*n_obs */
+  f64 *std_q;     /* n_exog */
+  f64 *std_r;     /* n_obs */
 
   i64 bk_violations;
 } sdsge_obj_common;
-
-/* Seed params(n_params) with the calibrated baseline (once, at construction). */
-static inline void sdsge_init_params(f64 *SDSGE_RESTRICT params,
-                                     const f64 *SDSGE_RESTRICT base_params,
-                                     i64 n_params) {
-  for (i64 i = 0; i < n_params; ++i) {
-    params[i] = base_params[i];
-  }
-}
-
-/* Seed calib_vec(n_par) from params (once, after sdsge_init_params). */
-static inline void sdsge_init_calib(f64 *SDSGE_RESTRICT calib_vec,
-                                    const f64 *SDSGE_RESTRICT params,
-                                    const i64 *SDSGE_RESTRICT calib_gather,
-                                    i64 n_par) {
-  for (i64 i = 0; i < n_par; ++i) {
-    calib_vec[i] = params[calib_gather[i]];
-  }
-}
-
-/* Per-eval: scatter estimated scalars into params, refresh estimated calib_vec. */
-static inline void sdsge_fill_params(sdsge_obj_common *base,
-                                     const f64 *SDSGE_RESTRICT theta) {
-  f64 x, logjac;
-  for (i64 s = 0; s < base->pmap.n_scalars; ++s) {
-    const sdsge_scalar_scatter *sc = &base->pmap.scalars[s];
-    sdsge_transform_inverse_and_logjac(sc->transform_code,
-                                       (f64 *)sc->transform_params,
-                                       theta[sc->theta_idx], &x, &logjac);
-    base->params[sc->param_slot] = x;
-  }
-  for (i64 u = 0; u < base->pmap.n_calib_upd; ++u) {
-    const i64 pos = base->pmap.calib_upd[u];
-    base->calib_vec[pos] = base->params[base->pmap.calib_gather[pos]];
-  }
-}
 
 /* Linear-filter objective context. */
 typedef struct {
@@ -220,13 +151,13 @@ typedef struct {
   const f64 *zero_state; /* n_var */
   f64 *C;                /* n_obs*n_var */
   f64 *d;                /* n_obs */
-} sdsge_obj_linear;
+} sdsge_linear_ctx;
 
 /* Extended-filter objective context. */
 typedef struct {
   sdsge_obj_common base;
   sdsge_solve1 solve;
-} sdsge_obj_extended;
+} sdsge_extended_ctx;
 
 /* Unscented-filter objective context. */
 typedef struct {
@@ -237,14 +168,24 @@ typedef struct {
   f64 alpha;
   f64 beta;
   f64 kappa;
-} sdsge_obj_unscented;
+} sdsge_unscented_ctx;
+
+/* One-time construction seeds (called once, from the ctx composer). */
+void sdsge_init_params(f64 *SDSGE_RESTRICT params,
+                       const f64 *SDSGE_RESTRICT base_params, i64 n_params);
+void sdsge_init_calib(f64 *SDSGE_RESTRICT calib_vec,
+                      const f64 *SDSGE_RESTRICT params,
+                      const i64 *SDSGE_RESTRICT calib_gather, i64 n_par);
 
 /* Per-flavor objective: theta -> loglik (+ logprior if has_priors). */
-f64 sdsge_objective_linear(sdsge_obj_linear *ctx,
-                           const f64 *SDSGE_RESTRICT theta, int has_priors);
-f64 sdsge_objective_extended(sdsge_obj_extended *ctx,
-                             const f64 *SDSGE_RESTRICT theta, int has_priors);
-f64 sdsge_objective_unscented(sdsge_obj_unscented *ctx,
-                              const f64 *SDSGE_RESTRICT theta, int has_priors);
+f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
+                     int has_priors);
+/*
+ * f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT
+ * theta, int has_priors);
+ *
+ * f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const f64 *SDSGE_RESTRICT
+ * theta, int has_priors);
+ * */
 
 #endif /* SDSGE_ESTIMATION_H */

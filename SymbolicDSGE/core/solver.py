@@ -15,8 +15,9 @@ from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout
 from .linearization import linearize_model
 from .solved_model import SolvedModel
-from .solver_backend import PerturbationSolution, klein_solve
+from .solver_backend import KleinSolution, PerturbationSolution, klein_solve
 from .._ckernels.core import (
+    assemble_state_space,
     second_order,
     second_order_risk,
     bicomplex_hessian,
@@ -376,7 +377,9 @@ class DSGESolver:
         return asarray(steady_state, dtype=float64)
 
     @staticmethod
-    def _assemble_state_space(sol: Any, compiled: CompiledModel) -> tuple[ND, ND]:
+    def _assemble_state_space(
+        sol: KleinSolution | PerturbationSolution, compiled: CompiledModel
+    ) -> tuple[ND, ND]:
         """First-order state space: X_t = [states; controls], x_{t+1} = p x_t (+
         shocks), controls_t = f x_t. Shocks hit only the first n_exog states."""
         p = np.asarray(sol.p, dtype=complex128)
@@ -387,17 +390,7 @@ class DSGESolver:
         if n_exo > n_s:
             raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
 
-        A = real_if_close(
-            np.block([[p, np.zeros((n_s, n_u))], [f @ p, np.zeros((n_u, n_u))]])
-        )
-        B_state = np.vstack(
-            [
-                np.eye(n_exo, dtype=float64),
-                np.zeros((n_s - n_exo, n_exo), dtype=float64),
-            ]
-        )
-        B = real_if_close(np.vstack([B_state, f @ B_state]))
-        return A, B
+        return assemble_state_space(p, f, n_s, n_u, n_exo)
 
     @staticmethod
     def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
