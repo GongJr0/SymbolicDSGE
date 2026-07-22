@@ -67,6 +67,7 @@ cdef extern from "estimation.h":
         int has_prior
 
     ctypedef struct sdsge_solve1:
+        double *ss
         double *a_real
         double *b_real
         c128 *s
@@ -85,7 +86,7 @@ cdef extern from "estimation.h":
         klein_zgges_fn zgges
         meas_fn meas
         meas_fn jac
-        const double *steady_state
+        const double *ss_seed
         int log_linear
         const double *y
         const double *P0
@@ -109,7 +110,6 @@ cdef extern from "estimation.h":
     ctypedef struct sdsge_linear_ctx:
         sdsge_obj_common base
         sdsge_solve1 solve
-        const double *zero_state
         double *C
         double *d
 
@@ -135,19 +135,18 @@ def obj_linear_base(
     int n_exog,
     int n_obs,
     int log_linear,
-    double[::1] steady_state,   # n_var
+    double[::1] ss_seed,        # n_var (Newton seed for the steady state)
     double[::1] base_calib,     # n_par (== n_params here)
     double[:, ::1] Q,           # n_exog*n_exog constant
     double[:, ::1] R,           # n_obs*n_obs constant
     double[:, ::1] y,           # T*n_obs
     double[:, ::1] P0,          # n_var*n_var
-    double[::1] zero_state,     # n_var
     double jitter,
     int symmetrize,
 ):
     """Evaluate the native linear objective at base calibration (n_theta == 0,
     constant Q/R, no prior). Returns loglik. Composer for the first parity."""
-    cdef int64_t n_var = steady_state.shape[0]
+    cdef int64_t n_var = ss_seed.shape[0]
     cdef int64_t n_par = base_calib.shape[0]
     cdef int64_t T = y.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
@@ -156,6 +155,7 @@ def obj_linear_base(
     params = np.empty(n_par, dtype=np.float64)
     calib_vec = np.empty(n_par, dtype=np.float64)
     calib_gather = np.arange(n_par, dtype=np.int64)
+    ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
     s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
@@ -173,6 +173,7 @@ def obj_linear_base(
     cdef double[::1] paramsv = params
     cdef double[::1] calibv = calib_vec
     cdef int64_t[::1] cgv = calib_gather
+    cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
     cdef double complex[::1, :] sv = s
@@ -205,7 +206,7 @@ def obj_linear_base(
     b.meas = <meas_fn><void*>meas_addr
     b.jac = <meas_fn><void*>jac_addr
 
-    b.steady_state = &steady_state[0]
+    b.ss_seed = &ss_seed[0]
     b.log_linear = log_linear
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
@@ -244,6 +245,7 @@ def obj_linear_base(
     b.std_r = NULL
     b.bk_violations = 0
 
+    ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
     ctx.solve.b_real = &brv[0, 0]
     ctx.solve.s = <c128*>&sv[0, 0]
@@ -255,7 +257,6 @@ def obj_linear_base(
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
 
-    ctx.zero_state = &zero_state[0]
     ctx.C = &Cv[0, 0]
     ctx.d = &dv[0]
 

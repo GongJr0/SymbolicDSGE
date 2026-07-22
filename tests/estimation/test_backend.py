@@ -187,8 +187,8 @@ def test_build_C_d_matches_affine_measurement_function(post82_bundle):
     h_func = compiled.construct_measurement_array_func(compiled.observable_names)
 
     obs = ["Infl", "Rate"]
-    C, d = compiled.build_affine_measurement_matrices(params, obs)
     state = np.zeros((len(compiled.cur_syms),), dtype=np.float64)
+    C, d = compiled.build_affine_measurement_matrices(params, obs, state)
 
     y_func = np.asarray(h_func(state, param_vec), dtype=np.float64)
     obs_idx = [compiled.observable_names.index(name) for name in obs]

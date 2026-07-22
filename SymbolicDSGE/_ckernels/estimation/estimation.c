@@ -1,6 +1,18 @@
 #include "estimation.h"
 #include "../core/core.h"
 #include "../core/klein_postproc.h"
+#include "../core/steady_state.h"
+
+/* Newton steady-state config, matching the Python solver defaults. */
+#define SDSGE_SS_MAX_ITER 50
+#define SDSGE_SS_TOL 1e-12
+
+/* sdsge_solve1_run outcomes. */
+#define SDSGE_SOLVE_OK 0
+#define SDSGE_SOLVE_BK                                                         \
+  1 /* stab != 0 or QZ breakdown; caller counts a BK violation */
+#define SDSGE_SOLVE_NO_SS                                                      \
+  2 /* steady-state Newton failed; sentinel, not a BK count */
 
 /* theta -> params fill. Non-estimated slots (and their calib image) never move
  * across evals, so they are seeded once here; the per-eval fill touches only
@@ -148,12 +160,23 @@ static inline const f64 *sdsge_build_cov(const sdsge_cov_spec *spec,
 
 static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
   const i64 n = b->dims.n_var;
-  klein_preproc(b->residual, b->steady_state, b->calib_vec, n, b->dims.n_par, n,
+
+  /* Resolve the steady state at the current params by Newton from ss_seed, then
+   * linearize there. A gap model (ss = 0) seeds at 0 and converges in one step;
+   * a params draw with no steady state fails and is rejected as infeasible. */
+  i64 iters = 0;
+  if (sdsge_steady_state_newton(b->residual, b->ss_seed, b->calib_vec, n,
+                                b->dims.n_par, SDSGE_SS_MAX_ITER, SDSGE_SS_TOL,
+                                s->ss, &iters) != SDSGE_NEWTON_OK) {
+    return SDSGE_SOLVE_NO_SS;
+  }
+
+  klein_preproc(b->residual, s->ss, b->calib_vec, n, b->dims.n_par, n,
                 b->log_linear, s->a_real, s->b_real);
   sdsge_to_complex_colmajor(s->a_real, s->s, n);
   sdsge_to_complex_colmajor(s->b_real, s->t, n);
   if (klein_qz(b->zgges, n, s->s, s->t, s->z) != KLEIN_QZ_OK) {
-    return 1;
+    return SDSGE_SOLVE_BK;
   }
   sdsge_transpose_sq(s->s, n);
   sdsge_transpose_sq(s->t, n);
@@ -161,11 +184,11 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
   klein_postproc(s->s, s->t, s->z, b->dims.n_state, b->dims.n_ctrl, s->f, s->p,
                  &s->stab, s->eig);
   if (s->stab != 0) {
-    return 1;
+    return SDSGE_SOLVE_BK;
   }
   sdsge_assemble_state_space(s->p, s->f, b->dims.n_state, b->dims.n_ctrl,
                              b->dims.n_exog, s->A, s->B);
-  return 0;
+  return SDSGE_SOLVE_OK;
 }
 
 /* Fold the log-prior into a computed loglik. Non-finite loglik or logprior ->
@@ -197,8 +220,10 @@ static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
  * point. C is n_obs*n_var, d is n_obs. */
 static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
   const sdsge_obj_common *b = &ctx->base;
-  b->meas(ctx->zero_state, b->calib_vec, ctx->d);
-  b->jac(ctx->zero_state, b->calib_vec, ctx->C);
+  const sdsge_solve1 *s = &ctx->solve;
+
+  b->meas(s->ss, b->calib_vec, ctx->d);
+  b->jac(s->ss, b->calib_vec, ctx->C);
 }
 
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
@@ -212,8 +237,12 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   const f64 *R =
       sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
 
-  if (sdsge_solve1_run(b, s)) {
+  const int solve_rc = sdsge_solve1_run(b, s);
+  if (solve_rc == SDSGE_SOLVE_BK) {
     b->bk_violations++;
+    return -INFINITY;
+  }
+  if (solve_rc != SDSGE_SOLVE_OK) {
     return -INFINITY;
   }
   sdsge_build_measurement(ctx);
@@ -254,8 +283,12 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   const f64 *R =
       sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
 
-  if (sdsge_solve1_run(b, s)) {
+  const int solve_rc = sdsge_solve1_run(b, s);
+  if (solve_rc == SDSGE_SOLVE_BK) {
     b->bk_violations++;
+    return -INFINITY;
+  }
+  if (solve_rc != SDSGE_SOLVE_OK) {
     return -INFINITY;
   }
 

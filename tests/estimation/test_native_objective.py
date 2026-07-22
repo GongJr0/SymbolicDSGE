@@ -80,7 +80,6 @@ def test_obj_linear_base_matches_model_kalman(bundle):
     steady_c = cc(steady, dtype=np.float64)
     y_c = cc(prep.y_reordered, dtype=np.float64)
     P0 = cc(prep.P0, dtype=np.float64)
-    zero_state = cc(prep.zero_state, dtype=np.float64)
 
     n_var = len(compiled.var_names)
     assert P0.shape == (n_var, n_var)
@@ -99,7 +98,6 @@ def test_obj_linear_base_matches_model_kalman(bundle):
         R,
         y_c,
         P0,
-        zero_state,
         float(prep.kf_jitter),
         int(prep.kf_sym),
     )

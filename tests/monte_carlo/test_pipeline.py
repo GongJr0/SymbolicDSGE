@@ -1048,7 +1048,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         equations=SimpleNamespace(obs_is_affine={"obs": True}),
     )
 
-    def build_affine_measurement_matrices(params, y_names):
+    def build_affine_measurement_matrices(params, y_names, ss):
         assert params == {}
         assert y_names == ["obs"]
         return C, d
@@ -1064,7 +1064,11 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
     )
     dgp = SolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64), order=1),
+        policy=SimpleNamespace(
+            f=np.array([[0.0]], dtype=np.float64),
+            order=1,
+            steady_state=np.zeros(2, dtype=np.float64),
+        ),
         A=A,
         B=B,
     )

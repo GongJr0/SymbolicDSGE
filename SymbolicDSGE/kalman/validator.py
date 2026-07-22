@@ -257,6 +257,29 @@ def validate_kf_inputs(
             )
 
     # ---------- Covariance sanity (optional) ----------
+    _validate_covariances(
+        Q,
+        R,
+        P0,
+        check_symmetry=check_symmetry,
+        check_nonneg_diag=check_nonneg_diag,
+        rtol=rtol,
+        atol=atol,
+    )
+
+    return KFValidationContext(n_state=n, n_obs=m, n_shock=k, T=T)
+
+
+def _validate_covariances(
+    Q: NDF,
+    R: NDF,
+    P0: Optional[NDF],
+    *,
+    check_symmetry: bool,
+    check_nonneg_diag: bool,
+    rtol: float,
+    atol: float,
+) -> None:
     if check_symmetry:
         if not np.allclose(Q, Q.T, rtol=rtol, atol=atol):
             raise ValueError("Q must be symmetric (within tolerance).")
@@ -273,4 +296,43 @@ def validate_kf_inputs(
         if P0 is not None and np.any(np.diag(P0) < -atol):
             raise ValueError("P0 must have non-negative diagonal entries (variances).")
 
-    return KFValidationContext(n_state=n, n_obs=m, n_shock=k, T=T)
+
+def validate_ukf_inputs(
+    *,
+    Q: NDF,
+    R: NDF,
+    P0: Optional[NDF] = None,
+    meas_addr: Optional[int] = None,
+    calib_params: Optional[NDF] = None,
+    check_symmetry: bool = True,
+    check_nonneg_diag: bool = True,
+    rtol: float = 1e-10,
+    atol: float = 1e-12,
+) -> None:
+    """Validate unscented-filter inputs: the measurement address and calibration
+    vector must be present, and Q/R/P0 must be square 2D covariances. The
+    second-order-solution requirement is enforced at dispatch (SolvedModel)."""
+    if not meas_addr:
+        raise ValueError("Unscented mode requires meas_addr.")
+    if calib_params is None:
+        raise ValueError("Unscented mode requires calib_params.")
+
+    for name, M in (("Q", Q), ("R", R), ("P0", P0)):
+        if M is None:
+            continue
+        if not isinstance(M, np.ndarray):
+            raise TypeError(f"{name} must be a numpy ndarray, got {type(M).__name__}.")
+        if M.ndim != 2 or M.shape[0] != M.shape[1]:
+            raise ValueError(f"{name} must be a square 2D matrix. Got shape {M.shape}.")
+        if not np.isfinite(M).all():
+            raise ValueError(f"{name} contains non-finite values.")
+
+    _validate_covariances(
+        Q,
+        R,
+        P0,
+        check_symmetry=check_symmetry,
+        check_nonneg_diag=check_nonneg_diag,
+        rtol=rtol,
+        atol=atol,
+    )

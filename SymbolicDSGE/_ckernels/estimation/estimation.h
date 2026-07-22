@@ -82,6 +82,7 @@ typedef struct {
 
 /* First-order Klein solve outputs. */
 typedef struct {
+  f64 *ss;     /* n_var: Newton-resolved steady state (from ss_seed) */
   f64 *a_real; /* n_var*n_var */
   f64 *b_real; /* n_var*n_var */
   c128 *s;     /* n_var*n_var */
@@ -118,7 +119,7 @@ typedef struct {
   meas_fn meas;
   meas_fn jac;
 
-  const f64 *steady_state; /* n_var */
+  const f64 *ss_seed; /* n_var: Newton seed for the steady state */
   int log_linear;
 
   const f64 *y;  /* T*n_obs */
@@ -148,9 +149,8 @@ typedef struct {
 typedef struct {
   sdsge_obj_common base;
   sdsge_solve1 solve;
-  const f64 *zero_state; /* n_var */
-  f64 *C;                /* n_obs*n_var */
-  f64 *d;                /* n_obs */
+  f64 *C; /* n_obs*n_var */
+  f64 *d; /* n_obs */
 } sdsge_linear_ctx;
 
 /* Extended-filter objective context. */
