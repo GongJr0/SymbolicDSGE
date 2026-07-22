@@ -15,7 +15,12 @@ from sympy import Symbol
 
 from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.estimation import backend
-from SymbolicDSGE._ckernels.estimation._estimation import obj_linear_base
+from SymbolicDSGE.kalman.config import KalmanConfig
+from SymbolicDSGE.kalman.interface import FilterMode, _resolve_P0
+from SymbolicDSGE._ckernels.estimation._estimation import (
+    obj_linear_base,
+    obj_unscented_base,
+)
 
 
 @pytest.fixture(scope="module")
@@ -103,6 +108,95 @@ def test_obj_linear_base_matches_model_kalman(bundle):
     )
 
     ll_model = solved.kalman(y=y, filter_mode="linear", observables=obs).loglik
+
+    assert bk == 0
+    assert np.isfinite(ll)
+    np.testing.assert_allclose(ll, ll_model, rtol=1e-9, atol=1e-9)
+
+
+@pytest.fixture(scope="module")
+def rbc_bundle(rbc_second_order_test_model_path):
+    """Second-order RBC (levels model, nonzero steady state) for the unscented
+    parity. The fixture has no kalman section, so a minimal config is supplied:
+    a uniform-diagonal P0 (so ``compile``'s variable permutation is a no-op) and
+    a scalar measurement noise."""
+    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
+    n_var = 3  # z, k, c
+    R = np.array([[1e-4]], dtype=np.float64)
+    kalman = KalmanConfig(R=R, P0=np.eye(n_var, dtype=np.float64) * 0.1)
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+
+    # Levels model: seed Newton from the resolved steady state, not zeros.
+    seed = np.asarray(
+        solver.solve(compiled=compiled, order=2).policy.steady_state, dtype=np.float64
+    )
+    solved = solver.solve(compiled=compiled, ss_seed=seed, order=2)
+
+    T = 40
+    rng = np.random.default_rng(20260303)
+    sim = solved.sim(
+        T=T,
+        shocks={"z": rng.normal(0.0, 0.01, size=T)},
+        x0=np.asarray(solved.policy.steady_state, dtype=np.float64),
+        observables=True,
+    )
+    y = pd.DataFrame({"c_obs": sim["c_obs"][1:]})
+    return {
+        "compiled": compiled,
+        "solved": solved,
+        "seed": seed,
+        "y": y,
+        "R": R,
+    }
+
+
+def test_obj_unscented_base_matches_model_kalman(rbc_bundle):
+    compiled = rbc_bundle["compiled"]
+    solved = rbc_bundle["solved"]
+    seed = rbc_bundle["seed"]
+    y = rbc_bundle["y"]
+    R = rbc_bundle["R"]
+    obs = ["c_obs"]
+    n_state = compiled.n_state
+    jitter, symmetrize = 1e-8, 1
+
+    base = backend.extract_base_params(compiled)
+
+    cc = np.ascontiguousarray
+    Q = cc(backend.build_Q(compiled, base), dtype=np.float64)
+    calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
+    y_c = np.array(y.to_numpy(), dtype=np.float64, copy=True)
+
+    # UKF augments the state: the native filter reads a 2*n_state P0, the block
+    # expansion the interface applies for the oracle.
+    P0_base = np.eye(n_state, dtype=np.float64) * 0.1
+    P0_ukf = cc(_resolve_P0(FilterMode.UNSCENTED, n_state, P0_base), dtype=np.float64)
+
+    ll, bk = obj_unscented_base(
+        compiled.construct_objective_cfunc().address,
+        compiled.construct_objective_cfunc_bicomplex().address,
+        compiled.construct_measurement_cfunc(obs).address,
+        n_state,
+        compiled.n_exog,
+        len(obs),
+        cc(seed, dtype=np.float64),
+        calib,
+        Q,
+        cc(R, dtype=np.float64),
+        y_c,
+        P0_ukf,
+        float(jitter),
+        int(symmetrize),
+    )
+
+    ll_model = solved.kalman(
+        y=y,
+        filter_mode="unscented",
+        observables=obs,
+        jitter=jitter,
+        symmetrize=bool(symmetrize),
+    ).loglik
 
     assert bk == 0
     assert np.isfinite(ll)

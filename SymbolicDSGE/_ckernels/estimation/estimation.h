@@ -3,10 +3,11 @@
 
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
-#include "../core/klein_preproc.h" /* sdsge_residual_fn */
-#include "../core/klein_qz.h"      /* klein_zgges_fn */
-#include "../kalman/kalman.h"      /* meas_fn */
-#include "prior_program.h"         /* transform codes, dispatch */
+#include "../core/bicomplex_hessian.h" /* bc_residual_fn */
+#include "../core/klein_preproc.h"     /* sdsge_residual_fn */
+#include "../core/klein_qz.h"          /* klein_zgges_fn */
+#include "../kalman/kalman.h"          /* meas_fn */
+#include "prior_program.h"             /* transform codes, dispatch */
 
 /* Native estimation objective context and theta-fill (issue #327). */
 
@@ -115,6 +116,8 @@ typedef struct {
   sdsge_dims dims;
 
   sdsge_residual_fn residual;
+  bc_residual_fn bc_residual;
+
   klein_zgges_fn zgges;
   meas_fn meas;
   meas_fn jac;
@@ -182,9 +185,11 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                      int has_priors);
 f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                        int has_priors);
-/*
- * f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const f64 *SDSGE_RESTRICT
- * theta, int has_priors);
- * */
+
+f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
+                        const f64 *SDSGE_RESTRICT theta, int has_priors);
+
+/* Hessian Step Constant */
+#define SDSGE_HESSIAN_STEP 1e-4
 
 #endif /* SDSGE_ESTIMATION_H */

@@ -1,6 +1,7 @@
 #include "estimation.h"
 #include "../core/core.h"
 #include "../core/klein_postproc.h"
+#include "../core/second_order.h"
 #include "../core/steady_state.h"
 
 /* Newton steady-state config, matching the Python solver defaults. */
@@ -317,6 +318,94 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                    .store_history = 0};
   ekf_outputs out = {.loglik = &ll};
   if (ekf_hot_loop(&in, &out) != KF_OK) {
+    return -INFINITY;
+  }
+  return sdsge_add_lp(b, theta, ll, has_priors);
+}
+
+f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
+                        const f64 *SDSGE_RESTRICT theta, int has_priors) {
+  sdsge_obj_common *b = &ctx->base;
+  sdsge_solve1 *s = &ctx->solve;
+  sdsge_solve2 *s2 = &ctx->solve2;
+
+  sdsge_fill_params(b, theta);
+
+  const f64 *Q =
+      sdsge_build_cov(&b->q_spec, theta, b->params, b->std_q, b->corr_q, b->Q);
+  const f64 *R =
+      sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
+
+  const int rc = sdsge_solve1_run(b, s);
+
+  if (rc == SDSGE_SOLVE_BK) {
+    b->bk_violations++;
+    return -INFINITY;
+  }
+  if (rc != SDSGE_SOLVE_OK) {
+    return -INFINITY;
+  }
+
+  sdsge_real_part(s->p, s2->hx_real, b->dims.n_state * b->dims.n_state);
+  sdsge_real_part(s->f, s2->gx_real, b->dims.n_state * b->dims.n_ctrl);
+  sdsge_bx_from_B(s->B, b->dims.n_state, b->dims.n_exog, s2->bx);
+
+  if (sdsge_bicomplex_hessian(
+          b->bc_residual, s->ss, b->calib_vec, b->dims.n_var, b->dims.n_par,
+          b->dims.n_var, SDSGE_HESSIAN_STEP, s2->f_xx) != SDSGE_HESSIAN_OK) {
+    return -INFINITY;
+  }
+
+  if (sdsge_second_order(s->a_real, s->b_real, s2->f_xx, s2->gx_real,
+                         s2->hx_real, b->dims.n_var, b->dims.n_state, s2->gxx,
+                         s2->hxx) != SDSGE_SECOND_ORDER_OK) {
+    return -INFINITY;
+  }
+
+  if (!b->q_spec.is_constant) {
+    if (sdsge_chol(Q, 0.0, s2->eta, b->q_spec.K) != SDSGE_OK) {
+      return -INFINITY;
+    }
+  }
+
+  if (sdsge_second_order_risk(s->a_real, s->b_real, s2->f_xx, s2->gx_real,
+                              s2->gxx, s2->eta, b->dims.n_var, b->dims.n_state,
+                              b->dims.n_exog, s2->gss,
+                              s2->hss) != SDSGE_SECOND_ORDER_OK) {
+    return -INFINITY;
+  }
+
+  f64 ll = 0.0;
+  ukf_inputs in = {.meas = b->meas,
+                   .hx = s2->hx_real,
+                   .gx = s2->gx_real,
+                   .bx = s2->bx,
+                   .hxx = s2->hxx,
+                   .gxx = s2->gxx,
+                   .hss = s2->hss,
+                   .gss = s2->gss,
+                   .steady_state = s->ss,
+                   .params = b->calib_vec,
+                   .Q = Q,
+                   .R = R,
+                   .obs = b->y,
+                   .z0 = ctx->z0,
+                   .P0 = b->P0,
+                   .T = b->dims.T,
+                   .n_state = b->dims.n_state,
+                   .n_ctrl = b->dims.n_ctrl,
+                   .n_exog = b->dims.n_exog,
+                   .n_obs = b->dims.n_obs,
+                   .n_params = b->dims.n_par,
+                   .alpha = ctx->alpha,
+                   .beta = ctx->beta,
+                   .kappa = ctx->kappa,
+                   .jitter = b->jitter,
+                   .symmetrize = b->symmetrize,
+                   .store_history = 0};
+
+  ukf_outputs out = {.loglik = &ll};
+  if (ukf_hot_loop(&in, &out) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);

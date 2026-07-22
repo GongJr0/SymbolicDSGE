@@ -7,6 +7,9 @@ import pytest
 TESTS_DIR = Path(__file__).resolve().parent
 POST82_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "POST82.yaml"
 DENSE_LKJ_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "LKJ_DENSE.yaml"
+RBC_SECOND_ORDER_TEST_MODEL_PATH = (
+    TESTS_DIR / "fixtures" / "models" / "rbc_second_order.yaml"
+)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -29,3 +32,8 @@ def post82_test_model_path() -> Path:
 @pytest.fixture(scope="session")
 def dense_lkj_test_model_path() -> Path:
     return DENSE_LKJ_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def rbc_second_order_test_model_path() -> Path:
+    return RBC_SECOND_ORDER_TEST_MODEL_PATH
