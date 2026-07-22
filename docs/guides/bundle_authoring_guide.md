@@ -36,21 +36,21 @@ compiled = solver.compile(
 )
 sol = solver.solve(
     compiled,
-    steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
+    ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 
 bundle.add_model(
     "reference",
     model.source_yaml, # (4)!
     compile_kwargs={"linearize": False},
-    solve_kwargs={"steady_state": [0.0, 0.0, 0.0, 0.0, 0.0]},
+    solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 
 bundle.add_model(
     "dgp",
     model.source_yaml,
     compile_kwargs={"linearize": False},
-    solve_kwargs={"steady_state": [0.0, 0.0, 0.0, 0.0, 0.0]},
+    solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 ```
 

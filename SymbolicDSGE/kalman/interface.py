@@ -8,7 +8,12 @@ from .filter import (
     _unscented_filter_result_from_raw,
 )
 from .config import KalmanConfig, make_R
-from .validator import validate_kf_inputs, _KalmanDebugInfo, FilterMode
+from .validator import (
+    validate_kf_inputs,
+    validate_ukf_inputs,
+    _KalmanDebugInfo,
+    FilterMode,
+)
 from typing import TYPE_CHECKING, Any, Tuple, Literal
 
 if TYPE_CHECKING:
@@ -36,19 +41,18 @@ RawFilterOutput = FilterRawResult | UnscentedFilterRawResult
 
 @dataclass
 class _KFMatrices:
-    """Cached model-constant Kalman matrices for one cache key.
+    """Cached model-constant Kalman covariances for one cache key.
 
     Stored on the :class:`SolvedModel` (see ``SolvedModel._kf_cache``) and shared
     across repeated filter calls so the per-call interface stops rebuilding
-    ``C``/``d``/``Q``/``P0``/``R`` for a fixed calibration. ``R_const`` is filled
-    lazily on the first constant-R call for the key (a key first seen via a
-    user-supplied or estimated ``R`` leaves it ``None``). ``validated`` flips to
-    ``True`` once the constant covariances pass the symmetry / non-negative-
-    diagonal checks, letting subsequent constant-R calls skip them.
+    ``Q``/``R`` for a fixed calibration. ``C``/``d`` are cached separately
+    (``SolvedModel._cd_cache``, via ``_get_C_d``). ``R_const`` is filled lazily on
+    the first constant-R call for the key (a key first seen via a user-supplied or
+    estimated ``R`` leaves it ``None``). ``validated`` flips to ``True`` once the
+    constant covariances pass the symmetry / non-negative-diagonal checks, letting
+    subsequent constant-R calls skip them.
     """
 
-    C: NDF | None
-    d: NDF | None
     Q: NDF
     R_const: NDF | None = None
     validated: bool = False
@@ -107,15 +111,10 @@ class KalmanInterface(KalmanFilter):
         )
         record = model._kf_cache_get(cache_key)
         if record is None:
-            if self.mode == FilterMode.LINEAR:
-                C, d = self._get_C_d()
-            else:
-                C, d = None, None
-            record = _KFMatrices(C=C, d=d, Q=self._build_Q())
+            record = _KFMatrices(Q=self._build_Q())
             model._kf_cache_put(cache_key, record)
         self._cache_record = record
 
-        self.C, self.d = record.C, record.d
         self.Q = record.Q
 
         self._uses_const_R = R is None
@@ -135,8 +134,6 @@ class KalmanInterface(KalmanFilter):
         self.ukf_alpha = 1.0
         self.ukf_beta = 2.0
         self.ukf_kappa = 1.0
-
-        self._validate_mode_and_inputs()
 
         self.jitter = self._get_jitter(jitter)
         self.symmetrize = self._get_symmetrize(symmetrize)
@@ -390,7 +387,7 @@ class KalmanInterface(KalmanFilter):
         z0 = self._build_unscented_z0(x0)
         base_args = self._unscented_validated_args
         run_args = base_args | _arg_overrides
-        self._validate_unscented_covariances(run_args, arg_overrides=_arg_overrides)
+        self._validate_unscented_run(run_args, arg_overrides=_arg_overrides)
         return z0, run_args
 
     def _set_debug_info(
@@ -400,11 +397,12 @@ class KalmanInterface(KalmanFilter):
         run_args: dict[str, Any],
         z0: NDF | None = None,
     ) -> None:
+        C, d = self._get_C_d()
         self._debug_info = _KalmanDebugInfo(
             A=run_args.get("A", self.A),
             B=run_args.get("B", self.B),
-            C=run_args.get("C", self.C),
-            d=run_args.get("d", self.d),
+            C=run_args.get("C", C),
+            d=run_args.get("d", d),
             Q=run_args.get("Q", self.Q),
             R=run_args.get("R", self.R),
             y=run_args.get("y", self.y),
@@ -596,48 +594,7 @@ class KalmanInterface(KalmanFilter):
 
         return obs_canonical, y_reordered
 
-    def _validate_mode_and_inputs(self) -> None:
-        if self.mode == FilterMode.LINEAR:
-            if (self.C is None) or self.d is None:
-                raise ValueError(
-                    "C and d matrices are required for linear Kalman Filter."
-                )
-
-        elif self.mode == FilterMode.EXTENDED:
-            if (self.meas_addr is None) or (self.jac_addr is None):
-                raise ValueError(
-                    "meas_addr and jac_addr are required for extended Kalman Filter."
-                )
-
-        elif self.mode == FilterMode.UNSCENTED:
-            if self.meas_addr is None or self.meas_addr == 0:
-                raise ValueError("meas_addr is required for unscented Kalman Filter.")
-            if self.calib_params is None:
-                raise ValueError(
-                    "calib_params is required for unscented Kalman Filter."
-                )
-            if getattr(getattr(self.model, "policy", None), "order", None) != 2:
-                raise ValueError(
-                    "Unscented Kalman Filter requires a second order solution."
-                )
-
-        else:
-            raise ValueError(f"Unrecognized filter mode: {self.mode}")
-
-    @staticmethod
-    def _check_covariance_matrix(name: str, value: NDF) -> None:
-        if not isinstance(value, np.ndarray):
-            raise TypeError(f"{name} must be a numpy ndarray.")
-        if value.ndim != 2 or value.shape[0] != value.shape[1]:
-            raise ValueError(f"{name} must be a square 2D matrix.")
-        if not np.isfinite(value).all():
-            raise ValueError(f"{name} contains non-finite values.")
-        if not np.allclose(value, value.T):
-            raise ValueError(f"{name} must be symmetric.")
-        if np.any(np.diag(value) < 0.0):
-            raise ValueError(f"{name} must have non-negative diagonal entries.")
-
-    def _validate_unscented_covariances(
+    def _validate_unscented_run(
         self,
         run_args: dict[str, Any],
         *,
@@ -649,9 +606,13 @@ class KalmanInterface(KalmanFilter):
         if const_validated:
             return
 
-        self._check_covariance_matrix("Q", run_args["Q"])
-        self._check_covariance_matrix("R", run_args["R"])
-        self._check_covariance_matrix("P0", run_args["P0"])
+        validate_ukf_inputs(
+            Q=run_args["Q"],
+            R=run_args["R"],
+            P0=run_args["P0"],
+            meas_addr=self.meas_addr,
+            calib_params=self.calib_params,
+        )
         if self._uses_const_R and not arg_overrides:
             self._cache_record.validated = True
 
@@ -697,12 +658,13 @@ class KalmanInterface(KalmanFilter):
 
     @property
     def _linear_validated_args(self) -> dict:
+        C, d = self._get_C_d()
         return {
             # State Space Definition
             "A": self.A,
             "B": self.B,
-            "C": self.C,
-            "d": self.d,
+            "C": C,
+            "d": d,
             "Q": self.Q,
             "R": self.R,
             "P0": self.P0,

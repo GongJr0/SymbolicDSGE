@@ -1,4 +1,5 @@
 from dataclasses import dataclass, asdict
+from functools import cached_property
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -77,56 +78,6 @@ class SolvedModel:
             raise ValueError(
                 f"Simulation for solution order {self.policy.order} is not implemented."
             )
-
-    @property
-    def config(self) -> ModelConfig:
-        return self.compiled.config
-
-    @property
-    def kalman_config(self) -> KalmanConfig | None:
-        return self.compiled.kalman
-
-    def _calibration_fingerprint(self) -> int:
-        """Hashable snapshot of calibration parameter values.
-
-        Keys the Kalman matrix cache so a parameter change (MLE/MCMC) is a cache
-        miss -- the rebuilt matrices stay correct -- while a repeated parameter
-        vector (Monte Carlo, a revisited proposal) is a hit. Cheap: a tuple hash
-        over the handful of scalar parameters, dwarfed by the matrix builds it
-        guards.
-        """
-        params = self.config.calibration.parameters
-        return hash((tuple(params.keys()), tuple(float(v) for v in params.values())))
-
-    def _kf_cache_get(self, key: tuple) -> _KFMatrices | None:
-        """Cached Kalman matrices for ``key``, or ``None`` on miss.
-
-        The cache is a plain dict attached lazily: this is a frozen dataclass, so
-        it lives outside the declared fields and stays invisible to ``asdict`` /
-        bundle serialization.
-        """
-        cache = self.__dict__.get("_kf_cache")
-        return None if cache is None else cache.get(key)
-
-    def _kf_cache_put(self, key: tuple, matrices: _KFMatrices) -> None:
-        cache = self.__dict__.get("_kf_cache")
-        if cache is None:
-            cache = {}
-            object.__setattr__(self, "_kf_cache", cache)
-        cache[key] = matrices
-
-    def clear_kf_cache(self) -> None:
-        """Drop cached Kalman matrices.
-
-        Needed only when a model is mutated in place after a filter call in a way
-        the calibration fingerprint cannot see -- e.g. overwriting a hardcoded
-        ``kalman_config.R`` / ``P0`` matrix (a parametric R built from calibration
-        is covered automatically). The expected lifecycle (solve once, filter
-        many) never needs this.
-        """
-        cache = self.__dict__.get("_kf_cache")
-        if cache is not None:
-            cache.clear()
 
     def sim(
         self,
@@ -690,10 +641,18 @@ class SolvedModel:
         self,
         y_names: list[str],
     ) -> Tuple[NDF, NDF]:
-        return self.compiled.build_affine_measurement_matrices(
+        key = (tuple(y_names), self._calibration_fingerprint())
+        hit = self._cd_cache.get(key)
+        if hit is not None:
+            return hit
+
+        result = self.compiled.build_affine_measurement_matrices(
             self.compiled.config.calibration.parameters,
             y_names,
+            self.policy.steady_state,
         )
+        self._cd_cache[key] = result
+        return result
 
     def _non_affine_measurement(
         self,
@@ -847,6 +806,43 @@ class SolvedModel:
         )
 
         return cast("FitResult", interface.fit_to_kf(y))
+
+    def _calibration_fingerprint(self) -> int:
+        """Hashable snapshot of calibration parameter values."""
+
+        params = self.config.calibration.parameters
+        return hash((tuple(params.keys()), tuple(float(v) for v in params.values())))
+
+    def _kf_cache_get(self, key: tuple) -> _KFMatrices | None:
+        """Cached Kalman matrices for ``key``, or ``None`` on miss."""
+
+        return self._kf_cache.get(key)
+
+    def _kf_cache_put(self, key: tuple, matrices: _KFMatrices) -> None:
+        """Store Kalman matrices for ``key`` in the cache."""
+
+        self._kf_cache[key] = matrices
+
+    def clear_kf_cache(self) -> None:
+        """Drop cached Kalman matrices."""
+        self._kf_cache.clear()
+        self._cd_cache.clear()
+
+    @property
+    def config(self) -> ModelConfig:
+        return self.compiled.config
+
+    @property
+    def kalman_config(self) -> KalmanConfig | None:
+        return self.compiled.kalman
+
+    @cached_property
+    def _cd_cache(self) -> dict[tuple, Tuple[NDF, NDF]]:
+        return {}
+
+    @cached_property
+    def _kf_cache(self) -> dict[tuple, _KFMatrices]:
+        return {}
 
 
 SimFn = Callable[

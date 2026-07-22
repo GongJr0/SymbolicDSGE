@@ -14,6 +14,15 @@ from numpy.typing import NDArray
 _F64 = NDArray[float64]
 _C128 = NDArray[complex128]
 
+def assemble_state_space(
+    p: _C128,
+    f: _C128,
+    n_state: int,
+    n_control: int,
+    n_exog: int,
+) -> tuple[_F64, _F64]:
+    """(A, B) <- linear state space from (p, f) matrices."""
+
 def simulate_linear_states_into(
     A: _F64,
     B: _F64,

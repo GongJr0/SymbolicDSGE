@@ -15,13 +15,13 @@ from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout
 from .linearization import linearize_model
 from .solved_model import SolvedModel
-from .solver_backend import PerturbationSolution, klein_solve
+from .solver_backend import KleinSolution, PerturbationSolution, klein_solve
 from .._ckernels.core import (
+    assemble_state_space,
     second_order,
     second_order_risk,
     bicomplex_hessian,
     klein_preprocess,
-    steady_state_newton,
 )
 
 if TYPE_CHECKING:
@@ -305,7 +305,7 @@ class DSGESolver:
         compiled: CompiledModel,
         *,
         parameters: dict[str, float] | None = None,
-        steady_state: list[float] | ndarray | dict[str, float] | None = None,
+        ss_seed: list[float] | ndarray | dict[str, float] | None = None,
         order: int = 1,
         raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
@@ -323,60 +323,68 @@ class DSGESolver:
         """
         if order not in (1, 2):
             raise ValueError(f"order must be 1 or 2, got {order}.")
-        conf = self.model_config
+
+        conf = compiled.config
+        seed = self._resolve_ss_seed(ss_seed, compiled)
 
         if parameters is None:
-            params: dict[str, float64] = {
-                p.name: float64(conf.calibration.parameters[p])
-                for p in conf.parameters
-                if p in conf.calibration.parameters
-            }
+            param_vec = np.array(
+                [conf.calibration.parameters[p.name] for p in compiled.calib_params],
+                dtype=float64,
+            )
         else:
-            params = {p: float64(v) for p, v in parameters.items()}
-
-        param_vec = np.ascontiguousarray(
-            np.array([params[p.name] for p in compiled.calib_params], dtype=float64)
-        )
-        given_ss = self._coerce_steady_state(steady_state, compiled)
+            param_vec = np.array(
+                [parameters[p.name] for p in compiled.calib_params], dtype=float64
+            )
 
         if order == 2:
             return self._solve_second_order(
-                compiled, param_vec, given_ss, raise_on_bk_violation
+                compiled, param_vec, seed, raise_on_bk_violation
             )
-
-        ss = (
-            given_ss
-            if given_ss is not None
-            else np.zeros(len(compiled.var_names), dtype=float64)
-        )
-        sol = klein_solve(
-            compiled.construct_objective_cfunc(),
-            param_vec,
-            ss,
-            compiled.n_state,
-        )
-        self._raise_or_warn_stability_error(
-            sol.stab, should_raise=raise_on_bk_violation
-        )
-        A, B = self._assemble_state_space(sol, compiled)
-        return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
+        return self._solve_first_order(compiled, param_vec, seed, raise_on_bk_violation)
 
     @staticmethod
-    def _coerce_steady_state(
-        steady_state: list[float] | ndarray | dict[str, float] | None,
+    def _resolve_ss_seed(
+        ss_seed: list[float] | ndarray | dict[str, float] | None,
         compiled: CompiledModel,
-    ) -> NDF | None:
-        """User-supplied steady state -> canonical-order vector (or ``None``)."""
-        if steady_state is None:
-            return None
-        if isinstance(steady_state, dict):
-            return np.array(
-                [steady_state.get(vn, 0.0) for vn in compiled.var_names], dtype=float64
-            )
-        return asarray(steady_state, dtype=float64)
+    ) -> NDF:
+        """Newton seed for the steady state, in canonical variable order.
+
+        Priority: an explicit ``ss_seed`` (a dict is scattered into canonical
+        order, missing entries 0) > the model's configured symbolic steady state
+        > zeros. Newton resolves ``F(ss, ss) = 0`` from here, so a gap model
+        (ss = 0) seeds at 0 and converges in one step, while a level model that
+        declares its steady state in the config seeds itself.
+        """
+        if ss_seed is not None:
+            if isinstance(ss_seed, dict):
+                return np.array(
+                    [ss_seed.get(vn, 0.0) for vn in compiled.var_names],
+                    dtype=float64,
+                )
+            return asarray(ss_seed, dtype=float64)
+
+        conf = compiled.config
+        name_to_func = {v.__name__: v for v in conf.variables.variables}
+        params = conf.calibration.parameters
+        ss = np.zeros(len(compiled.var_names), dtype=float64)
+        for i, name in enumerate(compiled.var_names):
+            expr = conf.variables.steady_state[name_to_func[name]]
+            if expr is None:
+                continue
+            val = sp.simplify(sp.sympify(expr).subs(params))
+            try:
+                ss[i] = float(val)
+            except TypeError as exc:
+                raise ValueError(
+                    f"Steady state for '{name}' did not evaluate to a number: {val}"
+                ) from exc
+        return ss
 
     @staticmethod
-    def _assemble_state_space(sol: Any, compiled: CompiledModel) -> tuple[ND, ND]:
+    def _assemble_state_space(
+        sol: KleinSolution | PerturbationSolution, compiled: CompiledModel
+    ) -> tuple[ND, ND]:
         """First-order state space: X_t = [states; controls], x_{t+1} = p x_t (+
         shocks), controls_t = f x_t. Shocks hit only the first n_exog states."""
         p = np.asarray(sol.p, dtype=complex128)
@@ -387,17 +395,7 @@ class DSGESolver:
         if n_exo > n_s:
             raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
 
-        A = real_if_close(
-            np.block([[p, np.zeros((n_s, n_u))], [f @ p, np.zeros((n_u, n_u))]])
-        )
-        B_state = np.vstack(
-            [
-                np.eye(n_exo, dtype=float64),
-                np.zeros((n_s - n_exo, n_exo), dtype=float64),
-            ]
-        )
-        B = real_if_close(np.vstack([B_state, f @ B_state]))
-        return A, B
+        return assemble_state_space(p, f, n_s, n_u, n_exo)
 
     @staticmethod
     def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
@@ -409,34 +407,50 @@ class DSGESolver:
             raise ValueError(msg)
         warnings.warn(msg, UserWarning, stacklevel=2)
 
+    def _solve_first_order(
+        self,
+        compiled: CompiledModel,
+        param_vec: NDF,
+        seed: NDF,
+        raise_on_bk_violation: bool = True,
+    ) -> SolvedModel:
+        """First-order (Klein) solve."""
+        sol = klein_solve(
+            compiled.construct_objective_cfunc(),
+            param_vec,
+            seed,
+            compiled.n_state,
+        )
+        self._raise_or_warn_stability_error(
+            sol.stab, should_raise=raise_on_bk_violation
+        )
+        A, B = self._assemble_state_space(sol, compiled)
+
+        return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
+
     def _solve_second_order(
         self,
         compiled: CompiledModel,
         param_vec: NDF,
-        given_ss: NDF | None,
+        seed: NDF,
         raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
-        """Second-order (SGU) solve. Resolves + validates the nonlinear steady
-        state, runs the Klein first order, sweeps the bicomplex Hessian, and
-        assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss`` risk correction into a
-        :class:`PerturbationSolution`. Requires the native extension."""
+        """Second-order (SGU) solve. Runs the Klein first order (which Newton-
+        resolves the steady state from ``seed``), sweeps the bicomplex Hessian at
+        that steady state, and assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss``
+        risk correction into a :class:`PerturbationSolution`. Requires the native
+        extension."""
 
         n_eq = len(compiled.var_names)
         n_state = compiled.n_state
         cf = compiled.construct_objective_cfunc()
         cf_bc = compiled.construct_objective_cfunc_bicomplex()
 
-        seed = (
-            given_ss
-            if given_ss is not None
-            else self._resolve_config_steady_state(compiled)
-        )
-        ss = self._checked_steady_state(cf, param_vec, seed)
-
-        sol = klein_solve(cf, param_vec, ss, n_state)
+        sol = klein_solve(cf, param_vec, seed, n_state)
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
+        ss = sol.steady_state
         gx, hx = np.real(sol.f), np.real(sol.p)
 
         a, b = klein_preprocess(cf.address, ss, param_vec, n_eq, False)
@@ -459,47 +473,6 @@ class DSGESolver:
         )
         A, B = self._assemble_state_space(pert, compiled)
         return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
-
-    @staticmethod
-    def _resolve_config_steady_state(compiled: CompiledModel) -> NDF:
-        """Evaluate each variable's symbolic ``steady_state`` (None -> 0) against
-        the calibration -> a canonical-order vector."""
-        conf = compiled.config
-        name_to_func = {v.__name__: v for v in conf.variables.variables}
-        params = conf.calibration.parameters
-        ss = np.zeros(len(compiled.var_names), dtype=float64)
-        for i, name in enumerate(compiled.var_names):
-            expr = conf.variables.steady_state[name_to_func[name]]
-            if expr is None:
-                continue
-            val = sp.simplify(sp.sympify(expr).subs(params))
-            try:
-                ss[i] = float(val)
-            except TypeError as exc:
-                raise ValueError(
-                    f"Steady state for '{name}' did not evaluate to a number: {val}"
-                ) from exc
-        return ss
-
-    @staticmethod
-    def _checked_steady_state(cf: Any, param_vec: NDF, seed: NDF) -> NDF:
-        """Solve ``F(ss, ss) = 0`` from ``seed`` and cross-check against it: a
-        configured steady state that disagrees with the solved one (beyond
-        tolerance) is a modeling error, so raise rather than expand at a bad point.
-        """
-        seed = np.ascontiguousarray(seed, dtype=float64)
-        ss, _ = steady_state_newton(cf.address, seed, param_vec)
-        solved = np.asarray(ss, dtype=float64)
-
-        if not np.allclose(solved, seed, rtol=1e-6, atol=1e-8):
-            diff = float(np.max(np.abs(solved - seed)))
-            raise ValueError(
-                "Configured steady state disagrees with the numerically solved "
-                f"steady state (max abs diff {diff:.3e}): configured="
-                f"{np.asarray(seed)}, solved={solved}. Fix the model's steady_state "
-                "entries (or the steady_state= argument) so F(ss, ss) = 0 holds."
-            )
-        return solved
 
     @staticmethod
     def _build_eta(compiled: CompiledModel) -> NDF:
@@ -551,7 +524,7 @@ class DSGESolver:
         filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: list[float] | NDArray | dict[str, float] | None = None,
+        ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
@@ -569,10 +542,10 @@ class DSGESolver:
             filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
-            steady_state=(
-                asarray(steady_state, dtype=float64)
-                if isinstance(steady_state, list)
-                else steady_state
+            ss_seed=(
+                asarray(ss_seed, dtype=float64)
+                if isinstance(ss_seed, list)
+                else ss_seed
             ),
             x0=x0,
             P0=P0,
@@ -602,7 +575,7 @@ class DSGESolver:
         filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: list[float] | NDArray | dict[str, float] | None = None,
+        ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
@@ -617,10 +590,10 @@ class DSGESolver:
             filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
-            steady_state=(
-                asarray(steady_state, dtype=float64)
-                if isinstance(steady_state, list)
-                else steady_state
+            ss_seed=(
+                asarray(ss_seed, dtype=float64)
+                if isinstance(ss_seed, list)
+                else ss_seed
             ),
             x0=x0,
             P0=P0,
@@ -652,7 +625,7 @@ class DSGESolver:
         filter_mode: str = "linear",
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: list[float] | NDArray | dict[str, float] | None = None,
+        ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
@@ -661,10 +634,8 @@ class DSGESolver:
         **method_kwargs: Any,
     ) -> tuple[Any, SolvedModel]:
 
-        steady_state = (
-            np.asarray(steady_state, dtype=float64)
-            if isinstance(steady_state, list)
-            else steady_state
+        ss_seed = (
+            np.asarray(ss_seed, dtype=float64) if isinstance(ss_seed, list) else ss_seed
         )
         est = self._estimator(
             compiled=compiled,
@@ -673,7 +644,7 @@ class DSGESolver:
             filter_mode=filter_mode,
             estimated_params=estimated_params,
             priors=priors,
-            steady_state=steady_state,
+            ss_seed=ss_seed,
             x0=x0,
             P0=P0,
             jitter=jitter,
@@ -712,7 +683,7 @@ class DSGESolver:
         solved = self.solve(
             compiled=compiled,
             parameters={k: float(v) for k, v in solve_params.items()},
-            steady_state=steady_state,
+            ss_seed=ss_seed,
         )
         return result, solved
 

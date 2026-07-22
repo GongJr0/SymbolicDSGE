@@ -8,6 +8,7 @@ from numpy import complex128, float64
 from numpy.typing import NDArray
 
 from .._ckernels.core import (
+    steady_state_newton,
     klein_postprocess,
     klein_preprocess,
     klein_qz,
@@ -24,12 +25,17 @@ class KleinSolution:
     ``p``/``f`` are complex (the imaginary parts are ~1e-16 roundoff from the
     complex Schur form; the caller collapses them via ``real_if_close``). Stored
     as ``SolvedModel.policy``; downstream reads only ``.f`` and ``.stab``.
+
+    ``steady_state`` is the Newton-resolved steady state the solve linearized at
+    (the seed after convergence), so second-order and measurement callers reuse
+    it instead of re-solving.
     """
 
     p: NDC
     f: NDC
     stab: int
     eig: NDC
+    steady_state: NDF
     order: int = 1
 
 
@@ -64,22 +70,24 @@ class PerturbationSolution:
 def klein_solve(
     residual_cfunc: Any,
     params: NDF,
-    steady_state: NDF,
+    ss_seed: NDF,
     n_states: int,
     *,
     log_linear: bool = False,
 ) -> KleinSolution:
-    """First-order Klein solve of the compiled model at ``(params, steady_state)``.
+    """First-order Klein solve of the compiled model at ``params``.
 
     ``residual_cfunc`` is the compiled residual as a numba @cfunc
     (``construct_objective_cfunc()``); it drives the complex-step preproc in C.
-    Returns a :class:`KleinSolution` with complex ``p``/``f``.
+    ``ss_seed`` seeds a Newton solve of ``F(ss, ss) = 0``; the solve linearizes
+    at the resolved steady state, which the returned :class:`KleinSolution`
+    carries in ``steady_state``.
     """
-    # Klein requires a square pencil: n_eq == n_var == len(steady_state).
-    n_eq = np.asarray(steady_state).shape[0]
-    a, b = klein_preprocess(
-        residual_cfunc.address, steady_state, params, n_eq, log_linear
-    )
+    # Klein requires a square pencil: n_eq == n_var == len(ss_seed).
+    n_eq = np.asarray(ss_seed).shape[0]
+    ss, _ = steady_state_newton(residual_cfunc.address, ss_seed, params)
+
+    a, b = klein_preprocess(residual_cfunc.address, ss, params, n_eq, log_linear)
     # Native QZ (LAPACK zgges via the scipy cython_lapack pointer, ordered by the
     # Klein 'ouc' criterion) — bit-for-bit equal to the former
     # ordqz(a, b, sort="ouc", output="complex")[0, 1, 5].
@@ -90,4 +98,6 @@ def klein_solve(
         np.asarray(z, dtype=complex128),
         n_states,
     )
-    return KleinSolution(p=p, f=f, stab=stab, eig=eig)
+    return KleinSolution(
+        p=p, f=f, stab=stab, eig=eig, steady_state=np.asarray(ss, dtype=float64)
+    )

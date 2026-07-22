@@ -121,6 +121,7 @@ class CompiledModel:
         self,
         params: Mapping[Any, Any] | Any,
         observables: list[str],
+        ss: NDF,
     ) -> tuple[NDF, NDF]:
         param_vec = self._coerce_param_vector(params)
         if param_vec.shape[0] != len(self.calib_params):
@@ -128,13 +129,12 @@ class CompiledModel:
                 f"Parameter vector length {param_vec.shape[0]} != {len(self.calib_params)}"
             )
 
-        zero_state = np.zeros((len(self.cur_syms),), dtype=float64)
         meas_addr = self.construct_measurement_cfunc(observables).address
         jac_addr = self.construct_observable_jacobian_cfunc(observables).address
         n_obs = len(observables)
 
-        d = measurement_eval(meas_addr, zero_state, param_vec, n_obs)
-        C = jacobian_eval(jac_addr, zero_state, param_vec, n_obs, len(self.cur_syms))
+        d = measurement_eval(meas_addr, ss, param_vec, n_obs)
+        C = jacobian_eval(jac_addr, ss, param_vec, n_obs, len(self.cur_syms))
         return C, d
 
     def _normalize_observables(

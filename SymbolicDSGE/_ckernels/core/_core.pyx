@@ -8,11 +8,23 @@ are exactly double/int64_t, so the extern is declared with those.
 
 from libc.stdint cimport int64_t
 
-from scipy.linalg.cython_lapack cimport zgges, zselect2
+from cpython.pycapsule cimport PyCapsule_GetName, PyCapsule_GetPointer
 
 import numpy as np
+import scipy.linalg.cython_lapack as _cython_lapack
+
+
+cdef extern from "../_common/sdsge_complex.h":
+    ctypedef struct c128:
+        double re
+        double im
+    c128 c128_sqrt(c128 a)
+
 
 cdef extern from "core.h" nogil:
+    void sdsge_assemble_state_space(
+        const c128 *p, const c128 *f, const int64_t n_state, int64_t n_control,
+        const int64_t n_exog, double *A, double *B)
     void sdsge_simulate_linear_states(
         const double *A, const double *B, const double *x0,
         const double *shock, double *out, int64_t T, int64_t n, int64_t k)
@@ -28,17 +40,32 @@ cdef extern from "core.h" nogil:
         double *x_out, double *y_out)
 
 
-cdef extern from "../_common/sdsge_complex.h":
-    ctypedef struct c128:
-        double re
-        double im
-    c128 c128_sqrt(c128 a)
-
-
 cdef extern from "klein_postproc.h" nogil:
     int64_t klein_postproc(
         const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
         c128 *f, c128 *p, int64_t *stab, c128 *eig)
+
+
+cdef extern from "klein_qz.h" nogil:
+    # Opaque function-pointer alias; the real zgges signature lives in the
+    # header. We only reinterpret the scipy cython_lapack ``zgges`` capsule
+    # pointer to this type and hand it straight to the C routine.
+    ctypedef void (*klein_zgges_fn)()
+    int64_t c_klein_qz "klein_qz" (
+        klein_zgges_fn zgges_ptr, int64_t n, c128 *s, c128 *t, c128 *z)
+    int KLEIN_QZ_OK
+    int KLEIN_QZ_ALLOC_FAIL
+    int KLEIN_QZ_LAPACK_FAIL
+
+
+# LAPACK ``zgges`` reached through its scipy ``cython_lapack`` capsule address
+# (no build-time LAPACK link), cast to the C routine's expected pointer type
+# once at import. This is the exact runtime-address mechanism the native
+# estimation objective (#327) uses.
+cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
+cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
+    _zgges_capsule, PyCapsule_GetName(_zgges_capsule)
+)
 
 
 cdef extern from "spike.h" nogil:
@@ -122,6 +149,30 @@ cdef extern from "bicomplex_hessian.h" nogil:
 # ``void(vars*, par*, out*)``. Held Python-side; called here by ``.address``, nogil.
 ctypedef void (*sdsge_measurement_fn)(
     double *vars, double *par, double *out) noexcept nogil
+
+
+def assemble_state_space(p, f, n_state, n_control, n_exog):
+    """State-space matrices ``(A, B)`` from a solution ``(p, f)``. """
+    cdef double complex[:, ::1] pv = np.ascontiguousarray(p, dtype=np.complex128)
+    cdef double complex[:, ::1] fv = np.ascontiguousarray(f, dtype=np.complex128)
+
+    n = n_state + n_control
+    cdef int64_t n_s = <int64_t>n_state
+    cdef int64_t n_c = <int64_t>(n - n_state)
+    cdef int64_t n_e = <int64_t>n_exog
+
+    A = np.empty((n, n), dtype=np.float64)
+    B = np.empty((n, n_exog), dtype=np.float64)
+
+    cdef double[:, ::1] Av = A
+    cdef double[:, ::1] Bv = B
+
+    with nogil:
+        sdsge_assemble_state_space(
+            <c128 *>&pv[0, 0], <c128 *>&fv[0, 0], n_s, n_c, n_e,
+            &Av[0, 0], &Bv[0, 0]
+        )
+    return A, B
 
 
 def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):
@@ -331,83 +382,47 @@ def klein_preprocess(
     return a, b
 
 
-cdef bint _klein_ouc(double complex *alpha, double complex *beta) noexcept nogil:
-    """Klein 'outside unit circle' selctg for zgges: select |alpha/beta| > 1.
-
-    Division-safe magnitude compare (|alpha| > |beta|), matching
-    ``scipy.linalg.ordqz(..., sort="ouc")``. beta == 0 (infinite generalized
-    eigenvalue) selects true, as it must.
-    """
-    cdef double aa = alpha[0].real * alpha[0].real + alpha[0].imag * alpha[0].imag
-    cdef double bb = beta[0].real * beta[0].real + beta[0].imag * beta[0].imag
-    return aa > bb
-
-
 def klein_qz(a, b):
     """Native generalized Schur (QZ) with the Klein 'ouc' ordering, via LAPACK
-    ``zgges`` (called through the scipy ``cython_lapack`` pointer, no build-time
-    LAPACK link). Returns ``(s, t, z)`` == ``scipy.linalg.ordqz(a, b,
+    ``zgges`` (reached through the scipy ``cython_lapack`` capsule pointer, no
+    build-time LAPACK link). Returns ``(s, t, z)`` == ``scipy.linalg.ordqz(a, b,
     sort="ouc", output="complex")`` indices ``[0, 1, 5]``: ordered Schur factors
     ``S``/``T`` and right Schur vectors ``Z``, ready for ``klein_postprocess``.
+
+    Thin buffer-marshalling shim: the workspace query, ``zgges`` calls, and the
+    'ouc' selctg all live in the C routine ``klein_qz`` (``klein_qz.c``), shared
+    with the native estimation objective.
     """
     a_f = np.asfortranarray(a, dtype=np.complex128)
     b_f = np.asfortranarray(b, dtype=np.complex128)
-    cdef int n = a_f.shape[0]
+    cdef int64_t n = a_f.shape[0]
     if a_f.shape[1] != n or b_f.shape[0] != n or b_f.shape[1] != n:
         raise ValueError("klein_qz requires square, identically shaped a and b.")
     if n == 0:
         return a_f, b_f, np.zeros((0, 0), dtype=np.complex128)
 
-    vsl = np.zeros((n, n), dtype=np.complex128, order="F")
-    vsr = np.zeros((n, n), dtype=np.complex128, order="F")
-    alpha = np.zeros(n, dtype=np.complex128)
-    beta = np.zeros(n, dtype=np.complex128)
-    rwork = np.zeros(8 * n, dtype=np.float64)
-    bwork = np.zeros(n, dtype=np.int32)
-
+    # ``s``/``t`` are the pencil on input, overwritten in place to the ordered
+    # Schur factors; ``z`` receives the right Schur vectors.
+    z = np.zeros((n, n), dtype=np.complex128, order="F")
     cdef double complex[::1, :] av = a_f
     cdef double complex[::1, :] bv = b_f
-    cdef double complex[::1, :] vslv = vsl
-    cdef double complex[::1, :] vsrv = vsr
-    cdef double complex[::1] alphav = alpha
-    cdef double complex[::1] betav = beta
-    cdef double[::1] rworkv = rwork
-    cdef int[::1] bworkv = bwork
-
-    cdef char jobvsl = b"V"
-    cdef char jobvsr = b"V"
-    cdef char sort = b"S"
-    cdef int sdim = 0
-    cdef int info = 0
-    cdef int lwork = -1
-    cdef double complex wq = 0
-
-    # Workspace query (lwork = -1): zgges writes the optimal size to wq.
+    cdef double complex[::1, :] zv = z
+    cdef int64_t status
     with nogil:
-        zgges(&jobvsl, &jobvsr, &sort, <zselect2*>&_klein_ouc, &n,
-              &av[0, 0], &n, &bv[0, 0], &n, &sdim,
-              &alphav[0], &betav[0], &vslv[0, 0], &n, &vsrv[0, 0], &n,
-              &wq, &lwork, &rworkv[0], <bint *>&bworkv[0], &info)
-    lwork = <int>wq.real
-    if lwork < 1:
-        lwork = 1
-    work = np.zeros(lwork, dtype=np.complex128)
-    cdef double complex[::1] workv = work
-
-    with nogil:
-        zgges(&jobvsl, &jobvsr, &sort, <zselect2*>&_klein_ouc, &n,
-              &av[0, 0], &n, &bv[0, 0], &n, &sdim,
-              &alphav[0], &betav[0], &vslv[0, 0], &n, &vsrv[0, 0], &n,
-              &workv[0], &lwork, &rworkv[0], <bint *>&bworkv[0], &info)
-    if info != 0:
-        raise RuntimeError(f"zgges failed with info={info}.")
-    return a_f, b_f, vsr
+        status = c_klein_qz(
+            _zgges, n,
+            <c128 *>&av[0, 0], <c128 *>&bv[0, 0], <c128 *>&zv[0, 0])
+    if status == KLEIN_QZ_ALLOC_FAIL:
+        raise MemoryError("klein_qz: workspace allocation failed.")
+    if status != KLEIN_QZ_OK:
+        raise RuntimeError("klein_qz: LAPACK zgges failed.")
+    return a_f, b_f, z
 
 
 def steady_state_newton(
     size_t residual_addr,
-    double[::1] seed,
-    double[::1] params,
+    seed,
+    params,
     int64_t max_iter=50,
     double tol=1e-12,
 ):
@@ -419,11 +434,15 @@ def steady_state_newton(
     cdef int64_t n_var = seed.shape[0]
     cdef int64_t n_par = params.shape[0]
 
+    cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
+    cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+
+    cdef const double *seed_ptr = &seedv[0] if n_var > 0 else NULL
+    cdef const double *par_ptr = &parv[0] if n_par > 0 else NULL
+
     ss = np.empty(n_var, dtype=np.float64)
     cdef double[::1] ssv = ss
 
-    cdef const double *seed_ptr = &seed[0] if n_var > 0 else NULL
-    cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
     cdef double *ss_ptr = &ssv[0] if n_var > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     cdef int64_t iters = 0

@@ -83,7 +83,7 @@ class EstimationRunRequest(BaseModel):
     parameters: list[EstimationParameterSpec] = Field(min_length=1)
     method_kwargs: dict[str, Any] = Field(default_factory=dict)
     compile_kwargs: dict[str, Any] = Field(default_factory=dict)
-    steady_state: list[float] | None = None
+    ss_seed: list[float] | None = None
     posterior_point: str = "mean"
     estimate_and_solve: bool = False
 

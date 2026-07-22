@@ -142,7 +142,7 @@ print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objectiv
 sol = solver.solve(
     compiled,
     parameters=None,
-    steady_state=[0.0, 0.0, 0.0, 0.0, 0.0],
+    ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 print("Is stable: ", sol.policy.stab == 0)
 print("Eigenvalues: ", sol.policy.eig)

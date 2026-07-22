@@ -188,11 +188,12 @@ def test_interface_init_reorders_obs_and_builds_state_space():
 
     assert ki.observables == ["ObsA", "ObsB"]
     assert np.array_equal(ki.y, np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT))
+    C, d = ki._get_C_d()
     assert np.array_equal(
-        ki.C,
+        C,
         np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 1.0]], dtype=FLOAT),
     )
-    assert np.array_equal(ki.d, np.array([1.0, -1.0], dtype=FLOAT))
+    assert np.array_equal(d, np.array([1.0, -1.0], dtype=FLOAT))
     assert np.allclose(
         ki.Q,
         np.array([[0.04, 0.015], [0.015, 0.09]], dtype=FLOAT),
@@ -227,8 +228,9 @@ def test_interface_init_extended_skips_linear_measurement_builder():
         calib_params=np.array([0.5], dtype=FLOAT),
     )
 
-    assert ki.C is None
-    assert ki.d is None
+    # `bomb` above fires if _build_C_d_from_obs runs during construction; reaching
+    # here means extended mode never triggered the linear measurement build.
+    assert ki.mode == FilterMode.EXTENDED
 
 
 def test_interface_init_accepts_user_r_override():
@@ -453,24 +455,8 @@ def test_reorder_obs_rejects_invalid_inputs(observables, y, match):
         ki._reorder_obs(observables, y)
 
 
-def test_validate_mode_and_kalman_config_property_error_paths():
-    linear = _make_shell()
-    linear.mode = FilterMode.LINEAR
-    linear.C = None
-    linear.d = np.zeros((1,), dtype=FLOAT)
-
-    with pytest.raises(ValueError, match="C and d matrices are required"):
-        linear._validate_mode_and_inputs()
-
-    extended = _make_shell()
-    extended.mode = FilterMode.EXTENDED
-    extended.meas_addr = None
-    extended.jac_addr = 1
-
-    with pytest.raises(ValueError, match="meas_addr and jac_addr are required"):
-        extended._validate_mode_and_inputs()
-
-    # A missing Kalman config is now rejected at construction, not on property access.
+def test_kalman_config_required_at_construction():
+    # A missing Kalman config is rejected at construction, not on property access.
     with pytest.raises(
         ValueError, match="A Kalman filter configuration is required for filtering"
     ):

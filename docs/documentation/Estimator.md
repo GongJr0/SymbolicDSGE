@@ -24,7 +24,7 @@ Estimator(
     filter_mode: str = "linear", # (6)!
     estimated_params: Sequence[str] | None = None,
     priors: Mapping[str, Prior] | None = None, # (4)!
-    steady_state: np.ndarray | dict[str, float] | None = None,
+    ss_seed: np.ndarray | dict[str, float] | None = None,
     x0: np.ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool | None = None,

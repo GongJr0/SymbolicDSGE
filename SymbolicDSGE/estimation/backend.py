@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from ..core.solved_model import SolvedModel
+    from ..core.solver_backend import PerturbationSolution
 
 import numpy as np
 import pandas as pd
@@ -34,7 +38,6 @@ class PreparedFilterRun:
     mode: str
     meas_addr: int
     jac_addr: int
-    zero_state: NDF
     P0: NDF | None
     kf_jitter: float64
     kf_sym: bool
@@ -219,13 +222,13 @@ def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
 def build_C_d_from_cfunc(
     meas_addr: int,
     jac_addr: int,
-    zero_state: NDF,
+    ss: NDF,
     calib_params: NDF,
     n_obs: int,
 ) -> tuple[NDF, NDF]:
-    n_var = zero_state.shape[0]
-    d = measurement_eval(meas_addr, zero_state, calib_params, n_obs)
-    C = jacobian_eval(jac_addr, zero_state, calib_params, n_obs, n_var)
+    n_var = ss.shape[0]
+    d = measurement_eval(meas_addr, ss, calib_params, n_obs)
+    C = jacobian_eval(jac_addr, ss, calib_params, n_obs, n_var)
     return C, d
 
 
@@ -260,7 +263,6 @@ def prepare_filter_run(
         mode=mode,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         jac_addr=compiled.construct_observable_jacobian_cfunc(obs).address,
-        zero_state=np.zeros((len(compiled.cur_syms),), dtype=float64),
         P0=_resolve_P0(
             FilterMode(mode),
             compiled.n_state,
@@ -311,7 +313,7 @@ def _get_solution(
     compiled: CompiledModel,
     params: Mapping[str, float64],
     mode: str,
-    steady_state: NDF | dict[str, float] | None,
+    ss_seed: NDF | dict[str, float] | None,
     raise_on_bk_violation: bool = True,
 ) -> Any:
     """Solve the model to the order the filter mode requires.
@@ -327,14 +329,14 @@ def _get_solution(
         compiled=compiled,
         order=2 if mode == "unscented" else 1,
         parameters={k: float(v) for k, v in params.items()},
-        steady_state=steady_state,
+        ss_seed=ss_seed,
         raise_on_bk_violation=raise_on_bk_violation,
     )
 
 
 def _prepare_filter_loglik(
     *,
-    sol: Any,
+    sol: SolvedModel,
     prepared: PreparedFilterRun,
     Q: NDF,
     calib_params: NDF,
@@ -365,7 +367,7 @@ def _prepare_filter_loglik(
         C, d = build_C_d_from_cfunc(
             prepared.meas_addr,
             prepared.jac_addr,
-            prepared.zero_state,
+            sol.policy.steady_state,
             calib_params,
             prepared.y_reordered.shape[1],
         )
@@ -393,6 +395,7 @@ def _prepare_filter_loglik(
     elif mode == "unscented":
         # hx is (n_state, n_state); recover n_state from it so bx and the
         # augmented z0 don't need `compiled` threaded in.
+        pol = cast("PerturbationSolution", sol.policy)
         n_state = sol.policy.p.shape[0]
         if x0 is None:
             x0_state = np.zeros((n_state,), dtype=float64)
@@ -404,14 +407,14 @@ def _prepare_filter_loglik(
         run_filter = KalmanFilter.run_unscented_raw
         mode_args = {
             "meas_addr": prepared.meas_addr,
-            "hx": sol.policy.p,
-            "gx": sol.policy.f,
+            "hx": pol.p,
+            "gx": pol.f,
             "bx": asarray(sol.B[:n_state, :], dtype=float64),
-            "hxx": sol.policy.hxx,
-            "gxx": sol.policy.gxx,
-            "hss": sol.policy.hss,
-            "gss": sol.policy.gss,
-            "steady_state": sol.policy.steady_state,
+            "hxx": pol.hxx,
+            "gxx": pol.gxx,
+            "hss": pol.hss,
+            "gss": pol.gss,
+            "steady_state": pol.steady_state,
             "calib_params": calib_params,
             "z0": z0,
         }
@@ -434,7 +437,7 @@ def evaluate_loglik(
     params: Mapping[str, float64],
     filter_mode: str,
     observables: list[str] | None,
-    steady_state: NDF | dict[str, float] | None,
+    ss_seed: NDF | dict[str, float] | None,
     x0: NDF | None,
     jitter: float | float64 | None,
     symmetrize: bool | None,
@@ -462,7 +465,7 @@ def evaluate_loglik(
         compiled=compiled,
         params=params,
         mode=prepared_run.mode,
-        steady_state=steady_state,
+        ss_seed=ss_seed,
         raise_on_bk_violation=False,
     )
     Q = build_Q(compiled, params, corr=q_corr)

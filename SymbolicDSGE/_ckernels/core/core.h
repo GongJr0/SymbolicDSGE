@@ -2,11 +2,16 @@
 #define SDSGE_CORE_H
 
 #include "../_common/sdsge_common.h"
+#include "../_common/sdsge_complex.h"
 #include "../_common/sdsge_linalg.h"
 
-/* Linear state-space simulation kernels (pure C; no Python).
- * All arrays are C-contiguous, row-major, f64. Mirrors the numba kernels in
- * SymbolicDSGE/core/simulation.py. */
+/* Assemble state-space */
+void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
+                                const c128 *SDSGE_RESTRICT f, const i64 n_state,
+                                const i64 n_control, const i64 n_exog,
+                                f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B);
+
+/* Linear state-space simulation kernels */
 
 /* out[(T+1, n)] : out[0] = x0; out[t+1] = A @ out[t] + B @ shock[t]. */
 void sdsge_simulate_linear_states(const f64 *SDSGE_RESTRICT A,     /* (n, n) */
@@ -27,18 +32,18 @@ void sdsge_affine_observations(
 /* Pruned second order simulation.
  * x_out[(T+1, nx)] and y_out[(T+1, ny)] are dense split outputs. */
 i64 sdsge_simulate_second_order_pruned(
-    const f64 *SDSGE_RESTRICT hx,    /* (nx, nx) */
-    const f64 *SDSGE_RESTRICT gx,    /* (ny, nx), nullable when ny == 0 */
-    const f64 *SDSGE_RESTRICT bx,    /* (nx, n_exog), nullable when n_exog == 0 */
-    const f64 *SDSGE_RESTRICT hxx,   /* (nx, nx, nx) */
-    const f64 *SDSGE_RESTRICT gxx,   /* (ny, nx, nx), nullable when ny == 0 */
-    const f64 *SDSGE_RESTRICT hss,   /* (nx,) */
-    const f64 *SDSGE_RESTRICT gss,   /* (ny,), nullable when ny == 0 */
-    const f64 *SDSGE_RESTRICT x0,    /* (nx,) */
+    const f64 *SDSGE_RESTRICT hx,  /* (nx, nx) */
+    const f64 *SDSGE_RESTRICT gx,  /* (ny, nx), nullable when ny == 0 */
+    const f64 *SDSGE_RESTRICT bx,  /* (nx, n_exog), nullable when n_exog == 0 */
+    const f64 *SDSGE_RESTRICT hxx, /* (nx, nx, nx) */
+    const f64 *SDSGE_RESTRICT gxx, /* (ny, nx, nx), nullable when ny == 0 */
+    const f64 *SDSGE_RESTRICT hss, /* (nx,) */
+    const f64 *SDSGE_RESTRICT gss, /* (ny,), nullable when ny == 0 */
+    const f64 *SDSGE_RESTRICT x0,  /* (nx,) */
     const f64 *SDSGE_RESTRICT shock, /* (T, n_exog), nullable when empty */
     i64 T, i64 nx, i64 ny, i64 n_exog,
-    f64 *SDSGE_RESTRICT x_out,       /* (T+1, nx) */
-    f64 *SDSGE_RESTRICT y_out);      /* (T+1, ny), nullable when ny == 0 */
+    f64 *SDSGE_RESTRICT x_out,  /* (T+1, nx) */
+    f64 *SDSGE_RESTRICT y_out); /* (T+1, ny), nullable when ny == 0 */
 
 /* ERROR CODES */
 #define SDSGE_CORE_SUCCESS 0

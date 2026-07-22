@@ -103,7 +103,7 @@ class Estimator:
         filter_mode: str = "linear",
         estimated_params: Sequence[str] | None = None,
         priors: Mapping[str, Any] | None = None,
-        steady_state: NDF | dict[str, float] | None = None,
+        ss_seed: NDF | dict[str, float] | None = None,
         x0: NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
@@ -125,7 +125,7 @@ class Estimator:
         self.filter_mode = filter_mode
         self._input_priors = dict(priors) if priors is not None else None
 
-        self.steady_state = steady_state
+        self.ss_seed = ss_seed
         self.x0 = x0
         self.jitter = jitter
         self.symmetrize = symmetrize
@@ -957,7 +957,7 @@ class Estimator:
             params=params,
             filter_mode=self.filter_mode,
             observables=self.observables,
-            steady_state=self.steady_state,
+            ss_seed=self.ss_seed,
             x0=self.x0,
             jitter=self.jitter,
             symmetrize=self.symmetrize,

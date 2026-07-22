@@ -31,7 +31,7 @@ def _baseline_spec() -> EstimationSpec:
         ],
         observables=["y", "pi"],
         method_kwargs={"options": {"maxiter": 100}},
-        steady_state=[0.0, 0.0],
+        ss_seed=[0.0, 0.0],
         posterior_point="map",
     )
 
@@ -81,7 +81,7 @@ def test_estimation_spec_omits_unset_optionals() -> None:
     )
     as_dict = spec.to_dict()
     assert "observables" not in as_dict
-    assert "steady_state" not in as_dict
+    assert "ss_seed" not in as_dict
 
 
 def test_estimation_spec_rejects_unknown_method() -> None:
@@ -435,7 +435,7 @@ def test_estimation_run_request_to_core_drops_ui_fields() -> None:
         ],
         method_kwargs={"options": {"maxiter": 100}},
         compile_kwargs={"linearize": True},
-        steady_state=[0.0, 0.0],
+        ss_seed=[0.0, 0.0],
         posterior_point="map",
         estimate_and_solve=True,
     )
@@ -450,7 +450,7 @@ def test_estimation_run_request_to_core_drops_ui_fields() -> None:
     assert as_dict["method"] == "map"
     assert as_dict["observables"] == ["y", "pi"]
     assert as_dict["posterior_point"] == "map"
-    assert as_dict["steady_state"] == [0.0, 0.0]
+    assert as_dict["ss_seed"] == [0.0, 0.0]
     assert as_dict["method_kwargs"] == {"options": {"maxiter": 100}}
     assert "compile_kwargs" not in as_dict  # now a model-level concern, dropped
     assert as_dict["parameters"][0]["name"] == "beta"
