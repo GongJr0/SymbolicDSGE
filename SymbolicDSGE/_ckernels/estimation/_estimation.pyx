@@ -115,6 +115,10 @@ cdef extern from "estimation.h":
         double *C
         double *d
 
+    ctypedef struct sdsge_extended_ctx:
+        sdsge_obj_common base
+        sdsge_solve1 solve
+
     ctypedef struct sdsge_solve2:
         double *f_xx
         double *hx_real
@@ -142,6 +146,8 @@ cdef extern from "estimation.h":
                           const int64_t *calib_gather, int64_t n_par) nogil
     double sdsge_obj_linear(sdsge_linear_ctx *ctx, const double *theta,
                             int has_priors) nogil
+    double sdsge_obj_extended(sdsge_extended_ctx *ctx, const double *theta,
+                              int has_priors) nogil
     double sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const double *theta,
                                int has_priors) nogil
 
@@ -294,6 +300,144 @@ def obj_linear_base(
     cdef double ll
     with nogil:
         ll = sdsge_obj_linear(&ctx, NULL, 0)
+    return ll, int(b.bk_violations)
+
+
+def obj_extended_base(
+    size_t residual_addr,
+    size_t meas_addr,
+    size_t jac_addr,
+    int n_state,
+    int n_exog,
+    int n_obs,
+    int log_linear,
+    double[::1] ss_seed,        # n_var (Newton seed for the steady state)
+    double[::1] base_calib,     # n_par (== n_params here)
+    double[:, ::1] Q,           # n_exog*n_exog constant
+    double[:, ::1] R,           # n_obs*n_obs constant
+    double[:, ::1] y,           # T*n_obs
+    double[:, ::1] P0,          # n_var*n_var
+    double jitter,
+    int symmetrize,
+):
+    """Evaluate the native extended objective at base calibration (n_theta == 0,
+    constant Q/R, no prior). Returns loglik. Same as ``obj_linear_base`` minus the
+    (C, d) buffers: the EKF relinearizes the measurement each step via the meas /
+    jac cfuncs at the running state estimate."""
+    cdef int64_t n_var = ss_seed.shape[0]
+    cdef int64_t n_par = base_calib.shape[0]
+    cdef int64_t T = y.shape[0]
+    cdef int64_t n_ctrl = n_var - n_state
+
+    # Preallocated scratch (kept alive for the whole call).
+    params = np.empty(n_par, dtype=np.float64)
+    calib_vec = np.empty(n_par, dtype=np.float64)
+    calib_gather = np.arange(n_par, dtype=np.int64)
+    ss = np.empty(n_var, dtype=np.float64)
+    a_real = np.empty((n_var, n_var), dtype=np.float64)
+    b_real = np.empty((n_var, n_var), dtype=np.float64)
+    s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
+    p = np.empty((n_state, n_state), dtype=np.complex128)
+    eig = np.empty(n_var, dtype=np.complex128)
+    x0 = np.zeros(n_var, dtype=np.float64)
+    A = np.empty((n_var, n_var), dtype=np.float64)
+    B = np.empty((n_var, n_exog), dtype=np.float64)
+
+    cdef double[::1] paramsv = params
+    cdef double[::1] calibv = calib_vec
+    cdef int64_t[::1] cgv = calib_gather
+    cdef double[::1] ssv = ss
+    cdef double[:, ::1] arv = a_real
+    cdef double[:, ::1] brv = b_real
+    cdef double complex[::1, :] sv = s
+    cdef double complex[::1, :] tv = t
+    cdef double complex[::1, :] zv = z
+    cdef double complex[:, ::1] fv = f
+    cdef double complex[:, ::1] pv = p
+    cdef double complex[::1] eigv = eig
+    cdef double[::1] x0v = x0
+    cdef double[:, ::1] Av = A
+    cdef double[:, ::1] Bv = B
+
+    cdef sdsge_extended_ctx ctx
+    cdef sdsge_obj_common *b = &ctx.base
+
+    b.dims.n_theta = 0
+    b.dims.n_var = n_var
+    b.dims.n_state = n_state
+    b.dims.n_ctrl = n_ctrl
+    b.dims.n_exog = n_exog
+    b.dims.n_obs = n_obs
+    b.dims.n_par = n_par
+    b.dims.n_params = n_par
+    b.dims.T = T
+
+    b.residual = <sdsge_residual_fn><void*>residual_addr
+    b.zgges = _zgges
+    b.meas = <meas_fn><void*>meas_addr
+    b.jac = <meas_fn><void*>jac_addr
+
+    b.ss_seed = &ss_seed[0]
+    b.log_linear = log_linear
+    b.y = &y[0, 0]
+    b.P0 = &P0[0, 0]
+    b.x0 = &x0v[0]
+    b.jitter = jitter
+    b.symmetrize = symmetrize
+
+    b.pmap.base_params = &base_calib[0]
+    b.pmap.scalars = NULL
+    b.pmap.n_scalars = 0
+    b.pmap.calib_gather = &cgv[0]
+    b.pmap.calib_upd = NULL
+    b.pmap.n_calib_upd = 0
+
+    b.q_spec.is_constant = 1
+    b.q_spec.constant = &Q[0, 0]
+    b.q_spec.K = n_exog
+    b.q_spec.corr_from_block = 0
+    b.q_spec.n_pairs = 0
+
+    b.r_spec.is_constant = 1
+    b.r_spec.constant = &R[0, 0]
+    b.r_spec.K = n_obs
+    b.r_spec.corr_from_block = 0
+    b.r_spec.n_pairs = 0
+
+    b.prior.has_prior = 0
+
+    b.params = &paramsv[0]
+    b.calib_vec = &calibv[0]
+    b.Q = NULL
+    b.R = NULL
+    b.corr_q = NULL
+    b.corr_r = NULL
+    b.std_q = NULL
+    b.std_r = NULL
+    b.bk_violations = 0
+
+    ctx.solve.ss = &ssv[0]
+    ctx.solve.a_real = &arv[0, 0]
+    ctx.solve.b_real = &brv[0, 0]
+    ctx.solve.s = <c128*>&sv[0, 0]
+    ctx.solve.t = <c128*>&tv[0, 0]
+    ctx.solve.z = <c128*>&zv[0, 0]
+    ctx.solve.f = <c128*>&fv[0, 0]
+    ctx.solve.p = <c128*>&pv[0, 0]
+    ctx.solve.eig = <c128*>&eigv[0]
+    ctx.solve.A = &Av[0, 0]
+    ctx.solve.B = &Bv[0, 0]
+
+    # One-time construction seeds (see obj_linear_base).
+    sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
+    sdsge_init_calib(&calibv[0], &paramsv[0], &cgv[0], n_par)
+
+    cdef double ll
+    with nogil:
+        ll = sdsge_obj_extended(&ctx, NULL, 0)
     return ll, int(b.bk_violations)
 
 

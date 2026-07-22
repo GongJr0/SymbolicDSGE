@@ -18,6 +18,7 @@ from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.kalman.interface import FilterMode, _resolve_P0
 from SymbolicDSGE._ckernels.estimation._estimation import (
+    obj_extended_base,
     obj_linear_base,
     obj_unscented_base,
 )
@@ -108,6 +109,58 @@ def test_obj_linear_base_matches_model_kalman(bundle):
     )
 
     ll_model = solved.kalman(y=y, filter_mode="linear", observables=obs).loglik
+
+    assert bk == 0
+    assert np.isfinite(ll)
+    np.testing.assert_allclose(ll, ll_model, rtol=1e-9, atol=1e-9)
+
+
+def test_obj_extended_base_matches_model_kalman(bundle):
+    compiled = bundle["compiled"]
+    kalman = bundle["kalman"]
+    solved = bundle["solved"]
+    steady = bundle["steady"]
+    y = bundle["y"]
+    obs = ["Infl", "Rate"]
+
+    base = backend.extract_base_params(compiled)
+    prep = backend.prepare_filter_run(
+        compiled=compiled,
+        kalman=kalman,
+        y=y,
+        observables=obs,
+        filter_mode="extended",
+        jitter=None,
+        symmetrize=None,
+    )
+
+    cc = np.ascontiguousarray
+    Q = cc(backend.build_Q(compiled, base), dtype=np.float64)
+    R = cc(backend.build_R(compiled, kalman, prep.observables, base), dtype=np.float64)
+    calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
+    steady_c = cc(steady, dtype=np.float64)
+    y_c = cc(prep.y_reordered, dtype=np.float64)
+    P0 = cc(prep.P0, dtype=np.float64)
+
+    ll, bk = obj_extended_base(
+        compiled.construct_objective_cfunc().address,
+        prep.meas_addr,
+        prep.jac_addr,
+        compiled.n_state,
+        compiled.n_exog,
+        len(prep.observables),
+        0,  # log_linear
+        steady_c,
+        calib,
+        Q,
+        R,
+        y_c,
+        P0,
+        float(prep.kf_jitter),
+        int(prep.kf_sym),
+    )
+
+    ll_model = solved.kalman(y=y, filter_mode="extended", observables=obs).loglik
 
     assert bk == 0
     assert np.isfinite(ll)
