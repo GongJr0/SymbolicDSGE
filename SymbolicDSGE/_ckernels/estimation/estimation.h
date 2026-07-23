@@ -174,6 +174,15 @@ typedef struct {
 void sdsge_init_params(f64 *SDSGE_RESTRICT params,
                        const f64 *SDSGE_RESTRICT base_params, i64 n_par);
 
+/* Post-loop resolution at a theta (e.g. x_best): scatter into params, and the
+ * log-prior from the packed tables. Both are scatter / prior only, no filter, so
+ * they are cheap to call once after the optimizer returns. Shared by every mode
+ * (they operate on the common base). */
+void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
+                          const f64 *SDSGE_RESTRICT theta);
+f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
+                      const f64 *SDSGE_RESTRICT theta);
+
 /* Per-flavor objective: theta -> loglik (+ logprior if has_priors). */
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                      int has_priors);

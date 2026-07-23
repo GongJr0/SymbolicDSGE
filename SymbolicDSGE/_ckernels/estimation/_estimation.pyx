@@ -150,6 +150,9 @@ cdef extern from "estimation.h":
 
     void sdsge_init_params(double *params, const double *base_params,
                            int64_t n_par) nogil
+    void sdsge_scatter_params(sdsge_obj_common *base, const double *theta) nogil
+    double sdsge_logprior_at(const sdsge_obj_common *base,
+                             const double *theta) nogil
     double sdsge_obj_linear(sdsge_linear_ctx *ctx, const double *theta,
                             int has_priors) nogil
     double sdsge_obj_extended(sdsge_extended_ctx *ctx, const double *theta,
@@ -656,22 +659,29 @@ def obj_unscented_base(
     return ll, int(b.bk_violations)
 
 
-# --- Native MLE/MAP driver over the linear objective (issue #330) -----------
+# --- Native MLE/MAP driver over the per-mode objective (issue #330) ----------
 #
-# Two trampolines adapt the objective's (ctx, theta, has_priors) ABI to the
+# Trampolines adapt each mode's objective (ctx, theta, has_priors) ABI to the
 # optimizer's (x, void*ctx) ABI, negating loglik/logpost for minimization. The
 # BK/NaN sentinel (-inf loglik) maps to +inf, which the drivers tolerate.
 
-cdef double _obj_ll(const double *x, void *ctx) noexcept nogil:
+cdef double _obj_lin_ll(const double *x, void *ctx) noexcept nogil:
     return -sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 0)
-
-
-cdef double _obj_lp(const double *x, void *ctx) noexcept nogil:
+cdef double _obj_lin_lp(const double *x, void *ctx) noexcept nogil:
     return -sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 1)
+cdef double _obj_ext_ll(const double *x, void *ctx) noexcept nogil:
+    return -sdsge_obj_extended(<sdsge_extended_ctx*>ctx, x, 0)
+cdef double _obj_ext_lp(const double *x, void *ctx) noexcept nogil:
+    return -sdsge_obj_extended(<sdsge_extended_ctx*>ctx, x, 1)
+cdef double _obj_unsc_ll(const double *x, void *ctx) noexcept nogil:
+    return -sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 0)
+cdef double _obj_unsc_lp(const double *x, void *ctx) noexcept nogil:
+    return -sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 1)
 
 
-def run_estimation_linear(
+def run_estimation(
     object ctx_dto,
+    str mode,
     str method,
     double[::1] theta0,
     bounds=None,
@@ -686,11 +696,13 @@ def run_estimation_linear(
     double xatol=1e-4,
     double fatol=1e-4,
 ):
-    """Native linear-filter MLE/MAP. Marshal the ``PyLinearContext`` DTO into
-    ``sdsge_linear_ctx``, then minimize ``-loglik`` (``has_priors=0``) or
-    ``-logpost`` (``has_priors=1``) with the native L-BFGS-B / Nelder-Mead driver.
-    Returns the lean driver result dict. Theta-naming and the logprior split are
-    the caller's post-loop step (a native scatter at ``x_best``), not wired yet."""
+    """Native MLE/MAP over the linear / extended / unscented objective. Marshal
+    the mode's context DTO into its C ctx, then minimize ``-loglik``
+    (``has_priors=0``) or ``-logpost`` (``has_priors=1``) with the native
+    L-BFGS-B / Nelder-Mead driver. Returns the driver result plus ``params`` (the
+    named parameter vector scattered at x_best) and ``logprior`` (MAP), all
+    resolved natively with no filter re-eval. The base marshaling is shared; only
+    the ctx struct, objective, and mode scratch differ per ``mode``."""
     cdef object base = ctx_dto.base
     cdef object dims = base.dims
     cdef int64_t n_theta = dims.n_theta
@@ -701,6 +713,7 @@ def run_estimation_linear(
     cdef int64_t n_obs = dims.n_obs
     cdef int64_t n_par = dims.n_par
     cdef int64_t T = dims.T
+    cdef int64_t n2 = 2 * n_var
 
     # Working theta (the driver mutates it in place).
     x = np.array(theta0, dtype=np.float64, copy=True)
@@ -748,8 +761,21 @@ def run_estimation_linear(
     d = np.empty(n_obs, dtype=np.float64)
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
-    cdef double[:, ::1] Cv = C
+    cdef double[:, ::1] Cv = C  # linear measurement scratch (wired only for linear)
     cdef double[::1] dv = d
+
+    # Unscented-only second-order scratch (allocated in that branch).
+    cdef double[:, :, ::1] fxxv
+    cdef double[:, ::1] hxrv
+    cdef double[:, ::1] gxrv
+    cdef double[:, ::1] bxv
+    cdef double[:, :, ::1] gxxv
+    cdef double[:, :, ::1] hxxv
+    cdef double[::1] gssv
+    cdef double[::1] hssv
+    cdef double[::1] st2v
+    cdef double[:, ::1] etav
+    cdef double[::1] z0v
     Q = np.empty((n_exog, n_exog), dtype=np.float64)
     R = np.empty((n_obs, n_obs), dtype=np.float64)
     corr_q = np.empty((n_exog, n_exog), dtype=np.float64)
@@ -834,9 +860,33 @@ def run_estimation_linear(
             nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
     cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
 
-    # Assemble the context.
-    cdef sdsge_linear_ctx ctx
-    cdef sdsge_obj_common *b = &ctx.base
+    # Mode dispatch: pick the ctx, its base/solve1 pointers, the void* the driver
+    # sees, and the objective trampoline. Only one ctx is used per call.
+    cdef sdsge_linear_ctx lctx
+    cdef sdsge_extended_ctx ectx
+    cdef sdsge_unscented_ctx uctx
+    cdef sdsge_obj_common *b
+    cdef sdsge_solve1 *s1
+    cdef void *ctxp
+    cdef sdsge_objective_fn obj
+    if mode == "linear":
+        b = &lctx.base
+        s1 = &lctx.solve
+        ctxp = <void*>&lctx
+        obj = _obj_lin_lp if has_priors else _obj_lin_ll
+    elif mode == "extended":
+        b = &ectx.base
+        s1 = &ectx.solve
+        ctxp = <void*>&ectx
+        obj = _obj_ext_lp if has_priors else _obj_ext_ll
+    elif mode == "unscented":
+        b = &uctx.base
+        s1 = &uctx.solve
+        ctxp = <void*>&uctx
+        obj = _obj_unsc_lp if has_priors else _obj_unsc_ll
+    else:
+        PyMem_Free(scalars_c)
+        raise ValueError(f"unsupported native filter mode {mode!r}")
 
     b.dims.n_theta = n_theta
     b.dims.n_var = n_var
@@ -956,25 +1006,69 @@ def run_estimation_linear(
     b.std_r = &srv[0]
     b.bk_violations = 0
 
-    ctx.solve.ss = &ssv2[0]
-    ctx.solve.a_real = &arv[0, 0]
-    ctx.solve.b_real = &brv[0, 0]
-    ctx.solve.s = <c128*>&sv[0, 0]
-    ctx.solve.t = <c128*>&tv[0, 0]
-    ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = <c128*>&fv[0, 0]
-    ctx.solve.p = <c128*>&pv[0, 0]
-    ctx.solve.eig = <c128*>&eigv[0]
-    ctx.solve.A = &Av[0, 0]
-    ctx.solve.B = &Bv[0, 0]
-    ctx.C = &Cv[0, 0]
-    ctx.d = &dv[0]
+    s1.ss = &ssv2[0]
+    s1.a_real = &arv[0, 0]
+    s1.b_real = &brv[0, 0]
+    s1.s = <c128*>&sv[0, 0]
+    s1.t = <c128*>&tv[0, 0]
+    s1.z = <c128*>&zv[0, 0]
+    s1.f = <c128*>&fv[0, 0]
+    s1.p = <c128*>&pv[0, 0]
+    s1.eig = <c128*>&eigv[0]
+    s1.A = &Av[0, 0]
+    s1.B = &Bv[0, 0]
+
+    # Mode-specific ctx wiring.
+    if mode == "linear":
+        lctx.C = &Cv[0, 0]
+        lctx.d = &dv[0]
+    elif mode == "unscented":
+        f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
+        hx_real = np.empty((n_state, n_state), dtype=np.float64)
+        gx_real = np.empty((n_ctrl, n_state), dtype=np.float64)
+        bx = np.empty((n_state, n_exog), dtype=np.float64)
+        gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
+        hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
+        gss = np.empty(n_ctrl, dtype=np.float64)
+        hss = np.empty(n_state, dtype=np.float64)
+        steady2 = np.empty(n_var, dtype=np.float64)
+        # eta (n_state x n_exog): the objective recomputes chol(Q) per eval when Q
+        # varies; for constant Q it reads this precomputed factor.
+        eta = np.zeros((n_state, n_exog), dtype=np.float64)
+        if qs.is_constant and n_exog > 0:
+            eta[:n_exog, :] = np.linalg.cholesky(
+                np.asarray(qs.constant, dtype=np.float64).reshape(n_exog, n_exog)
+            )
+        z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
+        fxxv = f_xx
+        hxrv = hx_real
+        gxrv = gx_real
+        bxv = bx
+        gxxv = gxx
+        hxxv = hxx
+        gssv = gss
+        hssv = hss
+        st2v = steady2
+        etav = eta
+        z0v = z0
+        uctx.solve2.f_xx = &fxxv[0, 0, 0]
+        uctx.solve2.hx_real = &hxrv[0, 0]
+        uctx.solve2.gx_real = &gxrv[0, 0]
+        uctx.solve2.bx = &bxv[0, 0]
+        uctx.solve2.eta = &etav[0, 0]
+        uctx.solve2.gxx = &gxxv[0, 0, 0]
+        uctx.solve2.hxx = &hxxv[0, 0, 0]
+        uctx.solve2.gss = &gssv[0]
+        uctx.solve2.hss = &hssv[0]
+        uctx.solve2.steady_state = &st2v[0]
+        uctx.z0 = &z0v[0]
+        uctx.alpha = ctx_dto.alpha
+        uctx.beta = ctx_dto.beta
+        uctx.kappa = ctx_dto.kappa
 
     # Seed the calibrated baseline once; the per-eval fill touches only the
     # estimated slots.
     sdsge_init_params(&paramsv[0], &bpv[0], n_par)
-
-    cdef sdsge_objective_fn obj = _obj_lp if has_priors else _obj_ll
 
     cdef sdsge_lbfgsb_options lopt
     cdef sdsge_lbfgsb_result lres
@@ -986,6 +1080,8 @@ def run_estimation_linear(
     cdef double fun = 0.0
     cdef int success = 0
     cdef bytes message = b""
+    cdef double lpr = 0.0
+    params_out = params
 
     try:
         if method == "L-BFGS-B":
@@ -997,7 +1093,7 @@ def run_estimation_linear(
             lopt.pgtol = pgtol
             lopt.fd_step = fd_step
             with nogil:
-                sdsge_lbfgsb(obj, <void*>&ctx, n_theta, &xv[0], &lo[0], &hi[0],
+                sdsge_lbfgsb(obj, ctxp, n_theta, &xv[0], &lo[0], &hi[0],
                              nbd_ptr, &lopt, &lres)
             status = lres.status
             nfev = lres.nfev
@@ -1011,7 +1107,7 @@ def run_estimation_linear(
             nopt.xatol = xatol
             nopt.fatol = fatol
             with nogil:
-                sdsge_neldermead(obj, <void*>&ctx, n_theta, &xv[0], &lo[0],
+                sdsge_neldermead(obj, ctxp, n_theta, &xv[0], &lo[0],
                                  &hi[0], nbd_ptr, &nopt, &nres)
             status = nres.status
             nfev = nres.nfev
@@ -1021,6 +1117,14 @@ def run_estimation_linear(
             message = (<bytes>nres.message) if nres.message != NULL else b""
         else:
             raise ValueError(f"unsupported native method {method!r}")
+        # Resolve the named params (scatter x_best -> params) and, for MAP, the
+        # log-prior at x_best. Scatter / prior only, no filter. scalars_c must
+        # still be alive here (the scatter reads it), so this runs before free.
+        with nogil:
+            sdsge_scatter_params(b, &xv[0])
+            if has_priors:
+                lpr = sdsge_logprior_at(b, &xv[0])
+        params_out = np.array(params, dtype=np.float64, copy=True)
     finally:
         PyMem_Free(scalars_c)
 
@@ -1033,4 +1137,6 @@ def run_estimation_linear(
         "status": int(status),
         "message": message.decode(),
         "bk_violations": int(b.bk_violations),
+        "params": params_out,
+        "logprior": float(lpr),
     }

@@ -637,6 +637,12 @@ function ParameterDetails({
             {result.result.loglik !== undefined && (
               <ResultValue label="Log likelihood" value={format(result.result.loglik)} />
             )}
+            {result.result.logpost !== undefined && (
+              <ResultValue label="Log posterior" value={format(result.result.logpost)} />
+            )}
+            {result.result.logprior !== undefined && (
+              <ResultValue label="Log prior" value={format(result.result.logprior)} />
+            )}
             {result.result.logpost_mean !== undefined && (
               <ResultValue
                 label="Mean log posterior"

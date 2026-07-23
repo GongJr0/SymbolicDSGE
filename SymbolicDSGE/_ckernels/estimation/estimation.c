@@ -39,6 +39,13 @@ static inline void sdsge_fill_params(sdsge_obj_common *base,
   }
 }
 
+/* Public wrapper: scatter a theta into base->params (e.g. resolve x_best after
+ * the optimizer returns). params then holds the named parameter vector. */
+void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
+                          const f64 *SDSGE_RESTRICT theta) {
+  sdsge_fill_params(base, theta);
+}
+
 /* Real pencil (row-major) -> complex Schur input (column-major), widened. */
 static inline void sdsge_to_complex_colmajor(const f64 *SDSGE_RESTRICT a,
                                              c128 *SDSGE_RESTRICT s,
@@ -206,6 +213,23 @@ static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
   return ll + lp;
 }
 
+/* Public: the log-prior alone at a theta (e.g. x_best), from the packed tables.
+ * No filter. 0 when the run carries no prior (MLE). */
+f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
+                      const f64 *SDSGE_RESTRICT theta) {
+  const sdsge_prior_tables *pr = &base->prior;
+  if (!pr->has_prior) {
+    return 0.0;
+  }
+  return sdsge_logprior_program(
+      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
+      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
+      (f64 *)pr->scalar_transform_params, pr->n_scalar,
+      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
+      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
+      (f64 *)pr->matrix_log_constants, pr->n_blocks);
+}
+
 /* Linear measurement (C, d) from the meas / jac cfuncs at the linearization
  * point. C is n_obs*n_var, d is n_obs. */
 static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
@@ -342,12 +366,14 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   if (sdsge_bicomplex_hessian(
           b->bc_residual, s->ss, b->params, b->dims.n_var, b->dims.n_par,
           b->dims.n_var, SDSGE_HESSIAN_STEP, s2->f_xx) != SDSGE_HESSIAN_OK) {
+
     return -INFINITY;
   }
 
   if (sdsge_second_order(s->a_real, s->b_real, s2->f_xx, s2->gx_real,
                          s2->hx_real, b->dims.n_var, b->dims.n_state, s2->gxx,
                          s2->hxx) != SDSGE_SECOND_ORDER_OK) {
+
     return -INFINITY;
   }
 
@@ -361,6 +387,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
                               s2->gxx, s2->eta, b->dims.n_var, b->dims.n_state,
                               b->dims.n_exog, s2->gss,
                               s2->hss) != SDSGE_SECOND_ORDER_OK) {
+
     return -INFINITY;
   }
 
@@ -395,6 +422,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
 
   ukf_outputs out = {.loglik = &ll};
   if (ukf_hot_loop(&in, &out) != KF_OK) {
+
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);

@@ -134,7 +134,8 @@ export interface EstimationRunResult {
   method: EstimationMethod;
   solved: boolean;
   result: {
-    kind: EstimationMethod;
+    // Opt results (mle/map) carry no inner kind; only the mcmc wire sets it.
+    kind?: EstimationMethod;
     success?: boolean;
     message?: string;
     theta?: Record<string, number>;
