@@ -8,6 +8,7 @@ point for the scipy parity tests; the estimation objective wires in separately
 (issue #330).
 """
 
+from libc.math cimport INFINITY
 from libc.stdint cimport int64_t
 
 import numpy as np
@@ -37,6 +38,28 @@ cdef extern from "optim.h":
                          double *x, const double *lo, const double *hi,
                          const int64_t *nbd, const sdsge_lbfgsb_options *opt,
                          sdsge_lbfgsb_result *out) nogil
+
+
+cdef extern from "nelder_mead.h":
+    ctypedef struct sdsge_neldermead_options:
+        int64_t maxiter
+        int64_t maxfun
+        double xatol
+        double fatol
+
+    ctypedef struct sdsge_neldermead_result:
+        int64_t status
+        int64_t nfev
+        int64_t nit
+        double fun
+        int success
+        const char *message
+
+    int64_t sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
+                             double *x, const double *lo, const double *hi,
+                             const int64_t *nbd,
+                             const sdsge_neldermead_options *opt,
+                             sdsge_neldermead_result *out) nogil
 
 
 # --- Benchmark objectives (match sdsge_objective_fn) --------------------------
@@ -80,6 +103,16 @@ cdef double _obj_double_well(const double *x, void *ctx) noexcept nogil:
     return s
 
 
+cdef double _obj_rosen_halfplane(const double *x, void *ctx) noexcept nogil:
+    # Rosenbrock restricted to the feasible half-plane x[0] >= 0; +inf outside.
+    # Models a BK-violation boundary: the optimizer must tolerate +inf returns
+    # and keep searching from the feasible vertices. The minimum (all-ones) is
+    # feasible.
+    if x[0] < 0.0:
+        return INFINITY
+    return _obj_rosenbrock(x, ctx)
+
+
 cdef sdsge_objective_fn _objective(str name) except NULL:
     if name == "rosenbrock":
         return _obj_rosenbrock
@@ -87,6 +120,8 @@ cdef sdsge_objective_fn _objective(str name) except NULL:
         return _obj_quad
     if name == "double_well":
         return _obj_double_well
+    if name == "rosen_halfplane":
+        return _obj_rosen_halfplane
     raise ValueError(f"unknown objective {name!r}")
 
 
@@ -153,6 +188,76 @@ def run_lbfgsb(
     with nogil:
         sdsge_lbfgsb(obj, <void *>&ctx, n, &xv[0], &lo[0], &hi[0], nbd_ptr,
                      &opt, &res)
+
+    return {
+        "x": x,
+        "fun": res.fun,
+        "nfev": int(res.nfev),
+        "nit": int(res.nit),
+        "success": bool(res.success),
+        "status": int(res.status),
+        "message": (<bytes>res.message).decode() if res.message != NULL else "",
+    }
+
+
+def run_neldermead(
+    str objective,
+    double[::1] x0,
+    bounds=None,
+    object params=None,
+    int maxiter=0,
+    int maxfun=0,
+    double xatol=1e-4,
+    double fatol=1e-4,
+):
+    """Minimize a benchmark objective with native Nelder-Mead. ``bounds`` is None
+    (unbounded) or a length-n list of (lo, hi) with None for a missing side.
+    ``params`` feeds the parametrized objectives (``quad``). ``maxiter``/``maxfun``
+    of 0 default to ``N*200`` (scipy's rule). Returns a result dict mirroring the
+    lean native struct."""
+    cdef int64_t n = x0.shape[0]
+    x = np.array(x0, dtype=np.float64, copy=True)
+    cdef double[::1] xv = x
+
+    cdef double[::1] pv
+    cdef ObjCtx ctx
+    ctx.n = n
+    ctx.p = NULL
+    if params is not None:
+        pv = np.ascontiguousarray(params, dtype=np.float64)
+        ctx.p = &pv[0]
+
+    # Bounds -> lo/hi/nbd (scipy map: none=0, lower=1, both=2, upper=3).
+    cdef double[::1] lo = np.zeros(n, dtype=np.float64)
+    cdef double[::1] hi = np.zeros(n, dtype=np.float64)
+    cdef int64_t[::1] nbd = np.zeros(n, dtype=np.int64)
+    cdef int has_bounds = bounds is not None
+    cdef int i
+    if has_bounds:
+        for i in range(n):
+            lb, ub = bounds[i]
+            has_lo = lb is not None
+            has_hi = ub is not None
+            if has_lo:
+                lo[i] = lb
+            if has_hi:
+                hi[i] = ub
+            nbd[i] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
+
+    cdef sdsge_objective_fn obj = _objective(objective)
+
+    cdef sdsge_neldermead_options opt
+    opt.maxiter = maxiter
+    opt.maxfun = maxfun
+    opt.xatol = xatol
+    opt.fatol = fatol
+
+    cdef sdsge_neldermead_result res
+    cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
+
+    with nogil:
+        sdsge_neldermead(obj, <void *>&ctx, n, &xv[0], &lo[0], &hi[0], nbd_ptr,
+                         &opt, &res)
 
     return {
         "x": x,
