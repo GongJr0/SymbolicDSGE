@@ -29,6 +29,7 @@ from ..kalman.interface import _resolve_P0
 from ..kalman.validator import FilterMode
 
 NDF = NDArray[np.float64]
+NDI = NDArray[np.int64]
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,197 @@ class PreparedFilterRun:
     P0: NDF | None
     kf_jitter: float64
     kf_sym: bool
+
+
+# ---------------------------------------------------------------------------
+# Native estimation context DTOs (issue #330).
+#
+# Struct-shaped mirrors of the C context in
+# ``_ckernels/estimation/estimation.h``: one dataclass per C struct, fields in
+# struct order so the C header reads as the checklist. The Python producer fills
+# these once per run (all name->index resolution and table flattening); the
+# Cython composer maps them field-for-field onto the C structs, allocates the
+# scratch buffers, and makes the single native call.
+#
+# Contract at this seam:
+#   * Python pins DTYPE only. Every int64 array is ``np.int64`` and every
+#     float64 array is ``np.float64``; contiguity is NOT guaranteed here.
+#   * Cython enforces C-contiguity at the transmission layer (the deterministic
+#     final cast), pins the arrays, and holds the keepalive across the ``nogil``
+#     call. No defensive re-cast on the Python side.
+#   * Count fields on the C structs (``n_scalars``, ``n_pairs``, ``n_scalar``,
+#     ``n_blocks``) are NOT carried here: the composer derives each from its
+#     array length, so length is the single source of truth and a count/array
+#     mismatch is unrepresentable.
+#   * Scratch buffers (``solve1``/``solve2``, ``Q``/``R``/``corr_*``/``std_*``,
+#     ``params``, linear ``C``/``d``) have no Python source; the composer
+#     allocates them from ``dims`` and they are intentionally absent from these
+#     DTOs.
+#   * Native outputs (``bk_violations``, the result struct) are absent too.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class PyDims:
+    """Mirror of ``sdsge_dims``: model and data dimensions (all i64)."""
+
+    n_theta: int  # estimated params
+    n_var: int  # nx + ny (pencil / filter dim)
+    n_state: int  # nx
+    n_ctrl: int  # ny
+    n_exog: int  # k
+    n_obs: int  # m
+    n_par: int  # calib params
+    T: int  # observations
+
+
+def get_dims(compiled: CompiledModel, estimated_params: list[str], y: NDF) -> PyDims:
+    n_var = len(compiled.var_names)
+    return PyDims(
+        n_theta=len(estimated_params),
+        n_var=n_var,
+        n_state=compiled.n_state,
+        n_ctrl=n_var - compiled.n_state,
+        n_exog=compiled.n_exog,
+        n_obs=y.shape[1],
+        n_par=len(compiled.calib_params),
+        T=y.shape[0],
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PyScalarScatter:
+    """Mirror of ``sdsge_scalar_scatter``: one estimated scalar's theta->params
+    scatter. ``transform_params`` is a ``np.float64`` array of length
+    ``SDSGE_N_TRANSFORM_PARAMS``."""
+
+    theta_idx: int
+    param_slot: int
+    transform_code: int
+    transform_params: NDF
+
+
+@dataclass(frozen=True, slots=True)
+class PyParamMap:
+    """Mirror of ``sdsge_param_map``: theta->params resolution tables.
+
+    ``scalars`` is the array-of-structs the C ``scalars`` pointer addresses
+    (``n_scalars`` = ``len(scalars)``). ``base_params`` and every slot index
+    (``scalars`` ``param_slot``, and the cov specs' ``std_slots``/``pair_slot``)
+    are in ``calib_params`` order, so ``params`` doubles as the residual argument
+    vector with no gather step."""
+
+    base_params: NDF  # n_par, calib_params order
+    scalars: list[PyScalarScatter]  # n_scalars
+
+
+@dataclass(frozen=True, slots=True)
+class PyCovSpec:
+    """Mirror of ``sdsge_cov_spec``: a Q or R covariance build spec.
+
+    ``is_constant`` picks a loop-invariant ``constant`` (K*K, resolved once in
+    prep) over the per-eval rebuild. When rebuilt, ``std_slots`` gives the K
+    diagonal param slots; the correlation comes either from a CPC block
+    (``corr_from_block`` with ``block_theta_off``/``block_theta_len`` into theta)
+    or from the ``pair_i``/``pair_j``/``pair_slot`` triples
+    (``n_pairs`` = ``len(pair_i)``)."""
+
+    is_constant: bool
+    constant: NDF | None  # K*K, or None
+    K: int  # n_exog (Q) or n_obs (R)
+    std_slots: NDI  # K
+    corr_from_block: bool
+    block_theta_off: int
+    block_theta_len: int
+    pair_i: NDI  # n_pairs
+    pair_j: NDI  # n_pairs
+    pair_slot: NDI  # n_pairs
+
+
+@dataclass(frozen=True, slots=True)
+class PyPriorTables:
+    """Mirror of ``sdsge_prior_tables``: packed log-prior program arguments.
+
+    ``has_prior`` gates the whole block. Scalar columns run to ``n_scalar`` =
+    ``len(scalar_indices)``; ``scalar_dist_params`` is flattened n_scalar*5 and
+    ``scalar_transform_params`` n_scalar*3. Matrix (CPC/LKJ) block columns run to
+    ``n_blocks`` = ``len(matrix_offsets)``."""
+
+    has_prior: bool
+    scalar_indices: NDI  # n_scalar
+    scalar_dist_codes: NDI  # n_scalar
+    scalar_transform_codes: NDI  # n_scalar
+    scalar_dist_params: NDF  # n_scalar*5
+    scalar_transform_params: NDF  # n_scalar*3
+    matrix_offsets: NDI  # n_blocks
+    matrix_dims: NDI  # n_blocks
+    matrix_lengths: NDI  # n_blocks
+    matrix_etas: NDF  # n_blocks
+    matrix_log_constants: NDF  # n_blocks
+
+
+@dataclass(frozen=True, slots=True)
+class PyObjCommon:
+    """Mirror of ``sdsge_obj_common``: the mode-independent objective inputs.
+
+    Runtime addresses arrive as ``int`` (cfunc ``.address`` / capsule pointer);
+    ``zgges`` is absent because the composer pulls it from the scipy cython_lapack
+    capsule, not from Python. The scratch fields on the C struct (``params``,
+    ``Q``, ``R``, ``corr_q``, ``corr_r``, ``std_q``, ``std_r``) and the
+    ``bk_violations`` output are composer-owned and omitted here."""
+
+    dims: PyDims
+
+    residual_addr: int
+    bc_residual_addr: int  # bicomplex-Hessian residual; 0 when unused (linear)
+    meas_addr: int
+    jac_addr: int
+
+    ss_seed: NDF  # n_var: Newton seed for the steady state
+    log_linear: bool
+
+    y: NDF  # T*n_obs
+    P0: NDF  # n_var*n_var; UKF 2*n_state square
+    x0: NDF | None  # n_var, or None
+    jitter: float
+    symmetrize: bool
+
+    pmap: PyParamMap
+    q_spec: PyCovSpec
+    r_spec: PyCovSpec
+    prior: PyPriorTables
+
+
+@dataclass(frozen=True, slots=True)
+class PyLinearContext:
+    """Mirror of ``sdsge_linear_ctx``. The ``solve1`` buffers and the ``C``/``d``
+    measurement-linearization outputs are composer-allocated scratch, so this
+    wrapper adds no Python-provided fields beyond ``base``."""
+
+    base: PyObjCommon
+
+
+@dataclass(frozen=True, slots=True)
+class PyExtendedContext:
+    """Mirror of ``sdsge_extended_ctx``. ``solve1`` is composer-allocated scratch;
+    no Python-provided fields beyond ``base``."""
+
+    base: PyObjCommon
+
+
+@dataclass(frozen=True, slots=True)
+class PyUnscentedContext:
+    """Mirror of ``sdsge_unscented_ctx``. ``solve1``/``solve2`` are
+    composer-allocated scratch. ``z0`` is the Python-provided initial augmented
+    state ``[x0_state; 0]`` of shape ``(2*n_state,)`` (the user's first-order
+    ``x0``, given as ``n_state`` or full ``n_var`` and sliced to the state block;
+    the tail is zeroed). ``alpha``/``beta``/``kappa`` are the UKF tuning scalars."""
+
+    base: PyObjCommon
+    z0: NDF  # 2*n_state
+    alpha: float
+    beta: float
+    kappa: float
 
 
 def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:

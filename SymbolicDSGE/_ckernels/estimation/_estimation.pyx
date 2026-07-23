@@ -34,7 +34,6 @@ cdef extern from "estimation.h":
         int64_t n_exog
         int64_t n_obs
         int64_t n_par
-        int64_t n_params
         int64_t T
 
     ctypedef struct sdsge_scalar_scatter:
@@ -47,9 +46,6 @@ cdef extern from "estimation.h":
         const double *base_params
         const sdsge_scalar_scatter *scalars
         int64_t n_scalars
-        const int64_t *calib_gather
-        const int64_t *calib_upd
-        int64_t n_calib_upd
 
     ctypedef struct sdsge_cov_spec:
         int is_constant
@@ -100,7 +96,6 @@ cdef extern from "estimation.h":
         sdsge_cov_spec r_spec
         sdsge_prior_tables prior
         double *params
-        double *calib_vec
         double *Q
         double *R
         double *corr_q
@@ -141,9 +136,7 @@ cdef extern from "estimation.h":
         double kappa
 
     void sdsge_init_params(double *params, const double *base_params,
-                           int64_t n_params) nogil
-    void sdsge_init_calib(double *calib_vec, const double *params,
-                          const int64_t *calib_gather, int64_t n_par) nogil
+                           int64_t n_par) nogil
     double sdsge_obj_linear(sdsge_linear_ctx *ctx, const double *theta,
                             int has_priors) nogil
     double sdsge_obj_extended(sdsge_extended_ctx *ctx, const double *theta,
@@ -167,7 +160,7 @@ def obj_linear_base(
     int n_obs,
     int log_linear,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
-    double[::1] base_calib,     # n_par (== n_params here)
+    double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
     double[:, ::1] R,           # n_obs*n_obs constant
     double[:, ::1] y,           # T*n_obs
@@ -184,8 +177,6 @@ def obj_linear_base(
 
     # Preallocated scratch (kept alive for the whole call).
     params = np.empty(n_par, dtype=np.float64)
-    calib_vec = np.empty(n_par, dtype=np.float64)
-    calib_gather = np.arange(n_par, dtype=np.int64)
     ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
@@ -202,8 +193,6 @@ def obj_linear_base(
     d = np.empty(n_obs, dtype=np.float64)
 
     cdef double[::1] paramsv = params
-    cdef double[::1] calibv = calib_vec
-    cdef int64_t[::1] cgv = calib_gather
     cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
@@ -229,7 +218,6 @@ def obj_linear_base(
     b.dims.n_exog = n_exog
     b.dims.n_obs = n_obs
     b.dims.n_par = n_par
-    b.dims.n_params = n_par
     b.dims.T = T
 
     b.residual = <sdsge_residual_fn><void*>residual_addr
@@ -248,9 +236,6 @@ def obj_linear_base(
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
     b.pmap.n_scalars = 0
-    b.pmap.calib_gather = &cgv[0]
-    b.pmap.calib_upd = NULL
-    b.pmap.n_calib_upd = 0
 
     b.q_spec.is_constant = 1
     b.q_spec.constant = &Q[0, 0]
@@ -267,7 +252,6 @@ def obj_linear_base(
     b.prior.has_prior = 0
 
     b.params = &paramsv[0]
-    b.calib_vec = &calibv[0]
     b.Q = NULL
     b.R = NULL
     b.corr_q = NULL
@@ -291,11 +275,9 @@ def obj_linear_base(
     ctx.C = &Cv[0, 0]
     ctx.d = &dv[0]
 
-    # One-time construction seeds: fill the calibrated baseline and its calib
-    # image (the per-eval fill only touches estimated slots, of which there are
-    # none here).
+    # One-time construction seed: fill the calibrated baseline (the per-eval fill
+    # only touches estimated slots, of which there are none here).
     sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
-    sdsge_init_calib(&calibv[0], &paramsv[0], &cgv[0], n_par)
 
     cdef double ll
     with nogil:
@@ -312,7 +294,7 @@ def obj_extended_base(
     int n_obs,
     int log_linear,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
-    double[::1] base_calib,     # n_par (== n_params here)
+    double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
     double[:, ::1] R,           # n_obs*n_obs constant
     double[:, ::1] y,           # T*n_obs
@@ -331,8 +313,6 @@ def obj_extended_base(
 
     # Preallocated scratch (kept alive for the whole call).
     params = np.empty(n_par, dtype=np.float64)
-    calib_vec = np.empty(n_par, dtype=np.float64)
-    calib_gather = np.arange(n_par, dtype=np.int64)
     ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
@@ -347,8 +327,6 @@ def obj_extended_base(
     B = np.empty((n_var, n_exog), dtype=np.float64)
 
     cdef double[::1] paramsv = params
-    cdef double[::1] calibv = calib_vec
-    cdef int64_t[::1] cgv = calib_gather
     cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
@@ -372,7 +350,6 @@ def obj_extended_base(
     b.dims.n_exog = n_exog
     b.dims.n_obs = n_obs
     b.dims.n_par = n_par
-    b.dims.n_params = n_par
     b.dims.T = T
 
     b.residual = <sdsge_residual_fn><void*>residual_addr
@@ -391,9 +368,6 @@ def obj_extended_base(
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
     b.pmap.n_scalars = 0
-    b.pmap.calib_gather = &cgv[0]
-    b.pmap.calib_upd = NULL
-    b.pmap.n_calib_upd = 0
 
     b.q_spec.is_constant = 1
     b.q_spec.constant = &Q[0, 0]
@@ -410,7 +384,6 @@ def obj_extended_base(
     b.prior.has_prior = 0
 
     b.params = &paramsv[0]
-    b.calib_vec = &calibv[0]
     b.Q = NULL
     b.R = NULL
     b.corr_q = NULL
@@ -431,9 +404,8 @@ def obj_extended_base(
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
 
-    # One-time construction seeds (see obj_linear_base).
+    # One-time construction seed (see obj_linear_base).
     sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
-    sdsge_init_calib(&calibv[0], &paramsv[0], &cgv[0], n_par)
 
     cdef double ll
     with nogil:
@@ -449,7 +421,7 @@ def obj_unscented_base(
     int n_exog,
     int n_obs,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
-    double[::1] base_calib,     # n_par (== n_params here)
+    double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
     double[:, ::1] R,           # n_obs*n_obs constant
     double[:, ::1] y,           # T*n_obs
@@ -472,8 +444,6 @@ def obj_unscented_base(
 
     # Preallocated scratch (kept alive for the whole call).
     params = np.empty(n_par, dtype=np.float64)
-    calib_vec = np.empty(n_par, dtype=np.float64)
-    calib_gather = np.arange(n_par, dtype=np.int64)
     ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
@@ -510,8 +480,6 @@ def obj_unscented_base(
     z0[:n_state] = x0[:n_state]
 
     cdef double[::1] paramsv = params
-    cdef double[::1] calibv = calib_vec
-    cdef int64_t[::1] cgv = calib_gather
     cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
@@ -547,7 +515,6 @@ def obj_unscented_base(
     b.dims.n_exog = n_exog
     b.dims.n_obs = n_obs
     b.dims.n_par = n_par
-    b.dims.n_params = n_par
     b.dims.T = T
 
     b.residual = <sdsge_residual_fn><void*>residual_addr
@@ -567,9 +534,6 @@ def obj_unscented_base(
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
     b.pmap.n_scalars = 0
-    b.pmap.calib_gather = &cgv[0]
-    b.pmap.calib_upd = NULL
-    b.pmap.n_calib_upd = 0
 
     b.q_spec.is_constant = 1
     b.q_spec.constant = &Q[0, 0]
@@ -586,7 +550,6 @@ def obj_unscented_base(
     b.prior.has_prior = 0
 
     b.params = &paramsv[0]
-    b.calib_vec = &calibv[0]
     b.Q = NULL
     b.R = NULL
     b.corr_q = NULL
@@ -623,9 +586,8 @@ def obj_unscented_base(
     ctx.beta = beta
     ctx.kappa = kappa
 
-    # One-time construction seeds (see obj_linear_base).
+    # One-time construction seed (see obj_linear_base).
     sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
-    sdsge_init_calib(&calibv[0], &paramsv[0], &cgv[0], n_par)
 
     cdef double ll
     with nogil:
