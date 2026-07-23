@@ -53,120 +53,120 @@ enum StatusMsg {
 // Internal functions
 
 static void mainlb(
-    CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
-    CBLAS_INT* nbd, double* f, double* g, double factr, double pgtol,
-    double* ws, double* wy, double* sy, double* ss, double* wt, double* wn,
-    double* snd, double* z, double* r, double* d, double* t, double* xp,
-    double* wa, CBLAS_INT* index, CBLAS_INT* iwhere, CBLAS_INT* indx2, CBLAS_INT* task, CBLAS_INT* task_msg,
-    CBLAS_INT* lsave, CBLAS_INT* isave, double* dsave, CBLAS_INT maxls, CBLAS_INT* ln_task, CBLAS_INT* ln_taskmsg
+    i64 n, i64 m, f64* x, f64* l, f64* u,
+    i64* nbd, f64* f, f64* g, f64 factr, f64 pgtol,
+    f64* ws, f64* wy, f64* sy, f64* ss, f64* wt, f64* wn,
+    f64* snd, f64* z, f64* r, f64* d, f64* t, f64* xp,
+    f64* wa, i64* index, i64* iwhere, i64* indx2, i64* task, i64* task_msg,
+    i64* lsave, i64* isave, f64* dsave, i64 maxls, i64* ln_task, i64* ln_taskmsg
 );
 static void active(
-    CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
-    CBLAS_INT* iwhere, CBLAS_INT* prjctd, CBLAS_INT* cnstnd, CBLAS_INT* boxed
+    i64 n, f64* l, f64* u, i64* nbd, f64* x,
+    i64* iwhere, i64* prjctd, i64* cnstnd, i64* boxed
 );
 static void bmv(
-    CBLAS_INT m, double* sy, double* wt, CBLAS_INT col,
-    double* v, double* p, CBLAS_INT* info
+    i64 m, f64* sy, f64* wt, i64 col,
+    f64* v, f64* p, i64* info
 );
 static void cauchy(
-    CBLAS_INT n, double* x, double* l, double* u,
-    CBLAS_INT* nbd, double *g, CBLAS_INT* iorder, CBLAS_INT* iwhere, double* t,
-    double* d, double* xcp, CBLAS_INT m, double* wy, double* ws,
-    double* sy, double* wt, double theta, CBLAS_INT col,
-    CBLAS_INT head, double* p, double* c, double* wbp, double* v, CBLAS_INT* nseg,
-    double sbgnrm, CBLAS_INT* info
+    i64 n, f64* x, f64* l, f64* u,
+    i64* nbd, f64 *g, i64* iorder, i64* iwhere, f64* t,
+    f64* d, f64* xcp, i64 m, f64* wy, f64* ws,
+    f64* sy, f64* wt, f64 theta, i64 col,
+    i64 head, f64* p, f64* c, f64* wbp, f64* v, i64* nseg,
+    f64 sbgnrm, i64* info
 );
 static void cmprlb(
-    CBLAS_INT n, CBLAS_INT m, double* x, double* g,
-    double* ws, double* wy, double* sy, double* wt,
-    double* z, double* r, double* wa, CBLAS_INT* index,
-    double theta, CBLAS_INT col, CBLAS_INT head, CBLAS_INT nfree,
-    CBLAS_INT cnstnd, CBLAS_INT* info
+    i64 n, i64 m, f64* x, f64* g,
+    f64* ws, f64* wy, f64* sy, f64* wt,
+    f64* z, f64* r, f64* wa, i64* index,
+    f64 theta, i64 col, i64 head, i64 nfree,
+    i64 cnstnd, i64* info
 );
 static void errclb(
-    CBLAS_INT n, CBLAS_INT m, double factr, double* l,
-    double* u, CBLAS_INT* nbd, CBLAS_INT* task, CBLAS_INT* task_msg, CBLAS_INT* info, CBLAS_INT* k
+    i64 n, i64 m, f64 factr, f64* l,
+    f64* u, i64* nbd, i64* task, i64* task_msg, i64* info, i64* k
 );
 static void formk(
-    CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter,
-    CBLAS_INT ileave, CBLAS_INT* indx2, CBLAS_INT iupdat, CBLAS_INT updatd,
-    double* wn, double* wn1, CBLAS_INT m, double* ws, double* wy,
-    double* sy, double theta, CBLAS_INT col, CBLAS_INT head,
-    CBLAS_INT* info
+    i64 n, i64 nsub, i64* ind, i64 nenter,
+    i64 ileave, i64* indx2, i64 iupdat, i64 updatd,
+    f64* wn, f64* wn1, i64 m, f64* ws, f64* wy,
+    f64* sy, f64 theta, i64 col, i64 head,
+    i64* info
 );
 static void formt(
-    CBLAS_INT m, double* wt, double* sy, double* ss, CBLAS_INT col,
-    double theta, CBLAS_INT* info
+    i64 m, f64* wt, f64* sy, f64* ss, i64 col,
+    f64 theta, i64* info
 );
 static void freev(
-    CBLAS_INT n, CBLAS_INT* nfree, CBLAS_INT* idx, CBLAS_INT* nenter, CBLAS_INT* ileave, CBLAS_INT* idx2,
-    CBLAS_INT* iwhere, CBLAS_INT* wrk, CBLAS_INT updatd, CBLAS_INT cnstnd,
-    CBLAS_INT iter
+    i64 n, i64* nfree, i64* idx, i64* nenter, i64* ileave, i64* idx2,
+    i64* iwhere, i64* wrk, i64 updatd, i64 cnstnd,
+    i64 iter
 );
-static void hpsolb(CBLAS_INT n, double* t, CBLAS_INT* iorder, CBLAS_INT iheap);
+static void hpsolb(i64 n, f64* t, i64* iorder, i64 iheap);
 static void lnsrlb(
-    CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
-    double f, double* fold, double *gd, double *gdold, double* g,
-    double* d, double* r, double* t, double* z, double* stp, double* dnorm,
-    double* dtd, double* xstep, double* stpmx, CBLAS_INT iter, CBLAS_INT* ifun,
-    CBLAS_INT* iback, CBLAS_INT* nfgv, CBLAS_INT* info, CBLAS_INT* task, CBLAS_INT* task_msg, CBLAS_INT boxed,
-    CBLAS_INT cnstnd, CBLAS_INT* isave, double* dsave, CBLAS_INT* temp_task, CBLAS_INT* temp_task_msg
+    i64 n, f64* l, f64* u, i64* nbd, f64* x,
+    f64 f, f64* fold, f64 *gd, f64 *gdold, f64* g,
+    f64* d, f64* r, f64* t, f64* z, f64* stp, f64* dnorm,
+    f64* dtd, f64* xstep, f64* stpmx, i64 iter, i64* ifun,
+    i64* iback, i64* nfgv, i64* info, i64* task, i64* task_msg, i64 boxed,
+    i64 cnstnd, i64* isave, f64* dsave, i64* temp_task, i64* temp_task_msg
 );
 static void matupd(
-    CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
-    double* d, double* r, CBLAS_INT* itail, CBLAS_INT iupdat, CBLAS_INT* col,
-    CBLAS_INT* head, double* theta, double rr, double dr, double stp,
-    double dtd
+    i64 n, i64 m, f64* ws, f64 *wy, f64* sy, f64* ss,
+    f64* d, f64* r, i64* itail, i64 iupdat, i64* col,
+    i64* head, f64* theta, f64 rr, f64 dr, f64 stp,
+    f64 dtd
 );
 static void projgr(
-    CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd,
-    double* x, double* g, double* sbgnrm
+    i64 n, f64* l, f64* u, i64* nbd,
+    f64* x, f64* g, f64* sbgnrm
 );
 static void subsm(
-    CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind, double* l,
-    double* u, CBLAS_INT* nbd, double* x, double* d, double* xp,
-    double* ws, double* wy, double theta, double* xx,
-    double* gg, CBLAS_INT col, CBLAS_INT head, CBLAS_INT* iword, double* wv,
-    double* wn, CBLAS_INT* info
+    i64 n, i64 m, i64 nsub, i64* ind, f64* l,
+    f64* u, i64* nbd, f64* x, f64* d, f64* xp,
+    f64* ws, f64* wy, f64 theta, f64* xx,
+    f64* gg, i64 col, i64 head, i64* iword, f64* wv,
+    f64* wn, i64* info
 );
 
 // Line search functions
 static void dcsrch(
-    double f, double g, double* stp, double ftol,
-    double gtol, double xtol, double stpmin,
-    double stpmax, CBLAS_INT* task, CBLAS_INT* task_msg, CBLAS_INT* isave, double* dsave
+    f64 f, f64 g, f64* stp, f64 ftol,
+    f64 gtol, f64 xtol, f64 stpmin,
+    f64 stpmax, i64* task, i64* task_msg, i64* isave, f64* dsave
 );
 static void dcstep(
-    double* stx, double* fx, double* dx, double* sty, double* fy, double* dy,
-    double* stp, double fp, double dp, CBLAS_INT* brackt,
-    double stpmin, double stpmax
+    f64* stx, f64* fx, f64* dx, f64* sty, f64* fy, f64* dy,
+    f64* stp, f64 fp, f64 dp, i64* brackt,
+    f64 stpmin, f64 stpmax
 );
 
 // Helper functions
 static inline void save_local_vars(
-    CBLAS_INT prjctd, CBLAS_INT cnstnd, CBLAS_INT boxed, CBLAS_INT updatd,
-    CBLAS_INT nintol,
-    CBLAS_INT iback, CBLAS_INT nskip, CBLAS_INT head, CBLAS_INT col, CBLAS_INT itail,
-    CBLAS_INT iter, CBLAS_INT iupdat, CBLAS_INT nseg, CBLAS_INT nfgv, CBLAS_INT info,
-    CBLAS_INT ifun, CBLAS_INT iword, CBLAS_INT nfree, CBLAS_INT nact, CBLAS_INT ileave,
-    CBLAS_INT nenter,
-    double theta, double fold, double tol, double dnorm, double gd,
-    double stpmx, double sbgnrm, double stp, double gdold, double dtd,
-    CBLAS_INT* lsave, CBLAS_INT* isave, double* dsave
+    i64 prjctd, i64 cnstnd, i64 boxed, i64 updatd,
+    i64 nintol,
+    i64 iback, i64 nskip, i64 head, i64 col, i64 itail,
+    i64 iter, i64 iupdat, i64 nseg, i64 nfgv, i64 info,
+    i64 ifun, i64 iword, i64 nfree, i64 nact, i64 ileave,
+    i64 nenter,
+    f64 theta, f64 fold, f64 tol, f64 dnorm, f64 gd,
+    f64 stpmx, f64 sbgnrm, f64 stp, f64 gdold, f64 dtd,
+    i64* lsave, i64* isave, f64* dsave
 );
 static inline void save_vars(
-    CBLAS_INT brackt, CBLAS_INT stage, double ginit, double gtest, double gx, double gy,
-    double finit, double fx, double fy, double stx, double sty, double stmin,
-    double stmax, double width, double width1, CBLAS_INT* isave, double* dsave
+    i64 brackt, i64 stage, f64 ginit, f64 gtest, f64 gx, f64 gy,
+    f64 finit, f64 fx, f64 fy, f64 stx, f64 sty, f64 stmin,
+    f64 stmax, f64 width, f64 width1, i64* isave, f64* dsave
 );
 
-static double epsmach = 2.220446049250313e-016;  /* np.finfo(np.float64).eps  */
+static f64 epsmach = 2.220446049250313e-016;  /* np.finfo(np.float64).eps  */
 
 
 void
-setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd, double* f,
-       double* g, double factr, double pgtol, double* wa, CBLAS_INT* iwa, CBLAS_INT* task,
-       CBLAS_INT* lsave, CBLAS_INT* isave, double* dsave, CBLAS_INT maxls, CBLAS_INT* ln_task)
+setulb(i64 n, i64 m, f64* x, f64* l, f64* u, i64* nbd, f64* f,
+       f64* g, f64 factr, f64 pgtol, f64* wa, i64* iwa, i64* task,
+       i64* lsave, i64* isave, f64* dsave, i64 maxls, i64* ln_task)
 {
     //     ************
     //
@@ -186,15 +186,15 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
     //         used to define the limited memory matrix.
     //       On exit m is unchanged.
     //
-    //     x is a double precision array of dimension n.
+    //     x is a f64 precision array of dimension n.
     //       On entry x is an approximation to the solution.
     //       On exit x is the current approximation.
     //
-    //     l is a double precision array of dimension n.
+    //     l is a f64 precision array of dimension n.
     //       On entry l is the lower bound on x.
     //       On exit l is unchanged.
     //
-    //     u is a double precision array of dimension n.
+    //     u is a f64 precision array of dimension n.
     //       On entry u is the upper bound on x.
     //       On exit u is unchanged.
     //
@@ -207,15 +207,15 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
     //                3 if x(i) has only an upper bound.
     //       On exit nbd is unchanged.
     //
-    //     f is a double precision variable.
+    //     f is a f64 precision variable.
     //       On first entry f is unspecified.
     //       On final exit f is the value of the function at x.
     //
-    //     g is a double precision array of dimension n.
+    //     g is a f64 precision array of dimension n.
     //       On first entry g is unspecified.
     //       On final exit g is the value of the gradient at x.
     //
-    //     factr is a double precision variable.
+    //     factr is a f64 precision variable.
     //       On entry factr >= 0 is specified by the user.  The iteration
     //         will stop when
     //
@@ -227,7 +227,7 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
     //         high accuracy.
     //       On exit factr is unchanged.
     //
-    //     pgtol is a double precision variable.
+    //     pgtol is a f64 precision variable.
     //       On entry pgtol >= 0 is specified by the user.  The iteration
     //         will stop when
     //
@@ -236,7 +236,7 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
     //         where pg_i is the ith component of the projected gradient.
     //       On exit pgtol is unchanged.
     //
-    //     wa is a double precision working array of length
+    //     wa is a f64 precision working array of length
     //       (2mmax + 5)nmax + 12mmax^2 + 12mmax.
     //
     //     iwa is an integer working array of length 3nmax.
@@ -293,7 +293,7 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
     //         isave(41) = the number of variables entering the set of active
     //                         constraints in the current iteration.
     //
-    //     dsave is a double precision working array of dimension 29.
+    //     dsave is a f64 precision working array of dimension 29.
     //       On exit with 'task' = NEW_X, the following information is
     //                                                             available:
     //         dsave(1) = current 'theta' in the BFGS matrix;
@@ -348,7 +348,7 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
     //
     //     ************
     //
-    CBLAS_INT lws, lr, lz, lt, ld, lxp, lwa, lwy, lsy, lss, lwt, lwn, lsnd;
+    i64 lws, lr, lz, lt, ld, lxp, lwa, lwy, lsy, lss, lwt, lwn, lsnd;
 
     if (task[0] == START)
     {
@@ -395,15 +395,15 @@ setulb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u, CBLAS_INT* nbd
 
 
 static inline void save_local_vars(
-    CBLAS_INT prjctd, CBLAS_INT cnstnd, CBLAS_INT boxed, CBLAS_INT updatd,
-    CBLAS_INT nintol,
-    CBLAS_INT iback, CBLAS_INT nskip, CBLAS_INT head, CBLAS_INT col, CBLAS_INT itail,
-    CBLAS_INT iter, CBLAS_INT iupdat, CBLAS_INT nseg, CBLAS_INT nfgv, CBLAS_INT info,
-    CBLAS_INT ifun, CBLAS_INT iword, CBLAS_INT nfree, CBLAS_INT nact, CBLAS_INT ileave,
-    CBLAS_INT nenter,
-    double theta, double fold, double tol, double dnorm, double gd,
-    double stpmx, double sbgnrm, double stp, double gdold, double dtd,
-    CBLAS_INT* lsave, CBLAS_INT* isave, double* dsave
+    i64 prjctd, i64 cnstnd, i64 boxed, i64 updatd,
+    i64 nintol,
+    i64 iback, i64 nskip, i64 head, i64 col, i64 itail,
+    i64 iter, i64 iupdat, i64 nseg, i64 nfgv, i64 info,
+    i64 ifun, i64 iword, i64 nfree, i64 nact, i64 ileave,
+    i64 nenter,
+    f64 theta, f64 fold, f64 tol, f64 dnorm, f64 gd,
+    f64 stpmx, f64 sbgnrm, f64 stp, f64 gdold, f64 dtd,
+    i64* lsave, i64* isave, f64* dsave
 )
 {
     // Save local variables
@@ -450,13 +450,13 @@ static inline void save_local_vars(
 
 
 void
-mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
-       CBLAS_INT* nbd, double* f, double* g, double factr, double pgtol,
-       double* ws, double* wy, double* sy, double* ss, double* wt, double* wn,
-       double* snd, double* z, double* r, double* d, double* t, double* xp,
-       double* wa, CBLAS_INT* index, CBLAS_INT* iwhere, CBLAS_INT* indx2, CBLAS_INT* task,
-       CBLAS_INT* task_msg, CBLAS_INT* lsave, CBLAS_INT* isave, double* dsave, CBLAS_INT maxls,
-       CBLAS_INT* temp_task, CBLAS_INT* temp_taskmsg)
+mainlb(i64 n, i64 m, f64* x, f64* l, f64* u,
+       i64* nbd, f64* f, f64* g, f64 factr, f64 pgtol,
+       f64* ws, f64* wy, f64* sy, f64* ss, f64* wt, f64* wn,
+       f64* snd, f64* z, f64* r, f64* d, f64* t, f64* xp,
+       f64* wa, i64* index, i64* iwhere, i64* indx2, i64* task,
+       i64* task_msg, i64* lsave, i64* isave, f64* dsave, i64 maxls,
+       i64* temp_task, i64* temp_taskmsg)
 {
     //     ************
     //
@@ -474,15 +474,15 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //          corrections allowed in the limited memory matrix.
     //       On exit m is unchanged.
     //
-    //     x is a double precision array of dimension n.
+    //     x is a f64 precision array of dimension n.
     //       On entry x is an approximation to the solution.
     //       On exit x is the current approximation.
     //
-    //     l is a double precision array of dimension n.
+    //     l is a f64 precision array of dimension n.
     //       On entry l is the lower bound of x.
     //       On exit l is unchanged.
     //
-    //     u is a double precision array of dimension n.
+    //     u is a f64 precision array of dimension n.
     //       On entry u is the upper bound of x.
     //       On exit u is unchanged.
     //
@@ -495,15 +495,15 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //                3 if x(i) has only an upper bound.
     //       On exit nbd is unchanged.
     //
-    //     f is a double precision variable.
+    //     f is a f64 precision variable.
     //       On first entry f is unspecified.
     //       On final exit f is the value of the function at x.
     //
-    //     g is a double precision array of dimension n.
+    //     g is a f64 precision array of dimension n.
     //       On first entry g is unspecified.
     //       On final exit g is the value of the gradient at x.
     //
-    //     factr is a double precision variable.
+    //     factr is a f64 precision variable.
     //       On entry factr >= 0 is specified by the user.  The iteration
     //         will stop when
     //
@@ -513,7 +513,7 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //         generated by the code.
     //       On exit factr is unchanged.
     //
-    //     pgtol is a double precision variable.
+    //     pgtol is a f64 precision variable.
     //       On entry pgtol >= 0 is specified by the user.  The iteration
     //         will stop when
     //
@@ -522,7 +522,7 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //         where pg_i is the ith component of the projected gradient.
     //       On exit pgtol is unchanged.
     //
-    //     ws, wy, sy, and wt are double precision working arrays used to
+    //     ws, wy, sy, and wt are f64 precision working arrays used to
     //       store the following information defining the limited memory
     //          BFGS matrix:
     //          ws, of dimension n x m, stores S, the matrix of s-vectors;
@@ -534,7 +534,7 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //                                  of (theta*S'S+LD^(-1)L'); see eq.
     //                                  (2.26) in [3].
     //
-    //     wn is a double precision working array of dimension 2m x 2m
+    //     wn is a f64 precision working array of dimension 2m x 2m
     //       used to store the LEL^T factorization of the indefinite matrix
     //                 K = [-D -Y'ZZ'Y/theta     L_a'-R_z'  ]
     //                     [L_a -R_z           theta*S'AA'S ]
@@ -542,17 +542,17 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //       where     E = [-I  0]
     //                     [ 0  I]
     //
-    //     snd is a double precision working array of dimension 2m x 2m
+    //     snd is a f64 precision working array of dimension 2m x 2m
     //       used to store the lower triangular part of
     //                 N = [Y' ZZ'Y   L_a'+R_z']
     //                     [L_a +R_z  S'AA'S   ]
     //
-    //     z(n),r(n),d(n),t(n), xp(n),wa(8*m) are double precision working arrays.
+    //     z(n),r(n),d(n),t(n), xp(n),wa(8*m) are f64 precision working arrays.
     //       z  is used at different times to store the Cauchy point and
     //          the Newton point.
     //       xp is used to safeguard the projected Newton direction
     //
-    //     sg(m),sgo(m),yg(m),ygo(m) are double precision working arrays.
+    //     sg(m),sgo(m),yg(m),ygo(m) are f64 precision working arrays.
     //
     //     index is an integer working array of dimension n.
     //       In subroutine freev, index is used to store the free and fixed
@@ -593,7 +593,7 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //
     //     isave is an integer working array of dimension 23.
     //
-    //     dsave is a double precision working array of dimension 29.
+    //     dsave is a f64 precision working array of dimension 29.
     //
     //
     //     Subprograms called
@@ -638,12 +638,12 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
     //
     //
     //     ************
-    CBLAS_INT prjctd, cnstnd, boxed, updatd, wrk;
-    CBLAS_INT i, k, nintol, iback, nskip, head, col, iter, itail, iupdat;
-    CBLAS_INT nseg, nfgv, info, ifun, iword, nfree, nact, ileave, nenter;
-    double theta, fold, dr, rr, tol, xstep, sbgnrm, stpmx, ddum, dnorm, dtd;
-    double gd, gdold, stp;
-    CBLAS_INT one_int = 1;
+    i64 prjctd, cnstnd, boxed, updatd, wrk;
+    i64 i, k, nintol, iback, nskip, head, col, iter, itail, iupdat;
+    i64 nseg, nfgv, info, ifun, iword, nfree, nact, ileave, nenter;
+    f64 theta, fold, dr, rr, tol, xstep, sbgnrm, stpmx, ddum, dnorm, dtd;
+    f64 gd, gdold, stp;
+    i64 one_int = 1;
 
     stpmx = 0.0;
 
@@ -744,8 +744,8 @@ mainlb(CBLAS_INT n, CBLAS_INT m, double* x, double* l, double* u,
         {
             if (*task_msg == STOP_CPU)
             {
-                BLAS_FUNC(dcopy)(&n, t, &one_int, x, &one_int);
-                BLAS_FUNC(dcopy)(&n, r, &one_int, g, &one_int);
+                sdsge_shim_dcopy(&n, t, &one_int, x, &one_int);
+                sdsge_shim_dcopy(&n, r, &one_int, g, &one_int);
                 *f = fold;
             }
             save_local_vars(
@@ -827,7 +827,7 @@ LINE111:
                 cnstnd, iter);
             nact = n - nfree;
         } else {
-            BLAS_FUNC(dcopy)(&n, x, &one_int, z, &one_int);
+            sdsge_shim_dcopy(&n, x, &one_int, z, &one_int);
             wrk = updatd;
             nseg = 0;
         }
@@ -909,8 +909,8 @@ LINE666:
 
         if ((info != 0) || (iback >= maxls))
         {
-            BLAS_FUNC(dcopy)(&n, t, &one_int, x, &one_int);
-            BLAS_FUNC(dcopy)(&n, r, &one_int, g, &one_int);
+            sdsge_shim_dcopy(&n, t, &one_int, x, &one_int);
+            sdsge_shim_dcopy(&n, r, &one_int, g, &one_int);
             *f = fold;
 
             if (col == 0)
@@ -1016,7 +1016,7 @@ LINE777:
             r[i] = g[i] - r[i];
         }
         // 42
-        rr = pow(BLAS_FUNC(dnrm2)(&n, r, &one_int), 2.0);
+        rr = pow(sdsge_shim_dnrm2(&n, r, &one_int), 2.0);
 
         if (stp == 1.0)
         {
@@ -1024,7 +1024,7 @@ LINE777:
             ddum = -gdold;
         } else {
             dr = (gd - gdold)*stp;
-            BLAS_FUNC(dscal)(&n, &stp, d, &one_int);
+            sdsge_shim_dscal(&n, &stp, d, &one_int);
             ddum = -gdold*stp;
         }
 
@@ -1078,8 +1078,8 @@ LINE777:
 
 
 void
-active(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
-       CBLAS_INT* iwhere, CBLAS_INT* prjctd, CBLAS_INT* cnstnd, CBLAS_INT* boxed)
+active(i64 n, f64* l, f64* u, i64* nbd, f64* x,
+       i64* iwhere, i64* prjctd, i64* cnstnd, i64* boxed)
 {
     //     ************
     //
@@ -1107,7 +1107,7 @@ active(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
     //
     //
     //     ************
-    CBLAS_INT i;
+    i64 i;
 
     // Initialize nbdd, prjctd, cnstnd, and boxed.
     *prjctd = 0;
@@ -1165,7 +1165,7 @@ active(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
 
 
 void
-bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CBLAS_INT* info)
+bmv(i64 m, f64* sy, f64* wt, i64 col, f64* v, f64* p, i64* info)
 {
     //     ************
     //
@@ -1180,11 +1180,11 @@ bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CB
     //         used to define the limited memory matrix.
     //       On exit m is unchanged.
     //
-    //     sy is a double precision array of dimension m x m.
+    //     sy is a f64 precision array of dimension m x m.
     //       On entry sy specifies the matrix S'Y.
     //       On exit sy is unchanged.
     //
-    //     wt is a double precision array of dimension m x m.
+    //     wt is a f64 precision array of dimension m x m.
     //       On entry wt specifies the upper triangular matrix J' which is
     //         the Cholesky factor of (thetaS'S+LD^(-1)L').
     //       On exit wt is unchanged.
@@ -1194,11 +1194,11 @@ bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CB
     //         stored in the compact L-BFGS formula.
     //       On exit col is unchanged.
     //
-    //     v is a double precision array of dimension 2col.
+    //     v is a f64 precision array of dimension 2col.
     //       On entry v specifies vector v.
     //       On exit v is unchanged.
     //
-    //     p is a double precision array of dimension 2col.
+    //     p is a f64 precision array of dimension 2col.
     //       On entry p is unspecified.
     //       On exit p is the product Mv.
     //
@@ -1224,8 +1224,8 @@ bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CB
     //
     //
     //     ************
-    CBLAS_INT i, k, i2, one_int = 1;
-    double ssum;
+    i64 i, k, i2, one_int = 1;
+    f64 ssum;
     char *uplo = "U", *trans = "T", *diag = "N";
 
     if (col == 0) { return; }
@@ -1250,7 +1250,7 @@ bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CB
 
     // Solve the triangular system
     // dtrtrs(uplo, trans, diag, n, nrhs, a, lda, b, ldb, info)
-    BLAS_FUNC(dtrtrs)(uplo, trans, diag, &col, &one_int, wt, &m, &p[col], &col, info);
+    sdsge_shim_dtrtrs(uplo, trans, diag, &col, &one_int, wt, &m, &p[col], &col, info);
     if (*info != 0) { return; }
 
     // Solve D^(1/2)p1=v1.
@@ -1266,7 +1266,7 @@ bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CB
     // solve J^Tp2=p2.
     // dtrtrs(uplo, trans, diag, n, nrhs, a, lda, b, ldb, info)
     trans = "N";
-    BLAS_FUNC(dtrtrs)(uplo, trans, diag, &col, &one_int, wt, &m, &p[col], &col, info);
+    sdsge_shim_dtrtrs(uplo, trans, diag, &col, &one_int, wt, &m, &p[col], &col, info);
     if (*info != 0) { return; }
 
     // compute p1=-D^(-1/2)(p1-D^(-1/2)L'p2)
@@ -1295,12 +1295,12 @@ bmv(CBLAS_INT m, double* sy, double* wt, CBLAS_INT col, double* v, double* p, CB
 
 
 void
-cauchy(CBLAS_INT n, double* x, double* l, double* u,
-       CBLAS_INT* nbd, double *g, CBLAS_INT* iorder, CBLAS_INT* iwhere, double* t,
-       double* d, double* xcp, CBLAS_INT m, double* wy, double* ws,
-       double* sy, double* wt, double theta, CBLAS_INT col,
-       CBLAS_INT head, double* p, double* c, double* wbp, double* v,
-       CBLAS_INT* nseg, double sbgnrm, CBLAS_INT* info)
+cauchy(i64 n, f64* x, f64* l, f64* u,
+       i64* nbd, f64 *g, i64* iorder, i64* iwhere, f64* t,
+       f64* d, f64* xcp, i64 m, f64* wy, f64* ws,
+       f64* sy, f64* wt, f64 theta, i64 col,
+       i64 head, f64* p, f64* c, f64* wbp, f64* v,
+       i64* nseg, f64 sbgnrm, i64* info)
 {
     //     ************
     //
@@ -1321,15 +1321,15 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //       On entry n is the dimension of the problem.
     //       On exit n is unchanged.
     //
-    //     x is a double precision array of dimension n.
+    //     x is a f64 precision array of dimension n.
     //       On entry x is the starting point for the GCP computation.
     //       On exit x is unchanged.
     //
-    //     l is a double precision array of dimension n.
+    //     l is a f64 precision array of dimension n.
     //       On entry l is the lower bound of x.
     //       On exit l is unchanged.
     //
-    //     u is a double precision array of dimension n.
+    //     u is a f64 precision array of dimension n.
     //       On entry u is the upper bound of x.
     //       On exit u is unchanged.
     //
@@ -1342,7 +1342,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //                3 if x(i) has only an upper bound.
     //       On exit nbd is unchanged.
     //
-    //     g is a double precision array of dimension n.
+    //     g is a f64 precision array of dimension n.
     //       On entry g is the gradient of f(x).  g must be a nonzero vector.
     //       On exit g is unchanged.
     //
@@ -1367,13 +1367,13 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //                 3   if x(i) is always fixed, i.e.,  u(i)=x(i)=l(i)
     //                 -1  if x(i) is always free, i.e., it has no bounds.
     //
-    //     t is a double precision working array of dimension n.
+    //     t is a f64 precision working array of dimension n.
     //       t will be used to store the break points.
     //
-    //     d is a double precision array of dimension n used to store
+    //     d is a f64 precision array of dimension n used to store
     //       the Cauchy direction P(x-tg)-x.
     //
-    //     xcp is a double precision array of dimension n used to return the
+    //     xcp is a f64 precision array of dimension n used to return the
     //       GCP on exit.
     //
     //     m is an integer variable.
@@ -1381,7 +1381,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //         used to define the limited memory matrix.
     //       On exit m is unchanged.
     //
-    //     ws, wy, sy, and wt are double precision arrays.
+    //     ws, wy, sy, and wt are f64 precision arrays.
     //       On entry they store information that defines the
     //                             limited memory BFGS matrix:
     //         ws(n,m) stores S, a set of s-vectors;
@@ -1391,7 +1391,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //                 Cholesky factorization of (theta*S'S+LD^(-1)L').
     //       On exit these arrays are unchanged.
     //
-    //     theta is a double precision variable.
+    //     theta is a f64 precision variable.
     //       On entry theta is the scaling factor specifying B_0 = theta I.
     //       On exit theta is unchanged.
     //
@@ -1405,23 +1405,23 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //         in S (or Y).
     //       On exit col is unchanged.
     //
-    //     p is a double precision working array of dimension 2m.
+    //     p is a f64 precision working array of dimension 2m.
     //       p will be used to store the vector p = W^(T)d.
     //
-    //     c is a double precision working array of dimension 2m.
+    //     c is a f64 precision working array of dimension 2m.
     //       c will be used to store the vector c = W^(T)(xcp-x).
     //
-    //     wbp is a double precision working array of dimension 2m.
+    //     wbp is a f64 precision working array of dimension 2m.
     //       wbp will be used to store the row of W corresponding
     //         to a breakpoint.
     //
-    //     v is a double precision working array of dimension 2m.
+    //     v is a f64 precision working array of dimension 2m.
     //
     //     nseg is an integer variable.
     //       On exit nseg records the number of quadratic segments explored
     //         in searching for the GCP.
     //
-    //     sg and yg are double precision arrays of dimension m.
+    //     sg and yg are f64 precision arrays of dimension m.
     //       On entry sg  and yg store S'g and Y'g correspondingly.
     //       On exit they are unchanged.
     //
@@ -1435,7 +1435,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //        iprint>100  print details of every iteration including x and g;
     //
     //
-    //     sbgnrm is a double precision variable.
+    //     sbgnrm is a f64 precision variable.
     //       On entry sbgnrm is the norm of the projected gradient at x.
     //       On exit sbgnrm is unchanged.
     //
@@ -1477,10 +1477,10 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     //
     //
     //     ************
-    CBLAS_INT bnded, xlower, xupper;
-    CBLAS_INT i, j, col2, nfree, nbreak, pointr, ibp, nleft, ibkmin, iter, one_int = 1;
-    double f1, f2, dt, dtm, tsum, dibp, zibp, dibp2, bkmin, tu, tl, wmc, wmp;
-    double wmw, tj, tj0, neggi, f2_org;
+    i64 bnded, xlower, xupper;
+    i64 i, j, col2, nfree, nbreak, pointr, ibp, nleft, ibkmin, iter, one_int = 1;
+    f64 f1, f2, dt, dtm, tsum, dibp, zibp, dibp2, bkmin, tu, tl, wmc, wmp;
+    f64 wmw, tj, tj0, neggi, f2_org;
 
     f1 = 0.0;
     tl = 0.0;
@@ -1488,7 +1488,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
 
     if (sbgnrm <= 0.0)
     {
-        BLAS_FUNC(dcopy)(&n, x, &one_int, xcp, &one_int);
+        sdsge_shim_dcopy(&n, x, &one_int, xcp, &one_int);
         return;
     }
     bnded = 1;
@@ -1582,10 +1582,10 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     if (theta != 1.0)
     {
         // Complete the initialization of p for theta not= one.
-        BLAS_FUNC(dscal)(&col, &theta, &p[col], &one_int);
+        sdsge_shim_dscal(&col, &theta, &p[col], &one_int);
     }
     // Initialize GCP xcp = x.
-    BLAS_FUNC(dcopy)(&n, x, &one_int, xcp, &one_int);
+    sdsge_shim_dcopy(&n, x, &one_int, xcp, &one_int);
     if ((nbreak == -1) && (nfree == n))
     {
         // is a zero vector, return with the initial xcp as GCP.
@@ -1604,7 +1604,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     if (col > 0) {
         bmv(m, sy, wt, col, p, v, info);
         if (*info != 0) { return; }
-        f2 = f2 - BLAS_FUNC(ddot)(&col2, v, &one_int, p, &one_int);
+        f2 = f2 - sdsge_shim_ddot(&col2, v, &one_int, p, &one_int);
     }
     dtm = -f1 / f2;
     tsum = 0.0;
@@ -1653,11 +1653,11 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
             tsum = tsum + dtm;
             // Move free variables (i.e. the ones w/o breakpoints) and the variables
             // whose breakpoints haven't been reached.
-            BLAS_FUNC(daxpy)(&n, &tsum, d, &one_int, xcp, &one_int);
+            sdsge_shim_daxpy(&n, &tsum, d, &one_int, xcp, &one_int);
 
             // Update c = c + dtm*p = W'(x^c - x)
             // which will be used in computing r = Z'(B(x^c - x) + g).
-            if (col > 0) { BLAS_FUNC(daxpy)(&col2, &dtm, p, &one_int, c, &one_int); }
+            if (col > 0) { sdsge_shim_daxpy(&col2, &dtm, p, &one_int, c, &one_int); }
 
             return;
         }
@@ -1683,7 +1683,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
             dtm = dt;
             // Update c = c + dtm*p = W'(x^c - x)
             // which will be used in computing r = Z'(B(x^c - x) + g).
-            if (col > 0) { BLAS_FUNC(daxpy)(&col2, &dtm, p, &one_int, c, &one_int); }
+            if (col > 0) { sdsge_shim_daxpy(&col2, &dtm, p, &one_int, c, &one_int); }
             return;
         }
 
@@ -1698,7 +1698,7 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
         f2 = f2 - theta*dibp2;
         if (col > 0) {
             // Update c = c + dt*p.
-            BLAS_FUNC(daxpy)(&col2, &dt, p, &one_int, c, &one_int);
+            sdsge_shim_daxpy(&col2, &dt, p, &one_int, c, &one_int);
             // Choose wbp, the row of W corresponding to the breakpoint encountered.
             pointr = head;
             for (j = 0; j < col; j++) {
@@ -1711,12 +1711,12 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
             // Compute (wbp)Mc, (wbp)Mp, and (wbp)M(wbp)'.
             bmv(m, sy, wt, col, wbp, v, info);
             if (*info != 0) { return; }
-            wmc = BLAS_FUNC(ddot)(&col2, c, &one_int, v, &one_int);
-            wmp = BLAS_FUNC(ddot)(&col2, p, &one_int, v, &one_int);
-            wmw = BLAS_FUNC(ddot)(&col2, wbp, &one_int, v, &one_int);
+            wmc = sdsge_shim_ddot(&col2, c, &one_int, v, &one_int);
+            wmp = sdsge_shim_ddot(&col2, p, &one_int, v, &one_int);
+            wmw = sdsge_shim_ddot(&col2, wbp, &one_int, v, &one_int);
             // Update p = p - dibp*wbp.
             dibp = -dibp;
-            BLAS_FUNC(daxpy)(&col2, &dibp, wbp, &one_int, p, &one_int);
+            sdsge_shim_daxpy(&col2, &dibp, wbp, &one_int, p, &one_int);
             dibp = -dibp;
 
             // Complete updating f1 and f2 while col > 0.
@@ -1744,22 +1744,22 @@ cauchy(CBLAS_INT n, double* x, double* l, double* u,
     tsum = tsum + dtm;
     // Move free variables (i.e. the ones w/o breakpoints) and the variables
     // whose breakpoints haven't been reached.
-    BLAS_FUNC(daxpy)(&n, &tsum, d, &one_int, xcp, &one_int);
+    sdsge_shim_daxpy(&n, &tsum, d, &one_int, xcp, &one_int);
 
     // Update c = c + dtm*p = W'(x^c - x)
     // which will be used in computing r = Z'(B(x^c - x) + g).
-    if (col > 0) { BLAS_FUNC(daxpy)(&col2, &dtm, p, &one_int, c, &one_int); }
+    if (col > 0) { sdsge_shim_daxpy(&col2, &dtm, p, &one_int, c, &one_int); }
 
     return;
 }
 
 
 void
-cmprlb(CBLAS_INT n, CBLAS_INT m, double* x, double* g,
-       double* ws, double* wy, double* sy, double* wt,
-       double* z, double* r, double* wa, CBLAS_INT* index,
-       double theta, CBLAS_INT col, CBLAS_INT head, CBLAS_INT nfree,
-       CBLAS_INT cnstnd, CBLAS_INT* info)
+cmprlb(i64 n, i64 m, f64* x, f64* g,
+       f64* ws, f64* wy, f64* sy, f64* wt,
+       f64* z, f64* r, f64* wa, i64* index,
+       f64 theta, i64 col, i64 head, i64 nfree,
+       i64 cnstnd, i64* info)
 {
     //     ************
     //
@@ -1784,8 +1784,8 @@ cmprlb(CBLAS_INT n, CBLAS_INT m, double* x, double* g,
     //
     //
     //     ************
-    CBLAS_INT i, j, k, pointr;
-    double a1, a2;
+    i64 i, j, k, pointr;
+    f64 a1, a2;
 
     if ((!cnstnd) && (col > 0))
     {
@@ -1822,9 +1822,9 @@ cmprlb(CBLAS_INT n, CBLAS_INT m, double* x, double* g,
 
 
 void
-errclb(CBLAS_INT n, CBLAS_INT m, double factr, double* l,
-       double* u, CBLAS_INT* nbd, CBLAS_INT* task, CBLAS_INT* task_msg, CBLAS_INT* info,
-       CBLAS_INT* k)
+errclb(i64 n, i64 m, f64 factr, f64* l,
+       f64* u, i64* nbd, i64* task, i64* task_msg, i64* info,
+       i64* k)
 {
     //     ************
     //
@@ -1844,7 +1844,7 @@ errclb(CBLAS_INT n, CBLAS_INT m, double factr, double* l,
     //
     //
     //     ************
-    CBLAS_INT i;
+    i64 i;
 
     // Check the input arguments for errors.
     if (n <= 0) { *task = ERROR; *task_msg = ERROR_N; }
@@ -1879,10 +1879,10 @@ errclb(CBLAS_INT n, CBLAS_INT m, double factr, double* l,
 
 
 void
-formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT ileave,
-      CBLAS_INT* indx2, CBLAS_INT iupdat, CBLAS_INT updatd, double* wn,
-      double* wn1, CBLAS_INT m, double* ws, double* wy,
-      double* sy, double theta, CBLAS_INT col, CBLAS_INT head, CBLAS_INT* info)
+formk(i64 n, i64 nsub, i64* ind, i64 nenter, i64 ileave,
+      i64* indx2, i64 iupdat, i64 updatd, f64* wn,
+      f64* wn1, i64 m, f64* ws, f64* wy,
+      f64* sy, f64 theta, i64 col, i64 head, i64* info)
 {
     //     ************
     //
@@ -1934,14 +1934,14 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
     //       On entry 'updatd' is true if the L-BFGS matrix is updatd.
     //       On exit 'updatd' is unchanged.
     //
-    //     wn is a double precision array of dimension 2m x 2m.
+    //     wn is a f64 precision array of dimension 2m x 2m.
     //       On entry wn is unspecified.
     //       On exit the upper triangle of wn stores the LEL^T factorization
     //         of the 2*col x 2*col indefinite matrix
     //                     [-D -Y'ZZ'Y/theta     L_a'-R_z'  ]
     //                     [L_a -R_z           theta*S'AA'S ]
     //
-    //     wn1 is a double precision array of dimension 2m x 2m.
+    //     wn1 is a f64 precision array of dimension 2m x 2m.
     //       On entry wn1 stores the lower triangular part of
     //                     [Y' ZZ'Y   L_a'+R_z']
     //                     [L_a+R_z   S'AA'S   ]
@@ -1955,8 +1955,8 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
     //         used to define the limited memory matrix.
     //       On exit m is unchanged.
     //
-    //     ws, wy, sy, and wtyy are double precision arrays;
-    //     theta is a double precision variable;
+    //     ws, wy, sy, and wtyy are f64 precision arrays;
+    //     theta is a f64 precision variable;
     //     col is an integer variable;
     //     head is an integer variable.
     //       On entry they store the information defining the
@@ -2006,9 +2006,9 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
     //
     //
     //     ************
-    CBLAS_INT m2, ipntr, jpntr, iy, is, jy, js, is1, js1, k1, i, k, col2, pbegin, pend;
-    CBLAS_INT dbegin, dend, upcl, one_int = 1, temp_int;
-    double temp1, temp2, temp3, temp4;
+    i64 m2, ipntr, jpntr, iy, is, jy, js, is1, js1, k1, i, k, col2, pbegin, pend;
+    i64 dbegin, dend, upcl, one_int = 1, temp_int;
+    f64 temp1, temp2, temp3, temp4;
     char *uplo = "U", *trans = "T", *diag = "N";
 
     // Form the lower triangular part of
@@ -2026,10 +2026,10 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
             {
                 js = m + jy;
                 temp_int = m - (jy + 1);
-                BLAS_FUNC(dcopy)(&temp_int, &wn1[(jy + 1) + 2*m*(jy + 1)], &one_int, &wn1[jy + 2*m*jy], &one_int);
-                BLAS_FUNC(dcopy)(&temp_int, &wn1[(js + 1) + 2*m*(js + 1)], &one_int, &wn1[js + 2*m*js], &one_int);
+                sdsge_shim_dcopy(&temp_int, &wn1[(jy + 1) + 2*m*(jy + 1)], &one_int, &wn1[jy + 2*m*jy], &one_int);
+                sdsge_shim_dcopy(&temp_int, &wn1[(js + 1) + 2*m*(js + 1)], &one_int, &wn1[js + 2*m*js], &one_int);
                 temp_int = m - 1;
-                BLAS_FUNC(dcopy)(&temp_int, &wn1[(m + 1) + 2*m*(jy + 1)], &one_int, &wn1[m + 2*m*jy], &one_int);
+                sdsge_shim_dcopy(&temp_int, &wn1[(m + 1) + 2*m*(jy + 1)], &one_int, &wn1[m + 2*m*jy], &one_int);
             }
             // 10
         }
@@ -2213,14 +2213,14 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
     //                      with L' stored in the upper triangle of wn.
 
     // dpotrf(uplo, n, a, lda, info)
-    BLAS_FUNC(dpotrf)(uplo, &col, wn, &m2, info);
+    sdsge_shim_dpotrf(uplo, &col, wn, &m2, info);
     if (*info != 0) { *info = -1; return; }
 
     // Then form L^-1(-L_a'+R_z') in the (1,2) block.
     col2 = 2*col;
 
     // dtrtrs(uplo, trans, diag, n, nrhs, a, lda, b, ldb, info)
-    BLAS_FUNC(dtrtrs)(uplo, trans, diag, &col, &col, wn, &m2, &wn[m2*col], &m2, info);
+    sdsge_shim_dtrtrs(uplo, trans, diag, &col, &col, wn, &m2, &wn[m2*col], &m2, info);
 
     // Form S'AA'S*theta + (L^-1(-L_a'+R_z'))'L^-1(-L_a'+R_z') in the upper
     //  triangle of (2,2) block of wn.
@@ -2228,14 +2228,14 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
     {
         for (js = is; js < col2; js++)
         {
-            wn[is + m2*js] = wn[is + m2*js] + BLAS_FUNC(ddot)(&col, &wn[m2*is], &one_int, &wn[m2*js], &one_int);
+            wn[is + m2*js] = wn[is + m2*js] + sdsge_shim_ddot(&col, &wn[m2*is], &one_int, &wn[m2*js], &one_int);
         }
         // 74
     }
     // 72
 
     // dpotrf(uplo, n, a, lda, info)
-    BLAS_FUNC(dpotrf)(uplo, &col, &wn[col + m2*col], &m2, info);
+    sdsge_shim_dpotrf(uplo, &col, &wn[col + m2*col], &m2, info);
     if (*info != 0) { *info = -2; }
 
     return;
@@ -2243,8 +2243,8 @@ formk(CBLAS_INT n, CBLAS_INT nsub, CBLAS_INT* ind, CBLAS_INT nenter, CBLAS_INT i
 
 
 void
-formt(CBLAS_INT m, double* wt, double* sy, double* ss, CBLAS_INT col,
-      double theta, CBLAS_INT* info)
+formt(i64 m, f64* wt, f64* sy, f64* ss, i64 col,
+      f64 theta, i64* info)
 {
     //     ************
     //
@@ -2271,8 +2271,8 @@ formt(CBLAS_INT m, double* wt, double* sy, double* ss, CBLAS_INT col,
     //
     //
     //     ************
-    CBLAS_INT i, j, k, k1;
-    double ddum;
+    i64 i, j, k, k1;
+    f64 ddum;
     char *uplo = "U";
 
     // Form the upper half of  T = theta*SS + L*D^(-1)*L', store T in the upper
@@ -2302,7 +2302,7 @@ formt(CBLAS_INT m, double* wt, double* sy, double* ss, CBLAS_INT col,
 
     // Cholesky factorize T to J*J' with J' stored in the upper triangle of wt.
     // dpotrf(uplo, n, a, lda, info)
-    BLAS_FUNC(dpotrf)(uplo, &col, wt, &m, info);
+    sdsge_shim_dpotrf(uplo, &col, wt, &m, info);
     if (*info != 0) { *info = -3; }
 
     return;
@@ -2310,9 +2310,9 @@ formt(CBLAS_INT m, double* wt, double* sy, double* ss, CBLAS_INT col,
 
 
 void
-freev(CBLAS_INT n, CBLAS_INT* nfree, CBLAS_INT* idx, CBLAS_INT* nenter, CBLAS_INT* ileave, CBLAS_INT* idx2,
-      CBLAS_INT* iwhere, CBLAS_INT* wrk, CBLAS_INT updatd, CBLAS_INT cnstnd,
-      CBLAS_INT iter)
+freev(i64 n, i64* nfree, i64* idx, i64* nenter, i64* ileave, i64* idx2,
+      i64* iwhere, i64* wrk, i64 updatd, i64 cnstnd,
+      i64 iter)
 {
     //     ************
     //
@@ -2351,7 +2351,7 @@ freev(CBLAS_INT n, CBLAS_INT* nfree, CBLAS_INT* idx, CBLAS_INT* nenter, CBLAS_IN
     //
     //
     //     ************
-    CBLAS_INT i, iact, k;
+    i64 i, iact, k;
 
     // in formk
     // nenter will be used as exclusive upper bound
@@ -2408,7 +2408,7 @@ freev(CBLAS_INT n, CBLAS_INT* nfree, CBLAS_INT* idx, CBLAS_INT* nenter, CBLAS_IN
 
 
 void
-hpsolb(CBLAS_INT n, double* t, CBLAS_INT* iorder, CBLAS_INT iheap)
+hpsolb(i64 n, f64* t, i64* iorder, i64 iheap)
 {
     //     ************
     //
@@ -2421,7 +2421,7 @@ hpsolb(CBLAS_INT n, double* t, CBLAS_INT* iorder, CBLAS_INT iheap)
     //       On entry n is the dimension of the arrays t and iorder.
     //       On exit n is unchanged.
     //
-    //     t is a double precision array of dimension n.
+    //     t is a f64 precision array of dimension n.
     //       On entry t stores the elements to be sorted,
     //       On exit t(n) stores the least elements of t, and t(1) to t(n-1)
     //         stores the remaining elements in the form of a heap.
@@ -2451,8 +2451,8 @@ hpsolb(CBLAS_INT n, double* t, CBLAS_INT* iorder, CBLAS_INT iheap)
     //     in collaboration with R.H. Byrd, P. Lu-Chen and J. Nocedal.
     //
     //     ************
-    CBLAS_INT i, j, k, indxin, indxout;
-    double ddum, out;
+    i64 i, j, k, indxin, indxout;
+    f64 ddum, out;
 
     if (iheap == 0)
     {
@@ -2531,13 +2531,13 @@ hpsolb(CBLAS_INT n, double* t, CBLAS_INT* iorder, CBLAS_INT iheap)
 
 
 void
-lnsrlb(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
-       double f, double* fold, double *gd, double *gdold, double* g,
-       double* d, double* r, double* t, double* z, double* stp, double* dnorm,
-       double* dtd, double* xstep, double* stpmx, CBLAS_INT iter, CBLAS_INT* ifun,
-       CBLAS_INT* iback, CBLAS_INT* nfgv, CBLAS_INT* info, CBLAS_INT* task, CBLAS_INT* task_msg,
-       CBLAS_INT boxed, CBLAS_INT cnstnd, CBLAS_INT* isave, double* dsave, CBLAS_INT* temp_task,
-       CBLAS_INT* temp_taskmsg)
+lnsrlb(i64 n, f64* l, f64* u, i64* nbd, f64* x,
+       f64 f, f64* fold, f64 *gd, f64 *gdold, f64* g,
+       f64* d, f64* r, f64* t, f64* z, f64* stp, f64* dnorm,
+       f64* dtd, f64* xstep, f64* stpmx, i64 iter, i64* ifun,
+       i64* iback, i64* nfgv, i64* info, i64* task, i64* task_msg,
+       i64 boxed, i64 cnstnd, i64* isave, f64* dsave, i64* temp_task,
+       i64* temp_taskmsg)
 {
     //     **********
     //
@@ -2564,12 +2564,12 @@ lnsrlb(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
     //
     //
     //     **********
-    CBLAS_INT i, one_int = 1;
-    double a1, a2, ftol = 1e-3, gtol = 0.9, xtol = 0.1;
+    i64 i, one_int = 1;
+    f64 a1, a2, ftol = 1e-3, gtol = 0.9, xtol = 0.1;
 
     if (*task_msg != FG_LNSRCH) {
 
-        *dnorm = BLAS_FUNC(dnrm2)(&n, d, &one_int);
+        *dnorm = sdsge_shim_dnrm2(&n, d, &one_int);
         *dtd = pow(*dnorm, 2.0);
 
         // Determine the maximum step length.
@@ -2629,7 +2629,7 @@ lnsrlb(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
         *temp_taskmsg = NO_MSG;
     }
 
-    *gd = BLAS_FUNC(ddot)(&n, g, &one_int, d, &one_int);
+    *gd = sdsge_shim_ddot(&n, g, &one_int, d, &one_int);
     if (*ifun == 0)
     {
         *gdold = *gd;
@@ -2654,7 +2654,7 @@ lnsrlb(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
         if (*stp == 1.0)
         {
             // for (i = 0; i < n; i++) { x[i] = z[i]; }
-            BLAS_FUNC(dcopy)(&n, z, &one_int, x, &one_int);
+            sdsge_shim_dcopy(&n, z, &one_int, x, &one_int);
         } else {
             for (i = 0; i < n; i++)
             {
@@ -2675,10 +2675,10 @@ lnsrlb(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd, double* x,
 
 
 void
-matupd(CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
-       double* d, double* r, CBLAS_INT* itail, CBLAS_INT iupdat, CBLAS_INT* col,
-       CBLAS_INT* head, double* theta, double rr, double dr, double stp,
-       double dtd)
+matupd(i64 n, i64 m, f64* ws, f64 *wy, f64* sy, f64* ss,
+       f64* d, f64* r, i64* itail, i64 iupdat, i64* col,
+       i64* head, f64* theta, f64 rr, f64 dr, f64 stp,
+       f64 dtd)
 {
     //     ************
     //
@@ -2703,7 +2703,7 @@ matupd(CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
     //
     //
     //     ************
-    CBLAS_INT j, pointr, temp_int, one_int = 1;
+    i64 j, pointr, temp_int, one_int = 1;
 
     // Set pointers for matrices WS and WY.
     if (iupdat <= m)
@@ -2716,8 +2716,8 @@ matupd(CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
     }
 
     // Update matrices WS and WY.
-    BLAS_FUNC(dcopy)(&n, d, &one_int, &ws[(*itail) * n], &one_int);
-    BLAS_FUNC(dcopy)(&n, r, &one_int, &wy[(*itail) * n], &one_int);
+    sdsge_shim_dcopy(&n, d, &one_int, &ws[(*itail) * n], &one_int);
+    sdsge_shim_dcopy(&n, r, &one_int, &wy[(*itail) * n], &one_int);
 
     // Set theta=yy/ys.
     *theta = rr / dr;
@@ -2728,9 +2728,9 @@ matupd(CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
     {
         for (j = 1; j < *col; j++)
         {
-            BLAS_FUNC(dcopy)(&j, &ss[1 + m*j], &one_int, &ss[m*(j-1)], &one_int);
+            sdsge_shim_dcopy(&j, &ss[1 + m*j], &one_int, &ss[m*(j-1)], &one_int);
             temp_int = *col - j;
-            BLAS_FUNC(dcopy)(&temp_int, &sy[j + m*j], &one_int, &sy[(j-1) + m*(j-1)], &one_int);
+            sdsge_shim_dcopy(&temp_int, &sy[j + m*j], &one_int, &sy[(j-1) + m*(j-1)], &one_int);
         }
         // 50
     }
@@ -2739,8 +2739,8 @@ matupd(CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
     pointr = *head;
     for (j = 0; j < *col - 1; j++)
     {
-        sy[*col - 1 + m*j] = BLAS_FUNC(ddot)(&n, d, &one_int, &wy[pointr*n], &one_int);
-        ss[j + m*(*col - 1)] = BLAS_FUNC(ddot)(&n, &ws[pointr*n], &one_int, &d[0], &one_int);
+        sy[*col - 1 + m*j] = sdsge_shim_ddot(&n, d, &one_int, &wy[pointr*n], &one_int);
+        ss[j + m*(*col - 1)] = sdsge_shim_ddot(&n, &ws[pointr*n], &one_int, &d[0], &one_int);
         pointr = (pointr + 1) % m;
     }
     // 51
@@ -2753,8 +2753,8 @@ matupd(CBLAS_INT n, CBLAS_INT m, double* ws, double *wy, double* sy, double* ss,
 
 
 void
-projgr(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd,
-       double* x, double* g, double* sbgnrm)
+projgr(i64 n, f64* l, f64* u, i64* nbd,
+       f64* x, f64* g, f64* sbgnrm)
 {
     //     ************
     //
@@ -2775,8 +2775,8 @@ projgr(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd,
     //
     //
     //     ************
-    CBLAS_INT i;
-    double gi;
+    i64 i;
+    f64 gi;
 
     *sbgnrm = 0.0;
     for (i = 0; i < n; i++)
@@ -2805,11 +2805,11 @@ projgr(CBLAS_INT n, double* l, double* u, CBLAS_INT* nbd,
 }
 
 
-void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
-           double* l, double* u, CBLAS_INT* nbd, double* x,
-           double* d, double* xp, double* ws, double* wy,
-           double theta, double* xx, double* gg, CBLAS_INT col,
-           CBLAS_INT head, CBLAS_INT* iword, double* wv, double* wn, CBLAS_INT* info)
+void subsm(i64 n, i64 m, i64 nsub, i64* ind,
+           f64* l, f64* u, i64* nbd, f64* x,
+           f64* d, f64* xp, f64* ws, f64* wy,
+           f64 theta, f64* xx, f64* gg, i64 col,
+           i64 head, i64* iword, f64* wv, f64* wn, i64* info)
 {
     //     **********************************************************************
     //
@@ -2880,11 +2880,11 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
     //       On entry ind specifies the coordinate indices of free variables.
     //       On exit ind is unchanged.
     //
-    //     l is a double precision array of dimension n.
+    //     l is a f64 precision array of dimension n.
     //       On entry l is the lower bound of x.
     //       On exit l is unchanged.
     //
-    //     u is a double precision array of dimension n.
+    //     u is a f64 precision array of dimension n.
     //       On entry u is the upper bound of x.
     //       On exit u is unchanged.
     //
@@ -2897,27 +2897,27 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
     //                3 if x(i) has only an upper bound.
     //       On exit nbd is unchanged.
     //
-    //     x is a double precision array of dimension n.
+    //     x is a f64 precision array of dimension n.
     //       On entry x specifies the Cauchy point xcp.
     //       On exit x(i) is the minimizer of Q over the subspace of
     //                                                        free variables.
     //
-    //     d is a double precision array of dimension n.
+    //     d is a f64 precision array of dimension n.
     //       On entry d is the reduced gradient of Q at xcp.
     //       On exit d is the Newton direction of Q.
     //
-    //    xp is a double precision array of dimension n.
+    //    xp is a f64 precision array of dimension n.
     //       used to safeguard the projected Newton direction
     //
-    //    xx is a double precision array of dimension n
+    //    xx is a f64 precision array of dimension n
     //       On entry it holds the current iterate
     //       On output it is unchanged
-    //    gg is a double precision array of dimension n
+    //    gg is a f64 precision array of dimension n
     //       On entry it holds the gradient at the current iterate
     //       On output it is unchanged
     //
-    //     ws and wy are double precision arrays;
-    //     theta is a double precision variable;
+    //     ws and wy are f64 precision arrays;
+    //     theta is a f64 precision variable;
     //     col is an integer variable;
     //     head is an integer variable.
     //       On entry they store the information defining the
@@ -2935,9 +2935,9 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
     //         iword = 0 if the solution is in the box,
     //                 1 if some bound is encountered.
     //
-    //     wv is a double precision working array of dimension 2m.
+    //     wv is a f64 precision working array of dimension 2m.
     //
-    //     wn is a double precision array of dimension 2m x 2m.
+    //     wn is a f64 precision array of dimension 2m x 2m.
     //       On entry the upper triangle of wn stores the LEL^T factorization
     //         of the indefinite matrix
     //
@@ -2987,8 +2987,8 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
     //
     //
     //     ************
-    CBLAS_INT pointr, m2, col2, ibd, jy, js, i, j, k, one_int = 1;
-    double alpha, xk, dk, temp, temp1, temp2, dd_p;
+    i64 pointr, m2, col2, ibd, jy, js, i, j, k, one_int = 1;
+    f64 alpha, xk, dk, temp, temp1, temp2, dd_p;
     char *uplo = "U", *trans = "T", *diag = "N";
 
     // n, m, col, nsub are size variables.
@@ -3017,13 +3017,13 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
     col2 = 2*col;
 
     // dtrtrs(uplo, trans, diag, n, nrhs, a, lda, b, ldb, info)
-    BLAS_FUNC(dtrtrs)(uplo, trans, diag, &col2, &one_int, wn, &m2, wv, &m2, info);
+    sdsge_shim_dtrtrs(uplo, trans, diag, &col2, &one_int, wn, &m2, wv, &m2, info);
     if (*info != 0) { return; }
 
     for (i = 0; i < col; i++) { wv[i] = -wv[i]; }
 
     trans = "N";
-    BLAS_FUNC(dtrtrs)(uplo, trans, diag, &col2, &one_int, wn, &m2, wv, &m2, info);
+    sdsge_shim_dtrtrs(uplo, trans, diag, &col2, &one_int, wn, &m2, wv, &m2, info);
     if (*info != 0) { return; }
 
     // Compute d = (1/theta)d + (1/theta**2)Z'W wv.
@@ -3044,14 +3044,14 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
 
     temp = 1.0 / theta;
     // n, da, dx, incx
-    BLAS_FUNC(dscal)(&nsub, &temp, d, &one_int);
+    sdsge_shim_dscal(&nsub, &temp, d, &one_int);
 
     // -----------------------------------------------------
     // Let us try the projection, d is the Newton direction.
 
     *iword = 0;
     // for (i = 0; i < n; i++) { xp[i] = x[i]; }
-    BLAS_FUNC(dcopy)(&n, x, &one_int, xp, &one_int);
+    sdsge_shim_dcopy(&n, x, &one_int, xp, &one_int);
 
     for (i = 0; i < nsub; i++)
     {
@@ -3094,7 +3094,7 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
     if (dd_p > 0.0)
     {
         // for (i = 0; i < n; i++) { x[i] = xp[i]; }
-        BLAS_FUNC(dcopy)(&n, xp, &one_int, x, &one_int);
+        sdsge_shim_dcopy(&n, xp, &one_int, x, &one_int);
     } else {
         return;
     }
@@ -3162,9 +3162,9 @@ void subsm(CBLAS_INT n, CBLAS_INT m, CBLAS_INT nsub, CBLAS_INT* ind,
 
 
 void
-dcsrch(double f, double g, double* stp, double ftol, double gtol,
-       double xtol, double stpmin, double stpmax, CBLAS_INT* task,
-       CBLAS_INT* task_msg, CBLAS_INT* isave, double* dsave)
+dcsrch(f64 f, f64 g, f64* stp, f64 ftol, f64 gtol,
+       f64 xtol, f64 stpmin, f64 stpmax, i64* task,
+       i64* task_msg, i64* isave, f64* dsave)
 {
     //     **********
     //
@@ -3217,19 +3217,19 @@ dcsrch(double f, double g, double* stp, double ftol, double gtol,
     //                          task,isave,dsave)
     //     where
     //
-    //       f is a double precision variable.
+    //       f is a f64 precision variable.
     //         On initial entry f is the value of the function at 0.
     //            On subsequent entries f is the value of the
     //            function at stp.
     //         On exit f is the value of the function at stp.
     //
-    //       g is a double precision variable.
+    //       g is a f64 precision variable.
     //         On initial entry g is the derivative of the function at 0.
     //            On subsequent entries g is the derivative of the
     //            function at stp.
     //         On exit g is the derivative of the function at stp.
     //
-    //       stp is a double precision variable.
+    //       stp is a f64 precision variable.
     //         On entry stp is the current estimate of a satisfactory
     //            step. On initial entry, a positive initial estimate
     //            must be provided.
@@ -3237,28 +3237,28 @@ dcsrch(double f, double g, double* stp, double ftol, double gtol,
     //            if task = 'FG'. If task = 'CONV' then stp satisfies
     //            the sufficient decrease and curvature condition.
     //
-    //       ftol is a double precision variable.
+    //       ftol is a f64 precision variable.
     //         On entry ftol specifies a nonnegative tolerance for the
     //            sufficient decrease condition.
     //         On exit ftol is unchanged.
     //
-    //       gtol is a double precision variable.
+    //       gtol is a f64 precision variable.
     //         On entry gtol specifies a nonnegative tolerance for the
     //            curvature condition.
     //         On exit gtol is unchanged.
     //
-    //       xtol is a double precision variable.
+    //       xtol is a f64 precision variable.
     //         On entry xtol specifies a nonnegative relative tolerance
     //            for an acceptable step. The subroutine exits with a
     //            warning if the relative difference between sty and stx
     //            is less than xtol.
     //         On exit xtol is unchanged.
     //
-    //       stpmin is a double precision variable.
+    //       stpmin is a f64 precision variable.
     //         On entry stpmin is a nonnegative lower bound for the step.
     //         On exit stpmin is unchanged.
     //
-    //       stpmax is a double precision variable.
+    //       stpmax is a f64 precision variable.
     //         On entry stpmax is a nonnegative upper bound for the step.
     //         On exit stpmax is unchanged.
     //
@@ -3283,7 +3283,7 @@ dcsrch(double f, double g, double* stp, double ftol, double gtol,
     //
     //       isave is an integer work array of dimension 2.
     //
-    //       dsave is a double precision work array of dimension 13.
+    //       dsave is a f64 precision work array of dimension 13.
     //
     //     Subprograms called
     //
@@ -3298,11 +3298,11 @@ dcsrch(double f, double g, double* stp, double ftol, double gtol,
     //     Brett M. Averick, Richard G. Carter, and Jorge J. More'.
     //
     //     **********
-    CBLAS_INT brackt, stage;
-    double finit, ftest, fm, fx, fxm, fy, fym, ginit, gtest, gm, gx, gxm, gy;
-    double gym, stx, sty, stmin, stmax, width, width1;
-    double xtrapl = 1.1;
-    double xtrapu = 4.0;
+    i64 brackt, stage;
+    f64 finit, ftest, fm, fx, fxm, fy, fym, ginit, gtest, gm, gx, gxm, gy;
+    f64 gym, stx, sty, stmin, stmax, width, width1;
+    f64 xtrapl = 1.1;
+    f64 xtrapu = 4.0;
 
     // Initialization block.
     if (*task == START)
@@ -3480,9 +3480,9 @@ dcsrch(double f, double g, double* stp, double ftol, double gtol,
 }
 
 static inline void save_vars(
-    CBLAS_INT brackt, CBLAS_INT stage, double ginit, double gtest, double gx, double gy,
-    double finit, double fx, double fy, double stx, double sty, double stmin,
-    double stmax, double width, double width1, CBLAS_INT* isave, double* dsave) {
+    i64 brackt, i64 stage, f64 ginit, f64 gtest, f64 gx, f64 gy,
+    f64 finit, f64 fx, f64 fy, f64 stx, f64 sty, f64 stmin,
+    f64 stmax, f64 width, f64 width1, i64* isave, f64* dsave) {
     if (brackt)
     {
         isave[0] = 1;
@@ -3510,9 +3510,9 @@ static inline void save_vars(
 
 
 void
-dcstep (double* stx, double* fx, double* dx, double* sty, double* fy, double* dy,
-        double* stp, double fp, double dp, CBLAS_INT* brackt,
-        double stpmin, double stpmax)
+dcstep (f64* stx, f64* fx, f64* dx, f64* sty, f64* fy, f64* dy,
+        f64* stp, f64 fp, f64 dp, i64* brackt,
+        f64 stpmin, f64 stpmax)
 {
     //     **********
     //
@@ -3540,46 +3540,46 @@ dcstep (double* stx, double* fx, double* dx, double* sty, double* fy, double* dy
     //
     //     where
     //
-    //       stx is a double precision variable.
+    //       stx is a f64 precision variable.
     //         On entry stx is the best step obtained so far and is an
     //            endpoint of the interval that contains the minimizer.
     //         On exit stx is the updated best step.
     //
-    //       fx is a double precision variable.
+    //       fx is a f64 precision variable.
     //         On entry fx is the function at stx.
     //         On exit fx is the function at stx.
     //
-    //       dx is a double precision variable.
+    //       dx is a f64 precision variable.
     //         On entry dx is the derivative of the function at
     //            stx. The derivative must be negative in the direction of
     //            the step, that is, dx and stp - stx must have opposite
     //            signs.
     //         On exit dx is the derivative of the function at stx.
     //
-    //       sty is a double precision variable.
+    //       sty is a f64 precision variable.
     //         On entry sty is the second endpoint of the interval that
     //            contains the minimizer.
     //         On exit sty is the updated endpoint of the interval that
     //            contains the minimizer.
     //
-    //       fy is a double precision variable.
+    //       fy is a f64 precision variable.
     //         On entry fy is the function at sty.
     //         On exit fy is the function at sty.
     //
-    //       dy is a double precision variable.
+    //       dy is a f64 precision variable.
     //         On entry dy is the derivative of the function at sty.
     //         On exit dy is the derivative of the function at the exit sty.
     //
-    //       stp is a double precision variable.
+    //       stp is a f64 precision variable.
     //         On entry stp is the current step. If brackt is set to .true.
     //            then on input stp must be between stx and sty.
     //         On exit stp is a new trial step.
     //
-    //       fp is a double precision variable.
+    //       fp is a f64 precision variable.
     //         On entry fp is the function at stp
     //         On exit fp is unchanged.
     //
-    //       dp is a double precision variable.
+    //       dp is a f64 precision variable.
     //         On entry dp is the derivative of the function at stp.
     //         On exit dp is unchanged.
     //
@@ -3589,11 +3589,11 @@ dcstep (double* stx, double* fx, double* dx, double* sty, double* fy, double* dy
     //         On exit brackt specifies if a minimizer has been bracketed.
     //            When a minimizer is bracketed brackt is set to .true.
     //
-    //       stpmin is a double precision variable.
+    //       stpmin is a f64 precision variable.
     //         On entry stpmin is a lower bound for the step.
     //         On exit stpmin is unchanged.
     //
-    //       stpmax is a double precision variable.
+    //       stpmax is a f64 precision variable.
     //         On entry stpmax is an upper bound for the step.
     //         On exit stpmax is unchanged.
     //
@@ -3606,7 +3606,7 @@ dcstep (double* stx, double* fx, double* dx, double* sty, double* fy, double* dy
     //     Brett M. Averick and Jorge J. More'.
     //
     //     **********
-    double gamma, p, q, r, s, sgnd, stpc, stpf, stpq, theta;
+    f64 gamma, p, q, r, s, sgnd, stpc, stpf, stpq, theta;
     sgnd = dp * (*dx / fabs(*dx));
 
     // First case: A higher function value. The minimum is bracketed.

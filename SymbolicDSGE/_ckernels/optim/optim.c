@@ -39,16 +39,16 @@ static const char *sdsge_lbfgsb_message(i64 task) {
  * probe is one objective eval; *nfev is bumped per probe. A non-finite f0 marks
  * an infeasible point: the gradient is left at zero so the line search reduces
  * the step on the (non-finite) f value alone. Returns the probe count. */
-static void sdsge_fd_grad(sdsge_objective_fn obj, void *ctx, blas_int n, f64 *x,
+static void sdsge_fd_grad(sdsge_objective_fn obj, void *ctx, i64 n, f64 *x,
                           f64 f0, f64 fd_step, f64 *g, i64 *nfev) {
   if (!isfinite(f0)) {
-    for (blas_int i = 0; i < n; ++i) {
+    for (i64 i = 0; i < n; ++i) {
       g[i] = 0.0;
     }
     return;
   }
   const f64 rel = sqrt(DBL_EPSILON);
-  for (blas_int i = 0; i < n; ++i) {
+  for (i64 i = 0; i < n; ++i) {
     const f64 xi = x[i];
     f64 h = fd_step > 0.0 ? fd_step : rel * fmax(1.0, fabs(xi));
     x[i] = xi + h;
@@ -59,25 +59,25 @@ static void sdsge_fd_grad(sdsge_objective_fn obj, void *ctx, blas_int n, f64 *x,
   }
 }
 
-i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx,
-                 const sdsge_blas_ops *blas, i64 n, f64 *SDSGE_RESTRICT x,
-                 const f64 *lo, const f64 *hi, const i64 *nbd_in,
-                 const sdsge_lbfgsb_options *opt, sdsge_lbfgsb_result *out) {
-  const blas_int N = (blas_int)n;
-  const blas_int m = (blas_int)opt->m;
-  const blas_int maxls = (blas_int)opt->maxls;
+i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
+                 f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
+                 const i64 *nbd_in, const sdsge_lbfgsb_options *opt,
+                 sdsge_lbfgsb_result *out) {
+  const i64 N = n;
+  const i64 m = opt->m;
+  const i64 maxls = opt->maxls;
   const f64 factr = opt->factr;
   const f64 pgtol = opt->pgtol;
 
   /* Workspace (sizes per scipy's _lbfgsb_py wrapper). One allocation, freed on
    * return; the reverse-communication loop itself allocates nothing. */
   const size_t wa_len = (size_t)(2 * m * N + 5 * N + 11 * m * m + 8 * m);
-  double *wa = (double *)malloc(wa_len * sizeof(double));
-  double *g = (double *)malloc((size_t)N * sizeof(double));
-  double *l = (double *)malloc((size_t)N * sizeof(double));
-  double *u = (double *)malloc((size_t)N * sizeof(double));
-  CBLAS_INT *iwa = (CBLAS_INT *)malloc((size_t)(3 * N) * sizeof(CBLAS_INT));
-  CBLAS_INT *nbd = (CBLAS_INT *)malloc((size_t)N * sizeof(CBLAS_INT));
+  f64 *wa = (f64 *)malloc(wa_len * sizeof(f64));
+  f64 *g = (f64 *)malloc((size_t)N * sizeof(f64));
+  f64 *l = (f64 *)malloc((size_t)N * sizeof(f64));
+  f64 *u = (f64 *)malloc((size_t)N * sizeof(f64));
+  i64 *iwa = (i64 *)malloc((size_t)(3 * N) * sizeof(i64));
+  i64 *nbd = (i64 *)malloc((size_t)N * sizeof(i64));
   if (!wa || !g || !l || !u || !iwa || !nbd) {
     free(wa);
     free(g);
@@ -96,23 +96,21 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx,
     return SDSGE_OPTIM_EALLOC;
   }
 
-  for (blas_int i = 0; i < N; ++i) {
+  for (i64 i = 0; i < N; ++i) {
     l[i] = lo ? lo[i] : 0.0;
     u[i] = hi ? hi[i] : 0.0;
-    nbd[i] = nbd_in ? (CBLAS_INT)nbd_in[i] : 0;
+    nbd[i] = nbd_in ? nbd_in[i] : 0;
   }
 
-  CBLAS_INT task[2] = {TASK_START, 0};
-  CBLAS_INT ln_task[2] = {0, 0};
-  CBLAS_INT lsave[4] = {0, 0, 0, 0};
-  CBLAS_INT isave[44];
-  double dsave[29];
+  i64 task[2] = {TASK_START, 0};
+  i64 ln_task[2] = {0, 0};
+  i64 lsave[4] = {0, 0, 0, 0};
+  i64 isave[44];
+  f64 dsave[29];
   memset(isave, 0, sizeof(isave));
   memset(dsave, 0, sizeof(dsave));
 
-  sdsge_optim_set_blas(blas);
-
-  double f = 0.0;
+  f64 f = 0.0;
   i64 nfev = 0, nit = 0;
 
   for (;;) {

@@ -2,34 +2,15 @@
 """Cython surface for the native optimizer module.
 
 Exposes the L-BFGS-B driver over synthetic benchmark objectives (Rosenbrock,
-ill-conditioned quadratic, separable double well) with a selectable BLAS backend
-(``"capsule"`` = scipy cython_blas/lapack pointers, ``"shim"`` = self-contained).
-This is the entry point for the scipy parity tests and the capsule-vs-shim bench;
-the estimation objective wires in separately (issue #330).
+ill-conditioned quadratic, separable double well). The vendored scipy L-BFGS-B
+kernel runs over self-contained BLAS shims (no external BLAS). This is the entry
+point for the scipy parity tests; the estimation objective wires in separately
+(issue #330).
 """
 
 from libc.stdint cimport int64_t
 
-from cpython.pycapsule cimport PyCapsule_GetName, PyCapsule_GetPointer
-
 import numpy as np
-import scipy.linalg.cython_blas as _cblas
-import scipy.linalg.cython_lapack as _clapack
-
-
-cdef extern from "blas_backend.h":
-    ctypedef struct sdsge_blas_ops:
-        void *dcopy
-        void *daxpy
-        void *dscal
-        void *ddot
-        void *dnrm2
-        void *dpotrf
-        void *dtrtrs
-    void sdsge_blas_ops_shim(sdsge_blas_ops *ops)
-    void sdsge_blas_ops_from_ptrs(sdsge_blas_ops *ops, void *dcopy, void *daxpy,
-                                  void *dscal, void *ddot, void *dnrm2,
-                                  void *dpotrf, void *dtrtrs)
 
 
 cdef extern from "optim.h":
@@ -52,10 +33,9 @@ cdef extern from "optim.h":
         int success
         const char *message
 
-    int64_t sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx,
-                         const sdsge_blas_ops *blas, int64_t n, double *x,
-                         const double *lo, const double *hi, const int64_t *nbd,
-                         const sdsge_lbfgsb_options *opt,
+    int64_t sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
+                         double *x, const double *lo, const double *hi,
+                         const int64_t *nbd, const sdsge_lbfgsb_options *opt,
                          sdsge_lbfgsb_result *out) nogil
 
 
@@ -110,29 +90,9 @@ cdef sdsge_objective_fn _objective(str name) except NULL:
     raise ValueError(f"unknown objective {name!r}")
 
 
-cdef void* _cap(mod, str name):
-    cap = mod.__pyx_capi__[name]
-    return PyCapsule_GetPointer(cap, PyCapsule_GetName(cap))
-
-
-cdef void _fill_backend(sdsge_blas_ops *ops, str backend):
-    if backend == "shim":
-        sdsge_blas_ops_shim(ops)
-    elif backend == "capsule":
-        sdsge_blas_ops_from_ptrs(
-            ops,
-            _cap(_cblas, "dcopy"), _cap(_cblas, "daxpy"), _cap(_cblas, "dscal"),
-            _cap(_cblas, "ddot"), _cap(_cblas, "dnrm2"),
-            _cap(_clapack, "dpotrf"), _cap(_clapack, "dtrtrs"),
-        )
-    else:
-        raise ValueError(f"backend must be 'capsule' or 'shim', got {backend!r}")
-
-
 def run_lbfgsb(
     str objective,
     double[::1] x0,
-    str backend="shim",
     bounds=None,
     object params=None,
     int m=10,
@@ -176,9 +136,6 @@ def run_lbfgsb(
                 hi[i] = ub
             nbd[i] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
 
-    cdef sdsge_blas_ops ops
-    _fill_backend(&ops, backend)
-
     cdef sdsge_objective_fn obj = _objective(objective)
 
     cdef sdsge_lbfgsb_options opt
@@ -194,7 +151,7 @@ def run_lbfgsb(
     cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
 
     with nogil:
-        sdsge_lbfgsb(obj, <void *>&ctx, &ops, n, &xv[0], &lo[0], &hi[0], nbd_ptr,
+        sdsge_lbfgsb(obj, <void *>&ctx, n, &xv[0], &lo[0], &hi[0], nbd_ptr,
                      &opt, &res)
 
     return {

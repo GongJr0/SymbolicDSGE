@@ -2,11 +2,12 @@
 #define SDSGE_OPTIM_H
 
 #include "../_common/sdsge_common.h"
-#include "blas_backend.h"
 
 /* Native optimizer drivers (issue #329). Shared subsystem: any consumer links
  * optim via _EXTRA_DEPS. The estimation-specific objective trampoline lives in
- * the estimation module and wires in at #330; nothing here depends on it. */
+ * the estimation module and wires in at #330; nothing here depends on it. The
+ * linear-algebra primitives the L-BFGS-B kernel needs are served by
+ * self-contained shims (shim.c), so the driver takes no backend argument. */
 
 /* Objective ABI: minimize f(x). Returns the scalar objective at x (length n).
  * A non-finite return (+INFINITY) marks an infeasible point; the driver's FD
@@ -36,14 +37,14 @@ typedef struct {
 
 /* L-BFGS-B on a box-bounded objective. `x` is start -> optimum (length n).
  * Bounds: lo[i]/hi[i] gated by nbd[i] in {0 none, 1 lower, 2 both, 3 upper};
- * nbd == NULL means fully unbounded. `blas` selects the backend (capsule or
- * shim). The driver makes one workspace allocation up front (not in the eval
- * loop) and frees it on return; it never longjmps. Returns the exit status
- * (also in out->status). SDSGE_OPTIM_EALLOC on a failed workspace allocation. */
-i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx,
-                 const sdsge_blas_ops *blas, i64 n, f64 *SDSGE_RESTRICT x,
-                 const f64 *lo, const f64 *hi, const i64 *nbd,
-                 const sdsge_lbfgsb_options *opt, sdsge_lbfgsb_result *out);
+ * nbd == NULL means fully unbounded. The driver makes one workspace allocation
+ * up front (not in the eval loop) and frees it on return; it never longjmps.
+ * Returns the exit status (also in out->status). SDSGE_OPTIM_EALLOC on a failed
+ * workspace allocation. */
+i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
+                 f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
+                 const i64 *nbd, const sdsge_lbfgsb_options *opt,
+                 sdsge_lbfgsb_result *out);
 
 #define SDSGE_OPTIM_EALLOC (-1)
 
