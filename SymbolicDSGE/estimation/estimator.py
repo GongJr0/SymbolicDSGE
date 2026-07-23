@@ -20,35 +20,14 @@ from ..bayesian.transforms.tanh import TanhTransform
 from ..bayesian.transforms.transform import Transform
 from ..core.compiled_model import CompiledModel
 from ..core.solver import DSGESolver
-from . import backend
 from .prior_program import PackedLogPrior, build_packed_logprior
-from .results import MCMCResult, OptimizationResult
+from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
 from .spec import EstimationSpec, PriorSpec
 
+from . import backend
+from .backend import MatrixName, MatrixPriorKey, MatrixPriorBlock
+
 NDF = NDArray[np.float64]
-_MatrixName = Literal["R", "Q"]
-_MatrixPriorKey = Literal["R_corr", "Q_corr"]
-
-
-class _MatrixPriorBlock(NamedTuple):
-    """Minimal per-matrix LKJ metadata.
-
-    ``positions`` is an ``(n_members, 2)`` int array of ``(row, col)`` targets in
-    the correlation matrix, parallel to ``member_names``. The block's members
-    occupy a contiguous theta run, so ``theta_slice`` (a plain ``slice``) covers
-    them all: ``theta[theta_slice]`` is the block's unconstrained z with no gather.
-    Resolution yields a partial block (``theta_slice`` empty, ``prior`` ``None``);
-    it is completed via ``_replace`` once the theta layout is known. The reserved
-    matrix key ("R_corr"/"Q_corr") is the dict key the block is stored under in
-    ``_matrix_blocks``, so it is not repeated on the block itself.
-    """
-
-    dim: int
-    labels: list[str]
-    member_names: list[str]
-    positions: NDArray[np.int64]
-    theta_slice: slice
-    prior: Prior | None
 
 
 class MissingConfigError(Exception):
@@ -82,11 +61,11 @@ class Estimator:
         )
 
     @property
-    def _reserved_matrix_keys(self) -> tuple[_MatrixPriorKey, _MatrixPriorKey]:
+    def _reserved_matrix_keys(self) -> tuple[MatrixPriorKey, MatrixPriorKey]:
         return ("R_corr", "Q_corr")
 
     @staticmethod
-    def _matrix_name_for_reserved_key(name: str) -> _MatrixName:
+    def _matrix_name_for_reserved_key(name: str) -> MatrixName:
         if name == "R_corr":
             return "R"
         if name == "Q_corr":
@@ -174,7 +153,7 @@ class Estimator:
         # A reserved matrix key requested for estimation builds a CPC (Cholesky)
         # correlation block whether or not an LKJ prior is attached; the prior is
         # optional density on top of the reparameterization.
-        self._requested_reserved_keys: tuple[_MatrixPriorKey, ...] = tuple(
+        self._requested_reserved_keys: tuple[MatrixPriorKey, ...] = tuple(
             k for k in self._reserved_matrix_keys if k in requested_names_raw
         )
         self.priors = self._select_active_priors(requested_names_raw)
@@ -484,8 +463,8 @@ class Estimator:
 
     def _dense_matrix_error(
         self,
-        key: _MatrixPriorKey,
-        matrix_name: _MatrixName,
+        key: MatrixPriorKey,
+        matrix_name: MatrixName,
         missing_pairs: Sequence[tuple[str, str]],
     ) -> str:
         pair_text = self._format_pairs(missing_pairs)
@@ -518,11 +497,11 @@ class Estimator:
     def _build_matrix_resolution(
         self,
         *,
-        key: _MatrixPriorKey,
+        key: MatrixPriorKey,
         labels: list[str],
         std_param_map: Mapping[str, str | None],
         corr_param_map: Mapping[frozenset[str], str | None],
-    ) -> _MatrixPriorBlock:
+    ) -> MatrixPriorBlock:
         """Resolve the named std/correlation parameters for one matrix into a
         partial :class:`_MatrixPriorBlock` (``theta_slice`` empty, ``prior``
         ``None``). Validates a unique named variance per diagonal and that no
@@ -563,7 +542,7 @@ class Estimator:
                 member_names.append(corr_name)
                 positions.append((row, col))
 
-        return _MatrixPriorBlock(
+        return MatrixPriorBlock(
             dim=dim,
             labels=list(labels),
             member_names=member_names,
@@ -572,7 +551,7 @@ class Estimator:
             prior=None,
         )
 
-    def _resolve_R(self) -> _MatrixPriorBlock:
+    def _resolve_R(self) -> MatrixPriorBlock:
         labels = self._prepared_filter.observables
         std_param_map = self.kalman.R_std_param_map
         corr_param_map = self.kalman.R_corr_param_map
@@ -587,7 +566,7 @@ class Estimator:
             corr_param_map=corr_param_map,
         )
 
-    def _resolve_Q(self) -> _MatrixPriorBlock:
+    def _resolve_Q(self) -> MatrixPriorBlock:
         Q_cov = backend.build_Q(self.compiled, self._base_params)
         self._cov_to_corr(Q_cov, "Q")
 
@@ -619,13 +598,13 @@ class Estimator:
             corr_param_map=corr_param_map,
         )
 
-    def _build_matrix_prior_blocks(self) -> dict[str, _MatrixPriorBlock]:
+    def _build_matrix_prior_blocks(self) -> dict[str, MatrixPriorBlock]:
         # A reserved key requested for estimation builds a dense CPC correlation
         # block regardless of priors -- this is the SPD-by-construction Cholesky
         # reparameterization. An LKJChol prior, when present, is validated and
         # attached as optional density; without one the block carries prior=None
         # (pure reparameterization, e.g. the MLE path).
-        blocks: dict[str, _MatrixPriorBlock] = {}
+        blocks: dict[str, MatrixPriorBlock] = {}
         claimed_names: set[str] = set()
         for key in self._requested_reserved_keys:
             matrix_name = self._matrix_name_for_reserved_key(key)
@@ -710,7 +689,7 @@ class Estimator:
         return blocks
 
     @staticmethod
-    def _corr_from_member_values(block: _MatrixPriorBlock, values: NDF) -> NDF:
+    def _corr_from_member_values(block: MatrixPriorBlock, values: NDF) -> NDF:
         corr = np.eye(block.dim, dtype=float64)
         rows = block.positions[:, 0]
         cols = block.positions[:, 1]
@@ -720,7 +699,7 @@ class Estimator:
         return corr
 
     @staticmethod
-    def _block_cpc_from_corr(block: _MatrixPriorBlock, corr: NDF) -> NDF:
+    def _block_cpc_from_corr(block: MatrixPriorBlock, corr: NDF) -> NDF:
         try:
             return backend._unconstrained_from_corr(corr)
         except ValueError as exc:
@@ -731,7 +710,7 @@ class Estimator:
 
     @staticmethod
     def _block_corr_from_theta(
-        block: _MatrixPriorBlock, theta_block: NDF
+        block: MatrixPriorBlock, theta_block: NDF
     ) -> tuple[NDF, NDF]:
         Lcorr = backend._corr_chol_from_unconstrained(theta_block, block.dim)
         corr = np.asarray(Lcorr @ Lcorr.T, dtype=float64)
@@ -741,7 +720,7 @@ class Estimator:
         self,
         *,
         method: str | None = None,
-        result: OptimizationResult | MCMCResult | None = None,
+        result: MLEResult | MAPResult | MCMCResult | None = None,
         priors: Mapping[str, PriorSpec] | None = None,
         observables: Sequence[str] | None = None,
         method_kwargs: Mapping[str, Any] | None = None,
@@ -1118,28 +1097,28 @@ class Estimator:
         x = asarray(res.x, dtype=float64)
         theta = self.theta_to_params(x)
 
-        ll = self._safe_loglik(x)
-        lpr = self._safe_logprior(x)
-        lpo = (
-            float64(ll + lpr)
-            if np.isfinite(ll) and np.isfinite(lpr)
-            else float64(-np.inf)
-        )
-
-        return OptimizationResult(
-            kind=kind,
+        common: dict[str, Any] = dict(
             x=x,
             theta=theta,
             success=bool(res.success),
             message=str(res.message),
             fun=float64(res.fun),
-            loglik=float64(ll),
-            logprior=float64(lpr),
-            logpost=float64(lpo),
             nfev=int(res.nfev),
             nit=(int(res.nit) if hasattr(res, "nit") and res.nit is not None else None),
             optimizer_config=dict(config or {}),
         )
+        if kind == "mle":
+            return MLEResult(**common, loglik=self._safe_loglik(x))
+        if kind == "map":
+            ll = self._safe_loglik(x)
+            lpr = self._safe_logprior(x)
+            lpo = (
+                float64(ll + lpr)
+                if np.isfinite(ll) and np.isfinite(lpr)
+                else float64(-np.inf)
+            )
+            return MAPResult(**common, logpost=lpo, logprior=lpr)
+        raise ValueError(f"unknown result kind {kind!r}")
 
     def mle(
         self,
@@ -1351,15 +1330,17 @@ class Estimator:
 
 
 def _method_from_result(
-    result: OptimizationResult | MCMCResult | None,
+    result: MLEResult | MAPResult | MCMCResult | None,
 ) -> str | None:
     """The estimation method (``mle``/``map``/``mcmc``) implied by a result."""
     if result is None:
         return None
     if isinstance(result, MCMCResult):
         return "mcmc"
-    if isinstance(result, OptimizationResult):
-        return result.kind
+    if isinstance(result, MLEResult):
+        return "mle"
+    if isinstance(result, MAPResult):
+        return "map"
     raise TypeError(f"Unsupported estimation result type: {type(result).__name__}")
 
 

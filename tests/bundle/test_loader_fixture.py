@@ -17,7 +17,7 @@ from SymbolicDSGE.bundle.loader import (
     build_from,
 )
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
+from SymbolicDSGE.estimation.results import MCMCResult, MAPResult, OptimizationResult
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "bundle_fixture.sdsge"
 
@@ -40,17 +40,16 @@ def test_build_from_fixture_end_to_end():
 
 
 _OPT_META = {
-    "kind": "map",
+    "x": [1.0, -2.0],
     "theta": {"a": 1.0, "b": -2.0},
     "success": True,
     "message": "converged",
     "fun": 1.5,
-    "loglik": -1.0,
-    "logprior": -0.5,
-    "logpost": -1.5,
     "nfev": 7,
     "nit": 3,
     "optimizer_config": {"method": "L-BFGS-B"},
+    "logpost": -1.5,
+    "logprior": -0.5,
 }
 
 _MCMC_META = {
@@ -64,11 +63,9 @@ _MCMC_META = {
 
 
 def test_rebuild_optimization_result():
-    res = L._rebuild_optimization_result(_OPT_META)
-    assert isinstance(res, OptimizationResult)
-    assert res.kind == "map"
+    res = MAPResult.from_dict(_OPT_META)
+    assert isinstance(res, (MAPResult, OptimizationResult))
     assert res.theta["a"] == pytest.approx(1.0)
-    # x is recovered from theta values, in order
     assert np.allclose(res.x, [1.0, -2.0])
     assert res.nfev == 7
 

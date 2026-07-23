@@ -6,7 +6,6 @@ from SymbolicDSGE.estimation.spec import (
     EstimationParameterSpec,
     EstimationSpec,
     MCMCResultMeta,
-    OptimizationResultMeta,
     PriorSpec,
 )
 
@@ -126,41 +125,6 @@ def test_estimation_spec_allows_duplicate_inactive_names() -> None:
             EstimationParameterSpec(name="a", initial=1.0, estimate=False),
         ],
     )
-
-
-def test_optimization_result_meta_round_trips() -> None:
-    meta = OptimizationResultMeta(
-        kind="mle",
-        theta={"beta": 0.99, "rho": 0.8},
-        success=True,
-        message="Optimization terminated successfully.",
-        fun=-12.3,
-        loglik=-10.0,
-        logprior=-2.3,
-        logpost=-12.3,
-        nfev=42,
-        nit=15,
-    )
-    as_dict = meta.to_dict()
-    assert OptimizationResultMeta.from_dict(as_dict).to_dict() == as_dict
-
-
-def test_optimization_result_meta_nit_optional() -> None:
-    meta = OptimizationResultMeta(
-        kind="map",
-        theta={"a": 1.0},
-        success=False,
-        message="",
-        fun=0.0,
-        loglik=0.0,
-        logprior=0.0,
-        logpost=0.0,
-        nfev=1,
-        nit=None,
-    )
-    as_dict = meta.to_dict()
-    assert as_dict["nit"] is None
-    assert OptimizationResultMeta.from_dict(as_dict).nit is None
 
 
 def test_mcmc_result_meta_round_trips() -> None:
@@ -305,29 +269,6 @@ def test_to_estimator_inputs_requires_prior_for_map() -> None:
     )
     with pytest.raises(ValueError, match="requires a prior for MAP"):
         spec.to_estimator_inputs()
-
-
-def test_optimization_result_meta_round_trips_with_config() -> None:
-    meta = OptimizationResultMeta(
-        kind="mle",
-        theta={"a": 1.0},
-        success=True,
-        message="",
-        fun=0.0,
-        loglik=0.0,
-        logprior=0.0,
-        logpost=0.0,
-        nfev=1,
-        nit=None,
-        optimizer_config={
-            "method": "L-BFGS-B",
-            "bounds": [[0.0, 1.0]],
-            "options": {"maxiter": 10},
-        },
-    )
-    as_dict = meta.to_dict()
-    assert as_dict["optimizer_config"]["method"] == "L-BFGS-B"
-    assert OptimizationResultMeta.from_dict(as_dict).to_dict() == as_dict
 
 
 def test_mcmc_result_meta_round_trips_with_config() -> None:

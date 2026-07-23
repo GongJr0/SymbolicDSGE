@@ -9,6 +9,7 @@ by hand.
 from libc.stdint cimport int64_t
 
 from cpython.pycapsule cimport PyCapsule_GetName, PyCapsule_GetPointer
+from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
 import numpy as np
 import scipy.linalg.cython_lapack as _cython_lapack
@@ -62,6 +63,18 @@ cdef extern from "estimation.h":
 
     ctypedef struct sdsge_prior_tables:
         int has_prior
+        const int64_t *scalar_indices
+        const int64_t *scalar_dist_codes
+        const int64_t *scalar_transform_codes
+        const double *scalar_dist_params
+        const double *scalar_transform_params
+        int64_t n_scalar
+        const int64_t *matrix_offsets
+        const int64_t *matrix_dims
+        const int64_t *matrix_lengths
+        const double *matrix_etas
+        const double *matrix_log_constants
+        int64_t n_blocks
 
     ctypedef struct sdsge_solve1:
         double *ss
@@ -143,6 +156,54 @@ cdef extern from "estimation.h":
                               int has_priors) nogil
     double sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const double *theta,
                                int has_priors) nogil
+
+
+cdef extern from "optim.h":
+    ctypedef double (*sdsge_objective_fn)(const double *x, void *ctx) noexcept nogil
+
+    ctypedef struct sdsge_lbfgsb_options:
+        int64_t m
+        int64_t maxiter
+        int64_t maxfun
+        int64_t maxls
+        double factr
+        double pgtol
+        double fd_step
+
+    ctypedef struct sdsge_lbfgsb_result:
+        int64_t status
+        int64_t nfev
+        int64_t nit
+        double fun
+        int success
+        const char *message
+
+    int64_t sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
+                         double *x, const double *lo, const double *hi,
+                         const int64_t *nbd, const sdsge_lbfgsb_options *opt,
+                         sdsge_lbfgsb_result *out) nogil
+
+
+cdef extern from "nelder_mead.h":
+    ctypedef struct sdsge_neldermead_options:
+        int64_t maxiter
+        int64_t maxfun
+        double xatol
+        double fatol
+
+    ctypedef struct sdsge_neldermead_result:
+        int64_t status
+        int64_t nfev
+        int64_t nit
+        double fun
+        int success
+        const char *message
+
+    int64_t sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
+                             double *x, const double *lo, const double *hi,
+                             const int64_t *nbd,
+                             const sdsge_neldermead_options *opt,
+                             sdsge_neldermead_result *out) nogil
 
 
 cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
@@ -593,3 +654,383 @@ def obj_unscented_base(
     with nogil:
         ll = sdsge_obj_unscented(&ctx, NULL, 0)
     return ll, int(b.bk_violations)
+
+
+# --- Native MLE/MAP driver over the linear objective (issue #330) -----------
+#
+# Two trampolines adapt the objective's (ctx, theta, has_priors) ABI to the
+# optimizer's (x, void*ctx) ABI, negating loglik/logpost for minimization. The
+# BK/NaN sentinel (-inf loglik) maps to +inf, which the drivers tolerate.
+
+cdef double _obj_ll(const double *x, void *ctx) noexcept nogil:
+    return -sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 0)
+
+
+cdef double _obj_lp(const double *x, void *ctx) noexcept nogil:
+    return -sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 1)
+
+
+def run_estimation_linear(
+    object ctx_dto,
+    str method,
+    double[::1] theta0,
+    bounds=None,
+    int has_priors=0,
+    int m=10,
+    int maxiter=15000,
+    int maxfun=15000,
+    int maxls=20,
+    double factr=1e7,
+    double pgtol=1e-5,
+    double fd_step=0.0,
+    double xatol=1e-4,
+    double fatol=1e-4,
+):
+    """Native linear-filter MLE/MAP. Marshal the ``PyLinearContext`` DTO into
+    ``sdsge_linear_ctx``, then minimize ``-loglik`` (``has_priors=0``) or
+    ``-logpost`` (``has_priors=1``) with the native L-BFGS-B / Nelder-Mead driver.
+    Returns the lean driver result dict. Theta-naming and the logprior split are
+    the caller's post-loop step (a native scatter at ``x_best``), not wired yet."""
+    cdef object base = ctx_dto.base
+    cdef object dims = base.dims
+    cdef int64_t n_theta = dims.n_theta
+    cdef int64_t n_var = dims.n_var
+    cdef int64_t n_state = dims.n_state
+    cdef int64_t n_ctrl = dims.n_ctrl
+    cdef int64_t n_exog = dims.n_exog
+    cdef int64_t n_obs = dims.n_obs
+    cdef int64_t n_par = dims.n_par
+    cdef int64_t T = dims.T
+
+    # Working theta (the driver mutates it in place).
+    x = np.array(theta0, dtype=np.float64, copy=True)
+    cdef double[::1] xv = x
+
+    # Pinned inputs. Python guarantees dtype; C-contiguity is enforced here.
+    cdef double[::1] ssv = np.ascontiguousarray(base.ss_seed, dtype=np.float64)
+    cdef double[:, ::1] yv = np.ascontiguousarray(base.y, dtype=np.float64)
+    cdef double[:, ::1] P0v = np.ascontiguousarray(base.P0, dtype=np.float64)
+    cdef double[::1] bpv = np.ascontiguousarray(
+        base.pmap.base_params, dtype=np.float64
+    )
+    # The linear kf dereferences x0 unconditionally (no NULL guard), so a
+    # missing x0 materializes as the zero initial state, matching obj_linear_base.
+    cdef double[::1] x0v
+    if base.x0 is not None:
+        x0v = np.ascontiguousarray(base.x0, dtype=np.float64)
+    else:
+        x0v = np.zeros(n_var, dtype=np.float64)
+
+    # Scratch the objective writes (allocated from dims, kept alive here).
+    params = np.empty(n_par, dtype=np.float64)
+    cdef double[::1] paramsv = params
+    ss = np.empty(n_var, dtype=np.float64)
+    cdef double[::1] ssv2 = ss
+    a_real = np.empty((n_var, n_var), dtype=np.float64)
+    b_real = np.empty((n_var, n_var), dtype=np.float64)
+    cdef double[:, ::1] arv = a_real
+    cdef double[:, ::1] brv = b_real
+    s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    cdef double complex[::1, :] sv = s
+    cdef double complex[::1, :] tv = t
+    cdef double complex[::1, :] zv = z
+    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
+    p = np.empty((n_state, n_state), dtype=np.complex128)
+    eig = np.empty(n_var, dtype=np.complex128)
+    cdef double complex[:, ::1] fv = f
+    cdef double complex[:, ::1] pv = p
+    cdef double complex[::1] eigv = eig
+    A = np.empty((n_var, n_var), dtype=np.float64)
+    B = np.empty((n_var, n_exog), dtype=np.float64)
+    C = np.empty((n_obs, n_var), dtype=np.float64)
+    d = np.empty(n_obs, dtype=np.float64)
+    cdef double[:, ::1] Av = A
+    cdef double[:, ::1] Bv = B
+    cdef double[:, ::1] Cv = C
+    cdef double[::1] dv = d
+    Q = np.empty((n_exog, n_exog), dtype=np.float64)
+    R = np.empty((n_obs, n_obs), dtype=np.float64)
+    corr_q = np.empty((n_exog, n_exog), dtype=np.float64)
+    corr_r = np.empty((n_obs, n_obs), dtype=np.float64)
+    std_q = np.empty(n_exog, dtype=np.float64)
+    std_r = np.empty(n_obs, dtype=np.float64)
+    cdef double[:, ::1] Qv = Q
+    cdef double[:, ::1] Rv = R
+    cdef double[:, ::1] cqv = corr_q
+    cdef double[:, ::1] crv = corr_r
+    cdef double[::1] sqv = std_q
+    cdef double[::1] srv = std_r
+
+    # Scatter array-of-structs (malloc'd; freed after the driver returns).
+    scalars_list = base.pmap.scalars
+    cdef int64_t n_scalars = len(scalars_list)
+    cdef sdsge_scalar_scatter *scalars_c = <sdsge_scalar_scatter *>PyMem_Malloc(
+        (n_scalars if n_scalars > 0 else 1) * sizeof(sdsge_scalar_scatter)
+    )
+    if scalars_c == NULL:
+        raise MemoryError()
+    cdef int64_t si
+    cdef object sc
+    cdef double[::1] tpv
+    for si in range(n_scalars):
+        sc = scalars_list[si]
+        scalars_c[si].theta_idx = <int64_t>sc.theta_idx
+        scalars_c[si].param_slot = <int64_t>sc.param_slot
+        scalars_c[si].transform_code = <int64_t>sc.transform_code
+        tpv = np.ascontiguousarray(sc.transform_params, dtype=np.float64)
+        scalars_c[si].transform_params[0] = tpv[0]
+        scalars_c[si].transform_params[1] = tpv[1]
+        scalars_c[si].transform_params[2] = tpv[2]
+
+    # Cov-spec pinned arrays (declared up front, assigned per regime).
+    cdef object qs = base.q_spec
+    cdef object rs = base.r_spec
+    cdef double[:, ::1] q_const_v
+    cdef double[:, ::1] r_const_v
+    cdef int64_t[::1] q_std_v
+    cdef int64_t[::1] r_std_v
+    cdef int64_t[::1] q_pi_v
+    cdef int64_t[::1] q_pj_v
+    cdef int64_t[::1] q_ps_v
+    cdef int64_t[::1] r_pi_v
+    cdef int64_t[::1] r_pj_v
+    cdef int64_t[::1] r_ps_v
+    cdef int64_t q_np = 0
+    cdef int64_t r_np = 0
+
+    # Prior pinned arrays.
+    cdef object pr = base.prior
+    cdef int has_prior = int(pr.has_prior)
+    cdef int64_t[::1] p_si_v
+    cdef int64_t[::1] p_sdc_v
+    cdef int64_t[::1] p_stc_v
+    cdef double[:, ::1] p_sdp_v
+    cdef double[:, ::1] p_stp_v
+    cdef int64_t[::1] p_mo_v
+    cdef int64_t[::1] p_md_v
+    cdef int64_t[::1] p_ml_v
+    cdef double[::1] p_me_v
+    cdef double[::1] p_mlc_v
+    cdef int64_t p_nscalar = 0
+    cdef int64_t p_nblocks = 0
+
+    # Bounds -> lo/hi/nbd (scipy map: none=0, lower=1, both=2, upper=3).
+    cdef double[::1] lo = np.zeros(n_theta, dtype=np.float64)
+    cdef double[::1] hi = np.zeros(n_theta, dtype=np.float64)
+    cdef int64_t[::1] nbd = np.zeros(n_theta, dtype=np.int64)
+    cdef int has_bounds = bounds is not None
+    cdef int64_t bi
+    if has_bounds:
+        for bi in range(n_theta):
+            lb, ub = bounds[bi]
+            has_lo = lb is not None
+            has_hi = ub is not None
+            if has_lo:
+                lo[bi] = lb
+            if has_hi:
+                hi[bi] = ub
+            nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
+    cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
+
+    # Assemble the context.
+    cdef sdsge_linear_ctx ctx
+    cdef sdsge_obj_common *b = &ctx.base
+
+    b.dims.n_theta = n_theta
+    b.dims.n_var = n_var
+    b.dims.n_state = n_state
+    b.dims.n_ctrl = n_ctrl
+    b.dims.n_exog = n_exog
+    b.dims.n_obs = n_obs
+    b.dims.n_par = n_par
+    b.dims.T = T
+
+    b.residual = <sdsge_residual_fn><void*><size_t>base.residual_addr
+    b.bc_residual = <bc_residual_fn><void*><size_t>base.bc_residual_addr
+    b.zgges = _zgges
+    b.meas = <meas_fn><void*><size_t>base.meas_addr
+    b.jac = <meas_fn><void*><size_t>base.jac_addr
+
+    b.ss_seed = &ssv[0]
+    b.log_linear = int(base.log_linear)
+    b.y = &yv[0, 0]
+    b.P0 = &P0v[0, 0]
+    b.x0 = &x0v[0]
+    b.jitter = base.jitter
+    b.symmetrize = int(base.symmetrize)
+
+    b.pmap.base_params = &bpv[0]
+    b.pmap.scalars = scalars_c if n_scalars > 0 else NULL
+    b.pmap.n_scalars = n_scalars
+
+    b.q_spec.is_constant = int(qs.is_constant)
+    b.q_spec.K = <int64_t>qs.K
+    b.q_spec.corr_from_block = int(qs.corr_from_block)
+    b.q_spec.block_theta_off = <int64_t>qs.block_theta_off
+    b.q_spec.block_theta_len = <int64_t>qs.block_theta_len
+    if qs.is_constant:
+        q_const_v = np.ascontiguousarray(qs.constant, dtype=np.float64)
+        b.q_spec.constant = &q_const_v[0, 0]
+        b.q_spec.std_slots = NULL
+        b.q_spec.pair_i = NULL
+        b.q_spec.pair_j = NULL
+        b.q_spec.pair_slot = NULL
+        b.q_spec.n_pairs = 0
+    else:
+        b.q_spec.constant = NULL
+        q_std_v = np.ascontiguousarray(qs.std_slots, dtype=np.int64)
+        b.q_spec.std_slots = &q_std_v[0]
+        q_pi_v = np.ascontiguousarray(qs.pair_i, dtype=np.int64)
+        q_pj_v = np.ascontiguousarray(qs.pair_j, dtype=np.int64)
+        q_ps_v = np.ascontiguousarray(qs.pair_slot, dtype=np.int64)
+        q_np = q_pi_v.shape[0]
+        b.q_spec.n_pairs = q_np
+        b.q_spec.pair_i = &q_pi_v[0] if q_np > 0 else NULL
+        b.q_spec.pair_j = &q_pj_v[0] if q_np > 0 else NULL
+        b.q_spec.pair_slot = &q_ps_v[0] if q_np > 0 else NULL
+
+    b.r_spec.is_constant = int(rs.is_constant)
+    b.r_spec.K = <int64_t>rs.K
+    b.r_spec.corr_from_block = int(rs.corr_from_block)
+    b.r_spec.block_theta_off = <int64_t>rs.block_theta_off
+    b.r_spec.block_theta_len = <int64_t>rs.block_theta_len
+    if rs.is_constant:
+        r_const_v = np.ascontiguousarray(rs.constant, dtype=np.float64)
+        b.r_spec.constant = &r_const_v[0, 0]
+        b.r_spec.std_slots = NULL
+        b.r_spec.pair_i = NULL
+        b.r_spec.pair_j = NULL
+        b.r_spec.pair_slot = NULL
+        b.r_spec.n_pairs = 0
+    else:
+        b.r_spec.constant = NULL
+        r_std_v = np.ascontiguousarray(rs.std_slots, dtype=np.int64)
+        b.r_spec.std_slots = &r_std_v[0]
+        r_pi_v = np.ascontiguousarray(rs.pair_i, dtype=np.int64)
+        r_pj_v = np.ascontiguousarray(rs.pair_j, dtype=np.int64)
+        r_ps_v = np.ascontiguousarray(rs.pair_slot, dtype=np.int64)
+        r_np = r_pi_v.shape[0]
+        b.r_spec.n_pairs = r_np
+        b.r_spec.pair_i = &r_pi_v[0] if r_np > 0 else NULL
+        b.r_spec.pair_j = &r_pj_v[0] if r_np > 0 else NULL
+        b.r_spec.pair_slot = &r_ps_v[0] if r_np > 0 else NULL
+
+    b.prior.has_prior = has_prior
+    if has_prior:
+        p_si_v = np.ascontiguousarray(pr.scalar_indices, dtype=np.int64)
+        p_sdc_v = np.ascontiguousarray(pr.scalar_dist_codes, dtype=np.int64)
+        p_stc_v = np.ascontiguousarray(pr.scalar_transform_codes, dtype=np.int64)
+        p_sdp_v = np.ascontiguousarray(pr.scalar_dist_params, dtype=np.float64)
+        p_stp_v = np.ascontiguousarray(pr.scalar_transform_params, dtype=np.float64)
+        p_mo_v = np.ascontiguousarray(pr.matrix_offsets, dtype=np.int64)
+        p_md_v = np.ascontiguousarray(pr.matrix_dims, dtype=np.int64)
+        p_ml_v = np.ascontiguousarray(pr.matrix_lengths, dtype=np.int64)
+        p_me_v = np.ascontiguousarray(pr.matrix_etas, dtype=np.float64)
+        p_mlc_v = np.ascontiguousarray(pr.matrix_log_constants, dtype=np.float64)
+        p_nscalar = p_si_v.shape[0]
+        p_nblocks = p_mo_v.shape[0]
+        b.prior.scalar_indices = &p_si_v[0] if p_nscalar > 0 else NULL
+        b.prior.scalar_dist_codes = &p_sdc_v[0] if p_nscalar > 0 else NULL
+        b.prior.scalar_transform_codes = &p_stc_v[0] if p_nscalar > 0 else NULL
+        b.prior.scalar_dist_params = &p_sdp_v[0, 0] if p_nscalar > 0 else NULL
+        b.prior.scalar_transform_params = &p_stp_v[0, 0] if p_nscalar > 0 else NULL
+        b.prior.n_scalar = p_nscalar
+        b.prior.matrix_offsets = &p_mo_v[0] if p_nblocks > 0 else NULL
+        b.prior.matrix_dims = &p_md_v[0] if p_nblocks > 0 else NULL
+        b.prior.matrix_lengths = &p_ml_v[0] if p_nblocks > 0 else NULL
+        b.prior.matrix_etas = &p_me_v[0] if p_nblocks > 0 else NULL
+        b.prior.matrix_log_constants = &p_mlc_v[0] if p_nblocks > 0 else NULL
+        b.prior.n_blocks = p_nblocks
+    else:
+        b.prior.n_scalar = 0
+        b.prior.n_blocks = 0
+
+    b.params = &paramsv[0]
+    b.Q = &Qv[0, 0]
+    b.R = &Rv[0, 0]
+    b.corr_q = &cqv[0, 0]
+    b.corr_r = &crv[0, 0]
+    b.std_q = &sqv[0]
+    b.std_r = &srv[0]
+    b.bk_violations = 0
+
+    ctx.solve.ss = &ssv2[0]
+    ctx.solve.a_real = &arv[0, 0]
+    ctx.solve.b_real = &brv[0, 0]
+    ctx.solve.s = <c128*>&sv[0, 0]
+    ctx.solve.t = <c128*>&tv[0, 0]
+    ctx.solve.z = <c128*>&zv[0, 0]
+    ctx.solve.f = <c128*>&fv[0, 0]
+    ctx.solve.p = <c128*>&pv[0, 0]
+    ctx.solve.eig = <c128*>&eigv[0]
+    ctx.solve.A = &Av[0, 0]
+    ctx.solve.B = &Bv[0, 0]
+    ctx.C = &Cv[0, 0]
+    ctx.d = &dv[0]
+
+    # Seed the calibrated baseline once; the per-eval fill touches only the
+    # estimated slots.
+    sdsge_init_params(&paramsv[0], &bpv[0], n_par)
+
+    cdef sdsge_objective_fn obj = _obj_lp if has_priors else _obj_ll
+
+    cdef sdsge_lbfgsb_options lopt
+    cdef sdsge_lbfgsb_result lres
+    cdef sdsge_neldermead_options nopt
+    cdef sdsge_neldermead_result nres
+    cdef int64_t status = 0
+    cdef int64_t nfev = 0
+    cdef int64_t nit = 0
+    cdef double fun = 0.0
+    cdef int success = 0
+    cdef bytes message = b""
+
+    try:
+        if method == "L-BFGS-B":
+            lopt.m = m
+            lopt.maxiter = maxiter
+            lopt.maxfun = maxfun
+            lopt.maxls = maxls
+            lopt.factr = factr
+            lopt.pgtol = pgtol
+            lopt.fd_step = fd_step
+            with nogil:
+                sdsge_lbfgsb(obj, <void*>&ctx, n_theta, &xv[0], &lo[0], &hi[0],
+                             nbd_ptr, &lopt, &lres)
+            status = lres.status
+            nfev = lres.nfev
+            nit = lres.nit
+            fun = lres.fun
+            success = lres.success
+            message = (<bytes>lres.message) if lres.message != NULL else b""
+        elif method == "Nelder-Mead":
+            nopt.maxiter = maxiter
+            nopt.maxfun = maxfun
+            nopt.xatol = xatol
+            nopt.fatol = fatol
+            with nogil:
+                sdsge_neldermead(obj, <void*>&ctx, n_theta, &xv[0], &lo[0],
+                                 &hi[0], nbd_ptr, &nopt, &nres)
+            status = nres.status
+            nfev = nres.nfev
+            nit = nres.nit
+            fun = nres.fun
+            success = nres.success
+            message = (<bytes>nres.message) if nres.message != NULL else b""
+        else:
+            raise ValueError(f"unsupported native method {method!r}")
+    finally:
+        PyMem_Free(scalars_c)
+
+    return {
+        "x": x,
+        "fun": fun,
+        "nfev": int(nfev),
+        "nit": int(nit),
+        "success": bool(success),
+        "status": int(status),
+        "message": message.decode(),
+        "bk_violations": int(b.bk_violations),
+    }

@@ -41,10 +41,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.model_parser import ModelParser
+from ..estimation.results import MLEResult, MAPResult
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
-    OptimizationResultMeta,
 )
 from ..monte_carlo.spec import PipelineSpec
 from .builder import BundleBuilder
@@ -252,15 +252,17 @@ def _compile_estimation(
         raise CompileError(f"{est_dir}/ is present but spec.json is missing.")
     spec = EstimationSpec.from_json(spec_path.read_text(encoding="utf-8"))
 
-    result: OptimizationResultMeta | MCMCResultMeta | None = None
+    result: MLEResult | MAPResult | MCMCResultMeta | None = None
     result_path = est_dir / "result.json"
     if result_path.exists():
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         data = payload["data"]
-        if payload.get("type") == "mcmc":
+        if (typ := payload.get("type")) == "mcmc":
             result = MCMCResultMeta.from_dict(data)
+        elif typ == "mle":
+            result = MLEResult.from_dict(data)
         else:
-            result = OptimizationResultMeta.from_dict(data)
+            result = MAPResult.from_dict(data)
 
     expected_observables = model_observables.get("reference") or model_observables.get(
         "dgp"

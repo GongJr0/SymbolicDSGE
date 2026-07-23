@@ -31,8 +31,9 @@ if TYPE_CHECKING:
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
-    OptimizationResultMeta,
 )
+from ..estimation.results import OptimizationResult, MLEResult, MAPResult
+
 from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from ..monte_carlo.serialize import (
@@ -146,13 +147,7 @@ class BundleBuilder:
         self,
         source: EstimationSpec | "Estimator",  # pyright: ignore
         *,
-        result: (
-            OptimizationResult
-            | MCMCResult
-            | OptimizationResultMeta
-            | MCMCResultMeta
-            | None
-        ) = None,
+        result: MLEResult | MAPResult | MCMCResult | MCMCResultMeta | None = None,
         observed: NDArray[Any] | None = None,
         observable_names: list[str] | None = None,
         posterior: Mapping[str, NDArray[Any]] | None = None,
@@ -199,12 +194,21 @@ class BundleBuilder:
             Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
             spec.to_json(indent=2).encode("utf-8"),
         )
-        if isinstance(result, (OptimizationResult, MCMCResult)):
-            if isinstance(result, MCMCResult) and posterior is None:
+        if isinstance(result, MCMCResult):
+            # A live MCMCResult carries its own posterior; pull it before the meta
+            # projection drops the bulk traces.
+            if posterior is None:
                 posterior = result.posterior_arrays()
-            result = result.to_meta()
+            result = result.to_meta()  # project to trace-free document for bundle
+
         if result is not None:
-            kind = "mcmc" if isinstance(result, MCMCResultMeta) else "optimization"
+            if isinstance(result, MCMCResultMeta):
+                kind = "mcmc"
+            elif isinstance(result, MLEResult):
+                kind = "mle"
+            else:
+                kind = "map"
+
             payload = json.dumps({"type": kind, "data": result.to_dict()}, indent=2)
             self._add(
                 Member(path=_ESTIMATION_RESULT, kind="estimation_result"),

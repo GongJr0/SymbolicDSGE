@@ -9,6 +9,7 @@ from sympy import Symbol
 import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.core.solver import DSGESolver
 from SymbolicDSGE.estimation.estimator import Estimator
+from SymbolicDSGE.estimation.results import MLEResult
 
 
 class _UnitIntervalPrior:
@@ -147,7 +148,7 @@ def test_solver_estimate_and_solve_mle(monkeypatch):
         estimated_params=["a"],
         bounds=[(-5.0, 5.0)],
     )
-    assert result.kind == "mle"
+    assert isinstance(result, MLEResult)
     assert abs(captured["parameters"]["a"] - 2.0) < 1e-4
     sym_a = next(iter(compiled.config.calibration.parameters.keys()))
     assert float(compiled.config.calibration.parameters[sym_a]) == pytest.approx(

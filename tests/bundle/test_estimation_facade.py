@@ -12,7 +12,7 @@ from SymbolicDSGE.bayesian.priors import make_prior
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.estimation import Estimator
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
+from SymbolicDSGE.estimation.results import MCMCResult, MAPResult
 
 
 def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
@@ -75,17 +75,13 @@ def _estimator() -> Estimator:
     )
 
 
-def _optimization_result() -> OptimizationResult:
-    return OptimizationResult(
-        kind="map",
+def _optimization_result() -> MAPResult:
+    return MAPResult(
         x=np.array([0.31], dtype=np.float64),
         theta={"a": float64(0.31)},
         success=True,
         message="ok",
         fun=float64(1.0),
-        loglik=float64(-1.0),
-        logprior=float64(-0.5),
-        logpost=float64(-1.5),
         nfev=12,
         nit=4,
         optimizer_config={
@@ -93,6 +89,8 @@ def _optimization_result() -> OptimizationResult:
             "bounds": [[-1.0, 1.0]],
             "options": {"maxiter": 20},
         },
+        logpost=float64(-1.5),
+        logprior=float64(-0.5),
     )
 
 
@@ -114,7 +112,7 @@ def test_facade_flattens_optimization_run() -> None:
 
     # result + observed members written
     result_doc = json.loads(files["estimation/result.json"])
-    assert result_doc["type"] == "optimization"
+    assert result_doc["type"] == "map"
     assert "estimation/observed.parquet" in files
 
 

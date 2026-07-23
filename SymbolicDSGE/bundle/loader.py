@@ -20,11 +20,10 @@ from numpy.typing import NDArray
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import DSGESolver
-from ..estimation.results import MCMCResult, OptimizationResult
+from ..estimation.results import MCMCResult, MLEResult, MAPResult
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
-    OptimizationResultMeta,
 )
 from ..monte_carlo.serialize import pipeline_result_wire
 from ..monte_carlo.spec import PipelineSpec
@@ -52,7 +51,7 @@ class LoadedEstimation:
     """
 
     spec: EstimationSpec
-    result: OptimizationResult | MCMCResult | None = None
+    result: MLEResult | MAPResult | MCMCResult | None = None
     observed: NDArray[Any] | None = None
     posterior: dict[str, NDArray[Any]] | None = None
 
@@ -194,15 +193,17 @@ def _load_estimation(
     if trace_members:
         posterior = collapse_columns(_load_columns(archive, trace_members[0]))
 
-    result: OptimizationResult | MCMCResult | None = None
+    result: MLEResult | MAPResult | MCMCResult | None = None
     result_members = manifest.members_by_kind("estimation_result")
     if result_members:
         payload = json.loads(archive.read_text(result_members[0].path))
         data = payload["data"]
-        if payload.get("type") == "mcmc":
+        if (typ := payload.get("type")) == "mcmc":
             result = _rebuild_mcmc_result(data, posterior)
-        else:
-            result = _rebuild_optimization_result(data)
+        elif typ == "mle":
+            result = MLEResult.from_dict(data)
+        elif typ == "map":
+            result = MAPResult.from_dict(data)
 
     return LoadedEstimation(
         spec=spec, result=result, observed=observed, posterior=posterior
@@ -233,29 +234,6 @@ def _rebuild_mcmc_result(
         burn_in=meta.burn_in,
         thin=meta.thin,
         sampler_config=dict(meta.sampler_config),
-    )
-
-
-def _rebuild_optimization_result(data: dict[str, Any]) -> OptimizationResult:
-    """Rebuild an MLE/MAP result from its metadata (point estimate, no traces).
-
-    ``x`` is recovered from ``theta`` (same ordering the estimator built it from).
-    """
-    meta = OptimizationResultMeta.from_dict(data)
-    theta = {str(k): np.float64(v) for k, v in meta.theta.items()}
-    return OptimizationResult(
-        kind=meta.kind,
-        x=np.asarray(list(theta.values()), dtype=np.float64),
-        theta=theta,
-        success=meta.success,
-        message=meta.message,
-        fun=np.float64(meta.fun),
-        loglik=np.float64(meta.loglik),
-        logprior=np.float64(meta.logprior),
-        logpost=np.float64(meta.logpost),
-        nfev=meta.nfev,
-        nit=meta.nit,
-        optimizer_config=dict(meta.optimizer_config),
     )
 
 

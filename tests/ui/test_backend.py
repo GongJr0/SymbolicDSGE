@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from fastapi.testclient import TestClient
 
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
+from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 from SymbolicDSGE.ui.app import create_app
 from SymbolicDSGE.ui.estimation import (
     build_estimation_inputs,
@@ -269,18 +269,16 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert slot.solver is not None
     assert slot.solved is not None
     solved_model = slot.solved
-    result = OptimizationResult(
-        kind="mle",
+    result = MLEResult(
         x=np.array([0.98], dtype=np.float64),
         theta={"beta": np.float64(0.98)},
         success=True,
         message="converged",
         fun=np.float64(1.25),
-        loglik=np.float64(-1.25),
-        logprior=np.float64(0.0),
-        logpost=np.float64(-1.25),
         nfev=4,
         nit=2,
+        optimizer_config={},
+        loglik=np.float64(-1.25),
     )
     captured: dict[str, object] = {}
 

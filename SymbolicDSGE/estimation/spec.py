@@ -333,63 +333,6 @@ class EstimationSpec:
 
 
 @dataclass
-class OptimizationResultMeta:
-    """Text-only metadata for an :class:`OptimizationResult`.
-
-    The flat ``x`` vector isn't carried — ``theta`` covers the same point
-    estimate by name. Sufficient to repaint the MLE/MAP summary on load and to
-    rebuild a first-class :class:`OptimizationResult` (``x`` from ``theta``).
-    """
-
-    kind: str
-    theta: dict[str, float]
-    success: bool
-    message: str
-    fun: float
-    loglik: float
-    logprior: float
-    logpost: float
-    nfev: int
-    nit: int | None = None
-    optimizer_config: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not self.kind:
-            raise ValueError("OptimizationResultMeta.kind must be non-empty.")
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "kind": self.kind,
-            "theta": {str(k): float(v) for k, v in self.theta.items()},
-            "success": bool(self.success),
-            "message": self.message,
-            "fun": float(self.fun),
-            "loglik": float(self.loglik),
-            "logprior": float(self.logprior),
-            "logpost": float(self.logpost),
-            "nfev": int(self.nfev),
-            "nit": None if self.nit is None else int(self.nit),
-            "optimizer_config": dict(self.optimizer_config),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> OptimizationResultMeta:
-        return cls(
-            kind=str(data["kind"]),
-            theta={str(k): float(v) for k, v in dict(data["theta"]).items()},
-            success=bool(data["success"]),
-            message=str(data["message"]),
-            fun=float(data["fun"]),
-            loglik=float(data["loglik"]),
-            logprior=float(data["logprior"]),
-            logpost=float(data["logpost"]),
-            nfev=int(data["nfev"]),
-            nit=None if data.get("nit") is None else int(data["nit"]),
-            optimizer_config=dict(data.get("optimizer_config", {})),
-        )
-
-
-@dataclass
 class MCMCResultMeta:
     """Text-only metadata for an :class:`MCMCResult`.
 

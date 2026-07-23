@@ -21,7 +21,9 @@ from SymbolicDSGE.bayesian.transforms import (
     TanhTransform,
 )
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
-from SymbolicDSGE.estimation.estimator import MissingConfigError, _MatrixPriorBlock
+from SymbolicDSGE.estimation.estimator import MissingConfigError
+from SymbolicDSGE.estimation.backend import MatrixPriorBlock
+from SymbolicDSGE.estimation.results import MLEResult
 
 
 class _QuadraticPrior:
@@ -275,8 +277,8 @@ def test_mle_records_optimizer_config(monkeypatch):
     assert out.optimizer_config["method"] == "L-BFGS-B"
     assert out.optimizer_config["bounds"] == [[-5.0, 5.0]]
     assert out.optimizer_config["options"] == {"maxiter": 10}
-    # config survives projection to bundle metadata
-    assert out.to_meta().optimizer_config == out.optimizer_config
+    # config survives projection to the serializable dict
+    assert out.to_dict()["optimizer_config"] == out.optimizer_config
 
 
 def test_mcmc_records_sampler_config(monkeypatch):
@@ -941,7 +943,7 @@ def test_pack_opt_result_and_mcmc_validation_branches(monkeypatch):
             nit=None,
         ),
     )
-    assert packed.kind == "mle"
+    assert isinstance(packed, MLEResult)
     assert packed.nit is None
 
     with pytest.raises(ValueError, match="n_draws must be positive"):
@@ -1019,7 +1021,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     # resolutions; mark R_corr as a requested block so the loop runs over it.
     est_base._requested_reserved_keys = ("R_corr",)
 
-    res_dim1 = _MatrixPriorBlock(
+    res_dim1 = MatrixPriorBlock(
         dim=1,
         labels=["A"],
         member_names=[],
@@ -1039,7 +1041,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     with pytest.raises(ValueError, match="dimension at least 2"):
         est_base._build_matrix_prior_blocks()
 
-    res_short = _MatrixPriorBlock(
+    res_short = MatrixPriorBlock(
         dim=3,
         labels=["A", "B", "C"],
         member_names=["rho_ba", "rho_ca"],
@@ -1077,7 +1079,7 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         std_param_map={"A": "meas_a", "B": "meas_b"},
         corr_param_map={frozenset(("B", "A")): "meas_rho_ab"},
     )
-    q_resolution = _MatrixPriorBlock(
+    q_resolution = MatrixPriorBlock(
         dim=2,
         labels=["u", "v"],
         member_names=["meas_rho_ab"],
