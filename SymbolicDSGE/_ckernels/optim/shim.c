@@ -135,7 +135,7 @@ void sdsge_shim_dtrtrs(char *uplo, char *trans, char *diag, i64 *np, i64 *nrhsp,
     }
   }
   for (i64 c = 0; c < nrhs; ++c) {
-    f64 *x = &b[(size_t)c * ldb];
+    f64 *x = &b[c * ldb];
     if (notrans && upper) { /* U x = b : back substitution */
       for (i64 i = n - 1; i >= 0; --i) {
         f64 s = x[i];
