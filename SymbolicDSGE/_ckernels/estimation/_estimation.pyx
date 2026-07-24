@@ -8,11 +8,17 @@ by hand.
 
 from libc.stdint cimport int64_t
 
-from cpython.pycapsule cimport PyCapsule_GetName, PyCapsule_GetPointer
+from cpython.pycapsule cimport (
+    PyCapsule_GetName,
+    PyCapsule_GetPointer,
+    PyCapsule_IsValid,
+)
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
 import numpy as np
 import scipy.linalg.cython_lapack as _cython_lapack
+
+from numpy.random cimport bitgen_t
 
 
 cdef extern from "../_common/sdsge_complex.h":
@@ -207,6 +213,35 @@ cdef extern from "nelder_mead.h":
                              const int64_t *nbd,
                              const sdsge_neldermead_options *opt,
                              sdsge_neldermead_result *out) nogil
+
+
+cdef extern from "mcmc.h":
+    ctypedef struct sdsge_mcmc_options:
+        int64_t n_draws
+        int64_t burn_in
+        int64_t thin
+        int adapt
+        int64_t adapt_start
+        int64_t adapt_interval
+        double adapt_epsilon
+        double proposal_scale
+
+    ctypedef struct sdsge_mcmc_buffers:
+        double *kept
+        double *kept_lp
+
+    ctypedef struct sdsge_mcmc_result:
+        int64_t n_accepted
+        int64_t total_steps
+        int64_t bk_violations
+        int64_t status
+        const char *message
+
+    int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
+                           bitgen_t *bg, const double *theta0, int64_t d,
+                           const sdsge_mcmc_options *opt,
+                           sdsge_mcmc_buffers *buf,
+                           sdsge_mcmc_result *out) nogil
 
 
 cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
@@ -679,30 +714,77 @@ cdef double _obj_unsc_lp(const double *x, void *ctx) noexcept nogil:
     return -sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 1)
 
 
-def run_estimation(
-    object ctx_dto,
-    str mode,
-    str method,
-    double[::1] theta0,
-    bounds=None,
-    int has_priors=0,
-    int m=10,
-    int maxiter=15000,
-    int maxfun=15000,
-    int maxls=20,
-    double factr=1e7,
-    double pgtol=1e-5,
-    double fd_step=0.0,
-    double xatol=1e-4,
-    double fatol=1e-4,
-):
-    """Native MLE/MAP over the linear / extended / unscented objective. Marshal
-    the mode's context DTO into its C ctx, then minimize ``-loglik``
-    (``has_priors=0``) or ``-logpost`` (``has_priors=1``) with the native
-    L-BFGS-B / Nelder-Mead driver. Returns the driver result plus ``params`` (the
-    named parameter vector scattered at x_best) and ``logprior`` (MAP), all
-    resolved natively with no filter re-eval. The base marshaling is shared; only
-    the ctx struct, objective, and mode scratch differ per ``mode``."""
+# MCMC drives the objective as +logpost (no minimization negation); priors are
+# always on (MCMC requires a posterior). The -inf BK/non-finite sentinel flows
+# through unchanged and auto-rejects in the native mainloop.
+cdef double _post_lin(const double *x, void *ctx) noexcept nogil:
+    return sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 1)
+cdef double _post_ext(const double *x, void *ctx) noexcept nogil:
+    return sdsge_obj_extended(<sdsge_extended_ctx*>ctx, x, 1)
+cdef double _post_unsc(const double *x, void *ctx) noexcept nogil:
+    return sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 1)
+
+
+# numpy tags the BitGenerator capsule with this exact name; a mismatch makes
+# PyCapsule_GetPointer reject the pointer, so a foreign capsule can't be
+# dereferenced. Mirrors the rng subsystem's own unwrap.
+cdef const char *_BITGEN_CAPSULE_NAME = b"BitGenerator"
+
+
+cdef bitgen_t *_bitgen_ptr(object rng) except NULL:
+    """Borrow the ``bitgen_t*`` from a numpy ``Generator``. The caller MUST keep
+    ``rng`` alive for the whole native run (the capsule pointer is borrowed)."""
+    capsule = rng.bit_generator.capsule
+    if not PyCapsule_IsValid(capsule, _BITGEN_CAPSULE_NAME):
+        raise ValueError(
+            "random_state must resolve to a numpy Generator exposing a valid "
+            "BitGenerator capsule."
+        )
+    return <bitgen_t *>PyCapsule_GetPointer(capsule, _BITGEN_CAPSULE_NAME)
+
+
+cdef class _NativeCtx:
+    """Owns a fully-marshalled native objective context. The C ctx pointers
+    (``b`` / ``s1`` / ``ctxp``) are valid only while this holder is alive: it
+    retains every backing buffer in ``keep`` and the malloc'd scatter table in
+    ``scalars_c`` (freed on dealloc). Shared base for the MLE/MAP driver (#330)
+    and the MCMC mainloop (#331); callers add their own working theta, bounds and
+    objective wiring on top."""
+    cdef sdsge_linear_ctx lctx
+    cdef sdsge_extended_ctx ectx
+    cdef sdsge_unscented_ctx uctx
+    cdef sdsge_obj_common *b
+    cdef sdsge_solve1 *s1
+    cdef void *ctxp
+    cdef sdsge_scalar_scatter *scalars_c
+    cdef list keep
+    cdef object params
+    cdef int has_prior
+    cdef int64_t n_theta
+
+    def __cinit__(self):
+        self.b = NULL
+        self.s1 = NULL
+        self.ctxp = NULL
+        self.scalars_c = NULL
+        self.keep = []
+        self.params = None
+        self.has_prior = 0
+        self.n_theta = 0
+
+    def __dealloc__(self):
+        if self.scalars_c != NULL:
+            PyMem_Free(self.scalars_c)
+            self.scalars_c = NULL
+
+
+cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
+    """Marshal a mode's context DTO into its C ctx. Returns a holder that owns the
+    ctx and every buffer it points into; the raw pointers stay valid as long as
+    the returned holder is referenced. Mode is validated here; the objective
+    trampoline is chosen by each caller (minimized for MLE/MAP, +logpost for
+    MCMC)."""
+    cdef _NativeCtx nc = _NativeCtx()
     cdef object base = ctx_dto.base
     cdef object dims = base.dims
     cdef int64_t n_theta = dims.n_theta
@@ -714,44 +796,62 @@ def run_estimation(
     cdef int64_t n_par = dims.n_par
     cdef int64_t T = dims.T
     cdef int64_t n2 = 2 * n_var
+    nc.n_theta = n_theta
 
-    # Working theta (the driver mutates it in place).
-    x = np.array(theta0, dtype=np.float64, copy=True)
-    cdef double[::1] xv = x
-
-    # Pinned inputs. Python guarantees dtype; C-contiguity is enforced here.
-    cdef double[::1] ssv = np.ascontiguousarray(base.ss_seed, dtype=np.float64)
-    cdef double[:, ::1] yv = np.ascontiguousarray(base.y, dtype=np.float64)
-    cdef double[:, ::1] P0v = np.ascontiguousarray(base.P0, dtype=np.float64)
-    cdef double[::1] bpv = np.ascontiguousarray(
-        base.pmap.base_params, dtype=np.float64
-    )
-    # The linear kf dereferences x0 unconditionally (no NULL guard), so a
-    # missing x0 materializes as the zero initial state, matching obj_linear_base.
+    # Pinned inputs. Python guarantees dtype; C-contiguity is enforced here. Each
+    # backing array is retained in nc.keep so the raw pointers below outlive the
+    # transient memoryviews.
+    _ss_seed = np.ascontiguousarray(base.ss_seed, dtype=np.float64)
+    nc.keep.append(_ss_seed)
+    cdef double[::1] ssv = _ss_seed
+    _y = np.ascontiguousarray(base.y, dtype=np.float64)
+    nc.keep.append(_y)
+    cdef double[:, ::1] yv = _y
+    _P0 = np.ascontiguousarray(base.P0, dtype=np.float64)
+    nc.keep.append(_P0)
+    cdef double[:, ::1] P0v = _P0
+    _bp = np.ascontiguousarray(base.pmap.base_params, dtype=np.float64)
+    nc.keep.append(_bp)
+    cdef double[::1] bpv = _bp
+    # The linear kf dereferences x0 unconditionally (no NULL guard), so a missing
+    # x0 materializes as the zero initial state, matching obj_linear_base.
     cdef double[::1] x0v
     if base.x0 is not None:
-        x0v = np.ascontiguousarray(base.x0, dtype=np.float64)
+        _x0 = np.ascontiguousarray(base.x0, dtype=np.float64)
     else:
-        x0v = np.zeros(n_var, dtype=np.float64)
+        _x0 = np.zeros(n_var, dtype=np.float64)
+    nc.keep.append(_x0)
+    x0v = _x0
 
-    # Scratch the objective writes (allocated from dims, kept alive here).
+    # Scratch the objective writes (allocated from dims, kept alive in nc.keep).
     params = np.empty(n_par, dtype=np.float64)
+    nc.params = params
+    nc.keep.append(params)
     cdef double[::1] paramsv = params
     ss = np.empty(n_var, dtype=np.float64)
+    nc.keep.append(ss)
     cdef double[::1] ssv2 = ss
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
+    nc.keep.append(a_real)
+    nc.keep.append(b_real)
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
     s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    nc.keep.append(s)
+    nc.keep.append(t)
+    nc.keep.append(z)
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
     f = np.empty((n_ctrl, n_state), dtype=np.complex128)
     p = np.empty((n_state, n_state), dtype=np.complex128)
     eig = np.empty(n_var, dtype=np.complex128)
+    nc.keep.append(f)
+    nc.keep.append(p)
+    nc.keep.append(eig)
     cdef double complex[:, ::1] fv = f
     cdef double complex[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
@@ -759,9 +859,13 @@ def run_estimation(
     B = np.empty((n_var, n_exog), dtype=np.float64)
     C = np.empty((n_obs, n_var), dtype=np.float64)
     d = np.empty(n_obs, dtype=np.float64)
+    nc.keep.append(A)
+    nc.keep.append(B)
+    nc.keep.append(C)
+    nc.keep.append(d)
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
-    cdef double[:, ::1] Cv = C  # linear measurement scratch (wired only for linear)
+    cdef double[:, ::1] Cv = C
     cdef double[::1] dv = d
 
     # Unscented-only second-order scratch (allocated in that branch).
@@ -782,6 +886,12 @@ def run_estimation(
     corr_r = np.empty((n_obs, n_obs), dtype=np.float64)
     std_q = np.empty(n_exog, dtype=np.float64)
     std_r = np.empty(n_obs, dtype=np.float64)
+    nc.keep.append(Q)
+    nc.keep.append(R)
+    nc.keep.append(corr_q)
+    nc.keep.append(corr_r)
+    nc.keep.append(std_q)
+    nc.keep.append(std_r)
     cdef double[:, ::1] Qv = Q
     cdef double[:, ::1] Rv = R
     cdef double[:, ::1] cqv = corr_q
@@ -789,14 +899,15 @@ def run_estimation(
     cdef double[::1] sqv = std_q
     cdef double[::1] srv = std_r
 
-    # Scatter array-of-structs (malloc'd; freed after the driver returns).
+    # Scatter array-of-structs (malloc'd; freed by nc.__dealloc__).
     scalars_list = base.pmap.scalars
     cdef int64_t n_scalars = len(scalars_list)
-    cdef sdsge_scalar_scatter *scalars_c = <sdsge_scalar_scatter *>PyMem_Malloc(
+    nc.scalars_c = <sdsge_scalar_scatter *>PyMem_Malloc(
         (n_scalars if n_scalars > 0 else 1) * sizeof(sdsge_scalar_scatter)
     )
-    if scalars_c == NULL:
+    if nc.scalars_c == NULL:
         raise MemoryError()
+    cdef sdsge_scalar_scatter *scalars_c = nc.scalars_c
     cdef int64_t si
     cdef object sc
     cdef double[::1] tpv
@@ -829,6 +940,7 @@ def run_estimation(
     # Prior pinned arrays.
     cdef object pr = base.prior
     cdef int has_prior = int(pr.has_prior)
+    nc.has_prior = has_prior
     cdef int64_t[::1] p_si_v
     cdef int64_t[::1] p_sdc_v
     cdef int64_t[::1] p_stc_v
@@ -842,51 +954,24 @@ def run_estimation(
     cdef int64_t p_nscalar = 0
     cdef int64_t p_nblocks = 0
 
-    # Bounds -> lo/hi/nbd (scipy map: none=0, lower=1, both=2, upper=3).
-    cdef double[::1] lo = np.zeros(n_theta, dtype=np.float64)
-    cdef double[::1] hi = np.zeros(n_theta, dtype=np.float64)
-    cdef int64_t[::1] nbd = np.zeros(n_theta, dtype=np.int64)
-    cdef int has_bounds = bounds is not None
-    cdef int64_t bi
-    if has_bounds:
-        for bi in range(n_theta):
-            lb, ub = bounds[bi]
-            has_lo = lb is not None
-            has_hi = ub is not None
-            if has_lo:
-                lo[bi] = lb
-            if has_hi:
-                hi[bi] = ub
-            nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
-    cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
-
-    # Mode dispatch: pick the ctx, its base/solve1 pointers, the void* the driver
-    # sees, and the objective trampoline. Only one ctx is used per call.
-    cdef sdsge_linear_ctx lctx
-    cdef sdsge_extended_ctx ectx
-    cdef sdsge_unscented_ctx uctx
-    cdef sdsge_obj_common *b
-    cdef sdsge_solve1 *s1
-    cdef void *ctxp
-    cdef sdsge_objective_fn obj
+    # Mode dispatch: pick the ctx and its base/solve1 pointers + the void* the
+    # driver sees. The objective trampoline is chosen by each caller.
     if mode == "linear":
-        b = &lctx.base
-        s1 = &lctx.solve
-        ctxp = <void*>&lctx
-        obj = _obj_lin_lp if has_priors else _obj_lin_ll
+        nc.b = &nc.lctx.base
+        nc.s1 = &nc.lctx.solve
+        nc.ctxp = <void*>&nc.lctx
     elif mode == "extended":
-        b = &ectx.base
-        s1 = &ectx.solve
-        ctxp = <void*>&ectx
-        obj = _obj_ext_lp if has_priors else _obj_ext_ll
+        nc.b = &nc.ectx.base
+        nc.s1 = &nc.ectx.solve
+        nc.ctxp = <void*>&nc.ectx
     elif mode == "unscented":
-        b = &uctx.base
-        s1 = &uctx.solve
-        ctxp = <void*>&uctx
-        obj = _obj_unsc_lp if has_priors else _obj_unsc_ll
+        nc.b = &nc.uctx.base
+        nc.s1 = &nc.uctx.solve
+        nc.ctxp = <void*>&nc.uctx
     else:
-        PyMem_Free(scalars_c)
         raise ValueError(f"unsupported native filter mode {mode!r}")
+    cdef sdsge_obj_common *b = nc.b
+    cdef sdsge_solve1 *s1 = nc.s1
 
     b.dims.n_theta = n_theta
     b.dims.n_var = n_var
@@ -921,7 +1006,9 @@ def run_estimation(
     b.q_spec.block_theta_off = <int64_t>qs.block_theta_off
     b.q_spec.block_theta_len = <int64_t>qs.block_theta_len
     if qs.is_constant:
-        q_const_v = np.ascontiguousarray(qs.constant, dtype=np.float64)
+        _qc = np.ascontiguousarray(qs.constant, dtype=np.float64)
+        nc.keep.append(_qc)
+        q_const_v = _qc
         b.q_spec.constant = &q_const_v[0, 0]
         b.q_spec.std_slots = NULL
         b.q_spec.pair_i = NULL
@@ -930,11 +1017,19 @@ def run_estimation(
         b.q_spec.n_pairs = 0
     else:
         b.q_spec.constant = NULL
-        q_std_v = np.ascontiguousarray(qs.std_slots, dtype=np.int64)
+        _qstd = np.ascontiguousarray(qs.std_slots, dtype=np.int64)
+        nc.keep.append(_qstd)
+        q_std_v = _qstd
         b.q_spec.std_slots = &q_std_v[0]
-        q_pi_v = np.ascontiguousarray(qs.pair_i, dtype=np.int64)
-        q_pj_v = np.ascontiguousarray(qs.pair_j, dtype=np.int64)
-        q_ps_v = np.ascontiguousarray(qs.pair_slot, dtype=np.int64)
+        _qpi = np.ascontiguousarray(qs.pair_i, dtype=np.int64)
+        _qpj = np.ascontiguousarray(qs.pair_j, dtype=np.int64)
+        _qps = np.ascontiguousarray(qs.pair_slot, dtype=np.int64)
+        nc.keep.append(_qpi)
+        nc.keep.append(_qpj)
+        nc.keep.append(_qps)
+        q_pi_v = _qpi
+        q_pj_v = _qpj
+        q_ps_v = _qps
         q_np = q_pi_v.shape[0]
         b.q_spec.n_pairs = q_np
         b.q_spec.pair_i = &q_pi_v[0] if q_np > 0 else NULL
@@ -947,7 +1042,9 @@ def run_estimation(
     b.r_spec.block_theta_off = <int64_t>rs.block_theta_off
     b.r_spec.block_theta_len = <int64_t>rs.block_theta_len
     if rs.is_constant:
-        r_const_v = np.ascontiguousarray(rs.constant, dtype=np.float64)
+        _rc = np.ascontiguousarray(rs.constant, dtype=np.float64)
+        nc.keep.append(_rc)
+        r_const_v = _rc
         b.r_spec.constant = &r_const_v[0, 0]
         b.r_spec.std_slots = NULL
         b.r_spec.pair_i = NULL
@@ -956,11 +1053,19 @@ def run_estimation(
         b.r_spec.n_pairs = 0
     else:
         b.r_spec.constant = NULL
-        r_std_v = np.ascontiguousarray(rs.std_slots, dtype=np.int64)
+        _rstd = np.ascontiguousarray(rs.std_slots, dtype=np.int64)
+        nc.keep.append(_rstd)
+        r_std_v = _rstd
         b.r_spec.std_slots = &r_std_v[0]
-        r_pi_v = np.ascontiguousarray(rs.pair_i, dtype=np.int64)
-        r_pj_v = np.ascontiguousarray(rs.pair_j, dtype=np.int64)
-        r_ps_v = np.ascontiguousarray(rs.pair_slot, dtype=np.int64)
+        _rpi = np.ascontiguousarray(rs.pair_i, dtype=np.int64)
+        _rpj = np.ascontiguousarray(rs.pair_j, dtype=np.int64)
+        _rps = np.ascontiguousarray(rs.pair_slot, dtype=np.int64)
+        nc.keep.append(_rpi)
+        nc.keep.append(_rpj)
+        nc.keep.append(_rps)
+        r_pi_v = _rpi
+        r_pj_v = _rpj
+        r_ps_v = _rps
         r_np = r_pi_v.shape[0]
         b.r_spec.n_pairs = r_np
         b.r_spec.pair_i = &r_pi_v[0] if r_np > 0 else NULL
@@ -969,16 +1074,29 @@ def run_estimation(
 
     b.prior.has_prior = has_prior
     if has_prior:
-        p_si_v = np.ascontiguousarray(pr.scalar_indices, dtype=np.int64)
-        p_sdc_v = np.ascontiguousarray(pr.scalar_dist_codes, dtype=np.int64)
-        p_stc_v = np.ascontiguousarray(pr.scalar_transform_codes, dtype=np.int64)
-        p_sdp_v = np.ascontiguousarray(pr.scalar_dist_params, dtype=np.float64)
-        p_stp_v = np.ascontiguousarray(pr.scalar_transform_params, dtype=np.float64)
-        p_mo_v = np.ascontiguousarray(pr.matrix_offsets, dtype=np.int64)
-        p_md_v = np.ascontiguousarray(pr.matrix_dims, dtype=np.int64)
-        p_ml_v = np.ascontiguousarray(pr.matrix_lengths, dtype=np.int64)
-        p_me_v = np.ascontiguousarray(pr.matrix_etas, dtype=np.float64)
-        p_mlc_v = np.ascontiguousarray(pr.matrix_log_constants, dtype=np.float64)
+        _psi = np.ascontiguousarray(pr.scalar_indices, dtype=np.int64)
+        _psdc = np.ascontiguousarray(pr.scalar_dist_codes, dtype=np.int64)
+        _pstc = np.ascontiguousarray(pr.scalar_transform_codes, dtype=np.int64)
+        _psdp = np.ascontiguousarray(pr.scalar_dist_params, dtype=np.float64)
+        _pstp = np.ascontiguousarray(pr.scalar_transform_params, dtype=np.float64)
+        _pmo = np.ascontiguousarray(pr.matrix_offsets, dtype=np.int64)
+        _pmd = np.ascontiguousarray(pr.matrix_dims, dtype=np.int64)
+        _pml = np.ascontiguousarray(pr.matrix_lengths, dtype=np.int64)
+        _pme = np.ascontiguousarray(pr.matrix_etas, dtype=np.float64)
+        _pmlc = np.ascontiguousarray(pr.matrix_log_constants, dtype=np.float64)
+        for _a in (_psi, _psdc, _pstc, _psdp, _pstp,
+                   _pmo, _pmd, _pml, _pme, _pmlc):
+            nc.keep.append(_a)
+        p_si_v = _psi
+        p_sdc_v = _psdc
+        p_stc_v = _pstc
+        p_sdp_v = _psdp
+        p_stp_v = _pstp
+        p_mo_v = _pmo
+        p_md_v = _pmd
+        p_ml_v = _pml
+        p_me_v = _pme
+        p_mlc_v = _pmlc
         p_nscalar = p_si_v.shape[0]
         p_nblocks = p_mo_v.shape[0]
         b.prior.scalar_indices = &p_si_v[0] if p_nscalar > 0 else NULL
@@ -1020,8 +1138,8 @@ def run_estimation(
 
     # Mode-specific ctx wiring.
     if mode == "linear":
-        lctx.C = &Cv[0, 0]
-        lctx.d = &dv[0]
+        nc.lctx.C = &Cv[0, 0]
+        nc.lctx.d = &dv[0]
     elif mode == "unscented":
         f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
         hx_real = np.empty((n_state, n_state), dtype=np.float64)
@@ -1040,6 +1158,9 @@ def run_estimation(
                 np.asarray(qs.constant, dtype=np.float64).reshape(n_exog, n_exog)
             )
         z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
+        for _a in (f_xx, hx_real, gx_real, bx, gxx, hxx,
+                   gss, hss, steady2, eta, z0):
+            nc.keep.append(_a)
         fxxv = f_xx
         hxrv = hx_real
         gxrv = gx_real
@@ -1051,24 +1172,87 @@ def run_estimation(
         st2v = steady2
         etav = eta
         z0v = z0
-        uctx.solve2.f_xx = &fxxv[0, 0, 0]
-        uctx.solve2.hx_real = &hxrv[0, 0]
-        uctx.solve2.gx_real = &gxrv[0, 0]
-        uctx.solve2.bx = &bxv[0, 0]
-        uctx.solve2.eta = &etav[0, 0]
-        uctx.solve2.gxx = &gxxv[0, 0, 0]
-        uctx.solve2.hxx = &hxxv[0, 0, 0]
-        uctx.solve2.gss = &gssv[0]
-        uctx.solve2.hss = &hssv[0]
-        uctx.solve2.steady_state = &st2v[0]
-        uctx.z0 = &z0v[0]
-        uctx.alpha = ctx_dto.alpha
-        uctx.beta = ctx_dto.beta
-        uctx.kappa = ctx_dto.kappa
+        nc.uctx.solve2.f_xx = &fxxv[0, 0, 0]
+        nc.uctx.solve2.hx_real = &hxrv[0, 0]
+        nc.uctx.solve2.gx_real = &gxrv[0, 0]
+        nc.uctx.solve2.bx = &bxv[0, 0]
+        nc.uctx.solve2.eta = &etav[0, 0]
+        nc.uctx.solve2.gxx = &gxxv[0, 0, 0]
+        nc.uctx.solve2.hxx = &hxxv[0, 0, 0]
+        nc.uctx.solve2.gss = &gssv[0]
+        nc.uctx.solve2.hss = &hssv[0]
+        nc.uctx.solve2.steady_state = &st2v[0]
+        nc.uctx.z0 = &z0v[0]
+        nc.uctx.alpha = ctx_dto.alpha
+        nc.uctx.beta = ctx_dto.beta
+        nc.uctx.kappa = ctx_dto.kappa
 
     # Seed the calibrated baseline once; the per-eval fill touches only the
     # estimated slots.
     sdsge_init_params(&paramsv[0], &bpv[0], n_par)
+    return nc
+
+
+def run_estimation(
+    object ctx_dto,
+    str mode,
+    str method,
+    double[::1] theta0,
+    bounds=None,
+    int has_priors=0,
+    int m=10,
+    int maxiter=15000,
+    int maxfun=15000,
+    int maxls=20,
+    double factr=1e7,
+    double pgtol=1e-5,
+    double fd_step=0.0,
+    double xatol=1e-4,
+    double fatol=1e-4,
+):
+    """Native MLE/MAP over the linear / extended / unscented objective. Marshal
+    the mode's context DTO into its C ctx, then minimize ``-loglik``
+    (``has_priors=0``) or ``-logpost`` (``has_priors=1``) with the native
+    L-BFGS-B / Nelder-Mead driver. Returns the driver result plus ``params`` (the
+    named parameter vector scattered at x_best) and ``logprior`` (MAP), all
+    resolved natively with no filter re-eval. The base marshaling is shared; only
+    the ctx struct, objective, and mode scratch differ per ``mode``."""
+    cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
+    cdef sdsge_obj_common *b = nc.b
+    cdef void *ctxp = nc.ctxp
+    cdef int64_t n_theta = nc.n_theta
+
+    # Working theta (the driver mutates it in place).
+    x = np.array(theta0, dtype=np.float64, copy=True)
+    cdef double[::1] xv = x
+
+    # Bounds -> lo/hi/nbd (scipy map: none=0, lower=1, both=2, upper=3).
+    cdef double[::1] lo = np.zeros(n_theta, dtype=np.float64)
+    cdef double[::1] hi = np.zeros(n_theta, dtype=np.float64)
+    cdef int64_t[::1] nbd = np.zeros(n_theta, dtype=np.int64)
+    cdef int has_bounds = bounds is not None
+    cdef int64_t bi
+    if has_bounds:
+        for bi in range(n_theta):
+            lb, ub = bounds[bi]
+            has_lo = lb is not None
+            has_hi = ub is not None
+            if has_lo:
+                lo[bi] = lb
+            if has_hi:
+                hi[bi] = ub
+            nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
+    cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
+
+    # Objective trampoline for this mode: minimize -loglik / -logpost. Mode was
+    # already validated in _build_native_ctx.
+    cdef sdsge_objective_fn obj
+    if mode == "linear":
+        obj = _obj_lin_lp if has_priors else _obj_lin_ll
+    elif mode == "extended":
+        obj = _obj_ext_lp if has_priors else _obj_ext_ll
+    else:
+        obj = _obj_unsc_lp if has_priors else _obj_unsc_ll
 
     cdef sdsge_lbfgsb_options lopt
     cdef sdsge_lbfgsb_result lres
@@ -1081,52 +1265,48 @@ def run_estimation(
     cdef int success = 0
     cdef bytes message = b""
     cdef double lpr = 0.0
-    params_out = params
 
-    try:
-        if method == "L-BFGS-B":
-            lopt.m = m
-            lopt.maxiter = maxiter
-            lopt.maxfun = maxfun
-            lopt.maxls = maxls
-            lopt.factr = factr
-            lopt.pgtol = pgtol
-            lopt.fd_step = fd_step
-            with nogil:
-                sdsge_lbfgsb(obj, ctxp, n_theta, &xv[0], &lo[0], &hi[0],
-                             nbd_ptr, &lopt, &lres)
-            status = lres.status
-            nfev = lres.nfev
-            nit = lres.nit
-            fun = lres.fun
-            success = lres.success
-            message = (<bytes>lres.message) if lres.message != NULL else b""
-        elif method == "Nelder-Mead":
-            nopt.maxiter = maxiter
-            nopt.maxfun = maxfun
-            nopt.xatol = xatol
-            nopt.fatol = fatol
-            with nogil:
-                sdsge_neldermead(obj, ctxp, n_theta, &xv[0], &lo[0],
-                                 &hi[0], nbd_ptr, &nopt, &nres)
-            status = nres.status
-            nfev = nres.nfev
-            nit = nres.nit
-            fun = nres.fun
-            success = nres.success
-            message = (<bytes>nres.message) if nres.message != NULL else b""
-        else:
-            raise ValueError(f"unsupported native method {method!r}")
-        # Resolve the named params (scatter x_best -> params) and, for MAP, the
-        # log-prior at x_best. Scatter / prior only, no filter. scalars_c must
-        # still be alive here (the scatter reads it), so this runs before free.
+    if method == "L-BFGS-B":
+        lopt.m = m
+        lopt.maxiter = maxiter
+        lopt.maxfun = maxfun
+        lopt.maxls = maxls
+        lopt.factr = factr
+        lopt.pgtol = pgtol
+        lopt.fd_step = fd_step
         with nogil:
-            sdsge_scatter_params(b, &xv[0])
-            if has_priors:
-                lpr = sdsge_logprior_at(b, &xv[0])
-        params_out = np.array(params, dtype=np.float64, copy=True)
-    finally:
-        PyMem_Free(scalars_c)
+            sdsge_lbfgsb(obj, ctxp, n_theta, &xv[0], &lo[0], &hi[0],
+                         nbd_ptr, &lopt, &lres)
+        status = lres.status
+        nfev = lres.nfev
+        nit = lres.nit
+        fun = lres.fun
+        success = lres.success
+        message = (<bytes>lres.message) if lres.message != NULL else b""
+    elif method == "Nelder-Mead":
+        nopt.maxiter = maxiter
+        nopt.maxfun = maxfun
+        nopt.xatol = xatol
+        nopt.fatol = fatol
+        with nogil:
+            sdsge_neldermead(obj, ctxp, n_theta, &xv[0], &lo[0],
+                             &hi[0], nbd_ptr, &nopt, &nres)
+        status = nres.status
+        nfev = nres.nfev
+        nit = nres.nit
+        fun = nres.fun
+        success = nres.success
+        message = (<bytes>nres.message) if nres.message != NULL else b""
+    else:
+        raise ValueError(f"unsupported native method {method!r}")
+    # Resolve the named params (scatter x_best -> params) and, for MAP, the
+    # log-prior at x_best. Scatter / prior only, no filter. nc (hence the scatter
+    # table) stays alive as a local through this call.
+    with nogil:
+        sdsge_scatter_params(b, &xv[0])
+        if has_priors:
+            lpr = sdsge_logprior_at(b, &xv[0])
+    params_out = np.array(nc.params, dtype=np.float64, copy=True)
 
     return {
         "x": x,
@@ -1139,4 +1319,98 @@ def run_estimation(
         "bk_violations": int(b.bk_violations),
         "params": params_out,
         "logprior": float(lpr),
+    }
+
+
+def run_mcmc(
+    object ctx_dto,
+    str mode,
+    double[::1] theta0,
+    object rng,
+    int64_t n_draws,
+    int64_t burn_in=1000,
+    int64_t thin=1,
+    int adapt=1,
+    int64_t adapt_start=100,
+    int64_t adapt_interval=25,
+    double proposal_scale=0.1,
+    double adapt_epsilon=1e-8,
+):
+    """Native adaptive random-walk Metropolis over the linear / extended /
+    unscented +logpost objective (issue #331). Marshals the mode's context DTO
+    once, borrows ``rng``'s PCG64 state, and runs the whole chain in native
+    ``nogil`` code, returning the kept draws (in theta space) plus the acceptance
+    / BK counters. ``rng`` must be a numpy ``Generator``; it is held for the whole
+    native run (the ``bitgen_t*`` is borrowed). Draws stay bit-exact numpy; the
+    proposal (Cholesky) and covariance adaptation are native (statistical, not
+    bit, equivalence with the numpy chain)."""
+    if n_draws <= 0:
+        raise ValueError("n_draws must be positive.")
+    if burn_in < 0:
+        raise ValueError("burn_in must be non-negative.")
+    if thin <= 0:
+        raise ValueError("thin must be positive.")
+    if adapt_interval <= 0:
+        raise ValueError("adapt_interval must be positive.")
+
+    cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
+    cdef sdsge_obj_common *b = nc.b
+    cdef void *ctxp = nc.ctxp
+    cdef int64_t d = nc.n_theta
+    if d <= 0:
+        raise ValueError("No estimated parameters were provided.")
+
+    # Borrow numpy's PCG64 state. `rng` is an argument, so its reference is held
+    # for the whole call, including the nogil run below (the pointer is borrowed).
+    cdef bitgen_t *bg = _bitgen_ptr(rng)
+
+    cdef double[::1] th0v = np.ascontiguousarray(theta0, dtype=np.float64)
+
+    # Output buffers (Python-owned; native fills them).
+    kept = np.empty((n_draws, d), dtype=np.float64)
+    kept_lp = np.empty(n_draws, dtype=np.float64)
+    cdef double[:, ::1] keptv = kept
+    cdef double[::1] keptlpv = kept_lp
+
+    # +logpost trampoline for this mode (mode already validated in the builder).
+    cdef sdsge_objective_fn logpost
+    if mode == "linear":
+        logpost = _post_lin
+    elif mode == "extended":
+        logpost = _post_ext
+    else:
+        logpost = _post_unsc
+
+    cdef sdsge_mcmc_options opt
+    opt.n_draws = n_draws
+    opt.burn_in = burn_in
+    opt.thin = thin
+    opt.adapt = adapt
+    opt.adapt_start = adapt_start
+    opt.adapt_interval = adapt_interval
+    opt.adapt_epsilon = adapt_epsilon
+    opt.proposal_scale = proposal_scale
+
+    cdef sdsge_mcmc_buffers buf
+    buf.kept = &keptv[0, 0]
+    buf.kept_lp = &keptlpv[0]
+
+    cdef sdsge_mcmc_result res
+    b.bk_violations = 0
+    with nogil:
+        sdsge_mcmc_run(logpost, ctxp, bg, &th0v[0], d, &opt, &buf, &res)
+
+    if res.status != 0:
+        raise MemoryError(
+            (<bytes>res.message).decode()
+            if res.message != NULL
+            else "native MCMC run failed"
+        )
+
+    return {
+        "samples_theta": kept,
+        "logpost_trace": kept_lp,
+        "n_accepted": int(res.n_accepted),
+        "total_steps": int(res.total_steps),
+        "bk_violations": int(b.bk_violations),
     }

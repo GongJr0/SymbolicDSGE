@@ -15,7 +15,7 @@ from ._prior_program import (
     transform_inverse_and_logjac,
     unconstrained_from_corr_chol,
 )
-from ._estimation import run_estimation
+from ._estimation import run_estimation, run_mcmc
 
 __all__ = [
     "cov_from_unconstrained",
@@ -24,6 +24,7 @@ __all__ = [
     "lkj_chol_logpdf_from_z",
     "logprior_program",
     "run_estimation",
+    "run_mcmc",
     "transform_inverse_and_logjac",
     "unconstrained_from_corr_chol",
 ]

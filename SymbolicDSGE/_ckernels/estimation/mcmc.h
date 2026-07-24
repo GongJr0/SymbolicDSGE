@@ -14,6 +14,8 @@ typedef struct {
   i64 thin;
   int adapt;
   i64 adapt_start;
+  i64 adapt_interval; /* recompute the proposal cov every this many steps (>= 1)
+                       */
   f64 adapt_epsilon;
   f64 proposal_scale;
 } sdsge_mcmc_options;
@@ -33,8 +35,12 @@ typedef struct {
   const char *message;
 } sdsge_mcmc_result;
 
+/* status codes for sdsge_mcmc_result.status */
+#define SDSGE_MCMC_OK 0
+#define SDSGE_MCMC_EALLOC (-1)
+
 /* HOT LOOP DRIVER */
-i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen *bg,
+i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *theta0, i64 d, const sdsge_mcmc_options *opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out);
 
