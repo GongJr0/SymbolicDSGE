@@ -16,6 +16,7 @@ contract with the native kernel) and are imported here.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 from numpy import float64
@@ -323,6 +324,106 @@ def _unconstrained_from_corr_chol(L: NDF) -> NDF:
             rem = float64(rem - L[k, j] * L[k, j])
             idx += 1
     return z
+
+
+@dataclass(frozen=True)
+class RWMReference:
+    """Frozen output of the numpy-era adaptive-RWM reference chain.
+
+    ``kept`` / ``kept_lp`` are in **theta** (unconstrained) space, the space the
+    chain actually walks; callers map ``kept`` to named parameters the same way
+    ``Estimator.mcmc`` does (``theta_to_params`` per row) when a param-space
+    comparison is wanted. ``n_accepted`` / ``accept_rate`` count over all
+    ``total_steps`` (burn-in included), matching the estimator.
+    """
+
+    kept: NDF
+    kept_lp: NDF
+    accept_rate: float
+    n_accepted: int
+    total_steps: int
+
+
+def adaptive_rwm_reference(
+    logpost,
+    theta0: NDF,
+    rng: np.random.Generator,
+    *,
+    n_draws: int,
+    burn_in: int = 1000,
+    thin: int = 1,
+    adapt: bool = True,
+    adapt_start: int = 100,
+    adapt_interval: int = 25,
+    proposal_scale: float = 0.1,
+    adapt_epsilon: float = 1e-8,
+) -> RWMReference:
+    """Verbatim transcription of the numpy-era ``Estimator.mcmc`` mainloop.
+
+    This is the **pre-port oracle**: the Haario adaptive random-walk Metropolis
+    chain exactly as it ran on numpy (``rng.multivariate_normal`` SVD proposal +
+    ``np.cov`` batch adaptation + ``2.38**2/d`` scaling), lifted out of the lib so
+    it stays frozen once ``Estimator.mcmc`` is rewritten onto the native frozen
+    stream. The native chain is validated against the marginals this produces
+    (KS + acceptance rate), per the statistical-equivalence contract (#331); it is
+    deliberately NOT bit-reproduced.
+
+    ``logpost(theta) -> float`` is the caller's safe log-posterior (``-inf`` on a
+    BK violation / non-finite eval, auto-rejected here via the finiteness gate).
+    RNG consumption order is load-bearing for the faithfulness test: one
+    ``multivariate_normal`` per step, then one ``random()`` only when the proposal
+    logpost is finite -- identical to the estimator.
+    """
+    current = np.asarray(theta0, dtype=float64).copy()
+    d = current.shape[0]
+    total_steps = burn_in + n_draws * thin
+    cov = (float64(proposal_scale) ** 2) * np.eye(d, dtype=float64)
+    scale = float64((2.38**2) / d)
+
+    cur_lp = float64(logpost(current))
+    accepted = 0
+
+    history = np.empty((total_steps, d), dtype=float64)
+    kept = np.empty((n_draws, d), dtype=float64)
+    kept_lp = np.empty((n_draws,), dtype=float64)
+
+    keep_i = 0
+    eye_d = np.eye(d, dtype=float64)
+
+    for t in range(total_steps):
+        prop = rng.multivariate_normal(current, cov)
+        prop_lp = float64(logpost(prop))
+
+        if np.isfinite(prop_lp):
+            log_alpha = prop_lp - cur_lp
+            if np.log(rng.random()) < log_alpha:
+                current = prop
+                cur_lp = prop_lp
+                accepted += 1
+
+        history[t] = current
+
+        if adapt and t < burn_in and t >= adapt_start and (t + 1) % adapt_interval == 0:
+            hist = history[: t + 1]
+            if d == 1:
+                var = np.var(hist[:, 0], ddof=1) if hist.shape[0] > 1 else float64(1.0)
+                cov = np.array([[scale * var + adapt_epsilon]], dtype=float64)
+            else:
+                emp = np.cov(hist.T, ddof=1) if hist.shape[0] > 1 else eye_d
+                cov = scale * (np.asarray(emp, dtype=float64) + adapt_epsilon * eye_d)
+
+        if t >= burn_in and (t - burn_in) % thin == 0:
+            kept[keep_i] = current
+            kept_lp[keep_i] = cur_lp
+            keep_i += 1
+
+    return RWMReference(
+        kept=kept,
+        kept_lp=kept_lp,
+        accept_rate=float(accepted / total_steps),
+        n_accepted=int(accepted),
+        total_steps=int(total_steps),
+    )
 
 
 @njit(cache=True)
