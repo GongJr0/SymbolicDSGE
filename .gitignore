@@ -147,6 +147,10 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# clangd local config + index cache (machine-specific include paths)
+.clangd
+.cache/
+
 # Environments
 .envrc
 .venv

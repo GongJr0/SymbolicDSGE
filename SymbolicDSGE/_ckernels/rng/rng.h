@@ -2,7 +2,14 @@
 #define SDSGE_RNG_H
 
 #include "../_common/sdsge_common.h"
-#include "numpy/random/bitgen.h" /* bitgen_t: numpy's borrowed engine struct */
+
+/* numpy owns this ABI type (typedef struct bitgen { ... } bitgen_t;). We only
+ * ever pass the pointer through to numpy's fill functions and never dereference
+ * it, so an incomplete forward declaration is sufficient. Keeping numpy's header
+ * out of ours means every consumer (mcmc.h, the estimation driver) stays free of
+ * numpy's build-time-only include path and resolves under static analysis. The
+ * definition is completed in rng.c alone, via <numpy/random/distributions.h>. */
+typedef struct bitgen bitgen_t;
 
 /* Native RNG bridge (issue #328). Shared subsystem: any consumer that draws
  * randoms links rng via _EXTRA_DEPS, which also pulls the numpy include path and
