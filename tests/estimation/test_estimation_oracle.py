@@ -17,53 +17,15 @@ same basin at a slightly different point).
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
-from sympy import Symbol
 
-from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MLEResult, MAPResult
 
+# The ``post82`` fixture lives in tests/estimation/conftest.py.
+
 _TH0 = np.array([2.0, 0.8], dtype=np.float64)
 _BNDS = [(1.0, 5.0), (0.0, 0.99)]
-
-
-@pytest.fixture(scope="module")
-def post82(post82_test_model_path):
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    steady = np.zeros(len(compiled.var_names), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, ss_seed=steady)
-
-    calib = compiled.config.calibration
-    sig = {
-        s: float(calib.parameters[calib.shock_std[Symbol(s)]])
-        for s in ("e_g", "e_z", "e_r")
-    }
-    T = 48
-    rng = np.random.default_rng(20260724)
-    sim = solved.sim(
-        T=T,
-        shocks={
-            "g": rng.normal(0.0, sig["e_g"], size=T),
-            "z": rng.normal(0.0, sig["e_z"], size=T),
-            "r": rng.normal(0.0, sig["e_r"], size=T),
-        },
-        x0=np.zeros(len(compiled.var_names), dtype=np.float64),
-        observables=True,
-    )
-    y = pd.DataFrame(
-        {"OutGap": sim["OutGap"][1:], "Infl": sim["Infl"][1:], "Rate": sim["Rate"][1:]}
-    )
-    return {
-        "solver": solver,
-        "compiled": compiled,
-        "y": y,
-        "steady": steady,
-        "obs": ["OutGap", "Infl", "Rate"],
-    }
 
 
 def _mle_estimator(post82, mode: str) -> Estimator:

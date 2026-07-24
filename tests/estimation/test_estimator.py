@@ -5,11 +5,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from numpy import float64
-from scipy.optimize import OptimizeResult
 from sympy import Matrix, Symbol
 
 import SymbolicDSGE.estimation.backend as est_backend
-import SymbolicDSGE.estimation.estimator as est_estimator
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bayesian.priors import Prior
@@ -23,7 +21,6 @@ from SymbolicDSGE.bayesian.transforms import (
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
 from SymbolicDSGE.estimation.estimator import MissingConfigError
 from SymbolicDSGE.estimation.backend import MatrixPriorBlock
-from SymbolicDSGE.estimation.results import MLEResult
 
 
 class _QuadraticPrior:
@@ -192,20 +189,6 @@ def _fake_loglik(**kwargs):
     return float64(-((a - 2.0) ** 2))
 
 
-def test_mle_finds_quadratic_mode(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    out = est.mle(theta0=np.array([0.0], dtype=np.float64), bounds=[(-5.0, 5.0)])
-    assert out.success
-    assert abs(out.theta["a"] - 2.0) < 1e-4
-
-
 def test_to_spec_captures_targets_initials_and_method():
     from SymbolicDSGE.estimation.spec import EstimationSpec, PriorSpec
 
@@ -259,26 +242,32 @@ def test_to_spec_reverses_live_scalar_priors():
     assert param.prior.parameters == {"mean": 0.0, "std": 1.0}
 
 
-def test_mle_records_optimizer_config(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
+def test_mle_records_optimizer_config(post82_estimator):
+    est = post82_estimator()
     out = est.mle(
-        theta0=np.array([0.0], dtype=np.float64),
-        bounds=[(-5.0, 5.0)],
-        options={"maxiter": 10},
+        theta0=np.array([2.0, 0.8], dtype=np.float64),
+        bounds=[(1.0, 5.0), (0.0, 0.99)],
+        maxiter=10,
     )
 
-    assert out.optimizer_config["method"] == "L-BFGS-B"
-    assert out.optimizer_config["bounds"] == [[-5.0, 5.0]]
-    assert out.optimizer_config["options"] == {"maxiter": 10}
+    cfg = out.optimizer_config
+    assert cfg["method"] == "L-BFGS-B"
+    assert cfg["bounds"] == [[1.0, 5.0], [0.0, 0.99]]
+    # optimizer kwargs are recorded under "options"; maxiter reflects the call
+    assert cfg["options"]["maxiter"] == 10
+    assert set(cfg["options"]) == {
+        "m",
+        "maxiter",
+        "maxfun",
+        "maxls",
+        "factr",
+        "pgtol",
+        "fd_step",
+        "xatol",
+        "fatol",
+    }
     # config survives projection to the serializable dict
-    assert out.to_dict()["optimizer_config"] == out.optimizer_config
+    assert out.to_dict()["optimizer_config"] == cfg
 
 
 def test_mcmc_records_sampler_config(monkeypatch):
@@ -307,26 +296,6 @@ def test_mcmc_records_sampler_config(monkeypatch):
     # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
     assert "n_draws" not in cfg
     assert out.to_meta().sampler_config == cfg
-
-
-def test_map_is_public_and_uses_prior(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    prior = _QuadraticPrior(mean=1.0, weight=5.0)
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": prior},
-    )
-
-    mle = est.mle(theta0=np.array([0.0], dtype=np.float64), bounds=[(-5.0, 5.0)])
-    map_res = est.map(theta0=np.array([0.0], dtype=np.float64), bounds=[(-5.0, 5.0)])
-
-    assert map_res.success
-    assert abs(map_res.theta["a"] - 1.0) < abs(mle.theta["a"] - 1.0)
-    assert 1.0 < map_res.theta["a"] < 2.0
 
 
 def test_map_without_priors_raises(monkeypatch):
@@ -464,16 +433,12 @@ def test_safe_loglik_invalidates_warning_signal(monkeypatch):
     assert est._warning_signal_count >= 1
 
 
-def test_estimation_reports_warning_count_once(monkeypatch, capsys):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
+def test_estimation_reports_warning_count_once(post82_estimator, capsys):
+    est = post82_estimator()
+    _ = est.mle(
+        theta0=np.array([2.0, 0.8], dtype=np.float64),
+        bounds=[(1.0, 5.0), (0.0, 0.99)],
     )
-    _ = est.mle(theta0=np.array([0.0], dtype=np.float64), bounds=[(-5.0, 5.0)])
     lines = [
         ln
         for ln in capsys.readouterr().out.splitlines()
@@ -922,7 +887,7 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
     assert np.isneginf(est._safe_logprior(np.array([0.0], dtype=np.float64)))
 
 
-def test_pack_opt_result_and_mcmc_validation_branches(monkeypatch):
+def test_mcmc_validation_branches(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
     est = Estimator(
         solver=SimpleNamespace(),
@@ -931,20 +896,6 @@ def test_pack_opt_result_and_mcmc_validation_branches(monkeypatch):
         estimated_params=["a"],
         priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
     )
-
-    packed = est._pack_opt_result(
-        "mle",
-        OptimizeResult(
-            x=np.array([1.0], dtype=np.float64),
-            success=True,
-            message="ok",
-            fun=np.float64(-1.0),
-            nfev=3,
-            nit=None,
-        ),
-    )
-    assert isinstance(packed, MLEResult)
-    assert packed.nit is None
 
     with pytest.raises(ValueError, match="n_draws must be positive"):
         est.mcmc(n_draws=0)
@@ -1217,35 +1168,7 @@ def test_logprior_base_branch_and_logpost(monkeypatch):
     )
 
 
-def test_mle_map_and_adaptation_branches(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
-    )
-
-    def fake_minimize(fun, x0, method=None, bounds=None, options=None):
-        assert np.isinf(fun(np.asarray(x0, dtype=np.float64)))
-        return OptimizeResult(
-            x=np.asarray(x0, dtype=np.float64),
-            success=True,
-            message="ok",
-            fun=np.float64(0.0),
-            nfev=1,
-            nit=1,
-        )
-
-    monkeypatch.setattr(
-        est_backend, "evaluate_loglik", lambda **kwargs: float64(np.nan)
-    )
-    monkeypatch.setattr(est_estimator.optimize, "minimize", fake_minimize)
-    _ = est.mle(theta0=np.array([0.0], dtype=np.float64))
-    _ = est.map(theta0=np.array([0.0], dtype=np.float64))
-
+def test_mcmc_adaptation_branches(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
     est_adapt = Estimator(
         solver=SimpleNamespace(),

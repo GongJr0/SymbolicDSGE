@@ -113,25 +113,26 @@ def test_solver_exposes_private_estimator_factory():
     assert isinstance(est, Estimator)
 
 
-def test_solver_estimate_validates_config_initial_guess_against_prior(monkeypatch):
-    solver = _make_solver()
-    compiled = _make_compiled(2.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+def test_solver_estimate_validates_config_initial_guess_against_prior(post82):
+    solver = post82["solver"]
 
+    # map validates the initial guess against the priors' support before the
+    # search; a psi_pi of 2.0 sits outside the unit interval.
     with pytest.raises(ValueError, match="incompatible with the provided priors"):
         solver.estimate(
-            compiled=compiled,
-            y=np.zeros((4, 1), dtype=np.float64),
+            compiled=post82["compiled"],
+            y=post82["y"],
             method="map",
-            estimated_params=["a"],
-            priors={"a": _UnitIntervalPrior()},
+            observables=post82["obs"],
+            estimated_params=["psi_pi"],
+            priors={"psi_pi": _UnitIntervalPrior()},
+            ss_seed=post82["steady"],
+            theta0={"psi_pi": 2.0},
         )
 
 
-def test_solver_estimate_and_solve_mle(monkeypatch):
-    solver = _make_solver()
-    compiled = _make_compiled(0.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+def test_solver_estimate_and_solve_mle(post82, monkeypatch):
+    solver = post82["solver"]
 
     captured = {}
 
@@ -139,39 +140,41 @@ def test_solver_estimate_and_solve_mle(monkeypatch):
         captured["parameters"] = parameters
         return SimpleNamespace(params=parameters)
 
-    solver.solve = fake_solve  # type: ignore[method-assign]
+    monkeypatch.setattr(solver, "solve", fake_solve)
 
     result, solved = solver.estimate_and_solve(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
+        compiled=post82["compiled"],
+        y=post82["y"],
         method="mle",
-        estimated_params=["a"],
-        bounds=[(-5.0, 5.0)],
+        observables=post82["obs"],
+        estimated_params=["psi_pi", "rho_r"],
+        ss_seed=post82["steady"],
+        theta0=np.array([2.0, 0.8], dtype=np.float64),
+        bounds=[(1.0, 5.0), (0.0, 0.99)],
     )
     assert isinstance(result, MLEResult)
-    assert abs(captured["parameters"]["a"] - 2.0) < 1e-4
-    sym_a = next(iter(compiled.config.calibration.parameters.keys()))
-    assert float(compiled.config.calibration.parameters[sym_a]) == pytest.approx(
-        captured["parameters"]["a"]
-    )
+    # estimate_and_solve threads the estimated point into solve as plain floats
+    assert "psi_pi" in captured["parameters"] and "rho_r" in captured["parameters"]
+    assert captured["parameters"] == {k: float(v) for k, v in result.theta.items()}
     assert solved.params == captured["parameters"]
 
 
-def test_solver_estimate_accepts_theta0_dictionary(monkeypatch):
-    solver = _make_solver()
-    compiled = _make_compiled(0.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+def test_solver_estimate_accepts_theta0_dictionary(post82):
+    solver = post82["solver"]
 
     out = solver.estimate(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
+        compiled=post82["compiled"],
+        y=post82["y"],
         method="mle",
-        estimated_params=["a"],
-        theta0={"a": 0.0},
-        bounds=[(-5.0, 5.0)],
+        observables=post82["obs"],
+        estimated_params=["psi_pi", "rho_r"],
+        ss_seed=post82["steady"],
+        theta0={"psi_pi": 2.0, "rho_r": 0.8},
+        bounds=[(1.0, 5.0), (0.0, 0.99)],
     )
+    assert isinstance(out, MLEResult)
     assert out.success
-    assert abs(out.theta["a"] - 2.0) < 1e-4
+    assert "psi_pi" in out.theta and "rho_r" in out.theta
 
 
 def test_solver_estimate_rejects_incomplete_theta0_dictionary(monkeypatch):
@@ -190,26 +193,30 @@ def test_solver_estimate_rejects_incomplete_theta0_dictionary(monkeypatch):
 
 
 def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_prior(
-    monkeypatch,
+    post82,
 ):
-    solver = _make_solver()
-    compiled = _make_compiled(1.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+    solver = post82["solver"]
 
+    # A log-transformed prior means the dict theta0 (given in parameter space) is
+    # mapped through the transform to the unconstrained theta the driver expects;
+    # a positive psi_pi must land in a finite basin rather than blowing up.
     prior = Estimator.make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    out = solver.estimate(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
-        method="mle",
-        estimated_params=["a"],
-        priors={"a": prior},
-        theta0={"a": 1.0},
-        bounds=[(-5.0, 5.0)],
-    )
+    with pytest.warns(UserWarning, match="MLE will ignore"):
+        out = solver.estimate(
+            compiled=post82["compiled"],
+            y=post82["y"],
+            method="mle",
+            observables=post82["obs"],
+            estimated_params=["psi_pi"],
+            priors={"psi_pi": prior},
+            ss_seed=post82["steady"],
+            theta0={"psi_pi": 2.0},
+            bounds=[(1.0, 5.0)],
+        )
     assert out.success
 
 

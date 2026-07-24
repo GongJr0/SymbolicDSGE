@@ -3,13 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 import warnings
 from time import perf_counter
-from typing import Any, Callable, Mapping, Sequence, cast
+from typing import Any, Callable, Literal, Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
 from numpy import asarray, float64
 from numpy.typing import NDArray
-from scipy import optimize
 
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
@@ -29,7 +28,18 @@ from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
 from .spec import EstimationSpec, PriorSpec
 
 from . import backend
-from .backend import MatrixName, MatrixPriorKey, MatrixPriorBlock
+from .backend import (
+    MatrixName,
+    MatrixPriorKey,
+    MatrixPriorBlock,
+    PyExtendedContext,
+    PyLinearContext,
+    PyUnscentedContext,
+    build_linear_context,
+    build_extended_context,
+    build_unscented_context,
+    build_obj_common,
+)
 
 NDF = NDArray[np.float64]
 
@@ -1038,9 +1048,9 @@ class Estimator:
     def _reset_search_warning_count(self) -> None:
         self._warning_signal_count = 0
 
-    def _report_search_warning_count(self, kind: str) -> None:
+    def _report_search_warning_count(self, kind: str, n_err: int) -> None:
         print(
-            f"[Estimator:{kind}] BK stability warnings encountered during search: {self._warning_signal_count}"
+            f"[Estimator:{kind}] BK stability warnings encountered during search: {n_err}"
         )
 
     @staticmethod
@@ -1082,7 +1092,7 @@ class Estimator:
 
     @staticmethod
     def _serialize_bounds(
-        bounds: Sequence[tuple[float, float]] | None,
+        bounds: Sequence[tuple[float | None, float | None]] | None,
     ) -> list[list[float | None]] | None:
         if bounds is None:
             return None
@@ -1094,119 +1104,200 @@ class Estimator:
     def _pack_opt_result(
         self,
         kind: str,
-        res: optimize.OptimizeResult,
+        res: dict[str, Any],
         *,
         config: Mapping[str, Any] | None = None,
     ) -> OptimizationResult:
-        x = asarray(res.x, dtype=float64)
-        theta = self.theta_to_params(x)
+        x = asarray(res["x"], dtype=float64)
+        # res["params"] is the calib-order parameter vector at x_best; name it to
+        # match the dict shape theta_to_params produced.
+        theta = {
+            str(name): float64(value)
+            for name, value in zip(self.compiled.calib_params, res["params"])
+        }
 
         common: dict[str, Any] = dict(
             x=x,
             theta=theta,
-            success=bool(res.success),
-            message=str(res.message),
-            fun=float64(res.fun),
-            nfev=int(res.nfev),
-            nit=(int(res.nit) if hasattr(res, "nit") and res.nit is not None else None),
+            success=bool(res["success"]),
+            message=str(res["message"]),
+            fun=float64(res["fun"]),
+            nfev=int(res["nfev"]),
+            nit=int(res["nit"]),
             optimizer_config=dict(config or {}),
         )
         if kind == "mle":
-            return MLEResult(**common, loglik=self._safe_loglik(x))
+            return MLEResult(**common, loglik=-res["fun"])
         if kind == "map":
-            ll = self._safe_loglik(x)
-            lpr = self._safe_logprior(x)
-            lpo = (
-                float64(ll + lpr)
-                if np.isfinite(ll) and np.isfinite(lpr)
-                else float64(-np.inf)
-            )
-            return MAPResult(**common, logpost=lpo, logprior=lpr)
+            return MAPResult(**common, logpost=-res["fun"], logprior=res["logprior"])
         raise ValueError(f"unknown result kind {kind!r}")
+
+    def _point_estimate(
+        self,
+        routine: Literal["mle", "map"],
+        has_priors: int,
+        theta0: NDF | Mapping[str, float] | None = None,
+        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
+        m: int = 10,
+        maxiter: int = 15000,
+        maxfun: int = 15000,
+        maxls: int = 20,
+        factr: float = 1e7,
+        pgtol: float = 1e-5,
+        fd_step: float = 0.0,
+        xatol: float = 1e-4,
+        fatol: float = 1e-4,
+    ) -> OptimizationResult:
+        init = self.resolve_theta0(theta0)
+        if routine == "map":
+            self._validate_prior_initial_guess(init)
+
+        common = build_obj_common(
+            compiled=self.compiled,
+            kalman=self.kalman,
+            prepared=self._prepared_filter,
+            param_names=self.param_names,
+            param_index=self._param_index,
+            matrix_member_names=self._matrix_member_names,
+            matrix_blocks=self._matrix_blocks,
+            param_transforms=self._param_transforms,
+            packed_logprior=self._packed_logprior,
+            ss_seed=self.ss_seed,
+            x0=self.x0,
+            R_override=self.R,
+        )
+
+        ctx: PyLinearContext | PyExtendedContext | PyUnscentedContext
+        if (mode := self.filter_mode) == "linear":
+            ctx = build_linear_context(common)
+        elif mode == "extended":
+            ctx = build_extended_context(common)
+        elif mode == "unscented":
+            ctx = build_unscented_context(common, compiled=self.compiled, x0=self.x0)
+        else:
+            raise ValueError(f"Unknown filter_mode {mode!r}.")
+
+        res = run_estimation(
+            ctx,
+            mode,
+            method,
+            theta0=init,
+            bounds=bounds,
+            has_priors=has_priors,
+            m=m,
+            maxiter=maxiter,
+            maxfun=maxfun,
+            maxls=maxls,
+            factr=factr,
+            pgtol=pgtol,
+            fd_step=fd_step,
+            xatol=xatol,
+            fatol=fatol,
+        )
+
+        out = self._pack_opt_result(
+            routine,
+            res,
+            config={
+                "method": method,
+                "bounds": self._serialize_bounds(bounds),
+                "options": {
+                    "m": m,
+                    "maxiter": maxiter,
+                    "maxfun": maxfun,
+                    "maxls": maxls,
+                    "factr": factr,
+                    "pgtol": pgtol,
+                    "fd_step": fd_step,
+                    "xatol": xatol,
+                    "fatol": fatol,
+                },
+            },
+        )
+        self._report_search_warning_count(routine, res["bk_violations"])
+        return out
 
     def mle(
         self,
         *,
         theta0: NDF | Mapping[str, float] | None = None,
-        bounds: Sequence[tuple[float, float]] | None = None,
-        method: str = "L-BFGS-B",
-        options: Mapping[str, Any] | None = None,
-    ) -> OptimizationResult:
-        self._reset_search_warning_count()
-        init = self.resolve_theta0(theta0)
+        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
+        m: int = 10,
+        maxiter: int = 15000,
+        maxfun: int = 15000,
+        maxls: int = 20,
+        factr: float = 1e7,
+        pgtol: float = 1e-5,
+        fd_step: float = 0.0,
+        xatol: float = 1e-4,
+        fatol: float = 1e-4,
+    ) -> MLEResult:
+        if self.priors is not None:
+            warnings.warn(
+                "MLE will ignore any provided priors. Use MAP or MCMC for prior-informed estimation.",
+                UserWarning,
+            )
 
-        def obj(theta: NDF) -> float64:
-            ll = self._safe_loglik(theta)
-            if not np.isfinite(ll):
-                return float64(np.inf)
-            return float64(-ll)
-
-        minimize = cast(Any, optimize.minimize)
-        res = cast(
-            optimize.OptimizeResult,
-            minimize(
-                obj,
-                x0=init,
-                method=method,
+        return cast(
+            MLEResult,
+            self._point_estimate(
+                routine="mle",
+                has_priors=0,
+                theta0=theta0,
                 bounds=bounds,
-                options=(dict(options) if options is not None else None),
+                method=method,
+                m=m,
+                maxiter=maxiter,
+                maxfun=maxfun,
+                maxls=maxls,
+                factr=factr,
+                pgtol=pgtol,
+                fd_step=fd_step,
+                xatol=xatol,
+                fatol=fatol,
             ),
         )
-        out = self._pack_opt_result(
-            "mle",
-            res,
-            config={
-                "method": method,
-                "bounds": self._serialize_bounds(bounds),
-                "options": dict(options) if options is not None else {},
-            },
-        )
-        self._report_search_warning_count("mle")
-        return out
 
     def map(
         self,
         *,
         theta0: NDF | Mapping[str, float] | None = None,
-        bounds: Sequence[tuple[float, float]] | None = None,
-        method: str = "L-BFGS-B",
-        options: Mapping[str, Any] | None = None,
-    ) -> OptimizationResult:
+        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
+        m: int = 10,
+        maxiter: int = 15000,
+        maxfun: int = 15000,
+        maxls: int = 20,
+        factr: float = 1e7,
+        pgtol: float = 1e-5,
+        fd_step: float = 0.0,
+        xatol: float = 1e-4,
+        fatol: float = 1e-4,
+    ) -> MAPResult:
         if self.priors is None:
             raise ValueError("MAP requires priors. No priors were provided.")
 
-        self._reset_search_warning_count()
-        init = self.resolve_theta0(theta0)
-        self._validate_prior_initial_guess(init)
-
-        def obj(theta: NDF) -> float64:
-            lp = self._safe_logpost(theta)
-            if not np.isfinite(lp):
-                return float64(np.inf)
-            return float64(-lp)
-
-        minimize = cast(Any, optimize.minimize)
-        res = cast(
-            optimize.OptimizeResult,
-            minimize(
-                obj,
-                x0=init,
-                method=method,
+        return cast(
+            MAPResult,
+            self._point_estimate(
+                routine="map",
+                has_priors=1,
+                theta0=theta0,
                 bounds=bounds,
-                options=(dict(options) if options is not None else None),
+                method=method,
+                m=m,
+                maxiter=maxiter,
+                maxfun=maxfun,
+                maxls=maxls,
+                factr=factr,
+                pgtol=pgtol,
+                fd_step=fd_step,
+                xatol=xatol,
+                fatol=fatol,
             ),
         )
-        out = self._pack_opt_result(
-            "map",
-            res,
-            config={
-                "method": method,
-                "bounds": self._serialize_bounds(bounds),
-                "options": dict(options) if options is not None else {},
-            },
-        )
-        self._report_search_warning_count("map")
-        return out
 
     def mcmc(
         self,
@@ -1329,7 +1420,7 @@ class Estimator:
                 ),
             },
         )
-        self._report_search_warning_count("mcmc")
+        self._report_search_warning_count("mcmc", 0)
         return out
 
 

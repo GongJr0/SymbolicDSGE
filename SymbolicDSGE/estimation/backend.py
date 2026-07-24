@@ -539,7 +539,6 @@ def build_obj_common(
     compiled: CompiledModel,
     kalman: KalmanConfig,
     prepared: PreparedFilterRun,
-    filter_mode: str,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
     matrix_member_names: set[str],
@@ -566,7 +565,7 @@ def build_obj_common(
 
     bc_residual_addr = (
         compiled.construct_objective_cfunc_bicomplex().address
-        if filter_mode == "unscented"
+        if prepared.mode == "unscented"
         else 0
     )
     ss_seed_vec = DSGESolver._resolve_ss_seed(ss_seed, compiled)
@@ -687,8 +686,8 @@ def _unscented_z0(compiled: CompiledModel, x0: NDF | None) -> NDF:
 
 
 def build_unscented_context(
-    *,
     base: PyObjCommon,
+    *,
     compiled: CompiledModel,
     x0: NDF | None,
     alpha: float = 1.0,
