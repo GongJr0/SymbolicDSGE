@@ -66,19 +66,17 @@ typedef struct {
   i64 n_ctrl;   /* ny */
   i64 n_exog;   /* k */
   i64 n_obs;    /* m */
-  i64 n_par;    /* calib subvector length */
-  i64 n_params; /* total param slots */
-  i64 T;        /* observations */
+  i64 n_par; /* calib params */
+  i64 T;     /* observations */
 } sdsge_dims;
 
-/* theta -> params resolution tables. */
+/* theta -> params resolution tables. base_params and every slot index
+ * (scalars' param_slot, cov std_slots/pair_slot) are in calib_params order, so
+ * params doubles as the residual/measurement argument vector: no gather. */
 typedef struct {
-  const f64 *base_params;              /* n_params */
+  const f64 *base_params;              /* n_par */
   const sdsge_scalar_scatter *scalars; /* n_scalars */
   i64 n_scalars;
-  const i64 *calib_gather; /* n_par */
-  const i64 *calib_upd;    /* n_calib_upd */
-  i64 n_calib_upd;
 } sdsge_param_map;
 
 /* First-order Klein solve outputs. */
@@ -136,8 +134,7 @@ typedef struct {
   sdsge_cov_spec r_spec;
   sdsge_prior_tables prior;
 
-  f64 *params;    /* n_params */
-  f64 *calib_vec; /* n_par */
+  f64 *params;    /* n_par; calib_params order, residual/meas argument vector */
   f64 *Q;         /* n_exog*n_exog */
   f64 *R;         /* n_obs*n_obs */
   f64 *corr_q;    /* n_exog*n_exog */
@@ -175,10 +172,16 @@ typedef struct {
 
 /* One-time construction seeds (called once, from the ctx composer). */
 void sdsge_init_params(f64 *SDSGE_RESTRICT params,
-                       const f64 *SDSGE_RESTRICT base_params, i64 n_params);
-void sdsge_init_calib(f64 *SDSGE_RESTRICT calib_vec,
-                      const f64 *SDSGE_RESTRICT params,
-                      const i64 *SDSGE_RESTRICT calib_gather, i64 n_par);
+                       const f64 *SDSGE_RESTRICT base_params, i64 n_par);
+
+/* Post-loop resolution at a theta (e.g. x_best): scatter into params, and the
+ * log-prior from the packed tables. Both are scatter / prior only, no filter, so
+ * they are cheap to call once after the optimizer returns. Shared by every mode
+ * (they operate on the common base). */
+void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
+                          const f64 *SDSGE_RESTRICT theta);
+f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
+                      const f64 *SDSGE_RESTRICT theta);
 
 /* Per-flavor objective: theta -> loglik (+ logprior if has_priors). */
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,

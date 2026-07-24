@@ -28,6 +28,7 @@ from ..bayesian.transforms.logit import LogitTransform
 from ..bayesian.transforms.lower_bounded import LowerBoundedTransform
 from ..bayesian.transforms.probit import ProbitTransform
 from ..bayesian.transforms.softplus import SoftplusTransform
+from ..bayesian.transforms.tanh import TanhTransform
 from ..bayesian.transforms.upper_bounded import UpperBoundedTransform
 
 NDF = NDArray[np.float64]
@@ -71,6 +72,7 @@ class TransformCode(IntEnum):
     AFFINE_PROBIT = 7
     LOWER_BOUNDED = 8
     UPPER_BOUNDED = 9
+    TANH = 10
 
 
 #: Packed-row strides (mirror ``SDSGE_N_DIST_PARAMS`` / ``SDSGE_N_TRANSFORM_PARAMS``
@@ -270,6 +272,8 @@ def _pack_transform(transform: Any) -> tuple[int | None, list[float]]:
         return TransformCode.LOGIT, params
     if isinstance(transform, ProbitTransform):
         return TransformCode.PROBIT, params
+    if isinstance(transform, TanhTransform):
+        return TransformCode.TANH, params
     if isinstance(transform, AffineLogitTransform):
         params[0] = float(transform.low)
         params[1] = float(transform.high)

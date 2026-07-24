@@ -26,6 +26,14 @@ f64 sdsge_sigmoid_scalar(f64 x) {
   }
 }
 
+/* log(sech^2(y)) = log(1 - tanh^2(y)); mirrors sdsge_log_sech2 in transforms.c
+ * so the TANH scatter is bit-identical to the low-level tanh kernel the Python
+ * path uses. Avoids the 1 - tanh^2 cancellation and the cosh overflow. */
+static inline f64 sdsge_log_sech2(f64 y) {
+  f64 ay = fabs(y);
+  return 2.0 * (0.6931471805599453 - ay - log1p(exp(-2.0 * ay)));
+}
+
 f64 sdsge_std_norm_cdf(f64 x) { return 0.5 * (1.0 + erf(x / SQRT2)); }
 
 f64 sdsge_std_norm_logpdf(f64 x) { return -0.5 * x * x - 0.5 * log(TWO_PI); }
@@ -73,6 +81,10 @@ void sdsge_transform_inverse_and_logjac(i64 code, f64 *SDSGE_RESTRICT params,
   case SDSGE_TRANSFORM_UPPER_BOUNDED:
     *out_x = params[0] - exp(z);
     *out_logjac = z;
+    break;
+  case SDSGE_TRANSFORM_TANH:
+    *out_x = tanh(z);
+    *out_logjac = sdsge_log_sech2(z);
     break;
   default:
     *out_x = NAN;

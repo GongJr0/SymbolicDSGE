@@ -6,7 +6,7 @@ from numpy import float64
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    from .spec import MCMCResultMeta, OptimizationResultMeta
+    from .spec import MCMCResultMeta
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -14,42 +14,90 @@ NDI = NDArray[np.int64]
 
 @dataclass(frozen=True)
 class OptimizationResult:
-    kind: str
     x: NDF
     theta: dict[str, float64]
     success: bool
     message: str
     fun: float64
-    loglik: float64
-    logprior: float64
-    logpost: float64
     nfev: int
     nit: int | None
     #: Call configuration for the ``mle``/``map`` run (optimizer ``method``,
     #: ``bounds``, ``options``) — recorded so the run is reconstructable.
-    optimizer_config: dict[str, Any] = field(default_factory=dict)
+    optimizer_config: dict[str, Any]
 
-    def to_meta(self) -> "OptimizationResultMeta":
-        """Project to the text-only metadata carried in a ``.sdsge`` bundle.
 
-        Drops the flat ``x`` vector; ``theta`` carries the same point estimate
-        by parameter name. The ``optimizer_config`` (method/bounds/options) is
-        preserved.
-        """
-        from .spec import OptimizationResultMeta
+@dataclass(frozen=True)
+class MLEResult(OptimizationResult):
+    """Maximum-likelihood point estimate result."""
 
-        return OptimizationResultMeta(
-            kind=self.kind,
-            theta={str(k): float(v) for k, v in self.theta.items()},
-            success=bool(self.success),
-            message=str(self.message),
-            fun=float(self.fun),
-            loglik=float(self.loglik),
-            logprior=float(self.logprior),
-            logpost=float(self.logpost),
-            nfev=int(self.nfev),
-            nit=None if self.nit is None else int(self.nit),
-            optimizer_config=dict(self.optimizer_config),
+    loglik: float64
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict representation of the result."""
+        return {
+            "x": self.x.tolist(),
+            "theta": {k: float(v) for k, v in self.theta.items()},
+            "success": bool(self.success),
+            "message": str(self.message),
+            "fun": float(self.fun),
+            "nfev": int(self.nfev),
+            "nit": int(self.nit) if self.nit is not None else None,
+            "optimizer_config": dict(self.optimizer_config),
+            "loglik": float(self.loglik),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MLEResult":
+        """Construct a MLEResult from a JSON-serializable dict representation."""
+        return cls(
+            x=np.asarray(data["x"], dtype=float64),
+            theta={k: float64(v) for k, v in data["theta"].items()},
+            success=bool(data["success"]),
+            message=str(data["message"]),
+            fun=float64(data["fun"]),
+            nfev=int(data["nfev"]),
+            nit=int(data["nit"]) if data["nit"] is not None else None,
+            optimizer_config=dict(data.get("optimizer_config", {})),
+            loglik=float64(data["loglik"]),
+        )
+
+
+@dataclass(frozen=True)
+class MAPResult(OptimizationResult):
+    """Maximum-a-posteriori point estimate result."""
+
+    logpost: float64
+    logprior: float64
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict representation of the result."""
+        return {
+            "x": self.x.tolist(),
+            "theta": {k: float(v) for k, v in self.theta.items()},
+            "success": bool(self.success),
+            "message": str(self.message),
+            "fun": float(self.fun),
+            "nfev": int(self.nfev),
+            "nit": int(self.nit) if self.nit is not None else None,
+            "optimizer_config": dict(self.optimizer_config),
+            "logpost": float(self.logpost),
+            "logprior": float(self.logprior),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MAPResult":
+        """Construct a MAPResult from a JSON-serializable dict representation."""
+        return cls(
+            x=np.asarray(data["x"], dtype=float64),
+            theta={k: float64(v) for k, v in data["theta"].items()},
+            success=bool(data["success"]),
+            message=str(data["message"]),
+            fun=float64(data["fun"]),
+            nfev=int(data["nfev"]),
+            nit=int(data["nit"]) if data["nit"] is not None else None,
+            optimizer_config=dict(data.get("optimizer_config", {})),
+            logpost=float64(data["logpost"]),
+            logprior=float64(data["logprior"]),
         )
 
 

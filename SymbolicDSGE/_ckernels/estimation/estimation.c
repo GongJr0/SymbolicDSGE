@@ -15,22 +15,15 @@
 #define SDSGE_SOLVE_NO_SS                                                      \
   2 /* steady-state Newton failed; sentinel, not a BK count */
 
-/* theta -> params fill. Non-estimated slots (and their calib image) never move
- * across evals, so they are seeded once here; the per-eval fill touches only
- * the estimated entries. */
+/* theta -> params fill. params is in calib_params order and is the residual
+ * argument vector directly (no gather). Non-estimated slots never move across
+ * evals, so they are seeded once here; the per-eval fill touches only the
+ * estimated entries. */
 
 void sdsge_init_params(f64 *SDSGE_RESTRICT params,
-                       const f64 *SDSGE_RESTRICT base_params, i64 n_params) {
-  for (i64 i = 0; i < n_params; ++i) {
-    params[i] = base_params[i];
-  }
-}
-
-void sdsge_init_calib(f64 *SDSGE_RESTRICT calib_vec,
-                      const f64 *SDSGE_RESTRICT params,
-                      const i64 *SDSGE_RESTRICT calib_gather, i64 n_par) {
+                       const f64 *SDSGE_RESTRICT base_params, i64 n_par) {
   for (i64 i = 0; i < n_par; ++i) {
-    calib_vec[i] = params[calib_gather[i]];
+    params[i] = base_params[i];
   }
 }
 
@@ -44,10 +37,13 @@ static inline void sdsge_fill_params(sdsge_obj_common *base,
                                        theta[sc->theta_idx], &x, &logjac);
     base->params[sc->param_slot] = x;
   }
-  for (i64 u = 0; u < base->pmap.n_calib_upd; ++u) {
-    const i64 pos = base->pmap.calib_upd[u];
-    base->calib_vec[pos] = base->params[base->pmap.calib_gather[pos]];
-  }
+}
+
+/* Public wrapper: scatter a theta into base->params (e.g. resolve x_best after
+ * the optimizer returns). params then holds the named parameter vector. */
+void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
+                          const f64 *SDSGE_RESTRICT theta) {
+  sdsge_fill_params(base, theta);
 }
 
 /* Real pencil (row-major) -> complex Schur input (column-major), widened. */
@@ -166,13 +162,13 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
    * linearize there. A gap model (ss = 0) seeds at 0 and converges in one step;
    * a params draw with no steady state fails and is rejected as infeasible. */
   i64 iters = 0;
-  if (sdsge_steady_state_newton(b->residual, b->ss_seed, b->calib_vec, n,
+  if (sdsge_steady_state_newton(b->residual, b->ss_seed, b->params, n,
                                 b->dims.n_par, SDSGE_SS_MAX_ITER, SDSGE_SS_TOL,
                                 s->ss, &iters) != SDSGE_NEWTON_OK) {
     return SDSGE_SOLVE_NO_SS;
   }
 
-  klein_preproc(b->residual, s->ss, b->calib_vec, n, b->dims.n_par, n,
+  klein_preproc(b->residual, s->ss, b->params, n, b->dims.n_par, n,
                 b->log_linear, s->a_real, s->b_real);
   sdsge_to_complex_colmajor(s->a_real, s->s, n);
   sdsge_to_complex_colmajor(s->b_real, s->t, n);
@@ -217,14 +213,31 @@ static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
   return ll + lp;
 }
 
+/* Public: the log-prior alone at a theta (e.g. x_best), from the packed tables.
+ * No filter. 0 when the run carries no prior (MLE). */
+f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
+                      const f64 *SDSGE_RESTRICT theta) {
+  const sdsge_prior_tables *pr = &base->prior;
+  if (!pr->has_prior) {
+    return 0.0;
+  }
+  return sdsge_logprior_program(
+      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
+      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
+      (f64 *)pr->scalar_transform_params, pr->n_scalar,
+      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
+      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
+      (f64 *)pr->matrix_log_constants, pr->n_blocks);
+}
+
 /* Linear measurement (C, d) from the meas / jac cfuncs at the linearization
  * point. C is n_obs*n_var, d is n_obs. */
 static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
   const sdsge_obj_common *b = &ctx->base;
   const sdsge_solve1 *s = &ctx->solve;
 
-  b->meas(s->ss, b->calib_vec, ctx->d);
-  b->jac(s->ss, b->calib_vec, ctx->C);
+  b->meas(s->ss, b->params, ctx->d);
+  b->jac(s->ss, b->params, ctx->C);
 }
 
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
@@ -300,7 +313,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                    .jac = b->jac,
                    .A = s->A,
                    .B = s->B,
-                   .calib_params = b->calib_vec,
+                   .calib_params = b->params,
                    .Q = Q,
                    .R = R,
                    .y = b->y,
@@ -351,14 +364,16 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   sdsge_bx_from_B(s->B, b->dims.n_state, b->dims.n_exog, s2->bx);
 
   if (sdsge_bicomplex_hessian(
-          b->bc_residual, s->ss, b->calib_vec, b->dims.n_var, b->dims.n_par,
+          b->bc_residual, s->ss, b->params, b->dims.n_var, b->dims.n_par,
           b->dims.n_var, SDSGE_HESSIAN_STEP, s2->f_xx) != SDSGE_HESSIAN_OK) {
+
     return -INFINITY;
   }
 
   if (sdsge_second_order(s->a_real, s->b_real, s2->f_xx, s2->gx_real,
                          s2->hx_real, b->dims.n_var, b->dims.n_state, s2->gxx,
                          s2->hxx) != SDSGE_SECOND_ORDER_OK) {
+
     return -INFINITY;
   }
 
@@ -372,6 +387,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
                               s2->gxx, s2->eta, b->dims.n_var, b->dims.n_state,
                               b->dims.n_exog, s2->gss,
                               s2->hss) != SDSGE_SECOND_ORDER_OK) {
+
     return -INFINITY;
   }
 
@@ -385,7 +401,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
                    .hss = s2->hss,
                    .gss = s2->gss,
                    .steady_state = s->ss,
-                   .params = b->calib_vec,
+                   .params = b->params,
                    .Q = Q,
                    .R = R,
                    .obs = b->y,
@@ -406,6 +422,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
 
   ukf_outputs out = {.loglik = &ll};
   if (ukf_hot_loop(&in, &out) != KF_OK) {
+
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);

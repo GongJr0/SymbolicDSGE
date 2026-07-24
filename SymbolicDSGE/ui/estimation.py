@@ -5,18 +5,18 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from SymbolicDSGE.bayesian.distributions.param_builder import DIST_PARAMS_DISPATCH
-from SymbolicDSGE.bayesian.transforms.transform_dispatch import (
+from ..bayesian.distributions.param_builder import DIST_PARAMS_DISPATCH
+from ..bayesian.transforms.transform_dispatch import (
     TRANSFORM_METHOD_DISPATCH,
 )
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
-from SymbolicDSGE.estimation.spec import (
+from ..estimation.results import MLEResult, MAPResult, MCMCResult, OptimizationResult
+from ..estimation.spec import (
     EstimationParameterSpec as CoreEstimationParameterSpec,
 )
-from SymbolicDSGE.estimation.spec import (
+
+from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
-    OptimizationResultMeta,
 )
 
 from .schemas import EstimationParameterSpec
@@ -91,7 +91,7 @@ def build_estimation_inputs(
 
 
 def emit_estimation_wire(
-    obj: OptimizationResult | OptimizationResultMeta | MCMCResult | MCMCResultMeta,
+    obj: MLEResult | MAPResult | MCMCResult | MCMCResultMeta,
     *,
     traces: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -109,28 +109,36 @@ def emit_estimation_wire(
     the meta dataclasses and live result classes overlap perfectly on the
     scalar slice each helper reads.
     """
-    if isinstance(obj, (OptimizationResult, OptimizationResultMeta)):
-        return _emit_optimization_wire(obj)
+    if isinstance(obj, MLEResult):
+        return _emit_mle_wire(obj)
+    if isinstance(obj, MAPResult):
+        return _emit_map_wire(obj)
     if isinstance(obj, (MCMCResult, MCMCResultMeta)):
         return _emit_mcmc_wire(obj, traces)
     raise TypeError(f"Unsupported estimation result type: {type(obj).__name__}")
 
 
 def _emit_optimization_wire(
-    obj: OptimizationResult | OptimizationResultMeta,
+    obj: OptimizationResult,
 ) -> dict[str, Any]:
     return {
-        "kind": obj.kind,
         "success": bool(obj.success),
         "message": obj.message,
         "theta": {name: float(value) for name, value in obj.theta.items()},
         "fun": float(obj.fun),
-        "loglik": float(obj.loglik),
-        "logprior": float(obj.logprior),
-        "logpost": float(obj.logpost),
         "nfev": int(obj.nfev),
         "nit": obj.nit,
     }
+
+
+def _emit_mle_wire(obj: MLEResult) -> dict[str, Any]:
+    optim = _emit_optimization_wire(obj)
+    return optim | {"loglik": float(obj.loglik)}
+
+
+def _emit_map_wire(obj: MAPResult) -> dict[str, Any]:
+    optim = _emit_optimization_wire(obj)
+    return optim | {"logpost": float(obj.logpost), "logprior": float(obj.logprior)}
 
 
 def _emit_mcmc_wire(

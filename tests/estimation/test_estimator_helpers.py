@@ -12,23 +12,20 @@ from SymbolicDSGE.estimation.estimator import (
     _method_from_result,
     _method_kwargs_from_result,
 )
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
+from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 
 
-def _opt_result(**cfg) -> OptimizationResult:
-    return OptimizationResult(
-        kind="mle",
+def _opt_result(**cfg) -> MLEResult:
+    return MLEResult(
         x=np.zeros(1, dtype=float64),
         theta={"a": float64(1.0)},
         success=True,
         message="",
         fun=float64(0.0),
-        loglik=float64(0.0),
-        logprior=float64(0.0),
-        logpost=float64(0.0),
         nfev=1,
         nit=1,
         optimizer_config=dict(cfg),
+        loglik=float64(0.0),
     )
 
 

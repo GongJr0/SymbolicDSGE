@@ -14,12 +14,11 @@ from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
+from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
 from SymbolicDSGE.estimation.spec import (
     EstimationParameterSpec,
     EstimationSpec,
     MCMCResultMeta,
-    OptimizationResultMeta,
 )
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 from SymbolicDSGE.ui import build_workspace, create_app, serve_from
@@ -100,34 +99,24 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
 # -- emit_estimation_wire parity --------------------------------------------
 
 
-def test_emit_wire_optimization_meta_matches_live_result() -> None:
+def test_emit_wire_mle_result() -> None:
     theta = {"beta": 0.99, "rho": 0.8}
-    live = OptimizationResult(
-        kind="mle",
+    res = MLEResult(
         x=np.array(list(theta.values())),
         theta={k: np.float64(v) for k, v in theta.items()},
         success=True,
         message="ok",
         fun=np.float64(-12.3),
+        nfev=42,
+        nit=15,
+        optimizer_config={},
         loglik=np.float64(-10.0),
-        logprior=np.float64(-2.3),
-        logpost=np.float64(-12.3),
-        nfev=42,
-        nit=15,
     )
-    meta = OptimizationResultMeta(
-        kind="mle",
-        theta=theta,
-        success=True,
-        message="ok",
-        fun=-12.3,
-        loglik=-10.0,
-        logprior=-2.3,
-        logpost=-12.3,
-        nfev=42,
-        nit=15,
-    )
-    assert emit_estimation_wire(live) == emit_estimation_wire(meta)
+    wire = emit_estimation_wire(res)
+    assert wire["theta"] == {"beta": 0.99, "rho": 0.8}
+    assert (wire["fun"], wire["nfev"], wire["nit"]) == (-12.3, 42, 15)
+    assert wire["loglik"] == -10.0
+    assert wire["success"] is True and wire["message"] == "ok"
 
 
 def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
@@ -163,19 +152,19 @@ def test_emit_wire_mcmc_meta_requires_traces() -> None:
 
 
 def test_serialize_estimation_result_shim_delegates() -> None:
-    meta = OptimizationResultMeta(
-        kind="map",
-        theta={"a": 1.0},
+    res = MAPResult(
+        x=np.array([1.0]),
+        theta={"a": np.float64(1.0)},
         success=False,
         message="x",
-        fun=0.0,
-        loglik=0.0,
-        logprior=0.0,
-        logpost=0.0,
+        fun=np.float64(0.0),
         nfev=1,
         nit=None,
+        optimizer_config={},
+        logpost=np.float64(0.0),
+        logprior=np.float64(0.0),
     )
-    assert serialize_estimation_result(meta) == emit_estimation_wire(meta)
+    assert serialize_estimation_result(res) == emit_estimation_wire(res)
 
 
 # -- Workspace + session summary -------------------------------------------

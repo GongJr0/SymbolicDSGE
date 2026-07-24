@@ -100,6 +100,13 @@ def _transform_inverse_and_logjac(
         return float64(params[0] + math.exp(float(z))), z
     if code == TransformCode.UPPER_BOUNDED:
         return float64(params[0] - math.exp(float(z))), z
+    if code == TransformCode.TANH:
+        # log(sech^2(z)); mirrors sdsge_log_sech2 in transforms.c / the estimation
+        # scatter dispatch. Avoids the 1 - tanh^2 cancellation and cosh overflow.
+        ay = abs(float(z))
+        return float64(math.tanh(float(z))), float64(
+            2.0 * (0.6931471805599453 - ay - math.log1p(math.exp(-2.0 * ay)))
+        )
     return float64(np.nan), float64(np.nan)
 
 

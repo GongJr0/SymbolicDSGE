@@ -613,6 +613,24 @@ static void ukf_store_history(const ukf_inputs *in,
   }
 }
 
+/* Sigma-point Cholesky with an on-failure floor. Factor at the caller's jitter
+ * first, so a well-conditioned covariance is unperturbed (parity with the plain
+ * path); only when that fails add a scale-relative floor to lift a rank-deficient
+ * covariance (e.g. a zero-risk-correction second order, whose augmented block is
+ * degenerate) above the pivot threshold. A genuinely unfilterable matrix still
+ * returns SDSGE_NOT_PD. */
+#define UKF_CHOL_FLOOR_REL 1e-10
+static int ukf_chol_auto(const f64 *SDSGE_RESTRICT P, f64 jitter,
+                         f64 *SDSGE_RESTRICT L, i64 n) {
+  if (sdsge_chol(P, jitter, L, n) == SDSGE_OK)
+    return SDSGE_OK;
+  f64 scale = 0.0;
+  for (i64 i = 0; i < n; ++i)
+    if (P[i * n + i] > scale)
+      scale = P[i * n + i];
+  return sdsge_chol(P, jitter + scale * UKF_CHOL_FLOOR_REL, L, n);
+}
+
 i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
   const i64 ns = in->n_state;
   const i64 nc = in->n_ctrl;
@@ -699,7 +717,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
   i64 status = KF_OK;
 
   for (i64 t = 0; t < T; ++t) {
-    if (sdsge_chol(P_prev, in->jitter, P_chol, nz) != SDSGE_OK) {
+    if (ukf_chol_auto(P_prev, in->jitter, P_chol, nz) != SDSGE_OK) {
       status = KF_ERR_MATRIX_CONDITION;
       break;
     }
@@ -714,7 +732,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
     if (in->symmetrize)
       sdsge_sym_inplace(P_pred, nz);
 
-    if (sdsge_chol(P_pred, in->jitter, P_chol, nz) != SDSGE_OK) {
+    if (ukf_chol_auto(P_pred, in->jitter, P_chol, nz) != SDSGE_OK) {
       status = KF_ERR_MATRIX_CONDITION;
       break;
     }
@@ -729,7 +747,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
       sdsge_sym_inplace(S, no);
 
     kf_row_minus_vec(in->obs, t, y_pred, innov, no);
-    if (sdsge_chol(S, in->jitter, L, no) != SDSGE_OK) {
+    if (ukf_chol_auto(S, in->jitter, L, no) != SDSGE_OK) {
       status = KF_ERR_MATRIX_CONDITION;
       break;
     }

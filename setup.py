@@ -25,7 +25,7 @@ _COMMON = os.path.join(_CKERNELS, "_common")
 # share symbols). Keyed by extension subdir name. `_common` is linked into every
 # extension already; this is for the higher-level subsystems (core, kalman, ...).
 _EXTRA_DEPS = {
-    "estimation": ["core", "kalman"],
+    "estimation": ["core", "kalman", "optim"],
 }
 
 

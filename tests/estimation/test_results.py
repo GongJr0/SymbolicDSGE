@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 from numpy import float64
 
-from SymbolicDSGE.estimation.results import MCMCResult, OptimizationResult
-from SymbolicDSGE.estimation.spec import MCMCResultMeta, OptimizationResultMeta
+from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
+from SymbolicDSGE.estimation.spec import MCMCResultMeta
 
 
 def _result(
@@ -202,30 +202,49 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
     assert calls == ["show", "show", "show"]
 
 
-def test_optimization_result_to_meta_projects_field_for_field():
-    res = OptimizationResult(
-        kind="map",
+def test_map_result_to_dict_roundtrips():
+    res = MAPResult(
         x=np.array([0.1, 0.2], dtype=np.float64),
         theta={"a": float64(0.1), "b": float64(0.2)},
         success=True,
         message="converged",
         fun=float64(-3.5),
-        loglik=float64(-3.0),
-        logprior=float64(-0.5),
-        logpost=float64(-3.5),
         nfev=42,
         nit=7,
+        optimizer_config={"method": "L-BFGS-B"},
+        logpost=float64(-3.5),
+        logprior=float64(-0.5),
     )
 
-    meta = res.to_meta()
+    d = res.to_dict()
+    assert d["theta"] == {"a": 0.1, "b": 0.2}
+    assert d["nfev"] == 42 and d["nit"] == 7
+    assert d["logpost"] == -3.5 and d["logprior"] == -0.5
+    # round-trips through the serializable dict form
+    assert MAPResult.from_dict(d).to_dict() == d
 
-    assert isinstance(meta, OptimizationResultMeta)
-    assert meta.kind == "map"
-    assert meta.theta == {"a": 0.1, "b": 0.2}
-    assert meta.nfev == 42 and meta.nit == 7
-    assert meta.logpost == -3.5
-    # round-trips through the bundle text form
-    assert OptimizationResultMeta.from_dict(meta.to_dict()).to_dict() == meta.to_dict()
+
+def test_mle_result_to_dict_roundtrips():
+    res = MLEResult(
+        x=np.array([1.0], dtype=np.float64),
+        theta={"a": float64(1.0)},
+        success=True,
+        message="ok",
+        fun=float64(-2.0),
+        nfev=5,
+        nit=None,
+        optimizer_config={
+            "method": "L-BFGS-B",
+            "bounds": [[0.0, 1.0]],
+            "options": {"maxiter": 10},
+        },
+        loglik=float64(-2.0),
+    )
+
+    d = res.to_dict()
+    assert d["loglik"] == -2.0 and d["nit"] is None
+    assert d["optimizer_config"]["method"] == "L-BFGS-B"
+    assert MLEResult.from_dict(d).to_dict() == d
 
 
 def test_mcmc_result_to_meta_and_posterior_arrays():
