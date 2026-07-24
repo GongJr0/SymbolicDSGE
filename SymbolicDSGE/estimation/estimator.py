@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import warnings
 from time import perf_counter
-from typing import Any, Callable, Literal, Mapping, NamedTuple, Sequence, cast
+from typing import Any, Callable, Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -18,8 +18,12 @@ from ..bayesian.transforms.identity import Identity
 from ..bayesian.transforms.log import LogTransform
 from ..bayesian.transforms.tanh import TanhTransform
 from ..bayesian.transforms.transform import Transform
+
 from ..core.compiled_model import CompiledModel
 from ..core.solver import DSGESolver
+
+from .._ckernels.estimation import run_estimation
+
 from .prior_program import PackedLogPrior, build_packed_logprior
 from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
 from .spec import EstimationSpec, PriorSpec
@@ -1017,7 +1021,7 @@ class Estimator:
         # kernel down on its output-buffer limit. Intercept at the source: a
         # counting ``showwarning`` tallies each warning and discards it, so
         # nothing is printed and nothing is retained (O(1) memory, no per-eval
-        # buffer scan). stderr is deliberately left alone -- genuine errors there
+        # buffer scan). stderr is deliberately left alone. Genuine errors there
         # halt the evaluation and are caught by the callers.
         signals = 0
 

@@ -9,12 +9,11 @@ from ..bayesian.distributions.param_builder import DIST_PARAMS_DISPATCH
 from ..bayesian.transforms.transform_dispatch import (
     TRANSFORM_METHOD_DISPATCH,
 )
-from ..estimation.results import MCMCResult, OptimizationResult
+from ..estimation.results import MLEResult, MAPResult, MCMCResult, OptimizationResult
 from ..estimation.spec import (
     EstimationParameterSpec as CoreEstimationParameterSpec,
 )
 
-from ..estimation.results import MLEResult, MAPResult
 from ..estimation.spec import (
     EstimationSpec,
     MCMCResultMeta,
