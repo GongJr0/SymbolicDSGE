@@ -1088,6 +1088,11 @@ def _prepare_filter_loglik(
 
     def loglik_of_R(R: NDF) -> float64:
         run = run_filter(R=R, **mode_args, **common)
+        # A run that errored (e.g. a singular covariance) returns the partial
+        # accumulation up to the failure; treat it as infeasible, not a valid
+        # likelihood, so the search rejects the draw instead of chasing garbage.
+        if run.status != 0:
+            return float64(-np.inf)
         return float64(run.loglik)
 
     return loglik_of_R
