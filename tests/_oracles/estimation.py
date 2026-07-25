@@ -328,13 +328,13 @@ def _unconstrained_from_corr_chol(L: NDF) -> NDF:
 
 @dataclass(frozen=True)
 class RWMReference:
-    """Frozen output of the numpy-era adaptive-RWM reference chain.
+    """Output of an adaptive random-walk Metropolis reference chain
+    (``native_algorithm_mimic``).
 
     ``kept`` / ``kept_lp`` are in **theta** (unconstrained) space, the space the
-    chain actually walks; callers map ``kept`` to named parameters the same way
-    ``Estimator.mcmc`` does (``theta_to_params`` per row) when a param-space
-    comparison is wanted. ``n_accepted`` / ``accept_rate`` count over all
-    ``total_steps`` (burn-in included), matching the estimator.
+    chain walks; map ``kept`` to named parameters via ``theta_to_params`` per row
+    for a param-space view. ``n_accepted`` / ``accept_rate`` count over all
+    ``total_steps`` (burn-in included), matching ``Estimator.mcmc``.
     """
 
     kept: NDF
@@ -342,88 +342,6 @@ class RWMReference:
     accept_rate: float
     n_accepted: int
     total_steps: int
-
-
-def adaptive_rwm_reference(
-    logpost,
-    theta0: NDF,
-    rng: np.random.Generator,
-    *,
-    n_draws: int,
-    burn_in: int = 1000,
-    thin: int = 1,
-    adapt: bool = True,
-    adapt_start: int = 100,
-    adapt_interval: int = 25,
-    proposal_scale: float = 0.1,
-    adapt_epsilon: float = 1e-8,
-) -> RWMReference:
-    """Verbatim transcription of the numpy-era ``Estimator.mcmc`` mainloop.
-
-    This is the **pre-port oracle**: the Haario adaptive random-walk Metropolis
-    chain exactly as it ran on numpy (``rng.multivariate_normal`` SVD proposal +
-    ``np.cov`` batch adaptation + ``2.38**2/d`` scaling), lifted out of the lib so
-    it stays frozen once ``Estimator.mcmc`` is rewritten onto the native frozen
-    stream. The native chain is validated against the marginals this produces
-    (KS + acceptance rate), per the statistical-equivalence contract (#331); it is
-    deliberately NOT bit-reproduced.
-
-    ``logpost(theta) -> float`` is the caller's safe log-posterior (``-inf`` on a
-    BK violation / non-finite eval, auto-rejected here via the finiteness gate).
-    RNG consumption order is load-bearing for the faithfulness test: one
-    ``multivariate_normal`` per step, then one ``random()`` only when the proposal
-    logpost is finite -- identical to the estimator.
-    """
-    current = np.asarray(theta0, dtype=float64).copy()
-    d = current.shape[0]
-    total_steps = burn_in + n_draws * thin
-    cov = (float64(proposal_scale) ** 2) * np.eye(d, dtype=float64)
-    scale = float64((2.38**2) / d)
-
-    cur_lp = float64(logpost(current))
-    accepted = 0
-
-    history = np.empty((total_steps, d), dtype=float64)
-    kept = np.empty((n_draws, d), dtype=float64)
-    kept_lp = np.empty((n_draws,), dtype=float64)
-
-    keep_i = 0
-    eye_d = np.eye(d, dtype=float64)
-
-    for t in range(total_steps):
-        prop = rng.multivariate_normal(current, cov)
-        prop_lp = float64(logpost(prop))
-
-        if np.isfinite(prop_lp):
-            log_alpha = prop_lp - cur_lp
-            if np.log(rng.random()) < log_alpha:
-                current = prop
-                cur_lp = prop_lp
-                accepted += 1
-
-        history[t] = current
-
-        if adapt and t < burn_in and t >= adapt_start and (t + 1) % adapt_interval == 0:
-            hist = history[: t + 1]
-            if d == 1:
-                var = np.var(hist[:, 0], ddof=1) if hist.shape[0] > 1 else float64(1.0)
-                cov = np.array([[scale * var + adapt_epsilon]], dtype=float64)
-            else:
-                emp = np.cov(hist.T, ddof=1) if hist.shape[0] > 1 else eye_d
-                cov = scale * (np.asarray(emp, dtype=float64) + adapt_epsilon * eye_d)
-
-        if t >= burn_in and (t - burn_in) % thin == 0:
-            kept[keep_i] = current
-            kept_lp[keep_i] = cur_lp
-            keep_i += 1
-
-    return RWMReference(
-        kept=kept,
-        kept_lp=kept_lp,
-        accept_rate=float(accepted / total_steps),
-        n_accepted=int(accepted),
-        total_steps=int(total_steps),
-    )
 
 
 @njit(cache=True)
@@ -438,3 +356,175 @@ def _R_from_unconstrained(u: NDF, K: int) -> tuple[NDF, NDF, NDF]:
     std_row = std.reshape((1, K))
     R = corr * std_col * std_row
     return (R.astype(float64), std, Lcorr)
+
+
+# --- test support ------------------------------------------------------------
+# Standalone POST82 estimator + native-algorithm reference chain, used by the
+# deterministic native-parity tests (no pytest fixture required).
+
+
+def build_post82_estimator(
+    *,
+    estimated_params=("psi_pi", "rho_r"),
+    priors=None,
+    filter_mode="linear",
+):
+    """Compile the POST82 test model + a short simulated panel and return an
+    ``Estimator`` ready for ``mcmc`` -- the statistical-oracle setup, standalone
+    (no pytest fixture). Default priors are normal on ``psi_pi`` / ``rho_r``;
+    pass ``estimated_params`` + ``priors`` together to override."""
+    from pathlib import Path
+
+    import pandas as pd
+    from sympy import Symbol
+
+    from SymbolicDSGE import ModelParser, DSGESolver
+    from SymbolicDSGE.estimation import Estimator
+
+    path = (
+        Path(__file__).resolve().parent.parent / "fixtures" / "models" / "POST82.yaml"
+    )
+    model, kalman = ModelParser(str(path)).get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    steady = np.zeros(len(compiled.var_names), dtype=np.float64)
+    solved = solver.solve(compiled=compiled, ss_seed=steady)
+
+    calib = compiled.config.calibration
+    sig = {
+        s: float(calib.parameters[calib.shock_std[Symbol(s)]])
+        for s in ("e_g", "e_z", "e_r")
+    }
+    T = 48
+    rng = np.random.default_rng(20260724)
+    sim = solved.sim(
+        T=T,
+        shocks={
+            "g": rng.normal(0.0, sig["e_g"], size=T),
+            "z": rng.normal(0.0, sig["e_z"], size=T),
+            "r": rng.normal(0.0, sig["e_r"], size=T),
+        },
+        x0=np.zeros(len(compiled.var_names), dtype=np.float64),
+        observables=True,
+    )
+    y = pd.DataFrame(
+        {"OutGap": sim["OutGap"][1:], "Infl": sim["Infl"][1:], "Rate": sim["Rate"][1:]}
+    )
+
+    if priors is None:
+        priors = {
+            "psi_pi": Estimator.make_prior(
+                distribution="normal",
+                parameters={"mean": 2.0, "std": 0.5},
+                transform="identity",
+            ),
+            "rho_r": Estimator.make_prior(
+                distribution="normal",
+                parameters={"mean": 0.8, "std": 0.1},
+                transform="identity",
+            ),
+        }
+
+    return Estimator(
+        solver=solver,
+        compiled=compiled,
+        y=y,
+        observables=["OutGap", "Infl", "Rate"],
+        filter_mode=filter_mode,
+        estimated_params=list(estimated_params),
+        priors=priors,
+        ss_seed=steady,
+    )
+
+
+def native_algorithm_mimic(
+    logpost,
+    theta0: NDF,
+    rng: np.random.Generator,
+    *,
+    n_draws: int,
+    burn_in: int = 1000,
+    thin: int = 1,
+    adapt: bool = True,
+    adapt_start: int = 100,
+    adapt_interval: int = 25,
+    proposal_scale: float = 0.1,
+    adapt_epsilon: float = 1e-8,
+    cov_method: str = "welford",
+) -> RWMReference:
+    """Numpy transcription of the **native** mcmc algorithm (issue #331).
+
+    Mirrors the native recipe exactly (as opposed to the numpy-era chain, which
+    used a ``multivariate_normal`` SVD proposal + batch ``np.cov``):
+    ``rng.standard_normal`` draws (bit-identical to the native
+    ``standard_normal_fill``), a Cholesky proposal ``current + L @ z``, and a
+    running Welford covariance refactored on the same schedule. Driven by a
+    ``NativeLogpost`` handle and a fixed seed, it reproduces the native mainloop
+    bit-for-bit up to the Cholesky factorization -- the deterministic parity
+    reference for the native loop mechanics. Returns theta-space kept draws.
+
+    ``cov_method`` selects the adaptation covariance estimator: ``"welford"`` (the
+    native running estimator) or ``"batch"`` (the numpy-era ``np.cov`` over full
+    history). Holding everything else fixed, comparing the two isolates the single
+    algorithmic difference between the native and numpy-era chains."""
+    theta0 = np.asarray(theta0, dtype=float64)
+    d = theta0.shape[0]
+    total_steps = burn_in + n_draws * thin
+    scale = float64((2.38**2) / d)
+
+    L = proposal_scale * np.eye(d, dtype=float64)
+    mean = np.zeros(d, dtype=float64)
+    M2 = np.zeros((d, d), dtype=float64)
+    count = 0
+    history = np.empty((total_steps, d), dtype=float64)  # for cov_method="batch"
+    eye_d = np.eye(d, dtype=float64)
+
+    current = theta0.copy()
+    cur_lp = float64(logpost(current))
+    accepted = 0
+
+    kept = np.empty((n_draws, d), dtype=float64)
+    kept_lp = np.empty((n_draws,), dtype=float64)
+    keep_i = 0
+
+    for t in range(total_steps):
+        z = rng.standard_normal(d)
+        prop = current + L @ z
+        prop_lp = float64(logpost(prop))
+
+        if np.isfinite(prop_lp):
+            if np.log(rng.random()) < prop_lp - cur_lp:
+                current = prop
+                cur_lp = prop_lp
+                accepted += 1
+
+        history[t] = current
+        if adapt and t < burn_in:
+            count += 1
+            delta = current - mean
+            mean = mean + delta / count
+            delta2 = current - mean
+            M2 = M2 + np.outer(delta, delta2)
+            if t >= adapt_start and (t + 1) % adapt_interval == 0 and count > 1:
+                if cov_method == "welford":
+                    emp = M2 / (count - 1)
+                else:  # batch np.cov over full history, numpy-era style
+                    emp = np.cov(history[: t + 1].T, ddof=1)
+                S = scale * (np.asarray(emp, dtype=float64) + adapt_epsilon * eye_d)
+                try:
+                    L = np.linalg.cholesky(S)
+                except np.linalg.LinAlgError:
+                    pass
+
+        if t >= burn_in and (t - burn_in) % thin == 0:
+            kept[keep_i] = current
+            kept_lp[keep_i] = cur_lp
+            keep_i += 1
+
+    return RWMReference(
+        kept=kept,
+        kept_lp=kept_lp,
+        accept_rate=float(accepted / total_steps),
+        n_accepted=int(accepted),
+        total_steps=int(total_steps),
+    )

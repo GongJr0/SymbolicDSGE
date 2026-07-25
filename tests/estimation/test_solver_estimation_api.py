@@ -220,10 +220,16 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
     assert out.success
 
 
-def test_solver_estimate_and_solve_mcmc(monkeypatch):
-    solver = _make_solver()
-    compiled = _make_compiled(0.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+def _normal_prior(mean, std):
+    return Estimator.make_prior(
+        distribution="normal",
+        parameters={"mean": mean, "std": std},
+        transform="identity",
+    )
+
+
+def test_solver_estimate_and_solve_mcmc(post82, monkeypatch):
+    solver = post82["solver"]
 
     captured = {}
 
@@ -231,29 +237,31 @@ def test_solver_estimate_and_solve_mcmc(monkeypatch):
         captured["parameters"] = parameters
         return SimpleNamespace(params=parameters)
 
-    solver.solve = fake_solve  # type: ignore[method-assign]
+    monkeypatch.setattr(solver, "solve", fake_solve)
 
     result, solved = solver.estimate_and_solve(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
+        compiled=post82["compiled"],
+        y=post82["y"],
         method="mcmc",
+        observables=post82["obs"],
+        estimated_params=["psi_pi"],
+        priors={"psi_pi": _normal_prior(2.0, 0.5)},
+        ss_seed=post82["steady"],
         posterior_point="map",
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=1.0, weight=2.0)},
         n_draws=30,
         burn_in=30,
         random_state=123,
     )
 
     assert result.samples.shape == (30, 1)
-    assert "a" in captured["parameters"]
+    assert "psi_pi" in captured["parameters"]
     assert solved.params == captured["parameters"]
 
 
-def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(monkeypatch):
-    solver = _make_solver()
-    compiled = _make_compiled_two(0.0, 3.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
+def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
+    post82, monkeypatch
+):
+    solver = post82["solver"]
 
     captured = {}
 
@@ -261,28 +269,30 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(monkeypat
         captured["parameters"] = parameters
         return SimpleNamespace(params=parameters)
 
-    solver.solve = fake_solve  # type: ignore[method-assign]
+    monkeypatch.setattr(solver, "solve", fake_solve)
 
     result, solved = solver.estimate_and_solve(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
+        compiled=post82["compiled"],
+        y=post82["y"],
         method="mcmc",
+        observables=post82["obs"],
+        estimated_params=["psi_pi"],
+        priors={"psi_pi": _normal_prior(2.0, 0.5)},
+        ss_seed=post82["steady"],
         posterior_point="mean",
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=1.0, weight=2.0)},
         n_draws=20,
         burn_in=20,
         random_state=123,
     )
 
     assert result.samples.shape == (20, 1)
-    assert "a" in captured["parameters"]
-    assert "b" in captured["parameters"]
-    assert float(captured["parameters"]["b"]) == pytest.approx(3.0)
+    assert "psi_pi" in captured["parameters"]
+    # non-estimated params thread through the solve at their calibration values
     sym_map = {
         getattr(k, "name", k): v
-        for k, v in compiled.config.calibration.parameters.items()
+        for k, v in post82["compiled"].config.calibration.parameters.items()
     }
-    assert float(sym_map["a"]) == pytest.approx(captured["parameters"]["a"])
-    assert float(sym_map["b"]) == pytest.approx(captured["parameters"]["b"])
+    assert float(captured["parameters"]["rho_r"]) == pytest.approx(
+        float(sym_map["rho_r"])
+    )
     assert solved.params == captured["parameters"]

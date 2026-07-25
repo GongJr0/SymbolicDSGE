@@ -178,8 +178,13 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
   sdsge_transpose_sq(s->s, n);
   sdsge_transpose_sq(s->t, n);
   sdsge_transpose_sq(s->z, n);
-  klein_postproc(s->s, s->t, s->z, b->dims.n_state, b->dims.n_ctrl, s->f, s->p,
-                 &s->stab, s->eig);
+  if (klein_postproc(s->s, s->t, s->z, b->dims.n_state, b->dims.n_ctrl, s->f,
+                     s->p, &s->stab, s->eig) != SDSGE_KLEIN_POSTPROC_SUCCESS) {
+    /* singular z11 (a Blanchard-Kahn failure, e.g. a non-stationary exogenous
+     * root at rho >= 1), workspace alloc failure, or a stateless model. Any of
+     * these leaves f/p/stab unusable, so reject the draw. */
+    return SDSGE_SOLVE_BK;
+  }
   if (s->stab != 0) {
     return SDSGE_SOLVE_BK;
   }

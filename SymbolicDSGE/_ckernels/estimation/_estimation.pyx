@@ -1414,3 +1414,44 @@ def run_mcmc(
         "total_steps": int(res.total_steps),
         "bk_violations": int(b.bk_violations),
     }
+
+
+cdef class NativeLogpost:
+    """Single-eval handle over a built native objective context.
+
+    ``logpost(theta)`` / ``loglik(theta)`` return the native objective at
+    ``theta`` -- the exact value run_mcmc / run_estimation evaluate per step
+    (``+logpost`` / ``+loglik`` form; ``-inf`` on a BK or non-finite solve). The
+    ctx is marshalled once at construction; each call re-solves at ``theta``. This
+    is the seam parity tests use to drive a Python reference chain through the
+    SAME objective the native loop uses, isolating loop mechanics from the
+    objective; it is not the estimation hot path."""
+    cdef _NativeCtx nc
+    cdef str mode
+
+    def __cinit__(self, object ctx_dto, str mode):
+        self.nc = _build_native_ctx(ctx_dto, mode)
+        self.mode = mode
+
+    cdef double _eval(self, const double *theta, int has_priors):
+        cdef void *ctxp = self.nc.ctxp
+        if self.mode == "linear":
+            return sdsge_obj_linear(<sdsge_linear_ctx*>ctxp, theta, has_priors)
+        elif self.mode == "extended":
+            return sdsge_obj_extended(<sdsge_extended_ctx*>ctxp, theta, has_priors)
+        else:
+            return sdsge_obj_unscented(<sdsge_unscented_ctx*>ctxp, theta, has_priors)
+
+    def loglik(self, double[::1] theta not None):
+        if theta.shape[0] != self.nc.n_theta:
+            raise ValueError(
+                "theta length does not match the estimated parameter count."
+            )
+        return float(self._eval(&theta[0], 0))
+
+    def logpost(self, double[::1] theta not None):
+        if theta.shape[0] != self.nc.n_theta:
+            raise ValueError(
+                "theta length does not match the estimated parameter count."
+            )
+        return float(self._eval(&theta[0], 1))
