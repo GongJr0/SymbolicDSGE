@@ -89,23 +89,23 @@ prior_spec = {
 
     ...,
 
-    "rho_gz": make_prior(
-        "normal",
-        parameters={"mean": 0.0, "std": 0.2},
-        transform="affine_logit", # (3)!
-        transform_kwargs={"low": -1.0, "high": 1.0}
+    "Q_corr": make_prior( # (3)!
+        "lkj_chol",
+        transform="cholesky_corr",
+        parameters={"eta": 2.0, "K": 3},
     ),
     "sig_r": make_prior(
         "gamma",
         parameters={"mean": 0.18, "std": 0.1},
         transform="log",
     ),
+    ...,
 }
 ```
 
 1. `logit` does not require parameters and (inverse) transforms to (0, 1)
 2. `log` maps real numbers to positive reals without requiring parameters.
-3. `affine_logit` takes a low ($a$) and high ($b$) bound to map (a, b)
+3. `Q_corr` and `R_corr` are block estimations requiring the complete correlation matrix to be parameterized in the config. The `lkj_chol` distribution and `cholesky_corr` are necessary to produce a valid correlation block and are enforced.
 
 ## Running the Estimation
 
@@ -137,7 +137,7 @@ res, sol = solver.estimate_and_solve(
 8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
 
 ```text
-MCMC sampling concluded in 71.61 seconds with 1536.00 iterations per second.
+MCMC sampling concluded in 7.58 seconds with 14509.21 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 
@@ -180,23 +180,25 @@ pd.Series(
 2. Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)
 
 ```text
-beta                0.969
-rho_r               0.775
-rho_g               0.828
-rho_z               0.889
-psi_pi              4.142
-psi_x               0.364
-kappa               0.363
-tau_inv             0.414
-rho_gz              0.085
-meas_rho_ir         0.005
-sig_r               0.032
-sig_g               0.063
-sig_z               0.674
-meas_infl           1.427
-meas_rate           0.002
-loglik           -266.964
-accept_rate         0.233
+beta                0.971
+rho_r               0.813
+rho_g               0.869
+rho_z               0.859
+psi_pi              3.256
+psi_x               0.341
+kappa               0.458
+tau_inv             0.984
+rho_gz              0.034
+rho_gr              0.774
+rho_zr             -0.336
+meas_rho_ir        -0.055
+sig_r               0.112
+sig_g               0.166
+sig_z               0.645
+meas_infl           1.138
+meas_rate           0.044
+loglik           -251.538
+accept_rate         0.135
 n_draws        100000.000
 burn_in         10000.000
 thin                1.000
@@ -218,21 +220,23 @@ res.hpd_intervals(alpha=0.05, n_digits=3) # (1)!
 1. `alpha` is the probability mass outside the interval. For example, `alpha=0.05` means we want to compute the 95% HPD interval. `n_digits` is the number of digits to round the output to.
 
 ```text
-{'beta': (np.float64(0.943), np.float64(0.99)),
- 'rho_r': (np.float64(0.725), np.float64(0.82)),
- 'rho_g': (np.float64(0.762), np.float64(0.891)),
- 'rho_z': (np.float64(0.854), np.float64(0.924)),
- 'psi_pi': (np.float64(3.122), np.float64(5.171)),
- 'psi_x': (np.float64(0.159), np.float64(0.611)),
- 'kappa': (np.float64(0.218), np.float64(0.512)),
- 'tau_inv': (np.float64(0.216), np.float64(0.631)),
- 'rho_gz': (np.float64(-0.326), np.float64(0.543)),
- 'meas_rho_ir': (np.float64(-0.843), np.float64(0.843)),
- 'sig_r': (np.float64(0.01), np.float64(0.057)),
- 'sig_g': (np.float64(0.011), np.float64(0.122)),
- 'sig_z': (np.float64(0.491), np.float64(0.875)),
- 'meas_infl': (np.float64(1.209), np.float64(1.629)),
- 'meas_rate': (np.float64(-0.118), np.float64(0.118))}
+{'beta': (np.float64(0.946), np.float64(0.991)),
+ 'rho_r': (np.float64(0.759), np.float64(0.872)),
+ 'rho_g': (np.float64(0.817), np.float64(0.914)),
+ 'rho_z': (np.float64(0.805), np.float64(0.907)),
+ 'psi_pi': (np.float64(2.017), np.float64(4.432)),
+ 'psi_x': (np.float64(0.143), np.float64(0.573)),
+ 'kappa': (np.float64(0.287), np.float64(0.642)),
+ 'tau_inv': (np.float64(0.41), np.float64(1.622)),
+ 'rho_gz': (np.float64(-0.699), np.float64(0.85)),
+ 'rho_gr': (np.float64(0.457), np.float64(0.981)),
+ 'rho_zr': (np.float64(-0.959), np.float64(0.532)),
+ 'meas_rho_ir': (np.float64(-0.843), np.float64(0.739)),
+ 'sig_r': (np.float64(0.082), np.float64(0.143)),
+ 'sig_g': (np.float64(0.04), np.float64(0.289)),
+ 'sig_z': (np.float64(0.444), np.float64(0.848)),
+ 'meas_infl': (np.float64(0.439), np.float64(1.535)),
+ 'meas_rate': (np.float64(0.0), np.float64(0.107))}
 ```
 
 ### Posterior Density Estimation

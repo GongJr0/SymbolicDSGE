@@ -17,7 +17,7 @@ parameters: [beta, kappa, tau_inv,
              rho_g, rho_z,
              pi_star, r_star,
              sig_r, sig_g, sig_z,
-             rho_gz,
+             rho_gz, rho_gr, rho_zr,
              meas_infl, meas_rate, meas_outgap,
              meas_rho_ir, meas_rho_gi, meas_rho_gr]
 
@@ -74,6 +74,9 @@ calibration:
     rho_z: 0.85
 
     rho_gz: 0.36
+    rho_gr: 0.0
+    rho_zr: 0.0
+
     sig_r: 0.18
     sig_g: 0.18
     sig_z: 0.64
@@ -93,6 +96,8 @@ calibration:
       e_r: sig_r
     corr:
       e_g, e_z: rho_gz
+      e_g, e_r: rho_gr
+      e_z, e_r: rho_zr
 
 kalman:
 

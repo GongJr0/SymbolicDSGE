@@ -91,7 +91,7 @@ DSGESolver.estimate(
     *,
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
-    method: str = "mle",
+    method: Literal["mle", "map", "mcmc"] = "mle",
     theta0: np.ndarray | Mapping[str, float] | None = None, # (1)!
     observables: list[str] | None = None,
     filter_mode: str = "linear", # (3)!
@@ -108,14 +108,14 @@ DSGESolver.estimate(
 ```
 
 1. If `#!python theta0` is passed as a dictionary, it is reordered internally to the estimator's canonical parameter order.
-2. If `#!python R` is not supplied, the estimator attempts to infer `R` from data before optimization/sampling (MAP on full `R`, with MLE fallback on failure).
+2. If `#!python R` is not supplied, it comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
 3. Filter algorithm for the likelihood: `#!python "linear"` (affine measurements), `#!python "extended"` (EKF, nonlinear measurements), or `#!python "unscented"` (UKF).
 
 ???+ note "Filter Mode"
     `#!python filter_mode` is an explicit choice and is no longer inferred. Use `#!python "linear"` when all selected measurement equations are affine, `#!python "extended"` for nonlinear measurements, and `#!python "unscented"` to run the UKF. The `#!python "unscented"` mode solves the model to second order internally and is the only mode that consumes the perturbation policy tensors.
 
 ???+ note "Point Estimation Result"
-    `method="mle"` and `method="map"` return `SymbolicDSGE.OptimizationResult`, not `scipy.optimize.OptimizeResult`.
+    `method="mle"` and `method="map"` return `SymbolicDSGE.OptimizationResult`. They run entirely in the native backend, whose optimizer set is `#!python "L-BFGS-B"` (default) and `#!python "Nelder-Mead"`; passing any other optimizer raises. See [`Estimator`](./Estimator.md#mle) for the per-optimizer keyword arguments.
 
 __Method kwargs:__
 
@@ -130,7 +130,7 @@ DSGESolver.estimate_and_solve(
     *,
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
-    method: str = "mle",
+    method: Literal["mle", "map", "mcmc"] = "mle",
     theta0: np.ndarray | Mapping[str, float] | None = None,
     posterior_point: str = "mean",
     observables: list[str] | None = None,

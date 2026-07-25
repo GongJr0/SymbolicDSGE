@@ -124,12 +124,23 @@ Estimator.mle(
     *,
     theta0: np.ndarray | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
-    method: str = "L-BFGS-B",
-    options: Mapping[str, Any] | None = None,
+    method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
+    m: int = 10, # (3)!
+    maxiter: int = 15000,
+    maxfun: int = 15000,
+    maxls: int = 20,
+    factr: float = 1e7,
+    pgtol: float = 1e-5,
+    fd_step: float = 0.0,
+    xatol: float = 1e-4, # (4)!
+    fatol: float = 1e-4,
 ) -> OptimizationResult
 ```
 
 1. If `None`, uses transformed calibration defaults.
+2. Native optimizer. Only the two listed are supported; see the note below.
+3. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
+4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
 
 ## MAP
 ```python
@@ -137,12 +148,26 @@ Estimator.map(
     *,
     theta0: np.ndarray | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
-    method: str = "L-BFGS-B",
-    options: Mapping[str, Any] | None = None,
+    method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
+    m: int = 10, # (3)!
+    maxiter: int = 15000,
+    maxfun: int = 15000,
+    maxls: int = 20,
+    factr: float = 1e7,
+    pgtol: float = 1e-5,
+    fd_step: float = 0.0,
+    xatol: float = 1e-4, # (4)!
+    fatol: float = 1e-4,
 ) -> OptimizationResult
 ```
 
 1. Requires non-`None` priors at estimator construction.
+2. Native optimizer. Only the two listed are supported; see the note below.
+3. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
+4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
+
+???+ note "Native optimizer set"
+    `mle` and `map` run entirely in the native backend, which ships a curated set of optimizers with no scipy fallback. Only `#!python "L-BFGS-B"` (default; quasi-Newton with a finite-difference gradient) and `#!python "Nelder-Mead"` (gradient-free) are supported; any other `method` raises. Each optimizer's tuning parameters are passed as explicit keyword arguments: the L-BFGS-B group (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`) and the Nelder-Mead group (`xatol`, `fatol`).
 
 ## MCMC
 ```python
@@ -172,8 +197,11 @@ Estimator.mcmc(
 ???+ note "MCMC Sample Space"
     `MCMCResult.samples` are returned in constrained parameter space (parameter names), not raw unconstrained `theta`.
 
+???+ note "Reproducibility"
+    `random_state` seeds the native sampler, which advances numpy's own PCG64 stream. A fixed `random_state` reproduces the native chain exactly; that chain is statistically equivalent to the pre-native numpy sampler, not bit-identical to it.
+
 ## Result Objects
-MLE and MAP return `SymbolicDSGE.OptimizationResult`. The scipy `OptimizeResult` object is used internally by the optimizer and is not returned.
+MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native optimizer's result struct; scipy is not involved.
 
 ### OptimizationResult
 | __Field__ | __Type__ | __Description__ |
