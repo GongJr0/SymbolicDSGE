@@ -184,7 +184,19 @@ def test_ui_backend_reports_configured_shock_correlations() -> None:
             "key": "e_g,e_z",
             "corr_param": "rho_gz",
             "corr_value": 0.36,
-        }
+        },
+        {
+            "pair": ["e_g", "e_r"],
+            "key": "e_g,e_r",
+            "corr_param": "rho_gr",
+            "corr_value": 0.0,
+        },
+        {
+            "pair": ["e_z", "e_r"],
+            "key": "e_z,e_r",
+            "corr_param": "rho_zr",
+            "corr_value": 0.0,
+        },
     ]
 
 
