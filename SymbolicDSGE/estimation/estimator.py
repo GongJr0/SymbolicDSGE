@@ -21,7 +21,7 @@ from ..bayesian.transforms.transform import Transform
 from ..core.compiled_model import CompiledModel
 from ..core.solver import DSGESolver
 
-from .._ckernels.estimation import run_estimation
+from .._ckernels.estimation import run_estimation, run_mcmc
 
 from .prior_program import PackedLogPrior, build_packed_logprior
 from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
@@ -1132,27 +1132,16 @@ class Estimator:
             return MAPResult(**common, logpost=-res["fun"], logprior=res["logprior"])
         raise ValueError(f"unknown result kind {kind!r}")
 
-    def _point_estimate(
+    def _build_native_context(
         self,
-        routine: Literal["mle", "map"],
-        has_priors: int,
-        theta0: NDF | Mapping[str, float] | None = None,
-        bounds: Sequence[tuple[float | None, float | None]] | None = None,
-        method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
-        m: int = 10,
-        maxiter: int = 15000,
-        maxfun: int = 15000,
-        maxls: int = 20,
-        factr: float = 1e7,
-        pgtol: float = 1e-5,
-        fd_step: float = 0.0,
-        xatol: float = 1e-4,
-        fatol: float = 1e-4,
-    ) -> OptimizationResult:
-        init = self.resolve_theta0(theta0)
-        if routine == "map":
-            self._validate_prior_initial_guess(init)
+    ) -> tuple[PyLinearContext | PyExtendedContext | PyUnscentedContext, str]:
+        """Build the native objective context DTO for the current filter mode.
 
+        Method-agnostic: it depends only on ``self`` (model, data, priors, Q/R
+        specs, transforms), so the same ctx serves the MLE/MAP optimizer driver
+        and the MCMC mainloop. The driver decides how to drive it (minimized
+        ``-logpost`` vs ``+logpost``); the ctx is identical.
+        """
         common = build_obj_common(
             compiled=self.compiled,
             kalman=self.kalman,
@@ -1177,6 +1166,30 @@ class Estimator:
             ctx = build_unscented_context(common, compiled=self.compiled, x0=self.x0)
         else:
             raise ValueError(f"Unknown filter_mode {mode!r}.")
+        return ctx, mode
+
+    def _point_estimate(
+        self,
+        routine: Literal["mle", "map"],
+        has_priors: int,
+        theta0: NDF | Mapping[str, float] | None = None,
+        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
+        m: int = 10,
+        maxiter: int = 15000,
+        maxfun: int = 15000,
+        maxls: int = 20,
+        factr: float = 1e7,
+        pgtol: float = 1e-5,
+        fd_step: float = 0.0,
+        xatol: float = 1e-4,
+        fatol: float = 1e-4,
+    ) -> OptimizationResult:
+        init = self.resolve_theta0(theta0)
+        if routine == "map":
+            self._validate_prior_initial_guess(init)
+
+        ctx, mode = self._build_native_context()
 
         res = run_estimation(
             ctx,
@@ -1319,9 +1332,10 @@ class Estimator:
             raise ValueError("burn_in must be non-negative.")
         if thin <= 0:
             raise ValueError("thin must be positive.")
+        if adapt_interval <= 0:
+            raise ValueError("adapt_interval must be positive.")
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
-        self._reset_search_warning_count()
 
         rng = (
             self._clone_generator(random_state)
@@ -1331,64 +1345,35 @@ class Estimator:
 
         current = self.resolve_theta0(theta0)
         self._validate_prior_initial_guess(current)
-        d = current.shape[0]
-        if d == 0:
+        if current.shape[0] == 0:
             raise ValueError("No estimated parameters were provided.")
 
-        total_steps = burn_in + n_draws * thin
-        cov = (float64(proposal_scale) ** 2) * np.eye(d, dtype=float64)
-        scale = float64((2.38**2) / d)
+        ctx, mode = self._build_native_context()
 
-        cur_lp = self._safe_logpost(current)
-        accepted = 0
-
-        history = np.empty((total_steps, d), dtype=float64)
-        lp_trace = np.empty((total_steps,), dtype=float64)
-        kept = np.empty((n_draws, d), dtype=float64)
-        kept_lp = np.empty((n_draws,), dtype=float64)
-
-        keep_i = 0
-        eye_d = np.eye(d, dtype=float64)
+        # The chain runs entirely in native nogil code; ``rng`` (numpy's own
+        # PCG64) is borrowed for the run and must outlive it, which the local
+        # reference here guarantees. Timing wraps only the native call.
         t0 = perf_counter()
-
-        for t in range(total_steps):
-            prop = rng.multivariate_normal(current, cov)
-            prop_lp = self._safe_logpost(prop)
-
-            if np.isfinite(prop_lp):
-                log_alpha = prop_lp - cur_lp
-                if np.log(rng.random()) < log_alpha:
-                    current = prop
-                    cur_lp = prop_lp
-                    accepted += 1
-
-            history[t] = current
-            lp_trace[t] = cur_lp
-
-            if (
-                adapt
-                and t < burn_in
-                and t >= adapt_start
-                and (t + 1) % adapt_interval == 0
-            ):
-                hist = history[: t + 1]
-                if d == 1:
-                    var = (
-                        np.var(hist[:, 0], ddof=1)
-                        if hist.shape[0] > 1
-                        else float64(1.0)
-                    )
-                    cov = np.array([[scale * var + adapt_epsilon]], dtype=float64)
-                else:
-                    emp = np.cov(hist.T, ddof=1) if hist.shape[0] > 1 else eye_d
-                    cov = scale * (asarray(emp, dtype=float64) + adapt_epsilon * eye_d)
-
-            if t >= burn_in and (t - burn_in) % thin == 0:
-                kept[keep_i] = current
-                kept_lp[keep_i] = cur_lp
-                keep_i += 1
+        out = run_mcmc(
+            ctx,
+            mode,
+            np.ascontiguousarray(current, dtype=float64),
+            rng,
+            n_draws=n_draws,
+            burn_in=burn_in,
+            thin=thin,
+            adapt=int(adapt),
+            adapt_start=adapt_start,
+            adapt_interval=adapt_interval,
+            proposal_scale=proposal_scale,
+            adapt_epsilon=adapt_epsilon,
+        )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
+        total_steps = int(out["total_steps"])
+        kept = out["samples_theta"]
+
+        # kept draws walk theta space; map each to the named parameters.
         kept_params = np.empty_like(kept, dtype=float64)
         for i in range(n_draws):
             p = self.theta_to_params(kept[i])
@@ -1399,11 +1384,11 @@ class Estimator:
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
 
-        out = MCMCResult(
+        result = MCMCResult(
             param_names=list(self.param_names),
             samples=kept_params,
-            logpost_trace=kept_lp,
-            accept_rate=float64(accepted / total_steps),
+            logpost_trace=out["logpost_trace"],
+            accept_rate=float64(out["n_accepted"] / total_steps),
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
@@ -1420,8 +1405,8 @@ class Estimator:
                 ),
             },
         )
-        self._report_search_warning_count("mcmc", 0)
-        return out
+        self._report_search_warning_count("mcmc", out["bk_violations"])
+        return result
 
 
 def _method_from_result(

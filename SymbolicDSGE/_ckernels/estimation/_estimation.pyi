@@ -9,6 +9,7 @@ parity harnesses.
 
 from typing import Any, Sequence
 
+import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
@@ -84,3 +85,22 @@ def run_estimation(
     xatol: float = ...,
     fatol: float = ...,
 ) -> dict[str, Any]: ...
+def run_mcmc(
+    ctx_dto: Any,
+    mode: str,
+    theta0: _F64,
+    rng: np.random.Generator,
+    n_draws: int,
+    burn_in: int = ...,
+    thin: int = ...,
+    adapt: int = ...,
+    adapt_start: int = ...,
+    adapt_interval: int = ...,
+    proposal_scale: float = ...,
+    adapt_epsilon: float = ...,
+) -> dict[str, Any]: ...
+
+class NativeLogpost:
+    def __init__(self, ctx_dto: Any, mode: str) -> None: ...
+    def loglik(self, theta: _F64) -> float: ...
+    def logpost(self, theta: _F64) -> float: ...

@@ -25,8 +25,14 @@ _COMMON = os.path.join(_CKERNELS, "_common")
 # share symbols). Keyed by extension subdir name. `_common` is linked into every
 # extension already; this is for the higher-level subsystems (core, kalman, ...).
 _EXTRA_DEPS = {
-    "estimation": ["core", "kalman", "optim"],
+    "estimation": ["core", "kalman", "optim", "rng"],
 }
+
+# Subsystems whose hand-written C draws randoms through numpy's low-level RNG
+# C-API (numpy/random headers + the `npyrandom` static lib). An extension needs
+# the numpy include path and the `npyrandom` link iff it compiles `rng` sources:
+# either it IS `rng`, or it lists `rng` in _EXTRA_DEPS. Keeping this scoped means
+# the six RNG-free subsystems never pull the numpy build dependency.
 
 
 def _hand_c(subdir: str) -> list[str]:
@@ -71,12 +77,26 @@ def _extensions() -> list[Extension]:
         dep_c = [c for d in dep_dirs for c in _hand_c(d)]
 
         sources = [pyx] + hand_c + dep_c + common_sources
+
+        subname = os.path.basename(subdir)
+        include_dirs = [subdir, *dep_dirs, _COMMON]
+        ext_kwargs: dict[str, object] = {}
+        if subname == "rng" or "rng" in _EXTRA_DEPS.get(subname, []):
+            import numpy as np
+
+            include_dirs.append(np.get_include())
+            ext_kwargs["library_dirs"] = [
+                os.path.join(os.path.dirname(np.__file__), "random", "lib")
+            ]
+            ext_kwargs["libraries"] = ["npyrandom"]
+
         extensions.append(
             Extension(
                 module,
                 sources=sources,
-                include_dirs=[subdir, *dep_dirs, _COMMON],
+                include_dirs=include_dirs,
                 extra_compile_args=extra_args,
+                **ext_kwargs,
             )
         )
 

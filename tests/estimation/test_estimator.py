@@ -270,17 +270,28 @@ def test_mle_records_optimizer_config(post82_estimator):
     assert out.to_dict()["optimizer_config"] == cfg
 
 
-def test_mcmc_records_sampler_config(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
+def _normal_prior(mean, std):
+    return Estimator.make_prior(
+        distribution="normal",
+        parameters={"mean": mean, "std": std},
+        transform="identity",
     )
-    out = est.mcmc(n_draws=5, burn_in=2, thin=1, random_state=7, proposal_scale=0.2)
+
+
+@pytest.fixture
+def mcmc_estimator(post82_estimator):
+    """POST82 estimator with normal priors on ``psi_pi`` / ``rho_r``, ready for
+    mcmc. The native mcmc path drives the compiled kernels, so these tests need a
+    real model rather than a SimpleNamespace stub + fake loglik."""
+    return post82_estimator(
+        priors={"psi_pi": _normal_prior(2.0, 0.5), "rho_r": _normal_prior(0.8, 0.1)}
+    )
+
+
+def test_mcmc_records_sampler_config(mcmc_estimator):
+    out = mcmc_estimator.mcmc(
+        n_draws=5, burn_in=2, thin=1, random_state=7, proposal_scale=0.2
+    )
 
     cfg = out.sampler_config
     assert cfg["random_state"] == 7
@@ -311,84 +322,55 @@ def test_map_without_priors_raises(monkeypatch):
         est.map(theta0=np.array([0.0], dtype=np.float64))
 
 
-def test_mcmc_returns_expected_shapes_and_stats(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
-    )
-
-    out = est.mcmc(
+def test_mcmc_returns_expected_shapes_and_stats(mcmc_estimator):
+    out = mcmc_estimator.mcmc(
         n_draws=40,
         burn_in=40,
         thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
+        theta0=np.array([2.0, 0.8], dtype=np.float64),
         random_state=123,
         adapt=True,
     )
-    assert out.param_names == ["a"]
-    assert out.samples.shape == (40, 1)
+    assert out.param_names == ["psi_pi", "rho_r"]
+    assert out.samples.shape == (40, 2)
     assert out.logpost_trace.shape == (40,)
     assert 0.0 <= out.accept_rate <= 1.0
 
 
-def test_mcmc_seed_zero_is_exactly_reproducible(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
-    )
-
+def test_mcmc_seed_zero_is_exactly_reproducible(mcmc_estimator):
     kwargs = dict(
         n_draws=30,
         burn_in=30,
         thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
+        theta0=np.array([2.0, 0.8], dtype=np.float64),
         random_state=0,
         adapt=True,
     )
-    out1 = est.mcmc(**kwargs)
-    out2 = est.mcmc(**kwargs)
+    out1 = mcmc_estimator.mcmc(**kwargs)
+    out2 = mcmc_estimator.mcmc(**kwargs)
 
     assert np.array_equal(out1.samples, out2.samples)
     assert np.array_equal(out1.logpost_trace, out2.logpost_trace)
     assert out1.accept_rate == pytest.approx(out2.accept_rate)
 
 
-def test_mcmc_clones_generator_input_state(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": _QuadraticPrior(mean=1.0, weight=5.0)},
-    )
-
+def test_mcmc_clones_generator_input_state(mcmc_estimator):
     shared_rng = np.random.default_rng(123)
     kwargs = dict(
         n_draws=30,
         burn_in=30,
         thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
+        theta0=np.array([2.0, 0.8], dtype=np.float64),
         random_state=shared_rng,
         adapt=True,
     )
-    out1 = est.mcmc(**kwargs)
-    out2 = est.mcmc(**kwargs)
+    out1 = mcmc_estimator.mcmc(**kwargs)
+    out2 = mcmc_estimator.mcmc(**kwargs)
 
     assert np.array_equal(out1.samples, out2.samples)
     assert np.array_equal(out1.logpost_trace, out2.logpost_trace)
     assert out1.accept_rate == pytest.approx(out2.accept_rate)
+    # the caller's generator is snapshotted, not consumed
     assert shared_rng.random() == pytest.approx(np.random.default_rng(123).random())
 
 
@@ -586,27 +568,10 @@ def test_matrix_prior_overlap_with_scalar_component_prior_raises():
         )
 
 
-def test_matrix_prior_on_R_keeps_mcmc_samples_in_valid_correlation_support(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", lambda **kwargs: float64(0.0))
-
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled_with_dense_r_block(),
-        y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R_corr"],
-        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
-    )
-
-    out = est.mcmc(
-        n_draws=12,
-        burn_in=8,
-        thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
-        random_state=123,
-        adapt=False,
-    )
-
-    assert np.all(np.abs(out.samples[:, 0]) < 1.0)
+# Matrix-prior-on-R MCMC on a real model (valid-correlation-support) is covered
+# by test_estimator_lkj_integration.test_matrix_prior_on_R_runs_full_mcmc_with_
+# real_likelihood; the SimpleNamespace stub version can no longer drive the native
+# path and is not re-added here.
 
 
 def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
@@ -626,26 +591,19 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
     assert "placeholder default value" in msg
 
 
-def test_mcmc_reports_samples_in_constrained_space_for_log_transform(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-
+def test_mcmc_reports_samples_in_constrained_space_for_log_transform(post82_estimator):
+    # sig_r is a shock std (positive support -> Log transform), so mcmc must report
+    # its samples in constrained (positive) space, not the unconstrained draw space.
     prior = Estimator.make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": prior},
-    )
+    est = post82_estimator(estimated_params=["sig_r"], priors={"sig_r": prior})
     out = est.mcmc(
         n_draws=20,
         burn_in=10,
         thin=1,
-        theta0=np.array([0.0], dtype=np.float64),
         random_state=123,
         adapt=False,
     )
@@ -1168,25 +1126,24 @@ def test_logprior_base_branch_and_logpost(monkeypatch):
     )
 
 
-def test_mcmc_adaptation_branches(monkeypatch):
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
-    est_adapt = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled_with_r(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a", "meas"],
-        priors={
-            "a": _QuadraticPrior(mean=0.0, weight=1.0),
-            "meas": _QuadraticPrior(mean=1.0, weight=1.0),
-        },
+@pytest.mark.parametrize("estimated", [["psi_pi"], ["psi_pi", "rho_r"]])
+def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated):
+    # The native running covariance has no d==1 special case (a 1x1 covariance
+    # subsumes it), so adaptation must run cleanly for both scalar and vector theta.
+    priors = {
+        "psi_pi": _normal_prior(2.0, 0.5),
+        "rho_r": _normal_prior(0.8, 0.1),
+    }
+    est = post82_estimator(
+        estimated_params=estimated, priors={n: priors[n] for n in estimated}
     )
-    _ = est_adapt.mcmc(
-        n_draws=2,
-        burn_in=2,
+    out = est.mcmc(
+        n_draws=10,
+        burn_in=10,
         thin=1,
-        theta0=np.array([0.0, 1.0], dtype=np.float64),
         random_state=123,
         adapt=True,
         adapt_start=0,
         adapt_interval=1,
     )
+    assert out.samples.shape == (10, len(estimated))

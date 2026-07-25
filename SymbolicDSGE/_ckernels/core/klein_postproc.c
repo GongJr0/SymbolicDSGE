@@ -7,6 +7,12 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
                    i64 *SDSGE_RESTRICT stab, c128 *SDSGE_RESTRICT eig) {
   i64 N = n_s + n_cs;
 
+  /* Stamp the stab sentinel up front: every early-return failure below leaves a
+   * non-zero (undetermined) stab, never a stale value, so a caller that reads
+   * stab without checking the return code still sees a violation. Overwritten
+   * with the real 0 / -1 / +1 on the successful path. */
+  *stab = SDSGE_KLEIN_STAB_UNSET;
+
   /* A model with no states has no Klein solution. Fail fast before any
    * allocation -- the state/inv/solve routines all assume n_s >= 1. */
   if (n_s <= 0) {
