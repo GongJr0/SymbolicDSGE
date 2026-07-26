@@ -221,6 +221,7 @@ class MCPipelineResult(
     failures: tuple[MCFailure, ...] = (),
     regression_summaries: Mapping[str, MCRegressionResult] = {},
     postproc: Mapping[str, Any] = {},
+    data_summaries: Mapping[str, MCDataSummary] = {},
 )
 ```
 
@@ -240,6 +241,7 @@ __Fields and Properties:__
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
 | postproc | `#!python Mapping[str, Any]` | Post-loop artifacts keyed by step name or nested artifact key. |
+| data_summaries | `#!python Mapping[str, MCDataSummary]` | Across-replication summaries of the generated data, keyed by array name (`states`, `observables`, `raw:<name>`). Reduced inside the loop, so they cover every successful replication regardless of retention. |
 | succeeded | `#!python bool` | `True` when no failures were collected. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |

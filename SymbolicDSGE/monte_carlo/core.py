@@ -11,14 +11,15 @@ if TYPE_CHECKING:
     from .graph import PipelineGraph
     from .spec import PipelineSpec
 
-from .._diag_tests.result import MCResult, TestResult
+from .._diag_tests.result import MCResultAccumulator, TestResult
 from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
-from ..regression.ols import MCRegressionResult
+from ..regression.ols import MCRegressionAccumulator
 from ..regression.result import RegressionResult
 from .mc_constructs import (
     MCContext,
     MCData,
+    MCDataAccumulator,
     MCFailure,
     MCPipelineResult,
     MCMeta,
@@ -148,9 +149,13 @@ class MCPipeline:
         reference: SolvedModel,
         dgp: SolvedModel | None = None,
         n_rep: int,
-        retain_payloads: bool = True,
-        retain_test_results: bool = True,
-        retain_contexts: bool = False,
+        payload_poolsize: int = 10000,
+        test_result_poolsize: int = 10000,
+        # Contexts are off by default: a retained ``MCContext`` transitively holds
+        # this replication's ``MCData`` and its result objects (designs included),
+        # so a context pool re-retains exactly what the trace accumulators exist to
+        # release. The native loop has no per-replication context at all.
+        context_poolsize: int = 0,
         fail_fast: bool = True,
         verbosity: int = 1,
     ) -> MCPipelineResult:
@@ -159,12 +164,25 @@ class MCPipeline:
         if verbosity not in (0, 1, 2):
             raise ValueError("verbosity must be 0, 1, or 2.")
 
-        contexts: list[MCContext] = []
         n_successful = 0
+        retain_payloads, payload_stride = _pool_stride(n_rep, payload_poolsize)
+        retain_test_results, test_stride = _pool_stride(n_rep, test_result_poolsize)
+        retain_contexts, context_stride = _pool_stride(n_rep, context_poolsize)
+
+        contexts: list[MCContext] = []
         payload_traces: list[Mapping[str, object]] = []
         failures: list[MCFailure] = []
-        results_by_step: dict[str, list[TestResult]] = {}
-        regression_results_by_step: dict[str, list[RegressionResult]] = {}
+        # Test / regression results are reduced to their traces as each
+        # replication finishes, so the result objects never accumulate. The
+        # strided pools below retain a bounded sample of the objects themselves
+        # for inspection; the traces they summarize stay full length, so pooling
+        # never costs MC granularity.
+        test_accumulators: dict[str, MCResultAccumulator] = {}
+        regression_accumulators: dict[str, MCRegressionAccumulator] = {}
+        test_result_pool: dict[str, list[TestResult]] = {}
+        # The generated data is the largest per-replication object, so it is
+        # summarized on the spot and dropped rather than retained behind a pool.
+        data_accumulator = MCDataAccumulator()
         # Per-replication step timings feed the it/s rates. Postproc runs once
         # after the loop and times itself (see ``_run_postproc``); its runtime is
         # never folded into the it/s denominator.
@@ -208,16 +226,26 @@ class MCPipeline:
                 continue
 
             n_successful += 1
-            if retain_contexts:
+            data_accumulator.push(context.data)
+            if retain_contexts and (rep_idx % context_stride == 0):
                 contexts.append(context)
-            if retain_payloads:
+            if retain_payloads and (rep_idx % payload_stride == 0):
                 payload_traces.append(dict(context.payloads))
+            pool_test_results = retain_test_results and (rep_idx % test_stride == 0)
             for name, test_result in context.results.items():
-                results_by_step.setdefault(name, []).append(test_result)
+                accumulator = test_accumulators.get(name)
+                if accumulator is None:
+                    accumulator = test_accumulators[name] = MCResultAccumulator(n_rep)
+                accumulator.push(test_result, step_name=name)
+                if pool_test_results:
+                    test_result_pool.setdefault(name, []).append(test_result)
             for name, regression_result in context.regressions.items():
-                regression_results_by_step.setdefault(name, []).append(
-                    regression_result
-                )
+                regression_accumulator = regression_accumulators.get(name)
+                if regression_accumulator is None:
+                    regression_accumulator = regression_accumulators[name] = (
+                        MCRegressionAccumulator(n_rep)
+                    )
+                regression_accumulator.push(regression_result)
             if postproc_steps:
                 _accumulate_payload_columns(payload_columns, context.payloads)
 
@@ -226,8 +254,14 @@ class MCPipeline:
         # separately and never enter the it/s denominator.
         elapsed_s = perf_counter() - loop_start
 
-        test_summaries = _summarize_tests(results_by_step)
-        regression_summaries = _summarize_regressions(regression_results_by_step)
+        test_summaries = {
+            name: accumulator.finalize(name)
+            for name, accumulator in test_accumulators.items()
+        }
+        regression_summaries = {
+            name: accumulator.finalize()
+            for name, accumulator in regression_accumulators.items()
+        }
         postproc, postproc_elapsed_s = self._run_postproc(
             postproc_steps,
             test_summaries=test_summaries,
@@ -262,7 +296,7 @@ class MCPipeline:
             n_successful=n_successful,
             test_summaries=test_summaries,
             test_results=(
-                {name: tuple(values) for name, values in results_by_step.items()}
+                {name: tuple(values) for name, values in test_result_pool.items()}
                 if retain_test_results
                 else None
             ),
@@ -271,6 +305,7 @@ class MCPipeline:
             failures=tuple(failures),
             regression_summaries=regression_summaries,
             postproc=postproc,
+            data_summaries=data_accumulator.finalize(),
         )
         if verbosity == 1:
             report_mc_performance(meta)
@@ -385,6 +420,21 @@ class MCPipeline:
         return postproc, postproc_elapsed_s
 
 
+def _pool_stride(n_rep: int, poolsize: int) -> tuple[bool, int]:
+    """Retention flag and replication stride for a fixed-size inspection pool.
+
+    A non-positive ``poolsize`` disables retention and reports a zero stride the
+    caller never applies (the flag short-circuits ahead of the modulo). Otherwise
+    the stride is ``ceil(n_rep / poolsize)``, which keeps the pool at or under
+    ``poolsize`` entries without a running count, and is 1 for a run shorter than
+    the pool so every replication is kept. Sampling the tail is not guaranteed:
+    the final ``stride - 1`` replications fall outside the sample.
+    """
+    if poolsize <= 0:
+        return False, 0
+    return True, (n_rep + poolsize - 1) // poolsize
+
+
 def _validate_source_producer(
     consumer: MCStep,
     selector: Any,
@@ -463,72 +513,3 @@ def _stack_payload_columns(
         if arrays and len({array.shape for array in arrays}) == 1:
             out[payload_trace_key(name)] = np.stack(arrays)
     return out
-
-
-def _df_metadata_matches(a: object, b: object) -> bool:
-    """Compare normalized df metadata across replications, treating NaN == NaN
-    as a match. Parameter-free reference distributions (CUSUM) carry a NaN df
-    placeholder, which a plain ``!=`` would otherwise flag as incompatible."""
-    at = a if isinstance(a, tuple) else (a,)
-    bt = b if isinstance(b, tuple) else (b,)
-    if len(at) != len(bt):
-        return False
-    for x, y in zip(at, bt):
-        if x == y:
-            continue
-        if (
-            isinstance(x, float | np.floating)
-            and isinstance(y, float | np.floating)
-            and np.isnan(x)
-            and np.isnan(y)
-        ):
-            continue
-        return False
-    return True
-
-
-def _summarize_tests(
-    results_by_step: Mapping[str, list[TestResult]],
-) -> dict[str, MCResult]:
-    test_summaries: dict[str, MCResult] = {}
-
-    for step_name, results in results_by_step.items():
-        if not results:
-            continue
-        first = results[0]
-        for result in results[1:]:
-            if (
-                result.dist is not first.dist
-                or result.pval_method is not first.pval_method
-                or not _df_metadata_matches(result.df, first.df)
-                or result.alpha != first.alpha
-            ):
-                raise ValueError(
-                    f"Test results for step '{step_name}' have incompatible metadata."
-                )
-        stat_trace = np.asarray(
-            [result.statistic for result in results], dtype=np.float64
-        )
-        summary = MCResult(
-            test_name=step_name,
-            dist=first.dist,
-            df=first.df,
-            pval_method=first.pval_method,
-            alpha=first.alpha,
-            statistic_trace=stat_trace,
-            status_trace=tuple(result.status for result in results),
-        )
-        test_summaries[step_name] = summary
-
-    return test_summaries
-
-
-def _summarize_regressions(
-    results_by_step: Mapping[str, list[RegressionResult]],
-) -> dict[str, MCRegressionResult]:
-    regression_summaries: dict[str, MCRegressionResult] = {}
-    for step_name, results in results_by_step.items():
-        if not results:
-            continue
-        regression_summaries[step_name] = MCRegressionResult.from_results(results)
-    return regression_summaries

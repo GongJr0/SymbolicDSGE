@@ -114,109 +114,109 @@ class OLSResult(RegressionResult):
 
 @dataclass(frozen=True)
 class MCRegressionResult:
-    variables: list[str]
-    results: tuple[RegressionResult, ...] = field(repr=False)
+    """Across-replication regression summary, held as traces.
 
-    coef_trace: NDF = field(init=False)
-    status_trace: tuple[RegressionStatus, ...] = field(init=False)
+    Carries only the sufficient statistics of each replication's solve, all
+    ``O(k)`` or ``O(1)`` per replication: the coefficient, standard-error, SSR,
+    SST, and status traces. The per-replication ``RegressionResult`` objects and
+    their ``y`` / ``X`` arrays are consumed by
+    :class:`MCRegressionAccumulator` and released, so a run's retained memory
+    does not scale with the regression sample size. Every reported quantity
+    derives from the stored traces.
+    """
+
+    variables: list[str]
+    coef_trace: NDF
+    status_trace: tuple[RegressionStatus, ...]
+    ssr_trace: NDF
+    sst_trace: NDF
+    n: int
+    is_ols: bool = False
+    #: OLS standard errors, computed per replication while the design was still
+    #: live. ``None`` for kinds that do not report them; read via ``se_trace``.
+    stored_se_trace: NDF | None = field(default=None, repr=False)
+
     n_rep: int = field(init=False)
-    n: int = field(init=False)
     k: int = field(init=False)
 
     def __post_init__(self) -> None:
-        results = tuple(self.results)
-        if not results:
-            raise ValueError("MCRegressionResult requires at least one result.")
-
-        first = results[0]
         variables = list(self.variables)
-        if variables != first.variables:
-            raise ValueError("MC regression variables must match the first result.")
-
-        n = first.n
-        k = first.k
+        coef_trace = np.ascontiguousarray(self.coef_trace, dtype=np.float64)
+        if coef_trace.ndim != 2:
+            raise ValueError("MC regression coef_trace must be a 2D array.")
+        n_rep, k = coef_trace.shape
+        if n_rep == 0:
+            raise ValueError("MCRegressionResult requires at least one result.")
         if len(variables) != k:
             raise ValueError(
                 "MC regression variables must match the number of coefficients."
             )
-
-        coef_trace: list[NDF] = []
-        status_trace: list[RegressionStatus] = []
-        for result in results:
-            if result.variables != variables:
-                raise ValueError("MC regression results have incompatible variables.")
-            if result.n != n or result.k != k:
-                raise ValueError("MC regression results have incompatible dimensions.")
-            if result.y.shape != (n,):
-                raise ValueError("MC regression results require 1D response arrays.")
-            if result.X.shape != (n, k):
-                raise ValueError("MC regression results have incompatible designs.")
-            if result.coefficients.shape != (k,):
+        status_trace = tuple(RegressionStatus(status) for status in self.status_trace)
+        if len(status_trace) != n_rep:
+            raise ValueError(
+                "MC regression status trace must match the coefficient trace length."
+            )
+        ssr_trace = np.ascontiguousarray(self.ssr_trace, dtype=np.float64)
+        sst_trace = np.ascontiguousarray(self.sst_trace, dtype=np.float64)
+        if ssr_trace.shape != (n_rep,) or sst_trace.shape != (n_rep,):
+            raise ValueError(
+                "MC regression SSR and SST traces must be 1D and match the "
+                "coefficient trace length."
+            )
+        se_trace = self.stored_se_trace
+        if se_trace is not None:
+            se_trace = np.ascontiguousarray(se_trace, dtype=np.float64)
+            if se_trace.shape != (n_rep, k):
                 raise ValueError(
-                    "MC regression results have incompatible coefficient shapes."
+                    "MC regression standard-error trace must match the coefficient "
+                    "trace shape."
                 )
-            coef_trace.append(result.coefficients)
-            status_trace.append(result.status)
 
         object.__setattr__(self, "variables", variables)
-        object.__setattr__(self, "results", results)
-        object.__setattr__(self, "coef_trace", np.vstack(coef_trace))
-        object.__setattr__(self, "status_trace", tuple(status_trace))
-        object.__setattr__(self, "n_rep", len(self.results))
-        object.__setattr__(self, "n", n)
-        object.__setattr__(self, "k", k)
+        object.__setattr__(self, "coef_trace", coef_trace)
+        object.__setattr__(self, "status_trace", status_trace)
+        object.__setattr__(self, "ssr_trace", ssr_trace)
+        object.__setattr__(self, "sst_trace", sst_trace)
+        object.__setattr__(self, "stored_se_trace", se_trace)
+        object.__setattr__(self, "n", int(self.n))
+        object.__setattr__(self, "is_ols", bool(self.is_ols))
+        object.__setattr__(self, "n_rep", int(n_rep))
+        object.__setattr__(self, "k", int(k))
+
+    @classmethod
+    def accumulator(cls, n_rep: int) -> "MCRegressionAccumulator":
+        """A streaming builder that consumes results and releases them."""
+        return MCRegressionAccumulator(n_rep)
 
     @classmethod
     def from_results(cls, results: Sequence[RegressionResult]) -> "MCRegressionResult":
         result_tuple = tuple(results)
         if not result_tuple:
             raise ValueError("MCRegressionResult requires at least one result.")
-        return cls(variables=list(result_tuple[0].variables), results=result_tuple)
+        accumulator = cls.accumulator(len(result_tuple))
+        for result in result_tuple:
+            accumulator.push(result)
+        return accumulator.finalize()
 
-    def _require_ols_results(self) -> tuple[OLSResult, ...]:
-        if not all(isinstance(result, OLSResult) for result in self.results):
+    def _require_ols(self) -> None:
+        if not self.is_ols:
             raise TypeError(
                 "OLS-specific MC diagnostics require all results to be OLSResult."
             )
-        return cast(tuple[OLSResult, ...], self.results)
 
     @property
     def coefficients(self) -> NDF:
         return self.coef_trace
 
-    @cached_property
-    def y_trace(self) -> NDF:
-        return np.ascontiguousarray(
-            np.stack([result.y for result in self.results]),
-            dtype=np.float64,
-        )
-
-    @cached_property
-    def x_trace(self) -> NDF:
-        return np.ascontiguousarray(
-            np.stack([result.X for result in self.results]),
-            dtype=np.float64,
-        )
-
-    @cached_property
-    def y_hat_trace(self) -> NDF:
-        return np.asarray(
-            np.einsum("rnk,rk->rn", self.x_trace, self.coef_trace),
-            dtype=np.float64,
-        )
-
-    @cached_property
-    def residual_trace(self) -> NDF:
-        return np.asarray(self.y_trace - self.y_hat_trace, dtype=np.float64)
-
-    @cached_property
-    def ssr_trace(self) -> NDF:
-        return np.asarray((self.residual_trace**2).sum(axis=1), dtype=np.float64)
-
-    @cached_property
-    def sst_trace(self) -> NDF:
-        centered = self.y_trace - self.y_trace.mean(axis=1, keepdims=True)
-        return np.asarray((centered**2).sum(axis=1), dtype=np.float64)
+    @property
+    def se_trace(self) -> NDF:
+        self._require_ols()
+        se_trace = self.stored_se_trace
+        if se_trace is None:
+            raise TypeError(
+                "OLS-specific MC diagnostics require all results to be OLSResult."
+            )
+        return se_trace
 
     @cached_property
     def mse_trace(self) -> NDF:
@@ -225,22 +225,6 @@ class MCRegressionResult:
     @cached_property
     def rmse_trace(self) -> NDF:
         return np.asarray(np.sqrt(self.mse_trace), dtype=np.float64)
-
-    @cached_property
-    def se_trace(self) -> NDF:
-        results = self._require_ols_results()
-        if all(result._L.shape == (self.k, self.k) for result in results):
-            sigma2 = self.ssr_trace / (self.n - self.k)
-            eye = np.eye(self.k, dtype=np.float64)
-            rhs = np.broadcast_to(eye, (self.n_rep, self.k, self.k))
-            L_trace = np.stack([result._L for result in results])
-            L_inv = np.linalg.solve(L_trace, rhs)
-            inv_diag = (L_inv * L_inv).sum(axis=1)
-            return np.asarray(np.sqrt(inv_diag * sigma2[:, None]), dtype=np.float64)
-
-        return np.asarray(
-            np.vstack([result.se for result in results]), dtype=np.float64
-        )
 
     @cached_property
     def t_stat_trace(self) -> NDF:
@@ -274,7 +258,7 @@ class MCRegressionResult:
 
     @cached_property
     def F_stat_trace(self) -> NDF:
-        self._require_ols_results()
+        self._require_ols()
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         num = self.r2_trace / dfn
         denom = (1 - self.r2_trace) / dfd
@@ -287,7 +271,7 @@ class MCRegressionResult:
         return np.asarray(PvalMethod.SF(frozen, self.F_stat_trace), dtype=np.float64)
 
     def confidence_intervals(self, alpha: FloatScalar = 0.05) -> NDF:
-        self._require_ols_results()
+        self._require_ols()
         q = 1 - alpha / 2
         df = self.n - self.k
         t_crit = t.ppf(q, df)
@@ -301,7 +285,7 @@ class MCRegressionResult:
         index = pd.MultiIndex.from_product(
             [range(self.n_rep), self.variables], names=["rep", "variable"]
         )
-        if not all(isinstance(result, OLSResult) for result in self.results):
+        if not self.is_ols:
             return pd.DataFrame(
                 {
                     "coef": self.coef_trace.reshape(-1),
@@ -324,7 +308,7 @@ class MCRegressionResult:
         )
 
     def F_test(self, alpha: FloatScalar = 0.05) -> MCResult:
-        self._require_ols_results()
+        self._require_ols()
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         return MCResult(
             test_name="F-test",
@@ -348,3 +332,99 @@ class MCRegressionResult:
             "n": self.n,
             "k": self.k,
         }
+
+
+class MCRegressionAccumulator:
+    """Streaming builder for an :class:`MCRegressionResult` over a replication loop.
+
+    Extracts each replication's sufficient statistics (coefficients, status, SSR,
+    SST, and OLS standard errors) at push time and releases the
+    :class:`RegressionResult`, so neither the design matrix nor the response
+    survives the replication. The standard errors are computed here rather than
+    lazily, since the design they need is gone once the object is released.
+
+    Buffers are sized on ``n_rep`` up front and filled at a cursor, so a run with
+    skipped replications finalizes to the count actually pushed.
+    """
+
+    __slots__ = (
+        "_coef",
+        "_se",
+        "_ssr",
+        "_sst",
+        "_status",
+        "_variables",
+        "_n",
+        "_k",
+        "_is_ols",
+        "_cursor",
+        "_capacity",
+    )
+
+    def __init__(self, n_rep: int) -> None:
+        if n_rep <= 0:
+            raise ValueError("MCRegressionAccumulator requires a positive n_rep.")
+        self._capacity = int(n_rep)
+        self._coef: NDF | None = None
+        self._se: NDF | None = None
+        self._ssr: NDF = np.empty(self._capacity, dtype=np.float64)
+        self._sst: NDF = np.empty(self._capacity, dtype=np.float64)
+        self._status: list[RegressionStatus] = []
+        self._variables: list[str] | None = None
+        self._n = -1
+        self._k = -1
+        self._is_ols = False
+        self._cursor = 0
+
+    @property
+    def n_pushed(self) -> int:
+        """Replications pushed so far."""
+        return self._cursor
+
+    def push(self, result: RegressionResult) -> None:
+        """Record one replication's result, releasing the object to the caller."""
+        if self._variables is None:
+            self._variables = list(result.variables)
+            self._n = result.n
+            self._k = result.k
+            self._is_ols = isinstance(result, OLSResult)
+            self._coef = np.empty((self._capacity, self._k), dtype=np.float64)
+            if self._is_ols:
+                self._se = np.empty((self._capacity, self._k), dtype=np.float64)
+        else:
+            if result.variables != self._variables:
+                raise ValueError("MC regression results have incompatible variables.")
+            if result.n != self._n or result.k != self._k:
+                raise ValueError("MC regression results have incompatible dimensions.")
+            if self._is_ols != isinstance(result, OLSResult):
+                raise ValueError("MC regression results have incompatible kinds.")
+        if self._cursor >= self._capacity:
+            raise ValueError(
+                "MC regression results exceed the accumulator's capacity of "
+                f"{self._capacity} replications."
+            )
+
+        assert self._coef is not None
+        self._coef[self._cursor] = result.coefficients
+        self._ssr[self._cursor] = result.ssr
+        self._sst[self._cursor] = result.sst
+        self._status.append(result.status)
+        if self._se is not None:
+            self._se[self._cursor] = cast(OLSResult, result).se
+        self._cursor += 1
+
+    def finalize(self) -> MCRegressionResult:
+        """Build the summary over the replications pushed so far."""
+        if self._variables is None or self._coef is None:
+            raise ValueError("MCRegressionResult requires at least one result.")
+        cursor = self._cursor
+        return MCRegressionResult(
+            variables=self._variables,
+            coef_trace=self._coef[:cursor].copy(),
+            status_trace=tuple(self._status),
+            ssr_trace=self._ssr[:cursor].copy(),
+            sst_trace=self._sst[:cursor].copy(),
+            n=self._n,
+            is_ols=self._is_ols,
+            stored_se_trace=(None if self._se is None else self._se[:cursor].copy()),
+        )

@@ -56,6 +56,120 @@ class MCData(NamedTuple):
     observable_names: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class MCDataSummary:
+    """Across-replication summary of one named :class:`MCData` array.
+
+    Reduced in the loop (see :class:`MCDataAccumulator`), so the arrays it
+    describes are discarded with their replication.
+    """
+
+    #: Replications that contributed an array under this name.
+    n_rep: int
+    #: Shape of the first contributing replication's array.
+    shape: tuple[int, ...]
+    #: Total element count summed over contributing replications.
+    n_values: int
+    #: Elements of that total that were finite.
+    n_finite: int
+    mean: float | None
+    std: float | None
+    min: float | None
+    max: float | None
+
+
+class MCDataAccumulator:
+    """Streaming summary of the :class:`MCData` arrays a run produces.
+
+    One instance covers a whole run: :meth:`push` folds a replication's
+    ``states``, ``observables``, and raw series into per-name running sums, and
+    :meth:`finalize` divides out. Nothing here scales with ``n_rep`` or with the
+    sample dimension, so a replication's arrays are free the moment it ends.
+
+    Statistics are pooled over every finite element of every contributing
+    replication, not averaged over per-replication statistics.
+    """
+
+    #: Raw series carrying the state matrix under a reserved key; already
+    #: summarized as ``states``, so it never gets its own entry.
+    _SKIP_RAW = "_X"
+
+    def __init__(self) -> None:
+        self._n_rep: dict[str, int] = {}
+        self._shape: dict[str, tuple[int, ...]] = {}
+        self._n_values: dict[str, int] = {}
+        self._n_finite: dict[str, int] = {}
+        self._sum: dict[str, float] = {}
+        self._square_sum: dict[str, float] = {}
+        self._min: dict[str, float] = {}
+        self._max: dict[str, float] = {}
+
+    def push(self, data: MCData | None) -> None:
+        """Fold one replication's arrays into the running summaries."""
+        if data is None:
+            return
+        if data.states is not None:
+            self._push_array("states", np.asarray(data.states))
+        if data.observables is not None:
+            self._push_array("observables", np.asarray(data.observables))
+        for name, value in data.raw.items():
+            if name != self._SKIP_RAW:
+                self._push_array(f"raw:{name}", np.asarray(value))
+
+    def _push_array(self, name: str, array: np.ndarray) -> None:
+        if name not in self._n_rep:
+            self._n_rep[name] = 0
+            self._shape[name] = array.shape
+            self._n_values[name] = 0
+            self._n_finite[name] = 0
+            self._sum[name] = 0.0
+            self._square_sum[name] = 0.0
+            self._min[name] = np.inf
+            self._max[name] = -np.inf
+        self._n_rep[name] += 1
+        self._n_values[name] += int(array.size)
+        finite = array[np.isfinite(array)]
+        if finite.size == 0:
+            return
+        self._n_finite[name] += int(finite.size)
+        self._sum[name] += float(finite.sum())
+        self._square_sum[name] += float(np.square(finite).sum())
+        self._min[name] = min(self._min[name], float(finite.min()))
+        self._max[name] = max(self._max[name], float(finite.max()))
+
+    def finalize(self) -> dict[str, MCDataSummary]:
+        """The per-name summaries, in first-seen order."""
+        return {name: self._finalize_one(name) for name in self._n_rep}
+
+    def _finalize_one(self, name: str) -> MCDataSummary:
+        n_finite = self._n_finite[name]
+        if n_finite == 0:
+            return MCDataSummary(
+                n_rep=self._n_rep[name],
+                shape=self._shape[name],
+                n_values=self._n_values[name],
+                n_finite=0,
+                mean=None,
+                std=None,
+                min=None,
+                max=None,
+            )
+        mean = self._sum[name] / n_finite
+        # Clamped because the sum-of-squares form can go slightly negative on a
+        # near-constant series once cancellation bites.
+        variance = max(0.0, self._square_sum[name] / n_finite - mean**2)
+        return MCDataSummary(
+            n_rep=self._n_rep[name],
+            shape=self._shape[name],
+            n_values=self._n_values[name],
+            n_finite=n_finite,
+            mean=mean,
+            std=variance**0.5,
+            min=self._min[name],
+            max=self._max[name],
+        )
+
+
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")
 DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
 # The array-valued filter outputs, in tuple order. ``status`` is a scalar error
@@ -435,6 +549,11 @@ class MCPipelineResult:
     #: ``"<step>.<key>"`` for multi-artifact ops). Values are
     #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
     postproc: Mapping[str, Any] = dataclass_field(default_factory=dict)
+
+    #: Across-replication summaries of the generated data, keyed by array name
+    #: (``"states"``, ``"observables"``, ``"raw:<name>"``). Reduced in the loop,
+    #: so these cover every successful replication whatever the pool sizes are.
+    data_summaries: Mapping[str, MCDataSummary] = dataclass_field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
