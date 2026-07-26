@@ -1,5 +1,6 @@
 #include "transforms.h"
 #include <math.h>
+#include <stddef.h>
 
 /* Column means and sums of squared deviations of a row-major (n, p) buffer, in
  * one Welford pass. Writes mean(p) and m2(p); both are zeroed here. The
@@ -119,9 +120,9 @@ i64 sdsge_diff(const f64 *SDSGE_RESTRICT x, const i64 order, const i64 n,
    * p). `scratch` holds the previous value of each level: state[m * p + j] is
    * the last difference of order m seen in column j.
    *
-   * Level m is undefined until row m, where it is primed instead of differenced.
-   * Once every level has been primed, row t emits row t - order. The
-   * subtractions are the same ones repeated `np.diff` performs, in the same
+   * Level m is undefined until row m, where it is primed instead of
+   * differenced. Once every level has been primed, row t emits row t - order.
+   * The subtractions are the same ones repeated `np.diff` performs, in the same
    * order, so the results agree to the bit.
    */
   for (i64 i = 0; i < n; ++i) {
@@ -258,7 +259,8 @@ static i64 rolling_moment_ax0(const f64 *SDSGE_RESTRICT x, const i64 n,
         const f64 old_value = leaving[j];
 
         reduced_mean = ((f64)window * old_mean - old_value) * inv_reduced;
-        reduced_m2 = m2[j] - (old_value - old_mean) * (old_value - reduced_mean);
+        reduced_m2 =
+            m2[j] - (old_value - old_mean) * (old_value - reduced_mean);
       }
 
       /* Add entering[j] back, bringing the window to `window` points. */
