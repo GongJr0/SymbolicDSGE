@@ -1,16 +1,16 @@
 """Native Monte Carlo kernels (per-replication sample transforms).
 
-Re-exports the compiled ``_transforms`` extension. Nothing in the library
-imports this yet: the Python transform ops in
-``SymbolicDSGE.monte_carlo.operations.transforms`` remain the implementation,
-and these kernels exist for the native replication loop and its parity tests.
+Re-exports the compiled ``_transforms`` extension, which backs the transform ops
+in ``SymbolicDSGE.monte_carlo.operations.transforms``. The parity tests check
+these kernels against ``tests/_oracles/mc_transforms``, never against those ops,
+which now call straight through to here.
 """
 
 from ._transforms import (
     BAD_ARG as BAD_ARG,
-    diff,
-    log,
-    log_diff,
+    diff_transform,
+    log_transform,
+    log_diff_transform,
     rolling_mean,
     rolling_std,
     rolling_var,
@@ -19,9 +19,9 @@ from ._transforms import (
 
 __all__ = [
     "BAD_ARG",
-    "diff",
-    "log",
-    "log_diff",
+    "diff_transform",
+    "log_transform",
+    "log_diff_transform",
     "rolling_mean",
     "rolling_std",
     "rolling_var",

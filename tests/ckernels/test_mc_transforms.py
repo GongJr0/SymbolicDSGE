@@ -1,9 +1,10 @@
 """Parity tests for the native Monte Carlo transform kernels
 (``_ckernels.monte_carlo``).
 
-Each kernel is checked against the Python op in
-``monte_carlo.operations.transforms.ops``, which stays the library's
-implementation: nothing imports these kernels yet.
+Each kernel is checked against ``_oracles.mc_transforms``, never against
+``monte_carlo.operations.transforms.ops``: once the ops call these kernels, an
+assertion against them would compare the native code with itself and keep
+passing.
 
 ``diff`` and ``log_diff`` agree bitwise because they perform the same
 subtractions in the same order as ``np.diff``. Everything else agrees to a
@@ -12,7 +13,7 @@ tolerance, for two reasons worth keeping in mind when a case here is tightened:
 - ``log`` calls libm while NumPy switches to a SIMD implementation above a size
   threshold, so a large sample differs on a few elements by 1 ulp,
 - the rolling kernels slide the window by removing the leaving observation from
-  the Welford state, where NumPy recomputes each window from scratch.
+  the Welford state, where the oracle recomputes each window from scratch.
 """
 
 from __future__ import annotations
@@ -22,13 +23,10 @@ import pytest
 
 native = pytest.importorskip("SymbolicDSGE._ckernels.monte_carlo")
 
-from SymbolicDSGE.monte_carlo.operations.transforms import ops
+from _oracles import mc_transforms as oracle
 
 RTOL = 1e-11
 ATOL = 1e-11
-
-# The Python ops take the executor's keyword contract; none of them read it.
-_OP_KW = dict(context=None, reference=None, dgp=None, rep_idx=0)
 
 _SHAPES = [(64, 3), (17, 1), (200, 5)]
 
@@ -48,12 +46,12 @@ def rng():
 
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize("ddof", [0, 1])
-def test_standardize_matches_python_op(rng, shape, ddof) -> None:
+def test_standardize_matches_oracle(rng, shape, ddof) -> None:
     x = _sample(rng, *shape)
 
     np.testing.assert_allclose(
         native.standardize_ax0(x, ddof),
-        ops.run_standardize(sample=x, ddof=ddof, **_OP_KW),
+        oracle.standardize(x, ddof),
         rtol=RTOL,
         atol=ATOL,
     )
@@ -66,29 +64,27 @@ def test_standardize_zeros_a_constant_column(rng) -> None:
     out = native.standardize_ax0(x, 0)
 
     np.testing.assert_array_equal(out[:, 0], np.zeros(32))
-    np.testing.assert_allclose(
-        out, ops.run_standardize(sample=x, ddof=0, **_OP_KW), rtol=RTOL, atol=ATOL
-    )
+    np.testing.assert_allclose(out, oracle.standardize(x, 0), rtol=RTOL, atol=ATOL)
 
 
 @pytest.mark.parametrize("shape", _SHAPES)
-def test_log_matches_python_op(rng, shape) -> None:
+def test_log_matches_oracle(rng, shape) -> None:
     x = _sample(rng, *shape, positive=True)
 
     np.testing.assert_allclose(
-        native.log(x, 0.25),
-        ops.run_log(sample=x, offset=0.25, **_OP_KW),
+        native.log_transform(x, 0.25),
+        oracle.log(x, 0.25),
         rtol=RTOL,
         atol=ATOL,
     )
 
 
 @pytest.mark.parametrize("shape", _SHAPES)
-def test_log_diff_matches_python_op(rng, shape) -> None:
+def test_log_diff_matches_oracle(rng, shape) -> None:
     x = _sample(rng, *shape, positive=True)
-    want = ops.run_log_diff(sample=x, offset=0.25, **_OP_KW)
+    want = oracle.log_diff(x, 0.25)
 
-    got = native.log_diff(x, 0.25)
+    got = native.log_diff_transform(x, 0.25)
 
     assert got.shape == want.shape == (shape[0] - 1, shape[1])
     np.testing.assert_allclose(got, want, rtol=RTOL, atol=ATOL)
@@ -96,11 +92,11 @@ def test_log_diff_matches_python_op(rng, shape) -> None:
 
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize("order", [1, 2, 3])
-def test_diff_matches_python_op_bitwise(rng, shape, order) -> None:
+def test_diff_matches_oracle_bitwise(rng, shape, order) -> None:
     x = _sample(rng, *shape)
-    want = ops.run_diff(sample=x, order=order, **_OP_KW)
+    want = oracle.diff(x, order)
 
-    got = native.diff(x, order)
+    got = native.diff_transform(x, order)
 
     assert got.shape == want.shape == (shape[0] - order, shape[1])
     np.testing.assert_array_equal(got, want)
@@ -108,12 +104,12 @@ def test_diff_matches_python_op_bitwise(rng, shape, order) -> None:
 
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize("window", [1, 5, 64])
-def test_rolling_mean_matches_python_op(rng, shape, window) -> None:
+def test_rolling_mean_matches_oracle(rng, shape, window) -> None:
     n, p = shape
     if window > n:
         pytest.skip("window wider than the sample is rejected, not compared")
     x = _sample(rng, n, p)
-    want = ops.run_rolling_mean(sample=x, window=window, **_OP_KW)
+    want = oracle.rolling_mean(x, window)
 
     got = native.rolling_mean(x, window)
 
@@ -124,7 +120,7 @@ def test_rolling_mean_matches_python_op(rng, shape, window) -> None:
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize("window", [2, 5, 64])
 @pytest.mark.parametrize("ddof", [0, 1])
-def test_rolling_var_and_std_match_python_op(rng, shape, window, ddof) -> None:
+def test_rolling_var_and_std_match_oracle(rng, shape, window, ddof) -> None:
     n, p = shape
     if window > n:
         pytest.skip("window wider than the sample is rejected, not compared")
@@ -132,13 +128,13 @@ def test_rolling_var_and_std_match_python_op(rng, shape, window, ddof) -> None:
 
     np.testing.assert_allclose(
         native.rolling_var(x, window, ddof),
-        ops.run_rolling_var(sample=x, window=window, ddof=ddof, **_OP_KW),
+        oracle.rolling_var(x, window, ddof),
         rtol=RTOL,
         atol=ATOL,
     )
     np.testing.assert_allclose(
         native.rolling_std(x, window, ddof),
-        ops.run_rolling_std(sample=x, window=window, ddof=ddof, **_OP_KW),
+        oracle.rolling_std(x, window, ddof),
         rtol=RTOL,
         atol=ATOL,
     )
@@ -176,12 +172,24 @@ def test_full_width_window_reproduces_the_whole_sample_moment(rng) -> None:
 @pytest.mark.parametrize(
     ("call", "match"),
     [
-        (lambda x: native.rolling_mean(x, 99), "rejected its arguments"),
-        (lambda x: native.rolling_mean(x, 0), "rejected its arguments"),
-        (lambda x: native.rolling_var(x, 3, 3), "rejected its arguments"),
-        (lambda x: native.rolling_std(x, 3, 4), "rejected its arguments"),
-        (lambda x: native.diff(x, 0), "order must be at least 1"),
-        (lambda x: native.standardize_ax0(x, 8), "rejected its arguments"),
+        (
+            lambda x: native.rolling_mean(x, 99),
+            r"window \(99\) exceeds input length \(8\)",
+        ),
+        (lambda x: native.rolling_mean(x, 0), "window must be at least 1"),
+        (
+            lambda x: native.rolling_var(x, 3, 3),
+            r"ddof \(3\) must be smaller than the window \(3\)",
+        ),
+        (
+            lambda x: native.rolling_std(x, 3, 4),
+            r"ddof \(4\) must be smaller than the window \(3\)",
+        ),
+        (lambda x: native.diff_transform(x, 0), "order must be at least 1"),
+        (
+            lambda x: native.standardize_ax0(x, 8),
+            r"ddof \(8\) must be smaller than the sample length \(8\)",
+        ),
     ],
 )
 def test_kernels_reject_arguments_they_are_not_defined_on(call, match) -> None:
@@ -194,9 +202,9 @@ def test_kernels_reject_arguments_they_are_not_defined_on(call, match) -> None:
 def test_transforms_that_consume_every_row_return_no_rows() -> None:
     x = np.ascontiguousarray(np.arange(16.0).reshape(8, 2))
 
-    assert native.diff(x, 8).shape == (0, 2)
-    assert native.diff(x, 9).shape == (0, 2)
-    assert native.log_diff(x[:1] + 1.0).shape == (0, 2)
+    assert native.diff_transform(x, 8).shape == (0, 2)
+    assert native.diff_transform(x, 9).shape == (0, 2)
+    assert native.log_diff_transform(x[:1] + 1.0).shape == (0, 2)
 
 
 def test_kernels_accept_non_contiguous_and_non_float_input() -> None:
@@ -207,8 +215,5 @@ def test_kernels_accept_non_contiguous_and_non_float_input() -> None:
     integers = np.arange(16).reshape(8, 2)
 
     np.testing.assert_array_equal(
-        native.diff(strided, 1), np.diff(np.ascontiguousarray(strided), axis=0)
-    )
-    np.testing.assert_array_equal(
-        native.diff(integers, 1), np.diff(integers.astype(np.float64), axis=0)
+        native.diff_transform(integers, 1), np.diff(integers.astype(np.float64), axis=0)
     )
