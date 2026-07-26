@@ -6,6 +6,17 @@ from ....core.solved_model import SolvedModel
 from ...mc_constructs import MCContext
 from ..types import NDF
 
+
+from ...._ckernels.monte_carlo import (
+    standardize_ax0,
+    log_transform,
+    log_diff_transform,
+    diff_transform,
+    rolling_mean,
+    rolling_std,
+    rolling_var,
+)
+
 # Built-in transforms receive their selected input from the MC executor.
 
 
@@ -25,13 +36,7 @@ def run_standardize(
     blowing up an entire MC replication.
     """
     del context, reference, dgp, rep_idx
-    arr = sample
-    mean = arr.mean(axis=0, keepdims=True)
-    std = arr.std(axis=0, ddof=ddof, keepdims=True)
-    safe_std = np.where(std == 0.0, 1.0, std)
-    out = (arr - mean) / safe_std
-    out = np.where(std == 0.0, 0.0, out)
-    return np.ascontiguousarray(out, dtype=np.float64)
+    return standardize_ax0(sample, ddof=ddof)
 
 
 def run_log(
@@ -45,8 +50,7 @@ def run_log(
 ) -> NDF:
     """``log(x + offset)`` per element. ``offset`` lets users handle zeros."""
     del context, reference, dgp, rep_idx
-    arr = sample
-    return np.log(arr + offset)
+    return log_transform(sample, offset=offset)
 
 
 def run_log_diff(
@@ -64,9 +68,7 @@ def run_log_diff(
     to handle inputs that touch zero.
     """
     del context, reference, dgp, rep_idx
-    arr = sample
-    logged = np.log(arr + offset)
-    return np.diff(logged, axis=0)
+    return log_diff_transform(sample, offset=offset)
 
 
 def run_diff(
@@ -80,21 +82,7 @@ def run_diff(
 ) -> NDF:
     """``np.diff`` along the time axis, repeated ``order`` times."""
     del context, reference, dgp, rep_idx
-    if order < 1:
-        raise ValueError("diff order must be at least 1.")
-    arr = sample
-    return np.diff(arr, n=order, axis=0)
-
-
-def _rolling_window_view(arr: NDF, window: int) -> NDF:
-    if window < 1:
-        raise ValueError("rolling window must be at least 1.")
-    if window > arr.shape[0]:
-        raise ValueError(
-            f"rolling window ({window}) exceeds input length ({arr.shape[0]})."
-        )
-    # ``sliding_window_view`` -> (n - w + 1, w, k); axis=0 over the time axis.
-    return np.lib.stride_tricks.sliding_window_view(arr, window, axis=0)
+    return diff_transform(sample, order=order)
 
 
 def run_rolling_mean(
@@ -112,9 +100,7 @@ def run_rolling_mean(
     preceding ``window`` periods (inclusive of the current row).
     """
     del context, reference, dgp, rep_idx
-    arr = sample
-    out: NDF = _rolling_window_view(arr, window).mean(axis=-1)
-    return out
+    return rolling_mean(sample, window=window)
 
 
 def run_rolling_std(
@@ -129,9 +115,7 @@ def run_rolling_std(
 ) -> NDF:
     """Trailing rolling standard deviation over the time axis."""
     del context, reference, dgp, rep_idx
-    arr = sample
-    out: NDF = _rolling_window_view(arr, window).std(axis=-1, ddof=ddof)
-    return out
+    return rolling_std(sample, window=window, ddof=ddof)
 
 
 def run_rolling_var(
@@ -146,6 +130,4 @@ def run_rolling_var(
 ) -> NDF:
     """Trailing rolling variance over the time axis."""
     del context, reference, dgp, rep_idx
-    arr = sample
-    out: NDF = _rolling_window_view(arr, window).var(axis=-1, ddof=ddof)
-    return out
+    return rolling_var(sample, window=window, ddof=ddof)
