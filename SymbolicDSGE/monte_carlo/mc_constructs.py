@@ -223,7 +223,6 @@ SOURCE_KIND_FILTER = 2
 class SourceArgs:
     arg: str
     source_step: str
-    source_idx: int
     source_kind: int
     field: str
     field_idx: int
@@ -308,7 +307,6 @@ def _compile_source_args(
         return SourceArgs(
             arg=arg,
             source_step=source_step,
-            source_idx=-1,
             source_kind=SOURCE_KIND_DATA,
             field=source_field,
             field_idx=MC_DATA_FIELD_INDEX[source_field],
@@ -320,7 +318,6 @@ def _compile_source_args(
         return SourceArgs(
             arg=arg,
             source_step=source_step,
-            source_idx=-1,
             source_kind=SOURCE_KIND_FILTER,
             field=source_field,
             field_idx=FILTER_RAW_FIELD_INDEX[source_field],
@@ -333,7 +330,6 @@ def _compile_source_args(
         return SourceArgs(
             arg=arg,
             source_step=source_step,
-            source_idx=-1,
             source_kind=SOURCE_KIND_PAYLOAD,
             field=source_field,
             field_idx=DYNAMIC_FIELD_INDEX[source_field],

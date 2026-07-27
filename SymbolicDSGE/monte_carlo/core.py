@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import cached_property
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -42,6 +42,9 @@ class MCPipeline:
     #: Post-loop ops, run once after the loop over the assembled across-rep
     #: traces. This is a terminal phase, not part of the graph.
     postproc_steps: tuple[MCStep, ...]
+    #: Producer indices for each per-replication step's source arguments.
+    #: Kept separate from the authored ``SourceArgs`` objects.
+    _source_indices: tuple[tuple[int, ...], ...]
 
     def __init__(
         self,
@@ -51,9 +54,10 @@ class MCPipeline:
         rep_tuple = tuple(per_rep_steps)
         postproc_tuple = tuple(postproc_steps)
         self._validate_steps(rep_tuple, postproc_tuple)
-        rep_tuple = self._bind_source_args(rep_tuple)
+        source_indices = self._resolve_source_indices(rep_tuple)
         object.__setattr__(self, "per_rep_steps", rep_tuple)
         object.__setattr__(self, "postproc_steps", postproc_tuple)
+        object.__setattr__(self, "_source_indices", source_indices)
 
     @staticmethod
     def _validate_steps(
@@ -84,39 +88,39 @@ class MCPipeline:
                 )
 
     @staticmethod
-    def _bind_source_args(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
-        index_by_name: dict[str, int] = {}
-        canonical_name: dict[str, str] = {}
+    def _resolve_source_indices(
+        per_rep_steps: tuple[MCStep, ...],
+    ) -> tuple[tuple[int, ...], ...]:
+        index_by_source: dict[str, int] = {}
         for index, step in enumerate(per_rep_steps):
-            index_by_name[step.name] = index
-            canonical_name[step.name] = step.name
-            index_by_name[step.output_key] = index
-            canonical_name[step.output_key] = step.name
-        bound_steps: list[MCStep] = []
-        for step_index, step in enumerate(per_rep_steps):
-            bound_args = []
-            for selector in step.source_args:
-                producer = selector.source_step
-                if producer not in index_by_name:
+            for source_name in (step.name, step.output_key):
+                prior_index = index_by_source.get(source_name)
+                if prior_index is not None and prior_index != index:
                     raise ValueError(
-                        f"Step {step.name!r} depends on unknown producer {producer!r}."
+                        f"Pipeline source name {source_name!r} is ambiguous."
                     )
-                source_idx = index_by_name[producer]
+                index_by_source[source_name] = index
+
+        resolved: list[tuple[int, ...]] = []
+        for step_index, step in enumerate(per_rep_steps):
+            step_indices: list[int] = []
+            for selector in step.source_args:
+                source_name = selector.source_step
+                source_idx = index_by_source.get(source_name)
+                if source_idx is None:
+                    raise ValueError(
+                        f"Step {step.name!r} depends on unknown producer {source_name!r}."
+                    )
                 producer_step = per_rep_steps[source_idx]
-                producer = canonical_name[producer]
                 if source_idx >= step_index:
                     raise ValueError(
-                        f"Step {step.name!r} depends on {producer!r}, which does not "
+                        f"Step {step.name!r} depends on {producer_step.name!r}, which does not "
                         "appear earlier in the pipeline."
                     )
                 _validate_source_producer(step, selector, producer_step)
-                bound_args.append(
-                    replace(selector, source_step=producer, source_idx=source_idx)
-                )
-            if tuple(bound_args) != step.source_args:
-                step = replace(step, source_args=tuple(bound_args))
-            bound_steps.append(step)
-        return tuple(bound_steps)
+                step_indices.append(source_idx)
+            resolved.append(tuple(step_indices))
+        return tuple(resolved)
 
     @cached_property
     def graph(self) -> "PipelineGraph":
@@ -128,7 +132,7 @@ class MCPipeline:
         """
         from .graph import PipelineGraph
 
-        return PipelineGraph.from_steps(self.per_rep_steps)
+        return PipelineGraph.from_steps(self.per_rep_steps, self._source_indices)
 
     def to_spec(self) -> "PipelineSpec":
         """Serialize this pipeline to its graph-form :class:`PipelineSpec`.
@@ -183,11 +187,11 @@ class MCPipeline:
             context = MCContext(rep_idx=rep_idx, reference=reference, dgp=dgp)
             failed_step_name: str | None = None
             try:
-                for step in rep_steps:
+                for step_index, step in enumerate(rep_steps):
                     failed_step_name = step.name
                     step_start = perf_counter()
                     try:
-                        self._run_step(context, step)
+                        self._run_step(context, step, self._source_indices[step_index])
                     except Exception:
                         step_failures[step.name] += 1
                         raise
@@ -278,10 +282,15 @@ class MCPipeline:
             report_mc_step_performance(meta)
         return result
 
-    def _run_step(self, context: MCContext, step: MCStep) -> None:
+    def _run_step(
+        self,
+        context: MCContext,
+        step: MCStep,
+        source_indices: Sequence[int],
+    ) -> None:
         kwargs = dict(step.kwargs)
-        for selector in step.source_args:
-            kwargs[selector.arg] = _resolve_source_array(context, selector)
+        for selector, source_idx in zip(step.source_args, source_indices):
+            kwargs[selector.arg] = _resolve_source_array(context, selector, source_idx)
         if step.op_type is OpType.DATAGEN:
             out = step.func(
                 reference=context.reference,
