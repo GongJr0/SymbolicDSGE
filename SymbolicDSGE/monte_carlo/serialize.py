@@ -19,7 +19,8 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .mc_constructs import MCDataSummary, MCPipelineResult
+from ..regression.ols import OLSResult
+from .mc_constructs import MCContext, MCPipelineResult
 from .postproc import Artifact, Raw, Summary, normalize_artifacts
 from .traces import regression_trace_keys, test_trace_keys
 
@@ -99,10 +100,7 @@ def serialize_pipeline_result(
             name: _serialize_regression_summary(summary)
             for name, summary in result.regression_summaries.items()
         },
-        "data_summaries": {
-            name: _serialize_data_summary(summary)
-            for name, summary in result.data_summaries.items()
-        },
+        "data_summaries": _summarize_context_data(result.contexts or ()),
         "postproc": {
             name: _serialize_artifact(artifact)
             for name, artifact in _normalized_postproc(result).items()
@@ -453,7 +451,7 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
         "metrics": metrics,
         "ols": None,
     }
-    if summary.is_ols:
+    if all(isinstance(item, OLSResult) for item in summary.results):
         out["ols"] = {
             "mean_standard_errors": _json_value(np.mean(summary.se_trace, axis=0)),
             "mean_t_statistics": _json_value(np.mean(summary.t_stat_trace, axis=0)),
@@ -472,17 +470,60 @@ def _status_counts(status_trace: Sequence[Any]) -> dict[str, int]:
     return counts
 
 
-def _serialize_data_summary(summary: MCDataSummary) -> dict[str, Any]:
-    """Wire entry for one in-loop :class:`MCDataSummary`."""
+def _summarize_context_data(contexts: Sequence[MCContext]) -> dict[str, Any]:
+    arrays: dict[str, list[np.ndarray]] = {}
+    for context in contexts:
+        if context.data is None:
+            continue
+        data = context.data
+        if data.states is not None:
+            arrays.setdefault("states", []).append(np.asarray(data.states))
+        if data.observables is not None:
+            arrays.setdefault("observables", []).append(np.asarray(data.observables))
+        for name, value in data.raw.items():
+            if name != "_X":
+                arrays.setdefault(f"raw:{name}", []).append(np.asarray(value))
+    return {name: _array_collection_summary(values) for name, values in arrays.items()}
+
+
+def _array_collection_summary(values: Sequence[np.ndarray]) -> dict[str, Any]:
+    n_total = sum(int(arr.size) for arr in values)
+    n_finite = 0
+    value_sum = 0.0
+    square_sum = 0.0
+    minimum = np.inf
+    maximum = -np.inf
+    for arr in values:
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            continue
+        n_finite += int(finite.size)
+        value_sum += float(finite.sum())
+        square_sum += float(np.square(finite).sum())
+        minimum = min(minimum, float(finite.min()))
+        maximum = max(maximum, float(finite.max()))
+    if n_finite == 0:
+        return {
+            "n_rep": len(values),
+            "shape": list(values[0].shape),
+            "n_values": n_total,
+            "n_finite": 0,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
+        }
+    mean = value_sum / n_finite
+    variance = max(0.0, square_sum / n_finite - mean**2)
     return {
-        "n_rep": summary.n_rep,
-        "shape": [int(dim) for dim in summary.shape],
-        "n_values": summary.n_values,
-        "n_finite": summary.n_finite,
-        "mean": _json_value(summary.mean),
-        "std": _json_value(summary.std),
-        "min": _json_value(summary.min),
-        "max": _json_value(summary.max),
+        "n_rep": len(values),
+        "shape": list(values[0].shape),
+        "n_values": n_total,
+        "n_finite": n_finite,
+        "mean": _json_float(mean),
+        "std": _json_float(variance**0.5),
+        "min": _json_float(minimum),
+        "max": _json_float(maximum),
     }
 
 

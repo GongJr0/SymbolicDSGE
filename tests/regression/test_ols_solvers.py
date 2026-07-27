@@ -308,6 +308,10 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
         np.vstack([result.coefficients for result in results]),
     )
     np.testing.assert_allclose(
+        out.y_hat_trace,
+        np.vstack([result.y_hat for result in results]),
+    )
+    np.testing.assert_allclose(
         out.se_trace,
         np.vstack([result.se for result in results]),
     )

@@ -22,8 +22,7 @@ from SymbolicDSGE.ui.serializers import decode_array, encode_array
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.monte_carlo import MCData, MCPipelineResult
-from SymbolicDSGE.monte_carlo.mc_constructs import MCDataAccumulator
+from SymbolicDSGE.monte_carlo import MCContext, MCData, MCPipelineResult
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
 from SymbolicDSGE.regression.ols import MCRegressionResult, ols
 
@@ -1033,12 +1032,14 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         statistic_trace=np.array([0.5, 1.5], dtype=np.float64),
         status_trace=(TestStatus.OK, TestStatus.BAD_SHAPE),
     )
-    data_accumulator = MCDataAccumulator()
-    data_accumulator.push(
-        MCData(
+    context = MCContext(
+        rep_idx=0,
+        reference=None,  # type: ignore[arg-type]
+        dgp=None,
+        data=MCData(
             states=np.arange(12, dtype=np.float64).reshape(4, 3),
             raw={"x": np.arange(4, dtype=np.float64)},
-        )
+        ),
     )
     result = MCPipelineResult(
         n_rep=2,
@@ -1052,9 +1053,8 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         test_summaries={"diagnostic": tests},
         test_results=None,
         payloads=None,
-        contexts=None,
+        contexts=(context,),
         regression_summaries={"ols": regressions},
-        data_summaries=data_accumulator.finalize(),
     )
 
     payload = serialize_pipeline_result(result, run_id="run")

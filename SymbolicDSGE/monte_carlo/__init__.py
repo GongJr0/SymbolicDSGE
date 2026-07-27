@@ -28,7 +28,6 @@ from .postproc import Raw, Summary
 from .mc_constructs import (
     MCContext,
     MCData,
-    MCDataSummary,
     MCPipelineResult,
     MCStep,
     OpType,
@@ -47,7 +46,6 @@ __all__ = [
     "MCStep",
     "MCContext",
     "MCData",
-    "MCDataSummary",
     "OpType",
     "numpy_operation",
     "pandas_operation",
