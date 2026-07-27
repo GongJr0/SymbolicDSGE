@@ -1493,7 +1493,6 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
                     SourceArgs(
                         arg="sample",
                         source_step="datagen",
-                        source_idx=-1,
                         source_kind=SOURCE_KIND_DATA,
                         field="states",
                         field_idx=MC_DATA_FIELD_INDEX["states"],
@@ -1589,7 +1588,6 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         SourceArgs(
             arg="sample",
             source_step="datagen",
-            source_idx=0,
             source_kind=SOURCE_KIND_DATA,
             field="states",
             field_idx=MC_DATA_FIELD_INDEX["states"],
@@ -1597,6 +1595,7 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
             burn_in=1,
             drop_initial=True,
         ),
+        0,
     )
     np.testing.assert_allclose(selected, states[1:, [1]])
 
@@ -1605,12 +1604,12 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
         SourceArgs(
             arg="sample",
             source_step="vector",
-            source_idx=1,
             source_kind=SOURCE_KIND_PAYLOAD,
             field="payload",
             field_idx=DYNAMIC_FIELD_INDEX["payload"],
             burn_in=2,
         ),
+        1,
     )
     np.testing.assert_allclose(payload, np.arange(2.0, 5.0).reshape(3, 1))
 
@@ -1623,12 +1622,12 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
             SourceArgs(
                 arg="sample",
                 source_step="filter",
-                source_idx=2,
                 source_kind=SOURCE_KIND_FILTER,
                 field="std_innov",
                 field_idx=FILTER_RAW_FIELD_INDEX["std_innov"],
                 columns=slice(0, 1),
             ),
+            2,
         ),
         filt.std_innov[:, :1],
     )

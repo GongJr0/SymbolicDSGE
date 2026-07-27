@@ -64,8 +64,12 @@ def _resolve_seed_increment(
     return increment
 
 
-def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
-    out: NDF = context.payload_slots[selector.source_idx][selector.field_idx][
+def _resolve_source_array(
+    context: MCContext,
+    selector: SourceArgs,
+    source_idx: int,
+) -> NDF:
+    out: NDF = context.payload_slots[source_idx][selector.field_idx][
         selector.row_start :, selector.column_selector
     ]
     return out

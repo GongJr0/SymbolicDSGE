@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from .catalog import FILTER_SOURCES
 from .mc_constructs import MCStep, OpType
@@ -80,7 +80,11 @@ class PipelineGraph:
         self.order: tuple[str, ...] = tuple(nodes)
 
     @classmethod
-    def from_steps(cls, steps: tuple[MCStep, ...]) -> PipelineGraph:
+    def from_steps(
+        cls,
+        steps: tuple[MCStep, ...],
+        source_indices: Sequence[Sequence[int]] | None = None,
+    ) -> PipelineGraph:
         if not steps:
             raise ValueError("Cannot build a graph from an empty pipeline.")
         index = {step.name: i for i, step in enumerate(steps)}
@@ -88,7 +92,13 @@ class PipelineGraph:
 
         inputs_by_name: dict[str, tuple[InputEdge, ...]] = {}
         for position, step in enumerate(steps):
-            edges = _resolve_inputs(step, root_name=root)
+            indices = None if source_indices is None else source_indices[position]
+            edges = _resolve_inputs(
+                step,
+                root_name=root,
+                steps=steps,
+                source_indices=indices,
+            )
             for edge in edges:
                 if edge.producer not in index:
                     raise ValueError(
@@ -134,17 +144,34 @@ class PipelineGraph:
         return out
 
 
-def _resolve_inputs(step: MCStep, *, root_name: str) -> tuple[InputEdge, ...]:
+def _resolve_inputs(
+    step: MCStep,
+    *,
+    root_name: str,
+    steps: tuple[MCStep, ...],
+    source_indices: Sequence[int] | None,
+) -> tuple[InputEdge, ...]:
     if step.op_type is OpType.DATAGEN:
         return ()
     if step.op_type is OpType.FILTER:
         return (InputEdge(role="source", producer=root_name, channel="observables"),)
 
+    if source_indices is None:
+        return tuple(
+            InputEdge(
+                role=selector.arg,
+                producer=selector.source_step,
+                channel=selector.field,
+            )
+            for selector in step.source_args
+        )
+    if len(source_indices) != len(step.source_args):
+        raise ValueError(f"Step {step.name!r} has inconsistent resolved sources.")
     return tuple(
         InputEdge(
             role=selector.arg,
-            producer=selector.source_step,
+            producer=steps[source_idx].name,
             channel=selector.field,
         )
-        for selector in step.source_args
+        for selector, source_idx in zip(step.source_args, source_indices)
     )
