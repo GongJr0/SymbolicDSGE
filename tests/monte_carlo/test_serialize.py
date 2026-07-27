@@ -98,7 +98,7 @@ def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
     return pipeline.run(
         reference=cast(SolvedModel, object()),
         n_rep=n_rep,
-        context_poolsize=10000,
+        retain_contexts=True,
         verbosity=0,
     )
 

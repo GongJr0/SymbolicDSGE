@@ -204,7 +204,7 @@ def test_raw_model_data_pipeline_runs_without_dgp_and_aggregates_wald_results() 
         ]
     )
 
-    out = pipeline.run(reference=reference, n_rep=2, context_poolsize=10000)
+    out = pipeline.run(reference=reference, n_rep=2, retain_contexts=True)
 
     statistic = wald_mean_hac(states, target, bandwidth=0).statistic
     expected = np.full(2, statistic, dtype=np.float64)
@@ -241,7 +241,7 @@ def test_raw_model_data_pipeline_accepts_observables_without_states() -> None:
         ]
     )
 
-    out = pipeline.run(reference=reference, n_rep=2, context_poolsize=10000)
+    out = pipeline.run(reference=reference, n_rep=2, retain_contexts=True)
 
     statistic = wald_mean_hac(observables, target, bandwidth=0).statistic
     expected = np.full(2, statistic, dtype=np.float64)
@@ -508,7 +508,7 @@ def test_add_payload_step_registers_1d_payload_for_downstream_steps() -> None:
         ]
     )
 
-    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, context_poolsize=10000)
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2, retain_contexts=True)
 
     expected = wald_mean_hac(payload.reshape(-1, 1), target, bandwidth=0).statistic
     np.testing.assert_allclose(
@@ -872,9 +872,8 @@ def test_pipeline_retention_controls_drop_payload_and_result_traces() -> None:
     out = pipeline.run(
         reference=reference,
         n_rep=2,
-        payload_poolsize=0,
-        test_result_poolsize=0,
-        context_poolsize=0,
+        retain_payloads=False,
+        retain_test_results=False,
     )
 
     assert out.payloads is None
@@ -1128,7 +1127,7 @@ def test_transform_step_returning_mcdata_updates_downstream_data() -> None:
         ]
     )
 
-    out = pipeline.run(reference=reference, n_rep=2, context_poolsize=10000)
+    out = pipeline.run(reference=reference, n_rep=2, retain_contexts=True)
 
     np.testing.assert_allclose(reference.kalman_calls[0]["y"], observables + 1.0)
     assert out.contexts is not None
@@ -1202,7 +1201,7 @@ def test_regression_summary_does_not_depend_on_payload_retention() -> None:
         ]
     )
 
-    out = pipeline.run(reference=reference, n_rep=2, payload_poolsize=0)
+    out = pipeline.run(reference=reference, n_rep=2, retain_payloads=False)
 
     assert out.payloads is None
     assert out.test_summaries == {}
