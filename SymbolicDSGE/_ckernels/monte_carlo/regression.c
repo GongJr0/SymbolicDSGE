@@ -4,6 +4,7 @@
 #include "../regression/lasso.h"
 #include "../regression/regression.h"
 #include <math.h>
+#include <stddef.h>
 
 static void sdsge_mc_set_failure(sdsge_mc_regression_record *rec) {
   for (i64 i = 0; i < rec->p; ++i)
@@ -16,7 +17,7 @@ static void sdsge_mc_set_failure(sdsge_mc_regression_record *rec) {
 }
 
 static void sdsge_mc_compute_ssr_sst(const f64 *X, const f64 *y,
-                                      sdsge_mc_regression_record *rec) {
+                                     sdsge_mc_regression_record *rec) {
   const i64 n = rec->n;
   const i64 p = rec->p;
   f64 ssr = 0.0;
@@ -76,8 +77,7 @@ static void sdsge_mc_sparse_gram(const f64 *X, const f64 *y,
       g[i] = g[row] - G_base[row * p] * y_mean;
       for (i64 j = 0; j < k; ++j) {
         const i64 col = j + 1;
-        G[i * k + j] = G_base[row * p + col] -
-                           G_base[row * p] * G_base[col];
+        G[i * k + j] = G_base[row * p + col] - G_base[row * p] * G_base[col];
       }
     }
     g[k] = y_mean;
@@ -133,15 +133,15 @@ void sdsge_mc_ols_fit(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
   }
 }
 
-void sdsge_mc_ridge_fit(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
-                        f64 alpha, i64 intercept,
+void sdsge_mc_ridge_fit(const f64 *SDSGE_RESTRICT X,
+                        const f64 *SDSGE_RESTRICT y, f64 alpha, i64 intercept,
                         sdsge_mc_regression_record *SDSGE_RESTRICT rec,
                         f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT G,
                         f64 *SDSGE_RESTRICT G_unpen, f64 *SDSGE_RESTRICT g,
                         f64 *SDSGE_RESTRICT col) {
   f64 dof = 0.0;
   sdsge_chol_solve_L2(X, y, rec->n, rec->p, alpha, intercept, rec->coef, L,
-                       &dof, &rec->status, G, G_unpen, g, col);
+                      &dof, &rec->status, G, G_unpen, g, col);
   if (rec->status == REGRESSION_OK)
     sdsge_mc_compute_ssr_sst(X, y, rec);
   else
@@ -150,28 +150,27 @@ void sdsge_mc_ridge_fit(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y
 
 void sdsge_mc_ridge_gs_fit(
     const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
-    const f64 *SDSGE_RESTRICT alphas, i64 n_alpha, i64 criterion,
-    i64 intercept, sdsge_mc_regression_record *SDSGE_RESTRICT rec,
-    f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
-    f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT g,
+    const f64 *SDSGE_RESTRICT alphas, i64 n_alpha, i64 criterion, i64 intercept,
+    sdsge_mc_regression_record *SDSGE_RESTRICT rec, f64 *SDSGE_RESTRICT G_base,
+    f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT g,
     f64 *SDSGE_RESTRICT coef_work, f64 *SDSGE_RESTRICT col) {
   f64 alpha = NAN;
   f64 objective = NAN;
   sdsge_ridge_grid_search(X, y, rec->n, rec->p, alphas, n_alpha, criterion,
-                           intercept, &alpha, rec->coef, &objective,
-                           &rec->status, G_base, G, g, L, coef_work, col);
+                          intercept, &alpha, rec->coef, &objective,
+                          &rec->status, G_base, G, g, L, coef_work, col);
   if (rec->status == REGRESSION_OK)
     sdsge_mc_compute_ssr_sst(X, y, rec);
   else
     sdsge_mc_set_failure(rec);
 }
 
-void sdsge_mc_lasso_fit(
-    const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y, f64 alpha,
-    i64 intercept, i64 max_iter, f64 tol,
-    sdsge_mc_regression_record *SDSGE_RESTRICT rec,
-    f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
-    f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT Gcoef) {
+void sdsge_mc_lasso_fit(const f64 *SDSGE_RESTRICT X,
+                        const f64 *SDSGE_RESTRICT y, f64 alpha, i64 intercept,
+                        i64 max_iter, f64 tol,
+                        sdsge_mc_regression_record *SDSGE_RESTRICT rec,
+                        f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
+                        f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT Gcoef) {
   const i64 k = rec->p - (intercept ? 1 : 0);
   sdsge_mc_sparse_gram(X, y, rec, intercept, G_base, G, g);
   rec->status = sdsge_lasso_gram_cd(G, g, k, alpha, max_iter, tol,
@@ -187,17 +186,16 @@ void sdsge_mc_lasso_fit(
 
 void sdsge_mc_lasso_gs_fit(
     const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
-    const f64 *SDSGE_RESTRICT alphas, i64 n_alpha, i64 intercept,
-    i64 max_iter, f64 tol, sdsge_mc_regression_record *SDSGE_RESTRICT rec,
-    f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
-    f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT lam_path,
-    f64 *SDSGE_RESTRICT beta_path, f64 *SDSGE_RESTRICT beta_grid,
-    f64 *SDSGE_RESTRICT work) {
+    const f64 *SDSGE_RESTRICT alphas, i64 n_alpha, i64 intercept, i64 max_iter,
+    f64 tol, sdsge_mc_regression_record *SDSGE_RESTRICT rec,
+    f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT g,
+    f64 *SDSGE_RESTRICT lam_path, f64 *SDSGE_RESTRICT beta_path,
+    f64 *SDSGE_RESTRICT beta_grid, f64 *SDSGE_RESTRICT work) {
   const i64 k = rec->p - (intercept ? 1 : 0);
   i64 n_knots = 0;
   sdsge_mc_sparse_gram(X, y, rec, intercept, G_base, G, g);
   rec->status = sdsge_lars_lasso_gram(G, g, k, max_iter, tol, lam_path,
-                                       beta_path, &n_knots, work);
+                                      beta_path, &n_knots, work);
   if (rec->status != REGRESSION_OK) {
     sdsge_mc_set_failure(rec);
     return;
@@ -235,18 +233,16 @@ void sdsge_mc_lasso_gs_fit(
 void sdsge_mc_elastic_net_fit(
     const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y, f64 alpha,
     f64 l1_ratio, i64 intercept, i64 max_iter, f64 tol,
-    sdsge_mc_regression_record *SDSGE_RESTRICT rec,
-    f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
-    f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT Gcoef) {
+    sdsge_mc_regression_record *SDSGE_RESTRICT rec, f64 *SDSGE_RESTRICT G_base,
+    f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT Gcoef) {
   const i64 k = rec->p - (intercept ? 1 : 0);
   const f64 alpha_l1 = alpha * l1_ratio;
   const f64 alpha_l2 = alpha * (1.0 - l1_ratio);
   sdsge_mc_sparse_gram(X, y, rec, intercept, G_base, G, g);
   for (i64 j = 0; j < k; ++j)
     Gcoef[j] = 0.0;
-  rec->status = sdsge_en_gram_cd(G, g, k, alpha_l1, alpha_l2, Gcoef,
-                                 max_iter, tol,
-                                 rec->coef + (intercept ? 1 : 0), Gcoef);
+  rec->status = sdsge_en_gram_cd(G, g, k, alpha_l1, alpha_l2, Gcoef, max_iter,
+                                 tol, rec->coef + (intercept ? 1 : 0), Gcoef);
   if (rec->status == REGRESSION_OK) {
     if (intercept)
       sdsge_mc_restore_intercept(rec, G_base, g[k]);
@@ -258,11 +254,10 @@ void sdsge_mc_elastic_net_fit(
 
 void sdsge_mc_elastic_net_gs_fit(
     const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
-    const f64 *SDSGE_RESTRICT alphas, i64 n_alpha, f64 l1_ratio,
-    i64 criterion, i64 intercept, i64 max_iter, f64 tol,
-    sdsge_mc_regression_record *SDSGE_RESTRICT rec,
-    f64 *SDSGE_RESTRICT G_base, f64 *SDSGE_RESTRICT G,
-    f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT beta_grid,
+    const f64 *SDSGE_RESTRICT alphas, i64 n_alpha, f64 l1_ratio, i64 criterion,
+    i64 intercept, i64 max_iter, f64 tol,
+    sdsge_mc_regression_record *SDSGE_RESTRICT rec, f64 *SDSGE_RESTRICT G_base,
+    f64 *SDSGE_RESTRICT G, f64 *SDSGE_RESTRICT g, f64 *SDSGE_RESTRICT beta_grid,
     i64 *SDSGE_RESTRICT statuses, f64 *SDSGE_RESTRICT Gcoef,
     f64 *SDSGE_RESTRICT beta, f64 *SDSGE_RESTRICT dof_work) {
   const i64 k = rec->p - (intercept ? 1 : 0);
