@@ -17,19 +17,21 @@ cdef extern from "diag.h":
     int DIAG_FALLBACK
 
     int sdsge_bg_stat(const double *eps, const double *X, int64_t n, int64_t K,
-                      int64_t lags, double *stat_out) nogil
+                      int64_t lags, double *arena, double *stat_out) nogil
     int sdsge_bp_aux(const double *eps, const double *X_aug, int64_t n,
-                     int64_t p, double *rss_out, double *tss_out) nogil
+                     int64_t p, double *arena, double *rss_out,
+                     double *tss_out) nogil
     int sdsge_chow_stat(const double *y, const double *X, int64_t T, int64_t p,
-                        int64_t t_break, double *stat_out) nogil
+                        int64_t t_break, double *arena, double *stat_out) nogil
     int sdsge_recursive_residuals(const double *y, const double *X, int64_t T,
-                                  int64_t p, double *w_out) nogil
+                                  int64_t p, double *arena, double *w_out) nogil
     int sdsge_cusum_series(const double *y, const double *X, int64_t T,
-                           int64_t p, double *series_out) nogil
+                           int64_t p, double *arena, double *series_out) nogil
     int sdsge_cusum_stat(const double *y, const double *X, int64_t T,
-                         int64_t p, double *stat_out) nogil
+                         int64_t p, double *arena, double *stat_out) nogil
     int sdsge_cusumsq_stat(const double *y, const double *X, int64_t T,
-                           int64_t p, int64_t *n_out, double *stat_out) nogil
+                           int64_t p, int64_t *n_out, double *arena,
+                           double *stat_out) nogil
     int sdsge_acorr(const double *x, const int64_t n, const int64_t L,
                     double *z_scratch, double *out) nogil
     int sdsge_lb_stat(const double *x, const int64_t n, int64_t L,
@@ -92,10 +94,16 @@ def bg_stat(eps, X, int64_t lags):
 
     cdef int64_t n = eps_mv.shape[0]
     cdef int64_t K = X_mv.shape[1]
+    cdef int64_t p = K + lags + 1
+    cdef int64_t arena_len = n * p + 2 * p * p + 2 * p
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_bg_stat(&eps_mv[0], &X_mv[0, 0], n, K, lags, &stat)
+        status = sdsge_bg_stat(
+            &eps_mv[0], &X_mv[0, 0], n, K, lags, arena_ptr, &stat
+        )
     return status, stat
 
 
@@ -106,11 +114,16 @@ def bp_aux(eps, X_aug):
 
     cdef int64_t n = X_aug_mv.shape[0]
     cdef int64_t p = X_aug_mv.shape[1]
+    cdef int64_t arena_len = n + 2 * p * p + 2 * p
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     cdef double rss = 0.0
     cdef double tss = 0.0
     cdef int status
     with nogil:
-        status = sdsge_bp_aux(&eps_mv[0], &X_aug_mv[0, 0], n, p, &rss, &tss)
+        status = sdsge_bp_aux(
+            &eps_mv[0], &X_aug_mv[0, 0], n, p, arena_ptr, &rss, &tss
+        )
     return status, rss, tss
 
 
@@ -121,10 +134,15 @@ def chow_stat(y, X, int64_t t_break):
 
     cdef int64_t T = X_mv.shape[0]
     cdef int64_t p = X_mv.shape[1]
+    cdef int64_t arena_len = 2 * p * p + 2 * p
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_chow_stat(&y_mv[0], &X_mv[0, 0], T, p, t_break, &stat)
+        status = sdsge_chow_stat(
+            &y_mv[0], &X_mv[0, 0], T, p, t_break, arena_ptr, &stat
+        )
     return status, stat
 
 
@@ -136,12 +154,17 @@ def recursive_residuals(y, X):
     cdef int64_t T = X_mv.shape[0]
     cdef int64_t p = X_mv.shape[1]
     cdef int64_t w_len = T - p if T > p else 0
+    cdef int64_t arena_len = 3 * p * p + 3 * p
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     w = np.empty(w_len, dtype=np.float64)
     cdef double[::1] w_mv = w
     cdef double *w_ptr = &w_mv[0] if w_len > 0 else NULL
     cdef int status
     with nogil:
-        status = sdsge_recursive_residuals(&y_mv[0], &X_mv[0, 0], T, p, w_ptr)
+        status = sdsge_recursive_residuals(
+            &y_mv[0], &X_mv[0, 0], T, p, arena_ptr, w_ptr
+        )
     return status, w
 
 
@@ -153,12 +176,17 @@ def cusum_series(y, X):
     cdef int64_t T = X_mv.shape[0]
     cdef int64_t p = X_mv.shape[1]
     cdef int64_t s_len = T - p if T > p else 0
+    cdef int64_t arena_len = s_len + 2 * p * p + 2 * p + 3 * p * p + 3 * p
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     series = np.empty(s_len, dtype=np.float64)
     cdef double[::1] s_mv = series
     cdef double *s_ptr = &s_mv[0] if s_len > 0 else NULL
     cdef int status
     with nogil:
-        status = sdsge_cusum_series(&y_mv[0], &X_mv[0, 0], T, p, s_ptr)
+        status = sdsge_cusum_series(
+            &y_mv[0], &X_mv[0, 0], T, p, arena_ptr, s_ptr
+        )
     return status, series
 
 
@@ -169,10 +197,14 @@ def cusum_stat(y, X):
 
     cdef int64_t T = X_mv.shape[0]
     cdef int64_t p = X_mv.shape[1]
+    cdef int64_t nrec = T - p if T > p else 0
+    cdef int64_t arena_len = nrec + 2 * p * p + 2 * p + 3 * p * p + 3 * p + nrec
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_cusum_stat(&y_mv[0], &X_mv[0, 0], T, p, &stat)
+        status = sdsge_cusum_stat(&y_mv[0], &X_mv[0, 0], T, p, arena_ptr, &stat)
     return status, stat
 
 
@@ -206,11 +238,17 @@ def cusumsq_stat(y, X):
 
     cdef int64_t T = X_mv.shape[0]
     cdef int64_t p = X_mv.shape[1]
+    cdef int64_t nrec = T - p if T > p else 0
+    cdef int64_t arena_len = 3 * p * p + 3 * p + nrec
+    cdef double[::1] arena_mv = np.empty(arena_len, dtype=np.float64)
+    cdef double *arena_ptr = &arena_mv[0] if arena_len > 0 else NULL
     cdef int64_t n = 0
     cdef double stat = 0.0
     cdef int status
     with nogil:
-        status = sdsge_cusumsq_stat(&y_mv[0], &X_mv[0, 0], T, p, &n, &stat)
+        status = sdsge_cusumsq_stat(
+            &y_mv[0], &X_mv[0, 0], T, p, &n, arena_ptr, &stat
+        )
     return status, n, stat
 
 
