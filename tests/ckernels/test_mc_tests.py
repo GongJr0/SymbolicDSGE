@@ -6,6 +6,11 @@ import numpy as np
 
 from SymbolicDSGE._ckernels.diag import _diag as diag
 from SymbolicDSGE._ckernels.monte_carlo import _tests as mc_tests
+from SymbolicDSGE._diag_tests.wald_test import (
+    wald_covariance_hac,
+    wald_mean_hac,
+    wald_second_moment_hac,
+)
 
 
 def _sample() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -27,14 +32,62 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     n, p = X.shape
     lags = 5
 
-    statistic, status = mc_tests.ljung_box_fit(
+    statistic, status = mc_tests.ljung_box_runner(
         residuals, lags, np.empty(n), np.empty(lags + 1)
     )
     expected_status, expected = diag.lb_stat(residuals, lags)
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
 
-    statistic, status = mc_tests.jarque_bera_fit(residuals)
+    wald_g = X[:, 1:]
+    wald_q = wald_g.shape[1]
+    target_mean = np.zeros(wald_q, dtype=np.float64)
+    mean_arena = np.empty(n * wald_q + 3 * wald_q * wald_q + 4 * wald_q)
+    statistic, status = mc_tests.wald_mean_hac_runner(
+        wald_g,
+        target_mean,
+        1,
+        mc_tests.WALD_BW_MANUAL,
+        2,
+        mean_arena,
+        np.empty(wald_q, dtype=np.int64),
+    )
+    expected = wald_mean_hac(wald_g, target_mean, kernel="parzen", bandwidth=2)
+    assert status == 0
+    np.testing.assert_allclose(statistic, expected.statistic)
+
+    target_matrix = np.eye(wald_q, dtype=np.float64)
+    v = wald_q * (wald_q + 1) // 2
+    covariance_arena = np.empty(n * wald_q + n * v + 3 * v * v + 5 * v)
+    statistic, status = mc_tests.wald_covariance_hac_runner(
+        wald_g,
+        target_matrix,
+        2,
+        mc_tests.WALD_BW_MANUAL,
+        2,
+        covariance_arena,
+        np.empty(v, dtype=np.int64),
+    )
+    expected = wald_covariance_hac(wald_g, target_matrix, kernel="qs", bandwidth=2)
+    assert status == 0
+    np.testing.assert_allclose(statistic, expected.statistic)
+
+    statistic, status = mc_tests.wald_second_moment_hac_runner(
+        wald_g,
+        target_matrix,
+        1,
+        mc_tests.WALD_BW_AUTO,
+        0,
+        np.empty(n * v + 3 * v * v + 5 * v),
+        np.empty(v, dtype=np.int64),
+    )
+    expected = wald_second_moment_hac(
+        wald_g, target_matrix, kernel="parzen", bandwidth="auto"
+    )
+    assert status == 0
+    np.testing.assert_allclose(statistic, expected.statistic)
+
+    statistic, status = mc_tests.jarque_bera_runner(residuals)
     expected_status, expected = diag.jb_stat(residuals)
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
@@ -45,7 +98,7 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
         [[0.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
         dtype=np.float64,
     )
-    statistic, status = mc_tests.wald_fit(
+    statistic, status = mc_tests.wald_runner(
         mean,
         target,
         omega,
@@ -60,38 +113,38 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     np.testing.assert_allclose(statistic, expected)
 
     arena = np.empty(n + 2 * p * p + 2 * p)
-    statistic, status = mc_tests.breusch_pagan_fit(residuals, X, False, arena)
+    statistic, status = mc_tests.breusch_pagan_runner(residuals, X, False, arena)
     expected_status, rss, tss = diag.bp_aux(residuals, X)
     assert status == expected_status
     np.testing.assert_allclose(statistic, max(0.0, 0.5 * (tss - rss)))
 
-    statistic, status = mc_tests.breusch_pagan_fit(residuals, X, True, arena)
+    statistic, status = mc_tests.breusch_pagan_runner(residuals, X, True, arena)
     expected = 0.0 if tss <= 0.0 else n * min(1.0, max(0.0, 1.0 - rss / tss))
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
 
     k = p - 1
     bg_p = 1 + k + lags
-    statistic, status = mc_tests.breusch_godfrey_fit(
+    statistic, status = mc_tests.breusch_godfrey_runner(
         residuals, X[:, 1:], lags, np.empty(n * bg_p + 2 * bg_p * bg_p + 2 * bg_p)
     )
     expected_status, expected = diag.bg_stat(residuals, X[:, 1:], lags)
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
 
-    statistic, status = mc_tests.chow_fit(y, X, 50, np.empty(2 * p * p + 2 * p))
+    statistic, status = mc_tests.chow_runner(y, X, 50, np.empty(2 * p * p + 2 * p))
     expected_status, expected = diag.chow_stat(y, X, 50)
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
 
     cusum_arena = np.empty(n - p + 2 * p * p + 2 * p + 3 * p * p + 3 * p + n - p)
-    statistic, status = mc_tests.cusum_fit(y, X, cusum_arena)
+    statistic, status = mc_tests.cusum_runner(y, X, cusum_arena)
     expected_status, expected = diag.cusum_stat(y, X)
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
 
     cusumsq_arena = np.empty(3 * p * p + 3 * p + n - p)
-    statistic, status = mc_tests.cusumsq_fit(y, X, cusumsq_arena)
+    statistic, status = mc_tests.cusumsq_runner(y, X, cusumsq_arena)
     expected_status, _, expected = diag.cusumsq_stat(y, X)
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)

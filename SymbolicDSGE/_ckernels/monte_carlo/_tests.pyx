@@ -43,6 +43,27 @@ cdef extern from "diag_wald.h":
         int64_t n, int64_t p, double *dev_scratch, double *factor_scratch,
         int64_t *pivot_scratch, double *solved_scratch, double *stat_out,
     ) nogil
+    int sdsge_wald_mean_hac(
+        const double *g, const double *target, int64_t n, int64_t q,
+        int kernel_id, int bandwidth_mode, int64_t manual_bandwidth,
+        double *arena, int64_t *pivot_scratch, double *stat_out,
+    ) nogil
+    int sdsge_wald_covariance_hac(
+        const double *g, const double *target, int64_t n, int64_t q,
+        int kernel_id, int bandwidth_mode, int64_t manual_bandwidth,
+        double *arena, int64_t *pivot_scratch, double *stat_out,
+    ) nogil
+    int sdsge_wald_second_moment_hac(
+        const double *g, const double *target, int64_t n, int64_t q,
+        int kernel_id, int bandwidth_mode, int64_t manual_bandwidth,
+        double *arena, int64_t *pivot_scratch, double *stat_out,
+    ) nogil
+
+
+WALD_BW_MANUAL = 0
+WALD_BW_WOOLDRIDGE = 1
+WALD_BW_ANDREWS = 2
+WALD_BW_AUTO = 3
 
 
 def ljung_box_runner(x, int64_t lags, z_scratch, acorr_scratch):
@@ -93,6 +114,66 @@ def wald_runner(
         status = sdsge_wald_stat_from_mean_and_cov(
             &mean_mv[0], &target_mv[0], &omega_mv[0, 0], n, mean_mv.shape[0],
             &dev_mv[0], &factor_mv[0, 0], &pivot_mv[0], &solved_mv[0], &stat,
+        )
+    return stat, status
+
+
+def wald_mean_hac_runner(
+    g, target, int kernel_id, int bandwidth_mode, int64_t manual_bandwidth,
+    arena, pivot_scratch,
+):
+    """Return mean-Wald HAC ``(statistic, status)`` using caller scratch."""
+    cdef double[:, ::1] g_mv = np.ascontiguousarray(g, dtype=np.float64)
+    cdef double[::1] target_mv = np.ascontiguousarray(target, dtype=np.float64)
+    cdef double[::1] arena_mv = arena
+    cdef int64_t[::1] pivot_mv = pivot_scratch
+    cdef double stat = np.nan
+    cdef int status
+    with nogil:
+        status = sdsge_wald_mean_hac(
+            &g_mv[0, 0], &target_mv[0], g_mv.shape[0], g_mv.shape[1],
+            kernel_id, bandwidth_mode, manual_bandwidth, &arena_mv[0],
+            &pivot_mv[0], &stat,
+        )
+    return stat, status
+
+
+def wald_covariance_hac_runner(
+    g, target, int kernel_id, int bandwidth_mode, int64_t manual_bandwidth,
+    arena, pivot_scratch,
+):
+    """Return covariance-Wald HAC ``(statistic, status)`` using caller scratch."""
+    cdef double[:, ::1] g_mv = np.ascontiguousarray(g, dtype=np.float64)
+    cdef double[:, ::1] target_mv = np.ascontiguousarray(target, dtype=np.float64)
+    cdef double[::1] arena_mv = arena
+    cdef int64_t[::1] pivot_mv = pivot_scratch
+    cdef double stat = np.nan
+    cdef int status
+    with nogil:
+        status = sdsge_wald_covariance_hac(
+            &g_mv[0, 0], &target_mv[0, 0], g_mv.shape[0], g_mv.shape[1],
+            kernel_id, bandwidth_mode, manual_bandwidth, &arena_mv[0],
+            &pivot_mv[0], &stat,
+        )
+    return stat, status
+
+
+def wald_second_moment_hac_runner(
+    g, target, int kernel_id, int bandwidth_mode, int64_t manual_bandwidth,
+    arena, pivot_scratch,
+):
+    """Return second-moment Wald HAC ``(statistic, status)`` using caller scratch."""
+    cdef double[:, ::1] g_mv = np.ascontiguousarray(g, dtype=np.float64)
+    cdef double[:, ::1] target_mv = np.ascontiguousarray(target, dtype=np.float64)
+    cdef double[::1] arena_mv = arena
+    cdef int64_t[::1] pivot_mv = pivot_scratch
+    cdef double stat = np.nan
+    cdef int status
+    with nogil:
+        status = sdsge_wald_second_moment_hac(
+            &g_mv[0, 0], &target_mv[0, 0], g_mv.shape[0], g_mv.shape[1],
+            kernel_id, bandwidth_mode, manual_bandwidth, &arena_mv[0],
+            &pivot_mv[0], &stat,
         )
     return stat, status
 
