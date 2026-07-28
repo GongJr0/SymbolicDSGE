@@ -26,6 +26,7 @@ _COMMON = os.path.join(_CKERNELS, "_common")
 # extension already; this is for the higher-level subsystems (core, kalman, ...).
 _EXTRA_DEPS = {
     "estimation": ["core", "kalman", "optim", "rng"],
+    "monte_carlo": ["core", "kalman", "rng", "regression"],
 }
 
 # Subsystems whose hand-written C draws randoms through numpy's low-level RNG
