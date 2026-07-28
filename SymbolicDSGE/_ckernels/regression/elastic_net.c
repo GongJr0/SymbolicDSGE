@@ -73,7 +73,8 @@ void sdsge_en_gram_cd_path(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRIC
 }
 
 f64 sdsge_en_active_dof(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT beta,
-                        i64 k, f64 alpha_l2, i64 intercept, f64 atol) {
+                        i64 k, f64 alpha_l2, i64 intercept, f64 atol,
+                        f64 *SDSGE_RESTRICT work) {
   const f64 ic = (f64)(intercept ? 1 : 0);
 
   i64 na = 0;
@@ -83,30 +84,26 @@ f64 sdsge_en_active_dof(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT b
   if (na == 0)
     return ic;
 
-  i64 *active = (i64 *)malloc((size_t)na * sizeof(i64));
-  f64 *G_active = (f64 *)malloc((size_t)(na * na) * sizeof(f64));
-  f64 *pen = (f64 *)malloc((size_t)(na * na) * sizeof(f64));
-  f64 *L = (f64 *)malloc((size_t)(na * na) * sizeof(f64));
-  f64 *col = (f64 *)malloc((size_t)na * sizeof(f64));
-  if (active == NULL || G_active == NULL || pen == NULL || L == NULL ||
-      col == NULL) {
-    free(active);
-    free(G_active);
-    free(pen);
-    free(L);
-    free(col);
-    return (f64)na + ic; /* numba's except branch returns n_active */
-  }
-
-  i64 cur = 0;
-  for (i64 j = 0; j < k; ++j)
-    if (fabs(beta[j]) > atol)
-      active[cur++] = j;
+  f64 *G_active = work;
+  f64 *pen = work + k * k;
+  f64 *L = work + 2 * k * k;
+  f64 *col = work + 3 * k * k;
 
   for (i64 i = 0; i < na; ++i) {
-    const i64 row = active[i];
+    i64 row = -1;
+    for (i64 j = 0, active = 0; j < k; ++j)
+      if (fabs(beta[j]) > atol && active++ == i) {
+        row = j;
+        break;
+      }
     for (i64 j = 0; j < na; ++j) {
-      const f64 val = G[row * k + active[j]];
+      i64 column = -1;
+      for (i64 candidate = 0, active = 0; candidate < k; ++candidate)
+        if (fabs(beta[candidate]) > atol && active++ == j) {
+          column = candidate;
+          break;
+        }
+      const f64 val = G[row * k + column];
       G_active[i * na + j] = val;
       pen[i * na + j] = val;
     }
@@ -128,10 +125,5 @@ f64 sdsge_en_active_dof(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT b
     }
   }
 
-  free(active);
-  free(G_active);
-  free(pen);
-  free(L);
-  free(col);
   return dof + ic;
 }
