@@ -1,11 +1,16 @@
 #include "diag.h"
 #include <math.h>
-#include <stdlib.h>
+#include <stddef.h>
 
 /* Breusch-Godfrey: regress eps on [1 | X | lagged eps], statistic n * R^2 (no
  * intercept removal -- TSS is sum(eps^2), matching the numba kernel). */
+i64 sdsge_bg_arena_size(i64 n, i64 K, i64 lags) {
+  i64 p = 1 + K + lags;
+  return n * p + 2 * p * p + 2 * p;
+}
 int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
-                  i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT stat_out) {
+                  i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT arena,
+                  f64 *SDSGE_RESTRICT stat_out) {
   if (n <= lags) {
     *stat_out = NAN;
     return DIAG_INSUFFICIENT_SAMPLES;
@@ -14,10 +19,6 @@ int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
   const i64 p = K + lags + 1; /* intercept + regressors + lagged residuals */
 
   /* arena: design(n*p) + G(p*p) + L(p*p) + g(p) + coef(p) */
-  const i64 total = n * p + 2 * p * p + 2 * p;
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return DIAG_LINALG;
   f64 *ptr = arena;
   f64 *design = ptr;
   ptr += n * p;
@@ -43,7 +44,6 @@ int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
   sdsge_gram(design, G, n, p);
   sdsge_gram_rhs(design, eps, g, n, p);
   if (sdsge_chol_solve(G, g, coef, L, p) != SDSGE_OK) {
-    free(arena);
     return DIAG_FALLBACK;
   }
 
@@ -59,16 +59,16 @@ int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
   }
 
   *stat_out = (tss > 0.0) ? (f64)n * (1.0 - rss / tss) : 0.0;
-  free(arena);
   return DIAG_OK;
 }
 
 /* Breusch-Pagan auxiliary regression of the scaled squared residuals on X_aug.
  * Returns the fit's RSS and centered TSS; the caller shapes them into bp_stat /
  * robust_bp_stat. */
+i64 sdsge_bp_arena_size(i64 n, i64 p) { return n + 2 * p * p + 2 * p; }
 int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
-                 i64 n, i64 p, f64 *SDSGE_RESTRICT rss_out,
-                 f64 *SDSGE_RESTRICT tss_out) {
+                 i64 n, i64 p, f64 *SDSGE_RESTRICT arena,
+                 f64 *SDSGE_RESTRICT rss_out, f64 *SDSGE_RESTRICT tss_out) {
   if (n == 0)
     return DIAG_INSUFFICIENT_SAMPLES;
 
@@ -81,10 +81,6 @@ int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
     return DIAG_UDEF_VARIANCE;
 
   /* arena: g(n) + G(p*p) + L(p*p) + rhs(p) + coef(p) */
-  const i64 total = n + 2 * p * p + 2 * p;
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return DIAG_LINALG;
   f64 *ptr = arena;
   f64 *gvec = ptr;
   ptr += n;
@@ -103,7 +99,6 @@ int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
   sdsge_gram(X_aug, G, n, p);
   sdsge_gram_rhs(X_aug, gvec, rhs, n, p);
   if (sdsge_chol_solve(G, rhs, coef, L, p) != SDSGE_OK) {
-    free(arena);
     return DIAG_FALLBACK;
   }
 
@@ -126,7 +121,30 @@ int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
 
   *rss_out = rss;
   *tss_out = tss;
-  free(arena);
+  return DIAG_OK;
+}
+
+int sdsge_bp_stat(const f64 *SDSGE_RESTRICT eps,
+                  const f64 *SDSGE_RESTRICT X_aug, const i64 n,
+                  const i64 p, const i64 robust,
+                  f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out) {
+  f64 rss = NAN;
+  f64 tss = NAN;
+  *stat_out = NAN;
+  const int status = sdsge_bp_aux(eps, X_aug, n, p, arena, &rss, &tss);
+  if (status != DIAG_OK)
+    return status;
+
+  if (robust) {
+    if (tss <= 0.0) {
+      *stat_out = 0.0;
+      return DIAG_OK;
+    }
+    const f64 r2 = max_f64(0.0, min_f64(1.0, 1.0 - rss / tss));
+    *stat_out = r2 * (f64)n;
+  } else {
+    *stat_out = max_f64(0.0, 0.5 * (tss - rss));
+  }
   return DIAG_OK;
 }
 
@@ -157,8 +175,10 @@ static int chow_segment_rss(const f64 *SDSGE_RESTRICT y_seg,
   return SDSGE_OK;
 }
 
+i64 sdsge_chow_arena_size(i64 p) { return 2 * p * p + 2 * p; }
 int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
-                    i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT stat_out) {
+                    i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT arena,
+                    f64 *SDSGE_RESTRICT stat_out) {
   if (T <= 2 * p) {
     *stat_out = NAN;
     return DIAG_INSUFFICIENT_SAMPLES;
@@ -169,10 +189,6 @@ int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
   }
 
   /* arena: G(p*p) + L(p*p) + g(p) + coef(p), reused across the three fits. */
-  const i64 total = 2 * p * p + 2 * p;
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return DIAG_LINALG;
   f64 *ptr = arena;
   f64 *G = ptr;
   ptr += p * p;
@@ -191,14 +207,12 @@ int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
       chow_segment_rss(y, X, n1, p, G, L, g, coef, &rss_1) != SDSGE_OK ||
       chow_segment_rss(y + n1, X + n1 * p, n2, p, G, L, g, coef, &rss_2) !=
           SDSGE_OK) {
-    free(arena);
     return DIAG_FALLBACK;
   }
 
   f64 num = (rss_c - (rss_1 + rss_2)) / (f64)p;
   f64 denom = (rss_1 + rss_2) / (f64)(T - 2 * p);
   *stat_out = num / denom;
-  free(arena);
   return DIAG_OK;
 }
 
@@ -229,16 +243,13 @@ static int ols_residual_sigma(const f64 *SDSGE_RESTRICT y,
 }
 
 int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
-                       i64 T, i64 p, f64 *SDSGE_RESTRICT series_out) {
+                       i64 T, i64 p, f64 *SDSGE_RESTRICT arena,
+                       f64 *SDSGE_RESTRICT series_out) {
   if (T == 0 || T <= p)
     return DIAG_INSUFFICIENT_SAMPLES;
 
-  /* arena: w(T-p) + G(p*p) + L(p*p) + g(p) + coef(p) */
+  /* arena: w(T-p) + G(p*p) + L(p*p) + g(p) + coef(p) + residuals_scratch */
   const i64 nrec = T - p;
-  const i64 total = nrec + 2 * p * p + 2 * p;
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return DIAG_LINALG;
   f64 *ptr = arena;
   f64 *w = ptr;
   ptr += nrec;
@@ -250,16 +261,15 @@ int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
   ptr += p;
   f64 *coef = ptr;
   ptr += p;
+  f64 *residuals = ptr;
 
-  int status = sdsge_recursive_residuals(y, X, T, p, w);
+  int status = sdsge_recursive_residuals(y, X, T, p, residuals, w);
   if (status != DIAG_OK) {
-    free(arena);
     return status; /* INSUFFICIENT_SAMPLES or FALLBACK */
   }
 
   f64 sigma = 0.0;
   if (ols_residual_sigma(y, X, T, p, G, L, g, coef, &sigma) != SDSGE_OK) {
-    free(arena);
     return DIAG_FALLBACK;
   }
 
@@ -268,26 +278,26 @@ int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
     acc += w[i];
     series_out[i] = acc / sigma;
   }
-  free(arena);
   return DIAG_OK;
 }
 
+i64 sdsge_cusum_arena_size(i64 T, i64 p) {
+  return (T - p) + 2 * p * p + 2 * p + 3 * p * p + 3 * p + (T - p);
+}
 int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
-                     i64 T, i64 p, f64 *SDSGE_RESTRICT stat_out) {
+                     i64 T, i64 p, f64 *SDSGE_RESTRICT arena,
+                     f64 *SDSGE_RESTRICT stat_out) {
   if (T == 0 || T <= p) {
     *stat_out = NAN;
     return DIAG_INSUFFICIENT_SAMPLES;
   }
 
   const i64 nrec = T - p;
-  f64 *series = (f64 *)malloc((size_t)nrec * sizeof(f64));
-  if (series == NULL)
-    return DIAG_LINALG;
+  f64 *series = arena + nrec + 2 * p * p + 2 * p + 3 * p * p + 3 * p;
 
-  int status = sdsge_cusum_series(y, X, T, p, series);
+  int status = sdsge_cusum_series(y, X, T, p, arena, series);
   if (status != DIAG_OK) {
     *stat_out = NAN;
-    free(series);
     return status;
   }
 
@@ -300,12 +310,15 @@ int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
       best = val;
   }
   *stat_out = best;
-  free(series);
   return DIAG_OK;
 }
 
+i64 sdsge_cusumsq_arena_size(i64 T, i64 p) {
+  return 3 * p * p + 3 * p + (T - p);
+}
 int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                        i64 T, i64 p, i64 *SDSGE_RESTRICT n_out,
+                       f64 *SDSGE_RESTRICT arena,
                        f64 *SDSGE_RESTRICT stat_out) {
   const i64 nrec = (T > p) ? (T - p) : 0;
   *n_out = nrec;
@@ -314,14 +327,11 @@ int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
     return DIAG_INSUFFICIENT_SAMPLES;
   }
 
-  f64 *w = (f64 *)malloc((size_t)nrec * sizeof(f64));
-  if (w == NULL)
-    return DIAG_LINALG;
+  f64 *w = arena + 3 * p * p + 3 * p; /* arena: recursive residuals + weights */
 
-  int status = sdsge_recursive_residuals(y, X, T, p, w);
+  int status = sdsge_recursive_residuals(y, X, T, p, arena, w);
   if (status != DIAG_OK) {
     *stat_out = NAN;
-    free(w);
     return status;
   }
 
@@ -339,21 +349,18 @@ int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
       best = dev;
   }
   *stat_out = best / sqrt(2.0);
-  free(w);
   return DIAG_OK;
 }
 
 int sdsge_recursive_residuals(const f64 *SDSGE_RESTRICT y,
                               const f64 *SDSGE_RESTRICT X, i64 T, i64 p,
+                              f64 *SDSGE_RESTRICT arena,
                               f64 *SDSGE_RESTRICT w_out) {
   if (T == 0 || T <= p)
     return DIAG_INSUFFICIENT_SAMPLES;
 
   /* arena: G(p*p) + L(p*p) + P(p*p) + Xty(p) + beta(p) + Px(p) */
-  const i64 total = 3 * p * p + 3 * p;
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return DIAG_LINALG;
+
   f64 *ptr = arena;
   f64 *G = ptr;
   ptr += p * p;
@@ -372,7 +379,6 @@ int sdsge_recursive_residuals(const f64 *SDSGE_RESTRICT y,
   sdsge_gram(X, G, p, p);
   sdsge_gram_rhs(X, y, Xty, p, p);
   if (sdsge_chol_inv(G, P, L, p) != SDSGE_OK) {
-    free(arena);
     return DIAG_FALLBACK;
   }
   for (i64 a = 0; a < p; ++a) {
@@ -412,7 +418,6 @@ int sdsge_recursive_residuals(const f64 *SDSGE_RESTRICT y,
     }
   }
 
-  free(arena);
   return DIAG_OK;
 }
 
@@ -476,6 +481,12 @@ int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
   return DIAG_OK;
 }
 
+i64 sdsge_lb_arena_size(const i64 n, const i64 L) {
+  const i64 n_safe = max_i64(n, 0);
+  const i64 l_safe = min_i64(max_i64(L, 0), max_i64(n_safe - 1, 0));
+  return n_safe + l_safe + 1;
+}
+
 /* Jarque-Bera normality statistic n * (skew^2/6 + (kurt-3)^2/24), mirroring the
  * numba jb_stat. The statistic is computed whenever the variance is defined;
  * the small-sample (n < 10) result is still returned, only with an
@@ -504,8 +515,9 @@ int sdsge_jb_stat(const f64 *SDSGE_RESTRICT x, i64 n, f64 *SDSGE_RESTRICT out) {
   m4 /= (f64)n;
 
   /* A non-finite m2 means the input carried NaN/inf (e.g. log of a non-positive
-   * value upstream); `m2 <= 0.0` alone can't catch it since every NaN comparison
-   * is false, so it would otherwise fall through to an OK/NaN statistic. */
+   * value upstream); `m2 <= 0.0` alone can't catch it since every NaN
+   * comparison is false, so it would otherwise fall through to an OK/NaN
+   * statistic. */
   if (!isfinite(m2) || m2 <= 0.0) {
     *out = NAN;
     return DIAG_UDEF_VARIANCE;
