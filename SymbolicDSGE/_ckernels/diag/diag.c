@@ -1,7 +1,6 @@
 #include "diag.h"
 #include <math.h>
 #include <stddef.h>
-#include <stdlib.h>
 
 /* Breusch-Godfrey: regress eps on [1 | X | lagged eps], statistic n * R^2 (no
  * intercept removal -- TSS is sum(eps^2), matching the numba kernel). */
