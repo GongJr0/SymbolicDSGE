@@ -3,6 +3,11 @@ from numpy.typing import NDArray
 
 _F64 = NDArray[float64]
 
+WALD_BW_MANUAL: int
+WALD_BW_WOOLDRIDGE: int
+WALD_BW_ANDREWS: int
+WALD_BW_AUTO: int
+
 def ljung_box_runner(
     x: _F64,
     lags: int,
@@ -19,6 +24,33 @@ def wald_runner(
     factor_scratch: _F64,
     pivot_scratch: NDArray[int64],
     solved_scratch: _F64,
+) -> tuple[float64, int]: ...
+def wald_mean_hac_runner(
+    g: _F64,
+    target: _F64,
+    kernel_id: int,
+    bandwidth_mode: int,
+    manual_bandwidth: int,
+    arena: _F64,
+    pivot_scratch: NDArray[int64],
+) -> tuple[float64, int]: ...
+def wald_covariance_hac_runner(
+    g: _F64,
+    target: _F64,
+    kernel_id: int,
+    bandwidth_mode: int,
+    manual_bandwidth: int,
+    arena: _F64,
+    pivot_scratch: NDArray[int64],
+) -> tuple[float64, int]: ...
+def wald_second_moment_hac_runner(
+    g: _F64,
+    target: _F64,
+    kernel_id: int,
+    bandwidth_mode: int,
+    manual_bandwidth: int,
+    arena: _F64,
+    pivot_scratch: NDArray[int64],
 ) -> tuple[float64, int]: ...
 def breusch_pagan_runner(
     residuals: _F64,
