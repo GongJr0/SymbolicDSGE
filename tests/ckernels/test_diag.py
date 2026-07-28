@@ -244,13 +244,30 @@ def test_wald_stat_parity(q):
     assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)
 
 
-def test_wald_stat_fallback_on_non_pd():
-    """A non-PD omega makes the native Cholesky path signal DIAG_FALLBACK."""
+def test_wald_stat_lu_parity_on_indefinite_covariance():
+    """The native LU fallback matches the reference solve for non-PD omega."""
+    q = 3
+    mean = np.ascontiguousarray(np.ones(q))
+    target = np.ascontiguousarray(np.zeros(q))
+    omega = np.array([[0.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+    ns, nstat = diag.wald_stat_from_mean_and_cov(mean, target, omega, 50)
+    rs, rstat, rdf = jit_wald_stat_from_mean_and_cov(mean, target, omega, 50)
+    assert ns == rs == 0
+    assert rdf == q
+    assert np.isclose(nstat, rstat, rtol=RTOL, atol=ATOL)
+
+
+def test_wald_stat_returns_linalg_error_for_singular_covariance():
     q = 3
     mean = np.ascontiguousarray(np.ones(q))
     target = np.ascontiguousarray(np.zeros(q))
     omega = np.zeros((q, q), dtype=np.float64)
-    assert diag.wald_stat_from_mean_and_cov(mean, target, omega, 50)[0] == diag.FALLBACK
+    ns, nstat = diag.wald_stat_from_mean_and_cov(mean, target, omega, 50)
+    rs, rstat, rdf = jit_wald_stat_from_mean_and_cov(mean, target, omega, 50)
+    assert ns == rs == -2
+    assert rdf == q
+    assert np.isnan(nstat)
+    assert np.isnan(rstat)
 
 
 @pytest.mark.parametrize("shape", [(10, 1), (20, 3), (15, 4)])

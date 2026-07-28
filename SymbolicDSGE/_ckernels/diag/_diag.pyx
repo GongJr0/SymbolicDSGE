@@ -58,7 +58,9 @@ cdef extern from "diag_wald.h":
                                           const double *target,
                                           const double *omega, int64_t n,
                                           int64_t p, double *dev_scratch,
-                                          double *L_scratch,
+                                          double *factor_scratch,
+                                          int64_t *pivot_scratch,
+                                          double *solved_scratch,
                                           double *stat_out) nogil
 
     int sdsge_symmetric_outer_prod_2dim(const double *x, int64_t n, int64_t p,
@@ -360,8 +362,8 @@ def wald_stat_from_mean_and_cov(mean, target,
                                 omega, int64_t n):
     """Wald statistic n * dev^T omega^-1 dev with dev = mean - target.
 
-    Returns (status, stat). status is DIAG_OK, or FALLBACK when omega is not
-    positive definite (the caller recomputes via the numba LU path).
+    Returns (status, stat). The kernel uses Cholesky for positive-definite
+    covariance matrices and partial-pivot LU otherwise.
     """
     cdef int64_t p = mean.shape[0]
     cdef double stat = 0.0
@@ -372,13 +374,17 @@ def wald_stat_from_mean_and_cov(mean, target,
     cdef double[:, ::1] omega_mv = np.ascontiguousarray(omega, dtype=np.float64)
 
     dev = np.empty(p, dtype=np.float64)
-    chol = np.empty((p, p), dtype=np.float64)
+    factor = np.empty((p, p), dtype=np.float64)
+    pivot = np.empty(p, dtype=np.int64)
+    solved = np.empty(p, dtype=np.float64)
     cdef double[::1] dev_mv = dev
-    cdef double[:, ::1] chol_mv = chol
+    cdef double[:, ::1] factor_mv = factor
+    cdef int64_t[::1] pivot_mv = pivot
+    cdef double[::1] solved_mv = solved
     with nogil:
         status = sdsge_wald_stat_from_mean_and_cov(
             &mean_mv[0], &target_mv[0], &omega_mv[0, 0], n, p,
-            &dev_mv[0], &chol_mv[0, 0], &stat)
+            &dev_mv[0], &factor_mv[0, 0], &pivot_mv[0], &solved_mv[0], &stat)
     return status, stat
 
 
