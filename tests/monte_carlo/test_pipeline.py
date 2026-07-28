@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from SymbolicDSGE import Shock
+from SymbolicDSGE import DSGESolver, ModelParser, Shock
 from SymbolicDSGE._diag_tests.breusch_godfrey import breusch_godfrey
 from SymbolicDSGE._diag_tests.breusch_pagan import (
     breusch_pagan,
@@ -20,6 +20,8 @@ from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult
+from SymbolicDSGE.kalman.config import KalmanConfig
+from SymbolicDSGE.monte_carlo.allocation import BufferSpec
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     MCContext,
@@ -56,7 +58,7 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
     ljung_box_test_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step, transform_step
 from SymbolicDSGE.monte_carlo.operations.utils import (
     _clone_or_pass_shocks,
     _resolve_source_array,
@@ -1135,6 +1137,161 @@ def test_transform_step_returning_mcdata_updates_downstream_data() -> None:
     np.testing.assert_allclose(out.contexts[0].data.observables, observables + 1.0)
     assert out.payloads is not None
     assert isinstance(out.payloads[0]["add_noise"], MCData)
+
+
+def test_output_shape_resolution_tracks_selected_transform_payloads() -> None:
+    observables = np.zeros((2, 8, 3), dtype=np.float64)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(observables=observables),
+            log_diff_step(
+                "growth",
+                source="datagen",
+                field="observables",
+                columns=[1, 2],
+                burn_in=1,
+            ),
+            regression_step(
+                "ols",
+                y_source="growth",
+                y_field="payload",
+                y_column=0,
+                X_source="growth",
+                X_field="payload",
+                X_columns=1,
+            ),
+        ]
+    )
+
+    specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
+
+    assert specs == {
+        "datagen": {"observables": BufferSpec((8, 3), np.float64)},
+        "growth": {"payload": BufferSpec((6, 2), np.float64)},
+        "ols": {
+            "coef": BufferSpec((2,), np.float64),
+            "se": BufferSpec((2,), np.float64),
+            "ssr": BufferSpec((), np.float64),
+            "sst": BufferSpec((), np.float64),
+            "status": BufferSpec((), np.int64),
+        },
+    }
+
+
+def test_output_shape_resolution_includes_linear_filter_fields() -> None:
+    reference = _FakeSolvedModel()
+    reference.compiled.observable_names = ["a", "b", "c"]
+    observables = np.zeros((2, 8, 3), dtype=np.float64)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(
+                observables=observables,
+                observable_names=("a", "b", "c"),
+            ),
+            reference_filter_step(
+                observables=["a", "c"],
+                return_shocks=True,
+            ),
+        ]
+    )
+
+    specs = pipeline._resolve_output_specs(reference, None)
+
+    assert specs["filter"] == {
+        "x_pred": BufferSpec((8, 2), np.float64),
+        "x_filt": BufferSpec((8, 2), np.float64),
+        "P_pred": BufferSpec((8, 2, 2), np.float64),
+        "P_filt": BufferSpec((8, 2, 2), np.float64),
+        "y_pred": BufferSpec((8, 2), np.float64),
+        "y_filt": BufferSpec((8, 2), np.float64),
+        "innov": BufferSpec((8, 2), np.float64),
+        "std_innov": BufferSpec((8, 2), np.float64),
+        "S": BufferSpec((8, 2, 2), np.float64),
+        "eps_hat": BufferSpec((8, 1), np.float64),
+    }
+
+
+def test_output_shape_resolution_includes_scalar_test_channels() -> None:
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(
+                observables=np.zeros((8, 1), dtype=np.float64),
+                observable_names=("obs",),
+            ),
+            jarque_bera_test_step("jb", source="datagen", field="observables"),
+        ]
+    )
+
+    specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
+
+    assert specs["jb"] == {
+        "statistic": BufferSpec((), np.float64),
+        "pval": BufferSpec((), np.float64),
+        "status": BufferSpec((), np.int64),
+    }
+
+
+def test_output_shape_resolution_normalizes_payload_values_to_source_shapes() -> None:
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(observables=np.zeros((4, 1), dtype=np.float64)),
+            add_payload_step("vector", np.arange(4.0, dtype=np.float64)),
+            add_payload_step("matrix", np.zeros((4, 2), dtype=np.float64)),
+        ]
+    )
+
+    specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
+
+    assert specs["vector"] == {"payload": BufferSpec((4, 1), np.float64)}
+    assert specs["matrix"] == {"payload": BufferSpec((4, 2), np.float64)}
+
+
+def test_output_shape_resolution_includes_unscented_filter_fields(
+    rbc_second_order_test_model_path,
+) -> None:
+    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
+    n_var = len(model.variables.variables)
+    solver = DSGESolver(
+        model,
+        KalmanConfig(
+            R=np.array([[0.01]], dtype=np.float64),
+            P0=0.1 * np.eye(n_var, dtype=np.float64),
+        ),
+    )
+    compiled = solver.compile()
+    reference = solver.solve(compiled=compiled, order=2)
+
+    T = 6
+    n_obs = len(reference.compiled.observable_names)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(
+                observables=np.zeros((T, n_obs), dtype=np.float64),
+                observable_names=reference.compiled.observable_names,
+            ),
+            reference_filter_step(filter_mode="unscented"),
+        ]
+    )
+
+    specs = pipeline._resolve_output_specs(reference, None)
+    n_state = reference.compiled.n_state
+    n_z = 2 * n_state
+
+    assert specs["filter"] == {
+        "x_pred": BufferSpec((T, n_var), np.float64),
+        "x_filt": BufferSpec((T, n_var), np.float64),
+        "y_pred": BufferSpec((T, n_obs), np.float64),
+        "y_filt": BufferSpec((T, n_obs), np.float64),
+        "S": BufferSpec((T, n_obs, n_obs), np.float64),
+        "innov": BufferSpec((T, n_obs), np.float64),
+        "std_innov": BufferSpec((T, n_obs), np.float64),
+        "P_pred": BufferSpec((T, n_z, n_z), np.float64),
+        "P_filt": BufferSpec((T, n_z, n_z), np.float64),
+        "x1_pred": BufferSpec((T, n_state), np.float64),
+        "x1_filt": BufferSpec((T, n_state), np.float64),
+        "x2_pred": BufferSpec((T, n_state), np.float64),
+        "x2_filt": BufferSpec((T, n_state), np.float64),
+    }
 
 
 def test_regression_step_runs_ols_and_stores_result_payload() -> None:
