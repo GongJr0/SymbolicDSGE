@@ -1,5 +1,5 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
-"""Caller-buffer shims for native non-Wald Monte Carlo test statistics.
+"""Caller-buffer shims for native Monte Carlo test statistics.
 
 These functions return only ``(statistic, status)``. Distribution metadata and
 p-values are replication-invariant and belong to the post-loop layer.
@@ -37,8 +37,15 @@ cdef extern from "diag.h":
     ) nogil
     int sdsge_jb_stat(const double *x, int64_t n, double *stat_out) nogil
 
+cdef extern from "diag_wald.h":
+    int sdsge_wald_stat_from_mean_and_cov(
+        const double *mean, const double *target, const double *omega,
+        int64_t n, int64_t p, double *dev_scratch, double *factor_scratch,
+        int64_t *pivot_scratch, double *solved_scratch, double *stat_out,
+    ) nogil
 
-def ljung_box_fit(x, int64_t lags, z_scratch, acorr_scratch):
+
+def ljung_box_runner(x, int64_t lags, z_scratch, acorr_scratch):
     """Return the Ljung-Box ``(statistic, status)`` using caller scratch."""
     cdef double[::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
     cdef double[::1] z_mv = z_scratch
@@ -52,7 +59,7 @@ def ljung_box_fit(x, int64_t lags, z_scratch, acorr_scratch):
     return stat, status
 
 
-def jarque_bera_fit(x):
+def jarque_bera_runner(x):
     """Return the allocation-free Jarque-Bera ``(statistic, status)``."""
     cdef double[::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
     cdef double stat = 0.0
@@ -63,7 +70,34 @@ def jarque_bera_fit(x):
     return stat, status
 
 
-def breusch_pagan_fit(residuals, X_aug, bint robust, arena):
+def wald_runner(
+    mean, target, omega, int64_t n, dev_scratch, factor_scratch,
+    pivot_scratch, solved_scratch,
+):
+    """Return the Wald ``(statistic, status)`` using caller-owned scratch.
+
+    ``dev_scratch`` and ``solved_scratch`` have length ``p``;
+    ``factor_scratch`` has shape ``(p, p)``; and ``pivot_scratch`` has length
+    ``p``, where ``p`` is the dimension of ``mean``.
+    """
+    cdef double[::1] mean_mv = np.ascontiguousarray(mean, dtype=np.float64)
+    cdef double[::1] target_mv = np.ascontiguousarray(target, dtype=np.float64)
+    cdef double[:, ::1] omega_mv = np.ascontiguousarray(omega, dtype=np.float64)
+    cdef double[::1] dev_mv = dev_scratch
+    cdef double[:, ::1] factor_mv = factor_scratch
+    cdef int64_t[::1] pivot_mv = pivot_scratch
+    cdef double[::1] solved_mv = solved_scratch
+    cdef double stat = np.nan
+    cdef int status
+    with nogil:
+        status = sdsge_wald_stat_from_mean_and_cov(
+            &mean_mv[0], &target_mv[0], &omega_mv[0, 0], n, mean_mv.shape[0],
+            &dev_mv[0], &factor_mv[0, 0], &pivot_mv[0], &solved_mv[0], &stat,
+        )
+    return stat, status
+
+
+def breusch_pagan_runner(residuals, X_aug, bint robust, arena):
     """Return a Breusch-Pagan ``(statistic, status)`` from an augmented design.
 
     ``X_aug`` must include the leading auxiliary-regression intercept column.
@@ -102,7 +136,7 @@ def breusch_pagan_fit(residuals, X_aug, bint robust, arena):
     return stat, status
 
 
-def breusch_godfrey_fit(residuals, X, int64_t lags, arena):
+def breusch_godfrey_runner(residuals, X, int64_t lags, arena):
     """Return the Breusch-Godfrey ``(statistic, status)``."""
     cdef double[::1] residuals_mv = np.ascontiguousarray(
         residuals, dtype=np.float64
@@ -119,7 +153,7 @@ def breusch_godfrey_fit(residuals, X, int64_t lags, arena):
     return stat, status
 
 
-def chow_fit(y, X, int64_t t_break, arena):
+def chow_runner(y, X, int64_t t_break, arena):
     """Return the Chow break-point ``(statistic, status)``."""
     cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
     cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
@@ -134,7 +168,7 @@ def chow_fit(y, X, int64_t t_break, arena):
     return stat, status
 
 
-def cusum_fit(y, X, arena):
+def cusum_runner(y, X, arena):
     """Return the CUSUM ``(statistic, status)``."""
     cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
     cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)
@@ -149,7 +183,7 @@ def cusum_fit(y, X, arena):
     return stat, status
 
 
-def cusumsq_fit(y, X, arena):
+def cusumsq_runner(y, X, arena):
     """Return the CUSUMSQ ``(statistic, status)``."""
     cdef double[::1] y_mv = np.ascontiguousarray(y, dtype=np.float64)
     cdef double[:, ::1] X_mv = np.ascontiguousarray(X, dtype=np.float64)

@@ -39,6 +39,26 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     assert status == expected_status
     np.testing.assert_allclose(statistic, expected)
 
+    mean = np.ascontiguousarray(np.array([1.0, -2.0, 0.5]))
+    target = np.zeros(3, dtype=np.float64)
+    omega = np.array(
+        [[0.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+        dtype=np.float64,
+    )
+    statistic, status = mc_tests.wald_fit(
+        mean,
+        target,
+        omega,
+        n,
+        np.empty(3),
+        np.empty((3, 3)),
+        np.empty(3, dtype=np.int64),
+        np.empty(3),
+    )
+    expected_status, expected = diag.wald_stat_from_mean_and_cov(mean, target, omega, n)
+    assert status == expected_status
+    np.testing.assert_allclose(statistic, expected)
+
     arena = np.empty(n + 2 * p * p + 2 * p)
     statistic, status = mc_tests.breusch_pagan_fit(residuals, X, False, arena)
     expected_status, rss, tss = diag.bp_aux(residuals, X)
