@@ -24,4 +24,46 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
                                 i64 ny, i64 n_exog, i64 n_par, i64 m,
                                 f64 *SDSGE_RESTRICT simout);
 
+/* Linear filter input is [A(n,n), B(n,k), C(m,n), d(m), Q(k,k), R(m,m),
+ * y(T,m), x0(n), P0(n,n)]. Output follows FilterRawResult field order:
+ * [x_pred, x_filt, P_pred, P_filt, y_pred, y_filt, innov, std_innov, S,
+ * eps_hat (when return_shocks), loglik]. */
+i64 sdsge_filter_linear_input_arena_size(i64 n, i64 m, i64 k, i64 T);
+i64 sdsge_filter_linear_output_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                           int return_shocks);
+int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
+                             f64 *SDSGE_RESTRICT scratch_arena, i64 T, i64 n,
+                             i64 m, i64 k, int symmetrize, f64 jitter,
+                             int return_shocks,
+                             f64 *SDSGE_RESTRICT output_arena);
+
+/* Extended filter input is [A(n,n), B(n,k), params(n_par), Q(k,k), R(m,m),
+ * y(T,m), x0(n), P0(n,n)]. Output has the linear filter layout. */
+i64 sdsge_filter_extended_input_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                            i64 n_par);
+i64 sdsge_filter_extended_output_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                             int return_shocks);
+int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
+                               f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
+                               meas_fn jac, i64 T, i64 n, i64 m, i64 k,
+                               i64 n_par, int symmetrize, f64 jitter,
+                               int return_shocks,
+                               f64 *SDSGE_RESTRICT output_arena);
+
+/* Unscented input is [hx(ns,ns), gx(nc,ns), bx(ns,ne), hxx(ns,ns,ns),
+ * gxx(nc,ns,ns), hss(ns), gss(nc), steady_state(ns+nc), params(n_par),
+ * Q(ne,ne), R(no,no), obs(T,no), z0(2*ns), P0(2*ns,2*ns)]. Output follows
+ * UnscentedFilterRawResult field order, omitting eps_hat (always None). */
+i64 sdsge_filter_unscented_input_arena_size(i64 n_state, i64 n_ctrl,
+                                             i64 n_exog, i64 n_obs, i64 T,
+                                             i64 n_par);
+i64 sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
+                                              i64 n_obs, i64 T);
+i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
+                                f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
+                                i64 T, i64 n_state, i64 n_ctrl, i64 n_exog,
+                                i64 n_obs, i64 n_par, f64 alpha, f64 beta,
+                                f64 kappa, int symmetrize, f64 jitter,
+                                f64 *SDSGE_RESTRICT output_arena);
+
 #endif /* SDSGE_MC_CORE_STEPS */

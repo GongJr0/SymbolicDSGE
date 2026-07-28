@@ -108,8 +108,10 @@ typedef struct {
 } kf_outputs;
 
 /* Run the linear Kalman filter. Returns KF_OK, KF_ERR_MATRIX_CONDITION (non-PD
- * innovation covariance), or KF_ERR_ALLOC (scratch allocation failed). */
-int kf_hot_loop(const kf_inputs *in, kf_outputs *out);
+ * innovation covariance) */
+i64 kf_arena_size(const i64 n, const i64 m, const i64 k);
+int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
+                kf_outputs *out);
 
 /* Function Ptr for Non-Linear Measurement Function */
 typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT x,
@@ -141,8 +143,10 @@ typedef struct {
 
 /* Run the extended Kalman filter: linear transition, nonlinear measurement via
  * the meas/jac cfunc pointers (relinearized each step). Returns KF_OK,
- * KF_ERR_MATRIX_CONDITION (non-PD innovation covariance), or KF_ERR_ALLOC. */
-int ekf_hot_loop(const ekf_inputs *in, ekf_outputs *out);
+ * KF_ERR_MATRIX_CONDITION (non-PD innovation covariance) */
+i64 ekf_arena_size(const i64 n, const i64 m, const i64 k);
+int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
+                 ekf_outputs *out);
 
 /* Unscented Kalman Filter */
 
@@ -200,6 +204,9 @@ typedef struct {
   f64 *loglik;
 } ukf_outputs;
 
-i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out);
+i64 ukf_arena_size(const i64 n_state, const i64 n_ctrl, const i64 n_exog,
+                   const i64 n_obs);
+i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
+                 ukf_outputs *out);
 
 #endif /* SDSGE_KALMAN_H */

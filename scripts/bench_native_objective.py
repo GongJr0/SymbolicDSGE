@@ -1,14 +1,11 @@
 """Benchmark the native estimation objective against the Python solve+filter path.
 
-Synthetic ``n_theta == 0`` case: base calibration, constant Q/R, no prior. For
-each filter mode the native ``obj_*_base`` composer runs the entire
-solve -> filter -> loglik in C behind a single Python call. The baseline is the
-equivalent Python per-evaluation work, ``solver.solve(...).kalman(...)``, which
-recomputes the solve every call just as the native objective does internally.
-Both therefore measure one full objective evaluation, so the ratio reflects the
-per-draw speedup an estimator would see (cfunc/LAPACK addresses and packed
-inputs are built once, outside the timed loop, exactly as an estimator amortizes
-them across draws).
+Each case prepares an ``Estimator`` with one calibrated parameter in theta,
+then constructs a persistent native ``NativeLogpost`` context. The benchmark
+therefore measures the repeated objective evaluation used by native estimation:
+solve -> filter -> loglik, with cfunc addresses, packed inputs, and filter
+scratch retained across evaluations. The Python baseline is the corresponding
+``Estimator.loglik(theta)`` call.
 
 The sample length T is swept on a log-grid (default 100 .. 1e6, 10 whole-number
 steps). The filter is O(T) while the solve is O(n^3) and T-independent, so the
@@ -53,14 +50,10 @@ POST82 = FIXTURES / "POST82.yaml"
 RBC = FIXTURES / "rbc_second_order.yaml"
 
 from SymbolicDSGE import DSGESolver, ModelParser  # noqa: E402
-from SymbolicDSGE.estimation import backend  # noqa: E402
+from SymbolicDSGE.estimation import Estimator, backend  # noqa: E402
 from SymbolicDSGE.kalman.config import KalmanConfig  # noqa: E402
 from SymbolicDSGE.kalman.interface import FilterMode, _resolve_P0  # noqa: E402
-from SymbolicDSGE._ckernels.estimation._estimation import (  # noqa: E402
-    obj_extended_base,
-    obj_linear_base,
-    obj_unscented_base,
-)
+from SymbolicDSGE._ckernels.estimation._estimation import NativeLogpost  # noqa: E402
 
 _cc = np.ascontiguousarray
 _POST82_MODES = ("linear", "extended")
@@ -140,55 +133,34 @@ def _post82_y(ctx: Post82Ctx, T: int) -> pd.DataFrame:
         )
         ctx.y_cache[T] = pd.DataFrame(
             {
-                "OutGap": sim["OutGap"][1:],
-                "Infl": sim["Infl"][1:],
-                "Rate": sim["Rate"][1:],
+                "OutGap": sim["OutGap"],
+                "Infl": sim["Infl"],
+                "Rate": sim["Rate"],
             }
         )
     return ctx.y_cache[T]
 
 
 def _post82_case(ctx: Post82Ctx, mode: str, T: int) -> Case:
-    composer = obj_linear_base if mode == "linear" else obj_extended_base
     y = _post82_y(ctx, T)
-    base = backend.extract_base_params(ctx.compiled)
-    prep = backend.prepare_filter_run(
+    estimator = Estimator(
+        solver=ctx.solver,
         compiled=ctx.compiled,
-        kalman=ctx.kalman,
         y=y,
         observables=ctx.obs,
         filter_mode=mode,
-        jitter=None,
-        symmetrize=None,
+        estimated_params=["beta"],
+        ss_seed=ctx.steady,
     )
-    R = _cc(
-        backend.build_R(ctx.compiled, ctx.kalman, prep.observables, base),
-        dtype=np.float64,
-    )
-    args = (
-        ctx.residual_addr,
-        prep.meas_addr,
-        prep.jac_addr,
-        ctx.compiled.n_state,
-        ctx.compiled.n_exog,
-        len(prep.observables),
-        0,
-        _cc(ctx.steady, dtype=np.float64),
-        ctx.calib,
-        ctx.Q,
-        R,
-        _cc(prep.y_reordered, dtype=np.float64),
-        _cc(prep.P0, dtype=np.float64),
-        float(prep.kf_jitter),
-        int(prep.kf_sym),
-    )
+    theta = estimator.resolve_theta0(None)
+    native_ctx, native_mode = estimator._build_native_context()
+    native_objective = NativeLogpost(native_ctx, native_mode)
 
-    def native(_c=composer, _a=args) -> float:
-        return _c(*_a)[0]
+    def native(_objective=native_objective, _theta=theta) -> float:
+        return _objective.loglik(_theta)
 
-    def python(_m=mode, _y=y) -> float:
-        solved_i = ctx.solver.solve(compiled=ctx.compiled, ss_seed=ctx.steady)
-        return float(solved_i.kalman(y=_y, filter_mode=_m, observables=ctx.obs).loglik)
+    def python(_estimator=estimator, _theta=theta) -> float:
+        return float(_estimator.loglik(_theta))
 
     return Case(mode, T, native, python, native(), python())
 
@@ -252,39 +224,29 @@ def _rbc_case(ctx: RbcCtx, T: int) -> Case:
         x0=np.asarray(ctx.solved.policy.steady_state, dtype=np.float64),
         observables=True,
     )
-    y = pd.DataFrame({"c_obs": sim["c_obs"][1:]})
-    y_c = np.array(y.to_numpy(), dtype=np.float64, copy=True)
-    args = (
-        ctx.residual_addr,
-        ctx.bc_addr,
-        ctx.meas_addr,
-        ctx.compiled.n_state,
-        ctx.compiled.n_exog,
-        len(ctx.obs),
-        _cc(ctx.seed, dtype=np.float64),
-        ctx.calib,
-        ctx.Q,
-        ctx.R,
-        y_c,
-        ctx.P0_ukf,
-        float(ctx.jitter),
-        int(ctx.sym),
+    y = pd.DataFrame({"c_obs": sim["c_obs"]})
+    estimator = Estimator(
+        solver=ctx.solver,
+        compiled=ctx.compiled,
+        y=y,
+        observables=ctx.obs,
+        filter_mode="unscented",
+        estimated_params=["beta"],
+        ss_seed=ctx.seed,
+        jitter=ctx.jitter,
+        symmetrize=bool(ctx.sym),
+        R=ctx.R,
+        P0=np.eye(ctx.compiled.n_state, dtype=np.float64) * 0.1,
     )
+    theta = estimator.resolve_theta0(None)
+    native_ctx, native_mode = estimator._build_native_context()
+    native_objective = NativeLogpost(native_ctx, native_mode)
 
-    def native(_a=args) -> float:
-        return obj_unscented_base(*_a)[0]
+    def native(_objective=native_objective, _theta=theta) -> float:
+        return _objective.loglik(_theta)
 
-    def python(_y=y) -> float:
-        solved_i = ctx.solver.solve(compiled=ctx.compiled, ss_seed=ctx.seed, order=2)
-        return float(
-            solved_i.kalman(
-                y=_y,
-                filter_mode="unscented",
-                observables=ctx.obs,
-                jitter=ctx.jitter,
-                symmetrize=bool(ctx.sym),
-            ).loglik
-        )
+    def python(_estimator=estimator, _theta=theta) -> float:
+        return float(_estimator.loglik(_theta))
 
     return Case("unscented", T, native, python, native(), python())
 

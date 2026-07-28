@@ -121,6 +121,7 @@ cdef extern from "estimation.h":
         double *corr_r
         double *std_q
         double *std_r
+        double *filter_arena
         int64_t bk_violations
 
     ctypedef struct sdsge_linear_ctx:
@@ -165,6 +166,14 @@ cdef extern from "estimation.h":
                               int has_priors) nogil
     double sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const double *theta,
                                int has_priors) nogil
+
+
+cdef extern from "../kalman/kalman.h":
+    int64_t kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    int64_t ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    int64_t ukf_arena_size(
+        int64_t n_state, int64_t n_ctrl, int64_t n_exog, int64_t n_obs,
+    ) nogil
 
 
 cdef extern from "optim.h":
@@ -358,6 +367,9 @@ def obj_linear_base(
     b.std_q = NULL
     b.std_r = NULL
     b.bk_violations = 0
+    filter_arena = np.empty(kf_arena_size(n_var, n_obs, n_exog), dtype=np.float64)
+    cdef double[::1] filter_arena_v = filter_arena
+    b.filter_arena = &filter_arena_v[0]
 
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
@@ -490,6 +502,9 @@ def obj_extended_base(
     b.std_q = NULL
     b.std_r = NULL
     b.bk_violations = 0
+    filter_arena = np.empty(ekf_arena_size(n_var, n_obs, n_exog), dtype=np.float64)
+    cdef double[::1] filter_arena_v = filter_arena
+    b.filter_arena = &filter_arena_v[0]
 
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
@@ -656,6 +671,11 @@ def obj_unscented_base(
     b.std_q = NULL
     b.std_r = NULL
     b.bk_violations = 0
+    filter_arena = np.empty(
+        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs), dtype=np.float64
+    )
+    cdef double[::1] filter_arena_v = filter_arena
+    b.filter_arena = &filter_arena_v[0]
 
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
@@ -951,6 +971,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef int64_t[::1] p_ml_v
     cdef double[::1] p_me_v
     cdef double[::1] p_mlc_v
+    cdef double[::1] filter_arena_v
     cdef int64_t p_nscalar = 0
     cdef int64_t p_nblocks = 0
 
@@ -1123,6 +1144,22 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     b.std_q = &sqv[0]
     b.std_r = &srv[0]
     b.bk_violations = 0
+
+    if mode == "linear":
+        filter_arena = np.empty(
+            kf_arena_size(n_var, n_obs, n_exog), dtype=np.float64
+        )
+    elif mode == "extended":
+        filter_arena = np.empty(
+            ekf_arena_size(n_var, n_obs, n_exog), dtype=np.float64
+        )
+    else:
+        filter_arena = np.empty(
+            ukf_arena_size(n_state, n_ctrl, n_exog, n_obs), dtype=np.float64
+        )
+    nc.keep.append(filter_arena)
+    filter_arena_v = filter_arena
+    b.filter_arena = &filter_arena_v[0]
 
     s1.ss = &ssv2[0]
     s1.a_real = &arv[0, 0]
