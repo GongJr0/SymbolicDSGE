@@ -16,6 +16,7 @@ from ..core.solved_model import SolvedModel
 from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.ols import MCRegressionResult
 from ..regression.result import RegressionResult
+from .allocation import BufferPlan, resolve_output_specs
 from .mc_constructs import (
     MCContext,
     MCData,
@@ -39,11 +40,12 @@ from .operations.utils import _resolve_source_array
 class MCPipeline:
     #: Per-replication steps: the dependency DAG, a single DATAGEN root first.
     per_rep_steps: tuple[MCStep, ...]
+
     #: Post-loop ops, run once after the loop over the assembled across-rep
     #: traces. This is a terminal phase, not part of the graph.
     postproc_steps: tuple[MCStep, ...]
+
     #: Producer indices for each per-replication step's source arguments.
-    #: Kept separate from the authored ``SourceArgs`` objects.
     _source_indices: tuple[tuple[int, ...], ...]
 
     def __init__(
@@ -133,6 +135,15 @@ class MCPipeline:
         from .graph import PipelineGraph
 
         return PipelineGraph.from_steps(self.per_rep_steps, self._source_indices)
+
+    def _resolve_output_specs(
+        self,
+        reference: SolvedModel,
+        dgp: SolvedModel | None,
+    ) -> BufferPlan:
+        return resolve_output_specs(
+            self.per_rep_steps, self._source_indices, reference, dgp
+        )
 
     def to_spec(self) -> "PipelineSpec":
         """Serialize this pipeline to its graph-form :class:`PipelineSpec`.

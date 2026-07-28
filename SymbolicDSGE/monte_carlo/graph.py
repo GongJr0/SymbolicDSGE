@@ -76,7 +76,7 @@ class PipelineGraph:
     def __init__(self, nodes: dict[str, PipelineNode], root: str) -> None:
         self.nodes = nodes
         self.root = root
-        #: authored (and validated) execution order — a valid topological order.
+        #: authored (and validated) execution order; a valid topological order.
         self.order: tuple[str, ...] = tuple(nodes)
 
     @classmethod
