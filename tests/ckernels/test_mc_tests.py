@@ -41,6 +41,7 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     assert mc_tests.chow_arena_size(p) == 2 * p * p + 2 * p
     assert mc_tests.cusum_arena_size(n, p) == (2 * (n - p) + 5 * p * p + 5 * p)
     assert mc_tests.cusumsq_arena_size(n, p) == 3 * p * p + 3 * p + n - p
+    assert mc_tests.ljung_box_arena_size(n, lags) == n + lags + 1
     wald_q = p - 1
     wald_v = wald_q * (wald_q + 1) // 2
     assert mc_tests.wald_mean_hac_arena_size(n, wald_q) == (
@@ -54,7 +55,7 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     )
 
     statistic, status = mc_tests.ljung_box_runner(
-        residuals, lags, np.empty(n), np.empty(lags + 1)
+        residuals, lags, np.empty(mc_tests.ljung_box_arena_size(n, lags))
     )
     expected_status, expected = diag.lb_stat(residuals, lags)
     assert status == expected_status

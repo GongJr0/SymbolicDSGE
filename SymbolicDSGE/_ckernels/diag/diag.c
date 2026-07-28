@@ -124,6 +124,30 @@ int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
   return DIAG_OK;
 }
 
+int sdsge_bp_stat(const f64 *SDSGE_RESTRICT eps,
+                  const f64 *SDSGE_RESTRICT X_aug, const i64 n,
+                  const i64 p, const i64 robust,
+                  f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out) {
+  f64 rss = NAN;
+  f64 tss = NAN;
+  *stat_out = NAN;
+  const int status = sdsge_bp_aux(eps, X_aug, n, p, arena, &rss, &tss);
+  if (status != DIAG_OK)
+    return status;
+
+  if (robust) {
+    if (tss <= 0.0) {
+      *stat_out = 0.0;
+      return DIAG_OK;
+    }
+    const f64 r2 = max_f64(0.0, min_f64(1.0, 1.0 - rss / tss));
+    *stat_out = r2 * (f64)n;
+  } else {
+    *stat_out = max_f64(0.0, 0.5 * (tss - rss));
+  }
+  return DIAG_OK;
+}
+
 /* Residual sum of squares of the OLS fit of y_seg(rows) on X_seg(rows, p), via
  * the normal equations. Returns SDSGE_OK / SDSGE_NOT_PD. Scratch G/L/g/coef are
  * caller-provided (all length p / p*p). */
@@ -455,6 +479,12 @@ int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
   stat *= (f64)n * (f64)(n + 2);
   *out = stat;
   return DIAG_OK;
+}
+
+i64 sdsge_lb_arena_size(const i64 n, const i64 L) {
+  const i64 n_safe = max_i64(n, 0);
+  const i64 l_safe = min_i64(max_i64(L, 0), max_i64(n_safe - 1, 0));
+  return n_safe + l_safe + 1;
 }
 
 /* Jarque-Bera normality statistic n * (skew^2/6 + (kurt-3)^2/24), mirroring the

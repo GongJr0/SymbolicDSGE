@@ -47,6 +47,9 @@ i64 sdsge_bp_arena_size(i64 n, i64 p);
 int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
                  i64 n, i64 p, f64 *SDSGE_RESTRICT arena,
                  f64 *SDSGE_RESTRICT rss_out, f64 *SDSGE_RESTRICT tss_out);
+int sdsge_bp_stat(const f64 *SDSGE_RESTRICT eps,
+                  const f64 *SDSGE_RESTRICT X_aug, i64 n, i64 p, i64 robust,
+                  f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out);
 
 /* Chow break-point F statistic. y(T), X(T,p), split at t_break. Fits the pooled
  * and the two sub-sample regressions; DIAG_FALLBACK if any is rank-deficient.
@@ -108,6 +111,7 @@ int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
 int sdsge_acorr(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 L,
                 f64 *SDSGE_RESTRICT z_scratch, f64 *SDSGE_RESTRICT out);
 
+i64 sdsge_lb_arena_size(i64 n, i64 L);
 int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
                   f64 *SDSGE_RESTRICT z_scratch,
                   f64 *SDSGE_RESTRICT acorr_scratch, f64 *SDSGE_RESTRICT out);
