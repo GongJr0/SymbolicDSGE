@@ -5,6 +5,9 @@
 #include "../_common/sdsge_complex.h"
 #include "../_common/sdsge_linalg.h"
 
+/* Measurement / observable-jacobian @cfunc ABI: ``void(vars*, par*, out*)``. */
+typedef void (*sdsge_measurement_fn)(f64 *vars, f64 *par, f64 *out);
+
 /* Assemble state-space */
 void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
                                 const c128 *SDSGE_RESTRICT f, const i64 n_state,
