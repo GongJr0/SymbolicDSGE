@@ -313,24 +313,20 @@ def _resolve_regression_specs(
             f"Regression step {step.name!r} response and design must have the "
             "same number of rows."
         )
-    if step.kwargs["kind"] != "ols":
-        raise NotImplementedError(
-            f"Native Monte Carlo regression shape resolution supports only OLS, "
-            f"not {step.kwargs['kind']!r}."
-        )
-
     p = X_columns + int(step.kwargs["intercept"])
     if p == 0:
         raise ValueError(
             f"Regression step {step.name!r} requires a regressor or an intercept."
         )
-    return {
+    output_specs: dict[str, BufferSpec] = {
         "coef": BufferSpec((p,), np.float64),
-        "se": BufferSpec((p,), np.float64),
         "ssr": BufferSpec((), np.float64),
         "sst": BufferSpec((), np.float64),
         "status": BufferSpec((), np.int64),
     }
+    if step.kwargs["kind"] == "ols":
+        output_specs["se"] = BufferSpec((p,), np.float64)
+    return output_specs
 
 
 def _resolve_test_specs() -> dict[str, BufferSpec]:
