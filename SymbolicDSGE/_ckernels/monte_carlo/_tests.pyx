@@ -16,6 +16,7 @@ cdef extern from "diag.h":
     int64_t sdsge_chow_arena_size(int64_t p) nogil
     int64_t sdsge_cusum_arena_size(int64_t n, int64_t p) nogil
     int64_t sdsge_cusumsq_arena_size(int64_t n, int64_t p) nogil
+    int64_t sdsge_lb_arena_size(int64_t n, int64_t lags) nogil
     int sdsge_bg_stat(
         const double *eps, const double *X, int64_t n, int64_t k,
         int64_t lags, double *arena, double *stat_out,
@@ -23,6 +24,10 @@ cdef extern from "diag.h":
     int sdsge_bp_aux(
         const double *eps, const double *X_aug, int64_t n, int64_t p,
         double *arena, double *rss_out, double *tss_out,
+    ) nogil
+    int sdsge_bp_stat(
+        const double *eps, const double *X_aug, int64_t n, int64_t p,
+        int64_t robust, double *arena, double *stat_out,
     ) nogil
     int sdsge_chow_stat(
         const double *y, const double *X, int64_t n, int64_t p,
@@ -99,6 +104,11 @@ def cusumsq_arena_size(int64_t n, int64_t p):
     return sdsge_cusumsq_arena_size(n, p)
 
 
+def ljung_box_arena_size(int64_t n, int64_t lags):
+    """Return the float64 arena length for Ljung-Box."""
+    return sdsge_lb_arena_size(n, lags)
+
+
 def wald_mean_hac_arena_size(int64_t n, int64_t q):
     """Return the float64 arena length for mean-Wald HAC."""
     return sdsge_wald_mean_hac_arena_size(n, q)
@@ -114,16 +124,18 @@ def wald_second_moment_hac_arena_size(int64_t n, int64_t q):
     return sdsge_wald_second_moment_hac_arena_size(n, q)
 
 
-def ljung_box_runner(x, int64_t lags, z_scratch, acorr_scratch):
+def ljung_box_runner(x, int64_t lags, arena):
     """Return the Ljung-Box ``(statistic, status)`` using caller scratch."""
     cdef double[::1] x_mv = np.ascontiguousarray(x, dtype=np.float64)
-    cdef double[::1] z_mv = z_scratch
-    cdef double[::1] acorr_mv = acorr_scratch
+    cdef double[::1] arena_mv = arena
+    cdef int64_t n = x_mv.shape[0]
     cdef double stat = 0.0
     cdef int status
+    cdef double *x_ptr = &x_mv[0] if n > 0 else NULL
+    cdef double *arena_ptr = &arena_mv[0]
     with nogil:
         status = sdsge_lb_stat(
-            &x_mv[0], x_mv.shape[0], lags, &z_mv[0], &acorr_mv[0], &stat
+            x_ptr, n, lags, arena_ptr, arena_ptr + n, &stat
         )
     return stat, status
 
@@ -236,32 +248,13 @@ def breusch_pagan_runner(residuals, X_aug, bint robust, arena):
     )
     cdef double[:, ::1] X_aug_mv = np.ascontiguousarray(X_aug, dtype=np.float64)
     cdef double[::1] arena_mv = arena
-    cdef double rss = 0.0
-    cdef double tss = 0.0
     cdef double stat = np.nan
-    cdef double r2
     cdef int status
     with nogil:
-        status = sdsge_bp_aux(
+        status = sdsge_bp_stat(
             &residuals_mv[0], &X_aug_mv[0, 0], X_aug_mv.shape[0],
-            X_aug_mv.shape[1], &arena_mv[0], &rss, &tss
+            X_aug_mv.shape[1], robust, &arena_mv[0], &stat
         )
-    if status != 0:
-        return stat, status
-    if robust:
-        if tss <= 0.0:
-            stat = 0.0
-        else:
-            r2 = 1.0 - rss / tss
-            if r2 < 0.0:
-                r2 = 0.0
-            elif r2 > 1.0:
-                r2 = 1.0
-            stat = r2 * residuals_mv.shape[0]
-    else:
-        stat = 0.5 * (tss - rss)
-        if stat < 0.0:
-            stat = 0.0
     return stat, status
 
 
