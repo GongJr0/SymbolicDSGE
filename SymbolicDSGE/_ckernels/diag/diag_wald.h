@@ -68,6 +68,10 @@ int sdsge_wald_stat_from_mean_and_cov(const f64 *SDSGE_RESTRICT mean,
  * `manual_bandwidth` is used only for WALD_BW_MANUAL. All other modes resolve
  * bandwidth in C, then clamp it to n - 1. Each function returns a diagnostic
  * status and writes the Wald statistic to `stat_out` on success. */
+i64 sdsge_wald_mean_hac_arena_size(i64 n, i64 q);
+i64 sdsge_wald_covariance_hac_arena_size(i64 n, i64 q);
+i64 sdsge_wald_second_moment_hac_arena_size(i64 n, i64 q);
+
 int sdsge_wald_mean_hac(const f64 *SDSGE_RESTRICT g,
                         const f64 *SDSGE_RESTRICT target, i64 n, i64 q,
                         KernelID kernel_id, WaldBandwidthMode bandwidth_mode,

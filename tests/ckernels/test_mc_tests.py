@@ -32,6 +32,27 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     n, p = X.shape
     lags = 5
 
+    assert mc_tests.breusch_godfrey_arena_size(n, p - 1, lags) == (
+        n * (1 + (p - 1) + lags)
+        + 2 * (1 + (p - 1) + lags) ** 2
+        + 2 * (1 + (p - 1) + lags)
+    )
+    assert mc_tests.breusch_pagan_arena_size(n, p) == n + 2 * p * p + 2 * p
+    assert mc_tests.chow_arena_size(p) == 2 * p * p + 2 * p
+    assert mc_tests.cusum_arena_size(n, p) == (2 * (n - p) + 5 * p * p + 5 * p)
+    assert mc_tests.cusumsq_arena_size(n, p) == 3 * p * p + 3 * p + n - p
+    wald_q = p - 1
+    wald_v = wald_q * (wald_q + 1) // 2
+    assert mc_tests.wald_mean_hac_arena_size(n, wald_q) == (
+        n * wald_q + 3 * wald_q * wald_q + 4 * wald_q
+    )
+    assert mc_tests.wald_covariance_hac_arena_size(n, wald_q) == (
+        n * wald_q + n * wald_v + 3 * wald_v * wald_v + 5 * wald_v
+    )
+    assert mc_tests.wald_second_moment_hac_arena_size(n, wald_q) == (
+        n * wald_v + 3 * wald_v * wald_v + 5 * wald_v
+    )
+
     statistic, status = mc_tests.ljung_box_runner(
         residuals, lags, np.empty(n), np.empty(lags + 1)
     )
@@ -42,7 +63,7 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
     wald_g = X[:, 1:]
     wald_q = wald_g.shape[1]
     target_mean = np.zeros(wald_q, dtype=np.float64)
-    mean_arena = np.empty(n * wald_q + 3 * wald_q * wald_q + 4 * wald_q)
+    mean_arena = np.empty(mc_tests.wald_mean_hac_arena_size(n, wald_q))
     statistic, status = mc_tests.wald_mean_hac_runner(
         wald_g,
         target_mean,
@@ -58,7 +79,7 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
 
     target_matrix = np.eye(wald_q, dtype=np.float64)
     v = wald_q * (wald_q + 1) // 2
-    covariance_arena = np.empty(n * wald_q + n * v + 3 * v * v + 5 * v)
+    covariance_arena = np.empty(mc_tests.wald_covariance_hac_arena_size(n, wald_q))
     statistic, status = mc_tests.wald_covariance_hac_runner(
         wald_g,
         target_matrix,
@@ -78,7 +99,7 @@ def test_mc_test_shims_match_native_diagnostic_statistics() -> None:
         1,
         mc_tests.WALD_BW_AUTO,
         0,
-        np.empty(n * v + 3 * v * v + 5 * v),
+        np.empty(mc_tests.wald_second_moment_hac_arena_size(n, wald_q)),
         np.empty(v, dtype=np.int64),
     )
     expected = wald_second_moment_hac(
