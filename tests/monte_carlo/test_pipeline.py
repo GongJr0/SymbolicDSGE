@@ -1178,6 +1178,37 @@ def test_output_shape_resolution_tracks_selected_transform_payloads() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "kind",
+    ("ridge", "lasso", "elastic_net", "ridge_gs", "lasso_gs", "elastic_net_gs"),
+)
+def test_output_specs_for_non_ols_regressions(kind: str) -> None:
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(observables=np.zeros((8, 2), dtype=np.float64)),
+            regression_step(
+                kind,
+                y_source="datagen",
+                y_field="observables",
+                y_column=0,
+                X_source="datagen",
+                X_field="observables",
+                X_columns=1,
+                kind=kind,
+            ),
+        ]
+    )
+
+    specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
+
+    assert specs[kind] == {
+        "coef": BufferSpec((2,), np.float64),
+        "ssr": BufferSpec((), np.float64),
+        "sst": BufferSpec((), np.float64),
+        "status": BufferSpec((), np.int64),
+    }
+
+
 def test_output_shape_resolution_includes_linear_filter_fields() -> None:
     reference = _FakeSolvedModel()
     reference.compiled.observable_names = ["a", "b", "c"]
