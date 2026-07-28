@@ -208,28 +208,42 @@ int sdsge_wald_stat_from_mean_and_cov(const f64 *SDSGE_RESTRICT mean,
                                       const f64 *SDSGE_RESTRICT omega,
                                       const i64 n, const i64 p,
                                       f64 *SDSGE_RESTRICT dev_scratch,
-                                      f64 *SDSGE_RESTRICT L_scratch,
+                                      f64 *SDSGE_RESTRICT factor_scratch,
+                                      i64 *SDSGE_RESTRICT pivot_scratch,
+                                      f64 *SDSGE_RESTRICT solved_scratch,
                                       f64 *SDSGE_RESTRICT stat_out) {
   /* Compute the Wald statistic: *
    * dev = mean - target;
    * stat = n * (dev^T @ omega^-1 @ dev); */
+  *stat_out = NAN;
   for (i64 i = 0; i < p; ++i) {
     dev_scratch[i] = mean[i] - target[i];
   }
-  int code = sdsge_chol(omega, 0.0, L_scratch, p);
-  if (code != SDSGE_OK) {
-    return DIAG_FALLBACK;
+  int code = sdsge_chol(omega, 0.0, factor_scratch, p);
+  if (code == SDSGE_OK) {
+    sdsge_forward_subst(factor_scratch, dev_scratch, solved_scratch, p);
+    sdsge_backward_subst_chol_t(factor_scratch, solved_scratch, solved_scratch,
+                                p);
+  } else {
+    memcpy(factor_scratch, omega, sizeof(f64) * p * p);
+    if (sdsge_lu_factor_inplace(factor_scratch, pivot_scratch, p) !=
+        SDSGE_LU_SUCCESS) {
+      return DIAG_LINALG;
+    }
+    sdsge_lu_solve(factor_scratch, pivot_scratch, dev_scratch, solved_scratch,
+                   p, 1);
   }
 
-  sdsge_forward_subst(L_scratch, dev_scratch, dev_scratch, p);
-
-  /* Stat = n * sum(z_i^2) */
+  /* Stat = n * dev^T omega^-1 dev. */
   f64 stat = 0.0;
   for (i64 i = 0; i < p; ++i) {
-    stat += dev_scratch[i] * dev_scratch[i];
+    stat += dev_scratch[i] * solved_scratch[i];
   }
-
-  *stat_out = (f64)n * stat;
+  stat *= (f64)n;
+  if (stat < 0.0 && stat > -1e-12) {
+    stat = 0.0;
+  }
+  *stat_out = stat;
   return DIAG_OK;
 }
 

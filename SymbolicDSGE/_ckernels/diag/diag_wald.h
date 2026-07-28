@@ -48,7 +48,9 @@ int sdsge_wald_stat_from_mean_and_cov(const f64 *SDSGE_RESTRICT mean,
                                       const f64 *SDSGE_RESTRICT omega,
                                       const i64 n, const i64 p,
                                       f64 *SDSGE_RESTRICT dev_scratch,
-                                      f64 *SDSGE_RESTRICT L_scratch,
+                                      f64 *SDSGE_RESTRICT factor_scratch,
+                                      i64 *SDSGE_RESTRICT pivot_scratch,
+                                      f64 *SDSGE_RESTRICT solved_scratch,
                                       f64 *SDSGE_RESTRICT stat_out);
 
 int sdsge_symmetric_outer_prod_2dim(const f64 *SDSGE_RESTRICT x, const i64 n,
