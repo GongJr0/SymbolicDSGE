@@ -24,9 +24,9 @@ void sdsge_en_gram_cd_path(const f64 *G, const f64 *g, i64 k,
                            f64 *Gcoef, f64 *beta);
 
 /* Effective dof on the active set: trace(penalized^-1 @ G_active) + intercept,
- * where penalized = G_active + alpha_l2*I over the support of beta. Active-set
- * scratch is malloc'd. */
+ * where penalized = G_active + alpha_l2*I over the support of beta. ``work``
+ * has size 3*k*k + k. */
 f64 sdsge_en_active_dof(const f64 *G, const f64 *beta, i64 k, f64 alpha_l2,
-                        i64 intercept, f64 atol);
+                        i64 intercept, f64 atol, f64 *work);
 
 #endif /* SDSGE_ELASTIC_NET_H */
