@@ -285,7 +285,7 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                   .return_shocks = 0,
                   .store_history = 0};
   kf_outputs out = {.loglik = &ll};
-  if (kf_hot_loop(&in, &out) != KF_OK) {
+  if (kf_hot_loop(&in, b->filter_arena, &out) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
@@ -335,7 +335,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                    .return_shocks = 0,
                    .store_history = 0};
   ekf_outputs out = {.loglik = &ll};
-  if (ekf_hot_loop(&in, &out) != KF_OK) {
+  if (ekf_hot_loop(&in, b->filter_arena, &out) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
@@ -426,7 +426,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
                    .store_history = 0};
 
   ukf_outputs out = {.loglik = &ll};
-  if (ukf_hot_loop(&in, &out) != KF_OK) {
+  if (ukf_hot_loop(&in, b->filter_arena, &out) != KF_OK) {
 
     return -INFINITY;
   }

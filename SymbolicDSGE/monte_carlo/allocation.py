@@ -229,6 +229,7 @@ def _resolve_filter_specs(
         S=(T, n_obs, n_obs),
         innov=(T, n_obs),
         std_innov=(T, n_obs),
+        loglik=(),
     )
     match step.kwargs["filter_mode"]:
         case "linear" | "extended":

@@ -163,3 +163,252 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
     }
   }
 }
+
+i64 sdsge_filter_linear_input_arena_size(const i64 n, const i64 m,
+                                          const i64 k, const i64 T) {
+  return n * n + n * k + m * n + m + k * k + m * m + T * m + n + n * n;
+}
+
+i64 sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
+                                           const i64 k, const i64 T,
+                                           const int return_shocks) {
+  return 2 * T * n + 2 * T * n * n + 4 * T * m + T * m * m +
+         (return_shocks ? T * k : 0) + 1;
+}
+
+int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
+                             f64 *SDSGE_RESTRICT scratch_arena, const i64 T,
+                             const i64 n, const i64 m, const i64 k,
+                             const int symmetrize, const f64 jitter,
+                             const int return_shocks,
+                             f64 *SDSGE_RESTRICT output_arena) {
+  const f64 *A = input_arena;
+  const f64 *B = A + n * n;
+  const f64 *C = B + n * k;
+  const f64 *d = C + m * n;
+  const f64 *Q = d + m;
+  const f64 *R = Q + k * k;
+  const f64 *y = R + m * m;
+  const f64 *x0 = y + T * m;
+  const f64 *P0 = x0 + n;
+  f64 *p = output_arena;
+  kf_outputs out = {.x_pred = p};
+  p += T * n;
+  out.x_filt = p;
+  p += T * n;
+  out.P_pred = p;
+  p += T * n * n;
+  out.P_filt = p;
+  p += T * n * n;
+  out.y_pred = p;
+  p += T * m;
+  out.y_filt = p;
+  p += T * m;
+  out.innov = p;
+  p += T * m;
+  out.std_innov = p;
+  p += T * m;
+  out.S = p;
+  p += T * m * m;
+  out.eps_hat = return_shocks ? p : NULL;
+  p += return_shocks ? T * k : 0;
+  out.loglik = p;
+
+  const kf_inputs in = {.n = n,
+                        .m = m,
+                        .k = k,
+                        .T = T,
+                        .A = A,
+                        .B = B,
+                        .C = C,
+                        .d = d,
+                        .Q = Q,
+                        .R = R,
+                        .y = y,
+                        .x0 = x0,
+                        .P0 = P0,
+                        .symmetrize = symmetrize,
+                        .jitter = jitter,
+                        .return_shocks = return_shocks,
+                        .store_history = 1};
+  return kf_hot_loop(&in, scratch_arena, &out);
+}
+
+i64 sdsge_filter_extended_input_arena_size(const i64 n, const i64 m,
+                                            const i64 k, const i64 T,
+                                            const i64 n_par) {
+  return n * n + n * k + n_par + k * k + m * m + T * m + n + n * n;
+}
+
+i64 sdsge_filter_extended_output_arena_size(const i64 n, const i64 m,
+                                             const i64 k, const i64 T,
+                                             const int return_shocks) {
+  return sdsge_filter_linear_output_arena_size(n, m, k, T, return_shocks);
+}
+
+int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
+                               f64 *SDSGE_RESTRICT scratch_arena,
+                               const meas_fn meas, const meas_fn jac,
+                               const i64 T, const i64 n, const i64 m,
+                               const i64 k, const i64 n_par,
+                               const int symmetrize, const f64 jitter,
+                               const int return_shocks,
+                               f64 *SDSGE_RESTRICT output_arena) {
+  const f64 *A = input_arena;
+  const f64 *B = A + n * n;
+  const f64 *params = B + n * k;
+  const f64 *Q = params + n_par;
+  const f64 *R = Q + k * k;
+  const f64 *y = R + m * m;
+  const f64 *x0 = y + T * m;
+  const f64 *P0 = x0 + n;
+  f64 *p = output_arena;
+  ekf_outputs out = {.x_pred = p};
+  p += T * n;
+  out.x_filt = p;
+  p += T * n;
+  out.P_pred = p;
+  p += T * n * n;
+  out.P_filt = p;
+  p += T * n * n;
+  out.y_pred = p;
+  p += T * m;
+  out.y_filt = p;
+  p += T * m;
+  out.innov = p;
+  p += T * m;
+  out.std_innov = p;
+  p += T * m;
+  out.S = p;
+  p += T * m * m;
+  out.eps_hat = return_shocks ? p : NULL;
+  p += return_shocks ? T * k : 0;
+  out.loglik = p;
+
+  const ekf_inputs in = {.meas = meas,
+                         .jac = jac,
+                         .A = A,
+                         .B = B,
+                         .calib_params = params,
+                         .Q = Q,
+                         .R = R,
+                         .y = y,
+                         .x0 = x0,
+                         .P0 = P0,
+                         .T = T,
+                         .n = n,
+                         .m = m,
+                         .k = k,
+                         .n_par = n_par,
+                         .jitter = jitter,
+                         .symmetrize = symmetrize,
+                         .compute_y_filt = 1,
+                         .return_shocks = return_shocks,
+                         .store_history = 1};
+  return ekf_hot_loop(&in, scratch_arena, &out);
+}
+
+i64 sdsge_filter_unscented_input_arena_size(const i64 n_state,
+                                             const i64 n_ctrl,
+                                             const i64 n_exog,
+                                             const i64 n_obs, const i64 T,
+                                             const i64 n_par) {
+  const i64 nz = 2 * n_state;
+  return n_state * n_state + n_ctrl * n_state + n_state * n_exog +
+         n_state * n_state * n_state + n_ctrl * n_state * n_state + n_state +
+         n_ctrl + n_state + n_ctrl + n_par + n_exog * n_exog + n_obs * n_obs +
+         T * n_obs + nz + nz * nz;
+}
+
+i64 sdsge_filter_unscented_output_arena_size(const i64 n_state,
+                                              const i64 n_ctrl,
+                                              const i64 n_obs, const i64 T) {
+  const i64 n_var = n_state + n_ctrl;
+  const i64 nz = 2 * n_state;
+  return 2 * T * n_var + 2 * T * nz * nz + 4 * T * n_obs + T * n_obs * n_obs +
+         4 * T * n_state + 1;
+}
+
+i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
+                                f64 *SDSGE_RESTRICT scratch_arena,
+                                const meas_fn meas, const i64 T,
+                                const i64 n_state, const i64 n_ctrl,
+                                const i64 n_exog, const i64 n_obs,
+                                const i64 n_par, const f64 alpha,
+                                const f64 beta, const f64 kappa,
+                                const int symmetrize, const f64 jitter,
+                                f64 *SDSGE_RESTRICT output_arena) {
+  const i64 n_var = n_state + n_ctrl;
+  const i64 nz = 2 * n_state;
+  const f64 *hx = input_arena;
+  const f64 *gx = hx + n_state * n_state;
+  const f64 *bx = gx + n_ctrl * n_state;
+  const f64 *hxx = bx + n_state * n_exog;
+  const f64 *gxx = hxx + n_state * n_state * n_state;
+  const f64 *hss = gxx + n_ctrl * n_state * n_state;
+  const f64 *gss = hss + n_state;
+  const f64 *steady_state = gss + n_ctrl;
+  const f64 *params = steady_state + n_var;
+  const f64 *Q = params + n_par;
+  const f64 *R = Q + n_exog * n_exog;
+  const f64 *obs = R + n_obs * n_obs;
+  const f64 *z0 = obs + T * n_obs;
+  const f64 *P0 = z0 + nz;
+  f64 *p = output_arena;
+  ukf_outputs out = {.x_pred = p};
+  p += T * n_var;
+  out.x_filt = p;
+  p += T * n_var;
+  out.P_pred = p;
+  p += T * nz * nz;
+  out.P_filt = p;
+  p += T * nz * nz;
+  out.y_pred = p;
+  p += T * n_obs;
+  out.y_filt = p;
+  p += T * n_obs;
+  out.innov = p;
+  p += T * n_obs;
+  out.std_innov = p;
+  p += T * n_obs;
+  out.S = p;
+  p += T * n_obs * n_obs;
+  out.loglik = p;
+  p += 1;
+  out.x1_pred = p;
+  p += T * n_state;
+  out.x2_pred = p;
+  p += T * n_state;
+  out.x1_filt = p;
+  p += T * n_state;
+  out.x2_filt = p;
+
+  const ukf_inputs in = {.meas = meas,
+                         .hx = hx,
+                         .gx = gx,
+                         .bx = bx,
+                         .hxx = hxx,
+                         .gxx = gxx,
+                         .hss = hss,
+                         .gss = gss,
+                         .steady_state = steady_state,
+                         .params = params,
+                         .Q = Q,
+                         .R = R,
+                         .obs = obs,
+                         .z0 = z0,
+                         .P0 = P0,
+                         .T = T,
+                         .n_state = n_state,
+                         .n_ctrl = n_ctrl,
+                         .n_exog = n_exog,
+                         .n_obs = n_obs,
+                         .n_params = n_par,
+                         .alpha = alpha,
+                         .beta = beta,
+                         .kappa = kappa,
+                         .jitter = jitter,
+                         .symmetrize = symmetrize,
+                         .store_history = 1};
+  return ukf_hot_loop(&in, scratch_arena, &out);
+}
