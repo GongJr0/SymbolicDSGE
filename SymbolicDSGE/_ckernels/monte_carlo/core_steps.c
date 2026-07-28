@@ -1,11 +1,20 @@
 #include "core_steps.h"
 #include "../core/core.h"
 
-void sdsge_simulate_order1_step(
-    const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
-    const f64 *SDSGE_RESTRICT C, const f64 *SDSGE_RESTRICT d,
-    const f64 *SDSGE_RESTRICT x0, const f64 *SDSGE_RESTRICT shock, const i64 T,
-    const i64 n, const i64 k, const i64 m, f64 *SDSGE_RESTRICT simout) {
+i64 sdsge_simulate_order1_arena_size(const i64 n, const i64 k, const i64 T,
+                                     const i64 n_par) {
+  return n * n + n * k + n + T * k + n_par;
+}
+void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
+                                sdsge_measurement_fn measurement, const i64 T,
+                                const i64 n, const i64 k, const i64 n_par,
+                                const i64 m, f64 *SDSGE_RESTRICT simout) {
+  const f64 *SDSGE_RESTRICT A = arena;
+  const f64 *SDSGE_RESTRICT B = A + n * n;
+  const f64 *SDSGE_RESTRICT x0 = B + n * k;
+  const f64 *SDSGE_RESTRICT shock = x0 + n;
+  f64 *SDSGE_RESTRICT params = (f64 *)(shock + T * k);
+  (void)n_par;
   f64 *states = simout;
   f64 *observables = simout + T * n;
 
@@ -26,26 +35,37 @@ void sdsge_simulate_order1_step(
       state_t[i] = value;
     }
 
-    for (i64 i = 0; i < m; ++i) {
-      const f64 *Ci = C + i * n;
-      f64 value = d[i];
-      for (i64 j = 0; j < n; ++j)
-        value += Ci[j] * state_t[j];
-      observable_t[i] = value;
+    if (m > 0) {
+      measurement(state_t, params, observable_t);
     }
   }
 }
 
-void sdsge_simulate_order2_step(
-    const f64 *SDSGE_RESTRICT hx, const f64 *SDSGE_RESTRICT gx,
-    const f64 *SDSGE_RESTRICT bx, const f64 *SDSGE_RESTRICT hxx,
-    const f64 *SDSGE_RESTRICT gxx, const f64 *SDSGE_RESTRICT hss,
-    const f64 *SDSGE_RESTRICT gss, const f64 *SDSGE_RESTRICT steady_state,
-    const f64 *SDSGE_RESTRICT x0, const f64 *SDSGE_RESTRICT shock,
-    sdsge_measurement_fn measurement, f64 *SDSGE_RESTRICT params, i64 T, i64 nx,
-    i64 ny, i64 n_exog, i64 m, f64 *SDSGE_RESTRICT simout,
-    f64 *SDSGE_RESTRICT scratch) {
+i64 sdsge_simulate_order2_arena_size(const i64 n_state, const i64 n_var,
+                                     const i64 n_exog, const i64 T,
+                                     const i64 n_par) {
+  i64 nx = n_state;
+  i64 ny = n_var - n_state;
+  return nx * nx + ny * nx + nx * n_exog + nx * nx * nx + ny * nx * nx + nx +
+         ny + (nx + ny) + nx + T * n_exog + n_par + 4 * nx + nx * nx;
+}
+void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
+                                sdsge_measurement_fn measurement, i64 T, i64 nx,
+                                i64 ny, i64 n_exog, i64 n_par, i64 m,
+                                f64 *SDSGE_RESTRICT simout) {
   const i64 n = nx + ny;
+  const f64 *SDSGE_RESTRICT hx = arena;
+  const f64 *SDSGE_RESTRICT gx = hx + nx * nx;
+  const f64 *SDSGE_RESTRICT bx = gx + ny * nx;
+  const f64 *SDSGE_RESTRICT hxx = bx + nx * n_exog;
+  const f64 *SDSGE_RESTRICT gxx = hxx + nx * nx * nx;
+  const f64 *SDSGE_RESTRICT hss = gxx + ny * nx * nx;
+  const f64 *SDSGE_RESTRICT gss = hss + nx;
+  const f64 *SDSGE_RESTRICT steady_state = gss + ny;
+  const f64 *SDSGE_RESTRICT x0 = steady_state + n;
+  const f64 *SDSGE_RESTRICT shock = x0 + nx;
+  f64 *SDSGE_RESTRICT params = (f64 *)(shock + T * n_exog);
+  f64 *SDSGE_RESTRICT scratch = params + n_par;
   f64 *SDSGE_RESTRICT states = simout;
   f64 *SDSGE_RESTRICT observables = simout + T * n;
   f64 *SDSGE_RESTRICT x1_cur = scratch;
