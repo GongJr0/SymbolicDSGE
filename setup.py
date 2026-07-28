@@ -4,9 +4,6 @@ Project metadata lives in ``pyproject.toml`` (PEP 621); this file only declares
 the compiled extensions. One extension per ``_ckernels`` subsystem that ships a
 ``_<name>.pyx`` shim; each links its sibling ``*.c`` plus the shared
 ``_common/*.c`` sources.
-
-If Cython is unavailable, the extension list is empty and the library falls back
-to its numba kernels at runtime (so a metadata-only operation still works).
 """
 
 from __future__ import annotations
@@ -26,7 +23,7 @@ _COMMON = os.path.join(_CKERNELS, "_common")
 # extension already; this is for the higher-level subsystems (core, kalman, ...).
 _EXTRA_DEPS = {
     "estimation": ["core", "kalman", "optim", "rng"],
-    "monte_carlo": ["core", "kalman", "rng", "regression"],
+    "monte_carlo": ["core", "kalman", "rng", "regression", "diag"],
 }
 
 # Subsystems whose hand-written C draws randoms through numpy's low-level RNG
