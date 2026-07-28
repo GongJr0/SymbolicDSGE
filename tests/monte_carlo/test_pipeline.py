@@ -107,7 +107,7 @@ class _FakeSolvedModel:
     ):
         del shock_scale, x0
         self._draw_shocks(shocks)
-        t = np.arange(T + 1, dtype=np.float64)
+        t = np.arange(1, T + 1, dtype=np.float64)
         return np.column_stack(
             [
                 t + self.offset,
@@ -1084,14 +1084,15 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         observables=True,
     )
 
-    expected_states = np.empty((T + 1, 2), dtype=np.float64)
-    expected_states[0] = 0.0
+    expected_states = np.empty((T, 2), dtype=np.float64)
+    previous = np.zeros(2, dtype=np.float64)
     for t in range(T):
-        expected_states[t + 1] = A @ expected_states[t] + B[:, 0] * shock[t]
+        expected_states[t] = A @ previous + B[:, 0] * shock[t]
+        previous = expected_states[t]
     expected_obs = expected_states @ C.T + d
 
     np.testing.assert_allclose(data.states, expected_states)
-    np.testing.assert_allclose(data.observables, expected_obs[1:])
+    np.testing.assert_allclose(data.observables, expected_obs)
     np.testing.assert_allclose(data.raw["_X"], expected_states)
     np.testing.assert_allclose(data.raw["u"], expected_states[:, 0])
     np.testing.assert_allclose(data.raw["obs"], expected_obs[:, 0])

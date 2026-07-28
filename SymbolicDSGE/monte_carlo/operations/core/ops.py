@@ -57,7 +57,7 @@ def simulate(
     raw["_X"] = states
     if obs_names:
         obs_full = model._simulate_observable_matrix(states, drop_initial=False)
-        obs_mat = np.ascontiguousarray(obs_full[1:], dtype=np.float64)
+        obs_mat = np.ascontiguousarray(obs_full, dtype=np.float64)
         for i, name in enumerate(obs_names):
             raw[name] = obs_full[:, i]
     return MCData(

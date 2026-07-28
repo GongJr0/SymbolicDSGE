@@ -313,7 +313,7 @@ def test_rbc_second_order_deterministic_sim_matches_dynare():
 
     np.testing.assert_allclose(
         out,
-        _DYNARE_DETERMINISTIC_SIM,
+        _DYNARE_DETERMINISTIC_SIM[1:],
         rtol=2e-6,
         atol=2e-6,
     )
@@ -330,7 +330,7 @@ def test_rbc_second_order_stochastic_sim_matches_dynare():
 
     np.testing.assert_allclose(
         out,
-        _DYNARE_STOCHASTIC_SIM,
+        _DYNARE_STOCHASTIC_SIM[1:],
         rtol=2e-6,
         atol=2e-6,
     )
@@ -341,4 +341,4 @@ def test_rbc_second_order_irf_matches_dynare():
 
     out = solved.irf(["z"], T=_DYNARE_IRF.shape[0] - 1)["_X"]
 
-    np.testing.assert_allclose(out, _DYNARE_IRF, rtol=2e-6, atol=2e-6)
+    np.testing.assert_allclose(out, _DYNARE_IRF[1:], rtol=2e-6, atol=2e-6)

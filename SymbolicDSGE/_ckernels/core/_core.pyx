@@ -30,7 +30,7 @@ cdef extern from "core.h" nogil:
         const double *shock, double *out, int64_t T, int64_t n, int64_t k)
     void sdsge_affine_observations(
         const double *states, const double *C, const double *d,
-        int64_t state_start, double *out, int64_t T, int64_t m, int64_t n)
+        double *out, int64_t T, int64_t m, int64_t n)
     int64_t sdsge_simulate_second_order_pruned(
         const double *hx, const double *gx, const double *bx,
         const double *hxx, const double *gxx,
@@ -176,7 +176,7 @@ def assemble_state_space(p, f, n_state, n_control, n_exog):
 
 
 def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):
-    """out[(T+1, n)] <- linear state recursion. ``out`` is the caller's
+    """out[(T, n)] <- post-shock linear state recursion. ``out`` is the caller's
     C-contiguous f64 output buffer, written in place; inputs are coerced."""
     cdef double[:, ::1] Av = np.ascontiguousarray(A, dtype=np.float64)
     cdef double[:, ::1] Bv = np.ascontiguousarray(B, dtype=np.float64)
@@ -185,17 +185,15 @@ def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):
     cdef int64_t n = Av.shape[0]
     cdef int64_t k = Bv.shape[1]
     cdef int64_t T = shockv.shape[0]
-    # out[0] = x0 is written even when T == 0, so the C call always runs; only
-    # the shock pointer can dangle on an empty (0, k) buffer.
-    cdef const double *shock_ptr = &shockv[0, 0] if T > 0 else NULL
+    cdef const double *shock_ptr = &shockv[0, 0]
     with nogil:
         sdsge_simulate_linear_states(
             &Av[0, 0], &Bv[0, 0], &x0v[0], shock_ptr, &out[0, 0], T, n, k
         )
 
 
-def affine_observations_into(states, C, d, int64_t state_start, double[:, ::1] out):
-    """out[(T, m)] <- d + C @ states[state_start + t]. ``out`` is the caller's
+def affine_observations_into(states, C, d, double[:, ::1] out):
+    """out[(T, m)] <- d + C @ states[t]. ``out`` is the caller's
     C-contiguous f64 output buffer, written in place; inputs are coerced."""
     cdef int64_t T = out.shape[0]
     if T == 0:
@@ -207,7 +205,7 @@ def affine_observations_into(states, C, d, int64_t state_start, double[:, ::1] o
     cdef int64_t n = Cv.shape[1]
     with nogil:
         sdsge_affine_observations(
-            &statesv[0, 0], &Cv[0, 0], &dv[0], state_start, &out[0, 0], T, m, n
+            &statesv[0, 0], &Cv[0, 0], &dv[0], &out[0, 0], T, m, n
         )
 
 
@@ -260,8 +258,8 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
     if shockv.shape[1] != n_exog:
         raise ValueError("shock_mat must have shape (T, n_exog).")
 
-    x_out = np.empty((T + 1, nx), dtype=np.float64)
-    y_out = np.empty((T + 1, ny), dtype=np.float64)
+    x_out = np.empty((T, nx), dtype=np.float64)
+    y_out = np.empty((T, ny), dtype=np.float64)
     xoutv = x_out
     youtv = y_out
     x_ptr = &xoutv[0, 0]

@@ -177,9 +177,7 @@ def _resolve_datagen_specs(
                     "Simulation shape resolution requires its target model."
                 )
             T = int(step.kwargs["T"])
-            shapes: dict[str, Shape] = {
-                "states": (T + 1, len(model.compiled.var_names))
-            }
+            shapes: dict[str, Shape] = {"states": (T, len(model.compiled.var_names))}
             if step.kwargs["observables"]:
                 shapes["observables"] = (T, len(model.compiled.observable_names))
             return _float_specs(shapes)

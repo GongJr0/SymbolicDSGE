@@ -87,7 +87,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
 
     x_series = next(series for series in sim_body["series"] if series["name"] == "_X")
     x_arr = decode_array(ArrayEnvelope.model_validate(x_series["array"]))
-    assert x_arr.shape == (6, solved_body["A_shape"][0])
+    assert x_arr.shape == (5, solved_body["A_shape"][0])
 
     fetched = client.get(f"/api/run/{sim_body['run_id']}")
     assert fetched.status_code == 200
@@ -652,7 +652,7 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
     assert set(body["test_summaries"]) == {"normality"}
     summary = body["test_summaries"]["normality"]
     assert summary["distribution"] == "jb_lookup"
-    assert summary["df"] == 12
+    assert summary["df"] == 11
     assert summary["n"] == 2
 
 
