@@ -22,6 +22,8 @@ cdef extern from "../_common/sdsge_complex.h":
 
 
 cdef extern from "core.h" nogil:
+    ctypedef void (*sdsge_measurement_fn)(
+        double *vars, double *par, double *out) noexcept
     void sdsge_assemble_state_space(
         const c128 *p, const c128 *f, const int64_t n_state, int64_t n_control,
         const int64_t n_exog, double *A, double *B)
@@ -143,12 +145,6 @@ cdef extern from "bicomplex_hessian.h" nogil:
         bc_residual_fn residual, const double *ss, const double *par,
         int64_t n_var, int64_t n_par, int64_t n_eq, double step,
         double *hessian)
-
-
-# Measurement / observable-jacobian @cfunc (build_measurement_cfunc, real ABI):
-# ``void(vars*, par*, out*)``. Held Python-side; called here by ``.address``, nogil.
-ctypedef void (*sdsge_measurement_fn)(
-    double *vars, double *par, double *out) noexcept nogil
 
 
 def assemble_state_space(p, f, n_state, n_control, n_exog):
