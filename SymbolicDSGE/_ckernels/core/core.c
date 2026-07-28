@@ -74,13 +74,10 @@ void sdsge_simulate_linear_states(const f64 *SDSGE_RESTRICT A,
                                   const f64 *SDSGE_RESTRICT shock,
                                   f64 *SDSGE_RESTRICT out, i64 T, i64 n,
                                   i64 k) {
-  for (i64 i = 0; i < n; ++i)
-    out[i] = x0[i];
-
   for (i64 t = 0; t < T; ++t) {
-    const f64 *xt = out + t * n;
+    const f64 *xt = t == 0 ? x0 : out + (t - 1) * n;
     const f64 *st = shock + t * k;
-    f64 *xn = out + (t + 1) * n;
+    f64 *xn = out + t * n;
     for (i64 i = 0; i < n; ++i) {
       const f64 *Ai = A + i * n;
       const f64 *Bi = B + i * k;
@@ -96,10 +93,10 @@ void sdsge_simulate_linear_states(const f64 *SDSGE_RESTRICT A,
 
 void sdsge_affine_observations(const f64 *SDSGE_RESTRICT states,
                                const f64 *SDSGE_RESTRICT C,
-                               const f64 *SDSGE_RESTRICT d, i64 state_start,
+                               const f64 *SDSGE_RESTRICT d,
                                f64 *SDSGE_RESTRICT out, i64 T, i64 m, i64 n) {
   for (i64 t = 0; t < T; ++t) {
-    const f64 *row = states + (state_start + t) * n;
+    const f64 *row = states + t * n;
     f64 *ot = out + t * m;
     for (i64 i = 0; i < m; ++i) {
       const f64 *Ci = C + i * n;
@@ -138,44 +135,13 @@ i64 sdsge_simulate_second_order_pruned(
     x2_cur[i] = 0.0;
   }
 
-  for (i64 t = 0; t <= T; ++t) {
-    f64 *SDSGE_RESTRICT xt = x_out + t * nx;
-
-    for (i64 i = 0; i < nx; ++i) {
-      xt[i] = x1_cur[i] + x2_cur[i];
-    }
-
+  for (i64 t = 0; t < T; ++t) {
     for (i64 j = 0; j < nx; ++j) {
       const f64 xj = x1_cur[j];
       f64 *SDSGE_RESTRICT row = x1_outer + j * nx;
       for (i64 k = 0; k < nx; ++k) {
         row[k] = xj * x1_cur[k];
       }
-    }
-
-    if (ny > 0) {
-      f64 *SDSGE_RESTRICT yt = y_out + t * ny;
-      for (i64 i = 0; i < ny; ++i) {
-        const f64 *SDSGE_RESTRICT gxi = gx + i * nx;
-        const f64 *SDSGE_RESTRICT gxxi = gxx + i * nx * nx;
-        f64 s = 0.5 * gss[i];
-
-        for (i64 j = 0; j < nx; ++j) {
-          s += gxi[j] * xt[j];
-        }
-        for (i64 j = 0; j < nx; ++j) {
-          const f64 *SDSGE_RESTRICT gxxij = gxxi + j * nx;
-          const f64 *SDSGE_RESTRICT outerj = x1_outer + j * nx;
-          for (i64 k = 0; k < nx; ++k) {
-            s += 0.5 * gxxij[k] * outerj[k];
-          }
-        }
-        yt[i] = s;
-      }
-    }
-
-    if (t == T) {
-      break;
     }
 
     const f64 *SDSGE_RESTRICT shock_t = n_exog > 0 ? shock + t * n_exog : NULL;
@@ -212,6 +178,40 @@ i64 sdsge_simulate_second_order_pruned(
     tmp = x2_cur;
     x2_cur = x2_next;
     x2_next = tmp;
+
+    f64 *SDSGE_RESTRICT xt = x_out + t * nx;
+    for (i64 i = 0; i < nx; ++i) {
+      xt[i] = x1_cur[i] + x2_cur[i];
+    }
+
+    if (ny > 0) {
+      for (i64 j = 0; j < nx; ++j) {
+        const f64 xj = x1_cur[j];
+        f64 *SDSGE_RESTRICT row = x1_outer + j * nx;
+        for (i64 k = 0; k < nx; ++k) {
+          row[k] = xj * x1_cur[k];
+        }
+      }
+
+      f64 *SDSGE_RESTRICT yt = y_out + t * ny;
+      for (i64 i = 0; i < ny; ++i) {
+        const f64 *SDSGE_RESTRICT gxi = gx + i * nx;
+        const f64 *SDSGE_RESTRICT gxxi = gxx + i * nx * nx;
+        f64 s = 0.5 * gss[i];
+
+        for (i64 j = 0; j < nx; ++j) {
+          s += gxi[j] * xt[j];
+        }
+        for (i64 j = 0; j < nx; ++j) {
+          const f64 *SDSGE_RESTRICT gxxij = gxxi + j * nx;
+          const f64 *SDSGE_RESTRICT outerj = x1_outer + j * nx;
+          for (i64 k = 0; k < nx; ++k) {
+            s += 0.5 * gxxij[k] * outerj[k];
+          }
+        }
+        yt[i] = s;
+      }
+    }
   }
 
   free(arena);

@@ -33,17 +33,14 @@ def _simulate_linear_states_into_numba(
     n = A.shape[0]
     k = B.shape[1]
 
-    for i in range(n):
-        out[0, i] = x0[i]
-
     for t in range(T):
         for i in range(n):
             s = 0.0
             for j in range(n):
-                s += A[i, j] * out[t, j]
+                s += A[i, j] * (x0[j] if t == 0 else out[t - 1, j])
             for j in range(k):
                 s += B[i, j] * shock_mat[t, j]
-            out[t + 1, i] = s
+            out[t, i] = s
 
 
 @njit(cache=True)
@@ -51,7 +48,6 @@ def _affine_observations_into_numba(
     states: NDF,
     C: NDF,
     d: NDF,
-    state_start: int,
     out: NDF,
 ) -> None:
     T = out.shape[0]
@@ -59,11 +55,10 @@ def _affine_observations_into_numba(
     n = C.shape[1]
 
     for t in range(T):
-        state_row = state_start + t
         for i in range(m):
             s = d[i]
             for j in range(n):
-                s += C[i, j] * states[state_row, j]
+                s += C[i, j] * states[t, j]
             out[t, i] = s
 
 
@@ -84,8 +79,8 @@ def _simulate_second_order_pruned_numba(
     ny = gx.shape[0]
     n_exog = bx.shape[1]
 
-    x_out = np.empty((T + 1, nx), dtype=np.float64)
-    y_out = np.empty((T + 1, ny), dtype=np.float64)
+    x_out = np.empty((T, nx), dtype=np.float64)
+    y_out = np.empty((T, ny), dtype=np.float64)
     x1_cur = np.empty(nx, dtype=np.float64)
     x1_next = np.empty(nx, dtype=np.float64)
     x2_cur = np.empty(nx, dtype=np.float64)
@@ -96,25 +91,10 @@ def _simulate_second_order_pruned_numba(
         x1_cur[i] = x0[i]
         x2_cur[i] = 0.0
 
-    for t in range(T + 1):
-        for i in range(nx):
-            x_out[t, i] = x1_cur[i] + x2_cur[i]
-
+    for t in range(T):
         for j in range(nx):
             for k in range(nx):
                 x1_outer[j, k] = x1_cur[j] * x1_cur[k]
-
-        for i in range(ny):
-            s = 0.5 * gss[i]
-            for j in range(nx):
-                s += gx[i, j] * x_out[t, j]
-            for j in range(nx):
-                for k in range(nx):
-                    s += 0.5 * gxx[i, j, k] * x1_outer[j, k]
-            y_out[t, i] = s
-
-        if t == T:
-            break
 
         for i in range(nx):
             s1 = 0.0
@@ -133,6 +113,22 @@ def _simulate_second_order_pruned_numba(
         for i in range(nx):
             x1_cur[i] = x1_next[i]
             x2_cur[i] = x2_next[i]
+
+        for i in range(nx):
+            x_out[t, i] = x1_cur[i] + x2_cur[i]
+
+        for j in range(nx):
+            for k in range(nx):
+                x1_outer[j, k] = x1_cur[j] * x1_cur[k]
+
+        for i in range(ny):
+            s = 0.5 * gss[i]
+            for j in range(nx):
+                s += gx[i, j] * x_out[t, j]
+            for j in range(nx):
+                for k in range(nx):
+                    s += 0.5 * gxx[i, j, k] * x1_outer[j, k]
+            y_out[t, i] = s
 
     return x_out, y_out
 

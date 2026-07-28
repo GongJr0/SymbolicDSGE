@@ -36,10 +36,9 @@ def affine_observations_into(
     states: _F64,
     C: _F64,
     d: _F64,
-    state_start: int,
     out: _F64,
 ) -> None:
-    """out[(T, m)] <- d + C @ states[state_start + t]. Mirrors the numba kernel."""
+    """out[(T, m)] <- d + C @ states[t]. Mirrors the numba kernel."""
 
 def simulate_second_order_pruned(
     hx: _F64,

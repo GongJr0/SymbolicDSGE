@@ -51,7 +51,7 @@ def post82(post82_test_model_path):
         observables=True,
     )
     y = pd.DataFrame(
-        {"OutGap": sim["OutGap"][1:], "Infl": sim["Infl"][1:], "Rate": sim["Rate"][1:]}
+        {"OutGap": sim["OutGap"], "Infl": sim["Infl"], "Rate": sim["Rate"]}
     )
     return {
         "solver": solver,

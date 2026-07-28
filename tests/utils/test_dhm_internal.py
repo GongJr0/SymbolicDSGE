@@ -50,7 +50,6 @@ def test_low_level_state_and_moment_builders_match_manual_construction():
     states = dhm_module._simulate_linear_states(A, B, x0, shock_mat)
     expected_states = np.array(
         [
-            [1.0, 2.0],
             [1.0, 2.25],
             [-0.5, 1.75],
         ],
