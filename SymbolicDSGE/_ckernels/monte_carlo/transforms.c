@@ -27,6 +27,9 @@ static void welford_ax0(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
   }
 }
 
+arena_size sdsge_standardize_ax0_arena_size(i64 n, i64 p) {
+  return make_sizer(n * p + 2 * p, 0);
+}
 i64 sdsge_standardize_ax0(const f64 *SDSGE_RESTRICT x, const i64 ddof,
                           const i64 n, const i64 p, f64 *SDSGE_RESTRICT scratch,
                           f64 *SDSGE_RESTRICT out) {
@@ -62,6 +65,7 @@ i64 sdsge_standardize_ax0(const f64 *SDSGE_RESTRICT x, const i64 ddof,
   return SDSGE_TRANSFORM_SUCCESS;
 }
 
+arena_size sdsge_log_arena_size(i64 n, i64 p) { return make_sizer(n * p, 0); }
 i64 sdsge_log(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
               const i64 p, f64 *SDSGE_RESTRICT out) {
   if (n <= 0 || p <= 0) {
@@ -77,6 +81,9 @@ i64 sdsge_log(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
   return SDSGE_TRANSFORM_SUCCESS;
 }
 
+arena_size sdsge_log_diff_arena_size(i64 n, i64 p) {
+  return make_sizer(n * p + p, 0);
+}
 i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
                    const i64 p, f64 *SDSGE_RESTRICT scratch,
                    f64 *SDSGE_RESTRICT out) {
@@ -107,6 +114,9 @@ i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
   return SDSGE_TRANSFORM_SUCCESS;
 }
 
+arena_size sdsge_diff_arena_size(i64 n, i64 p, i64 order) {
+  return make_sizer(n * p + order * p, 0);
+}
 i64 sdsge_diff(const f64 *SDSGE_RESTRICT x, const i64 order, const i64 n,
                const i64 p, f64 *SDSGE_RESTRICT scratch,
                f64 *SDSGE_RESTRICT out) {
@@ -157,6 +167,10 @@ i64 sdsge_diff(const f64 *SDSGE_RESTRICT x, const i64 order, const i64 n,
   return SDSGE_TRANSFORM_SUCCESS;
 }
 
+arena_size sdsge_rolling_mean_arena_size(i64 n, i64 p, i64 window) {
+  (void)window;
+  return make_sizer(n * p + p, 0);
+}
 i64 sdsge_rolling_mean(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
                        const i64 window, f64 *SDSGE_RESTRICT scratch,
                        f64 *SDSGE_RESTRICT out) {
@@ -213,6 +227,7 @@ i64 sdsge_rolling_mean(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
  * Welford avoids, so m2 drifts on a long window over a large mean; it is
  * clamped at zero, and callers comparing against a per-window recomputation
  * should expect agreement to a tolerance rather than to the bit. */
+
 static i64 rolling_moment_ax0(const f64 *SDSGE_RESTRICT x, const i64 n,
                               const i64 p, const i64 window, const i64 ddof,
                               const int take_sqrt, f64 *SDSGE_RESTRICT scratch,
@@ -279,15 +294,128 @@ static i64 rolling_moment_ax0(const f64 *SDSGE_RESTRICT x, const i64 n,
 
   return SDSGE_TRANSFORM_SUCCESS;
 }
-
+arena_size sdsge_rolling_var_arena_size(i64 n, i64 p, i64 window) {
+  (void)window;
+  return make_sizer(n * p + 2 * p, 0);
+}
 i64 sdsge_rolling_var(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
                       const i64 window, const i64 ddof,
                       f64 *SDSGE_RESTRICT scratch, f64 *SDSGE_RESTRICT out) {
   return rolling_moment_ax0(x, n, p, window, ddof, 0, scratch, out);
 }
 
+arena_size sdsge_rolling_std_arena_size(i64 n, i64 p, i64 window) {
+  (void)window;
+  return make_sizer(n * p + 2 * p, 0);
+}
 i64 sdsge_rolling_std(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
                       const i64 window, const i64 ddof,
                       f64 *SDSGE_RESTRICT scratch, f64 *SDSGE_RESTRICT out) {
   return rolling_moment_ax0(x, n, p, window, ddof, 1, scratch, out);
+}
+
+static int sdsge_mc_transform_status(const i64 status,
+                                     i64 *SDSGE_RESTRICT int_out) {
+  if (int_out != NULL) {
+    int_out[0] = status;
+  }
+  return (int)status;
+}
+
+int sdsge_mc_standardize_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_standardize_step_ctx *config = ctx;
+  const i64 input_count = config->n * config->p;
+  const i64 status = sdsge_standardize_ax0(
+      float_in_work, config->ddof, config->n, config->p,
+      float_in_work + input_count, float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_log_runner(const i64 rep_idx,
+                        f64 *SDSGE_RESTRICT float_in_work,
+                        f64 *SDSGE_RESTRICT float_out,
+                        i64 *SDSGE_RESTRICT int_work,
+                        i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_log_step_ctx *config = ctx;
+  const i64 status = sdsge_log(float_in_work, config->offset, config->n,
+                               config->p, float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_log_diff_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_log_diff_step_ctx *config = ctx;
+  const i64 input_count = config->n * config->p;
+  const i64 status = sdsge_log_diff(float_in_work, config->offset, config->n,
+                                    config->p, float_in_work + input_count,
+                                    float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_diff_runner(const i64 rep_idx,
+                         f64 *SDSGE_RESTRICT float_in_work,
+                         f64 *SDSGE_RESTRICT float_out,
+                         i64 *SDSGE_RESTRICT int_work,
+                         i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_diff_step_ctx *config = ctx;
+  const i64 input_count = config->n * config->p;
+  const i64 status = sdsge_diff(float_in_work, config->order, config->n,
+                                config->p, float_in_work + input_count,
+                                float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_rolling_mean_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_rolling_mean_step_ctx *config = ctx;
+  const i64 input_count = config->n * config->p;
+  const i64 status = sdsge_rolling_mean(
+      float_in_work, config->n, config->p, config->window,
+      float_in_work + input_count, float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_rolling_var_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_rolling_var_step_ctx *config = ctx;
+  const i64 input_count = config->n * config->p;
+  const i64 status = sdsge_rolling_var(
+      float_in_work, config->n, config->p, config->window, config->ddof,
+      float_in_work + input_count, float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_rolling_std_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_rolling_std_step_ctx *config = ctx;
+  const i64 input_count = config->n * config->p;
+  const i64 status = sdsge_rolling_std(
+      float_in_work, config->n, config->p, config->window, config->ddof,
+      float_in_work + input_count, float_out);
+  return sdsge_mc_transform_status(status, int_out);
 }

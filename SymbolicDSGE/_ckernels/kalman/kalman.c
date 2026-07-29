@@ -142,14 +142,16 @@ void kf_build_shock_projection(const f64 *SDSGE_RESTRICT B,
   sdsge_matmul(Q, temp_km, out, k, k, m);
 }
 
-i64 kf_arena_size(const i64 n, const i64 m, const i64 k) {
-  return 2 * n + 7 * m /* vectors + triangular-solve scratch */
-         + 6 * n * n   /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
-         + 2 * m * m   /* S_buf, L */
-         + 3 * n * m   /* PCt, K, temp_nm */
-         + m * n       /* temp_mn */
-         + n * k       /* temp_nk */
-         + 2 * k * m;  /* M, temp_km */
+arena_size kf_arena_size(const i64 n, const i64 m, const i64 k) {
+  return make_sizer(
+      2 * n + 7 * m    /* vectors + triangular-solve scratch */
+          + 6 * n * n  /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+          + 2 * m * m  /* S_buf, L */
+          + 3 * n * m  /* PCt, K, temp_nm */
+          + m * n      /* temp_mn */
+          + n * k      /* temp_nk */
+          + 2 * k * m, /* M, temp_km */
+      0);
 }
 int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 kf_outputs *out) {
@@ -276,14 +278,16 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   return status;
 }
 
-i64 ekf_arena_size(const i64 n, const i64 m, const i64 k) {
-  return 2 * n + 6 * m /* vectors + triangular-solve scratch */
-         + 6 * n * n   /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
-         + 2 * m * m   /* S_buf, L */
-         + 4 * n * m   /* PCt, K, temp_nm, H_buf */
-         + m * n       /* temp_mn */
-         + n * k       /* temp_nk */
-         + 2 * k * m;  /* M, temp_km */
+arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k) {
+  return make_sizer(
+      2 * n + 6 * m    /* vectors + triangular-solve scratch */
+          + 6 * n * n  /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+          + 2 * m * m  /* S_buf, L */
+          + 4 * n * m  /* PCt, K, temp_nm, H_buf */
+          + m * n      /* temp_mn */
+          + n * k      /* temp_nk */
+          + 2 * k * m, /* M, temp_km */
+      0);
 }
 
 int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
@@ -618,15 +622,16 @@ static int ukf_chol_auto(const f64 *SDSGE_RESTRICT P, f64 jitter,
   return sdsge_chol(P, jitter + scale * UKF_CHOL_FLOOR_REL, L, n);
 }
 
-i64 ukf_arena_size(const i64 n_state, const i64 n_ctrl, const i64 n_exog,
-                   const i64 n_obs) {
+arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl,
+                           const i64 n_exog, const i64 n_obs) {
   const i64 nz = 2 * n_state;
   const i64 n_sig = 2 * nz + 1;
   const i64 nv = n_state + n_ctrl;
 
-  return 3 * nz + 4 * nz * nz + 2 * n_sig * nz + n_sig * n_obs +
-         n_state * n_state + n_state * n_exog + 6 * n_obs + 2 * n_obs * n_obs +
-         2 * nz * n_obs + nv;
+  return make_sizer(3 * nz + 4 * nz * nz + 2 * n_sig * nz + n_sig * n_obs +
+                        n_state * n_state + n_state * n_exog + 6 * n_obs +
+                        2 * n_obs * n_obs + 2 * nz * n_obs + nv,
+                    0);
 }
 i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
                  ukf_outputs *out) {

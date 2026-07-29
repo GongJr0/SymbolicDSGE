@@ -4,9 +4,9 @@
 
 /* Breusch-Godfrey: regress eps on [1 | X | lagged eps], statistic n * R^2 (no
  * intercept removal -- TSS is sum(eps^2), matching the numba kernel). */
-i64 sdsge_bg_arena_size(i64 n, i64 K, i64 lags) {
+arena_size sdsge_bg_arena_size(i64 n, i64 K, i64 lags) {
   i64 p = 1 + K + lags;
-  return n * p + 2 * p * p + 2 * p;
+  return make_sizer(n * p + 2 * p * p + 2 * p, 0);
 }
 int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
                   i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT arena,
@@ -65,7 +65,9 @@ int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
 /* Breusch-Pagan auxiliary regression of the scaled squared residuals on X_aug.
  * Returns the fit's RSS and centered TSS; the caller shapes them into bp_stat /
  * robust_bp_stat. */
-i64 sdsge_bp_arena_size(i64 n, i64 p) { return n + 2 * p * p + 2 * p; }
+arena_size sdsge_bp_arena_size(i64 n, i64 p) {
+  return make_sizer(n + 2 * p * p + 2 * p, 0);
+}
 int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
                  i64 n, i64 p, f64 *SDSGE_RESTRICT arena,
                  f64 *SDSGE_RESTRICT rss_out, f64 *SDSGE_RESTRICT tss_out) {
@@ -175,7 +177,9 @@ static int chow_segment_rss(const f64 *SDSGE_RESTRICT y_seg,
   return SDSGE_OK;
 }
 
-i64 sdsge_chow_arena_size(i64 p) { return 2 * p * p + 2 * p; }
+arena_size sdsge_chow_arena_size(i64 p) {
+  return make_sizer(2 * p * p + 2 * p, 0);
+}
 int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                     i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT arena,
                     f64 *SDSGE_RESTRICT stat_out) {
@@ -281,8 +285,10 @@ int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
   return DIAG_OK;
 }
 
-i64 sdsge_cusum_arena_size(i64 T, i64 p) {
-  return (T - p) + 2 * p * p + 2 * p + 3 * p * p + 3 * p + (T - p);
+arena_size sdsge_cusum_arena_size(i64 T, i64 p) {
+  return make_sizer((T - p) + 2 * p * p + 2 * p + 3 * p * p + 3 * p +
+                        (T - p),
+                    0);
 }
 int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                      i64 T, i64 p, f64 *SDSGE_RESTRICT arena,
@@ -313,8 +319,8 @@ int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
   return DIAG_OK;
 }
 
-i64 sdsge_cusumsq_arena_size(i64 T, i64 p) {
-  return 3 * p * p + 3 * p + (T - p);
+arena_size sdsge_cusumsq_arena_size(i64 T, i64 p) {
+  return make_sizer(3 * p * p + 3 * p + (T - p), 0);
 }
 int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                        i64 T, i64 p, i64 *SDSGE_RESTRICT n_out,
@@ -481,10 +487,10 @@ int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
   return DIAG_OK;
 }
 
-i64 sdsge_lb_arena_size(const i64 n, const i64 L) {
+arena_size sdsge_lb_arena_size(const i64 n, const i64 L) {
   const i64 n_safe = max_i64(n, 0);
   const i64 l_safe = min_i64(max_i64(L, 0), max_i64(n_safe - 1, 0));
-  return n_safe + l_safe + 1;
+  return make_sizer(n_safe + l_safe + 1, 0);
 }
 
 /* Jarque-Bera normality statistic n * (skew^2/6 + (kurt-3)^2/24), mirroring the

@@ -321,18 +321,19 @@ static int wald_hac_from_moments(f64 *SDSGE_RESTRICT moments,
       mean, target, omega, n, p, dev, factor, pivot_scratch, solved, stat_out);
 }
 
-i64 sdsge_wald_mean_hac_arena_size(const i64 n, const i64 q) {
-  return n * q + 3 * q * q + 4 * q;
+arena_size sdsge_wald_mean_hac_arena_size(const i64 n, const i64 q) {
+  return make_sizer(n * q + 3 * q * q + 4 * q, q);
 }
 
-i64 sdsge_wald_covariance_hac_arena_size(const i64 n, const i64 q) {
+arena_size sdsge_wald_covariance_hac_arena_size(const i64 n, const i64 q) {
   const i64 v = q * (q + 1) / 2;
-  return n * q + n * v + 3 * v * v + 5 * v;
+  return make_sizer(n * q + n * v + 3 * v * v + 5 * v, v);
 }
 
-i64 sdsge_wald_second_moment_hac_arena_size(const i64 n, const i64 q) {
+arena_size sdsge_wald_second_moment_hac_arena_size(const i64 n,
+                                                     const i64 q) {
   const i64 v = q * (q + 1) / 2;
-  return n * v + 3 * v * v + 5 * v;
+  return make_sizer(n * v + 3 * v * v + 5 * v, v);
 }
 
 int sdsge_wald_mean_hac(const f64 *SDSGE_RESTRICT g,
