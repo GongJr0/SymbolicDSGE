@@ -5,8 +5,10 @@
 #include "../core/core.h"
 #include "../kalman/kalman.h"
 
-/* Static payload materialization: output[0:n] := input[0:n]. */
+/* Payload materialization. ``input_batched`` selects input[rep_idx] from a
+ * leading replication axis; otherwise the same input span is copied each time. */
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, i64 n,
+                            int input_batched, i64 rep_idx,
                             f64 *SDSGE_RESTRICT output);
 
 /* Raw model-data materialization. ``*_batched`` selects input[rep_idx] from a

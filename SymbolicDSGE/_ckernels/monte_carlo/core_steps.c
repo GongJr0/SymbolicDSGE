@@ -3,9 +3,11 @@
 #include <string.h>
 
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, const i64 n,
+                            const int input_batched, const i64 rep_idx,
                             f64 *SDSGE_RESTRICT output) {
   if (n > 0)
-    memcpy(output, input, (size_t)n * sizeof(f64));
+    memcpy(output, input + (input_batched ? rep_idx * n : 0),
+           (size_t)n * sizeof(f64));
 }
 
 void sdsge_raw_model_data_step(

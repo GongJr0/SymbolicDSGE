@@ -109,7 +109,9 @@ def _payload_shape(value: object) -> Shape:
         return array.shape[0], 1
     if array.ndim == 2:
         return tuple(int(size) for size in array.shape)
-    raise ValueError(f"Payload must be 1-D, or 2-D; got {array.ndim}-D.")
+    if array.ndim == 3:
+        return tuple(int(size) for size in array.shape[1:])
+    raise ValueError(f"Payload must be 1-D, 2-D, or 3-D; got {array.ndim}-D.")
 
 
 def _float_specs(shapes: Mapping[str, Shape]) -> dict[str, BufferSpec]:
