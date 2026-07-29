@@ -552,16 +552,20 @@ def test_add_payload_step_registers_2d_payload_with_column_selection() -> None:
     )
 
 
-def test_add_payload_step_rejects_non_matrix_payloads() -> None:
+def test_add_payload_step_selects_batched_payload_by_replication() -> None:
+    payload = np.arange(12.0, dtype=np.float64).reshape(2, 3, 2)
     pipeline = MCPipeline(
         [
-            raw_model_data_step(observables=np.zeros((2, 1))),
-            add_payload_step("cube", np.zeros((1, 2, 3), dtype=np.float64)),
+            raw_model_data_step(observables=np.zeros((3, 1))),
+            add_payload_step("cube", payload),
         ]
     )
 
-    with pytest.raises(ValueError, match="Payload must be 1-D, or 2-D"):
-        pipeline.run(reference=_FakeSolvedModel(), n_rep=1)
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2)
+
+    assert out.payloads is not None
+    np.testing.assert_allclose(out.payloads[0]["cube"], payload[0])
+    np.testing.assert_allclose(out.payloads[1]["cube"], payload[1])
 
 
 def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> None:
