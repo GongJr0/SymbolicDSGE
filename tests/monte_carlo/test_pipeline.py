@@ -1214,7 +1214,10 @@ def test_output_specs_for_non_ols_regressions(kind: str) -> None:
     }
 
 
-def test_output_shape_resolution_includes_linear_filter_fields() -> None:
+@pytest.mark.parametrize("filter_mode", ("linear", "extended"))
+def test_output_shape_resolution_includes_linear_filter_fields(
+    filter_mode: str,
+) -> None:
     reference = _FakeSolvedModel()
     reference.compiled.observable_names = ["a", "b", "c"]
     observables = np.zeros((2, 8, 3), dtype=np.float64)
@@ -1225,6 +1228,7 @@ def test_output_shape_resolution_includes_linear_filter_fields() -> None:
                 observable_names=("a", "b", "c"),
             ),
             reference_filter_step(
+                filter_mode=filter_mode,
                 observables=["a", "c"],
                 return_shocks=True,
             ),
@@ -1244,6 +1248,7 @@ def test_output_shape_resolution_includes_linear_filter_fields() -> None:
         "std_innov": BufferSpec((8, 2), np.float64),
         "S": BufferSpec((8, 2, 2), np.float64),
         "eps_hat": BufferSpec((8, 1), np.float64),
+        "loglik": BufferSpec((), np.float64),
     }
 
 
@@ -1327,6 +1332,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
         "x1_filt": BufferSpec((T, n_state), np.float64),
         "x2_pred": BufferSpec((T, n_state), np.float64),
         "x2_filt": BufferSpec((T, n_state), np.float64),
+        "loglik": BufferSpec((), np.float64),
     }
 
 
