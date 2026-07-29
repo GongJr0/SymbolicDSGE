@@ -60,14 +60,14 @@ typedef struct {
 
 /* Model and data dimensions. */
 typedef struct {
-  i64 n_theta;  /* estimated params */
-  i64 n_var;    /* nx + ny (pencil / filter dim) */
-  i64 n_state;  /* nx */
-  i64 n_ctrl;   /* ny */
-  i64 n_exog;   /* k */
-  i64 n_obs;    /* m */
-  i64 n_par; /* calib params */
-  i64 T;     /* observations */
+  i64 n_theta; /* estimated params */
+  i64 n_var;   /* nx + ny (pencil / filter dim) */
+  i64 n_state; /* nx */
+  i64 n_ctrl;  /* ny */
+  i64 n_exog;  /* k */
+  i64 n_obs;   /* m */
+  i64 n_par;   /* calib params */
+  i64 T;       /* observations */
 } sdsge_dims;
 
 /* theta -> params resolution tables. base_params and every slot index
@@ -134,13 +134,16 @@ typedef struct {
   sdsge_cov_spec r_spec;
   sdsge_prior_tables prior;
 
-  f64 *params;    /* n_par; calib_params order, residual/meas argument vector */
-  f64 *Q;         /* n_exog*n_exog */
-  f64 *R;         /* n_obs*n_obs */
-  f64 *corr_q;    /* n_exog*n_exog */
-  f64 *corr_r;    /* n_obs*n_obs */
-  f64 *std_q;     /* n_exog */
-  f64 *std_r;     /* n_obs */
+  f64 *params; /* n_par; calib_params order, residual/meas argument vector */
+  f64 *Q;      /* n_exog*n_exog */
+  f64 *R;      /* n_obs*n_obs */
+  f64 *corr_q; /* n_exog*n_exog */
+  f64 *corr_r; /* n_obs*n_obs */
+  f64 *std_q;  /* n_exog */
+  f64 *std_r;  /* n_obs */
+
+  f64 *filter_arena; /* scratch for the filter sizeof(f64)*<filter>_arena_size()
+                      */
 
   i64 bk_violations;
 } sdsge_obj_common;
@@ -175,9 +178,9 @@ void sdsge_init_params(f64 *SDSGE_RESTRICT params,
                        const f64 *SDSGE_RESTRICT base_params, i64 n_par);
 
 /* Post-loop resolution at a theta (e.g. x_best): scatter into params, and the
- * log-prior from the packed tables. Both are scatter / prior only, no filter, so
- * they are cheap to call once after the optimizer returns. Shared by every mode
- * (they operate on the common base). */
+ * log-prior from the packed tables. Both are scatter / prior only, no filter,
+ * so they are cheap to call once after the optimizer returns. Shared by every
+ * mode (they operate on the common base). */
 void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
                           const f64 *SDSGE_RESTRICT theta);
 f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,

@@ -107,7 +107,7 @@ class _FakeSolvedModel:
     ):
         del shock_scale, x0
         self._draw_shocks(shocks)
-        t = np.arange(T + 1, dtype=np.float64)
+        t = np.arange(1, T + 1, dtype=np.float64)
         return np.column_stack(
             [
                 t + self.offset,
@@ -552,16 +552,20 @@ def test_add_payload_step_registers_2d_payload_with_column_selection() -> None:
     )
 
 
-def test_add_payload_step_rejects_non_matrix_payloads() -> None:
+def test_add_payload_step_selects_batched_payload_by_replication() -> None:
+    payload = np.arange(12.0, dtype=np.float64).reshape(2, 3, 2)
     pipeline = MCPipeline(
         [
-            raw_model_data_step(observables=np.zeros((2, 1))),
-            add_payload_step("cube", np.zeros((1, 2, 3), dtype=np.float64)),
+            raw_model_data_step(observables=np.zeros((3, 1))),
+            add_payload_step("cube", payload),
         ]
     )
 
-    with pytest.raises(ValueError, match="Payload must be 1-D, or 2-D"):
-        pipeline.run(reference=_FakeSolvedModel(), n_rep=1)
+    out = pipeline.run(reference=_FakeSolvedModel(), n_rep=2)
+
+    assert out.payloads is not None
+    np.testing.assert_allclose(out.payloads[0]["cube"], payload[0])
+    np.testing.assert_allclose(out.payloads[1]["cube"], payload[1])
 
 
 def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs() -> None:
@@ -1084,14 +1088,15 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         observables=True,
     )
 
-    expected_states = np.empty((T + 1, 2), dtype=np.float64)
-    expected_states[0] = 0.0
+    expected_states = np.empty((T, 2), dtype=np.float64)
+    previous = np.zeros(2, dtype=np.float64)
     for t in range(T):
-        expected_states[t + 1] = A @ expected_states[t] + B[:, 0] * shock[t]
+        expected_states[t] = A @ previous + B[:, 0] * shock[t]
+        previous = expected_states[t]
     expected_obs = expected_states @ C.T + d
 
     np.testing.assert_allclose(data.states, expected_states)
-    np.testing.assert_allclose(data.observables, expected_obs[1:])
+    np.testing.assert_allclose(data.observables, expected_obs)
     np.testing.assert_allclose(data.raw["_X"], expected_states)
     np.testing.assert_allclose(data.raw["u"], expected_states[:, 0])
     np.testing.assert_allclose(data.raw["obs"], expected_obs[:, 0])
@@ -1209,7 +1214,10 @@ def test_output_specs_for_non_ols_regressions(kind: str) -> None:
     }
 
 
-def test_output_shape_resolution_includes_linear_filter_fields() -> None:
+@pytest.mark.parametrize("filter_mode", ("linear", "extended"))
+def test_output_shape_resolution_includes_linear_filter_fields(
+    filter_mode: str,
+) -> None:
     reference = _FakeSolvedModel()
     reference.compiled.observable_names = ["a", "b", "c"]
     observables = np.zeros((2, 8, 3), dtype=np.float64)
@@ -1220,6 +1228,7 @@ def test_output_shape_resolution_includes_linear_filter_fields() -> None:
                 observable_names=("a", "b", "c"),
             ),
             reference_filter_step(
+                filter_mode=filter_mode,
                 observables=["a", "c"],
                 return_shocks=True,
             ),
@@ -1239,6 +1248,7 @@ def test_output_shape_resolution_includes_linear_filter_fields() -> None:
         "std_innov": BufferSpec((8, 2), np.float64),
         "S": BufferSpec((8, 2, 2), np.float64),
         "eps_hat": BufferSpec((8, 1), np.float64),
+        "loglik": BufferSpec((), np.float64),
     }
 
 
@@ -1322,6 +1332,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
         "x1_filt": BufferSpec((T, n_state), np.float64),
         "x2_pred": BufferSpec((T, n_state), np.float64),
         "x2_filt": BufferSpec((T, n_state), np.float64),
+        "loglik": BufferSpec((), np.float64),
     }
 
 

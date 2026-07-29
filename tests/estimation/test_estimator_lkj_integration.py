@@ -39,9 +39,9 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     )
     y = pd.DataFrame(
         {
-            "OutGap": sim["OutGap"][1:],
-            "Infl": sim["Infl"][1:],
-            "Rate": sim["Rate"][1:],
+            "OutGap": sim["OutGap"],
+            "Infl": sim["Infl"],
+            "Rate": sim["Rate"],
         }
     )
     return {

@@ -49,7 +49,7 @@ def test_den_haan_marcet_one_sample_matches_sim_state_path(solved_test):
         use_conditional_expectation=False,
     )
 
-    assert np.allclose(out.states, expected[1:])
+    assert np.allclose(out.states, expected)
     assert np.allclose(
         out.shock_matrix[:, solved_test.compiled.idx["u"]],
         np.full((T,), 0.50, dtype=np.float64),
@@ -58,9 +58,9 @@ def test_den_haan_marcet_one_sample_matches_sim_state_path(solved_test):
         out.shock_matrix[:, solved_test.compiled.idx["v"]],
         shocks["v"],
     )
-    assert out.moments.shape == (T - 1, 6)
-    assert out.residuals.shape == (T - 1, 2)
-    assert out.instruments.shape == (T - 1, 3)
+    assert out.moments.shape == (T - 2, 6)
+    assert out.residuals.shape == (T - 2, 2)
+    assert out.instruments.shape == (T - 2, 3)
     assert out.variables == list(solved_test.compiled.var_names)
     assert np.allclose(out.raw_residuals, out.residuals)
     assert np.isfinite(out.statistic)
@@ -109,7 +109,7 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
     )
 
     assert np.allclose(captured["cov"], expected_cov)
-    assert np.allclose(out.states, expected[1:])
+    assert np.allclose(out.states, expected)
     assert np.allclose(
         out.shock_matrix[:, solved_post82.compiled.idx["g"]],
         expected_cov[0, 0],
@@ -188,8 +188,8 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
         dtype=np.complex128,
     )
     objective = solved_test.compiled.equations
-    manual = np.empty((T, 1), dtype=np.float64)
-    for t in range(T):
+    manual = np.empty((T - 1, 1), dtype=np.float64)
+    for t in range(T - 1):
         manual[t, 0] = objective(
             projected_forward[t].astype(np.complex128),
             current_states[t].astype(np.complex128),
@@ -213,8 +213,8 @@ def test_measurement_moment_test_single_observable_matches_manual_construction(
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, shocks=shocks, observables=True)
-    aligned_states = sim["_X"][1:]
-    predicted_full = sim[obs_name][1:]
+    aligned_states = sim["_X"]
+    predicted_full = sim[obs_name]
     offset = np.linspace(0.10, -0.05, T, dtype=np.float64)
     y = predicted_full + offset
 
@@ -278,7 +278,7 @@ def test_measurement_moment_test_list_returns_canonical_results(solved_test):
         )
         for idx, name in enumerate(requested)
     }
-    y = np.column_stack([sim[name][1:] + offsets[name] for name in requested])
+    y = np.column_stack([sim[name] + offsets[name] for name in requested])
 
     out = dhm.measurement_moment_test(
         y,
@@ -299,7 +299,7 @@ def test_measurement_moment_test_list_returns_canonical_results(solved_test):
         obs_name = result.observables[0]
         assert np.allclose(
             result.observed,
-            sim[obs_name][1:] + offsets[obs_name],
+            sim[obs_name] + offsets[obs_name],
         )
 
 
@@ -315,7 +315,7 @@ def test_joint_measurement_moment_test_stacks_moments_and_uses_all_observables(
     dhm = DenHaanMarcet(solved_test)
     sim = solved_test.sim(T, shocks=shocks, observables=True)
     y = {
-        obs: sim[obs][1:] + np.linspace(0.02 * (idx + 1), -0.01, T, dtype=np.float64)
+        obs: sim[obs] + np.linspace(0.02 * (idx + 1), -0.01, T, dtype=np.float64)
         for idx, obs in enumerate(solved_test.compiled.observable_names)
     }
 
@@ -356,7 +356,7 @@ def test_measurement_moment_test_from_state_path_matches_simulation_path(
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, shocks=shocks, observables=True)
-    y = sim[obs_name][1:] + np.linspace(0.03, -0.02, T, dtype=np.float64)
+    y = sim[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
 
     sim_out = dhm.measurement_moment_test(
         y,
@@ -396,7 +396,7 @@ def test_measurement_moment_test_accepts_shock_specs(solved_test):
         "v": Shock(dist="norm", seed=4),
     }
     sim = solved_test.sim(T, shocks=shock_specs, observables=True)
-    y = sim[obs_name][1:] + np.linspace(0.03, -0.02, T, dtype=np.float64)
+    y = sim[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
 
     direct = dhm.measurement_moment_test(
         y,
@@ -441,8 +441,8 @@ def test_measurement_moment_test_supports_lagged_instruments(solved_test):
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, shocks=shocks, observables=True)
-    aligned_states = sim["_X"][1:]
-    predicted = sim[obs_name][1:]
+    aligned_states = sim["_X"]
+    predicted = sim[obs_name]
     y = predicted + np.linspace(0.01, 0.09, T, dtype=np.float64)
 
     out = dhm.measurement_moment_test_from_state_path(
@@ -477,7 +477,7 @@ def test_measurement_moment_test_allows_measurement_override(solved_test):
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T)
-    aligned_states = sim["_X"][1:]
+    aligned_states = sim["_X"]
     idx_pi = solved_test.compiled.idx["Pi"]
     beta = float(
         solved_test.compiled.config.calibration.parameters[
@@ -514,7 +514,7 @@ def test_measurement_moment_test_raises_when_adjusted_df_is_not_positive(
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, observables=True)
-    y = sim[obs_name][1:]
+    y = sim[obs_name]
 
     with pytest.raises(ValueError, match="requires more moment conditions"):
         dhm.measurement_moment_test(
@@ -527,7 +527,7 @@ def test_measurement_moment_test_raises_when_adjusted_df_is_not_positive(
 
     with pytest.raises(ValueError, match="requires more moment conditions"):
         dhm.joint_measurement_moment_test(
-            {obs: sim[obs][1:] for obs in solved_test.compiled.observable_names},
+            {obs: sim[obs] for obs in solved_test.compiled.observable_names},
             instrument_idx=["u"],
             include_constant=False,
             n_estimated_params=len(solved_test.compiled.observable_names),

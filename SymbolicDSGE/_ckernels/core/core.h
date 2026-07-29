@@ -5,6 +5,9 @@
 #include "../_common/sdsge_complex.h"
 #include "../_common/sdsge_linalg.h"
 
+/* Measurement / observable-jacobian @cfunc ABI: ``void(vars*, par*, out*)``. */
+typedef void (*sdsge_measurement_fn)(f64 *vars, f64 *par, f64 *out);
+
 /* Assemble state-space */
 void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
                                 const c128 *SDSGE_RESTRICT f, const i64 n_state,
@@ -21,13 +24,13 @@ void sdsge_simulate_linear_states(const f64 *SDSGE_RESTRICT A,     /* (n, n) */
                                   f64 *SDSGE_RESTRICT out, /* (T+1, n) */
                                   i64 T, i64 n, i64 k);
 
-/* out[(T, m)] : out[t] = d + C @ states[state_start + t]. */
-void sdsge_affine_observations(
-    const f64 *SDSGE_RESTRICT states, /* (>= state_start + T, n) row-major */
-    const f64 *SDSGE_RESTRICT C,      /* (m, n) */
-    const f64 *SDSGE_RESTRICT d,      /* (m,)   */
-    i64 state_start, f64 *SDSGE_RESTRICT out, /* (T, m) */
-    i64 T, i64 m, i64 n);
+/* out[(T, m)] : out[t] = d + C @ states[t]. */
+void sdsge_affine_observations(const f64 *SDSGE_RESTRICT
+                                   states, /* (T, n) row-major */
+                               const f64 *SDSGE_RESTRICT C, /* (m, n) */
+                               const f64 *SDSGE_RESTRICT d, /* (m,)   */
+                               f64 *SDSGE_RESTRICT out,     /* (T, m) */
+                               i64 T, i64 m, i64 n);
 
 /* Pruned second order simulation.
  * x_out[(T+1, nx)] and y_out[(T+1, ny)] are dense split outputs. */

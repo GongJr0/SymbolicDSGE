@@ -62,7 +62,7 @@ def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path) -> None:
     assert isinstance(loaded, LoadedBundle)
     assert loaded.reference is not None
     # Re-solved model is usable.
-    assert loaded.reference.sim(5)["_X"].shape[0] == 6
+    assert loaded.reference.sim(5)["_X"].shape[0] == 5
 
 
 def test_to_bundle_builder_returns_chainable_builder(tmp_path: Path) -> None:

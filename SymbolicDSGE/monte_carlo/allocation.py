@@ -109,7 +109,9 @@ def _payload_shape(value: object) -> Shape:
         return array.shape[0], 1
     if array.ndim == 2:
         return tuple(int(size) for size in array.shape)
-    raise ValueError(f"Payload must be 1-D, or 2-D; got {array.ndim}-D.")
+    if array.ndim == 3:
+        return tuple(int(size) for size in array.shape[1:])
+    raise ValueError(f"Payload must be 1-D, 2-D, or 3-D; got {array.ndim}-D.")
 
 
 def _float_specs(shapes: Mapping[str, Shape]) -> dict[str, BufferSpec]:
@@ -177,9 +179,7 @@ def _resolve_datagen_specs(
                     "Simulation shape resolution requires its target model."
                 )
             T = int(step.kwargs["T"])
-            shapes: dict[str, Shape] = {
-                "states": (T + 1, len(model.compiled.var_names))
-            }
+            shapes: dict[str, Shape] = {"states": (T, len(model.compiled.var_names))}
             if step.kwargs["observables"]:
                 shapes["observables"] = (T, len(model.compiled.observable_names))
             return _float_specs(shapes)
@@ -231,6 +231,7 @@ def _resolve_filter_specs(
         S=(T, n_obs, n_obs),
         innov=(T, n_obs),
         std_innov=(T, n_obs),
+        loglik=(),
     )
     match step.kwargs["filter_mode"]:
         case "linear" | "extended":

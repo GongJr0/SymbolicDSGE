@@ -27,7 +27,7 @@ from ..core.solved_model import SolvedModel
 _DHMShock = Shock | Callable[[float | np.ndarray], np.ndarray] | np.ndarray
 _DHMShocks = Mapping[str, _DHMShock]
 
-from .._ckernels.core import residual_path
+from .._ckernels.core import residual_path, simulate_linear_states_into
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 _FOC_CACHE: dict[
@@ -123,7 +123,6 @@ class _PreparedMeasurementMoments:
     instrument_idx: np.ndarray
 
 
-@njit(cache=True)
 def _simulate_linear_states(
     A: np.ndarray,
     B: np.ndarray,
@@ -132,11 +131,9 @@ def _simulate_linear_states(
 ) -> np.ndarray:
     T = shock_mat.shape[0]
     n = A.shape[0]
-    X = np.zeros((T + 1, n), dtype=np.float64)
-    X[0] = x0
+    X = np.empty((T, n), dtype=np.float64)
 
-    for t in range(T):
-        X[t + 1] = A @ X[t] + B @ shock_mat[t]
+    simulate_linear_states_into(A, B, x0, shock_mat, X)
 
     return X
 
@@ -1276,7 +1273,7 @@ class DenHaanMarcet:
         return np.ascontiguousarray(moments, dtype=np.float64)
 
     def _aligned_testing_states(self, states: np.ndarray) -> np.ndarray:
-        return np.ascontiguousarray(states[1:], dtype=np.float64)
+        return np.ascontiguousarray(states, dtype=np.float64)
 
     def _validate_moment_controls(
         self,
