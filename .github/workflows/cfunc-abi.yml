@@ -53,6 +53,8 @@ jobs:
       # numeric stack (numpy/numba/scipy/sympy) to load the extension, but none
       # of the heavy extras, and we run a single test.
       - name: Sync minimal deps (builds the native extension)
+        env:
+          SDSGE_TOOLCHAIN: ${{ matrix.os == 'windows-latest' && 'clang-cl' || '' }}
         run: uv sync --frozen
 
       - name: cfunc <-> native ABI check
