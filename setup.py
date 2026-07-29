@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import glob
 import os
+import shutil
 from typing import cast
 
 from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext
 
 _CKERNELS = os.path.join("SymbolicDSGE", "_ckernels")
 _COMMON = os.path.join(_CKERNELS, "_common")
@@ -48,11 +50,83 @@ def _hand_c(subdir: str) -> list[str]:
 
 def _compile_args() -> list[str]:
     # -O3 everywhere we can; never -ffast-math (it breaks IEEE parity with the
-    # numba/numpy reference, which the parity tests rely on). MSVC (CI Windows)
-    # is IEEE-safe at /O2 by default; /fp:fast is never added.
+    # numba/numpy reference, which the parity tests rely on). MSVC is IEEE-safe
+    # at /O2 by default; /fp:fast is never added.
+    flags = [
+        "-O3",
+        "-fno-math-errno",
+        "-ffp-contract=fast",
+        "-fassociative-math",
+        "-Wno-visibility",
+        "-Wno-unused-function",
+        "-Wno-unused-but-set-variable",
+    ]
+
     if os.name == "nt":
-        return ["/O2"]
-    return ["-O3", "-fno-fast-math"]
+        if os.environ.get("SDSGE_TOOLCHAIN", "").lower() == "clang-cl":
+            # clang-cl emits LLVM bitcode; lld-link consumes it and runs the
+            # ThinLTO phase directly, without MSVC's /GL or /LTCG flags.
+            flags.append("-flto=thin")
+        return ["/clang:" + flag for flag in flags]
+    return flags
+
+
+class ClangCLBuildExt(build_ext):
+    """Opt into clang-cl while retaining setuptools' MSVC ABI backend."""
+
+    def build_extensions(self) -> None:
+        toolchain = os.environ.get("SDSGE_TOOLCHAIN", "").lower()
+
+        if not toolchain:
+            super().build_extensions()
+            return
+
+        if toolchain != "clang-cl":
+            raise RuntimeError(
+                "SDSGE_TOOLCHAIN must be 'clang-cl' when set, " f"got {toolchain!r}."
+            )
+
+        if self.compiler.compiler_type != "msvc":
+            raise RuntimeError(
+                "clang-cl build expected the MSVC backend, "
+                f"got {self.compiler.compiler_type!r}."
+            )
+
+        clang_cl = shutil.which("clang-cl.exe")
+        lld_link = shutil.which("lld-link.exe")
+        if clang_cl is None or lld_link is None:
+            missing = [
+                name
+                for name, path in (
+                    ("clang-cl.exe", clang_cl),
+                    ("lld-link.exe", lld_link),
+                )
+                if path is None
+            ]
+            raise RuntimeError(
+                "SDSGE_TOOLCHAIN=clang-cl requires " + ", ".join(missing) + " on PATH."
+            )
+
+        # Force the MSVC backend to discover its include/library environment
+        # before replacing cl.exe and link.exe.
+        if not getattr(self.compiler, "initialized", True):
+            self.compiler.initialize()
+
+        self.compiler.cc = clang_cl
+        self.compiler.linker = lld_link
+
+        compile_options = getattr(self.compiler, "compile_options", None)
+        if compile_options is not None:
+            self.compiler.compile_options = [
+                flag for flag in compile_options if flag != "/GL"
+            ]
+
+        ldflags = getattr(self.compiler, "_ldflags", None)
+        if ldflags is not None:
+            for flags in ldflags.values():
+                flags[:] = [flag for flag in flags if flag != "/LTCG"]
+
+        super().build_extensions()
 
 
 def _extensions() -> list[Extension]:
@@ -114,4 +188,4 @@ def _extensions() -> list[Extension]:
     return cast("list[Extension]", cythonized)
 
 
-setup(ext_modules=_extensions())
+setup(ext_modules=_extensions(), cmdclass={"build_ext": ClangCLBuildExt})
