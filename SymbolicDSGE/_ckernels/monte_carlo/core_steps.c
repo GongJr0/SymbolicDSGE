@@ -2,6 +2,114 @@
 #include "../core/core.h"
 #include <string.h>
 
+static int sdsge_mc_finish_status(const int status,
+                                  i64 *SDSGE_RESTRICT int_out) {
+  if (int_out != NULL)
+    int_out[0] = (i64)status;
+  return status;
+}
+
+int sdsge_mc_payload_runner(const i64 rep_idx,
+                            f64 *SDSGE_RESTRICT float_in_work,
+                            f64 *SDSGE_RESTRICT float_out,
+                            i64 *SDSGE_RESTRICT int_work,
+                            i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_payload_step_ctx *ctx = ctx_ptr;
+  (void)float_in_work;
+  (void)int_work;
+  sdsge_add_payload_step(ctx->input, ctx->n, ctx->input_batched, rep_idx,
+                         float_out);
+  return sdsge_mc_finish_status(SDSGE_OK, int_out);
+}
+
+int sdsge_mc_raw_model_data_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_raw_model_data_step_ctx *ctx = ctx_ptr;
+  (void)float_in_work;
+  (void)int_work;
+  sdsge_raw_model_data_step(
+      ctx->states_input, ctx->n_states, ctx->states_batched, float_out,
+      ctx->observables_input, ctx->n_observables, ctx->observables_batched,
+      rep_idx, float_out + ctx->n_states);
+  return sdsge_mc_finish_status(SDSGE_OK, int_out);
+}
+
+int sdsge_mc_simulate_order1_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_simulate_order1_step_ctx *ctx = ctx_ptr;
+  (void)rep_idx;
+  (void)int_work;
+  sdsge_simulate_order1_step(float_in_work, ctx->measurement, ctx->T, ctx->n,
+                             ctx->k, ctx->n_par, ctx->m, float_out);
+  return sdsge_mc_finish_status(SDSGE_OK, int_out);
+}
+
+int sdsge_mc_simulate_order2_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_simulate_order2_step_ctx *ctx = ctx_ptr;
+  (void)rep_idx;
+  (void)int_work;
+  sdsge_simulate_order2_step(float_in_work, ctx->measurement, ctx->T,
+                             ctx->n_state, ctx->n_ctrl, ctx->n_exog,
+                             ctx->n_par, ctx->m, float_out);
+  return sdsge_mc_finish_status(SDSGE_OK, int_out);
+}
+
+int sdsge_mc_filter_linear_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_filter_linear_step_ctx *ctx = ctx_ptr;
+  const i64 input_size =
+      sdsge_filter_linear_input_arena_size(ctx->n, ctx->m, ctx->k, ctx->T);
+  (void)rep_idx;
+  (void)int_work;
+  const int status = sdsge_filter_linear_step(
+      float_in_work, float_in_work + input_size, ctx->T, ctx->n, ctx->m,
+      ctx->k, ctx->symmetrize, ctx->jitter, ctx->return_shocks, float_out);
+  return sdsge_mc_finish_status(status, int_out);
+}
+
+int sdsge_mc_filter_extended_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_filter_extended_step_ctx *ctx = ctx_ptr;
+  const i64 input_size = sdsge_filter_extended_input_arena_size(
+      ctx->n, ctx->m, ctx->k, ctx->T, ctx->n_par);
+  (void)rep_idx;
+  (void)int_work;
+  const int status = sdsge_filter_extended_step(
+      float_in_work, float_in_work + input_size, ctx->measurement,
+      ctx->jacobian, ctx->T, ctx->n, ctx->m, ctx->k, ctx->n_par,
+      ctx->symmetrize, ctx->jitter, ctx->return_shocks, float_out);
+  return sdsge_mc_finish_status(status, int_out);
+}
+
+int sdsge_mc_filter_unscented_runner(
+    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+  const sdsge_mc_filter_unscented_step_ctx *ctx = ctx_ptr;
+  const i64 input_size = sdsge_filter_unscented_input_arena_size(
+      ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->T,
+      ctx->n_par);
+  (void)rep_idx;
+  (void)int_work;
+  const int status = (int)sdsge_filter_unscented_step(
+      float_in_work, float_in_work + input_size, ctx->measurement, ctx->T,
+      ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->n_par,
+      ctx->alpha, ctx->beta, ctx->kappa, ctx->symmetrize, ctx->jitter,
+      float_out);
+  return sdsge_mc_finish_status(status, int_out);
+}
+
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, const i64 n,
                             const int input_batched, const i64 rep_idx,
                             f64 *SDSGE_RESTRICT output) {
