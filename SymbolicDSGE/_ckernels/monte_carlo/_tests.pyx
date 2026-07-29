@@ -9,14 +9,18 @@ import numpy as np
 
 from libc.stdint cimport int64_t
 
+cdef extern from "sdsge_common.h":
+    ctypedef struct arena_size:
+        int64_t n_float
+        int64_t n_int
 
 cdef extern from "diag.h":
-    int64_t sdsge_bg_arena_size(int64_t n, int64_t k, int64_t lags) nogil
-    int64_t sdsge_bp_arena_size(int64_t n, int64_t p) nogil
-    int64_t sdsge_chow_arena_size(int64_t p) nogil
-    int64_t sdsge_cusum_arena_size(int64_t n, int64_t p) nogil
-    int64_t sdsge_cusumsq_arena_size(int64_t n, int64_t p) nogil
-    int64_t sdsge_lb_arena_size(int64_t n, int64_t lags) nogil
+    arena_size sdsge_bg_arena_size(int64_t n, int64_t k, int64_t lags) nogil
+    arena_size sdsge_bp_arena_size(int64_t n, int64_t p) nogil
+    arena_size sdsge_chow_arena_size(int64_t p) nogil
+    arena_size sdsge_cusum_arena_size(int64_t n, int64_t p) nogil
+    arena_size sdsge_cusumsq_arena_size(int64_t n, int64_t p) nogil
+    arena_size sdsge_lb_arena_size(int64_t n, int64_t lags) nogil
     int sdsge_bg_stat(
         const double *eps, const double *X, int64_t n, int64_t k,
         int64_t lags, double *arena, double *stat_out,
@@ -48,9 +52,9 @@ cdef extern from "diag.h":
     int sdsge_jb_stat(const double *x, int64_t n, double *stat_out) nogil
 
 cdef extern from "diag_wald.h":
-    int64_t sdsge_wald_mean_hac_arena_size(int64_t n, int64_t q) nogil
-    int64_t sdsge_wald_covariance_hac_arena_size(int64_t n, int64_t q) nogil
-    int64_t sdsge_wald_second_moment_hac_arena_size(int64_t n, int64_t q) nogil
+    arena_size sdsge_wald_mean_hac_arena_size(int64_t n, int64_t q) nogil
+    arena_size sdsge_wald_covariance_hac_arena_size(int64_t n, int64_t q) nogil
+    arena_size sdsge_wald_second_moment_hac_arena_size(int64_t n, int64_t q) nogil
     int sdsge_wald_stat_from_mean_and_cov(
         const double *mean, const double *target, const double *omega,
         int64_t n, int64_t p, double *dev_scratch, double *factor_scratch,
@@ -81,47 +85,47 @@ WALD_BW_AUTO = 3
 
 def breusch_godfrey_arena_size(int64_t n, int64_t k, int64_t lags):
     """Return the float64 arena length for Breusch-Godfrey."""
-    return sdsge_bg_arena_size(n, k, lags)
+    return sdsge_bg_arena_size(n, k, lags).n_float
 
 
 def breusch_pagan_arena_size(int64_t n, int64_t p):
     """Return the float64 arena length for Breusch-Pagan."""
-    return sdsge_bp_arena_size(n, p)
+    return sdsge_bp_arena_size(n, p).n_float
 
 
 def chow_arena_size(int64_t p):
     """Return the float64 arena length for Chow."""
-    return sdsge_chow_arena_size(p)
+    return sdsge_chow_arena_size(p).n_float
 
 
 def cusum_arena_size(int64_t n, int64_t p):
     """Return the float64 arena length for CUSUM."""
-    return sdsge_cusum_arena_size(n, p)
+    return sdsge_cusum_arena_size(n, p).n_float
 
 
 def cusumsq_arena_size(int64_t n, int64_t p):
     """Return the float64 arena length for CUSUMSQ."""
-    return sdsge_cusumsq_arena_size(n, p)
+    return sdsge_cusumsq_arena_size(n, p).n_float
 
 
 def ljung_box_arena_size(int64_t n, int64_t lags):
     """Return the float64 arena length for Ljung-Box."""
-    return sdsge_lb_arena_size(n, lags)
+    return sdsge_lb_arena_size(n, lags).n_float
 
 
 def wald_mean_hac_arena_size(int64_t n, int64_t q):
     """Return the float64 arena length for mean-Wald HAC."""
-    return sdsge_wald_mean_hac_arena_size(n, q)
+    return sdsge_wald_mean_hac_arena_size(n, q).n_float
 
 
 def wald_covariance_hac_arena_size(int64_t n, int64_t q):
     """Return the float64 arena length for covariance-Wald HAC."""
-    return sdsge_wald_covariance_hac_arena_size(n, q)
+    return sdsge_wald_covariance_hac_arena_size(n, q).n_float
 
 
 def wald_second_moment_hac_arena_size(int64_t n, int64_t q):
     """Return the float64 arena length for second-moment-Wald HAC."""
-    return sdsge_wald_second_moment_hac_arena_size(n, q)
+    return sdsge_wald_second_moment_hac_arena_size(n, q).n_float
 
 
 def ljung_box_runner(x, int64_t lags, arena):

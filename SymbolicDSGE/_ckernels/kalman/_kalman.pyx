@@ -12,6 +12,10 @@ import numpy as np
 
 from libc.stdint cimport int64_t
 
+cdef extern from "sdsge_common.h":
+    ctypedef struct arena_size:
+        int64_t n_float
+        int64_t n_int
 
 cdef extern from "kalman.h":
     int KF_OK
@@ -50,7 +54,7 @@ cdef extern from "kalman.h":
         double *eps_hat
         double *loglik
 
-    int64_t kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
     int kf_hot_loop(
         const kf_inputs *inp,
         double *arena,
@@ -98,7 +102,7 @@ cdef extern from "kalman.h":
         double *eps_hat
         double *loglik
 
-    int64_t ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
     int c_ekf_hot_loop "ekf_hot_loop"(
         const ekf_inputs *inp,
         double *arena,
@@ -157,7 +161,7 @@ cdef extern from "kalman.h":
 
         double *loglik
 
-    int64_t ukf_arena_size(
+    arena_size ukf_arena_size(
         int64_t n_state,
         int64_t n_ctrl,
         int64_t n_exog,
@@ -219,7 +223,7 @@ def kalman_hot_loop(
     std_innov = np.zeros((hist_T, m), dtype=np.float64)
     S = np.zeros((hist_T, m, m), dtype=np.float64)
     eps_hat = np.zeros((shock_T, k), dtype=np.float64)
-    arena = np.empty(kf_arena_size(n, m, k), dtype=np.float64)
+    arena = np.empty(kf_arena_size(n, m, k).n_float, dtype=np.float64)
     cdef double loglik = 0.0
 
     cdef double[:, ::1] x_pred_mv = x_pred
@@ -350,7 +354,7 @@ def ekf_hot_loop(
     std_innov = np.zeros((hist_T, m), dtype=np.float64)
     S = np.zeros((hist_T, m, m), dtype=np.float64)
     eps_hat = np.zeros((shock_T, k), dtype=np.float64)
-    arena = np.empty(ekf_arena_size(n, m, k), dtype=np.float64)
+    arena = np.empty(ekf_arena_size(n, m, k).n_float, dtype=np.float64)
     cdef double loglik = 0.0
 
     cdef double[:, ::1] x_pred_mv = x_pred
@@ -525,7 +529,7 @@ def ukf_hot_loop(
     std_innov = np.zeros((hist_T, n_obs), dtype=np.float64)
     S = np.zeros((hist_T, n_obs, n_obs), dtype=np.float64)
     arena = np.empty(
-        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs), dtype=np.float64
+        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float, dtype=np.float64
     )
     cdef double loglik = 0.0
 

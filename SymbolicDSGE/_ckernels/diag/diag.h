@@ -32,7 +32,7 @@
  * p = 1 + K + lags
  * arena:  n * p + 2 * p * p + 2 * p
  */
-i64 sdsge_bg_arena_size(i64 n, i64 K, i64 lags);
+arena_size sdsge_bg_arena_size(i64 n, i64 K, i64 lags);
 int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
                   i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT arena,
                   f64 *SDSGE_RESTRICT stat_out);
@@ -43,7 +43,7 @@ int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
  *
  * arena: n + 2 * p * p + 2 * p
  */
-i64 sdsge_bp_arena_size(i64 n, i64 p);
+arena_size sdsge_bp_arena_size(i64 n, i64 p);
 int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
                  i64 n, i64 p, f64 *SDSGE_RESTRICT arena,
                  f64 *SDSGE_RESTRICT rss_out, f64 *SDSGE_RESTRICT tss_out);
@@ -56,7 +56,7 @@ int sdsge_bp_stat(const f64 *SDSGE_RESTRICT eps,
  *
  * arena: 2 * p * p + 2 * p
  * */
-i64 sdsge_chow_arena_size(i64 p);
+arena_size sdsge_chow_arena_size(i64 p);
 int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                     i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT arena,
                     f64 *SDSGE_RESTRICT stat_out);
@@ -91,7 +91,7 @@ int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
  * scratch arena: (T - p) + 2 * p * p + 2 * p    +    (3 * p * p + 3 * p)    +
  * (T - p);
  * */
-i64 sdsge_cusum_arena_size(i64 T, i64 p);
+arena_size sdsge_cusum_arena_size(i64 T, i64 p);
 int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                      i64 T, i64 p, f64 *SDSGE_RESTRICT arena,
                      f64 *SDSGE_RESTRICT stat_out);
@@ -103,7 +103,7 @@ int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
  *        recursive residuals       weights
  * arena: 3 * p * p + 3 * p    +    (T - p)
  * */
-i64 sdsge_cusumsq_arena_size(i64 T, i64 p);
+arena_size sdsge_cusumsq_arena_size(i64 T, i64 p);
 int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                        i64 T, i64 p, i64 *SDSGE_RESTRICT n_out,
                        f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out);
@@ -111,7 +111,7 @@ int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
 int sdsge_acorr(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 L,
                 f64 *SDSGE_RESTRICT z_scratch, f64 *SDSGE_RESTRICT out);
 
-i64 sdsge_lb_arena_size(i64 n, i64 L);
+arena_size sdsge_lb_arena_size(i64 n, i64 L);
 int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
                   f64 *SDSGE_RESTRICT z_scratch,
                   f64 *SDSGE_RESTRICT acorr_scratch, f64 *SDSGE_RESTRICT out);

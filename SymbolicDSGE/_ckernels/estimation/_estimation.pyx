@@ -168,10 +168,16 @@ cdef extern from "estimation.h":
                                int has_priors) nogil
 
 
+cdef extern from "sdsge_common.h":
+    ctypedef struct arena_size:
+        int64_t n_float
+        int64_t n_int
+
+
 cdef extern from "../kalman/kalman.h":
-    int64_t kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
-    int64_t ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
-    int64_t ukf_arena_size(
+    arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    arena_size ukf_arena_size(
         int64_t n_state, int64_t n_ctrl, int64_t n_exog, int64_t n_obs,
     ) nogil
 
@@ -367,7 +373,9 @@ def obj_linear_base(
     b.std_q = NULL
     b.std_r = NULL
     b.bk_violations = 0
-    filter_arena = np.empty(kf_arena_size(n_var, n_obs, n_exog), dtype=np.float64)
+    filter_arena = np.empty(
+        kf_arena_size(n_var, n_obs, n_exog).n_float, dtype=np.float64
+    )
     cdef double[::1] filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
 
@@ -502,7 +510,9 @@ def obj_extended_base(
     b.std_q = NULL
     b.std_r = NULL
     b.bk_violations = 0
-    filter_arena = np.empty(ekf_arena_size(n_var, n_obs, n_exog), dtype=np.float64)
+    filter_arena = np.empty(
+        ekf_arena_size(n_var, n_obs, n_exog).n_float, dtype=np.float64
+    )
     cdef double[::1] filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
 
@@ -672,7 +682,8 @@ def obj_unscented_base(
     b.std_r = NULL
     b.bk_violations = 0
     filter_arena = np.empty(
-        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs), dtype=np.float64
+        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float,
+        dtype=np.float64,
     )
     cdef double[::1] filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
@@ -1147,15 +1158,16 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
 
     if mode == "linear":
         filter_arena = np.empty(
-            kf_arena_size(n_var, n_obs, n_exog), dtype=np.float64
+            kf_arena_size(n_var, n_obs, n_exog).n_float, dtype=np.float64
         )
     elif mode == "extended":
         filter_arena = np.empty(
-            ekf_arena_size(n_var, n_obs, n_exog), dtype=np.float64
+            ekf_arena_size(n_var, n_obs, n_exog).n_float, dtype=np.float64
         )
     else:
         filter_arena = np.empty(
-            ukf_arena_size(n_state, n_ctrl, n_exog, n_obs), dtype=np.float64
+            ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float,
+            dtype=np.float64,
         )
     nc.keep.append(filter_arena)
     filter_arena_v = filter_arena

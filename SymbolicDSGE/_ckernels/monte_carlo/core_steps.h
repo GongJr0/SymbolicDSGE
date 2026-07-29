@@ -4,6 +4,113 @@
 #include "../_common/sdsge_common.h"
 #include "../core/core.h"
 #include "../kalman/kalman.h"
+#include "runner.h"
+
+/* Static configuration for future generic native MC step dispatch. Dynamic
+ * numeric inputs, scratch, and outputs remain in caller-owned arenas. */
+typedef struct {
+  const f64 *input;
+  i64 n;
+  int input_batched;
+} sdsge_mc_payload_step_ctx;
+
+typedef struct {
+  const f64 *states_input;
+  i64 n_states;
+  int states_batched;
+  const f64 *observables_input;
+  i64 n_observables;
+  int observables_batched;
+} sdsge_mc_raw_model_data_step_ctx;
+
+typedef struct {
+  sdsge_measurement_fn measurement;
+  i64 T;
+  i64 n;
+  i64 k;
+  i64 n_par;
+  i64 m;
+} sdsge_mc_simulate_order1_step_ctx;
+
+typedef struct {
+  sdsge_measurement_fn measurement;
+  i64 T;
+  i64 n_state;
+  i64 n_ctrl;
+  i64 n_exog;
+  i64 n_par;
+  i64 m;
+} sdsge_mc_simulate_order2_step_ctx;
+
+typedef struct {
+  i64 T;
+  i64 n;
+  i64 m;
+  i64 k;
+  int symmetrize;
+  f64 jitter;
+  int return_shocks;
+} sdsge_mc_filter_linear_step_ctx;
+
+typedef struct {
+  meas_fn measurement;
+  meas_fn jacobian;
+  i64 T;
+  i64 n;
+  i64 m;
+  i64 k;
+  i64 n_par;
+  int symmetrize;
+  f64 jitter;
+  int return_shocks;
+} sdsge_mc_filter_extended_step_ctx;
+
+typedef struct {
+  meas_fn measurement;
+  i64 T;
+  i64 n_state;
+  i64 n_ctrl;
+  i64 n_exog;
+  i64 n_obs;
+  i64 n_par;
+  f64 alpha;
+  f64 beta;
+  f64 kappa;
+  int symmetrize;
+  f64 jitter;
+} sdsge_mc_filter_unscented_step_ctx;
+
+/* Generic-runner adapters. They preserve the canonical arena layouts of the
+ * direct kernels below and write one status code when ``int_out`` is non-NULL.
+ */
+int sdsge_mc_payload_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                            f64 *SDSGE_RESTRICT float_out,
+                            i64 *SDSGE_RESTRICT int_work,
+                            i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_raw_model_data_runner(
+    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_simulate_order1_runner(
+    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_simulate_order2_runner(
+    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_filter_linear_runner(
+    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_filter_extended_runner(
+    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_filter_unscented_runner(
+    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
+    i64 *SDSGE_RESTRICT int_out, const void *ctx);
 
 /* Payload materialization. ``input_batched`` selects input[rep_idx] from a
  * leading replication axis; otherwise the same input span is copied each time. */
