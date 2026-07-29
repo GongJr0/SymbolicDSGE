@@ -1,5 +1,30 @@
 #include "core_steps.h"
 #include "../core/core.h"
+#include <string.h>
+
+void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, const i64 n,
+                            f64 *SDSGE_RESTRICT output) {
+  if (n > 0)
+    memcpy(output, input, (size_t)n * sizeof(f64));
+}
+
+void sdsge_raw_model_data_step(
+    const f64 *SDSGE_RESTRICT states_input, const i64 n_states,
+    const int states_batched,
+    f64 *SDSGE_RESTRICT states_output,
+    const f64 *SDSGE_RESTRICT observables_input, const i64 n_observables,
+    const int observables_batched, const i64 rep_idx,
+    f64 *SDSGE_RESTRICT observables_output) {
+  if (n_states > 0)
+    memcpy(states_output,
+           states_input + (states_batched ? rep_idx * n_states : 0),
+           (size_t)n_states * sizeof(f64));
+  if (n_observables > 0)
+    memcpy(observables_output,
+           observables_input +
+               (observables_batched ? rep_idx * n_observables : 0),
+           (size_t)n_observables * sizeof(f64));
+}
 
 i64 sdsge_simulate_order1_arena_size(const i64 n, const i64 k, const i64 T,
                                      const i64 n_par) {

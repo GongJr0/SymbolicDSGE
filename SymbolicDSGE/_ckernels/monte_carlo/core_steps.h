@@ -5,6 +5,21 @@
 #include "../core/core.h"
 #include "../kalman/kalman.h"
 
+/* Static payload materialization: output[0:n] := input[0:n]. */
+void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, i64 n,
+                            f64 *SDSGE_RESTRICT output);
+
+/* Raw model-data materialization. ``*_batched`` selects input[rep_idx] from a
+ * leading replication axis; otherwise the same input span is copied each time.
+ * Either input/output pair may be NULL when its element count is zero. */
+void sdsge_raw_model_data_step(const f64 *SDSGE_RESTRICT states_input,
+                               i64 n_states, int states_batched,
+                               f64 *SDSGE_RESTRICT states_output,
+                               const f64 *SDSGE_RESTRICT observables_input,
+                               i64 n_observables, int observables_batched,
+                               i64 rep_idx,
+                               f64 *SDSGE_RESTRICT observables_output);
+
 /* ``input`` is [A(n,n), B(n,k), x0(n), shock(T,k), params(n_par)].
  * ``simout`` is [states(T,n), observables(T,m)]. */
 i64 sdsge_simulate_order1_arena_size(i64 n, i64 k, i64 T, i64 n_par);
