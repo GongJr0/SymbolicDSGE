@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from .native_lowering import LoweredMCRun
     from .spec import PipelineSpec
 
-from SymbolicDSGE._diag_tests.result import MCResult, TestResult
+from .legacy_test_result import MCResult, TestResult
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.regression.result import RegressionResult

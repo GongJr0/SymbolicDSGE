@@ -5,7 +5,7 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from ...mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
-from SymbolicDSGE._diag_tests.result import TestResult
+from ...legacy_test_result import TestResult
 
 from .ops import (
     run_wald_test,

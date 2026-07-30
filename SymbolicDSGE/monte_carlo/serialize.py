@@ -77,7 +77,7 @@ def serialize_pipeline_result(
         "test_summaries": {
             name: {
                 "test_name": summary.test_name,
-                "n": summary.n,
+                "n": summary.n,  # type: ignore
                 "alpha": float(summary.alpha),
                 "distribution": summary.dist.value,
                 "df": _json_value(summary.df),

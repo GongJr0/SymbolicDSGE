@@ -1030,7 +1030,10 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic_trace=np.array([0.5, 1.5], dtype=np.float64),
-        status_trace=(TestStatus.OK, TestStatus.BAD_SHAPE),
+        n_retained=2,
+        retained_reps=np.array([0, 1], dtype=np.int_),
+        n_rep=2,
+        _raw_status=np.array([TestStatus.OK, TestStatus.BAD_SHAPE], dtype=np.int_),
     )
     context = MCContext(
         rep_idx=0,

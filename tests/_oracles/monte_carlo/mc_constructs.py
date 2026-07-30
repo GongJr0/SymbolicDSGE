@@ -17,7 +17,7 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from SymbolicDSGE._diag_tests.result import MCResult, TestResult
+from .legacy_test_result import MCResult, TestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel

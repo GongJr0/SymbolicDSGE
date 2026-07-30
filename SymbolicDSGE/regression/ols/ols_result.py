@@ -244,9 +244,19 @@ class MCRegressionResult:
             pval_method=PvalMethod.SF,
             alpha=float64(alpha),
             statistic_trace=self.F_stat_trace,
-            status_trace=tuple(
-                TestStatus.OK if status is RegressionStatus.OK else TestStatus.LINALG
-                for status in self.status_trace
+            n_retained=self.n_retained,
+            retained_reps=self.retained_reps,
+            n_rep=self.n_rep,
+            _raw_status=np.asarray(
+                [
+                    (
+                        TestStatus.OK
+                        if status is RegressionStatus.OK
+                        else TestStatus.LINALG
+                    )
+                    for status in self.status_trace
+                ],
+                dtype=np.int_,
             ),
         )
 

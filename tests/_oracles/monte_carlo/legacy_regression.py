@@ -16,7 +16,7 @@ from SymbolicDSGE._diag_tests.distributions import (
     PvalMethod,
     ReferenceDistribution,
 )
-from SymbolicDSGE._diag_tests.result import MCResult
+from .legacy_test_result import MCResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.regression.enums import RegressionStatus
 from SymbolicDSGE.regression.ols.ols_result import (

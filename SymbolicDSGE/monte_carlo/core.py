@@ -549,7 +549,7 @@ def _summarize_tests(
         stat_trace = np.asarray(
             [result.statistic for result in results], dtype=np.float64
         )
-        summary = MCResult(
+        summary = MCResult(  # type: ignore
             test_name=step_name,
             dist=first.dist,
             df=first.df,
