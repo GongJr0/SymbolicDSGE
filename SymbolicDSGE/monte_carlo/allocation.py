@@ -286,7 +286,7 @@ def _resolve_regression_input_asize(
             p,
             intercept,
             int(step.kwargs.get("num", 0)),
-            int(step.kwargs.get("max_iter", 0)),
+            int(step.kwargs.get("max_iter", 1000)),
         )
     )
 

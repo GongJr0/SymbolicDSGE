@@ -17,7 +17,16 @@ from SymbolicDSGE.monte_carlo.operations.core import (
     simulation_step,
 )
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
-from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
+from SymbolicDSGE.monte_carlo.operations.tests import (
+    breusch_godfrey_test_step,
+    breusch_pagan_test_step,
+    chow_test_step,
+    cusum_test_step,
+    cusumsq_test_step,
+    jarque_bera_test_step,
+    ljung_box_test_step,
+    wald_test_step,
+)
 from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step
 
 
@@ -112,6 +121,182 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
         rtol=1e-10,
         atol=1e-12,
     )
+
+
+def test_native_lowering_runs_all_regression_kinds() -> None:
+    n_rep, n = 3, 48
+    rng = np.random.default_rng(20260801)
+    X = rng.normal(size=(n_rep, n, 2))
+    y = (
+        0.5
+        + 1.25 * X[:, :, :1]
+        - 0.75 * X[:, :, 1:]
+        + rng.normal(scale=0.1, size=(n_rep, n, 1))
+    )
+    kinds = {
+        "ols": {},
+        "ridge": {"alpha": 0.3},
+        "ridge_gs": {"start": 0.01, "stop": 1.0, "num": 5, "criterion": "aic"},
+        "lasso": {"alpha": 0.03, "max_iter": 2000},
+        "lasso_gs": {"start": 0.01, "stop": 1.0, "num": 5, "max_iter": 2000},
+        "elastic_net": {"alpha": 0.03, "l1_ratio": 0.4, "max_iter": 2000},
+        "elastic_net_gs": {
+            "start": 0.01,
+            "stop": 1.0,
+            "num": 5,
+            "l1_ratio": 0.4,
+            "criterion": "aic",
+            "max_iter": 2000,
+        },
+    }
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step("data", states=X, observables=y),
+            *[
+                regression_step(
+                    name,
+                    y_source="data",
+                    y_field="observables",
+                    X_source="data",
+                    X_field="states",
+                    kind=name,
+                    **kwargs,
+                )
+                for name, kwargs in kinds.items()
+            ],
+        ]
+    )
+    reference = cast(SolvedModel, object())
+
+    expected = pipeline.run(reference=reference, n_rep=n_rep, verbosity=0)
+    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
+
+    assert result.status == 0
+    for name in kinds:
+        layout = lowered.plan[name].out_fields["coef"]
+        actual = (
+            lowered.allocation.steps[name]
+            .float_retained[:, layout.offset : layout.offset + layout.flat_count]
+            .reshape(n_rep, *layout.shape)
+        )
+        np.testing.assert_allclose(
+            actual,
+            expected.coefficient_traces[name],
+            rtol=1e-9,
+            atol=1e-11,
+        )
+
+
+def test_native_lowering_runs_all_diagnostic_kinds() -> None:
+    n_rep, n = 3, 64
+    rng = np.random.default_rng(20260802)
+    X = rng.normal(size=(n_rep, n, 2))
+    y = (
+        0.5
+        + 1.25 * X[:, :, :1]
+        - 0.75 * X[:, :, 1:]
+        + rng.normal(scale=0.1, size=(n_rep, n, 1))
+    )
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step("data", states=X, observables=y),
+            wald_test_step(
+                "wald",
+                source="data",
+                field="states",
+                target=np.zeros(2, dtype=np.float64),
+                bandwidth="auto",
+            ),
+            wald_test_step(
+                "wald_covariance",
+                source="data",
+                field="states",
+                target=np.eye(2, dtype=np.float64),
+                kind="covariance",
+                kernel="parzen",
+                bandwidth=3,
+            ),
+            wald_test_step(
+                "wald_second_moment",
+                source="data",
+                field="states",
+                target=np.eye(2, dtype=np.float64),
+                kind="second_moment",
+                kernel="qs",
+                bandwidth="andrews",
+            ),
+            ljung_box_test_step(
+                "lb", source="data", field="observables", column=0, lags=4
+            ),
+            jarque_bera_test_step("jb", source="data", field="observables", column=0),
+            breusch_pagan_test_step(
+                "bp",
+                residuals_source="data",
+                residuals_field="observables",
+                X_source="data",
+                X_field="states",
+                robust=True,
+            ),
+            breusch_godfrey_test_step(
+                "bg",
+                residuals_source="data",
+                residuals_field="observables",
+                X_source="data",
+                X_field="states",
+                lags=2,
+            ),
+            cusum_test_step(
+                "cusum",
+                y_source="data",
+                y_field="observables",
+                X_source="data",
+                X_field="states",
+            ),
+            cusumsq_test_step(
+                "cusumsq",
+                y_source="data",
+                y_field="observables",
+                X_source="data",
+                X_field="states",
+            ),
+            chow_test_step(
+                "chow",
+                y_source="data",
+                y_field="observables",
+                X_source="data",
+                X_field="states",
+                t_break=32,
+            ),
+        ]
+    )
+    reference = cast(SolvedModel, object())
+
+    expected = pipeline.run(reference=reference, n_rep=n_rep, verbosity=0)
+    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
+
+    assert result.status == 0
+    for name in (
+        "wald",
+        "wald_covariance",
+        "wald_second_moment",
+        "lb",
+        "jb",
+        "bp",
+        "bg",
+        "cusum",
+        "cusumsq",
+        "chow",
+    ):
+        layout = lowered.plan[name].out_fields["statistic"]
+        actual = lowered.allocation.steps[name].float_retained[:, layout.offset]
+        np.testing.assert_allclose(
+            actual,
+            expected.statistic_traces[name],
+            rtol=1e-9,
+            atol=1e-11,
+        )
 
 
 def test_native_lowering_runs_first_order_simulation_with_observables() -> None:

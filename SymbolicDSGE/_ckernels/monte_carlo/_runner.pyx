@@ -360,6 +360,57 @@ cdef extern from "regression.h":
         int64_t p
         int intercept
 
+    ctypedef struct sdsge_mc_ridge_step_ctx:
+        int64_t n
+        int64_t p
+        int intercept
+        double alpha
+
+    ctypedef struct sdsge_mc_ridge_gs_step_ctx:
+        const double *alphas
+        int64_t n
+        int64_t p
+        int64_t n_alpha
+        int64_t criterion
+        int intercept
+
+    ctypedef struct sdsge_mc_lasso_step_ctx:
+        int64_t n
+        int64_t p
+        int intercept
+        int64_t max_iter
+        double tol
+        double alpha
+
+    ctypedef struct sdsge_mc_lasso_gs_step_ctx:
+        const double *alphas
+        int64_t n
+        int64_t p
+        int64_t n_alpha
+        int intercept
+        int64_t max_iter
+        double tol
+
+    ctypedef struct sdsge_mc_elastic_net_step_ctx:
+        int64_t n
+        int64_t p
+        int intercept
+        int64_t max_iter
+        double tol
+        double alpha
+        double l1_ratio
+
+    ctypedef struct sdsge_mc_elastic_net_gs_step_ctx:
+        const double *alphas
+        int64_t n
+        int64_t p
+        int64_t n_alpha
+        int64_t criterion
+        int intercept
+        int64_t max_iter
+        double tol
+        double l1_ratio
+
     int sdsge_mc_ols_runner(
         int64_t rep_idx,
         double *float_in_work,
@@ -369,10 +420,63 @@ cdef extern from "regression.h":
         const void *ctx,
     ) noexcept nogil
 
+    int sdsge_mc_ridge_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_ridge_gs_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_lasso_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_lasso_gs_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_elastic_net_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_elastic_net_gs_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+
 
 cdef extern from "tests.h":
+    ctypedef struct sdsge_mc_wald_test_ctx:
+        const double *target
+        int64_t n
+        int64_t q
+        int64_t manual_bandwidth
+        int kernel_id
+        int bandwidth_mode
+        int kind
+
+    ctypedef struct sdsge_mc_ljung_box_test_ctx:
+        int64_t n
+        int64_t lags
+
     ctypedef struct sdsge_mc_jarque_bera_test_ctx:
         int64_t n
+
+    ctypedef struct sdsge_mc_breusch_pagan_test_ctx:
+        int64_t n
+        int64_t k
+        int robust
+
+    ctypedef struct sdsge_mc_breusch_godfrey_test_ctx:
+        int64_t n
+        int64_t k
+        int64_t lags
+
+    ctypedef struct sdsge_mc_cusum_test_ctx:
+        int64_t n
+        int64_t p
+
+    ctypedef sdsge_mc_cusum_test_ctx sdsge_mc_cusumsq_test_ctx
+
+    ctypedef struct sdsge_mc_chow_test_ctx:
+        int64_t n
+        int64_t p
+        int64_t t_break
 
     int sdsge_mc_jarque_bera_test_runner(
         int64_t rep_idx,
@@ -381,6 +485,28 @@ cdef extern from "tests.h":
         int64_t *int_work,
         int64_t *int_out,
         const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_wald_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_ljung_box_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_breusch_pagan_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_breusch_godfrey_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_cusum_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_cusumsq_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
+    ) noexcept nogil
+    int sdsge_mc_chow_test_runner(
+        int64_t, double *, double *, int64_t *, int64_t *, const void *
     ) noexcept nogil
 
 
@@ -423,7 +549,20 @@ cdef class NativeStep:
     cdef sdsge_mc_rolling_mean_step_ctx _rolling_mean_ctx
     cdef sdsge_mc_rolling_var_step_ctx _rolling_var_ctx
     cdef sdsge_mc_ols_step_ctx _ols_ctx
+    cdef sdsge_mc_ridge_step_ctx _ridge_ctx
+    cdef sdsge_mc_ridge_gs_step_ctx _ridge_gs_ctx
+    cdef sdsge_mc_lasso_step_ctx _lasso_ctx
+    cdef sdsge_mc_lasso_gs_step_ctx _lasso_gs_ctx
+    cdef sdsge_mc_elastic_net_step_ctx _elastic_net_ctx
+    cdef sdsge_mc_elastic_net_gs_step_ctx _elastic_net_gs_ctx
+    cdef sdsge_mc_wald_test_ctx _wald_ctx
+    cdef sdsge_mc_ljung_box_test_ctx _ljung_box_ctx
     cdef sdsge_mc_jarque_bera_test_ctx _jarque_bera_ctx
+    cdef sdsge_mc_breusch_pagan_test_ctx _breusch_pagan_ctx
+    cdef sdsge_mc_breusch_godfrey_test_ctx _breusch_godfrey_ctx
+    cdef sdsge_mc_cusum_test_ctx _cusum_ctx
+    cdef sdsge_mc_cusumsq_test_ctx _cusumsq_ctx
+    cdef sdsge_mc_chow_test_ctx _chow_ctx
 
     def __cinit__(self):
         self._n_batch = 0
@@ -967,6 +1106,173 @@ def ols_step(str name, int64_t n, int64_t p, bint intercept=True):
     return step
 
 
+cdef cnp.ndarray _alpha_grid(
+    double start,
+    double stop,
+    int64_t num,
+):
+    if start <= 0.0 or stop <= 0.0:
+        raise ValueError("Native grid-search penalties must be positive.")
+    if num <= 0:
+        raise ValueError("Native grid-search requires a positive num.")
+    return np.ascontiguousarray(
+        np.exp(np.linspace(np.log(start), np.log(stop), num=num)),
+        dtype=np.float64,
+    )
+
+
+def ridge_step(
+    str name,
+    int64_t n,
+    int64_t p,
+    double alpha,
+    bint intercept=True,
+):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or p <= 0 or alpha < 0.0:
+        raise ValueError("Native ridge dimensions and alpha must be valid.")
+    step._ridge_ctx.n = n
+    step._ridge_ctx.p = p
+    step._ridge_ctx.intercept = intercept
+    step._ridge_ctx.alpha = alpha
+    step._bind(name, sdsge_mc_ridge_runner, <const void *>&step._ridge_ctx,
+               None, 0, -1, -1, p + 2, 1)
+    return step
+
+
+def ridge_gs_step(
+    str name,
+    int64_t n,
+    int64_t p,
+    double start,
+    double stop,
+    int64_t num,
+    int64_t criterion,
+    bint intercept=True,
+):
+    cdef NativeStep step = NativeStep()
+    cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
+    if n < 0 or p <= 0:
+        raise ValueError("Native ridge grid-search dimensions must be valid.")
+    step._ridge_gs_ctx.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    step._ridge_gs_ctx.n = n
+    step._ridge_gs_ctx.p = p
+    step._ridge_gs_ctx.n_alpha = num
+    step._ridge_gs_ctx.criterion = criterion
+    step._ridge_gs_ctx.intercept = intercept
+    step._bind(name, sdsge_mc_ridge_gs_runner,
+               <const void *>&step._ridge_gs_ctx, alphas, 0, -1, -1, p + 2, 1)
+    return step
+
+
+def lasso_step(
+    str name,
+    int64_t n,
+    int64_t p,
+    double alpha,
+    int64_t max_iter=1000,
+    double tol=1e-10,
+    bint intercept=True,
+):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or p <= 0 or alpha < 0.0 or max_iter <= 0 or tol <= 0.0:
+        raise ValueError("Native lasso settings must be valid.")
+    step._lasso_ctx.n = n
+    step._lasso_ctx.p = p
+    step._lasso_ctx.intercept = intercept
+    step._lasso_ctx.max_iter = max_iter
+    step._lasso_ctx.tol = tol
+    step._lasso_ctx.alpha = alpha
+    step._bind(name, sdsge_mc_lasso_runner, <const void *>&step._lasso_ctx,
+               None, 0, -1, -1, p + 2, 1)
+    return step
+
+
+def lasso_gs_step(
+    str name,
+    int64_t n,
+    int64_t p,
+    double start,
+    double stop,
+    int64_t num,
+    int64_t max_iter=1000,
+    double tol=1e-10,
+    bint intercept=True,
+):
+    cdef NativeStep step = NativeStep()
+    cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
+    if n < 0 or p <= 0 or max_iter <= 0 or tol <= 0.0:
+        raise ValueError("Native lasso grid-search settings must be valid.")
+    step._lasso_gs_ctx.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    step._lasso_gs_ctx.n = n
+    step._lasso_gs_ctx.p = p
+    step._lasso_gs_ctx.n_alpha = num
+    step._lasso_gs_ctx.intercept = intercept
+    step._lasso_gs_ctx.max_iter = max_iter
+    step._lasso_gs_ctx.tol = tol
+    step._bind(name, sdsge_mc_lasso_gs_runner,
+               <const void *>&step._lasso_gs_ctx, alphas, 0, -1, -1, p + 2, 1)
+    return step
+
+
+def elastic_net_step(
+    str name,
+    int64_t n,
+    int64_t p,
+    double alpha,
+    double l1_ratio,
+    int64_t max_iter=1000,
+    double tol=1e-10,
+    bint intercept=True,
+):
+    cdef NativeStep step = NativeStep()
+    if (n < 0 or p <= 0 or alpha < 0.0 or l1_ratio < 0.0
+            or l1_ratio > 1.0 or max_iter <= 0 or tol <= 0.0):
+        raise ValueError("Native elastic-net settings must be valid.")
+    step._elastic_net_ctx.n = n
+    step._elastic_net_ctx.p = p
+    step._elastic_net_ctx.intercept = intercept
+    step._elastic_net_ctx.max_iter = max_iter
+    step._elastic_net_ctx.tol = tol
+    step._elastic_net_ctx.alpha = alpha
+    step._elastic_net_ctx.l1_ratio = l1_ratio
+    step._bind(name, sdsge_mc_elastic_net_runner,
+               <const void *>&step._elastic_net_ctx, None, 0, -1, -1, p + 2, 1)
+    return step
+
+
+def elastic_net_gs_step(
+    str name,
+    int64_t n,
+    int64_t p,
+    double start,
+    double stop,
+    int64_t num,
+    double l1_ratio,
+    int64_t criterion,
+    int64_t max_iter=1000,
+    double tol=1e-10,
+    bint intercept=True,
+):
+    cdef NativeStep step = NativeStep()
+    cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
+    if (n < 0 or p <= 0 or l1_ratio < 0.0 or l1_ratio > 1.0
+            or max_iter <= 0 or tol <= 0.0):
+        raise ValueError("Native elastic-net grid-search settings must be valid.")
+    step._elastic_net_gs_ctx.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    step._elastic_net_gs_ctx.n = n
+    step._elastic_net_gs_ctx.p = p
+    step._elastic_net_gs_ctx.n_alpha = num
+    step._elastic_net_gs_ctx.criterion = criterion
+    step._elastic_net_gs_ctx.intercept = intercept
+    step._elastic_net_gs_ctx.max_iter = max_iter
+    step._elastic_net_gs_ctx.tol = tol
+    step._elastic_net_gs_ctx.l1_ratio = l1_ratio
+    step._bind(name, sdsge_mc_elastic_net_gs_runner,
+               <const void *>&step._elastic_net_gs_ctx, alphas, 0, -1, -1, p + 2, 1)
+    return step
+
+
 def jarque_bera_step(str name, int64_t n):
     """Bind the native Jarque-Bera adapter after source staging has compiled."""
     cdef NativeStep step = NativeStep()
@@ -986,6 +1292,101 @@ def jarque_bera_step(str name, int64_t n):
         1,
         1,
     )
+    return step
+
+
+def wald_step(
+    str name,
+    target,
+    int64_t n,
+    int64_t q,
+    int64_t manual_bandwidth,
+    int kernel_id,
+    int bandwidth_mode,
+    int kind,
+):
+    cdef NativeStep step = NativeStep()
+    cdef cnp.ndarray target_array = np.ascontiguousarray(target, dtype=np.float64)
+    if n < 0 or q <= 0 or target_array.size == 0:
+        raise ValueError("Native Wald dimensions and target must be valid.")
+    step._wald_ctx.target = <const double *>cnp.PyArray_DATA(target_array)
+    step._wald_ctx.n = n
+    step._wald_ctx.q = q
+    step._wald_ctx.manual_bandwidth = manual_bandwidth
+    step._wald_ctx.kernel_id = kernel_id
+    step._wald_ctx.bandwidth_mode = bandwidth_mode
+    step._wald_ctx.kind = kind
+    step._bind(name, sdsge_mc_wald_test_runner, <const void *>&step._wald_ctx,
+               target_array, 0, -1, -1, 1, 1)
+    return step
+
+
+def ljung_box_step(str name, int64_t n, int64_t lags):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or lags < 0:
+        raise ValueError("Native Ljung-Box settings must be non-negative.")
+    step._ljung_box_ctx.n = n
+    step._ljung_box_ctx.lags = lags
+    step._bind(name, sdsge_mc_ljung_box_test_runner,
+               <const void *>&step._ljung_box_ctx, None, 0, -1, 0, 1, 1)
+    return step
+
+
+def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=False):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or k < 0:
+        raise ValueError("Native Breusch-Pagan dimensions must be non-negative.")
+    step._breusch_pagan_ctx.n = n
+    step._breusch_pagan_ctx.k = k
+    step._breusch_pagan_ctx.robust = robust
+    step._bind(name, sdsge_mc_breusch_pagan_test_runner,
+               <const void *>&step._breusch_pagan_ctx, None, 0, -1, 0, 1, 1)
+    return step
+
+
+def breusch_godfrey_step(str name, int64_t n, int64_t k, int64_t lags):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or k < 0 or lags < 0:
+        raise ValueError("Native Breusch-Godfrey settings must be non-negative.")
+    step._breusch_godfrey_ctx.n = n
+    step._breusch_godfrey_ctx.k = k
+    step._breusch_godfrey_ctx.lags = lags
+    step._bind(name, sdsge_mc_breusch_godfrey_test_runner,
+               <const void *>&step._breusch_godfrey_ctx, None, 0, -1, 0, 1, 1)
+    return step
+
+
+def cusum_step(str name, int64_t n, int64_t p):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or p <= 0:
+        raise ValueError("Native CUSUM dimensions must be valid.")
+    step._cusum_ctx.n = n
+    step._cusum_ctx.p = p
+    step._bind(name, sdsge_mc_cusum_test_runner, <const void *>&step._cusum_ctx,
+               None, 0, -1, 0, 1, 1)
+    return step
+
+
+def cusumsq_step(str name, int64_t n, int64_t p):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or p <= 0:
+        raise ValueError("Native CUSUMSQ dimensions must be valid.")
+    step._cusumsq_ctx.n = n
+    step._cusumsq_ctx.p = p
+    step._bind(name, sdsge_mc_cusumsq_test_runner,
+               <const void *>&step._cusumsq_ctx, None, 0, -1, 0, 1, 1)
+    return step
+
+
+def chow_step(str name, int64_t n, int64_t p, int64_t t_break):
+    cdef NativeStep step = NativeStep()
+    if n < 0 or p <= 0 or t_break < 0:
+        raise ValueError("Native Chow settings must be valid.")
+    step._chow_ctx.n = n
+    step._chow_ctx.p = p
+    step._chow_ctx.t_break = t_break
+    step._bind(name, sdsge_mc_chow_test_runner, <const void *>&step._chow_ctx,
+               None, 0, -1, 0, 1, 1)
     return step
 
 

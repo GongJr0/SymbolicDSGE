@@ -20,16 +20,29 @@ from SymbolicDSGE.kalman.interface import KalmanInterface
 from .._ckernels.monte_carlo._arenas import ArenaAllocation, allocate_arenas
 from .._ckernels.monte_carlo._runner import (
     NativeStep,
+    breusch_godfrey_step,
+    breusch_pagan_step,
+    chow_step,
+    cusum_step,
+    cusumsq_step,
+    elastic_net_gs_step,
+    elastic_net_step,
     filter_extended_step,
     filter_linear_step,
     filter_unscented_step,
     simulate1_step,
     simulate2_step,
     jarque_bera_step,
+    lasso_gs_step,
+    lasso_step,
+    ljung_box_step,
     ols_step,
     payload_step,
     raw_model_data_step,
+    ridge_gs_step,
+    ridge_step,
     transform_step,
+    wald_step,
 )
 from ..core.solved_model import SolvedModel
 from .allocation import BufferPlan, FieldLayout, StepBufferPlan
@@ -172,24 +185,35 @@ def _lower_step(
         return _lower_filter_step(step, steps[0], plan, reference, dgp)
 
     if step.op_type is OpType.REGRESSION:
-        if step.kwargs["kind"] != "ols":
-            raise NotImplementedError(
-                f"Native lowering is not implemented for {step.kwargs['kind']!r}."
-            )
-        n, x_columns = _selected_shape(
-            source_indices[1], step.source_args[1], steps, plan
-        )
-        y_rows, y_columns = _selected_shape(
-            source_indices[0], step.source_args[0], steps, plan
-        )
-        if y_rows != n or y_columns != 1:
-            raise ValueError("Native OLS lowering requires a one-column response.")
-        intercept = bool(step.kwargs["intercept"])
-        p = x_columns + int(intercept)
-        step_bindings: list[FloatInputBinding] = []
-        if intercept:
-            step_bindings.append(_fill_binding(n, 0, p, 1.0))
-        step_bindings.append(
+        return _lower_regression_step(step, source_indices, steps, plan)
+
+    if step.op_type is OpType.TEST:
+        return _lower_test_step(step, source_indices, steps, plan)
+
+    raise NotImplementedError(
+        f"Native lowering is not implemented for {step.name!r} ({step.step_type!r})."
+    )
+
+
+def _lower_regression_step(
+    step: MCStep,
+    source_indices: tuple[int, ...],
+    steps: tuple[MCStep, ...],
+    plan: BufferPlan,
+) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
+    n, x_columns = _selected_shape(source_indices[1], step.source_args[1], steps, plan)
+    y_rows, y_columns = _selected_shape(
+        source_indices[0], step.source_args[0], steps, plan
+    )
+    if y_rows != n or y_columns != 1:
+        raise ValueError("Native regression lowering requires a one-column response.")
+    intercept = bool(step.kwargs["intercept"])
+    p = x_columns + int(intercept)
+    bindings: list[FloatInputBinding] = []
+    if intercept:
+        bindings.append(_fill_binding(n, 0, p, 1.0))
+    bindings.extend(
+        (
             _source_binding(
                 source_indices[1],
                 steps,
@@ -197,9 +221,7 @@ def _lower_step(
                 step.source_args[1],
                 target_offset=int(intercept),
                 target_row_stride=p,
-            )
-        )
-        step_bindings.append(
+            ),
             _source_binding(
                 source_indices[0],
                 steps,
@@ -207,19 +229,117 @@ def _lower_step(
                 step.source_args[0],
                 target_offset=n * p,
                 target_row_stride=1,
-            )
+            ),
         )
-        return ols_step(step.name, n, p, intercept), tuple(step_bindings)
+    )
+    kind = step.kwargs["kind"]
+    native_step = _regression_native_step(step, n, p, intercept)
+    return native_step, tuple(bindings)
 
-    if step.op_type is OpType.TEST:
-        if step.step_type != "jarque_bera":
-            raise NotImplementedError(
-                f"Native lowering is not implemented for {step.step_type!r}."
-            )
-        n, p = _selected_shape(source_indices[0], step.source_args[0], steps, plan)
-        if p != 1:
-            raise ValueError("Native Jarque-Bera lowering requires one column.")
-        return jarque_bera_step(step.name, n), (
+
+def _regression_native_step(
+    step: MCStep,
+    n: int,
+    p: int,
+    intercept: bool,
+) -> NativeStep:
+    kind = step.kwargs["kind"]
+    if kind == "ols":
+        return ols_step(step.name, n, p, intercept)
+    if kind == "ridge":
+        return ridge_step(step.name, n, p, float(step.kwargs["alpha"]), intercept)
+    if kind == "ridge_gs":
+        return ridge_gs_step(
+            step.name,
+            n,
+            p,
+            float(step.kwargs["start"]),
+            float(step.kwargs["stop"]),
+            int(step.kwargs["num"]),
+            _criterion_code(step.kwargs.get("criterion", "aic")),
+            intercept,
+        )
+    if kind == "lasso":
+        return lasso_step(
+            step.name,
+            n,
+            p,
+            float(step.kwargs["alpha"]),
+            int(step.kwargs.get("max_iter", 1000)),
+            float(step.kwargs.get("tol", 1e-10)),
+            intercept,
+        )
+    if kind == "lasso_gs":
+        return lasso_gs_step(
+            step.name,
+            n,
+            p,
+            float(step.kwargs["start"]),
+            float(step.kwargs["stop"]),
+            int(step.kwargs["num"]),
+            int(step.kwargs.get("max_iter", 1000)),
+            float(step.kwargs.get("tol", 1e-10)),
+            intercept,
+        )
+    if kind == "elastic_net":
+        return elastic_net_step(
+            step.name,
+            n,
+            p,
+            float(step.kwargs["alpha"]),
+            float(step.kwargs["l1_ratio"]),
+            int(step.kwargs.get("max_iter", 1000)),
+            float(step.kwargs.get("tol", 1e-10)),
+            intercept,
+        )
+    if kind == "elastic_net_gs":
+        return elastic_net_gs_step(
+            step.name,
+            n,
+            p,
+            float(step.kwargs["start"]),
+            float(step.kwargs["stop"]),
+            int(step.kwargs["num"]),
+            float(step.kwargs["l1_ratio"]),
+            _criterion_code(step.kwargs.get("criterion", "loss")),
+            int(step.kwargs.get("max_iter", 1000)),
+            float(step.kwargs.get("tol", 1e-10)),
+            intercept,
+        )
+    raise ValueError(f"Unsupported native regression kind: {kind!r}.")
+
+
+def _criterion_code(value: object) -> int:
+    codes = {"aic": 1, "bic": 2, "loss": 3}
+    try:
+        return codes[str(value)]
+    except KeyError as exc:
+        raise ValueError(
+            "Regression criterion must be 'aic', 'bic', or 'loss'."
+        ) from exc
+
+
+def _lower_test_step(
+    step: MCStep,
+    source_indices: tuple[int, ...],
+    steps: tuple[MCStep, ...],
+    plan: BufferPlan,
+) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
+    n, first_columns = _selected_shape(
+        source_indices[0], step.source_args[0], steps, plan
+    )
+    kind = step.step_type
+    if kind == "wald":
+        return _lower_wald_step(step, source_indices[0], steps, plan, n, first_columns)
+    if kind in {"ljung_box", "jarque_bera"}:
+        if first_columns != 1:
+            raise ValueError(f"Native {kind} lowering requires one column.")
+        native_step = (
+            ljung_box_step(step.name, n, int(step.kwargs["lags"]))
+            if kind == "ljung_box"
+            else jarque_bera_step(step.name, n)
+        )
+        return native_step, (
             _source_binding(
                 source_indices[0],
                 steps,
@@ -229,10 +349,107 @@ def _lower_step(
                 target_row_stride=1,
             ),
         )
-
-    raise NotImplementedError(
-        f"Native lowering is not implemented for {step.name!r} ({step.step_type!r})."
+    if kind not in {"breusch_pagan", "breusch_godfrey", "cusum", "cusumsq", "chow"}:
+        raise ValueError(f"Unsupported native diagnostic kind: {kind!r}.")
+    if first_columns != 1:
+        raise ValueError(f"Native {kind} lowering requires a one-column response.")
+    x_rows, x_columns = _selected_shape(
+        source_indices[1], step.source_args[1], steps, plan
     )
+    if x_rows != n:
+        raise ValueError("Native diagnostic sources must have matching row counts.")
+    if kind == "breusch_pagan":
+        native_step = breusch_pagan_step(
+            step.name, n, x_columns, bool(step.kwargs["robust"])
+        )
+    elif kind == "breusch_godfrey":
+        native_step = breusch_godfrey_step(
+            step.name, n, x_columns, int(step.kwargs["lags"])
+        )
+    elif kind == "cusum":
+        native_step = cusum_step(step.name, n, x_columns)
+    elif kind == "cusumsq":
+        native_step = cusumsq_step(step.name, n, x_columns)
+    else:
+        native_step = chow_step(step.name, n, x_columns, int(step.kwargs["t_break"]))
+    return native_step, (
+        _source_binding(
+            source_indices[0],
+            steps,
+            plan,
+            step.source_args[0],
+            target_offset=0,
+            target_row_stride=1,
+        ),
+        _source_binding(
+            source_indices[1],
+            steps,
+            plan,
+            step.source_args[1],
+            target_offset=n,
+            target_row_stride=x_columns,
+        ),
+    )
+
+
+def _lower_wald_step(
+    step: MCStep,
+    source_idx: int,
+    steps: tuple[MCStep, ...],
+    plan: BufferPlan,
+    n: int,
+    q: int,
+) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
+    kind_codes = {"mean": 0, "covariance": 1, "second_moment": 2}
+    kernel_codes = {"bartlett": 0, "parzen": 1, "qs": 2}
+    bandwidth_modes = {None: 3, "andrews": 2, "wooldridge": 1, "auto": 3}
+    try:
+        kind_code = kind_codes[step.kwargs["kind"]]
+        kernel_code = kernel_codes[step.kwargs["kernel"]]
+    except KeyError as exc:
+        raise ValueError("Unsupported native Wald configuration.") from exc
+    bandwidth = step.kwargs["bandwidth"]
+    if isinstance(bandwidth, bool):
+        raise ValueError("Wald bandwidth must be an integer, mode, or None.")
+    if isinstance(bandwidth, int):
+        bandwidth_mode = 0
+        manual_bandwidth = bandwidth
+    else:
+        try:
+            bandwidth_mode = bandwidth_modes[bandwidth]
+        except KeyError as exc:
+            raise ValueError("Unsupported native Wald bandwidth mode.") from exc
+        manual_bandwidth = 0
+    target = _wald_target(step.kwargs["target"], q, kind_code)
+    return wald_step(
+        step.name,
+        target,
+        n,
+        q,
+        manual_bandwidth,
+        kernel_code,
+        bandwidth_mode,
+        kind_code,
+    ), (
+        _source_binding(
+            source_idx,
+            steps,
+            plan,
+            step.source_args[0],
+            target_offset=0,
+            target_row_stride=q,
+        ),
+    )
+
+
+def _wald_target(value: object, q: int, kind: int) -> NDF:
+    target = _array_f64(np.asarray(value, dtype=np.float64))
+    if kind == 0:
+        if target.ndim != 1 or target.shape[0] != q:
+            raise ValueError("Wald mean target must have one value per source column.")
+    elif target.ndim != 2 or target.shape != (q, q):
+        raise ValueError("Wald matrix target must match the source column count.")
+    return target
 
 
 def _lower_simulation_step(

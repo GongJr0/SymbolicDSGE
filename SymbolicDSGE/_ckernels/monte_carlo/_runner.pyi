@@ -98,7 +98,81 @@ def transform_step(
     window: int = 1,
 ) -> NativeStep: ...
 def ols_step(name: str, n: int, p: int, intercept: bool = True) -> NativeStep: ...
+def ridge_step(
+    name: str, n: int, p: int, alpha: float, intercept: bool = True
+) -> NativeStep: ...
+def ridge_gs_step(
+    name: str,
+    n: int,
+    p: int,
+    start: float,
+    stop: float,
+    num: int,
+    criterion: int,
+    intercept: bool = True,
+) -> NativeStep: ...
+def lasso_step(
+    name: str,
+    n: int,
+    p: int,
+    alpha: float,
+    max_iter: int = 1000,
+    tol: float = 1e-10,
+    intercept: bool = True,
+) -> NativeStep: ...
+def lasso_gs_step(
+    name: str,
+    n: int,
+    p: int,
+    start: float,
+    stop: float,
+    num: int,
+    max_iter: int = 1000,
+    tol: float = 1e-10,
+    intercept: bool = True,
+) -> NativeStep: ...
+def elastic_net_step(
+    name: str,
+    n: int,
+    p: int,
+    alpha: float,
+    l1_ratio: float,
+    max_iter: int = 1000,
+    tol: float = 1e-10,
+    intercept: bool = True,
+) -> NativeStep: ...
+def elastic_net_gs_step(
+    name: str,
+    n: int,
+    p: int,
+    start: float,
+    stop: float,
+    num: int,
+    l1_ratio: float,
+    criterion: int,
+    max_iter: int = 1000,
+    tol: float = 1e-10,
+    intercept: bool = True,
+) -> NativeStep: ...
+def wald_step(
+    name: str,
+    target: ArrayLike,
+    n: int,
+    q: int,
+    manual_bandwidth: int,
+    kernel_id: int,
+    bandwidth_mode: int,
+    kind: int,
+) -> NativeStep: ...
+def ljung_box_step(name: str, n: int, lags: int) -> NativeStep: ...
 def jarque_bera_step(name: str, n: int) -> NativeStep: ...
+def breusch_pagan_step(
+    name: str, n: int, k: int, robust: bool = False
+) -> NativeStep: ...
+def breusch_godfrey_step(name: str, n: int, k: int, lags: int) -> NativeStep: ...
+def cusum_step(name: str, n: int, p: int) -> NativeStep: ...
+def cusumsq_step(name: str, n: int, p: int) -> NativeStep: ...
+def chow_step(name: str, n: int, p: int, t_break: int) -> NativeStep: ...
 def run(
     allocation: ArenaAllocation,
     steps: Sequence[NativeStep],
