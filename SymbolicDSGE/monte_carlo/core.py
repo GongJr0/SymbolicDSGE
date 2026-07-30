@@ -9,6 +9,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .graph import PipelineGraph
+    from .native_lowering import LoweredMCRun
     from .spec import PipelineSpec
 
 from .._diag_tests.result import MCResult, TestResult
@@ -143,6 +144,25 @@ class MCPipeline:
     ) -> BufferPlan:
         return resolve_output_specs(
             self.per_rep_steps, self._source_indices, reference, dgp
+        )
+
+    def lower_native(
+        self,
+        *,
+        reference: SolvedModel,
+        dgp: SolvedModel | None = None,
+        n_rep: int,
+        n_jobs: int | None = None,
+    ) -> "LoweredMCRun":
+        """Resolve one native runner invocation without executing it."""
+        from .native_lowering import lower_native_run
+
+        return lower_native_run(
+            self,
+            reference=reference,
+            dgp=dgp,
+            n_rep=n_rep,
+            n_jobs=n_jobs,
         )
 
     def to_spec(self) -> "PipelineSpec":

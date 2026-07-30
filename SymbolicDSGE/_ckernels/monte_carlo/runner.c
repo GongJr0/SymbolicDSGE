@@ -4,6 +4,8 @@
 #include <omp.h>
 #include <string.h>
 
+static f64 *worker_float_lane(f64 *base, i64 worker_idx, i64 worker_stride);
+
 static int valid_runner(const sdsge_mc_runner_ctx *runner) {
   if (runner == NULL || runner->steps == NULL ||
       runner->failure_step_by_rep == NULL ||
@@ -28,7 +30,10 @@ static int valid_runner(const sdsge_mc_runner_ctx *runner) {
         step->float_in_work_worker_stride < 0 ||
         step->int_in_work_worker_stride < 0 ||
         step->float_live_out_worker_stride < 0 ||
-        step->int_live_out_worker_stride < 0) {
+        step->int_live_out_worker_stride < 0 ||
+        step->n_float_input_bindings < 0 ||
+        (step->n_float_input_bindings > 0 &&
+         step->float_input_bindings == NULL)) {
       return 0;
     }
     if ((step->float_retained_stride > 0 && step->float_retained == NULL) ||
@@ -42,6 +47,89 @@ static int valid_runner(const sdsge_mc_runner_ctx *runner) {
     }
   }
   return 1;
+}
+
+static int materialize_step_inputs(const sdsge_mc_runner_ctx *runner,
+                                   const i64 step_idx,
+                                   const i64 worker_idx, const i64 rep_idx) {
+  const sdsge_mc_step_desc *step = runner->steps + step_idx;
+  f64 *target = worker_float_lane(step->float_in_work, worker_idx,
+                                  step->float_in_work_worker_stride);
+
+  for (i64 binding_idx = 0; binding_idx < step->n_float_input_bindings;
+       ++binding_idx) {
+    const sdsge_mc_float_input_binding *binding =
+        step->float_input_bindings + binding_idx;
+    if (binding->n_rows < 0 || binding->n_columns < 0 ||
+        binding->target_offset < 0 || binding->target_row_stride < 0 ||
+        binding->target_row_stride < binding->n_columns ||
+        (binding->n_rows > 0 && binding->target_offset +
+                                       (binding->n_rows - 1) *
+                                           binding->target_row_stride +
+                                       binding->n_columns >
+                                   step->float_in_work_worker_stride)) {
+      return SDSGE_MC_RUN_BAD_ARG;
+    }
+    if (binding->n_rows == 0 || binding->n_columns == 0) {
+      continue;
+    }
+    if (binding->source_step_idx == -1) {
+      for (i64 row = 0; row < binding->n_rows; ++row) {
+        f64 *target_row = target + binding->target_offset +
+                          row * binding->target_row_stride;
+        for (i64 column = 0; column < binding->n_columns; ++column) {
+          target_row[column] = binding->fill_value;
+        }
+      }
+      continue;
+    }
+
+    if (binding->source_offset < 0 || binding->source_row_stride <= 0 ||
+        binding->row_start < 0 ||
+        (binding->n_columns > 0 && binding->columns == NULL)) {
+      return SDSGE_MC_RUN_BAD_ARG;
+    }
+    const f64 *source_lane;
+    if (binding->source_step_idx < -1) {
+      if (binding->static_source == NULL || binding->static_rep_stride < 0) {
+        return SDSGE_MC_RUN_BAD_ARG;
+      }
+      source_lane = binding->static_source + binding->source_offset;
+      if (binding->static_batched) {
+        source_lane += rep_idx * binding->static_rep_stride;
+      }
+    } else {
+      if (binding->source_step_idx >= step_idx) {
+        return SDSGE_MC_RUN_BAD_ARG;
+      }
+      const sdsge_mc_step_desc *source =
+          runner->steps + binding->source_step_idx;
+      if (binding->source_offset +
+              (binding->row_start + binding->n_rows - 1) *
+                  binding->source_row_stride >=
+          source->float_live_out_worker_stride) {
+        return SDSGE_MC_RUN_BAD_ARG;
+      }
+      source_lane =
+          worker_float_lane(source->float_live_out, worker_idx,
+                            source->float_live_out_worker_stride) +
+          binding->source_offset;
+    }
+    for (i64 row = 0; row < binding->n_rows; ++row) {
+      const f64 *source_row =
+          source_lane + (binding->row_start + row) * binding->source_row_stride;
+      f64 *target_row =
+          target + binding->target_offset + row * binding->target_row_stride;
+      for (i64 column = 0; column < binding->n_columns; ++column) {
+        const i64 source_column = binding->columns[column];
+        if (source_column < 0 || source_column >= binding->source_row_stride) {
+          return SDSGE_MC_RUN_BAD_ARG;
+        }
+        target_row[column] = source_row[source_column];
+      }
+    }
+  }
+  return SDSGE_MC_RUN_OK;
 }
 
 static int halt_requested(const sdsge_mc_runner_ctx *runner) {
@@ -165,17 +253,20 @@ int sdsge_mc_run(sdsge_mc_runner_ctx *runner) {
       if (runner->profile_steps) {
         step_started_s = omp_get_wtime();
       }
-      status = step->fn(
-          rep_idx,
-          worker_float_lane(step->float_in_work, worker_idx,
-                            step->float_in_work_worker_stride),
-          worker_float_lane(step->float_live_out, worker_idx,
-                            step->float_live_out_worker_stride),
-          worker_int_lane(step->int_in_work, worker_idx,
-                          step->int_in_work_worker_stride),
-          worker_int_lane(step->int_live_out, worker_idx,
-                          step->int_live_out_worker_stride),
-          step->ctx);
+      status = materialize_step_inputs(runner, step_idx, worker_idx, rep_idx);
+      if (status == SDSGE_MC_RUN_OK) {
+        status = step->fn(
+            rep_idx,
+            worker_float_lane(step->float_in_work, worker_idx,
+                              step->float_in_work_worker_stride),
+            worker_float_lane(step->float_live_out, worker_idx,
+                              step->float_live_out_worker_stride),
+            worker_int_lane(step->int_in_work, worker_idx,
+                            step->int_in_work_worker_stride),
+            worker_int_lane(step->int_live_out, worker_idx,
+                            step->int_live_out_worker_stride),
+            step->ctx);
+      }
       if (status != SDSGE_MC_RUN_OK) {
         if (runner->profile_steps) {
           const i64 offset = worker_idx * runner->n_steps + step_idx;

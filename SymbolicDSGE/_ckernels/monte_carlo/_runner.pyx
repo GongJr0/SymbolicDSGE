@@ -14,7 +14,7 @@ import numpy as np
 cimport numpy as cnp
 
 from cpython.mem cimport PyMem_Free, PyMem_Malloc
-from libc.stdint cimport int64_t
+from libc.stdint cimport int64_t, uintptr_t
 
 
 cdef extern from "runner.h":
@@ -26,6 +26,21 @@ cdef extern from "runner.h":
         int64_t *int_out,
         const void *ctx,
     ) noexcept nogil
+
+    ctypedef struct sdsge_mc_float_input_binding:
+        int64_t source_step_idx
+        int64_t source_offset
+        int64_t source_row_stride
+        int64_t row_start
+        int64_t n_rows
+        const int64_t *columns
+        int64_t n_columns
+        int64_t target_offset
+        int64_t target_row_stride
+        double fill_value
+        const double *static_source
+        int64_t static_rep_stride
+        int static_batched
 
     ctypedef struct sdsge_mc_step_desc:
         sdsge_mc_step_fn fn
@@ -43,6 +58,8 @@ cdef extern from "runner.h":
         int64_t float_retained_stride
         int64_t int_retained_stride
         const void *ctx
+        const sdsge_mc_float_input_binding *float_input_bindings
+        int64_t n_float_input_bindings
 
     ctypedef struct sdsge_mc_failure:
         int64_t rep_idx
@@ -68,12 +85,85 @@ cdef extern from "runner.h":
 
 
 cdef extern from "core_steps.h":
+    ctypedef void (*sdsge_measurement_fn)(
+        double *vars,
+        double *par,
+        double *out,
+    ) noexcept nogil
+
     ctypedef struct sdsge_mc_payload_step_ctx:
         const double *input
         int64_t n
         int input_batched
 
     int sdsge_mc_payload_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    ctypedef struct sdsge_mc_raw_model_data_step_ctx:
+        const double *states_input
+        int64_t n_states
+        int states_batched
+        const double *observables_input
+        int64_t n_observables
+        int observables_batched
+
+    int sdsge_mc_raw_model_data_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    ctypedef struct sdsge_mc_simulate_order1_step_ctx:
+        sdsge_measurement_fn measurement
+        int64_t T
+        int64_t n
+        int64_t k
+        int64_t n_par
+        int64_t m
+
+    ctypedef struct sdsge_mc_simulate_order2_step_ctx:
+        sdsge_measurement_fn measurement
+        int64_t T
+        int64_t n_state
+        int64_t n_ctrl
+        int64_t n_exog
+        int64_t n_par
+        int64_t m
+
+    int64_t sdsge_simulate_order1_arena_size(
+        int64_t n,
+        int64_t k,
+        int64_t T,
+        int64_t n_par,
+    ) noexcept nogil
+
+    int64_t sdsge_simulate_order2_arena_size(
+        int64_t n_state,
+        int64_t n_var,
+        int64_t n_exog,
+        int64_t T,
+        int64_t n_par,
+    ) noexcept nogil
+
+    int sdsge_mc_simulate_order1_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_simulate_order2_runner(
         int64_t rep_idx,
         double *float_in_work,
         double *float_out,
@@ -173,6 +263,36 @@ cdef extern from "transforms.h":
     ) noexcept nogil
 
 
+cdef extern from "regression.h":
+    ctypedef struct sdsge_mc_ols_step_ctx:
+        int64_t n
+        int64_t p
+        int intercept
+
+    int sdsge_mc_ols_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+
+cdef extern from "tests.h":
+    ctypedef struct sdsge_mc_jarque_bera_test_ctx:
+        int64_t n
+
+    int sdsge_mc_jarque_bera_test_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+
 class NativeRunResult(NamedTuple):
     """Status returned by one native runner invocation."""
 
@@ -199,12 +319,17 @@ cdef class NativeStep:
     cdef int64_t _output_n_float
     cdef int64_t _output_n_int
     cdef sdsge_mc_payload_step_ctx _payload_ctx
+    cdef sdsge_mc_raw_model_data_step_ctx _raw_model_data_ctx
+    cdef sdsge_mc_simulate_order1_step_ctx _simulate_order1_ctx
+    cdef sdsge_mc_simulate_order2_step_ctx _simulate_order2_ctx
     cdef sdsge_mc_standardize_step_ctx _standardize_ctx
     cdef sdsge_mc_log_step_ctx _log_ctx
     cdef sdsge_mc_log_diff_step_ctx _log_diff_ctx
     cdef sdsge_mc_diff_step_ctx _diff_ctx
     cdef sdsge_mc_rolling_mean_step_ctx _rolling_mean_ctx
     cdef sdsge_mc_rolling_var_step_ctx _rolling_var_ctx
+    cdef sdsge_mc_ols_step_ctx _ols_ctx
+    cdef sdsge_mc_jarque_bera_test_ctx _jarque_bera_ctx
 
     def __cinit__(self):
         self._n_batch = 0
@@ -212,6 +337,35 @@ cdef class NativeStep:
         self._input_n_int = -1
         self._output_n_float = -1
         self._output_n_int = -1
+
+    cdef void _bind(
+        self,
+        str name,
+        sdsge_mc_step_fn fn,
+        const void *ctx,
+        object backing,
+        int64_t n_batch,
+        int64_t input_n_float,
+        int64_t input_n_int,
+        int64_t output_n_float,
+        int64_t output_n_int,
+    ) except *:
+        """Finish one typed context after its factory has initialized it."""
+        if not name:
+            raise ValueError("Native step name must be non-empty.")
+        if fn == NULL or ctx == NULL:
+            raise ValueError("Native steps require a function and context.")
+        if n_batch < 0:
+            raise ValueError("Native step batch count must be non-negative.")
+        self._name = name
+        self._fn = fn
+        self._ctx = ctx
+        self._backing = backing
+        self._n_batch = n_batch
+        self._input_n_float = input_n_float
+        self._input_n_int = input_n_int
+        self._output_n_float = output_n_float
+        self._output_n_int = output_n_int
 
     @property
     def name(self):
@@ -268,8 +422,6 @@ def payload_step(str name, value):
     cdef cnp.ndarray input_array = np.ascontiguousarray(value, dtype=np.float64)
     cdef int64_t n
 
-    if not name:
-        raise ValueError("Native step name must be non-empty.")
     if input_array.ndim not in (1, 2, 3):
         raise ValueError("Payload input must be one-, two-, or three-dimensional.")
     if input_array.ndim == 3:
@@ -280,17 +432,178 @@ def payload_step(str name, value):
     else:
         n = input_array.size
 
-    step._name = name
-    step._backing = input_array
     step._payload_ctx.input = <const double *>cnp.PyArray_DATA(input_array)
     step._payload_ctx.n = n
     step._payload_ctx.input_batched = input_array.ndim == 3
-    step._fn = sdsge_mc_payload_runner
-    step._ctx = <const void *>&step._payload_ctx
-    step._input_n_float = 0
-    step._input_n_int = 0
-    step._output_n_float = n
-    step._output_n_int = 0
+    step._bind(
+        name,
+        sdsge_mc_payload_runner,
+        <const void *>&step._payload_ctx,
+        input_array,
+        step._n_batch,
+        0,
+        0,
+        n,
+        0,
+    )
+    return step
+
+
+def raw_model_data_step(str name, states=None, observables=None):
+    """Bind native raw data materialization with optional batched inputs."""
+    cdef NativeStep step = NativeStep()
+    cdef cnp.ndarray states_array
+    cdef cnp.ndarray observables_array
+    cdef int64_t n_states = 0
+    cdef int64_t n_observables = 0
+    cdef int64_t n_batch = 0
+    cdef int states_batched = 0
+    cdef int observables_batched = 0
+
+    if states is None and observables is None:
+        raise ValueError("Raw model data requires states or observables.")
+
+    if states is not None:
+        states_array = np.ascontiguousarray(states, dtype=np.float64)
+        if states_array.ndim not in (1, 2, 3):
+            raise ValueError("Raw states must be 1D, 2D, or 3D.")
+        states_batched = states_array.ndim == 3
+        n_states = (
+            states_array.size // states_array.shape[0]
+            if states_batched else states_array.size
+        )
+        n_batch = states_array.shape[0] if states_batched else 0
+        step._raw_model_data_ctx.states_input = <const double *>cnp.PyArray_DATA(
+            states_array
+        )
+    else:
+        states_array = None
+        step._raw_model_data_ctx.states_input = NULL
+
+    if observables is not None:
+        observables_array = np.ascontiguousarray(observables, dtype=np.float64)
+        if observables_array.ndim not in (1, 2, 3):
+            raise ValueError(
+                "Raw observables must be 1D, 2D, or 3D."
+            )
+        observables_batched = observables_array.ndim == 3
+        n_observables = (
+            observables_array.size // observables_array.shape[0]
+            if observables_batched else observables_array.size
+        )
+        if observables_batched:
+            if n_batch and n_batch != observables_array.shape[0]:
+                raise ValueError("Batched states and observables must share n_rep.")
+            n_batch = observables_array.shape[0]
+        step._raw_model_data_ctx.observables_input = <const double *>cnp.PyArray_DATA(
+            observables_array
+        )
+    else:
+        observables_array = None
+        step._raw_model_data_ctx.observables_input = NULL
+
+    step._raw_model_data_ctx.n_states = n_states
+    step._raw_model_data_ctx.states_batched = states_batched
+    step._raw_model_data_ctx.n_observables = n_observables
+    step._raw_model_data_ctx.observables_batched = observables_batched
+    step._bind(
+        name,
+        sdsge_mc_raw_model_data_runner,
+        <const void *>&step._raw_model_data_ctx,
+        (states_array, observables_array),
+        n_batch,
+        0,
+        0,
+        n_states + n_observables,
+        0,
+    )
+    return step
+
+
+def simulate1_step(
+    str name,
+    uintptr_t measurement_addr,
+    int64_t T,
+    int64_t n_var,
+    int64_t n_exog,
+    int64_t n_par,
+    int64_t n_obs,
+):
+    """Bind a first-order simulation with resolved dimensions and callback."""
+    cdef NativeStep step = NativeStep()
+
+    if T < 0 or n_exog < 0 or n_par < 0:
+        raise ValueError("Native simulation dimensions must be non-negative.")
+    if n_var <= 0:
+        raise ValueError("First-order simulation requires at least one variable.")
+    if n_obs < 0:
+        raise ValueError("Native simulation observation count must be non-negative.")
+    if n_obs and measurement_addr == 0:
+        raise ValueError("Observable simulation requires a measurement address.")
+
+    step._simulate_order1_ctx.measurement = (
+        <sdsge_measurement_fn><void *>measurement_addr
+    )
+    step._simulate_order1_ctx.T = T
+    step._simulate_order1_ctx.n = n_var
+    step._simulate_order1_ctx.k = n_exog
+    step._simulate_order1_ctx.n_par = n_par
+    step._simulate_order1_ctx.m = n_obs
+    step._bind(
+        name,
+        sdsge_mc_simulate_order1_runner,
+        <const void *>&step._simulate_order1_ctx,
+        None,
+        0,
+        sdsge_simulate_order1_arena_size(n_var, n_exog, T, n_par),
+        0,
+        T * (n_var + n_obs),
+        0,
+    )
+    return step
+
+
+def simulate2_step(
+    str name,
+    uintptr_t measurement_addr,
+    int64_t T,
+    int64_t n_state,
+    int64_t n_ctrl,
+    int64_t n_exog,
+    int64_t n_par,
+    int64_t n_obs,
+):
+    """Bind a second-order simulation with resolved dimensions and callback."""
+    cdef NativeStep step = NativeStep()
+    cdef int64_t n_var = n_state + n_ctrl
+
+    if T < 0 or n_state <= 0 or n_ctrl < 0 or n_exog < 0 or n_par < 0:
+        raise ValueError("Native simulation dimensions must be valid and non-negative.")
+    if n_obs < 0:
+        raise ValueError("Native simulation observation count must be non-negative.")
+    if n_obs and measurement_addr == 0:
+        raise ValueError("Observable simulation requires a measurement address.")
+
+    step._simulate_order2_ctx.measurement = (
+        <sdsge_measurement_fn><void *>measurement_addr
+    )
+    step._simulate_order2_ctx.T = T
+    step._simulate_order2_ctx.n_state = n_state
+    step._simulate_order2_ctx.n_ctrl = n_ctrl
+    step._simulate_order2_ctx.n_exog = n_exog
+    step._simulate_order2_ctx.n_par = n_par
+    step._simulate_order2_ctx.m = n_obs
+    step._bind(
+        name,
+        sdsge_mc_simulate_order2_runner,
+        <const void *>&step._simulate_order2_ctx,
+        None,
+        0,
+        sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par),
+        0,
+        T * (n_var + n_obs),
+        0,
+    )
     return step
 
 
@@ -308,54 +621,53 @@ def transform_step(
     cdef NativeStep step = NativeStep()
     cdef int64_t input_count
     cdef int64_t output_rows
+    cdef sdsge_mc_step_fn fn
+    cdef const void *ctx
 
-    if not name:
-        raise ValueError("Native step name must be non-empty.")
     if n < 0 or p < 0:
         raise ValueError("Transform dimensions must be non-negative.")
 
     input_count = n * p
-    step._name = name
     step._input_n_int = 0
     step._output_n_int = 0
     if kind == "standardize":
         step._standardize_ctx.n = n
         step._standardize_ctx.p = p
         step._standardize_ctx.ddof = ddof
-        step._fn = sdsge_mc_standardize_runner
-        step._ctx = <const void *>&step._standardize_ctx
+        fn = sdsge_mc_standardize_runner
+        ctx = <const void *>&step._standardize_ctx
         step._input_n_float = input_count + 2 * p
         step._output_n_float = input_count
     elif kind == "log":
         step._log_ctx.n = n
         step._log_ctx.p = p
         step._log_ctx.offset = offset
-        step._fn = sdsge_mc_log_runner
-        step._ctx = <const void *>&step._log_ctx
+        fn = sdsge_mc_log_runner
+        ctx = <const void *>&step._log_ctx
         step._input_n_float = input_count
         step._output_n_float = input_count
     elif kind == "log_diff":
         step._log_diff_ctx.n = n
         step._log_diff_ctx.p = p
         step._log_diff_ctx.offset = offset
-        step._fn = sdsge_mc_log_diff_runner
-        step._ctx = <const void *>&step._log_diff_ctx
+        fn = sdsge_mc_log_diff_runner
+        ctx = <const void *>&step._log_diff_ctx
         step._input_n_float = input_count + p
         step._output_n_float = max(0, n - 1) * p
     elif kind == "diff":
         step._diff_ctx.n = n
         step._diff_ctx.p = p
         step._diff_ctx.order = order
-        step._fn = sdsge_mc_diff_runner
-        step._ctx = <const void *>&step._diff_ctx
+        fn = sdsge_mc_diff_runner
+        ctx = <const void *>&step._diff_ctx
         step._input_n_float = input_count + max(0, order) * p
         step._output_n_float = max(0, n - order) * p
     elif kind == "rolling_mean":
         step._rolling_mean_ctx.n = n
         step._rolling_mean_ctx.p = p
         step._rolling_mean_ctx.window = window
-        step._fn = sdsge_mc_rolling_mean_runner
-        step._ctx = <const void *>&step._rolling_mean_ctx
+        fn = sdsge_mc_rolling_mean_runner
+        ctx = <const void *>&step._rolling_mean_ctx
         step._input_n_float = input_count + p
         output_rows = max(0, n - window + 1)
         step._output_n_float = output_rows * p
@@ -364,23 +676,81 @@ def transform_step(
         step._rolling_var_ctx.p = p
         step._rolling_var_ctx.window = window
         step._rolling_var_ctx.ddof = ddof
-        step._fn = (
+        fn = (
             sdsge_mc_rolling_var_runner
             if kind == "rolling_var"
             else sdsge_mc_rolling_std_runner
         )
-        step._ctx = <const void *>&step._rolling_var_ctx
+        ctx = <const void *>&step._rolling_var_ctx
         step._input_n_float = input_count + 2 * p
         output_rows = max(0, n - window + 1)
         step._output_n_float = output_rows * p
     else:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
+    step._bind(
+        name,
+        fn,
+        ctx,
+        None,
+        0,
+        step._input_n_float,
+        step._input_n_int,
+        step._output_n_float,
+        step._output_n_int,
+    )
+    return step
+
+
+def ols_step(str name, int64_t n, int64_t p, bint intercept=True):
+    """Bind the native OLS adapter after source staging has been compiled."""
+    cdef NativeStep step = NativeStep()
+
+    if n < 0 or p <= 0:
+        raise ValueError("OLS dimensions require n >= 0 and p > 0.")
+
+    step._ols_ctx.n = n
+    step._ols_ctx.p = p
+    step._ols_ctx.intercept = intercept
+    step._bind(
+        name,
+        sdsge_mc_ols_runner,
+        <const void *>&step._ols_ctx,
+        None,
+        0,
+        -1,
+        0,
+        2 * p + 2,
+        1,
+    )
+    return step
+
+
+def jarque_bera_step(str name, int64_t n):
+    """Bind the native Jarque-Bera adapter after source staging has compiled."""
+    cdef NativeStep step = NativeStep()
+
+    if n < 0:
+        raise ValueError("Jarque-Bera sample length must be non-negative.")
+
+    step._jarque_bera_ctx.n = n
+    step._bind(
+        name,
+        sdsge_mc_jarque_bera_test_runner,
+        <const void *>&step._jarque_bera_ctx,
+        None,
+        0,
+        -1,
+        0,
+        1,
+        1,
+    )
     return step
 
 
 def run(
     allocation,
     steps,
+    input_bindings=None,
     bint fail_fast=False,
     bint profile_steps=False,
 ):
@@ -397,6 +767,8 @@ def run(
     cdef double wall_elapsed_s = 0.0
     cdef object step_names = tuple(allocation.plan)
     cdef object step_arenas
+    cdef object step_binding_specs
+    cdef object binding_spec
     cdef NativeStep step
     cdef cnp.ndarray float_in_work
     cdef cnp.ndarray int_in_work
@@ -410,14 +782,26 @@ def run(
     cdef cnp.ndarray step_elapsed_s_by_worker
     cdef cnp.ndarray step_counts_by_worker
     cdef cnp.ndarray step_failures_by_worker
+    cdef cnp.ndarray binding_columns
+    cdef cnp.ndarray static_values
     cdef sdsge_mc_step_desc *descs
+    cdef sdsge_mc_float_input_binding *bindings = NULL
     cdef sdsge_mc_runner_ctx runner
+    cdef int64_t n_bindings = 0
+    cdef int64_t binding_idx = 0
+    cdef int64_t binding_offset = 0
 
     if n_steps == 0:
         raise ValueError("Native runner requires at least one step binding.")
     if n_steps != len(step_names):
         raise ValueError("Native bindings must cover every "
                          "allocated step exactly once.")
+    if input_bindings is None:
+        input_bindings = tuple(() for _ in range(n_steps))
+    if len(input_bindings) != n_steps:
+        raise ValueError("Native input bindings must match the step count.")
+    for step_binding_specs in input_bindings:
+        n_bindings += len(step_binding_specs)
 
     failure_step_by_rep = _require_arena(
         np.asarray(allocation.failure_step_by_rep).reshape(1, -1),
@@ -442,6 +826,13 @@ def run(
     if descs == NULL:
         raise MemoryError("Unable to allocate native Monte Carlo descriptors.")
     try:
+        if n_bindings:
+            bindings = <sdsge_mc_float_input_binding *>PyMem_Malloc(
+                n_bindings * sizeof(sdsge_mc_float_input_binding)
+            )
+            if bindings == NULL:
+                raise MemoryError("Unable to allocate native "
+                                  "Monte Carlo input bindings.")
         for step_idx in range(n_steps):
             step = steps[step_idx]
             if step._fn == NULL or step._ctx == NULL:
@@ -532,6 +923,77 @@ def run(
             descs[step_idx].float_retained_stride = float_retained.shape[1]
             descs[step_idx].int_retained_stride = int_retained.shape[1]
             descs[step_idx].ctx = step._ctx
+            step_binding_specs = input_bindings[step_idx]
+            descs[step_idx].n_float_input_bindings = len(step_binding_specs)
+            descs[step_idx].float_input_bindings = (
+                bindings + binding_offset if step_binding_specs else NULL
+            )
+            for binding_idx in range(len(step_binding_specs)):
+                binding_spec = step_binding_specs[binding_idx]
+                binding_columns = np.asarray(binding_spec.columns)
+                if (
+                    binding_columns.dtype != np.dtype(np.int64)
+                    or binding_columns.ndim != 1
+                    or not binding_columns.flags.c_contiguous
+                ):
+                    raise ValueError(
+                        "Native input binding columns must be contiguous int64 vectors."
+                    )
+                bindings[binding_offset + binding_idx].source_step_idx = (
+                    binding_spec.source_step_idx
+                )
+                bindings[binding_offset + binding_idx].source_offset = (
+                    binding_spec.source_offset
+                )
+                bindings[binding_offset + binding_idx].source_row_stride = (
+                    binding_spec.source_row_stride
+                )
+                bindings[binding_offset + binding_idx].row_start = (
+                        binding_spec.row_start
+                )
+                bindings[binding_offset + binding_idx].n_rows = binding_spec.n_rows
+                bindings[binding_offset + binding_idx].columns = (
+                    _int_data(binding_columns)
+                    if binding_columns.shape[0]
+                    else NULL
+                )
+                bindings[binding_offset + binding_idx].n_columns = (
+                    binding_columns.shape[0]
+                )
+                bindings[binding_offset + binding_idx].target_offset = (
+                    binding_spec.target_offset
+                )
+                bindings[binding_offset + binding_idx].target_row_stride = (
+                    binding_spec.target_row_stride
+                )
+                bindings[binding_offset + binding_idx].fill_value = (
+                        binding_spec.fill_value
+                )
+                if binding_spec.source_step_idx < -1:
+                    static_values = np.asarray(binding_spec.static_values)
+                    if (
+                        static_values.dtype != np.dtype(np.float64)
+                        or static_values.ndim != 1
+                        or not static_values.flags.c_contiguous
+                    ):
+                        raise ValueError(
+                            "Native static input bindings require "
+                            "contiguous float64 vectors."
+                        )
+                    bindings[binding_offset + binding_idx].static_source = _float_data(
+                        static_values
+                    )
+                    bindings[binding_offset + binding_idx].static_rep_stride = (
+                        binding_spec.static_rep_stride
+                    )
+                    bindings[binding_offset + binding_idx].static_batched = (
+                        binding_spec.static_batched
+                    )
+                else:
+                    bindings[binding_offset + binding_idx].static_source = NULL
+                    bindings[binding_offset + binding_idx].static_rep_stride = 0
+                    bindings[binding_offset + binding_idx].static_batched = 0
+            binding_offset += len(step_binding_specs)
 
         runner.steps = descs
         runner.n_steps = n_steps
@@ -578,4 +1040,5 @@ def run(
             step_failures_by_worker if profile_steps else None,
         )
     finally:
+        PyMem_Free(bindings)
         PyMem_Free(descs)

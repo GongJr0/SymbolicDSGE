@@ -11,6 +11,27 @@ typedef int (*sdsge_mc_step_fn)(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                                 i64 *SDSGE_RESTRICT int_work,
                                 i64 *SDSGE_RESTRICT int_out, const void *ctx);
 
+/* One compiled float-lane source transfer. ``source_step_idx`` is -1 for a
+ * constant fill, less than -1 for immutable static backing, and otherwise
+ * identifies an earlier producer's live output lane. Columns and row spans
+ * are resolved in Python, while the runner copies only the selected values
+ * into the consumer kernel's native input layout. */
+typedef struct {
+  i64 source_step_idx;
+  i64 source_offset;
+  i64 source_row_stride;
+  i64 row_start;
+  i64 n_rows;
+  const i64 *columns;
+  i64 n_columns;
+  i64 target_offset;
+  i64 target_row_stride;
+  f64 fill_value;
+  const f64 *static_source;
+  i64 static_rep_stride;
+  int static_batched;
+} sdsge_mc_float_input_binding;
+
 /* One compiled pipeline step. All arena bases come from Cython-owned NumPy
  * arrays. Worker strides select the temporary row for the executing worker.
  * The runner calls ``fn`` with that row's input/work and live output lanes,
@@ -32,6 +53,8 @@ typedef struct {
   i64 float_retained_stride;
   i64 int_retained_stride;
   const void *ctx;
+  const sdsge_mc_float_input_binding *float_input_bindings;
+  i64 n_float_input_bindings;
 } sdsge_mc_step_desc;
 
 /* One failure selected by the runner's atomic halt protocol. ``rep_idx`` and
