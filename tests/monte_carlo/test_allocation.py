@@ -3,24 +3,26 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.monte_carlo.allocation import BufferSpec, allocate_buffers
+from SymbolicDSGE.monte_carlo.allocation import _FieldSpec, _compile_field_layout
 
 
-def test_allocate_buffers_creates_nested_pipeline_owned_arrays() -> None:
-    buffers = allocate_buffers(
+def test_compile_field_layout_uses_separate_dtype_local_offsets() -> None:
+    size, fields = _compile_field_layout(
         {
-            "ols": {
-                "coef_trace": BufferSpec((4, 3), np.float64),
-                "status_trace": BufferSpec((4,), np.int64),
-            }
+            "payload": _FieldSpec((4, 3), np.float64),
+            "status": _FieldSpec((), np.int64),
+            "loglik": _FieldSpec((), np.float64),
+            "failure": _FieldSpec((2,), np.int64),
         }
     )
 
-    assert buffers["ols"]["coef_trace"].shape == (4, 3)
-    assert buffers["ols"]["coef_trace"].dtype == np.float64
-    assert buffers["ols"]["status_trace"].dtype == np.int64
+    assert size == (13, 3)
+    assert fields["payload"].offset == 0
+    assert fields["loglik"].offset == 12
+    assert fields["status"].offset == 0
+    assert fields["failure"].offset == 1
 
 
-def test_allocate_buffers_rejects_invalid_requests() -> None:
-    with pytest.raises(ValueError, match="negative dimension"):
-        allocate_buffers({"step": {"bad": BufferSpec((-1,), np.float64)}})
+def test_compile_field_layout_rejects_non_native_dtype() -> None:
+    with pytest.raises(TypeError, match="unsupported dtype"):
+        _compile_field_layout({"bad": _FieldSpec((1,), np.int32)})

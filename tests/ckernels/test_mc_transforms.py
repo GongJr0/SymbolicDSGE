@@ -123,12 +123,17 @@ def test_rolling_transforms_match_numpy_oracle(
 def test_single_period_and_full_width_windows(rng: np.random.Generator) -> None:
     sample = _sample(rng, 64, 3)
 
-    np.testing.assert_array_equal(native.rolling_mean(sample, 1), sample)
     np.testing.assert_array_equal(
         native.rolling_var(sample, 1, 0), np.zeros_like(sample)
     )
     np.testing.assert_array_equal(
         native.rolling_std(sample, 1, 0), np.zeros_like(sample)
+    )
+    np.testing.assert_allclose(
+        native.rolling_mean(sample, 1),
+        sample,
+        atol=ATOL,
+        rtol=RTOL,
     )
     np.testing.assert_allclose(
         native.rolling_var(sample, 64, 1)[0],

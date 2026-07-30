@@ -266,15 +266,16 @@ class MCStep:
     #: hand-built steps that bypassed the factories.
     step_type: str | None = None
 
+    # Currently no-op (-1 == n_rep), native will allocate outputs based on this value if set.
+    n_retain: int = -1
+
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("MCStep name must be non-empty.")
-        object.__setattr__(self, "op_type", OpType(self.op_type))
-        object.__setattr__(self, "kwargs", dict(self.kwargs))
-        object.__setattr__(self, "source_args", tuple(self.source_args))
-        # The pandas namespace is a post-loop-only privilege: a PandasCustomFunc
-        # in a per-rep step would reference pandas inside the replication loop,
-        # which the looser contract is not meant to sanction.
+
+        if self.n_retain < -1:
+            raise ValueError("MCStep n_retain must be -1 (retain all) or non-negative.")
+
         if (
             isinstance(self.func, PandasCustomFunc)
             and self.op_type is not OpType.POSTPROC
@@ -389,12 +390,25 @@ class MCMeta:
 
     @property
     def step_it_s(self) -> Mapping[str, float]:
+        return self.step_worker_it_s
+
+    @property
+    def step_worker_it_s(self) -> Mapping[str, float]:
+        """Exclusive per-step throughput from accumulated worker-seconds."""
         return {
             name: _iterations_per_second(
                 self.step_counts[name],
                 elapsed_s,
             )
             for name, elapsed_s in self.step_elapsed_s.items()
+        }
+
+    @property
+    def step_wall_it_s(self) -> Mapping[str, float]:
+        """Per-step throughput against the replication loop's wall time."""
+        return {
+            name: _iterations_per_second(self.step_counts[name], self.elapsed_s)
+            for name in self.step_elapsed_s
         }
 
     @property
@@ -526,15 +540,18 @@ def report_mc_step_performance(
     *,
     print_func: Callable[[str], None] = print,
 ) -> None:
-    step_rates = meta.step_it_s
+    worker_rates = meta.step_worker_it_s
+    wall_rates = meta.step_wall_it_s
     print_func(
         f"MC run concluded {_conclusion_word(meta.failed_steps == {})} in {meta.elapsed_s:.2f}s with {meta.it_s:.2f} it/s."
     )
     print_func(f"Per-step Report:\n")
     for step_name in meta.step_elapsed_s:
         print_func(
-            f"\t{step_name}: {meta.step_failures[step_name]} faliures, "
-            f"{step_rates[step_name]:.2f} it/s ({meta.step_elapsed_s[step_name]:.2f}s)."
+            f"\t{step_name}: {meta.step_failures[step_name]} failures, "
+            f"{worker_rates[step_name]:.2f} worker it/s "
+            f"({meta.step_elapsed_s[step_name]:.2f} worker-s), "
+            f"{wall_rates[step_name]:.2f} wall it/s."
         )
 
     if meta.postproc_elapsed_s:

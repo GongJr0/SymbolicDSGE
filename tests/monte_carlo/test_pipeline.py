@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -21,7 +22,7 @@ from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult
 from SymbolicDSGE.kalman.config import KalmanConfig
-from SymbolicDSGE.monte_carlo.allocation import BufferSpec
+from SymbolicDSGE.monte_carlo.allocation import ArenaSize, FieldLayout, StepBufferPlan
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     MCContext,
@@ -71,14 +72,41 @@ from SymbolicDSGE.regression.lasso import LassoResult
 from SymbolicDSGE.regression.ridge import RidgeResult
 
 
+def _assert_output_plan(
+    plan: StepBufferPlan,
+    name: str,
+    *fields: tuple[str, tuple[int, ...], object],
+) -> None:
+    float_offset = 0
+    int_offset = 0
+    layouts: dict[str, FieldLayout] = {}
+    for field_name, shape, raw_dtype in fields:
+        dtype = np.dtype(raw_dtype)
+        flat_count = int(np.prod(shape, dtype=np.intp)) if shape else 1
+        if dtype == np.dtype(np.float64):
+            offset = float_offset
+            float_offset += flat_count
+        else:
+            assert dtype == np.dtype(np.int64)
+            offset = int_offset
+            int_offset += flat_count
+        layouts[field_name] = FieldLayout(shape, flat_count, dtype, offset)
+    assert plan.name == name
+    assert plan.output_size == ArenaSize(float_offset, int_offset)
+    assert plan.out_fields == layouts
+    assert plan.n_retain == -1
+
+
 class _FakeSolvedModel:
     def __init__(self, offset: float = 0.0) -> None:
         self.offset = offset
         self.compiled = SimpleNamespace(
             idx={"x": 0, "z": 1},
             var_names=["x", "z"],
+            n_state=1,
             n_exog=1,
             observable_names=["obs"],
+            calib_params=[],
         )
         self.kalman_calls: list[dict] = []
         self.sim_shocks: list[dict[str, np.ndarray]] = []
@@ -913,6 +941,8 @@ def test_pipeline_result_reports_overall_and_step_performance() -> None:
     assert out.meta.step_counts == {"datagen": 2, "state_mean": 2}
     assert out.meta.step_failures == {"datagen": 0, "state_mean": 0}
     assert set(out.meta.step_it_s) == {"datagen", "state_mean"}
+    assert set(out.meta.step_worker_it_s) == {"datagen", "state_mean"}
+    assert set(out.meta.step_wall_it_s) == {"datagen", "state_mean"}
 
     lines: list[str] = []
     report_mc_performance(out.meta, print_func=lines.append)
@@ -921,11 +951,12 @@ def test_pipeline_result_reports_overall_and_step_performance() -> None:
 
     lines.clear()
     out.report_step_performance(print_func=lines.append)
-    # Overall header, then an indented it/s line per step. The post-processing
-    # section is suppressed entirely because this pipeline has no postproc steps.
+    # Overall header, then an indented worker and wall it/s line per step. The
+    # post-processing section is suppressed because this pipeline has no
+    # postproc steps.
     assert lines[0].startswith("MC run concluded successfully in ")
-    assert any("datagen" in line and line.endswith("s).") for line in lines)
-    assert any("state_mean" in line and line.endswith("s).") for line in lines)
+    assert any("datagen" in line and "wall it/s." in line for line in lines)
+    assert any("state_mean" in line and "wall it/s." in line for line in lines)
     assert not any("Post-processing Report" in line for line in lines)
 
     lines.clear()
@@ -962,8 +993,8 @@ def test_pipeline_run_verbosity_controls_performance_output(
     pipeline.run(reference=reference, n_rep=2, verbosity=2)
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines[0].startswith("MC run concluded successfully in ")
-    assert any("datagen" in line and line.endswith("s).") for line in lines)
-    assert any("state_mean" in line and line.endswith("s).") for line in lines)
+    assert any("datagen" in line and "wall it/s." in line for line in lines)
+    assert any("state_mean" in line and "wall it/s." in line for line in lines)
     assert not any("Post-processing Report" in line for line in lines)
 
     with pytest.raises(ValueError, match="verbosity"):
@@ -1170,17 +1201,22 @@ def test_output_shape_resolution_tracks_selected_transform_payloads() -> None:
 
     specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
 
-    assert specs == {
-        "datagen": {"observables": BufferSpec((8, 3), np.float64)},
-        "growth": {"payload": BufferSpec((6, 2), np.float64)},
-        "ols": {
-            "coef": BufferSpec((2,), np.float64),
-            "se": BufferSpec((2,), np.float64),
-            "ssr": BufferSpec((), np.float64),
-            "sst": BufferSpec((), np.float64),
-            "status": BufferSpec((), np.int64),
-        },
-    }
+    _assert_output_plan(
+        specs["datagen"], "datagen", ("observables", (8, 3), np.float64)
+    )
+    _assert_output_plan(specs["growth"], "growth", ("payload", (6, 2), np.float64))
+    _assert_output_plan(
+        specs["ols"],
+        "ols",
+        ("coef", (2,), np.float64),
+        ("ssr", (), np.float64),
+        ("sst", (), np.float64),
+        ("status", (), np.int64),
+        ("se", (2,), np.float64),
+    )
+    assert specs["datagen"].input_size == ArenaSize()
+    assert specs["growth"].input_size == ArenaSize(16, 0)
+    assert specs["ols"].input_size == ArenaSize(30, 0)
 
 
 @pytest.mark.parametrize(
@@ -1206,12 +1242,14 @@ def test_output_specs_for_non_ols_regressions(kind: str) -> None:
 
     specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
 
-    assert specs[kind] == {
-        "coef": BufferSpec((2,), np.float64),
-        "ssr": BufferSpec((), np.float64),
-        "sst": BufferSpec((), np.float64),
-        "status": BufferSpec((), np.int64),
-    }
+    _assert_output_plan(
+        specs[kind],
+        kind,
+        ("coef", (2,), np.float64),
+        ("ssr", (), np.float64),
+        ("sst", (), np.float64),
+        ("status", (), np.int64),
+    )
 
 
 @pytest.mark.parametrize("filter_mode", ("linear", "extended"))
@@ -1237,19 +1275,21 @@ def test_output_shape_resolution_includes_linear_filter_fields(
 
     specs = pipeline._resolve_output_specs(reference, None)
 
-    assert specs["filter"] == {
-        "x_pred": BufferSpec((8, 2), np.float64),
-        "x_filt": BufferSpec((8, 2), np.float64),
-        "P_pred": BufferSpec((8, 2, 2), np.float64),
-        "P_filt": BufferSpec((8, 2, 2), np.float64),
-        "y_pred": BufferSpec((8, 2), np.float64),
-        "y_filt": BufferSpec((8, 2), np.float64),
-        "innov": BufferSpec((8, 2), np.float64),
-        "std_innov": BufferSpec((8, 2), np.float64),
-        "S": BufferSpec((8, 2, 2), np.float64),
-        "eps_hat": BufferSpec((8, 1), np.float64),
-        "loglik": BufferSpec((), np.float64),
-    }
+    _assert_output_plan(
+        specs["filter"],
+        "filter",
+        ("x_pred", (8, 2), np.float64),
+        ("x_filt", (8, 2), np.float64),
+        ("P_pred", (8, 2, 2), np.float64),
+        ("P_filt", (8, 2, 2), np.float64),
+        ("y_pred", (8, 2), np.float64),
+        ("y_filt", (8, 2), np.float64),
+        ("innov", (8, 2), np.float64),
+        ("std_innov", (8, 2), np.float64),
+        ("S", (8, 2, 2), np.float64),
+        ("eps_hat", (8, 1), np.float64),
+        ("loglik", (), np.float64),
+    )
 
 
 def test_output_shape_resolution_includes_scalar_test_channels() -> None:
@@ -1265,11 +1305,12 @@ def test_output_shape_resolution_includes_scalar_test_channels() -> None:
 
     specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
 
-    assert specs["jb"] == {
-        "statistic": BufferSpec((), np.float64),
-        "pval": BufferSpec((), np.float64),
-        "status": BufferSpec((), np.int64),
-    }
+    _assert_output_plan(
+        specs["jb"],
+        "jb",
+        ("statistic", (), np.float64),
+        ("status", (), np.int64),
+    )
 
 
 def test_output_shape_resolution_normalizes_payload_values_to_source_shapes() -> None:
@@ -1283,8 +1324,20 @@ def test_output_shape_resolution_normalizes_payload_values_to_source_shapes() ->
 
     specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
 
-    assert specs["vector"] == {"payload": BufferSpec((4, 1), np.float64)}
-    assert specs["matrix"] == {"payload": BufferSpec((4, 2), np.float64)}
+    _assert_output_plan(specs["vector"], "vector", ("payload", (4, 1), np.float64))
+    _assert_output_plan(specs["matrix"], "matrix", ("payload", (4, 2), np.float64))
+
+
+def test_output_plan_carries_step_retention_count() -> None:
+    datagen = replace(
+        raw_model_data_step(observables=np.zeros((4, 1), dtype=np.float64)),
+        n_retain=2,
+    )
+    pipeline = MCPipeline([datagen])
+
+    specs = pipeline._resolve_output_specs(_FakeSolvedModel(), None)
+
+    assert specs["datagen"].n_retain == 2
 
 
 def test_output_shape_resolution_includes_unscented_filter_fields(
@@ -1318,22 +1371,24 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     n_state = reference.compiled.n_state
     n_z = 2 * n_state
 
-    assert specs["filter"] == {
-        "x_pred": BufferSpec((T, n_var), np.float64),
-        "x_filt": BufferSpec((T, n_var), np.float64),
-        "y_pred": BufferSpec((T, n_obs), np.float64),
-        "y_filt": BufferSpec((T, n_obs), np.float64),
-        "S": BufferSpec((T, n_obs, n_obs), np.float64),
-        "innov": BufferSpec((T, n_obs), np.float64),
-        "std_innov": BufferSpec((T, n_obs), np.float64),
-        "P_pred": BufferSpec((T, n_z, n_z), np.float64),
-        "P_filt": BufferSpec((T, n_z, n_z), np.float64),
-        "x1_pred": BufferSpec((T, n_state), np.float64),
-        "x1_filt": BufferSpec((T, n_state), np.float64),
-        "x2_pred": BufferSpec((T, n_state), np.float64),
-        "x2_filt": BufferSpec((T, n_state), np.float64),
-        "loglik": BufferSpec((), np.float64),
-    }
+    _assert_output_plan(
+        specs["filter"],
+        "filter",
+        ("x_pred", (T, n_var), np.float64),
+        ("x_filt", (T, n_var), np.float64),
+        ("P_pred", (T, n_z, n_z), np.float64),
+        ("P_filt", (T, n_z, n_z), np.float64),
+        ("y_pred", (T, n_obs), np.float64),
+        ("y_filt", (T, n_obs), np.float64),
+        ("innov", (T, n_obs), np.float64),
+        ("std_innov", (T, n_obs), np.float64),
+        ("S", (T, n_obs, n_obs), np.float64),
+        ("loglik", (), np.float64),
+        ("x1_pred", (T, n_state), np.float64),
+        ("x2_pred", (T, n_state), np.float64),
+        ("x1_filt", (T, n_state), np.float64),
+        ("x2_filt", (T, n_state), np.float64),
+    )
 
 
 def test_regression_step_runs_ols_and_stores_result_payload() -> None:
@@ -1718,8 +1773,8 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     lines.clear()
     report_mc_step_performance(out.meta, print_func=lines.append)
     assert lines[0].startswith("MC run concluded unsuccessfully in ")
-    assert any("datagen" in line and line.endswith("s).") for line in lines)
-    assert any("state_mean" in line and line.endswith("s).") for line in lines)
+    assert any("datagen" in line and "wall it/s." in line for line in lines)
+    assert any("state_mean" in line and "wall it/s." in line for line in lines)
 
 
 def test_mc_operation_utils_validate_seeded_shock_specs() -> None:

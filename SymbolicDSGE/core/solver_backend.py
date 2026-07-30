@@ -61,10 +61,10 @@ class PerturbationSolution:
     eig: NDC
     order: int
     steady_state: NDF
-    gxx: NDF | None = None
-    hxx: NDF | None = None
-    gss: NDF | None = None
-    hss: NDF | None = None
+    gxx: NDF
+    hxx: NDF
+    gss: NDF
+    hss: NDF
 
 
 def klein_solve(
