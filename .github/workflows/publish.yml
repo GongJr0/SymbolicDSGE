@@ -59,11 +59,29 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew install llvm libomp
+          brew install cmake llvm
           llvm_prefix="$(brew --prefix llvm)"
-          libomp_prefix="$(brew --prefix libomp)"
+          llvm_version="22.1.8"
+          libomp_prefix="${RUNNER_TEMP}/libomp"
+          llvm_source="${RUNNER_TEMP}/llvm-project-${llvm_version}.src"
+          curl --fail --location \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-${llvm_version}/llvm-project-${llvm_version}.src.tar.xz" \
+            --output "${RUNNER_TEMP}/llvm-project.tar.xz"
+          tar -xf "${RUNNER_TEMP}/llvm-project.tar.xz" -C "${RUNNER_TEMP}"
+          cmake -S "${llvm_source}/runtimes" -B "${RUNNER_TEMP}/libomp-build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${libomp_prefix}" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DLIBOMP_INSTALL_ALIASES=OFF \
+            -DLLVM_ENABLE_RUNTIMES=openmp \
+            -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
+            -DOPENMP_ENABLE_OMPT_TOOLS=OFF
+          cmake --build "${RUNNER_TEMP}/libomp-build" --parallel
+          cmake --install "${RUNNER_TEMP}/libomp-build"
           echo "CC=${llvm_prefix}/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=${llvm_prefix}/bin/clang++" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
           echo "CFLAGS=-I${libomp_prefix}/include" >> "$GITHUB_ENV"
           echo "LDFLAGS=-L${libomp_prefix}/lib -Wl,-rpath,${libomp_prefix}/lib" >> "$GITHUB_ENV"
 
