@@ -245,11 +245,12 @@ def test_perf_report_separates_postproc_runtime_from_it_s() -> None:
     assert lines[1].startswith("Post-processing concluded successfully in ")
     assert lines[1].endswith("s.") and "it/s" not in lines[1]
 
-    # verbosity=2: per-rep steps as it/s; postproc in its own section as runtime.
+    # verbosity=2: per-rep steps report worker and wall it/s; postproc remains
+    # in its own section as runtime.
     lines.clear()
     result.report_step_performance(print_func=lines.append)
     assert lines[0].startswith("MC run concluded")
-    assert any("jb" in line and line.endswith("s).") for line in lines)
+    assert any("jb" in line and "wall it/s." in line for line in lines)
     assert any("Post-processing Report" in line for line in lines)
     pp_line = next(line for line in lines if line.strip().startswith("pp:"))
     assert pp_line.endswith("s.") and "it/s" not in pp_line

@@ -107,6 +107,9 @@ def test_result_document_drops_bulk_traces_and_is_json_safe() -> None:
     result = _run_demo_pipeline()
     document = result_document(result, run_id="r1")
 
+    assert set(document["step_worker_it_s"]) == {"datagen", "jb", "ols"}
+    assert set(document["step_wall_it_s"]) == {"datagen", "jb", "ols"}
+
     test_entry = document["test_summaries"]["jb"]
     for key in ("statistic_trace", "pval_trace", "status_trace"):
         assert key not in test_entry

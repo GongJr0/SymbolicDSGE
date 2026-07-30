@@ -7,6 +7,10 @@ class NativeRunResult(NamedTuple):
     halt_rep_idx: int
     halt_step_idx: int
     halt_status: int
+    wall_elapsed_s: float
+    step_elapsed_s_by_worker: object
+    step_counts_by_worker: object
+    step_failures_by_worker: object
 
 class NativeStep:
     @property
@@ -27,4 +31,5 @@ def run(
     allocation: ArenaAllocation,
     steps: Sequence[NativeStep],
     fail_fast: bool = False,
+    profile_steps: bool = False,
 ) -> NativeRunResult: ...

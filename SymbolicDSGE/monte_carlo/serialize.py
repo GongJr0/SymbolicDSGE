@@ -60,6 +60,8 @@ def serialize_pipeline_result(
         "it_s": result.meta.it_s,
         "step_elapsed_s": dict(result.meta.step_elapsed_s),
         "step_it_s": dict(result.meta.step_it_s),
+        "step_worker_it_s": dict(result.meta.step_worker_it_s),
+        "step_wall_it_s": dict(result.meta.step_wall_it_s),
         "step_counts": dict(result.meta.step_counts),
         "step_failures": dict(result.meta.step_failures),
         "postproc_elapsed_s": dict(result.meta.postproc_elapsed_s),

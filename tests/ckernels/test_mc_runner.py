@@ -39,6 +39,26 @@ def test_runner_lowers_arenas_and_retains_batched_payload_rows() -> None:
     assert allocation.failure_status_by_rep.tolist() == [0] * 5
 
 
+def test_runner_profiles_step_work_per_worker_and_wall_time() -> None:
+    payload = np.arange(10.0).reshape(5, 2, 1)
+    allocation = allocate_arenas(_plan("payload", 0, 2), 5, n_jobs=2)
+
+    result = run(
+        allocation,
+        [payload_step("payload", payload)],
+        profile_steps=True,
+    )
+
+    assert result.status == 0
+    assert result.wall_elapsed_s > 0.0
+    assert result.step_elapsed_s_by_worker.shape == (2, 1)
+    assert result.step_counts_by_worker.shape == (2, 1)
+    assert result.step_failures_by_worker.shape == (2, 1)
+    assert result.step_elapsed_s_by_worker.min() >= 0.0
+    assert result.step_counts_by_worker.sum() == 5
+    assert result.step_failures_by_worker.sum() == 0
+
+
 def test_runner_passes_null_for_zero_width_optional_integer_output() -> None:
     allocation = allocate_arenas(_plan("log", 4, 4), 3, n_jobs=2)
     allocation.steps["log"].float_in_work[:] = np.array(

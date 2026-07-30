@@ -58,6 +58,8 @@ jobs:
       # Reads [tool.cibuildwheel] from pyproject; builds + per-platform tests.
       - name: Build & test wheels
         uses: pypa/cibuildwheel@v4.1.0
+        env:
+          CIBW_ENVIRONMENT_WINDOWS: SDSGE_TOOLCHAIN=clang-cl
 
       - name: Upload wheels
         if: github.event_name != 'pull_request'

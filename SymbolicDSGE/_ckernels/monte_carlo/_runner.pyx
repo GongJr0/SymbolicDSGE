@@ -7,6 +7,7 @@ module combines both at call time, releases the GIL for the native replication
 loop, and leaves results in the allocation's retained arrays.
 """
 
+from time import perf_counter
 from typing import NamedTuple
 
 import numpy as np
@@ -58,6 +59,10 @@ cdef extern from "runner.h":
         sdsge_mc_failure halt_failure
         int64_t *failure_step_by_rep
         int64_t *failure_status_by_rep
+        int profile_steps
+        double *step_elapsed_s_by_worker
+        int64_t *step_counts_by_worker
+        int64_t *step_failures_by_worker
 
     int sdsge_mc_run(sdsge_mc_runner_ctx *runner) noexcept nogil
 
@@ -175,6 +180,10 @@ class NativeRunResult(NamedTuple):
     halt_rep_idx: int
     halt_step_idx: int
     halt_status: int
+    wall_elapsed_s: float
+    step_elapsed_s_by_worker: object
+    step_counts_by_worker: object
+    step_failures_by_worker: object
 
 
 cdef class NativeStep:
@@ -369,7 +378,12 @@ def transform_step(
     return step
 
 
-def run(allocation, steps, bint fail_fast=False):
+def run(
+    allocation,
+    steps,
+    bint fail_fast=False,
+    bint profile_steps=False,
+):
     """Lower ``allocation`` and static bindings, then invoke the native loop.
 
     Bindings must follow the allocation plan's step order. The allocation keeps
@@ -379,6 +393,8 @@ def run(allocation, steps, bint fail_fast=False):
     cdef int64_t n_steps = len(steps)
     cdef int64_t step_idx
     cdef int status
+    cdef double wall_started_s = 0.0
+    cdef double wall_elapsed_s = 0.0
     cdef object step_names = tuple(allocation.plan)
     cdef object step_arenas
     cdef NativeStep step
@@ -391,6 +407,9 @@ def run(allocation, steps, bint fail_fast=False):
     cdef cnp.ndarray retained_row_by_rep
     cdef cnp.ndarray failure_step_by_rep
     cdef cnp.ndarray failure_status_by_rep
+    cdef cnp.ndarray step_elapsed_s_by_worker
+    cdef cnp.ndarray step_counts_by_worker
+    cdef cnp.ndarray step_failures_by_worker
     cdef sdsge_mc_step_desc *descs
     cdef sdsge_mc_runner_ctx runner
 
@@ -525,13 +544,38 @@ def run(allocation, steps, bint fail_fast=False):
         runner.halt_failure.status = 0
         runner.failure_step_by_rep = _int_data(failure_step_by_rep)
         runner.failure_status_by_rep = _int_data(failure_status_by_rep)
+        runner.profile_steps = profile_steps
+        if profile_steps:
+            step_elapsed_s_by_worker = np.empty(
+                (allocation.n_workers, n_steps), dtype=np.float64
+            )
+            step_counts_by_worker = np.empty(
+                (allocation.n_workers, n_steps), dtype=np.int64
+            )
+            step_failures_by_worker = np.empty(
+                (allocation.n_workers, n_steps), dtype=np.int64
+            )
+            runner.step_elapsed_s_by_worker = _float_data(step_elapsed_s_by_worker)
+            runner.step_counts_by_worker = _int_data(step_counts_by_worker)
+            runner.step_failures_by_worker = _int_data(step_failures_by_worker)
+            wall_started_s = perf_counter()
+        else:
+            runner.step_elapsed_s_by_worker = NULL
+            runner.step_counts_by_worker = NULL
+            runner.step_failures_by_worker = NULL
         with nogil:
             status = sdsge_mc_run(&runner)
+        if profile_steps:
+            wall_elapsed_s = perf_counter() - wall_started_s
         return NativeRunResult(
             status,
             runner.halt_failure.rep_idx,
             runner.halt_failure.step_idx,
             runner.halt_failure.status,
+            wall_elapsed_s,
+            step_elapsed_s_by_worker if profile_steps else None,
+            step_counts_by_worker if profile_steps else None,
+            step_failures_by_worker if profile_steps else None,
         )
     finally:
         PyMem_Free(descs)

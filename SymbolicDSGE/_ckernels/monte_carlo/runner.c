@@ -12,6 +12,12 @@ static int valid_runner(const sdsge_mc_runner_ctx *runner) {
       runner->n_workers > INT_MAX) {
     return 0;
   }
+  if (runner->profile_steps &&
+      (runner->step_elapsed_s_by_worker == NULL ||
+       runner->step_counts_by_worker == NULL ||
+       runner->step_failures_by_worker == NULL)) {
+    return 0;
+  }
 
   for (i64 step_idx = 0; step_idx < runner->n_steps; ++step_idx) {
     const sdsge_mc_step_desc *step = runner->steps + step_idx;
@@ -123,6 +129,16 @@ static void initialize_run_state(sdsge_mc_runner_ctx *runner) {
     runner->failure_step_by_rep[rep_idx] = SDSGE_MC_NOT_RUN;
     runner->failure_status_by_rep[rep_idx] = SDSGE_MC_NOT_RUN;
   }
+  if (runner->profile_steps) {
+    for (i64 worker_idx = 0; worker_idx < runner->n_workers; ++worker_idx) {
+      const i64 offset = worker_idx * runner->n_steps;
+      for (i64 step_idx = 0; step_idx < runner->n_steps; ++step_idx) {
+        runner->step_elapsed_s_by_worker[offset + step_idx] = 0.0;
+        runner->step_counts_by_worker[offset + step_idx] = 0;
+        runner->step_failures_by_worker[offset + step_idx] = 0;
+      }
+    }
+  }
 }
 
 int sdsge_mc_run(sdsge_mc_runner_ctx *runner) {
@@ -145,6 +161,10 @@ int sdsge_mc_run(sdsge_mc_runner_ctx *runner) {
     int status = SDSGE_MC_RUN_OK;
     for (i64 step_idx = 0; step_idx < runner->n_steps; ++step_idx) {
       const sdsge_mc_step_desc *step = runner->steps + step_idx;
+      f64 step_started_s = 0.0;
+      if (runner->profile_steps) {
+        step_started_s = omp_get_wtime();
+      }
       status = step->fn(
           rep_idx,
           worker_float_lane(step->float_in_work, worker_idx,
@@ -157,6 +177,13 @@ int sdsge_mc_run(sdsge_mc_runner_ctx *runner) {
                           step->int_live_out_worker_stride),
           step->ctx);
       if (status != SDSGE_MC_RUN_OK) {
+        if (runner->profile_steps) {
+          const i64 offset = worker_idx * runner->n_steps + step_idx;
+          runner->step_elapsed_s_by_worker[offset] +=
+              omp_get_wtime() - step_started_s;
+          runner->step_counts_by_worker[offset] += 1;
+          runner->step_failures_by_worker[offset] += 1;
+        }
         runner->failure_step_by_rep[rep_idx] = step_idx;
         runner->failure_status_by_rep[rep_idx] = status;
         if (runner->fail_fast) {
@@ -165,6 +192,12 @@ int sdsge_mc_run(sdsge_mc_runner_ctx *runner) {
         break;
       }
       retain_step_output(step, rep_idx, worker_idx);
+      if (runner->profile_steps) {
+        const i64 offset = worker_idx * runner->n_steps + step_idx;
+        runner->step_elapsed_s_by_worker[offset] +=
+            omp_get_wtime() - step_started_s;
+        runner->step_counts_by_worker[offset] += 1;
+      }
     }
 
     if (status == SDSGE_MC_RUN_OK) {

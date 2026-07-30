@@ -59,7 +59,10 @@ typedef struct {
  * new replications when ``fail_fast`` is nonzero.
  *
  * Before returning, the runner sets every retained row belonging to a failed
- * or unfinished replication to defined sentinels. */
+ * or unfinished replication to defined sentinels. When ``profile_steps`` is
+ * nonzero, each profiling array has ``n_workers * n_steps`` entries in
+ * worker-major order. The runner clears and writes only the executing
+ * worker's row, so profiling adds no synchronization to the hot loop. */
 
 typedef struct {
   const sdsge_mc_step_desc *steps;
@@ -71,6 +74,10 @@ typedef struct {
   sdsge_mc_failure halt_failure;
   i64 *failure_step_by_rep;
   i64 *failure_status_by_rep;
+  int profile_steps;
+  f64 *step_elapsed_s_by_worker;
+  i64 *step_counts_by_worker;
+  i64 *step_failures_by_worker;
 } sdsge_mc_runner_ctx;
 
 int sdsge_mc_run(sdsge_mc_runner_ctx *runner);
