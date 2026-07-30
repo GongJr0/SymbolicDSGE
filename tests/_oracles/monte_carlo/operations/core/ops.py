@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+from typing import Literal, Mapping, Sequence
+
+import numpy as np
+from numpy import float64, ndarray
+
+
+from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
+from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
+
+
+def simulate(
+    *,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    target: Literal["reference", "dgp"] = "dgp",
+    T: int,
+    shocks: ShockMapping | None = None,
+    seed_increment: SeedIncrement = "auto",
+    shock_scale: float | float64 = 1.0,
+    x0: ndarray | None = None,
+    observables: bool = True,
+) -> MCData:
+    target_valid = target in ("reference", "dgp")
+    if not target_valid:
+        raise ValueError(f"Invalid target '{target}'; must be 'reference' or 'dgp'.")
+    model = reference if target == "reference" else dgp
+    if model is None:
+        raise ValueError(f"simulate requires a {target} SolvedModel.")
+
+    sim_shocks = _clone_or_pass_shocks(
+        shocks,
+        T=T,
+        rep_idx=rep_idx,
+        seed_increment=seed_increment,
+    )
+    states = np.ascontiguousarray(
+        model._simulate_state_matrix(
+            T=T,
+            shocks=sim_shocks,
+            shock_scale=shock_scale,
+            x0=x0,
+        ),
+        dtype=np.float64,
+    )
+    obs_names = (
+        tuple(getattr(model.compiled, "observable_names", ())) if observables else ()
+    )
+    obs_mat = None
+    raw: dict[str, np.ndarray] = {
+        name: states[:, model.compiled.idx[name]] for name in model.compiled.var_names
+    }
+    raw["_X"] = states
+    if obs_names:
+        obs_full = model._simulate_observable_matrix(states, drop_initial=False)
+        obs_mat = np.ascontiguousarray(obs_full, dtype=np.float64)
+        for i, name in enumerate(obs_names):
+            raw[name] = obs_full[:, i]
+    return MCData(
+        states=states,
+        observables=obs_mat,
+        raw=raw,
+        n_exog=model.compiled.n_exog,
+        observable_names=obs_names,
+    )
+
+
+def raw_model_data_datagen(
+    *,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    states: NDF | None = None,
+    observables: NDF | None = None,
+    raw: Mapping[str, NDF] | None = None,
+    observable_names: Sequence[str] = (),
+) -> MCData:
+    del reference, dgp
+    if states is None and observables is None:
+        raise ValueError(
+            "raw_model_data_datagen requires states, observables, or both."
+        )
+
+    state_mat = None
+    if states is not None:
+        state_mat = _select_raw_rep_array("states", states, rep_idx)
+    obs_mat = None
+    if observables is not None:
+        obs_mat = _select_raw_rep_array("observables", observables, rep_idx)
+    raw_payload: dict[str, NDF] = {}
+    if state_mat is not None:
+        raw_payload["_X"] = state_mat
+    if raw is not None:
+        raw_payload.update(
+            {
+                key: _select_raw_rep_array(f"raw['{key}']", value, rep_idx)
+                for key, value in raw.items()
+            }
+        )
+    return MCData(
+        states=state_mat,
+        observables=obs_mat,
+        n_exog=-1,
+        raw=raw_payload,
+        observable_names=tuple(observable_names),
+    )
+
+
+def run_reference_filter(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+    observables: list[str] | None = None,
+    x0: NDF | None = None,
+    jitter: float | float64 | None = None,
+    symmetrize: bool | None = None,
+    return_shocks: bool = False,
+    P0: NDF | None = None,
+    R: NDF | None = None,
+) -> FilterRawResult | UnscentedFilterRawResult:
+    del dgp, rep_idx
+    data = context.require_data()
+    if data.observables is None:
+        raise ValueError("Reference filter step requires generated observables.")
+    obs = observables
+    if obs is None and data.observable_names:
+        obs = list(data.observable_names)
+    return reference._kalman_raw(
+        y=data.observables,
+        filter_mode=filter_mode,
+        observables=obs,
+        x0=x0,
+        jitter=jitter,
+        symmetrize=symmetrize,
+        return_shocks=return_shocks,
+        P0=P0,
+        R=R,
+    )
+
+
+def add_payload(
+    *,
+    context: MCContext,
+    reference: SolvedModel,
+    dgp: SolvedModel | None,
+    rep_idx: int,
+    value: (
+        NDF
+        | Sequence[float]
+        | Sequence[Sequence[float]]
+        | Sequence[Sequence[Sequence[float]]]
+    ),
+) -> NDF:
+    del context, reference, dgp
+
+    out = np.asarray(value, dtype=np.float64)
+    if out.ndim not in (1, 2, 3):
+        raise ValueError(f"Payload must be 1-D, 2-D, or 3-D; got {out.ndim}-D.")
+    if out.ndim == 3:
+        rep_payload: NDF = out[rep_idx]
+        return rep_payload
+    return out

@@ -1,4 +1,7 @@
-"""Reference (numba / numpy) implementations kept as parity oracles for the
-native ``_ckernels`` kernels. Not part of the shipped library; imported only by
-the parity tests via ``from _oracles.<subsystem> import ...`` (``tests`` is on
-the path through ``pythonpath`` in ``[tool.pytest.ini_options]``)."""
+"""Reference implementations kept as parity oracles for native kernels.
+
+The ``monte_carlo`` package is a complete snapshot of the former Python Monte
+Carlo stack. It is test-only and intentionally independent from the live native
+lowering path. Tests import oracle modules through ``_oracles.<subsystem>``
+because ``tests`` is on ``pythonpath`` in ``[tool.pytest.ini_options]``.
+"""
