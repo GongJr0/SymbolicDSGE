@@ -55,6 +55,18 @@ jobs:
         if: github.event_name != 'pull_request'
         run: python scripts/build_frontend.py
 
+      - name: Set up macOS OpenMP toolchain
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install llvm libomp
+          llvm_prefix="$(brew --prefix llvm)"
+          libomp_prefix="$(brew --prefix libomp)"
+          echo "CC=${llvm_prefix}/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=${llvm_prefix}/bin/clang++" >> "$GITHUB_ENV"
+          echo "CFLAGS=-I${libomp_prefix}/include" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L${libomp_prefix}/lib -Wl,-rpath,${libomp_prefix}/lib" >> "$GITHUB_ENV"
+
       # Reads [tool.cibuildwheel] from pyproject; builds + per-platform tests.
       - name: Build & test wheels
         uses: pypa/cibuildwheel@v4.1.0

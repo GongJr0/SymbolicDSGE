@@ -47,13 +47,15 @@ def _hand_c(subdir: str) -> list[str]:
 
 
 def _compile_args() -> list[str]:
-    # These flags preserve the expected floating-point behavior without using
-    # the unsafe whole-program relaxation implied by ``-ffast-math``.
+    # Reassociation requires non-stop IEEE arithmetic on GCC. Wheel tests
+    # validate the resulting numerical behavior for each compiler target.
     flags = [
         "-O3",
         "-fno-math-errno",
         "-ffp-contract=fast",
         "-fassociative-math",
+        "-fno-signed-zeros",
+        "-fno-trapping-math",
         "-fopenmp",
         "-Wno-visibility",
         "-Wno-unused-function",
@@ -74,8 +76,50 @@ def _link_args() -> list[str]:
     return [] if os.name == "nt" else ["-fopenmp"]
 
 
+def _clang_cl_lib_dir() -> str | None:
+    """Return the LLVM library directory used by the clang-cl OpenMP runtime."""
+    if os.name != "nt" or os.environ.get("SDSGE_TOOLCHAIN", "").lower() != "clang-cl":
+        return None
+
+    clang_cl = shutil.which("clang-cl.exe")
+    if clang_cl is None:
+        return None
+    llvm_lib = os.path.join(os.path.dirname(os.path.dirname(clang_cl)), "lib")
+    if not os.path.isfile(os.path.join(llvm_lib, "libomp.lib")):
+        raise RuntimeError(f"clang-cl OpenMP runtime not found in {llvm_lib!r}.")
+    return llvm_lib
+
+
+def _clang_cl_runtime_dll() -> str | None:
+    """Return the OpenMP DLL used by an in-place clang-cl build."""
+    if os.name != "nt" or os.environ.get("SDSGE_TOOLCHAIN", "").lower() != "clang-cl":
+        return None
+
+    clang_cl = shutil.which("clang-cl.exe")
+    if clang_cl is None:
+        return None
+    libomp_dll = os.path.join(os.path.dirname(clang_cl), "libomp.dll")
+    if not os.path.isfile(libomp_dll):
+        raise RuntimeError(f"clang-cl OpenMP runtime not found at {libomp_dll!r}.")
+    return libomp_dll
+
+
 class ClangCLBuildExt(build_ext):
     """Opt into clang-cl while retaining setuptools' MSVC ABI backend."""
+
+    def run(self) -> None:
+        super().run()
+
+        if not self.inplace:
+            return
+        libomp_dll = _clang_cl_runtime_dll()
+        if libomp_dll is None:
+            return
+
+        # cibuildwheel repairs wheels with delvewheel. Local in-place builds
+        # instead need the dynamic runtime alongside the importing extension.
+        target_dir = os.path.join("SymbolicDSGE", "_ckernels", "monte_carlo")
+        shutil.copy2(libomp_dll, target_dir)
 
     def build_extensions(self) -> None:
         toolchain = os.environ.get("SDSGE_TOOLCHAIN", "").lower()
@@ -140,6 +184,7 @@ def _extensions() -> list[Extension]:
 
     common_sources = sorted(glob.glob(os.path.join(_COMMON, "*.c")))
     extra_args = _compile_args()
+    clang_cl_lib_dir = _clang_cl_lib_dir()
 
     extensions: list[Extension] = []
     for pyx in sorted(glob.glob(os.path.join(_CKERNELS, "*", "_*.pyx"))):
@@ -157,15 +202,24 @@ def _extensions() -> list[Extension]:
 
         subname = os.path.basename(subdir)
         include_dirs = [subdir, *dep_dirs, _COMMON]
+        library_dirs: list[str] = []
+        libraries: list[str] = []
         ext_kwargs: dict[str, object] = {}
         if subname == "rng" or "rng" in _EXTRA_DEPS.get(subname, []):
             import numpy as np
 
             include_dirs.append(np.get_include())
-            ext_kwargs["library_dirs"] = [
+            library_dirs.append(
                 os.path.join(os.path.dirname(np.__file__), "random", "lib")
-            ]
-            ext_kwargs["libraries"] = ["npyrandom"]
+            )
+            libraries.append("npyrandom")
+        if clang_cl_lib_dir is not None and subname == "monte_carlo":
+            library_dirs.append(clang_cl_lib_dir)
+            libraries.append("libomp")
+        if library_dirs:
+            ext_kwargs["library_dirs"] = library_dirs
+        if libraries:
+            ext_kwargs["libraries"] = libraries
 
         extensions.append(
             Extension(
