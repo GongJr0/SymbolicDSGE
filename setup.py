@@ -49,8 +49,13 @@ def _compile_args() -> list[str]:
     # numba/numpy reference, which the parity tests rely on). MSVC (CI Windows)
     # is IEEE-safe at /O2 by default; /fp:fast is never added.
     if os.name == "nt":
-        return ["/O2"]
-    return ["-O3", "-fno-fast-math"]
+        return ["/O2", "/openmp"]
+    return ["-O3", "-fno-fast-math", "-fopenmp"]
+
+
+def _link_args() -> list[str]:
+    """Link the OpenMP runtime on compilers that do not do so implicitly."""
+    return [] if os.name == "nt" else ["-fopenmp"]
 
 
 def _extensions() -> list[Extension]:
@@ -94,6 +99,7 @@ def _extensions() -> list[Extension]:
                 sources=sources,
                 include_dirs=include_dirs,
                 extra_compile_args=extra_args,
+                extra_link_args=_link_args(),
                 **ext_kwargs,
             )
         )

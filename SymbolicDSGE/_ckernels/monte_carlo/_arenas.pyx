@@ -6,6 +6,8 @@ that plan and a run's ``n_rep`` into the contiguous NumPy arrays owned by a
 future native runner.  Step-context lowering supplies static data separately.
 """
 
+import os
+
 import numpy as np
 
 from libc.stdint cimport int64_t
@@ -28,8 +30,11 @@ cdef class ArenaAllocation:
     """All dynamic arena allocations for one Monte Carlo run."""
 
     cdef public int64_t n_rep
+    cdef public int64_t n_workers
     cdef public dict plan
     cdef public dict steps
+    cdef public object failure_step_by_rep
+    cdef public object failure_status_by_rep
 
 
 def resolve_retention(int64_t n_retain, int64_t n_rep):
@@ -61,11 +66,38 @@ def resolve_retention(int64_t n_retain, int64_t n_rep):
     return retained_reps, retained_row_by_rep
 
 
-def allocate_arenas(dict plan, int64_t n_rep):
+def resolve_n_workers(object n_jobs=None):
+    """Resolve joblib-style ``n_jobs`` to a positive native worker count."""
+    cdef int64_t n_jobs_value
+    cdef int64_t cpu_count
+
+    if n_jobs is None:
+        return 1
+    if isinstance(n_jobs, bool) or not isinstance(n_jobs, int):
+        raise TypeError("n_jobs must be an integer or None.")
+    n_jobs_value = n_jobs
+
+    if n_jobs_value == 0:
+        raise ValueError("n_jobs must not be zero.")
+    if n_jobs_value > 0:
+        return n_jobs_value
+
+    cpu_count = (
+        os.process_cpu_count()
+        if hasattr(os, "process_cpu_count")
+        else os.cpu_count()
+    )
+    if cpu_count is None:
+        cpu_count = 1
+
+    return max(1, cpu_count + 1 + n_jobs_value)
+
+
+def allocate_arenas(dict plan, int64_t n_rep, object n_jobs=None):
     """Allocate per-step dynamic arenas for a resolved ``BufferPlan``.
 
     ``plan`` contains Python ``StepBufferPlan`` instances.  Its input and live
-    output lanes are single-replication arrays; retained lanes are compact,
+    output lanes have one row per worker; retained lanes are compact,
     replication-major arrays whose row count is resolved from ``n_rep``.
     """
     cdef ArenaAllocation allocation = ArenaAllocation()
@@ -79,13 +111,22 @@ def allocate_arenas(dict plan, int64_t n_rep):
     cdef int64_t n_float_out
     cdef int64_t n_int_out
     cdef int64_t n_retain
+    cdef int64_t n_workers
 
     if n_rep <= 0:
         raise ValueError("n_rep must be positive.")
 
     allocation.n_rep = n_rep
+    n_workers = resolve_n_workers(n_jobs)
+    allocation.n_workers = n_workers
     allocation.plan = dict(plan)
     allocation.steps = {}
+    allocation.failure_step_by_rep = np.full(
+        n_rep, np.iinfo(np.int64).min, dtype=np.int64
+    )
+    allocation.failure_status_by_rep = np.full(
+        n_rep, np.iinfo(np.int64).min, dtype=np.int64
+    )
     for step_name, step_plan in allocation.plan.items():
         n_float_in = step_plan.input_size.n_float
         n_int_in = step_plan.input_size.n_int
@@ -95,10 +136,16 @@ def allocate_arenas(dict plan, int64_t n_rep):
         retained_reps, retained_row_by_rep = resolve_retention(n_retain, n_rep)
 
         step_arenas = StepArenas()
-        step_arenas.float_in_work = np.empty(n_float_in, dtype=np.float64)
-        step_arenas.int_in_work = np.empty(n_int_in, dtype=np.int64)
-        step_arenas.float_live_out = np.empty(n_float_out, dtype=np.float64)
-        step_arenas.int_live_out = np.empty(n_int_out, dtype=np.int64)
+        step_arenas.float_in_work = np.empty(
+            (n_workers, n_float_in), dtype=np.float64
+        )
+        step_arenas.int_in_work = np.empty((n_workers, n_int_in), dtype=np.int64)
+        step_arenas.float_live_out = np.empty(
+            (n_workers, n_float_out), dtype=np.float64
+        )
+        step_arenas.int_live_out = np.empty(
+            (n_workers, n_int_out), dtype=np.int64
+        )
         step_arenas.float_retained = np.empty(
             (retained_reps.shape[0], n_float_out), dtype=np.float64
         )

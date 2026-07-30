@@ -15,10 +15,16 @@ class StepArenas:
 
 class ArenaAllocation:
     n_rep: int
+    n_workers: int
     plan: dict[str, Any]
     steps: dict[str, StepArenas]
+    failure_step_by_rep: NDArray[np.int64]
+    failure_status_by_rep: NDArray[np.int64]
 
 def resolve_retention(
     n_retain: int, n_rep: int
 ) -> tuple[NDArray[np.int64], NDArray[np.int64]]: ...
-def allocate_arenas(plan: Mapping[str, Any], n_rep: int) -> ArenaAllocation: ...
+def resolve_n_workers(n_jobs: int | None = None) -> int: ...
+def allocate_arenas(
+    plan: Mapping[str, Any], n_rep: int, n_jobs: int | None = None
+) -> ArenaAllocation: ...
