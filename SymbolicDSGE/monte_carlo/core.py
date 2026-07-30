@@ -570,5 +570,5 @@ def _summarize_regressions(
     for step_name, results in results_by_step.items():
         if not results:
             continue
-        regression_summaries[step_name] = MCRegressionResult.from_results(results)
+        regression_summaries[step_name] = MCRegressionResult.from_results(results)  # type: ignore
     return regression_summaries

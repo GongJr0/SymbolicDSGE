@@ -23,9 +23,9 @@ from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.regression.enums import RegressionStatus
-from SymbolicDSGE.regression.ols import MCRegressionResult
 from SymbolicDSGE.regression.result import RegressionResult
 from .custom_op import PandasCustomFunc
+from .legacy_regression import MCRegressionResult
 
 NDF = NDArray[float64]
 NDB = NDArray[np.bool_]

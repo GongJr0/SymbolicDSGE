@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 from SymbolicDSGE._diag_tests.result import MCResult, TestResult
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
-from SymbolicDSGE.regression.ols import MCRegressionResult
 from SymbolicDSGE.regression.result import RegressionResult
 from .allocation import BufferPlan, resolve_output_specs
+from .legacy_regression import MCRegressionResult
 from .mc_constructs import (
     MCContext,
     MCData,
