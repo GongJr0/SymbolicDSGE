@@ -266,15 +266,16 @@ class MCStep:
     #: hand-built steps that bypassed the factories.
     step_type: str | None = None
 
+    # Currently no-op (-1 == n_rep), native will allocate outputs based on this value if set.
+    n_retain: int = -1
+
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("MCStep name must be non-empty.")
-        object.__setattr__(self, "op_type", OpType(self.op_type))
-        object.__setattr__(self, "kwargs", dict(self.kwargs))
-        object.__setattr__(self, "source_args", tuple(self.source_args))
-        # The pandas namespace is a post-loop-only privilege: a PandasCustomFunc
-        # in a per-rep step would reference pandas inside the replication loop,
-        # which the looser contract is not meant to sanction.
+
+        if self.n_retain < -1:
+            raise ValueError("MCStep n_retain must be -1 (retain all) or non-negative.")
+
         if (
             isinstance(self.func, PandasCustomFunc)
             and self.op_type is not OpType.POSTPROC
