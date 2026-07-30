@@ -51,9 +51,7 @@ def serialize_pipeline_result(
         "run_id": run_id,
         "kind": "mc",
         "n_rep": result.n_rep,
-        "payloads_retained": result.meta.payloads_retained,
-        "test_results_retained": result.meta.test_results_retained,
-        "contexts_retained": result.meta.contexts_retained,
+        "n_retained_by_step": dict(result.meta.n_retained_by_step),
         "n_successful": result.n_successful,
         "succeeded": result.succeeded,
         "elapsed_s": result.meta.elapsed_s,
@@ -77,7 +75,9 @@ def serialize_pipeline_result(
         "test_summaries": {
             name: {
                 "test_name": summary.test_name,
-                "n": summary.n,  # type: ignore
+                "n_rep": summary.n_rep,
+                "n_retained": summary.n_retained,
+                "retained_reps": _json_value(summary.retained_reps),
                 "alpha": float(summary.alpha),
                 "distribution": summary.dist.value,
                 "df": _json_value(summary.df),

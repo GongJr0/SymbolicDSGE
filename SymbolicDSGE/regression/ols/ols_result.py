@@ -116,7 +116,7 @@ class OLSResult(RegressionResult):
 @dataclass(frozen=True)
 class MCRegressionResult:
     kind: str
-    variables: list[str]
+    variables: Sequence[str]
     coef_trace: NDF
 
     ssr_trace: NDF

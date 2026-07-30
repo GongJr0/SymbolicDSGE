@@ -366,9 +366,7 @@ class MCFailure:
 class MCMeta:
     n_rep: int
 
-    payloads_retained: bool
-    test_results_retained: bool
-    contexts_retained: bool
+    n_retained_by_step: Mapping[str, int]
 
     #: Wall-clock seconds of the replication loop alone; the basis for ``it_s``.
     #: Post-loop aggregation and postproc are excluded (see ``postproc_elapsed_s``).

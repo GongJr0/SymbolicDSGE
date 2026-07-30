@@ -15,6 +15,11 @@ from ..._ckernels.monte_carlo._runner import (
     raw_model_data_step,
     transform_step,
 )
+from ..._diag_tests.distributions import (
+    DistributionParameter,
+    PvalMethod,
+    ReferenceDistribution,
+)
 from ...core.solved_model import SolvedModel
 from ..allocation import BufferPlan, FieldLayout, StepBufferPlan
 from ..mc_constructs import MCStep, OpType, SourceArgs
@@ -50,6 +55,28 @@ class FloatInputBinding:
 
 
 @dataclass(frozen=True)
+class TestResultSpec:
+    """Resolved result metadata declared by a native diagnostic step."""
+
+    name: str
+    dist: ReferenceDistribution
+    df: DistributionParameter | tuple[DistributionParameter, ...]
+    pval_method: PvalMethod
+    alpha: np.float64
+
+
+@dataclass(frozen=True)
+class RegressionResultSpec:
+    """Resolved semantic metadata for one native regression result."""
+
+    name: str
+    kind: str
+    variables: tuple[str, ...]
+    n: int
+    k: int
+
+
+@dataclass(frozen=True)
 class LoweredMCRun:
     """Run-local native inputs produced from one resolved pipeline."""
 
@@ -57,6 +84,8 @@ class LoweredMCRun:
     allocation: ArenaAllocation
     steps: tuple[NativeStep, ...]
     input_bindings: tuple[tuple[FloatInputBinding, ...], ...]
+    test_result_specs: Mapping[str, TestResultSpec]
+    regression_result_specs: Mapping[str, RegressionResultSpec]
     reference: SolvedModel
     dgp: SolvedModel | None
 
@@ -77,6 +106,8 @@ def lower_native_run(
     allocation = allocate_arenas(plan, n_rep, n_jobs=n_jobs)
     steps: list[NativeStep] = []
     bindings: list[tuple[FloatInputBinding, ...]] = []
+    test_result_specs: dict[str, TestResultSpec] = {}
+    regression_result_specs: dict[str, RegressionResultSpec] = {}
     for step_idx, step in enumerate(pipeline.per_rep_steps):
         native_step, step_bindings = _lower_step(
             step_idx,
@@ -90,11 +121,36 @@ def lower_native_run(
         )
         steps.append(native_step)
         bindings.append(step_bindings)
+        if step.op_type is OpType.TEST:
+            dist = native_step.test_distribution
+            df = native_step.test_df
+            if dist is None or df is None:
+                raise RuntimeError(
+                    f"Native diagnostic {step.name!r} has no result metadata."
+                )
+            test_result_specs[step.name] = TestResultSpec(
+                name=step.name,
+                dist=dist,
+                df=df,
+                pval_method=PvalMethod.SF,
+                alpha=np.float64(step.kwargs["alpha"]),
+            )
+        elif step.op_type is OpType.REGRESSION:
+            from .regressions import regression_result_spec
+
+            regression_result_specs[step.name] = regression_result_spec(
+                step,
+                pipeline._source_indices[step_idx],
+                pipeline.per_rep_steps,
+                plan,
+            )
     return LoweredMCRun(
         plan,
         allocation,
         tuple(steps),
         tuple(bindings),
+        test_result_specs,
+        regression_result_specs,
         reference,
         dgp,
     )

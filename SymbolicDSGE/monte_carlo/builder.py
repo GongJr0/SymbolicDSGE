@@ -370,9 +370,6 @@ def run_pipeline(
         reference=reference,
         dgp=dgp,
         n_rep=n_rep,
-        retain_payloads=False,
-        retain_test_results=False,
-        retain_contexts=True,
         fail_fast=fail_fast,
         verbosity=0,
     )

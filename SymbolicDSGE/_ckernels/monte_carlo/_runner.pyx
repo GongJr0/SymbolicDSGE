@@ -16,6 +16,8 @@ cimport numpy as cnp
 from cpython.mem cimport PyMem_Free, PyMem_Malloc
 from libc.stdint cimport int64_t, uintptr_t
 
+from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
+
 
 cdef extern from "runner.h":
     ctypedef int (*sdsge_mc_step_fn)(
@@ -530,6 +532,8 @@ cdef class NativeStep:
     cdef const void *_ctx
     cdef object _name
     cdef object _backing
+    cdef object _test_distribution
+    cdef object _test_df
     cdef int64_t _n_batch
     cdef int64_t _input_n_float
     cdef int64_t _input_n_int
@@ -565,6 +569,8 @@ cdef class NativeStep:
     cdef sdsge_mc_chow_test_ctx _chow_ctx
 
     def __cinit__(self):
+        self._test_distribution = None
+        self._test_df = None
         self._n_batch = 0
         self._input_n_float = -1
         self._input_n_int = -1
@@ -603,6 +609,14 @@ cdef class NativeStep:
     @property
     def name(self):
         return self._name
+
+    @property
+    def test_distribution(self):
+        return self._test_distribution
+
+    @property
+    def test_df(self):
+        return self._test_df
 
 
 cdef cnp.ndarray _require_arena(
@@ -1281,6 +1295,8 @@ def jarque_bera_step(str name, int64_t n):
         raise ValueError("Jarque-Bera sample length must be non-negative.")
 
     step._jarque_bera_ctx.n = n
+    step._test_distribution = ReferenceDistribution.JB_LOOKUP
+    step._test_df = n
     step._bind(
         name,
         sdsge_mc_jarque_bera_test_runner,
@@ -1316,6 +1332,8 @@ def wald_step(
     step._wald_ctx.kernel_id = kernel_id
     step._wald_ctx.bandwidth_mode = bandwidth_mode
     step._wald_ctx.kind = kind
+    step._test_distribution = ReferenceDistribution.CHI2
+    step._test_df = q if kind == 0 else q * (q + 1) // 2
     step._bind(name, sdsge_mc_wald_test_runner, <const void *>&step._wald_ctx,
                target_array, 0, -1, -1, 1, 1)
     return step
@@ -1327,6 +1345,8 @@ def ljung_box_step(str name, int64_t n, int64_t lags):
         raise ValueError("Native Ljung-Box settings must be non-negative.")
     step._ljung_box_ctx.n = n
     step._ljung_box_ctx.lags = lags
+    step._test_distribution = ReferenceDistribution.CHI2
+    step._test_df = lags
     step._bind(name, sdsge_mc_ljung_box_test_runner,
                <const void *>&step._ljung_box_ctx, None, 0, -1, 0, 1, 1)
     return step
@@ -1339,6 +1359,8 @@ def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=False):
     step._breusch_pagan_ctx.n = n
     step._breusch_pagan_ctx.k = k
     step._breusch_pagan_ctx.robust = robust
+    step._test_distribution = ReferenceDistribution.CHI2
+    step._test_df = k
     step._bind(name, sdsge_mc_breusch_pagan_test_runner,
                <const void *>&step._breusch_pagan_ctx, None, 0, -1, 0, 1, 1)
     return step
@@ -1351,6 +1373,8 @@ def breusch_godfrey_step(str name, int64_t n, int64_t k, int64_t lags):
     step._breusch_godfrey_ctx.n = n
     step._breusch_godfrey_ctx.k = k
     step._breusch_godfrey_ctx.lags = lags
+    step._test_distribution = ReferenceDistribution.CHI2
+    step._test_df = lags
     step._bind(name, sdsge_mc_breusch_godfrey_test_runner,
                <const void *>&step._breusch_godfrey_ctx, None, 0, -1, 0, 1, 1)
     return step
@@ -1362,6 +1386,8 @@ def cusum_step(str name, int64_t n, int64_t p):
         raise ValueError("Native CUSUM dimensions must be valid.")
     step._cusum_ctx.n = n
     step._cusum_ctx.p = p
+    step._test_distribution = ReferenceDistribution.CUSUM
+    step._test_df = np.nan
     step._bind(name, sdsge_mc_cusum_test_runner, <const void *>&step._cusum_ctx,
                None, 0, -1, 0, 1, 1)
     return step
@@ -1373,6 +1399,8 @@ def cusumsq_step(str name, int64_t n, int64_t p):
         raise ValueError("Native CUSUMSQ dimensions must be valid.")
     step._cusumsq_ctx.n = n
     step._cusumsq_ctx.p = p
+    step._test_distribution = ReferenceDistribution.CUSUMSQ
+    step._test_df = max(0, n - p)
     step._bind(name, sdsge_mc_cusumsq_test_runner,
                <const void *>&step._cusumsq_ctx, None, 0, -1, 0, 1, 1)
     return step
@@ -1385,6 +1413,8 @@ def chow_step(str name, int64_t n, int64_t p, int64_t t_break):
     step._chow_ctx.n = n
     step._chow_ctx.p = p
     step._chow_ctx.t_break = t_break
+    step._test_distribution = ReferenceDistribution.F
+    step._test_df = (p, n - 2 * p)
     step._bind(name, sdsge_mc_chow_test_runner, <const void *>&step._chow_ctx,
                None, 0, -1, 0, 1, 1)
     return step

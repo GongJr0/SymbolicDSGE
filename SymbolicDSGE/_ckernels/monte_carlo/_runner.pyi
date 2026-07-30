@@ -5,6 +5,10 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from ._arenas import ArenaAllocation
+from SymbolicDSGE._diag_tests.distributions import (
+    DistributionParameter,
+    ReferenceDistribution,
+)
 from SymbolicDSGE.monte_carlo.native_lowering import FloatInputBinding
 
 NDF = NDArray[np.float64]
@@ -23,6 +27,12 @@ class NativeRunResult(NamedTuple):
 class NativeStep:
     @property
     def name(self) -> str: ...
+    @property
+    def test_distribution(self) -> ReferenceDistribution | None: ...
+    @property
+    def test_df(
+        self,
+    ) -> DistributionParameter | tuple[DistributionParameter, ...] | None: ...
 
 def payload_step(name: str, value: ArrayLike) -> NativeStep: ...
 def raw_model_data_step(

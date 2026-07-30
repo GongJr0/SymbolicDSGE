@@ -7,6 +7,7 @@ import numpy as np
 
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
+from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.core.solver_backend import PerturbationSolution
@@ -278,6 +279,34 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
     result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
 
     assert result.status == 0
+    specs = lowered.test_result_specs
+    assert set(specs) == {
+        "wald",
+        "wald_covariance",
+        "wald_second_moment",
+        "lb",
+        "jb",
+        "bp",
+        "bg",
+        "cusum",
+        "cusumsq",
+        "chow",
+    }
+    assert specs["wald"].dist is ReferenceDistribution.CHI2
+    assert specs["wald"].df == 2
+    assert specs["wald_covariance"].df == 3
+    assert specs["wald_second_moment"].df == 3
+    assert specs["lb"].df == 4
+    assert specs["jb"].dist is ReferenceDistribution.JB_LOOKUP
+    assert specs["jb"].df == n
+    assert specs["bp"].df == 2
+    assert specs["bg"].df == 2
+    assert specs["cusum"].dist is ReferenceDistribution.CUSUM
+    assert np.isnan(specs["cusum"].df)
+    assert specs["cusumsq"].df == n - 2
+    assert specs["chow"].dist is ReferenceDistribution.F
+    assert specs["chow"].df == (2, n - 4)
+    assert all(spec.pval_method is PvalMethod.SF for spec in specs.values())
     for name in (
         "wald",
         "wald_covariance",
