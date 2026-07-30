@@ -91,6 +91,12 @@ cdef extern from "core_steps.h":
         double *out,
     ) noexcept nogil
 
+    ctypedef void (*meas_fn)(
+        const double *vars,
+        const double *par,
+        double *out,
+    ) noexcept nogil
+
     ctypedef struct sdsge_mc_payload_step_ctx:
         const double *input
         int64_t n
@@ -164,6 +170,91 @@ cdef extern from "core_steps.h":
     ) noexcept nogil
 
     int sdsge_mc_simulate_order2_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    ctypedef struct sdsge_mc_filter_linear_step_ctx:
+        int64_t T
+        int64_t n
+        int64_t m
+        int64_t k
+        int symmetrize
+        double jitter
+        int return_shocks
+
+    ctypedef struct sdsge_mc_filter_extended_step_ctx:
+        meas_fn measurement
+        meas_fn jacobian
+        int64_t T
+        int64_t n
+        int64_t m
+        int64_t k
+        int64_t n_par
+        int symmetrize
+        double jitter
+        int return_shocks
+
+    ctypedef struct sdsge_mc_filter_unscented_step_ctx:
+        meas_fn measurement
+        int64_t T
+        int64_t n_state
+        int64_t n_ctrl
+        int64_t n_exog
+        int64_t n_obs
+        int64_t n_par
+        double alpha
+        double beta
+        double kappa
+        int symmetrize
+        double jitter
+
+    int64_t sdsge_filter_linear_output_arena_size(
+        int64_t n,
+        int64_t m,
+        int64_t k,
+        int64_t T,
+        int return_shocks,
+    ) noexcept nogil
+
+    int64_t sdsge_filter_extended_output_arena_size(
+        int64_t n,
+        int64_t m,
+        int64_t k,
+        int64_t T,
+        int return_shocks,
+    ) noexcept nogil
+
+    int64_t sdsge_filter_unscented_output_arena_size(
+        int64_t n_state,
+        int64_t n_ctrl,
+        int64_t n_obs,
+        int64_t T,
+    ) noexcept nogil
+
+    int sdsge_mc_filter_linear_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_filter_extended_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_filter_unscented_runner(
         int64_t rep_idx,
         double *float_in_work,
         double *float_out,
@@ -322,6 +413,9 @@ cdef class NativeStep:
     cdef sdsge_mc_raw_model_data_step_ctx _raw_model_data_ctx
     cdef sdsge_mc_simulate_order1_step_ctx _simulate_order1_ctx
     cdef sdsge_mc_simulate_order2_step_ctx _simulate_order2_ctx
+    cdef sdsge_mc_filter_linear_step_ctx _filter_linear_ctx
+    cdef sdsge_mc_filter_extended_step_ctx _filter_extended_ctx
+    cdef sdsge_mc_filter_unscented_step_ctx _filter_unscented_ctx
     cdef sdsge_mc_standardize_step_ctx _standardize_ctx
     cdef sdsge_mc_log_step_ctx _log_ctx
     cdef sdsge_mc_log_diff_step_ctx _log_diff_ctx
@@ -602,6 +696,154 @@ def simulate2_step(
         sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par),
         0,
         T * (n_var + n_obs),
+        0,
+    )
+    return step
+
+
+def filter_linear_step(
+    str name,
+    int64_t T,
+    int64_t n_var,
+    int64_t n_obs,
+    int64_t n_exog,
+    bint symmetrize=False,
+    double jitter=0.0,
+    bint return_shocks=False,
+):
+    """Bind a linear Kalman filter with resolved scalar settings."""
+    cdef NativeStep step = NativeStep()
+
+    if T < 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0:
+        raise ValueError("Native linear filter dimensions must be valid.")
+
+    step._filter_linear_ctx.T = T
+    step._filter_linear_ctx.n = n_var
+    step._filter_linear_ctx.m = n_obs
+    step._filter_linear_ctx.k = n_exog
+    step._filter_linear_ctx.symmetrize = symmetrize
+    step._filter_linear_ctx.jitter = jitter
+    step._filter_linear_ctx.return_shocks = return_shocks
+    step._bind(
+        name,
+        sdsge_mc_filter_linear_runner,
+        <const void *>&step._filter_linear_ctx,
+        None,
+        0,
+        -1,
+        0,
+        sdsge_filter_linear_output_arena_size(
+            n_var,
+            n_obs,
+            n_exog,
+            T,
+            return_shocks,
+        ),
+        0,
+    )
+    return step
+
+
+def filter_extended_step(
+    str name,
+    uintptr_t measurement_addr,
+    uintptr_t jacobian_addr,
+    int64_t T,
+    int64_t n_var,
+    int64_t n_obs,
+    int64_t n_exog,
+    int64_t n_par,
+    bint symmetrize=False,
+    double jitter=0.0,
+    bint return_shocks=False,
+):
+    """Bind an extended Kalman filter with resolved callbacks and settings."""
+    cdef NativeStep step = NativeStep()
+
+    if T < 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0 or n_par < 0:
+        raise ValueError("Native extended filter dimensions must be valid.")
+    if measurement_addr == 0 or jacobian_addr == 0:
+        raise ValueError("Native extended filtering requires both callback addresses.")
+
+    step._filter_extended_ctx.measurement = <meas_fn><void *>measurement_addr
+    step._filter_extended_ctx.jacobian = <meas_fn><void *>jacobian_addr
+    step._filter_extended_ctx.T = T
+    step._filter_extended_ctx.n = n_var
+    step._filter_extended_ctx.m = n_obs
+    step._filter_extended_ctx.k = n_exog
+    step._filter_extended_ctx.n_par = n_par
+    step._filter_extended_ctx.symmetrize = symmetrize
+    step._filter_extended_ctx.jitter = jitter
+    step._filter_extended_ctx.return_shocks = return_shocks
+    step._bind(
+        name,
+        sdsge_mc_filter_extended_runner,
+        <const void *>&step._filter_extended_ctx,
+        None,
+        0,
+        -1,
+        0,
+        sdsge_filter_extended_output_arena_size(
+            n_var,
+            n_obs,
+            n_exog,
+            T,
+            return_shocks,
+        ),
+        0,
+    )
+    return step
+
+
+def filter_unscented_step(
+    str name,
+    uintptr_t measurement_addr,
+    int64_t T,
+    int64_t n_state,
+    int64_t n_ctrl,
+    int64_t n_exog,
+    int64_t n_obs,
+    int64_t n_par,
+    double alpha,
+    double beta,
+    double kappa,
+    bint symmetrize=False,
+    double jitter=0.0,
+):
+    """Bind an unscented Kalman filter with resolved callback and settings."""
+    cdef NativeStep step = NativeStep()
+
+    if T < 0 or n_state <= 0 or n_ctrl < 0 or n_exog < 0 or n_obs <= 0:
+        raise ValueError("Native unscented filter dimensions must be valid.")
+    if n_par < 0 or measurement_addr == 0:
+        raise ValueError("Native unscented filtering requires a callback address.")
+
+    step._filter_unscented_ctx.measurement = <meas_fn><void *>measurement_addr
+    step._filter_unscented_ctx.T = T
+    step._filter_unscented_ctx.n_state = n_state
+    step._filter_unscented_ctx.n_ctrl = n_ctrl
+    step._filter_unscented_ctx.n_exog = n_exog
+    step._filter_unscented_ctx.n_obs = n_obs
+    step._filter_unscented_ctx.n_par = n_par
+    step._filter_unscented_ctx.alpha = alpha
+    step._filter_unscented_ctx.beta = beta
+    step._filter_unscented_ctx.kappa = kappa
+    step._filter_unscented_ctx.symmetrize = symmetrize
+    step._filter_unscented_ctx.jitter = jitter
+    step._bind(
+        name,
+        sdsge_mc_filter_unscented_runner,
+        <const void *>&step._filter_unscented_ctx,
+        None,
+        0,
+        -1,
+        0,
+        sdsge_filter_unscented_output_arena_size(
+            n_state,
+            n_ctrl,
+            n_obs,
+            T,
+        ),
         0,
     )
     return step

@@ -49,6 +49,44 @@ def simulate2_step(
     n_par: int,
     n_obs: int,
 ) -> NativeStep: ...
+def filter_linear_step(
+    name: str,
+    T: int,
+    n_var: int,
+    n_obs: int,
+    n_exog: int,
+    symmetrize: bool = False,
+    jitter: float = 0.0,
+    return_shocks: bool = False,
+) -> NativeStep: ...
+def filter_extended_step(
+    name: str,
+    measurement_addr: int,
+    jacobian_addr: int,
+    T: int,
+    n_var: int,
+    n_obs: int,
+    n_exog: int,
+    n_par: int,
+    symmetrize: bool = False,
+    jitter: float = 0.0,
+    return_shocks: bool = False,
+) -> NativeStep: ...
+def filter_unscented_step(
+    name: str,
+    measurement_addr: int,
+    T: int,
+    n_state: int,
+    n_ctrl: int,
+    n_exog: int,
+    n_obs: int,
+    n_par: int,
+    alpha: float,
+    beta: float,
+    kappa: float,
+    symmetrize: bool = False,
+    jitter: float = 0.0,
+) -> NativeStep: ...
 def transform_step(
     name: str,
     kind: str,

@@ -9,9 +9,11 @@ from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.core.solver_backend import PerturbationSolution
+from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.operations.core import (
     raw_model_data_step,
+    reference_filter_step,
     simulation_step,
 )
 from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
@@ -224,3 +226,161 @@ def test_native_lowering_runs_second_order_simulation() -> None:
         rtol=1e-12,
         atol=1e-12,
     )
+
+
+def test_native_lowering_runs_linear_and_extended_filters() -> None:
+    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+    solver = DSGESolver(model, kalman)
+    solved = solver.solve(solver.compile())
+    T = 8
+    expected_simulation = solved.sim(T, observables=True)
+    expected_y = np.column_stack(
+        [expected_simulation[name] for name in solved.compiled.observable_names]
+    )
+
+    for mode in ("linear", "extended"):
+        pipeline = MCPipeline(
+            [
+                simulation_step("sim", target="reference", T=T, observables=True),
+                reference_filter_step("filter", filter_mode=mode),
+            ]
+        )
+        lowered = pipeline.lower_native(reference=solved, n_rep=1, n_jobs=1)
+        native_result = run_native(
+            lowered.allocation,
+            lowered.steps,
+            lowered.input_bindings,
+        )
+
+        assert native_result.status == 0
+        expected_filter = solved._kalman_raw(y=expected_y, filter_mode=mode)
+        for field in ("x_pred", "x_filt", "P_pred", "innov", "loglik"):
+            layout = lowered.plan["filter"].out_fields[field]
+            actual = (
+                lowered.allocation.steps["filter"]
+                .float_retained[0, layout.offset : layout.offset + layout.flat_count]
+                .reshape(layout.shape)
+            )
+            np.testing.assert_allclose(
+                actual,
+                getattr(expected_filter, field),
+                rtol=1e-10,
+                atol=1e-12,
+            )
+
+
+def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
+    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+    solver = DSGESolver(model, kalman)
+    solved = solver.solve(solver.compile())
+    T = 8
+    requested = ["Rate", "OutGap"]
+    n_var = len(solved.compiled.var_names)
+    shocks = {
+        name: np.linspace(0.01, 0.03, T, dtype=np.float64)
+        for name in solved.compiled.layout.exo_state_names
+    }
+    x0 = np.full(n_var, 0.05, dtype=np.float64)
+    P0 = 0.2 * np.eye(n_var, dtype=np.float64)
+    R = np.array([[0.1, 0.02], [0.02, 0.3]], dtype=np.float64)
+    pipeline = MCPipeline(
+        [
+            simulation_step(
+                "sim",
+                target="reference",
+                T=T,
+                shocks=shocks,
+                observables=True,
+            ),
+            reference_filter_step(
+                "filter",
+                filter_mode="linear",
+                observables=requested,
+                x0=x0,
+                P0=P0,
+                R=R,
+                return_shocks=True,
+            ),
+        ]
+    )
+
+    lowered = pipeline.lower_native(reference=solved, n_rep=1, n_jobs=1)
+    native_result = run_native(
+        lowered.allocation,
+        lowered.steps,
+        lowered.input_bindings,
+    )
+
+    assert native_result.status == 0
+    simulated = solved.sim(T, shocks=shocks, observables=True)
+    expected_y = np.column_stack([simulated[name] for name in requested])
+    expected_filter = solved._kalman_raw(
+        y=expected_y,
+        filter_mode="linear",
+        observables=requested,
+        x0=x0,
+        P0=P0,
+        R=R,
+        return_shocks=True,
+    )
+    for field in ("x_pred", "P_filt", "innov", "eps_hat", "loglik"):
+        layout = lowered.plan["filter"].out_fields[field]
+        actual = (
+            lowered.allocation.steps["filter"]
+            .float_retained[0, layout.offset : layout.offset + layout.flat_count]
+            .reshape(layout.shape)
+        )
+        np.testing.assert_allclose(
+            actual,
+            getattr(expected_filter, field),
+            rtol=1e-10,
+            atol=1e-12,
+        )
+
+
+def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
+    model, _ = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    n_var = len(model.variables.variables)
+    solver = DSGESolver(
+        model,
+        KalmanConfig(
+            R=np.array([[0.01]], dtype=np.float64),
+            P0=0.1 * np.eye(n_var, dtype=np.float64),
+        ),
+    )
+    solved = solver.solve(solver.compile(), order=2)
+    T = 5
+    y = np.zeros((T, len(solved.compiled.observable_names)), dtype=np.float64)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step(
+                "data",
+                observables=y,
+                observable_names=solved.compiled.observable_names,
+            ),
+            reference_filter_step("filter", filter_mode="unscented"),
+        ]
+    )
+
+    lowered = pipeline.lower_native(reference=solved, n_rep=1, n_jobs=1)
+    native_result = run_native(
+        lowered.allocation,
+        lowered.steps,
+        lowered.input_bindings,
+    )
+
+    assert native_result.status == 0
+    expected_filter = solved._kalman_raw(y=y, filter_mode="unscented")
+    for field in ("x_pred", "x_filt", "P_pred", "innov", "loglik", "x2_filt"):
+        layout = lowered.plan["filter"].out_fields[field]
+        actual = (
+            lowered.allocation.steps["filter"]
+            .float_retained[0, layout.offset : layout.offset + layout.flat_count]
+            .reshape(layout.shape)
+        )
+        np.testing.assert_allclose(
+            actual,
+            getattr(expected_filter, field),
+            rtol=1e-10,
+            atol=1e-12,
+        )
