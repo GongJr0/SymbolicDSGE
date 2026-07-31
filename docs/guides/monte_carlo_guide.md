@@ -100,7 +100,6 @@ from SymbolicDSGE import Shock
 datagen_step = simulation_step(
     T=T,
     target="dgp",  # (1)!
-    seed_increment="auto", # (2)!
     shocks={
         "g,z": Shock(dist="norm", multivar=True, seed=0),
         "r": Shock(dist="norm", seed=1),
@@ -110,17 +109,25 @@ datagen_step = simulation_step(
 ```
 
 1. `target` can be either `"reference"` or `"dgp"` and defaults to `"dgp"`. It selects which model role is simulated.
-2. `seed_increment` is an `int` or `"auto"`. It controls seed offsets between replications for seeded `Shock` objects.
 
-???+ note "Seed Collisions"
-    Seeds are calculated per replication as `base_seed + rep_idx * seed_increment`.
-    With `"auto"`, `seed_increment` is set to the number of seeded `Shock` objects.
+???+ note "Replication Streams"
+    Normal and uniform shocks are drawn inside the native loop. Each replication addresses its own stream of a counter based engine keyed on the specification's seed and its position in the mapping, so replications never overlap and two specifications sharing a seed stay independent.
 
-    Two shock specifications with base seeds $s_1$ and $s_2$ can collide under `"auto"` if $s_1 \equiv s_2 \mod k$, where $k$ is the number of seeded shock objects.
-    As long as the two `Shock` specifications are not the exact same, this will not yield identical shocks.
+    A seeded specification replays bit for bit across runs, and the result does not depend on `n_rep` or `n_jobs`. A specification with `seed=None` draws from a fresh key each run.
 
-`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` to `SolvedModel.sim(...)`. It adds `target`, which selects the model role, and `seed_increment`, which controls seed offsets across replications for seeded `Shock` objects.
+`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` to `SolvedModel.sim(...)`. It adds `target`, which selects the model role.
 The `shocks` argument follows the same dictionary convention as `SolvedModel.sim(...)`. Each MC iteration runs the selected model with this specification and passes the output data downstream.
+
+To inspect one replication on its own, `replication_shocks` hands back the exact shock paths that replication saw, keyed the same way the specification is:
+
+```python
+from SymbolicDSGE.monte_carlo import replication_shocks
+
+shocks = replication_shocks(dgp, datagen_step, rep_idx=417)
+sample = dgp.sim(T=T, shocks=shocks, shock_scale=1.0)
+```
+
+Scaling is already applied to what comes back, which is why `shock_scale` is `1.0` above. Only seeded specifications are reproducible this way; one with `seed=None` was drawn from a key the run discarded.
 
 ### Filtering
 

@@ -36,13 +36,30 @@ int sdsge_mc_raw_model_data_runner(
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
 }
 
+/* Where the (T, k) shock block sits in each simulation input arena. Derived
+ * from the layouts documented in core_steps.h so the offset stays with the
+ * layout it describes rather than being recomputed by the caller. */
+static inline i64 sdsge_simulate_order1_shock_offset(const i64 n, const i64 k) {
+  return n * n + n * k + n;
+}
+
+static inline i64 sdsge_simulate_order2_shock_offset(const i64 nx, const i64 ny,
+                                                     const i64 n_exog) {
+  return nx * nx + ny * nx + nx * n_exog + nx * nx * nx + ny * nx * nx + nx +
+         ny + (nx + ny) + nx;
+}
+
 int sdsge_mc_simulate_order1_runner(
     const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
     f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
     i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
   const sdsge_mc_simulate_order1_step_ctx *ctx = ctx_ptr;
-  (void)rep_idx;
   (void)int_work;
+  if (ctx->shocks != NULL) {
+    sdsge_mc_shock_draw(
+        ctx->shocks, rep_idx, float_in_work + ctx->shock_scratch_offset,
+        float_in_work + sdsge_simulate_order1_shock_offset(ctx->n, ctx->k));
+  }
   sdsge_simulate_order1_step(float_in_work, ctx->measurement, ctx->T, ctx->n,
                              ctx->k, ctx->n_par, ctx->m, float_out);
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
@@ -53,8 +70,14 @@ int sdsge_mc_simulate_order2_runner(
     f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
     i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
   const sdsge_mc_simulate_order2_step_ctx *ctx = ctx_ptr;
-  (void)rep_idx;
   (void)int_work;
+  if (ctx->shocks != NULL) {
+    sdsge_mc_shock_draw(ctx->shocks, rep_idx,
+                        float_in_work + ctx->shock_scratch_offset,
+                        float_in_work + sdsge_simulate_order2_shock_offset(
+                                            ctx->n_state, ctx->n_ctrl,
+                                            ctx->n_exog));
+  }
   sdsge_simulate_order2_step(float_in_work, ctx->measurement, ctx->T,
                              ctx->n_state, ctx->n_ctrl, ctx->n_exog,
                              ctx->n_par, ctx->m, float_out);

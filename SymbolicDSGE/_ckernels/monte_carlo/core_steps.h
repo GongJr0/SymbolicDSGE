@@ -5,6 +5,7 @@
 #include "../core/core.h"
 #include "../kalman/kalman.h"
 #include "runner.h"
+#include "shocks.h"
 
 /* Static configuration for future generic native MC step dispatch. Dynamic
  * numeric inputs, scratch, and outputs remain in caller-owned arenas. */
@@ -23,6 +24,11 @@ typedef struct {
   int observables_batched;
 } sdsge_mc_raw_model_data_step_ctx;
 
+/* `shocks` selects how the (T, k) shock block in the input arena is populated.
+ * NULL means the runner already copied it in through a static binding (the
+ * Python prematerialization route). Otherwise the step draws its own shocks
+ * from `rep_idx` before simulating, and `shock_scratch_offset` locates the
+ * draw's scratch just past the arena the simulation itself needs. */
 typedef struct {
   sdsge_measurement_fn measurement;
   i64 T;
@@ -30,6 +36,8 @@ typedef struct {
   i64 k;
   i64 n_par;
   i64 m;
+  const sdsge_mc_shock_plan *shocks;
+  i64 shock_scratch_offset;
 } sdsge_mc_simulate_order1_step_ctx;
 
 typedef struct {
@@ -40,6 +48,8 @@ typedef struct {
   i64 n_exog;
   i64 n_par;
   i64 m;
+  const sdsge_mc_shock_plan *shocks;
+  i64 shock_scratch_offset;
 } sdsge_mc_simulate_order2_step_ctx;
 
 typedef struct {

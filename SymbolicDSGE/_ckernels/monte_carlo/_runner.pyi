@@ -34,6 +34,24 @@ class NativeStep:
         self,
     ) -> DistributionParameter | tuple[DistributionParameter, ...] | None: ...
 
+SHOCK_NORMAL: int
+SHOCK_UNIFORM: int
+
+class NativeShockPlan:
+    @property
+    def scratch_size(self) -> int: ...
+    @property
+    def n_entries(self) -> int: ...
+    def draw(self, rep_idx: int) -> NDF: ...
+
+def shock_plan(
+    entries: Sequence[
+        tuple[int, ArrayLike, ArrayLike | None, ArrayLike | None, float, float, int]
+    ],
+    T: int,
+    n_exog: int,
+    shock_scale: float,
+) -> NativeShockPlan: ...
 def payload_step(name: str, value: ArrayLike) -> NativeStep: ...
 def raw_model_data_step(
     name: str,
@@ -48,6 +66,7 @@ def simulate1_step(
     n_exog: int,
     n_par: int,
     n_obs: int,
+    shocks: NativeShockPlan | None = None,
 ) -> NativeStep: ...
 def simulate2_step(
     name: str,
@@ -58,6 +77,7 @@ def simulate2_step(
     n_exog: int,
     n_par: int,
     n_obs: int,
+    shocks: NativeShockPlan | None = None,
 ) -> NativeStep: ...
 def filter_linear_step(
     name: str,

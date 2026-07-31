@@ -984,38 +984,37 @@ def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:
         )
         assert solved.status_code == 200
 
-    valid = client.post(
-        "/api/mc/validate",
-        json={
+    def _pipeline(bandwidth: str) -> dict:
+        return {
             "nodes": [
                 {
                     "id": "sim",
                     "step_type": "simulation",
                     "name": "datagen",
-                    "params": {"T": 8, "seed_increment": "2"},
-                }
-            ],
-            "edges": [],
-        },
-    )
-    invalid = client.post(
-        "/api/mc/validate",
-        json={
-            "nodes": [
+                    "params": {"T": 8},
+                },
                 {
-                    "id": "sim",
-                    "step_type": "simulation",
-                    "name": "datagen",
-                    "params": {"T": 8, "seed_increment": "invalid"},
-                }
+                    "id": "w",
+                    "step_type": "wald",
+                    "name": "w",
+                    "params": {
+                        "source": "datagen",
+                        "field": "states",
+                        "kind": "mean",
+                        "target_vector": [0.0],
+                        "bandwidth": bandwidth,
+                    },
+                },
             ],
-            "edges": [],
-        },
-    )
+            "edges": [{"source": "sim", "target": "w"}],
+        }
+
+    valid = client.post("/api/mc/validate", json=_pipeline("2"))
+    invalid = client.post("/api/mc/validate", json=_pipeline("invalid"))
 
     assert valid.status_code == 200
     assert invalid.status_code == 400
-    assert "seed_increment" in invalid.json()["detail"]["message"]
+    assert "bandwidth" in invalid.json()["detail"]["message"]
 
 
 def test_ui_backend_serializes_detailed_mc_summaries() -> None:

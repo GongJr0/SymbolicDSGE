@@ -15,6 +15,7 @@ import numpy as np
 from .._ckernels.monte_carlo import _arena
 from ..core.solved_model import SolvedModel
 from .mc_constructs import MCStep, OpType, SourceArgs
+from .shock_native import native_shock_scratch
 
 Shape: TypeAlias = tuple[int, ...]
 
@@ -215,16 +216,23 @@ def _resolve_datagen_input_asize(
     model = reference if step.kwargs["target"] == "reference" else dgp
     if model is None:
         raise ValueError("Simulation input planning requires its target model.")
-    return _asize(
+    T = int(step.kwargs["T"])
+    size = _asize(
         _arena.simulation_arena_size(
             model.policy.order,
             model.compiled.n_state,
             len(model.compiled.var_names),
             model.compiled.n_exog,
-            int(step.kwargs["T"]),
+            T,
             len(model.compiled.calib_params),
         )
     )
+    # A step that draws its own shocks needs scratch past the simulation arena.
+    # Lowering decides the same way, off the same spec, so the two agree.
+    scratch = native_shock_scratch(step.kwargs["shocks"], T)
+    if scratch:
+        size = ArenaSize(n_float=size.n_float + scratch, n_int=size.n_int)
+    return size
 
 
 def _resolve_filter_input_asize(

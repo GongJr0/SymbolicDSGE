@@ -14,9 +14,44 @@ import numpy as np
 cimport numpy as cnp
 
 from cpython.mem cimport PyMem_Free, PyMem_Malloc
-from libc.stdint cimport int64_t, uintptr_t
+from libc.stdint cimport int64_t, uint64_t, uintptr_t
 
 from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
+
+
+cdef extern from "shocks.h":
+    int SDSGE_MC_SHOCK_NORMAL
+    int SDSGE_MC_SHOCK_UNIFORM
+
+    ctypedef struct sdsge_mc_shock_entry:
+        int family
+        int64_t width
+        const int64_t *columns
+        const double *factor
+        const double *loc
+        double low
+        double span
+        uint64_t key
+        uint64_t entry_idx
+
+    ctypedef struct sdsge_mc_shock_plan:
+        const sdsge_mc_shock_entry *entries
+        int64_t n_entries
+        int64_t T
+        int64_t n_exog
+        double shock_scale
+        int64_t max_width
+
+    int64_t sdsge_mc_shock_scratch_size(
+        const sdsge_mc_shock_plan *plan,
+    ) noexcept nogil
+
+    void sdsge_mc_shock_draw(
+        const sdsge_mc_shock_plan *plan,
+        int64_t rep_idx,
+        double *scratch,
+        double *out,
+    ) noexcept nogil
 
 
 cdef extern from "runner.h":
@@ -137,6 +172,8 @@ cdef extern from "core_steps.h":
         int64_t k
         int64_t n_par
         int64_t m
+        const sdsge_mc_shock_plan *shocks
+        int64_t shock_scratch_offset
 
     ctypedef struct sdsge_mc_simulate_order2_step_ctx:
         sdsge_measurement_fn measurement
@@ -146,6 +183,8 @@ cdef extern from "core_steps.h":
         int64_t n_exog
         int64_t n_par
         int64_t m
+        const sdsge_mc_shock_plan *shocks
+        int64_t shock_scratch_offset
 
     int64_t sdsge_simulate_order1_arena_size(
         int64_t n,
@@ -546,6 +585,167 @@ class NativeRunResult(NamedTuple):
     step_failures_by_worker: object
 
 
+cdef class NativeShockPlan:
+    """A shock spec resolved into the layout the native draw reads.
+
+    Owns the C entry array and holds a reference to every NumPy buffer its
+    entries point at, so the plan is the single lifetime anchor: a simulation
+    step keeps one of these alive for as long as its context references it.
+
+    The plan is immutable and shared read-only across workers. Nothing here is
+    touched during the run, which is what lets the draw be reentrant.
+    """
+
+    cdef sdsge_mc_shock_plan _plan
+    cdef sdsge_mc_shock_entry *_entries
+    cdef object _backing
+
+    def __cinit__(self):
+        self._entries = NULL
+        self._backing = []
+
+    def __dealloc__(self):
+        if self._entries != NULL:
+            PyMem_Free(self._entries)
+            self._entries = NULL
+
+    cdef const sdsge_mc_shock_plan *c_plan(self) noexcept:
+        return &self._plan
+
+    @property
+    def scratch_size(self):
+        """Extra float arena elements the draw needs, for step sizing."""
+        return sdsge_mc_shock_scratch_size(&self._plan)
+
+    @property
+    def n_entries(self):
+        return self._plan.n_entries
+
+    def draw(self, int64_t rep_idx):
+        """Materialize one replication's ``(T, n_exog)`` shock block.
+
+        The run never calls this; it draws straight into its arena. This is the
+        route back out for a caller holding a replication index and wanting the
+        exact block that replication saw, which is what makes a single
+        replication reproducible outside the loop.
+        """
+        if rep_idx < 0:
+            raise ValueError("rep_idx must be non-negative.")
+        cdef double[:, ::1] out = np.zeros(
+            (self._plan.T, self._plan.n_exog), dtype=np.float64
+        )
+        cdef double[::1] scratch = np.empty(
+            max(sdsge_mc_shock_scratch_size(&self._plan), 1), dtype=np.float64
+        )
+        with nogil:
+            sdsge_mc_shock_draw(&self._plan, rep_idx, &scratch[0], &out[0, 0])
+        return np.asarray(out)
+
+
+def shock_plan(
+    list entries,
+    int64_t T,
+    int64_t n_exog,
+    double shock_scale,
+):
+    """Build a native shock plan from resolved entries.
+
+    Each entry is ``(family, columns, factor, loc, low, span, key)``. ``family``
+    is one of the ``SHOCK_*`` constants below. ``columns`` is the int64 array of
+    exogenous column indices the entry drives, in the order its ``factor`` was
+    built in. ``factor`` is the row-major ``(width, width)`` matrix with
+    ``factor @ factor.T`` equal to the covariance (a 1x1 holding the standard
+    deviation in the univariate case) and is required for normal entries.
+    ``loc`` is an optional width-long mean vector. ``low`` and ``span`` apply to
+    uniform entries only.
+
+    An entry's position in this list becomes its stream selector, so two entries
+    sharing a seed still draw independently.
+    """
+    cdef NativeShockPlan plan = NativeShockPlan()
+    cdef int64_t n = len(entries)
+    cdef int64_t i
+    cdef int64_t width
+    cdef int64_t max_width = 0
+    cdef int family
+    cdef cnp.ndarray columns_arr
+    cdef cnp.ndarray factor_arr
+    cdef cnp.ndarray loc_arr
+
+    if T < 0 or n_exog < 0:
+        raise ValueError("Native shock plan dimensions must be non-negative.")
+    if n <= 0:
+        raise ValueError("Native shock plan requires at least one entry.")
+
+    plan._entries = <sdsge_mc_shock_entry *>PyMem_Malloc(
+        <size_t>n * sizeof(sdsge_mc_shock_entry)
+    )
+    if plan._entries == NULL:
+        raise MemoryError("Could not allocate native shock entries.")
+
+    for i in range(n):
+        family, columns, factor, loc, low, span, key = entries[i]
+
+        columns_arr = np.ascontiguousarray(columns, dtype=np.int64)
+        if columns_arr.ndim != 1 or columns_arr.shape[0] == 0:
+            raise ValueError("Shock entry columns must be a non-empty 1D array.")
+        width = columns_arr.shape[0]
+        if (columns_arr < 0).any() or (columns_arr >= n_exog).any():
+            raise ValueError("Shock entry columns must index the exogenous block.")
+        plan._backing.append(columns_arr)
+
+        if family == SDSGE_MC_SHOCK_UNIFORM:
+            if width != 1:
+                raise ValueError("Uniform shock entries must be univariate.")
+            plan._entries[i].factor = NULL
+            plan._entries[i].loc = NULL
+        elif family == SDSGE_MC_SHOCK_NORMAL:
+            if factor is None:
+                raise ValueError("Normal shock entries require a factor matrix.")
+            factor_arr = np.ascontiguousarray(factor, dtype=np.float64)
+            if factor_arr.ndim != 2 or factor_arr.shape[0] != width \
+                    or factor_arr.shape[1] != width:
+                raise ValueError(
+                    "Shock entry factor must be square and match its width."
+                )
+            plan._backing.append(factor_arr)
+            plan._entries[i].factor = <const double *>cnp.PyArray_DATA(factor_arr)
+            if loc is None:
+                plan._entries[i].loc = NULL
+            else:
+                loc_arr = np.ascontiguousarray(loc, dtype=np.float64)
+                if loc_arr.ndim != 1 or loc_arr.shape[0] != width:
+                    raise ValueError("Shock entry loc must match its width.")
+                plan._backing.append(loc_arr)
+                plan._entries[i].loc = <const double *>cnp.PyArray_DATA(loc_arr)
+        else:
+            raise ValueError(f"Unsupported native shock family: {family!r}.")
+
+        plan._entries[i].family = family
+        plan._entries[i].width = width
+        plan._entries[i].columns = <const int64_t *>cnp.PyArray_DATA(columns_arr)
+        plan._entries[i].low = low
+        plan._entries[i].span = span
+        plan._entries[i].key = <uint64_t>key
+        # Position in the spec, so entries sharing a seed stay independent.
+        plan._entries[i].entry_idx = <uint64_t>i
+
+        if width > max_width:
+            max_width = width
+
+    plan._plan.entries = plan._entries
+    plan._plan.n_entries = n
+    plan._plan.T = T
+    plan._plan.n_exog = n_exog
+    plan._plan.shock_scale = shock_scale
+    plan._plan.max_width = max_width
+    return plan
+
+
+SHOCK_NORMAL = SDSGE_MC_SHOCK_NORMAL
+SHOCK_UNIFORM = SDSGE_MC_SHOCK_UNIFORM
+
+
 cdef class NativeStep:
     """One native step function plus its persistent static C context."""
 
@@ -797,9 +997,16 @@ def simulate1_step(
     int64_t n_exog,
     int64_t n_par,
     int64_t n_obs,
+    NativeShockPlan shocks=None,
 ):
-    """Bind a first-order simulation with resolved dimensions and callback."""
+    """Bind a first-order simulation with resolved dimensions and callback.
+
+    ``shocks`` makes the step draw its own shock block from ``rep_idx`` instead
+    of reading one the runner copied in. The draw's scratch is appended to the
+    simulation's own arena, and the plan is held for the step's lifetime.
+    """
     cdef NativeStep step = NativeStep()
+    cdef int64_t arena = sdsge_simulate_order1_arena_size(n_var, n_exog, T, n_par)
 
     if T < 0 or n_exog < 0 or n_par < 0:
         raise ValueError("Native simulation dimensions must be non-negative.")
@@ -818,18 +1025,39 @@ def simulate1_step(
     step._simulate_order1_ctx.k = n_exog
     step._simulate_order1_ctx.n_par = n_par
     step._simulate_order1_ctx.m = n_obs
+    step._simulate_order1_ctx.shock_scratch_offset = arena
+    if shocks is None:
+        step._simulate_order1_ctx.shocks = NULL
+    else:
+        _check_shock_plan(shocks, T, n_exog)
+        step._simulate_order1_ctx.shocks = shocks.c_plan()
+        arena += shocks.scratch_size
     step._bind(
         name,
         sdsge_mc_simulate_order1_runner,
         <const void *>&step._simulate_order1_ctx,
-        None,
+        shocks,
         0,
-        sdsge_simulate_order1_arena_size(n_var, n_exog, T, n_par),
+        arena,
         0,
         T * (n_var + n_obs),
         0,
     )
     return step
+
+
+cdef void _check_shock_plan(
+    NativeShockPlan shocks,
+    int64_t T,
+    int64_t n_exog,
+) except *:
+    """The plan and the step must agree on the block the draw writes into."""
+    if shocks._plan.T != T or shocks._plan.n_exog != n_exog:
+        raise ValueError(
+            "Native shock plan does not match its simulation step: plan is "
+            f"({shocks._plan.T}, {shocks._plan.n_exog}), step expects "
+            f"({T}, {n_exog})."
+        )
 
 
 def simulate2_step(
@@ -841,10 +1069,15 @@ def simulate2_step(
     int64_t n_exog,
     int64_t n_par,
     int64_t n_obs,
+    NativeShockPlan shocks=None,
 ):
-    """Bind a second-order simulation with resolved dimensions and callback."""
+    """Bind a second-order simulation with resolved dimensions and callback.
+
+    ``shocks`` behaves as in :func:`simulate1_step`.
+    """
     cdef NativeStep step = NativeStep()
     cdef int64_t n_var = n_state + n_ctrl
+    cdef int64_t arena
 
     if T < 0 or n_state <= 0 or n_ctrl < 0 or n_exog < 0 or n_par < 0:
         raise ValueError("Native simulation dimensions must be valid and non-negative.")
@@ -853,6 +1086,7 @@ def simulate2_step(
     if n_obs and measurement_addr == 0:
         raise ValueError("Observable simulation requires a measurement address.")
 
+    arena = sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par)
     step._simulate_order2_ctx.measurement = (
         <sdsge_measurement_fn><void *>measurement_addr
     )
@@ -862,13 +1096,20 @@ def simulate2_step(
     step._simulate_order2_ctx.n_exog = n_exog
     step._simulate_order2_ctx.n_par = n_par
     step._simulate_order2_ctx.m = n_obs
+    step._simulate_order2_ctx.shock_scratch_offset = arena
+    if shocks is None:
+        step._simulate_order2_ctx.shocks = NULL
+    else:
+        _check_shock_plan(shocks, T, n_exog)
+        step._simulate_order2_ctx.shocks = shocks.c_plan()
+        arena += shocks.scratch_size
     step._bind(
         name,
         sdsge_mc_simulate_order2_runner,
         <const void *>&step._simulate_order2_ctx,
-        None,
+        shocks,
         0,
-        sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par),
+        arena,
         0,
         T * (n_var + n_obs),
         0,

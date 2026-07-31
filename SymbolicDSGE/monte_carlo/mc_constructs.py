@@ -5,7 +5,6 @@ from enum import StrEnum
 from typing import (
     Any,
     Callable,
-    Literal,
     Mapping,
     Sequence,
     Union,
@@ -29,7 +28,6 @@ ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
 ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
-SeedIncrement = Union[int, Literal["auto"]]
 
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")

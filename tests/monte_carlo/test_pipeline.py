@@ -1056,7 +1056,6 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
             simulation_step(
                 T=T,
                 shocks=shocks,
-                seed_increment="auto",
                 observables=False,
             )
         ]
