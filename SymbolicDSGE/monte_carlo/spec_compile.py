@@ -34,7 +34,7 @@ from numpy.typing import NDArray
 
 from ..core.shock_generators import Shock, ShockParameters
 from .catalog import STEP_CATALOG
-from .mc_constructs import SourceArgs
+from .mc_constructs import OpType, SourceArgs
 from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
 
 if TYPE_CHECKING:
@@ -69,19 +69,14 @@ def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
 def raw_model_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
     """The named bulk arrays a ``raw_model_data`` datagen ships.
 
-    ``states`` / ``observables`` keep their names; entries of ``raw`` are
-    namespaced ``raw:<key>``. Shared with the bundle builder, which feeds them to
-    :func:`SymbolicDSGE.bundle.parquet.arrays_to_parquet`.
+    ``states`` and ``observables`` keep their names. Shared with the bundle
+    builder, which feeds them to :func:`SymbolicDSGE.bundle.parquet.arrays_to_parquet`.
     """
     out: dict[str, NDArray[Any]] = {}
     for key in ("states", "observables"):
         value = kwargs[key]
         if value is not None:
             out[key] = np.asarray(value, dtype=np.float64)
-    raw = kwargs["raw"]
-    if raw:
-        for name, value in raw.items():
-            out[f"raw:{name}"] = np.asarray(value, dtype=np.float64)
     return out
 
 
@@ -97,8 +92,8 @@ def _step_type(step: "MCStep") -> str:
 def _recover_params(step: "MCStep") -> dict[str, Any]:
     step_type = step.step_type
     if step_type == "raw_model_data":
-        return _recover_raw_model_data(step)
-    if step_type == "simulation":
+        params = _recover_raw_model_data(step)
+    elif step_type == "simulation":
         params = _recover_simulation(step.kwargs)
     elif step_type == "wald":
         params = _recover_wald(step.kwargs)
@@ -108,6 +103,8 @@ def _recover_params(step: "MCStep") -> dict[str, Any]:
     else:
         params = _jsonable_params(dict(step.kwargs))
     params.update(_recover_source_params(step_type, step.source_args))
+    if step.op_type is not OpType.POSTPROC and step.n_retain != -1:
+        params["n_retain"] = step.n_retain
     return params
 
 

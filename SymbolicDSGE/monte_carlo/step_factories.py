@@ -47,7 +47,6 @@ def raw_model_data_step(
     *,
     states: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
     observables: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
-    raw: Mapping[str, NDF] | None = None,
     observable_names: Sequence[str] = (),
 ) -> MCStep:
     return MCStep(
@@ -56,7 +55,6 @@ def raw_model_data_step(
         kwargs={
             "states": states,
             "observables": observables,
-            "raw": raw,
             "observable_names": observable_names,
         },
         step_type="raw_model_data",

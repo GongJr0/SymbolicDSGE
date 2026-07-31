@@ -37,6 +37,7 @@ MCStepKind = Literal[
     "rolling_mean",
     "rolling_std",
     "rolling_var",
+    "payload",
     # post-processing (post-loop ops over across-rep traces)
     "kde",
     # custom (user-supplied ops, shipped as cloudpickle bundle members); the
