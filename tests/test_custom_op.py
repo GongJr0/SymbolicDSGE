@@ -20,10 +20,11 @@ import pandas as pd
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
     CustomOpValidationError,
+    NumbaCustomFunc,
     NumpyCustomFunc,
     PandasCustomFunc,
     SAFE_NAMESPACE_VERSION,
-    numpy_operation,
+    custom_transform,
     pandas_operation,
 )
 
@@ -36,9 +37,10 @@ def _identity_decorator(func):
     return func
 
 
-@numpy_operation
-def _decorated_log_diff(arr):
-    return np.diff(np.log(arr + 1.0))
+@custom_transform
+def _decorated_numba_copy(sample, output):
+    output[:] = sample
+    return 0
 
 
 @_identity_decorator
@@ -59,6 +61,21 @@ def uses_numpy_alias(arr):
 
 def uses_math_only(x):
     return math.sqrt(x) + math.pi
+
+
+def numba_demean(sample, output):
+    for col in range(sample.shape[1]):
+        mean = sample[:, col].mean()
+        output[:, col] = sample[:, col] - mean
+    return 0
+
+
+def numba_wrong_signature(sample):
+    return 0
+
+
+def numba_invalid_return(sample, output):
+    return "invalid"
 
 
 def uses_linalg(matrix):
@@ -422,22 +439,69 @@ def test_cloudpickle_round_trip_preserves_helper_recursion() -> None:
     )
 
 
-# ---- @numpy_operation decorator ----------------------------------------
+# ---- @custom_transform decorator ----------------------------------------
 
 
-def test_numpy_operation_decorator_produces_numpy_custom_func() -> None:
-    assert isinstance(_decorated_log_diff, NumpyCustomFunc)
-    arr = np.array([1.0, 3.0, 7.0])
-    np.testing.assert_allclose(_decorated_log_diff(arr), np.diff(np.log(arr + 1.0)))
-    # The marker decorator stays in the captured source (intent for reviewers).
-    assert "@numpy_operation" in _decorated_log_diff.source
+def test_numba_custom_func_compiles_array_contract() -> None:
+    wrapped = NumbaCustomFunc(numba_demean)
+    callback = wrapped.cfunc()
+    sample = np.arange(6.0).reshape(3, 2)
+    output = np.empty_like(sample)
+
+    status = callback.ctypes(
+        sample.ctypes.data_as(callback.ctypes.argtypes[0]),
+        output.ctypes.data_as(callback.ctypes.argtypes[1]),
+        3,
+        2,
+        3,
+        2,
+    )
+
+    assert status == 0
+    assert callback is wrapped.cfunc()
+    assert wrapped.address == callback.address
+    np.testing.assert_allclose(output, [[-2.0, -2.0], [0.0, 0.0], [2.0, 2.0]])
 
 
-def test_numpy_operation_decorated_func_round_trips() -> None:
-    restored = cloudpickle.loads(cloudpickle.dumps(_decorated_log_diff))
-    arr = np.array([1.0, 3.0, 7.0])
-    np.testing.assert_allclose(restored(arr), _decorated_log_diff(arr))
-    assert restored.source == _decorated_log_diff.source
+def test_numba_custom_func_rejects_non_array_contract() -> None:
+    with pytest.raises(CustomOpValidationError, match="exactly two positional"):
+        NumbaCustomFunc(numba_wrong_signature)
+
+
+def test_numba_custom_func_warns_before_propagating_numba_errors() -> None:
+    wrapped = NumbaCustomFunc(numba_invalid_return)
+
+    with pytest.warns(RuntimeWarning, match="could not compile"):
+        with pytest.raises(Exception):
+            wrapped.cfunc()
+
+
+def test_numba_custom_func_cloudpickle_round_trip_recompiles_callback() -> None:
+    wrapped = NumbaCustomFunc(numba_demean)
+    first_address = wrapped.address
+
+    restored = cloudpickle.loads(cloudpickle.dumps(wrapped))
+
+    assert isinstance(restored, NumbaCustomFunc)
+    assert restored.address > 0
+    assert restored._compiled is not None
+    assert restored._callback is not None
+    assert restored.address != first_address
+
+
+def test_custom_transform_decorator_produces_numba_custom_func() -> None:
+    assert isinstance(_decorated_numba_copy, NumbaCustomFunc)
+    assert "@custom_transform" in _decorated_numba_copy.source
+
+
+def test_custom_transform_decorated_func_round_trips() -> None:
+    restored = cloudpickle.loads(cloudpickle.dumps(_decorated_numba_copy))
+    sample = np.arange(6.0).reshape(3, 2)
+    output = np.empty_like(sample)
+
+    assert restored(sample, output) == 0
+    np.testing.assert_allclose(output, sample)
+    assert restored.source == _decorated_numba_copy.source
 
 
 def test_non_marker_decorator_is_still_rejected() -> None:
@@ -447,8 +511,7 @@ def test_non_marker_decorator_is_still_rejected() -> None:
 
 # --- from_source (UI / web-editor path) -----------------------------------
 
-_FROM_SOURCE_OK = """@numpy_operation
-def standardize_cols(*, context, reference, dgp, rep_idx, **kwargs):
+_FROM_SOURCE_OK = """def standardize_cols(*, context, reference, dgp, rep_idx, **kwargs):
     arr = np.asarray(kwargs["x"], dtype=float)
     return (arr - arr.mean(axis=0)) / arr.std(axis=0)
 """
@@ -457,8 +520,6 @@ def standardize_cols(*, context, reference, dgp, rep_idx, **kwargs):
 def test_from_source_validates_execs_and_runs() -> None:
     func = NumpyCustomFunc.from_source(_FROM_SOURCE_OK)
     assert func.name == "standardize_cols"
-    # The @numpy_operation marker is preserved in the audit source.
-    assert "@numpy_operation" in func.source
     out = func(
         context=None, reference=None, dgp=None, rep_idx=0, x=np.array([1.0, 2, 3])
     )

@@ -19,8 +19,7 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ..regression.ols import OLSResult
-from .mc_constructs import MCContext, MCPipelineResult
+from .mc_constructs import MCPipelineResult
 from .postproc import Artifact, Raw, Summary, normalize_artifacts
 from .traces import regression_trace_keys, test_trace_keys
 
@@ -51,15 +50,15 @@ def serialize_pipeline_result(
         "run_id": run_id,
         "kind": "mc",
         "n_rep": result.n_rep,
-        "payloads_retained": result.meta.payloads_retained,
-        "test_results_retained": result.meta.test_results_retained,
-        "contexts_retained": result.meta.contexts_retained,
+        "n_retained_by_step": dict(result.meta.n_retained_by_step),
         "n_successful": result.n_successful,
         "succeeded": result.succeeded,
         "elapsed_s": result.meta.elapsed_s,
         "it_s": result.meta.it_s,
         "step_elapsed_s": dict(result.meta.step_elapsed_s),
         "step_it_s": dict(result.meta.step_it_s),
+        "step_worker_it_s": dict(result.meta.step_worker_it_s),
+        "step_wall_it_s": dict(result.meta.step_wall_it_s),
         "step_counts": dict(result.meta.step_counts),
         "step_failures": dict(result.meta.step_failures),
         "postproc_elapsed_s": dict(result.meta.postproc_elapsed_s),
@@ -75,7 +74,9 @@ def serialize_pipeline_result(
         "test_summaries": {
             name: {
                 "test_name": summary.test_name,
-                "n": summary.n,
+                "n_rep": summary.n_rep,
+                "n_retained": summary.n_retained,
+                "retained_reps": _json_value(summary.retained_reps),
                 "alpha": float(summary.alpha),
                 "distribution": summary.dist.value,
                 "df": _json_value(summary.df),
@@ -100,7 +101,6 @@ def serialize_pipeline_result(
             name: _serialize_regression_summary(summary)
             for name, summary in result.regression_summaries.items()
         },
-        "data_summaries": _summarize_context_data(result.contexts or ()),
         "postproc": {
             name: _serialize_artifact(artifact)
             for name, artifact in _normalized_postproc(result).items()
@@ -374,20 +374,20 @@ def pipeline_result_wire(
             entry["data"] = _table_data_or_null(entry, tables.get(name, {}))
         # scalar artifacts keep their inline value from the document
     for name, entry in wire["test_summaries"].items():
-        n = int(entry.get("n", 0))
+        n = int(entry.get("n_retained", entry.get("n_rep", 0)))
         entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)
         entry["pval_trace"] = _trace_or_null(traces, f"test.{name}.pval", n)
         entry["status_trace"] = _status_trace(traces, f"test.{name}.status")
     for name, entry in wire["regression_summaries"].items():
-        n_rep = int(entry.get("n_rep", 0))
+        n_retained = int(entry.get("n_retained", entry.get("n_rep", 0)))
         k = int(entry.get("k", 0))
         coef = traces.get(f"regression.{name}.coef")
         entry["coef_trace"] = (
             _json_value(coef)
             if coef is not None
-            else [[None] * k for _ in range(n_rep)]
+            else [[None] * k for _ in range(n_retained)]
         )
-        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_rep)
+        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_retained)
         entry["status_trace"] = _status_trace(traces, f"regression.{name}.status")
     return wire
 
@@ -441,6 +441,8 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
     out = {
         "variables": summary.variables,
         "n_rep": summary.n_rep,
+        "n_retained": summary.n_retained,
+        "retained_reps": _json_value(summary.retained_reps),
         "n": summary.n,
         "k": summary.k,
         "coef_trace": _json_value(summary.coef_trace),
@@ -451,7 +453,7 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
         "metrics": metrics,
         "ols": None,
     }
-    if all(isinstance(item, OLSResult) for item in summary.results):
+    if summary.kind == "ols":
         out["ols"] = {
             "mean_standard_errors": _json_value(np.mean(summary.se_trace, axis=0)),
             "mean_t_statistics": _json_value(np.mean(summary.t_stat_trace, axis=0)),
@@ -468,63 +470,6 @@ def _status_counts(status_trace: Sequence[Any]) -> dict[str, int]:
     for status in status_trace:
         counts[status.name] = counts.get(status.name, 0) + 1
     return counts
-
-
-def _summarize_context_data(contexts: Sequence[MCContext]) -> dict[str, Any]:
-    arrays: dict[str, list[np.ndarray]] = {}
-    for context in contexts:
-        if context.data is None:
-            continue
-        data = context.data
-        if data.states is not None:
-            arrays.setdefault("states", []).append(np.asarray(data.states))
-        if data.observables is not None:
-            arrays.setdefault("observables", []).append(np.asarray(data.observables))
-        for name, value in data.raw.items():
-            if name != "_X":
-                arrays.setdefault(f"raw:{name}", []).append(np.asarray(value))
-    return {name: _array_collection_summary(values) for name, values in arrays.items()}
-
-
-def _array_collection_summary(values: Sequence[np.ndarray]) -> dict[str, Any]:
-    n_total = sum(int(arr.size) for arr in values)
-    n_finite = 0
-    value_sum = 0.0
-    square_sum = 0.0
-    minimum = np.inf
-    maximum = -np.inf
-    for arr in values:
-        finite = arr[np.isfinite(arr)]
-        if finite.size == 0:
-            continue
-        n_finite += int(finite.size)
-        value_sum += float(finite.sum())
-        square_sum += float(np.square(finite).sum())
-        minimum = min(minimum, float(finite.min()))
-        maximum = max(maximum, float(finite.max()))
-    if n_finite == 0:
-        return {
-            "n_rep": len(values),
-            "shape": list(values[0].shape),
-            "n_values": n_total,
-            "n_finite": 0,
-            "mean": None,
-            "std": None,
-            "min": None,
-            "max": None,
-        }
-    mean = value_sum / n_finite
-    variance = max(0.0, square_sum / n_finite - mean**2)
-    return {
-        "n_rep": len(values),
-        "shape": list(values[0].shape),
-        "n_values": n_total,
-        "n_finite": n_finite,
-        "mean": _json_float(mean),
-        "std": _json_float(variance**0.5),
-        "min": _json_float(minimum),
-        "max": _json_float(maximum),
-    }
 
 
 def _trace_summary(values: Any) -> dict[str, Any]:

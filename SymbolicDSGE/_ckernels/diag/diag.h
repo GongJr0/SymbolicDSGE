@@ -27,52 +27,91 @@
 #define DIAG_FALLBACK 1
 
 /* Breusch-Godfrey LM statistic. eps(n), X(n,K). Builds the auxiliary design
- * [1 | X | lagged eps] internally. Writes the statistic to *stat_out. */
+ * [1 | X | lagged eps] internally. Writes the statistic to *stat_out.
+ *
+ * p = 1 + K + lags
+ * arena:  n * p + 2 * p * p + 2 * p
+ */
+arena_size sdsge_bg_arena_size(i64 n, i64 K, i64 lags);
 int sdsge_bg_stat(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X,
-                  i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT stat_out);
+                  i64 n, i64 K, i64 lags, f64 *SDSGE_RESTRICT arena,
+                  f64 *SDSGE_RESTRICT stat_out);
 
 /* Breusch-Pagan auxiliary regression. eps(n), X_aug(n,p) already augmented with
  * the intercept column (the augment + constant-column validation stay in the
- * Python wrapper). Writes RSS and centered TSS of the auxiliary fit. */
+ * Python wrapper). Writes RSS and centered TSS of the auxiliary fit.
+ *
+ * arena: n + 2 * p * p + 2 * p
+ */
+arena_size sdsge_bp_arena_size(i64 n, i64 p);
 int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
-                 i64 n, i64 p, f64 *SDSGE_RESTRICT rss_out,
-                 f64 *SDSGE_RESTRICT tss_out);
+                 i64 n, i64 p, f64 *SDSGE_RESTRICT arena,
+                 f64 *SDSGE_RESTRICT rss_out, f64 *SDSGE_RESTRICT tss_out);
+int sdsge_bp_stat(const f64 *SDSGE_RESTRICT eps,
+                  const f64 *SDSGE_RESTRICT X_aug, i64 n, i64 p, i64 robust,
+                  f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out);
 
 /* Chow break-point F statistic. y(T), X(T,p), split at t_break. Fits the pooled
  * and the two sub-sample regressions; DIAG_FALLBACK if any is rank-deficient.
- */
+ *
+ * arena: 2 * p * p + 2 * p
+ * */
+arena_size sdsge_chow_arena_size(i64 p);
 int sdsge_chow_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
-                    i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT stat_out);
+                    i64 T, i64 p, i64 t_break, f64 *SDSGE_RESTRICT arena,
+                    f64 *SDSGE_RESTRICT stat_out);
 
 /* Brown-Durbin-Evans recursive residuals (the w series, length T-p). y(T),
  * X(T,p). Fully native: seeds beta/P from the first p rows via an SPD inverse,
  * then the rank-1 downdate recursion. DIAG_FALLBACK if the seed Gram is
- * singular. */
+ * singular.
+ *
+ * arena: 3 * p * p + 3 * p
+ * */
 int sdsge_recursive_residuals(const f64 *SDSGE_RESTRICT y,
                               const f64 *SDSGE_RESTRICT X, i64 T, i64 p,
+                              f64 *SDSGE_RESTRICT arena,
                               f64 *SDSGE_RESTRICT w_out);
 
 /* Standardized CUSUM series (length T-p): cumsum(recursive residuals) / sigma,
  * where sigma is the full-sample OLS residual std. DIAG_FALLBACK if the seed
- * Gram or the full-sample normal equations are rank-deficient. */
+ * Gram or the full-sample normal equations are rank-deficient.
+ *
+ *              internal arena                  recursive residuals
+ * arena: ((T - p) + 2 * p * p + 2 * p)    +    (3 * p * p + 3 * p)
+ * */
 int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
-                       i64 T, i64 p, f64 *SDSGE_RESTRICT series_out);
+                       i64 T, i64 p, f64 *SDSGE_RESTRICT arena,
+                       f64 *SDSGE_RESTRICT series_out);
 
 /* CUSUM statistic: max over t of |series_t| / (sqrt(T-p) + 2 (t-p) /
- * sqrt(T-p)). */
+ * sqrt(T-p)).i
+ *
+ *             internal arena                 recursive residuals       series
+ * scratch arena: (T - p) + 2 * p * p + 2 * p    +    (3 * p * p + 3 * p)    +
+ * (T - p);
+ * */
+arena_size sdsge_cusum_arena_size(i64 T, i64 p);
 int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
-                     i64 T, i64 p, f64 *SDSGE_RESTRICT stat_out);
+                     i64 T, i64 p, f64 *SDSGE_RESTRICT arena,
+                     f64 *SDSGE_RESTRICT stat_out);
 
 /* CUSUM-of-squares statistic. Writes the residual count n = T-p and the
  * Kolmogorov-type max deviation of the normalized squared-residual partial sums
- * from the t/n line, divided by sqrt(2). */
+ * from the t/n line, divided by sqrt(2).
+ *
+ *        recursive residuals       weights
+ * arena: 3 * p * p + 3 * p    +    (T - p)
+ * */
+arena_size sdsge_cusumsq_arena_size(i64 T, i64 p);
 int sdsge_cusumsq_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
                        i64 T, i64 p, i64 *SDSGE_RESTRICT n_out,
-                       f64 *SDSGE_RESTRICT stat_out);
+                       f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out);
 
 int sdsge_acorr(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 L,
                 f64 *SDSGE_RESTRICT z_scratch, f64 *SDSGE_RESTRICT out);
 
+arena_size sdsge_lb_arena_size(i64 n, i64 L);
 int sdsge_lb_stat(const f64 *SDSGE_RESTRICT x, const i64 n, i64 L,
                   f64 *SDSGE_RESTRICT z_scratch,
                   f64 *SDSGE_RESTRICT acorr_scratch, f64 *SDSGE_RESTRICT out);

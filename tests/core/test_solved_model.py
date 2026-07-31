@@ -131,10 +131,18 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
 
 def _manual_second_order_path(data, shock, x0_state) -> np.ndarray:
     T = shock.shape[0]
-    expected = np.empty((T + 1, 3), dtype=np.float64)
+    expected = np.empty((T, 3), dtype=np.float64)
     x1 = x0_state.copy()
     x2 = np.zeros(2, dtype=np.float64)
-    for t in range(T + 1):
+    for t in range(T):
+        outer = np.outer(x1, x1)
+        x1_next = data["hx"] @ x1 + data["bx"][:, 0] * shock[t]
+        x2_next = (
+            data["hx"] @ x2
+            + 0.5 * np.einsum("ijk,jk->i", data["hxx"], outer)
+            + 0.5 * data["hss"]
+        )
+        x1, x2 = x1_next, x2_next
         state = x1 + x2
         outer = np.outer(x1, x1)
         expected[t, :2] = state
@@ -143,15 +151,6 @@ def _manual_second_order_path(data, shock, x0_state) -> np.ndarray:
             + 0.5 * np.sum(data["gxx"][0] * outer)
             + 0.5 * data["gss"][0]
         )
-        if t == T:
-            break
-        x1_next = data["hx"] @ x1 + data["bx"][:, 0] * shock[t]
-        x2_next = (
-            data["hx"] @ x2
-            + 0.5 * np.einsum("ijk,jk->i", data["hxx"], outer)
-            + 0.5 * data["hss"]
-        )
-        x1, x2 = x1_next, x2_next
     return expected
 
 
@@ -160,10 +159,10 @@ def test_solved_model_sim_shapes_and_keys(solved_test):
     out = solved_test.sim(T)
 
     assert "_X" in out
-    assert out["_X"].shape == (T + 1, solved_test.A.shape[0])
+    assert out["_X"].shape == (T, solved_test.A.shape[0])
     for name in solved_test.compiled.var_names:
         assert name in out
-        assert out[name].shape == (T + 1,)
+        assert out[name].shape == (T,)
 
 
 def test_linear_simulation_kernel_writes_manual_recursion() -> None:
@@ -174,21 +173,22 @@ def test_linear_simulation_kernel_writes_manual_recursion() -> None:
         [[0.5, 1.0], [-1.0, 0.0], [0.25, -0.5]],
         dtype=np.float64,
     )
-    out = np.empty((shock_mat.shape[0] + 1, A.shape[0]), dtype=np.float64)
+    out = np.empty((shock_mat.shape[0], A.shape[0]), dtype=np.float64)
     py_out = np.empty_like(out)
 
     simulate_linear_states_into(A, B, x0, shock_mat, out)
     _simulate_linear_states_into_numba.py_func(A, B, x0, shock_mat, py_out)
 
     expected = np.empty_like(out)
-    expected[0] = x0
+    previous = x0
     for t in range(shock_mat.shape[0]):
-        expected[t + 1] = A @ expected[t] + B @ shock_mat[t]
+        expected[t] = A @ previous + B @ shock_mat[t]
+        previous = expected[t]
     np.testing.assert_allclose(out, expected)
     np.testing.assert_allclose(py_out, expected)
 
 
-def test_affine_observation_kernel_writes_with_state_offset() -> None:
+def test_affine_observation_kernel_writes_all_states() -> None:
     states = np.array(
         [
             [1.0, 2.0],
@@ -199,14 +199,14 @@ def test_affine_observation_kernel_writes_with_state_offset() -> None:
     )
     C = np.array([[2.0, -0.5], [0.0, 1.5]], dtype=np.float64)
     d = np.array([1.0, -2.0], dtype=np.float64)
-    out = np.empty((2, 2), dtype=np.float64)
+    out = np.empty((3, 2), dtype=np.float64)
     py_out = np.empty_like(out)
 
-    affine_observations_into(states, C, d, 1, out)
-    _affine_observations_into_numba.py_func(states, C, d, 1, py_out)
+    affine_observations_into(states, C, d, out)
+    _affine_observations_into_numba.py_func(states, C, d, py_out)
 
-    np.testing.assert_allclose(out, states[1:] @ C.T + d)
-    np.testing.assert_allclose(py_out, states[1:] @ C.T + d)
+    np.testing.assert_allclose(out, states @ C.T + d)
+    np.testing.assert_allclose(py_out, states @ C.T + d)
 
 
 def test_solved_model_sim_matches_manual_state_recursion(solved_test):
@@ -224,9 +224,10 @@ def test_solved_model_sim_matches_manual_state_recursion(solved_test):
         shock_scale=0.5,
     )
     expected = np.empty_like(out["_X"])
-    expected[0] = solved_test._simulation_initial_state(None)
+    previous = solved_test._simulation_initial_state(None)
     for t in range(T):
-        expected[t + 1] = solved_test.A @ expected[t] + solved_test.B @ shock_mat[t]
+        expected[t] = solved_test.A @ previous + solved_test.B @ shock_mat[t]
+        previous = expected[t]
     np.testing.assert_allclose(out["_X"], expected)
 
 
@@ -257,7 +258,7 @@ def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
     ) - _manual_second_order_path(data, zero, np.zeros(2, dtype=np.float64))
 
     np.testing.assert_allclose(out, expected)
-    np.testing.assert_allclose(out[0], np.zeros(3, dtype=np.float64))
+    assert out.shape == (T, 3)
 
 
 def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
@@ -269,7 +270,7 @@ def test_solved_model_sim_with_observables_includes_measurements(solved_test):
     out = solved_test.sim(10, observables=True)
     for obs in solved_test.compiled.observable_names:
         assert obs in out
-        assert out[obs].shape == (11,)
+        assert out[obs].shape == (10,)
 
 
 def test_solved_model_affine_observables_can_drop_initial_row(solved_test):
@@ -311,7 +312,7 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
 
     out = solved.sim(3, observables=True)
 
-    assert np.array_equal(out["Obs"], np.array([0.0, 1.0, 2.0, 3.0]))
+    assert np.array_equal(out["Obs"], np.array([0.0, 1.0, 2.0]))
 
 
 def test_solved_model_irf_validation_errors(solved_test):
@@ -323,7 +324,7 @@ def test_solved_model_irf_validation_errors(solved_test):
 
 def test_solved_model_irf_runs_for_exogenous_shock(solved_test):
     out = solved_test.irf(shocks=["u"], T=8, observables=True)
-    assert out["u"].shape == (9,)
+    assert out["u"].shape == (8,)
     assert "_X" in out
     assert "Infl" in out and "Rate" in out
 
@@ -333,10 +334,10 @@ def test_solved_model_transition_plot_renders_observables_and_shocks(
 ):
     def fake_irf(self, shocks, T, scale=1.0, observables=False):
         return {
-            "_X": np.zeros((T + 1, 3), dtype=np.float64),
-            "Infl": np.linspace(0.0, 1.0, T + 1),
-            "u": np.linspace(1.0, 0.0, T + 1),
-            "x": np.linspace(-1.0, 0.0, T + 1),
+            "_X": np.zeros((T, 3), dtype=np.float64),
+            "Infl": np.linspace(0.0, 1.0, T),
+            "u": np.linspace(1.0, 0.0, T),
+            "x": np.linspace(-1.0, 0.0, T),
         }
 
     monkeypatch.setattr(solved_model_module.SolvedModel, "irf", fake_irf)
@@ -460,7 +461,7 @@ def test_solved_model_shock_unpack_rejects_variable_in_two_entries(solved_test):
 
 def test_solved_model_kalman_smoke(solved_post82):
     sim = solved_post82.sim(20, observables=True)
-    y = pd.DataFrame({"Infl": sim["Infl"][1:], "Rate": sim["Rate"][1:]})
+    y = pd.DataFrame({"Infl": sim["Infl"], "Rate": sim["Rate"]})
 
     out = solved_post82.kalman(y, observables=["Infl", "Rate"])
     assert out is not None

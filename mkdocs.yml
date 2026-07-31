@@ -218,6 +218,7 @@ nav:
                   - Regression Steps: documentation/monte_carlo/operations/regressions/regression.md
               - Transforms:
                   - Custom Transform: documentation/monte_carlo/operations/transforms/custom.md
+                  - Payload: documentation/monte_carlo/operations/transforms/payload.md
                   - Standardize: documentation/monte_carlo/operations/transforms/standardize.md
                   - Log: documentation/monte_carlo/operations/transforms/log.md
                   - Log Difference: documentation/monte_carlo/operations/transforms/log_diff.md

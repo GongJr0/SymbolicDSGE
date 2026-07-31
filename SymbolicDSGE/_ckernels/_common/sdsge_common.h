@@ -46,6 +46,16 @@ static inline i64 max_i64(i64 a, i64 b) { return (a > b) ? a : b; }
 static inline f64 min_f64(f64 a, f64 b) { return (a < b) ? a : b; }
 static inline f64 max_f64(f64 a, f64 b) { return (a > b) ? a : b; }
 
+/* float/int arena size descriptor and constructor. */
+typedef struct {
+  i64 n_float;
+  i64 n_int;
+} arena_size;
+
+static inline arena_size make_sizer(i64 n_float, i64 n_int) {
+  return (arena_size){.n_float = n_float, .n_int = n_int};
+}
+
 /* Portable `restrict` qualifier (C99 `restrict` is not in C++ and is spelled
  * differently by MSVC). */
 #if defined(__GNUC__) || defined(__clang__)

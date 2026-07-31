@@ -18,7 +18,7 @@ jarque_bera_test_step(
 ) -> MCStep
 ```
 
-`jarque_bera_test_step` wraps `run_jarque_bera_test(...)`. It selects one series from a producer step and runs the Jarque-Bera test for normality from the sample skewness and excess kurtosis.
+`jarque_bera_test_step` runs as a native per-replication kernel. It selects one series from a producer step and runs the Jarque-Bera test for normality from the sample skewness and excess kurtosis.
 
 ???+ info "Reference Distribution"
     The statistic is compared against a $\chi^2(2)$ distribution asymptotically. For small samples the test uses a finite-sample critical-value lookup keyed on the sample size, so the reported degrees of freedom carry the sample size rather than a fixed value.

@@ -73,9 +73,64 @@ const CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
   step_type: "transform:custom",
   title: "Custom Op",
   default_name: "custom_op",
-  description: "User-defined Python transform, validated and run per replication.",
+  description: "User-defined Numba transform, run once per replication.",
   category: "transforms",
-  fields: [],
+  fields: [
+    {
+      key: "source",
+      label: "Input step",
+      type: "text",
+      default: "",
+      required: true,
+      options: [],
+      minimum: null,
+      when: [],
+    },
+    {
+      key: "field",
+      label: "Input array",
+      type: "select",
+      default: "observables",
+      required: true,
+      options: [
+        "states",
+        "observables",
+        "x_pred",
+        "x_filt",
+        "x1_pred",
+        "x2_pred",
+        "x1_filt",
+        "x2_filt",
+        "y_pred",
+        "y_filt",
+        "innov",
+        "std_innov",
+        "eps_hat",
+      ],
+      minimum: null,
+      when: [],
+    },
+    {
+      key: "columns",
+      label: "Input columns",
+      type: "number_list",
+      default: [],
+      required: false,
+      options: [],
+      minimum: 0,
+      when: [],
+    },
+    {
+      key: "output_shape",
+      label: "Output shape",
+      type: "number_list",
+      default: [1, 1],
+      required: true,
+      options: [],
+      minimum: 0,
+      when: [],
+    },
+  ],
 };
 
 // Post-loop sibling of CUSTOM_CATALOG_ITEM: a user-authored summary op run once
@@ -135,6 +190,8 @@ function MCPipelineBuilder({
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nRep, setNRep] = useState(100);
+  const [nJobs, setNJobs] = useState<number | null>(null);
+  const [verbosity, setVerbosity] = useState(0);
   const [failFast, setFailFast] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -171,6 +228,8 @@ function MCPipelineBuilder({
           setNodes(restored.nodes);
           setEdges(restored.edges);
           setNRep(workspace?.nRep ?? 100);
+          setNJobs(workspace?.nJobs ?? null);
+          setVerbosity(workspace?.verbosity ?? 0);
           setFailFast(workspace?.failFast ?? true);
         } else {
           const simulation = value.steps.find(
@@ -281,6 +340,8 @@ function MCPipelineBuilder({
           ]),
         ),
         nRep,
+        nJobs,
+        verbosity,
         failFast,
       }).catch((error: unknown) => {
         setNotice(error instanceof Error ? error.message : String(error));
@@ -288,7 +349,7 @@ function MCPipelineBuilder({
       });
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [edges, failFast, hydrated, nRep, nodes, pipeline]);
+  }, [edges, failFast, hydrated, nJobs, nRep, nodes, pipeline, verbosity]);
 
   useEffect(() => {
     if (!hydrated || result === null) return;
@@ -439,7 +500,7 @@ function MCPipelineBuilder({
   async function run() {
     setBusy(true);
     try {
-      const output = await runMCPipeline(pipeline, nRep, failFast);
+      const output = await runMCPipeline(pipeline, nRep, nJobs, failFast, verbosity);
       setResult(output);
       setNotice(
         `MC run completed: ${output.n_successful}/${output.n_rep} replications at ${output.it_s.toFixed(2)} it/s.`,
@@ -457,6 +518,8 @@ function MCPipelineBuilder({
     resetPipeline();
     setResult(null);
     setNRep(100);
+    setNJobs(null);
+    setVerbosity(0);
     setFailFast(true);
     try {
       await clearMCWorkspace();
@@ -583,6 +646,30 @@ function MCPipelineBuilder({
             value={nRep}
             onChange={(event) => setNRep(Number(event.target.value))}
           />
+        </label>
+        <label>
+          Workers
+          <input
+            type="number"
+            min={1}
+            placeholder="auto"
+            value={nJobs ?? ""}
+            onChange={(event) => {
+              const value = event.target.value;
+              setNJobs(value === "" ? null : Number(value));
+            }}
+          />
+        </label>
+        <label>
+          Verbosity
+          <select
+            value={verbosity}
+            onChange={(event) => setVerbosity(Number(event.target.value))}
+          >
+            <option value={0}>Quiet</option>
+            <option value={1}>Run summary</option>
+            <option value={2}>Step timings</option>
+          </select>
         </label>
         <label className="switch-row">
           <span>Fail fast</span>
@@ -802,7 +889,10 @@ function makeNode(
   const name = count === 0 ? item.default_name : `${item.default_name}_${count + 1}`;
   const params =
     item.step_type === "transform:custom"
-      ? { code: customTemplate }
+      ? {
+          ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
+          code: customTemplate,
+        }
       : item.step_type === "postproc:custom"
         ? { code: POSTPROC_CUSTOM_TEMPLATE }
         : Object.fromEntries(item.fields.map((field) => [field.key, field.default]));

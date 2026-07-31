@@ -32,6 +32,26 @@ from SymbolicDSGE.regression.ols.solvers import (
 )
 
 
+def _mc_regression_from_ols(results: tuple[OLSResult, ...]) -> MCRegressionResult:
+    first = results[0]
+    return MCRegressionResult(
+        kind="ols",
+        variables=first.variables,
+        coef_trace=np.vstack([result.coefficients for result in results]),
+        ssr_trace=np.asarray([result.ssr for result in results], dtype=np.float64),
+        sst_trace=np.asarray([result.sst for result in results], dtype=np.float64),
+        _se_trace=np.vstack([result.se for result in results]),
+        n_retained=len(results),
+        retained_reps=np.arange(len(results), dtype=np.int_),
+        n_rep=len(results),
+        n=first.n,
+        k=first.k,
+        _raw_status=np.asarray(
+            [int(result.status) for result in results], dtype=np.int_
+        ),
+    )
+
+
 def test_chol_solve_returns_factor_for_standard_error_calculation() -> None:
     x = np.array(
         [
@@ -297,7 +317,7 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
         ols(x, y1, variables=["const", "trend"], intercept=False),
     )
 
-    out = MCRegressionResult.from_results(results)
+    out = _mc_regression_from_ols(results)
 
     np.testing.assert_allclose(
         out.coef_trace,
@@ -306,10 +326,6 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
     np.testing.assert_allclose(
         out.coefficients,
         np.vstack([result.coefficients for result in results]),
-    )
-    np.testing.assert_allclose(
-        out.y_hat_trace,
-        np.vstack([result.y_hat for result in results]),
     )
     np.testing.assert_allclose(
         out.se_trace,
@@ -349,8 +365,10 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
     np.testing.assert_allclose(ci[0], results[0].confidence_intervals(alpha=0.1))
 
     summary = out.summary(alpha=0.1)
-    assert list(summary.index.names) == ["rep", "variable"]
+    assert list(summary.index.names) == ["retained_row", "variable"]
+    np.testing.assert_array_equal(summary["rep_idx"].to_numpy(), [0, 0, 1, 1])
     assert list(summary.columns) == [
+        "rep_idx",
         "coef",
         "std_err",
         "coef_ci_low",
@@ -389,7 +407,7 @@ def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs()
         ols(x, np.array([0.8, 2.4, 3.2, 3.9], dtype=np.float64), intercept=False),
     )
 
-    out = MCRegressionResult.from_results(results)
+    out = _mc_regression_from_ols(results)
 
     assert out.status_trace == (
         RegressionStatus.RANK_DEFICIENT,
@@ -401,7 +419,7 @@ def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs()
     )
 
 
-def test_mc_regression_result_validates_compatible_runs() -> None:
+def test_mc_regression_result_uses_declared_native_variables() -> None:
     x = np.array(
         [
             [1.0, 0.0],
@@ -423,5 +441,6 @@ def test_mc_regression_result_validates_compatible_runs() -> None:
         intercept=False,
     )
 
-    with pytest.raises(ValueError, match="incompatible variables"):
-        MCRegressionResult.from_results((first, second))
+    out = _mc_regression_from_ols((first, second))
+    assert out.variables == ["c", "x"]
+    np.testing.assert_allclose(out.coef_trace[1], second.coefficients)

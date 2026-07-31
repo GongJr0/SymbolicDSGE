@@ -5,7 +5,7 @@ from .types import NDF
 
 import numpy as np
 
-from ...core.shock_generators import Shock
+from SymbolicDSGE.core.shock_generators import Shock
 from ..mc_constructs import (
     MCContext,
     SeedIncrement,
@@ -64,8 +64,12 @@ def _resolve_seed_increment(
     return increment
 
 
-def _resolve_source_array(context: MCContext, selector: SourceArgs) -> NDF:
-    out: NDF = context.payload_slots[selector.source_idx][selector.field_idx][
+def _resolve_source_array(
+    context: MCContext,
+    selector: SourceArgs,
+    source_idx: int,
+) -> NDF:
+    out: NDF = context.payload_slots[source_idx][selector.field_idx][
         selector.row_start :, selector.column_selector
     ]
     return out

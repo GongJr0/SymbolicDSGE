@@ -7,8 +7,8 @@ tags:
 ```python
 simulation_step(
     name: str = "datagen",
-    *,
     target: Literal["reference", "dgp"] = "dgp",
+    *,
     T: int,
     shocks: Mapping[str, Shock | Callable | ndarray] | None = None,
     seed_increment: int | Literal["auto"] = "auto",
@@ -18,7 +18,7 @@ simulation_step(
 ) -> MCStep
 ```
 
-`simulation_step` wraps `simulate(...)`. Each replication drives one solved model's simulation: the DGP by default, or the reference model when `target="reference"`. The selected model must be supplied to `MCPipeline.run(...)`.
+`simulation_step` generates one replication's data from a solved model: the DGP by default, or the reference model when `target="reference"`. The selected model must be supplied to `MCPipeline.run(...)`. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
 
 __Inputs:__
 
@@ -30,7 +30,7 @@ __Inputs:__
 | seed_increment | Integer seed offset per replication, or `"auto"` to increment by the number of seeded `Shock` objects. |
 | shock_scale | Shock scaling passed into `SolvedModel.sim(...)`. |
 | x0 | Optional initial state. |
-| observables | If `True`, observable paths are included in `MCData.observables`. |
+| observables | If `True`, observable paths are produced alongside states, and downstream steps may read `field="observables"`. |
 
 ???+ info "Seed Convention"
     For generator style `Shock` objects with integer seeds, replication `rep_idx` receives `shock.seed + rep_idx * seed_increment`. With `seed_increment="auto"`, the increment is the number of seeded `Shock` entries. Array shocks and callable shocks are passed through unchanged.

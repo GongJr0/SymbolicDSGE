@@ -4,7 +4,7 @@ from typing import Any, Callable, Mapping, Sequence, Literal
 from numpy import float64
 from numpy.typing import NDArray
 
-from ....core.shock_generators import Shock
+from SymbolicDSGE.core.shock_generators import Shock
 from ...mc_constructs import MCStep, OpType
 from .ops import (
     simulate,
@@ -130,11 +130,17 @@ def reference_filter_step(
 
 def add_payload_step(
     name: str,
-    payload: NDF | Sequence[float] | Sequence[Sequence[float]],
+    payload: (
+        NDF
+        | Sequence[float]
+        | Sequence[Sequence[float]]
+        | Sequence[Sequence[Sequence[float]]]
+    ),
 ) -> MCStep:
-    """Add a replication-specific payload to the context.
+    """Add a payload to the context.
 
-    The ``payload`` is stored in ``context.payload[name]`` for that replication.
+    One- and two-dimensional payloads are reused across replications. A
+    three-dimensional payload is indexed on its leading replication axis.
     """
     return MCStep(
         name=name,

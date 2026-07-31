@@ -22,7 +22,7 @@ chow_test_step(
 ) -> MCStep
 ```
 
-`chow_test_step` wraps `run_chow_test(...)`. It resolves the response and regressors from explicit producer and field pairs, then tests for a structural break at `t_break` by comparing the pooled residual sum of squares against the two subsample fits.
+`chow_test_step` runs as a native per-replication kernel. It resolves the response and regressors from explicit producer and field pairs, then tests for a structural break at `t_break` by comparing the pooled residual sum of squares against the two subsample fits.
 
 ???+ info "Reference Distribution"
     The statistic is compared against an $F(p,\ T - 2p)$ distribution, where $p$ is the number of regressor columns and $T$ is the number of observations.

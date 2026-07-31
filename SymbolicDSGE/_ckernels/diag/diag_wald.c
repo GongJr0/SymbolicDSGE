@@ -1,6 +1,7 @@
 #include "diag_wald.h"
 #include "diag.h"
 #include <math.h>
+#include <string.h>
 
 /* Column mean/var of a row-major (n, p) buffer (not on the Python side). */
 static f64 col_mean(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
@@ -140,6 +141,53 @@ i64 andrews_bandwidth_matrix(const f64 *SDSGE_RESTRICT r, KernelID kernel_id,
   return (i64)floor(sdsge_median_f64(ls, m));
 }
 
+static int wald_resolve_bandwidth(const f64 *SDSGE_RESTRICT r,
+                                  const KernelID kernel_id,
+                                  const WaldBandwidthMode bandwidth_mode,
+                                  const i64 manual_bandwidth, const i64 n,
+                                  const i64 p,
+                                  f64 *SDSGE_RESTRICT bandwidth_scratch,
+                                  i64 *SDSGE_RESTRICT out) {
+  if (kernel_id < BARTLETT || kernel_id >= KERNEL_COUNT || n < 2)
+    return (kernel_id < BARTLETT || kernel_id >= KERNEL_COUNT)
+               ? DIAG_BAD_PARAMETER
+               : DIAG_INSUFFICIENT_SAMPLES;
+
+  i64 bandwidth = 0;
+  switch (bandwidth_mode) {
+  case WALD_BW_MANUAL:
+    if (manual_bandwidth < 0)
+      return DIAG_BAD_PARAMETER;
+    bandwidth = manual_bandwidth;
+    break;
+  case WALD_BW_WOOLDRIDGE:
+    bandwidth = wooldridge_bandwidth(r, n);
+    break;
+  case WALD_BW_ANDREWS:
+    bandwidth = andrews_bandwidth_matrix(r, kernel_id, n, p, bandwidth_scratch);
+    break;
+  case WALD_BW_AUTO:
+    bandwidth =
+        (kernel_id == BARTLETT)
+            ? wooldridge_bandwidth(r, n)
+            : andrews_bandwidth_matrix(r, kernel_id, n, p, bandwidth_scratch);
+    break;
+  default:
+    return DIAG_BAD_PARAMETER;
+  }
+  *out = min_i64(bandwidth, n - 1);
+  return DIAG_OK;
+}
+
+static void center_inplace(f64 *SDSGE_RESTRICT x,
+                           const f64 *SDSGE_RESTRICT mean, const i64 n,
+                           const i64 p) {
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < p; ++j)
+      x[i * p + j] -= mean[j];
+  }
+}
+
 // kernel weight function
 
 f64 kernel_weight(i64 j, i64 L, KernelID kernel_id) {
@@ -203,42 +251,180 @@ void sdsge_hac_estimator_matmul(f64 *SDSGE_RESTRICT r, KernelID kernel_id,
 // ------
 // --- wald_test ---
 
-int sdsge_wald_stat_from_mean_and_cov(const f64 *SDSGE_RESTRICT mean,
-                                      const f64 *SDSGE_RESTRICT target,
-                                      const f64 *SDSGE_RESTRICT omega,
-                                      const i64 n, const i64 p,
-                                      f64 *SDSGE_RESTRICT dev_scratch,
-                                      f64 *SDSGE_RESTRICT L_scratch,
-                                      f64 *SDSGE_RESTRICT stat_out) {
+int sdsge_wald_stat_from_mean_and_cov(
+    const f64 *SDSGE_RESTRICT mean, const f64 *SDSGE_RESTRICT target,
+    const f64 *SDSGE_RESTRICT omega, const i64 n, const i64 p,
+    f64 *SDSGE_RESTRICT dev_scratch, f64 *SDSGE_RESTRICT factor_scratch,
+    i64 *SDSGE_RESTRICT pivot_scratch, f64 *SDSGE_RESTRICT solved_scratch,
+    f64 *SDSGE_RESTRICT stat_out) {
   /* Compute the Wald statistic: *
    * dev = mean - target;
    * stat = n * (dev^T @ omega^-1 @ dev); */
+  *stat_out = NAN;
   for (i64 i = 0; i < p; ++i) {
     dev_scratch[i] = mean[i] - target[i];
   }
-  int code = sdsge_chol(omega, 0.0, L_scratch, p);
-  if (code != SDSGE_OK) {
-    return DIAG_FALLBACK;
+  int code = sdsge_chol(omega, 0.0, factor_scratch, p);
+  if (code == SDSGE_OK) {
+    sdsge_forward_subst(factor_scratch, dev_scratch, solved_scratch, p);
+    sdsge_backward_subst_chol_t(factor_scratch, solved_scratch, solved_scratch,
+                                p);
+  } else {
+    memcpy(factor_scratch, omega, sizeof(f64) * p * p);
+    if (sdsge_lu_factor_inplace(factor_scratch, pivot_scratch, p) !=
+        SDSGE_LU_SUCCESS) {
+      return DIAG_LINALG;
+    }
+    sdsge_lu_solve(factor_scratch, pivot_scratch, dev_scratch, solved_scratch,
+                   p, 1);
   }
 
-  sdsge_forward_subst(L_scratch, dev_scratch, dev_scratch, p);
-
-  /* Stat = n * sum(z_i^2) */
+  /* Stat = n * dev^T omega^-1 dev. */
   f64 stat = 0.0;
   for (i64 i = 0; i < p; ++i) {
-    stat += dev_scratch[i] * dev_scratch[i];
+    stat += dev_scratch[i] * solved_scratch[i];
   }
-
-  *stat_out = (f64)n * stat;
+  stat *= (f64)n;
+  if (stat < 0.0 && stat > -1e-12) {
+    stat = 0.0;
+  }
+  *stat_out = stat;
   return DIAG_OK;
+}
+
+static int wald_hac_from_moments(f64 *SDSGE_RESTRICT moments,
+                                 const f64 *SDSGE_RESTRICT target, const i64 n,
+                                 const i64 p, const KernelID kernel_id,
+                                 const WaldBandwidthMode bandwidth_mode,
+                                 const i64 manual_bandwidth,
+                                 f64 *SDSGE_RESTRICT scratch,
+                                 i64 *SDSGE_RESTRICT pivot_scratch,
+                                 f64 *SDSGE_RESTRICT stat_out) {
+  f64 *mean = scratch;
+  f64 *gamma = mean + p;
+  f64 *omega = gamma + p * p;
+  f64 *dev = omega + p * p;
+  f64 *factor = dev + p;
+  f64 *solved = factor + p * p;
+  f64 *bandwidth_scratch = solved + p;
+  i64 bandwidth = 0;
+
+  sdsge_fill_mean_ax0(moments, n, p, mean);
+  center_inplace(moments, mean, n, p);
+  int status = wald_resolve_bandwidth(moments, kernel_id, bandwidth_mode,
+                                      manual_bandwidth, n, p, bandwidth_scratch,
+                                      &bandwidth);
+  if (status != DIAG_OK)
+    return status;
+  sdsge_hac_estimator_matmul(moments, kernel_id, bandwidth, n, p, gamma, omega);
+  return sdsge_wald_stat_from_mean_and_cov(
+      mean, target, omega, n, p, dev, factor, pivot_scratch, solved, stat_out);
+}
+
+arena_size sdsge_wald_mean_hac_arena_size(const i64 n, const i64 q) {
+  return make_sizer(n * q + 3 * q * q + 4 * q, q);
+}
+
+arena_size sdsge_wald_covariance_hac_arena_size(const i64 n, const i64 q) {
+  const i64 v = q * (q + 1) / 2;
+  return make_sizer(n * q + n * v + 3 * v * v + 5 * v, v);
+}
+
+arena_size sdsge_wald_second_moment_hac_arena_size(const i64 n,
+                                                     const i64 q) {
+  const i64 v = q * (q + 1) / 2;
+  return make_sizer(n * v + 3 * v * v + 5 * v, v);
+}
+
+int sdsge_wald_mean_hac(const f64 *SDSGE_RESTRICT g,
+                        const f64 *SDSGE_RESTRICT target, const i64 n,
+                        const i64 q, const KernelID kernel_id,
+                        const WaldBandwidthMode bandwidth_mode,
+                        const i64 manual_bandwidth, f64 *SDSGE_RESTRICT arena,
+                        i64 *SDSGE_RESTRICT pivot_scratch,
+                        f64 *SDSGE_RESTRICT stat_out) {
+  if (n < 2)
+    return DIAG_INSUFFICIENT_SAMPLES;
+  f64 *moments = arena;
+  f64 *scratch = moments + n * q;
+  memcpy(moments, g, sizeof(f64) * n * q);
+  return wald_hac_from_moments(moments, target, n, q, kernel_id, bandwidth_mode,
+                               manual_bandwidth, scratch, pivot_scratch,
+                               stat_out);
+}
+
+static int wald_matrix_moment_hac(const f64 *SDSGE_RESTRICT g,
+                                  const f64 *SDSGE_RESTRICT target, const i64 n,
+                                  const i64 q, const KernelID kernel_id,
+                                  const WaldBandwidthMode bandwidth_mode,
+                                  const i64 manual_bandwidth,
+                                  f64 *SDSGE_RESTRICT arena,
+                                  i64 *SDSGE_RESTRICT pivot_scratch,
+                                  f64 *SDSGE_RESTRICT stat_out) {
+  if (n < 2)
+    return DIAG_INSUFFICIENT_SAMPLES;
+  const i64 v = q * (q + 1) / 2;
+  f64 *target_vec = arena;
+  f64 *moments = target_vec + v;
+  f64 *scratch = moments + n * v;
+  int status =
+      sdsge_fill_symmetric_target_vec(target, 1e-8, 1e-5, q, target_vec);
+  if (status != DIAG_OK)
+    return status;
+  sdsge_symmetric_outer_prod_2dim(g, n, q, v, moments);
+  return wald_hac_from_moments(moments, target_vec, n, v, kernel_id,
+                               bandwidth_mode, manual_bandwidth, scratch,
+                               pivot_scratch, stat_out);
+}
+
+int sdsge_wald_covariance_hac(const f64 *SDSGE_RESTRICT g,
+                              const f64 *SDSGE_RESTRICT target, const i64 n,
+                              const i64 q, const KernelID kernel_id,
+                              const WaldBandwidthMode bandwidth_mode,
+                              const i64 manual_bandwidth,
+                              f64 *SDSGE_RESTRICT arena,
+                              i64 *SDSGE_RESTRICT pivot_scratch,
+                              f64 *SDSGE_RESTRICT stat_out) {
+  /* Covariance moments are vech((g_t - mean(g))(g_t - mean(g))'). */
+  const i64 v = q * (q + 1) / 2;
+  f64 *target_vec = arena;
+  f64 *centered = target_vec + v;
+  f64 *mean = centered + n * q;
+  f64 *moments = mean;
+  f64 *scratch = moments + n * v;
+  if (n < 2)
+    return DIAG_INSUFFICIENT_SAMPLES;
+  sdsge_fill_mean_ax0(g, n, q, mean);
+  sdsge_fill_centered_ax0(g, mean, n, q, centered);
+  int status =
+      sdsge_fill_symmetric_target_vec(target, 1e-8, 1e-5, q, target_vec);
+  if (status != DIAG_OK)
+    return status;
+  sdsge_symmetric_outer_prod_2dim(centered, n, q, v, moments);
+  return wald_hac_from_moments(moments, target_vec, n, v, kernel_id,
+                               bandwidth_mode, manual_bandwidth, scratch,
+                               pivot_scratch, stat_out);
+}
+
+int sdsge_wald_second_moment_hac(const f64 *SDSGE_RESTRICT g,
+                                 const f64 *SDSGE_RESTRICT target, const i64 n,
+                                 const i64 q, const KernelID kernel_id,
+                                 const WaldBandwidthMode bandwidth_mode,
+                                 const i64 manual_bandwidth,
+                                 f64 *SDSGE_RESTRICT arena,
+                                 i64 *SDSGE_RESTRICT pivot_scratch,
+                                 f64 *SDSGE_RESTRICT stat_out) {
+  return wald_matrix_moment_hac(g, target, n, q, kernel_id, bandwidth_mode,
+                                manual_bandwidth, arena, pivot_scratch,
+                                stat_out);
 }
 
 int sdsge_symmetric_outer_prod_2dim(const f64 *SDSGE_RESTRICT x, const i64 n,
                                     const i64 p, const i64 q,
                                     f64 *SDSGE_RESTRICT out) {
   /* out is (n, q) with q = floor(p * (p + 1) / 2); the python side computes q
-   * for shape checks, so don't recompute it here. x is (n, p): its row stride is
-   * p, only out's row stride is q. */
+   * for shape checks, so don't recompute it here. x is (n, p): its row stride
+   * is p, only out's row stride is q. */
   i64 k = 0;
   f64 x_i = 0.0;
   for (i64 t = 0; t < n; ++t) {

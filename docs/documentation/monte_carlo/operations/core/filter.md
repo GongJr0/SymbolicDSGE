@@ -19,9 +19,9 @@ reference_filter_step(
 ) -> MCStep
 ```
 
-`reference_filter_step` wraps `run_reference_filter(...)`. It reads `context.data.observables` and calls `reference.kalman(...)`.
+`reference_filter_step` runs the reference model's Kalman filter over the data step's observables, once per replication, as a native kernel. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
 
-When `observables=None`, generated `MCData.observable_names` are used if available. If names are not available, `reference.kalman(...)` falls back to its normal observable resolution.
+When `observables=None`, the observable names carried by the data step are used if available. If names are not available, the reference model's normal observable resolution applies.
 
 __Inputs:__
 

@@ -47,7 +47,7 @@ def trace_keys_for(step_type: str, name: str) -> list[str]:
         return list(regression_trace_keys(name).values())
     if step_type in TERMINAL_STEP_TYPES:  # remaining terminals are tests
         return list(test_trace_keys(name).values())
-    if step_type in TRANSFORM_STEP_TYPES or step_type == "transform:custom":
+    if step_type in TRANSFORM_STEP_TYPES | {"payload", "transform:custom"}:
         return [payload_trace_key(name)]
     return []  # datagen / filter / postproc produce no consumable trace
 

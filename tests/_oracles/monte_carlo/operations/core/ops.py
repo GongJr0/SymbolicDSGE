@@ -6,8 +6,8 @@ import numpy as np
 from numpy import float64, ndarray
 
 
-from ....core.solved_model import SolvedModel
-from ....kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
 
@@ -57,7 +57,7 @@ def simulate(
     raw["_X"] = states
     if obs_names:
         obs_full = model._simulate_observable_matrix(states, drop_initial=False)
-        obs_mat = np.ascontiguousarray(obs_full[1:], dtype=np.float64)
+        obs_mat = np.ascontiguousarray(obs_full, dtype=np.float64)
         for i, name in enumerate(obs_names):
             raw[name] = obs_full[:, i]
     return MCData(
@@ -151,11 +151,19 @@ def add_payload(
     reference: SolvedModel,
     dgp: SolvedModel | None,
     rep_idx: int,
-    value: NDF | Sequence[float] | Sequence[Sequence[float]],
+    value: (
+        NDF
+        | Sequence[float]
+        | Sequence[Sequence[float]]
+        | Sequence[Sequence[Sequence[float]]]
+    ),
 ) -> NDF:
-    del context, reference, dgp, rep_idx
+    del context, reference, dgp
 
     out = np.asarray(value, dtype=np.float64)
-    if not out.ndim in (1, 2):
-        raise ValueError(f"Payload must be 1-D, or 2-D; got {out.ndim}-D.")
+    if out.ndim not in (1, 2, 3):
+        raise ValueError(f"Payload must be 1-D, 2-D, or 3-D; got {out.ndim}-D.")
+    if out.ndim == 3:
+        rep_payload: NDF = out[rep_idx]
+        return rep_payload
     return out

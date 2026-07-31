@@ -213,7 +213,7 @@ class SolvedModel:
         if all(is_affine.values()):
             C, d = self._build_C_d_from_obs(y_names)
             Y = np.empty((states.shape[0] - start, len(y_names)), dtype=float64)
-            affine_observations_into(states, C, d, start, Y)
+            affine_observations_into(states, C, d, Y)
             return Y
 
         Y = self._non_affine_measurement(y_names, states)
@@ -319,7 +319,7 @@ class SolvedModel:
             int(fig_square), int(fig_square), figsize=(4 * fig_square, 3 * fig_square)
         )  # 4:3 aspect ratio
         ax = ax.flatten()
-        time = np.arange(T + 1)  # +1 for initial state
+        time = np.arange(T)
 
         # Remove unused axes
         nplots = len(transitions)
@@ -870,7 +870,7 @@ def _simulate_order1(
         shocks=shocks,
         shock_scale=shock_scale,
     )
-    X = np.empty((T + 1, model.A.shape[0]), dtype=float64)
+    X = np.empty((T, model.A.shape[0]), dtype=float64)
     simulate_linear_states_into(
         asarray(model.A, dtype=float64),
         asarray(model.B, dtype=float64),
@@ -925,7 +925,7 @@ def _simulate_order2(
         shock_mat,
     )
 
-    X = np.empty((T + 1, n), dtype=float64)
+    X = np.empty((T, n), dtype=float64)
     X[:, :n_state] = x_path + ss_state
     if ny > 0:
         X[:, n_state:] = y_path + ss[n_state:]

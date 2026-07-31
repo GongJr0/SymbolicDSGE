@@ -3,7 +3,6 @@ from .result import TestResult
 from .distributions import PvalMethod, ReferenceDistribution
 from .status import TestStatus
 from .._ckernels.diag import (
-    FALLBACK as DIAG_FALLBACK,
     fill_centered_ax0,
     fill_mean_ax0,
     fill_symmetric_target_vec,
@@ -78,19 +77,10 @@ def jit_wald_stat_from_mean_and_cov(
 def _wald_stat(
     mean: NDF, target: NDF, omega: NDF, n: int
 ) -> tuple[int64, float64, int64]:
-    """Wald statistic; native Cholesky fast path, numba fallback.
-
-    The native kernel returns ``DIAG_FALLBACK`` when omega is not positive
-    definite, in which case the numba kernel recomputes via its LU fallback
-    (which handles an indefinite-but-nonsingular omega). Shapes are guaranteed by
-    the callers, so the native path is only gated on the extension being present.
-    """
+    """Wald statistic through the native Cholesky or partial-pivot LU path."""
     q = mean.shape[0]
     status, stat = wald_stat_from_mean_and_cov(mean, target, omega, n)
-    if status != DIAG_FALLBACK:
-        return int64(status), float64(stat), int64(q)
-    nb_err, nb_stat, nb_df = jit_wald_stat_from_mean_and_cov(mean, target, omega, n)
-    return int64(nb_err), float64(nb_stat), int64(nb_df)
+    return int64(status), float64(stat), int64(q)
 
 
 def _fill_symmetric_target_vec(target: NDF) -> tuple[int64, NDF]:

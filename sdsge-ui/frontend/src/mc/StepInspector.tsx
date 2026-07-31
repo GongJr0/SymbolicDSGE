@@ -185,14 +185,36 @@ export function StepInspector({
           }
         />
       </label>
+      {node.data.catalog.category !== "postproc" && (
+        <label>
+          Retained samples
+          <input
+            type="number"
+            min={-1}
+            value={Number(node.data.params.n_retain ?? -1)}
+            onChange={(event) => updateParam("n_retain", Number(event.target.value))}
+          />
+        </label>
+      )}
       {isCustom ? (
-        <CustomOpEditor
-          nodeId={node.id}
-          stepType={node.data.stepType}
-          code={String(node.data.params.code ?? "")}
-          theme={theme}
-          onChange={(value) => updateParam("code", value)}
-        />
+        <>
+          {node.data.stepType === "transform:custom" && (
+            <div className="mc-inspector-fields">
+              {renderFields(
+                node.data.catalog.fields.filter((field) =>
+                  fieldVisible(field, node.data.params),
+                ),
+              )}
+            </div>
+          )}
+          <CustomOpEditor
+            nodeId={node.id}
+            stepType={node.data.stepType}
+            code={String(node.data.params.code ?? "")}
+            theme={theme}
+            onChange={(value) => updateParam("code", value)}
+          />
+        </>
       ) : (
         <div className="mc-inspector-fields">
           {renderFields(

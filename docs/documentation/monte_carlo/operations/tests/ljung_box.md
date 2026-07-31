@@ -19,7 +19,7 @@ ljung_box_test_step(
 ) -> MCStep
 ```
 
-`ljung_box_test_step` wraps `run_ljung_box_test(...)`. It selects one series from a producer step and runs the Ljung-Box test for autocorrelation up to the specified number of lags.
+`ljung_box_test_step` runs as a native per-replication kernel. It selects one series from a producer step and runs the Ljung-Box test for autocorrelation up to the specified number of lags.
 
 ???+ warning "Lag Handling"
     If `lags` is greater than the selected sample length, the test runs up to the maximum possible lag. There is no automatic lag selection heuristic.

@@ -122,37 +122,42 @@ We create a Monte Carlo pipeline and run it as we would in a live session. Simil
 ```python
 from SymbolicDSGE import Shock
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.operations import (
-    core as c,  # (1)!
-    tests as t,  # (2)!
+from SymbolicDSGE.monte_carlo.step_factories import (  # (1)!
+    jarque_bera_test_step,
+    simulation_step,
 )
 
-gz_shock = Shock(seed=0, multivar=True, dist="norm")  # (3)!
+gz_shock = Shock(seed=0, multivar=True, dist="norm")  # (2)!
 r_shock = Shock(seed=1, multivar=False, dist="t", dist_kwargs={"df": 3})
 
 mc_pipeline = MCPipeline([
-        c.simulation_step(
+        simulation_step(
+            "datagen",
             target="dgp",
             T=200,
             shocks={"g,z": gz_shock, "r": r_shock},
         ),
-        t.jarque_bera_test_step("jb_test", source="observables", column=0),
+        jarque_bera_test_step(
+            "jb_test",
+            source="datagen",  # (3)!
+            field="observables",
+            column=0,
+        ),
 ])
 mc_res = mc_pipeline.run(
     reference=sol,
     dgp=sol,
     n_rep=1000,
-    retain_payloads=False,
-    retain_contexts=True,
+    n_jobs=-1,
     verbosity=2,
 )
 
 bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 ```
 
-1. `core` contains data generation, raw data consumption, and Kalman filtering.
-2. `tests` contains multiple built-in statistical tests.
-3. Notice we don't call `Shock.shock_generator` here. The MC pipeline needs to manage the seed per replication to avoid repeating the same shock path across replications.
+1. Every built-in step factory lives in `step_factories`: data generation, raw data consumption, Kalman filtering, transforms, statistical tests, regressions, and post-processing.
+2. Notice we don't call `Shock.shock_generator` here. The MC pipeline needs to manage the seed per replication to avoid repeating the same shock path across replications.
+3. `source` names the producer step, and `field` names the array on its output. Here the test reads the first observable column of the simulated sample.
 
 ## Specify a simulation prefill
 

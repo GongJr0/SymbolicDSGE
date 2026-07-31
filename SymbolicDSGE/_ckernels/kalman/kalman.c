@@ -142,21 +142,20 @@ void kf_build_shock_projection(const f64 *SDSGE_RESTRICT B,
   sdsge_matmul(Q, temp_km, out, k, k, m);
 }
 
-int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
+arena_size kf_arena_size(const i64 n, const i64 m, const i64 k) {
+  return make_sizer(
+      2 * n + 7 * m    /* vectors + triangular-solve scratch */
+          + 6 * n * n  /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+          + 2 * m * m  /* S_buf, L */
+          + 3 * n * m  /* PCt, K, temp_nm */
+          + m * n      /* temp_mn */
+          + n * k      /* temp_nk */
+          + 2 * k * m, /* M, temp_km */
+      0);
+}
+int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
+                kf_outputs *out) {
   const i64 n = in->n, m = in->m, k = in->k, T = in->T;
-
-  /* One scratch arena carved into every per-step buffer (allocated once). */
-  const i64 total =
-      2 * n + 7 * m /* vectors + triangular-solve scratch */
-      + 6 * n * n   /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
-      + 2 * m * m   /* S_buf, L */
-      + 3 * n * m   /* PCt, K, temp_nm */
-      + m * n       /* temp_mn */
-      + n * k       /* temp_nk */
-      + 2 * k * m;  /* M, temp_km */
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return KF_ERR_ALLOC;
 
   f64 *p = arena;
   f64 *x_pred_buf = p;
@@ -276,28 +275,24 @@ int kf_hot_loop(const kf_inputs *in, kf_outputs *out) {
   }
 
   *out->loglik = loglik;
-  free(arena);
   return status;
 }
 
-int ekf_hot_loop(const ekf_inputs *in, ekf_outputs *out) {
-  const i64 n = in->n, m = in->m, k = in->k, T = in->T;
+arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k) {
+  return make_sizer(
+      2 * n + 6 * m    /* vectors + triangular-solve scratch */
+          + 6 * n * n  /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+          + 2 * m * m  /* S_buf, L */
+          + 4 * n * m  /* PCt, K, temp_nm, H_buf */
+          + m * n      /* temp_mn */
+          + n * k      /* temp_nk */
+          + 2 * k * m, /* M, temp_km */
+      0);
+}
 
-  /* One scratch arena carved into every per-step buffer (allocated once). Same
-   * layout as the linear filter, plus a per-step measurement jacobian H_buf(m,n)
-   * since the EKF relinearizes each step. y_filt is written straight into the
-   * output (only when compute_y_filt), so it needs no scratch vector. */
-  const i64 total =
-      2 * n + 6 * m /* vectors + triangular-solve scratch */
-      + 6 * n * n   /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
-      + 2 * m * m   /* S_buf, L */
-      + 4 * n * m   /* PCt, K, temp_nm, H_buf */
-      + m * n       /* temp_mn */
-      + n * k       /* temp_nk */
-      + 2 * k * m;  /* M, temp_km */
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return KF_ERR_ALLOC;
+int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
+                 ekf_outputs *out) {
+  const i64 n = in->n, m = in->m, k = in->k, T = in->T;
 
   f64 *p = arena;
   f64 *x_pred_buf = p;
@@ -420,14 +415,12 @@ int ekf_hot_loop(const ekf_inputs *in, ekf_outputs *out) {
   }
 
   *out->loglik = loglik;
-  free(arena);
   return status;
 }
 
 static void ukf_build_sigma_points(const f64 *SDSGE_RESTRICT mean,
-                                   const f64 *SDSGE_RESTRICT chol,
-                                   f64 gamma, f64 *SDSGE_RESTRICT sigma,
-                                   i64 n) {
+                                   const f64 *SDSGE_RESTRICT chol, f64 gamma,
+                                   f64 *SDSGE_RESTRICT sigma, i64 n) {
   memcpy(sigma, mean, (size_t)n * sizeof(f64));
   for (i64 col = 0; col < n; ++col) {
     f64 *plus = sigma + (1 + col) * n;
@@ -492,8 +485,7 @@ static void ukf_pruned_transition(const ukf_inputs *in,
   }
 }
 
-static void ukf_project_vars(const ukf_inputs *in,
-                             const f64 *SDSGE_RESTRICT z,
+static void ukf_project_vars(const ukf_inputs *in, const f64 *SDSGE_RESTRICT z,
                              f64 *SDSGE_RESTRICT vars) {
   const i64 ns = in->n_state;
   const i64 nc = in->n_ctrl;
@@ -518,8 +510,7 @@ static void ukf_project_vars(const ukf_inputs *in,
 
 static void ukf_eval_measurement_sigma(const ukf_inputs *in,
                                        const f64 *SDSGE_RESTRICT sigma_z,
-                                       i64 n_sig,
-                                       f64 *SDSGE_RESTRICT vars_buf,
+                                       i64 n_sig, f64 *SDSGE_RESTRICT vars_buf,
                                        f64 *SDSGE_RESTRICT sigma_y) {
   const i64 nz = 2 * in->n_state;
   const i64 no = in->n_obs;
@@ -529,11 +520,13 @@ static void ukf_eval_measurement_sigma(const ukf_inputs *in,
   }
 }
 
-static void ukf_weighted_meas_cov_cross(
-    const f64 *SDSGE_RESTRICT sigma_z, const f64 *SDSGE_RESTRICT z_mean,
-    const f64 *SDSGE_RESTRICT sigma_y, const f64 *SDSGE_RESTRICT y_mean, f64 w0,
-    f64 wi, i64 n_sig, i64 nz, i64 no, f64 *SDSGE_RESTRICT S,
-    f64 *SDSGE_RESTRICT Pzy) {
+static void ukf_weighted_meas_cov_cross(const f64 *SDSGE_RESTRICT sigma_z,
+                                        const f64 *SDSGE_RESTRICT z_mean,
+                                        const f64 *SDSGE_RESTRICT sigma_y,
+                                        const f64 *SDSGE_RESTRICT y_mean,
+                                        f64 w0, f64 wi, i64 n_sig, i64 nz,
+                                        i64 no, f64 *SDSGE_RESTRICT S,
+                                        f64 *SDSGE_RESTRICT Pzy) {
   sdsge_zero_mat(S, no, no);
   sdsge_zero_mat(Pzy, nz, no);
 
@@ -575,11 +568,9 @@ static void ukf_cov_update(const f64 *SDSGE_RESTRICT P_pred,
   }
 }
 
-static void ukf_store_history(const ukf_inputs *in,
-                              const f64 *SDSGE_RESTRICT z,
+static void ukf_store_history(const ukf_inputs *in, const f64 *SDSGE_RESTRICT z,
                               const f64 *SDSGE_RESTRICT P,
-                              f64 *SDSGE_RESTRICT x1,
-                              f64 *SDSGE_RESTRICT x2,
+                              f64 *SDSGE_RESTRICT x1, f64 *SDSGE_RESTRICT x2,
                               f64 *SDSGE_RESTRICT x, i64 t) {
   const i64 ns = in->n_state;
   const i64 nc = in->n_ctrl;
@@ -615,10 +606,10 @@ static void ukf_store_history(const ukf_inputs *in,
 
 /* Sigma-point Cholesky with an on-failure floor. Factor at the caller's jitter
  * first, so a well-conditioned covariance is unperturbed (parity with the plain
- * path); only when that fails add a scale-relative floor to lift a rank-deficient
- * covariance (e.g. a zero-risk-correction second order, whose augmented block is
- * degenerate) above the pivot threshold. A genuinely unfilterable matrix still
- * returns SDSGE_NOT_PD. */
+ * path); only when that fails add a scale-relative floor to lift a
+ * rank-deficient covariance (e.g. a zero-risk-correction second order, whose
+ * augmented block is degenerate) above the pivot threshold. A genuinely
+ * unfilterable matrix still returns SDSGE_NOT_PD. */
 #define UKF_CHOL_FLOOR_REL 1e-10
 static int ukf_chol_auto(const f64 *SDSGE_RESTRICT P, f64 jitter,
                          f64 *SDSGE_RESTRICT L, i64 n) {
@@ -631,7 +622,19 @@ static int ukf_chol_auto(const f64 *SDSGE_RESTRICT P, f64 jitter,
   return sdsge_chol(P, jitter + scale * UKF_CHOL_FLOOR_REL, L, n);
 }
 
-i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
+arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl,
+                           const i64 n_exog, const i64 n_obs) {
+  const i64 nz = 2 * n_state;
+  const i64 n_sig = 2 * nz + 1;
+  const i64 nv = n_state + n_ctrl;
+
+  return make_sizer(3 * nz + 4 * nz * nz + 2 * n_sig * nz + n_sig * n_obs +
+                        n_state * n_state + n_state * n_exog + 6 * n_obs +
+                        2 * n_obs * n_obs + 2 * nz * n_obs + nv,
+                    0);
+}
+i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
+                 ukf_outputs *out) {
   const i64 ns = in->n_state;
   const i64 nc = in->n_ctrl;
   const i64 ne = in->n_exog;
@@ -652,14 +655,6 @@ i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
   const f64 w0_m = lambda / scale;
   const f64 w0_c = w0_m + (1.0 - in->alpha * in->alpha + in->beta);
   const f64 wi = 1.0 / (2.0 * scale);
-
-  const i64 total =
-      3 * nz + 4 * nz * nz + 2 * n_sig * nz + n_sig * no + ns * ns +
-      ns * ne + 6 * no + 2 * no * no + 2 * nz * no + nv;
-
-  f64 *arena = (f64 *)malloc((size_t)total * sizeof(f64));
-  if (arena == NULL)
-    return KF_ERR_ALLOC;
 
   f64 *p = arena;
   f64 *z_prev = p;
@@ -788,6 +783,5 @@ i64 ukf_hot_loop(const ukf_inputs *in, ukf_outputs *out) {
   }
 
   *out->loglik = loglik;
-  free(arena);
   return status;
 }

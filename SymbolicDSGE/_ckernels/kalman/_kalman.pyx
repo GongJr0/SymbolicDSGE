@@ -12,6 +12,10 @@ import numpy as np
 
 from libc.stdint cimport int64_t
 
+cdef extern from "sdsge_common.h":
+    ctypedef struct arena_size:
+        int64_t n_float
+        int64_t n_int
 
 cdef extern from "kalman.h":
     int KF_OK
@@ -50,7 +54,12 @@ cdef extern from "kalman.h":
         double *eps_hat
         double *loglik
 
-    int kf_hot_loop(const kf_inputs *inp, kf_outputs *outp) nogil
+    arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    int kf_hot_loop(
+        const kf_inputs *inp,
+        double *arena,
+        kf_outputs *outp,
+    ) nogil
 
     ctypedef void (*meas_fn)(
         const double *x,
@@ -93,8 +102,10 @@ cdef extern from "kalman.h":
         double *eps_hat
         double *loglik
 
+    arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
     int c_ekf_hot_loop "ekf_hot_loop"(
         const ekf_inputs *inp,
+        double *arena,
         ekf_outputs *outp,
     ) nogil
 
@@ -150,8 +161,15 @@ cdef extern from "kalman.h":
 
         double *loglik
 
+    arena_size ukf_arena_size(
+        int64_t n_state,
+        int64_t n_ctrl,
+        int64_t n_exog,
+        int64_t n_obs,
+    ) nogil
     int64_t c_ukf_hot_loop "ukf_hot_loop"(
         const ukf_inputs *inp,
+        double *arena,
         ukf_outputs *outp,
     ) nogil
 
@@ -205,6 +223,7 @@ def kalman_hot_loop(
     std_innov = np.zeros((hist_T, m), dtype=np.float64)
     S = np.zeros((hist_T, m, m), dtype=np.float64)
     eps_hat = np.zeros((shock_T, k), dtype=np.float64)
+    arena = np.empty(kf_arena_size(n, m, k).n_float, dtype=np.float64)
     cdef double loglik = 0.0
 
     cdef double[:, ::1] x_pred_mv = x_pred
@@ -217,6 +236,7 @@ def kalman_hot_loop(
     cdef double[:, ::1] std_innov_mv = std_innov
     cdef double[:, :, ::1] S_mv = S
     cdef double[:, ::1] eps_hat_mv = eps_hat
+    cdef double[::1] arena_mv = arena
 
     cdef kf_inputs inp
     inp.n = n
@@ -252,7 +272,7 @@ def kalman_hot_loop(
 
     cdef int64_t status
     with nogil:
-        status = kf_hot_loop(&inp, &outp)
+        status = kf_hot_loop(&inp, &arena_mv[0], &outp)
 
     return (
         status,
@@ -334,6 +354,7 @@ def ekf_hot_loop(
     std_innov = np.zeros((hist_T, m), dtype=np.float64)
     S = np.zeros((hist_T, m, m), dtype=np.float64)
     eps_hat = np.zeros((shock_T, k), dtype=np.float64)
+    arena = np.empty(ekf_arena_size(n, m, k).n_float, dtype=np.float64)
     cdef double loglik = 0.0
 
     cdef double[:, ::1] x_pred_mv = x_pred
@@ -346,6 +367,7 @@ def ekf_hot_loop(
     cdef double[:, ::1] std_innov_mv = std_innov
     cdef double[:, :, ::1] S_mv = S
     cdef double[:, ::1] eps_hat_mv = eps_hat
+    cdef double[::1] arena_mv = arena
 
     cdef ekf_inputs inp
     inp.meas = <meas_fn><void*>meas_addr
@@ -384,7 +406,7 @@ def ekf_hot_loop(
 
     cdef int status
     with nogil:
-        status = c_ekf_hot_loop(&inp, &outp)
+        status = c_ekf_hot_loop(&inp, &arena_mv[0], &outp)
 
     return (
         status,
@@ -506,6 +528,9 @@ def ukf_hot_loop(
     innov = np.zeros((hist_T, n_obs), dtype=np.float64)
     std_innov = np.zeros((hist_T, n_obs), dtype=np.float64)
     S = np.zeros((hist_T, n_obs, n_obs), dtype=np.float64)
+    arena = np.empty(
+        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float, dtype=np.float64
+    )
     cdef double loglik = 0.0
 
     cdef double[:, ::1] x1_pred_mv = x1_pred
@@ -521,6 +546,7 @@ def ukf_hot_loop(
     cdef double[:, ::1] innov_mv = innov
     cdef double[:, ::1] std_innov_mv = std_innov
     cdef double[:, :, ::1] S_mv = S
+    cdef double[::1] arena_mv = arena
 
     cdef ukf_inputs inp
     inp.meas = <meas_fn><void*>meas_addr
@@ -575,7 +601,7 @@ def ukf_hot_loop(
 
     cdef int64_t status
     with nogil:
-        status = c_ukf_hot_loop(&inp, &outp)
+        status = c_ukf_hot_loop(&inp, &arena_mv[0], &outp)
 
     return (
         status,

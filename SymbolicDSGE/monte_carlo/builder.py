@@ -24,9 +24,12 @@ from .catalog import (
 )
 from .core import MCPipeline
 from .mc_constructs import MCPipelineResult
-from .operations.core import raw_model_data_step
-from .operations.postproc import postproc_step
-from .operations.transforms import transform_step
+from .step_factories import (
+    add_payload_step,
+    postproc_step,
+    raw_model_data_step,
+    transform_step,
+)
 from .spec import NodeSpec, PipelineSpec, PostprocSpec
 from .traces import available_traces
 
@@ -36,7 +39,7 @@ if TYPE_CHECKING:
 #: Transform-role kinds at the spec level: the catalogue transforms plus the
 #: user transform custom op (an ``OpType.TRANSFORM`` middle node shipped as a
 #: member).
-_TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"transform:custom"}
+_TRANSFORM_KINDS = TRANSFORM_STEP_TYPES | {"payload", "transform:custom"}
 
 #: ``source`` kinds a transform/terminal may legally link from.
 _ROOT_SOURCE_TYPES = DATAGEN_STEP_TYPES | {"filter"}
@@ -268,17 +271,7 @@ def build_pipeline(
     resources = resources or {}
     per_rep_steps = []
     for node in ordered:
-        if node.step_type == "raw_model_data":
-            per_rep_steps.append(_build_raw_model_data(node, resources))
-        elif node.step_type == "transform:custom":
-            per_rep_steps.append(_build_custom(node, resources, transform_step))
-        else:
-            definition = STEP_CATALOG.get(node.step_type)
-            if definition is None:
-                raise ValueError(f"Unsupported MC step type: {node.step_type}")
-            per_rep_steps.append(
-                definition.build(node.name, _clean_params(node.params))
-            )
+        per_rep_steps.append(_build_per_rep_step(node, resources))
 
     postproc_steps = []
     for pp in postprocs:
@@ -292,9 +285,32 @@ def build_pipeline(
     return MCPipeline(per_rep_steps, postproc_steps)
 
 
-def _build_raw_model_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
-    """Rehydrate a ``raw_model_data`` datagen, injecting its arrays from resources."""
+def _build_per_rep_step(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
     params = dict(node.params)
+    n_retain = _pop_n_retain(params, node.name)
+    if node.step_type == "raw_model_data":
+        step = _build_raw_model_data(node, resources, params)
+    elif node.step_type == "payload":
+        value = params.pop("value", None)
+        if value is None:
+            raise ValueError(f"Payload step {node.name!r} requires a value.")
+        step = add_payload_step(node.name, value)
+    elif node.step_type == "transform:custom":
+        step = _build_custom(node, resources, transform_step, params)
+    else:
+        definition = STEP_CATALOG.get(node.step_type)
+        if definition is None:
+            raise ValueError(f"Unsupported MC step type: {node.step_type}")
+        step = definition.build(node.name, _clean_params(params))
+    return replace(step, n_retain=n_retain)
+
+
+def _build_raw_model_data(
+    node: NodeSpec,
+    resources: Mapping[str, Any],
+    params: dict[str, Any],
+) -> Any:
+    """Rehydrate a ``raw_model_data`` datagen, injecting its arrays from resources."""
     ref = params.pop("data_ref", node.name)
     params.pop("data_shapes", None)
     arrays = resources.get(ref)
@@ -308,13 +324,6 @@ def _build_raw_model_data(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
         kwargs["states"] = arrays["states"]
     if "observables" in arrays:
         kwargs["observables"] = arrays["observables"]
-    raw = {
-        key[len("raw:") :]: value
-        for key, value in arrays.items()
-        if key.startswith("raw:")
-    }
-    if raw:
-        kwargs["raw"] = raw
     observable_names = params["observable_names"]
     if observable_names:
         kwargs["observable_names"] = tuple(observable_names)
@@ -325,13 +334,15 @@ def _build_custom(
     node: NodeSpec | PostprocSpec,
     resources: Mapping[str, Any],
     factory: Any,
+    params: dict[str, Any] | None = None,
 ) -> Any:
     """Rehydrate a custom op, reattaching its callable from resources.
 
     ``factory`` is the step constructor for the op role (``transform_step`` for a
     ``transform:custom`` node, ``postproc_step`` for a ``postproc:custom`` spec).
     """
-    params = dict(node.params)
+    if params is None:
+        params = dict(node.params)
     ref = params.pop("func_ref", node.name)
     # The authoring source rides in ``code`` (compiled into the resources
     # callable upstream); it is not a runtime kwarg of the op.
@@ -345,6 +356,17 @@ def _build_custom(
     return factory(node.name, func, **_clean_params(params))
 
 
+def _pop_n_retain(params: dict[str, Any], step_name: str) -> int:
+    value = params.pop("n_retain", -1)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"Step {step_name!r} n_retain must be an integer.")
+    if value < -1:
+        raise ValueError(
+            f"Step {step_name!r} n_retain must be -1 (retain all) or non-negative."
+        )
+    return value
+
+
 def run_pipeline(
     spec: PipelineSpec,
     *,
@@ -352,6 +374,8 @@ def run_pipeline(
     dgp: SolvedModel | None,
     n_rep: int,
     fail_fast: bool,
+    n_jobs: int | None = None,
+    verbosity: int = 0,
     resources: Mapping[str, Any] | None = None,
 ) -> MCPipelineResult:
     """Validate, compile, and run ``spec`` against the reference and DGP models.
@@ -370,11 +394,9 @@ def run_pipeline(
         reference=reference,
         dgp=dgp,
         n_rep=n_rep,
-        retain_payloads=False,
-        retain_test_results=False,
-        retain_contexts=True,
         fail_fast=fail_fast,
-        verbosity=0,
+        n_jobs=n_jobs,
+        verbosity=verbosity,
     )
 
 

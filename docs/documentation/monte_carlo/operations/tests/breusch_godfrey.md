@@ -22,7 +22,7 @@ breusch_godfrey_test_step(
 ) -> MCStep
 ```
 
-`breusch_godfrey_test_step` wraps `run_breusch_godfrey_test(...)`. It resolves residuals and regressors from explicit producer and field pairs, then tests residual serial correlation up to order `lags`.
+`breusch_godfrey_test_step` runs as a native per-replication kernel. It resolves residuals and regressors from explicit producer and field pairs, then tests residual serial correlation up to order `lags`.
 
 ???+ info "Reference Distribution"
     The Lagrange-multiplier statistic is compared against a $\chi^2(\text{lags})$ distribution.

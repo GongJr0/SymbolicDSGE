@@ -19,6 +19,9 @@ The `monte_carlo` module is written for two cases:
 
 This demonstration focuses on the first case where two models are present.
 
+???+ info "Native Execution"
+    The replication loop is compiled and executed natively without holding the GIL. You describe the experiment in Python, and the whole per-replication DAG runs as native kernels over pre-planned buffers. Python code runs only when you build the pipeline and when the post-loop phase reduces the assembled traces.
+
 ## Model Instantiation
 
 ```python
@@ -26,11 +29,11 @@ import numpy as np
 import pandas as pd
 
 from SymbolicDSGE import DSGESolver, ModelParser
-from SymbolicDSGE.monte_carlo.operations.core import (
+from SymbolicDSGE.monte_carlo.step_factories import (
     reference_filter_step,
     simulation_step,
+    wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.tests import wald_test_step
 
 model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
 ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
@@ -78,11 +81,11 @@ pipeline = MCPipeline(
 1. Length of each simulated sample.
 2. Number of observables the model(s) have.
 3. Steps here are executed per replication.
-4. This field is reserved for `POSTPROC` steps; these execture once after the replication loop concludes.
+4. This field is reserved for `POSTPROC` steps; these execute once after the replication loop concludes.
 
 `MCPipeline` is used to compile the steps that need to be executed for each repetition.
 Every step of `MCPipeline` must be an `MCStep` object.
-The pipeline will be built using the step-generating functions under `SymbolicDSGE.monte_carlo.operations`.
+The pipeline will be built using the step-generating functions under `SymbolicDSGE.monte_carlo.step_factories`.
 
 ### Data Generation
 
@@ -122,13 +125,13 @@ The `shocks` argument follows the same dictionary convention as `SolvedModel.sim
 ### Filtering
 
 The first step after datagen is filtering the reference model using a Kalman filter against the DGP simulated observables.
-`reference_filter_step` is a pre-built function configuring the `SolvedModel.kalman` filter to be called per iteration for this purpose.
+`reference_filter_step` is a pre-built function configuring the reference model's Kalman filter to be run per iteration for this purpose.
 
 ```python
 kf_step = reference_filter_step()
 ```
 
-`reference_filter_step` accepts all `SolvedModel.kalman` kwargs similar to the simulation step function.
+`reference_filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
 
 ### Testing
 
@@ -148,45 +151,43 @@ mean_test_step = wald_test_step(
 ```
 
 1. Name of the step. (This will be used as the key to access the results)
-2. Data source to use when conducting the test. In this case, it is the Kalman filter (named `"filter"` by default).
-3. Field in the source's return. `std_innov` is the standardized innovations from the kalman filter's `FilterResult` object.
+2. Producer step to read from. In this case, it is the Kalman filter (named `"filter"` by default).
+3. Field in the producer's output. `std_innov` is the standardized innovations of the Kalman filter.
 4. Target to test against. In this case we're testing if the mean of each observable is zero.
 5. Kind of the wald test. Available inputs are: `Literal["mean", "covariance", "second_moment"]`.
 6. Number of periods to discard before running the tests.
 
-Each test returns a `TestResult` object and the results are aggregated to produce an MC summary.
+Every test step writes a statistic, a p-value, and a status per replication. These are aggregated into an MC summary once the loop concludes.
 
 ### Built-in and Custom Transforms
 
-A special wrapper `numpy_operation` is used when defining custom transforms to restrict the namespace availabe. This eliminates some obvious security like `exec` and `eval` on top of restricting what portion of `numpy` is allowed. All custom transforms are parsed as `NumpyCustomFunc` regardless of the decorator. Decorating allows to show intent on the author's side. A custom transform function is defined as follows:
+Custom transforms run inside the native loop, so they are wrapped with `custom_transform` and compiled by Numba. The wrapper snapshots the function source and the globals it references so the operation can travel inside a `.sdsge` archive, and it enforces the native transform contract: exactly two positional arguments and an integer status return.
 
 ```python
-from SymbolicDSGE.monte_carlo import numpy_operation
-from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo import custom_transform
 
-@numpy_operation
-def custom_standardize(
-    context: MCContext,  # (1)! 
-    reference: SolvedModel, # (2)!
-    dgp: SolvedModel | None, # (3)!
-    rep_idx: int  # (4)!
-) -> np.ndarray | None:
-    del reference, dgp, rep_idx  # (5)!
-    data: MCData = context.require_data()  # (6)!
-    obs = data.observables
+@custom_transform
+def custom_standardize(sample, output) -> int:  # (1)!
+    n, p = sample.shape
+    for j in range(p):
+        mean = 0.0
+        for i in range(n):
+            mean += sample[i, j]
+        mean /= n
 
-    if obs is not None:
-        return (obs - obs.mean(axis=0)) / obs.std(axis=0)
-    
-    return None
+        var = 0.0
+        for i in range(n):
+            var += (sample[i, j] - mean) ** 2
+        std = (var / n) ** 0.5
+
+        for i in range(n):
+            output[i, j] = (sample[i, j] - mean) / std
+
+    return 0  # (2)!
 ```
 
-1. `context` is a required argument for all custom transforms. It is used to access the current `MCContext` object at a given replication. `require_data()` and `require_payload()` are the two main methods to access data and payloads.
-2. `reference` is the reference model used in the pipeline. It is a required argument.
-3. `dgp` is the data-generating model used in the pipeline. It is a required argument.
-4. `rep_idx` is the current replication index. It is a required argument.
-5. Unused arguments are deleted both for clarity and to avoid linter warnings.
-6. Refer to [MC Core Containers](../documentation/monte_carlo/core_containers.md) for more information on the `MCData` object and its attributes.
+1. `sample` is the C-contiguous 2D `float64` slice selected for the current replication, `output` is the buffer the function writes into. Both are supplied by the runner; the function never allocates.
+2. `0` marks success. Any other value marks the replication as failed for this step.
 
 ???+ note "Built-in Transforms"
     There are multiple built-in transforms available in `SymbolicDSGE` and [standardization](../documentation/monte_carlo/operations/transforms/standardize.md) is one of them. All built-in transforms are documented and `standardize_step` is used as an example in this guide.
@@ -194,32 +195,35 @@ def custom_standardize(
 With a custom function defined, the step can be created using the generic `transform_step` function.
 
 ```python
-from SymbolicDSGE.monte_carlo.operations.transforms import transform_step, standardize_step
+from SymbolicDSGE.monte_carlo.step_factories import standardize_step, transform_step
 
 custom_std = transform_step(
     "custom_std",  # (1)!
-    func=custom_standardize,  # (2)!
-    store_key=None, # (3)!
+    custom_standardize,  # (2)!
+    source="filter",  # (3)!
+    field="innov",
+    output_shape=(T, n_obs),  # (4)!
 )
 
 builtin_std = standardize_step(
     "builtin_std",
     source="filter",
-    field="innov",  # (4)!  
+    field="innov",  # (5)!
 )
 
 ```
 
-1. Name of the step. Used as the key in the payload dictionary when `store_key` is `None`.
-2. The function to be executed. Any callable with the signature of a custom transform can be used here.
-3. The key to store the output of the transform in the payload dictionary. If `None`, the step name is used as the key.
-4. In this case, the `innov` attribute (raw innovations) of the `FilterResult` object is used.
+1. Name of the step. It becomes the trace key `payload.custom_std`.
+2. The function to be executed. A bare function is wrapped in `NumbaCustomFunc` automatically.
+3. `source` and `field` select the upstream array. `columns`, `burn_in`, and `drop_initial` narrow it further.
+4. Required. The output buffer is planned before the run starts, so the transform must declare the exact `(rows, columns)` it writes.
+5. In this case, the `innov` attribute (raw innovations) of the filter output is used.
 
 ### Post-Processing
 
-Post-processing is executed separately from the replication loop. The `kde_step` function is the only built-in. However, custom post-processing steps are more permissive than their transform counterparts. These steps are encapsulated by a `pandas_operation` decorator which extends the `numpy_operation` namespace with allowed `pandas` functionality. Post-processing functions do not have access to the per-replication context and data objects. Instead, they receive a flattened `traces` dictionary containing payloads, test results, and regression results.
+Post-processing is executed separately from the replication loop. The `kde_step` function is the only built-in. Custom post-processing steps stay in plain Python and are encapsulated by a `pandas_operation` decorator, which extends the numeric namespace with allowed `pandas` functionality. Post-processing functions do not see individual replications. Instead, they receive a flattened `traces` dictionary containing transform payloads, test results, and regression results.
 
-Access to a given given array follows a `"."` separated path, for example, the custom standardization step (which is a payload) is accessed as `traces["payload.custom_std"]`. Payloads contain whatever the step returned, but test and regression results are structured:
+Access to a given array follows a `"."` separated path, for example, the custom standardization step (which is a payload) is accessed as `traces["payload.custom_std"]`. Payload traces are stacked across retained replications, so a transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. Test and regression results are structured:
 
 __Test Traces:__
 
@@ -239,34 +243,38 @@ A custom post-processing function is defined as follows:
 from SymbolicDSGE.monte_carlo import pandas_operation
 
 @pandas_operation
-def get_std_obs_mean(*, traces: dict[str, Any]) -> pd.Series:
-    return traces["payload.custom_std"].mean(axis=0)
+def get_std_obs_mean(*, traces: dict[str, Any]) -> pd.DataFrame:
+    stacked = traces["payload.custom_std"]  # (1)!
+    return pd.DataFrame({"mean": stacked.mean(axis=(0, 1))})
 ```
+
+1. Shape `(n_retained, T, n_obs)`. Averaging over the first two axes gives the per-observable mean across the experiment.
 
 To create a step out of this function, we use `postproc_step`:
 
 ```python
-from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step, kde_step
+from SymbolicDSGE.monte_carlo.step_factories import kde_step, postproc_step
 
 custom_postproc = postproc_step(
     "custom_postproc",  # (1)!
-    func=get_std_obs_mean,  # (2)!
-    store_key=None,  # (3)!
+    get_std_obs_mean,  # (2)!
 )
 
 builtin_kde = kde_step(
     "builtin_kde",
-    trace="payload.builtin_std",  # (4)!
-    grid_points=100,  # (5)!
+    trace="payload.builtin_std",  # (3)!
+    grid_points=100,  # (4)!
 )
 
 ```
 
-1. Name of the step. Used as the key in the traces dictionary when `store_key` is `None`.
+1. Name of the step. It is the key the artifact is stored under in `MCPipelineResult.postproc`.
 2. The function to be executed. Any callable with the signature of a custom post-processing function can be used here.
-3. The key to store the output of the post-processing function in the traces dictionary. If `None`, the step name is used as the key.
-4. The trace to be used for the KDE. This is a payload in this case, but it can also be a test or regression result.
-5. The number of grid points to use for the KDE. This is only applicable to the built-in KDE step.
+3. The trace to be used for the KDE. This is a payload in this case, but it can also be a test or regression result.
+4. The number of grid points to use for the KDE. This is only applicable to the built-in KDE step.
+
+???+ tip "Render Hints"
+    Wrapping a returned artifact in `Summary(value, title=...)` or `Raw(value)` tells downstream consumers such as the GUI how to display it. Both are exported from `SymbolicDSGE.monte_carlo` and are optional; returning a bare object is fine.
 
 ### Complete Pipeline
 
@@ -288,40 +296,44 @@ postproc_steps=[
 ## Running the Pipeline
 
 The `MCPipeline` object explains the procedure that will run per iteration.
-`MCPipeline.run` is then used to run the procedure repeatedly.
+`MCPipeline.run` lowers that procedure to native kernels and executes it repeatedly.
 
 ```python
 mc = pipeline.run(
     reference=reference,
     dgp=dgp,
-    n_rep=1000,
-    retain_payloads=False,  # (1)!
-    retain_test_results=False,  # (2)!
-    retain_contexts=False,  # (3)!
-    verbosity=2,  # (4)!
+    n_rep=10000,
+    fail_fast=True,  # (1)!
+    n_jobs=-1,  # (2)!
+    verbosity=2,  # (3)!
 )
 ```
 
-1. Whether to keep payloads in the result or discard after the replication loop. Depending on the type of the payload, this can be a large amount of data.
-2. Whether to keep test result objects in the result or discard after the replication loop. Results are automatically aggregated into traces; this shouldn't be enabled unless you need access to the full `TestResult` featureset per replication.
-3. Whether to keep contexts in the result or discard after the replication loop. Contexts are memory-heavy and can cause you to run out of memory for large runs. Proceed with caution if you need to enable this option.
-4. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints throughout for the loop and time elapsed for the post-processing, `2` prints per-step throughput for the loop and time elapsed for the post-processing.
+1. Whether to raise on the first failing replication. With `False`, failures are recorded in `MCPipelineResult.failures` and the run continues.
+2. Number of worker threads. `None` runs single-threaded, a positive value is taken literally, and a negative value resolves to `max(1, cpu_count + 1 + n_jobs)` following the joblib convention.
+3. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total and the post-processing total, `2` additionally prints per-step throughput.
+
+???+ warning "Per-step Timings Require `verbosity=2`"
+    The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.71s with 1399.44 it/s.
+>>> MC run concluded successfully in 0.24s with 41314.48 it/s.
 Per-step Report:
 
-    datagen: 0 faliures, 3568.51 it/s (0.28s).
-    filter: 0 faliures, 3630.67 it/s (0.28s).
-    custom_std: 0 faliures, 18615.80 it/s (0.05s).
-    builtin_std: 0 faliures, 19841.51 it/s (0.05s).
-    std_innov_mean: 0 faliures, 23918.24 it/s (0.04s).
+    datagen: 0 failures, 69380.94 worker it/s (0.14 worker-s), 41314.48 wall it/s.
+    filter: 0 failures, 2688.02 worker it/s (3.72 worker-s), 41314.48 wall it/s.
+    custom_std: 0 failures, 153519.31 worker it/s (0.07 worker-s), 41314.48 wall it/s.
+    builtin_std: 0 failures, 198120.59 worker it/s (0.05 worker-s), 41314.48 wall it/s.
+    std_innov_mean: 0 failures, 87594.96 worker it/s (0.11 worker-s), 41314.48 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0004s.
-    builtin_kde: Succeeded in 1.3686s.
+    custom_postproc: Succeeded in 0.0194s.
+    builtin_kde: Succeeded in 9.5426s.
 ```
+
+???+ note "Worker Time vs Wall Time"
+    Worker rates divide by the time summed across threads, so they describe the cost of a step. Wall rates divide by the elapsed run time, so they describe what the step contributed to the observed duration. The two coincide when `n_jobs` resolves to `1`.
 
 This returns a `MCPipelineResult` object containing test summaries for each test step executed in the pipeline.
 To extract the test results, their p-values, and other relevant statistics, we can access the test summaries by key (step names).
@@ -345,17 +357,20 @@ print(summary.round(4))
 ```
 
 ```bash
->>>             mean_statistic  mean_pval  rejection_rate  ci_low  ci_high
-std_innov_mean           2.698      0.555           0.053   0.041    0.069
+>>>                mean_statistic  mean_pval  rejection_rate  ci_low  ci_high
+std_innov_mean           2.758      0.546           0.051   0.047    0.056
 
 ```
 
-Regression results are accessed similarly in `MCPipelineResult.regression_summaries`; and post-processing are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
+Regression results are accessed similarly in `MCPipelineResult.regression_summaries`, and post-processing artifacts are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
+
+???+ tip "Retaining Fewer Replications"
+    Transform payloads are stored for every replication by default, which can be a large amount of data. `MCStep` is frozen, so `dataclasses.replace(custom_std, n_retain=100)` produces a step that keeps an evenly spaced subset instead. `MCMeta.n_retained_by_step` reports what was actually kept. See [Result Access](../documentation/monte_carlo/result_access.md).
 
 ## Conclusion
 
 This guide demonstrates the usage of basic MC functionality through the pre-configured steps available in the library.
-Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_operation`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
+Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_transform` or `pandas_operation`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
 
 For future reference or a ready-made boilerplate, you can visit [this](../assets/monte_carlo.ipynb) link to access a notebook containing the process outlined in this guide.
 

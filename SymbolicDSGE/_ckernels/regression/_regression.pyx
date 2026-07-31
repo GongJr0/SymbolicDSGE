@@ -43,7 +43,7 @@ cdef extern from "elastic_net.h":
                                double *beta) nogil
     double sdsge_en_active_dof(const double *G, const double *beta, int64_t k,
                                double alpha_l2, int64_t intercept,
-                               double atol) nogil
+                               double atol, double *work) nogil
 
 
 cdef extern from "lasso.h":
@@ -52,7 +52,8 @@ cdef extern from "lasso.h":
                                 double *coef, double *Gcoef) nogil
     int64_t sdsge_lars_lasso_gram(const double *G, const double *c, int64_t k,
                                   int64_t max_iter, double tol, double *lam_path,
-                                  double *beta_path, int64_t *n_knots) nogil
+                                  double *beta_path, int64_t *n_knots,
+                                  double *work) nogil
     void sdsge_lasso_path_eval(const double *lam_path, const double *beta_path,
                                int64_t n_knots, int64_t k, const double *lam_grid,
                                int64_t n_grid, double *out) nogil
@@ -121,11 +122,13 @@ def lars_lasso_gram(double[:, ::1] G, double[::1] c, int64_t max_iter, double to
     cdef int64_t k = G.shape[0]
     cdef double[::1] lam_path = np.empty(max_iter + 1, dtype=np.float64)
     cdef double[:, ::1] beta_path = np.empty((max_iter + 1, k), dtype=np.float64)
+    cdef double[::1] work = np.empty(8 * k + k * k, dtype=np.float64)
     cdef int64_t n_knots = 0
     cdef int64_t status
     with nogil:
         status = sdsge_lars_lasso_gram(&G[0, 0], &c[0], k, max_iter, tol,
-                                       &lam_path[0], &beta_path[0, 0], &n_knots)
+                                       &lam_path[0], &beta_path[0, 0], &n_knots,
+                                       &work[0])
     return (
         np.asarray(lam_path[:n_knots]),
         np.asarray(beta_path[:n_knots]),
@@ -198,7 +201,10 @@ def elastic_net_active_dof(double[:, ::1] G, double[::1] beta, double alpha_l2,
                            bint intercept, double atol):
     """Active-set effective degrees of freedom. Returns a float."""
     cdef int64_t k = G.shape[0]
+    cdef double[::1] work = np.empty(3 * k * k + k, dtype=np.float64)
     cdef double dof
     with nogil:
-        dof = sdsge_en_active_dof(&G[0, 0], &beta[0], k, alpha_l2, intercept, atol)
+        dof = sdsge_en_active_dof(
+            &G[0, 0], &beta[0], k, alpha_l2, intercept, atol, &work[0]
+        )
     return dof

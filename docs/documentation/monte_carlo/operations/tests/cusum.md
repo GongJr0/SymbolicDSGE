@@ -21,7 +21,7 @@ cusum_test_step(
 ) -> MCStep
 ```
 
-`cusum_test_step` wraps `run_cusum_test(...)`. It resolves the response and regressors from explicit producer and field pairs, then tests coefficient stability using the cumulative sum of standardized recursive residuals.
+`cusum_test_step` runs as a native per-replication kernel. It resolves the response and regressors from explicit producer and field pairs, then tests coefficient stability using the cumulative sum of standardized recursive residuals.
 
 ???+ info "Reference Distribution"
     The test is parameter-free: the boundary-crossing probability is Durbin's closed-form approximation evaluated directly on the statistic, so the reported degrees of freedom are not applicable (rendered as `N/A`).

@@ -119,9 +119,11 @@ function PerformanceSummary({ result }: { result: MCPipelineResult }) {
           <thead>
             <tr>
               <th>Step</th>
+              <th>Retained</th>
               <th>Iterations</th>
-              <th>Elapsed</th>
-              <th>Throughput</th>
+              <th>Worker time</th>
+              <th>Worker it/s</th>
+              <th>Wall it/s</th>
               <th>Failures</th>
             </tr>
           </thead>
@@ -129,48 +131,17 @@ function PerformanceSummary({ result }: { result: MCPipelineResult }) {
             {Object.entries(result.step_elapsed_s).map(([name, elapsed]) => (
               <tr key={name}>
                 <td>{name}</td>
+                <td>{result.n_retained_by_step[name] ?? 0}</td>
                 <td>{result.step_counts[name] ?? 0}</td>
                 <td>{format(elapsed)} s</td>
-                <td>{format(result.step_it_s[name])} it/s</td>
+                <td>{format(result.step_worker_it_s[name])} it/s</td>
+                <td>{format(result.step_wall_it_s[name])} it/s</td>
                 <td>{result.step_failures[name] ?? 0}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <h3>Generated Data</h3>
-      {Object.keys(result.data_summaries).length === 0 ? (
-        <span className="muted">No generated data summaries</span>
-      ) : (
-        <div className="mc-table-scroll">
-          <table className="mc-summary-table">
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Per-rep shape</th>
-                <th>Finite values</th>
-                <th>Mean</th>
-                <th>Std.</th>
-                <th>Min.</th>
-                <th>Max.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(result.data_summaries).map(([name, summary]) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>{summary.shape.join(" x ")}</td>
-                  <td>{summary.n_finite}/{summary.n_values}</td>
-                  <td>{format(summary.mean)}</td>
-                  <td>{format(summary.std)}</td>
-                  <td>{format(summary.min)}</td>
-                  <td>{format(summary.max)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
       {result.failures.length > 0 && (
         <>
           <h3>Failures</h3>
@@ -213,7 +184,7 @@ function TestSummary({ result }: { result: MCPipelineResult }) {
             <tr>
               <th>Step</th>
               <th>Reference</th>
-              <th>N</th>
+              <th>Retained reps</th>
               <th>Status</th>
               <th>Mean statistic</th>
               <th>Statistic 95% CI</th>
@@ -229,7 +200,7 @@ function TestSummary({ result }: { result: MCPipelineResult }) {
               <tr key={name}>
                 <td>{name}</td>
                 <td>{summary.distribution}({formatDf(summary.df)})</td>
-                <td>{summary.n}</td>
+                <td>{summary.n_retained}</td>
                 <td>{formatStatusCounts(summary.status_counts)}</td>
                 <td>{format(summary.mean_statistic)}</td>
                 <td>{formatInterval(summary.statistic_ci)}</td>
@@ -302,7 +273,10 @@ function RegressionDetail({
     <section className="mc-regression-detail">
       <header>
         <strong>{name}</strong>
-        <span>{summary.n_rep} reps / n={summary.n} / k={summary.k}</span>
+        <span>
+          {summary.n_rep} reps / {summary.n_retained} retained / n={summary.n} / k=
+          {summary.k}
+        </span>
       </header>
       <div className="mc-status-list">
         {Object.entries(summary.status_counts).map(([status, count]) => (

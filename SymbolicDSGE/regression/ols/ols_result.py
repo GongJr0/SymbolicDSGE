@@ -11,6 +11,7 @@ from ..result import RegressionResult
 from ..._diag_tests.result import MCResult, TestResult
 from ..._diag_tests.status import TestStatus
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -114,109 +115,40 @@ class OLSResult(RegressionResult):
 
 @dataclass(frozen=True)
 class MCRegressionResult:
-    variables: list[str]
-    results: tuple[RegressionResult, ...] = field(repr=False)
+    kind: str
+    variables: Sequence[str]
+    coef_trace: NDF
 
-    coef_trace: NDF = field(init=False)
-    status_trace: tuple[RegressionStatus, ...] = field(init=False)
-    n_rep: int = field(init=False)
-    n: int = field(init=False)
-    k: int = field(init=False)
+    ssr_trace: NDF
+    sst_trace: NDF
+    _se_trace: NDF | None
 
-    def __post_init__(self) -> None:
-        results = tuple(self.results)
-        if not results:
-            raise ValueError("MCRegressionResult requires at least one result.")
+    n_retained: int
+    retained_reps: NDArray[np.int_]
+    n_rep: int
+    n: int
+    k: int
 
-        first = results[0]
-        variables = list(self.variables)
-        if variables != first.variables:
-            raise ValueError("MC regression variables must match the first result.")
-
-        n = first.n
-        k = first.k
-        if len(variables) != k:
-            raise ValueError(
-                "MC regression variables must match the number of coefficients."
-            )
-
-        coef_trace: list[NDF] = []
-        status_trace: list[RegressionStatus] = []
-        for result in results:
-            if result.variables != variables:
-                raise ValueError("MC regression results have incompatible variables.")
-            if result.n != n or result.k != k:
-                raise ValueError("MC regression results have incompatible dimensions.")
-            if result.y.shape != (n,):
-                raise ValueError("MC regression results require 1D response arrays.")
-            if result.X.shape != (n, k):
-                raise ValueError("MC regression results have incompatible designs.")
-            if result.coefficients.shape != (k,):
-                raise ValueError(
-                    "MC regression results have incompatible coefficient shapes."
-                )
-            coef_trace.append(result.coefficients)
-            status_trace.append(result.status)
-
-        object.__setattr__(self, "variables", variables)
-        object.__setattr__(self, "results", results)
-        object.__setattr__(self, "coef_trace", np.vstack(coef_trace))
-        object.__setattr__(self, "status_trace", tuple(status_trace))
-        object.__setattr__(self, "n_rep", len(self.results))
-        object.__setattr__(self, "n", n)
-        object.__setattr__(self, "k", k)
-
-    @classmethod
-    def from_results(cls, results: Sequence[RegressionResult]) -> "MCRegressionResult":
-        result_tuple = tuple(results)
-        if not result_tuple:
-            raise ValueError("MCRegressionResult requires at least one result.")
-        return cls(variables=list(result_tuple[0].variables), results=result_tuple)
-
-    def _require_ols_results(self) -> tuple[OLSResult, ...]:
-        if not all(isinstance(result, OLSResult) for result in self.results):
-            raise TypeError(
-                "OLS-specific MC diagnostics require all results to be OLSResult."
-            )
-        return cast(tuple[OLSResult, ...], self.results)
+    _raw_status: NDArray[np.int_]
 
     @property
     def coefficients(self) -> NDF:
         return self.coef_trace
 
     @cached_property
-    def y_trace(self) -> NDF:
-        return np.ascontiguousarray(
-            np.stack([result.y for result in self.results]),
-            dtype=np.float64,
-        )
+    def se_trace(self) -> NDF:
+        if self.kind == "ols" and self._se_trace is not None:
+            return self._se_trace
+        else:
+            warnings.warn(
+                "Non-OLS linear regressions don't have unbiased standard errors, `se_trace` is invalid.",
+                UserWarning,
+            )
+            return np.full((self.n_retained, self.k), np.nan, dtype=np.float64)
 
     @cached_property
-    def x_trace(self) -> NDF:
-        return np.ascontiguousarray(
-            np.stack([result.X for result in self.results]),
-            dtype=np.float64,
-        )
-
-    @cached_property
-    def y_hat_trace(self) -> NDF:
-        return np.asarray(
-            np.einsum("rnk,rk->rn", self.x_trace, self.coef_trace),
-            dtype=np.float64,
-        )
-
-    @cached_property
-    def residual_trace(self) -> NDF:
-        return np.asarray(self.y_trace - self.y_hat_trace, dtype=np.float64)
-
-    @cached_property
-    def ssr_trace(self) -> NDF:
-        return np.asarray((self.residual_trace**2).sum(axis=1), dtype=np.float64)
-
-    @cached_property
-    def sst_trace(self) -> NDF:
-        centered = self.y_trace - self.y_trace.mean(axis=1, keepdims=True)
-        return np.asarray((centered**2).sum(axis=1), dtype=np.float64)
+    def t_stat_trace(self) -> NDF:
+        return np.asarray(self.coef_trace / self.se_trace, dtype=np.float64)
 
     @cached_property
     def mse_trace(self) -> NDF:
@@ -227,28 +159,8 @@ class MCRegressionResult:
         return np.asarray(np.sqrt(self.mse_trace), dtype=np.float64)
 
     @cached_property
-    def se_trace(self) -> NDF:
-        results = self._require_ols_results()
-        if all(result._L.shape == (self.k, self.k) for result in results):
-            sigma2 = self.ssr_trace / (self.n - self.k)
-            eye = np.eye(self.k, dtype=np.float64)
-            rhs = np.broadcast_to(eye, (self.n_rep, self.k, self.k))
-            L_trace = np.stack([result._L for result in results])
-            L_inv = np.linalg.solve(L_trace, rhs)
-            inv_diag = (L_inv * L_inv).sum(axis=1)
-            return np.asarray(np.sqrt(inv_diag * sigma2[:, None]), dtype=np.float64)
-
-        return np.asarray(
-            np.vstack([result.se for result in results]), dtype=np.float64
-        )
-
-    @cached_property
-    def t_stat_trace(self) -> NDF:
-        return np.asarray(self.coef_trace / self.se_trace, dtype=np.float64)
-
-    @cached_property
     def r2_trace(self) -> NDF:
-        out = np.zeros(self.n_rep, dtype=np.float64)
+        out = np.zeros(self.n_retained, dtype=np.float64)
         mask = self.sst_trace > 0
         out[mask] = 1 - self.ssr_trace[mask] / self.sst_trace[mask]
         return out
@@ -256,7 +168,7 @@ class MCRegressionResult:
     @cached_property
     def r2_adj_trace(self) -> NDF:
         if self.n <= self.k + 1:
-            return np.zeros(self.n_rep, dtype=np.float64)
+            return np.zeros(self.n_retained, dtype=np.float64)
         return np.asarray(
             1 - (1 - self.r2_trace) * (self.n - 1) / (self.n - self.k - 1),
             dtype=np.float64,
@@ -274,7 +186,8 @@ class MCRegressionResult:
 
     @cached_property
     def F_stat_trace(self) -> NDF:
-        self._require_ols_results()
+        if self.kind != "ols":
+            return np.full(self.n_retained, np.nan, dtype=np.float64)
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         num = self.r2_trace / dfn
         denom = (1 - self.r2_trace) / dfd
@@ -282,12 +195,17 @@ class MCRegressionResult:
 
     @cached_property
     def F_pval_trace(self) -> NDF:
+        if self.kind != "ols":
+            return np.full(self.n_retained, np.nan, dtype=np.float64)
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         frozen = ReferenceDistribution.F.freeze(float64(dfn), float64(dfd))
         return np.asarray(PvalMethod.SF(frozen, self.F_stat_trace), dtype=np.float64)
 
+    @cached_property
+    def status_trace(self) -> tuple[RegressionStatus, ...]:
+        return tuple(RegressionStatus(status) for status in self._raw_status)
+
     def confidence_intervals(self, alpha: FloatScalar = 0.05) -> NDF:
-        self._require_ols_results()
         q = 1 - alpha / 2
         df = self.n - self.k
         t_crit = t.ppf(q, df)
@@ -299,19 +217,13 @@ class MCRegressionResult:
         import pandas as pd
 
         index = pd.MultiIndex.from_product(
-            [range(self.n_rep), self.variables], names=["rep", "variable"]
+            [range(self.n_retained), self.variables], names=["retained_row", "variable"]
         )
-        if not all(isinstance(result, OLSResult) for result in self.results):
-            return pd.DataFrame(
-                {
-                    "coef": self.coef_trace.reshape(-1),
-                },
-                index=index,
-            )
 
         coef_ci = self.confidence_intervals(alpha)
         return pd.DataFrame(
             {
+                "rep_idx": np.repeat(self.retained_reps, self.k),
                 "coef": self.coef_trace.reshape(-1),
                 "std_err": self.se_trace.reshape(-1),
                 "coef_ci_low": coef_ci[:, :, 0].reshape(-1),
@@ -324,7 +236,6 @@ class MCRegressionResult:
         )
 
     def F_test(self, alpha: FloatScalar = 0.05) -> MCResult:
-        self._require_ols_results()
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         return MCResult(
             test_name="F-test",
@@ -333,18 +244,52 @@ class MCRegressionResult:
             pval_method=PvalMethod.SF,
             alpha=float64(alpha),
             statistic_trace=self.F_stat_trace,
-            status_trace=tuple(
-                TestStatus.OK if status is RegressionStatus.OK else TestStatus.LINALG
-                for status in self.status_trace
+            n_retained=self.n_retained,
+            retained_reps=self.retained_reps,
+            n_rep=self.n_rep,
+            _raw_status=np.asarray(
+                [
+                    (
+                        TestStatus.OK
+                        if status is RegressionStatus.OK
+                        else TestStatus.LINALG
+                    )
+                    for status in self.status_trace
+                ],
+                dtype=np.int_,
             ),
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict) -> MCRegressionResult:
+        return cls(
+            kind=data["kind"],
+            variables=data["variables"],
+            coef_trace=data["coef_trace"],
+            ssr_trace=data["ssr_trace"],
+            sst_trace=data["sst_trace"],
+            _se_trace=data.get("_se_trace"),
+            n_retained=data["n_retained"],
+            retained_reps=data["retained_reps"],
+            n_rep=data["n_rep"],
+            n=data["n"],
+            k=data["k"],
+            _raw_status=data["_raw_status"],
         )
 
     def to_dict(self) -> dict:
         return {
+            "kind": self.kind,
             "variables": self.variables,
             "coef_trace": self.coef_trace,
             "status_trace": self.status_trace,
+            "ssr_trace": self.ssr_trace,
+            "sst_trace": self.sst_trace,
+            "_se_trace": self._se_trace,
+            "n_retained": self.n_retained,
+            "retained_reps": self.retained_reps,
             "n_rep": self.n_rep,
             "n": self.n,
             "k": self.k,
+            "_raw_status": self._raw_status,
         }

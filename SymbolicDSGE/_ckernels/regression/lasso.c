@@ -70,36 +70,38 @@ static void sdsge_solve_small(f64 *A, f64 *b, i64 n, f64 *x) {
   }
 }
 
+static i64 sdsge_lars_active_index(const f64 *active, i64 k, i64 ordinal) {
+  i64 count = 0;
+  for (i64 j = 0; j < k; ++j) {
+    if (active[j] != 0.0) {
+      if (count == ordinal)
+        return j;
+      count += 1;
+    }
+  }
+  return -1;
+}
+
 i64 sdsge_lars_lasso_gram(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT c,
                           i64 k, i64 max_iter, f64 tol,
                           f64 *SDSGE_RESTRICT lam_path,
                           f64 *SDSGE_RESTRICT beta_path,
-                          i64 *SDSGE_RESTRICT n_knots) {
-  /* One f64 block (7 vectors of k + the k*k active Gram) and one i64 block
-   * (active flags + active indices). */
-  f64 *fbuf = (f64 *)malloc((size_t)(7 * k + k * k) * sizeof(f64));
-  i64 *ibuf = (i64 *)malloc((size_t)(2 * k) * sizeof(i64));
-  if (fbuf == NULL || ibuf == NULL) {
-    free(fbuf);
-    free(ibuf);
-    *n_knots = 0;
-    return REGRESSION_NON_CONVERGENT;
-  }
-  f64 *beta = fbuf;
-  f64 *signs = fbuf + k;
-  f64 *r = fbuf + 2 * k;
-  f64 *s_A = fbuf + 3 * k;
-  f64 *w = fbuf + 4 * k;
-  f64 *d = fbuf + 5 * k;
-  f64 *Gd = fbuf + 6 * k;
-  f64 *G_AA = fbuf + 7 * k;
-  i64 *active = ibuf;
-  i64 *act_idx = ibuf + k;
+                          i64 *SDSGE_RESTRICT n_knots,
+                          f64 *SDSGE_RESTRICT work) {
+  f64 *beta = work;
+  f64 *signs = work + k;
+  f64 *r = work + 2 * k;
+  f64 *s_A = work + 3 * k;
+  f64 *w = work + 4 * k;
+  f64 *d = work + 5 * k;
+  f64 *Gd = work + 6 * k;
+  f64 *G_AA = work + 7 * k;
+  f64 *active = work + 7 * k + k * k;
 
   for (i64 j = 0; j < k; ++j) {
     beta[j] = 0.0;
     signs[j] = 0.0;
-    active[j] = 0;
+    active[j] = 0.0;
     r[j] = c[j]; /* residual correlations r = c - G@beta, beta == 0 */
   }
   i64 n_active = 0;
@@ -148,21 +150,20 @@ i64 sdsge_lars_lasso_gram(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT
     drop = 0;
 
     /* Collect active indices and build (G_AA, s_A). */
-    i64 cnt = 0;
-    for (i64 j = 0; j < k; ++j)
-      if (active[j])
-        act_idx[cnt++] = j;
     for (i64 a = 0; a < n_active; ++a) {
-      s_A[a] = signs[act_idx[a]];
-      for (i64 b = 0; b < n_active; ++b)
-        G_AA[a * n_active + b] = G[act_idx[a] * k + act_idx[b]];
+      const i64 row = sdsge_lars_active_index(active, k, a);
+      s_A[a] = signs[row];
+      for (i64 b = 0; b < n_active; ++b) {
+        const i64 col = sdsge_lars_active_index(active, k, b);
+        G_AA[a * n_active + b] = G[row * k + col];
+      }
     }
 
     /* Equiangular direction: solve G_AA w = s_A (s_A is destroyed). */
     sdsge_solve_small(G_AA, s_A, n_active, w);
     f64 sw = 0.0;
     for (i64 a = 0; a < n_active; ++a)
-      sw += signs[act_idx[a]] * w[a];
+      sw += signs[sdsge_lars_active_index(active, k, a)] * w[a];
     if (sw <= 0.0 || !isfinite(sw)) {
       status = REGRESSION_NON_CONVERGENT;
       goto done;
@@ -172,12 +173,14 @@ i64 sdsge_lars_lasso_gram(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT
     for (i64 j = 0; j < k; ++j)
       d[j] = 0.0;
     for (i64 a = 0; a < n_active; ++a)
-      d[act_idx[a]] = A_scalar * w[a];
+      d[sdsge_lars_active_index(active, k, a)] = A_scalar * w[a];
 
     for (i64 j = 0; j < k; ++j) {
       Gd[j] = 0.0;
-      for (i64 a = 0; a < n_active; ++a)
-        Gd[j] += G[j * k + act_idx[a]] * d[act_idx[a]];
+      for (i64 a = 0; a < n_active; ++a) {
+        const i64 index = sdsge_lars_active_index(active, k, a);
+        Gd[j] += G[j * k + index] * d[index];
+      }
     }
 
     f64 step = lam / A_scalar;
@@ -202,7 +205,7 @@ i64 sdsge_lars_lasso_gram(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT
 
     /* Lasso drop: an active coefficient crosses zero. */
     for (i64 a = 0; a < n_active; ++a) {
-      const i64 j = act_idx[a];
+      const i64 j = sdsge_lars_active_index(active, k, a);
       if (d[j] != 0.0) {
         const f64 t = -beta[j] / d[j];
         if (0.0 < t && t < step) {
@@ -240,8 +243,6 @@ i64 sdsge_lars_lasso_gram(const f64 *SDSGE_RESTRICT G, const f64 *SDSGE_RESTRICT
 
 done:
   *n_knots = knot;
-  free(fbuf);
-  free(ibuf);
   return status;
 }
 

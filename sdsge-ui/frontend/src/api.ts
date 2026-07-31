@@ -174,14 +174,18 @@ export function validateMCPipeline(
 export function runMCPipeline(
   pipeline: MCPipelineSpec,
   nRep: number,
+  nJobs: number | null,
   failFast: boolean,
+  verbosity: number,
 ): Promise<MCPipelineResult> {
   return requestJson<MCPipelineResult>("/api/run/mc", {
     method: "POST",
     body: JSON.stringify({
       pipeline,
       n_rep: nRep,
+      n_jobs: nJobs,
       fail_fast: failFast,
+      verbosity,
     }),
   });
 }
