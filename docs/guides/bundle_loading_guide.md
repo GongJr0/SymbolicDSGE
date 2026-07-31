@@ -88,22 +88,26 @@ if estimation is not None:
 
 1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-spec-and-result-types) instance. It round trips to and from JSON via `to_dict()` / `from_dict()`.
 
-`estimation.result` is the first class result the run produced: an `OptimizationResult` for MLE / MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces, so no manual reconstruction is needed.
+`estimation.result` is the first class result the run produced: a `MLEResult` for MLE, a `MAPResult` for MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces, so no manual reconstruction is needed.
 
 ```python
 from SymbolicDSGE.estimation.results import (
     MCMCResult,
-    OptimizationResult,
+    MAPResult,
+    MLEResult,
 )
 
+
 result = estimation.result
-if isinstance(result, OptimizationResult):
+if isinstance(result, MCMCResult):
+    print("Acceptance:", round(result.accept_rate, 2))
+    print("Draws:", result.n_draws, "burn-in:", result.burn_in)
+elif isinstance(result, MAPResult):
     print("Point estimate:", result.theta)
     print("Log-posterior:", result.logpost)
-elif isinstance(result, MCMCResult):
-    print("Acceptance:", result.accept_rate)
-    print("Draws:", result.n_draws, "burn-in:", result.burn_in)
-    print("HPD intervals:", result.hpd_intervals(alpha=0.05))
+elif isinstance(result, MLEResult):
+    print("Point estimate:", result.theta)
+    print("Log-likelihood:", result.loglik)
 ```
 
 Observed data and (when present) MCMC posterior are numpy arrays decoded from the embedded CSV or Parquet member.
@@ -180,9 +184,7 @@ mc_result = loaded.mc.pipeline.run(
     reference=loaded.reference,
     dgp=loaded.dgp,
     n_rep=loaded.mc.document["n_rep"],
-    retain_payloads=False, # (1)!
-    retain_test_results=False,
-    retain_contexts=False,
+    n_jobs=-1, # (1)!
     fail_fast=True,
     verbosity=1,
 )
@@ -195,7 +197,7 @@ pval_ci = jb.pval_confidence_interval(0.95)
 list(zip(stat_ci, pval_ci))
 ```
 
-1. These retention flags keep the rerun result compact. Summaries and traces are still produced.
+1. The rerun executes the same native loop the author ran. `n_jobs=-1` fans the replications across all available cores; `None` keeps it single-threaded.
 
 ???+ info "Validating without running"
     `LoadedMC.pipeline` has already been rebuilt from the stored spec. If you still want to inspect the serialized graph directly, `validate_pipeline_spec(loaded.mc.spec, has_reference=loaded.reference is not None, has_dgp=loaded.dgp is not None)` returns `(ordered, postprocs)` when the graph is well formed and raises with a specific message otherwise.
