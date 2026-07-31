@@ -11,7 +11,7 @@ from ...core.solved_model import SolvedModel
 from ..allocation import StepBufferPlan
 from ..mc_constructs import MCStep
 from ..operations.utils import _clone_or_pass_shocks
-from .core import (
+from .utils import (
     NDF,
     FloatInputBinding,
     _f64,

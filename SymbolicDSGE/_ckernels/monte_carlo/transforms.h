@@ -61,6 +61,19 @@ typedef struct {
 
 typedef sdsge_mc_rolling_var_step_ctx sdsge_mc_rolling_std_step_ctx;
 
+/* Custom transform callable and context */
+typedef i64 (*user_transform_fn)(f64 *SDSGE_RESTRICT inp,
+                                 f64 *SDSGE_RESTRICT out, i64 n_in, i64 p_in,
+                                 i64 n_out, i64 p_out);
+
+typedef struct {
+  user_transform_fn fn;
+  i64 n_in;
+  i64 p_in;
+  i64 n_out;
+  i64 p_out;
+} sdsge_mc_user_transform_step_ctx;
+
 /* Per-column z-score over axis 0; writes out(n, p). `scratch` is 2*p.
  * Columns whose standard deviation is zero are written as zeros rather than
  * dividing through, matching `run_standardize`. */
@@ -111,33 +124,39 @@ i64 sdsge_rolling_std(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
 /* Generic-runner adapters. ``float_in_work`` begins with x(n, p), followed by
  * the transform's scratch span. Each adapter writes its status to ``int_out``
  * when supplied. */
-int sdsge_mc_standardize_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_standardize_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx);
 int sdsge_mc_log_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                         f64 *SDSGE_RESTRICT float_out,
                         i64 *SDSGE_RESTRICT int_work,
                         i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_log_diff_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_log_diff_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                             f64 *SDSGE_RESTRICT float_out,
+                             i64 *SDSGE_RESTRICT int_work,
+                             i64 *SDSGE_RESTRICT int_out, const void *ctx);
 int sdsge_mc_diff_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                          f64 *SDSGE_RESTRICT float_out,
                          i64 *SDSGE_RESTRICT int_work,
                          i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_rolling_mean_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_rolling_var_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_rolling_std_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_rolling_mean_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                                 f64 *SDSGE_RESTRICT float_out,
+                                 i64 *SDSGE_RESTRICT int_work,
+                                 i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_rolling_var_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_rolling_std_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_user_transform_runner(i64 rep_idx,
+                                   f64 *SDSGE_RESTRICT float_in_work,
+                                   f64 *SDSGE_RESTRICT float_out,
+                                   i64 *SDSGE_RESTRICT int_work,
+                                   i64 *SDSGE_RESTRICT int_out,
+                                   const void *ctx);
 
 #endif /* SDSGE_MC_TRANSFORMS_H */

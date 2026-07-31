@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
     elastic_net_gs_step,
@@ -16,15 +14,13 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ..allocation import BufferPlan
 from ..mc_constructs import MCStep
-from .core import (
+from .utils import (
     FloatInputBinding,
+    RegressionResultSpec,
     _fill_binding,
     _selected_shape,
     _source_binding,
 )
-
-if TYPE_CHECKING:
-    from .core import RegressionResultSpec
 
 
 def lower_regression_step(
@@ -67,10 +63,8 @@ def regression_result_spec(
     source_indices: tuple[int, ...],
     steps: tuple[MCStep, ...],
     plan: BufferPlan,
-) -> "RegressionResultSpec":
+) -> RegressionResultSpec:
     """Resolve result metadata from the same source layout as the native ABI."""
-    from .core import RegressionResultSpec
-
     n, p, _, variables = _resolve_regression_shape(step, source_indices, steps, plan)
     return RegressionResultSpec(
         name=step.name,

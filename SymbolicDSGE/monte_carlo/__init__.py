@@ -19,9 +19,10 @@ from .catalog import (
 from .core import MCPipeline
 from .custom_op import (
     CustomFunc,
+    NumbaCustomFunc,
     NumpyCustomFunc,
     PandasCustomFunc,
-    numpy_operation,
+    custom_transform,
     pandas_operation,
 )
 from .postproc import Raw, Summary
@@ -47,9 +48,10 @@ __all__ = [
     "MCContext",
     "MCData",
     "OpType",
-    "numpy_operation",
+    "custom_transform",
     "pandas_operation",
     "CustomFunc",
+    "NumbaCustomFunc",
     "NumpyCustomFunc",
     "PandasCustomFunc",
     "Summary",

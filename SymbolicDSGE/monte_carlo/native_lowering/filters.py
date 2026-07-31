@@ -17,7 +17,7 @@ from ..._ckernels.monte_carlo._runner import (
 from ...core.solved_model import SolvedModel
 from ..allocation import BufferPlan, FieldLayout
 from ..mc_constructs import MCStep
-from .core import (
+from .utils import (
     NDF,
     NDI,
     FloatInputBinding,

@@ -19,7 +19,6 @@ from SymbolicDSGE.monte_carlo.custom_op import (
     CustomOpValidationError,
     NumpyCustomFunc,
     PandasCustomFunc,
-    numpy_operation,
 )
 
 BOTH = [NumpyCustomFunc, PandasCustomFunc]
@@ -138,9 +137,9 @@ def test_from_source_execution_failure():
 
 
 def test_attribute_form_marker_recognized_then_exec_fails():
-    # `@sd.numpy_operation` passes the marker check (Attribute branch) but `sd`
+    # `@sd.custom_transform` passes the marker check (Attribute branch) but `sd`
     # is undefined in the exec namespace, so it fails at execution.
-    src = "@sd.numpy_operation\ndef f(x):\n    return x"
+    src = "@sd.custom_transform\ndef f(x):\n    return x"
     with pytest.raises(CustomOpValidationError, match="failed to execute"):
         NumpyCustomFunc.from_source(src)
 
@@ -165,9 +164,11 @@ def test_plain_yield_rejected():
 # --- live-function capture paths (need a real module-level def) -------------
 
 
-@numpy_operation
 def _helper(x):
     return x + 1
+
+
+_helper = NumpyCustomFunc(_helper)
 
 
 def _uses_helper(x):

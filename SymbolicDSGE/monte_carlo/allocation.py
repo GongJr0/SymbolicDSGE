@@ -179,6 +179,8 @@ def _resolve_input_asize(
             n, p = _selected_source_shape(
                 plans, steps, source_indices[0], step.source_args[0]
             )
+            if step.step_type == "transform:custom":
+                return ArenaSize(n * p)
             param = int(step.kwargs.get("order", step.kwargs.get("window", 0)))
             return _asize(
                 _arena.transform_arena_size(step.step_type or "", n, p, param)
@@ -407,6 +409,13 @@ def _transform_output_shape(
 ) -> Shape:
     n_rows, n_columns = input_shape
     match step_type:
+        case "transform:custom":
+            shape = tuple(int(size) for size in kwargs["output_shape"])
+            if len(shape) != 2 or any(size < 0 for size in shape):
+                raise ValueError(
+                    "Custom transform output_shape must contain two non-negative dimensions."
+                )
+            return shape
         case "standardize" | "log":
             return n_rows, n_columns
         case "log_diff":

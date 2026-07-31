@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+
+from ...custom_op import NumbaCustomFunc
 from ...mc_constructs import (
     ColumnSelector,
     MCStep,
@@ -21,33 +23,53 @@ from .ops import (
 
 def transform_step(
     name: str,
-    func: Callable[..., Any],
+    func: Callable[..., Any] | NumbaCustomFunc,
     *,
-    store_key: str | None = None,
-    **step_kwargs: Any,
+    source: str,
+    field: str,
+    output_shape: tuple[int, int],
+    columns: ColumnSelector = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
 ) -> MCStep:
-    """Wrap a user callable as a per-replication ``OpType.TRANSFORM`` step.
+    """Build a native custom transform from a two-array Python function.
 
-    Signature: ``transform_step(name, func, *, store_key=None, **step_kwargs)``.
+    ``func`` receives C-contiguous two-dimensional ``sample`` and ``output``
+    arrays, fills ``output``, and returns a status integer. A plain function is
+    wrapped in :class:`~SymbolicDSGE.monte_carlo.custom_op.NumbaCustomFunc`.
+    ``output_shape`` declares the exact ``(n_rows, n_columns)`` result shape.
 
-    Op contract: ``func(*, context, reference, dgp, rep_idx, **kwargs)``; all
-    four are injected every replication (read this rep's data via
-    ``context.require_data()`` / ``context.require_payload(...)``), and any
-    ``step_kwargs`` passed here arrive as extra keywords. ``func`` returns a 2-D
-    ndarray stored as the step's payload (at ``store_key`` or ``name``).
-    Bundling requires ``func`` to be a
-    :class:`~SymbolicDSGE.monte_carlo.custom_op.NumpyCustomFunc` (use
-    ``@numpy_operation``); the bundle builder auto-wraps it at serialization.
+    The selected source is copied into the input array once per replication.
+    The output is exposed as this step's ``payload`` field.
 
     Example:
-        >>> transform_step("z", my_op)
+        >>> transform_step(
+        ...     "z",
+        ...     my_op,
+        ...     source="datagen",
+        ...     field="observables",
+        ...     output_shape=(100, 2),
+        ... )
     """
+    n_out, p_out = output_shape
+    if n_out < 0 or p_out < 0:
+        raise ValueError("output_shape dimensions must be non-negative.")
+    wrapped = func if isinstance(func, NumbaCustomFunc) else NumbaCustomFunc(func)
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
-        func=func,
-        kwargs=step_kwargs,
-        store_key=store_key,
+        func=wrapped,
+        kwargs={"output_shape": (n_out, p_out)},
+        source_args=(
+            _compile_source_args(
+                arg="sample",
+                source=source,
+                field=field,
+                columns=columns,
+                burn_in=burn_in,
+                drop_initial=drop_initial,
+            ),
+        ),
         step_type="transform:custom",
     )
 

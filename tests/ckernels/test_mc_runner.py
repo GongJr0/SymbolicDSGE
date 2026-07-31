@@ -9,6 +9,7 @@ from SymbolicDSGE._ckernels.monte_carlo._runner import (
     transform_step,
 )
 from SymbolicDSGE.monte_carlo.allocation import ArenaSize, StepBufferPlan
+from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 
 
 def _plan(name: str, n_float_in: int, n_float_out: int) -> dict[str, StepBufferPlan]:
@@ -21,6 +22,11 @@ def _plan(name: str, n_float_in: int, n_float_out: int) -> dict[str, StepBufferP
             n_retain=-1,
         )
     }
+
+
+def _numba_first_difference(sample, output):
+    output[:] = sample[1:] - sample[:-1]
+    return 0
 
 
 def test_runner_lowers_arenas_and_retains_batched_payload_rows() -> None:
@@ -71,6 +77,34 @@ def test_runner_passes_null_for_zero_width_optional_integer_output() -> None:
     np.testing.assert_allclose(
         allocation.steps["log"].float_retained,
         np.log(np.array([[1.0, 2.0, 3.0, 4.0]] * 3)),
+    )
+
+
+def test_runner_calls_numba_user_transform() -> None:
+    allocation = allocate_arenas(_plan("custom", 6, 4), 3, n_jobs=2)
+    allocation.steps["custom"].float_in_work[:] = np.arange(6.0)
+    callback = NumbaCustomFunc(_numba_first_difference)
+
+    result = run(
+        allocation,
+        [
+            transform_step(
+                "custom",
+                "custom",
+                3,
+                2,
+                function_address=callback.address,
+                backing=callback,
+                output_n=2,
+                output_p=2,
+            )
+        ],
+    )
+
+    assert result.status == 0
+    np.testing.assert_allclose(
+        allocation.steps["custom"].float_retained,
+        [[2.0, 2.0, 2.0, 2.0]] * 3,
     )
 
 

@@ -29,7 +29,43 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
     ljung_box_test_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step
+from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step, transform_step
+
+
+def _custom_first_difference(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:] = sample[1:] - sample[:-1]
+    return 0
+
+
+def test_native_lowering_runs_custom_transform() -> None:
+    n_rep, T = 3, 12
+    observables = np.arange(n_rep * T * 2, dtype=np.float64).reshape(n_rep, T, 2)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step("data", observables=observables),
+            transform_step(
+                "difference",
+                _custom_first_difference,
+                source="data",
+                field="observables",
+                output_shape=(T - 1, 2),
+            ),
+        ]
+    )
+
+    lowered = pipeline.lower_native(
+        reference=cast(SolvedModel, object()), n_rep=n_rep, n_jobs=1
+    )
+    result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
+
+    assert result.status == 0
+    layout = lowered.plan["difference"].out_fields["payload"]
+    actual = (
+        lowered.allocation.steps["difference"]
+        .float_retained[:, layout.offset : layout.offset + layout.flat_count]
+        .reshape(n_rep, *layout.shape)
+    )
+    np.testing.assert_allclose(actual, np.diff(observables, axis=1))
 
 
 def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> None:

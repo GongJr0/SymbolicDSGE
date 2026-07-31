@@ -13,6 +13,7 @@ from SymbolicDSGE.monte_carlo import (
     validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.catalog import _shocks_from_registry
+from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.mc_constructs import (
     DYNAMIC_FIELD_INDEX,
     DYNAMIC_SOURCE_FIELDS,
@@ -110,9 +111,29 @@ def test_source_arg_compile_validates_static_selection() -> None:
         standardize_step("bad_burn", source="datagen", field="states", burn_in=-1)
 
 
-def test_transform_step_stamps_custom_kind() -> None:
-    step = transform_step("tf", lambda **_: None)
+def _custom_copy(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:] = sample
+    return 0
+
+
+def test_transform_step_wraps_custom_function_and_compiles_source() -> None:
+    step = transform_step(
+        "tf",
+        _custom_copy,
+        source="dat",
+        field="observables",
+        output_shape=(4, 2),
+        columns=(0, 1),
+        burn_in=1,
+    )
+
     assert step.step_type == "transform:custom"
+    assert isinstance(step.func, NumbaCustomFunc)
+    assert step.kwargs == {"output_shape": (4, 2)}
+    assert step.source_args[0].source_step == "dat"
+    assert step.source_args[0].field == "observables"
+    assert step.source_args[0].columns == (0, 1)
+    assert step.source_args[0].burn_in == 1
 
 
 _FIELD_KEYS = {

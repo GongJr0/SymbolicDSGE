@@ -106,6 +106,10 @@ def transform_step(
     offset: float = 0.0,
     order: int = 1,
     window: int = 1,
+    function_address: int = 0,
+    backing: object | None = None,
+    output_n: int = -1,
+    output_p: int = -1,
 ) -> NativeStep: ...
 def ols_step(name: str, n: int, p: int, intercept: bool = True) -> NativeStep: ...
 def ridge_step(

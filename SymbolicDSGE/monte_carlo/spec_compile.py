@@ -117,6 +117,17 @@ def _recover_source_params(
 ) -> dict[str, Any]:
     if step_type is None or not source_args:
         return {}
+    if step_type == "transform:custom":
+        if len(source_args) != 1:
+            raise ValueError(
+                "A custom transform must have exactly one source argument."
+            )
+        return _recover_one_source(
+            source_args[0],
+            source_key="source",
+            field_key="field",
+            columns_key="columns",
+        )
     definition = STEP_CATALOG.get(step_type)
     if definition is None or not definition.source_bindings:
         return {}

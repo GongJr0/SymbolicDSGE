@@ -298,6 +298,20 @@ cdef extern from "transforms.h":
         int64_t window
         int64_t ddof
 
+    ctypedef int64_t (*user_transform_fn)(
+            double *inp,
+            double *out,
+            int64_t n_in, int64_t p_in,
+            int64_t n_out, int64_t p_out,
+            )
+
+    ctypedef struct sdsge_mc_user_transform_step_ctx:
+        user_transform_fn fn
+        int64_t n_in
+        int64_t p_in
+        int64_t n_out
+        int64_t p_out
+
     int sdsge_mc_standardize_runner(
         int64_t rep_idx,
         double *float_in_work,
@@ -354,7 +368,14 @@ cdef extern from "transforms.h":
         int64_t *int_out,
         const void *ctx,
     ) noexcept nogil
-
+    int sdsge_mc_user_transform_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
 
 cdef extern from "regression.h":
     ctypedef struct sdsge_mc_ols_step_ctx:
@@ -567,6 +588,7 @@ cdef class NativeStep:
     cdef sdsge_mc_cusum_test_ctx _cusum_ctx
     cdef sdsge_mc_cusumsq_test_ctx _cusumsq_ctx
     cdef sdsge_mc_chow_test_ctx _chow_ctx
+    cdef sdsge_mc_user_transform_step_ctx _user_transform_ctx
 
     def __cinit__(self):
         self._test_distribution = None
@@ -1011,6 +1033,10 @@ def transform_step(
     double offset=0.0,
     int64_t order=1,
     int64_t window=1,
+    uintptr_t function_address=0,
+    object backing=None,
+    int64_t output_n=-1,
+    int64_t output_p=-1,
 ):
     """Bind one native transform adapter using its resolved scalar settings."""
     cdef NativeStep step = NativeStep()
@@ -1080,13 +1106,29 @@ def transform_step(
         step._input_n_float = input_count + 2 * p
         output_rows = max(0, n - window + 1)
         step._output_n_float = output_rows * p
+    elif kind == "custom":
+        if function_address == 0:
+            raise ValueError("Native custom transforms require a callback address.")
+        if backing is None:
+            raise ValueError("Native custom transforms require callback backing.")
+        if output_n < 0 or output_p < 0:
+            raise ValueError("Native custom transform output dimensions are required.")
+        step._user_transform_ctx.fn = <user_transform_fn><void *>function_address
+        step._user_transform_ctx.n_in = n
+        step._user_transform_ctx.p_in = p
+        step._user_transform_ctx.n_out = output_n
+        step._user_transform_ctx.p_out = output_p
+        fn = sdsge_mc_user_transform_runner
+        ctx = <const void *>&step._user_transform_ctx
+        step._input_n_float = input_count
+        step._output_n_float = output_n * output_p
     else:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
     step._bind(
         name,
         fn,
         ctx,
-        None,
+        backing,
         0,
         step._input_n_float,
         step._input_n_int,
