@@ -22,7 +22,8 @@ from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
-from .shock_generators import Shock
+from .shock_generators import Shock, _gaussian_factor
+from .shock_plan import ShockPlan, ShockPlanEntry, validate_shock_targets
 from .solver_backend import KleinSolution, PerturbationSolution
 
 from .compiled_model import CompiledModel
@@ -52,6 +53,16 @@ if TYPE_CHECKING:
 
 ND = NDArray
 NDF = NDArray[float64]
+
+
+def _require_horizon(T: int | None, name: str) -> int:
+    """A live ``Shock`` resolves its family against a horizon; demand one."""
+    if T is None:
+        raise ValueError(
+            f"Shock spec {name!r} is a live Shock, so resolving it needs a "
+            "horizon T. Pass T, or materialize the spec into a draw closure first."
+        )
+    return T
 
 
 def _load_sr_fit_dependencies() -> tuple[type, type]:
@@ -160,9 +171,9 @@ class SolvedModel:
     ) -> dict[str, Callable[[float | NDF], NDF] | NDF]:
         """Resolve any ``Shock`` specs into their ``T``-horizon draw closures.
 
-        This is the single boundary where a distribution spec becomes a concrete
-        generator, so the validation anchor ``_shock_unpack`` only ever sees
-        callables/arrays. Live callables and raw arrays pass through untouched.
+        Live callables and raw arrays pass through untouched. Callers that hold
+        the specs themselves can hand them to ``_resolve_shock_plan`` directly,
+        which resolves the family without going through a closure.
         """
         return {
             name: shock.shock_generator(T) if isinstance(shock, Shock) else shock
@@ -177,18 +188,9 @@ class SolvedModel:
         ) = None,
         shock_scale: float = 1.0,
     ) -> NDF:
-        shock_mat = np.zeros((T, self.compiled.n_exog), dtype=float64)
         if shocks is None:
-            return shock_mat
-
-        shock_list = self._shock_unpack(self._materialize_shocks(shocks, T))
-        for idx, shock_vals in shock_list:
-            if shock_vals.shape[0] != T:
-                raise ValueError(
-                    f"Shock array for variable index {idx} must have length {T}."
-                )
-            shock_mat[:, idx] = shock_scale * shock_vals
-        return shock_mat
+            return np.zeros((T, self.compiled.n_exog), dtype=float64)
+        return self._resolve_shock_plan(shocks, T).matrix(T, shock_scale)
 
     def _simulate_state_matrix(
         self,
@@ -450,111 +452,155 @@ class SolvedModel:
             solve_kwargs=solve_kwargs,
         ).write(path)
 
-    def _shock_unpack(
-        self, shocks: Mapping[str, NDF | Callable[[float | NDF], NDF]]
-    ) -> list[Tuple[int, NDF]]:
-        out: list[Tuple[int, NDF]] = []
+    def _resolve_shock_plan(
+        self,
+        shocks: Mapping[str, Shock | NDF | Callable[[float | NDF], NDF]],
+        T: int | None = None,
+    ) -> ShockPlan:
+        """Resolve a shock spec against this model, once.
 
+        Everything here depends only on the model and the spec: target column
+        indices, the canonical order of a grouped entry, the standard deviations
+        and correlations read off the calibration, the assembled covariance, and
+        its Cholesky factor. None of it depends on the seed, so a caller drawing
+        many paths from one spec resolves a plan and redraws from it.
+
+        ``T`` is required only when the mapping carries live :class:`Shock`
+        specs, which resolve their distribution family against a horizon.
+        """
         conf = self.compiled.config
         reverse_shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
             {v: k for k, v in conf.shock_map.items()}
         )
         shock_stds = conf.calibration.shock_std
 
-        # This method is the per-run anchor, so every shock validation lives
-        # here in one pass over the spec. Each entry's variables must be
-        # exogenous, and each exogenous variable may be driven by at most one
-        # entry. A variable shared across two multivar keys (for example "g,z"
-        # and "g,r") is caught here; an exact duplicate key cannot reach this
-        # point because the shocks mapping deduplicates it upstream.
         exog_names = list(self.compiled.var_names[: self.compiled.n_exog])
-        exog_set = set(exog_names)
-        owner: dict[str, str] = {}
-        for name in shocks:
-            members = [n.strip() for n in name.split(",")] if "," in name else [name]
-            for member in members:
-                if member not in exog_set:
-                    where = f" in entry {name!r}" if "," in name else ""
-                    raise ValueError(
-                        f"Shock variable {member!r}{where} is not an exogenous "
-                        f"model variable. Valid shock variables: {exog_names}."
-                    )
-                if member in owner:
-                    raise ValueError(
-                        f"Shock variable {member!r} is driven by more than one "
-                        f"shock entry ({owner[member]!r} and {name!r}); each "
-                        "exogenous variable may appear in at most one entry."
-                    )
-                owner[member] = name
+        validate_shock_targets(list(shocks), exog_names)
+
+        entries: list[ShockPlanEntry] = []
+        seeded_count = 0
 
         for name, shock in shocks.items():
+            if isinstance(shock, Shock) and shock.seed is not None:
+                seeded_count += 1
+
             if "," in name:
-                # Multi-Var
                 multi_names = [n.strip() for n in name.split(",")]
                 indices = [self.compiled.idx[n] for n in multi_names]
                 perm = np.argsort(indices)
                 multi_names_sorted = [multi_names[i] for i in perm]
-                indices_sorted = [indices[i] for i in perm]
+                indices_sorted = tuple(indices[i] for i in perm)
 
                 if isinstance(shock, ndarray):
                     assert shock.shape[1] == len(
                         multi_names
                     ), f"Shock array for {name} must have shape (T, {len(multi_names)})"
-                    shock_sorted = shock[:, perm]
-                    out.extend(
-                        zip(
-                            indices_sorted,
-                            [shock_sorted[:, i] for i in range(shock_sorted.shape[1])],
+                    entries.append(
+                        ShockPlanEntry(
+                            key=name,
+                            indices=indices_sorted,
+                            multivar=True,
+                            values=asarray(shock[:, perm], dtype=float64),
                         )
                     )
+                    continue
 
-                elif callable(shock):
-                    shock_syms = [reverse_shock_map[n] for n in multi_names_sorted]
-                    sig_params = [shock_stds[sym] for sym in shock_syms]
-                    sigs = [self._get_param(sig, 1.0) for sig in sig_params]
-                    rhos = [
-                        self._get_rho(n1, n2, 0.0)
-                        for n1 in shock_syms
-                        for n2 in shock_syms
-                    ]
-                    corr = np.array(rhos).reshape(
-                        (len(multi_names_sorted), len(multi_names_sorted))
-                    )
-                    cov = corr * np.outer(sigs, sigs)
-
-                    mv_mat = shock(cov)  # pyright: ignore
-                    if mv_mat.shape[1] != len(multi_names):
-                        raise ValueError(
-                            f"Shock callable for {name} must return array with shape (T, {len(multi_names)})"
-                        )
-                    out.extend(
-                        zip(
-                            indices_sorted,
-                            [mv_mat[:, i] for i in range(mv_mat.shape[1])],
-                        )
-                    )
-                else:
+                if not isinstance(shock, Shock) and not callable(shock):
                     raise TypeError(
                         f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
                     )
+
+                shock_syms = [reverse_shock_map[n] for n in multi_names_sorted]
+                sig_params = [shock_stds[sym] for sym in shock_syms]
+                sigs = [self._get_param(sig, 1.0) for sig in sig_params]
+                rhos = [
+                    self._get_rho(n1, n2, 0.0) for n1 in shock_syms for n2 in shock_syms
+                ]
+                corr = np.array(rhos).reshape(
+                    (len(multi_names_sorted), len(multi_names_sorted))
+                )
+                cov = corr * np.outer(sigs, sigs)
+
+                if isinstance(shock, Shock):
+                    entries.append(
+                        ShockPlanEntry(
+                            key=name,
+                            indices=indices_sorted,
+                            multivar=True,
+                            scale=cov,
+                            factor=_gaussian_factor(cov),
+                            draw=shock.draw_fn(_require_horizon(T, name)),
+                            base_seed=(None if shock.seed is None else int(shock.seed)),
+                            spec=shock,
+                        )
+                    )
+                else:
+                    entries.append(
+                        ShockPlanEntry(
+                            key=name,
+                            indices=indices_sorted,
+                            multivar=True,
+                            scale=cov,
+                            func=shock,
+                        )
+                    )
+                continue
+
+            # Uni-Var (target validity already checked by validate_shock_targets)
+            idx = (self.compiled.idx[name],)
+            if isinstance(shock, ndarray):
+                entries.append(
+                    ShockPlanEntry(
+                        key=name,
+                        indices=idx,
+                        multivar=False,
+                        values=asarray(shock, dtype=float64),
+                    )
+                )
+                continue
+
+            if not isinstance(shock, Shock) and not callable(shock):
+                raise TypeError(
+                    f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
+                )
+
+            sym = reverse_shock_map[name]
+            sig = self._get_param(shock_stds[sym], 1.0)
+
+            if isinstance(shock, Shock):
+                entries.append(
+                    ShockPlanEntry(
+                        key=name,
+                        indices=idx,
+                        multivar=False,
+                        scale=sig,
+                        draw=shock.draw_fn(_require_horizon(T, name)),
+                        base_seed=None if shock.seed is None else int(shock.seed),
+                        spec=shock,
+                    )
+                )
             else:
-                # Uni-Var (target validity already checked in the pass above)
-                idx = self.compiled.idx[name]
-                if callable(shock):
-                    sym = reverse_shock_map[name]
-                    sig_param = shock_stds[sym]
-                    sig = self._get_param(sig_param, 1.0)
-
-                    shock_vals = shock(sig)
-                    out.append((idx, shock_vals))
-                elif isinstance(shock, ndarray):
-                    shock_vals = asarray(shock, dtype=float64)
-                    out.append((idx, shock_vals))
-                else:
-                    raise TypeError(
-                        f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
+                entries.append(
+                    ShockPlanEntry(
+                        key=name,
+                        indices=idx,
+                        multivar=False,
+                        scale=sig,
+                        func=shock,
                     )
-        return out
+                )
+
+        return ShockPlan(
+            entries=tuple(entries),
+            n_exog=self.compiled.n_exog,
+            seeded_count=seeded_count,
+        )
+
+    def _shock_unpack(
+        self, shocks: Mapping[str, NDF | Callable[[float | NDF], NDF]]
+    ) -> list[Tuple[int, NDF]]:
+        """Resolve a spec and draw it once, as ``(exogenous index, column)``."""
+        return self._resolve_shock_plan(shocks).unpack()
 
     def _get_rho(
         self, var1: str | Symbol, var2: str | Symbol, default: float = 0.0

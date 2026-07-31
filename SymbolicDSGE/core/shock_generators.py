@@ -15,6 +15,13 @@ from typing import Any, Callable, Literal, Mapping, TypedDict, cast, overload
 
 ShockDistribution = Literal["norm", "t", "uni"]
 
+# A family-resolved draw: ``(scale, seed, factor) -> (T,) | (T, k)``. See
+# :meth:`Shock.draw_fn` for the contract each argument carries.
+ShockDrawFn = Callable[
+    [Any, int | None, NDArray[float64] | None],
+    NDArray[float64],
+]
+
 
 class ShockParameters(TypedDict):
     dist: ShockDistribution
@@ -76,13 +83,18 @@ def _draw_normal(
 
 
 def _draw_normal_mv(
-    T: int, seed: int | None, mean: ndarray | None, cov: ndarray
+    T: int,
+    seed: int | None,
+    mean: ndarray | None,
+    cov: ndarray,
+    factor: ndarray | None = None,
 ) -> ndarray:
     cov = asarray(cov, dtype=float64)
     k = cov.shape[0]
     mean_vec = zeros(k, dtype=float64) if mean is None else asarray(mean, dtype=float64)
+    F = _gaussian_factor(cov) if factor is None else factor
     z = random.default_rng(seed).standard_normal((T, k))
-    return cast(ndarray, (mean_vec + z @ _gaussian_factor(cov).T).astype(float64))
+    return cast(ndarray, (mean_vec + z @ F.T).astype(float64))
 
 
 def _draw_t(
@@ -97,13 +109,19 @@ def _draw_t(
 
 
 def _draw_t_mv(
-    T: int, seed: int | None, df: float, loc: ndarray | None, shape: ndarray
+    T: int,
+    seed: int | None,
+    df: float,
+    loc: ndarray | None,
+    shape: ndarray,
+    factor: ndarray | None = None,
 ) -> ndarray:
     shape = asarray(shape, dtype=float64)
     k = shape.shape[0]
     loc_vec = zeros(k, dtype=float64) if loc is None else asarray(loc, dtype=float64)
+    F = _gaussian_factor(shape) if factor is None else factor
     rng = random.default_rng(seed)
-    z = rng.standard_normal((T, k)) @ _gaussian_factor(shape).T
+    z = rng.standard_normal((T, k)) @ F.T
     g = rng.chisquare(df, size=T) / df
     return cast(ndarray, (loc_vec + z / np.sqrt(g)[:, None]).astype(float64))
 
@@ -319,13 +337,20 @@ class Shock:
             " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
         )
 
-    def shock_generator(
-        self, T: int
-    ) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
-        """Build the per-scale draw closure for a ``T``-period horizon.
+    def draw_fn(self, T: int) -> ShockDrawFn:
+        """Resolve the distribution family once for a ``T``-period horizon.
 
-        ``T`` is supplied by the caller (the simulation), not stored on the
-        Shock; the returned callable takes only the scale argument ``s``.
+        The returned callable is ``f(scale, seed, factor)``. Resolving the
+        family, its keyword arguments, and (on the scipy route) the distribution
+        object costs the same whether one path or a hundred thousand are drawn,
+        so callers that redraw under varying seeds resolve once and call many
+        times. ``factor`` is an optional precomputed matrix ``F`` with
+        ``F @ F.T == scale`` for the multivariate families; passing it skips the
+        per-call factorization of an unchanged covariance. The univariate
+        families and the scipy route ignore it.
+
+        Family validation is eager: an unknown family, a Student-t without
+        ``df``, or a multivariate uniform raises here rather than at draw time.
         """
         self._assert_generator()
         kwargs = self.dist_kwargs.copy()
@@ -334,49 +359,73 @@ class Shock:
         # scipy distribution object (or a string with positional dist_args, which
         # the fast path doesn't model) keeps the scipy ``.rvs`` route.
         if isinstance(self.dist, str) and not self.dist_args:
-            return self._numpy_shock_generator(T, kwargs)
+            return self._numpy_draw_fn(T, kwargs)
 
         scale_key = "scale"
         if self.multivar:
             scale_key = "shape" if self.dist == "t" else "cov"
-        fun = lambda s: abstract_shock_array(
-            T,
-            self.seed,
-            self._get_dist(),
-            *self.dist_args,
-            **{**kwargs, scale_key: s},
-        )
+        dist = self._get_dist()
+        dist_args = self.dist_args
 
-        return fun
+        def _scipy_draw(
+            s: float | NDArray[float64],
+            seed: int | None,
+            factor: NDArray[float64] | None = None,
+        ) -> NDArray[float64]:
+            del factor  # scipy's own rvs owns the factorization
+            return abstract_shock_array(
+                T,
+                seed,
+                dist,
+                *dist_args,
+                **{**kwargs, scale_key: s},
+            )
 
-    def _numpy_shock_generator(
-        self, T: int, kwargs: dict
+        return _scipy_draw
+
+    def shock_generator(
+        self, T: int
     ) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
-        """Build the per-scale draw closure for a string family on numpy.
+        """Build the per-scale draw closure for a ``T``-period horizon.
+
+        ``T`` is supplied by the caller (the simulation), not stored on the
+        Shock; the returned callable takes only the scale argument ``s`` and
+        draws against this Shock's own ``seed``.
+        """
+        draw = self.draw_fn(T)
+        seed = self.seed
+        return lambda s: draw(s, seed, None)
+
+    def _numpy_draw_fn(self, T: int, kwargs: dict) -> ShockDrawFn:
+        """Resolve a string family onto the numpy Generator fast paths.
 
         The returned callable takes the scale argument ``s`` (a scalar std for
         univariate families, a covariance/shape matrix for multivariate ones),
-        mirroring the scipy-path contract.
+        mirroring the scipy-route contract.
         """
         family = self.dist
-        seed, multivar = self.seed, self.multivar
+        multivar = self.multivar
 
         if family == "norm":
             if multivar:
                 mean = kwargs.get("mean")
-                return lambda s: _draw_normal_mv(T, seed, mean, cast(ndarray, s))
+                return lambda s, seed, factor: _draw_normal_mv(
+                    T, seed, mean, cast(ndarray, s), factor
+                )
             loc = kwargs.get("loc", 0.0)
-            return lambda s: _draw_normal(T, seed, loc, cast(float, s))
+            return lambda s, seed, factor: _draw_normal(T, seed, loc, cast(float, s))
 
         if family == "t":
             if "df" not in kwargs:
                 raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
             df = kwargs["df"]
             if multivar:
-                loc = kwargs.get("loc")
-                return lambda s: _draw_t_mv(T, seed, df, loc, cast(ndarray, s))
+                loc_mv = kwargs.get("loc")
+                return lambda s, seed, factor: _draw_t_mv(
+                    T, seed, df, loc_mv, cast(ndarray, s), factor
+                )
             loc = kwargs.get("loc", 0.0)
-            return lambda s: _draw_t(T, seed, df, loc, cast(float, s))
+            return lambda s, seed, factor: _draw_t(T, seed, df, loc, cast(float, s))
 
         if family == "uni":
             if multivar:
@@ -384,7 +433,7 @@ class Shock:
                     "Multivariate uniform shocks are not implemented."
                 )
             loc = kwargs.get("loc", 0.0)
-            return lambda s: _draw_uniform(T, seed, loc, cast(float, s))
+            return lambda s, seed, factor: _draw_uniform(T, seed, loc, cast(float, s))
 
         raise ValueError(f"Unknown shock distribution family: {family!r}")
 

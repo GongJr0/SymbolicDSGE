@@ -325,12 +325,6 @@ def _compile_simulation(params: dict[str, Any]) -> dict[str, Any]:
     # mapping from library authoring) or come from the explicit registry the
     # user authored.
     params = dict(params)
-    if "seed_increment" in params:
-        params["seed_increment"] = _integer_or_keyword(
-            params["seed_increment"],
-            keywords={"auto"},
-            field_name="seed_increment",
-        )
     registry = None
     if "shock_registry" in params:
         registry = params.pop("shock_registry")
@@ -488,7 +482,6 @@ _STEP_DEFINITIONS: tuple[StepDefinition, ...] = (
             FieldSpec("T", "Periods", "number", 100, required=True, minimum=1),
             FieldSpec("observables", "Observables", "boolean", True),
             FieldSpec("shock_scale", "Shock scale", "number", 1.0),
-            FieldSpec("seed_increment", "Seed increment", "text", "auto"),
             FieldSpec("shock_registry", "Shocks", "shock_registry", []),
         ),
     ),

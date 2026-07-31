@@ -12,7 +12,7 @@ held for the whole call, including the ``nogil`` fill. The ``nogil`` block touch
 only the raw pointer, never the Python object.
 """
 
-from libc.stdint cimport int64_t
+from libc.stdint cimport int64_t, uint64_t
 
 from cpython.pycapsule cimport PyCapsule_GetPointer, PyCapsule_IsValid
 
@@ -26,6 +26,20 @@ cdef extern from "rng.h":
                                         double *out) nogil
     void sdsge_rng_standard_uniform_fill(bitgen_t *bg, int64_t n,
                                          double *out) nogil
+
+
+cdef extern from "philox.h":
+    ctypedef struct sdsge_philox_state:
+        pass
+
+    void sdsge_philox_seed(sdsge_philox_state *st, uint64_t key0,
+                           uint64_t key1, uint64_t stream0,
+                           uint64_t stream1) nogil
+    uint64_t sdsge_philox_next_u64(sdsge_philox_state *st) nogil
+    void sdsge_philox_standard_normal_fill(sdsge_philox_state *st, int64_t n,
+                                           double *out) nogil
+    void sdsge_philox_standard_uniform_fill(sdsge_philox_state *st, int64_t n,
+                                            double *out) nogil
 
 
 # numpy tags the BitGenerator capsule with this exact name; PyCapsule_GetPointer
@@ -75,4 +89,68 @@ def standard_uniform(object rng, int64_t n):
     cdef double[::1] outv = out
     with nogil:
         sdsge_rng_standard_uniform_fill(bg, n, &outv[0])
+    return out
+
+
+# --- Philox surface --------------------------------------------------------
+# The counter-based engine the Monte Carlo shock draw runs on. Native callers
+# use the C kernels directly (the state is stack-held inside the hot loop);
+# these wrappers exist so the engine's reproducibility can be driven and pinned
+# from Python. Draws here are NOT numpy-parity: the engine is ours.
+
+
+def philox_standard_normal(uint64_t key0, uint64_t key1, uint64_t stream0,
+                           uint64_t stream1, int64_t n):
+    """``n`` standard normal draws from the Philox stream ``(key, stream)``.
+
+    Seeding the same four words always replays the same draws, and distinct
+    words give independent streams.
+    """
+    if n < 0:
+        raise ValueError("n must be non-negative.")
+    out = np.empty(n, dtype=np.float64)
+    if n == 0:
+        return out
+    cdef sdsge_philox_state st
+    cdef double[::1] outv = out
+    with nogil:
+        sdsge_philox_seed(&st, key0, key1, stream0, stream1)
+        sdsge_philox_standard_normal_fill(&st, n, &outv[0])
+    return out
+
+
+def philox_standard_uniform(uint64_t key0, uint64_t key1, uint64_t stream0,
+                            uint64_t stream1, int64_t n):
+    """``n`` standard uniform draws in [0, 1) from the stream ``(key, stream)``."""
+    if n < 0:
+        raise ValueError("n must be non-negative.")
+    out = np.empty(n, dtype=np.float64)
+    if n == 0:
+        return out
+    cdef sdsge_philox_state st
+    cdef double[::1] outv = out
+    with nogil:
+        sdsge_philox_seed(&st, key0, key1, stream0, stream1)
+        sdsge_philox_standard_uniform_fill(&st, n, &outv[0])
+    return out
+
+
+def philox_raw(uint64_t key0, uint64_t key1, uint64_t stream0,
+               uint64_t stream1, int64_t n):
+    """``n`` raw 64-bit draws from the stream ``(key, stream)``.
+
+    The engine's own output, ahead of any distribution transform.
+    """
+    if n < 0:
+        raise ValueError("n must be non-negative.")
+    out = np.empty(n, dtype=np.uint64)
+    if n == 0:
+        return out
+    cdef sdsge_philox_state st
+    cdef uint64_t[::1] outv = out
+    cdef int64_t i
+    with nogil:
+        sdsge_philox_seed(&st, key0, key1, stream0, stream1)
+        for i in range(n):
+            outv[i] = sdsge_philox_next_u64(&st)
     return out

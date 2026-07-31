@@ -27,6 +27,7 @@ from .mc_constructs import (
     MCStep,
     OpType,
 )
+from .shock_native import replication_shocks
 from .spec import EdgeSpec, MCStepKind, NodeSpec, PipelineSpec, PostprocSpec
 from .traces import available_traces
 
@@ -53,6 +54,8 @@ __all__ = [
     "PostprocSpec",
     "MCStepKind",
     "available_traces",
+    # reproducing one replication
+    "replication_shocks",
     # catalogue
     "STEP_CATALOG",
     "StepDefinition",

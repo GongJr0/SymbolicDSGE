@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import numpy as np
-from typing import Callable, Mapping
 
 from SymbolicDSGE.core.solver_backend import PerturbationSolution
 
-from ..._ckernels.monte_carlo._runner import NativeStep, simulate1_step, simulate2_step
-from ...core.shock_generators import Shock
+from ..._ckernels.monte_carlo._runner import (
+    NativeStep,
+    simulate1_step,
+    simulate2_step,
+)
 from ...core.solved_model import SolvedModel
 from ..allocation import StepBufferPlan
-from ..mc_constructs import MCStep, SeedIncrement, ShockMapping
+from ..mc_constructs import MCStep
+from ..shock_native import build_native_plan, validate_shock_specs
 from .utils import (
     NDF,
     FloatInputBinding,
@@ -53,16 +56,23 @@ def lower_simulation_step(
         else 0
     )
     params = _model_params(model)
-    shocks, shocks_batched = _simulation_shocks(model, step, T, n_rep)
+    drawn = build_native_plan(model, step, T)
+    if drawn is None:
+        shocks, shocks_batched = _simulation_shocks(model, step, T, n_rep)
+    else:
+        # The step draws its own block per replication, so nothing is bound in.
+        shocks, shocks_batched = np.zeros((0, n_exog), dtype=np.float64), False
     order = model.policy.order
 
     if order == 1:
         _check_simulation_layout(step_plan, T, n_var, n_obs)
         native_step = simulate1_step(
-            step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs
+            step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs, drawn
         )
         x0 = model._simulation_initial_state(step.kwargs["x0"])
-        return native_step, _order1_bindings(model, x0, shocks, shocks_batched, params)
+        return native_step, _order1_bindings(
+            model, x0, shocks, shocks_batched, params, T
+        )
     if order == 2:
         _check_simulation_layout(step_plan, T, n_var, n_obs)
         native_step = simulate2_step(
@@ -74,6 +84,7 @@ def lower_simulation_step(
             n_exog,
             n_par,
             n_obs,
+            drawn,
         )
         steady_state = _f64(model.policy.steady_state)
         initial_state = model._simulation_initial_state(step.kwargs["x0"])
@@ -85,6 +96,7 @@ def lower_simulation_step(
             shocks,
             shocks_batched,
             params,
+            T,
         )
     raise ValueError(f"Unsupported native simulation order: {order}.")
 
@@ -95,9 +107,9 @@ def _order1_bindings(
     shocks: NDF,
     shocks_batched: bool,
     params: NDF,
+    T: int,
 ) -> tuple[FloatInputBinding, ...]:
     n_exog = model.compiled.n_exog
-    T = shocks.shape[-2]
     bindings: list[FloatInputBinding] = []
     offset = 0
     for values in (_f64(model.A), _f64(model.B), _f64(x0)):
@@ -119,12 +131,12 @@ def _order2_bindings(
     shocks: NDF,
     shocks_batched: bool,
     params: NDF,
+    T: int,
 ) -> tuple[FloatInputBinding, ...]:
     policy = model.policy
     if not isinstance(policy, PerturbationSolution):
         raise ValueError("Native simulation order 2 requires a perturbation solution.")
     n_exog = model.compiled.n_exog
-    T = shocks.shape[-2]
     values_by_layout = (
         _f64(policy.p),
         _f64(policy.f),
@@ -156,23 +168,25 @@ def _simulation_shocks(
     T: int,
     n_rep: int,
 ) -> tuple[NDF, bool]:
+    """Materialize the ``(n_rep, T, n_exog)`` shock slab the native loop reads.
+
+    The spec resolves against the model once. Only the seed varies per
+    replication, so the loop below reseeds and draws straight into its own row
+    of the slab; the calibration lookups, the covariance assembly, and its
+    Cholesky are not repeated. Each replication shifts every base seed by the
+    number of seeded entries, which keeps entries that share a run apart.
+    """
     shocks = step.kwargs["shocks"]
     shock_scale = float(step.kwargs["shock_scale"])
     if shocks is None:
         return _array_shocks(model, T, shock_scale), False
-    values = np.empty((n_rep, T, model.compiled.n_exog), dtype=np.float64)
+
+    validate_shock_specs(shocks)
+    plan = model._resolve_shock_plan(shocks, T)
+
+    values = np.zeros((n_rep, T, model.compiled.n_exog), dtype=np.float64)
     for rep_idx in range(n_rep):
-        per_rep_shocks = _clone_or_pass_shocks(
-            shocks,
-            T=T,
-            rep_idx=rep_idx,
-            seed_increment=step.kwargs["seed_increment"],
-        )
-        values[rep_idx] = model._simulation_shock_matrix(
-            T,
-            shocks=per_rep_shocks,
-            shock_scale=shock_scale,
-        )
+        plan.fill(values[rep_idx], T, shock_scale, rep_idx * plan.seeded_count)
     return values, True
 
 
@@ -198,53 +212,3 @@ def _check_simulation_layout(
             raise ValueError(
                 "Native simulation observables do not match their output layout."
             )
-
-
-def _clone_or_pass_shocks(
-    shocks: ShockMapping | None,
-    *,
-    T: int,
-    rep_idx: int,
-    seed_increment: SeedIncrement,
-) -> Mapping[str, Callable[[float | NDF], NDF] | NDF] | None:
-    if shocks is None:
-        return None
-    out: dict[str, Callable[[float | NDF], NDF] | NDF] = {}
-    seed_offset = rep_idx * _resolve_seed_increment(shocks, seed_increment)
-    for name, shock in shocks.items():
-        if isinstance(shock, Shock):
-            if shock.shock_arr is not None:
-                raise ValueError(
-                    "MC simulation requires generator-style Shock instances."
-                )
-            if ("," in name) != shock.multivar:
-                raise ValueError(
-                    f"Shock '{name}' must set multivar={',' in name} to match its specification."
-                )
-            seed = None if shock.seed is None else int(shock.seed) + seed_offset
-            out[name] = Shock(
-                dist=shock.dist,  # pyright: ignore
-                multivar=shock.multivar,
-                seed=seed,
-                dist_args=shock.dist_args,
-                dist_kwargs=shock.dist_kwargs.copy(),
-            ).shock_generator(T)
-        else:
-            out[name] = shock
-    return out
-
-
-def _resolve_seed_increment(
-    shocks: ShockMapping,
-    seed_increment: SeedIncrement,
-) -> int:
-    if seed_increment == "auto":
-        return sum(
-            1
-            for shock in shocks.values()
-            if isinstance(shock, Shock) and shock.seed is not None
-        )
-    increment = int(seed_increment)
-    if increment < 0:
-        raise ValueError("seed_increment must be non-negative or 'auto'.")
-    return increment
