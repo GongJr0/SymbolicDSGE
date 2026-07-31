@@ -8,13 +8,11 @@ tags:
 postproc_step(
     name: str,
     func: Callable[..., Any],
-    *,
-    store_key: str | None = None,
     **kwargs: Any,
 ) -> MCStep
 ```
 
-`postproc_step` creates a post-loop (`OpType.POSTPROC`) operation. It lives under `SymbolicDSGE.monte_carlo.operations.postproc`.
+`postproc_step` creates a post-loop (`OpType.POSTPROC`) operation. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
 
 Unlike a per-replication step, a post-processing op runs **once** after the replication loop completes, over the assembled across-replication `traces` registry:
 
@@ -26,7 +24,7 @@ func(
 ) -> Summary | Raw | Mapping[str, Any]
 ```
 
-`traces` is keyed by across-replication trace name (e.g. `"test.<name>.statistic"`, `"test.<name>.pval"`, `"regression.<name>.coef"`); see [Result Access](../../result_access.md) for the available keys. The op reads whichever traces it needs and returns one or more tagged artifacts.
+`traces` is keyed by across-replication trace name (`"test.<name>.statistic"`, `"test.<name>.pval"`, `"regression.<name>.coef"`, `"payload.<name>"`, and so on); see [Result Access](../../result_access.md) for the full key registry, or call `available_traces(spec)` to enumerate the keys a spec will produce. The op reads whichever traces it needs and returns one or more tagged artifacts.
 
 ## Return artifacts
 
@@ -37,15 +35,14 @@ Import from `SymbolicDSGE.monte_carlo`:
 | `Summary` | `#!python Summary(value, title=None, render="auto")` | Renderable result (scalar, table, small array, or DataFrame) with its own summary surface. `render` ∈ `{"auto", "table", "scalar", "array"}`. |
 | `Raw` | `#!python Raw(value: np.ndarray)` | Bulk numeric data kept as data (a trace member), not auto-rendered. |
 
-An op may return a single artifact, a bare value (an `ndarray` becomes `Raw`, anything else becomes `Summary`), or a `Mapping` of named outputs to emit several at once. A single artifact is stored under `store_key or name`; a mapping is stored under `f"{name}.{key}"`.
+An op may return a single artifact, a bare value (an `ndarray` becomes `Raw`, anything else becomes `Summary`), or a `Mapping` of named outputs to emit several at once. A single artifact is stored under `name`; a mapping is stored under `f"{name}.{key}"`.
 
 __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| name | Runtime step name and default artifact key. |
+| name | Runtime step name and artifact key. |
 | func | Callable to execute once after the replication loop. |
-| store_key | Optional override for the artifact key (single-artifact returns). |
 | kwargs | Extra keyword arguments forwarded to `func`. |
 
 ???+ note "Bundled custom operations"

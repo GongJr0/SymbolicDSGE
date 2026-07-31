@@ -71,9 +71,15 @@ __Fields:__
 __Methods:__
 
 ```python
-PipelineGraph.from_steps(steps: tuple[MCStep, ...]) -> PipelineGraph  # @classmethod
+@classmethod
+PipelineGraph.from_steps(
+    steps: tuple[MCStep, ...],
+    source_indices: Sequence[Sequence[int]] | None = None,
+) -> PipelineGraph
 PipelineGraph.edges() -> list[tuple[str, str]]
 ```
+
+`source_indices` supplies the producer position already resolved for each step's source arguments, one inner sequence per step in `steps` order. `MCPipeline.graph` passes the indices it resolved at construction; omitting them makes the graph resolve producers by name instead.
 
 __Properties:__
 

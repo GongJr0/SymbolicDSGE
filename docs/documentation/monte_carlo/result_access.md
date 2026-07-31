@@ -12,15 +12,34 @@ __Summary Fields and Methods:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| statistic_trace | `#!python ndarray` | Test statistic from each successful replication. |
+| statistic_trace | `#!python ndarray` | Test statistic from each retained replication. |
 | pval_trace | `#!python ndarray` | Vectorized p-values for `statistic_trace`. |
-| mean_statistic | `#!python float64` | Mean test statistic over successful replications. |
-| mean_pval | `#!python float64` | Mean p-value over successful replications. |
+| n_rep | `#!python int` | Requested replication count. |
+| n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
+| retained_reps | `#!python ndarray` | Replication indices behind each row of the traces, so a trace entry can be mapped back to its replication. |
+| mean_statistic | `#!python float64` | Mean test statistic over retained replications. |
+| mean_pval | `#!python float64` | Mean p-value over retained replications. |
 | rejection_rate | `#!python float64` | Share of p-values below `alpha`. |
 | pval_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the rejection rate. |
 | statistic_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the mean test statistic. |
 
-If `retain_test_results=True`, `MCPipelineResult.test_results` stores scalar per replication `TestResult` objects keyed by test step name.
+`MCRegressionResult` carries the same retention fields alongside `coef_trace`, `ssr_trace`, `sst_trace`, and, for OLS, a standard-error trace.
+
+__Across-Replication Traces:__
+
+Every producer's stacked output is addressable by a trace key. Post-loop ops receive these keys in their `traces` mapping, and `available_traces(spec)` enumerates them from a spec alone, before a run.
+
+| __Producer__ | __Keys__ |
+|:-------------|---------:|
+| test steps | `test.<name>.statistic`, `test.<name>.pval`, `test.<name>.status` |
+| regression steps | `regression.<name>.coef`, `regression.<name>.r2`, `regression.<name>.status` |
+| transform steps | `payload.<name>` |
+
+Data-generation, filter, and post-processing steps emit no consumable trace.
+
+__Post-Loop Artifacts:__
+
+`MCPipelineResult.postproc` maps each post-loop step to its returned artifacts, keyed by step name, or `"<step>.<key>"` when the op returns several named outputs. Values are `Summary` (renderable: scalar, table, or small array) or `Raw` (bulk numeric data kept as data).
 
 __Performance Reporting:__
 
@@ -28,7 +47,7 @@ __Performance Reporting:__
 |:---------|----------------:|
 | `MCPipelineResult.report_performance()` | Print the aggregate pipeline throughput report. |
 | `MCPipelineResult.report_step_performance()` | Print one throughput report line per pipeline step. |
-| `MCPipelineResult.meta` | `MCMeta` object containing elapsed time, step timings, failure counts, and throughput properties. |
+| `MCPipelineResult.meta` | `MCMeta` object containing elapsed time, step timings, retention counts, failure counts, and throughput properties. |
 
 ???+ warning "Retention and Memory Use"
-    `retain_contexts=True` and `retain_payloads=True` can store large arrays from every successful replication. For large Monte Carlo runs, prefer retaining aggregate summaries and scalar test results unless full per replication payloads are needed for debugging or downstream analysis.
+    Retained output is allocated up front, so a step's arena is sized before the loop runs. A transform retaining every replication of a large array is the dominant cost in a big run. Cap it with `n_retain` on the step when only the aggregate summaries matter; the run then keeps an evenly spaced subset of replications, and `retained_reps` records which ones.

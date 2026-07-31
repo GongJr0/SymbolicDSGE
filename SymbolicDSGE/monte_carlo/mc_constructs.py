@@ -124,7 +124,6 @@ class MCStep:
     #: hand-built steps that bypassed the factories.
     step_type: str | None = None
 
-    # Currently no-op (-1 == n_rep), native will allocate outputs based on this value if set.
     n_retain: int = -1
 
     def __post_init__(self) -> None:

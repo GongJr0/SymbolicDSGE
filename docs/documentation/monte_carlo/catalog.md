@@ -114,5 +114,5 @@ catalog_payload() -> dict[str, Any]
 
 Return a JSON-like payload of catalog entries for UI consumers.
 
-???+ note "Custom steps"
-    `STEP_CATALOG` only describes built-in operation kinds. Bundle-safe custom operations use `transform:custom` or `postproc:custom` specs and are restored through bundle resources rather than through catalog dispatch.
+???+ note "Steps outside the catalog"
+    `STEP_CATALOG` only describes catalog-driven operation kinds. Four spec kinds compile without a `StepDefinition`: `raw_model_data` and `payload` carry bulk arrays, and `transform:custom` and `postproc:custom` carry callables restored through bundle resources. The pipeline compiler dispatches all four ahead of catalog lookup.

@@ -12,7 +12,7 @@ kde_step(
 ) -> MCStep
 ```
 
-`kde_step` is a built-in post-loop (`OpType.POSTPROC`) operation that estimates a Gaussian kernel density of an across-replication trace. It lives under `SymbolicDSGE.monte_carlo.operations.postproc`.
+`kde_step` is a built-in post-loop (`OpType.POSTPROC`) operation that estimates a Gaussian kernel density of an across-replication trace. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
 
 It reads `traces[trace]` (a stacked across-replication array), estimates its density on a uniform grid spanning the finite data range, and emits two artifacts keyed under the step name:
 

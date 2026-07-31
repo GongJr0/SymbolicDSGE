@@ -24,14 +24,18 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | id | `#!python str` | Stable graph node id. Edges refer to this value. |
 | step_type | `#!python str` | Built-in or supported custom step kind. Must be in `STEP_KINDS`. |
-| name | `#!python str` | Runtime step name used for summaries and payload references. |
+| name | `#!python str` | Runtime step name used for summaries and trace keys. |
 | params | `#!python dict[str, Any]` | JSON-like parameter payload passed to the step compiler. |
+
+`params` may carry `n_retain` alongside the step's own parameters. The compiler pops it and stamps it onto the resulting `MCStep` rather than passing it to the factory. It is written back into the spec only when it differs from `-1`.
 
 __Methods:__
 
 ```python
 NodeSpec.to_dict() -> dict[str, Any]
-NodeSpec.from_dict(data: Mapping[str, Any]) -> NodeSpec  # @classmethod
+
+@classmethod
+NodeSpec.from_dict(data: Mapping[str, Any]) -> NodeSpec
 ```
 
 `from_dict` validates `step_type` against `STEP_KINDS`.
@@ -56,7 +60,9 @@ __Methods:__
 
 ```python
 EdgeSpec.to_dict() -> dict[str, str]
-EdgeSpec.from_dict(data: Mapping[str, Any]) -> EdgeSpec  # @classmethod
+
+@classmethod
+EdgeSpec.from_dict(data: Mapping[str, Any]) -> EdgeSpec
 ```
 
 ## `PostprocSpec`
@@ -83,7 +89,9 @@ __Methods:__
 
 ```python
 PostprocSpec.to_dict() -> dict[str, Any]
-PostprocSpec.from_dict(data: Mapping[str, Any]) -> PostprocSpec  # @classmethod
+
+@classmethod
+PostprocSpec.from_dict(data: Mapping[str, Any]) -> PostprocSpec
 ```
 
 ## `PipelineSpec`
@@ -111,9 +119,12 @@ __Methods:__
 
 ```python
 PipelineSpec.to_dict() -> dict[str, Any]
-PipelineSpec.from_dict(data: Mapping[str, Any]) -> PipelineSpec  # @classmethod
 PipelineSpec.to_json(*, indent: int | None = None) -> str
-PipelineSpec.from_json(text: str) -> PipelineSpec  # @classmethod
+
+@classmethod
+PipelineSpec.from_dict(data: Mapping[str, Any]) -> PipelineSpec
+@classmethod
+PipelineSpec.from_json(text: str) -> PipelineSpec
 ```
 
 ???+ info "Resources"
@@ -142,6 +153,7 @@ MCStepKind = Literal[
     "rolling_mean",
     "rolling_std",
     "rolling_var",
+    "payload",
     "kde",
     "transform:custom",
     "postproc:custom",

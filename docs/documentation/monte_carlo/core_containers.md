@@ -9,71 +9,39 @@ tags:
 class MCStep(
     name: str,
     op_type: OpType,
-    func: Callable[..., Any],
+    func: Callable[..., Any] | None = None,
     kwargs: Mapping[str, Any] = {},
     source_args: tuple[SourceArgs, ...] = (),
-    store_key: str | None = None,
     step_type: str | None = None,
+    n_retain: int = -1,
 )
 ```
 
-`MCStep` describes one operation in the pipeline. Most users should create steps through the factories under `SymbolicDSGE.monte_carlo.operations`.
+`MCStep` describes one operation in the pipeline. Most users should create steps through the factories in `SymbolicDSGE.monte_carlo.step_factories`.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.test_summaries`. |
+| name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.test_summaries`, and every producer derives its across-replication trace keys from it. |
 | op_type | `#!python OpType` | Operation type: `DATAGEN`, `TRANSFORM`, `FILTER`, `TEST`, `REGRESSION`, or `POSTPROC`. |
-| func | `#!python Callable` | Callable executed by the pipeline. |
-| kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step and passed into `func`. |
+| func | `#!python Callable | None` | Callable carried by the step. Built-in per-replication steps run as native kernels and leave this `None`; custom transforms carry a `NumbaCustomFunc` and post-loop ops carry a Python callable. |
+| kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step. Per-replication kernels read them when the run is lowered; post-loop ops receive them at call time. |
 | source_args | `#!python tuple[SourceArgs, ...]` | Compiled source selections resolved when the pipeline is built. |
-| store_key | `#!python str | None` | Optional payload key. If omitted, `name` is used. Transform `store_key` values may be used as source names downstream. |
 | step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, `"transform:custom"`, or `"postproc:custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
+| n_retain | `#!python int` | Number of replications whose output is retained for this step. `-1` retains all `n_rep` replications. A non-negative value sizes the step's arena to that many rows, filled from an evenly spaced subset of replication indices. It may not exceed `n_rep`. |
 
-???+ note "Factory groups"
-    Step factories are organized by operation group:
-
-    - `SymbolicDSGE.monte_carlo.operations.core`
-    - `SymbolicDSGE.monte_carlo.operations.tests`
-    - `SymbolicDSGE.monte_carlo.operations.regressions`
-    - `SymbolicDSGE.monte_carlo.operations.transforms`
+???+ note "Factory module"
+    All step factories live in `SymbolicDSGE.monte_carlo.step_factories`: data generation, filtering, transforms, tests, regressions, and post-processing.
 
 &nbsp;
 
 ```python
-class MCData(NamedTuple):
-    states: ndarray | None = None,
-    observables: ndarray | None = None,
-    n_exog: int = -1,
-    raw: Mapping[str, ndarray] = {},
-    observable_names: tuple[str, ...] = (),
-)
-```
-
-`MCData` is the standard per-replication data payload. State-only and observable-only payloads are supported, but downstream steps may require one or the other.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| states | `#!python ndarray | None` | Simulated or supplied state matrix. |
-| observables | `#!python ndarray | None` | Simulated or supplied observable matrix. |
-| n_exog | `#!python int` | Number of exogenous shocks when known. |
-| raw | `#!python Mapping[str, ndarray]` | Additional raw arrays, usually from `SolvedModel.sim(...)`. |
-| observable_names | `#!python tuple[str, ...]` | Observable column names used by the reference filter when explicit names are not supplied. |
-
-&nbsp;
-
-```python
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceArgs(
     arg: str,
     source_step: str,
-    source_idx: int,
-    source_kind: int,
     field: str,
-    field_idx: int,
     columns: int | Sequence[int] | slice | ndarray | None = None,
     column_selector: Sequence[int] | slice = slice(None),
     row_start: int = 0,
@@ -82,64 +50,23 @@ class SourceArgs(
 )
 ```
 
-`SourceArgs` is the compiled source selector used by built-in transforms, tests, and regressions. Factories create it from public `source` and `field` arguments.
+`SourceArgs` is the compiled source selector used by transforms, tests, and regressions. Factories create it from public `source` and `field` arguments, and the native lowering layer resolves it to concrete buffer offsets before the run starts.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| arg | `#!python str` | Runner keyword populated with the selected array, such as `"sample"`, `"y"`, or `"X"`. |
+| arg | `#!python str` | Role the selected array fills, such as `"sample"`, `"y"`, or `"X"`. |
 | source_step | `#!python str` | Producer step name after pipeline binding. |
-| source_idx | `#!python int` | Producer position in the per replication payload slot list. |
-| source_kind | `#!python int` | Internal source class: data, transform payload, or filter output. |
 | field | `#!python str` | Field read from the producer, such as `"observables"`, `"std_innov"`, or `"payload"`. |
-| field_idx | `#!python int` | Positional field index used inside the runner. |
-| columns | `#!python int | Sequence[int] | slice | ndarray | None` | Author supplied column selector. |
-| column_selector | `#!python Sequence[int] | slice` | Normalized selector used by the runner. |
-| row_start | `#!python int` | First selected row after applying `burn_in` and `drop_initial`. |
+| columns | `#!python int | Sequence[int] | slice | ndarray | None` | Author supplied column selector, normalized to a tuple of ints or a slice at construction. |
+| column_selector | `#!python Sequence[int] | slice` | Normalized selector. Derived from `columns`, not set directly. |
+| row_start | `#!python int` | First selected row. Derived from `burn_in` and `drop_initial`, not set directly. |
 | burn_in | `#!python int` | Number of leading rows to drop. |
 | drop_initial | `#!python bool` | If `True` and `burn_in` is zero, start at row `1`. |
 
 ???+ warning "Source fields"
-    Source fields are tied to the producer type. Data steps expose `states` and `observables`; transform steps expose `payload`; filter steps expose raw filter fields such as `x_pred`, `x_filt`, `y_pred`, `y_filt`, `innov`, `std_innov`, `eps_hat`, `x1_pred`, `x2_pred`, `x1_filt`, and `x2_filt`. Built-in array consumers expect the selected field to resolve to a 2D numeric array.
-
-&nbsp;
-
-```python
-@dataclass
-class MCContext(
-    rep_idx: int,
-    reference: SolvedModel,
-    dgp: SolvedModel | None,
-    data: MCData | None = None,
-    payload_slots: list[Any] = [],
-    payloads: dict[str, Any] = {},
-    results: dict[str, TestResult] = {},
-    regressions: dict[str, RegressionResult] = {},
-)
-```
-
-`MCContext` is the mutable object passed through a single replication. Transform, filter, test, and regression operations receive it as `context`. Postproc operations run after the replication loop and receive the assembled `traces` mapping instead.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| rep_idx | `#!python int` | Replication index. |
-| reference | `#!python SolvedModel` | Reference model for filtering and reference target simulation. |
-| dgp | `#!python SolvedModel | None` | DGP model for DGP target simulation. |
-| data | `#!python MCData | None` | Current replication data, populated by the data step. |
-| payload_slots | `#!python list[Any]` | Ordered producer outputs used by compiled source selectors. |
-| payloads | `#!python dict[str, Any]` | Outputs keyed by step output key for user inspection and custom operations. |
-| results | `#!python dict[str, TestResult]` | Scalar test results keyed by test step name. |
-| regressions | `#!python dict[str, RegressionResult]` | Regression results keyed by regression step name. |
-
-__Methods:__
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| `require_data()` | Return `data` or raise if no data-generation step has populated it. |
-| `require_payload(key)` | Return a payload by key or raise if the key is missing. |
+    Source fields are tied to the producer type. Data steps expose `states` and `observables`; transform steps expose `payload`; filter steps expose raw filter fields such as `x_pred`, `x_filt`, `y_pred`, `y_filt`, `innov`, `std_innov`, `eps_hat`, `x1_pred`, `x2_pred`, `x1_filt`, and `x2_filt`. Array consumers expect the selected field to resolve to a 2D numeric array.
 
 &nbsp;
 
@@ -153,13 +80,13 @@ class MCFailure(
 )
 ```
 
-`MCFailure` records one collected replication failure when `MCPipeline.run(..., fail_fast=False)`.
+`MCFailure` records one collected replication failure when `MCPipeline.run(..., fail_fast=False)`. Post-loop failures are recorded with `rep_idx = -1`.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| rep_idx | `#!python int` | Replication index that failed. |
+| rep_idx | `#!python int` | Replication index that failed, or `-1` for a post-loop step. |
 | step_name | `#!python str` | Step executing when the failure occurred. |
 | error_type | `#!python str` | Exception type name. |
 | message | `#!python str` | Exception message. |
@@ -170,9 +97,7 @@ __Fields:__
 @dataclass(frozen=True)
 class MCMeta(
     n_rep: int,
-    payloads_retained: bool,
-    test_results_retained: bool,
-    contexts_retained: bool,
+    n_retained_by_step: Mapping[str, int],
     elapsed_s: float = 0.0,
     step_elapsed_s: Mapping[str, float] = {},
     step_counts: Mapping[str, int] = {},
@@ -190,20 +115,20 @@ __Fields and Properties:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | n_rep | `#!python int` | Requested replication count. |
-| payloads_retained | `#!python bool` | Whether per replication payload dictionaries were retained. |
-| test_results_retained | `#!python bool` | Whether scalar test results were retained. |
-| contexts_retained | `#!python bool` | Whether full contexts were retained. |
-| elapsed_s | `#!python float` | Wall time for the replication loop. |
-| step_elapsed_s | `#!python Mapping[str, float]` | Wall time by per replication step. |
-| step_counts | `#!python Mapping[str, int]` | Attempted calls by per replication step. |
-| step_failures | `#!python Mapping[str, int]` | Collected failures by per replication step. |
+| n_retained_by_step | `#!python Mapping[str, int]` | Replications whose output was retained, by producer step. |
+| elapsed_s | `#!python float` | Wall time for the replication loop alone, excluding post-loop aggregation and postproc. |
+| step_elapsed_s | `#!python Mapping[str, float]` | Accumulated worker seconds by per-replication step. Populated only when the run is started with `verbosity=2`. |
+| step_counts | `#!python Mapping[str, int]` | Attempted calls by per-replication step. |
+| step_failures | `#!python Mapping[str, int]` | Collected failures by per-replication step. |
 | postproc_elapsed_s | `#!python Mapping[str, float]` | Wall time by post-loop step. |
-| failed_steps | `#!python dict[str, int]` | Collected per replication failures by step. |
+| failed_steps | `#!python dict[str, int]` | Collected per-replication failures by step. |
 | failed_postprocs | `#!python set[str]` | Post-loop steps that failed. |
 | it_s | `#!python float` | Replications attempted per replication loop second. |
-| step_it_s | `#!python Mapping[str, float]` | Step calls attempted per step wall second. |
+| step_worker_it_s | `#!python Mapping[str, float]` | Exclusive per-step throughput against accumulated worker seconds. |
+| step_wall_it_s | `#!python Mapping[str, float]` | Per-step throughput against the replication loop's wall time. |
+| step_it_s | `#!python Mapping[str, float]` | Alias for `step_worker_it_s`. |
 | postproc_total_s | `#!python float` | Total post-loop wall time. |
-| steps_success | `#!python bool` | `True` when no per replication failures were collected. |
+| steps_success | `#!python bool` | `True` when no per-replication failures were collected. |
 | postproc_success | `#!python bool` | `True` when no post-loop failures were collected. |
 
 &nbsp;
@@ -215,9 +140,7 @@ class MCPipelineResult(
     n_rep: int,
     n_successful: int,
     test_summaries: Mapping[str, MCResult],
-    test_results: Mapping[str, tuple[TestResult, ...]] | None,
     payloads: tuple[Mapping[str, Any], ...] | None,
-    contexts: tuple[MCContext, ...] | None,
     failures: tuple[MCFailure, ...] = (),
     regression_summaries: Mapping[str, MCRegressionResult] = {},
     postproc: Mapping[str, Any] = {},
@@ -234,13 +157,11 @@ __Fields and Properties:__
 | n_rep | `#!python int` | Requested replication count. |
 | n_successful | `#!python int` | Number of completed replications. |
 | test_summaries | `#!python Mapping[str, MCResult]` | Per-test aggregate result containers. |
-| test_results | `#!python Mapping[str, tuple[TestResult, ...]] | None` | Optional scalar per-replication test results. |
-| payloads | `#!python tuple[Mapping[str, Any], ...] | None` | Optional per-replication payload dictionaries. |
-| contexts | `#!python tuple[MCContext, ...] | None` | Optional full contexts. |
+| payloads | `#!python tuple[Mapping[str, Any], ...] | None` | Reserved slot for per-replication payload dictionaries. The native runner leaves it `None`; retained transform output is read from the stacked `payload.<name>` traces instead. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
-| postproc | `#!python Mapping[str, Any]` | Post-loop artifacts keyed by step name or nested artifact key. |
-| succeeded | `#!python bool` | `True` when no failures were collected. |
+| postproc | `#!python Mapping[str, Any]` | Post-loop artifacts keyed by step name, or `"<step>.<key>"` for multi-artifact ops. Values are `Summary` or `Raw` wrappers. |
+| succeeded | `#!python bool` | `True` when no per-replication or post-loop failures were collected. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
 | test_status_traces | `#!python Mapping[str, tuple[TestStatus, ...]]` | Shortcut for each test summary's status trace. |
@@ -251,4 +172,4 @@ __Fields and Properties:__
 | `report_step_performance()` | `#!python None` | Print one throughput report line per pipeline step. |
 
 ???+ note "P-Value Evaluation"
-    Scalar `TestResult` objects produced inside Monte Carlo Wald steps defer p-value and frozen-distribution construction until `pval`, `frozen_dist`, or `compute_pval()` is accessed. Aggregate `MCResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built.
+    Aggregate `MCResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built from the raw statistic arrays the native loop wrote.

@@ -7,38 +7,41 @@ tags:
 ```python
 transform_step(
     name: str,
-    func: Callable[..., Any],
+    func: Callable[..., Any] | NumbaCustomFunc,
     *,
-    store_key: str | None = None,
-    **step_kwargs: Any,
+    source: str,
+    field: str,
+    output_shape: tuple[int, int],
+    columns: ColumnSelector = None,
+    burn_in: int = 0,
+    drop_initial: bool = False,
 ) -> MCStep
 ```
 
-`transform_step` creates a custom per-replication transform operation. It lives under `SymbolicDSGE.monte_carlo.operations.transforms`.
+`transform_step` creates a custom per-replication transform operation. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
 
-The callable receives the normalized operation arguments:
+`func` is wrapped in a [`NumbaCustomFunc`](../../custom_ops.md#numbacustomfunc) if it is not one already, compiled, and called from the native replication loop through a pointer ABI. It must accept exactly two positional arguments and return an integer status code:
 
 ```python
-func(
-    *,
-    context: MCContext,
-    reference: SolvedModel,
-    dgp: SolvedModel | None,
-    rep_idx: int,
-    **step_kwargs,
-) -> Any
+func(sample, output) -> int
 ```
 
-If the callable returns an `MCData` object, the pipeline replaces `context.data` with that return value. The return value is stored in `context.payloads[store_key or name]`; numeric array returns can be consumed downstream with `source` set to the step name or `store_key`, and `field="payload"`.
+`sample` is the C-contiguous 2D `float64` slice selected by `source`, `field`, `columns`, and the row options. `output` is the C-contiguous 2D `float64` buffer of shape `output_shape` the function fills. Return `0` for success; any other value marks the replication as failed at this step.
+
+The written buffer is the step's payload. Downstream steps read it with `source` set to the step name and `field="payload"`, and it is stacked across replications under the trace key `payload.<name>`.
 
 __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| name | Runtime step name and default payload key. |
-| func | Callable to execute for each replication. |
-| store_key | Optional override for the payload key. |
-| step_kwargs | Extra keyword arguments forwarded to `func`. |
+| name | Runtime step name, payload source name, and trace key suffix. |
+| func | The transform. A `NumbaCustomFunc`, or a plain function wrapped into one. |
+| source | Producer step name supplying the input array. |
+| field | Field read from the producer, such as `"observables"`, `"std_innov"`, or `"payload"`. |
+| output_shape | `(rows, columns)` of the output buffer. Both dimensions must be non-negative. It fixes the arena size, so it cannot depend on the replication. |
+| columns | Column selector applied to the input: an int, a sequence of ints, a slice, or `None` for all columns. |
+| burn_in | Number of leading input rows to drop. |
+| drop_initial | If `True` and `burn_in` is zero, start at input row `1`. |
 
 ???+ note "Bundled custom operations"
-    In-process pipelines may use any callable. A pipeline written to an `.sdsge` bundle requires the callable to be a [`NumpyCustomFunc`](../../custom_ops.md#numpycustomfunc), usually via the [`numpy_operation`](../../custom_ops.md#numpy_operation) decorator. The bundle stores the callable as a side-channel resource and the portable spec references it by key.
+    A pipeline written to an `.sdsge` bundle stores the `NumbaCustomFunc` as a side-channel resource, and the portable spec references it by key. Compiled Numba artifacts are never serialized; a loaded transform recompiles on first use.

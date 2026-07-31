@@ -13,14 +13,17 @@ class MCPipeline(
 
 `MCPipeline` holds two step lists: `per_rep_steps` (the dependency DAG executed inside every replication) and `postproc_steps` (post-loop ops run **once** after the loop, over the assembled across-rep traces). The two are separate because a postproc is a terminal reduction, not a graph node.
 
+Per-replication steps execute in a native `nogil` loop. Building the pipeline resolves each step's producers, and lowering resolves the whole run into buffer arenas and native step descriptors before any replication starts.
+
 __Contract:__
 
 | __Rule__ | __Description__ |
 |:---------|----------------:|
 | One data-generation step | `per_rep_steps[0]` must have `op_type=OpType.DATAGEN`. Later per-rep steps cannot generate data once `DATAGEN` is performed.|
 | Postproc list is post-loop only | `postproc_steps` may contain only `OpType.POSTPROC` steps; per-rep steps may not. |
-| Unique step names | Names are used as payload/result/artifact keys, unique across both lists. |
-| Per-replication payloads | Per-rep steps pass results through `MCContext.payloads` inside the same replication. Aggregate summaries + postprocs run after all successful replications finish. |
+| Unique step names | Names are used as result and trace keys, unique across both lists. |
+| Producers precede consumers | A step's `source_args` may only reference steps that appear earlier in `per_rep_steps`, and the producer's `op_type` must match the field being read. |
+| Post-loop inputs are traces | Postprocs do not see individual replications. They receive the assembled `traces` mapping built after every replication finishes. |
 
 __Methods:__
 
@@ -39,16 +42,26 @@ Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channe
 `PipelineSpec` is the archive and UI representation. A bundle loaded back into Python reconstructs a live `LoadedMC.pipeline`.
 
 ```python
+MCPipeline.lower_native(
+    *,
+    reference: SolvedModel,
+    dgp: SolvedModel | None = None,
+    n_rep: int,
+    n_jobs: int | None = None,
+) -> LoweredMCRun
+```
+
+Resolve one native runner invocation without executing it: plans the output buffers, allocates the arenas, compiles the native step descriptors, and binds the model inputs. `run(...)` calls this first. Call it directly to inspect the resolved layout, or to hold the allocation across an out-of-band invocation of the runner.
+
+```python
 MCPipeline.run(
     *,
     reference: SolvedModel,
     dgp: SolvedModel | None = None,
     n_rep: int,
-    retain_payloads: bool = True,
-    retain_test_results: bool = True,
-    retain_contexts: bool = False,
     fail_fast: bool = True,
     verbosity: int = 1,
+    n_jobs: int | None = None,
 ) -> MCPipelineResult
 ```
 
@@ -59,17 +72,18 @@ __Inputs:__
 | reference | Reference `SolvedModel` used by reference-side operations such as Kalman filtering. |
 | dgp | Optional DGP `SolvedModel`. Required by `simulation_step` when it targets the DGP (`target="dgp"`, the default); not required for `target="reference"` or `raw_model_data_step`. |
 | n_rep | Number of Monte Carlo replications. |
-| retain_payloads | Store each successful replication's payload dictionary in the result container. |
-| retain_test_results | Store scalar `TestResult` objects from each successful replication. |
-| retain_contexts | Store full `MCContext` objects. This is useful for debugging and memory-heavy for large runs. |
 | fail_fast | If `True`, raise on the first failed replication. If `False`, collect `MCFailure` entries and summarize successful replications. |
-| verbosity | Performance-reporting level: `0` prints nothing, `1` prints one aggregate throughput line, and `2` prints one throughput line per step. |
+| verbosity | Performance-reporting level: `0` prints nothing, `1` prints one aggregate throughput line, and `2` enables native per-step profiling and prints one throughput line per step. |
+| n_jobs | Worker count for the native loop, resolved joblib-style: `None` uses one worker, a positive value is taken literally, and a negative value means `cpu_count + 1 + n_jobs`. `0` is rejected. |
 
 __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python MCPipelineResult` | Aggregate container with test summaries, optional per-replication payloads, optional scalar test results, optional contexts, and failures. |
+| `#!python MCPipelineResult` | Aggregate container with test summaries, regression summaries, post-loop artifacts, run metadata, and failures. |
+
+???+ note "Step timings need verbosity 2"
+    `MCMeta.step_elapsed_s`, `step_counts`, and `step_failures` are populated only when the run is started with `verbosity=2`, since per-step profiling instruments the native loop. At lower verbosity they are empty mappings.
 
 ???+ warning "Serializable steps"
-    `to_spec()` requires each step to carry a `step_type`. Use the built-in factories rather than hand-building `MCStep` objects when the pipeline needs to enter a `.sdsge` bundle.
+    `to_spec()` requires each step to carry a `step_type`. Use the factories in `SymbolicDSGE.monte_carlo.step_factories` rather than hand-building `MCStep` objects when the pipeline needs to enter a `.sdsge` bundle.

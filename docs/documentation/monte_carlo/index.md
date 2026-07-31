@@ -6,6 +6,8 @@ tags:
 
 The `monte_carlo` module provides a bounded pipeline for repeated simulation, filtering, transformation, and diagnostic testing. The main use case is to treat one `SolvedModel` as the data-generating process (DGP), treat another `SolvedModel` as the reference model, and aggregate diagnostic test results over independent replications.
 
+The replication loop is native. Building a pipeline resolves the step graph, lowering resolves it into buffer arenas and native step descriptors, and the loop itself then runs without holding the GIL, across as many workers as `n_jobs` requests. Nothing in the per-replication path calls back into Python except a custom transform, which is compiled by Numba and invoked through a pointer ABI.
+
 ???+ info "Reference and DGP Roles"
     The built-in simulation step draws data from the `dgp` by default, or from the `reference` model when configured with `target="reference"` (a size study, vs. a misspecification study against a distinct DGP). The built-in filtering step then runs `reference.kalman(...)` on the generated observables.
 
@@ -19,7 +21,17 @@ The live `MCPipeline` is the normal in-code object. `PipelineSpec` is the portab
 | `PipelineSpec` / `NodeSpec` / `EdgeSpec` / `PostprocSpec` | Plain dataclass specification. `nodes` and `edges` are the per-replication DAG; `postprocs` is the post-loop phase. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
 | `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against the step-kind sets and catalog metadata; returns `(ordered per-rep nodes, postprocs)` when well-formed. |
 | `build_pipeline(ordered, postprocs=(), *, resources=None)` | Compile validated per-rep nodes and postprocs into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a serialized spec. |
-| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, resources=None)` | Validate, compile, and run a `PipelineSpec`; returns `MCPipelineResult`. Use this for explicit spec workflows. |
+| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, n_jobs=None, verbosity=0, resources=None)` | Validate, compile, and run a `PipelineSpec`; returns `MCPipelineResult`. Use this for explicit spec workflows. |
+| `available_traces(spec)` | Every across-replication trace key the spec's producers will emit, in node order. Enumerable before a run, so a post-loop op's trace references can be validated up front. |
+
+## Step and Artifact Exports
+
+| Export | Purpose |
+| --- | --- |
+| `MCStep` / `OpType` | The step container and its operation-role enum. Prefer the factories in `SymbolicDSGE.monte_carlo.step_factories` over hand-building steps. |
+| `custom_transform` / `NumbaCustomFunc` | Author a per-replication custom transform. The function is compiled by Numba and called from the native loop. |
+| `pandas_operation` / `PandasCustomFunc` | Author a post-loop custom op. Runs once in Python, may build a DataFrame. |
+| `Summary` / `Raw` | Return wrappers a post-loop op uses to tag an output as renderable or as bulk data. |
 
 ```python
 from SymbolicDSGE import load_bundle

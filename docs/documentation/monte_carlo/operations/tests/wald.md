@@ -21,7 +21,7 @@ wald_test_step(
 ) -> MCStep
 ```
 
-`wald_test_step` wraps `run_wald_test(...)`. It selects a 1D or 2D array from a producer step and runs the requested HAC Wald diagnostic.
+`wald_test_step` runs as a native per-replication kernel. It selects a 1D or 2D array from a producer step and runs the requested HAC Wald diagnostic.
 
 __Inputs:__
 

@@ -43,8 +43,11 @@ Convenience accessor. Return the `model_config` member with the given `role` (`"
 ```python
 Manifest.to_dict() -> dict[str, Any]
 Manifest.to_json(*, indent: int | None = 2) -> str
-Manifest.from_dict(data: Mapping[str, Any]) -> Manifest      # @classmethod
-Manifest.from_json(text: str) -> Manifest                    # @classmethod
+
+@classmethod
+Manifest.from_dict(data: Mapping[str, Any]) -> Manifest
+@classmethod
+Manifest.from_json(text: str) -> Manifest
 ```
 
 Round-trippable JSON shape. `from_dict` / `from_json` validate `sdsge_version` and raise `ValueError` when the bundle is newer than the installed library supports.

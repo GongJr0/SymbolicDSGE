@@ -21,7 +21,7 @@ cusumsq_test_step(
 ) -> MCStep
 ```
 
-`cusumsq_test_step` wraps `run_cusumsq_test(...)`. It resolves the response and regressors from explicit producer and field pairs, then tests variance stability using the cumulative sum of squared recursive residuals.
+`cusumsq_test_step` runs as a native per-replication kernel. It resolves the response and regressors from explicit producer and field pairs, then tests variance stability using the cumulative sum of squared recursive residuals.
 
 ???+ info "Reference Distribution"
     The statistic is the maximum departure of the normalized squared-residual partial sums from their expected line, compared against a Kolmogorov-type survival function parameterized by the recursive-residual count $n = T - p$ (reported as the degrees of freedom).

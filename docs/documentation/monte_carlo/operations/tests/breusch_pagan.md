@@ -22,7 +22,7 @@ breusch_pagan_test_step(
 ) -> MCStep
 ```
 
-`breusch_pagan_test_step` wraps `run_breusch_pagan_test(...)`. It resolves residuals and regressors from explicit producer and field pairs, then tests heteroskedasticity by regressing squared residuals on the regressors.
+`breusch_pagan_test_step` runs as a native per-replication kernel. It resolves residuals and regressors from explicit producer and field pairs, then tests heteroskedasticity by regressing squared residuals on the regressors.
 
 ???+ info "Reference Distribution"
     The Lagrange-multiplier statistic is compared against a $\chi^2(p)$ distribution, where $p$ is the number of regressor columns. Set `robust=True` for Koenker's studentized variant, which is robust to non-normal residuals.
