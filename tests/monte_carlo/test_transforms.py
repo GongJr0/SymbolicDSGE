@@ -631,6 +631,7 @@ def test_step_kinds_match_catalog() -> None:
     assert frozenset(STEP_CATALOG.keys()) <= STEP_KINDS
     assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {
         "raw_model_data",
+        "payload",
         "transform:custom",
         "postproc:custom",
     }

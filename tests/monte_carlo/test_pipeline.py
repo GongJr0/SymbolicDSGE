@@ -18,6 +18,7 @@ from SymbolicDSGE._diag_tests.cusumsq import cusumsq_test
 from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
 from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
+from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult
@@ -41,6 +42,7 @@ from tests._oracles.monte_carlo.mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
+from tests._oracles.monte_carlo.legacy_test_result import TestResult as LegacyTestResult
 from tests._oracles.monte_carlo.operations.core import (
     add_payload_step,
     raw_model_data_step,
@@ -1734,10 +1736,18 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     states = _batched_states()
     target = np.zeros(2, dtype=np.float64)
 
-    def fail_on_third_rep(**kwargs):
-        if kwargs["rep_idx"] == 2:
+    def fail_on_third_rep(*, context, **kwargs):
+        if context.rep_idx == 2:
             raise RuntimeError("third replication failed")
-        return wald_mean_hac(kwargs["sample"], target, bandwidth=0)
+        return LegacyTestResult(
+            test_name="state_mean",
+            dist=ReferenceDistribution.CHI2,
+            df=np.float64(target.size),
+            pval_method=PvalMethod.SF,
+            alpha=np.float64(0.05),
+            statistic=np.float64(0.0),
+            status=TestStatus.OK,
+        )
 
     pipeline = MCPipeline(
         [

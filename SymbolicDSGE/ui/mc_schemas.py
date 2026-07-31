@@ -41,14 +41,16 @@ class MCPipelineSpec(BaseModel):
 class MCRunRequest(BaseModel):
     pipeline: MCPipelineSpec
     n_rep: int = Field(default=100, gt=0)
+    n_jobs: int | None = Field(default=None, gt=0)
     fail_fast: bool = True
+    verbosity: int = Field(default=0, ge=0, le=2)
 
 
 class MCCustomOpRequest(BaseModel):
     """A single custom-op source submission for live editor validation.
 
     ``step_type`` selects the validation namespace: ``postproc:custom`` validates
-    under the pandas namespace, everything else under numpy.
+    under the pandas namespace, everything else under Numba.
     """
 
     code: str = Field(min_length=1)

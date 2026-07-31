@@ -36,15 +36,11 @@ def _table_result(postproc: dict) -> MCPipelineResult:
         n_rep=3,
         meta=MCMeta(
             n_rep=3,
-            payloads_retained=False,
-            test_results_retained=False,
-            contexts_retained=False,
+            n_retained_by_step={},
         ),
         n_successful=3,
         test_summaries={},
-        test_results=None,
         payloads=None,
-        contexts=None,
         postproc=postproc,
     )
 
@@ -55,15 +51,11 @@ def _postproc_result() -> MCPipelineResult:
         n_rep=5,
         meta=MCMeta(
             n_rep=5,
-            payloads_retained=False,
-            test_results_retained=False,
-            contexts_retained=False,
+            n_retained_by_step={},
         ),
         n_successful=5,
         test_summaries={},
-        test_results=None,
         payloads=None,
-        contexts=None,
         postproc={
             "pcs": Summary(value=0.6, title="PCS"),
             "selection": Raw(value=np.array([0.0, 1.0, 0.0, 1.0, 0.0])),
@@ -100,8 +92,7 @@ def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
     return pipeline.run(
         reference=cast(SolvedModel, object()),
         n_rep=n_rep,
-        retain_contexts=True,
-        verbosity=0,
+        verbosity=2,
     )
 
 
@@ -222,15 +213,11 @@ def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
         n_rep=3,
         meta=MCMeta(
             n_rep=3,
-            payloads_retained=False,
-            test_results_retained=False,
-            contexts_retained=False,
+            n_retained_by_step={},
         ),
         n_successful=3,
         test_summaries={},
-        test_results=None,
         payloads=None,
-        contexts=None,
         postproc={"empty": Raw(value=np.full(3, np.nan))},
     )
     document = result_document(result, run_id="r1")

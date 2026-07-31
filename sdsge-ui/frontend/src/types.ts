@@ -179,6 +179,7 @@ export type MCStepType =
   | "rolling_mean"
   | "rolling_std"
   | "rolling_var"
+  | "payload"
   | "kde"
   | "transform:custom"
   | "postproc:custom";
@@ -273,20 +274,11 @@ export interface MCTraceSummary {
   q975: number | null;
 }
 
-export interface MCDataSummary {
-  n_rep: number;
-  shape: number[];
-  n_values: number;
-  n_finite: number;
-  mean: number | null;
-  std: number | null;
-  min: number | null;
-  max: number | null;
-}
-
 export interface MCTestSummary {
   test_name: string;
-  n: number;
+  n_rep: number;
+  n_retained: number;
+  retained_reps: number[];
   alpha: number;
   distribution: string;
   df: number | Array<number | null> | null;
@@ -309,6 +301,8 @@ export interface MCTestSummary {
 export interface MCRegressionSummary {
   variables: string[];
   n_rep: number;
+  n_retained: number;
+  retained_reps: number[];
   n: number;
   k: number;
   coef_trace: Array<Array<number | null>>;
@@ -331,12 +325,15 @@ export interface MCPipelineResult {
   run_id: string;
   kind: "mc";
   n_rep: number;
+  n_retained_by_step: Record<string, number>;
   n_successful: number;
   succeeded: boolean;
   elapsed_s: number;
   it_s: number;
   step_elapsed_s: Record<string, number>;
   step_it_s: Record<string, number>;
+  step_worker_it_s: Record<string, number>;
+  step_wall_it_s: Record<string, number>;
   step_counts: Record<string, number>;
   step_failures: Record<string, number>;
   failures: Array<{
@@ -347,7 +344,6 @@ export interface MCPipelineResult {
   }>;
   test_summaries: Record<string, MCTestSummary>;
   regression_summaries: Record<string, MCRegressionSummary>;
-  data_summaries: Record<string, MCDataSummary>;
   postproc?: Record<string, MCPostprocArtifact>;
 }
 

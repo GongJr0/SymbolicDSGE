@@ -24,6 +24,11 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 )
 
 
+def _copy_transform(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:, :] = sample
+    return 0
+
+
 def _simulation_pipeline() -> MCPipeline:
     return MCPipeline(
         [
@@ -153,7 +158,13 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     pipe = MCPipeline(
         [
             raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
-            transform_step("tf", lambda **_: None),
+            transform_step(
+                "tf",
+                _copy_transform,
+                source="dat",
+                field="observables",
+                output_shape=(5, 3),
+            ),
         ]
     )
     spec = pipe.to_spec()
@@ -162,9 +173,10 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     assert tf.step_type == "transform:custom"
     # the callable rides a separate bundle member; the spec only references it
     assert tf.params["func_ref"] == "tf"
-    assert "source" not in tf.params
-    assert "field" not in tf.params
-    assert {(e.source, e.target) for e in spec.edges} == set()
+    assert tf.params["source"] == "dat"
+    assert tf.params["field"] == "observables"
+    assert tf.params["output_shape"] == [5, 3]
+    assert {(e.source, e.target) for e in spec.edges} == {("dat", "tf")}
 
 
 def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:

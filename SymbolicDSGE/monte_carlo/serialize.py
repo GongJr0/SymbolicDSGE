@@ -19,7 +19,6 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ..regression.ols import OLSResult
 from .mc_constructs import MCPipelineResult
 from .postproc import Artifact, Raw, Summary, normalize_artifacts
 from .traces import regression_trace_keys, test_trace_keys
@@ -375,20 +374,20 @@ def pipeline_result_wire(
             entry["data"] = _table_data_or_null(entry, tables.get(name, {}))
         # scalar artifacts keep their inline value from the document
     for name, entry in wire["test_summaries"].items():
-        n = int(entry.get("n", 0))
+        n = int(entry.get("n_retained", entry.get("n_rep", 0)))
         entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)
         entry["pval_trace"] = _trace_or_null(traces, f"test.{name}.pval", n)
         entry["status_trace"] = _status_trace(traces, f"test.{name}.status")
     for name, entry in wire["regression_summaries"].items():
-        n_rep = int(entry.get("n_rep", 0))
+        n_retained = int(entry.get("n_retained", entry.get("n_rep", 0)))
         k = int(entry.get("k", 0))
         coef = traces.get(f"regression.{name}.coef")
         entry["coef_trace"] = (
             _json_value(coef)
             if coef is not None
-            else [[None] * k for _ in range(n_rep)]
+            else [[None] * k for _ in range(n_retained)]
         )
-        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_rep)
+        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_retained)
         entry["status_trace"] = _status_trace(traces, f"regression.{name}.status")
     return wire
 
@@ -442,6 +441,8 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
     out = {
         "variables": summary.variables,
         "n_rep": summary.n_rep,
+        "n_retained": summary.n_retained,
+        "retained_reps": _json_value(summary.retained_reps),
         "n": summary.n,
         "k": summary.k,
         "coef_trace": _json_value(summary.coef_trace),
@@ -452,7 +453,7 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
         "metrics": metrics,
         "ols": None,
     }
-    if all(isinstance(item, OLSResult) for item in summary.results):
+    if summary.kind == "ols":
         out["ols"] = {
             "mean_standard_errors": _json_value(np.mean(summary.se_trace, axis=0)),
             "mean_t_statistics": _json_value(np.mean(summary.t_stat_trace, axis=0)),

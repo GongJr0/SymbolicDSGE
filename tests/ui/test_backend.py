@@ -22,7 +22,7 @@ from SymbolicDSGE.ui.serializers import decode_array, encode_array
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCResult
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.monte_carlo import MCContext, MCData, MCPipelineResult
+from SymbolicDSGE.monte_carlo import MCPipelineResult
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
 from SymbolicDSGE.regression.ols import MCRegressionResult, ols
 
@@ -411,7 +411,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 3, "fail_fast": True},
+        json={"pipeline": pipeline, "n_rep": 3, "fail_fast": True, "verbosity": 2},
     )
     assert run.status_code == 200
     body = run.json()
@@ -421,8 +421,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     assert body["succeeded"] is True
     assert body["step_it_s"]["datagen"] > 0
     assert body["step_counts"]["datagen"] == 3
-    assert body["data_summaries"]["states"]["n_rep"] == 3
-    assert body["data_summaries"]["states"]["n_finite"] > 0
+    assert body["n_retained_by_step"]["datagen"] == 3
 
     fetched = client.get(f"/api/run/{body['run_id']}")
     assert fetched.status_code == 200
@@ -653,7 +652,7 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
     summary = body["test_summaries"]["normality"]
     assert summary["distribution"] == "jb_lookup"
     assert summary["df"] == 11
-    assert summary["n"] == 2
+    assert summary["n_retained"] == 2
 
 
 def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
@@ -717,7 +716,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
     assert summary["test_name"] == "heteroskedasticity"
     assert summary["distribution"] == "chi2"
     assert summary["df"] == 1
-    assert summary["n"] == 2
+    assert summary["n_retained"] == 2
 
 
 def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
@@ -781,7 +780,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
     assert summary["test_name"] == "serial_correlation"
     assert summary["distribution"] == "chi2"
     assert summary["df"] == 2
-    assert summary["n"] == 2
+    assert summary["n_retained"] == 2
 
 
 def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
@@ -843,7 +842,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
     summary = body["test_summaries"]["stability"]
     assert summary["test_name"] == "stability"
     assert summary["distribution"] == "cusum"
-    assert summary["n"] == 2
+    assert summary["n_retained"] == 2
 
 
 def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
@@ -905,7 +904,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
     summary = body["test_summaries"]["variance_stability"]
     assert summary["test_name"] == "variance_stability"
     assert summary["distribution"] == "cusumsq"
-    assert summary["n"] == 2
+    assert summary["n_retained"] == 2
 
 
 def test_ui_backend_runs_chow_monte_carlo_step() -> None:
@@ -968,7 +967,7 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
     summary = body["test_summaries"]["structural_break"]
     assert summary["test_name"] == "structural_break"
     assert summary["distribution"] == "f"
-    assert summary["n"] == 2
+    assert summary["n_retained"] == 2
 
 
 def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:
@@ -1022,7 +1021,21 @@ def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:
 def test_ui_backend_serializes_detailed_mc_summaries() -> None:
     X = np.arange(5, dtype=np.float64).reshape(-1, 1)
     y = np.array([0.0, 1.1, 1.9, 3.2, 3.8], dtype=np.float64)
-    regressions = MCRegressionResult.from_results([ols(X, y), ols(X, y + 0.25)])
+    ols_results = [ols(X, y), ols(X, y + 0.25)]
+    regressions = MCRegressionResult(
+        kind="ols",
+        variables=ols_results[0].variables,
+        coef_trace=np.vstack([result.coefficients for result in ols_results]),
+        ssr_trace=np.asarray([result.ssr for result in ols_results]),
+        sst_trace=np.asarray([result.sst for result in ols_results]),
+        _se_trace=np.vstack([result.se for result in ols_results]),
+        n_retained=2,
+        retained_reps=np.array([0, 1], dtype=np.int_),
+        n_rep=2,
+        n=ols_results[0].n,
+        k=ols_results[0].k,
+        _raw_status=np.asarray([int(result.status) for result in ols_results]),
+    )
     tests = MCResult(
         test_name="diagnostic",
         dist=ReferenceDistribution.CHI2,
@@ -1035,28 +1048,15 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         n_rep=2,
         _raw_status=np.array([TestStatus.OK, TestStatus.BAD_SHAPE], dtype=np.int_),
     )
-    context = MCContext(
-        rep_idx=0,
-        reference=None,  # type: ignore[arg-type]
-        dgp=None,
-        data=MCData(
-            states=np.arange(12, dtype=np.float64).reshape(4, 3),
-            raw={"x": np.arange(4, dtype=np.float64)},
-        ),
-    )
     result = MCPipelineResult(
         n_rep=2,
         meta=MCMeta(
             n_rep=2,
-            payloads_retained=False,
-            test_results_retained=False,
-            contexts_retained=False,
+            n_retained_by_step={"diagnostic": 2, "ols": 2},
         ),
         n_successful=2,
         test_summaries={"diagnostic": tests},
-        test_results=None,
         payloads=None,
-        contexts=(context,),
         regression_summaries={"ols": regressions},
     )
 
@@ -1074,8 +1074,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         payload["regression_summaries"]["ols"]["coefficient_summaries"][0]["variable"]
         == "Intercept"
     )
-    assert payload["data_summaries"]["states"]["shape"] == [4, 3]
-    assert payload["data_summaries"]["raw:x"]["mean"] == 1.5
+    assert payload["n_retained_by_step"] == {"diagnostic": 2, "ols": 2}
 
 
 def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
@@ -1121,10 +1120,10 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
         validate_pipeline_spec(missing, has_reference=True, has_dgp=True)
 
 
-_UI_CUSTOM_OP = """@numpy_operation
-def zscore(*, context, reference, dgp, rep_idx, **kwargs):
-    arr = np.asarray(context.require_data().observables, dtype=float)
-    return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+_UI_CUSTOM_OP = """@custom_transform
+def zscore(sample, output):
+    output[:, :] = sample
+    return 0
 """
 
 
@@ -1133,7 +1132,7 @@ def test_ui_backend_custom_op_template_and_validate() -> None:
 
     template = client.get("/api/mc/custom/template")
     assert template.status_code == 200
-    assert "@numpy_operation" in template.json()["template"]
+    assert "@custom_transform" in template.json()["template"]
 
     ok = client.post("/api/mc/custom/validate", json={"code": _UI_CUSTOM_OP})
     assert ok.status_code == 200
@@ -1180,6 +1179,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                     "code": _UI_CUSTOM_OP,
                     "source": "datagen",
                     "field": "observables",
+                    "output_shape": [8, 2],
                 },
             },
             {

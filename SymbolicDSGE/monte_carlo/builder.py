@@ -374,6 +374,8 @@ def run_pipeline(
     dgp: SolvedModel | None,
     n_rep: int,
     fail_fast: bool,
+    n_jobs: int | None = None,
+    verbosity: int = 0,
     resources: Mapping[str, Any] | None = None,
 ) -> MCPipelineResult:
     """Validate, compile, and run ``spec`` against the reference and DGP models.
@@ -393,7 +395,8 @@ def run_pipeline(
         dgp=dgp,
         n_rep=n_rep,
         fail_fast=fail_fast,
-        verbosity=0,
+        n_jobs=n_jobs,
+        verbosity=verbosity,
     )
 
 

@@ -20,7 +20,7 @@ from SymbolicDSGE.monte_carlo import validate_pipeline_spec as _validate_pipelin
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
     CustomOpValidationError,
-    NumpyCustomFunc,
+    NumbaCustomFunc,
     PandasCustomFunc,
 )
 from SymbolicDSGE.monte_carlo.serialize import (
@@ -31,23 +31,13 @@ from .mc_schemas import MCNodeSpec, MCPipelineSpec, MCPostprocSpec
 
 #: Pre-fill for the custom-op Monaco editor. numpy is available as ``np`` inside
 #: the safe namespace, so no imports are needed (and the validator rejects them).
-MC_CUSTOM_OP_TEMPLATE = '''@numpy_operation
-def transform(*, context, reference, dgp, rep_idx, **kwargs):
+MC_CUSTOM_OP_TEMPLATE = '''@custom_transform
+def transform(sample, output):
     """Custom Monte-Carlo transform. Runs once per replication."""
-    # numpy is available as `np` (no imports needed). Read this replication's
-    # data; `context.require_data()` returns the current MCData:
-    #   .states (T x k) / .observables (T x m) / .raw (dict) / .observable_names
-    data = context.require_data()
-    arr = np.asarray(data.observables, dtype=float)
-    # Filter output is NOT MCData. It is raw filter output stored as a payload.
-    # Read it via `context.require_payload("filter")` (the filter step's name)
-    # and pull a channel: .std_innov / .innov / .x_pred / .x_filt / .y_pred /
-    # .y_filt. Example:
-    #   fr = context.require_payload("filter")
-    #   arr = np.asarray(fr.std_innov, dtype=float)
-    # Return a 2-D ndarray (T x k). It is stored under this step's name, so a
-    # downstream step can read it with source="<this step name>", field="payload".
-    return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+    # `sample` is the selected source array. `output` has the shape declared
+    # on this step and must be written in full. Both are 2-D float64 arrays.
+    output[:, :] = sample
+    return 0
 '''
 
 
@@ -71,8 +61,8 @@ def mc_available_traces(spec: MCPipelineSpec) -> dict[str, list[str]]:
 
 
 def _custom_func_class(step_type: str) -> type[CustomFunc]:
-    """The wrapper class for a custom step kind: pandas for post-loop, else numpy."""
-    return PandasCustomFunc if step_type == "postproc:custom" else NumpyCustomFunc
+    """The wrapper class for a custom step kind: pandas for post-loop, else numba."""
+    return PandasCustomFunc if step_type == "postproc:custom" else NumbaCustomFunc
 
 
 def validate_custom_op(
@@ -96,7 +86,7 @@ def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
 
     Feeds ``build_pipeline``/``run_pipeline`` via their ``resources`` seam. The
     namespace is phase-based: ``postproc:custom`` nodes compile under the pandas
-    namespace, ``transform:custom`` under numpy. Raises ``ValueError``
+    namespace, ``transform:custom`` under Numba. Raises ``ValueError``
     (node-scoped) on missing or invalid source so the validate/run endpoints
     report which step failed.
     """
@@ -135,6 +125,8 @@ def run_pipeline(
     dgp: SolvedModel | None,
     n_rep: int,
     fail_fast: bool,
+    n_jobs: int | None = None,
+    verbosity: int = 0,
 ) -> MCPipelineResult:
     """Validate, compile, and run a UI pipeline request (custom ops included)."""
     return _run_pipeline(
@@ -143,5 +135,7 @@ def run_pipeline(
         dgp=dgp,
         n_rep=n_rep,
         fail_fast=fail_fast,
+        n_jobs=n_jobs,
+        verbosity=verbosity,
         resources=compile_custom_resources(spec),
     )
