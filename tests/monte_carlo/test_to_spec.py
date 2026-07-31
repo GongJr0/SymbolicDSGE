@@ -13,18 +13,14 @@ from SymbolicDSGE.monte_carlo import (
     build_pipeline,
     validate_pipeline_spec,
 )
-from SymbolicDSGE.monte_carlo.operations.core import (
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
     raw_model_data_step,
     reference_filter_step,
     simulation_step,
-)
-from SymbolicDSGE.monte_carlo.operations.tests import (
-    jarque_bera_test_step,
-    wald_test_step,
-)
-from SymbolicDSGE.monte_carlo.operations.transforms import (
     standardize_step,
     transform_step,
+    wald_test_step,
 )
 
 
@@ -172,7 +168,7 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
 
 
 def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
-    from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
+    from SymbolicDSGE.monte_carlo.step_factories import postproc_step
 
     def my_summary(*, traces, reference, dgp, threshold):
         return float(threshold)
@@ -197,7 +193,7 @@ def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
 
 
 def test_to_spec_round_trips_a_postproc_pipeline() -> None:
-    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+    from SymbolicDSGE.monte_carlo.step_factories import kde_step
 
     pipe = MCPipeline(
         [

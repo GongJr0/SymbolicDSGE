@@ -1,8 +1,6 @@
 """Monte-Carlo pipelines: public API.
 
-Step factories live in :mod:`SymbolicDSGE.monte_carlo.operations` and are reached
-through their group (``operations.tests``, ``operations.transforms``,
-``operations.regressions``, ``operations.core``). Result serialization helpers
+Step factories live in :mod:`SymbolicDSGE.monte_carlo.step_factories`. Result serialization helpers
 live in :mod:`SymbolicDSGE.monte_carlo.serialize`. This namespace exposes the
 types and entry points needed to build, run, and inspect pipelines in code.
 """
@@ -18,17 +16,13 @@ from .catalog import (
 )
 from .core import MCPipeline
 from .custom_op import (
-    CustomFunc,
     NumbaCustomFunc,
-    NumpyCustomFunc,
     PandasCustomFunc,
     custom_transform,
     pandas_operation,
 )
 from .postproc import Raw, Summary
 from .mc_constructs import (
-    MCContext,
-    MCData,
     MCPipelineResult,
     MCStep,
     OpType,
@@ -45,14 +39,10 @@ __all__ = [
     "validate_pipeline_spec",
     # step constructs (custom-op authoring surface)
     "MCStep",
-    "MCContext",
-    "MCData",
     "OpType",
     "custom_transform",
     "pandas_operation",
-    "CustomFunc",
     "NumbaCustomFunc",
-    "NumpyCustomFunc",
     "PandasCustomFunc",
     "Summary",
     "Raw",

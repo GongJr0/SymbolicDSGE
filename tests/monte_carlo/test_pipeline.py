@@ -22,15 +22,15 @@ from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult
 from SymbolicDSGE.kalman.config import KalmanConfig
-from SymbolicDSGE.monte_carlo.allocation import ArenaSize, FieldLayout, StepBufferPlan
-from SymbolicDSGE.monte_carlo import (
+from tests._oracles.monte_carlo.allocation import ArenaSize, FieldLayout, StepBufferPlan
+from tests._oracles.monte_carlo import (
     MCPipeline,
     MCContext,
     MCData,
     MCStep,
     OpType,
 )
-from SymbolicDSGE.monte_carlo.mc_constructs import (
+from tests._oracles.monte_carlo.mc_constructs import (
     DYNAMIC_FIELD_INDEX,
     FILTER_RAW_FIELD_INDEX,
     MC_DATA_FIELD_INDEX,
@@ -41,15 +41,15 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
-from SymbolicDSGE.monte_carlo.operations.core import (
+from tests._oracles.monte_carlo.operations.core import (
     add_payload_step,
     raw_model_data_step,
     reference_filter_step,
     simulation_step,
 )
-from SymbolicDSGE.monte_carlo.operations.core.ops import simulate
-from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
-from SymbolicDSGE.monte_carlo.operations.tests import (
+from tests._oracles.monte_carlo.operations.core.ops import simulate
+from tests._oracles.monte_carlo.operations.regressions import regression_step
+from tests._oracles.monte_carlo.operations.tests import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
@@ -59,8 +59,11 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
     ljung_box_test_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step, transform_step
-from SymbolicDSGE.monte_carlo.operations.utils import (
+from tests._oracles.monte_carlo.operations.transforms import (
+    log_diff_step,
+    transform_step,
+)
+from tests._oracles.monte_carlo.operations.utils import (
     _clone_or_pass_shocks,
     _resolve_source_array,
     _resolve_seed_increment,

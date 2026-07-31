@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Union
+from typing import Any, Literal, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -71,3 +71,53 @@ def normalize_artifacts(out: Any, step_name: str) -> dict[str, Artifact]:
     if isinstance(out, Mapping):
         return {f"{step_name}.{key}": as_artifact(value) for key, value in out.items()}
     return {step_name: as_artifact(out)}
+
+
+def run_kde(
+    *,
+    traces: Mapping[str, NDArray[Any]],
+    trace: str,
+    bandwidth: str | float = "scott",
+    grid_points: int = 200,
+    kernel: str = "gaussian",
+) -> dict[str, Raw | Summary]:
+    """Estimate a Gaussian KDE for one retained across-replication trace."""
+    from scipy.stats import gaussian_kde
+
+    if kernel != "gaussian":
+        raise ValueError(
+            f"KDE currently supports only the Gaussian kernel, got {kernel!r}."
+        )
+    if trace not in traces:
+        raise KeyError(f"KDE trace {trace!r} is not available in the run's traces.")
+    data = np.asarray(traces[trace], dtype=np.float64).reshape(-1)
+    data = data[np.isfinite(data)]
+    if data.size < 2:
+        raise ValueError(
+            f"KDE needs at least two finite values in trace {trace!r}, got {data.size}."
+        )
+    estimator = gaussian_kde(cast(Any, data), bw_method=cast(Any, bandwidth))
+    grid = np.linspace(float(data.min()), float(data.max()), int(grid_points))
+    density = np.asarray(estimator(grid), dtype=np.float64)
+    stats = {
+        "count": float(data.size),
+        "mean": float(data.mean()),
+        "std": float(data.std(ddof=1)) if data.size > 1 else float("nan"),
+        "min": float(data.min()),
+        "q25": float(np.quantile(data, 0.25)),
+        "median": float(np.median(data)),
+        "q75": float(np.quantile(data, 0.75)),
+        "max": float(data.max()),
+    }
+    import pandas as pd
+
+    return {
+        "curve": Raw(value=np.column_stack([grid, density])),
+        "descriptives": Summary(
+            value=pd.DataFrame(
+                {"statistic": list(stats), "value": list(stats.values())}
+            ),
+            title=f"{trace} descriptives",
+            render="table",
+        ),
+    }

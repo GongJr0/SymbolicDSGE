@@ -7,8 +7,6 @@ from typing import (
     Callable,
     Literal,
     Mapping,
-    NamedTuple,
-    Protocol,
     Sequence,
     Union,
 )
@@ -17,14 +15,12 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .._diag_tests.result import MCResult, TestResult
+from .._diag_tests.result import MCResult
 from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
-from ..core.solved_model import SolvedModel
-from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from ..kalman.filter import UnscentedFilterRawResult
 from ..regression.enums import RegressionStatus
 from ..regression.ols import MCRegressionResult
-from ..regression.result import RegressionResult
 from .custom_op import PandasCustomFunc
 
 NDF = NDArray[float64]
@@ -34,26 +30,6 @@ CompiledColumnSelector = Sequence[int] | slice | None
 ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
 SeedIncrement = Union[int, Literal["auto"]]
-
-
-class MCData(NamedTuple):
-    """One Monte Carlo replication's data payload.
-
-    Produced by a DATAGEN step and exposed to per-replication ops as
-    ``context.data`` (via ``context.require_data()``). Fields:
-
-    - ``states``: ``(T, n_state)`` latent state matrix, or None.
-    - ``observables``: ``(T, k)`` observable matrix, or None.
-    - ``n_exog``: number of exogenous shocks (-1 if unknown).
-    - ``raw``: mapping of named series (each model variable, plus "_X" = states).
-    - ``observable_names``: column names for ``observables``.
-    """
-
-    states: NDF | None = None
-    observables: NDF | None = None
-    n_exog: int = -1
-    raw: Mapping[str, NDF] = {}
-    observable_names: tuple[str, ...] = ()
 
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")
@@ -76,17 +52,6 @@ FILTER_SOURCE_FIELDS: tuple[str, ...] = (
     "std_innov",
     "eps_hat",
 )
-
-MC_DATA_FIELD_INDEX: dict[str, int] = {
-    field: index for index, field in enumerate(MC_DATA_SOURCE_FIELDS)
-}
-DYNAMIC_FIELD_INDEX: dict[str, int] = {
-    field: index for index, field in enumerate(DYNAMIC_SOURCE_FIELDS)
-}
-FILTER_RAW_FIELD_INDEX: dict[str, int] = {
-    field: index for index, field in enumerate(FILTER_RAW_SOURCE_FIELDS)
-}
-
 
 # Array-valued sources currently exposed to MC operations and the catalogue.
 ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
@@ -115,117 +80,11 @@ class OpType(StrEnum):
     POSTPROC = "postproc"
 
 
-@dataclass
-class MCContext:
-    """Per-replication state handed to every Monte Carlo op.
-
-    One ``MCContext`` exists per replication; ops read the generated data and
-    prior results from it and write their outputs back. Fields:
-
-    - ``rep_idx``: 0-based replication index.
-    - ``reference`` / ``dgp``: the reference and data-generating ``SolvedModel``s.
-    - ``data``: this replication's :class:`MCData` (None until a DATAGEN step
-      runs; prefer ``require_data()``).
-    - ``payloads``: transform outputs keyed by step name (see
-      ``require_payload()``).
-    - ``results`` / ``regressions``: test / regression results by step name.
-    """
-
-    rep_idx: int
-    reference: SolvedModel
-    dgp: SolvedModel | None
-    data: MCData | None = None
-    payload_slots: list[Any] = dataclass_field(default_factory=list)
-    payloads: dict[str, Any] = dataclass_field(default_factory=dict)
-    results: dict[str, TestResult] = dataclass_field(default_factory=dict)
-    regressions: dict[str, RegressionResult] = dataclass_field(default_factory=dict)
-
-    def require_data(self) -> MCData:
-        """Return ``data``, raising if no DATAGEN step has populated it yet."""
-        if self.data is None:
-            raise ValueError(
-                "MC context has no generated data. Add a DATAGEN step first."
-            )
-        return self.data
-
-    def require_payload(self, key: str) -> Any:
-        """Return the payload stored by transform step ``key``, raising if absent."""
-        if key not in self.payloads:
-            raise KeyError(f"MC context payload '{key}' is not available.")
-        return self.payloads[key]
-
-
-class DataGenOp(Protocol):
-    def __call__(
-        self,
-        *,
-        reference: SolvedModel,
-        dgp: SolvedModel | None,
-        rep_idx: int,
-        **kwargs: Any,
-    ) -> MCData: ...
-
-
-class ContextOp(Protocol):
-    def __call__(
-        self,
-        *,
-        context: MCContext,
-        reference: SolvedModel,
-        dgp: SolvedModel | None,
-        rep_idx: int,
-        **kwargs: Any,
-    ) -> Any: ...
-
-
-class FilterOp(Protocol):
-    def __call__(
-        self,
-        *,
-        context: MCContext,
-        reference: SolvedModel,
-        dgp: SolvedModel | None,
-        rep_idx: int,
-        **kwargs: Any,
-    ) -> FilterRawResult | UnscentedFilterRawResult: ...
-
-
-class TestOp(Protocol):
-    def __call__(
-        self,
-        *,
-        context: MCContext,
-        reference: SolvedModel,
-        dgp: SolvedModel | None,
-        rep_idx: int,
-        **kwargs: Any,
-    ) -> TestResult: ...
-
-
-class RegressionOp(Protocol):
-    def __call__(
-        self,
-        *,
-        context: MCContext,
-        reference: SolvedModel,
-        dgp: SolvedModel | None,
-        rep_idx: int,
-        **kwargs: Any,
-    ) -> RegressionResult: ...
-
-
-SOURCE_KIND_DATA = 0
-SOURCE_KIND_PAYLOAD = 1
-SOURCE_KIND_FILTER = 2
-
-
 @dataclass(frozen=True, slots=True)
 class SourceArgs:
     arg: str
     source_step: str
-    source_kind: int
     field: str
-    field_idx: int
     columns: ColumnSelector = None
     column_selector: Sequence[int] | slice = dataclass_field(
         default_factory=lambda: slice(None)
@@ -255,10 +114,9 @@ class SourceArgs:
 class MCStep:
     name: str
     op_type: OpType
-    func: Callable[..., Any]
+    func: Callable[..., Any] | None = None
     kwargs: Mapping[str, Any] = dataclass_field(default_factory=dict)
     source_args: tuple[SourceArgs, ...] = ()
-    store_key: str | None = None
     #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
     #: or ``"custom"`` for user-supplied ops. Stamped by the step factories;
     #: lets a live ``MCPipeline`` be compiled back to a serializable
@@ -286,10 +144,6 @@ class MCStep:
                 f"{self.op_type.value!r} step."
             )
 
-    @property
-    def output_key(self) -> str:
-        return self.store_key if self.store_key is not None else self.name
-
 
 def _compile_source_args(
     *,
@@ -304,36 +158,16 @@ def _compile_source_args(
     if not source_step:
         raise ValueError("source must be non-empty.")
     source_field = str(field)
-    if source_field in MC_DATA_FIELD_INDEX:
+    known_fields = (
+        *MC_DATA_SOURCE_FIELDS,
+        *FILTER_RAW_SOURCE_FIELDS,
+        *DYNAMIC_SOURCE_FIELDS,
+    )
+    if source_field in known_fields:
         return SourceArgs(
             arg=arg,
             source_step=source_step,
-            source_kind=SOURCE_KIND_DATA,
             field=source_field,
-            field_idx=MC_DATA_FIELD_INDEX[source_field],
-            columns=columns,
-            burn_in=burn_in,
-            drop_initial=bool(drop_initial),
-        )
-    if source_field in FILTER_RAW_FIELD_INDEX:
-        return SourceArgs(
-            arg=arg,
-            source_step=source_step,
-            source_kind=SOURCE_KIND_FILTER,
-            field=source_field,
-            field_idx=FILTER_RAW_FIELD_INDEX[source_field],
-            columns=columns,
-            burn_in=burn_in,
-            drop_initial=bool(drop_initial),
-        )
-
-    if source_field in DYNAMIC_FIELD_INDEX:
-        return SourceArgs(
-            arg=arg,
-            source_step=source_step,
-            source_kind=SOURCE_KIND_PAYLOAD,
-            field=source_field,
-            field_idx=DYNAMIC_FIELD_INDEX[source_field],
             columns=columns,
             burn_in=burn_in,
             drop_initial=bool(drop_initial),
@@ -431,9 +265,7 @@ class MCPipelineResult:
     n_rep: int
     n_successful: int
     test_summaries: Mapping[str, MCResult]
-    test_results: Mapping[str, tuple[TestResult, ...]] | None
     payloads: tuple[Mapping[str, Any], ...] | None
-    contexts: tuple[MCContext, ...] | None
     failures: tuple[MCFailure, ...] = ()
     regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
         default_factory=dict

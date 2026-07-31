@@ -5,7 +5,7 @@
 #include "runner.h"
 
 /* Per-replication sample transforms, mirroring
- * `monte_carlo.operations.transforms.ops`. Every kernel is allocation-free:
+ * `monte_carlo.step_factories`. Every kernel is allocation-free:
  * buffers are caller-owned so the replication loop allocates once at prep.
  * `x` is a row-major (n, p) sample with the time axis first, and `out` never
  * aliases `x` or `scratch`. Output row counts differ per transform and are

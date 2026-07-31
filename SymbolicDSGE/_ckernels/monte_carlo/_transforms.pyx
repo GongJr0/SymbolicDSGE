@@ -5,7 +5,7 @@ kernels.
 No numeric logic here -- only buffer->pointer marshalling, scratch allocation,
 and the GIL release. The algorithms live in transforms.c. Each ``def`` mirrors
 the matching Python op in
-``SymbolicDSGE/monte_carlo/operations/transforms/ops.py`` and returns the same
+``SymbolicDSGE/monte_carlo/step_factories.py`` and returns the same
 array shape, including the row counts that shrink with ``order`` or ``window``.
 
 Arguments a kernel is not defined on (a window wider than the sample, a

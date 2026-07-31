@@ -24,9 +24,7 @@ from .catalog import (
 )
 from .core import MCPipeline
 from .mc_constructs import MCPipelineResult
-from .operations.core import raw_model_data_step
-from .operations.postproc import postproc_step
-from .operations.transforms import transform_step
+from .step_factories import raw_model_data_step, postproc_step, transform_step
 from .spec import NodeSpec, PipelineSpec, PostprocSpec
 from .traces import available_traces
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Mapping
 
 import numpy as np
 
+from ..._diag_tests.distributions import PvalMethod
 from ..._ckernels.monte_carlo._arenas import ArenaAllocation, allocate_arenas
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
@@ -31,7 +32,6 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from ..._diag_tests.distributions import PvalMethod
     from ...core.solved_model import SolvedModel
     from ..core import MCPipeline
 

@@ -13,13 +13,7 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.core.solver_backend import PerturbationSolution
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.operations.core import (
-    raw_model_data_step,
-    reference_filter_step,
-    simulation_step,
-)
-from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
-from SymbolicDSGE.monte_carlo.operations.tests import (
+from SymbolicDSGE.monte_carlo.step_factories import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
@@ -27,9 +21,14 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
     cusumsq_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
+    raw_model_data_step,
+    reference_filter_step,
+    regression_step,
+    simulation_step,
+    log_diff_step,
+    transform_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step, transform_step
 
 
 def _custom_first_difference(sample: np.ndarray, output: np.ndarray) -> int:
@@ -129,9 +128,7 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
         ]
         .reshape(n_rep, *growth_layout.shape)
     )
-    expected_growth = np.stack(
-        [payload["growth"] for payload in python_result.payloads]
-    )
+    expected_growth = np.diff(np.log(observables), axis=1)
     np.testing.assert_allclose(growth, expected_growth)
 
     ols_layout = lowered.plan["ols"].out_fields["coef"]

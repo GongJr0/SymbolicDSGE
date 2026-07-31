@@ -8,37 +8,30 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from SymbolicDSGE._ckernels.monte_carlo._arenas import StepArenas
-
 if TYPE_CHECKING:
     from .graph import PipelineGraph
     from .native_lowering import LoweredMCRun
     from .spec import PipelineSpec
 
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
-from .._diag_tests.result import MCResult, TestResult
+from .._diag_tests.result import MCResult
 from ..core.solved_model import SolvedModel
-from ..kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ..regression.ols import MCRegressionResult
-from ..regression.result import RegressionResult
 from .allocation import BufferPlan, resolve_output_specs
 from .mc_constructs import (
-    MCContext,
-    MCData,
+    DYNAMIC_SOURCE_FIELDS,
+    FILTER_RAW_SOURCE_FIELDS,
+    MC_DATA_SOURCE_FIELDS,
     MCFailure,
     MCPipelineResult,
     MCMeta,
     MCStep,
     OpType,
-    SOURCE_KIND_DATA,
-    SOURCE_KIND_FILTER,
-    SOURCE_KIND_PAYLOAD,
     failed_postproc_names,
     failed_step_counts,
     report_mc_performance,
     report_mc_step_performance,
 )
-from .operations.utils import _resolve_source_array
 
 NDF = NDArray[np.float64]
 
@@ -105,22 +98,14 @@ class MCPipeline:
     def _resolve_source_indices(
         per_rep_steps: tuple[MCStep, ...],
     ) -> tuple[tuple[int, ...], ...]:
-        index_by_source: dict[str, int] = {}
-        for index, step in enumerate(per_rep_steps):
-            for source_name in (step.name, step.output_key):
-                prior_index = index_by_source.get(source_name)
-                if prior_index is not None and prior_index != index:
-                    raise ValueError(
-                        f"Pipeline source name {source_name!r} is ambiguous."
-                    )
-                index_by_source[source_name] = index
+        index_by_name = {step.name: index for index, step in enumerate(per_rep_steps)}
 
         resolved: list[tuple[int, ...]] = []
         for step_index, step in enumerate(per_rep_steps):
             step_indices: list[int] = []
             for selector in step.source_args:
                 source_name = selector.source_step
-                source_idx = index_by_source.get(source_name)
+                source_idx = index_by_name.get(source_name)
                 if source_idx is None:
                     raise ValueError(
                         f"Step {step.name!r} depends on unknown producer {source_name!r}."
@@ -314,9 +299,7 @@ class MCPipeline:
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
             ),
             test_summaries=test_summaries,
-            test_results=None,
             payloads=None,
-            contexts=None,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
             postproc=postprocs,
@@ -364,6 +347,10 @@ class MCPipeline:
 
         postproc: dict[str, Any] = {}
         for step in postproc_steps:
+            if step.func is None:
+                raise ValueError(
+                    f"POSTPROC step {step.name!r} has no callable function to run."
+                )
             step_start = perf_counter()
             out: Any = None
             failed = False
@@ -396,101 +383,21 @@ def _validate_source_producer(
     selector: Any,
     producer: MCStep,
 ) -> None:
-    if selector.source_kind == SOURCE_KIND_DATA:
+    if selector.field in MC_DATA_SOURCE_FIELDS:
         expected = OpType.DATAGEN
-    elif selector.source_kind == SOURCE_KIND_PAYLOAD:
+    elif selector.field in DYNAMIC_SOURCE_FIELDS:
         expected = OpType.TRANSFORM
-    elif selector.source_kind == SOURCE_KIND_FILTER:
+    elif selector.field in FILTER_RAW_SOURCE_FIELDS:
         expected = OpType.FILTER
     else:
         raise ValueError(
-            f"Step {consumer.name!r} has unknown source kind {selector.source_kind}."
+            f"Step {consumer.name!r} has unknown source field {selector.field!r}."
         )
     if producer.op_type is not expected:
         raise ValueError(
             f"Step {consumer.name!r} reads field {selector.field!r} from "
             f"{producer.name!r}, but that producer is {producer.op_type.value!r}."
         )
-
-
-def _source_slot(step: MCStep, out: Any) -> Any:
-    if step.op_type is OpType.TRANSFORM:
-        if isinstance(out, MCData):
-            return (out,)
-        return (_source_array(out),)
-    return out
-
-
-def _source_array(value: Any) -> np.ndarray:
-    arr = np.asarray(value, dtype=np.float64)
-    if arr.ndim == 1:
-        return arr.reshape(-1, 1)
-    if arr.ndim != 2:
-        raise ValueError(
-            f"Transform payloads used as sources must be 1D or 2D, got shape {arr.shape}."
-        )
-    return arr
-
-
-def _payload_to_array(value: object) -> np.ndarray | None:
-    """A per-rep payload value as a stackable numeric array, else ``None``.
-
-    Only numeric ndarray / scalar payloads (e.g. transform outputs) qualify;
-    structured payloads (``MCData`` / raw filter results / result objects) are
-    skipped from the post-loop trace registry.
-    """
-    if isinstance(value, np.ndarray):
-        return value
-    if isinstance(value, (int, float, np.number)):
-        return np.asarray(value, dtype=np.float64)
-    return None
-
-
-def _accumulate_payload_columns(
-    columns: dict[str, list[np.ndarray]], payloads: Mapping[str, object]
-) -> None:
-    for key, value in payloads.items():
-        array = _payload_to_array(value)
-        if array is not None:
-            columns.setdefault(key, []).append(array)
-
-
-def _stack_payload_columns(
-    columns: Mapping[str, list[np.ndarray]],
-) -> dict[str, np.ndarray]:
-    """Stack per-rep payload arrays into ``payload.<name>`` traces.
-
-    Only keys whose per-rep arrays share a shape across replications are stacked
-    (a transform whose output length varies per rep is skipped)."""
-    from .traces import payload_trace_key
-
-    out: dict[str, np.ndarray] = {}
-    for name, arrays in columns.items():
-        if arrays and len({array.shape for array in arrays}) == 1:
-            out[payload_trace_key(name)] = np.stack(arrays)
-    return out
-
-
-def _df_metadata_matches(a: object, b: object) -> bool:
-    """Compare normalized df metadata across replications, treating NaN == NaN
-    as a match. Parameter-free reference distributions (CUSUM) carry a NaN df
-    placeholder, which a plain ``!=`` would otherwise flag as incompatible."""
-    at = a if isinstance(a, tuple) else (a,)
-    bt = b if isinstance(b, tuple) else (b,)
-    if len(at) != len(bt):
-        return False
-    for x, y in zip(at, bt):
-        if x == y:
-            continue
-        if (
-            isinstance(x, float | np.floating)
-            and isinstance(y, float | np.floating)
-            and np.isnan(x)
-            and np.isnan(y)
-        ):
-            continue
-        return False
-    return True
 
 
 def _summarize_tests(

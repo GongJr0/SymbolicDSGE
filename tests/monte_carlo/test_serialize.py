@@ -15,9 +15,11 @@ from SymbolicDSGE.monte_carlo import (
     PipelineSpec,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
-from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
-from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
-from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    raw_model_data_step,
+    regression_step,
+)
 from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
 from SymbolicDSGE.monte_carlo.serialize import (
     pipeline_result_wire,

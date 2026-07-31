@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import numpy as np
+from typing import Callable, Mapping
 
 from SymbolicDSGE.core.solver_backend import PerturbationSolution
 
 from ..._ckernels.monte_carlo._runner import NativeStep, simulate1_step, simulate2_step
+from ...core.shock_generators import Shock
 from ...core.solved_model import SolvedModel
 from ..allocation import StepBufferPlan
-from ..mc_constructs import MCStep
-from ..operations.utils import _clone_or_pass_shocks
+from ..mc_constructs import MCStep, SeedIncrement, ShockMapping
 from .utils import (
     NDF,
     FloatInputBinding,
@@ -197,3 +198,53 @@ def _check_simulation_layout(
             raise ValueError(
                 "Native simulation observables do not match their output layout."
             )
+
+
+def _clone_or_pass_shocks(
+    shocks: ShockMapping | None,
+    *,
+    T: int,
+    rep_idx: int,
+    seed_increment: SeedIncrement,
+) -> Mapping[str, Callable[[float | NDF], NDF] | NDF] | None:
+    if shocks is None:
+        return None
+    out: dict[str, Callable[[float | NDF], NDF] | NDF] = {}
+    seed_offset = rep_idx * _resolve_seed_increment(shocks, seed_increment)
+    for name, shock in shocks.items():
+        if isinstance(shock, Shock):
+            if shock.shock_arr is not None:
+                raise ValueError(
+                    "MC simulation requires generator-style Shock instances."
+                )
+            if ("," in name) != shock.multivar:
+                raise ValueError(
+                    f"Shock '{name}' must set multivar={',' in name} to match its specification."
+                )
+            seed = None if shock.seed is None else int(shock.seed) + seed_offset
+            out[name] = Shock(
+                dist=shock.dist,  # pyright: ignore
+                multivar=shock.multivar,
+                seed=seed,
+                dist_args=shock.dist_args,
+                dist_kwargs=shock.dist_kwargs.copy(),
+            ).shock_generator(T)
+        else:
+            out[name] = shock
+    return out
+
+
+def _resolve_seed_increment(
+    shocks: ShockMapping,
+    seed_increment: SeedIncrement,
+) -> int:
+    if seed_increment == "auto":
+        return sum(
+            1
+            for shock in shocks.values()
+            if isinstance(shock, Shock) and shock.seed is not None
+        )
+    increment = int(seed_increment)
+    if increment < 0:
+        raise ValueError("seed_increment must be non-negative or 'auto'.")
+    return increment

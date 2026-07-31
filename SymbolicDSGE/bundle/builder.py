@@ -431,6 +431,8 @@ def _custom_op_blob(step: MCStep) -> bytes:
     )
     from ..monte_carlo.mc_constructs import OpType
 
+    if step.func is None:
+        raise ValueError(f"Custom step {step.name!r} has no callable.")
     wrapper = PandasCustomFunc if step.op_type is OpType.POSTPROC else NumpyCustomFunc
     if isinstance(step.func, PandasCustomFunc) and wrapper is NumpyCustomFunc:
         raise CustomOpValidationError(

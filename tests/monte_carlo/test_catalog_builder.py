@@ -23,7 +23,7 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
     MC_DATA_FIELD_INDEX,
     MC_DATA_SOURCE_FIELDS,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import (
+from SymbolicDSGE.monte_carlo.step_factories import (
     standardize_step,
     transform_step,
 )

@@ -48,21 +48,15 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
     MCStep,
     MCPipelineResult,
 )  # noqa: E402
-from SymbolicDSGE.monte_carlo.operations.core import (  # noqa: E402
-    raw_model_data_step,
-    reference_filter_step,
-    simulation_step,
-)
-from SymbolicDSGE.monte_carlo.operations.regressions import (
-    regression_step,
-)  # noqa: E402
-from SymbolicDSGE.monte_carlo.operations.tests import (  # noqa: E402
+from SymbolicDSGE.monte_carlo.step_factories import (  # noqa: E402
     breusch_godfrey_test_step,
     ljung_box_test_step,
-)
-from SymbolicDSGE.monte_carlo.operations.transforms import (
+    raw_model_data_step,
+    reference_filter_step,
+    regression_step,
     standardize_step,
-)  # noqa: E402
+    simulation_step,
+)
 from tests._oracles.monte_carlo.core import MCPipeline as LegacyMCPipeline  # noqa: E402
 from tests._oracles.monte_carlo.mc_constructs import (  # noqa: E402
     MCStep as LegacyMCStep,

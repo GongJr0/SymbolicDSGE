@@ -14,10 +14,12 @@ from SymbolicDSGE.monte_carlo.custom_op import (
     NumpyCustomFunc,
     PandasCustomFunc,
 )
-from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
-from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
-from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
-from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    postproc_step,
+    raw_model_data_step,
+    transform_step,
+)
 from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
 
 # Bundling a result that retained per-rep payloads/test-results/contexts warns
@@ -192,7 +194,7 @@ def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
 
 
 def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
-    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+    from SymbolicDSGE.monte_carlo.step_factories import kde_step
 
     observables = np.random.default_rng(3).normal(size=(4, 30, 2))
     pipe = MCPipeline(

@@ -13,9 +13,9 @@ from SymbolicDSGE.monte_carlo import (
     Raw,
     Summary,
 )
-from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
-from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
-from SymbolicDSGE.monte_carlo.operations.transforms import (
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    raw_model_data_step,
     standardize_step,
     transform_step,
 )
@@ -259,7 +259,7 @@ def test_perf_report_separates_postproc_runtime_from_it_s() -> None:
 def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
     import pandas as pd
 
-    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+    from SymbolicDSGE.monte_carlo.step_factories import kde_step
 
     def varying_payload(*, rep_idx, **_: object) -> np.ndarray:
         return np.asarray([float(rep_idx)], dtype=np.float64)
@@ -298,7 +298,7 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
 
 def test_runtime_traces_match_available_registry() -> None:
     # The static registry (#179) must equal the keys a run actually produces.
-    from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
+    from SymbolicDSGE.monte_carlo.step_factories import postproc_step
     from SymbolicDSGE.monte_carlo.traces import available_traces
 
     captured: dict[str, set] = {}

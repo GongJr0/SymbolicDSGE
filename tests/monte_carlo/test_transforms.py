@@ -16,13 +16,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from SymbolicDSGE.monte_carlo import (
+from tests._oracles.monte_carlo import (
     TRANSFORM_STEP_TYPES,
     build_pipeline,
     validate_pipeline_spec,
 )
-from SymbolicDSGE.monte_carlo.operations.core import simulation_step
-from SymbolicDSGE.monte_carlo.operations.transforms import (
+from tests._oracles.monte_carlo.operations.core import simulation_step
+from tests._oracles.monte_carlo.operations.transforms import (
     diff_step,
     log_diff_step,
     log_step,
@@ -31,8 +31,8 @@ from SymbolicDSGE.monte_carlo.operations.transforms import (
     rolling_var_step,
     standardize_step,
 )
-from SymbolicDSGE.monte_carlo.mc_constructs import MCContext, MCData, OpType
-from SymbolicDSGE.monte_carlo.operations.transforms.ops import (
+from tests._oracles.monte_carlo.mc_constructs import MCContext, MCData, OpType
+from tests._oracles.monte_carlo.operations.transforms.ops import (
     run_diff,
     run_log,
     run_log_diff,
@@ -41,7 +41,7 @@ from SymbolicDSGE.monte_carlo.operations.transforms.ops import (
     run_rolling_var,
     run_standardize,
 )
-from SymbolicDSGE.monte_carlo.spec import EdgeSpec, NodeSpec, PipelineSpec
+from tests._oracles.monte_carlo.spec import EdgeSpec, NodeSpec, PipelineSpec
 
 # ---- fixtures ------------------------------------------------------------
 
