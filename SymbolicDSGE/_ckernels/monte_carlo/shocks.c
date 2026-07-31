@@ -1,4 +1,5 @@
 #include "shocks.h"
+#include <stddef.h>
 
 /* Direct includes (not transitive via shocks.h): the Philox state and its fills
  * are declared in philox.h. Native-include hygiene wants the header that
@@ -38,7 +39,8 @@ static void sdsge_mc_shock_apply_normal(const sdsge_mc_shock_plan *plan,
       f64 acc = (entry->loc == NULL) ? 0.0 : entry->loc[i];
       i64 j;
       /* factor is lower-triangular on the Cholesky path, but the eigh
-       * fallback for a semidefinite covariance is dense, so sum the full row. */
+       * fallback for a semidefinite covariance is dense, so sum the full row.
+       */
       for (j = 0; j < width; j++) {
         acc += factor_row[j] * z_t[j];
       }
@@ -62,8 +64,7 @@ static void sdsge_mc_shock_apply_uniform(const sdsge_mc_shock_plan *plan,
 }
 
 void sdsge_mc_shock_draw(const sdsge_mc_shock_plan *plan, const i64 rep_idx,
-                         f64 *SDSGE_RESTRICT scratch,
-                         f64 *SDSGE_RESTRICT out) {
+                         f64 *SDSGE_RESTRICT scratch, f64 *SDSGE_RESTRICT out) {
   const i64 total = plan->T * plan->n_exog;
   sdsge_philox_state st;
   i64 i;
