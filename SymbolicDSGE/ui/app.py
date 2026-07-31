@@ -119,6 +119,8 @@ def create_app(
                 dgp=ui_session.solved_model("dgp"),
                 n_rep=request.n_rep,
                 fail_fast=request.fail_fast,
+                n_jobs=request.n_jobs,
+                verbosity=request.verbosity,
             )
             run_id = str(uuid4())
             payload = serialize_pipeline_result(result, run_id=run_id)

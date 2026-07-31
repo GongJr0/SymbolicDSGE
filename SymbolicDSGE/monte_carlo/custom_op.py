@@ -40,6 +40,7 @@ import math
 import operator
 import statistics
 import textwrap
+import warnings
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any, Callable, cast
@@ -293,17 +294,18 @@ def _extract_source(func: Callable[..., Any]) -> str:
 # AST validation.
 
 
-_OPERATION_MARKERS: frozenset[str] = frozenset({"numpy_operation", "pandas_operation"})
+_OPERATION_MARKERS: frozenset[str] = frozenset(
+    {"custom_transform", "numpy_operation", "pandas_operation"}
+)
 
 
 def _is_operation_decorator(node: ast.expr) -> bool:
-    """Recognize the ``@numpy_operation`` / ``@pandas_operation`` markers.
+    """Recognize the supported custom-operation decorator markers.
 
     A function decorated with one of these carries the decorator in its captured
     source (``inspect.getsource`` includes decorator lines), so the validator
     must tolerate these markers while still rejecting every other decorator.
-    Matched by trailing name so ``@numpy_operation`` and ``@sd.numpy_operation``
-    both pass.
+    Matched by trailing name so direct and module-qualified markers both pass.
     """
     if isinstance(node, ast.Name):
         return node.id in _OPERATION_MARKERS
@@ -364,8 +366,8 @@ class _Validator(ast.NodeVisitor):
             if not _is_operation_decorator(decorator):
                 self._fail(
                     "decorated functions cannot be wrapped (other than the "
-                    "@numpy_operation / @pandas_operation marker). Apply one as "
-                    "the only decorator, or remove decorators."
+                    "@custom_transform, @numpy_operation, or @pandas_operation "
+                    "marker). Apply one as the only decorator, or remove decorators."
                 )
         args = tree.args
         for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
@@ -894,8 +896,8 @@ class CustomFunc:
         typed into a web editor and ``exec``'d. This validates the supplied text
         directly (same AST contract) and executes it in the safe namespace to
         obtain the callable, snapshotting the original text as :attr:`source` for
-        receiver-side audit. A leading ``@numpy_operation`` / ``@pandas_operation``
-        marker is accepted and treated as a no-op (the result is wrapped here).
+        receiver-side audit. A leading operation marker is accepted and treated as
+        a no-op (the result is wrapped here).
 
         Raises :class:`CustomOpValidationError` on a parse error, a structure
         other than a single top-level ``def``, a safe-namespace violation, or an
@@ -923,6 +925,7 @@ class CustomFunc:
         # the bare function (its getsource-based wrap would fail on exec'd code).
         namespace: dict[str, Any] = {
             **safe_modules,
+            "custom_transform": lambda f: f,
             "numpy_operation": lambda f: f,
             "pandas_operation": lambda f: f,
         }
@@ -978,6 +981,119 @@ class NumpyCustomFunc(CustomFunc):
         return cast("NumpyCustomFunc", cls._from_source(source, **_NUMPY_NAMESPACE))
 
 
+class NumbaCustomFunc(NumpyCustomFunc):
+    """A numerical custom function compiled for the native transform ABI.
+
+    The wrapped plain function receives a C-contiguous two-dimensional input
+    array and a C-contiguous two-dimensional output array, and must return an
+    integer status code. :meth:`cfunc` compiles that function lazily, then
+    returns a callback with the pointer-and-shape ABI consumed by the native
+    custom-transform trampoline.
+
+    Numba determines whether the function body is valid when :meth:`cfunc` is
+    called. Compilation failures are warned and re-raised with Numba's original
+    diagnostic so users can correct their function directly.
+    """
+
+    __slots__ = ("_compiled", "_callback")
+
+    _compiled: Any | None
+    _callback: Any | None
+
+    def __init__(self, func: Callable[..., Any] | CustomFunc) -> None:
+        super().__init__(func)
+        _validate_numba_transform_signature(self._func, self.name)
+        self._compiled = None
+        self._callback = None
+
+    @classmethod
+    def from_source(cls, source: str) -> "NumbaCustomFunc":
+        instance = cast("NumbaCustomFunc", cls._from_source(source, **_NUMPY_NAMESPACE))
+        _validate_numba_transform_signature(instance._func, instance.name)
+        instance._compiled = None
+        instance._callback = None
+        return instance
+
+    def cfunc(self) -> Any:
+        """Return the cached native callback for this custom transform.
+
+        The callback has the fixed ABI ``(input_ptr, output_ptr, input_rows,
+        input_columns, output_rows, output_columns) -> int64``. It converts
+        the pointers into two-dimensional Numba array views before dispatching
+        to the user function.
+        """
+        if self._callback is not None:
+            return self._callback
+
+        try:
+            from numba import carray, cfunc, njit, types
+
+            array_type = types.float64[:, ::1]
+            user_signature = types.int64(array_type, array_type)
+            compiled = njit(user_signature)(self._func)
+            callback_signature = types.int64(
+                types.CPointer(types.float64),
+                types.CPointer(types.float64),
+                types.int64,
+                types.int64,
+                types.int64,
+                types.int64,
+            )
+
+            def callback(
+                input_ptr: Any,
+                output_ptr: Any,
+                input_rows: int,
+                input_columns: int,
+                output_rows: int,
+                output_columns: int,
+            ) -> int:
+                sample = carray(input_ptr, (input_rows, input_columns))
+                output = carray(output_ptr, (output_rows, output_columns))
+                return compiled(sample, output)  # type: ignore[no-any-return]
+
+            self._compiled = compiled
+            self._callback = cfunc(callback_signature)(callback)
+        except Exception as exc:
+            warnings.warn(
+                f"NumbaCustomFunc {self.name!r} could not compile: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            raise
+        return self._callback
+
+    def __getstate__(self) -> object:
+        """Serialize validated source state, never transient Numba artifacts."""
+        state = object.__getstate__(self)
+        if isinstance(state, tuple) and len(state) == 2 and isinstance(state[1], dict):
+            state[1]["_compiled"] = None
+            state[1]["_callback"] = None
+        return state
+
+    @property
+    def address(self) -> int:
+        """Address of the native callback retained by this wrapper."""
+        return int(self.cfunc().address)
+
+
+def _validate_numba_transform_signature(func: Callable[..., Any], name: str) -> None:
+    parameters = tuple(inspect.signature(func).parameters.values())
+    if len(parameters) != 2 or any(
+        parameter.kind
+        not in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        or parameter.default is not inspect.Parameter.empty
+        for parameter in parameters
+    ):
+        raise CustomOpValidationError(
+            f"{name!r}: a NumbaCustomFunc must accept exactly two positional "
+            "arguments: (sample, output)."
+        )
+
+
 class PandasCustomFunc(CustomFunc):
     """Custom op whose namespace additionally exposes pandas (as ``pd``).
 
@@ -996,21 +1112,21 @@ class PandasCustomFunc(CustomFunc):
         return cast("PandasCustomFunc", cls._from_source(source, **_pandas_namespace()))
 
 
-def numpy_operation(func: Callable[..., Any]) -> NumpyCustomFunc:
-    """Decorator marking a numerical function as a shippable numpy custom op.
+def custom_transform(func: Callable[..., Any]) -> NumbaCustomFunc:
+    """Decorator marking a numerical function as a shippable Numba custom transform.
 
-    Equivalent to wrapping with :class:`NumpyCustomFunc`, but as a decorator it
+    Equivalent to wrapping with :class:`NumbaCustomFunc`, but as a decorator it
     documents intent at the definition site and validates/snapshots up front::
 
-        @numpy_operation
-        def zscore(*, context, reference, dgp, rep_idx, **kwargs):
-            arr = context.require_data().observables
-            return (arr - arr.mean(axis=0)) / arr.std(axis=0)
-
-    The decorated name becomes a callable :class:`NumpyCustomFunc`, so it can be
+        @custom_transform
+        def my_transform(sample: ndarray[float64], output: ndarray[float64]) -> int:
+            # sample and output are 2D C-contiguous arrays
+            ...
+            return 0  # status code
+    The decorated name becomes a callable :class:`NumbaCustomFunc`, so it can be
     handed straight to ``transform_step`` (or any custom-op factory).
     """
-    return NumpyCustomFunc(func)
+    return NumbaCustomFunc(func)
 
 
 def pandas_operation(func: Callable[..., Any]) -> PandasCustomFunc:

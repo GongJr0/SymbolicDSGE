@@ -5,14 +5,14 @@ import numpy as np
 
 from ..types import NDF
 
-from ....core.solved_model import SolvedModel
+from SymbolicDSGE.core.solved_model import SolvedModel
 from ...mc_constructs import MCContext
 
-from ....regression import RegressionResult, RegressionKind
-from ....regression.ols import ols
-from ....regression.ridge import ridge, ridge_gs
-from ....regression.lasso import lasso, lasso_gs
-from ....regression.elastic_net import elastic_net, elastic_net_gs
+from SymbolicDSGE.regression import RegressionResult, RegressionKind
+from SymbolicDSGE.regression.ols import ols
+from SymbolicDSGE.regression.ridge import ridge, ridge_gs
+from SymbolicDSGE.regression.lasso import lasso, lasso_gs
+from SymbolicDSGE.regression.elastic_net import elastic_net, elastic_net_gs
 
 
 def run_regression(

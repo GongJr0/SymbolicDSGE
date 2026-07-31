@@ -56,10 +56,11 @@ typedef struct {
 } sdsge_mc_chow_test_ctx;
 
 /* Generic native Monte Carlo test adapters. Every adapter writes a scalar
- * statistic to ``float_out[0]`` and its status code to ``int_out[0]`` when the
- * latter is supplied. ``float_in_work`` starts with the operation inputs and
- * continues with all temporary float storage required by the underlying
- * diagnostic kernel. */
+ * statistic to ``float_out[0]`` and its diagnostic status to ``int_out[0]``
+ * when the latter is supplied, then returns ``SDSGE_MC_RUN_OK``. Diagnostic
+ * statuses are result data, not runner failures. ``float_in_work`` starts with
+ * the operation inputs and continues with all temporary float storage required
+ * by the underlying diagnostic kernel. */
 int sdsge_mc_wald_test_runner(
     i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
     f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,

@@ -11,6 +11,8 @@ export interface MCPersistedWorkspace {
   pipeline: MCPipelineSpec;
   positions: Record<string, { x: number; y: number }>;
   nRep: number;
+  nJobs: number | null;
+  verbosity: number;
   failFast: boolean;
 }
 

@@ -42,14 +42,14 @@ def test_jsonable_branches():
     assert SC._jsonable({"a": (1, 2)}) == {"a": [1, 2]}
 
 
-def test_raw_model_data_arrays_states_and_raw():
+def test_raw_model_data_arrays_states_only():
     kwargs = {
         "states": [[1.0, 2.0], [3.0, 4.0]],
         "observables": None,  # skipped
-        "raw": {"foo": [1.0, 2.0]},
+        "raw": {"foo": [1.0, 2.0]},  # legacy payloads are not serialized.
     }
     out = SC.raw_model_data_arrays(kwargs)
-    assert set(out) == {"states", "raw:foo"}
+    assert set(out) == {"states"}
     assert out["states"].shape == (2, 2)
 
 

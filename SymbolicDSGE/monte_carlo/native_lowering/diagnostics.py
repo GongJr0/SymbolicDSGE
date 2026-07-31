@@ -17,7 +17,7 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ..allocation import BufferPlan
 from ..mc_constructs import MCStep
-from .core import (
+from .utils import (
     NDF,
     FloatInputBinding,
     _array_f64,

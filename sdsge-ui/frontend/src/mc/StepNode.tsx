@@ -32,6 +32,7 @@ const ICONS: Record<MCStepType, LucideIcon> = {
   rolling_mean: Waves,
   rolling_std: Waves,
   rolling_var: Waves,
+  payload: DatabaseZap,
   kde: Activity,
   "transform:custom": Code,
   "postproc:custom": Code,

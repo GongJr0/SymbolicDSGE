@@ -11,13 +11,15 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomOpValidationError,
-    NumpyCustomFunc,
+    NumbaCustomFunc,
     PandasCustomFunc,
 )
-from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
-from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
-from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
-from SymbolicDSGE.monte_carlo.operations.transforms import transform_step
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    postproc_step,
+    raw_model_data_step,
+    transform_step,
+)
 from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
 
 # Bundling a result that retained per-rep payloads/test-results/contexts warns
@@ -27,10 +29,10 @@ from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
 pytestmark = pytest.mark.filterwarnings("ignore:MC results were ran with ")
 
 
-def zscore(*, context, **kwargs):
-    """Top-level custom op (NumpyCustomFunc-eligible)."""
-    arr = context.require_data().observables
-    return (arr - arr.mean(axis=0)) / arr.std(axis=0)
+def zscore(sample: np.ndarray, output: np.ndarray) -> int:
+    """Top-level custom transform with the fixed native ABI."""
+    output[:, :] = (sample - sample.mean(axis=0)) / sample.std(axis=0)
+    return 0
 
 
 def pval_table(*, traces):
@@ -106,7 +108,9 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
             raw_model_data_step(
                 "dat", observables=observables, observable_names=("y", "x")
             ),
-            transform_step("z", zscore, source="dat", field="observables"),
+            transform_step(
+                "z", zscore, source="dat", field="observables", output_shape=(15, 2)
+            ),
             jarque_bera_test_step("jb", source="z", field="payload"),
         ]
     )
@@ -122,7 +126,7 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     assert any(m.kind == "mc_custom_op" for m in loaded.manifest.members)
 
     func = loaded.mc.resources["z"]
-    assert isinstance(func, NumpyCustomFunc)  # wrapped + source-carrying
+    assert isinstance(func, NumbaCustomFunc)  # wrapped + source-carrying
     assert "zscore" in func.source
 
     rebuilt = loaded.mc.pipeline
@@ -166,13 +170,11 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     )
 
 
-def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
+def test_add_mc_bundles_native_result_without_legacy_retention_flags(
     tmp_path,
 ) -> None:
-    # A default run retains per-rep payloads / test results, none of which travel
-    # in the bundle. Bundling that result must warn the author so they know to
-    # re-run if the dropped fields matter (the rest of this module suppresses the
-    # warning as expected noise; here we assert it actually fires).
+    # Native results retain only declared output rows. There are no legacy
+    # contexts or Python result objects to warn about when bundling.
     observables = np.random.default_rng(0).normal(size=(4, 20, 2))
     pipe = MCPipeline(
         [
@@ -183,16 +185,16 @@ def test_add_mc_warns_when_bundling_a_result_with_retained_per_rep_data(
         ],
     )
     result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
-    assert result.meta.test_results_retained is True  # sanity: the run retained
-
-    with pytest.warns(UserWarning, match="not supported in the bundle"):
-        BundleBuilder(created_by="mc-test").add_mc(
-            pipe, result=result, run_id="r1"
-        ).write(tmp_path / "warn.sdsge")
+    target = (
+        BundleBuilder(created_by="mc-test")
+        .add_mc(pipe, result=result, run_id="r1")
+        .write(tmp_path / "native-result.sdsge")
+    )
+    assert build_from(target).mc is not None
 
 
 def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
-    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
+    from SymbolicDSGE.monte_carlo.step_factories import kde_step
 
     observables = np.random.default_rng(3).normal(size=(4, 30, 2))
     pipe = MCPipeline(
@@ -320,19 +322,21 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 def test_pandas_wrapper_rejected_outside_postproc() -> None:
     # A PandasCustomFunc on a per-rep transform is rejected at pipeline build.
     wrapped = PandasCustomFunc(pval_table)
-    with pytest.raises((ValueError, CustomOpValidationError), match="POSTPROC"):
-        transform_step("bad", wrapped, source="dat", field="observables")
+    with pytest.raises((ValueError, CustomOpValidationError), match="NumbaCustomFunc"):
+        transform_step(
+            "bad", wrapped, source="dat", field="observables", output_shape=(15, 2)
+        )
 
 
-def test_add_mc_rejects_unshippable_custom_op(tmp_path) -> None:
-    pipe = MCPipeline(
-        [
-            raw_model_data_step("dat", observables=np.zeros((2, 5, 2))),
-            transform_step("z", lambda **_: None, source="dat", field="observables"),
-        ]
-    )
+def test_transform_step_rejects_unshippable_custom_op() -> None:
     with pytest.raises(Exception, match="[Ll]ambda"):
-        BundleBuilder().add_mc(pipe)
+        transform_step(
+            "z",
+            lambda sample, output: 0,
+            source="dat",
+            field="observables",
+            output_shape=(5, 2),
+        )
 
 
 def test_add_mc_still_accepts_a_plain_pipeline_spec(tmp_path) -> None:

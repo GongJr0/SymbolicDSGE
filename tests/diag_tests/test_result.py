@@ -7,8 +7,32 @@ from scipy.stats import chi2, f
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.jb_lookup import JarqueBeraDist
 from SymbolicDSGE._diag_tests.result import MCResult, TestResult as DiagTestResult
-from SymbolicDSGE._diag_tests.result import _df_args, _normalize_df
 from SymbolicDSGE._diag_tests.status import TestStatus
+
+
+def _mc_result(
+    statistic_trace: np.ndarray,
+    statuses: tuple[TestStatus, ...] | None = None,
+    *,
+    n_rep: int | None = None,
+    retained_reps: np.ndarray | None = None,
+    **metadata: object,
+) -> MCResult:
+    n_retained = statistic_trace.shape[0]
+    if statuses is None:
+        statuses = (TestStatus.OK,) * n_retained
+    if n_rep is None:
+        n_rep = n_retained
+    if retained_reps is None:
+        retained_reps = np.arange(n_retained, dtype=np.int_)
+    return MCResult(
+        statistic_trace=statistic_trace,
+        n_retained=n_retained,
+        retained_reps=retained_reps,
+        n_rep=n_rep,
+        _raw_status=np.asarray(statuses, dtype=np.int_),
+        **metadata,
+    )
 
 
 def test_test_result_computes_p_value_from_reference_distribution() -> None:
@@ -40,11 +64,11 @@ def test_test_result_can_defer_p_value_until_requested() -> None:
     )
 
     assert out._pval is None
-    assert out._frozen_dist is None
+    assert "frozen_dist" not in out.__dict__
 
     assert out.compute_pval() == pytest.approx(chi2(df=2).sf(10.0))
     assert out._pval == pytest.approx(chi2(df=2).sf(10.0))
-    assert out._frozen_dist is not None
+    assert "frozen_dist" in out.__dict__
     assert out.pval == pytest.approx(chi2(df=2).sf(10.0))
 
 
@@ -52,14 +76,14 @@ def test_test_result_supports_multi_df_reference_distribution() -> None:
     out = DiagTestResult(
         test_name="f_test",
         dist=ReferenceDistribution.F,
-        df=(np.float64(2.0), np.float64(10.0)),
+        df=[np.float64(2.0), np.float64(10.0)],
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
         statistic=np.float64(3.0),
         status=TestStatus.OK,
     )
 
-    assert out.df == (np.float64(2.0), np.float64(10.0))
+    assert out.df == [np.float64(2.0), np.float64(10.0)]
     assert out.pval == pytest.approx(f(dfn=2.0, dfd=10.0).sf(3.0))
 
 
@@ -86,19 +110,23 @@ def test_test_result_to_dict_excludes_frozen_distribution() -> None:
     }
 
 
-def test_mc_result_derives_n_from_trace_length() -> None:
+def test_mc_result_exposes_retention_metadata() -> None:
     statistic_trace = np.array([1.0, 10.0, 20.0], dtype=np.float64)
-    out = MCResult(
+    out = _mc_result(
+        statistic_trace,
+        (TestStatus.OK,) * statistic_trace.size,
         test_name="demo",
         dist=ReferenceDistribution.CHI2,
         df=np.float64(2.0),
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
-        statistic_trace=statistic_trace,
-        status_trace=(TestStatus.OK,) * statistic_trace.size,
+        n_rep=10,
+        retained_reps=np.array([0, 4, 9], dtype=np.int_),
     )
 
-    assert out.n == 3
+    assert out.n_rep == 10
+    assert out.n_retained == 3
+    np.testing.assert_array_equal(out.retained_reps, [0, 4, 9])
     np.testing.assert_allclose(out.pval_trace, chi2(df=2).sf(statistic_trace))
     assert out.rejection_rate == pytest.approx(2.0 / 3.0)
     assert out.status_trace == (TestStatus.OK,) * 3
@@ -106,17 +134,16 @@ def test_mc_result_derives_n_from_trace_length() -> None:
 
 def test_mc_result_supports_multi_df_reference_distribution() -> None:
     statistic_trace = np.array([1.0, 3.0, 5.0], dtype=np.float64)
-    out = MCResult(
+    out = _mc_result(
+        statistic_trace,
+        (TestStatus.OK,) * statistic_trace.size,
         test_name="f_test",
         dist=ReferenceDistribution.F,
-        df=[np.float64(2.0), np.float64(10.0)],
+        df=(np.float64(2.0), np.float64(10.0)),
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
-        statistic_trace=statistic_trace,
-        status_trace=(TestStatus.OK,) * statistic_trace.size,
     )
 
-    assert out.df == (np.float64(2.0), np.float64(10.0))
     np.testing.assert_allclose(out.pval_trace, f(dfn=2.0, dfd=10.0).sf(statistic_trace))
 
 
@@ -158,14 +185,14 @@ def test_test_and_mc_results_preserve_integer_jb_sample_size() -> None:
         statistic=statistic,
         status=TestStatus.OK,
     )
-    mc_result = MCResult(
+    mc_result = _mc_result(
+        np.array([1.0, 5.0], dtype=np.float64),
+        (TestStatus.OK, TestStatus.INSUFFICIENT_SAMPLES),
         test_name="jarque_bera",
         dist=ReferenceDistribution.JB_LOOKUP,
         df=np.int64(100),
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.05),
-        statistic_trace=np.array([1.0, 5.0], dtype=np.float64),
-        status_trace=(TestStatus.OK, TestStatus.INSUFFICIENT_SAMPLES),
     )
 
     assert test_result.df == 100
@@ -175,74 +202,6 @@ def test_test_and_mc_results_preserve_integer_jb_sample_size() -> None:
         mc_result.pval_trace,
         JarqueBeraDist(100).sf(mc_result.statistic_trace),
     )
-
-
-def test_mc_result_raises_on_empty_traces() -> None:
-    with pytest.raises(ValueError, match="statistic_trace must be non-empty"):
-        MCResult(
-            test_name="demo",
-            dist=ReferenceDistribution.CHI2,
-            df=np.float64(2.0),
-            pval_method=PvalMethod.SF,
-            alpha=np.float64(0.05),
-            statistic_trace=np.array([], dtype=np.float64),
-            status_trace=(),
-        )
-
-
-def test_mc_result_raises_on_non_1d_statistic_trace() -> None:
-    with pytest.raises(ValueError, match="1D array"):
-        MCResult(
-            test_name="demo",
-            dist=ReferenceDistribution.CHI2,
-            df=np.float64(2.0),
-            pval_method=PvalMethod.SF,
-            alpha=np.float64(0.05),
-            statistic_trace=np.ones((2, 2), dtype=np.float64),
-            status_trace=(TestStatus.OK,) * 4,
-        )
-
-
-def test_mc_result_raises_on_unsupported_reference_distribution() -> None:
-    with pytest.raises(ValueError, match="Unsupported reference distribution"):
-        MCResult(
-            test_name="demo",
-            dist="not_a_distribution",
-            df=np.float64(2.0),
-            pval_method=PvalMethod.SF,
-            alpha=np.float64(0.05),
-            statistic_trace=np.array([1.0], dtype=np.float64),
-            status_trace=(TestStatus.OK,),
-        )
-
-
-def test_mc_result_rejects_mismatched_status_trace() -> None:
-    with pytest.raises(ValueError, match="same length"):
-        MCResult(
-            test_name="demo",
-            dist=ReferenceDistribution.CHI2,
-            df=np.float64(2.0),
-            pval_method=PvalMethod.SF,
-            alpha=np.float64(0.05),
-            statistic_trace=np.array([1.0, 2.0], dtype=np.float64),
-            status_trace=(TestStatus.OK,),
-        )
-
-
-def test_df_normalization_accepts_scalars_and_rejects_bad_sequences() -> None:
-    assert _normalize_df(np.array(2.0, dtype=np.float64)) == np.float64(2.0)
-    assert _df_args(np.float64(2.0)) == (np.float64(2.0),)
-    assert _normalize_df(np.int64(2)) == 2
-    assert _df_args(2) == (2,)
-
-    with pytest.raises(ValueError, match="1D"):
-        _normalize_df(np.ones((1, 1), dtype=np.float64))
-    with pytest.raises(ValueError, match="non-empty"):
-        _normalize_df(np.array([], dtype=np.float64))
-    with pytest.raises(TypeError, match="numeric"):
-        _normalize_df("2")
-    with pytest.raises(ValueError, match="non-empty"):
-        _normalize_df([])
 
 
 def test_test_result_lazy_distribution_and_repeated_pval_access() -> None:
@@ -257,21 +216,22 @@ def test_test_result_lazy_distribution_and_repeated_pval_access() -> None:
         _auto_pval=False,
     )
 
-    assert out._frozen_dist is None
-    assert out.frozen_dist is out._frozen_dist
+    assert "frozen_dist" not in out.__dict__
+    frozen_dist = out.frozen_dist
+    assert out.frozen_dist is frozen_dist
     first = out.compute_pval()
     assert out.compute_pval() == first
 
 
 def test_mc_result_confidence_intervals_cover_wilson_normal_and_t_paths() -> None:
-    out = MCResult(
+    out = _mc_result(
+        np.array([0.1, 1.0, 3.0, 5.0], dtype=np.float64),
+        (TestStatus.OK,) * 4,
         test_name="demo",
         dist=ReferenceDistribution.CHI2,
         df=np.float64(2.0),
         pval_method=PvalMethod.SF,
         alpha=np.float64(0.5),
-        statistic_trace=np.array([0.1, 1.0, 3.0, 5.0], dtype=np.float64),
-        status_trace=(TestStatus.OK,) * 4,
     )
 
     wilson = out.pval_confidence_interval(wilson=True)

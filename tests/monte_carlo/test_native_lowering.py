@@ -7,17 +7,13 @@ import numpy as np
 
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
+from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.core.solver_backend import PerturbationSolution
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.operations.core import (
-    raw_model_data_step,
-    reference_filter_step,
-    simulation_step,
-)
-from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
-from SymbolicDSGE.monte_carlo.operations.tests import (
+from SymbolicDSGE.monte_carlo.step_factories import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
@@ -25,9 +21,50 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
     cusumsq_test_step,
     jarque_bera_test_step,
     ljung_box_test_step,
+    raw_model_data_step,
+    reference_filter_step,
+    regression_step,
+    simulation_step,
+    log_diff_step,
+    transform_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step
+
+
+def _custom_first_difference(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:] = sample[1:] - sample[:-1]
+    return 0
+
+
+def test_native_lowering_runs_custom_transform() -> None:
+    n_rep, T = 3, 12
+    observables = np.arange(n_rep * T * 2, dtype=np.float64).reshape(n_rep, T, 2)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step("data", observables=observables),
+            transform_step(
+                "difference",
+                _custom_first_difference,
+                source="data",
+                field="observables",
+                output_shape=(T - 1, 2),
+            ),
+        ]
+    )
+
+    lowered = pipeline.lower_native(
+        reference=cast(SolvedModel, object()), n_rep=n_rep, n_jobs=1
+    )
+    result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
+
+    assert result.status == 0
+    layout = lowered.plan["difference"].out_fields["payload"]
+    actual = (
+        lowered.allocation.steps["difference"]
+        .float_retained[:, layout.offset : layout.offset + layout.flat_count]
+        .reshape(n_rep, *layout.shape)
+    )
+    np.testing.assert_allclose(actual, np.diff(observables, axis=1))
 
 
 def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> None:
@@ -91,9 +128,7 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
         ]
         .reshape(n_rep, *growth_layout.shape)
     )
-    expected_growth = np.stack(
-        [payload["growth"] for payload in python_result.payloads]
-    )
+    expected_growth = np.diff(np.log(observables), axis=1)
     np.testing.assert_allclose(growth, expected_growth)
 
     ols_layout = lowered.plan["ols"].out_fields["coef"]
@@ -277,6 +312,34 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
     result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
 
     assert result.status == 0
+    specs = lowered.test_result_specs
+    assert set(specs) == {
+        "wald",
+        "wald_covariance",
+        "wald_second_moment",
+        "lb",
+        "jb",
+        "bp",
+        "bg",
+        "cusum",
+        "cusumsq",
+        "chow",
+    }
+    assert specs["wald"].dist is ReferenceDistribution.CHI2
+    assert specs["wald"].df == 2
+    assert specs["wald_covariance"].df == 3
+    assert specs["wald_second_moment"].df == 3
+    assert specs["lb"].df == 4
+    assert specs["jb"].dist is ReferenceDistribution.JB_LOOKUP
+    assert specs["jb"].df == n
+    assert specs["bp"].df == 2
+    assert specs["bg"].df == 2
+    assert specs["cusum"].dist is ReferenceDistribution.CUSUM
+    assert np.isnan(specs["cusum"].df)
+    assert specs["cusumsq"].df == n - 2
+    assert specs["chow"].dist is ReferenceDistribution.F
+    assert specs["chow"].df == (2, n - 4)
+    assert all(spec.pval_method is PvalMethod.SF for spec in specs.values())
     for name in (
         "wald",
         "wald_covariance",
@@ -297,6 +360,32 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
             rtol=1e-9,
             atol=1e-11,
         )
+
+
+def test_native_diagnostic_status_is_retained_not_a_runner_failure() -> None:
+    n_rep, n = 2, 4
+    observables = np.arange(n_rep * n, dtype=np.float64).reshape(n_rep, n, 1)
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step("data", observables=observables),
+            jarque_bera_test_step("jb", source="data", field="observables", column=0),
+        ]
+    )
+    reference = cast(SolvedModel, object())
+
+    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    result = run_native(
+        lowered.allocation,
+        lowered.steps,
+        lowered.input_bindings,
+        fail_fast=True,
+    )
+
+    assert result.status == 0
+    assert lowered.allocation.failure_step_by_rep.tolist() == [-1] * n_rep
+    status_layout = lowered.plan["jb"].out_fields["status"]
+    actual_status = lowered.allocation.steps["jb"].int_retained[:, status_layout.offset]
+    np.testing.assert_array_equal(actual_status, int(TestStatus.INSUFFICIENT_SAMPLES))
 
 
 def test_native_lowering_runs_first_order_simulation_with_observables() -> None:

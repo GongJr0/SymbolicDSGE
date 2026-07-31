@@ -18,19 +18,20 @@ from SymbolicDSGE._diag_tests.cusumsq import cusumsq_test
 from SymbolicDSGE._diag_tests.jarque_bera import jarque_bera
 from SymbolicDSGE._diag_tests.ljung_box import ljung_box
 from SymbolicDSGE._diag_tests.status import TestStatus
+from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterRawResult
 from SymbolicDSGE.kalman.config import KalmanConfig
-from SymbolicDSGE.monte_carlo.allocation import ArenaSize, FieldLayout, StepBufferPlan
-from SymbolicDSGE.monte_carlo import (
+from tests._oracles.monte_carlo.allocation import ArenaSize, FieldLayout, StepBufferPlan
+from tests._oracles.monte_carlo import (
     MCPipeline,
     MCContext,
     MCData,
     MCStep,
     OpType,
 )
-from SymbolicDSGE.monte_carlo.mc_constructs import (
+from tests._oracles.monte_carlo.mc_constructs import (
     DYNAMIC_FIELD_INDEX,
     FILTER_RAW_FIELD_INDEX,
     MC_DATA_FIELD_INDEX,
@@ -41,15 +42,16 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
     report_mc_performance,
     report_mc_step_performance,
 )
-from SymbolicDSGE.monte_carlo.operations.core import (
+from tests._oracles.monte_carlo.legacy_test_result import TestResult as LegacyTestResult
+from tests._oracles.monte_carlo.operations.core import (
     add_payload_step,
     raw_model_data_step,
     reference_filter_step,
     simulation_step,
 )
-from SymbolicDSGE.monte_carlo.operations.core.ops import simulate
-from SymbolicDSGE.monte_carlo.operations.regressions import regression_step
-from SymbolicDSGE.monte_carlo.operations.tests import (
+from tests._oracles.monte_carlo.operations.core.ops import simulate
+from tests._oracles.monte_carlo.operations.regressions import regression_step
+from tests._oracles.monte_carlo.operations.tests import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
     chow_test_step,
@@ -59,8 +61,11 @@ from SymbolicDSGE.monte_carlo.operations.tests import (
     ljung_box_test_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import log_diff_step, transform_step
-from SymbolicDSGE.monte_carlo.operations.utils import (
+from tests._oracles.monte_carlo.operations.transforms import (
+    log_diff_step,
+    transform_step,
+)
+from tests._oracles.monte_carlo.operations.utils import (
     _clone_or_pass_shocks,
     _resolve_source_array,
     _resolve_seed_increment,
@@ -1731,10 +1736,18 @@ def test_pipeline_collects_failures_when_fail_fast_is_false() -> None:
     states = _batched_states()
     target = np.zeros(2, dtype=np.float64)
 
-    def fail_on_third_rep(**kwargs):
-        if kwargs["rep_idx"] == 2:
+    def fail_on_third_rep(*, context, **kwargs):
+        if context.rep_idx == 2:
             raise RuntimeError("third replication failed")
-        return wald_mean_hac(kwargs["sample"], target, bandwidth=0)
+        return LegacyTestResult(
+            test_name="state_mean",
+            dist=ReferenceDistribution.CHI2,
+            df=np.float64(target.size),
+            pval_method=PvalMethod.SF,
+            alpha=np.float64(0.05),
+            statistic=np.float64(0.0),
+            status=TestStatus.OK,
+        )
 
     pipeline = MCPipeline(
         [

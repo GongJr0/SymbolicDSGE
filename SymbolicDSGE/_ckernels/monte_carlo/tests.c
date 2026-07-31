@@ -5,7 +5,7 @@ static int sdsge_mc_test_status(const int status, i64 *SDSGE_RESTRICT int_out) {
   if (int_out != NULL) {
     int_out[0] = status;
   }
-  return status;
+  return SDSGE_MC_RUN_OK;
 }
 
 int sdsge_mc_wald_test_runner(const i64 rep_idx,

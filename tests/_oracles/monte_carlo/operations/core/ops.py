@@ -6,8 +6,8 @@ import numpy as np
 from numpy import float64, ndarray
 
 
-from ....core.solved_model import SolvedModel
-from ....kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from ...mc_constructs import MCContext, MCData, NDF, SeedIncrement, ShockMapping
 from ..utils import _clone_or_pass_shocks, _select_raw_rep_array
 

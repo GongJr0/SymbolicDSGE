@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ...._ckernels.monte_carlo import _transforms as native
+from SymbolicDSGE._ckernels.monte_carlo import _transforms as native
 
-from ....core.solved_model import SolvedModel
+from SymbolicDSGE.core.solved_model import SolvedModel
 from ...mc_constructs import MCContext
 from ..types import NDF
 

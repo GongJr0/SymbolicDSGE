@@ -322,49 +322,49 @@ static int sdsge_mc_transform_status(const i64 status,
   return (int)status;
 }
 
-int sdsge_mc_standardize_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+int sdsge_mc_standardize_runner(const i64 rep_idx,
+                                f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx) {
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_standardize_step_ctx *config = ctx;
   const i64 input_count = config->n * config->p;
-  const i64 status = sdsge_standardize_ax0(
-      float_in_work, config->ddof, config->n, config->p,
-      float_in_work + input_count, float_out);
+  const i64 status =
+      sdsge_standardize_ax0(float_in_work, config->ddof, config->n, config->p,
+                            float_in_work + input_count, float_out);
   return sdsge_mc_transform_status(status, int_out);
 }
 
-int sdsge_mc_log_runner(const i64 rep_idx,
-                        f64 *SDSGE_RESTRICT float_in_work,
+int sdsge_mc_log_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                         f64 *SDSGE_RESTRICT float_out,
                         i64 *SDSGE_RESTRICT int_work,
                         i64 *SDSGE_RESTRICT int_out, const void *ctx) {
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_log_step_ctx *config = ctx;
-  const i64 status = sdsge_log(float_in_work, config->offset, config->n,
-                               config->p, float_out);
+  const i64 status =
+      sdsge_log(float_in_work, config->offset, config->n, config->p, float_out);
   return sdsge_mc_transform_status(status, int_out);
 }
 
-int sdsge_mc_log_diff_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+int sdsge_mc_log_diff_runner(const i64 rep_idx,
+                             f64 *SDSGE_RESTRICT float_in_work,
+                             f64 *SDSGE_RESTRICT float_out,
+                             i64 *SDSGE_RESTRICT int_work,
+                             i64 *SDSGE_RESTRICT int_out, const void *ctx) {
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_log_diff_step_ctx *config = ctx;
   const i64 input_count = config->n * config->p;
-  const i64 status = sdsge_log_diff(float_in_work, config->offset, config->n,
-                                    config->p, float_in_work + input_count,
-                                    float_out);
+  const i64 status =
+      sdsge_log_diff(float_in_work, config->offset, config->n, config->p,
+                     float_in_work + input_count, float_out);
   return sdsge_mc_transform_status(status, int_out);
 }
 
-int sdsge_mc_diff_runner(const i64 rep_idx,
-                         f64 *SDSGE_RESTRICT float_in_work,
+int sdsge_mc_diff_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                          f64 *SDSGE_RESTRICT float_out,
                          i64 *SDSGE_RESTRICT int_work,
                          i64 *SDSGE_RESTRICT int_out, const void *ctx) {
@@ -372,50 +372,67 @@ int sdsge_mc_diff_runner(const i64 rep_idx,
   (void)int_work;
   const sdsge_mc_diff_step_ctx *config = ctx;
   const i64 input_count = config->n * config->p;
-  const i64 status = sdsge_diff(float_in_work, config->order, config->n,
-                                config->p, float_in_work + input_count,
-                                float_out);
+  const i64 status =
+      sdsge_diff(float_in_work, config->order, config->n, config->p,
+                 float_in_work + input_count, float_out);
   return sdsge_mc_transform_status(status, int_out);
 }
 
-int sdsge_mc_rolling_mean_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+int sdsge_mc_rolling_mean_runner(const i64 rep_idx,
+                                 f64 *SDSGE_RESTRICT float_in_work,
+                                 f64 *SDSGE_RESTRICT float_out,
+                                 i64 *SDSGE_RESTRICT int_work,
+                                 i64 *SDSGE_RESTRICT int_out, const void *ctx) {
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_rolling_mean_step_ctx *config = ctx;
   const i64 input_count = config->n * config->p;
-  const i64 status = sdsge_rolling_mean(
-      float_in_work, config->n, config->p, config->window,
-      float_in_work + input_count, float_out);
+  const i64 status =
+      sdsge_rolling_mean(float_in_work, config->n, config->p, config->window,
+                         float_in_work + input_count, float_out);
   return sdsge_mc_transform_status(status, int_out);
 }
 
-int sdsge_mc_rolling_var_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+int sdsge_mc_rolling_var_runner(const i64 rep_idx,
+                                f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx) {
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_rolling_var_step_ctx *config = ctx;
   const i64 input_count = config->n * config->p;
-  const i64 status = sdsge_rolling_var(
-      float_in_work, config->n, config->p, config->window, config->ddof,
-      float_in_work + input_count, float_out);
+  const i64 status =
+      sdsge_rolling_var(float_in_work, config->n, config->p, config->window,
+                        config->ddof, float_in_work + input_count, float_out);
   return sdsge_mc_transform_status(status, int_out);
 }
 
-int sdsge_mc_rolling_std_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx) {
+int sdsge_mc_rolling_std_runner(const i64 rep_idx,
+                                f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx) {
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_rolling_std_step_ctx *config = ctx;
   const i64 input_count = config->n * config->p;
-  const i64 status = sdsge_rolling_std(
-      float_in_work, config->n, config->p, config->window, config->ddof,
-      float_in_work + input_count, float_out);
+  const i64 status =
+      sdsge_rolling_std(float_in_work, config->n, config->p, config->window,
+                        config->ddof, float_in_work + input_count, float_out);
+  return sdsge_mc_transform_status(status, int_out);
+}
+
+int sdsge_mc_user_transform_runner(const i64 rep_idx,
+                                   f64 *SDSGE_RESTRICT float_in_work,
+                                   f64 *SDSGE_RESTRICT float_out,
+                                   i64 *SDSGE_RESTRICT int_work,
+                                   i64 *SDSGE_RESTRICT int_out,
+                                   const void *ctx) {
+  (void)rep_idx;
+  (void)int_work;
+  const sdsge_mc_user_transform_step_ctx *config = ctx;
+  const i64 status = config->fn(float_in_work, float_out, config->n_in,
+                                config->p_in, config->n_out, config->p_out);
   return sdsge_mc_transform_status(status, int_out);
 }

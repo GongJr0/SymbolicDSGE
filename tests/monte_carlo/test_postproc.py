@@ -13,9 +13,9 @@ from SymbolicDSGE.monte_carlo import (
     Raw,
     Summary,
 )
-from SymbolicDSGE.monte_carlo.operations.core import raw_model_data_step
-from SymbolicDSGE.monte_carlo.operations.tests import jarque_bera_test_step
-from SymbolicDSGE.monte_carlo.operations.transforms import (
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    raw_model_data_step,
     standardize_step,
     transform_step,
 )
@@ -23,12 +23,23 @@ from SymbolicDSGE.monte_carlo.operations.transforms import (
 _REFERENCE = cast(SolvedModel, object())
 
 
+def _copy_transform(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:, :] = sample
+    return 0
+
+
 def _observables(n_rep: int = 4, T: int = 40, k: int = 2, seed: int = 0) -> np.ndarray:
     del n_rep
     return np.random.default_rng(seed).normal(size=(T, k))
 
 
-def _run(steps: list[MCStep], *, n_rep: int = 4, fail_fast: bool = True):
+def _run(
+    steps: list[MCStep],
+    *,
+    n_rep: int = 4,
+    fail_fast: bool = True,
+    verbosity: int = 0,
+):
     pipeline = MCPipeline(
         [
             raw_model_data_step(
@@ -41,7 +52,7 @@ def _run(steps: list[MCStep], *, n_rep: int = 4, fail_fast: bool = True):
         steps,
     )
     return pipeline.run(
-        reference=_REFERENCE, n_rep=n_rep, fail_fast=fail_fast, verbosity=0
+        reference=_REFERENCE, n_rep=n_rep, fail_fast=fail_fast, verbosity=verbosity
     )
 
 
@@ -222,7 +233,7 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
 
 
 def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
-    result = _run([_postproc("probe", lambda *, traces: 1.0)], n_rep=7)
+    result = _run([_postproc("probe", lambda *, traces: 1.0)], n_rep=7, verbosity=2)
     # per-rep steps run 7 times and carry it/s rates; the postproc runs once and
     # is timed separately (runtime only, never in the per-rep step maps).
     assert result.meta.step_counts["jb"] == 7
@@ -236,7 +247,7 @@ def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
 
 
 def test_perf_report_separates_postproc_runtime_from_it_s() -> None:
-    result = _run([_postproc("pp", lambda *, traces: 1.0)], n_rep=5)
+    result = _run([_postproc("pp", lambda *, traces: 1.0)], n_rep=5, verbosity=2)
 
     # verbosity=1: pipeline it/s, then postproc *total runtime* (no it/s for it).
     lines: list[str] = []
@@ -259,17 +270,20 @@ def test_perf_report_separates_postproc_runtime_from_it_s() -> None:
 def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
     import pandas as pd
 
-    from SymbolicDSGE.monte_carlo.operations.postproc import kde_step
-
-    def varying_payload(*, rep_idx, **_: object) -> np.ndarray:
-        return np.asarray([float(rep_idx)], dtype=np.float64)
+    from SymbolicDSGE.monte_carlo.step_factories import kde_step
 
     pipeline = MCPipeline(
         [
             raw_model_data_step(
                 observables=_observables(12), observable_names=("y", "x")
             ),
-            transform_step("varying", varying_payload),
+            transform_step(
+                "varying",
+                _copy_transform,
+                source="datagen",
+                field="observables",
+                output_shape=(40, 2),
+            ),
         ],
         [kde_step("density", trace="payload.varying", grid_points=64)],
     )
@@ -293,12 +307,12 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
         "q75",
         "max",
     ]
-    assert desc.value.loc[0, "value"] == 12.0  # count == n_rep
+    assert desc.value.loc[0, "value"] == 960.0  # n_rep * T * n_columns
 
 
 def test_runtime_traces_match_available_registry() -> None:
     # The static registry (#179) must equal the keys a run actually produces.
-    from SymbolicDSGE.monte_carlo.operations.postproc import postproc_step
+    from SymbolicDSGE.monte_carlo.step_factories import postproc_step
     from SymbolicDSGE.monte_carlo.traces import available_traces
 
     captured: dict[str, set] = {}

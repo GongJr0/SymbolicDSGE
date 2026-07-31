@@ -4,16 +4,14 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.operations.core import (
-    reference_filter_step,
-    simulation_step,
-)
-from SymbolicDSGE.monte_carlo.operations.tests import (
+from SymbolicDSGE.monte_carlo.step_factories import (
     breusch_pagan_test_step,
     jarque_bera_test_step,
+    reference_filter_step,
+    simulation_step,
+    standardize_step,
     wald_test_step,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import standardize_step
 
 
 def test_linear_pipeline_graph_root_leaf_and_edges() -> None:

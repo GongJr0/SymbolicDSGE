@@ -13,16 +13,13 @@ from SymbolicDSGE.monte_carlo import (
     validate_pipeline_spec,
 )
 from SymbolicDSGE.monte_carlo.catalog import _shocks_from_registry
+from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.mc_constructs import (
-    DYNAMIC_FIELD_INDEX,
     DYNAMIC_SOURCE_FIELDS,
-    FILTER_RAW_FIELD_INDEX,
     FILTER_RAW_SOURCE_FIELDS,
-    MCData,
-    MC_DATA_FIELD_INDEX,
     MC_DATA_SOURCE_FIELDS,
 )
-from SymbolicDSGE.monte_carlo.operations.transforms import (
+from SymbolicDSGE.monte_carlo.step_factories import (
     standardize_step,
     transform_step,
 )
@@ -96,7 +93,6 @@ def test_source_kwargs_compile_to_runner_args_once() -> None:
     selector = step.source_args[0]
     assert selector.arg == "sample"
     assert selector.source_step == "obs"
-    assert selector.field_idx == DYNAMIC_FIELD_INDEX["payload"]
     assert selector.columns == (0,)
     assert selector.burn_in == 2
 
@@ -110,9 +106,29 @@ def test_source_arg_compile_validates_static_selection() -> None:
         standardize_step("bad_burn", source="datagen", field="states", burn_in=-1)
 
 
-def test_transform_step_stamps_custom_kind() -> None:
-    step = transform_step("tf", lambda **_: None)
+def _custom_copy(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:] = sample
+    return 0
+
+
+def test_transform_step_wraps_custom_function_and_compiles_source() -> None:
+    step = transform_step(
+        "tf",
+        _custom_copy,
+        source="dat",
+        field="observables",
+        output_shape=(4, 2),
+        columns=(0, 1),
+        burn_in=1,
+    )
+
     assert step.step_type == "transform:custom"
+    assert isinstance(step.func, NumbaCustomFunc)
+    assert step.kwargs == {"output_shape": (4, 2)}
+    assert step.source_args[0].source_step == "dat"
+    assert step.source_args[0].field == "observables"
+    assert step.source_args[0].columns == (0, 1)
+    assert step.source_args[0].burn_in == 1
 
 
 _FIELD_KEYS = {
@@ -161,31 +177,18 @@ def test_catalog_payload_shape_and_known_fields() -> None:
     assert "unscented" in filter_fields["filter_mode"]["options"]
 
 
-def test_source_field_indices_are_local_to_payload_shape() -> None:
+def test_source_fields_match_the_native_output_channels() -> None:
     assert MC_DATA_SOURCE_FIELDS == ("states", "observables")
-    assert set(MC_DATA_SOURCE_FIELDS) < set(MCData._fields)
     # ``status`` is a scalar error code, not a selectable array source, so it is
-    # excluded from the source-field set. The array fields keep their tuple order,
-    # and the linear array fields remain a positional prefix of the unscented set.
+    # excluded from the source-field set. Native lowering resolves the layouts,
+    # so source fields no longer carry Python-side positional indices.
     linear_array_fields = tuple(f for f in FilterRawResult._fields if f != "status")
     unscented_array_fields = tuple(
         f for f in UnscentedFilterRawResult._fields if f != "status"
     )
     assert FILTER_RAW_SOURCE_FIELDS[: len(linear_array_fields)] == linear_array_fields
     assert FILTER_RAW_SOURCE_FIELDS == unscented_array_fields
-    for index, field in enumerate(MC_DATA_SOURCE_FIELDS):
-        assert MC_DATA_FIELD_INDEX[field] == index
-    for index, field in enumerate(DYNAMIC_SOURCE_FIELDS):
-        assert DYNAMIC_FIELD_INDEX[field] == index
-    for index, field in enumerate(FILTER_RAW_SOURCE_FIELDS):
-        assert FILTER_RAW_FIELD_INDEX[field] == index
-
-    assert FILTER_RAW_FIELD_INDEX["std_innov"] == FILTER_RAW_SOURCE_FIELDS.index(
-        "std_innov"
-    )
-    assert FILTER_RAW_FIELD_INDEX["x2_filt"] == FILTER_RAW_SOURCE_FIELDS.index(
-        "x2_filt"
-    )
+    assert DYNAMIC_SOURCE_FIELDS == ("payload",)
 
 
 def test_catalog_entries_carry_selector_category() -> None:

@@ -4,7 +4,7 @@ from typing import Any, Callable, Mapping, Sequence, Literal
 from numpy import float64
 from numpy.typing import NDArray
 
-from ....core.shock_generators import Shock
+from SymbolicDSGE.core.shock_generators import Shock
 from ...mc_constructs import MCStep, OpType
 from .ops import (
     simulate,
