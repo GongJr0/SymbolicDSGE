@@ -129,6 +129,6 @@ skip = "*_i686 *-win32 *-musllinux*"
 # the numba reference. All CPythons are built; runtime-test one per platform
 # (the C is Python-version-agnostic, only the generated Cython glue differs) to
 # bound the per-wheel dependency install.
-test-requires = "pytest"
+test-requires = "pytest pytest-xdist"
 test-command = "python -m pytest -n auto -q {project}/tests/ckernels"
 test-skip = "cp311-* cp312-*"
