@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from .graph import PipelineGraph
+    from .memory import MCMemoryReport
     from .native_lowering import LoweredMCRun
     from .spec import PipelineSpec
 
@@ -149,6 +150,7 @@ class MCPipeline:
         dgp: SolvedModel | None = None,
         n_rep: int,
         n_jobs: int | None = None,
+        check_memory_availability: bool = True,
     ) -> "LoweredMCRun":
         """Resolve one native runner invocation without executing it."""
         from .native_lowering import lower_native_run
@@ -159,7 +161,39 @@ class MCPipeline:
             dgp=dgp,
             n_rep=n_rep,
             n_jobs=n_jobs,
+            check_memory_availability=check_memory_availability,
         )
+
+    def validate_memory_requirements(
+        self,
+        *,
+        reference: SolvedModel,
+        dgp: SolvedModel | None = None,
+        n_rep: int,
+        n_jobs: int | None = None,
+    ) -> "MCMemoryReport":
+        """Report what these run arguments would allocate, before running them.
+
+        Takes the arguments :meth:`run` takes, since the buffer plan they size
+        does not exist without them. Warns when the run spills past physical
+        memory, which costs throughput and nothing else, and raises
+        :class:`MemoryError` only when it does not fit with swap counted too.
+        The breakdown is printed before the raise so the numbers land above the
+        traceback rather than after it. The returned report carries that same
+        breakdown, naming no step as the one to shrink: which traces are worth
+        their memory is not a question the step graph can answer.
+        """
+        from .memory import MCMemoryProfiler
+
+        plan = self._resolve_output_specs(reference, dgp)
+        return MCMemoryProfiler(
+            plan,
+            self.per_rep_steps,
+            reference=reference,
+            dgp=dgp,
+            n_rep=n_rep,
+            n_jobs=n_jobs,
+        ).validate()
 
     def to_spec(self) -> "PipelineSpec":
         """Serialize this pipeline to its graph-form :class:`PipelineSpec`.
@@ -182,6 +216,7 @@ class MCPipeline:
         fail_fast: bool = True,
         verbosity: int = 1,
         n_jobs: int | None = None,
+        check_memory_availability: bool = True,
     ) -> MCPipelineResult:
         if n_rep <= 0:
             raise ValueError("n_rep must be positive.")
@@ -189,7 +224,11 @@ class MCPipeline:
             raise ValueError("verbosity must be 0, 1, or 2.")
 
         prep = self.lower_native(
-            reference=reference, dgp=dgp, n_rep=n_rep, n_jobs=n_jobs
+            reference=reference,
+            dgp=dgp,
+            n_rep=n_rep,
+            n_jobs=n_jobs,
+            check_memory_availability=check_memory_availability,
         )
         loop_started_s = perf_counter()
         native_res = run(

@@ -377,6 +377,7 @@ def run_pipeline(
     n_jobs: int | None = None,
     verbosity: int = 0,
     resources: Mapping[str, Any] | None = None,
+    check_memory_availability: bool = True,
 ) -> MCPipelineResult:
     """Validate, compile, and run ``spec`` against the reference and DGP models.
 
@@ -397,6 +398,7 @@ def run_pipeline(
         fail_fast=fail_fast,
         n_jobs=n_jobs,
         verbosity=verbosity,
+        check_memory_availability=check_memory_availability,
     )
 
 

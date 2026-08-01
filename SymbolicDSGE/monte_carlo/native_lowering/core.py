@@ -18,6 +18,7 @@ from ..._ckernels.monte_carlo._runner import (
 from ..allocation import BufferPlan
 from ..custom_op import NumbaCustomFunc
 from ..mc_constructs import MCStep, OpType
+from ..memory import MCMemoryProfiler
 from .diagnostics import lower_test_step
 from .filters import lower_filter_step
 from .regressions import lower_regression_step, regression_result_spec
@@ -57,12 +58,22 @@ def lower_native_run(
     dgp: SolvedModel | None,
     n_rep: int,
     n_jobs: int | None = None,
+    check_memory_availability: bool = True,
 ) -> LoweredMCRun:
     """Resolve and allocate one native run without entering the runner loop."""
     if n_rep <= 0:
         raise ValueError("n_rep must be positive.")
 
     plan = pipeline._resolve_output_specs(reference, dgp)
+    if check_memory_availability:
+        MCMemoryProfiler(
+            plan,
+            pipeline.per_rep_steps,
+            reference=reference,
+            dgp=dgp,
+            n_rep=n_rep,
+            n_jobs=n_jobs,
+        ).validate()
     allocation = allocate_arenas(plan, n_rep, n_jobs=n_jobs)
     steps: list[NativeStep] = []
     bindings: list[tuple[FloatInputBinding, ...]] = []

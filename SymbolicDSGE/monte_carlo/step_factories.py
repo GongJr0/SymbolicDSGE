@@ -18,6 +18,7 @@ NDF = NDArray[np.float64]
 def simulation_step(
     name: str = "datagen",
     target: str = "dgp",
+    n_retain: int = -1,
     *,
     T: int,
     shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
@@ -37,11 +38,13 @@ def simulation_step(
             "observables": observables,
         },
         step_type="simulation",
+        n_retain=n_retain,
     )
 
 
 def raw_model_data_step(
     name: str = "datagen",
+    n_retain: int = -1,
     *,
     states: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
     observables: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
@@ -56,11 +59,13 @@ def raw_model_data_step(
             "observable_names": observable_names,
         },
         step_type="raw_model_data",
+        n_retain=n_retain,
     )
 
 
 def reference_filter_step(
     name: str = "filter",
+    n_retain: int = -1,
     *,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
@@ -85,6 +90,7 @@ def reference_filter_step(
             "return_shocks": return_shocks,
         },
         step_type="filter",
+        n_retain=n_retain,
     )
 
 
@@ -96,12 +102,14 @@ def add_payload_step(
         | Sequence[Sequence[float]]
         | Sequence[Sequence[Sequence[float]]]
     ),
+    n_retain: int = -1,
 ) -> MCStep:
     return MCStep(
         name=name,
         op_type=OpType.TRANSFORM,
         kwargs={"value": payload},
         step_type="payload",
+        n_retain=n_retain,
     )
 
 
@@ -109,6 +117,7 @@ def _one_source_step(
     name: str,
     op_type: OpType,
     step_type: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -132,12 +141,14 @@ def _one_source_step(
             ),
         ),
         step_type=step_type,
+        n_retain=n_retain,
     )
 
 
 def transform_step(
     name: str,
     func: Callable[..., Any] | NumbaCustomFunc,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -166,11 +177,13 @@ def transform_step(
             ),
         ),
         step_type="transform:custom",
+        n_retain=n_retain,
     )
 
 
 def standardize_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -189,11 +202,13 @@ def standardize_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"ddof": ddof},
+        n_retain=n_retain,
     )
 
 
 def log_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -212,11 +227,13 @@ def log_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"offset": offset},
+        n_retain=n_retain,
     )
 
 
 def log_diff_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -235,11 +252,13 @@ def log_diff_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"offset": offset},
+        n_retain=n_retain,
     )
 
 
 def diff_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -258,11 +277,13 @@ def diff_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"order": order},
+        n_retain=n_retain,
     )
 
 
 def rolling_mean_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -281,11 +302,13 @@ def rolling_mean_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"window": window},
+        n_retain=n_retain,
     )
 
 
 def rolling_std_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -305,11 +328,13 @@ def rolling_std_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"window": window, "ddof": ddof},
+        n_retain=n_retain,
     )
 
 
 def rolling_var_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -329,11 +354,13 @@ def rolling_var_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"window": window, "ddof": ddof},
+        n_retain=n_retain,
     )
 
 
 def regression_step(
     name: str,
+    n_retain: int = -1,
     *,
     y_source: str,
     y_field: str,
@@ -378,12 +405,14 @@ def regression_step(
             ),
         ),
         step_type="regression",
+        n_retain=n_retain,
     )
 
 
 def _two_source_test(
     name: str,
     step_type: str,
+    n_retain: int = -1,
     *,
     first_source: str,
     first_field: str,
@@ -420,11 +449,13 @@ def _two_source_test(
             ),
         ),
         step_type=step_type,
+        n_retain=n_retain,
     )
 
 
 def wald_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -453,11 +484,13 @@ def wald_test_step(
             "bandwidth": bandwidth,
             "alpha": alpha,
         },
+        n_retain=n_retain,
     )
 
 
 def ljung_box_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -477,11 +510,13 @@ def ljung_box_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"lags": lags, "alpha": alpha},
+        n_retain=n_retain,
     )
 
 
 def jarque_bera_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -500,11 +535,13 @@ def jarque_bera_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"alpha": alpha},
+        n_retain=n_retain,
     )
 
 
 def breusch_pagan_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     residuals_source: str,
     residuals_field: str,
@@ -531,11 +568,13 @@ def breusch_pagan_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"robust": robust, "alpha": alpha},
+        n_retain=n_retain,
     )
 
 
 def breusch_godfrey_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     residuals_source: str,
     residuals_field: str,
@@ -562,11 +601,13 @@ def breusch_godfrey_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"lags": lags, "alpha": alpha},
+        n_retain=n_retain,
     )
 
 
 def cusum_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     y_source: str,
     y_field: str,
@@ -592,11 +633,13 @@ def cusum_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"alpha": alpha},
+        n_retain=n_retain,
     )
 
 
 def cusumsq_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     y_source: str,
     y_field: str,
@@ -622,11 +665,13 @@ def cusumsq_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"alpha": alpha},
+        n_retain=n_retain,
     )
 
 
 def chow_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     y_source: str,
     y_field: str,
@@ -653,6 +698,7 @@ def chow_test_step(
         burn_in=burn_in,
         drop_initial=drop_initial,
         kwargs={"t_break": t_break, "alpha": alpha},
+        n_retain=n_retain,
     )
 
 
