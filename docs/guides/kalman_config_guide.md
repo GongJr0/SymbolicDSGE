@@ -62,7 +62,7 @@ State Covariance ($P$) defines the inter-state variation through a covariance ma
 kalman:
     P0:
         mode: diag # (1)!
-        diag: # (3)!
+        diag: # (2)!
             g: 1.0
             z: 1.0
             r: 1.0
