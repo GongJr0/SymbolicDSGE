@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
@@ -29,7 +30,7 @@ ABUNDANT_MEMORY_BYTES = 1 << 50
 
 
 @pytest.fixture(autouse=True)
-def abundant_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+def abundant_memory() -> Iterator[None]:
     """Keep the machine's own free memory out of every test in the suite.
 
     The Monte Carlo memory profiler is the sole `psutil` consumer, and it reads
@@ -44,14 +45,15 @@ def abundant_memory(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **fields: int) -> None:
             self.__dict__.update(fields)
 
-    monkeypatch.setattr(
-        memory.psutil,
-        "virtual_memory",
-        lambda: _Reading(available=ABUNDANT_MEMORY_BYTES),
-    )
-    monkeypatch.setattr(
-        memory.psutil, "swap_memory", lambda: _Reading(free=ABUNDANT_MEMORY_BYTES)
-    )
+    virtual_memory = memory.psutil.virtual_memory
+    swap_memory = memory.psutil.swap_memory
+    memory.psutil.virtual_memory = lambda: _Reading(available=ABUNDANT_MEMORY_BYTES)
+    memory.psutil.swap_memory = lambda: _Reading(free=ABUNDANT_MEMORY_BYTES)
+    try:
+        yield
+    finally:
+        memory.psutil.virtual_memory = virtual_memory
+        memory.psutil.swap_memory = swap_memory
 
 
 @pytest.fixture(scope="session")
