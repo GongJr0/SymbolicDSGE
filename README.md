@@ -116,8 +116,7 @@ Suggestions for improving or extending the documentation are welcome as issues.
 ### Minimal Example
 
 ```python
-from SymbolicDSGE import ModelParser
-from SymbolicDSGE import DSGESolver
+from SymbolicDSGE import ModelParser, DSGESolver
 
 # Read the YAML config (Equations, Measurements, Parameters, Optional Filter Spec)
 parsed = ModelParser("<path-to-config>.yaml").get_all()
@@ -149,7 +148,7 @@ print("Eigenvalues: ", sol.policy.eig)
 ```
 ```text
 >>> Is stable:  True
-Eigenvalues:  [0.27920118+0.j 0.83000003+0.j 0.84999992+0.j 2.56517116+0.j 1.18470582+0.j]
+Eigenvalues:  [0.28 +0.j 0.83 +0.j 0.85 +0.j 2.605+0.j 1.185+0.j]
 ```
 ```python
 # Plot IRFs (single or multi shock)
@@ -160,4 +159,4 @@ sol.transition_plot(
     observables=True,
 )
 ```
-<img width="3570" height="2661" alt="image" src="https://github.com/user-attachments/assets/f5931ad7-a70b-43e9-b42e-614bc32f3854" />
+<img width="3569" height="2661" alt="image" src="https://github.com/user-attachments/assets/75a34d66-d586-419c-bd84-cccc259494a6" />
