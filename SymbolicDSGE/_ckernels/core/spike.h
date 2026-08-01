@@ -10,10 +10,10 @@
  *   - a numba @cfunc is callable from native code by pointer,
  *   - with the GIL released,
  *   - without numba's runtime (NRT) being reachable inside the call.
- * The whole preproc design depends on this holding, so tests/ckernels/test_spike.py
- * exercises it across the wheel platform matrix -- on demand via the "cfunc ABI"
- * workflow (.github/workflows/cfunc-abi.yml) and again on each wheel build via
- * cibuildwheel's per-platform test-command. Keep it. */
+ * The whole preproc design depends on this holding. tests/ckernels/test_spike.py
+ * exercises it across the wheel platform matrix, via
+ * .github/workflows/cfunc-abi.yml and cibuildwheel's per-platform
+ * test-command. Keep it. */
 
 typedef void (*spike_residual_fn)(const c128 *a, const c128 *b, c128 *out, i64 n);
 

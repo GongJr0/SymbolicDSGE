@@ -310,7 +310,7 @@ def ekf_hot_loop(
     measurement via the ``meas``/``jac`` @cfunc addresses).
 
     ``meas_addr``/``jac_addr`` are real-valued @cfunc addresses with signature
-    ``void(double* x, double* params, double* out)`` -- ``meas`` writes
+    ``void(double* x, double* params, double* out)``: ``meas`` writes
     ``out[m]``, ``jac`` writes the (m, n) row-major jacobian. Array inputs are
     coerced to contiguous float64 here. Returns ``(status, out)`` with the
     history tuple + loglik; the caller maps a nonzero status to the matching

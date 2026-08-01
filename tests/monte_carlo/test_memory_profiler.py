@@ -31,11 +31,42 @@ ARENA_NAMES = (
 )
 
 
+#: More memory than any plan here sizes to.
+ABUNDANT_BYTES = 1 << 50
+
+
 @pytest.fixture(scope="module")
 def solved() -> SolvedModel:
     model, kalman = ModelParser("MODELS/test.yaml").get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
+
+
+def _pin_memory(
+    monkeypatch: pytest.MonkeyPatch,
+    available: int,
+    swap_free: int = 0,
+) -> None:
+    """Fix what the profiler reads for physical memory and for swap."""
+    import SymbolicDSGE.monte_carlo.memory as memory
+
+    class _Reading:
+        def __init__(self, **fields: int) -> None:
+            self.__dict__.update(fields)
+
+    monkeypatch.setattr(
+        memory.psutil, "virtual_memory", lambda: _Reading(available=available)
+    )
+    monkeypatch.setattr(memory.psutil, "swap_memory", lambda: _Reading(free=swap_free))
+
+
+@pytest.fixture(autouse=True)
+def abundant_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the machine's own free memory out of every test in this file.
+
+    Tests that care about scarcity call :func:`_pin_memory` again.
+    """
+    _pin_memory(monkeypatch, available=ABUNDANT_BYTES, swap_free=ABUNDANT_BYTES)
 
 
 def _allocated_bytes(allocation: Any) -> int:
@@ -154,24 +185,6 @@ def test_fallback_shocks_are_counted_outside_the_arenas(solved: SolvedModel) -> 
     )
 
 
-def _pin_memory(
-    monkeypatch: pytest.MonkeyPatch,
-    available: int,
-    swap_free: int = 0,
-) -> None:
-    """Fix what the profiler reads for physical memory and for swap."""
-    import SymbolicDSGE.monte_carlo.memory as memory
-
-    class _Reading:
-        def __init__(self, **fields: int) -> None:
-            self.__dict__.update(fields)
-
-    monkeypatch.setattr(
-        memory.psutil, "virtual_memory", lambda: _Reading(available=available)
-    )
-    monkeypatch.setattr(memory.psutil, "swap_memory", lambda: _Reading(free=swap_free))
-
-
 def test_the_reserve_is_a_floor_plus_a_fraction_not_a_multiple(
     solved: SolvedModel,
 ) -> None:
@@ -225,15 +238,21 @@ def test_validate_raises_only_once_swap_cannot_absorb_it_either(
         pipeline.validate_memory_requirements(reference=solved, n_rep=64, n_jobs=1)
 
 
-def test_the_ceiling_counts_swap_on_top_of_physical(solved: SolvedModel) -> None:
+def test_the_ceiling_counts_swap_on_top_of_physical(
+    solved: SolvedModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
+    # Distinct readings, so summing them cannot be confused with doubling one.
+    _pin_memory(monkeypatch, available=ABUNDANT_BYTES, swap_free=ABUNDANT_BYTES // 4)
 
     report = pipeline.validate_memory_requirements(reference=solved, n_rep=8, n_jobs=1)
 
-    assert report.ceiling_bytes == report.available_bytes + report.swap_free_bytes
-    assert report.swap_free_bytes >= 0
+    assert report.available_bytes == ABUNDANT_BYTES
+    assert report.swap_free_bytes == ABUNDANT_BYTES // 4
+    assert report.ceiling_bytes == ABUNDANT_BYTES + ABUNDANT_BYTES // 4
 
 
 def test_the_raised_message_is_one_line_and_the_table_is_printed(

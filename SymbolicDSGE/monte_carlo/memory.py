@@ -1,11 +1,7 @@
 """Preflight memory profiling for a resolved Monte Carlo buffer plan.
 
-A run commits every retained arena before the first replication executes, and
-the default retains all replications of every step. Nothing reports that
-commitment, so an oversized plan allocates successfully and then degrades under
-paging rather than failing. This module walks a resolved plan, adds the terms
-that live outside it, and compares the total against what the machine has
-available right now.
+Sizes every retained arena a run commits before its first replication, adds the
+terms outside the plan, and compares the total against the machine.
 """
 
 from __future__ import annotations
@@ -30,35 +26,20 @@ if TYPE_CHECKING:
 #: Every native arena lane is float64 or int64, so a count converts directly.
 BYTES_PER_ELEMENT = 8
 
-#: Flat part of the reserve held back for the process around the run: the
-#: interpreter growing as results are read back, a notebook kernel holding its
-#: own copy, and the allocator's transient peaks. None of that scales with the
-#: size of the run, so neither does this term.
+#: Reserve held for the host process, independent of the size of the run.
 RESERVE_FLOOR_BYTES = 1024**3
 
-#: Part of the reserve that does scale, covering allocator overhead proportional
-#: to the arenas themselves. Deliberately small: a reserve expressed as a
-#: fraction of the machine rather than of the run withholds hundreds of
-#: gigabytes on a large host to protect against a fixed-size risk.
+#: Reserve proportional to the arenas, for allocator overhead.
 RESERVE_FRACTION = 0.025
 
 
-#: The package directory, against which a frame is judged library or caller.
 _PACKAGE_ROOT = os.path.normcase(os.path.dirname(os.path.dirname(__file__)))
 
 
 def _caller_stacklevel() -> int:
     """The ``stacklevel`` that blames the first frame outside this package.
 
-    Four call chains reach :meth:`MCMemoryProfiler.validate`, at four depths:
-    ``validate_memory_requirements`` is one hop from its caller, while a run
-    entered through :func:`~.builder.run_pipeline` is four. A constant is wrong
-    for three of them, and threading the depth through every signature between
-    here and the caller prices a warning header at four public arguments.
-    Counting the frames instead gets all four right and adds none.
-
-    This is what ``warnings.warn(skip_file_prefixes=...)`` does, which is 3.12
-    and later while this package supports 3.11.
+    Callers reach :meth:`MCMemoryProfiler.validate` at four different depths.
     """
     level = 1
     frame: FrameType | None = sys._getframe(1)
@@ -71,12 +52,7 @@ def _caller_stacklevel() -> int:
 
 
 def _print_flushed(message: str) -> None:
-    """Write to stdout and flush it.
-
-    Ordering against the traceback is the whole point of printing the report, and
-    a buffered stdout is drained after the interpreter has already written the
-    traceback to stderr.
-    """
+    """Write to stdout and flush, so the report lands before any traceback."""
     print(message, flush=True)
 
 
@@ -102,10 +78,8 @@ class StepMemory(NamedTuple):
 class MCMemoryReport:
     """What a run will allocate, against what the machine has available.
 
-    The report names no steps as targets for reduction. Retention intent is not
-    recoverable from the step graph: a value having downstream consumers does
-    not make it disposable, and a step feeding nothing may be the one its author
-    wants back. It reports the cost and leaves the choice.
+    Reports the cost per step and names none of them as the one to shrink, which
+    the step graph cannot tell.
     """
 
     steps: tuple[StepMemory, ...]
@@ -159,10 +133,7 @@ class MCMemoryReport:
     def ceiling_bytes(self) -> int:
         """The most the machine could hold, physical plus unused swap.
 
-        Past this an allocation does not get slower, it fails. On Windows the
-        commit limit is physical plus pagefile and a commit beyond it is refused
-        outright. Elsewhere the arenas allocate lazily and the process is killed
-        partway through the loop instead, which is the same loss arriving later.
+        Past this a run fails rather than slows, at allocation or partway through.
         """
         return self.available_bytes + self.swap_free_bytes
 
@@ -237,8 +208,7 @@ class MCMemoryReport:
             f"{label:<{label_width}}  {_format_bytes(value):>{widths[2]}}"
             for label, value in trailer
         ]
-        # The totals are whole-run figures, not a continuation of the per-step
-        # rows they align under. A rule keeps the two from reading as one table.
+        # Whole-run figures, not more step rows: keep them visually separate.
         rule = "-" * max(len(line) for line in (*lines, *totals))
         return "\n".join((*lines, rule, *totals))
 
@@ -246,11 +216,8 @@ class MCMemoryReport:
 class MCMemoryProfiler:
     """Sizes one native Monte Carlo run before its arenas are allocated.
 
-    Constructed from a resolved :data:`~.allocation.BufferPlan` and the run
-    arguments that plan was resolved under. It is not part of the public API:
-    a plan cannot be built without the run arguments in the first place, so the
-    profile is reached through :meth:`~.core.MCPipeline.validate_memory_requirements`
-    or raised automatically by a run.
+    Internal: reach a profile through
+    :meth:`~.core.MCPipeline.validate_memory_requirements`.
     """
 
     def __init__(
@@ -318,19 +285,11 @@ class MCMemoryProfiler:
     ) -> MCMemoryReport:
         """Profile the plan, warning when it is large and raising when it is too large.
 
-        Both paths print the breakdown rather than carrying it in the message
-        they raise or warn with, for the same reason on each. An exception
-        message long enough to hold the table is rendered after the traceback,
-        which puts the numbers below several screens of frames. A warning
-        message ending in the table is followed by the source line
-        :mod:`warnings` echoes for the frame it blames, which reads like a
-        stray frame under the totals. Printing leaves both with one line to
-        read.
+        Both paths print the breakdown and keep their message to one line, so the
+        table is not buried under a traceback or a warning's source-line echo.
         """
         report = self.report()
         if report.exceeds_limit:
-            # Titled here rather than in the report itself, which the warning
-            # path renders too and which is not an error there.
             print_func(f"Memory Availability Error:\n{report}")
             raise MemoryError(
                 f"This run requires {_format_bytes(report.total_bytes_w_margin)}, "
@@ -353,12 +312,9 @@ class MCMemoryProfiler:
     def _shock_bytes(self) -> int:
         """Bytes the fallback shock route materializes outside the arenas.
 
-        The native draw runs in C off a per-replication counter and allocates
-        nothing. One entry the kernel cannot reproduce sends the whole spec back
-        to the Python route, which materializes an ``(n_rep, T, n_exog)`` slab
-        while the step is lowered. Eligibility is read off the raw spec, the same
-        way the arena planner sizes its draw scratch and lowering picks its
-        branch, so the three cannot disagree.
+        A spec the native draw cannot reproduce is built in Python instead, as one
+        ``(n_rep, T, n_exog)`` slab. Eligibility is read off the raw spec, the same
+        way the arena planner and lowering read it.
         """
         step = self._steps[0]
         if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":

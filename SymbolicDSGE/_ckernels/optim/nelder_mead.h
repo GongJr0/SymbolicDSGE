@@ -6,18 +6,12 @@
 
 /* Native Nelder-Mead simplex driver (issue #335): a faithful transpilation of
  * scipy's BSD-3 `_minimize_neldermead` (scipy/optimize/_optimize.py). Gradient
- * free by construction: no FD gradient, no Hessian, no standard errors (the
- * contrast with #329's L-BFGS-B). It shares the objective-cfunc ABI
- * (`sdsge_objective_fn`) and the lean result-struct shape with that driver.
+ * free: no FD gradient, no Hessian, no standard errors.
  *
  * Standard (non-adaptive) coefficients only: rho=1, chi=2, psi=0.5, sigma=0.5.
- * Bounds use scipy's clipping scheme, not a transform: the initial simplex is
- * reflected-then-clipped into the box and every trial point is clipped, so a
- * BK-violation region never yields an out-of-box vertex. Non-finite objective
- * returns (+INFINITY) rank worst in the simplex ordering and do not derail the
- * search. Parity against scipy is asserted within tolerance on x/fun, never on
- * the per-iteration trajectory: scipy re-sorts with a non-stable argsort, so
- * tie ordering is not reproducible across implementations. */
+ * Bounds clip rather than transform: the initial simplex is reflected-then-
+ * clipped into the box and every trial point is clipped. Non-finite objective
+ * returns (+INFINITY) rank worst in the simplex ordering. */
 
 typedef struct {
   i64 maxiter; /* iteration cap; <= 0 -> N*200 (scipy default) */

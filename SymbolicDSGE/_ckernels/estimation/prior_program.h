@@ -4,14 +4,10 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_linalg.h"
 
-/* Integer dispatch codes for the packed log-prior kernel.
- *
- * These MUST stay in lockstep with the DistCode / TransformCode IntEnums in
- * prior_program.py (same names, same values): the Python side packs every prior
- * into int64 code arrays keyed by these values, and the native kernel switches
- * on them. SDSGE_N_*_PARAMS are the packed-row strides (N_DIST_PARAMS /
- * N_TRANSFORM_PARAMS in that module). Plain integer enums -- no CPython, no
- * NumPy -- so the kernel can include this header directly. */
+/* Integer dispatch codes for the packed log-prior kernel. These MUST stay in
+ * lockstep with the DistCode / TransformCode IntEnums in prior_program.py (same
+ * names, same values), which is what the Python side packs its int64 code
+ * arrays with. */
 
 typedef enum {
   SDSGE_DIST_NORMAL = 1,

@@ -115,7 +115,7 @@ jobs:
           if [ "$SR_CHANGED" != "true" ]; then
             PYTEST_MARKERS=(-m "not sr")
           fi
-          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" -n auto --dist loadgroup --cov --cov-report=term-missing --cov-report=xml:coverage/coverage.xml
+          uv run pytest -q ./tests "${PYTEST_MARKERS[@]}" -n auto --dist loadgroup --cov --cov-report=
           EXIT=$?
           set -e
           # juliacall's C-extension finalizers can segfault during interpreter
@@ -128,6 +128,27 @@ jobs:
             exit 0
           fi
           exit "$EXIT"
+
+      - name: Report coverage
+        if: always()
+        shell: bash
+        env:
+          SR_CHANGED: ${{ steps.sr_diff.outputs.sr_changed }}
+        run: |
+          if [ ! -f .coverage ]; then
+            echo "No coverage data written; skipping report."
+            exit 0
+          fi
+          mkdir -p coverage
+          # Deselected sr tests leave the sr package at 0%, so drop it from the
+          # figure rather than counting statements this run never measured.
+          COV_OMIT=()
+          if [ "$SR_CHANGED" != "true" ]; then
+            COV_OMIT=(--omit 'SymbolicDSGE/regression/sr/*')
+            echo "::notice::SR tests deselected; sr excluded from the coverage figure."
+          fi
+          uv run coverage report --show-missing "${COV_OMIT[@]}"
+          uv run coverage xml -o coverage/coverage.xml "${COV_OMIT[@]}"
 
       - name: Compute coverage percent
         id: cov

@@ -2,20 +2,18 @@
 """Thin Cython shim mapping NumPy buffers to the pure-C Monte Carlo transform
 kernels.
 
-No numeric logic here -- only buffer->pointer marshalling, scratch allocation,
-and the GIL release. The algorithms live in transforms.c. Each ``def`` mirrors
-the matching Python op in
-``SymbolicDSGE/monte_carlo/step_factories.py`` and returns the same
-array shape, including the row counts that shrink with ``order`` or ``window``.
+Buffer to pointer marshalling, scratch allocation, and the GIL release only;
+the algorithms live in transforms.c. Each ``def`` returns the same array shape
+as its counterpart in ``SymbolicDSGE/monte_carlo/step_factories.py``, including
+the row counts that shrink with ``order`` or ``window``.
 
 Arguments a kernel is not defined on (a window wider than the sample, a
-non-positive order, a ddof that empties the denominator) are screened here and
-raised as ``ValueError`` naming the offending pair, so the messages match the
-ones the pure-Python ops raised. ``SDSGE_TRANSFORM_BAD_ARG`` coming back from a
-kernel anyway is a backstop, not the usual path.
+non-positive order, a ddof that empties the denominator) raise ``ValueError``
+here, naming the offending pair. ``SDSGE_TRANSFORM_BAD_ARG`` coming back from a
+kernel is a backstop, not the usual path.
 
-Scratch is allocated per call here: the native replication loop calls the C
-entry points directly and owns its buffers.
+Scratch is allocated per call. The native replication loop bypasses this module
+and owns its own buffers.
 """
 
 import numpy as np

@@ -139,9 +139,7 @@ def _simulate_linear_states(
 
 
 # The residual is evaluated up front into `residuals_full` (n_steps x n_eq_all,
-# real); this builder just assembles moment conditions from it. It no longer
-# takes a higher-order njit residual, which also removes the disk-cache
-# serialization of a CPUDispatcher argument.
+# real); this builder just assembles moment conditions from it.
 @njit
 def _build_forward_moments(
     current_states: np.ndarray,

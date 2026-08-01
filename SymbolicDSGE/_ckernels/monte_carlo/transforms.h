@@ -20,7 +20,7 @@
  */
 #define SDSGE_TRANSFORM_BAD_ARG -6
 
-/* Static configuration for future generic native MC transform dispatch.
+/* Static configuration for generic native MC transform dispatch.
  * Dynamic sample data, scratch, and output remain in caller-owned arenas. */
 typedef struct {
   i64 n;

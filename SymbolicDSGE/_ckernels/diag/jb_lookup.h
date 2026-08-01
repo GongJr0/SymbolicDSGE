@@ -5,19 +5,8 @@
 
 /* Small-N Jarque-Bera reference distribution: table lookup + bilinear
  * interpolation over the Wuertz-Keller (2004) finite-sample critical-value
- * grid. Mirrors the numba kernels that used to live in
- * SymbolicDSGE/_diag_tests/jb_lookup.py.
- *
- * The (constant) N grid, p-value grid, and critical-value matrix are compiled
- * in as static const tables in jb_lookup.c; the Python module keeps its own
- * numpy copies purely for the distribution's small-N boundary check and the
- * parity tests. There is no rank-deficiency / fallback path here: the kernels
- * are pure interpolation, so the Python side is hard-native (no numba mirror).
- *
- * ``isf`` maps (n, p) -> critical value; ``pval`` maps (n, x) -> p-value. Each
- * has a scalar and an ``_into`` array form. The ``find_hilo`` helpers are the
- * bracketing primitives (ascending grid / descending critical-value column),
- * exposed so the parity tests can pin them directly. */
+ * grid, whose N grid, p-value grid, and critical-value matrix are static const
+ * tables in jb_lookup.c. Parity oracle: SymbolicDSGE/_diag_tests/jb_lookup.py. */
 
 /* Bracket ``val`` in the ascending array ``arr`` (length n). Writes the pair of
  * indices (lo, hi): (0,0) below the grid, (n-1,n-1) above it, (idx,idx) on an

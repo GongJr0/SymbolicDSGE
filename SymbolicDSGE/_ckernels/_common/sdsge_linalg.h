@@ -3,13 +3,9 @@
 
 #include "sdsge_common.h"
 
-/* Dense linear-algebra primitives shared across the native subsystems. These
- * were first written for the kalman hot loop (as the `kf_*` kernels) and are
- * now promoted here so the regression / diagnostic kernels reuse them.
- * Everything is plain C on C-contiguous, row-major f64 buffers; no CPython, no
- * NumPy, no BLAS (matrices are small and we keep bit-parity with the numba
- * reference). Buffers are caller-allocated and never alias unless a function
- * documents otherwise. */
+/* Dense linear-algebra primitives shared across the native subsystems. Plain C
+ * on C-contiguous, row-major f64 buffers; no CPython, NumPy, or BLAS. Buffers
+ * are caller-allocated and never alias unless a function documents otherwise. */
 
 /* out(r,c) := 0 */
 void sdsge_zero_mat(f64 *out, i64 r, i64 c);
@@ -20,12 +16,8 @@ void sdsge_sym_inplace(f64 *P, i64 n);
 /* out(n,m) := A(n,p) @ B(p,m) */
 void sdsge_matmul(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
 
-/* out(p,m) := A(n,p)^T @ B(n,m). The transpose is folded into the indexing (no
- * materialized A^T); contraction is over the row axis, accumulated row-by-row
- * like sdsge_gram (of which this is the asymmetric generalization: matmul_atb
- * of X with itself equals the full gram of X). `out` must not alias A or B, but
- * A and B may overlap each other -- both are read-only, so e.g. lagged views of
- * one buffer (A = M, B = M + j*cols) are fine. */
+/* out(p,m) := A(n,p)^T @ B(n,m). `out` must not alias A or B; A and B may
+ * overlap each other (e.g. lagged views of one buffer). */
 void sdsge_matmul_atb(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p,
                       i64 m);
 
@@ -77,7 +69,7 @@ void sdsge_gram_rhs(const f64 *X, const f64 *y, f64 *g, i64 n, i64 p);
 
 /* Solve the SPD system G(p,p) coef = g(p) via Cholesky. coef(p) is the output
  * (may alias g); scratch_L(p,p) holds the factor. Returns SDSGE_OK or
- * SDSGE_NOT_PD (G not positive definite -- caller falls back to lstsq). */
+ * SDSGE_NOT_PD. */
 int sdsge_chol_solve(const f64 *G, const f64 *g, f64 *coef, f64 *scratch_L,
                      i64 p);
 

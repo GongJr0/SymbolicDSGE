@@ -126,13 +126,9 @@ static inline bc256 bc256_cpow(const bc256 x, const bc256 y) {
   return bc256_reconst(c128_cpow(px1, py1), c128_cpow(px2, py2));
 }
 
-/* Principal square root via the direct in-slot solve of w^2 = x (x = z1 + z2 j):
+/* Principal square root of x = z1 + z2 j, solved in slot:
  *   w1 = sqrt((z1 + sqrt(z1^2 + z2^2)) / 2),   w2 = z2 / (2 w1).
- * Unlike the idempotent transcendentals this is cancellation-free on a
- * perturbation (the ij component comes out of a division, not a subtraction of
- * near-equal O(1) values). Assumes a positive-real-dominant base -- i.e. the
- * only place a real sqrt is meaningful; w1 = 0 (sqrt of a negative real) is
- * outside that domain. */
+ * Requires a positive-real-dominant base; w1 = 0 is outside the domain. */
 static inline bc256 bc256_sqrt(const bc256 x) {
   const c128 s =
       c128_sqrt(c128_add(c128_mul(x.a, x.a), c128_mul(x.b, x.b)));

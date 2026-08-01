@@ -1,12 +1,11 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Thin Cython shim for the native regression kernels.
 
-No numeric logic here -- only buffer->pointer marshalling, scratch allocation,
-and the GIL release. The algorithms live in regression.c; each ``def`` mirrors
-the matching numba helper in SymbolicDSGE/regression so the parity tests can hit
-them directly. ``chol_solve_L2`` is the single ridge solve; ``ridge_grid_search``
-runs the whole alpha grid in one native call (the Gram is formed once). A
-RANK_DEFICIENT status mirrors the numba contract (NaN coef, empty L).
+Buffer to pointer marshalling, scratch allocation, and the GIL release only;
+the algorithms live in regression.c. Parity oracles: the numba helpers in
+SymbolicDSGE/regression. ``chol_solve_L2`` is the single ridge solve,
+``ridge_grid_search`` the whole alpha grid in one native call. A RANK_DEFICIENT
+status returns NaN coef and an empty L, matching numba.
 """
 
 import numpy as np

@@ -4,10 +4,10 @@
 #include "../_common/sdsge_common.h"
 #include "regression.h" /* RegressionStatus codes */
 
-/* Lasso kernels, mirroring the numba helpers in SymbolicDSGE/regression/lasso.
- * The numba reference is compiled with fastmath=True; this C is strict IEEE, so
- * the two are NOT bit-identical -- they converge to the same (unique) lasso
- * minimizer, and the parity tests compare at the solver tolerance, not ULP. */
+/* Lasso kernels. Parity oracle: the numba helpers in
+ * SymbolicDSGE/regression/lasso, which are compiled with fastmath=True while
+ * this C is strict IEEE. The two are NOT bit-identical, so compare them at the
+ * solver tolerance rather than in ULP. */
 
 /* Coordinate descent on the Gram. coef(k) is the output, Gcoef(k) is caller
  * scratch. Returns REGRESSION_OK on convergence, else REGRESSION_NON_CONVERGENT.

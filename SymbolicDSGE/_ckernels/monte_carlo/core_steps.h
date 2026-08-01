@@ -7,8 +7,8 @@
 #include "runner.h"
 #include "shocks.h"
 
-/* Static configuration for future generic native MC step dispatch. Dynamic
- * numeric inputs, scratch, and outputs remain in caller-owned arenas. */
+/* Static configuration for generic native MC step dispatch. Dynamic numeric
+ * inputs, scratch, and outputs live in caller-owned arenas. */
 typedef struct {
   const f64 *input;
   i64 n;

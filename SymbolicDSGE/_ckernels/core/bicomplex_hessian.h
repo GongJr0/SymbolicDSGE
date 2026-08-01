@@ -9,10 +9,9 @@
  * over bc256 buffers (each bc256 == complex128[2], the cfunc's per-element view).
  *
  * z = (fwd, cur) stacked, 2*n_var wide. Perturbing z_i on the i-unit (a.im) and
- * z_j on the j-unit (b.re) -- both units on the same variable when i == j -- the
- * residual's ij component (b.im) / h^2 is d^2 F / dz_i dz_j. The driver only
- * constructs perturbations and extracts the ij component; the bicomplex
- * arithmetic lives in the numba cfunc.
+ * z_j on the j-unit (b.re), both units landing on one variable when i == j, the
+ * residual's ij component (b.im) / h^2 is d^2 F / dz_i dz_j. The bicomplex
+ * arithmetic itself lives in the numba cfunc.
  *
  * `hessian` is (n_eq, 2*n_var, 2*n_var) row-major f64, symmetric in the last
  * two. Levels only (no log-linear wrapping at order > 1). */

@@ -8,13 +8,10 @@
  * Chow, Brown-Durbin-Evans recursive residuals). Each mirrors the numba kernel
  * in SymbolicDSGE/_diag_tests/. All matrices are C-contiguous, row-major, f64.
  *
- * Error/status convention: the full-rank fast path (Cholesky on the normal
- * equations) runs entirely here. The negative codes below mirror the Python
- * TestStatus IntEnum exactly, so the Cython shim returns them verbatim.
- * DIAG_FALLBACK is the one extra value: it means "the design is rank-deficient,
- * the Cholesky path can't proceed -- re-run the whole statistic via the numba
- * kernel (which has the SVD-based lstsq fallback)". There is deliberately no
- * lstsq/SVD in C; this keeps the native side LAPACK-free. */
+ * The negative codes below mirror the Python TestStatus IntEnum, so the Cython
+ * shim returns them verbatim. DIAG_FALLBACK is the extra value: the design is
+ * rank-deficient and the caller must re-run the statistic via the numba kernel,
+ * which has the SVD-based lstsq path this side does not. */
 
 #define DIAG_OK 0
 #define DIAG_BAD_SHAPE -1

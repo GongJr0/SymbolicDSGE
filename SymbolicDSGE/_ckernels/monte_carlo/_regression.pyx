@@ -1,11 +1,7 @@
-
-
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Thin Python shim for native Monte Carlo regression kernels.
 
-The caller owns result and solver-work buffers. The eventual native MC
-executor can use the same ABI with its preallocated trace rows and scratch
-space.
+The caller owns the result and solver-work buffers.
 """
 
 from libc.stdint cimport int64_t
