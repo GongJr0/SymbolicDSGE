@@ -338,7 +338,7 @@ class MCPipeline:
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
             ),
             test_summaries=test_summaries,
-            payloads=None,
+            transform_outputs=payload_columns if payload_columns else None,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
             postproc=postprocs,

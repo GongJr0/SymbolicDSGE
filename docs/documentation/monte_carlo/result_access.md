@@ -25,6 +25,12 @@ __Summary Fields and Methods:__
 
 `MCRegressionResult` carries the same retention fields alongside `coef_trace`, `ssr_trace`, `sst_trace`, and, for OLS, a standard-error trace.
 
+__Transform Output:__
+
+`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is `None` when the pipeline has no transform steps. Retention follows the step's `n_retain`, and the producing step's `retained_reps` records which replications the rows came from.
+
+These are the same arrays post-loop ops receive under the `payload.<name>` trace keys below, so a value read here needs no post-processing step to reach it.
+
 __Across-Replication Traces:__
 
 Every producer's stacked output is addressable by a trace key. Post-loop ops receive these keys in their `traces` mapping, and `available_traces(spec)` enumerates them from a spec alone, before a run.

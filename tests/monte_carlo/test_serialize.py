@@ -40,7 +40,7 @@ def _table_result(postproc: dict) -> MCPipelineResult:
         ),
         n_successful=3,
         test_summaries={},
-        payloads=None,
+        transform_outputs=None,
         postproc=postproc,
     )
 
@@ -55,7 +55,7 @@ def _postproc_result() -> MCPipelineResult:
         ),
         n_successful=5,
         test_summaries={},
-        payloads=None,
+        transform_outputs=None,
         postproc={
             "pcs": Summary(value=0.6, title="PCS"),
             "selection": Raw(value=np.array([0.0, 1.0, 0.0, 1.0, 0.0])),
@@ -217,7 +217,7 @@ def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
         ),
         n_successful=3,
         test_summaries={},
-        payloads=None,
+        transform_outputs=None,
         postproc={"empty": Raw(value=np.full(3, np.nan))},
     )
     document = result_document(result, run_id="r1")

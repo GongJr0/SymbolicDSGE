@@ -1055,7 +1055,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         ),
         n_successful=2,
         test_summaries={"diagnostic": tests},
-        payloads=None,
+        transform_outputs=None,
         regression_summaries={"ols": regressions},
     )
 
