@@ -19,9 +19,6 @@ The `monte_carlo` module is written for two cases:
 
 This demonstration focuses on the first case where two models are present.
 
-???+ info "Native Execution"
-    The replication loop is compiled and executed natively without holding the GIL. You describe the experiment in Python, and the whole per-replication DAG runs as native kernels over pre-planned buffers. Python code runs only when you build the pipeline and when the post-loop phase reduces the assembled traces.
-
 ## Model Instantiation
 
 ```python
@@ -64,6 +61,13 @@ dgp = solver.solve(
 Now, we have two models to compare in a Monte Carlo experiment.
 We will determine whether the reference model is misspecified relative to the DGP using MC repeated Wald tests.
 
+???+ note "Data Retention"
+    Each step produces and records their output independently. Retaining full output resolution for every step can easily exceed available memory in consumer hardware.
+    `n_retain` controls how many replications persist outside the hot loop to give more granular memory management. All steps contain an `n_retain` argument, which defaults to `-1` (retain all). Setting it to `0` retains nothing, and any positive integer retains that many evenly spaced replications.
+
+    For reference, the exact run described in this guide requires a modest 1.42 GiB at 10,000 replications. At a more realistic 100,000 replications, the same run requires 14.2 GiB.
+
+
 ## Pipeline Setup
 
 ```python
@@ -100,6 +104,7 @@ from SymbolicDSGE import Shock
 datagen_step = simulation_step(
     T=T,
     target="dgp",  # (1)!
+    n_retain=-1,  # (2)!
     shocks={
         "g,z": Shock(dist="norm", multivar=True, seed=0),
         "r": Shock(dist="norm", seed=1),
@@ -313,30 +318,32 @@ mc = pipeline.run(
     fail_fast=True,  # (1)!
     n_jobs=-1,  # (2)!
     verbosity=2,  # (3)!
+    check_memory_availability=True,  # (4)!
 )
 ```
 
 1. Whether to raise on the first failing replication. With `False`, failures are recorded in `MCPipelineResult.failures` and the run continues.
 2. Number of worker threads. `None` runs single-threaded, a positive value is taken literally, and a negative value resolves to `max(1, cpu_count + 1 + n_jobs)` following the joblib convention.
 3. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total and the post-processing total, `2` additionally prints per-step throughput.
+4. Whether to size the run's retained arenas before allocating them. A run that spills past physical memory warns and proceeds; one that does not fit even with swap counted raises `MemoryError` with a per-step breakdown. `False` allocates unconditionally.
 
 ???+ warning "Per-step Timings Require `verbosity=2`"
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.24s with 41314.48 it/s.
+>>> MC run concluded successfully in 0.25s with 40529.48 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 69380.94 worker it/s (0.14 worker-s), 41314.48 wall it/s.
-    filter: 0 failures, 2688.02 worker it/s (3.72 worker-s), 41314.48 wall it/s.
-    custom_std: 0 failures, 153519.31 worker it/s (0.07 worker-s), 41314.48 wall it/s.
-    builtin_std: 0 failures, 198120.59 worker it/s (0.05 worker-s), 41314.48 wall it/s.
-    std_innov_mean: 0 failures, 87594.96 worker it/s (0.11 worker-s), 41314.48 wall it/s.
+    datagen: 0 failures, 47156.51 worker it/s (0.21 worker-s), 40529.48 wall it/s.
+    filter: 0 failures, 2908.28 worker it/s (3.44 worker-s), 40529.48 wall it/s.
+    custom_std: 0 failures, 219709.70 worker it/s (0.05 worker-s), 40529.48 wall it/s.
+    builtin_std: 0 failures, 172673.13 worker it/s (0.06 worker-s), 40529.48 wall it/s.
+    std_innov_mean: 0 failures, 87742.76 worker it/s (0.11 worker-s), 40529.48 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0194s.
-    builtin_kde: Succeeded in 9.5426s.
+    custom_postproc: Succeeded in 0.0184s.
+    builtin_kde: Succeeded in 9.1390s.
 ```
 
 ???+ note "Worker Time vs Wall Time"
@@ -372,7 +379,41 @@ std_innov_mean           2.758      0.546           0.051   0.047    0.056
 Regression results are accessed similarly in `MCPipelineResult.regression_summaries`, and post-processing artifacts are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
 
 ???+ tip "Retaining Fewer Replications"
-    Transform payloads are stored for every replication by default, which can be a large amount of data. `MCStep` is frozen, so `dataclasses.replace(custom_std, n_retain=100)` produces a step that keeps an evenly spaced subset instead. `MCMeta.n_retained_by_step` reports what was actually kept. See [Result Access](../documentation/monte_carlo/result_access.md).
+    Large runs can routinely exceed hardware memory in size requirements. It is strongly recommended to set `n_retain=0` for intermediate steps that are not needed for later
+    analysis or post-processing. This will allow you to retain much more replications for steps you care about before running out of memory. `n_retain=0` will not make the data unavailable to downstream steps, all data makes it through the pipeline, but non-retained replications are discarded after used. `n_retain=-1` is the default and retains all replications.
+
+???+ tip "Sizing a Run Before It Allocates"
+    `MCPipeline.validate_memory_requirements` takes the arguments `run` takes and reports what they would allocate, broken down by step. `run` performs the same check unless `check_memory_availability=False`. If a run is provably too large (meaning your RAM and swap combined are smaller than the required allocation), a `MemoryError` will block the run instead of seeing it crash hours later. `check_memory_availability=False` also disables this behavior.
+
+    ```python
+    print(pipeline.validate_memory_requirements(reference=reference, dgp=dgp, n_rep=400_000, n_jobs=-1))
+    ```
+
+    ```bash
+    >>> Memory Availability Error:
+        step               per rep   retained  n_retain
+        datagen          12.50 KiB   4.77 GiB        -1
+        filter          126.57 KiB  48.28 GiB        -1
+        custom_std        4.69 KiB   1.79 GiB        -1
+        builtin_std       4.69 KiB   1.79 GiB        -1
+        std_innov_mean        16 B   6.10 MiB        -1
+        -----------------------------------------------
+        worker lanes (x20)           3.57 MiB
+        run metadata                36.62 MiB
+        allocated                   56.67 GiB
+        reserve (1.00 GiB + 2.5%)    2.42 GiB
+        total                       59.09 GiB
+        available                    9.55 GiB
+        ceiling (+ swap free)       24.03 GiB
+
+    MemoryError: This run requires 59.09 GiB, which does not fit in 9.55 GiB free RAM 
+    + 14.48 GiB free swap. Lower n_retain or n_rep, or pass check_memory_availability=False to run anyway.
+
+    ```
+
+    `allocated` is what the run commits, and it is exact. The `reserve` on top of it is held for the process that hosts the run rather than for the arenas: the interpreter growing as results are read back, a notebook kernel holding its own copy, and the allocator's transient peaks. None of that scales with the size of the run, which is why the reserve is a flat floor plus a small fraction instead of a multiple. A shock specification the native draw cannot reproduce adds a `prematerialized shocks` row, which is an `(n_rep, T, n_exog)` array built in Python before the loop starts.
+
+    Passing `available` means the run no longer fits in physical memory and will page, which costs throughput. Passing `ceiling` means it does not fit even with swap counted. At that point, a mid-run crash is significantly more likely, and this is the point where `MCPipeline.run` raises `MemoryError`.
 
 ## Conclusion
 
