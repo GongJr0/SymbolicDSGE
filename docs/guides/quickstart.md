@@ -58,9 +58,6 @@ compiled = solver.compile(
 )
 
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)))
-print("\n")
-print("Equations as passed to the solver: \n", compiled.equations)
-
 ```
 
 1. `#!python None | list[sp.Function | str]`. `#!python None` uses the variable order in the config file. Custom orders must declare `[*exog, *state, *control]` in that order. If groups are not contiguous or a different order is used, the compiler will raise a validation error. Within groups, any order is accepted.
@@ -68,23 +65,18 @@ print("Equations as passed to the solver: \n", compiled.equations)
 3. Set to `#!python True` to symbolically linearize the model config before compiling it.
 
 At compilation, the equations are transformed as shown in the code output:
+
 ```text
-Equations with symbols removed:
- -beta*fwd_Pi + cur_Pi - cur_x*kappa - cur_z
+Equations with symbols removed: 
+ -beta*fwd_Pi + cur_Pi - kappa*(cur_x - cur_z)
 -cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
--cur_r*rho_r - e_R + fwd_r + (rho_r - 1)*(fwd_Pi*psi_pi + fwd_x*psi_x)
--cur_g*rho_g - e_g + fwd_g
--cur_z*rho_z - e_z + fwd_z
-
-
-Equations as passed to the solver:
- <function DSGESolver.compile.<locals>.equations at 0x0000012D16AB5B20>
+-cur_r*rho_r + fwd_r + (rho_r - 1)*(fwd_Pi*psi_pi + psi_x*(fwd_x - fwd_z))
+-cur_g*rho_g + fwd_g
+-cur_z*rho_z + fwd_z
 ```
 
 ???+ note "Variable Layout"
     The compiler infers the canonical solver layout from the configuration. Shock-map targets form the shocked/exogenous state block, dynamic equations determine the remaining state variables, and the rest are controls.
-
-    If you pass `#!python variable_order`, `#!python n_state`, or `#!python n_exog`, they are treated as explicit expectations. The compiler checks them against the inferred layout and raises if they do not match the config.
 
 ???+ note "Linearization"
     When passing the linearization flag, the parsed `ModelConfig` must have the linearization parameters defined. (refer to the [Config Guide](./model_config_guide.md))
@@ -112,8 +104,8 @@ print("Eigenvalues: ", sol.policy.eig)
 <div class="annotate" markdown>
 ```
 Is stable:  True
-Eigenvalues:  [0.27920118+0.j 0.83000003+0.j 0.84999992+0.j 2.56517116+0.j
- 1.18470582+0.j] (1)
+Eigenvalues:  [0.28018451+0.j 0.83      +0.j 0.85      +0.j 2.60451546+0.j
+ 1.18546572+0.j] (1)
 ```
 </div>
 1. Complex numbers are an artifact of the ordered Schur solve. All relevant matrices are cast to reals with `#!python np.real_if_close`
@@ -135,7 +127,7 @@ sol.transition_plot(
     scale=1.0,
     observables=True,
 )
-irf_dict["z"] # (3)!
+irf_dict["z"].round(3) # (3)!
 ```
 
 1. `#!python shock = sig_var * scale`
@@ -146,12 +138,9 @@ This produces the outputs:
 ![transition_plot output](../img/qs_transition.png "transition_plot output")
 
 ```text
-array([0.        , 0.64      , 0.54399995, 0.46239991, 0.39303989,
-       0.33408388, 0.28397127, 0.24137556, 0.2051692 , 0.17439381,
-       0.14823472, 0.1259995 , 0.10709957, 0.09103462, 0.07737942,
-       0.0657725 , 0.05590662, 0.04752063, 0.04039253, 0.03433365,
-       0.0291836 , 0.02480605, 0.02108514, 0.01792237, 0.01523401,
-       0.01294891])
+array([0.64 , 0.544, 0.462, 0.393, 0.334, 0.284, 0.241, 0.205, 0.174,
+       0.148, 0.126, 0.107, 0.091, 0.077, 0.066, 0.056, 0.048, 0.04 ,
+       0.034, 0.029, 0.025, 0.021, 0.018, 0.015, 0.013])
 ```
 
 ## Simulation
@@ -174,17 +163,27 @@ In case of multiple shocks with correlation the key for the dictionary uses `"g,
 from SymbolicDSGE import Shock
 
 T = 200
-shock_spec = lambda seed: Shock( # (1)!
+multi_shock_spec = lambda seed: Shock(
     dist="norm",
     multivar=True,
-    seed=seed, # (2)!
-    dist_kwargs={ # (3)!
+    seed=seed,
+    dist_kwargs={
         "mean": [0.0, 0.0],
     },
 )
 
+uni_shock_spec = lambda seed: Shock(
+    dist="norm",
+    multivar=False,
+    seed=seed,
+    dist_kwargs={
+        "loc": 0.0,
+    },
+)
+
 sim_shocks = {
-    "g,z": shock_spec(seed=1) # (4)!
+    "g,z": multi_shock_spec(seed=1),
+    "r": uni_shock_spec(seed=2),
 }
 
 ```
@@ -207,24 +206,24 @@ sim_data = sol.sim(
     observables=True,
 )
 del sim_data["_X"]  # (2)!
-pd.DataFrame(sim_data).head(10)
+pd.DataFrame(sim_data).head(10).round(3)  
 ```
 
 1. Simulation starts at steady state
 2. `"_X"` is a `ndarray` of all non-observable states for each time t. It is deleted here for code brevity in producing a `DataFrame`.
 
-|    |  __g__  | __z__  | __r__  |  __Pi__ |  __x__  |__Infl__ |__Rate__|
-|:--:|:-------:|:------:|:------:|:-------:|:-------:|:-------:|:------:|
-|  0 |  0      | 0      | 0      |  0      |  0      |  3.43   | 6.44   |
-|  1 |  0.0113 | 1.0502 | 0      |  2.0097 |  0.4527 | 11.469  | 6.44   |
-|  2 | -0.2055 | 0.5741 | 0.205  | -0.4441 | -1.6807 |  1.6538 | 7.2601 |
-|  3 | -0.4925 | 1.0832 | 0.1083 |  0.2587 | -1.8046 |  4.4646 | 6.873  |
-|  4 | -0.4139 | 2.0507 | 0.0962 |  2.3427 | -1.0963 | 12.8009 | 6.8249 |
-|  5 | -0.3628 | 1.9517 | 0.3014 |  1.2818 | -2.2254 |  8.557  | 7.6456 |
-|  6 | -0.5415 | 2.6315 | 0.3544 |  1.8491 | -2.8505 | 10.8264 | 7.8577 |
-|  7 | -0.5357 | 2.0374 | 0.4482 |  0.2843 | -3.6404 |  4.5671 | 8.233  |
-|  8 | -0.5484 | 2.477  | 0.362  |  1.503  | -2.9801 |  9.442  | 7.8881 |
-|  9 | -0.6129 | 2.0109 | 0.4187 |  0.1822 | -3.7172 |  4.1587 | 8.1148 |
+|    |      g |      z |      r |      x |     Pi |   OutGap |   Infl |   Rate |
+|---:|-------:|-------:|-------:|-------:|-------:|---------:|-------:|-------:|
+|  0 |  0.062 |  0.57  |  0.034 |  0.272 | -0.239 |    0.272 |  2.472 |  6.576 |
+|  1 |  0.111 | -0.217 | -0.094 |  0.819 |  0.825 |    0.819 |  6.729 |  6.066 |
+|  2 |  0.255 |  0.29  | -0.058 |  1.314 |  0.812 |    1.314 |  6.678 |  6.207 |
+|  3 |  0.115 |  0.47  | -0.396 |  3.018 |  2.028 |    3.018 | 11.54  |  4.856 |
+|  4 |  0.161 |  0.659 |  0.224 | -0.528 | -0.949 |   -0.528 | -0.366 |  7.336 |
+|  5 |  0.139 |  0.893 |  0.284 | -0.85  | -1.393 |   -0.85  | -2.141 |  7.576 |
+|  6 | -0.017 |  0.492 |  0.019 |  0.073 | -0.335 |    0.073 |  2.089 |  6.515 |
+|  7 | -0.101 |  0.665 |  0.116 | -0.705 | -1.092 |   -0.705 | -0.938 |  6.905 |
+|  8 | -0.077 |  0.4   |  0.023 | -0.187 | -0.467 |   -0.187 |  1.562 |  6.531 |
+|  9 | -0.204 |  0.006 | -0.134 |  0.17  |  0.133 |    0.17  |  3.964 |  5.903 |
 
 Alternative to a DataFrame, we can also plot the simulated paths:
 
