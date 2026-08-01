@@ -26,11 +26,6 @@ import numpy as np
 import pandas as pd
 
 from SymbolicDSGE import DSGESolver, ModelParser
-from SymbolicDSGE.monte_carlo.step_factories import (
-    reference_filter_step,
-    simulation_step,
-    wald_test_step,
-)
 
 model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
 ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
@@ -100,6 +95,7 @@ Using the `simulation_step` function, we generate an `MCStep` object that sample
 
 ```python
 from SymbolicDSGE import Shock
+from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 
 datagen_step = simulation_step(
     T=T,
@@ -140,6 +136,8 @@ The first step after datagen is filtering the reference model using a Kalman fil
 `reference_filter_step` is a pre-built function configuring the reference model's Kalman filter to be run per iteration for this purpose.
 
 ```python
+from SymbolicDSGE.monte_carlo.step_factories import reference_filter_step
+
 kf_step = reference_filter_step()
 ```
 
@@ -151,6 +149,7 @@ With filtered outputs, we run a test step using the `wald_test_step` function.
 `kind = "mean"` and `target = np.zeros(n_obs)` tests the first moment of the standardized innovations against a zero vector.
 
 ```python
+from SymbolicDSGE.monte_carlo.step_factories import wald_test_step
 
 mean_test_step = wald_test_step(
     "std_innov_mean",  # (1)!
