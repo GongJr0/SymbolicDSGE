@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -137,7 +139,8 @@ def lower_filter_step(
             ),
             _filter_bindings(before_y, binding, (x0, interface.P0)),
         )
-    if mode == "unscented":
+
+    else:  # mode == "unscented"
         if interface.return_shocks:
             raise ValueError("Unscented filtering does not support return_shocks.")
         policy = reference.policy
@@ -183,7 +186,6 @@ def lower_filter_step(
             ),
             _filter_bindings(before_y, binding, (z0, interface.P0)),
         )
-    raise ValueError(f"Unsupported native filter mode: {mode!r}.")
 
 
 def _filter_observable_names(
@@ -199,14 +201,12 @@ def _filter_observable_names(
             raw_names or tuple(reference.compiled.observable_names),
             tuple(requested) if requested is not None else (raw_names or None),
         )
-    if datagen_step.step_type == "simulation":
-        target = datagen_step.kwargs["target"]
-        model = reference if target == "reference" else dgp
-        if model is None:
-            raise ValueError("Filter DATAGEN simulation requires its target model.")
-        names = tuple(model.compiled.observable_names)
-        return names, tuple(requested) if requested is not None else names
-    raise NotImplementedError("Native filters require raw data or simulation DATAGEN.")
+
+    # simulation
+    target = datagen_step.kwargs["target"]
+    model = reference if target == "reference" else cast(SolvedModel, dgp)
+    names = tuple(model.compiled.observable_names)
+    return names, tuple(requested) if requested is not None else names
 
 
 def _canonical_observables(

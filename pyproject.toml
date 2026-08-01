@@ -104,6 +104,9 @@ markers = [
     "sr: tests that require the optional symbolic-regression dependency",
 ]
 
+[tool.coverage.run]
+source = ["SymbolicDSGE"]
+
 [tool.coverage.report]
 # numba compiles @njit / @cfunc bodies to machine code, so coverage.py cannot
 # trace lines inside them while JIT is active (which the runtime requires for
@@ -119,7 +122,7 @@ exclude_also = [
 build = "cp311-* cp312-* cp313-* cp314-*"
 # 64-bit only (drop 32-bit i686/win32). Skip musllinux: numba/llvmlite ship no
 # musl wheels, so the dep chain builds llvmlite from source there and fails
-# (needs LLVM) -- the package can't run on Alpine regardless, so don't ship
+# (needs LLVM); the package can't run on Alpine regardless, so don't ship
 # unusable musl wheels. No -march=native anywhere (baseline ISA).
 skip = "*_i686 *-win32 *-musllinux*"
 # Validate each platform: confirm the wheel loads and the native kernels match
@@ -127,5 +130,5 @@ skip = "*_i686 *-win32 *-musllinux*"
 # (the C is Python-version-agnostic, only the generated Cython glue differs) to
 # bound the per-wheel dependency install.
 test-requires = "pytest"
-test-command = "python -m pytest {project}/tests/ckernels -q"
+test-command = "python -m pytest -n auto -q {project}/tests/ckernels"
 test-skip = "cp311-* cp312-*"

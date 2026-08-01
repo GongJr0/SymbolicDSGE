@@ -40,8 +40,6 @@ def lower_test_step(
     if kind == "wald":
         return _lower_wald_step(step, source_indices[0], steps, plan, n, first_columns)
     if kind in {"ljung_box", "jarque_bera"}:
-        if first_columns != 1:
-            raise ValueError(f"Native {kind} lowering requires one column.")
         native_step = (
             ljung_box_step(step.name, n, int(step.kwargs["lags"]))
             if kind == "ljung_box"
@@ -57,16 +55,7 @@ def lower_test_step(
                 target_row_stride=1,
             ),
         )
-    supported = {"breusch_pagan", "breusch_godfrey", "cusum", "cusumsq", "chow"}
-    if kind not in supported:
-        raise ValueError(f"Unsupported native diagnostic kind: {kind!r}.")
-    if first_columns != 1:
-        raise ValueError(f"Native {kind} lowering requires a one-column response.")
-    x_rows, x_columns = _selected_shape(
-        source_indices[1], step.source_args[1], steps, plan
-    )
-    if x_rows != n:
-        raise ValueError("Native diagnostic sources must have matching row counts.")
+    _, x_columns = _selected_shape(source_indices[1], step.source_args[1], steps, plan)
     if kind == "breusch_pagan":
         native_step = breusch_pagan_step(
             step.name, n, x_columns, bool(step.kwargs["robust"])
