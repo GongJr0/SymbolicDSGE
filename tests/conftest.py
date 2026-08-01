@@ -24,6 +24,36 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.xdist_group("sr"))
 
 
+#: More memory than any test plan sizes to.
+ABUNDANT_MEMORY_BYTES = 1 << 50
+
+
+@pytest.fixture(autouse=True)
+def abundant_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the machine's own free memory out of every test in the suite.
+
+    The Monte Carlo memory profiler is the sole `psutil` consumer, and it reads
+    physical and swap availability live. Left alone, any test running a plan
+    large enough to approach whatever the machine happens to have free either
+    warns or raises, so a pass depends on ambient load rather than on the code
+    under test. Tests that care about scarcity pin their own readings.
+    """
+    import SymbolicDSGE.monte_carlo.memory as memory
+
+    class _Reading:
+        def __init__(self, **fields: int) -> None:
+            self.__dict__.update(fields)
+
+    monkeypatch.setattr(
+        memory.psutil,
+        "virtual_memory",
+        lambda: _Reading(available=ABUNDANT_MEMORY_BYTES),
+    )
+    monkeypatch.setattr(
+        memory.psutil, "swap_memory", lambda: _Reading(free=ABUNDANT_MEMORY_BYTES)
+    )
+
+
 @pytest.fixture(scope="session")
 def post82_test_model_path() -> Path:
     return POST82_TEST_MODEL_PATH

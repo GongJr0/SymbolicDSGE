@@ -262,7 +262,7 @@ class MCPipelineResult:
     n_rep: int
     n_successful: int
     test_summaries: Mapping[str, MCResult]
-    payloads: tuple[Mapping[str, Any], ...] | None
+    transform_outputs: Mapping[str, NDF] | None
     failures: tuple[MCFailure, ...] = ()
     regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
         default_factory=dict

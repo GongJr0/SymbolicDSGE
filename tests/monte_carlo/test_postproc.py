@@ -226,10 +226,21 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
         ],
         [_postproc("p", op)],
     )
-    pipeline.run(reference=_REFERENCE, n_rep=5, verbosity=0)
+    result = pipeline.run(reference=_REFERENCE, n_rep=5, verbosity=0)
 
     assert captured["has_payload"] is True
     assert captured["shape"][0] == 5  # stacked over replications
+
+    # The same stacked arrays reach the caller on the result, unkeyed.
+    assert result.transform_outputs is not None
+    assert set(result.transform_outputs) == {"s"}
+    assert result.transform_outputs["s"].shape == captured["shape"]
+
+
+def test_transform_outputs_is_none_without_transform_steps() -> None:
+    result = _run([], n_rep=4)
+
+    assert result.transform_outputs is None
 
 
 def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:

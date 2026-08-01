@@ -234,7 +234,7 @@ builtin_std = standardize_step(
 
 Post-processing is executed separately from the replication loop. The `kde_step` function is the only built-in. Custom post-processing steps stay in plain Python and are encapsulated by a `pandas_operation` decorator, which extends the numeric namespace with allowed `pandas` functionality. Post-processing functions do not see individual replications. Instead, they receive a flattened `traces` dictionary containing transform payloads, test results, and regression results.
 
-Access to a given array follows a `"."` separated path, for example, the custom standardization step (which is a payload) is accessed as `traces["payload.custom_std"]`. Payload traces are stacked across retained replications, so a transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. Test and regression results are structured:
+Access to a given array follows a `"."` separated path, for example, the custom standardization step (which is a payload) is accessed as `traces["payload.custom_std"]`. Payload traces are stacked across retained replications, so a transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The same stacked arrays are on the result as `result.transform_outputs["custom_std"]`. Test and regression results are structured:
 
 __Test Traces:__
 

@@ -140,7 +140,7 @@ class MCPipelineResult(
     n_rep: int,
     n_successful: int,
     test_summaries: Mapping[str, MCResult],
-    payloads: tuple[Mapping[str, Any], ...] | None,
+    transform_outputs: Mapping[str, ndarray] | None,
     failures: tuple[MCFailure, ...] = (),
     regression_summaries: Mapping[str, MCRegressionResult] = {},
     postproc: Mapping[str, Any] = {},
@@ -157,7 +157,7 @@ __Fields and Properties:__
 | n_rep | `#!python int` | Requested replication count. |
 | n_successful | `#!python int` | Number of completed replications. |
 | test_summaries | `#!python Mapping[str, MCResult]` | Per-test aggregate result containers. |
-| payloads | `#!python tuple[Mapping[str, Any], ...] | None` | Reserved slot for per-replication payload dictionaries. The native runner leaves it `None`; retained transform output is read from the stacked `payload.<name>` traces instead. |
+| transform_outputs | `#!python Mapping[str, ndarray] | None` | Retained transform output stacked across replications, keyed by step name, each shaped `(n_retained, *output_shape)`. `None` when the pipeline has no transform steps. Post-loop ops see the same arrays as `payload.<name>` traces. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
 | postproc | `#!python Mapping[str, Any]` | Post-loop artifacts keyed by step name, or `"<step>.<key>"` for multi-artifact ops. Values are `Summary` or `Raw` wrappers. |
