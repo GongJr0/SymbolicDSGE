@@ -1,12 +1,11 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Thin Cython shim for the native packed log-prior kernels.
 
-No numeric logic here -- only buffer->pointer marshalling and the GIL release.
-The algorithms live in prior_program.c; each ``def`` mirrors the matching numba
-helper in SymbolicDSGE/estimation/prior_program.py. The leaves are exposed so the
-parity tests can hit them directly; ``logprior_program`` is the per-replication
-hot path the estimator dispatches to. A NaN result means "fall back to the numba
-path" (out-of-support / unknown code), matching the numba kernel.
+Buffer to pointer marshalling and the GIL release only; the algorithms live in
+prior_program.c. Parity oracle: SymbolicDSGE/estimation/prior_program.py.
+``logprior_program`` is the per-replication hot path; the leaves are exposed for
+the parity tests. A NaN result means out-of-support or an unknown code, and the
+caller falls back to the numba path.
 """
 
 from libc.stdint cimport int64_t

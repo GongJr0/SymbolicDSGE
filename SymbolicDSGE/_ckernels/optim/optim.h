@@ -4,16 +4,13 @@
 #include "../_common/sdsge_common.h"
 
 /* Native optimizer drivers (issue #329). Shared subsystem: any consumer links
- * optim via _EXTRA_DEPS. The estimation-specific objective trampoline lives in
- * the estimation module and wires in at #330; nothing here depends on it. The
- * linear-algebra primitives the L-BFGS-B kernel needs are served by
- * self-contained shims (shim.c), so the driver takes no backend argument. */
+ * optim via _EXTRA_DEPS. Linear algebra comes from self-contained shims
+ * (shim.c), so the driver takes no backend argument. */
 
 /* Objective ABI: minimize f(x). Returns the scalar objective at x (length n).
  * A non-finite return (+INFINITY) marks an infeasible point; the driver's FD
- * gradient and line search treat it as "no decrease" and backtrack. `ctx` is the
- * caller's closure: benchmark params in tests, or the estimation trampoline over
- * the native sdsge_obj_* objective at wiring time. */
+ * gradient and line search treat it as "no decrease" and backtrack. `ctx` is
+ * the caller's closure. */
 typedef f64 (*sdsge_objective_fn)(const f64 *SDSGE_RESTRICT x, void *ctx);
 
 typedef struct {

@@ -67,9 +67,7 @@ typedef struct {
 
 /* ``SDSGE_MC_NOT_RUN`` marks failure-lane entries and integer retained
  * outputs for replications that failed or were skipped by a fail-fast halt.
- * Float retained outputs for the same rows are set to NAN. This prevents
- * NumPy's uninitialized ``empty`` allocations from being observable after the
- * run returns. */
+ * Float retained outputs for the same rows are set to NAN. */
 #define SDSGE_MC_NOT_RUN INT64_MIN
 #define SDSGE_MC_RUN_OK 0
 #define SDSGE_MC_RUN_HALTED 1
@@ -84,8 +82,7 @@ typedef struct {
  * Before returning, the runner sets every retained row belonging to a failed
  * or unfinished replication to defined sentinels. When ``profile_steps`` is
  * nonzero, each profiling array has ``n_workers * n_steps`` entries in
- * worker-major order. The runner clears and writes only the executing
- * worker's row, so profiling adds no synchronization to the hot loop. */
+ * worker-major order, and only the executing worker's row is written. */
 
 typedef struct {
   const sdsge_mc_step_desc *steps;

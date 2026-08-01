@@ -1,7 +1,7 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Native Monte Carlo arena-size boundary.
 
-Python's pipeline compiler owns shape resolution.  This module exposes the C
+Python's pipeline compiler owns shape resolution. This module exposes the C
 arena sizers so its allocation plan always follows the native kernel contract.
 """
 

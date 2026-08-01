@@ -1469,12 +1469,12 @@ cdef class NativeLogpost:
     """Single-eval handle over a built native objective context.
 
     ``logpost(theta)`` / ``loglik(theta)`` return the native objective at
-    ``theta`` -- the exact value run_mcmc / run_estimation evaluate per step
+    ``theta``, the exact value run_mcmc / run_estimation evaluate per step
     (``+logpost`` / ``+loglik`` form; ``-inf`` on a BK or non-finite solve). The
-    ctx is marshalled once at construction; each call re-solves at ``theta``. This
-    is the seam parity tests use to drive a Python reference chain through the
-    SAME objective the native loop uses, isolating loop mechanics from the
-    objective; it is not the estimation hot path."""
+    ctx is marshalled once at construction and each call re-solves at ``theta``.
+
+    This is the seam parity tests drive a Python reference chain through, not
+    the estimation hot path."""
     cdef _NativeCtx nc
     cdef str mode
 

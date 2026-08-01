@@ -1,11 +1,10 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Thin Cython shim mapping NumPy buffers to the pure-C diagnostic-test kernels.
 
-No numeric logic here -- only buffer->pointer marshalling and the GIL release.
-The algorithms live in diag.c. Each ``def`` mirrors the matching numba kernel in
-SymbolicDSGE/_diag_tests/ and returns the same (status, ...) tuple shape. A
-status of ``DIAG_FALLBACK`` means the design was rank-deficient and the caller
-must re-run the whole statistic via numba (which has the lstsq/SVD fallback).
+Buffer to pointer marshalling and the GIL release only; the algorithms live in
+diag.c. Each ``def`` returns the same (status, ...) tuple shape as its parity
+oracle in SymbolicDSGE/_diag_tests/. A ``DIAG_FALLBACK`` status means the design
+was rank-deficient and the caller must re-run the statistic via numba.
 """
 
 import numpy as np
@@ -314,9 +313,8 @@ def lb_stat(x, int64_t L):
 def hac_estimator_matmul(r, int kernel_id, int64_t L):
     """HAC long-run covariance (Gamma_0 + sum_j w_j(Gamma_j + Gamma_j')) / n.
 
-    Full-estimator parity with the numba ``jit_hac_estimator_matmul``: same
-    inputs (centered moment array, integer kernel id, bandwidth) and the same
-    (p, p) output -- no separate Gamma_0/scaling codepath on the caller side.
+    Parity oracle: the numba ``jit_hac_estimator_matmul``, same inputs (centered
+    moment array, integer kernel id, bandwidth) and the same (p, p) output.
     """
     cdef double[:, ::1] r_mv = np.ascontiguousarray(r, dtype=np.float64)
     cdef int64_t n = r_mv.shape[0]

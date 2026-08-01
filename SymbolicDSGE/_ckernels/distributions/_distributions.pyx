@@ -1,15 +1,13 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Thin Cython shim for the native distribution kernels.
 
-No numeric logic here -- only argument marshalling and the C call. The numba
-references now live in the test oracles (tests/_oracles/distributions.py), so
-this is the sole production path and the parity tests pin them together.
+Argument marshalling and the C call only. Parity oracle:
+tests/_oracles/distributions.py.
 
 ``ndtri_as241`` / ``erfinv_from_as241`` are the Wichura AS 241 inverse-normal
-primitives from ``_common/as241.c``. The vectorized ``ndtri_as241_into`` owns its
-own casting: it takes an untyped array, forces a C-contiguous float64 copy, and
-returns a new array shaped like the input. The precise NumPy types live in the
-``.pyi`` stub, not the signature.
+primitives from ``_common/as241.c``. The vectorized ``ndtri_as241_into`` takes
+an untyped array, forces a C-contiguous float64 copy, and returns a new array
+shaped like the input; its precise NumPy types are in the ``.pyi`` stub.
 """
 
 import numpy as np

@@ -1,9 +1,9 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Dynamic arena allocation for compiled Monte Carlo buffer plans.
 
-The Python planner resolves lane sizes and output layouts.  This module turns
-that plan and a run's ``n_rep`` into the contiguous NumPy arrays owned by a
-future native runner.  Step-context lowering supplies static data separately.
+The Python planner resolves lane sizes and output layouts. This module turns
+that plan and a run's ``n_rep`` into the contiguous NumPy arrays the native
+runner executes over. Step-context lowering supplies static data separately.
 """
 
 import os

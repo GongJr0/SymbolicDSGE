@@ -1,9 +1,9 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 """Thin Cython shim mapping NumPy buffers to the pure-C core kernels.
 
-No numeric logic here -- only the buffer->pointer marshalling and the GIL
-release. The algorithms live in core.c. At the ABI level the kernels' f64/i64
-are exactly double/int64_t, so the extern is declared with those.
+Buffer to pointer marshalling and the GIL release only; the algorithms live in
+core.c. The kernels' f64/i64 are exactly double/int64_t, so the externs are
+declared with those.
 """
 
 from libc.stdint cimport int64_t
@@ -458,7 +458,7 @@ def steady_state_newton(
 
 
 def second_order(a, b, f_xx, gx, hx, int64_t n_state):
-    """SGU second-order tensors ``(gxx, hxx)`` -- native transcription of
+    """SGU second-order tensors ``(gxx, hxx)``. Parity oracle:
     ``core.second_order.solve_second_order``. ``a``/``b`` are the first-order
     pencil ``(n, n)``, ``f_xx`` the residual Hessian ``(n, 2n, 2n)``, ``gx``
     ``(ny, nx)``, ``hx`` ``(nx, nx)``. Returns ``gxx (ny, nx, nx)``,
@@ -497,7 +497,7 @@ def second_order(a, b, f_xx, gx, hx, int64_t n_state):
 
 
 def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
-    """Sigma^2 risk correction ``(gss, hss)`` -- native transcription of
+    """Sigma^2 risk correction ``(gss, hss)``. Parity oracle:
     ``core.second_order.solve_second_order_risk``. ``gxx`` is the second-order
     controls ``(ny, nx, nx)``; ``eta`` the shock loading ``(nx, ne)``. Returns
     ``gss (ny,)``, ``hss (nx,)``. Inputs coerced to C-contiguous f64.
@@ -538,7 +538,7 @@ def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
 def residual_path(size_t residual_addr, cur_states, fwd_states, params, int64_t n_eq):
     """Real residual matrix ``(n_steps, n_eq)`` from a residual @cfunc
     (``build_cfunc``) evaluated over a simulated path. Native backend for the
-    Den Haan-Marcet moment builder -- reuses the solve's cfunc, so it never
+    Den Haan-Marcet moment builder, reusing the solve's cfunc so it never
     triggers the numba residual compile. Inputs are coerced to contiguous
     complex128 here.
     """
@@ -628,7 +628,7 @@ def measurement_path(size_t meas_addr, states, par, int64_t n_obs):
 def residual_eval(size_t residual_addr, fwd, cur, params, int64_t n_eq):
     """Complex residual vector ``F(fwd, cur, par)`` of length ``n_eq`` from a
     residual @cfunc (``build_cfunc``) given its ``.address``. Single-point native
-    evaluation -- the path ``CompiledModel.equations`` takes instead of the numba
+    evaluation, the path ``CompiledModel.equations`` takes instead of the numba
     vector kernel. Inputs are coerced to contiguous complex128 here.
     """
     cdef double complex[::1] fwdv = np.ascontiguousarray(

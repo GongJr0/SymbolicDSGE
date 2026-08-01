@@ -13,14 +13,13 @@
 #define KF_ERR_SINGULAR_MATRIX -4
 #define KF_ERR_ALLOC -5
 
-/* Kalman hot-loop helpers ported from the numba `*_into` kernels in
+/* Kalman hot-loop helpers. Parity oracle: the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.
  * Buffers are caller-allocated; nothing here aliases (inputs and outputs are
- * always distinct). The dense linear-algebra primitives these build on
- * (sdsge_matmul, sdsge_chol, sdsge_*subst, sdsge_dot, ...) now live in
- * _common/sdsge_linalg so the regression / diagnostic kernels share them. */
+ * always distinct). The dense primitives these build on are in
+ * _common/sdsge_linalg. */
 
-/* -- Kalman-specific dense helpers (not general enough for sdsge_linalg) -- */
+/* Kalman-specific dense helpers. */
 
 /* out(m) := A[row, :] - x(m), where A has m columns */
 void kf_row_minus_vec(const f64 *A, i64 row, const f64 *x, f64 *out, i64 m);

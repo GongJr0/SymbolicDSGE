@@ -4,10 +4,7 @@
 #include "../_common/sdsge_common.h"
 
 /* Second-order (SGU) policy tensors from the first-order solution and the
- * residual Hessian. Native transcription of
- * core.second_order.solve_second_order (row-major, allocation-free inner loop):
- * builds the symmetry-reduced linear system big_q @ sym, solves it with the f64
- * LU, and expands via sym.
+ * residual Hessian. Parity oracle: core.second_order.solve_second_order.
  *
  * Inputs (all C-contiguous, row-major, f64), with n = n_var = n_eq (square) and
  * ny = n - nx:
@@ -27,17 +24,17 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
                        const f64 *SDSGE_RESTRICT hx, const i64 n, const i64 nx,
                        f64 *SDSGE_RESTRICT gxx, f64 *SDSGE_RESTRICT hxx);
 
-/* Sigma^2 risk correction (g_ss, h_ss). Native transcription of
- * core.second_order.solve_second_order_risk. Only the forward-forward Hessian
- * blocks enter. Inputs as above plus:
+/* Sigma^2 risk correction (g_ss, h_ss). Parity oracle:
+ * core.second_order.solve_second_order_risk. Inputs as above plus:
  *   gxx  (ny, nx, nx)  second-order controls (from sdsge_second_order)
  *   eta  (nx, ne)      shock loading (eta @ eta^T = state innovation
  * covariance)
  *
  * Outputs:
  * gss (ny,) controls risk correction
- * hss  (nx,) states risk correction Solves the (n, n) system [Qg Qh] [gss; hss]
- * = -q. Same return codes. */
+ * hss (nx,) states risk correction
+ *
+ * Same return codes. */
 i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
                             const f64 *SDSGE_RESTRICT b,
                             const f64 *SDSGE_RESTRICT f_xx,
