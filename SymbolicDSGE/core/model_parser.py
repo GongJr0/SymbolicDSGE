@@ -82,6 +82,7 @@ class ModelParser:
     def __post_init__(self) -> None:
         conf = self.parsed.model
         self.validate_constraints(conf)
+        self.validate_ss_seed(conf)
 
     def get(self) -> ModelConfig:
         return self.parsed.model
@@ -141,6 +142,24 @@ class ModelParser:
                     raise ValueError(
                         f"Constraint for variable '{var}' references unknown symbols: {unknown_atoms}"
                     )
+
+    @classmethod
+    def validate_ss_seed(cls, conf: ModelConfig) -> None:
+        params = set(conf.parameters)
+        for var, expr in conf.variables.ss_seed.items():
+            if expr is None:
+                continue
+            applied = expr.atoms(AppliedUndef)
+            if applied:
+                raise ValueError(
+                    f"ss_seed for variable '{var.__name__}' must resolve to a number "
+                    f"but references model variables: {applied}"
+                )
+            unknown = expr.free_symbols - params
+            if unknown:
+                raise ValueError(
+                    f"ss_seed for variable '{var.__name__}' references unknown symbols: {unknown}"
+                )
 
     def from_yaml(self) -> tuple[dict, ParsedConfig]:
         data = self._load_yaml(self.config_path)

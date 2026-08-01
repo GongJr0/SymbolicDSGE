@@ -377,7 +377,7 @@ class DSGESolver:
                 ss[i] = float(val)
             except TypeError as exc:
                 raise ValueError(
-                    f"Steady state for '{name}' did not evaluate to a number: {val}"
+                    f"ss_seed for '{name}' did not evaluate to a number: {val}"
                 ) from exc
         return ss
 

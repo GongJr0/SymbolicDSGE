@@ -235,6 +235,50 @@ def test_validate_constraints_accepts_valid_obc(parsed_test):
     ModelParser.validate_constraints(conf)
 
 
+def test_validate_ss_seed_accepts_scalars_and_parameter_expressions(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    beta, rho_u = sp.Symbol("beta"), sp.Symbol("rho_u")
+    var = conf.variables.variables[0]
+    for expr in (sp.Float(0.8), sp.Integer(0), beta, beta / (1 - rho_u), None):
+        conf.variables.ss_seed[var] = expr
+        ModelParser.validate_ss_seed(conf)
+
+
+def test_validate_ss_seed_errors_on_undeclared_parameter(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    var = conf.variables.variables[0]
+    conf.variables.ss_seed[var] = sp.Symbol("not_a_param")
+
+    with pytest.raises(ValueError, match="references unknown symbols"):
+        ModelParser.validate_ss_seed(conf)
+
+
+def test_validate_ss_seed_errors_on_model_variable_reference(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    conf.variables.ss_seed[var] = var(t)
+
+    with pytest.raises(ValueError, match="must resolve to a number"):
+        ModelParser.validate_ss_seed(conf)
+
+
+def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path):
+    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+    data["variables"] = {
+        "u": {"ss_seed": "u_bar"},
+        "v": {},
+        "r": {},
+        "Pi": {},
+        "x": {},
+        "r_star": {},
+    }
+    bad = _write_yaml(tmp_path / "bad_ss_seed.yaml", data)
+
+    with pytest.raises(ValueError, match="references unknown symbols"):
+        ModelParser(bad)
+
+
 def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
     data["calibration"]["parameters"].pop("beta")
