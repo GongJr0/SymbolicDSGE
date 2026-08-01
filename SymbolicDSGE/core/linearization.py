@@ -109,9 +109,7 @@ class Linearizer:
             method_dict = {
                 var: conf.variables.linearization[var] for var in variable_order
             }
-            steady_state = {
-                var: conf.variables.steady_state[var] for var in variable_order
-            }
+            steady_state = {var: conf.variables.ss_seed[var] for var in variable_order}
             equations = list(conf.equations.model)
             time_symbol = Symbol("t", integer=True)
             shock_symbols = list(conf.shock_map.keys())

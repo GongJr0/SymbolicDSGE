@@ -14,9 +14,9 @@ def test_coerce_variable_data_branches():
     assert names == ["a", "b"] and data == {"a": {}, "b": {}}
     # mapping with None and dict specs
     names, data = ModelParser._coerce_variable_data(
-        {"variables": {"a": None, "b": {"steady_state": "b_ss"}}}
+        {"variables": {"a": None, "b": {"ss_seed": "b_ss"}}}
     )
-    assert data["a"] == {} and data["b"] == {"steady_state": "b_ss"}
+    assert data["a"] == {} and data["b"] == {"ss_seed": "b_ss"}
     # unsupported metadata key
     with pytest.raises(ValueError, match="unsupported metadata keys"):
         ModelParser._coerce_variable_data({"variables": {"a": {"bogus": 1}}})

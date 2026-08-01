@@ -90,7 +90,8 @@ class Calib(Base):
 @dataclass
 class Variables(Base):
     variables: list[Function]
-    steady_state: FunctionGetterDict[Function, Expr | None]
+    # None == 0 seed newton. Scalars are subtypes of Expr.
+    ss_seed: FunctionGetterDict[Function, Expr | None]
     linearization: FunctionGetterDict[Function, LinearizationMethod]
 
 

@@ -35,7 +35,6 @@ _ALLOWED_TOP_LEVEL_KEYS = frozenset(
     {
         "name",
         "variables",
-        "parameters",
         "observables",
         "shock_map",
         "equations",
@@ -83,7 +82,6 @@ class ModelParser:
     def __post_init__(self) -> None:
         conf = self.parsed.model
         self.validate_constraints(conf)
-        self.validate_calib(conf)
 
     def get(self) -> ModelConfig:
         return self.parsed.model
@@ -143,15 +141,6 @@ class ModelParser:
                     raise ValueError(
                         f"Constraint for variable '{var}' references unknown symbols: {unknown_atoms}"
                     )
-
-    @classmethod
-    def validate_calib(cls, conf: ModelConfig) -> None:
-        nf_param = []
-        for param in conf.calibration.parameters:
-            if param not in conf.parameters:
-                nf_param.append(param)
-        if nf_param:
-            raise ValueError(f"Calibration contains unknown parameters: {nf_param}")
 
     def from_yaml(self) -> tuple[dict, ParsedConfig]:
         data = self._load_yaml(self.config_path)
@@ -221,10 +210,9 @@ class ModelParser:
                 str(k): round(float(v), digits)
                 for k, v in config.calibration.parameters.items()
             }
-            data_out["parameters"] = list(normalized_params.keys())
             data_out.setdefault("calibration", {})["parameters"] = normalized_params
 
-        for key in ("parameters", "variables", "observables"):
+        for key in ("variables", "observables"):
             if isinstance(data_out.get(key), list):
                 data_out[key] = InlineList(data_out[key])
 
@@ -305,7 +293,9 @@ class ModelParser:
             map(Function, ordered_var_names)
         )  # pyright: ignore
 
-        params: list[Symbol] = list(sp.symbols(data["parameters"]))
+        params: list[Symbol] = list(
+            sp.symbols(list(data.get("calibration", {}).get("parameters", {}).keys()))
+        )
         observables: list[Symbol] = list(sp.symbols(data["observables"]))
 
         shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
@@ -343,7 +333,7 @@ class ModelParser:
 
         ordered_var_names = list(raw_variables.keys())
         variable_data: dict[str, dict[str, Any]] = {}
-        allowed_keys = {"steady_state", "linearization"}
+        allowed_keys = {"ss_seed", "linearization"}
         for name, spec in raw_variables.items():
             if spec is None:
                 variable_data[name] = {}
@@ -501,17 +491,17 @@ class ModelParser:
     ) -> Variables:
         _, variable_data = ModelParser._coerce_variable_data(data)
 
-        steady_state: dict[Function, Expr | None] = {}
+        ss_seed: dict[Function, Expr | None] = {}
         linearization: dict[Function, LinearizationMethod] = {}
 
         for var_name, var_func in zip(ordered_var_names, variable_funcs):
             spec = variable_data[var_name]
 
-            ss_raw = spec.get("steady_state", None)
+            ss_raw = spec.get("ss_seed", None)
             if ss_raw is None:
-                steady_state[var_func] = None
+                ss_seed[var_func] = None
             else:
-                steady_state[var_func] = _get_expr(str(ss_raw))
+                ss_seed[var_func] = _get_expr(str(ss_raw))
 
             method_raw = spec.get("linearization", LinearizationMethod.NONE.value)
             if isinstance(method_raw, str):
@@ -525,7 +515,7 @@ class ModelParser:
 
         return Variables(
             variables=variable_funcs,
-            steady_state=FunctionGetterDict(steady_state),
+            ss_seed=FunctionGetterDict(ss_seed),
             linearization=FunctionGetterDict(linearization),
         )
 
@@ -534,11 +524,11 @@ class ModelParser:
         data: dict[str, Any], _LOCALS: dict[str, Any]
     ) -> SymbolGetterDict[Symbol, float64]:
         calib = data.get("calibration", {}).get("parameters", {}) or {}
+        param_names = calib.keys()
         return SymbolGetterDict(
             {
                 _LOCALS[param_name]: float64(calib[param_name])
-                for param_name in data["parameters"]
-                if param_name in calib
+                for param_name in param_names
             }
         )
 
@@ -701,16 +691,7 @@ class ModelParser:
 
     @staticmethod
     def _require_calibrated_params(data: dict[str, Any]) -> None:
-        declared = set(data.get("parameters", []))
         calib = data.get("calibration", {}).get("parameters", {}) or {}
-        calibrated = set(calib.keys())
-
-        missing_declared = sorted(declared - calibrated)
-        if missing_declared:
-            raise ValueError(
-                "Missing calibration values for declared parameter(s): "
-                + ", ".join(missing_declared)
-            )
 
         referenced: set[str] = set()
 
@@ -725,9 +706,9 @@ class ModelParser:
 
         referenced = {p for p in referenced if isinstance(p, str)}
 
-        unknown = sorted(referenced - declared)
+        unknown = sorted(referenced - calib.keys())
         if unknown:
             raise ValueError(
-                "Config references parameter(s) not declared in `parameters`: "
+                "Config references parameter(s) not declared in `calibration.parameters`: "
                 + ", ".join(unknown)
             )

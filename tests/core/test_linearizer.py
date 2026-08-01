@@ -26,11 +26,10 @@ def _nonlinear_model_yaml() -> str:
         variables:
           a:
             linearization: log
-            steady_state: a_ss
+            ss_seed: a_ss
           k:
             linearization: taylor
-            steady_state: k_ss
-        parameters: [rho_a, rho_k, gamma, a_ss, k_ss, sig_a]
+            ss_seed: k_ss
         shock_map:
           e_a: a
         observables: [AObs]
@@ -64,12 +63,11 @@ def _mixed_methods_nonlinear_yaml() -> str:
         variables:
           a:
             linearization: log
-            steady_state: a_ss
+            ss_seed: a_ss
           k:
             linearization: taylor
-            steady_state: k_ss
+            ss_seed: k_ss
           z: {}
-        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z, meas_z]
         shock_map:
           e_a: a
           e_z: z
@@ -115,7 +113,6 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         """
         name: "HAND_LINEARIZED_EQUIVALENCE_TEST"
         variables: [a, k, z]
-        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z, meas_z]
         shock_map:
           e_a: a
           e_z: z

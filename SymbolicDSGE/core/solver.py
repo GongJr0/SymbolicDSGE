@@ -351,10 +351,10 @@ class DSGESolver:
         """Newton seed for the steady state, in canonical variable order.
 
         Priority: an explicit ``ss_seed`` (a dict is scattered into canonical
-        order, missing entries 0) > the model's configured symbolic steady state
+        order, missing entries 0) > the model's configured symbolic ``ss_seed``
         > zeros. Newton resolves ``F(ss, ss) = 0`` from here, so a gap model
         (ss = 0) seeds at 0 and converges in one step, while a level model that
-        declares its steady state in the config seeds itself.
+        declares its seed in the config seeds itself.
         """
         if ss_seed is not None:
             if isinstance(ss_seed, dict):
@@ -369,7 +369,7 @@ class DSGESolver:
         params = conf.calibration.parameters
         ss = np.zeros(len(compiled.var_names), dtype=float64)
         for i, name in enumerate(compiled.var_names):
-            expr = conf.variables.steady_state[name_to_func[name]]
+            expr = conf.variables.ss_seed[name_to_func[name]]
             if expr is None:
                 continue
             val = sp.simplify(sp.sympify(expr).subs(params))

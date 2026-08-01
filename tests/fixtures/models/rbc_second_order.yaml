@@ -10,11 +10,9 @@
 name: "RBC_SECOND_ORDER"
 
 variables:
-  c: {steady_state: c_ss}
-  k: {steady_state: k_ss}
-  z: {steady_state: null} # z_ss = 0
-
-parameters: [beta, gamma, alpha, delta, rho, sig, k_ss, c_ss]
+  c: {ss_seed: c_ss}
+  k: {ss_seed: k_ss}
+  z: {ss_seed: null} # z_ss = 0
 
 shock_map:
   e: z

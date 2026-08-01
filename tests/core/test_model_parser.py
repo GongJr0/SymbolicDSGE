@@ -74,10 +74,9 @@ def test_kalman_R_built_numerically_from_calibration(parsed_post82):
 _R_ARITHMETIC_MODEL = """
 name: RTEST
 variables:
-  x: {steady_state: null}
-  y: {steady_state: null}
-  z: {steady_state: null}
-parameters: [rho, sig, sig_x, sig_y, sig_z, rho_xy]
+  x: {ss_seed: null}
+  y: {ss_seed: null}
+  z: {ss_seed: null}
 shock_map:
   e_x: x
   e_y: y
@@ -147,8 +146,7 @@ def _p0_model_dict(p0: dict) -> dict:
     """A minimal two-variable (x, y) model carrying a `kalman.P0` block."""
     return {
         "name": "P0TEST",
-        "variables": {"x": {"steady_state": None}, "y": {"steady_state": None}},
-        "parameters": ["rho", "sig"],
+        "variables": {"x": {"ss_seed": None}, "y": {"ss_seed": None}},
         "shock_map": {"e_x": "x", "e_y": "y"},
         "observables": ["x_obs", "y_obs"],
         "equations": {
@@ -237,21 +235,12 @@ def test_validate_constraints_accepts_valid_obc(parsed_test):
     ModelParser.validate_constraints(conf)
 
 
-def test_validate_calib_errors_for_unknown_parameter(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
-    bad_param = sp.Symbol("not_declared")
-    conf.calibration.parameters[bad_param] = 1.0
-
-    with pytest.raises(ValueError, match="unknown parameters"):
-        ModelParser.validate_calib(conf)
-
-
-def test_require_calibrated_params_rejects_missing_declared(tmp_path):
+def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
-    with pytest.raises(ValueError, match="Missing calibration values"):
+    with pytest.raises(ValueError, match="SympifyError: beta"):
         ModelParser(bad)
 
 
@@ -260,11 +249,11 @@ def test_require_calibrated_params_rejects_unknown_referenced_parameter(tmp_path
     data["calibration"]["shocks"]["std"]["e_u"] = "unknown_sigma"
     bad = _write_yaml(tmp_path / "unknown_ref.yaml", data)
 
-    with pytest.raises(ValueError, match="not declared in `parameters`"):
+    with pytest.raises(ValueError, match="not declared in `calibration.parameters`"):
         ModelParser(bad)
 
 
-def test_require_calibrated_params_rejects_missing_declared_parameter_even_if_referenced(
+def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
     tmp_path,
 ):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
@@ -272,7 +261,7 @@ def test_require_calibrated_params_rejects_missing_declared_parameter_even_if_re
     data["calibration"]["parameters"].pop("sig_u")
     bad = _write_yaml(tmp_path / "missing_ref.yaml", data)
 
-    with pytest.raises(ValueError, match="Missing calibration values"):
+    with pytest.raises(ValueError, match="not declared in `calibration.parameters`"):
         ModelParser(bad)
 
 
@@ -285,7 +274,7 @@ def test_parser_rejects_model_equation_without_single_equals(tmp_path):
         ModelParser(bad)
 
 
-def test_legacy_variable_list_defaults_linearization_and_steady_state(parsed_test):
+def test_legacy_variable_list_defaults_linearization_and_ss_seed(parsed_test):
     conf = parsed_test.model
 
     assert conf.symbolically_linearized is False
@@ -301,7 +290,7 @@ def test_legacy_variable_list_defaults_linearization_and_steady_state(parsed_tes
         method == LinearizationMethod.NONE
         for method in conf.variables.linearization.values()
     )
-    assert all(ss is None for ss in conf.variables.steady_state.values())
+    assert all(ss is None for ss in conf.variables.ss_seed.values())
 
 
 def test_parser_builds_variable_metadata_from_mapping(tmp_path):
@@ -309,9 +298,9 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     data["variables"] = {
         "u": {"linearization": "taylor"},
         "v": {},
-        "r": {"linearization": "log", "steady_state": "rbar"},
-        "Pi": {"steady_state": "pi_mean"},
-        "x": {"steady_state": None},
+        "r": {"linearization": "log", "ss_seed": "rbar"},
+        "Pi": {"ss_seed": "pi_mean"},
+        "x": {"ss_seed": None},
         "r_star": {"linearization": "none"},
     }
     bad = _write_yaml(tmp_path / "variable_metadata.yaml", data)
@@ -329,15 +318,15 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     assert conf.variables.linearization["u"] == LinearizationMethod.TAYLOR
     assert conf.variables.linearization["v"] == LinearizationMethod.NONE
     assert conf.variables.linearization["r"] == LinearizationMethod.LOG
-    assert conf.variables.steady_state["r"] == sp.Symbol("rbar")
-    assert conf.variables.steady_state["Pi"] == sp.Symbol("pi_mean")
-    assert conf.variables.steady_state["x"] is None
+    assert conf.variables.ss_seed["r"] == sp.Symbol("rbar")
+    assert conf.variables.ss_seed["Pi"] == sp.Symbol("pi_mean")
+    assert conf.variables.ss_seed["x"] is None
 
 
-def test_parser_rejects_legacy_steady_state_typo_key(tmp_path):
+def test_parser_rejects_retired_steady_state_key(tmp_path):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
     data["variables"] = {
-        "u": {"stead_state": "ubar"},
+        "u": {"steady_state": "ubar"},
         "v": {},
         "r": {},
         "Pi": {},

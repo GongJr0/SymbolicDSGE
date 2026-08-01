@@ -2,12 +2,6 @@ name: "TEST"
 
 variables: [u, v, r, Pi, x, r_star]
 
-parameters: [beta, sigma, kappa,
-             phi_pi, phi_x, rho_r,
-             rho_u, rho_v, sig_u,
-             sig_v, rbar, pi_mean,
-             elb_level]
-
 shock_map:
     e_u: u
     e_v: v
@@ -20,7 +14,6 @@ equations:
     #    i.e., u(t) = rho_u*u(t-1) + e_u  -->  u(t+1) = rho_u*u(t) + e_u
 
     #    Time shifts are limited to +-1 period. Shifts of |n| > 1 will result in an error.
-
 
     model:
         # Placeholder Phillips Curve:

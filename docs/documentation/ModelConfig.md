@@ -39,7 +39,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | variables | `#!python list[sp.Function]` | Variables as functions of time. |
-| steady_state | `#!python FunctionGetterDict[Function, Expr | None]` | Steady state expression per variable, or `None`. |
+| ss_seed | `#!python FunctionGetterDict[Function, Expr | None]` | Newton seed for the steady-state solve, per variable. `None` seeds at zero. |
 | linearization | `#!python FunctionGetterDict[Function, LinearizationMethod]` | Linearization method per variable. |
 
 ## `Equations`

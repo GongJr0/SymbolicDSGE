@@ -12,15 +12,6 @@ variables: [g, z, r, x, Pi]
 # sig_r, sig_g, sig_z: std devs of innovations
 # rho_gz: corr(e_g, e_z)
 
-parameters: [beta, kappa, tau_inv,
-             psi_pi, psi_x, rho_r,
-             rho_g, rho_z,
-             pi_star, r_star,
-             sig_r, sig_g, sig_z,
-             rho_gz,
-             meas_infl, meas_rate, meas_outgap,
-             meas_rho_ir, meas_rho_gi, meas_rho_gr]
-
 shock_map:
   e_g: g
   e_z: z

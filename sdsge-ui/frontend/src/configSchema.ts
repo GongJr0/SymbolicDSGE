@@ -62,10 +62,10 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
                     description:
                       "Symbolic linearization method used when compile(linearize=True) is requested.",
                   },
-                  steady_state: {
+                  ss_seed: {
                     oneOf: [{ type: "string" }, { type: "number" }, { type: "null" }],
                     description:
-                      "Steady-state expression required for log or Taylor linearization.",
+                      "Newton seed for the steady state. Null seeds at zero.",
                   },
                 },
               },

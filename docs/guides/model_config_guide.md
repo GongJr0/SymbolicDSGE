@@ -43,13 +43,13 @@ variables: # as mapping
     z:
     r:
         linearization: log  # (2)!
-        steady_state: r_star # (3)!
+        ss_seed: r_star # (3)!
     ...
 ```
 
 1. Exongenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
 2. Can be one of `log`, `taylor`, or `none`.
-3. Name of the parameter containing the steady state level.
+3. Newton seed for the steady state. Omitted seeds at zero. Doubles as the expansion point under `log` or `taylor`.
 
 ## Parameters
 
@@ -61,16 +61,15 @@ Common examples of parameters are:
 - Steady state values
 - Model parameters such as the discount factor (often $\beta$)
 
-Ordering of the parameters does not matter in the configuration file.
-The `parameters` field is again declared as a list.
+Parameters are declared by their entries under [`calibration.parameters`](#parameters_1).
+There is no separate `parameters` list; a name is a parameter if and only if it is calibrated.
 
 ```yaml
-parameters: [beta, kappa, tau_inv,
-             psi_pi, psi_x, rho_r,
-             rho_g, rho_z,
-             pi_star, r_star,
-             sig_r, sig_g, sig_z,
-             rho_gz]
+calibration:
+    parameters:
+        beta: 0.99
+        kappa: 0.58
+        tau_inv: 1.86
 ```
 
 ???+ note "Calibration Values"
@@ -205,8 +204,8 @@ calibration:
 
 ### Parameters
 
-This section is used to define the known values of model parameters.
-All parameters defined in the namespace must (for now) have a value entry here.
+This section declares the model parameters and their known values.
+Any name referenced by the equations, shock calibration, or Kalman block must appear here.
 
 ```yaml
 calibration:
