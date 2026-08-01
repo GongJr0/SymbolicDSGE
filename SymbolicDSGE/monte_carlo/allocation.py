@@ -8,7 +8,7 @@ named logical arrays.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, NamedTuple, Sequence, TypeAlias
+from typing import Any, Mapping, NamedTuple, Sequence, TypeAlias, cast
 
 import numpy as np
 
@@ -208,14 +208,9 @@ def _resolve_datagen_input_asize(
 ) -> ArenaSize:
     if step.step_type == "raw_model_data":
         return ArenaSize()
-    if step.step_type != "simulation":
-        raise NotImplementedError(
-            f"Input arena resolution is not implemented for datagen step type "
-            f"{step.step_type!r}."
-        )
-    model = reference if step.kwargs["target"] == "reference" else dgp
-    if model is None:
-        raise ValueError("Simulation input planning requires its target model.")
+    model = cast(
+        SolvedModel, reference if step.kwargs["target"] == "reference" else dgp
+    )
     T = int(step.kwargs["T"])
     size = _asize(
         _arena.simulation_arena_size(
@@ -241,10 +236,7 @@ def _resolve_filter_input_asize(
     datagen_plan: StepBufferPlan,
     reference: SolvedModel,
 ) -> ArenaSize:
-    try:
-        T, datagen_n_obs = datagen_plan.out_fields["observables"].shape
-    except KeyError as exc:
-        raise ValueError("Filter input planning requires datagen observables.") from exc
+    T, datagen_n_obs = datagen_plan.out_fields["observables"].shape
     selected_observables = step.kwargs["observables"]
     if selected_observables is not None:
         n_obs = len(selected_observables)
@@ -276,17 +268,12 @@ def _resolve_regression_input_asize(
     plans: BufferPlan,
     steps: Sequence[MCStep],
 ) -> ArenaSize:
-    y_rows, y_columns = _selected_source_shape(
+    y_rows, _ = _selected_source_shape(
         plans, steps, source_indices[0], step.source_args[0]
     )
-    X_rows, X_columns = _selected_source_shape(
+    _, X_columns = _selected_source_shape(
         plans, steps, source_indices[1], step.source_args[1]
     )
-    if y_columns != 1 or y_rows != X_rows:
-        raise ValueError(
-            f"Regression step {step.name!r} must resolve one response column and "
-            "matching response and design row counts."
-        )
     intercept = bool(step.kwargs["intercept"])
     p = X_columns + int(intercept)
     return _asize(
