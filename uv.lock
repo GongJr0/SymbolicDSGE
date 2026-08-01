@@ -3814,7 +3814,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cloudpickle", specifier = ">=3.1.2" },
-    { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.139.2" },
+    { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.140.13" },
     { name = "fredapi", marker = "extra == 'fred'", specifier = ">=0.5.2" },
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "numba", specifier = ">=0.62.1,!=0.66.0" },
