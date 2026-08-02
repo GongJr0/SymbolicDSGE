@@ -18,14 +18,13 @@ def _parse(text: str):
 BASE = """
 name: MINI
 variables:
-  x: {steady_state: null}
-parameters: [rho, sig]
+  x: {ss_seed: null}
 shock_map:
   e: x
 observables: [x_obs]
 equations:
   model:
-    - x(t+1) = rho * x(t) + e
+    x_process: "x(t+1) = rho * x(t) + e"
   constraint: {}
   observables:
     x_obs: x(t)
@@ -47,18 +46,10 @@ def test_base_is_valid():
 
 def test_rejects_invalid_linearization_method():
     text = BASE.replace(
-        "x: {steady_state: null}",
-        "x: {steady_state: null, linearization: bogus}",
+        "x: {ss_seed: null}",
+        "x: {ss_seed: null, linearization: bogus}",
     )
     with pytest.raises(ValueError, match="Invalid linearization method 'bogus'"):
-        _parse(text)
-
-
-def test_rejects_declared_but_uncalibrated_parameter():
-    text = BASE.replace(
-        "parameters: [rho, sig]", "parameters: [rho, sig, phi]"
-    ).replace("x(t+1) = rho * x(t) + e", "x(t+1) = rho * x(t) + phi * x(t) + e")
-    with pytest.raises(ValueError, match="[Mm]issing calibration values"):
         _parse(text)
 
 
@@ -75,11 +66,9 @@ def test_rejects_trivial_equation():
 
 
 def test_rejects_malformed_observable_correlation_pair():
-    # rho_obs must be declared + calibrated so the undeclared-parameter check
-    # passes and parsing reaches the R-correlation pair guard.
-    text = BASE.replace(
-        "parameters: [rho, sig]", "parameters: [rho, sig, rho_obs]"
-    ).replace("    sig: 0.1", "    sig: 0.1\n    rho_obs: 0.0")
+    # rho_obs must be calibrated so the undeclared-parameter check passes and
+    # parsing reaches the R-correlation pair guard.
+    text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    rho_obs: 0.0")
     kalman_block = """
 kalman:
   R:

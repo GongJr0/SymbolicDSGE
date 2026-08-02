@@ -22,21 +22,20 @@ def _nonlinear_compile_yaml() -> str:
         variables:
           a:
             linearization: log
-            steady_state: a_ss
+            ss_seed: a_ss
           k:
             linearization: taylor
-            steady_state: k_ss
+            ss_seed: k_ss
           z: {}
-        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z]
         shock_map:
           e_a: a
           e_z: z
         observables: []
         equations:
           model:
-            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a
-            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)
-            - z(t+1) = rho_z*z(t) + e_z
+            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)"
+            z_process: "z(t+1) = rho_z*z(t) + e_z"
           constraint: {}
           observables: {}
         calibration:
@@ -202,7 +201,8 @@ def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
     t = sp.Symbol("t", integer=True)
     u = bad.variables.variables[0]
     e_u = next(iter(bad.shock_map.keys()))
-    bad.equations.model[0] = sp.Eq(u(t + 2), bad.parameters[0] * u(t) + e_u)
+    first = next(iter(bad.equations.model))
+    bad.equations.model[first] = sp.Eq(u(t + 2), bad.parameters[0] * u(t) + e_u)
 
     solver = DSGESolver(bad, kalman)
     with pytest.raises(ValueError, match="bad time offsets"):

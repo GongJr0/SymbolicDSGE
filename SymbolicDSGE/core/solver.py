@@ -6,7 +6,7 @@ from sympy import Symbol, Function, Expr
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
-from numpy import float64, complex128, asarray, ndarray, real_if_close
+from numpy import float64, complex128, asarray, ndarray
 from numpy.typing import NDArray
 
 import pandas as pd
@@ -56,7 +56,7 @@ class DSGESolver:
         # Convert model to minimization problem
         obj = [
             sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
-            for eq in conf.equations.model
+            for eq in conf.equations.model.values()
         ]
 
         shifted = [self._offset_lags(o, t) for o in obj]
@@ -184,7 +184,7 @@ class DSGESolver:
         exo_state_names = tuple(name for name in declared_names if name in shocked)
 
         state_candidates: set[str] = set()
-        for eq in conf.equations.model:
+        for eq in conf.equations.model.values():
             lhs_info = self._function_call_offset(eq.lhs, declared_set, t)
             if lhs_info is not None:
                 name, offset = lhs_info
@@ -351,10 +351,10 @@ class DSGESolver:
         """Newton seed for the steady state, in canonical variable order.
 
         Priority: an explicit ``ss_seed`` (a dict is scattered into canonical
-        order, missing entries 0) > the model's configured symbolic steady state
+        order, missing entries 0) > the model's configured symbolic ``ss_seed``
         > zeros. Newton resolves ``F(ss, ss) = 0`` from here, so a gap model
         (ss = 0) seeds at 0 and converges in one step, while a level model that
-        declares its steady state in the config seeds itself.
+        declares its seed in the config seeds itself.
         """
         if ss_seed is not None:
             if isinstance(ss_seed, dict):
@@ -369,7 +369,7 @@ class DSGESolver:
         params = conf.calibration.parameters
         ss = np.zeros(len(compiled.var_names), dtype=float64)
         for i, name in enumerate(compiled.var_names):
-            expr = conf.variables.steady_state[name_to_func[name]]
+            expr = conf.variables.ss_seed[name_to_func[name]]
             if expr is None:
                 continue
             val = sp.simplify(sp.sympify(expr).subs(params))
@@ -377,7 +377,7 @@ class DSGESolver:
                 ss[i] = float(val)
             except TypeError as exc:
                 raise ValueError(
-                    f"Steady state for '{name}' did not evaluate to a number: {val}"
+                    f"ss_seed for '{name}' did not evaluate to a number: {val}"
                 ) from exc
         return ss
 

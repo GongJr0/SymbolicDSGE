@@ -10,6 +10,7 @@ import sympy as sp
 import yaml
 
 from SymbolicDSGE.core.model_parser import ModelParser
+from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE.core.linearization import LinearizationMethod
 
 
@@ -74,10 +75,9 @@ def test_kalman_R_built_numerically_from_calibration(parsed_post82):
 _R_ARITHMETIC_MODEL = """
 name: RTEST
 variables:
-  x: {steady_state: null}
-  y: {steady_state: null}
-  z: {steady_state: null}
-parameters: [rho, sig, sig_x, sig_y, sig_z, rho_xy]
+  x: {ss_seed: null}
+  y: {ss_seed: null}
+  z: {ss_seed: null}
 shock_map:
   e_x: x
   e_y: y
@@ -85,9 +85,9 @@ shock_map:
 observables: [x_obs, y_obs, z_obs]
 equations:
   model:
-    - x(t+1) = rho * x(t) + e_x
-    - y(t+1) = rho * y(t) + e_y
-    - z(t+1) = rho * z(t) + e_z
+    x_process: "x(t+1) = rho * x(t) + e_x"
+    y_process: "y(t+1) = rho * y(t) + e_y"
+    z_process: "z(t+1) = rho * z(t) + e_z"
   constraint: {}
   observables:
     x_obs: x(t)
@@ -147,12 +147,14 @@ def _p0_model_dict(p0: dict) -> dict:
     """A minimal two-variable (x, y) model carrying a `kalman.P0` block."""
     return {
         "name": "P0TEST",
-        "variables": {"x": {"steady_state": None}, "y": {"steady_state": None}},
-        "parameters": ["rho", "sig"],
+        "variables": {"x": {"ss_seed": None}, "y": {"ss_seed": None}},
         "shock_map": {"e_x": "x", "e_y": "y"},
         "observables": ["x_obs", "y_obs"],
         "equations": {
-            "model": ["x(t+1) = rho * x(t) + e_x", "y(t+1) = rho * y(t) + e_y"],
+            "model": {
+                "x_process": "x(t+1) = rho * x(t) + e_x",
+                "y_process": "y(t+1) = rho * y(t) + e_y",
+            },
             "constraint": {},
             "observables": {"x_obs": "x(t)", "y_obs": "y(t)"},
         },
@@ -214,44 +216,157 @@ def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     ghost = sp.Function("ghost")
-    var = conf.variables.variables[0]
-    # OBC condition references an undeclared variable -> rejected.
-    conf.equations.constraint = type(conf.equations.constraint)(
-        {var: {ghost(t) < 0: sp.Integer(0)}}
-    )
+    # Binding condition references an undeclared variable -> rejected.
+    conf.equations.constraint = {
+        "obc": Constraint(bind=ghost(t) < 0, relax=ghost(t) >= 0)
+    }
 
     with pytest.raises(ValueError, match="unknown symbols"):
         ModelParser.validate_constraints(conf)
 
 
-def test_validate_constraints_accepts_valid_obc(parsed_test):
+def test_validate_constraints_accepts_valid_conditions(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
-    # Well-formed OBC over a declared variable ({var(t) < 0: 0}) must not raise;
-    # the time symbol is excluded and the binding is a valid Expr.
-    conf.equations.constraint = type(conf.equations.constraint)(
-        {var: {var(t) < 0: sp.Integer(0)}}
-    )
+    # Declared variable on both conditions; the time symbol is excluded.
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
 
     ModelParser.validate_constraints(conf)
 
 
-def test_validate_calib_errors_for_unknown_parameter(parsed_test):
+def test_validate_constraints_accepts_boolean_conditions(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
-    bad_param = sp.Symbol("not_declared")
-    conf.calibration.parameters[bad_param] = 1.0
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    conf.equations.constraint = {
+        "obc": Constraint(bind=sp.And(a(t) < 0, b(t) < 0), relax=a(t) >= 0)
+    }
 
-    with pytest.raises(ValueError, match="unknown parameters"):
-        ModelParser.validate_calib(conf)
+    ModelParser.validate_constraints(conf)
 
 
-def test_require_calibrated_params_rejects_missing_declared(tmp_path):
+def test_validate_constraints_rejects_more_than_two(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    conf.equations.constraint = {
+        f"obc{i}": Constraint(bind=var(t) < 0, relax=var(t) >= 0)
+        for i, var in enumerate(conf.variables.variables[:3])
+    }
+
+    with pytest.raises(NotImplementedError, match="1- and 2-constraint"):
+        ModelParser.validate_constraints(conf)
+
+
+def test_validate_regimes_requires_constraint_and_regime_together(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regime = None
+
+    with pytest.raises(ValueError, match="declared together"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_requires_every_binding_combination(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    first, second = list(conf.equations.model)[:2]
+    conf.equations.constraint = {
+        "lo": Constraint(bind=a(t) < 0, relax=a(t) >= 0),
+        "hi": Constraint(bind=b(t) < 0, relax=b(t) >= 0),
+    }
+    # The joint cell {lo, hi} is absent.
+    conf.equations.regime = {
+        frozenset({"lo"}): {first: sp.Eq(a(t), 0)},
+        frozenset({"hi"}): {second: sp.Eq(b(t), 0)},
+    }
+
+    with pytest.raises(ValueError, match="missing entries for binding combinations"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_rejects_unknown_replacement_target(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regime = {frozenset({"obc"}): {"nosuch": sp.Eq(var(t), 0)}}
+
+    with pytest.raises(ValueError, match="replaces undeclared model equations"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_accepts_a_complete_two_constraint_grid(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    first, second = list(conf.equations.model)[:2]
+    conf.equations.constraint = {
+        "lo": Constraint(bind=a(t) < 0, relax=a(t) >= 0),
+        "hi": Constraint(bind=b(t) < 0, relax=b(t) >= 0),
+    }
+    conf.equations.regime = {
+        frozenset({"lo"}): {first: sp.Eq(a(t), 0)},
+        frozenset({"hi"}): {second: sp.Eq(b(t), 0)},
+        frozenset({"lo", "hi"}): {first: sp.Eq(a(t), 0), second: sp.Eq(b(t), 0)},
+    }
+
+    ModelParser.validate_regimes(conf)
+
+
+def test_validate_ss_seed_accepts_scalars_and_parameter_expressions(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    beta, rho_u = sp.Symbol("beta"), sp.Symbol("rho_u")
+    var = conf.variables.variables[0]
+    for expr in (sp.Float(0.8), sp.Integer(0), beta, beta / (1 - rho_u), None):
+        conf.variables.ss_seed[var] = expr
+        ModelParser.validate_ss_seed(conf)
+
+
+def test_validate_ss_seed_errors_on_undeclared_parameter(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    var = conf.variables.variables[0]
+    conf.variables.ss_seed[var] = sp.Symbol("not_a_param")
+
+    with pytest.raises(ValueError, match="references unknown symbols"):
+        ModelParser.validate_ss_seed(conf)
+
+
+def test_validate_ss_seed_errors_on_model_variable_reference(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    conf.variables.ss_seed[var] = var(t)
+
+    with pytest.raises(ValueError, match="must resolve to a number"):
+        ModelParser.validate_ss_seed(conf)
+
+
+def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path):
+    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+    data["variables"] = {
+        "u": {"ss_seed": "u_bar"},
+        "v": {},
+        "r": {},
+        "Pi": {},
+        "x": {},
+        "r_star": {},
+    }
+    bad = _write_yaml(tmp_path / "bad_ss_seed.yaml", data)
+
+    with pytest.raises(ValueError, match="references unknown symbols"):
+        ModelParser(bad)
+
+
+def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
-    with pytest.raises(ValueError, match="Missing calibration values"):
+    with pytest.raises(ValueError, match="SympifyError: beta"):
         ModelParser(bad)
 
 
@@ -260,11 +375,11 @@ def test_require_calibrated_params_rejects_unknown_referenced_parameter(tmp_path
     data["calibration"]["shocks"]["std"]["e_u"] = "unknown_sigma"
     bad = _write_yaml(tmp_path / "unknown_ref.yaml", data)
 
-    with pytest.raises(ValueError, match="not declared in `parameters`"):
+    with pytest.raises(ValueError, match="not declared in `calibration.parameters`"):
         ModelParser(bad)
 
 
-def test_require_calibrated_params_rejects_missing_declared_parameter_even_if_referenced(
+def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
     tmp_path,
 ):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
@@ -272,7 +387,7 @@ def test_require_calibrated_params_rejects_missing_declared_parameter_even_if_re
     data["calibration"]["parameters"].pop("sig_u")
     bad = _write_yaml(tmp_path / "missing_ref.yaml", data)
 
-    with pytest.raises(ValueError, match="Missing calibration values"):
+    with pytest.raises(ValueError, match="not declared in `calibration.parameters`"):
         ModelParser(bad)
 
 
@@ -285,7 +400,7 @@ def test_parser_rejects_model_equation_without_single_equals(tmp_path):
         ModelParser(bad)
 
 
-def test_legacy_variable_list_defaults_linearization_and_steady_state(parsed_test):
+def test_legacy_variable_list_defaults_linearization_and_ss_seed(parsed_test):
     conf = parsed_test.model
 
     assert conf.symbolically_linearized is False
@@ -301,7 +416,7 @@ def test_legacy_variable_list_defaults_linearization_and_steady_state(parsed_tes
         method == LinearizationMethod.NONE
         for method in conf.variables.linearization.values()
     )
-    assert all(ss is None for ss in conf.variables.steady_state.values())
+    assert all(ss is None for ss in conf.variables.ss_seed.values())
 
 
 def test_parser_builds_variable_metadata_from_mapping(tmp_path):
@@ -309,9 +424,9 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     data["variables"] = {
         "u": {"linearization": "taylor"},
         "v": {},
-        "r": {"linearization": "log", "steady_state": "rbar"},
-        "Pi": {"steady_state": "pi_mean"},
-        "x": {"steady_state": None},
+        "r": {"linearization": "log", "ss_seed": "rbar"},
+        "Pi": {"ss_seed": "pi_mean"},
+        "x": {"ss_seed": None},
         "r_star": {"linearization": "none"},
     }
     bad = _write_yaml(tmp_path / "variable_metadata.yaml", data)
@@ -329,15 +444,15 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     assert conf.variables.linearization["u"] == LinearizationMethod.TAYLOR
     assert conf.variables.linearization["v"] == LinearizationMethod.NONE
     assert conf.variables.linearization["r"] == LinearizationMethod.LOG
-    assert conf.variables.steady_state["r"] == sp.Symbol("rbar")
-    assert conf.variables.steady_state["Pi"] == sp.Symbol("pi_mean")
-    assert conf.variables.steady_state["x"] is None
+    assert conf.variables.ss_seed["r"] == sp.Symbol("rbar")
+    assert conf.variables.ss_seed["Pi"] == sp.Symbol("pi_mean")
+    assert conf.variables.ss_seed["x"] is None
 
 
-def test_parser_rejects_legacy_steady_state_typo_key(tmp_path):
+def test_parser_rejects_retired_steady_state_key(tmp_path):
     data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
     data["variables"] = {
-        "u": {"stead_state": "ubar"},
+        "u": {"steady_state": "ubar"},
         "v": {},
         "r": {},
         "Pi": {},

@@ -27,7 +27,6 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
   type: "object",
   required: [
     "variables",
-    "parameters",
     "shock_map",
     "observables",
     "equations",
@@ -62,10 +61,10 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
                     description:
                       "Symbolic linearization method used when compile(linearize=True) is requested.",
                   },
-                  steady_state: {
+                  ss_seed: {
                     oneOf: [{ type: "string" }, { type: "number" }, { type: "null" }],
                     description:
-                      "Steady-state expression required for log or Taylor linearization.",
+                      "Newton seed for the steady state. Null seeds at zero.",
                   },
                 },
               },
@@ -77,12 +76,6 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
     constrained: {
       ...boolMap,
       description: "Map from variable name to whether the variable has a constraint equation.",
-    },
-    parameters: {
-      type: "array",
-      items: { type: "string" },
-      uniqueItems: true,
-      description: "Declared parameter names. Each must have a calibration value.",
     },
     shock_map: {
       ...symbolMap,
@@ -100,14 +93,39 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
       additionalProperties: false,
       properties: {
         model: {
-          type: "array",
-          items: { type: "string" },
-          minItems: 1,
-          description: "Model equations written as SymPy-parseable equalities.",
+          ...expressionMap,
+          minProperties: 1,
+          description: "Map from equation name to a SymPy-parseable equality.",
         },
         constraint: {
-          ...expressionMap,
-          description: "Map from constrained variable name to relational constraint.",
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            additionalProperties: false,
+            required: ["bind", "relax"],
+            properties: {
+              bind: {
+                type: "string",
+                description:
+                  "Entry condition, evaluated on the reference path. Relational or boolean combination.",
+              },
+              relax: {
+                type: "string",
+                description:
+                  "Exit condition, evaluated on the binding regime's shadow value.",
+              },
+            },
+          },
+          description: "Map from constraint name to its entry and exit conditions.",
+        },
+        regime: {
+          type: "object",
+          additionalProperties: {
+            ...expressionMap,
+            minProperties: 1,
+          },
+          description:
+            "Map from comma-joined binding constraint names, e.g. 'elb, irr', to the model equations that regime replaces.",
         },
         observables: {
           ...expressionMap,

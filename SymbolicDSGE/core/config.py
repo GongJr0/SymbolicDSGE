@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Any, TypeVar, Dict
+from typing import Any, TypeAlias, TypeVar, Dict
 from sympy import Symbol, Function, Eq, Expr, Matrix, And, Or, Not
 from sympy.core.relational import Relational
 from numpy import float64
@@ -70,11 +70,19 @@ class Base:
 
 
 @dataclass
+class Constraint(Base):
+    bind: Relational | And | Or | Not
+    relax: Relational | And | Or | Not
+
+
+Regime: TypeAlias = Dict[str, Eq]  # {model_equation_name: replacement}
+
+
+@dataclass
 class Equations(Base):
-    model: list[Eq]
-    constraint: SymbolGetterDict[
-        Symbol, Dict[Relational | And | Or | Not, Expr]
-    ]  # OBC Mapping = {var: {ineq_constraint: alternative_expr}}
+    model: Dict[str, Eq]
+    constraint: Dict[str, Constraint] | None  # {constraint_name: Constraint}
+    regime: Dict[frozenset[str], Regime] | None  # {binding_set: Regime}
     observable: SymbolGetterDict[Symbol, Expr]
     obs_is_affine: SymbolGetterDict[Symbol, bool]
     obs_jacobian: Matrix
@@ -90,7 +98,8 @@ class Calib(Base):
 @dataclass
 class Variables(Base):
     variables: list[Function]
-    steady_state: FunctionGetterDict[Function, Expr | None]
+    # None == 0 seed newton.
+    ss_seed: FunctionGetterDict[Function, Expr | None]
     linearization: FunctionGetterDict[Function, LinearizationMethod]
 
 

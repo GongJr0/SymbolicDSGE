@@ -26,18 +26,17 @@ def _nonlinear_model_yaml() -> str:
         variables:
           a:
             linearization: log
-            steady_state: a_ss
+            ss_seed: a_ss
           k:
             linearization: taylor
-            steady_state: k_ss
-        parameters: [rho_a, rho_k, gamma, a_ss, k_ss, sig_a]
+            ss_seed: k_ss
         shock_map:
           e_a: a
         observables: [AObs]
         equations:
           model:
-            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + e_a
-            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + gamma*(a(t) - a_ss)
+            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + gamma*(a(t) - a_ss)"
           constraint: {}
           observables:
             AObs: a(t)
@@ -64,21 +63,20 @@ def _mixed_methods_nonlinear_yaml() -> str:
         variables:
           a:
             linearization: log
-            steady_state: a_ss
+            ss_seed: a_ss
           k:
             linearization: taylor
-            steady_state: k_ss
+            ss_seed: k_ss
           z: {}
-        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z, meas_z]
         shock_map:
           e_a: a
           e_z: z
         observables: [ZObs]
         equations:
           model:
-            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a
-            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)
-            - z(t+1) = rho_z*z(t) + e_z
+            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)"
+            z_process: "z(t+1) = rho_z*z(t) + e_z"
           constraint: {}
           observables:
             ZObs: z(t)
@@ -115,16 +113,15 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         """
         name: "HAND_LINEARIZED_EQUIVALENCE_TEST"
         variables: [a, k, z]
-        parameters: [rho_a, rho_k, rho_z, gamma, a_ss, k_ss, sig_a, sig_z, meas_z]
         shock_map:
           e_a: a
           e_z: z
         observables: [ZObs]
         equations:
           model:
-            - a_ss*a(t+1) = rho_a*a_ss*a(t) + gamma*z(t) + e_a
-            - k(t+1) = rho_k*k(t) + z(t)
-            - z(t+1) = rho_z*z(t) + e_z
+            a_process: "a_ss*a(t+1) = rho_a*a_ss*a(t) + gamma*z(t) + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + z(t)"
+            z_process: "z(t+1) = rho_z*z(t) + e_z"
           constraint: {}
           observables:
             ZObs: z(t)

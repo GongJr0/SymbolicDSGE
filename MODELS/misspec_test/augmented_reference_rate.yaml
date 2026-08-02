@@ -2,33 +2,6 @@ name: "NK_LS_POST82"
 
 variables: [g, z, r, x, Pi]
 
-parameters:
-  [
-    beta,
-    kappa,
-    tau_inv,
-    psi_pi,
-    psi_x,
-    rho_r,
-    rho_g,
-    rho_z,
-    pi_star,
-    r_star,
-    sig_r,
-    sig_g,
-    sig_z,
-    rho_gz,
-    meas_infl,
-    meas_rate,
-    meas_outgap,
-    meas_rho_ir,
-    meas_rho_gi,
-    meas_rho_gr,
-    Pi_coef,
-    x_coef,
-    r_coef,
-  ]
-
 shock_map:
   e_g: g
   e_z: z
@@ -38,11 +11,11 @@ observables: [OutGap, Infl, Rate]
 
 equations:
   model:
-    - Pi(t) = beta*Pi(t+1) + kappa*(x(t) - z(t))
-    - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
-    - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*(x(t) - z(t))) + e_r
-    - g(t) = rho_g*g(t-1) + e_g
-    - z(t) = rho_z*z(t-1) + e_z
+    nkpc: "Pi(t) = beta*Pi(t+1) + kappa*(x(t) - z(t))"
+    euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)"
+    taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*(x(t) - z(t))) + e_r"
+    g_process: "g(t) = rho_g*g(t-1) + e_g"
+    z_process: "z(t) = rho_z*z(t-1) + e_z"
 
   constraint: {}
 

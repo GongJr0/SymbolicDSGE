@@ -44,8 +44,8 @@ def test_model_config_is_dict_indexable_and_nested_objects_are_base(
 
     assert conf["name"] == "TEST"
     assert conf["equations"] is conf.equations
-    assert list(map(str, conf.equations.to_dict()["model"])) == list(
-        map(str, conf.equations.model)
+    assert list(map(str, conf.equations.to_dict()["model"].values())) == list(
+        map(str, conf.equations.model.values())
     )
     assert (
         conf.calibration.to_dict()["parameters"].keys()
