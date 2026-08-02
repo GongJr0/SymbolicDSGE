@@ -1,6 +1,12 @@
 """Symbolic expression printers used by native numeric callbacks."""
 
 from .base import ExpressionPrinter, Layout, OpTable
+from .constraint_printer import (
+    ConstraintLayout,
+    ConstraintOps,
+    ConstraintPrinter,
+    build_constraint_cfunc,
+)
 from .measurement_printer import (
     F64Ops,
     MeasurementLayout,
@@ -19,6 +25,9 @@ from .residual_printer import (
 __all__ = [
     "BicomplexOps",
     "C128Ops",
+    "ConstraintLayout",
+    "ConstraintOps",
+    "ConstraintPrinter",
     "ExpressionPrinter",
     "F64Ops",
     "Layout",
@@ -28,6 +37,7 @@ __all__ = [
     "ResidualLayout",
     "ResidualPrinter",
     "build_cfunc",
+    "build_constraint_cfunc",
     "build_measurement_cfunc",
     "build_njit",
 ]
