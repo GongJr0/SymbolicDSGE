@@ -153,7 +153,7 @@ class ModelParser:
         free: set[Symbol] = set()
         for expr in exprs:
             applied |= expr.atoms(AppliedUndef)
-            free |= expr.free_symbols
+            free |= expr.free_symbols  # pyright: ignore
 
         time_syms = {s for c in applied for a in c.args for s in a.free_symbols}
         var_funcs = {c.func for c in applied}
@@ -396,6 +396,14 @@ class ModelParser:
                 f"Allowed: {sorted(allowed)}."
             )
 
+    @staticmethod
+    def _require_mapping(value: Any, where: str) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise TypeError(
+                f"'{where}' must be a mapping, got {type(value).__name__}: {value!r}"
+            )
+        return value
+
     @classmethod
     def _validate_schema(cls, data: dict[str, Any]) -> None:
         cls._check_deprecated(data)
@@ -530,7 +538,10 @@ class ModelParser:
                 raise TypeError(f"Constraint is not a valid SymPy Relational: {expr!r}")
             return out
 
-        def _get_eq(expr: str) -> Eq:
+        def _get_eq(expr: str | None) -> Eq:
+            if expr is None:
+                raise ValueError("Equation string cannot be None.")
+
             parts = [p.strip() for p in expr.split("=", maxsplit=2)]
             if len(parts) != 2:
                 raise ValueError(f"Equation must contain exactly one '=': {expr!r}")
@@ -553,8 +564,9 @@ class ModelParser:
 
         return _get_expr, _get_relational, _get_eq
 
-    @staticmethod
+    @classmethod
     def _parse_equations(
+        cls,
         data: dict[str, Any],
         _LOCALS: dict[str, Any],
         ordered_var_names: list[str],
@@ -570,19 +582,35 @@ class ModelParser:
 
         constraint_raw = eq_data.get("constraint", {}) or {}
 
-        constraint: dict[str, Constraint] = {
-            name: Constraint(
+        constraint: dict[str, Constraint] = {}
+        for name, raw_spec in constraint_raw.items():
+            spec = cls._require_mapping(raw_spec, f"equations.constraint.{name}")
+            constraint[name] = Constraint(
                 bind=_get_relational(spec["bind"]),
                 relax=_get_relational(spec["relax"]),
             )
-            for name, spec in constraint_raw.items()
-        }
 
         regime_raw = eq_data.get("regime", {}) or {}
         regime_key = lambda k: frozenset(map(str.strip, k.split(",")))
 
+        # Distinct spellings can name one constraint set ("a, b" and "b, a").
+        by_key: dict[frozenset[str], list[str]] = {}
+        for raw_key in regime_raw:
+            by_key.setdefault(regime_key(raw_key), []).append(raw_key)
+        if collisions := {k: v for k, v in by_key.items() if len(v) > 1}:
+            raise ValueError(
+                "Regime keys must name distinct constraint sets: "
+                + "; ".join(
+                    f"{sorted(spellings)} all name {sorted(key)}"
+                    for key, spellings in collisions.items()
+                )
+            )
+
         regime: dict[frozenset[str], Regime] = {
-            regime_key(k): {name: _get_eq(eq) for name, eq in v.items()}
+            regime_key(k): {
+                name: _get_eq(eq)
+                for name, eq in cls._require_mapping(v, f"equations.regime.{k}").items()
+            }
             for k, v in regime_raw.items()
         }
 
