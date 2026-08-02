@@ -4,22 +4,27 @@ import copy
 import sys
 from dataclasses import dataclass
 from io import StringIO
+from itertools import combinations
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from types import FrameType
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, TypeAlias
 import warnings
 
+from sympy.core.basic import Basic
 from sympy.core.symbol import AppliedUndef
 import yaml
 import sympy as sp
 from sympy import Matrix, Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
+from sympy.logic.boolalg import And, Or, Not
 from sympy.parsing.sympy_parser import standard_transformations, convert_xor
 from numpy import float64, ndarray
 
 from .config import (
     ModelConfig,
+    Constraint,
+    Regime,
     Equations,
     Calib,
     Variables,
@@ -51,10 +56,12 @@ _ALLOWED_TOP_LEVEL_KEYS = (
 )
 
 #: Allowed sub-keys for the nested config blocks
-_ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "observables"})
-_ALLOWED_CONSTRAINT_KEYS = frozenset(
-    {"displaces", "binds_when", "relaxes_when", "expression"}
-)
+_ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "regime", "observables"})
+_ALLOWED_CONSTRAINT_KEYS = frozenset({"bind", "relax"})
+
+#: Sympy types accepted as a regime entry/exit condition.
+_REGIME_SHIFT_CONDITIONAL: TypeAlias = Relational | And | Or | Not
+
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
 _ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
 _ALLOWED_KALMAN_KEYS = frozenset({"P0", "R"})
@@ -103,6 +110,7 @@ class ModelParser:
     def __post_init__(self) -> None:
         conf = self.parsed.model
         self.validate_constraints(conf)
+        self.validate_regimes(conf)  # reads validated bind conditions
         self.validate_ss_seed(conf)
 
     def get(self) -> ModelConfig:
@@ -133,36 +141,130 @@ class ModelParser:
         parser.parsed.model.source_yaml = text
         return parser
 
-    # --- existing validators unchanged ---
+    @staticmethod
+    def _unknown_atoms(conf: ModelConfig, *exprs: Basic) -> set[Any]:
+        """Variables and parameters referenced by *exprs* that the model omits.
+
+        Time symbols come from the free symbols of each applied function's
+        arguments, so an offset term like ``x(t+1)`` clears ``t`` the way
+        ``x(t)`` does.
+        """
+        applied: set[Any] = set()
+        free: set[Symbol] = set()
+        for expr in exprs:
+            applied |= expr.atoms(AppliedUndef)
+            free |= expr.free_symbols
+
+        time_syms = {s for c in applied for a in c.args for s in a.free_symbols}
+        var_funcs = {c.func for c in applied}
+
+        return (var_funcs - set(conf.variables.variables)) | (
+            (free - time_syms) - set(conf.parameters)
+        )
+
     @classmethod
     def validate_constraints(cls, conf: ModelConfig) -> None:
-        constraints: SymbolGetterDict[Symbol, dict[Relational, Expr]] = (
-            conf.equations.constraint
-        )  # pyright: ignore
-        for var, ineq_map in constraints.items():
-            # Check if inequalities and OBCs refer to uninitialized variables
-            for ineq, alt_obc in ineq_map.items():
-                if not isinstance(ineq, Relational):
-                    raise TypeError(
-                        f"Constraint for variable '{var}' is not a valid SymPy Relational: {ineq!r}"
-                    )
-                if not isinstance(alt_obc, Expr):
-                    raise TypeError(
-                        f"Alternative OBC for variable '{var}' is not a valid SymPy Expr: {alt_obc!r}"
-                    )
-                applied = ineq.atoms(AppliedUndef) | alt_obc.atoms(AppliedUndef)
-                time_syms = {a for c in applied for a in c.args}
-                param_syms = (ineq.free_symbols | alt_obc.free_symbols) - time_syms
+        if not conf.equations.constraint:
+            return
 
-                var_funcs = {c.func for c in applied}
+        constraints: dict[str, Constraint] = conf.equations.constraint
 
-                unknown_atoms = (var_funcs - set(conf.variables.variables)) | (
-                    param_syms - set(conf.parameters)
+        if len(constraints) > 2:
+            raise NotImplementedError(
+                "SymbolicDSGE currently supports the 1- and 2-constraint OccBin equivalent to that of Dynare."
+            )
+
+        for name, constraint in constraints.items():
+
+            # Check if inequalities refer to uninitialized variables
+            if not isinstance((binds := constraint.bind), _REGIME_SHIFT_CONDITIONAL):
+                raise TypeError(
+                    f"Binding condition for constraint '{name}' is not a valid SymPy Relational: {binds!r}"
                 )
-                if unknown_atoms:
-                    raise ValueError(
-                        f"Constraint for variable '{var}' references unknown symbols: {unknown_atoms}"
-                    )
+            if not isinstance((relaxes := constraint.relax), _REGIME_SHIFT_CONDITIONAL):
+                raise TypeError(
+                    f"Relaxing condition for constraint '{name}' is not a valid SymPy Relational: {relaxes!r}"
+                )
+
+            unknown_atoms = cls._unknown_atoms(conf, binds, relaxes)
+            if unknown_atoms:
+                raise ValueError(
+                    f"Constraint '{name}' references unknown symbols: {unknown_atoms}"
+                )
+
+    @classmethod
+    def validate_regimes(cls, conf: ModelConfig) -> None:
+        constraints = conf.equations.constraint
+        regimes = conf.equations.regime
+        if not constraints and not regimes:
+            return
+        if not constraints or not regimes:
+            raise ValueError(
+                "equations.constraint and equations.regime must be declared together; "
+                f"got constraint={'set' if constraints else 'empty'}, "
+                f"regime={'set' if regimes else 'empty'}"
+            )
+
+        declared = set(constraints)
+        unknown_members = {n for key in regimes for n in key} - declared
+        if unknown_members:
+            raise ValueError(
+                f"Regime keys name undeclared constraints: {sorted(unknown_members)}; "
+                f"declared: {sorted(declared)}"
+            )
+
+        # Every combination of binding constraints needs its own equation set.
+        expected = {
+            frozenset(combo)
+            for size in range(1, len(declared) + 1)
+            for combo in combinations(sorted(declared), size)
+        }
+        missing = expected - set(regimes)
+        if missing:
+            raise ValueError(
+                "equations.regime is missing entries for binding combinations: "
+                f"{sorted(', '.join(sorted(key)) for key in missing)}"
+            )
+
+        for key, regime in regimes.items():
+            cls._validate_regime(conf, key, regime, constraints)
+
+    @classmethod
+    def _validate_regime(
+        cls,
+        conf: ModelConfig,
+        key: frozenset[str],
+        regime: Regime,
+        constraints: dict[str, Constraint],
+    ) -> None:
+        label = ", ".join(sorted(key))
+
+        if sp.simplify(sp.And(*(constraints[n].bind for n in key))) is sp.false:
+            raise ValueError(
+                f"Regime '{label}' can never bind: its members' conditions are mutually exclusive"
+            )
+
+        if not regime:
+            raise ValueError(f"Regime '{label}' replaces no model equations")
+
+        unknown_targets = set(regime) - set(conf.equations.model)
+        if unknown_targets:
+            raise ValueError(
+                f"Regime '{label}' replaces undeclared model equations: "
+                f"{sorted(unknown_targets)}; declared: {sorted(conf.equations.model)}"
+            )
+
+        for target, replacement in regime.items():
+            if not isinstance(replacement, Eq):
+                raise TypeError(
+                    f"Replacement for '{target}' in regime '{label}' is not a valid SymPy Eq: {replacement!r}"
+                )
+            unknown_atoms = cls._unknown_atoms(conf, replacement)
+            if unknown_atoms:
+                raise ValueError(
+                    f"Replacement for '{target}' in regime '{label}' "
+                    f"references unknown symbols: {unknown_atoms}"
+                )
 
     @classmethod
     def validate_ss_seed(cls, conf: ModelConfig) -> None:
@@ -299,9 +401,15 @@ class ModelParser:
         cls._check_deprecated(data)
         cls._reject_unknown_keys(data, _ALLOWED_TOP_LEVEL_KEYS, "<root>")
         cls._reject_unknown_keys(
-            data.get("equations"), _ALLOWED_EQUATION_KEYS, "equations"
+            (eq := data.get("equations")), _ALLOWED_EQUATION_KEYS, "equations"
         )
-
+        if isinstance(eq, dict):
+            for name, spec in (eq.get("constraint") or {}).items():
+                cls._reject_unknown_keys(
+                    spec,
+                    _ALLOWED_CONSTRAINT_KEYS,
+                    f"equations.constraint.{name}",
+                )
         calib = data.get("calibration")
         cls._reject_unknown_keys(calib, _ALLOWED_CALIBRATION_KEYS, "calibration")
         if isinstance(calib, dict):
@@ -397,7 +505,7 @@ class ModelParser:
         _LOCALS: dict[str, Any],
     ) -> tuple[
         Callable[[str], Expr],
-        Callable[[str], Relational],
+        Callable[[str], _REGIME_SHIFT_CONDITIONAL],
         Callable[[str], Eq],
     ]:
         def _get_expr(expr: str) -> Expr:
@@ -411,14 +519,14 @@ class ModelParser:
                 raise TypeError(f"Expression is not a valid SymPy Expr: {expr!r}")
             return out
 
-        def _get_relational(expr: str) -> Relational:
+        def _get_relational(expr: str) -> _REGIME_SHIFT_CONDITIONAL:
             out = sp.parse_expr(
                 expr,
                 local_dict=_LOCALS,
                 evaluate=False,
                 transformations=_GLOBAL_TRANSFORMATIONS,
             )
-            if not isinstance(out, Relational):
+            if not isinstance(out, _REGIME_SHIFT_CONDITIONAL):
                 raise TypeError(f"Constraint is not a valid SymPy Relational: {expr!r}")
             return out
 
@@ -451,7 +559,7 @@ class ModelParser:
         _LOCALS: dict[str, Any],
         ordered_var_names: list[str],
         _get_eq: Callable[[str], Eq],
-        _get_relational: Callable[[str], Relational],
+        _get_relational: Callable[[str], _REGIME_SHIFT_CONDITIONAL],
         _get_expr: Callable[[str], Expr],
     ) -> Equations:
         eq_data = data["equations"]
@@ -460,17 +568,22 @@ class ModelParser:
             name: _get_eq(eq) for name, eq in eq_data["model"].items()
         }
 
-        # preserve variable order
         constraint_raw = eq_data.get("constraint", {}) or {}
-        constraint: dict[Symbol, dict[Relational, Expr]] = {
-            _LOCALS[var_name]: {
-                _get_relational(ineq): _get_expr(
-                    str(alt_obc)
-                )  # cast str so raw scalars don't throw
-                for ineq, alt_obc in constraint_raw[var_name].items()
-            }
-            for var_name in ordered_var_names
-            if var_name in constraint_raw
+
+        constraint: dict[str, Constraint] = {
+            name: Constraint(
+                bind=_get_relational(spec["bind"]),
+                relax=_get_relational(spec["relax"]),
+            )
+            for name, spec in constraint_raw.items()
+        }
+
+        regime_raw = eq_data.get("regime", {}) or {}
+        regime_key = lambda k: frozenset(map(str.strip, k.split(",")))
+
+        regime: dict[frozenset[str], Regime] = {
+            regime_key(k): {name: _get_eq(eq) for name, eq in v.items()}
+            for k, v in regime_raw.items()
         }
 
         observables_raw = eq_data.get("observables", {}) or {}
@@ -488,7 +601,8 @@ class ModelParser:
 
         return Equations(
             model=model,
-            constraint=SymbolGetterDict(constraint),
+            constraint=constraint if constraint else None,
+            regime=regime if regime else None,
             observable=SymbolGetterDict(observables_eq),
             obs_is_affine=SymbolGetterDict(is_affine),
             obs_jacobian=obs_jacobian,

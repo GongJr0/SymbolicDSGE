@@ -98,8 +98,34 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
           description: "Map from equation name to a SymPy-parseable equality.",
         },
         constraint: {
-          ...expressionMap,
-          description: "Map from constrained variable name to relational constraint.",
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            additionalProperties: false,
+            required: ["bind", "relax"],
+            properties: {
+              bind: {
+                type: "string",
+                description:
+                  "Entry condition, evaluated on the reference path. Relational or boolean combination.",
+              },
+              relax: {
+                type: "string",
+                description:
+                  "Exit condition, evaluated on the binding regime's shadow value.",
+              },
+            },
+          },
+          description: "Map from constraint name to its entry and exit conditions.",
+        },
+        regime: {
+          type: "object",
+          additionalProperties: {
+            ...expressionMap,
+            minProperties: 1,
+          },
+          description:
+            "Map from comma-joined binding constraint names, e.g. 'elb, irr', to the model equations that regime replaces.",
         },
         observables: {
           ...expressionMap,

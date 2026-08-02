@@ -10,6 +10,7 @@ import sympy as sp
 import yaml
 
 from SymbolicDSGE.core.model_parser import ModelParser
+from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE.core.linearization import LinearizationMethod
 
 
@@ -215,27 +216,105 @@ def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     ghost = sp.Function("ghost")
-    var = conf.variables.variables[0]
-    # OBC condition references an undeclared variable -> rejected.
-    conf.equations.constraint = type(conf.equations.constraint)(
-        {var: {ghost(t) < 0: sp.Integer(0)}}
-    )
+    # Binding condition references an undeclared variable -> rejected.
+    conf.equations.constraint = {
+        "obc": Constraint(bind=ghost(t) < 0, relax=ghost(t) >= 0)
+    }
 
     with pytest.raises(ValueError, match="unknown symbols"):
         ModelParser.validate_constraints(conf)
 
 
-def test_validate_constraints_accepts_valid_obc(parsed_test):
+def test_validate_constraints_accepts_valid_conditions(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
-    # Well-formed OBC over a declared variable ({var(t) < 0: 0}) must not raise;
-    # the time symbol is excluded and the binding is a valid Expr.
-    conf.equations.constraint = type(conf.equations.constraint)(
-        {var: {var(t) < 0: sp.Integer(0)}}
-    )
+    # Declared variable on both conditions; the time symbol is excluded.
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
 
     ModelParser.validate_constraints(conf)
+
+
+def test_validate_constraints_accepts_boolean_conditions(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    conf.equations.constraint = {
+        "obc": Constraint(bind=sp.And(a(t) < 0, b(t) < 0), relax=a(t) >= 0)
+    }
+
+    ModelParser.validate_constraints(conf)
+
+
+def test_validate_constraints_rejects_more_than_two(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    conf.equations.constraint = {
+        f"obc{i}": Constraint(bind=var(t) < 0, relax=var(t) >= 0)
+        for i, var in enumerate(conf.variables.variables[:3])
+    }
+
+    with pytest.raises(NotImplementedError, match="1- and 2-constraint"):
+        ModelParser.validate_constraints(conf)
+
+
+def test_validate_regimes_requires_constraint_and_regime_together(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regime = None
+
+    with pytest.raises(ValueError, match="declared together"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_requires_every_binding_combination(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    first, second = list(conf.equations.model)[:2]
+    conf.equations.constraint = {
+        "lo": Constraint(bind=a(t) < 0, relax=a(t) >= 0),
+        "hi": Constraint(bind=b(t) < 0, relax=b(t) >= 0),
+    }
+    # The joint cell {lo, hi} is absent.
+    conf.equations.regime = {
+        frozenset({"lo"}): {first: sp.Eq(a(t), 0)},
+        frozenset({"hi"}): {second: sp.Eq(b(t), 0)},
+    }
+
+    with pytest.raises(ValueError, match="missing entries for binding combinations"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_rejects_unknown_replacement_target(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regime = {frozenset({"obc"}): {"nosuch": sp.Eq(var(t), 0)}}
+
+    with pytest.raises(ValueError, match="replaces undeclared model equations"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_accepts_a_complete_two_constraint_grid(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    first, second = list(conf.equations.model)[:2]
+    conf.equations.constraint = {
+        "lo": Constraint(bind=a(t) < 0, relax=a(t) >= 0),
+        "hi": Constraint(bind=b(t) < 0, relax=b(t) >= 0),
+    }
+    conf.equations.regime = {
+        frozenset({"lo"}): {first: sp.Eq(a(t), 0)},
+        frozenset({"hi"}): {second: sp.Eq(b(t), 0)},
+        frozenset({"lo", "hi"}): {first: sp.Eq(a(t), 0), second: sp.Eq(b(t), 0)},
+    }
+
+    ModelParser.validate_regimes(conf)
 
 
 def test_validate_ss_seed_accepts_scalars_and_parameter_expressions(parsed_test):
