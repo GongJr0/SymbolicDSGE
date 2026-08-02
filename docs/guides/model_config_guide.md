@@ -116,20 +116,20 @@ The equations field treats all variables as a function of time; to refer to past
 
 ### Model Equations
 
-This field contains the state-space definition. Multiple equations are supplied to form all necessary interactions.
+This field contains the state-space definition. Equations are supplied as a mapping from equation name to equation, forming all necessary interactions.
 
 ```yaml
 equations:
     model:
-        - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t) # (1)!
+        nkpc: "Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)" # (1)!
 
-        - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t) # (2)!
+        euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)" # (2)!
 
-        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r # (3)!
+        taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r" # (3)!
 
-        - g(t) = rho_g*g(t-1) + e_g # (4)!
+        g_process: "g(t) = rho_g*g(t-1) + e_g" # (4)!
 
-        - z(t) = rho_z*z(t-1) + e_z # (5)!
+        z_process: "z(t) = rho_z*z(t-1) + e_z" # (5)!
     constraint: ...
     observables: ...
 ```
@@ -149,15 +149,15 @@ The `constraint` field stores piecewise OBC definitions. It maps a model variabl
 ```yaml
 equations:
     model:
-        - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
+        nkpc: "Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)"
 
-        - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
+        euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)"
 
-        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
+        taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r"
 
-        - g(t) = rho_g*g(t-1) + e_g
+        g_process: "g(t) = rho_g*g(t-1) + e_g"
 
-        - z(t) = rho_z*z(t-1) + e_z
+        z_process: "z(t) = rho_z*z(t-1) + e_z"
     constraint:
         r:
             r(t) >= 0: 0
@@ -172,15 +172,15 @@ This field contains the mappings of model variables to real-life observed variab
 ```yaml
 equations:
     model:
-        - Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
+        nkpc: "Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)"
 
-        - x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
+        euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)"
 
-        - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
+        taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r"
 
-        - g(t) = rho_g*g(t-1) + e_g
+        g_process: "g(t) = rho_g*g(t-1) + e_g"
 
-        - z(t) = rho_z*z(t-1) + e_z
+        z_process: "z(t) = rho_z*z(t-1) + e_z"
     constraint: {...}
     observables:
         Infl: 4*Pi(t) + pi_star # (1)!

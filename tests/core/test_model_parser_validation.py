@@ -24,7 +24,7 @@ shock_map:
 observables: [x_obs]
 equations:
   model:
-    - x(t+1) = rho * x(t) + e
+    x_process: "x(t+1) = rho * x(t) + e"
   constraint: {}
   observables:
     x_obs: x(t)

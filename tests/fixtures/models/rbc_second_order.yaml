@@ -21,9 +21,9 @@ observables: [c_obs]
 
 equations:
   model:
-    - c(t)**(-gamma) = beta * c(t+1)**(-gamma) * (alpha * exp(z(t+1)) * k(t+1)**(alpha - 1) + 1 - delta)
-    - k(t+1) = exp(z(t)) * k(t)**alpha + (1 - delta) * k(t) - c(t)
-    - z(t+1) = rho * z(t) + e
+    euler: "c(t)**(-gamma) = beta * c(t+1)**(-gamma) * (alpha * exp(z(t+1)) * k(t+1)**(alpha - 1) + 1 - delta)"
+    capital: "k(t+1) = exp(z(t)) * k(t)**alpha + (1 - delta) * k(t) - c(t)"
+    z_process: "z(t+1) = rho * z(t) + e"
   constraint: {}
   observables:
     c_obs: c(t)

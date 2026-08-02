@@ -35,8 +35,8 @@ def _nonlinear_model_yaml() -> str:
         observables: [AObs]
         equations:
           model:
-            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + e_a
-            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + gamma*(a(t) - a_ss)
+            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + gamma*(a(t) - a_ss)"
           constraint: {}
           observables:
             AObs: a(t)
@@ -74,9 +74,9 @@ def _mixed_methods_nonlinear_yaml() -> str:
         observables: [ZObs]
         equations:
           model:
-            - a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a
-            - k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)
-            - z(t+1) = rho_z*z(t) + e_z
+            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)"
+            z_process: "z(t+1) = rho_z*z(t) + e_z"
           constraint: {}
           observables:
             ZObs: z(t)
@@ -119,9 +119,9 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         observables: [ZObs]
         equations:
           model:
-            - a_ss*a(t+1) = rho_a*a_ss*a(t) + gamma*z(t) + e_a
-            - k(t+1) = rho_k*k(t) + z(t)
-            - z(t+1) = rho_z*z(t) + e_z
+            a_process: "a_ss*a(t+1) = rho_a*a_ss*a(t) + gamma*z(t) + e_a"
+            k_process: "k(t+1) = rho_k*k(t) + z(t)"
+            z_process: "z(t+1) = rho_z*z(t) + e_z"
           constraint: {}
           observables:
             ZObs: z(t)

@@ -6,7 +6,7 @@ from sympy import Symbol, Function, Expr
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
-from numpy import float64, complex128, asarray, ndarray, real_if_close
+from numpy import float64, complex128, asarray, ndarray
 from numpy.typing import NDArray
 
 import pandas as pd
@@ -56,7 +56,7 @@ class DSGESolver:
         # Convert model to minimization problem
         obj = [
             sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
-            for eq in conf.equations.model
+            for eq in conf.equations.model.values()
         ]
 
         shifted = [self._offset_lags(o, t) for o in obj]
@@ -184,7 +184,7 @@ class DSGESolver:
         exo_state_names = tuple(name for name in declared_names if name in shocked)
 
         state_candidates: set[str] = set()
-        for eq in conf.equations.model:
+        for eq in conf.equations.model.values():
             lhs_info = self._function_call_offset(eq.lhs, declared_set, t)
             if lhs_info is not None:
                 name, offset = lhs_info

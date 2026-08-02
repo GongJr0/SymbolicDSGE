@@ -27,7 +27,6 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
   type: "object",
   required: [
     "variables",
-    "parameters",
     "shock_map",
     "observables",
     "equations",
@@ -78,12 +77,6 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
       ...boolMap,
       description: "Map from variable name to whether the variable has a constraint equation.",
     },
-    parameters: {
-      type: "array",
-      items: { type: "string" },
-      uniqueItems: true,
-      description: "Declared parameter names. Each must have a calibration value.",
-    },
     shock_map: {
       ...symbolMap,
       description: "Map from shock symbols to exogenous state variables.",
@@ -100,10 +93,9 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
       additionalProperties: false,
       properties: {
         model: {
-          type: "array",
-          items: { type: "string" },
-          minItems: 1,
-          description: "Model equations written as SymPy-parseable equalities.",
+          ...expressionMap,
+          minProperties: 1,
+          description: "Map from equation name to a SymPy-parseable equality.",
         },
         constraint: {
           ...expressionMap,

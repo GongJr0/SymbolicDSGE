@@ -11,15 +11,15 @@ observables: [Infl, Rate, Out_HP]
 
 equations:
   model:
-    - Pi(t) = beta*Pi(t+1) + kappa*(x(t) - z(t))
+    nkpc: "Pi(t) = beta*Pi(t+1) + kappa*(x(t) - z(t))"
 
-    - x(t) = x(t+1) - (1/tau_inv)*(r(t) - Pi(t+1)) + g(t)
+    euler: "x(t) = x(t+1) - (1/tau_inv)*(r(t) - Pi(t+1)) + g(t)"
 
-    - r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*(x(t) - z(t))) + e_r
+    taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*(x(t) - z(t))) + e_r"
 
-    - g(t) = rho_g*g(t-1) + e_g
+    g_process: "g(t) = rho_g*g(t-1) + e_g"
 
-    - z(t) = rho_z*z(t-1) + e_z
+    z_process: "z(t) = rho_z*z(t-1) + e_z"
 
   constraint: {}
 

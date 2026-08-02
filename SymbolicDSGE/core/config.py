@@ -71,7 +71,7 @@ class Base:
 
 @dataclass
 class Equations(Base):
-    model: list[Eq]
+    model: Dict[str, Eq]
     constraint: SymbolGetterDict[
         Symbol, Dict[Relational | And | Or | Not, Expr]
     ]  # OBC Mapping = {var: {ineq_constraint: alternative_expr}}
@@ -90,7 +90,7 @@ class Calib(Base):
 @dataclass
 class Variables(Base):
     variables: list[Function]
-    # None == 0 seed newton. Scalars are subtypes of Expr.
+    # None == 0 seed newton.
     ss_seed: FunctionGetterDict[Function, Expr | None]
     linearization: FunctionGetterDict[Function, LinearizationMethod]
 

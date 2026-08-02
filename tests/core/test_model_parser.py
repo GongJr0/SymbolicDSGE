@@ -84,9 +84,9 @@ shock_map:
 observables: [x_obs, y_obs, z_obs]
 equations:
   model:
-    - x(t+1) = rho * x(t) + e_x
-    - y(t+1) = rho * y(t) + e_y
-    - z(t+1) = rho * z(t) + e_z
+    x_process: "x(t+1) = rho * x(t) + e_x"
+    y_process: "y(t+1) = rho * y(t) + e_y"
+    z_process: "z(t+1) = rho * z(t) + e_z"
   constraint: {}
   observables:
     x_obs: x(t)
@@ -150,7 +150,10 @@ def _p0_model_dict(p0: dict) -> dict:
         "shock_map": {"e_x": "x", "e_y": "y"},
         "observables": ["x_obs", "y_obs"],
         "equations": {
-            "model": ["x(t+1) = rho * x(t) + e_x", "y(t+1) = rho * y(t) + e_y"],
+            "model": {
+                "x_process": "x(t+1) = rho * x(t) + e_x",
+                "y_process": "y(t+1) = rho * y(t) + e_y",
+            },
             "constraint": {},
             "observables": {"x_obs": "x(t)", "y_obs": "y(t)"},
         },

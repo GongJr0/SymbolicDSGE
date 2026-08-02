@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import copy
+import sys
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from types import FrameType
 from typing import Any, Callable, Iterator
+import warnings
 
 from sympy.core.symbol import AppliedUndef
 import yaml
@@ -31,28 +34,46 @@ _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
 #: The only fields permitted at the top level of a model config. Any other key
 #: is rejected at parse time (see ``_validate_schema``).
-_ALLOWED_TOP_LEVEL_KEYS = frozenset(
-    {
-        "name",
-        "variables",
-        "observables",
-        "shock_map",
-        "equations",
-        "calibration",
-        "kalman",
-    }
+_DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters"})
+_ALLOWED_TOP_LEVEL_KEYS = (
+    frozenset(
+        {
+            "name",
+            "variables",
+            "observables",
+            "shock_map",
+            "equations",
+            "calibration",
+            "kalman",
+        }
+    )
+    | _DEPRECATED_TOP_LEVEL_KEYS
 )
 
-#: Allowed sub-keys for the nested config blocks (leaf mappings -- e.g. the
-#: per-variable constraint map or per-parameter values -- are user data, not
-#: schema, and are not key-checked). ``variables`` sub-keys are validated in
-#: ``_coerce_variable_data``.
+#: Allowed sub-keys for the nested config blocks
 _ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "observables"})
+_ALLOWED_CONSTRAINT_KEYS = frozenset(
+    {"displaces", "binds_when", "relaxes_when", "expression"}
+)
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
 _ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
 _ALLOWED_KALMAN_KEYS = frozenset({"P0", "R"})
 _ALLOWED_P0_KEYS = frozenset({"mode", "diag"})
 _ALLOWED_R_KEYS = frozenset({"std", "corr"})
+
+
+def _caller_stacklevel() -> int:
+    """``warnings.warn`` stacklevel of the first frame outside this module.
+
+    Entry depth varies: ``from_string`` re-enters through ``__init__``, so it
+    sits one frame deeper than path-based construction.
+    """
+    frame: FrameType | None = sys._getframe(1)
+    level = 1
+    while frame is not None and frame.f_code.co_filename == __file__:
+        frame = frame.f_back
+        level += 1
+    return level
 
 
 def _list_representer(dumper: yaml.Dumper, data: list[Any]) -> yaml.Node:
@@ -275,6 +296,7 @@ class ModelParser:
 
     @classmethod
     def _validate_schema(cls, data: dict[str, Any]) -> None:
+        cls._check_deprecated(data)
         cls._reject_unknown_keys(data, _ALLOWED_TOP_LEVEL_KEYS, "<root>")
         cls._reject_unknown_keys(
             data.get("equations"), _ALLOWED_EQUATION_KEYS, "equations"
@@ -434,7 +456,9 @@ class ModelParser:
     ) -> Equations:
         eq_data = data["equations"]
 
-        model: list[Eq] = [_get_eq(eq) for eq in eq_data["model"]]
+        model: dict[str, Eq] = {
+            name: _get_eq(eq) for name, eq in eq_data["model"].items()
+        }
 
         # preserve variable order
         constraint_raw = eq_data.get("constraint", {}) or {}
@@ -731,3 +755,20 @@ class ModelParser:
                 "Config references parameter(s) not declared in `calibration.parameters`: "
                 + ", ".join(unknown)
             )
+
+    @staticmethod
+    def _check_deprecated(data: dict[str, Any]) -> None:
+        for key in _DEPRECATED_TOP_LEVEL_KEYS:
+            if key in data:
+                warnings.warn(
+                    f"The key '{key}' is deprecated and will be ignored. Please refer to the documentation (Model Configuration Guide) for the current configuration format.",
+                    FutureWarning,
+                    stacklevel=_caller_stacklevel(),
+                )
+
+        if isinstance(data.get("equations"), dict):
+            if isinstance(data["equations"].get("model", {}), list):
+                raise NotImplementedError(
+                    "Equations as a list have been deprecated and removed. Please use a mapping/dictionary format. "
+                    "Refer to the documentation (Model Configuration Guide) for the updated format."
+                )

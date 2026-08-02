@@ -110,7 +110,7 @@ class Linearizer:
                 var: conf.variables.linearization[var] for var in variable_order
             }
             steady_state = {var: conf.variables.ss_seed[var] for var in variable_order}
-            equations = list(conf.equations.model)
+            equations = list(conf.equations.model.values())
             time_symbol = Symbol("t", integer=True)
             shock_symbols = list(conf.shock_map.keys())
 
@@ -126,8 +126,8 @@ class Linearizer:
         }
         self._equations = equations
         self._residuals: list[Expr] = [
-            eq.lhs - eq.rhs for eq in equations
-        ]  # pyright: ignore
+            eq.lhs - eq.rhs for eq in equations  # pyright: ignore
+        ]
         self._time_symbol = (
             time_symbol if time_symbol is not None else Symbol("t", integer=True)
         )
@@ -338,7 +338,13 @@ def linearize_model(conf: ModelConfig) -> ModelConfig:
 
     linearizer = Linearizer(conf)
     linearized = deepcopy(conf)
-    linearized.equations.model = linearizer.linearize_equations()
+    linearized.equations.model = dict(
+        zip(
+            linearized.equations.model.keys(),
+            linearizer.linearize_equations(),
+            strict=True,
+        )
+    )
     linearized.symbolically_linearized = True
     return linearized
 
