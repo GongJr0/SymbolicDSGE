@@ -2,7 +2,8 @@ import warnings
 from dataclasses import replace
 
 import sympy as sp
-from sympy import Symbol, Function, Expr
+from sympy import Symbol, Function, Expr, Basic
+from sympy.logic.boolalg import Boolean
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
@@ -111,6 +112,10 @@ class DSGESolver:
             for expr in compiled
         ]
 
+        constraint_names, constraint_exprs = self._compile_constraints(
+            conf, subs_map, var_funcs, t
+        )
+
         shifted_obs = [
             self._offset_lags(expr, t) for expr in conf.equations.observable.values()
         ]
@@ -143,7 +148,41 @@ class DSGESolver:
             observable_jacobian_eqs=observable_jacobian_eqs,
             n_state=layout.n_state,
             n_exog=layout.n_exog,
+            constraint_names=constraint_names,
+            constraint_exprs=constraint_exprs,
         )
+
+    def _compile_constraints(
+        self,
+        conf: ModelConfig,
+        subs_map: dict[Any, Symbol],
+        var_funcs: list[Function],
+        t: Symbol,
+    ) -> tuple[tuple[str, ...], list[Boolean]]:
+        """Regime conditions in declaration order, bind then relax per constraint.
+
+        Declaration order is the regime bit order; the ``frozenset`` regime keys
+        carry none. Conditions are contemporaneous, so no lag shift applies and
+        they are never simplified.
+        """
+        constraints = conf.equations.constraint
+        if not constraints:
+            return (), []
+
+        names = tuple(constraints)
+        exprs: list[Boolean] = []
+        for name in names:
+            constraint = constraints[name]
+            for kind, cond in (("bind", constraint.bind), ("relax", constraint.relax)):
+                bad = self._bad_time_offsets(cond, var_funcs, t, allowed={0})
+                if bad:
+                    raise ValueError(
+                        f"Condition '{kind}' of constraint '{name}' has bad time "
+                        f"offsets {sorted(bad)}. Constraint conditions may only "
+                        f"reference contemporaneous variables."
+                    )
+                exprs.append(cond.subs(subs_map))
+        return names, exprs
 
     @staticmethod
     def _coerce_variable_name(var: Any) -> str:
@@ -709,8 +748,13 @@ class DSGESolver:
         return obj
 
     @staticmethod
-    def _bad_time_offsets(expr: Expr, var_funcs: list[Function], t: Symbol) -> set[int]:
-        allowed = {0, 1}
+    def _bad_time_offsets(
+        expr: Basic,
+        var_funcs: list[Function],
+        t: Symbol,
+        allowed: set[int] | None = None,
+    ) -> set[int]:
+        allowed = {0, 1} if allowed is None else allowed
         bad: set[int] = set()
 
         for call in expr.atoms(sp.Function):

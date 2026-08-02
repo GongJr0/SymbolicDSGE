@@ -9,7 +9,7 @@ import pytest
 import sympy as sp
 import yaml
 
-from SymbolicDSGE.core.model_parser import ModelParser
+from SymbolicDSGE.core.model_parser import ModelParser, _check_connective_parens
 from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE.core.linearization import LinearizationMethod
 
@@ -244,6 +244,99 @@ def test_validate_constraints_accepts_boolean_conditions(parsed_test):
     }
 
     ModelParser.validate_constraints(conf)
+
+
+def test_validate_constraints_accepts_nested_connectives(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    cond = sp.Or(sp.And(a(t) < 0, b(t) < 0), sp.Not(a(t) > 5))
+    conf.equations.constraint = {"obc": Constraint(bind=cond, relax=a(t) >= 0)}
+
+    ModelParser.validate_constraints(conf)
+
+
+@pytest.mark.parametrize("depth", ["root", "nested"])
+def test_validate_constraints_rejects_non_relational_leaves(parsed_test, depth):
+    # Symbol subclasses Boolean, so And(x < 0, param) builds fine and the root
+    # type gate accepts it; only the leaf walk rejects the bare operand.
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a = conf.variables.variables[0]
+    param = conf.parameters[0]
+    bind = param if depth == "root" else sp.Or(sp.And(a(t) < 0, param), a(t) > 5)
+    conf.equations.constraint = {"obc": Constraint(bind=bind, relax=a(t) >= 0)}
+
+    with pytest.raises(TypeError, match="is not a valid SymPy Relational"):
+        ModelParser.validate_constraints(conf)
+
+
+def test_validate_constraints_rejects_relation_compared_to_relation(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a, b = conf.variables.variables[:2]
+    conf.equations.constraint = {
+        "obc": Constraint(bind=sp.Eq(a(t) < 0, b(t) < 0), relax=a(t) >= 0)
+    }
+
+    with pytest.raises(TypeError, match="compares the truth value"):
+        ModelParser.validate_constraints(conf)
+
+
+@pytest.mark.parametrize("side", ["bind", "relax"])
+def test_validate_constraints_rejects_shocks(parsed_test, side):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    a = conf.variables.variables[0]
+    shock = next(iter(conf.shock_map))
+    conditions = {"bind": a(t) < 0, "relax": a(t) >= 0}
+    conditions[side] = a(t) + shock < 0
+
+    conf.equations.constraint = {"obc": Constraint(**conditions)}
+
+    match = f"references shock\\(s\\) \\['{shock.name}'\\]"
+    with pytest.raises(ValueError, match=match):
+        ModelParser.validate_constraints(conf)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "x(t) < 0",
+        "(x(t) > 0) & (y(t) < 1)",
+        "(x(t) > 0)|(y(t) < 1)",
+        "((x(t) > 0) & (y(t) < 1)) | (z(t) < 2)",
+        "~(x(t) < 0)",
+    ],
+)
+def test_connective_parens_accepts_parenthesized_relations(condition):
+    _check_connective_parens(condition)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "x(t) > 0 | y(t) < 1",
+        "x(t) > 0 & y(t) < 1",
+        "(x(t) > 0) & y(t) < 1",
+        "x(t) > 0 & (y(t) < 1)",
+    ],
+)
+def test_connective_parens_rejects_unparenthesized_relations(condition):
+    # '&'/'|' bind tighter than the comparisons, so 'x > 0 | y < 1' parses as
+    # And(x > y, y < 1): a valid tree testing something never written.
+    with pytest.raises(ValueError, match="outside parentheses"):
+        _check_connective_parens(condition)
+
+
+def test_parser_rejects_unparenthesized_connective(parsed_test):
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["constraint"] = {
+        "obc": {"bind": "x(t) < 0 & y(t) < 0", "relax": "x(t) >= 0"}
+    }
+
+    with pytest.raises(ValueError, match="outside parentheses"):
+        ModelParser.from_string(yaml.safe_dump(data))
 
 
 def test_validate_constraints_rejects_more_than_two(parsed_test):

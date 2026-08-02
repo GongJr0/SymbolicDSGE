@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import sys
 from dataclasses import dataclass
 from io import StringIO
@@ -83,6 +84,25 @@ def _caller_stacklevel() -> int:
     return level
 
 
+def _check_connective_parens(expr: str) -> None:
+    """Require each ``&``/``|`` in a condition to join parenthesized relations.
+
+    Python binds ``&``/``|`` tighter than the comparisons, so ``x > 0 | y < 1``
+    parses as ``And(x > y, y < 1)``: a valid condition that tests something the
+    user never wrote. No inspection of the parsed tree can detect that, so the
+    raw text is the only place to catch it.
+    """
+    for match in re.finditer(r"[&|]", expr):
+        before = expr[: match.start()].rstrip()
+        after = expr[match.end() :].lstrip()
+        if not before.endswith(")") or not after.startswith("("):
+            raise ValueError(
+                f"Condition {expr!r} uses '{match.group()}' outside parentheses. "
+                f"'&' and '|' bind tighter than the comparisons, so each relation "
+                f"must be parenthesized: '(x > 0) {match.group()} (y < 1)'."
+            )
+
+
 def _list_representer(dumper: yaml.Dumper, data: list[Any]) -> yaml.Node:
     return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=True)
 
@@ -141,6 +161,49 @@ class ModelParser:
         parser.parsed.model.source_yaml = text
         return parser
 
+    @classmethod
+    def _validate_condition(cls, name: str, kind: str, cond: Any) -> None:
+        """Reject a condition that is not relations joined by connectives.
+
+        ``Symbol`` subclasses ``Boolean``, so ``And(x > 0, y)`` builds without
+        complaint and the root type gate accepts it. Only a positive
+        ``Relational`` check at every leaf catches the bare operand, and a
+        positive ``Expr`` check on each side catches a relation compared against
+        another relation.
+        """
+        if isinstance(cond, (And, Or, Not)):
+            for arg in cond.args:
+                cls._validate_condition(name, kind, arg)
+            return
+
+        if not isinstance(cond, Relational):
+            raise TypeError(
+                f"{kind} condition for constraint '{name}' is not a valid "
+                f"SymPy Relational: {cond!r}"
+            )
+
+        for side in cond.args:
+            if not isinstance(side, Expr):
+                raise TypeError(
+                    f"{kind} condition for constraint '{name}' compares the truth "
+                    f"value {side!r} rather than a numeric expression, in {cond!r}. "
+                    f"Combine relations with '&' or '|' between parenthesized "
+                    f"relations, not with a comparison."
+                )
+
+    @staticmethod
+    def _shock_atoms(conf: ModelConfig, *exprs: Basic) -> set[Symbol]:
+        """Shocks referenced by *exprs*.
+
+        Conditions are tested on a realized path where the shocks have already
+        been absorbed into the variables, so a shock cannot appear in one.
+        """
+        shocks = set(conf.shock_map)
+        found: set[Symbol] = set()
+        for expr in exprs:
+            found |= expr.free_symbols & shocks  # pyright: ignore
+        return found
+
     @staticmethod
     def _unknown_atoms(conf: ModelConfig, *exprs: Basic) -> set[Any]:
         """Variables and parameters referenced by *exprs* that the model omits.
@@ -176,16 +239,21 @@ class ModelParser:
 
         for name, constraint in constraints.items():
 
-            # Check if inequalities refer to uninitialized variables
-            if not isinstance((binds := constraint.bind), _REGIME_SHIFT_CONDITIONAL):
-                raise TypeError(
-                    f"Binding condition for constraint '{name}' is not a valid SymPy Relational: {binds!r}"
-                )
-            if not isinstance((relaxes := constraint.relax), _REGIME_SHIFT_CONDITIONAL):
-                raise TypeError(
-                    f"Relaxing condition for constraint '{name}' is not a valid SymPy Relational: {relaxes!r}"
+            binds, relaxes = constraint.bind, constraint.relax
+            cls._validate_condition(name, "Binding", binds)
+            cls._validate_condition(name, "Relaxing", relaxes)
+
+            # Named before _unknown_atoms, which would report a shock as an
+            # unknown symbol: shocks are neither variables nor parameters.
+            shocks = cls._shock_atoms(conf, binds, relaxes)
+            if shocks:
+                raise ValueError(
+                    f"Constraint '{name}' references shock(s) "
+                    f"{sorted(s.name for s in shocks)}; conditions may only "
+                    f"reference model variables and parameters."
                 )
 
+            # Check if inequalities refer to uninitialized variables
             unknown_atoms = cls._unknown_atoms(conf, binds, relaxes)
             if unknown_atoms:
                 raise ValueError(
@@ -528,6 +596,7 @@ class ModelParser:
             return out
 
         def _get_relational(expr: str) -> _REGIME_SHIFT_CONDITIONAL:
+            _check_connective_parens(expr)
             out = sp.parse_expr(
                 expr,
                 local_dict=_LOCALS,
