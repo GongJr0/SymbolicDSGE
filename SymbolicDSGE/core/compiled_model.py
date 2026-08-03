@@ -4,17 +4,21 @@ import numpy as np
 from numpy import complex128, float64
 from numpy.typing import NDArray
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from functools import cached_property
 from typing import Callable, Any, Mapping
+
+from sympy.logic.boolalg import Boolean
 
 from .config import ModelConfig
 from ..kalman.config import KalmanConfig
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
+    ConstraintLayout,
     MeasurementLayout,
     ResidualLayout,
     build_cfunc,
+    build_constraint_cfunc,
     build_measurement_cfunc,
 )
 from .._ckernels.core import jacobian_eval, measurement_eval, residual_eval
@@ -34,6 +38,52 @@ class VariableLayout:
     n_exog: int
     n_state: int
     idx: dict[str, int]
+
+
+@dataclass(frozen=True)
+class ConstraintFunc:
+    """Compiled regime conditions, and everything the native side needs to call them.
+
+    One cfunc evaluates every condition, writing ``2 * n_constraint`` int8 flags:
+    slot ``2i`` is constraint ``i`` binding, slot ``2i + 1`` is it relaxing. The
+    C caller selects with ``next = prev ? !relax : bind``, so both flags of a
+    constraint come from a single call and share their common subexpressions.
+
+    ``names`` is declaration order, which is the regime bit order.
+    """
+
+    cfunc: Any
+    names: tuple[str, ...]
+    n_var: int
+    n_par: int
+
+    @property
+    def address(self) -> int:
+        """Entry point of
+        ``void (*)(const double *cur, const double *par, int8_t *flags)``."""
+        return int(self.cfunc.address)
+
+    @property
+    def n_constraint(self) -> int:
+        return len(self.names)
+
+    @property
+    def n_flag(self) -> int:
+        return 2 * len(self.names)
+
+    def bind_slot(self, name: str) -> int:
+        return 2 * self.names.index(name)
+
+    def relax_slot(self, name: str) -> int:
+        return 2 * self.names.index(name) + 1
+
+    def bit(self, name: str) -> int:
+        """Bitmask position of ``name`` in a regime key."""
+        return self.names.index(name)
+
+    def mask(self, binding: frozenset[str] | set[str]) -> int:
+        """Regime key as a bitmask over ``names``."""
+        return sum(1 << self.bit(n) for n in binding)
 
 
 @dataclass(frozen=True)
@@ -59,6 +109,44 @@ class CompiledModel:
 
     n_state: int
     n_exog: int
+
+    # Regime conditions in declaration order, bind then relax per constraint;
+    # printed to a native cfunc on demand (construct_constraint_func).
+    constraint_names: tuple[str, ...] = ()
+    constraint_exprs: list[Boolean] = field(default_factory=list)
+
+    # Regime residuals in reference equation order, keyed by the bitmask of the
+    # regime's binding constraints over constraint_names; printed to native
+    # cfuncs on demand (construct_regime_cfuncs).
+    regime_eqs: dict[int, list[Expr]] = field(default_factory=dict)
+
+    @cached_property
+    def _regime_cfuncs(self) -> dict[int, Any]:
+        # One residual @cfunc per regime, sharing the reference layout: regimes
+        # replace equations by name, so n_eq/n_var/n_par are unchanged. Held here
+        # so the addresses stay valid for the driver.
+        layout = ResidualLayout.from_compiled(self)
+        return {mask: build_cfunc(eqs, layout) for mask, eqs in self.regime_eqs.items()}
+
+    def construct_regime_cfuncs(self) -> dict[int, Any]:
+        return self._regime_cfuncs
+
+    @cached_property
+    def _constraint_func(self) -> ConstraintFunc | None:
+        # Conditions as one numba @cfunc (C ABI) for the native OccBin driver.
+        # Held here so its .address stays valid for the driver.
+        if not self.constraint_names:
+            return None
+        layout = ConstraintLayout.from_compiled(self, self.constraint_names)
+        return ConstraintFunc(
+            cfunc=build_constraint_cfunc(self.constraint_exprs, layout),
+            names=self.constraint_names,
+            n_var=layout.n_var,
+            n_par=layout.n_par,
+        )
+
+    def construct_constraint_func(self) -> ConstraintFunc | None:
+        return self._constraint_func
 
     @cached_property
     def _objective_cfunc(self) -> Any:
