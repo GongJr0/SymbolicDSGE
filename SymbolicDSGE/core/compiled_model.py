@@ -87,6 +87,14 @@ class ConstraintFunc:
 
 
 @dataclass(frozen=True)
+class RegimeBlock:
+    rows: list[int]
+    residuals: list[Expr] = field(default_factory=list)
+    jac_a: list[Expr] = field(default_factory=list)
+    jac_b: list[Expr] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CompiledModel:
     config: ModelConfig
     kalman: KalmanConfig | None
@@ -115,10 +123,10 @@ class CompiledModel:
     constraint_names: tuple[str, ...] = ()
     constraint_exprs: list[Boolean] = field(default_factory=list)
 
-    # Regime residuals in reference equation order, keyed by the bitmask of the
-    # regime's binding constraints over constraint_names; printed to native
-    # cfuncs on demand (construct_regime_cfuncs).
-    regime_eqs: dict[int, list[Expr]] = field(default_factory=dict)
+    # One block per regime, keyed by the bitmask of its binding constraints over
+    # constraint_names. Residuals stay in reference equation order and print to
+    # native cfuncs on demand (construct_regime_cfuncs).
+    regimes: dict[int, RegimeBlock] = field(default_factory=dict)
 
     @cached_property
     def _regime_cfuncs(self) -> dict[int, Any]:
@@ -126,7 +134,10 @@ class CompiledModel:
         # replace equations by name, so n_eq/n_var/n_par are unchanged. Held here
         # so the addresses stay valid for the driver.
         layout = ResidualLayout.from_compiled(self)
-        return {mask: build_cfunc(eqs, layout) for mask, eqs in self.regime_eqs.items()}
+        return {
+            mask: build_cfunc(block.residuals, layout)
+            for mask, block in self.regimes.items()
+        }
 
     def construct_regime_cfuncs(self) -> dict[int, Any]:
         return self._regime_cfuncs

@@ -153,6 +153,134 @@ def test_flags_match_a_lambdify_oracle(compiled_obc):
         assert _call(cf, cur, par).tolist() == want
 
 
+def _params(compiled):
+    calib = compiled.config.calibration.parameters
+    return np.array([float(calib[p]) for p in compiled.calib_params])
+
+
+def _fold_to_cur(compiled):
+    fwd = [sp.Symbol(f"fwd_{name}") for name in compiled.var_names]
+    return dict(zip(fwd, compiled.cur_syms))
+
+
+def _evaluate(compiled, exprs, n_row, point, par):
+    """Flat row-major jacobian exprs as an (n_row, n_var) block."""
+    args = (compiled.cur_syms, compiled.calib_params)
+    vals = [float(sp.lambdify(args, e, "numpy")(point, par)) for e in exprs]
+    return np.array(vals).reshape(n_row, len(compiled.var_names))
+
+
+def _symbolic_pencil(compiled, residuals):
+    """(a, b) blocks by the diff-then-fold the regime blocks are emitted with."""
+    fold = _fold_to_cur(compiled)
+    a = [sp.diff(e, s).subs(fold) for e in residuals for s in fold]
+    b = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in compiled.cur_syms]
+    return a, b
+
+
+def _assert_pencil_parity(compiled, ss, scale):
+    # Regime blocks are row patches onto this pencil, so the procedure has to
+    # reproduce the reference sweep on every row before a patch of it means
+    # anything. Checked off the expansion point as well.
+    residuals = compiled.objective_eqs
+    par = _params(compiled)
+    n_var = len(compiled.var_names)
+    addr = compiled.construct_objective_cfunc().address
+    a_sym, b_sym = _symbolic_pencil(compiled, residuals)
+
+    assert len(a_sym) == len(residuals) * n_var
+    assert len(b_sym) == len(residuals) * n_var
+
+    rng = np.random.default_rng(0)
+    for trial in range(5):
+        point = ss if trial == 0 else ss + rng.normal(0, scale, n_var)
+        a_ref, b_ref = klein_preprocess(addr, point, par, n_var, False)
+
+        assert np.abs(a_ref).max() > 0.0
+        assert np.abs(b_ref).max() > 0.0
+        np.testing.assert_allclose(
+            _evaluate(compiled, a_sym, len(residuals), point, par), a_ref, atol=1e-10
+        )
+        np.testing.assert_allclose(
+            _evaluate(compiled, b_sym, len(residuals), point, par), b_ref, atol=1e-10
+        )
+
+
+def test_symbolic_pencil_matches_the_reference_sweep(compiled_post82):
+    _assert_pencil_parity(
+        compiled_post82, np.zeros(len(compiled_post82.var_names)), 0.3
+    )
+
+
+@pytest.fixture(scope="module")
+def compiled_lead_regime(parsed_post82):
+    """A replacement with leads, a lead-lead product and a nonlinear cur term.
+
+    The constant replacements above leave ``jac_a`` identically zero, so they
+    match a zero reference block no matter what the emission does. This one
+    forces both blocks nonzero and leaves fwd symbols inside the fwd derivative,
+    which is what the fold onto cur has to clean up.
+    """
+    model, _ = parsed_post82
+    g, z, r = model.variables.variables[:3]
+    beta = model.parameters[0]
+    target = list(model.equations.model)[2]
+    solver = _with_constraints(
+        parsed_post82,
+        {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
+        {
+            frozenset({"lo"}): {
+                target: sp.Eq(
+                    r(t), beta * g(t + 1) * z(t + 1) + sp.exp(g(t + 1)) - r(t) ** 2
+                )
+            }
+        },
+    )
+    return solver.compile()
+
+
+def test_regime_jacobians_match_the_complex_step_pencil(compiled_lead_regime):
+    # The blocks replace a complex-step sweep of the regime, so they have to
+    # reproduce it on the replaced rows. Checked away from the steady state too:
+    # a gap model sits at ss = 0, where a wrong block can still read as right.
+    compiled = compiled_lead_regime
+    block = compiled.regimes[1]
+    n_var = len(compiled.var_names)
+    n_row = len(block.rows)
+    par = _params(compiled)
+    cfunc = compiled.construct_regime_cfuncs()[1]
+
+    assert len(block.jac_a) == n_row * n_var
+    assert len(block.jac_b) == n_row * n_var
+
+    rng = np.random.default_rng(0)
+    for trial in range(5):
+        point = (
+            np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
+        )
+        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var, False)
+
+        assert np.abs(a_r[block.rows, :]).max() > 0.0
+        assert np.abs(b_r[block.rows, :]).max() > 0.0
+        np.testing.assert_allclose(
+            _evaluate(compiled, block.jac_a, n_row, point, par), a_r[block.rows, :]
+        )
+        np.testing.assert_allclose(
+            _evaluate(compiled, block.jac_b, n_row, point, par), b_r[block.rows, :]
+        )
+
+
+def test_regime_jacobians_fold_fwd_symbols_onto_cur(compiled_lead_regime):
+    # The blocks are printed against a single `cur` input vector, so a surviving
+    # fwd symbol would be unresolvable at emission.
+    compiled = compiled_lead_regime
+    block = compiled.regimes[1]
+    fwd_syms = {sp.Symbol(f"fwd_{name}") for name in compiled.var_names}
+
+    for expr in block.jac_a + block.jac_b:
+        assert not expr.free_symbols & fwd_syms
+
+
 @pytest.fixture(scope="module")
 def compiled_regimes(parsed_post82):
     """Two constraints whose regimes each replace the third model equation."""
@@ -178,7 +306,7 @@ def compiled_regimes(parsed_post82):
 def test_regimes_are_keyed_by_binding_bitmask(compiled_regimes):
     cf = compiled_regimes.construct_constraint_func()
 
-    assert sorted(compiled_regimes.regime_eqs) == [1, 2, 3]
+    assert sorted(compiled_regimes.regimes) == [1, 2, 3]
     assert cf.mask(frozenset({"lo"})) == 1
     assert cf.mask(frozenset({"hi"})) == 2
     assert cf.mask(frozenset({"lo", "hi"})) == 3
@@ -189,20 +317,25 @@ def test_regimes_replace_rows_in_reference_order(compiled_regimes):
     # replaced equation's row may differ and n_eq may not change.
     ref = compiled_regimes.objective_eqs
 
-    for mask, eqs in compiled_regimes.regime_eqs.items():
-        assert len(eqs) == len(ref)
+    for mask, block in compiled_regimes.regimes.items():
+        assert len(block.residuals) == len(ref)
         differing = [
-            i for i, (a, b) in enumerate(zip(ref, eqs)) if sp.simplify(a - b) != 0
+            i
+            for i, (a, b) in enumerate(zip(ref, block.residuals))
+            if sp.simplify(a - b) != 0
         ]
         assert differing == [2], f"mask {mask} changed rows {differing}"
+        assert block.rows == differing
 
 
 def test_regime_replacements_lower_to_residuals(compiled_regimes):
     cur_r, beta = sp.Symbol("cur_r"), sp.Symbol("beta")
 
-    assert compiled_regimes.regime_eqs[1][2] == cur_r
-    assert sp.simplify(compiled_regimes.regime_eqs[2][2] - (cur_r - beta)) == 0
-    assert sp.simplify(compiled_regimes.regime_eqs[3][2] - (cur_r - 2 * beta)) == 0
+    assert compiled_regimes.regimes[1].residuals[2] == cur_r
+    assert sp.simplify(compiled_regimes.regimes[2].residuals[2] - (cur_r - beta)) == 0
+    assert (
+        sp.simplify(compiled_regimes.regimes[3].residuals[2] - (cur_r - 2 * beta)) == 0
+    )
 
 
 def test_regime_cfuncs_cover_every_regime_and_are_cached(compiled_regimes):
@@ -264,6 +397,29 @@ def compiled_rbc_obc(rbc_second_order_test_model_path):
     return DSGESolver(conf, kalman).compile()
 
 
+def _rbc_steady_state(compiled):
+    calib = compiled.config.calibration.parameters
+    seed = np.array(
+        [
+            float(calib[sp.Symbol(f"{n}_ss")]) if n != "z" else 0.0
+            for n in compiled.var_names
+        ]
+    )
+    ss, _ = steady_state_newton(
+        compiled.construct_objective_cfunc().address, seed, _params(compiled)
+    )
+    return ss
+
+
+def test_symbolic_pencil_matches_the_reference_sweep_in_levels(compiled_rbc_obc):
+    # POST82 sits at ss = 0, where a pencil can read as right for the wrong
+    # reason. Here the expansion point is nonzero and the equations are
+    # genuinely nonlinear, so the derivatives carry state.
+    ss = _rbc_steady_state(compiled_rbc_obc)
+    assert np.abs(ss).max() > 1.0
+    _assert_pencil_parity(compiled_rbc_obc, ss, 0.05)
+
+
 def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     calib = compiled_rbc_obc.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled_rbc_obc.calib_params])
@@ -313,13 +469,28 @@ def test_regime_replacements_zero_shocks_like_the_reference(parsed_post82):
     compiled = solver.compile()
 
     cur_r = sp.Symbol("cur_r")
-    assert sp.simplify(compiled.regime_eqs[1][2] - cur_r * (1 - rho_r)) == 0
-    assert shock not in compiled.regime_eqs[1][2].free_symbols
+    assert sp.simplify(compiled.regimes[1].residuals[2] - cur_r * (1 - rho_r)) == 0
+    assert shock not in compiled.regimes[1].residuals[2].free_symbols
     assert compiled.construct_regime_cfuncs()[1] is not None
 
 
-def test_model_without_regimes_has_no_regime_eqs(compiled_post82):
-    assert compiled_post82.regime_eqs == {}
+def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
+    # The merge would append rather than overwrite, shifting every later row
+    # index off the reference.
+    model, _ = parsed_post82
+    r = model.variables.variables[2]
+    solver = _with_constraints(
+        parsed_post82,
+        {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
+        {frozenset({"lo"}): {"not_an_equation": sp.Eq(r(t), 0)}},
+    )
+
+    with pytest.raises(ValueError, match=r"does not declare: \['not_an_equation'\]"):
+        solver.compile()
+
+
+def test_model_without_regimes_has_no_regime_blocks(compiled_post82):
+    assert compiled_post82.regimes == {}
     assert compiled_post82.construct_regime_cfuncs() == {}
 
 

@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 import pandas as pd
 
 from .config import ModelConfig, SymbolGetterDict
-from .compiled_model import CompiledModel, VariableLayout
+from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from .linearization import linearize_model
 from .solved_model import SolvedModel
 from .solver_backend import KleinSolution, PerturbationSolution, klein_solve
@@ -115,8 +115,8 @@ class DSGESolver:
         constraint_names, constraint_exprs = self._compile_constraints(
             conf, subs_map, var_funcs, t
         )
-        regime_eqs = self._compile_regimes(
-            conf, constraint_names, subs_map, var_funcs, t
+        regimes = self._compile_regimes(
+            conf, constraint_names, subs_map, cur_syms, fwd_syms, var_funcs, t
         )
 
         shifted_obs = [
@@ -145,7 +145,7 @@ class DSGESolver:
             n_exog=layout.n_exog,
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
-            regime_eqs=regime_eqs,
+            regimes=regimes,
         )
 
     def _compile_constraints(
@@ -185,15 +185,22 @@ class DSGESolver:
         conf: ModelConfig,
         constraint_names: tuple[str, ...],
         subs_map: dict[Any, Symbol],
+        cur_syms: list[Symbol],
+        fwd_syms: list[Symbol],
         var_funcs: list[Function],
         t: Symbol,
-    ) -> dict[int, list[Expr]]:
-        """Regime residuals keyed by the bitmask of their binding constraints.
+    ) -> dict[int, RegimeBlock]:
+        """Regime blocks keyed by the bitmask of their binding constraints.
 
         Each regime is the reference model with its replacements overlaid. Every
         replacement target is a declared model equation, so the merge keeps
         reference equation order and every regime pencil stays row-aligned with
         the reference. Shocks are zeroed as they are on the reference residual.
+
+        ``rows`` records which reference rows the regime replaced, so the native
+        assembly can patch those rows into a copy of the reference pencil instead
+        of sweeping the whole regime. ``jac_a``/``jac_b`` are those rows' pencil
+        blocks, flat row-major ``(len(rows), n_var)``.
         """
         regimes = conf.equations.regime
         if not regimes:
@@ -201,12 +208,24 @@ class DSGESolver:
 
         bit = {name: i for i, name in enumerate(constraint_names)}
         shock_zero_subs = {shock: 0.0 for shock in conf.shock_map}
+        fwd_to_cur = dict(zip(fwd_syms, cur_syms))
 
-        compiled: dict[int, list[Expr]] = {}
+        compiled: dict[int, RegimeBlock] = {}
         for key, replacements in regimes.items():
             label = ", ".join(sorted(key))
+            # An unknown target would append instead of overwrite, silently
+            # lengthening the regime and misplacing every row index after it.
+            unknown = set(replacements) - set(conf.equations.model)
+            if unknown:
+                raise ValueError(
+                    f"Regime '{label}' replaces equations the model does not "
+                    f"declare: {sorted(unknown)}."
+                )
+
             residuals: list[Expr] = []
-            for name, eq in {**conf.equations.model, **replacements}.items():
+            rows: list[int] = []
+            merged = {**conf.equations.model, **replacements}
+            for row, (name, eq) in enumerate(merged.items()):
                 resid = self._offset_lags(
                     sp.simplify(eq.lhs - eq.rhs), t  # pyright: ignore
                 )
@@ -221,7 +240,27 @@ class DSGESolver:
                         resid.subs(subs_map).subs(shock_zero_subs)  # pyright: ignore
                     )
                 )
-            compiled[sum(1 << bit[name] for name in key)] = residuals
+                if name in replacements:
+                    rows.append(row)
+
+            # Pencils are taken at the expansion point, where fwd and cur are the
+            # same vector; differentiating before that fold is what keeps the two
+            # blocks distinct. b carries klein_preproc's sign on the cur sweep.
+            replaced = [residuals[row] for row in rows]
+            jac_a = [
+                sp.diff(resid, sym).subs(fwd_to_cur)
+                for resid in replaced
+                for sym in fwd_syms
+            ]
+            jac_b = [
+                (-sp.diff(resid, sym)).subs(fwd_to_cur)
+                for resid in replaced
+                for sym in cur_syms
+            ]
+
+            compiled[sum(1 << bit[name] for name in key)] = RegimeBlock(
+                residuals=residuals, rows=rows, jac_a=jac_a, jac_b=jac_b
+            )
         return compiled
 
     @staticmethod
