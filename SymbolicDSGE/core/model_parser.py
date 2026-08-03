@@ -129,6 +129,7 @@ class ModelParser:
 
     def __post_init__(self) -> None:
         conf = self.parsed.model
+        self.validate_equations(conf)
         self.validate_constraints(conf)
         self.validate_regimes(conf)  # reads validated bind conditions
         self.validate_ss_seed(conf)
@@ -206,7 +207,12 @@ class ModelParser:
 
     @staticmethod
     def _unknown_atoms(conf: ModelConfig, *exprs: Basic) -> set[Any]:
-        """Variables and parameters referenced by *exprs* that the model omits.
+        """Symbols referenced by *exprs* that the model declares nowhere.
+
+        Declared means a variable, a parameter, or a shock: regime replacements
+        are ordinary model equations, so a shock is as legitimate there as it is
+        in the equation being replaced. Conditions reject shocks earlier, with
+        their own message, so nothing reaches here relying on the old behavior.
 
         Time symbols come from the free symbols of each applied function's
         arguments, so an offset term like ``x(t+1)`` clears ``t`` the way
@@ -221,9 +227,26 @@ class ModelParser:
         time_syms = {s for c in applied for a in c.args for s in a.free_symbols}
         var_funcs = {c.func for c in applied}
 
+        declared = set(conf.parameters) | set(conf.shock_map)
         return (var_funcs - set(conf.variables.variables)) | (
-            (free - time_syms) - set(conf.parameters)
+            (free - time_syms) - declared
         )
+
+    @classmethod
+    def validate_equations(cls, conf: ModelConfig) -> None:
+        """Reject a model equation naming a symbol the model declares nowhere.
+
+        The same check regime replacements get, on the equations they replace: a
+        typo would otherwise survive parse as a live ``Symbol`` and only fail in
+        the printer, where the name is no longer attached to an equation.
+        """
+        for name, eq in conf.equations.model.items():
+            unknown_atoms = cls._unknown_atoms(conf, eq)
+            if unknown_atoms:
+                raise ValueError(
+                    f"Equation '{name}' references unknown symbols: "
+                    f"{sorted(str(a) for a in unknown_atoms)}"
+                )
 
     @classmethod
     def validate_constraints(cls, conf: ModelConfig) -> None:

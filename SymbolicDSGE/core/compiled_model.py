@@ -115,6 +115,22 @@ class CompiledModel:
     constraint_names: tuple[str, ...] = ()
     constraint_exprs: list[Boolean] = field(default_factory=list)
 
+    # Regime residuals in reference equation order, keyed by the bitmask of the
+    # regime's binding constraints over constraint_names; printed to native
+    # cfuncs on demand (construct_regime_cfuncs).
+    regime_eqs: dict[int, list[Expr]] = field(default_factory=dict)
+
+    @cached_property
+    def _regime_cfuncs(self) -> dict[int, Any]:
+        # One residual @cfunc per regime, sharing the reference layout: regimes
+        # replace equations by name, so n_eq/n_var/n_par are unchanged. Held here
+        # so the addresses stay valid for the driver.
+        layout = ResidualLayout.from_compiled(self)
+        return {mask: build_cfunc(eqs, layout) for mask, eqs in self.regime_eqs.items()}
+
+    def construct_regime_cfuncs(self) -> dict[int, Any]:
+        return self._regime_cfuncs
+
     @cached_property
     def _constraint_func(self) -> ConstraintFunc | None:
         # Conditions as one numba @cfunc (C ABI) for the native OccBin driver.

@@ -339,6 +339,27 @@ def test_parser_rejects_unparenthesized_connective(parsed_test):
         ModelParser.from_string(yaml.safe_dump(data))
 
 
+def test_validate_equations_accepts_variables_parameters_and_shocks(parsed_test):
+    # The declared set is the same one regime replacements are checked against.
+    ModelParser.validate_equations(parsed_test.model)
+
+
+def test_parser_rejects_unknown_symbol_in_model_equation():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["model"]["x_process"] = "x(t+1) = rho * x(t) + e_x + typo_symbol"
+
+    with pytest.raises(ValueError, match=r"Equation 'x_process' references unknown"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_undeclared_variable_in_model_equation():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["model"]["x_process"] = "x(t+1) = rho * x(t) + e_x + w(t)"
+
+    with pytest.raises(ValueError, match=r"Equation 'x_process' references unknown"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
 def test_validate_constraints_rejects_more_than_two(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
@@ -389,6 +410,34 @@ def test_validate_regimes_rejects_unknown_replacement_target(parsed_test):
     conf.equations.regime = {frozenset({"obc"}): {"nosuch": sp.Eq(var(t), 0)}}
 
     with pytest.raises(ValueError, match="replaces undeclared model equations"):
+        ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_accepts_shocks_in_replacements(parsed_test):
+    # A replacement is an ordinary model equation, so a shock is as legitimate
+    # there as in the equation it replaces. Conditions still reject shocks.
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    shock = next(iter(conf.shock_map))
+    target = next(iter(conf.equations.model))
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regime = {frozenset({"obc"}): {target: sp.Eq(var(t), shock)}}
+
+    ModelParser.validate_regimes(conf)
+
+
+def test_validate_regimes_rejects_unknown_symbols_in_replacements(parsed_test):
+    conf = copy.deepcopy(parsed_test.model)
+    t = sp.Symbol("t", integer=True)
+    var = conf.variables.variables[0]
+    target = next(iter(conf.equations.model))
+    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regime = {
+        frozenset({"obc"}): {target: sp.Eq(var(t), sp.Symbol("typo_symbol"))}
+    }
+
+    with pytest.raises(ValueError, match="references unknown symbols"):
         ModelParser.validate_regimes(conf)
 
 
