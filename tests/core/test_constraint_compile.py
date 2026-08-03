@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import copy
 import ctypes
+import dataclasses
 
 import numpy as np
 import pytest
 import sympy as sp
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core.compiled_model import RegimeBlock
 from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE._ckernels.core import (
     klein_preprocess,
@@ -281,6 +283,80 @@ def test_regime_jacobians_fold_fwd_symbols_onto_cur(compiled_lead_regime):
         assert not expr.free_symbols & fwd_syms
 
 
+def _call_jac(func, mask, cur, par):
+    """The regime jacobian cfunc's output as a (2, n_row, n_var) `[a, b]` view."""
+    fn = ctypes.CFUNCTYPE(
+        None,
+        ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double),
+    )(func.address(mask))
+    cur = np.ascontiguousarray(cur, dtype=np.float64)
+    par = np.ascontiguousarray(par, dtype=np.float64)
+    out = np.zeros(func.n_out(mask), dtype=np.float64)
+    fn(
+        cur.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        par.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+    )
+    return out.reshape(2, func.n_row(mask), func.n_var)
+
+
+def test_regime_jacobian_cfunc_writes_both_pencil_blocks(compiled_lead_regime):
+    # One call has to reproduce the regime's own complex-step sweep on the
+    # replaced rows, a block first then b, so the halves patch a reference
+    # pencil copy unchanged.
+    compiled = compiled_lead_regime
+    func = compiled.construct_regime_jacobian_func()
+    par = _params(compiled)
+    n_var = len(compiled.var_names)
+    rows = func.rows[1]
+    cfunc = compiled.construct_regime_cfuncs()[1]
+
+    assert func.masks == (1,)
+    assert func.n_out(1) == 2 * len(rows) * n_var
+
+    rng = np.random.default_rng(0)
+    for trial in range(5):
+        point = (
+            np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
+        )
+        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var, False)
+        got = _call_jac(func, 1, point, par)
+
+        assert np.abs(got).max() > 0.0
+        np.testing.assert_allclose(got[0], a_r[rows, :])
+        np.testing.assert_allclose(got[1], b_r[rows, :])
+
+
+def test_regime_jacobian_func_carries_every_regime_and_is_cached(compiled_regimes):
+    func = compiled_regimes.construct_regime_jacobian_func()
+
+    assert func.masks == (1, 2, 3)
+    assert (func.n_var, func.n_par) == (
+        len(compiled_regimes.var_names),
+        len(compiled_regimes.calib_params),
+    )
+    for mask, block in compiled_regimes.regimes.items():
+        # The driver reads these as an i64 buffer next to the address.
+        assert func.rows[mask].dtype == np.int64
+        assert func.rows[mask].tolist() == block.rows
+        assert func.n_row(mask) == len(block.rows)
+
+    assert compiled_regimes.construct_regime_jacobian_func() is func
+
+
+def test_regime_jacobian_rejects_a_block_that_does_not_match_its_rows(compiled_regimes):
+    # Emission is where both the block and n_var are in scope; a short block
+    # would otherwise reshape into a wrong pencil rather than fail.
+    broken = dataclasses.replace(
+        compiled_regimes, regimes={1: RegimeBlock(rows=[0], jac_a=[], jac_b=[])}
+    )
+
+    with pytest.raises(ValueError, match="expected"):
+        broken.construct_regime_jacobian_func()
+
+
 @pytest.fixture(scope="module")
 def compiled_regimes(parsed_post82):
     """Two constraints whose regimes each replace the third model equation."""
@@ -492,6 +568,7 @@ def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
 def test_model_without_regimes_has_no_regime_blocks(compiled_post82):
     assert compiled_post82.regimes == {}
     assert compiled_post82.construct_regime_cfuncs() == {}
+    assert compiled_post82.construct_regime_jacobian_func() is None
 
 
 def test_model_without_constraints_has_no_constraint_func(compiled_post82):

@@ -248,12 +248,12 @@ class DSGESolver:
             # blocks distinct. b carries klein_preproc's sign on the cur sweep.
             replaced = [residuals[row] for row in rows]
             jac_a = [
-                sp.diff(resid, sym).subs(fwd_to_cur)
+                sp.diff(resid, sym).subs(fwd_to_cur)  # pyright: ignore
                 for resid in replaced
                 for sym in fwd_syms
             ]
             jac_b = [
-                (-sp.diff(resid, sym)).subs(fwd_to_cur)
+                (-sp.diff(resid, sym)).subs(fwd_to_cur)  # pyright: ignore
                 for resid in replaced
                 for sym in cur_syms
             ]
