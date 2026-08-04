@@ -1,10 +1,21 @@
 #include "core.h"
-#include <stdlib.h>
+#include "../_common/sdsge_linalg.h" /* sdsge_lu_factor_inplace, sdsge_lu_solve */
+#include <math.h>                    /* exp */
+#include <stdlib.h>                  /* malloc, free */
 
-void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
-                                const c128 *SDSGE_RESTRICT f, const i64 n_state,
-                                const i64 n_control, const i64 n_exog,
-                                f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B) {
+arena_size sdsge_assemble_arena_size(const i64 n_state, const i64 n_control,
+                                     const i64 n_exog) {
+  if (n_exog <= 0) {
+    return make_sizer(0, 0);
+  }
+  return make_sizer(2 * (n_state + n_control) + 3 * n_exog * n_exog, n_exog);
+}
+
+i64 sdsge_assemble_state_space_into(
+    const c128 *SDSGE_RESTRICT p, const c128 *SDSGE_RESTRICT f,
+    const sdsge_shock_ctx *shock, const i64 n_state, const i64 n_control,
+    const i64 n_exog, f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT pivot,
+    f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B) {
   const i64 n_total = n_state + n_control;
 
   /*
@@ -41,8 +52,8 @@ void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
   }
 
   /*
-   * B_state = [I(n_exog)]
-   *           [    0    ]
+   * B_state = [Rex]  Rex is the within-period response to the innovations;
+   *           [ 0 ]  the endogenous states below it are predetermined.
    *
    * B = [B_state]
    *     [f @ B_state]
@@ -55,17 +66,95 @@ void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
     }
   }
 
-  /* B_state identity block. */
-  for (i64 i = 0; i < n_exog; ++i) {
-    B[i * n_exog + i] = 1.0;
+  if (n_exog == 0) {
+    return SDSGE_CORE_SUCCESS;
   }
 
-  /* Bottom block: f @ B_state == f[:, :n_exog]. */
-  for (i64 i = 0; i < n_control; ++i) {
+  const size_t n_sq = (size_t)n_exog * (size_t)n_exog;
+  f64 *fwd = arena;
+  f64 *cur = arena + n_total;
+  f64 *rhs = arena + 2 * n_total; /* -d(resid)/d(shock), the shock rows */
+  f64 *M = rhs + n_sq;
+  f64 *Rex = M + n_sq;
+
+  /* fwd and cur are both restrict, so the evaluation point goes in twice. */
+  for (i64 i = 0; i < n_total; ++i) {
+    fwd[i] = shock->log_linear ? exp(shock->ss[i]) : shock->ss[i];
+    cur[i] = fwd[i];
+  }
+  shock->fn(fwd, cur, shock->par, rhs);
+  for (size_t i = 0; i < n_sq; ++i) {
+    rhs[i] = -rhs[i];
+  }
+
+  /* At date t the states move by B_state and the controls by f @ B_state, so
+   * the shock rows read a[rows, :n_state] + a[rows, n_state:] @ f. B_state is
+   * zero past n_exog, so only its leading columns enter and the system is
+   * square. */
+  for (i64 k = 0; k < n_exog; ++k) {
+    const f64 *arow = shock->a + shock->rows[k] * n_total;
     for (i64 j = 0; j < n_exog; ++j) {
-      B[(n_state + i) * n_exog + j] = c128_real(f[i * n_state + j]);
+      f64 s = arow[j];
+      for (i64 c = 0; c < n_control; ++c) {
+        s += arow[n_state + c] * c128_real(f[c * n_state + j]);
+      }
+      M[k * n_exog + j] = s;
     }
   }
+
+  /* M is scratch, so it takes the factorization in place. */
+  const i64 lu_err = sdsge_lu_factor_inplace(M, pivot, n_exog);
+  if (lu_err != SDSGE_LU_SUCCESS) {
+    return lu_err == SDSGE_LU_SINGULAR ? SDSGE_CORE_SINGULAR
+                                       : SDSGE_CORE_ALLOC_FAIL;
+  }
+  sdsge_lu_solve(M, pivot, rhs, Rex, n_exog, n_exog);
+
+  for (i64 i = 0; i < n_exog; ++i) {
+    for (i64 j = 0; j < n_exog; ++j) {
+      B[i * n_exog + j] = Rex[i * n_exog + j];
+    }
+  }
+
+  /* Bottom block: f @ B_state == f[:, :n_exog] @ Rex. */
+  for (i64 i = 0; i < n_control; ++i) {
+    for (i64 j = 0; j < n_exog; ++j) {
+      f64 s = 0.0;
+      for (i64 k = 0; k < n_exog; ++k) {
+        s += c128_real(f[i * n_state + k]) * Rex[k * n_exog + j];
+      }
+      B[(n_state + i) * n_exog + j] = s;
+    }
+  }
+
+  return SDSGE_CORE_SUCCESS;
+}
+
+i64 sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
+                               const c128 *SDSGE_RESTRICT f,
+                               const sdsge_shock_ctx *shock, const i64 n_state,
+                               const i64 n_control, const i64 n_exog,
+                               f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B) {
+  const arena_size want =
+      sdsge_assemble_arena_size(n_state, n_control, n_exog);
+  f64 *arena = NULL;
+  i64 *pivot = NULL;
+
+  if (want.n_float > 0) {
+    arena = (f64 *)malloc((size_t)want.n_float * sizeof(f64));
+    pivot = (i64 *)malloc((size_t)want.n_int * sizeof(i64));
+    if (!arena || !pivot) {
+      free(arena);
+      free(pivot);
+      return SDSGE_CORE_ALLOC_FAIL;
+    }
+  }
+
+  const i64 err = sdsge_assemble_state_space_into(
+      p, f, shock, n_state, n_control, n_exog, arena, pivot, A, B);
+  free(arena);
+  free(pivot);
+  return err;
 }
 
 void sdsge_simulate_linear_states(const f64 *SDSGE_RESTRICT A,

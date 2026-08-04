@@ -164,7 +164,7 @@ i64 sdsge_simulate_order1_arena_size(const i64 n, const i64 k, const i64 T,
   return n * n + n * k + n + T * k + n_par;
 }
 void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
-                                sdsge_measurement_fn measurement, const i64 T,
+                                meas_fn measurement, const i64 T,
                                 const i64 n, const i64 k, const i64 n_par,
                                 const i64 m, f64 *SDSGE_RESTRICT simout) {
   const f64 *SDSGE_RESTRICT A = arena;
@@ -208,7 +208,7 @@ i64 sdsge_simulate_order2_arena_size(const i64 n_state, const i64 n_var,
          ny + (nx + ny) + nx + T * n_exog + n_par + 4 * nx + nx * nx;
 }
 void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
-                                sdsge_measurement_fn measurement, i64 T, i64 nx,
+                                meas_fn measurement, i64 T, i64 nx,
                                 i64 ny, i64 n_exog, i64 n_par, i64 m,
                                 f64 *SDSGE_RESTRICT simout) {
   const i64 n = nx + ny;

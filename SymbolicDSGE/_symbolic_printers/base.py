@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from typing import Any, Protocol
+from .ops import OpTable
 
 import sympy as sp
 
@@ -16,26 +17,6 @@ class Layout(Protocol):
 
     @property
     def n_expr(self) -> int: ...
-
-
-class OpTable(Protocol):
-    """Renders primitive operations for one numeric target."""
-
-    prelude_imports: tuple[str, ...]
-    elems_per_var: int
-
-    def const(self, v: float) -> str: ...
-    def load(self, buf: str, idx: int) -> str: ...
-    def store(self, buf: str, idx: int, expr: str) -> str: ...
-    def add(self, a: str, b: str) -> str: ...
-    def sub(self, a: str, b: str) -> str: ...
-    def mul(self, a: str, b: str) -> str: ...
-    def div(self, a: str, b: str) -> str: ...
-    def neg(self, a: str) -> str: ...
-    def real_scale(self, a: str, s: float) -> str: ...
-    def exp(self, a: str) -> str: ...
-    def log(self, a: str) -> str: ...
-    def sqrt(self, a: str) -> str: ...
 
 
 _ATOM = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[[0-9]+\])?$")
@@ -52,13 +33,13 @@ class ExpressionPrinter(ABC):
 
     @property
     @abstractmethod
-    def allocated_dtype(self) -> str:
-        """NumPy dtype used when an allocating wrapper is emitted."""
-
-    @property
-    @abstractmethod
     def context_name(self) -> str:
         """Short name used in unsupported node errors."""
+
+    @property
+    def allocated_dtype(self) -> str:
+        """NumPy dtype used when an allocating wrapper is emitted."""
+        return f"np.{self.ops.out_numba_type.name}"
 
     def emit(
         self, exprs: list[sp.Expr], layout: Layout, *, allocate: bool

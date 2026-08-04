@@ -4,9 +4,9 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
 #include "../core/bicomplex_hessian.h" /* bc_residual_fn */
+#include "../core/core.h"              /* shock_jacobian_fn, sdsge_shock_ctx */
 #include "../core/klein_preproc.h"     /* sdsge_residual_fn */
 #include "../core/klein_qz.h"          /* klein_zgges_fn */
-#include "../kalman/kalman.h"          /* meas_fn */
 #include "prior_program.h"             /* transform codes, dispatch */
 
 /* Native estimation objective context and theta-fill (issue #327). */
@@ -119,6 +119,9 @@ typedef struct {
   klein_zgges_fn zgges;
   meas_fn meas;
   meas_fn jac;
+
+  shock_jacobian_fn shock_jac;
+  const i64 *shock_rows; /* n_exog: the equations shock_jac emits, in its order */
 
   const f64 *ss_seed; /* n_var: Newton seed for the steady state */
   int log_linear;

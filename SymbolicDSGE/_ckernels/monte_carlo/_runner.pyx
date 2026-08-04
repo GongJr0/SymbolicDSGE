@@ -121,19 +121,15 @@ cdef extern from "runner.h":
     int sdsge_mc_run(sdsge_mc_runner_ctx *runner) noexcept nogil
 
 
-cdef extern from "core_steps.h":
-    ctypedef void (*sdsge_measurement_fn)(
-        double *vars,
-        double *par,
-        double *out,
-    ) noexcept nogil
-
+cdef extern from "../_common/sdsge_common.h":
     ctypedef void (*meas_fn)(
         const double *vars,
         const double *par,
         double *out,
     ) noexcept nogil
 
+
+cdef extern from "core_steps.h":
     ctypedef struct sdsge_mc_payload_step_ctx:
         const double *input
         int64_t n
@@ -166,7 +162,7 @@ cdef extern from "core_steps.h":
     ) noexcept nogil
 
     ctypedef struct sdsge_mc_simulate_order1_step_ctx:
-        sdsge_measurement_fn measurement
+        meas_fn measurement
         int64_t T
         int64_t n
         int64_t k
@@ -176,7 +172,7 @@ cdef extern from "core_steps.h":
         int64_t shock_scratch_offset
 
     ctypedef struct sdsge_mc_simulate_order2_step_ctx:
-        sdsge_measurement_fn measurement
+        meas_fn measurement
         int64_t T
         int64_t n_state
         int64_t n_ctrl
@@ -1018,7 +1014,7 @@ def simulate1_step(
         raise ValueError("Observable simulation requires a measurement address.")
 
     step._simulate_order1_ctx.measurement = (
-        <sdsge_measurement_fn><void *>measurement_addr
+        <meas_fn><void *>measurement_addr
     )
     step._simulate_order1_ctx.T = T
     step._simulate_order1_ctx.n = n_var
@@ -1088,7 +1084,7 @@ def simulate2_step(
 
     arena = sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par)
     step._simulate_order2_ctx.measurement = (
-        <sdsge_measurement_fn><void *>measurement_addr
+        <meas_fn><void *>measurement_addr
     )
     step._simulate_order2_ctx.T = T
     step._simulate_order2_ctx.n_state = n_state

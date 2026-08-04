@@ -547,7 +547,15 @@ class ModelParser:
         observables: list[Symbol] = list(sp.symbols(data["observables"]))
 
         shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-            {sp.Symbol(k): sp.Symbol(v) for k, v in data["shock_map"].items()}
+            {
+                sp.Symbol(k): sp.Symbol(v)
+                for k, v in dict(
+                    sorted(
+                        data["shock_map"].items(),
+                        key=lambda item: ordered_var_names.index(item[1]),
+                    )
+                ).items()
+            }
         )
         shock_syms: list[Symbol] = list(shock_map.keys())
 

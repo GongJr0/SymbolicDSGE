@@ -28,7 +28,9 @@ class KleinSolution:
 
     ``steady_state`` is the Newton-resolved steady state the solve linearized at
     (the seed after convergence), so second-order and measurement callers reuse
-    it instead of re-solving.
+    it instead of re-solving. ``a``/``b`` are the pencil at that point, kept for
+    the same reason: the state-space assembly and the second-order sweep both
+    need them, and recomputing means another complex-step jacobian.
     """
 
     p: NDC
@@ -36,6 +38,8 @@ class KleinSolution:
     stab: int
     eig: NDC
     steady_state: NDF
+    a: NDF
+    b: NDF
     order: int = 1
 
 
@@ -52,7 +56,8 @@ class PerturbationSolution:
     * ``hxx`` (nx, nx, nx), ``gxx`` (ny, nx, nx) -- the state-quadratic terms;
     * ``hss`` (nx,), ``gss`` (ny,) -- the sigma^2 risk correction.
 
-    ``steady_state`` is the (nonlinear) expansion point the tensors are taken at.
+    ``steady_state`` is the (nonlinear) expansion point the tensors are taken at,
+    and ``a``/``b`` the pencil there.
     """
 
     p: NDC
@@ -65,6 +70,8 @@ class PerturbationSolution:
     hxx: NDF
     gss: NDF
     hss: NDF
+    a: NDF
+    b: NDF
 
 
 def klein_solve(
@@ -99,5 +106,11 @@ def klein_solve(
         n_states,
     )
     return KleinSolution(
-        p=p, f=f, stab=stab, eig=eig, steady_state=np.asarray(ss, dtype=float64)
+        p=p,
+        f=f,
+        stab=stab,
+        eig=eig,
+        steady_state=np.asarray(ss, dtype=float64),
+        a=a,
+        b=b,
     )

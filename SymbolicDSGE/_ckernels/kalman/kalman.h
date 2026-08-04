@@ -112,10 +112,6 @@ arena_size kf_arena_size(const i64 n, const i64 m, const i64 k);
 int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 kf_outputs *out);
 
-/* Function Ptr for Non-Linear Measurement Function */
-typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT x,
-                        const f64 *SDSGE_RESTRICT params, f64 *out);
-
 /* Extended Kalman Filter */
 typedef struct {
   meas_fn meas;

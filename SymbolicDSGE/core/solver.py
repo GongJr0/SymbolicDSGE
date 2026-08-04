@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 import pandas as pd
 
 from .config import ModelConfig, SymbolGetterDict
-from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
+from .compiled_model import CompiledModel, ShockBlock, VariableLayout, RegimeBlock
 from .linearization import linearize_model
 from .solved_model import SolvedModel
 from .solver_backend import KleinSolution, PerturbationSolution, klein_solve
@@ -22,7 +22,6 @@ from .._ckernels.core import (
     second_order,
     second_order_risk,
     bicomplex_hessian,
-    klein_preprocess,
 )
 
 if TYPE_CHECKING:
@@ -60,8 +59,6 @@ class DSGESolver:
             for eq in conf.equations.model.values()
         ]
 
-        shifted = [self._offset_lags(o, t) for o in obj]
-
         name_to_func = {v.__name__: v for v in ordered_variables}
 
         layout = self._infer_variable_layout(conf, variable_order)
@@ -79,20 +76,24 @@ class DSGESolver:
             perm = [declared_idx[name] for name in layout.canonical_names]
             kalman_conf = replace(kalman_conf, P0=kalman_conf.P0[np.ix_(perm, perm)])
 
-        for i, obj in enumerate(shifted):
-            bad = self._bad_time_offsets(obj, var_funcs, t)
+        for i, eq in enumerate(obj):
+            bad = self._bad_time_offsets(eq, var_funcs, t)
             if bad:
                 raise ValueError(
-                    f"Equation {i} has bad time offsets {bad}. Only offsets of 0 and 1 are allowed."
+                    f"Equation {i} has bad time offsets {sorted(bad)}. Only "
+                    f"offsets of -1, 0 and 1 are allowed."
                 )
 
         # Substitutions
+        prev_syms = [Symbol(f"prev_{n}") for n in var_order]
         cur_syms = [Symbol(f"cur_{n}") for n in var_order]
         fwd_syms = [Symbol(f"fwd_{n}") for n in var_order]
 
         subs_map = {}
-        for _, f, cur, fwd in zip(var_order, var_funcs, cur_syms, fwd_syms):
-
+        for _, f, prev, cur, fwd in zip(
+            var_order, var_funcs, prev_syms, cur_syms, fwd_syms
+        ):
+            subs_map[f(t - 1)] = prev  # pyright: ignore
             subs_map[f(t)] = cur  # pyright: ignore
             subs_map[f(t + 1)] = fwd  # pyright: ignore
 
@@ -105,8 +106,34 @@ class DSGESolver:
             raise ValueError(f"params_order contains unknown parameters: {p_missing}")
         params = [name_to_param[name] for name in params_order]
 
-        compiled: list[Expr] = [sp.simplify(o.subs(subs_map)) for o in shifted]
-        shock_zero_subs = {shock: 0.0 for shock in conf.shock_map.keys()}
+        compiled: list[Expr] = [sp.simplify(o.subs(subs_map)) for o in obj]
+
+        shock_syms = list(conf.shock_map.keys())
+        shock_zero_subs = {shock: 0.0 for shock in shock_syms}
+
+        shock_jac: list[Expr] = [
+            sp.diff(expr, shock).subs(shock_zero_subs)  # pyright: ignore
+            for expr in compiled
+            for shock in shock_syms
+        ]
+        shock_rows = [
+            i
+            for i in range(len(compiled))
+            if any(
+                not shock_jac[i * layout.n_exog + j].is_zero
+                for j in range(layout.n_exog)
+            )
+        ]
+
+        if len(shock_rows) != layout.n_exog:
+            raise ValueError(
+                f"Model has {layout.n_exog} shocked states but only {len(shock_rows)} "
+                f"equations are affected by shocks. Check that the shock_map correctly "
+                "maps each shock to the variable it is intended to influence."
+            )
+
+        shock_block = ShockBlock(shock_rows, shock_jac)
+
         compiled_numeric: list[Expr] = [
             sp.simplify(expr.subs(shock_zero_subs))  # pyright: ignore
             for expr in compiled
@@ -119,10 +146,20 @@ class DSGESolver:
             conf, constraint_names, subs_map, cur_syms, fwd_syms, var_funcs, t
         )
 
-        shifted_obs = [
-            self._offset_lags(expr, t) for expr in conf.equations.observable.values()
+        observables = conf.equations.observable
+        for n, obs in observables.items():
+            # MeasurementLayout maps cur only, so a non-zero offset here would
+            # print to a slot that does not exist.
+            bad = self._bad_time_offsets(obs, var_funcs, t, allowed={0})
+            if bad:
+                raise ValueError(
+                    f"Observable '{n}' has bad time offsets {sorted(bad)}. "
+                    f"Observables may only reference contemporaneous variables."
+                )
+
+        observable_exprs = [
+            sp.simplify(expr.subs(subs_map)) for expr in observables.values()
         ]
-        observable_exprs = [sp.simplify(expr.subs(subs_map)) for expr in shifted_obs]
         # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
         # demand via CompiledModel.construct_observable_jacobian_cfunc.
         observable_jacobian_eqs: list[Expr] = [
@@ -136,6 +173,7 @@ class DSGESolver:
             layout=layout,
             var_names=var_order,
             calib_params=params,
+            shock_block=shock_block,
             idx=idx,
             objective_eqs=compiled_numeric,
             observable_names=[v.name for v in conf.observables],
@@ -226,14 +264,13 @@ class DSGESolver:
             rows: list[int] = []
             merged = {**conf.equations.model, **replacements}
             for row, (name, eq) in enumerate(merged.items()):
-                resid = self._offset_lags(
-                    sp.simplify(eq.lhs - eq.rhs), t  # pyright: ignore
-                )
+                resid = sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
                 bad = self._bad_time_offsets(resid, var_funcs, t)
                 if bad:
                     raise ValueError(
                         f"Equation '{name}' in regime '{label}' has bad time "
-                        f"offsets {sorted(bad)}. Only offsets of 0 and 1 are allowed."
+                        f"offsets {sorted(bad)}. Only offsets of -1, 0 and 1 "
+                        f"are allowed."
                     )
                 residuals.append(
                     sp.simplify(
@@ -501,10 +538,14 @@ class DSGESolver:
 
     @staticmethod
     def _assemble_state_space(
-        sol: KleinSolution | PerturbationSolution, compiled: CompiledModel
+        sol: KleinSolution | PerturbationSolution,
+        compiled: CompiledModel,
+        param_vec: NDF,
     ) -> tuple[ND, ND]:
         """First-order state space: X_t = [states; controls], x_{t+1} = p x_t (+
-        shocks), controls_t = f x_t. Shocks hit only the first n_exog states."""
+        shocks), controls_t = f x_t. Shocks hit only the first n_exog states,
+        with the impact block solved from the shock jacobian against ``sol.a``,
+        the forward jacobian at the steady state."""
         p = np.asarray(sol.p, dtype=complex128)
         f = np.asarray(sol.f, dtype=complex128)
         n_s = compiled.n_state
@@ -513,7 +554,22 @@ class DSGESolver:
         if n_exo > n_s:
             raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
 
-        return assemble_state_space(p, f, n_s, n_u, n_exo)
+        shock = compiled.construct_shock_jacobian_func()
+        if shock is None:
+            return assemble_state_space(p, f, n_s, n_u, n_exo)
+
+        return assemble_state_space(
+            p,
+            f,
+            n_s,
+            n_u,
+            n_exo,
+            shock.address,
+            shock.rows,
+            sol.a,
+            np.asarray(sol.steady_state, dtype=float64),
+            param_vec,
+        )
 
     @staticmethod
     def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
@@ -542,7 +598,7 @@ class DSGESolver:
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
-        A, B = self._assemble_state_space(sol, compiled)
+        A, B = self._assemble_state_space(sol, compiled, param_vec)
 
         return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
 
@@ -571,7 +627,7 @@ class DSGESolver:
         ss = sol.steady_state
         gx, hx = np.real(sol.f), np.real(sol.p)
 
-        a, b = klein_preprocess(cf.address, ss, param_vec, n_eq, False)
+        a, b = sol.a, sol.b
         f_xx = bicomplex_hessian(cf_bc.address, ss, param_vec, n_eq)
         gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
         eta = self._build_eta(compiled)
@@ -588,8 +644,10 @@ class DSGESolver:
             hxx=hxx,
             gss=gss,
             hss=hss,
+            a=a,
+            b=b,
         )
-        A, B = self._assemble_state_space(pert, compiled)
+        A, B = self._assemble_state_space(pert, compiled, param_vec)
         return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
 
     @staticmethod
@@ -806,34 +864,13 @@ class DSGESolver:
         return result, solved
 
     @staticmethod
-    def _min_time_offset(expr: Expr, t: Symbol) -> int:
-        offs = []
-        for call in expr.atoms(Function):
-            if not call.args:
-                continue
-
-            arg0 = call.args[0]
-            if arg0.free_symbols and t in arg0.free_symbols:
-                k = sp.simplify(arg0 - t)
-                if k.is_Integer:
-                    offs.append(int(k))
-        return min(offs) if offs else 0
-
-    def _offset_lags(self, obj: Expr, t: Symbol) -> Expr:
-        min_off = self._min_time_offset(obj, t)
-
-        if min_off < 0:
-            return sp.simplify(obj.subs(t, t - min_off))
-        return obj
-
-    @staticmethod
     def _bad_time_offsets(
         expr: Basic,
         var_funcs: list[Function],
         t: Symbol,
         allowed: set[int] | None = None,
     ) -> set[int]:
-        allowed = {0, 1} if allowed is None else allowed
+        allowed = {-1, 0, 1} if allowed is None else allowed
         bad: set[int] = set()
 
         for call in expr.atoms(sp.Function):

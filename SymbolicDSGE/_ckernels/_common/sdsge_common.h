@@ -55,4 +55,11 @@ static inline arena_size make_sizer(i64 n_float, i64 n_int) {
 #define SDSGE_RESTRICT
 #endif
 
+/* Measurement / observable-jacobian @cfunc ABI: ``void(vars*, par*, out*)``.
+ * Shared by the linear filter, the nonlinear filters and the MC steps; every
+ * call site passes three distinct buffers, so the restrict holds. */
+typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT vars,
+                        const f64 *SDSGE_RESTRICT par,
+                        f64 *SDSGE_RESTRICT out);
+
 #endif /* SDSGE_COMMON_H */

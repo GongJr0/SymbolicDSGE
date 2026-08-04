@@ -30,7 +30,7 @@ typedef struct {
  * from `rep_idx` before simulating, and `shock_scratch_offset` locates the
  * draw's scratch just past the arena the simulation itself needs. */
 typedef struct {
-  sdsge_measurement_fn measurement;
+  meas_fn measurement;
   i64 T;
   i64 n;
   i64 k;
@@ -41,7 +41,7 @@ typedef struct {
 } sdsge_mc_simulate_order1_step_ctx;
 
 typedef struct {
-  sdsge_measurement_fn measurement;
+  meas_fn measurement;
   i64 T;
   i64 n_state;
   i64 n_ctrl;
@@ -143,7 +143,7 @@ void sdsge_raw_model_data_step(const f64 *SDSGE_RESTRICT states_input,
  * ``simout`` is [states(T,n), observables(T,m)]. */
 i64 sdsge_simulate_order1_arena_size(i64 n, i64 k, i64 T, i64 n_par);
 void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
-                                sdsge_measurement_fn measurement, i64 T, i64 n,
+                                meas_fn measurement, i64 T, i64 n,
                                 i64 k, i64 n_par, i64 m,
                                 f64 *SDSGE_RESTRICT simout);
 
@@ -154,7 +154,7 @@ void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
 i64 sdsge_simulate_order2_arena_size(i64 n_state, i64 n_var, i64 n_exog, i64 T,
                                      i64 n_par);
 void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
-                                sdsge_measurement_fn measurement, i64 T, i64 nx,
+                                meas_fn measurement, i64 T, i64 nx,
                                 i64 ny, i64 n_exog, i64 n_par, i64 m,
                                 f64 *SDSGE_RESTRICT simout);
 
