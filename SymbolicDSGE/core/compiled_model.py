@@ -1,7 +1,7 @@
 from sympy import Symbol, Expr
 
 import numpy as np
-from numpy import complex128, float64
+from numpy import complex128, float64, int64
 from numpy.typing import NDArray
 
 from dataclasses import dataclass, asdict, field
@@ -87,6 +87,52 @@ class ConstraintFunc:
 
 
 @dataclass(frozen=True)
+class RegimeBlock:
+    rows: list[int]
+    residuals: list[Expr] = field(default_factory=list)
+    jac_a: list[Expr] = field(default_factory=list)
+    jac_b: list[Expr] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RegimeJacobianFunc:
+    """Compiled regime pencil rows, and everything the native side needs to call them.
+
+    One cfunc per regime, keyed by the same bitmask as ``regimes``, writing
+    ``[jac_a; jac_b]`` into a single ``2 * n_row * n_var`` buffer: the whole a
+    block first, then the whole b block, each row-major ``(n_row, n_var)`` and
+    ordered like ``rows``. Concatenated rather than interleaved because the two
+    halves patch into two separate copies of the reference pencil, so each row
+    is a contiguous copy on both sides.
+
+    ``jac_b`` carries klein_preproc's sign, so both halves drop into a reference
+    pencil copy as they are.
+    """
+
+    cfuncs: dict[int, Any]
+    rows: dict[int, NDArray[int64]]
+    n_var: int
+    n_par: int
+
+    @property
+    def masks(self) -> tuple[int, ...]:
+        return tuple(sorted(self.cfuncs))
+
+    def address(self, mask: int) -> int:
+        """Entry point of
+        ``void (*)(const double *cur, const double *par, double *out)``."""
+        return int(self.cfuncs[mask].address)
+
+    def n_row(self, mask: int) -> int:
+        """Reference rows this regime replaces."""
+        return int(self.rows[mask].shape[0])
+
+    def n_out(self, mask: int) -> int:
+        """Length of ``out``: both blocks, ``2 * n_row * n_var``."""
+        return 2 * self.n_row(mask) * self.n_var
+
+
+@dataclass(frozen=True)
 class CompiledModel:
     config: ModelConfig
     kalman: KalmanConfig | None
@@ -115,10 +161,10 @@ class CompiledModel:
     constraint_names: tuple[str, ...] = ()
     constraint_exprs: list[Boolean] = field(default_factory=list)
 
-    # Regime residuals in reference equation order, keyed by the bitmask of the
-    # regime's binding constraints over constraint_names; printed to native
-    # cfuncs on demand (construct_regime_cfuncs).
-    regime_eqs: dict[int, list[Expr]] = field(default_factory=dict)
+    # One block per regime, keyed by the bitmask of its binding constraints over
+    # constraint_names. Residuals stay in reference equation order and print to
+    # native cfuncs on demand (construct_regime_cfuncs).
+    regimes: dict[int, RegimeBlock] = field(default_factory=dict)
 
     @cached_property
     def _regime_cfuncs(self) -> dict[int, Any]:
@@ -126,10 +172,51 @@ class CompiledModel:
         # replace equations by name, so n_eq/n_var/n_par are unchanged. Held here
         # so the addresses stay valid for the driver.
         layout = ResidualLayout.from_compiled(self)
-        return {mask: build_cfunc(eqs, layout) for mask, eqs in self.regime_eqs.items()}
+        return {
+            mask: build_cfunc(block.residuals, layout)
+            for mask, block in self.regimes.items()
+        }
 
     def construct_regime_cfuncs(self) -> dict[int, Any]:
         return self._regime_cfuncs
+
+    @cached_property
+    def _regime_jacobian_func(self) -> RegimeJacobianFunc | None:
+        # Replaced rows of each regime pencil as one cfunc per regime, so the
+        # assembly patches a reference pencil copy instead of sweeping the whole
+        # regime. Both blocks share a cfunc: after the fwd fold they are
+        # functions of the same `cur` vector and share subexpressions. Held here
+        # so the addresses and the row buffers stay valid for the driver.
+        if not self.regimes:
+            return None
+
+        base = MeasurementLayout.from_compiled(self)
+        cfuncs: dict[int, Any] = {}
+        rows: dict[int, NDArray[int64]] = {}
+        for mask, block in self.regimes.items():
+            want = len(block.rows) * base.n_var
+            if len(block.jac_a) != want or len(block.jac_b) != want:
+                raise ValueError(
+                    f"Regime {mask} has {len(block.jac_a)}/{len(block.jac_b)} "
+                    f"jacobian entries, expected {want} for {len(block.rows)} "
+                    f"rows over {base.n_var} variables."
+                )
+            exprs = [*block.jac_a, *block.jac_b]
+            layout = MeasurementLayout(
+                slot=base.slot,
+                n_var=base.n_var,
+                n_par=base.n_par,
+                n_obs=len(exprs),
+            )
+            cfuncs[mask] = build_measurement_cfunc(exprs, layout)
+            rows[mask] = np.asarray(block.rows, dtype=np.int64)
+
+        return RegimeJacobianFunc(
+            cfuncs=cfuncs, rows=rows, n_var=base.n_var, n_par=base.n_par
+        )
+
+    def construct_regime_jacobian_func(self) -> RegimeJacobianFunc | None:
+        return self._regime_jacobian_func
 
     @cached_property
     def _constraint_func(self) -> ConstraintFunc | None:
