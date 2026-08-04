@@ -5,53 +5,14 @@
 #include "../_common/sdsge_complex.h"
 #include "../_common/sdsge_linalg.h"
 
-/* Shock jacobian @cfunc ABI: ``void(fwd*, cur*, par*, out*)``. Call it with a
- * scratch buffer for cur, never ss twice: fwd and cur are both restrict. */
-typedef void (*shock_jacobian_fn)(const f64 *SDSGE_RESTRICT fwd,
-                                  const f64 *SDSGE_RESTRICT cur,
-                                  const f64 *SDSGE_RESTRICT par,
-                                  f64 *SDSGE_RESTRICT out);
+/* Measurement / observable-jacobian @cfunc ABI: ``void(vars*, par*, out*)``. */
+typedef void (*sdsge_measurement_fn)(f64 *vars, f64 *par, f64 *out);
 
-/* How to build the exogenous impact block, and where to evaluate it.
- *
- * ``fn`` writes the shock-carrying rows of d(residual)/d(shock) as a square
- * ``(n_exog, n_exog)`` row-major block, row k being equation ``rows[k]``. The
- * same rows index ``a``, so both sides of the solve are ordered by ``rows``.
- *
- * ``log_linear`` mirrors klein_preproc: the pencil is the jacobian of the
- * transformed residual, so the shock jacobian is evaluated at exp(ss) to match.
- * The log(1 + .) wrap contributes 1/(1 + resid), which is 1 at the steady
- * state, so only the evaluation point differs.
- */
-typedef struct {
-  shock_jacobian_fn fn;
-  const f64 *SDSGE_RESTRICT a; /* (n_eq, n_var) row-major, from klein_preproc */
-  const i64 *SDSGE_RESTRICT rows; /* (n_exog,), the row order fn emits */
-  const f64 *SDSGE_RESTRICT ss;   /* (n_var,) */
-  const f64 *SDSGE_RESTRICT par;  /* (n_par,) */
-  i64 log_linear;
-} sdsge_shock_ctx;
-
-/* Scratch for the impact solve: the two evaluation buffers, the shock block,
- * the impact matrix (factored in place) and its solution, plus the pivots.
- * Zero on both counts when n_exog == 0. */
-arena_size sdsge_assemble_arena_size(const i64 n_state, const i64 n_control,
-                                     const i64 n_exog);
-
-/* Assemble state-space into a caller-owned arena, so a per-draw loop allocates
- * once. ``shock``, ``arena`` and ``pivot`` are read only when n_exog > 0. */
-i64 sdsge_assemble_state_space_into(
-    const c128 *SDSGE_RESTRICT p, const c128 *SDSGE_RESTRICT f,
-    const sdsge_shock_ctx *shock, const i64 n_state, const i64 n_control,
-    const i64 n_exog, f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT pivot,
-    f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B);
-
-/* One-shot wrapper: allocates the arena, calls the kernel, frees. */
-i64 sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
-                               const c128 *SDSGE_RESTRICT f,
-                               const sdsge_shock_ctx *shock, const i64 n_state,
-                               const i64 n_control, const i64 n_exog,
-                               f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B);
+/* Assemble state-space */
+void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
+                                const c128 *SDSGE_RESTRICT f, const i64 n_state,
+                                const i64 n_control, const i64 n_exog,
+                                f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B);
 
 /* Linear state-space simulation kernels */
 
@@ -90,7 +51,5 @@ i64 sdsge_simulate_second_order_pruned(
 /* ERROR CODES */
 #define SDSGE_CORE_SUCCESS 0
 #define SDSGE_CORE_ALLOC_FAIL -1
-/* Exogenous impact block is singular: no unique within-period response. */
-#define SDSGE_CORE_SINGULAR -2
 
 #endif /* SDSGE_CORE_H */

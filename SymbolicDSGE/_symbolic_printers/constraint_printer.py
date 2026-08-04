@@ -3,14 +3,63 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import sympy as sp
 from numba import cfunc, types
 from sympy import Symbol
 
-from .base import ExpressionPrinter
-from .ops import ConstraintOpTable, ConstraintOps
+from .base import ExpressionPrinter, OpTable
+from .measurement_printer import F64Ops
+
+
+class ConstraintOpTable(OpTable, Protocol):
+    """Op table extended with the comparisons and connectives conditions need."""
+
+    def lt(self, a: str, b: str) -> str: ...
+    def le(self, a: str, b: str) -> str: ...
+    def gt(self, a: str, b: str) -> str: ...
+    def ge(self, a: str, b: str) -> str: ...
+    def eq(self, a: str, b: str) -> str: ...
+    def ne(self, a: str, b: str) -> str: ...
+    def and_(self, a: str, b: str) -> str: ...
+    def or_(self, a: str, b: str) -> str: ...
+    def not_(self, a: str) -> str: ...
+
+
+class ConstraintOps(F64Ops, ConstraintOpTable):
+    """Real valued backend emitting 0/1 regime flags."""
+
+    def lt(self, a: str, b: str) -> str:
+        return f"({a} < {b})"
+
+    def le(self, a: str, b: str) -> str:
+        return f"({a} <= {b})"
+
+    def gt(self, a: str, b: str) -> str:
+        return f"({a} > {b})"
+
+    def ge(self, a: str, b: str) -> str:
+        return f"({a} >= {b})"
+
+    def eq(self, a: str, b: str) -> str:
+        return f"({a} == {b})"
+
+    def ne(self, a: str, b: str) -> str:
+        return f"({a} != {b})"
+
+    def and_(self, a: str, b: str) -> str:
+        return f"({a} and {b})"
+
+    def or_(self, a: str, b: str) -> str:
+        return f"({a} or {b})"
+
+    def not_(self, a: str) -> str:
+        return f"(not {a})"
+
+    def store(self, buf: str, idx: int, expr: str) -> str:
+        return f"{buf}[{idx}] = 1 if {expr} else 0"
+
 
 #: Relational node types mapped to the op that renders them.
 _RELATIONAL_OPS: dict[type, Callable[[ConstraintOpTable, str, str], str]] = {
@@ -63,6 +112,10 @@ class ConstraintPrinter(ExpressionPrinter):
         self.cops = ops
 
     @property
+    def allocated_dtype(self) -> str:
+        return "np.int8"
+
+    @property
     def context_name(self) -> str:
         return "constraint"
 
@@ -110,8 +163,8 @@ def build_constraint_cfunc(
     ns: dict[str, Any] = {}
     exec(src, ns)  # noqa: S102
     sig = types.void(
-        types.CPointer(table.numba_type),
-        types.CPointer(table.numba_type),
-        types.CPointer(table.out_numba_type),
+        types.CPointer(types.float64),
+        types.CPointer(types.float64),
+        types.CPointer(types.int8),
     )
     return cfunc(sig)(ns["_constraint_cf"])

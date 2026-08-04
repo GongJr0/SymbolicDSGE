@@ -21,28 +21,12 @@ cdef extern from "../_common/sdsge_complex.h":
     c128 c128_sqrt(c128 a)
 
 
-cdef extern from "../_common/sdsge_common.h" nogil:
-    ctypedef void (*meas_fn)(
-        const double *vars, const double *par, double *out) noexcept
-
-
 cdef extern from "core.h" nogil:
-    ctypedef void (*shock_jacobian_fn)(
-        const double *fwd, const double *cur,
-        const double *par, double *out) noexcept
-    ctypedef struct sdsge_shock_ctx:
-        shock_jacobian_fn fn
-        const double *a
-        const int64_t *rows
-        const double *ss
-        const double *par
-        int64_t log_linear
-    int64_t sdsge_assemble_state_space(
-        const c128 *p, const c128 *f, const sdsge_shock_ctx *shock,
-        const int64_t n_state, int64_t n_control,
+    ctypedef void (*sdsge_measurement_fn)(
+        double *vars, double *par, double *out) noexcept
+    void sdsge_assemble_state_space(
+        const c128 *p, const c128 *f, const int64_t n_state, int64_t n_control,
         const int64_t n_exog, double *A, double *B)
-    int64_t SDSGE_CORE_SUCCESS
-    int64_t SDSGE_CORE_SINGULAR
     void sdsge_simulate_linear_states(
         const double *A, const double *B, const double *x0,
         const double *shock, double *out, int64_t T, int64_t n, int64_t k)
@@ -163,26 +147,8 @@ cdef extern from "bicomplex_hessian.h" nogil:
         double *hessian)
 
 
-def assemble_state_space(
-    p,
-    f,
-    n_state,
-    n_control,
-    n_exog,
-    size_t shock_addr=0,
-    rows=None,
-    a=None,
-    steady_state=None,
-    params=None,
-    bint log_linear=False,
-):
-    """State-space matrices ``(A, B)`` from a solution ``(p, f)``.
-
-    The exogenous block of ``B`` is solved from the shock jacobian, so every
-    shock argument is required once ``n_exog > 0``: ``shock_addr`` is the
-    ``ShockJacobianFunc`` address, ``rows`` the equations it emits, and ``a``
-    the forward jacobian from ``klein_preprocess`` at ``steady_state``.
-    """
+def assemble_state_space(p, f, n_state, n_control, n_exog):
+    """State-space matrices ``(A, B)`` from a solution ``(p, f)``. """
     cdef double complex[:, ::1] pv = np.ascontiguousarray(p, dtype=np.complex128)
     cdef double complex[:, ::1] fv = np.ascontiguousarray(f, dtype=np.complex128)
 
@@ -196,43 +162,12 @@ def assemble_state_space(
 
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
-    cdef double *B_ptr = &Bv[0, 0] if n_e > 0 else NULL
-
-    cdef double[:, ::1] av
-    cdef int64_t[::1] rowsv
-    cdef double[::1] ssv
-    cdef double[::1] parv
-    cdef sdsge_shock_ctx shock
-    cdef int64_t err
-
-    if n_e > 0:
-        if shock_addr == 0 or rows is None or a is None:
-            raise ValueError(
-                "assemble_state_space: n_exog > 0 needs shock_addr, rows and a."
-            )
-        av = np.ascontiguousarray(a, dtype=np.float64)
-        rowsv = np.ascontiguousarray(rows, dtype=np.int64)
-        ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
-        parv = np.ascontiguousarray(params, dtype=np.float64)
-        shock.fn = <shock_jacobian_fn><void*>shock_addr
-        shock.a = &av[0, 0]
-        shock.rows = &rowsv[0]
-        shock.ss = &ssv[0]
-        shock.par = &parv[0] if parv.shape[0] > 0 else NULL
-        shock.log_linear = <int64_t>log_linear
 
     with nogil:
-        err = sdsge_assemble_state_space(
-            <c128 *>&pv[0, 0], <c128 *>&fv[0, 0], &shock, n_s, n_c, n_e,
-            &Av[0, 0], B_ptr
+        sdsge_assemble_state_space(
+            <c128 *>&pv[0, 0], <c128 *>&fv[0, 0], n_s, n_c, n_e,
+            &Av[0, 0], &Bv[0, 0]
         )
-    if err == SDSGE_CORE_SINGULAR:
-        raise ValueError(
-            "assemble_state_space: the exogenous impact block is singular, so "
-            "the within-period response to the innovations is not unique."
-        )
-    if err != SDSGE_CORE_SUCCESS:
-        raise MemoryError("assemble_state_space: allocation failed.")
     return A, B
 
 
@@ -644,7 +579,7 @@ def measurement_eval(size_t meas_addr, vars, par, int64_t n_obs):
     cdef double *vars_ptr = &vv[0] if vv.shape[0] > 0 else NULL
     cdef double *par_ptr = &pv[0] if pv.shape[0] > 0 else NULL
     cdef double *out_ptr = &ov[0] if n_obs > 0 else NULL
-    cdef meas_fn fn = <meas_fn><void*>meas_addr
+    cdef sdsge_measurement_fn fn = <sdsge_measurement_fn><void*>meas_addr
     with nogil:
         fn(vars_ptr, par_ptr, out_ptr)
     return out
@@ -663,7 +598,7 @@ def jacobian_eval(size_t jac_addr, vars, par, int64_t n_obs, int64_t n_var):
     cdef double *vars_ptr = &vv[0] if vv.shape[0] > 0 else NULL
     cdef double *par_ptr = &pv[0] if pv.shape[0] > 0 else NULL
     cdef double *out_ptr = &ov[0, 0] if (n_obs * n_var) > 0 else NULL
-    cdef meas_fn fn = <meas_fn><void*>jac_addr
+    cdef sdsge_measurement_fn fn = <sdsge_measurement_fn><void*>jac_addr
     with nogil:
         fn(vars_ptr, par_ptr, out_ptr)
     return out
@@ -681,7 +616,7 @@ def measurement_path(size_t meas_addr, states, par, int64_t n_obs):
     cdef double[:, ::1] ov = out
 
     cdef double *par_ptr = &pv[0] if pv.shape[0] > 0 else NULL
-    cdef meas_fn fn = <meas_fn><void*>meas_addr
+    cdef sdsge_measurement_fn fn = <sdsge_measurement_fn><void*>meas_addr
     cdef int64_t tt
     if n_obs > 0 and T > 0:
         with nogil:

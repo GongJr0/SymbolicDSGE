@@ -1,6 +1,5 @@
 #include "estimation.h"
 #include "../core/core.h"
-#include "../kalman/kalman.h"
 #include "../core/klein_postproc.h"
 #include "../core/second_order.h"
 #include "../core/steady_state.h"
@@ -15,8 +14,6 @@
   1 /* stab != 0 or QZ breakdown; caller counts a BK violation */
 #define SDSGE_SOLVE_NO_SS                                                      \
   2 /* steady-state Newton failed; sentinel, not a BK count */
-#define SDSGE_SOLVE_NO_IMPACT                                                  \
-  3 /* singular exogenous impact block or its workspace; not a BK count */
 
 /* theta -> params fill. params is in calib_params order and is the residual
  * argument vector directly (no gather). Non-estimated slots never move across
@@ -191,20 +188,8 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
   if (s->stab != 0) {
     return SDSGE_SOLVE_BK;
   }
-  /* The impact block is solved from the shock jacobian and the same rows of the
-   * pencil, so a_real has to still be the one klein_preproc filled: the QZ
-   * transposes above touch s/t/z only. */
-  const sdsge_shock_ctx shock = {.fn = b->shock_jac,
-                           .a = s->a_real,
-                           .rows = b->shock_rows,
-                           .ss = s->ss,
-                           .par = b->params,
-                           .log_linear = b->log_linear};
-  if (sdsge_assemble_state_space(s->p, s->f, &shock, b->dims.n_state,
-                                 b->dims.n_ctrl, b->dims.n_exog, s->A,
-                                 s->B) != SDSGE_CORE_SUCCESS) {
-    return SDSGE_SOLVE_NO_IMPACT;
-  }
+  sdsge_assemble_state_space(s->p, s->f, b->dims.n_state, b->dims.n_ctrl,
+                             b->dims.n_exog, s->A, s->B);
   return SDSGE_SOLVE_OK;
 }
 

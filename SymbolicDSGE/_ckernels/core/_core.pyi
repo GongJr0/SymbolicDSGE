@@ -8,12 +8,11 @@ must stay in sync with ``_core.pyx`` / ``core.c`` and the reference oracles in
 stub.
 """
 
-from numpy import complex128, float64, int64
+from numpy import complex128, float64
 from numpy.typing import NDArray
 
 _F64 = NDArray[float64]
 _C128 = NDArray[complex128]
-_I64 = NDArray[int64]
 
 def assemble_state_space(
     p: _C128,
@@ -21,15 +20,8 @@ def assemble_state_space(
     n_state: int,
     n_control: int,
     n_exog: int,
-    shock_addr: int = ...,
-    rows: _I64 | None = ...,
-    a: _F64 | None = ...,
-    steady_state: _F64 | None = ...,
-    params: _F64 | None = ...,
-    log_linear: bool = ...,
 ) -> tuple[_F64, _F64]:
-    """(A, B) <- linear state space from (p, f) matrices. The shock arguments
-    solve the exogenous block of B and are required when n_exog > 0."""
+    """(A, B) <- linear state space from (p, f) matrices."""
 
 def simulate_linear_states_into(
     A: _F64,

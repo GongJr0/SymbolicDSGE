@@ -469,8 +469,6 @@ def test_native_lowering_runs_second_order_simulation() -> None:
         hss=hss,
         gss=gss,
         steady_state=np.zeros(3, dtype=np.float64),
-        a=np.zeros((3, 3), dtype=np.float64),
-        b=np.zeros((3, 3), dtype=np.float64),
     )
     solved = SolvedModel(
         compiled=compiled,

@@ -17,12 +17,6 @@ cdef extern from "sdsge_common.h":
         int64_t n_float
         int64_t n_int
 
-    ctypedef void (*meas_fn)(
-        const double *vars,
-        const double *par,
-        double *out,
-    ) noexcept nogil
-
 cdef extern from "kalman.h":
     int KF_OK
     int KF_ERR_MATRIX_CONDITION
@@ -66,6 +60,12 @@ cdef extern from "kalman.h":
         double *arena,
         kf_outputs *outp,
     ) nogil
+
+    ctypedef void (*meas_fn)(
+        const double *x,
+        const double *params,
+        double *out,
+    ) noexcept nogil
 
     ctypedef struct ekf_inputs:
         meas_fn meas

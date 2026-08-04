@@ -9,8 +9,50 @@ import sympy as sp
 from numba import cfunc, types
 from sympy import Symbol
 
-from .base import ExpressionPrinter
-from .ops import F64Ops, OpTable
+from .base import ExpressionPrinter, OpTable
+
+
+class F64Ops(OpTable):
+    """Real valued backend for measurement callbacks."""
+
+    prelude_imports = ("import math",)
+    elems_per_var = 1
+
+    def const(self, v: float) -> str:
+        return repr(float(v))
+
+    def load(self, buf: str, idx: int) -> str:
+        return f"{buf}[{idx}]"
+
+    def store(self, buf: str, idx: int, expr: str) -> str:
+        return f"{buf}[{idx}] = {expr}"
+
+    def add(self, a: str, b: str) -> str:
+        return f"({a} + {b})"
+
+    def sub(self, a: str, b: str) -> str:
+        return f"({a} - {b})"
+
+    def mul(self, a: str, b: str) -> str:
+        return f"({a} * {b})"
+
+    def div(self, a: str, b: str) -> str:
+        return f"({a} / {b})"
+
+    def neg(self, a: str) -> str:
+        return f"(-{a})"
+
+    def real_scale(self, a: str, s: float) -> str:
+        return f"({float(s)!r} * {a})"
+
+    def exp(self, a: str) -> str:
+        return f"math.exp({a})"
+
+    def log(self, a: str) -> str:
+        return f"math.log({a})"
+
+    def sqrt(self, a: str) -> str:
+        return f"math.sqrt({a})"
 
 
 @dataclass(slots=True)
@@ -71,6 +113,10 @@ class MeasurementLayout:
 
 class MeasurementPrinter(ExpressionPrinter):
     @property
+    def allocated_dtype(self) -> str:
+        return "np.float64"
+
+    @property
     def context_name(self) -> str:
         return "measurement"
 
@@ -101,8 +147,8 @@ def build_measurement_cfunc(
     ns: dict[str, Any] = {}
     exec(src, ns)  # noqa: S102
     sig = types.void(
-        types.CPointer(table.numba_type),
-        types.CPointer(table.numba_type),
-        types.CPointer(table.out_numba_type),
+        types.CPointer(types.float64),
+        types.CPointer(types.float64),
+        types.CPointer(types.float64),
     )
     return cfunc(sig)(ns["_measurement_cf"])

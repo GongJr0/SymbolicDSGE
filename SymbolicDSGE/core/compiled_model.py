@@ -15,7 +15,6 @@ from ..kalman.config import KalmanConfig
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ConstraintLayout,
-    F64Ops,
     MeasurementLayout,
     ResidualLayout,
     build_cfunc,
@@ -134,49 +133,6 @@ class RegimeJacobianFunc:
 
 
 @dataclass(frozen=True)
-class ShockBlock:
-    """Symbolic d(residual)/d(shock), and which equations carry a shock.
-
-    ``jac`` is the full flat row-major ``(n_eq, n_exog)`` grid so entry
-    ``i * n_exog + j`` stays addressable by equation and shock. ``rows`` is the
-    equations with a nonzero row, which the squareness check pins at ``n_exog``.
-    """
-
-    rows: list[int]
-    jac: list[Expr]
-
-
-@dataclass(frozen=True)
-class ShockJacobianFunc:
-    """Shock jacobian rows as one cfunc, and what the native side needs to call it.
-
-    Compacted to ``rows`` at print time, so ``out`` is the square
-    ``(n_exog, n_exog)`` block row-major, row ``k`` being equation ``rows[k]``.
-    The impact matrix solve pairs it with the same rows of ``a``, so both sides
-    are indexed by ``rows`` in the same order.
-
-    Held by CompiledModel so ``address`` stays valid for the driver.
-    """
-
-    n_exog: int
-    cfunc: Any
-    rows: NDArray[int64]
-    n_var: int
-    n_par: int
-
-    @property
-    def address(self) -> int:
-        """Entry point of ``void (*)(const double *fwd, const double *cur,
-        const double *par, double *out)``."""
-        return int(self.cfunc.address)
-
-    @property
-    def n_out(self) -> int:
-        """Length of ``out``: the square block, ``n_exog * n_exog``."""
-        return self.n_exog * self.n_exog
-
-
-@dataclass(frozen=True)
 class CompiledModel:
     config: ModelConfig
     kalman: KalmanConfig | None
@@ -190,7 +146,6 @@ class CompiledModel:
     objective_eqs: list[Expr]
 
     calib_params: list[Symbol]
-    shock_block: ShockBlock
 
     observable_names: list[str]
     observable_eqs: list[Expr]
@@ -262,48 +217,6 @@ class CompiledModel:
 
     def construct_regime_jacobian_func(self) -> RegimeJacobianFunc | None:
         return self._regime_jacobian_func
-
-    @cached_property
-    def _shock_jacobian_func(self) -> ShockJacobianFunc | None:
-        # Shock-carrying rows of d(residual)/d(shock) as one cfunc, for the
-        # impact matrix solve in assemble_state_space. Shares the residual
-        # layout, so entries may carry fwd and cur alike. Held here so the
-        # address and the row buffer stay valid for the driver.
-        n_exog = self.n_exog
-        if n_exog == 0:
-            return None
-
-        base = ResidualLayout.from_compiled(self)
-        block = self.shock_block
-        want = base.n_eq * n_exog
-        if len(block.jac) != want:
-            raise ValueError(
-                f"Shock jacobian has {len(block.jac)} entries, expected {want} "
-                f"for {base.n_eq} equations over {n_exog} shocks."
-            )
-        if len(block.rows) != n_exog:
-            raise ValueError(
-                f"Shock jacobian has {len(block.rows)} shocked rows, expected "
-                f"{n_exog} for a square impact block."
-            )
-
-        exprs = [block.jac[i * n_exog + j] for i in block.rows for j in range(n_exog)]
-        layout = ResidualLayout(
-            slot=base.slot,
-            n_var=base.n_var,
-            n_par=base.n_par,
-            n_eq=len(exprs),
-        )
-        return ShockJacobianFunc(
-            n_exog=n_exog,
-            cfunc=build_cfunc(exprs, layout, F64Ops()),
-            rows=np.asarray(block.rows, dtype=np.int64),
-            n_var=base.n_var,
-            n_par=base.n_par,
-        )
-
-    def construct_shock_jacobian_func(self) -> ShockJacobianFunc | None:
-        return self._shock_jacobian_func
 
     @cached_property
     def _constraint_func(self) -> ConstraintFunc | None:
