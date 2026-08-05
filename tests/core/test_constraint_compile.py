@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import ctypes
 import dataclasses
+import re
 
 import numpy as np
 import pytest
@@ -126,7 +127,7 @@ def _call(cf, cur, par):
 def test_flags_match_the_written_conditions(compiled_obc, g, z, beta, expected):
     cf = compiled_obc.construct_constraint_func()
     cur = np.zeros(cf.n_var)
-    cur[0], cur[1] = g, z
+    cur[compiled_obc.idx["g"]], cur[compiled_obc.idx["z"]] = g, z
     par = np.zeros(cf.n_par)
     par[0] = beta
 
@@ -445,8 +446,12 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
         a_r, b_r = klein_preprocess(cfunc.address, ss_ref, par, n_eq, False)
         c_r = residual_eval(cfunc.address, ss_ref, ss_ref, par, n_eq).real
 
-        assert np.flatnonzero(np.abs(a_r - a_ref).max(axis=1)).tolist() == [2]
-        assert np.flatnonzero(np.abs(b_r - b_ref).max(axis=1)).tolist() == [2]
+        # The taylor rule and its replacements are both contemporaneous, so the
+        # swap lands entirely in b; what matters is that no other row moves.
+        changed = np.maximum(
+            np.abs(a_r - a_ref).max(axis=1), np.abs(b_r - b_ref).max(axis=1)
+        )
+        assert np.flatnonzero(changed).tolist() == [2]
 
         want = np.zeros(n_eq)
         want[2] = expected_c[mask]
@@ -473,16 +478,26 @@ def compiled_rbc_obc(rbc_second_order_test_model_path):
     return DSGESolver(conf, kalman).compile()
 
 
-def _rbc_steady_state(compiled):
+def _rbc_seed(compiled):
+    """Newton seed over the compiled layout, generated variables included.
+
+    A lag aux starts where its origin does, so the suffix is stripped before the
+    `<name>_ss` lookup; a shock state and an unseeded variable start at zero.
+    """
     calib = compiled.config.calibration.parameters
-    seed = np.array(
-        [
-            float(calib[sp.Symbol(f"{n}_ss")]) if n != "z" else 0.0
-            for n in compiled.var_names
-        ]
-    )
+    seeds = []
+    for name in compiled.var_names:
+        origin = re.sub(r"_lag\d+$", "", name)
+        sym = sp.Symbol(f"{origin}_ss")
+        seeds.append(float(calib[sym]) if sym in calib else 0.0)
+    return np.array(seeds)
+
+
+def _rbc_steady_state(compiled):
     ss, _ = steady_state_newton(
-        compiled.construct_objective_cfunc().address, seed, _params(compiled)
+        compiled.construct_objective_cfunc().address,
+        _rbc_seed(compiled),
+        _params(compiled),
     )
     return ss
 
@@ -500,15 +515,9 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     calib = compiled_rbc_obc.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled_rbc_obc.calib_params])
     n_eq = len(compiled_rbc_obc.var_names)
-    seed = np.array(
-        [
-            float(calib[sp.Symbol(f"{n}_ss")]) if n != "z" else 0.0
-            for n in compiled_rbc_obc.var_names
-        ]
-    )
 
     ref_cfunc = compiled_rbc_obc.construct_objective_cfunc()
-    ss_ref, _ = steady_state_newton(ref_cfunc.address, seed, par)
+    ss_ref, _ = steady_state_newton(ref_cfunc.address, _rbc_seed(compiled_rbc_obc), par)
 
     # The whole point of a levels fixture: the expansion point is not the origin.
     assert np.abs(ss_ref).max() > 1.0
@@ -529,9 +538,9 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     np.testing.assert_allclose(c_r, want, atol=1e-10)
 
 
-def test_regime_replacements_zero_shocks_like_the_reference(parsed_post82):
-    # Regimes walk the reference residual path, so a shock in a replacement is
-    # accepted and then zeroed the way it is in objective_eqs.
+def test_regime_replacements_lift_shocks_like_the_reference(parsed_post82):
+    # Regimes are desugared alongside the reference, so a shock in a replacement
+    # reaches the residual through its shock state rather than as a bare symbol.
     model, _ = parsed_post82
     r = model.variables.variables[2]
     shock = next(iter(model.shock_map))
@@ -544,9 +553,11 @@ def test_regime_replacements_zero_shocks_like_the_reference(parsed_post82):
 
     compiled = solver.compile()
 
-    cur_r = sp.Symbol("cur_r")
-    assert sp.simplify(compiled.regimes[1].residuals[2] - cur_r * (1 - rho_r)) == 0
-    assert shock not in compiled.regimes[1].residuals[2].free_symbols
+    cur_r, cur_shock = sp.Symbol("cur_r"), sp.Symbol(f"cur_{shock.name}_st")
+    residual = compiled.regimes[1].residuals[2]
+
+    assert sp.simplify(residual - (cur_r * (1 - rho_r) - cur_shock)) == 0
+    assert shock not in residual.free_symbols
     assert compiled.construct_regime_cfuncs()[1] is not None
 
 

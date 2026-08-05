@@ -7,6 +7,8 @@ correction terms.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 import sympy as sp
@@ -140,13 +142,31 @@ _DYNARE_IRF = np.array(
 )
 
 
-def _dynare_to_our_convention(dyn_row: list[float], rho: float) -> np.ndarray:
-    """Map a Dynare ghxx row ([kk, kz, zk, zz] in state order [k, z]) to our 2x2
-    Hessian in state order [z, k]. Our offset-0/+1 timing puts the innovation on
-    z(t+1) vs Dynare's z(t), so our z-state = rho * Dynare's -> every z-derivative
-    carries 1/rho (k is unaffected: same predetermined stock in both datings)."""
-    kk, kz, _zk, zz = dyn_row
-    return np.array([[zz / rho**2, kz / rho], [kz / rho, kk]])
+# Dynare's two states are the compiler's lag auxes, so a golden row maps onto our
+# tensors with no relabeling. Our third state is the lifted shock, which carries
+# what Dynare reports separately as ghxu/ghuu.
+_DYNARE_STATES = ("k_lag1", "z_lag1")
+
+
+def _dynare_pair(dyn_row: list[float]) -> np.ndarray:
+    """A Dynare ghxx row [kk, kz, zk, zz] as a 2x2 in state order [k, z]."""
+    return np.asarray(dyn_row, dtype=np.float64).reshape(2, 2)
+
+
+def _our_pair(compiled, tensor_row: np.ndarray) -> np.ndarray:
+    """The [k_lag1, z_lag1] sub-block of one row of a state tensor."""
+    ix = [compiled.idx[name] for name in _DYNARE_STATES]
+    return tensor_row[np.ix_(ix, ix)]
+
+
+def _levels_steady_state(compiled) -> np.ndarray:
+    """The RBC expansion point over the compiled layout, generated vars included."""
+    calib = compiled.config.calibration.parameters
+    known = {"k": float(calib[sp.Symbol("k_ss")]), "c": float(calib[sp.Symbol("c_ss")])}
+    return np.array(
+        [known.get(re.sub(r"_lag\d+$", "", n), 0.0) for n in compiled.var_names],
+        dtype=np.float64,
+    )
 
 
 def _drive(path):
@@ -181,6 +201,27 @@ def _solve_rbc_second_order():
     return solver.solve(compiled, order=2)
 
 
+def _golden_columns(solved) -> list[int]:
+    """Our columns matching the golden's stored [z, k, c].
+
+    The paths were captured against Dynare's own dating, where the reported k is
+    the predetermined stock. That is our k_lag1, not our contemporaneous k.
+    """
+    idx = solved.compiled.idx
+    return [idx["z"], idx["k_lag1"], idx["c"]]
+
+
+def _golden_x0(solved) -> np.ndarray:
+    """The Dynare initial condition over our state block [e_st, k_lag1, z_lag1].
+
+    The golden reports z contemporaneously but starts the path one period
+    earlier, so the initial lag is one AR step behind the printed value.
+    """
+    rho = float(solved.compiled.config.calibration.parameters[sp.Symbol("rho")])
+    z0, k0 = _DYNARE_SIM_X0
+    return np.array([0.0, k0, z0 / rho], dtype=np.float64)
+
+
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
 def test_first_order_foc_holds(path):
     a, b, _f_xx, gx, hx, n_state = _drive(path)
@@ -202,24 +243,18 @@ def test_linear_model_has_zero_second_order(path):
 
 
 def test_rbc_second_order_matches_dynare():
-    """The golden: our g_xx/h_xx match Dynare's ghxx (after the [k,z]->[z,k]
-    reorder + the (1/rho)^m timing map), and the risk correction g_ss/h_ss matches
-    ghs2 directly (a constant, so no timing factor). The independent-solver check
-    on the actual second-order math."""
+    """The golden: our g_xx/h_xx match Dynare's ghxx on the state pair Dynare and
+    we share, and the risk correction g_ss/h_ss matches ghs2. The
+    independent-solver check on the actual second-order math."""
     model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
     compiled = DSGESolver(model, kalman).compile()
-    assert list(compiled.var_names) == ["z", "k", "c"]  # states [z, k], control c
+    # States are all compiler-minted: the lifted shock and the two lag auxes.
+    assert list(compiled.var_names) == ["e_st", "k_lag1", "z_lag1", "c", "k", "z"]
 
     layout = ResidualLayout.from_compiled(compiled)
     n_eq, n_state = layout.n_eq, compiled.n_state
     calib = compiled.config.calibration.parameters
-    rho = float(calib[sp.Symbol("rho")])
-    ss_map = {
-        "z": 0.0,
-        "k": float(calib[sp.Symbol("k_ss")]),
-        "c": float(calib[sp.Symbol("c_ss")]),
-    }
-    ss = np.array([ss_map[nm] for nm in compiled.var_names], dtype=np.float64)
+    ss = _levels_steady_state(compiled)
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
 
     cf = compiled.construct_objective_cfunc()
@@ -239,28 +274,33 @@ def test_rbc_second_order_matches_dynare():
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
     gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
 
-    # gxx[0] = c (the single control); hxx[1] = k' (state index 1); hxx[0] = z'.
+    # k_lag1(t+1) = k(t), so Dynare's k' row is ours; z_lag1(t+1) = z(t) is linear.
+    ctrl = {n: i for i, n in enumerate(compiled.var_names[n_state:])}
     np.testing.assert_allclose(
-        gxx[0], _dynare_to_our_convention(_DYNARE_GHXX_C, rho), rtol=1e-4, atol=1e-6
-    )
-    np.testing.assert_allclose(
-        hxx[1],
-        _dynare_to_our_convention(_DYNARE_GHXX_KPRIME, rho),
+        _our_pair(compiled, gxx[ctrl["c"]]),
+        _dynare_pair(_DYNARE_GHXX_C),
         rtol=1e-4,
         atol=1e-6,
     )
-    np.testing.assert_allclose(hxx[0], 0.0, atol=1e-6)  # z' is linear
+    np.testing.assert_allclose(
+        _our_pair(compiled, hxx[compiled.idx["k_lag1"]]),
+        _dynare_pair(_DYNARE_GHXX_KPRIME),
+        rtol=1e-4,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(hxx[compiled.idx["z_lag1"]], 0.0, atol=1e-6)
 
-    # Risk correction vs ghs2: eta loads the single shock (std sig) on z (state 0);
-    # x' = h(x) + eta @ eps. There is no timing factor because g_ss and h_ss
-    # are constants.
+    # Risk correction vs ghs2: eta loads the single shock (std sig) on the lifted
+    # shock state; x' = h(x) + eta @ eps.
     sig = float(calib[sp.Symbol("sig")])
     eta = np.zeros((n_state, 1), dtype=np.float64)
-    eta[0, 0] = sig
+    eta[compiled.idx["e_st"], 0] = sig
     gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
-    # ours [g_ss(c); h_ss(z', k')] -> Dynare DR order [k', z, c]
     np.testing.assert_allclose(
-        [hss[1], hss[0], gss[0]], _DYNARE_GHS2, rtol=1e-4, atol=1e-8
+        [hss[compiled.idx["k_lag1"]], hss[compiled.idx["z_lag1"]], gss[ctrl["c"]]],
+        _DYNARE_GHS2,
+        rtol=1e-4,
+        atol=1e-8,
     )
 
 
@@ -277,28 +317,36 @@ def test_solve_order2_wiring():
     pol = solved.policy
     assert pol.order == 2
 
-    calib = compiled.config.calibration.parameters
-    rho = float(calib[sp.Symbol("rho")])
-    k_ss, c_ss = float(calib[sp.Symbol("k_ss")]), float(calib[sp.Symbol("c_ss")])
-    # steady state was solved/validated to the nonlinear point (order [z, k, c]).
+    ss = _levels_steady_state(compiled)
+    n_state = compiled.n_state
+    ctrl = {n: i for i, n in enumerate(compiled.var_names[n_state:])}
+    # steady state was solved/validated to the nonlinear point.
+    np.testing.assert_allclose(pol.steady_state, ss, rtol=1e-6, atol=1e-8)
     np.testing.assert_allclose(
-        pol.steady_state, [0.0, k_ss, c_ss], rtol=1e-6, atol=1e-8
-    )
-    np.testing.assert_allclose(
-        pol.gxx[0], _dynare_to_our_convention(_DYNARE_GHXX_C, rho), rtol=1e-4, atol=1e-6
-    )
-    np.testing.assert_allclose(
-        pol.hxx[1],
-        _dynare_to_our_convention(_DYNARE_GHXX_KPRIME, rho),
+        _our_pair(compiled, pol.gxx[ctrl["c"]]),
+        _dynare_pair(_DYNARE_GHXX_C),
         rtol=1e-4,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        [pol.hss[1], pol.hss[0], pol.gss[0]], _DYNARE_GHS2, rtol=1e-4, atol=1e-8
+        _our_pair(compiled, pol.hxx[compiled.idx["k_lag1"]]),
+        _dynare_pair(_DYNARE_GHXX_KPRIME),
+        rtol=1e-4,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        [
+            pol.hss[compiled.idx["k_lag1"]],
+            pol.hss[compiled.idx["z_lag1"]],
+            pol.gss[ctrl["c"]],
+        ],
+        _DYNARE_GHS2,
+        rtol=1e-4,
+        atol=1e-8,
     )
     # First order path is untouched: KleinSolution, no second-order tensors.
     # (levels model -> the expansion point must be supplied; zeros would fail BK.)
-    first = solver.solve(compiled, order=1, ss_seed=[0.0, k_ss, c_ss])
+    first = solver.solve(compiled, order=1, ss_seed=ss)
     assert first.policy.order == 1
     assert not hasattr(first.policy, "gxx")
 
@@ -308,8 +356,10 @@ def test_rbc_second_order_deterministic_sim_matches_dynare():
 
     out = solved.sim(
         _DYNARE_DETERMINISTIC_SIM.shape[0] - 1,
-        x0=_DYNARE_SIM_X0,
-    )["_X"]
+        x0=_golden_x0(solved),
+    )[
+        "_X"
+    ][:, _golden_columns(solved)]
 
     np.testing.assert_allclose(
         out,
@@ -324,9 +374,9 @@ def test_rbc_second_order_stochastic_sim_matches_dynare():
 
     out = solved.sim(
         _DYNARE_STOCHASTIC_SIM.shape[0] - 1,
-        x0=_DYNARE_SIM_X0,
-        shocks={"z": _DYNARE_STOCHASTIC_SHOCKS},
-    )["_X"]
+        x0=_golden_x0(solved),
+        shocks={"e": _DYNARE_STOCHASTIC_SHOCKS},
+    )["_X"][:, _golden_columns(solved)]
 
     np.testing.assert_allclose(
         out,
@@ -339,6 +389,8 @@ def test_rbc_second_order_stochastic_sim_matches_dynare():
 def test_rbc_second_order_irf_matches_dynare():
     solved = _solve_rbc_second_order()
 
-    out = solved.irf(["z"], T=_DYNARE_IRF.shape[0] - 1)["_X"]
+    out = solved.irf(["e"], T=_DYNARE_IRF.shape[0] - 1)["_X"][
+        :, _golden_columns(solved)
+    ]
 
     np.testing.assert_allclose(out, _DYNARE_IRF[1:], rtol=2e-6, atol=2e-6)

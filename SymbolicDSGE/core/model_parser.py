@@ -16,7 +16,7 @@ from sympy.core.basic import Basic
 from sympy.core.symbol import AppliedUndef
 import yaml
 import sympy as sp
-from sympy import Matrix, Symbol, Function, Eq, Expr
+from sympy import Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
 from sympy.logic.boolalg import And, Or, Not
 from sympy.parsing.sympy_parser import standard_transformations, convert_xor
@@ -713,7 +713,7 @@ class ModelParser:
             if obs_name in observables_raw
         }
 
-        is_affine, obs_jacobian = ModelParser._derive_observable_structure(
+        is_affine = ModelParser._derive_observable_structure(
             observables_eq=observables_eq,
             ordered_var_names=ordered_var_names,
             _LOCALS=_LOCALS,
@@ -725,7 +725,6 @@ class ModelParser:
             regime=regime if regime else None,
             observable=SymbolGetterDict(observables_eq),
             obs_is_affine=SymbolGetterDict(is_affine),
-            obs_jacobian=obs_jacobian,
         )
 
     @staticmethod
@@ -734,7 +733,7 @@ class ModelParser:
         observables_eq: dict[Symbol, Expr],
         ordered_var_names: list[str],
         _LOCALS: dict[str, Any],
-    ) -> tuple[dict[Symbol, bool], Matrix]:
+    ) -> dict[Symbol, bool]:
         t = _LOCALS["t"]
 
         state_funcs = [_LOCALS[var_name] for var_name in ordered_var_names]
@@ -747,16 +746,13 @@ class ModelParser:
         state_set = set(state_syms)
 
         is_affine = {obs: False for obs in observables_eq}
-        jacobian_entries: list[list[Expr]] = []
-
         for obs, expr in observables_eq.items():
             expr_symbolized = expr.xreplace(state_sym_subs)
             grads = [expr_symbolized.diff(s) for s in state_syms]
-            jacobian_entries.append(grads)  # pyright: ignore
             if all((g.free_symbols & state_set) == set() for g in grads):
                 is_affine[obs] = True
 
-        return is_affine, Matrix(jacobian_entries)
+        return is_affine
 
     @staticmethod
     def _parse_variables(

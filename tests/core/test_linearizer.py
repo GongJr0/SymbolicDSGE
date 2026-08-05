@@ -35,8 +35,8 @@ def _nonlinear_model_yaml() -> str:
         observables: [AObs]
         equations:
           model:
-            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + e_a"
-            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + gamma*(a(t) - a_ss)"
+            a_process: "a(t) = rho_a*a(t-1) + (1-rho_a)*a_ss + e_a"
+            k_process: "k(t) = rho_k*k(t-1) + (1-rho_k)*k_ss + gamma*(a(t-1) - a_ss)"
           constraint: {}
           observables:
             AObs: a(t)
@@ -74,9 +74,9 @@ def _mixed_methods_nonlinear_yaml() -> str:
         observables: [ZObs]
         equations:
           model:
-            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a"
-            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)"
-            z_process: "z(t+1) = rho_z*z(t) + e_z"
+            a_process: "a(t) = rho_a*a(t-1) + (1-rho_a)*a_ss + gamma*z(t-1) + e_a"
+            k_process: "k(t) = rho_k*k(t-1) + (1-rho_k)*k_ss + z(t-1)"
+            z_process: "z(t) = rho_z*z(t-1) + e_z"
           constraint: {}
           observables:
             ZObs: z(t)
@@ -119,9 +119,9 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         observables: [ZObs]
         equations:
           model:
-            a_process: "a_ss*a(t+1) = rho_a*a_ss*a(t) + gamma*z(t) + e_a"
-            k_process: "k(t+1) = rho_k*k(t) + z(t)"
-            z_process: "z(t+1) = rho_z*z(t) + e_z"
+            a_process: "a_ss*a(t) = rho_a*a_ss*a(t-1) + gamma*z(t-1) + e_a"
+            k_process: "k(t) = rho_k*k(t-1) + z(t-1)"
+            z_process: "z(t) = rho_z*z(t-1) + e_z"
           constraint: {}
           observables:
             ZObs: z(t)
@@ -280,8 +280,11 @@ def test_linearize_model_marks_copy_and_solver_compiles_and_solves(tmp_path):
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0
-    assert solved.A.shape == (2, 2)
-    assert solved.B.shape == (2, 1)
+    # a and k each gain a lag state and the shock gains one, so 2 declared plus
+    # 3 generated.
+    assert compiled.n_state == 3
+    assert solved.A.shape == (5, 5)
+    assert solved.B.shape == (5, 1)
 
 
 def test_linearized_model_supports_likelihood_evaluation(tmp_path):
@@ -307,7 +310,7 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
         params=params,
         filter_mode="linear",
         observables=["AObs"],
-        ss_seed=np.zeros((2,), dtype=np.float64),
+        ss_seed=np.zeros((len(compiled.var_names),), dtype=np.float64),
         x0=None,
         jitter=None,
         symmetrize=None,

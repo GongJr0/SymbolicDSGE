@@ -12,6 +12,9 @@ parity-testable. Two guards per case:
 The golden ``fun`` values were recorded from the scipy path; the native driver
 must land within tolerance. ``x`` is not pinned tightly (native FD lands in the
 same basin at a slightly different point).
+
+They score a panel this module simulates, so they were re-recorded when natural
+time dating moved the state space the panel comes out of.
 """
 
 from __future__ import annotations
@@ -57,9 +60,9 @@ def _assert_mle_packing(est: Estimator, res: MLEResult) -> None:
 @pytest.mark.parametrize(
     "mode,golden_fun",
     [
-        ("linear", 257.2567583860),
-        ("extended", 257.2567583860),
-        ("unscented", 257.9468468429),
+        ("linear", 204.8736595244),
+        ("extended", 204.8736595244),
+        ("unscented", 205.6265344010),
     ],
 )
 def test_mle_lbfgsb_oracle(post82, mode, golden_fun):
@@ -72,7 +75,7 @@ def test_mle_lbfgsb_oracle(post82, mode, golden_fun):
 def test_mle_nelder_mead_oracle(post82):
     est = _mle_estimator(post82, "linear")
     res = est.mle(theta0=_TH0, bounds=_BNDS, method="Nelder-Mead")
-    assert res.fun == pytest.approx(257.2567583857, abs=1e-3)
+    assert res.fun == pytest.approx(204.8736595230, abs=1e-3)
     _assert_mle_packing(est, res)
 
 
@@ -94,7 +97,7 @@ def test_map_lbfgsb_oracle(post82):
     )
     res = est.map(theta0=np.array([2.0], dtype=np.float64), bounds=[(1.0, 5.0)])
     assert isinstance(res, MAPResult)
-    assert res.fun == pytest.approx(257.5019149357, abs=1e-3)
+    assert res.fun == pytest.approx(205.7467140574, abs=1e-3)
 
     lp = float(est.loglik(res.x))
     lpr = float(est.logprior(res.x))

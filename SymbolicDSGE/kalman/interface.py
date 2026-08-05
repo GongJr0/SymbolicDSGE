@@ -495,22 +495,15 @@ class KalmanInterface(KalmanFilter):
 
     def _build_Q(self) -> NDF:
         params = self.model_config.calibration.parameters
-        shock_map = self.model.config.shock_map
         shock_std = self.model.config.calibration.shock_std
         shock_corr = self.model.config.calibration.shock_corr
 
-        var_order = self.model.compiled.var_names
-        exogs = var_order[: self.model.compiled.n_exog]
-
-        rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-            {exo: shock for shock, exo in shock_map.items()}
-        )
-        shocks = [rev[exo] for exo in exogs]
+        shocks = list(self.model.config.shock_map)
         stds = asarray(
             [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
         )
 
-        corr = np.eye(len(exogs), dtype=float64)
+        corr = np.eye(len(shocks), dtype=float64)
         n = len(stds)
         for i in range(n):
             for j in range(i + 1, n):

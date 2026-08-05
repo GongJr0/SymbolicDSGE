@@ -59,4 +59,3 @@ __Fields:__
 | constraint | `#!python SymbolGetterDict[Symbol, dict[Relational | And | Or | Not, Expr]]` | Piecewise OBC map keyed by constrained variable. Each variable may carry multiple condition entries, each paired with an alternative expression. |
 | observable | `#!python SymbolGetterDict[Symbol, Expr]` | Observable equations. |
 | obs_is_affine | `#!python SymbolGetterDict[Symbol, bool]` | Whether each observable equation is affine in current state variables. |
-| obs_jacobian | `#!python Matrix` | Observable Jacobian with respect to current state variables. |

@@ -9,11 +9,8 @@ shock_map:
 observables: [Infl, Rate]
 
 equations:
-    # Solver Compatibility Issue:
-    #    Shift all equations such that no lags appear. [Handled in Model Compiler]
-    #    i.e., u(t) = rho_u*u(t-1) + e_u  -->  u(t+1) = rho_u*u(t) + e_u
-
-    #    Time shifts are limited to +-1 period. Shifts of |n| > 1 will result in an error.
+    # Equations are written in natural time. Lags stay where they belong; the
+    # compiler lifts each one into a state of its own. Shocks are dated t.
 
     model:
         # Placeholder Phillips Curve:
@@ -23,16 +20,16 @@ equations:
         euler: "x(t) = x(t+1) - sigma*(r(t) - Pi(t+1)) + u(t)"
 
         # Placeholder AR(1) demand shock:
-        u_process: "u(t+1) = rho_u*u(t) + e_u"
+        u_process: "u(t) = rho_u*u(t-1) + e_u"
 
         # Placeholder Taylor-rule target rate:
         taylor: "r_star(t) = rbar + phi_pi*Pi(t) + phi_x*x(t) + v(t)"
 
         # Placeholder Interest-rate smoothing:
-        policy: "r(t+1) = rho_r*r(t) + (1 - rho_r)*r_star(t+1)"
+        policy: "r(t) = rho_r*r(t-1) + (1 - rho_r)*r_star(t)"
 
         # Placeholder Monetary policy shock:
-        v_process: "v(t+1) = rho_v*v(t) + e_v"
+        v_process: "v(t) = rho_v*v(t-1) + e_v"
 
     constraint: {}
 

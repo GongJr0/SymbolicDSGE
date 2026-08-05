@@ -97,6 +97,8 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
         n_exog=1,
         n_state=2,
         observable_names=[],
+        shock_names=("eps",),
+        shock_idx={"eps": 0},
         config=SimpleNamespace(
             shock_map={Symbol("eps"): Symbol("e")},
             calibration=SimpleNamespace(parameters={}, shock_std={}),
@@ -212,8 +214,8 @@ def test_affine_observation_kernel_writes_all_states() -> None:
 def test_solved_model_sim_matches_manual_state_recursion(solved_test):
     T = 4
     shocks = {
-        "u": np.array([0.5, -1.0, 0.25, 0.75], dtype=np.float64),
-        "v": np.array([1.0, 0.0, -0.5, 0.25], dtype=np.float64),
+        "e_u": np.array([0.5, -1.0, 0.25, 0.75], dtype=np.float64),
+        "e_v": np.array([1.0, 0.0, -0.5, 0.25], dtype=np.float64),
     }
 
     out = solved_test.sim(T, shocks=shocks, shock_scale=0.5)
@@ -237,7 +239,7 @@ def test_solved_model_second_order_sim_matches_pruned_recursion() -> None:
     shock = np.array([0.0, 0.05, -0.02], dtype=np.float64)
     x0 = np.array([0.2, -0.1, 99.0], dtype=np.float64)
 
-    out = solved.sim(T, shocks={"e": shock}, x0=x0)["_X"]
+    out = solved.sim(T, shocks={"eps": shock}, x0=x0)["_X"]
     expected = _manual_second_order_path(data, shock, x0[:2])
 
     np.testing.assert_allclose(out, expected)
@@ -250,7 +252,7 @@ def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
     shock = np.array([1.0, 0.0, 0.0], dtype=np.float64)
     zero = np.zeros(T, dtype=np.float64)
 
-    out = solved.irf(shocks=["e"], T=T)["_X"]
+    out = solved.irf(shocks=["eps"], T=T)["_X"]
     expected = _manual_second_order_path(
         data,
         shock,
@@ -263,7 +265,7 @@ def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
 
 def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
     with pytest.raises(ValueError, match="must have length"):
-        solved_test.sim(8, shocks={"u": np.ones(7)})
+        solved_test.sim(8, shocks={"e_u": np.ones(7)})
 
 
 def test_solved_model_sim_with_observables_includes_measurements(solved_test):
@@ -318,12 +320,13 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
 def test_solved_model_irf_validation_errors(solved_test):
     with pytest.raises(ValueError, match="At least one shock"):
         solved_test.irf(shocks=[], T=10)
-    with pytest.raises(ValueError, match="not found in exogenous"):
+    # A variable name is not a shock name, even a shocked one.
+    with pytest.raises(ValueError, match=r"Unknown shock\(s\) \['Pi'\]"):
         solved_test.irf(shocks=["Pi"], T=10)
 
 
-def test_solved_model_irf_runs_for_exogenous_shock(solved_test):
-    out = solved_test.irf(shocks=["u"], T=8, observables=True)
+def test_solved_model_irf_runs_for_a_model_shock(solved_test):
+    out = solved_test.irf(shocks=["e_u"], T=8, observables=True)
     assert out["u"].shape == (8,)
     assert "_X" in out
     assert "Infl" in out and "Rate" in out
@@ -343,7 +346,7 @@ def test_solved_model_transition_plot_renders_observables_and_shocks(
     monkeypatch.setattr(solved_model_module.SolvedModel, "irf", fake_irf)
     monkeypatch.setattr(plt, "show", lambda: None)
 
-    solved_test.transition_plot(T=3, shocks=["u"], observables=True)
+    solved_test.transition_plot(T=3, shocks=["e_u"], observables=True)
 
     assert plt.get_fignums()
     plt.close("all")
@@ -405,8 +408,8 @@ def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
         base = np.array([cov[0, 0], cov[1, 1]], dtype=float)
         return np.tile(base, (T, 1))
 
-    unpack_1 = solved_test._shock_unpack({"u,v": mv_shock})
-    unpack_2 = solved_test._shock_unpack({"v,u": mv_shock})
+    unpack_1 = solved_test._shock_unpack({"e_u,e_v": mv_shock})
+    unpack_2 = solved_test._shock_unpack({"e_v,e_u": mv_shock})
 
     idx_to_vec_1 = {idx: vec for idx, vec in unpack_1}
     idx_to_vec_2 = {idx: vec for idx, vec in unpack_2}
@@ -418,17 +421,17 @@ def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
 
 def test_solved_model_shock_unpack_univariate_callable_and_errors(solved_test):
     out = solved_test._shock_unpack(
-        {"u": lambda sig: np.full((4,), sig, dtype=np.float64)}
+        {"e_u": lambda sig: np.full((4,), sig, dtype=np.float64)}
     )
 
-    assert out[0][0] == solved_test.compiled.idx["u"]
+    assert out[0][0] == solved_test.compiled.shock_idx["e_u"]
     assert np.array_equal(out[0][1], np.full((4,), 0.50, dtype=np.float64))
 
-    with pytest.raises(ValueError, match="not an exogenous model variable"):
+    with pytest.raises(ValueError, match="is not a model shock"):
         solved_test._shock_unpack({"Pi": np.ones((4,), dtype=np.float64)})
 
     with pytest.raises(TypeError, match="must be a callable or ndarray"):
-        solved_test._shock_unpack({"u": "bad-shock"})
+        solved_test._shock_unpack({"e_u": "bad-shock"})
 
 
 def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
@@ -436,27 +439,27 @@ def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
         return np.ones((3, 1), dtype=np.float64)
 
     with pytest.raises(ValueError, match="must return array with shape"):
-        solved_test._shock_unpack({"u,v": bad_shape})
+        solved_test._shock_unpack({"e_u,e_v": bad_shape})
 
     with pytest.raises(TypeError, match="must be a callable or ndarray"):
-        solved_test._shock_unpack({"u,v": "bad-shock"})
+        solved_test._shock_unpack({"e_u,e_v": "bad-shock"})
 
 
 def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
     # An unknown member of a multivar key is named alongside the entry it came
     # from, so a typo is traceable to the exact grouped spec.
     arr = np.zeros((4, 2), dtype=np.float64)
-    with pytest.raises(ValueError, match=r"'Pi'.*entry 'u,Pi'"):
-        solved_test._shock_unpack({"u,Pi": arr})
+    with pytest.raises(ValueError, match=r"'Pi'.*entry 'e_u,Pi'"):
+        solved_test._shock_unpack({"e_u,Pi": arr})
 
 
-def test_solved_model_shock_unpack_rejects_variable_in_two_entries(solved_test):
-    # 'u' is driven by both a multivar and a univariate entry: each exogenous
-    # variable may appear in at most one entry, caught by the single pass.
+def test_solved_model_shock_unpack_rejects_shock_in_two_entries(solved_test):
+    # 'e_u' is driven by both a multivar and a univariate entry: each shock may
+    # appear in at most one entry, caught by the single pass.
     mv = np.zeros((4, 2), dtype=np.float64)
     uni = np.zeros((4,), dtype=np.float64)
-    with pytest.raises(ValueError, match=r"'u' is driven by more than one"):
-        solved_test._shock_unpack({"u,v": mv, "u": uni})
+    with pytest.raises(ValueError, match=r"'e_u' is driven by more than one"):
+        solved_test._shock_unpack({"e_u,e_v": mv, "e_u": uni})
 
 
 def test_solved_model_kalman_smoke(solved_post82):

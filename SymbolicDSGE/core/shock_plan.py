@@ -133,30 +133,30 @@ class ShockPlan:
 
 def validate_shock_targets(
     keys: Sequence[str],
-    exog_names: Sequence[str],
+    shock_names: Sequence[str],
 ) -> None:
-    """Check every entry names exogenous variables, each owned by one entry.
+    """Check every entry names model shocks, each owned by one entry.
 
-    Runs as one pass over the spec so a variable shared across two grouped keys
-    (for example ``"g,z"`` and ``"g,r"``) is caught. An exact duplicate key
-    cannot reach here because the mapping deduplicates it upstream.
+    Runs as one pass over the spec so a shock shared across two grouped keys
+    (for example ``"e_g,e_z"`` and ``"e_g,e_r"``) is caught. An exact duplicate
+    key cannot reach here because the mapping deduplicates it upstream.
     """
-    exog_set = set(exog_names)
+    shock_set = set(shock_names)
     owner: dict[str, str] = {}
     for name in keys:
         members = [n.strip() for n in name.split(",")] if "," in name else [name]
         for member in members:
-            if member not in exog_set:
+            if member not in shock_set:
                 where = f" in entry {name!r}" if "," in name else ""
                 raise ValueError(
-                    f"Shock variable {member!r}{where} is not an exogenous "
-                    f"model variable. Valid shock variables: {list(exog_names)}."
+                    f"Shock {member!r}{where} is not a model shock. "
+                    f"Valid shocks: {list(shock_names)}."
                 )
             if member in owner:
                 raise ValueError(
-                    f"Shock variable {member!r} is driven by more than one "
-                    f"shock entry ({owner[member]!r} and {name!r}); each "
-                    "exogenous variable may appear in at most one entry."
+                    f"Shock {member!r} is driven by more than one shock entry "
+                    f"({owner[member]!r} and {name!r}); each shock may appear "
+                    "in at most one entry."
                 )
             owner[member] = name
 

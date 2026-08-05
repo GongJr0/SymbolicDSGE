@@ -41,9 +41,9 @@ def post82_bundle(post82_test_model_path):
     sim = solved.sim(
         T=T,
         shocks={
-            "g": rng.normal(0.0, sig_g, size=T),
-            "z": rng.normal(0.0, sig_z, size=T),
-            "r": rng.normal(0.0, sig_r, size=T),
+            "e_g": rng.normal(0.0, sig_g, size=T),
+            "e_z": rng.normal(0.0, sig_z, size=T),
+            "e_r": rng.normal(0.0, sig_r, size=T),
         },
         x0=np.zeros((len(compiled.var_names),), dtype=np.float64),
         observables=True,

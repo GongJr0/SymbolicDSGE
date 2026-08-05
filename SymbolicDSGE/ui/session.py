@@ -540,25 +540,24 @@ class UISession:
             return out
 
         conf = slot.solved.config
-        targets = [
-            str(target)
-            for _, target in conf.shock_map.items()
-            if str(target) not in raw_shocks
+        # A spec is keyed by the shock, not by the variable the shock drives.
+        pending = [
+            str(shock) for shock in conf.shock_map if str(shock) not in raw_shocks
         ]
-        if not targets:
+        if not pending:
             return out
 
         seed = generation.seed
-        if generation.dist in {"norm", "t"} and len(targets) > 1:
-            key = ",".join(targets)
+        if generation.dist in {"norm", "t"} and len(pending) > 1:
+            key = ",".join(pending)
             dist_kwargs: dict[str, Any]
             if generation.dist == "t":
                 dist_kwargs = {
-                    "loc": [generation.loc] * len(targets),
+                    "loc": [generation.loc] * len(pending),
                     "df": generation.df,
                 }
             else:
-                dist_kwargs = {"mean": [generation.loc] * len(targets)}
+                dist_kwargs = {"mean": [generation.loc] * len(pending)}
             out[key] = Shock(
                 dist=generation.dist,
                 multivar=True,
@@ -567,12 +566,12 @@ class UISession:
             ).shock_generator(T)
             return out
 
-        for i, target in enumerate(targets):
+        for i, name in enumerate(pending):
             uni_kwargs: dict[str, float] = {"loc": generation.loc}
             if generation.dist == "t":
                 uni_kwargs["df"] = generation.df
             shock_seed = None if seed is None else seed + i
-            out[target] = Shock(
+            out[name] = Shock(
                 dist=generation.dist,
                 multivar=False,
                 seed=shock_seed,

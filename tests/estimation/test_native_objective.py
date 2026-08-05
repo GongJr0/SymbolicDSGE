@@ -41,9 +41,9 @@ def bundle(post82_test_model_path):
     sim = solved.sim(
         T=T,
         shocks={
-            "g": rng.normal(0.0, sig["e_g"], size=T),
-            "z": rng.normal(0.0, sig["e_z"], size=T),
-            "r": rng.normal(0.0, sig["e_r"], size=T),
+            "e_g": rng.normal(0.0, sig["e_g"], size=T),
+            "e_z": rng.normal(0.0, sig["e_z"], size=T),
+            "e_r": rng.normal(0.0, sig["e_r"], size=T),
         },
         x0=np.zeros((len(compiled.var_names),), dtype=np.float64),
         observables=True,
@@ -53,7 +53,9 @@ def bundle(post82_test_model_path):
     )
     return {
         "compiled": compiled,
-        "kalman": kalman,
+        # compile widens P0 over the generated variables, so the filter reads the
+        # compiled config rather than the parse-time one.
+        "kalman": compiled.kalman,
         "solved": solved,
         "steady": steady,
         "y": y,
@@ -171,10 +173,11 @@ def test_obj_extended_base_matches_model_kalman(bundle):
 def rbc_bundle(rbc_second_order_test_model_path):
     """Second-order RBC (levels model, nonzero steady state) for the unscented
     parity. The fixture has no kalman section, so a minimal config is supplied:
-    a uniform-diagonal P0 (so ``compile``'s variable permutation is a no-op) and
-    a scalar measurement noise."""
+    a uniform-diagonal P0 over the declared variables and a scalar measurement
+    noise. ``compile`` widens and permutes that P0, so the test reads the state
+    block back off the compiled config."""
     model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    n_var = 3  # z, k, c
+    n_var = 3  # declared: z, k, c
     R = np.array([[1e-4]], dtype=np.float64)
     kalman = KalmanConfig(R=R, P0=np.eye(n_var, dtype=np.float64) * 0.1)
     solver = DSGESolver(model, kalman)
@@ -190,7 +193,7 @@ def rbc_bundle(rbc_second_order_test_model_path):
     rng = np.random.default_rng(20260303)
     sim = solved.sim(
         T=T,
-        shocks={"z": rng.normal(0.0, 0.01, size=T)},
+        shocks={"e": rng.normal(0.0, 0.01, size=T)},
         x0=np.asarray(solved.policy.steady_state, dtype=np.float64),
         observables=True,
     )
@@ -223,7 +226,7 @@ def test_obj_unscented_base_matches_model_kalman(rbc_bundle):
 
     # UKF augments the state: the native filter reads a 2*n_state P0, the block
     # expansion the interface applies for the oracle.
-    P0_base = np.eye(n_state, dtype=np.float64) * 0.1
+    P0_base = np.ascontiguousarray(compiled.kalman.P0[:n_state, :n_state])
     P0_ukf = cc(_resolve_P0(FilterMode.UNSCENTED, n_state, P0_base), dtype=np.float64)
 
     ll, bk = obj_unscented_base(

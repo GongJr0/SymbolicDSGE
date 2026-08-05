@@ -400,9 +400,9 @@ def build_post82_estimator(
     sim = solved.sim(
         T=T,
         shocks={
-            "g": rng.normal(0.0, sig["e_g"], size=T),
-            "z": rng.normal(0.0, sig["e_z"], size=T),
-            "r": rng.normal(0.0, sig["e_r"], size=T),
+            "e_g": rng.normal(0.0, sig["e_g"], size=T),
+            "e_z": rng.normal(0.0, sig["e_z"], size=T),
+            "e_r": rng.normal(0.0, sig["e_r"], size=T),
         },
         x0=np.zeros(len(compiled.var_names), dtype=np.float64),
         observables=True,

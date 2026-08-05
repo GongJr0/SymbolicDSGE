@@ -393,10 +393,7 @@ def test_native_lowering_runs_first_order_simulation_with_observables() -> None:
     solver = DSGESolver(model, kalman)
     solved = solver.solve(solver.compile())
     T = 7
-    shocks = {
-        name: np.linspace(0.01, 0.03, T)
-        for name in solved.compiled.layout.exo_state_names
-    }
+    shocks = {name: np.linspace(0.01, 0.03, T) for name in solved.compiled.shock_names}
     pipeline = MCPipeline(
         [
             simulation_step(
@@ -552,7 +549,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
     n_var = len(solved.compiled.var_names)
     shocks = {
         name: np.linspace(0.01, 0.03, T, dtype=np.float64)
-        for name in solved.compiled.layout.exo_state_names
+        for name in solved.compiled.shock_names
     }
     x0 = np.full(n_var, 0.05, dtype=np.float64)
     P0 = 0.2 * np.eye(n_var, dtype=np.float64)
