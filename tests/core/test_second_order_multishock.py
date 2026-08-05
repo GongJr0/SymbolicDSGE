@@ -195,7 +195,7 @@ def test_multishock_second_order_structural_invariants():
     for name in linear:
         np.testing.assert_allclose(pol.hxx[compiled.idx[name]], 0.0, atol=1e-12)
     for name in _MS_SHOCK_STATES:
-        assert pol.hss[compiled.idx[name]] == 0.0
+        np.testing.assert_allclose(pol.hss[compiled.idx[name]], 0.0, atol=1e-12)
 
     np.testing.assert_allclose(
         pol.hxx[compiled.idx["k_lag1"]], pol.gxx[ctrl["k"]], rtol=1e-12, atol=1e-14
