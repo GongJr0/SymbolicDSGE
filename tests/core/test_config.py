@@ -44,9 +44,15 @@ def test_model_config_is_dict_indexable_and_nested_objects_are_base(
 
     assert conf["name"] == "TEST"
     assert conf["equations"] is conf.equations
-    assert list(map(str, conf.equations.to_dict()["model"].values())) == list(
-        map(str, conf.equations.model.values())
-    )
+
+    # to_dict deepcopies, and a deepcopy evaluates the arithmetic the parser
+    # leaves unevaluated (`t - 1*1` becomes `t - 1`), so the copies match by
+    # residual rather than by repr.
+    copied = conf.equations.to_dict()["model"]
+    assert copied.keys() == conf.equations.model.keys()
+    for key, eq in conf.equations.model.items():
+        residual = (copied[key].lhs - copied[key].rhs) - (eq.lhs - eq.rhs)
+        assert sp.simplify(residual) == 0
     assert (
         conf.calibration.to_dict()["parameters"].keys()
         == conf.calibration.parameters.keys()

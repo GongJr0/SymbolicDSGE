@@ -30,9 +30,9 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     sim = solved.sim(
         T=T,
         shocks={
-            "g": rng.normal(0.0, sig_g, size=T),
-            "z": rng.normal(0.0, sig_z, size=T),
-            "r": rng.normal(0.0, sig_r, size=T),
+            "e_g": rng.normal(0.0, sig_g, size=T),
+            "e_z": rng.normal(0.0, sig_z, size=T),
+            "e_r": rng.normal(0.0, sig_r, size=T),
         },
         x0=np.zeros((len(compiled.var_names),), dtype=np.float64),
         observables=True,
@@ -62,7 +62,8 @@ def _assert_valid_corr_draws(samples: np.ndarray) -> None:
         assert np.all(eigvals > 1e-10)
 
 
-def _notebook_like_prior_spec() -> dict[str, object]:
+def _full_size_prior_spec() -> dict[str, object]:
+    """Every estimable role at once: scalars, a bounded correlation, an LKJ block."""
     return {
         "beta": make_prior(
             "beta",
@@ -133,10 +134,10 @@ def _notebook_like_prior_spec() -> dict[str, object]:
     }
 
 
-def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden(
+def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
     dense_lkj_bundle,
 ):
-    prior_spec = _notebook_like_prior_spec()
+    prior_spec = _full_size_prior_spec()
     est = Estimator(
         solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
@@ -153,8 +154,8 @@ def test_packed_logprior_matches_python_path_with_notebook_like_estimator_golden
     )
 
     expected_logprior = -3.677756133346315
-    expected_loglik = -89.32084071241567
-    expected_logpost = -92.99859684576199
+    expected_loglik = -69.95167324089617
+    expected_logpost = -73.62942937424249
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(

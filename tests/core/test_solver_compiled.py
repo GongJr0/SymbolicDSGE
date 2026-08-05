@@ -33,9 +33,9 @@ def _nonlinear_compile_yaml() -> str:
         observables: []
         equations:
           model:
-            a_process: "a(t+1) = rho_a*a(t) + (1-rho_a)*a_ss + gamma*z(t) + e_a"
-            k_process: "k(t+1) = rho_k*k(t) + (1-rho_k)*k_ss + z(t)"
-            z_process: "z(t+1) = rho_z*z(t) + e_z"
+            a_process: "a(t) = rho_a*a(t-1) + (1-rho_a)*a_ss + gamma*z(t-1) + e_a"
+            k_process: "k(t) = rho_k*k(t-1) + (1-rho_k)*k_ss + z(t-1)"
+            z_process: "z(t) = rho_z*z(t-1) + e_z"
           constraint: {}
           observables: {}
         calibration:
@@ -61,7 +61,8 @@ def test_compile_builds_expected_structures(compiled_test):
     c = compiled_test
     n_vars = len(c.config.variables.variables)
 
-    assert c.n_state == 3
+    # test.yaml lags u, v and r and carries two shocks, so five generated states.
+    assert c.n_state == 5
     assert c.n_exog == 2
     assert len(c.var_names) == n_vars
     assert len(c.cur_syms) == n_vars
@@ -168,7 +169,7 @@ def test_compile_rejects_unknown_variable_order(parsed_test):
     model, kalman = parsed_test
     solver = DSGESolver(model, kalman)
 
-    with pytest.raises(ValueError, match="do not exist"):
+    with pytest.raises(ValueError, match="Unknown: \\['ghost'\\]"):
         solver.compile(
             variable_order=[*model.variables.variables, sp.Function("ghost")]
         )
@@ -190,9 +191,15 @@ def test_compile_infers_n_state_and_n_exog(parsed_test):
 
     compiled = solver.compile()
 
-    assert compiled.n_state == 3
+    assert compiled.n_state == 5
     assert compiled.n_exog == 2
-    assert compiled.var_names[: compiled.n_state] == ["u", "v", "r"]
+    assert compiled.var_names[: compiled.n_state] == [
+        "e_u_st",
+        "e_v_st",
+        "u_lag1",
+        "v_lag1",
+        "r_lag1",
+    ]
 
 
 def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
@@ -228,9 +235,11 @@ def test_compile_can_linearize_model_on_the_fly(tmp_path):
     assert [
         sp.simplify(a - b)
         for a, b in zip(
-            compiled_from_flag.objective_eqs, compiled_explicit.objective_eqs
+            compiled_from_flag.objective_eqs,
+            compiled_explicit.objective_eqs,
+            strict=True,
         )
-    ] == [0, 0, 0]
+    ] == [0] * len(compiled_explicit.objective_eqs)
 
     solved_from_flag = solver.solve(compiled_from_flag)
     solved_explicit = DSGESolver(

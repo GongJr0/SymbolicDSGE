@@ -97,7 +97,7 @@ def test_planned_bytes_match_the_allocation_exactly(solved: SolvedModel) -> None
                 T=6,
                 shocks={
                     name: Shock(dist="norm", seed=index)
-                    for index, name in enumerate(solved.compiled.layout.exo_state_names)
+                    for index, name in enumerate(solved.compiled.shock_names)
                 },
                 observables=True,
             )
@@ -150,7 +150,7 @@ def test_native_eligible_shocks_prematerialize_nothing(solved: SolvedModel) -> N
                 T=6,
                 shocks={
                     name: Shock(dist="norm", seed=index)
-                    for index, name in enumerate(solved.compiled.layout.exo_state_names)
+                    for index, name in enumerate(solved.compiled.shock_names)
                 },
             )
         ]
@@ -171,7 +171,7 @@ def test_fallback_shocks_are_counted_outside_the_arenas(solved: SolvedModel) -> 
                 T=T,
                 shocks={
                     name: Shock(dist="t", seed=index, dist_kwargs={"df": 8})
-                    for index, name in enumerate(solved.compiled.layout.exo_state_names)
+                    for index, name in enumerate(solved.compiled.shock_names)
                 },
             )
         ]

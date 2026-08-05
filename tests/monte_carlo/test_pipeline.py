@@ -1100,6 +1100,8 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         n_exog=1,
         n_state=1,
         observable_names=["obs"],
+        shock_names=("e_u",),
+        shock_idx={"e_u": 0},
         config=config,
         build_affine_measurement_matrices=build_affine_measurement_matrices,
     )
@@ -1119,7 +1121,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         dgp=dgp,
         rep_idx=0,
         T=T,
-        shocks={"u": shock},
+        shocks={"e_u": shock},
         observables=True,
     )
 
@@ -1348,17 +1350,19 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     rbc_second_order_test_model_path,
 ) -> None:
     model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    n_var = len(model.variables.variables)
+    n_declared = len(model.variables.variables)
     solver = DSGESolver(
         model,
         KalmanConfig(
             R=np.array([[0.01]], dtype=np.float64),
-            P0=0.1 * np.eye(n_var, dtype=np.float64),
+            P0=0.1 * np.eye(n_declared, dtype=np.float64),
         ),
     )
     compiled = solver.compile()
     reference = solver.solve(compiled=compiled, order=2)
 
+    # The state paths span the compiled layout, generated variables included.
+    n_var = len(compiled.var_names)
     T = 6
     n_obs = len(reference.compiled.observable_names)
     pipeline = MCPipeline(

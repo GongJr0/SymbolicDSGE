@@ -179,6 +179,7 @@ def _stub_compiled_with_sparse_q_block():
             kalman=SimpleNamespace(y_names=["y"]),
             observable_names=["y"],
             var_names=[x1, x2, x3],
+            shock_names=("e1", "e2", "e3"),
             n_exog=3,
         )
     )
@@ -901,6 +902,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
             kalman=SimpleNamespace(y_names=["y"]),
             observable_names=["y"],
             var_names=[x1, x2],
+            shock_names=("e1", "e2"),
             n_exog=2,
         )
     )

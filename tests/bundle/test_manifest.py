@@ -4,6 +4,7 @@ import pytest
 
 from SymbolicDSGE.bundle.manifest import (
     SDSGE_FORMAT_VERSION,
+    SDSGE_LAST_BREAKING_VERSION,
     Manifest,
     Member,
     SimSpec,
@@ -67,8 +68,41 @@ def test_manifest_round_trip() -> None:
     assert restored.simulation["reference"].shocks["u"]["seed"] == 42
 
 
-def test_manifest_rejects_newer_version() -> None:
+def test_manifest_reads_a_newer_bundle_that_broke_nothing() -> None:
+    # The bump that produced this bundle left last_breaking_version alone, so
+    # nothing in it postdates a break this reader is missing.
+    payload = Manifest(created_by="x").to_dict()
+    payload["sdsge_version"] = SDSGE_FORMAT_VERSION + 3
+
+    restored = Manifest.from_dict(payload)
+    assert restored.sdsge_version == SDSGE_FORMAT_VERSION + 3
+    assert restored.last_breaking_version == SDSGE_LAST_BREAKING_VERSION
+
+
+def test_manifest_rejects_a_bundle_written_after_a_later_break() -> None:
+    payload = Manifest(created_by="x").to_dict()
+    payload["sdsge_version"] = SDSGE_FORMAT_VERSION + 3
+    payload["last_breaking_version"] = SDSGE_FORMAT_VERSION + 1
+
+    with pytest.raises(ValueError, match="upgrade SymbolicDSGE"):
+        Manifest.from_dict(payload)
+
+
+def test_manifest_rejects_a_bundle_predating_the_last_break() -> None:
+    # A version 1 bundle keys its shock specs by the driven variable, so it
+    # rebuilds into specs naming shocks the model does not have.
+    payload = Manifest(created_by="x").to_dict()
+    payload["sdsge_version"] = SDSGE_LAST_BREAKING_VERSION - 1
+
+    with pytest.raises(ValueError, match="predates"):
+        Manifest.from_dict(payload)
+
+
+def test_manifest_without_the_field_assumes_its_own_version_broke() -> None:
+    # Written before last_breaking_version existed, so nothing says otherwise.
     payload = Manifest(created_by="x").to_dict()
     payload["sdsge_version"] = SDSGE_FORMAT_VERSION + 1
-    with pytest.raises(ValueError):
+    del payload["last_breaking_version"]
+
+    with pytest.raises(ValueError, match="upgrade SymbolicDSGE"):
         Manifest.from_dict(payload)

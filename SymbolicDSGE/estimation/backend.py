@@ -354,19 +354,14 @@ def build_q_spec(
 ) -> PyCovSpec:
     """Covariance spec for Q (shock covariance), mirroring :func:`build_Q`.
 
-    Members are the exogenous shocks in ``var_names[:n_exog]`` order; each std is
+    Members are the shocks in ``shock_map`` order; each std is
     ``shock_std[shock]`` and each off-diagonal correlation is the ``shock_corr``
     symbol for that shock pair (absent pairs stay zero). A ``Q_corr`` CPC block
     takes the ``corr_from_block`` regime."""
-    shock_map = compiled.config.shock_map
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
     n_exog = compiled.n_exog
-    exogs = compiled.var_names[:n_exog]
-    rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-        {exo: shock for shock, exo in shock_map.items()}
-    )
-    shocks = [rev[exo] for exo in exogs]
+    shocks = list(compiled.config.shock_map)
     std_names = [shock_std[s].name for s in shocks]
     corr_pairs: list[tuple[int, int, str]] = []
     for i in range(n_exog):
@@ -827,24 +822,19 @@ def build_Q(
     *,
     corr: NDF | None = None,
 ) -> NDF:
-    shock_map = compiled.config.shock_map
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
 
-    exogs = compiled.var_names[: compiled.n_exog]
-    rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-        {exo: shock for shock, exo in shock_map.items()}
-    )
-    shocks = [rev[exo] for exo in exogs]
+    shocks = list(compiled.config.shock_map)
 
     stds = asarray([float64(params[shock_std[s].name]) for s in shocks], dtype=float64)
 
-    # When an LKJ block already materialized the shock correlation matrix (in exog
-    # order) it is passed in directly, so we skip the name-keyed re-gather. Without
-    # a block the correlations live in ``params`` as named scalars (fixed
+    # When an LKJ block already materialized the shock correlation matrix (in
+    # shock order) it is passed in directly, so we skip the name-keyed re-gather.
+    # Without a block the correlations live in ``params`` as named scalars (fixed
     # calibration or plain estimated params) and are assembled here.
     if corr is None:
-        corr = np.eye(len(exogs), dtype=float64)
+        corr = np.eye(len(shocks), dtype=float64)
         n = len(stds)
         for i in range(n):
             for j in range(i + 1, n):
@@ -859,18 +849,13 @@ def build_Q(
 
 
 def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
-    shock_map = compiled.config.shock_map
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
 
-    exogs = compiled.var_names[: compiled.n_exog]
-    rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-        {exo: shock for shock, exo in shock_map.items()}
-    )
-    shocks = [rev[exo] for exo in exogs]
+    shocks = list(compiled.config.shock_map)
 
     stds = sp.Matrix([shock_std[s] for s in shocks])
-    corr = sp.eye(len(exogs))
+    corr = sp.eye(len(shocks))
 
     n = len(stds)
     for i in range(n):

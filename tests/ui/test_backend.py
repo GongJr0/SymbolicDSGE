@@ -71,7 +71,8 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert solved.status_code == 200
     solved_body = solved.json()
     assert solved_body["solved"] is True
-    assert solved_body["n_state"] == 3
+    # Two shock states, three lag auxes: every state is compiler-minted.
+    assert solved_body["n_state"] == 5
     assert solved_body["n_exog"] == 2
 
     simulated = client.post(
@@ -99,7 +100,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
             "role": "reference",
             "T": 5,
             "observables": False,
-            "shocks": {"u": encode_array(np.array([1.0, 0.0, 0.0, 0.0, 0.0]))},
+            "shocks": {"e_u": encode_array(np.array([1.0, 0.0, 0.0, 0.0, 0.0]))},
         },
     )
     assert shocked.status_code == 200
@@ -398,7 +399,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
                     "T": 8,
                     "observables": True,
                     "shock_registry": [
-                        {"vars": ["u", "v"], "dist": "norm", "seed": 10}
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 10}
                     ],
                 },
             }
@@ -450,7 +451,9 @@ _POSTPROC_PIPELINE = {
             "params": {
                 "T": 8,
                 "observables": True,
-                "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 10}],
+                "shock_registry": [
+                    {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 10}
+                ],
             },
         },
         {
@@ -677,7 +680,9 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 20,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
+                    ],
                 },
             },
             {
@@ -741,7 +746,9 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 20,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
+                    ],
                 },
             },
             {
@@ -805,7 +812,9 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 30,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
+                    ],
                 },
             },
             {
@@ -867,7 +876,9 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 30,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
+                    ],
                 },
             },
             {
@@ -929,7 +940,9 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 30,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 0}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
+                    ],
                 },
             },
             {
@@ -1167,7 +1180,9 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "params": {
                     "T": 8,
                     "observables": True,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 1}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 1}
+                    ],
                 },
             },
             {
@@ -1227,7 +1242,9 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
                 "params": {
                     "T": 8,
                     "observables": True,
-                    "shock_registry": [{"vars": ["u", "v"], "dist": "norm", "seed": 1}],
+                    "shock_registry": [
+                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 1}
+                    ],
                 },
             },
             {

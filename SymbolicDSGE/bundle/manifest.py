@@ -20,9 +20,18 @@ from numpy import ndarray
 
 from ..core.shock_generators import Shock, ShockParameters
 
-#: Bundle format version. Bump on breaking manifest changes; readers reject a
-#: ``sdsge_version`` they do not recognise.
-SDSGE_FORMAT_VERSION = 1
+#: Bundle format version. Bump on every manifest change.
+SDSGE_FORMAT_VERSION = 2
+
+#: The version at which the format last broke. A reader rejects bundles older
+#: than this, and each bundle records its own so a reader can tell a version it
+#: predates from a version that merely postdates it: a bump that breaks nothing
+#: leaves this alone and stays readable by older libraries.
+#:
+#: 2: shock specifications are keyed by shock name rather than by the variable
+#: the shock drives, so a version 1 bundle's ``simulation`` and ``mc_pipeline``
+#: name shocks that no longer resolve.
+SDSGE_LAST_BREAKING_VERSION = 2
 
 MemberKind = Literal[
     "model_config",
@@ -185,6 +194,7 @@ class Manifest:
     created_by: str = ""
     created_at: str | None = None
     sdsge_version: int = SDSGE_FORMAT_VERSION
+    last_breaking_version: int = SDSGE_LAST_BREAKING_VERSION
     members: list[Member] = field(default_factory=list)
     simulation: dict[str, SimSpec] | None = None
     checksums: dict[str, str] = field(default_factory=dict)
@@ -201,6 +211,7 @@ class Manifest:
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
             "sdsge_version": int(self.sdsge_version),
+            "last_breaking_version": int(self.last_breaking_version),
             "created_by": self.created_by,
             "members": [m.to_dict() for m in self.members],
         }
@@ -215,10 +226,20 @@ class Manifest:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Manifest:
         version = int(data.get("sdsge_version", SDSGE_FORMAT_VERSION))
-        if version > SDSGE_FORMAT_VERSION:
+        if version < SDSGE_LAST_BREAKING_VERSION:
             raise ValueError(
-                f"Bundle sdsge_version {version} is newer than this library "
-                f"supports ({SDSGE_FORMAT_VERSION}); upgrade SymbolicDSGE."
+                f"Bundle sdsge_version {version} predates the format's last "
+                f"breaking change ({SDSGE_LAST_BREAKING_VERSION}); rebuild the "
+                f"bundle from its sources."
+            )
+        # Absent on bundles written before the field existed, and those are
+        # already rejected above, so assuming the worst costs nothing.
+        last_break = int(data.get("last_breaking_version", version))
+        if last_break > SDSGE_FORMAT_VERSION:
+            raise ValueError(
+                f"Bundle sdsge_version {version} was written after a breaking "
+                f"change at {last_break}, which this library ({SDSGE_FORMAT_VERSION}) "
+                f"predates; upgrade SymbolicDSGE."
             )
         sim = data.get("simulation")
         return cls(
@@ -227,6 +248,7 @@ class Manifest:
                 None if data.get("created_at") is None else str(data["created_at"])
             ),
             sdsge_version=version,
+            last_breaking_version=last_break,
             members=[Member.from_dict(m) for m in data.get("members", [])],
             simulation=(
                 {k: SimSpec.from_dict(v) for k, v in sim.items()}

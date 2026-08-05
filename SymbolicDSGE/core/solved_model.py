@@ -248,20 +248,18 @@ class SolvedModel:
 
         if not shocks:
             raise ValueError("At least one shock must be specified for IRF.")
-        if not all(
-            s in self.compiled.var_names[: self.compiled.n_exog] for s in shocks
-        ):
-            raise ValueError("Shocked variable not found in exogenous model variables.")
+        unknown = [s for s in shocks if s not in self.compiled.shock_names]
+        if unknown:
+            raise ValueError(
+                f"Unknown shock(s) {unknown}. Model shocks: "
+                f"{list(self.compiled.shock_names)}."
+            )
         conf = self.compiled.config
 
         shock_spec = {}
-        rev: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-            {v: k for k, v in self.config.shock_map.items()}
-        )  # variable -> innovation
         sig_map = conf.calibration.shock_std
         for s in shocks:
-            sym = rev[s]
-            sig_sym = sig_map.get(sym)
+            sig_sym = sig_map.get(Symbol(s))
             sig = conf.calibration.parameters.get(sig_sym, 1.0)  # pyright: ignore
             arr = np.zeros((T,), dtype=float64)
             arr[0] = sig
@@ -469,13 +467,10 @@ class SolvedModel:
         specs, which resolve their distribution family against a horizon.
         """
         conf = self.compiled.config
-        reverse_shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-            {v: k for k, v in conf.shock_map.items()}
-        )
         shock_stds = conf.calibration.shock_std
 
-        exog_names = list(self.compiled.var_names[: self.compiled.n_exog])
-        validate_shock_targets(list(shocks), exog_names)
+        shock_col = self.compiled.shock_idx
+        validate_shock_targets(list(shocks), list(self.compiled.shock_names))
 
         entries: list[ShockPlanEntry] = []
         seeded_count = 0
@@ -486,7 +481,7 @@ class SolvedModel:
 
             if "," in name:
                 multi_names = [n.strip() for n in name.split(",")]
-                indices = [self.compiled.idx[n] for n in multi_names]
+                indices = [shock_col[n] for n in multi_names]
                 perm = np.argsort(indices)
                 multi_names_sorted = [multi_names[i] for i in perm]
                 indices_sorted = tuple(indices[i] for i in perm)
@@ -510,7 +505,7 @@ class SolvedModel:
                         f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
                     )
 
-                shock_syms = [reverse_shock_map[n] for n in multi_names_sorted]
+                shock_syms = [Symbol(n) for n in multi_names_sorted]
                 sig_params = [shock_stds[sym] for sym in shock_syms]
                 sigs = [self._get_param(sig, 1.0) for sig in sig_params]
                 rhos = [
@@ -547,7 +542,7 @@ class SolvedModel:
                 continue
 
             # Uni-Var (target validity already checked by validate_shock_targets)
-            idx = (self.compiled.idx[name],)
+            idx = (shock_col[name],)
             if isinstance(shock, ndarray):
                 entries.append(
                     ShockPlanEntry(
@@ -564,8 +559,7 @@ class SolvedModel:
                     f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
                 )
 
-            sym = reverse_shock_map[name]
-            sig = self._get_param(shock_stds[sym], 1.0)
+            sig = self._get_param(shock_stds[Symbol(name)], 1.0)
 
             if isinstance(shock, Shock):
                 entries.append(

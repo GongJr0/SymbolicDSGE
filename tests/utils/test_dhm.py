@@ -27,8 +27,8 @@ def solved_post82(post82_test_model_path):
 def test_den_haan_marcet_one_sample_matches_sim_state_path(solved_test):
     T = 12
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
 
@@ -51,12 +51,12 @@ def test_den_haan_marcet_one_sample_matches_sim_state_path(solved_test):
 
     assert np.allclose(out.states, expected)
     assert np.allclose(
-        out.shock_matrix[:, solved_test.compiled.idx["u"]],
+        out.shock_matrix[:, solved_test.compiled.shock_idx["e_u"]],
         np.full((T,), 0.50, dtype=np.float64),
     )
     assert np.allclose(
-        out.shock_matrix[:, solved_test.compiled.idx["v"]],
-        shocks["v"],
+        out.shock_matrix[:, solved_test.compiled.shock_idx["e_v"]],
+        shocks["e_v"],
     )
     assert out.moments.shape == (T - 2, 6)
     assert out.residuals.shape == (T - 2, 2)
@@ -87,7 +87,7 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
         captured["cov"] = cov.copy()
         return np.tile(np.array([cov[0, 0], cov[0, 1]], dtype=np.float64), (T, 1))
 
-    shocks = {"z,g": mv_shock}
+    shocks = {"e_z,e_g": mv_shock}
     expected = solved_post82.sim(T, shocks=shocks)["_X"]
     out = dhm.one_sample(
         T,
@@ -111,11 +111,11 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
     assert np.allclose(captured["cov"], expected_cov)
     assert np.allclose(out.states, expected)
     assert np.allclose(
-        out.shock_matrix[:, solved_post82.compiled.idx["g"]],
+        out.shock_matrix[:, solved_post82.compiled.shock_idx["e_g"]],
         expected_cov[0, 0],
     )
     assert np.allclose(
-        out.shock_matrix[:, solved_post82.compiled.idx["z"]],
+        out.shock_matrix[:, solved_post82.compiled.shock_idx["e_z"]],
         expected_cov[0, 1],
     )
 
@@ -132,16 +132,16 @@ def test_den_haan_marcet_one_sample_accepts_shock_specs(solved_post82):
     direct = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(dist="norm", multivar=True, seed=11),
-            "r": Shock(dist="norm", seed=21),
+            "e_z,e_g": Shock(dist="norm", multivar=True, seed=11),
+            "e_r": Shock(dist="norm", seed=21),
         },
         **kwargs,
     )
     manual = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
-            "r": Shock(dist="norm", seed=21).shock_generator(T),
+            "e_z,e_g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
+            "e_r": Shock(dist="norm", seed=21).shock_generator(T),
         },
         **kwargs,
     )
@@ -158,8 +158,8 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
 ):
     T = 10
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
     states = solved_test.sim(T, shocks=shocks)["_X"]
@@ -207,8 +207,8 @@ def test_measurement_moment_test_single_observable_matches_manual_construction(
     T = 10
     burn_in = 1
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
@@ -263,8 +263,8 @@ def test_measurement_moment_test_single_observable_matches_manual_construction(
 def test_measurement_moment_test_list_returns_canonical_results(solved_test):
     T = 8
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
     requested = list(reversed(solved_test.compiled.observable_names))
@@ -309,8 +309,8 @@ def test_joint_measurement_moment_test_stacks_moments_and_uses_all_observables(
     T = 9
     burn_in = 1
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
     sim = solved_test.sim(T, shocks=shocks, observables=True)
@@ -350,8 +350,8 @@ def test_measurement_moment_test_from_state_path_matches_simulation_path(
 ):
     T = 9
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
@@ -392,8 +392,8 @@ def test_measurement_moment_test_accepts_shock_specs(solved_test):
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     shock_specs = {
-        "u": Shock(dist="norm", seed=3),
-        "v": Shock(dist="norm", seed=4),
+        "e_u": Shock(dist="norm", seed=3),
+        "e_v": Shock(dist="norm", seed=4),
     }
     sim = solved_test.sim(T, shocks=shock_specs, observables=True)
     y = sim[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
@@ -411,8 +411,8 @@ def test_measurement_moment_test_accepts_shock_specs(solved_test):
         y,
         obs_name,
         shocks={
-            "u": Shock(dist="norm", seed=3).shock_generator(T),
-            "v": Shock(dist="norm", seed=4).shock_generator(T),
+            "e_u": Shock(dist="norm", seed=3).shock_generator(T),
+            "e_v": Shock(dist="norm", seed=4).shock_generator(T),
         },
         instrument_idx=["u"],
         include_constant=True,
@@ -435,8 +435,8 @@ def test_measurement_moment_test_accepts_shock_specs(solved_test):
 def test_measurement_moment_test_supports_lagged_instruments(solved_test):
     T = 9
     shocks = {
-        "u": lambda sig: np.full((T,), sig, dtype=np.float64),
-        "v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
+        "e_u": lambda sig: np.full((T,), sig, dtype=np.float64),
+        "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
@@ -540,7 +540,7 @@ def test_den_haan_marcet_monte_carlo_rejects_non_shock_inputs(solved_test):
     with pytest.raises(TypeError, match="requires Shock instances"):
         dhm.monte_carlo(
             8,
-            {"u": Shock(dist="norm", seed=3).shock_generator(8)},
+            {"e_u": Shock(dist="norm", seed=3).shock_generator(8)},
             n_rep=2,
         )
 
@@ -550,7 +550,7 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     dhm = DenHaanMarcet(solved_post82)
     grouped = Shock(dist="norm", multivar=True, seed=11)
     rate = Shock(dist="norm", seed=21)
-    base_shocks = {"z,g": grouped, "r": rate}
+    base_shocks = {"e_z,e_g": grouped, "e_r": rate}
     kwargs = {
         "equation_idx": [0, 1, 2],
         "instrument_idx": ["g", "z", "r"],
@@ -563,16 +563,16 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     rep0 = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
-            "r": Shock(dist="norm", seed=21).shock_generator(T),
+            "e_z,e_g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
+            "e_r": Shock(dist="norm", seed=21).shock_generator(T),
         },
         **kwargs,
     )
     rep1 = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(dist="norm", multivar=True, seed=12).shock_generator(T),
-            "r": Shock(dist="norm", seed=22).shock_generator(T),
+            "e_z,e_g": Shock(dist="norm", multivar=True, seed=12).shock_generator(T),
+            "e_r": Shock(dist="norm", seed=22).shock_generator(T),
         },
         **kwargs,
     )
@@ -605,8 +605,8 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     rep0_expected = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
-            "r": Shock(dist="norm", seed=21).shock_generator(T),
+            "e_z,e_g": Shock(dist="norm", multivar=True, seed=11).shock_generator(T),
+            "e_r": Shock(dist="norm", seed=21).shock_generator(T),
         },
         use_conditional_expectation=True,
         **kwargs,
@@ -614,8 +614,8 @@ def test_den_haan_marcet_monte_carlo_is_reproducible_without_mutation(solved_pos
     rep1_expected = dhm.one_sample(
         T,
         shocks={
-            "z,g": Shock(dist="norm", multivar=True, seed=12).shock_generator(T),
-            "r": Shock(dist="norm", seed=22).shock_generator(T),
+            "e_z,e_g": Shock(dist="norm", multivar=True, seed=12).shock_generator(T),
+            "e_r": Shock(dist="norm", seed=22).shock_generator(T),
         },
         use_conditional_expectation=True,
         **kwargs,

@@ -42,11 +42,11 @@ def _legacy_matrix(model, shocks, T, shock_scale, seed_offset):
 @pytest.mark.parametrize(
     "spec",
     [
-        {"u": Shock(dist="norm", seed=3)},
-        {"u": Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
-        {"u": Shock(dist="uni", seed=7)},
-        {"u,v": Shock(dist="norm", multivar=True, seed=11)},
-        {"u,v": Shock(dist="t", multivar=True, seed=13, dist_kwargs={"df": 6})},
+        {"e_u": Shock(dist="norm", seed=3)},
+        {"e_u": Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
+        {"e_u": Shock(dist="uni", seed=7)},
+        {"e_u,e_v": Shock(dist="norm", multivar=True, seed=11)},
+        {"e_u,e_v": Shock(dist="t", multivar=True, seed=13, dist_kwargs={"df": 6})},
     ],
 )
 @pytest.mark.parametrize("seed_offset", [0, 1, 37])
@@ -60,7 +60,7 @@ def test_plan_draw_matches_clone_per_draw(solved_test, spec, seed_offset):
 
 
 def test_plan_reseeds_independently_across_draws(solved_test):
-    spec = {"u,v": Shock(dist="norm", multivar=True, seed=11)}
+    spec = {"e_u,e_v": Shock(dist="norm", multivar=True, seed=11)}
     plan = solved_test._resolve_shock_plan(spec, T)
 
     first = plan.matrix(T, 1.0, 0)
@@ -73,7 +73,7 @@ def test_plan_reseeds_independently_across_draws(solved_test):
 
 
 def test_unseeded_spec_redraws_each_time(solved_test):
-    plan = solved_test._resolve_shock_plan({"u": Shock(dist="norm", seed=None)}, T)
+    plan = solved_test._resolve_shock_plan({"e_u": Shock(dist="norm", seed=None)}, T)
 
     first = plan.matrix(T, 1.0, 0)
     second = plan.matrix(T, 1.0, 0)
@@ -83,7 +83,7 @@ def test_unseeded_spec_redraws_each_time(solved_test):
 
 
 def test_plan_factor_matches_unfactored_covariance(solved_test):
-    spec = {"u,v": Shock(dist="norm", multivar=True, seed=11)}
+    spec = {"e_u,e_v": Shock(dist="norm", multivar=True, seed=11)}
     plan = solved_test._resolve_shock_plan(spec, T)
     entry = plan.entries[0]
 
@@ -96,7 +96,7 @@ def test_plan_factor_matches_unfactored_covariance(solved_test):
 
 
 def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
-    spec = {"u,v": Shock(dist="norm", multivar=True, seed=11)}
+    spec = {"e_u,e_v": Shock(dist="norm", multivar=True, seed=11)}
 
     calls = {"n": 0}
     original = type(solved_test)._get_rho
@@ -120,14 +120,14 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
 
 def test_passthrough_entries_ignore_the_seed_offset(solved_test):
     values = np.arange(T, dtype=np.float64)
-    plan = solved_test._resolve_shock_plan({"u": values}, T)
+    plan = solved_test._resolve_shock_plan({"e_u": values}, T)
 
     np.testing.assert_array_equal(plan.matrix(T, 1.0, 0), plan.matrix(T, 1.0, 9))
 
 
 def test_seeded_count_counts_seeded_entries(solved_test):
     spec = {
-        "u,v": Shock(dist="norm", multivar=True, seed=0),
+        "e_u,e_v": Shock(dist="norm", multivar=True, seed=0),
     }
     plan = solved_test._resolve_shock_plan(spec, T)
 
@@ -135,11 +135,11 @@ def test_seeded_count_counts_seeded_entries(solved_test):
 
 
 def test_unseeded_specs_do_not_count(solved_test):
-    plan = solved_test._resolve_shock_plan({"u": Shock(dist="norm", seed=None)}, T)
+    plan = solved_test._resolve_shock_plan({"e_u": Shock(dist="norm", seed=None)}, T)
 
     assert plan.seeded_count == 0
 
 
 def test_live_shock_requires_a_horizon(solved_test):
     with pytest.raises(ValueError, match="needs a horizon T"):
-        solved_test._resolve_shock_plan({"u": Shock(dist="norm", seed=1)})
+        solved_test._resolve_shock_plan({"e_u": Shock(dist="norm", seed=1)})

@@ -479,6 +479,7 @@ def decompile_bundle(
         created_by=manifest.created_by,
         created_at=manifest.created_at,
         sdsge_version=manifest.sdsge_version,
+        last_breaking_version=manifest.last_breaking_version,
         members=rewritten,
         simulation=manifest.simulation,
         # Checksums are sha256(bytes); skip on decompile — recompile recomputes.

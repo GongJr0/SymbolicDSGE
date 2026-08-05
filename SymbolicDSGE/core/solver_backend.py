@@ -92,12 +92,25 @@ def klein_solve(
     # Klein 'ouc' criterion) — bit-for-bit equal to the former
     # ordqz(a, b, sort="ouc", output="complex")[0, 1, 5].
     s, t, z = klein_qz(a, b)
-    f, p, stab, eig = klein_postprocess(
-        np.asarray(s, dtype=complex128),
-        np.asarray(t, dtype=complex128),
-        np.asarray(z, dtype=complex128),
-        n_states,
-    )
+    try:
+        f, p, stab, eig = klein_postprocess(
+            np.asarray(s, dtype=complex128),
+            np.asarray(t, dtype=complex128),
+            np.asarray(z, dtype=complex128),
+            n_states,
+        )
+    except ValueError as exc:
+        # The kernel reports the factor it could not invert. This is the first
+        # frame that knows the factors came from a model someone wrote, so the
+        # dating that fails the same way is named here rather than there.
+        if "Blanchard-Kahn" not in str(exc):
+            raise
+        raise ValueError(
+            f"{exc} An equation shifted forward in time fails this way too: "
+            f"the compiler lifts lags into states of its own, so a process "
+            f"belongs in its natural form `v(t) = rho*v(t-1) + e` rather than "
+            f"`v(t+1) = rho*v(t) + e`."
+        ) from exc
     return KleinSolution(
         p=p, f=f, stab=stab, eig=eig, steady_state=np.asarray(ss, dtype=float64)
     )

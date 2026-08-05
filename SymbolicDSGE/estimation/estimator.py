@@ -276,12 +276,8 @@ class Estimator:
         return {str(o) for o in obs}
 
     def _active_shock_names(self) -> set[str] | None:
-        compiled = self.compiled
         try:
-            shock_map = compiled.config.shock_map
-            exogs = [str(v) for v in compiled.var_names[: compiled.n_exog]]
-            rev = {str(exo): str(shock) for shock, exo in shock_map.items()}
-            return {rev[e] for e in exogs if e in rev}
+            return set(self.compiled.shock_names)
         except Exception:
             return None
 
@@ -584,12 +580,9 @@ class Estimator:
         Q_cov = backend.build_Q(self.compiled, self._base_params)
         self._cov_to_corr(Q_cov, "Q")
 
-        shock_map = self.compiled.config.shock_map
         shock_std = self.compiled.config.calibration.shock_std
         shock_corr = self.compiled.config.calibration.shock_corr
-        exogs = [str(v) for v in self.compiled.var_names[: self.compiled.n_exog]]
-        rev = {str(exo): str(shock) for shock, exo in shock_map.items()}
-        labels = [rev[exo] for exo in exogs]
+        labels = list(self.compiled.shock_names)
         std_param_map: dict[str, str | None] = {}
         corr_param_map: dict[frozenset[str], str | None] = {}
 

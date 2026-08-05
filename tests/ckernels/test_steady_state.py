@@ -8,6 +8,8 @@ zero steady state of a linear model.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 import sympy as sp
@@ -23,11 +25,28 @@ def _rbc():
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     eq = compiled.equations
-    # var order [z, k, c]; deterministic ss is (0, k_ss, c_ss).
+    # The seed sizes the solve, so it spans the compiled layout: a lag aux sits
+    # where its origin does, the lifted shock and tfp at 0.
+    levels = {
+        "k": float(calib[sp.Symbol("k_ss")]),
+        "c": float(calib[sp.Symbol("c_ss")]),
+    }
     true_ss = np.array(
-        [0.0, float(calib[sp.Symbol("k_ss")]), float(calib[sp.Symbol("c_ss")])]
+        [levels.get(re.sub(r"_lag\d+$", "", name), 0.0) for name in compiled.var_names],
+        dtype=np.float64,
     )
     return compiled, par, cf, eq, true_ss
+
+
+def _perturbed(compiled, true_ss, capital, consumption, tfp):
+    """A seed off the steady state, scaling every copy of a variable alike."""
+    seed = true_ss.copy()
+    for name in ("k", "k_lag1"):
+        seed[compiled.idx[name]] *= capital
+    seed[compiled.idx["c"]] *= consumption
+    for name in ("z", "z_lag1"):
+        seed[compiled.idx[name]] += tfp
+    return seed
 
 
 def _resid_norm(eq, ss, par):
@@ -47,8 +66,8 @@ def test_newton_rbc_from_exact_seed():
 
 
 def test_newton_rbc_from_perturbed_seed():
-    _compiled, par, cf, eq, true_ss = _rbc()
-    seed = true_ss * np.array([0.0, 1.1, 0.9]) + np.array([0.05, 0.0, 0.0])
+    compiled, par, cf, eq, true_ss = _rbc()
+    seed = _perturbed(compiled, true_ss, capital=1.1, consumption=0.9, tfp=0.05)
     ss, iters = steady_state_newton(cf.address, seed, par)
     assert 1 <= iters <= 20
     assert _resid_norm(eq, ss, par) < 1e-10
@@ -58,8 +77,8 @@ def test_newton_rbc_from_perturbed_seed():
 def test_newton_non_convergence_raises():
     # One iteration from a far seed cannot reach tol -> the driver reports failure
     # rather than returning a bogus point.
-    _compiled, par, cf, _eq, true_ss = _rbc()
-    seed = true_ss * np.array([0.0, 2.0, 0.5]) + np.array([0.5, 0.0, 0.0])
+    compiled, par, cf, _eq, true_ss = _rbc()
+    seed = _perturbed(compiled, true_ss, capital=2.0, consumption=0.5, tfp=0.5)
     with pytest.raises(ValueError, match="did not converge"):
         steady_state_newton(cf.address, seed, par, max_iter=1)
 

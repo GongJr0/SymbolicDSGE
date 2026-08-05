@@ -30,6 +30,24 @@ ND = NDArray
 
 @dataclass(frozen=True)
 class VariableLayout:
+    """Where every compiled variable sits, and which ones the compiler minted.
+
+    ``declared_names`` is the model's own declaration order followed by the
+    generated variables, which is the order the parse-time ``P0`` is widened
+    into. ``generated`` maps each generated name to its canonical position, so a
+    consumer hiding them filters by name or by position off the same map.
+
+    ``lag_origin`` maps each lag aux to the declared variable it tracks, at every
+    depth, which is what widens a declared-order input over the generated block.
+    A shock state is absent from it: it tracks an innovation, not a variable.
+
+    ``shock_names`` names the shock columns in ``shock_map`` order, which is the
+    order the compiler minted the shock states in, and ``shock_idx`` is that
+    order as a lookup. A shock is named by its own symbol rather than by the
+    variable it targets: after desugaring one shock may enter several equations,
+    and a target name would claim a scope the innovation does not have.
+    """
+
     declared_names: tuple[str, ...]
     canonical_names: tuple[str, ...]
     exo_state_names: tuple[str, ...]
@@ -38,6 +56,10 @@ class VariableLayout:
     n_exog: int
     n_state: int
     idx: dict[str, int]
+    generated: dict[str, int] = field(default_factory=dict)
+    lag_origin: dict[str, str] = field(default_factory=dict)
+    shock_names: tuple[str, ...] = ()
+    shock_idx: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -165,6 +187,16 @@ class CompiledModel:
     # constraint_names. Residuals stay in reference equation order and print to
     # native cfuncs on demand (construct_regime_cfuncs).
     regimes: dict[int, RegimeBlock] = field(default_factory=dict)
+
+    @property
+    def shock_names(self) -> tuple[str, ...]:
+        """Shock column names, in ``shock_map`` (and so column) order."""
+        return self.layout.shock_names
+
+    @property
+    def shock_idx(self) -> dict[str, int]:
+        """``{shock name: column}`` into the ``(T, n_exog)`` shock matrix."""
+        return self.layout.shock_idx
 
     @cached_property
     def _regime_cfuncs(self) -> dict[int, Any]:
