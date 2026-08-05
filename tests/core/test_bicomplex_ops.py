@@ -7,6 +7,8 @@ bicomplex algebra (value ``a + b*j``, ``j**2 = -1``) exercises each one.
 
 from __future__ import annotations
 
+import pytest
+
 from SymbolicDSGE.core import bicomplex as B
 
 X = (1.0 + 2.0j, 0.5 - 1.0j)
@@ -46,3 +48,19 @@ def test_sqrt_squared_recovers_value():
     assert _close(B.bc_sqrt((4.0 + 0.0j, 0.0 + 0.0j)), (2.0 + 0.0j, 0.0 + 0.0j))
     r = B.bc_sqrt(X)
     assert _close(B.bc_mul(r, r), X, tol=1e-8)
+
+
+@pytest.mark.parametrize("h", [1e-4, 1e-6, 1e-8])
+def test_transcendental_second_derivative_survives_a_small_step(h):
+    """The reason these are polar rather than idempotent.
+
+    Read the ij slot of ``exp(2.5 * log x)`` over ``h``, which is what the
+    Hessian sweep does. The projection form differences two values that agree to
+    O(h), so it lost roughly eps/h^2 here and was ~100% wrong by h = 1e-6. What
+    is left now is the bicomplex step's own O(h^2) truncation, which shrinks.
+    """
+    x0 = 0.9
+    x = (complex(x0, h), complex(h, 0.0))
+    f = B.bc_exp(B.bc_real_scale(B.bc_log(x), 2.5))
+
+    assert f[1].imag / h**2 == pytest.approx(2.5 * 1.5 * x0**0.5, rel=1e-7)

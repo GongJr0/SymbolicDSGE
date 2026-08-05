@@ -23,6 +23,20 @@ i64 sdsge_bicomplex_hessian(bc_residual_fn residual, const f64 *SDSGE_RESTRICT s
                             const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
                             i64 n_eq, f64 step, f64 *SDSGE_RESTRICT hessian);
 
+/* Default `step`, and the single source of truth for it: the Cython wrapper and
+ * the native estimation objective both read this.
+ *
+ * The bicomplex step carries O(step^2) truncation on the diagonal (i == j puts
+ * both units on one variable, and the 4th-order Taylor term then leaks into the
+ * ij slot), so smaller is better. Nothing opposes it: the transcendentals are
+ * cancellation-free, so there is no 1/step^2 roundoff term to trade against.
+ *
+ * Measured on the RBC model against an exact symbolic Hessian, over entries
+ * spanning 3e0 down to 9e-6, the worst relative error is O(step^2) exactly
+ * (1.3e-8 at 1e-4, 1.3e-12 at 1e-6) until it reaches a few ULP at 1e-8 and then
+ * stays flat to at least 1e-13. 1e-9 sits a decade inside that plateau. */
+#define SDSGE_HESSIAN_STEP 1e-9
+
 #define SDSGE_HESSIAN_OK 0
 #define SDSGE_HESSIAN_ALLOC_FAIL -1
 

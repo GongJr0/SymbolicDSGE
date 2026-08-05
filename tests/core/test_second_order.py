@@ -279,16 +279,16 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(
         _our_pair(compiled, gxx[ctrl["c"]]),
         _dynare_pair(_DYNARE_GHXX_C),
-        rtol=1e-4,
-        atol=1e-6,
+        rtol=5e-6,
+        atol=2e-7,
     )
     np.testing.assert_allclose(
         _our_pair(compiled, hxx[compiled.idx["k_lag1"]]),
         _dynare_pair(_DYNARE_GHXX_KPRIME),
-        rtol=1e-4,
-        atol=1e-6,
+        rtol=5e-6,
+        atol=2e-7,
     )
-    np.testing.assert_allclose(hxx[compiled.idx["z_lag1"]], 0.0, atol=1e-6)
+    np.testing.assert_allclose(hxx[compiled.idx["z_lag1"]], 0.0, atol=1e-12)
 
     # Risk correction vs ghs2: eta loads the single shock (std sig) on the lifted
     # shock state; x' = h(x) + eta @ eps.
@@ -299,8 +299,8 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(
         [hss[compiled.idx["k_lag1"]], hss[compiled.idx["z_lag1"]], gss[ctrl["c"]]],
         _DYNARE_GHS2,
-        rtol=1e-4,
-        atol=1e-8,
+        rtol=5e-6,
+        atol=1e-9,
     )
 
 
@@ -325,14 +325,14 @@ def test_solve_order2_wiring():
     np.testing.assert_allclose(
         _our_pair(compiled, pol.gxx[ctrl["c"]]),
         _dynare_pair(_DYNARE_GHXX_C),
-        rtol=1e-4,
-        atol=1e-6,
+        rtol=5e-6,
+        atol=2e-7,
     )
     np.testing.assert_allclose(
         _our_pair(compiled, pol.hxx[compiled.idx["k_lag1"]]),
         _dynare_pair(_DYNARE_GHXX_KPRIME),
-        rtol=1e-4,
-        atol=1e-6,
+        rtol=5e-6,
+        atol=2e-7,
     )
     np.testing.assert_allclose(
         [
@@ -341,8 +341,8 @@ def test_solve_order2_wiring():
             pol.gss[ctrl["c"]],
         ],
         _DYNARE_GHS2,
-        rtol=1e-4,
-        atol=1e-8,
+        rtol=5e-6,
+        atol=1e-9,
     )
     # First order path is untouched: KleinSolution, no second-order tensors.
     # (levels model -> the expansion point must be supplied; zeros would fail BK.)
