@@ -43,7 +43,7 @@ Live `OptimizationResult` and `MCMCResult` carry `.to_meta()` projections; `MCMC
 
 | Topic | Behavior |
 | --- | --- |
-| Format version | `Manifest.sdsge_version`; readers reject bundles with a newer-than-supported version. |
+| Format version | `Manifest.sdsge_version` with `Manifest.last_breaking_version`; readers reject bundles on the far side of a break, in either direction. |
 | Compression | Parquet members are stored uncompressed (`ZIP_STORED`); text members deflate. |
 | Determinism | Bundle stores simulation specs + seed, not simulation results. Reproducibility relies on numpy `PCG64`. |
 | Round trip | Model YAML re-parsed and re-solved with stored `compile_kwargs` and `solve_kwargs`. |

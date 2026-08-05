@@ -17,7 +17,8 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | created_by | `#!python str` | Library version string. Defaults to `"SymbolicDSGE <version>"` when produced by `BundleBuilder`. |
 | created_at | `#!python str \| None` | UTC ISO-8601 timestamp set at write time. |
-| sdsge_version | `#!python int` | Format version. Readers reject bundles with `sdsge_version > SDSGE_FORMAT_VERSION`. |
+| sdsge_version | `#!python int` | Format version the bundle was written at. Bumped on every manifest change. |
+| last_breaking_version | `#!python int` | Version at which the format last broke, as of writing. A reader needs to be at least this version. |
 | members | `#!python list[Member]` | Member inventory. Every archive entry has one. |
 | simulation | `#!python dict[str, SimSpec] \| None` | Inline simulation prefills keyed by role (no separate member). |
 | checksums | `#!python dict[str, str]` | SHA-256 hex digests keyed by member path. |
@@ -50,10 +51,14 @@ Manifest.from_dict(data: Mapping[str, Any]) -> Manifest
 Manifest.from_json(text: str) -> Manifest
 ```
 
-Round-trippable JSON shape. `from_dict` / `from_json` validate `sdsge_version` and raise `ValueError` when the bundle is newer than the installed library supports.
+Round-trippable JSON shape. `from_dict` / `from_json` validate the version pair and raise `ValueError` on either side of a break.
 
 ???+ warning "Forward / backward compatibility"
-    Readers are forward-tolerant on older versions (a v1 reader opens v1 bundles) but strict on newer ones (a v1 reader refuses a v2 bundle). Bump `SDSGE_FORMAT_VERSION` only on breaking manifest changes.
+    Compatibility is judged against breaks, not against version equality. A reader rejects a bundle older than its own `SDSGE_LAST_BREAKING_VERSION`, and rejects one whose `last_breaking_version` exceeds its `SDSGE_FORMAT_VERSION`. A newer bundle from a bump that broke nothing reads fine.
+
+    Bump `SDSGE_FORMAT_VERSION` on every manifest change and `SDSGE_LAST_BREAKING_VERSION` only when the change breaks readers. A bundle written before the field existed is treated as though its own version broke.
+
+    Version 2 keys shock specifications by shock name rather than by the variable the shock drives, so a version 1 `simulation` or `mc_pipeline` names shocks that no longer resolve.
 
 ## `Member`
 

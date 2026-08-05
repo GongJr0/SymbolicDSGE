@@ -313,21 +313,9 @@ class DSGESolver:
         idx = {name: i for i, name in enumerate(canonical_names)}
 
         # Shock columns follow shock_map order, which is the order the shock
-        # states were minted in. The target a shock declares is not read here:
-        # the lift keys on the shock symbol, so a shock may enter any number of
-        # equations without the map having to name them.
-        unknown_targets = [
-            name
-            for name in (
-                self._coerce_variable_name(target) for target in conf.shock_map.values()
-            )
-            if name not in set(model_names)
-        ]
-        if unknown_targets:
-            raise ValueError(
-                "shock_map targets unknown model variable(s): "
-                + ", ".join(unknown_targets)
-            )
+        # states were minted in. Only the keys are read: the lift keys on the
+        # shock symbol, so a shock enters any number of equations and the target
+        # a shock declares names nothing the compiler needs.
         shock_names = tuple(shock.name for shock in conf.shock_map)
 
         return VariableLayout(
