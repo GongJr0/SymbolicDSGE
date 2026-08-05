@@ -3,6 +3,11 @@
 These cover first order residual consistency, zero tensors for a linear model,
 Dynare parity for RBC ``g_xx`` and ``h_xx``, and Dynare parity for the risk
 correction terms.
+
+Two Dynare fixtures, one shock each way. rbc_second_order carries the simulation
+and IRF goldens; rbc_multishock_second_order carries the three-shock decision
+rule, which is the only place the shock cross terms and the correlated risk
+correction are pinned.
 """
 
 from __future__ import annotations
@@ -39,6 +44,24 @@ _DYNARE_GHXX_C = [
     0.004224819272851745,
     0.45842005940556829,
 ]
+
+# ghxu is (n_var, n_state * n_exog) and ghuu (n_var, n_exog^2), both flattened
+# the way MATLAB flattens, column major. With one shock that makes ghxu the k
+# column [k', z, c] followed by the z column, and ghuu a single [k', z, c].
+_DYNARE_GHXU = [
+    0.030653832421147185,
+    0.0,
+    0.0044471781819490769,
+    2.382013871953204,
+    0.0,
+    0.48254743095322666,
+]
+
+_DYNARE_GHUU = [2.5073830231086385, 0.0, 0.50794466416128847]
+
+# Row offsets into the DR ordering [k', z, c] shared by all of the above.
+_DR_KPRIME, _DR_Z, _DR_C = 0, 1, 2
+
 # ghs2 is the sigma squared risk correction in DR order [k', z, c].
 _DYNARE_GHS2 = [0.0010614857740643515, 0.0, -0.0010614857740643515]
 _DYNARE_SIM_X0 = np.array(
@@ -159,6 +182,27 @@ def _our_pair(compiled, tensor_row: np.ndarray) -> np.ndarray:
     return tensor_row[np.ix_(ix, ix)]
 
 
+def _our_shock_block(compiled, tensor_row: np.ndarray) -> np.ndarray:
+    """The e_st column of one tensor row as Dynare orders it: the two ghxu
+    entries [d2/dk de, d2/dz de] followed by ghuu [d2/de2]."""
+    e = compiled.idx["e_st"]
+    k, z = (compiled.idx[n] for n in _DYNARE_STATES)
+    return np.array([tensor_row[k, e], tensor_row[z, e], tensor_row[e, e]])
+
+
+def _dynare_shock_block(dr_row: int) -> np.ndarray:
+    """One decision-rule row's [ghxu_k, ghxu_z, ghuu], to line up with
+    ``_our_shock_block``. The two ghxu columns are ``n_var`` apart."""
+    n_var = len(_DYNARE_GHUU)
+    return np.array(
+        [
+            _DYNARE_GHXU[dr_row],
+            _DYNARE_GHXU[n_var + dr_row],
+            _DYNARE_GHUU[dr_row],
+        ]
+    )
+
+
 def _levels_steady_state(compiled) -> np.ndarray:
     """The RBC expansion point over the compiled layout, generated vars included."""
     calib = compiled.config.calibration.parameters
@@ -167,6 +211,14 @@ def _levels_steady_state(compiled) -> np.ndarray:
         [known.get(re.sub(r"_lag\d+$", "", n), 0.0) for n in compiled.var_names],
         dtype=np.float64,
     )
+
+
+def _solved_rbc():
+    """The RBC model solved to second order, as (solved, compiled)."""
+    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    return solver.solve(compiled, order=2), compiled
 
 
 def _drive(path):
@@ -304,6 +356,50 @@ def test_rbc_second_order_matches_dynare():
     )
 
 
+def test_rbc_shock_state_columns_carry_dynare_ghxu_ghuu():
+    """Desugaring lifts the shock into a state, so what Dynare reports as ghxu
+    and ghuu lands inside our g_xx/h_xx as the e_st column. That column is a
+    third of every tensor row and the ghxx assertions cover none of it.
+    """
+    solved, compiled = _solved_rbc()
+    pol = solved.policy
+    ctrl = {n: i for i, n in enumerate(compiled.var_names[compiled.n_state :])}
+
+    np.testing.assert_allclose(
+        _our_shock_block(compiled, pol.gxx[ctrl["c"]]),
+        _dynare_shock_block(_DR_C),
+        rtol=5e-6,
+        atol=2e-7,
+    )
+    np.testing.assert_allclose(
+        _our_shock_block(compiled, pol.hxx[compiled.idx["k_lag1"]]),
+        _dynare_shock_block(_DR_KPRIME),
+        rtol=5e-6,
+        atol=2e-7,
+    )
+
+
+def test_rbc_second_order_structural_invariants():
+    """What the compiler's own layout forces, independent of any golden.
+
+    The lifted shock is exogenous and i.i.d., so it has no transition row and no
+    risk correction. z_lag1(t+1) = z(t) is linear, so its row is flat. And
+    k_lag1(t+1) = k(t) makes the k_lag1 state row the same object as the k
+    control row, which is the identity that lets a ghxx golden be read off
+    either tensor.
+    """
+    solved, compiled = _solved_rbc()
+    pol = solved.policy
+    ctrl = {n: i for i, n in enumerate(compiled.var_names[compiled.n_state :])}
+
+    np.testing.assert_allclose(pol.hxx[compiled.idx["e_st"]], 0.0, atol=1e-12)
+    np.testing.assert_allclose(pol.hxx[compiled.idx["z_lag1"]], 0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        pol.hxx[compiled.idx["k_lag1"]], pol.gxx[ctrl["k"]], rtol=1e-12, atol=1e-14
+    )
+    assert pol.hss[compiled.idx["e_st"]] == 0.0
+
+
 def test_solve_order2_wiring():
     """The .solve(order=2) public path end to end: it resolves + cross-checks the
     nonlinear steady state, builds eta from the shock calibration, and returns a
@@ -394,3 +490,376 @@ def test_rbc_second_order_irf_matches_dynare():
     ]
 
     np.testing.assert_allclose(out, _DYNARE_IRF[1:], rtol=2e-6, atol=2e-6)
+
+
+# --- three correlated shocks -------------------------------------------------
+# The single-shock fixture above cannot reach the shock cross terms, the Cholesky
+# branch of the eta builder, or a risk correction against anything but one
+# variance. rbc_multishock_second_order.yaml exists for those three.
+
+_MULTISHOCK = "tests/fixtures/models/rbc_multishock_second_order.yaml"
+_MS_SHOCK_STATES = ("e_z_st", "e_d_st", "e_g_st")
+_MS_STDS = ("sig_z", "sig_d", "sig_g")
+_MS_CORRS = {(0, 1): "corr_zd", (0, 2): "corr_zg", (1, 2): "corr_dg"}
+
+# Dynare stoch_simul(order=2) on tests/fixtures/models/rbc_multishock_second_order.mod,
+# untouched full precision, as make_rbc_multishock_second_order_goldens.m prints
+# it. One list per DR row.
+#
+# The three vocabularies below are the whole mapping, and are named on our side:
+# Dynare's DR rows [k, d, g, z, c], its state columns [k, d, g, z] which are our
+# lag auxes, and its exogenous columns [e_z, e_d, e_g] which are our lifted shock
+# states. Second-order columns are Kronecker products of those, column (i-1)*q + j
+# of kron(A, B) pairing A(i) with B(j): ghxx is state x state, ghxu state x exo,
+# ghuu exo x exo.
+_MS_DR_ROWS = ("k", "d", "g", "z", "c")
+_MS_DR_STATES = ("k_lag1", "d_lag1", "g_lag1", "z_lag1")
+_MS_DR_EXO = ("e_z_st", "e_d_st", "e_g_st")
+
+_DYNARE_MS_GHX = [
+    [0.97764956105920198, 3.0989174339781824, -0.3378547421051602, 2.0621545726769814],
+    [0, 0.80000000000000004, -1.7945246048385654e-18, 0],
+    [0, 0, 0.90000000000000013, 0],
+    [0, -1.3429187802919278e-16, -4.5749892275358046e-18, 0.94999999999999973],
+    [
+        0.032451449658549333,
+        -3.0989174339781824,
+        -0.11214525789483983,
+        0.80240672562080839,
+    ],
+]
+
+_DYNARE_MS_GHU = [
+    [2.1706890238705081, 3.8736467924727291, -0.37539415789462244],
+    [0, 0.99999999999999989, 0],
+    [-0, -0, 1],
+    [1, -0, -0],
+    [0.8446386585482194, -3.8736467924727291, -0.12460584210537756],
+]
+
+_DYNARE_MS_GHXX = [
+    [
+        -0.00027449463044743234,
+        0.062557461268933023,
+        -0.00096642240723384819,
+        0.029666628209446988,
+        0.062557461268933023,
+        -4.7511056132642189,
+        -0.20841866901845763,
+        1.3867403480517568,
+        -0.00096642240723384841,
+        -0.2084186690184576,
+        -0.34196846880008797,
+        -0.013242044372532652,
+        0.029666628209446988,
+        1.3867403480517571,
+        -0.013242044372532638,
+        2.2929612765158933,
+    ],
+    [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1.2779006356522617e-18,
+        1.0223205085218094e-17,
+        0,
+        1.2779006356522617e-18,
+        -2.6727647100921956e-51,
+        0,
+        0,
+        1.0223205085218094e-17,
+        0,
+        0,
+    ],
+    [0] * 16,
+    [0] * 16,
+    [
+        -0.0005550993496256703,
+        -0.062557461268933023,
+        0.00096642240723384841,
+        0.0036793319724172271,
+        -0.062557461268933037,
+        4.7511056132642171,
+        0.20841866901845768,
+        -1.3867403480517575,
+        0.00096642240723384862,
+        0.20841866901845757,
+        -0.063031531199912214,
+        0.013242044372532638,
+        0.0036793319724172276,
+        -1.3867403480517575,
+        0.013242044372532628,
+        0.42837195686700674,
+    ],
+]
+
+_DYNARE_MS_GHXU = [
+    [
+        0.031228029694154731,
+        0.078196826586166349,
+        -0.0010738026747042775,
+        1.459726682159743,
+        -5.9388820165802807,
+        -0.23157629890939729,
+        -0.013938994076350221,
+        -0.26052333627307239,
+        -0.37996496533343094,
+        2.4136434489640988,
+        1.7334254350646985,
+        -0.014713382636147422,
+    ],
+    [
+        1.5973757945653272e-19,
+        -0,
+        -3.9934394864133179e-20,
+        -0,
+        -0,
+        -0,
+        6.3895031782613087e-19,
+        -0,
+        -2.5558012713045235e-18,
+        -0,
+        -8.1785640681744752e-17,
+        -0,
+    ],
+    [-0, 0, 0, 0, 0, 0, 0, 0, 0, -0, 0, 0],
+    [0] * 12,
+    [
+        0.0038729810235970858,
+        -0.078196826586166349,
+        0.0010738026747042775,
+        -1.4597266821597434,
+        5.9388820165802807,
+        0.23157629890939729,
+        0.013938994076350207,
+        0.26052333627307239,
+        -0.070035034666569115,
+        0.45091784933369128,
+        -1.7334254350646985,
+        0.014713382636147422,
+    ],
+]
+
+_DYNARE_MS_GHUU = [
+    [
+        2.5406773146990527,
+        1.8246583526996811,
+        -0.015487771195944695,
+        1.8246583526996811,
+        -7.423602520725356,
+        -0.28947037363674705,
+        -0.015487771195944709,
+        -0.28947037363674688,
+        -0.42218329481492323,
+    ],
+    [
+        -0,
+        -0,
+        6.3895031782613087e-19,
+        -0,
+        3.2714256272697901e-16,
+        -1.0223205085218094e-17,
+        -0,
+        1.0223205085218094e-17,
+        -0,
+    ],
+    [0] * 9,
+    [0] * 9,
+    [
+        0.47465036771967467,
+        -1.8246583526996811,
+        0.015487771195944695,
+        -1.8246583526996811,
+        7.423602520725356,
+        0.28947037363674705,
+        0.015487771195944709,
+        0.28947037363674688,
+        -0.077816705185076787,
+    ],
+]
+
+_DYNARE_MS_GHS2 = [
+    0.031518725236580371,
+    -3.9934394864133179e-20,
+    0.0,
+    0.0,
+    -0.031518725236580371,
+]
+
+
+def _solved_multishock():
+    """The three-shock RBC solved to second order, as (solved, compiled)."""
+    model, kalman = ModelParser(_MULTISHOCK).get_all()
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    return solver.solve(compiled, order=2), compiled
+
+
+def _ms_preproc(solved, compiled):
+    """(a, b, f_xx) at the solved steady state, enough to re-run the risk
+    correction with an eta of our choosing."""
+    par = np.array(
+        [
+            float(compiled.config.calibration.parameters[p])
+            for p in compiled.calib_params
+        ],
+        dtype=np.float64,
+    )
+    n_eq = len(compiled.var_names)
+    ss = solved.policy.steady_state
+    cf = compiled.construct_objective_cfunc()
+    cf_bc = compiled.construct_objective_cfunc_bicomplex()
+    a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
+    return a, b, bicomplex_hessian(cf_bc.address, ss, par, n_eq)
+
+
+def _ms_covariance(compiled) -> np.ndarray:
+    """The 3x3 innovation covariance the yaml calibrates, read straight off the
+    parameters rather than off eta."""
+    calib = compiled.config.calibration.parameters
+    stds = np.array([float(calib[sp.Symbol(s)]) for s in _MS_STDS])
+    corr = np.eye(3)
+    for (i, j), name in _MS_CORRS.items():
+        corr[i, j] = corr[j, i] = float(calib[sp.Symbol(name)])
+    return corr * np.outer(stds, stds)
+
+
+def _ms_dr_row(solved, compiled, dr_row: str):
+    """(first order, second order, risk) for one Dynare DR row.
+
+    Dynare's k row is next period's capital, which on our side is the k_lag1
+    transition row; every other DR row is one of our controls."""
+    pol = solved.policy
+    if dr_row == "k":
+        i = compiled.idx["k_lag1"]
+        return np.real(pol.p)[i], pol.hxx[i], pol.hss[i]
+    ctrl = {n: i for i, n in enumerate(compiled.var_names[compiled.n_state :])}
+    i = ctrl[dr_row]
+    return np.real(pol.f)[i], pol.gxx[i], pol.gss[i]
+
+
+def test_multishock_first_order_matches_dynare():
+    """ghx and ghu with three shocks. The lifted shock states hold ghu, so the
+    two Dynare arrays are one slice of our first order rule each."""
+    solved, compiled = _solved_multishock()
+    si = [compiled.idx[n] for n in _MS_DR_STATES]
+    ei = [compiled.idx[n] for n in _MS_DR_EXO]
+
+    for r, name in enumerate(_MS_DR_ROWS):
+        first, _, _ = _ms_dr_row(solved, compiled, name)
+        np.testing.assert_allclose(
+            first[si], _DYNARE_MS_GHX[r], rtol=5e-6, atol=2e-7, err_msg=f"ghx {name}"
+        )
+        np.testing.assert_allclose(
+            first[ei], _DYNARE_MS_GHU[r], rtol=5e-6, atol=2e-7, err_msg=f"ghu {name}"
+        )
+
+
+def test_multishock_second_order_matches_dynare():
+    """ghxx, ghxu and ghuu with three shocks, every DR row.
+
+    ghxu and ghuu are the payload: with one shock they are a rescaling of ghxx
+    and constrain nothing new, but here they carry the cross terms between
+    distinct innovations, which no single-shock model has.
+    """
+    solved, compiled = _solved_multishock()
+    si = [compiled.idx[n] for n in _MS_DR_STATES]
+    ei = [compiled.idx[n] for n in _MS_DR_EXO]
+    ns, ne = len(si), len(ei)
+
+    for r, name in enumerate(_MS_DR_ROWS):
+        _, tensor, _ = _ms_dr_row(solved, compiled, name)
+        for label, ix, golden, shape in (
+            ("ghxx", (si, si), _DYNARE_MS_GHXX[r], (ns, ns)),
+            ("ghxu", (si, ei), _DYNARE_MS_GHXU[r], (ns, ne)),
+            ("ghuu", (ei, ei), _DYNARE_MS_GHUU[r], (ne, ne)),
+        ):
+            np.testing.assert_allclose(
+                tensor[np.ix_(*ix)],
+                np.asarray(golden, dtype=np.float64).reshape(shape),
+                rtol=5e-6,
+                atol=2e-7,
+                err_msg=f"{label} {name}",
+            )
+
+
+def test_multishock_risk_correction_matches_dynare():
+    """ghs2 against a full covariance rather than one variance. This is the only
+    assertion in the file that the shock correlations reach the solution at all,
+    since eta enters nothing else."""
+    solved, compiled = _solved_multishock()
+    ours = [_ms_dr_row(solved, compiled, name)[2] for name in _MS_DR_ROWS]
+
+    np.testing.assert_allclose(ours, _DYNARE_MS_GHS2, rtol=5e-6, atol=1e-8)
+
+
+def test_multishock_eta_reproduces_the_calibrated_covariance():
+    """eta is a Cholesky factor, so only ``eta @ eta.T`` is meaningful, and that
+    has to be the calibrated covariance on the exog-state rows and zero below."""
+    _, compiled = _solved_multishock()
+    eta = DSGESolver._build_eta(compiled)
+    n_exog = compiled.n_exog
+
+    assert eta.shape == (compiled.n_state, n_exog)
+    np.testing.assert_allclose(
+        eta[:n_exog] @ eta[:n_exog].T, _ms_covariance(compiled), rtol=1e-13, atol=0.0
+    )
+    np.testing.assert_array_equal(eta[n_exog:], 0.0)
+
+
+def test_multishock_risk_correction_reads_the_off_diagonals():
+    """The correlations have to reach g_ss, and only through ``eta @ eta.T``.
+
+    Zeroing the off-diagonals moves g_ss, so the covariance is not being read as
+    a diagonal. Refactoring the same covariance through its symmetric square root
+    instead of its Cholesky leaves g_ss alone, so nothing is reading the factor.
+    """
+    solved, compiled = _solved_multishock()
+    a, b, f_xx = _ms_preproc(solved, compiled)
+    gxx = solved.policy.gxx
+    n_state, n_exog = compiled.n_state, compiled.n_exog
+
+    eta = DSGESolver._build_eta(compiled)
+    cov = _ms_covariance(compiled)
+    gx = np.real(solved.policy.f)
+
+    diag = np.zeros_like(eta)
+    diag[:n_exog, :] = np.diag(np.sqrt(np.diag(cov)))
+    w, v = np.linalg.eigh(cov)
+    root = np.zeros_like(eta)
+    root[:n_exog, :] = v @ np.diag(np.sqrt(w)) @ v.T
+
+    gss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)[0]
+    gss_diag = second_order_risk(a, b, f_xx, gx, gxx, diag, n_state)[0]
+    gss_root = second_order_risk(a, b, f_xx, gx, gxx, root, n_state)[0]
+
+    assert not np.allclose(gss, gss_diag, rtol=1e-3, atol=1e-12)
+    np.testing.assert_allclose(gss, gss_root, rtol=1e-10, atol=1e-15)
+
+
+def test_multishock_second_order_structural_invariants():
+    """The same layout facts the single-shock fixture pins, once per shock.
+
+    Every lifted shock is exogenous and i.i.d., so it has no transition row and
+    no risk correction; every AR(1) lag row is linear, so it is flat; and
+    k_lag1(t+1) = k(t) keeps the k_lag1 state row equal to the k control row.
+    """
+    solved, compiled = _solved_multishock()
+    pol = solved.policy
+    ctrl = {n: i for i, n in enumerate(compiled.var_names[compiled.n_state :])}
+
+    np.testing.assert_allclose(pol.gxx, pol.gxx.transpose(0, 2, 1), rtol=0, atol=0)
+    np.testing.assert_allclose(pol.hxx, pol.hxx.transpose(0, 2, 1), rtol=0, atol=0)
+
+    linear = _MS_SHOCK_STATES + ("z_lag1", "d_lag1", "g_lag1")
+    for name in linear:
+        np.testing.assert_allclose(pol.hxx[compiled.idx[name]], 0.0, atol=1e-12)
+    for name in _MS_SHOCK_STATES:
+        assert pol.hss[compiled.idx[name]] == 0.0
+
+    np.testing.assert_allclose(
+        pol.hxx[compiled.idx["k_lag1"]], pol.gxx[ctrl["k"]], rtol=1e-12, atol=1e-14
+    )
