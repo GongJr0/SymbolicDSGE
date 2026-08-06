@@ -6,6 +6,7 @@
 #include "../core/bicomplex_hessian.h" /* bc_residual_fn, SDSGE_HESSIAN_STEP */
 #include "../core/klein_preproc.h"     /* sdsge_residual_fn */
 #include "../core/klein_qz.h"          /* klein_zgges_fn */
+#include "../core/klein_solve.h"       /* sdsge_klein_spec, sdsge_solve1 */
 #include "../kalman/kalman.h"          /* meas_fn */
 #include "prior_program.h"             /* transform codes, dispatch */
 
@@ -78,22 +79,6 @@ typedef struct {
   const sdsge_scalar_scatter *scalars; /* n_scalars */
   i64 n_scalars;
 } sdsge_param_map;
-
-/* First-order Klein solve outputs. */
-typedef struct {
-  f64 *ss;     /* n_var: Newton-resolved steady state (from ss_seed) */
-  f64 *a_real; /* n_var*n_var */
-  f64 *b_real; /* n_var*n_var */
-  c128 *s;     /* n_var*n_var */
-  c128 *t;     /* n_var*n_var */
-  c128 *z;     /* n_var*n_var */
-  c128 *f;     /* n_ctrl*n_state */
-  c128 *p;     /* n_state*n_state */
-  c128 *eig;   /* n_var */
-  i64 stab;
-  f64 *A; /* n_var*n_var */
-  f64 *B; /* n_var*n_exog */
-} sdsge_solve1;
 
 /* Second-order (SGU) solve outputs. */
 typedef struct {

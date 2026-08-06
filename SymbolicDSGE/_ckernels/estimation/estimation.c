@@ -1,12 +1,6 @@
 #include "estimation.h"
-#include "../core/core.h"
-#include "../core/klein_postproc.h"
+#include "../core/klein_solve.h"
 #include "../core/second_order.h"
-#include "../core/steady_state.h"
-
-/* Newton steady-state config, matching the Python solver defaults. */
-#define SDSGE_SS_MAX_ITER 50
-#define SDSGE_SS_TOL 1e-12
 
 /* sdsge_solve1_run outcomes. */
 #define SDSGE_SOLVE_OK 0
@@ -46,33 +40,11 @@ void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
   sdsge_fill_params(base, theta);
 }
 
-/* Real pencil (row-major) -> complex Schur input (column-major), widened. */
-static inline void sdsge_to_complex_colmajor(const f64 *SDSGE_RESTRICT a,
-                                             c128 *SDSGE_RESTRICT s,
-                                             const i64 n) {
-  for (i64 i = 0; i < n; ++i) {
-    for (i64 j = 0; j < n; ++j) {
-      s[j * n + i] = c128_from_real(a[i * n + j]);
-    }
-  }
-}
-
 /* Real part of a contiguous complex buffer. */
 static inline void sdsge_real_part(const c128 *SDSGE_RESTRICT src,
                                    f64 *SDSGE_RESTRICT dst, const i64 len) {
   for (i64 k = 0; k < len; ++k) {
     dst[k] = c128_real(src[k]);
-  }
-}
-
-/* In-place square transpose (column-major <-> row-major). */
-static inline void sdsge_transpose_sq(c128 *SDSGE_RESTRICT m, const i64 n) {
-  for (i64 i = 0; i < n; ++i) {
-    for (i64 j = i + 1; j < n; ++j) {
-      const c128 tmp = m[i * n + j];
-      m[i * n + j] = m[j * n + i];
-      m[j * n + i] = tmp;
-    }
   }
 }
 
@@ -155,42 +127,32 @@ static inline const f64 *sdsge_build_cov(const sdsge_cov_spec *spec,
   return out;
 }
 
+/* Estimation's reading of the core solve: every way the pencil half can fail
+ * leaves f/p/stab unusable, and so does a nonzero stab, so all of them reject
+ * the draw as a Blanchard-Kahn violation. A missing steady state and an
+ * allocation failure are not violations and are not counted as such. */
 static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
-  const i64 n = b->dims.n_var;
+  const sdsge_klein_spec spec = {.residual = b->residual,
+                                 .zgges = b->zgges,
+                                 .ss_seed = b->ss_seed,
+                                 .params = b->params,
+                                 .n_var = b->dims.n_var,
+                                 .n_state = b->dims.n_state,
+                                 .n_ctrl = b->dims.n_ctrl,
+                                 .n_exog = b->dims.n_exog,
+                                 .n_par = b->dims.n_par,
+                                 .log_linear = b->log_linear};
 
-  /* Resolve the steady state at the current params by Newton from ss_seed, then
-   * linearize there. A gap model (ss = 0) seeds at 0 and converges in one step;
-   * a params draw with no steady state fails and is rejected as infeasible. */
-  i64 iters = 0;
-  if (sdsge_steady_state_newton(b->residual, b->ss_seed, b->params, n,
-                                b->dims.n_par, SDSGE_SS_MAX_ITER, SDSGE_SS_TOL,
-                                s->ss, &iters) != SDSGE_NEWTON_OK) {
+  switch (sdsge_klein_solve1(&spec, s)) {
+  case SDSGE_KLEIN_SOLVE_OK:
+    return (s->stab != 0) ? SDSGE_SOLVE_BK : SDSGE_SOLVE_OK;
+  case SDSGE_KLEIN_SOLVE_QZ:
+  case SDSGE_KLEIN_SOLVE_SINGULAR:
+  case SDSGE_KLEIN_SOLVE_NO_STATES:
+    return SDSGE_SOLVE_BK;
+  default:
     return SDSGE_SOLVE_NO_SS;
   }
-
-  klein_preproc(b->residual, s->ss, b->params, n, b->dims.n_par, n,
-                b->log_linear, s->a_real, s->b_real);
-  sdsge_to_complex_colmajor(s->a_real, s->s, n);
-  sdsge_to_complex_colmajor(s->b_real, s->t, n);
-  if (klein_qz(b->zgges, n, s->s, s->t, s->z) != KLEIN_QZ_OK) {
-    return SDSGE_SOLVE_BK;
-  }
-  sdsge_transpose_sq(s->s, n);
-  sdsge_transpose_sq(s->t, n);
-  sdsge_transpose_sq(s->z, n);
-  if (klein_postproc(s->s, s->t, s->z, b->dims.n_state, b->dims.n_ctrl, s->f,
-                     s->p, &s->stab, s->eig) != SDSGE_KLEIN_POSTPROC_SUCCESS) {
-    /* singular z11 (a Blanchard-Kahn failure, e.g. a non-stationary exogenous
-     * root at rho >= 1), workspace alloc failure, or a stateless model. Any of
-     * these leaves f/p/stab unusable, so reject the draw. */
-    return SDSGE_SOLVE_BK;
-  }
-  if (s->stab != 0) {
-    return SDSGE_SOLVE_BK;
-  }
-  sdsge_assemble_state_space(s->p, s->f, b->dims.n_state, b->dims.n_ctrl,
-                             b->dims.n_exog, s->A, s->B);
-  return SDSGE_SOLVE_OK;
 }
 
 /* Fold the log-prior into a computed loglik. Non-finite loglik or logprior ->

@@ -86,6 +86,40 @@ cdef extern from "klein_preproc.h" nogil:
         double *a, double *b)
 
 
+cdef extern from "klein_solve.h" nogil:
+    ctypedef struct sdsge_klein_spec:
+        sdsge_residual_fn residual
+        klein_zgges_fn zgges
+        const double *ss_seed
+        const double *params
+        int64_t n_var
+        int64_t n_state
+        int64_t n_ctrl
+        int64_t n_exog
+        int64_t n_par
+        int log_linear
+    ctypedef struct sdsge_solve1:
+        double *ss
+        double *a_real
+        double *b_real
+        c128 *s
+        c128 *t
+        c128 *z
+        c128 *f
+        c128 *p
+        c128 *eig
+        int64_t stab
+        double *A
+        double *B
+    int64_t sdsge_klein_solve1(const sdsge_klein_spec *spec, sdsge_solve1 *out)
+    int SDSGE_KLEIN_SOLVE_ALLOC
+    int SDSGE_KLEIN_SOLVE_SS_SINGULAR
+    int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
+    int SDSGE_KLEIN_SOLVE_QZ
+    int SDSGE_KLEIN_SOLVE_SINGULAR
+    int SDSGE_KLEIN_SOLVE_NO_STATES
+
+
 cdef extern from "residual_path.h" nogil:
     int64_t sdsge_residual_path(
         sdsge_residual_fn resid, const c128 *cur, const c128 *fwd,
@@ -456,6 +490,116 @@ def steady_state_newton(
             "(or the residual went non-finite)."
         )
     return ss, int(iters)
+
+
+def klein_solve1(
+    size_t residual_addr,
+    seed,
+    params,
+    int64_t n_state,
+    int64_t n_exog=0,
+    bint log_linear=False,
+):
+    """One-shot first-order Klein solve, in a single GIL release.
+
+    Fuses ``steady_state_newton`` -> ``klein_preprocess`` -> ``klein_qz`` ->
+    ``klein_postprocess`` -> ``assemble_state_space``, driving the same C
+    routine as the native estimation objective. Fusing removes the layout
+    round-trip the staged path pays: ``klein_qz`` emits column-major and
+    ``klein_postprocess`` reads row-major, so staging bridges them by copying
+    where the driver transposes in place.
+
+    Returns ``(ss, a, b, f, p, stab, eig, A, B)``. ``a``/``b`` are the pencil the
+    solve linearized at, handed back so a second-order caller need not rebuild
+    it. ``stab`` is reported, never raised on: whether a Blanchard-Kahn
+    stability/uniqueness violation is fatal is the caller's decision.
+    """
+    cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
+    cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+    cdef int64_t n_var = seedv.shape[0]
+    cdef int64_t n_par = parv.shape[0]
+    cdef int64_t n_ctrl = n_var - n_state
+
+    if n_state < 1:
+        raise ValueError("klein_solve1 requires n_states >= 1.")
+    if n_ctrl < 0:
+        raise ValueError("n_states exceeds the matrix dimension.")
+    if not 0 <= n_exog <= n_state:
+        raise ValueError(f"n_exog ({n_exog}) cannot exceed n_state ({n_state}).")
+
+    ss = np.empty(n_var, dtype=np.float64)
+    a = np.empty((n_var, n_var), dtype=np.float64)
+    b = np.empty((n_var, n_var), dtype=np.float64)
+    s = np.empty((n_var, n_var), dtype=np.complex128)
+    t = np.empty((n_var, n_var), dtype=np.complex128)
+    z = np.empty((n_var, n_var), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
+    p = np.empty((n_state, n_state), dtype=np.complex128)
+    eig = np.empty(n_var, dtype=np.complex128)
+    A = np.empty((n_var, n_var), dtype=np.float64)
+    B = np.empty((n_var, n_exog), dtype=np.float64)
+
+    cdef double[::1] ssv = ss
+    cdef double[:, ::1] av = a
+    cdef double[:, ::1] bv = b
+    cdef double complex[:, ::1] sv = s
+    cdef double complex[:, ::1] tv = t
+    cdef double complex[:, ::1] zv = z
+    cdef double complex[:, ::1] fv = f
+    cdef double complex[:, ::1] pv = p
+    cdef double complex[::1] eigv = eig
+    cdef double[:, ::1] Av = A
+    cdef double[:, ::1] Bv = B
+
+    cdef sdsge_klein_spec spec
+    spec.residual = <sdsge_residual_fn><void*>residual_addr
+    spec.zgges = _zgges
+    spec.ss_seed = &seedv[0]
+    spec.params = &parv[0] if n_par > 0 else NULL
+    spec.n_var = n_var
+    spec.n_state = n_state
+    spec.n_ctrl = n_ctrl
+    spec.n_exog = n_exog
+    spec.n_par = n_par
+    spec.log_linear = log_linear
+
+    cdef sdsge_solve1 out
+    out.ss = &ssv[0]
+    out.a_real = &av[0, 0]
+    out.b_real = &bv[0, 0]
+    out.s = <c128 *>&sv[0, 0]
+    out.t = <c128 *>&tv[0, 0]
+    out.z = <c128 *>&zv[0, 0]
+    out.f = <c128 *>&fv[0, 0] if n_ctrl > 0 else NULL
+    out.p = <c128 *>&pv[0, 0]
+    out.eig = <c128 *>&eigv[0]
+    out.stab = 0
+    out.A = &Av[0, 0]
+    out.B = &Bv[0, 0] if n_exog > 0 else NULL
+
+    cdef int64_t err
+    with nogil:
+        err = sdsge_klein_solve1(&spec, &out)
+
+    # The staged shims' messages, verbatim: callers match on them.
+    if err == SDSGE_KLEIN_SOLVE_ALLOC:
+        raise MemoryError("klein_solve1: allocation failed.")
+    if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
+        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
+    if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
+        raise ValueError(
+            "steady_state_newton: did not converge within max_iter "
+            "(or the residual went non-finite)."
+        )
+    if err == SDSGE_KLEIN_SOLVE_QZ:
+        raise RuntimeError("klein_qz: LAPACK zgges failed.")
+    if err == SDSGE_KLEIN_SOLVE_SINGULAR:
+        raise ValueError(
+            "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
+        )
+    if err == SDSGE_KLEIN_SOLVE_NO_STATES:
+        raise ValueError("klein_postprocess: model has no states.")
+    return ss, a, b, f, p, int(out.stab), eig, A, B
 
 
 def second_order(a, b, f_xx, gx, hx, int64_t n_state):

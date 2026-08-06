@@ -7,7 +7,7 @@ from sympy.logic.boolalg import Boolean
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
-from numpy import float64, complex128, asarray, ndarray
+from numpy import float64, asarray, ndarray
 from numpy.typing import NDArray
 
 import pandas as pd
@@ -17,13 +17,11 @@ from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from .desugar import GeneratedKind, GeneratedVariable, desugar_model
 from .linearization import linearize_model
 from .solved_model import SolvedModel
-from .solver_backend import KleinSolution, PerturbationSolution, klein_solve
+from .solver_backend import PerturbationSolution, klein_solve
 from .._ckernels.core import (
-    assemble_state_space,
     second_order,
     second_order_risk,
     bicomplex_hessian,
-    klein_preprocess,
 )
 
 if TYPE_CHECKING:
@@ -508,22 +506,6 @@ class DSGESolver:
         )
 
     @staticmethod
-    def _assemble_state_space(
-        sol: KleinSolution | PerturbationSolution, compiled: CompiledModel
-    ) -> tuple[ND, ND]:
-        """First-order state space: X_t = [states; controls], x_{t+1} = p x_t (+
-        shocks), controls_t = f x_t. Shocks hit only the first n_exog states."""
-        p = np.asarray(sol.p, dtype=complex128)
-        f = np.asarray(sol.f, dtype=complex128)
-        n_s = compiled.n_state
-        n_u = len(compiled.var_names) - n_s
-        n_exo = compiled.n_exog
-        if n_exo > n_s:
-            raise ValueError(f"n_exog ({n_exo}) cannot exceed n_state ({n_s}).")
-
-        return assemble_state_space(p, f, n_s, n_u, n_exo)
-
-    @staticmethod
     def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
         """Raise or warn on a Klein stability/uniqueness violation."""
         if stab == 0:
@@ -546,13 +528,12 @@ class DSGESolver:
             param_vec,
             seed,
             compiled.n_state,
+            n_exog=compiled.n_exog,
         )
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
-        A, B = self._assemble_state_space(sol, compiled)
-
-        return SolvedModel(compiled=compiled, policy=sol, A=A, B=B)
+        return SolvedModel(compiled=compiled, policy=sol, A=sol.A, B=sol.B)
 
     def _solve_second_order(
         self,
@@ -572,18 +553,18 @@ class DSGESolver:
         cf = compiled.construct_objective_cfunc()
         cf_bc = compiled.construct_objective_cfunc_bicomplex()
 
-        sol = klein_solve(cf, param_vec, seed, n_state)
+        sol = klein_solve(cf, param_vec, seed, n_state, n_exog=compiled.n_exog)
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
         ss = sol.steady_state
         gx, hx = np.real(sol.f), np.real(sol.p)
 
-        a, b = klein_preprocess(cf.address, ss, param_vec, n_eq, False)
+        # sol.a / sol.b are the pencil the Klein solve already took at ss.
         f_xx = bicomplex_hessian(cf_bc.address, ss, param_vec, n_eq)
-        gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
+        gxx, hxx = second_order(sol.a, sol.b, f_xx, gx, hx, n_state)
         eta = self._build_eta(compiled)
-        gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+        gss, hss = second_order_risk(sol.a, sol.b, f_xx, gx, gxx, eta, n_state)
 
         pert = PerturbationSolution(
             p=sol.p,
@@ -597,8 +578,8 @@ class DSGESolver:
             gss=gss,
             hss=hss,
         )
-        A, B = self._assemble_state_space(pert, compiled)
-        return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
+        # p/f are the first-order solution unchanged, so its state space stands.
+        return SolvedModel(compiled=compiled, policy=pert, A=sol.A, B=sol.B)
 
     @staticmethod
     def _build_eta(compiled: CompiledModel) -> NDF:

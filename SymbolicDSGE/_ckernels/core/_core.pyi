@@ -89,6 +89,20 @@ def steady_state_newton(
     """Newton solve of F(ss, ss) = 0 from a residual @cfunc address; returns
     (ss, iters). Jacobian a - b via klein_preproc, step via f64 LU."""
 
+def klein_solve1(
+    residual_addr: int,
+    seed: _F64,
+    params: _F64,
+    n_state: int,
+    n_exog: int = ...,
+    log_linear: bool = ...,
+) -> tuple[_F64, _F64, _F64, _C128, _C128, int, _C128, _F64, _F64]:
+    """(ss, a, b, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
+
+    Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
+    assemble_state_space into one GIL release. ``stab`` is reported, not raised
+    on."""
+
 def second_order(
     a: _F64,
     b: _F64,
