@@ -677,9 +677,17 @@ class ModelParser:
         constraint: dict[str, Constraint] = {}
         for name, raw_spec in constraint_raw.items():
             spec = cls._require_mapping(raw_spec, f"equations.constraint.{name}")
+            if (bind := spec.get("bind")) is None:
+                raise ValueError(f"Constraint '{name}' is missing a 'bind' condition.")
+            bind = _get_relational(bind)
+            if (relax := spec.get("relax")) is None:
+                relax = Not(bind)  # Default relax for symmetric constraint
+            else:
+                relax = _get_relational(relax)
+
             constraint[name] = Constraint(
-                bind=_get_relational(spec["bind"]),
-                relax=_get_relational(spec["relax"]),
+                bind=bind,
+                relax=relax,
             )
 
         regime_raw = eq_data.get("regime", {}) or {}

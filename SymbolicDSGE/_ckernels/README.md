@@ -55,7 +55,7 @@ protocol, so NumPy's C-API never enters the build.
 3. Re-export in `_ckernels/foo/__init__.py`: `from ._foo import bar as bar`.
 4. In the consumer (`SymbolicDSGE/foo/...`), `try` the native import and fall
    back to the numba kernel on `ImportError`.
-5. Add a parity test under `tests/_ckernels/`.
+5. Add a parity test under `tests/ckernels/`.
 
 `setup.py` auto-discovers any `_ckernels/*/_*.pyx` and links its sibling `*.c`
 plus all `_common/*.c` — no per-subsystem build edits needed.
