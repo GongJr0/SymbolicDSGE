@@ -18,7 +18,7 @@ typedef struct {
 } c128_lu;
 
 /* Arithmetic. Defined `static inline` in the header so every translation unit
- * inlines them; math.h (fabs/hypot) comes in via sdsge_common.h. */
+ * inlines them; math.h (fabs/hypot/log1p) comes in via sdsge_common.h. */
 
 static inline c128 c128_make(const f64 re, const f64 im) {
   c128 result;
@@ -108,6 +108,23 @@ static inline c128 c128_exp(const c128 a) {
 
 static inline c128 c128_log(const c128 a) {
   return c128_make(log(c128_abs(a)), atan2(a.im, a.re));
+}
+
+static inline c128 c128_cos(const c128 a) {
+  return c128_make(cos(a.re) * cosh(a.im), -sin(a.re) * sinh(a.im));
+}
+
+static inline c128 c128_sin(const c128 a) {
+  return c128_make(sin(a.re) * cosh(a.im), cos(a.re) * sinh(a.im));
+}
+
+/* Principal arctangent, log-free in the small-argument regime the bicomplex
+ * step lives in: atan(z) = -i*atanh(i*z) expanded so that a near-zero result
+ * comes out of atan2 and log1p rather than a difference of two logarithms. */
+static inline c128 c128_atan(const c128 a) {
+  const f64 x = a.re, y = a.im;
+  return c128_make(0.5 * atan2(2.0 * x, 1.0 - x * x - y * y),
+                   0.25 * log1p(4.0 * y / ((1.0 - y) * (1.0 - y) + x * x)));
 }
 
 static inline c128 c128_spow(const c128 a, const f64 p) {

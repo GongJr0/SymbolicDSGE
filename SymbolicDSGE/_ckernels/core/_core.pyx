@@ -141,6 +141,7 @@ cdef extern from "../_common/sdsge_bicomplex.h" nogil:
 cdef extern from "bicomplex_hessian.h" nogil:
     ctypedef void (*bc_residual_fn)(
         const bc256 *fwd, const bc256 *cur, const bc256 *par, bc256 *out)
+    const double SDSGE_HESSIAN_STEP
     int64_t sdsge_bicomplex_hessian(
         bc_residual_fn residual, const double *ss, const double *par,
         int64_t n_var, int64_t n_par, int64_t n_eq, double step,
@@ -655,11 +656,13 @@ def bicomplex_hessian(
     double[::1] steady_state,
     double[::1] params,
     int64_t n_eq,
-    double step=1e-4,
+    double step=SDSGE_HESSIAN_STEP,
 ):
     """Residual Hessian ``F_xx`` (n_eq, 2*n_var, 2*n_var) via the bicomplex step,
     from a bicomplex residual @cfunc (``build_cfunc(..., BicomplexOps())``) given
     its ``.address``. Second-order native preproc; feeds the g_xx assembly.
+
+    ``step`` defaults to ``SDSGE_HESSIAN_STEP``; see the C header for what sets it.
     """
     cdef int64_t n_var = steady_state.shape[0]
     cdef int64_t n_par = params.shape[0]

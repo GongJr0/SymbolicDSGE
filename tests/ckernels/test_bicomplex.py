@@ -7,19 +7,21 @@ shim as ``bc_*`` on the 4-tuple ``(real, i, j, ij) = (a.re, a.im, b.re, b.im)``.
 
 Two independent checks:
 
-1. **Algebra** -- every op against a NumPy pair-of-complex reference (a different
-   implementation than the C: ``exp`` uses the direct ``e^{z1}(cos z2 + j sin z2)``
-   formula vs the header's idempotent projection, so agreement is cross-algorithm,
-   not tautological). Random inputs carry nonzero i/j/ij so a projection/reconst
-   sign error cannot hide.
-2. **Derivatives** -- the actual point: perturb along i and j, read the ij
-   component / h^2, compare to the analytic second derivative. Representation-
+1. **Algebra**: every op against a NumPy pair-of-complex reference (a different
+   implementation than the C, which reaches ``exp``/``log`` through the polar
+   form in ``j`` while the reference uses the idempotent projection, so agreement
+   is cross-algorithm, not tautological). Random inputs carry nonzero i/j/ij so a
+   projection/reconst sign error cannot hide.
+2. **Derivatives**: the actual point. Perturb along i and j, read the ij
+   component / h^2, compare to the analytic second derivative. Representation
    independent end-to-end validation.
 
 Numerical note: the bicomplex second derivative has O(h^2) *truncation* (unlike
-complex-step's exact first derivative -- this is the bicomplex-vs-hyperdual
+complex-step's exact first derivative; this is the bicomplex versus hyperdual
 tradeoff), so derivative tests use a moderate ``h`` and matched tolerances.
-Polynomials up to cubic are exact at any ``h`` (no f'''' term).
+Polynomials up to cubic are exact at any ``h`` (no f'''' term). There is no
+opposing roundoff term: the projection the reference uses would put one there,
+which is why the header does not.
 """
 
 from __future__ import annotations
@@ -81,12 +83,26 @@ def _ref_div(x: BC, y: BC) -> BC:
     return _from_pair((xa * ya + xb * yb) / denom, (xb * ya - xa * yb) / denom)
 
 
-def _ref_exp(x: BC) -> BC:
-    # Direct formula (independent of the header's idempotent projection):
-    # exp(za + zb j) = exp(za) * (cos zb + j sin zb).
+def _ref_proj(x: BC) -> tuple[complex, complex]:
     za, zb = _to_pair(x)
-    e = cmath.exp(za)
-    return _from_pair(e * cmath.cos(zb), e * cmath.sin(zb))
+    return za - 1j * zb, za + 1j * zb
+
+
+def _ref_reconst(w1: complex, w2: complex) -> BC:
+    return _from_pair((w1 + w2) * 0.5, 1j * (w1 - w2) * 0.5)
+
+
+def _ref_exp(x: BC) -> BC:
+    # Idempotent projection: f applied componentwise on the two idempotent
+    # slots. Independent of the header, which uses the polar form in j. Exact in
+    # exact arithmetic, and well conditioned at the O(1) inputs used here.
+    w1, w2 = _ref_proj(x)
+    return _ref_reconst(cmath.exp(w1), cmath.exp(w2))
+
+
+def _ref_log(x: BC) -> BC:
+    w1, w2 = _ref_proj(x)
+    return _ref_reconst(cmath.log(w1), cmath.log(w2))
 
 
 def _rand_bc(rng: np.random.Generator) -> BC:
@@ -152,11 +168,19 @@ def test_proj_matches_reference(seed):
 
 
 @pytest.mark.parametrize("seed", range(8))
-def test_exp_matches_direct_formula(seed):
+def test_exp_matches_projection_formula(seed):
     rng = np.random.default_rng(seed)
-    # Modest magnitude so the idempotent projection stays well conditioned.
+    # Modest magnitude so the reference's projection stays well conditioned.
     x = tuple(float(v) for v in rng.uniform(-1.0, 1.0, size=4))
     np.testing.assert_allclose(bc_exp(x), _ref_exp(x), rtol=1e-9, atol=1e-12)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_log_matches_projection_formula(seed):
+    rng = np.random.default_rng(seed)
+    # Real-dominant base: the polar form's branch, and the reference's.
+    x = (float(rng.uniform(0.5, 2.0)), *rng.uniform(-0.3, 0.3, size=3))
+    np.testing.assert_allclose(bc_log(x), _ref_log(x), rtol=1e-9, atol=1e-12)
 
 
 def test_exp_of_real_matches_scalar():
@@ -319,16 +343,28 @@ def test_second_derivative_rational():
 
 
 def test_second_derivative_exp():
-    # f(x) = exp(x),  f''(x) = exp(x). Transcendental path (idempotent exp),
-    # so moderate h and looser tolerance (truncation + projection conditioning).
+    # f(x) = exp(x),  f''(x) = exp(x). Transcendental path, so what is left at
+    # this h is truncation alone: the polar form adds no roundoff term.
     x0, h = 0.5, 1e-4
     f = bc_exp((x0, h, h, 0.0))
-    assert _ij(f) / h**2 == pytest.approx(np.exp(x0), rel=1e-5)
+    assert _ij(f) / h**2 == pytest.approx(np.exp(x0), rel=1e-7)
 
 
 def test_second_derivative_power():
-    # f(x) = x^2.5,  f''(x) = 2.5 * 1.5 * x^0.5.
+    # f(x) = x^2.5,  f''(x) = 2.5 * 1.5 * x^0.5. Composed exp(p * log x), so it
+    # covers the log path too.
     x0, h = 1.4, 1e-4
     f = bc_spow((x0, h, h, 0.0), 2.5)
     analytic = 2.5 * 1.5 * x0**0.5
-    assert _ij(f) / h**2 == pytest.approx(analytic, rel=1e-5)
+    assert _ij(f) / h**2 == pytest.approx(analytic, rel=1e-7)
+
+
+@pytest.mark.parametrize("h", [1e-4, 1e-6, 1e-8])
+def test_transcendental_second_derivative_holds_as_h_shrinks(h):
+    # The regression guard. Under the idempotent projection this lost roughly
+    # eps/h^2 and was ~100% wrong by h = 1e-6; truncation-only error keeps
+    # shrinking instead.
+    x0 = 0.9
+    f = bc_exp(bc_real_scale(bc_log((x0, h, h, 0.0)), 2.5))
+    analytic = 2.5 * 1.5 * x0**0.5
+    assert _ij(f) / h**2 == pytest.approx(analytic, rel=1e-7)

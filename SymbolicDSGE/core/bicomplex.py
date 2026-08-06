@@ -9,7 +9,13 @@ no heap), ``inline="always"`` so they fold into the residual.
 
 Only the primitive set is here; the printer composes ``ipow``/``spow``/``cpow``/
 half-integer powers from these (repeated ``bc_mul``, ``bc_exp(bc_log)``, ...).
-Transcendentals use the idempotent projection, matching the C reconst sign.
+
+Transcendentals use the polar form, not the idempotent projection. The
+projection evaluates ``f(a - i*b)`` and ``f(a + i*b)`` and reconstructs from
+their half-difference, and those two agree to O(step), so the ``ij`` slot the
+Hessian reads is what the subtraction cancels away. That is what put a
+``1/step^2`` roundoff floor under the second-order tensors, on top of the
+O(step^2) truncation the bicomplex step carries inherently.
 """
 
 from __future__ import annotations
@@ -57,20 +63,18 @@ def bc_real_scale(x, s):  # type: ignore[no-untyped-def]
 
 @njit(**_INLINE)
 def bc_exp(x):  # type: ignore[no-untyped-def]
-    # Idempotent projection: p1 = a - i*b, p2 = a + i*b; f componentwise;
-    # reconstruct a' = (w1+w2)/2, b' = i*(w1-w2)/2.
-    iz2 = 1j * x[1]
-    w1 = cmath.exp(x[0] - iz2)
-    w2 = cmath.exp(x[0] + iz2)
-    return ((w1 + w2) * 0.5, 1j * (w1 - w2) * 0.5)
+    # exp(a + b*j) = exp(a) * (cos b + j sin b), the j-analogue of the complex
+    # polar form. b is O(step), so both slots are products, never differences.
+    e = cmath.exp(x[0])
+    return (e * cmath.cos(x[1]), e * cmath.sin(x[1]))
 
 
 @njit(**_INLINE)
 def bc_log(x):  # type: ignore[no-untyped-def]
-    iz2 = 1j * x[1]
-    w1 = cmath.log(x[0] - iz2)
-    w2 = cmath.log(x[0] + iz2)
-    return ((w1 + w2) * 0.5, 1j * (w1 - w2) * 0.5)
+    # Same polar form inverted: log(a + b*j) = log(a) + log(1 + q^2)/2 + j*atan(q)
+    # for q = b/a. Requires a real-dominant a, as bc_sqrt does.
+    q = x[1] / x[0]
+    return (cmath.log(x[0]) + 0.5 * cmath.log(1.0 + q * q), cmath.atan(q))
 
 
 @njit(**_INLINE)

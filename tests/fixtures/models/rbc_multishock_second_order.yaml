@@ -1,0 +1,80 @@
+# RBC with three correlated shocks: the second-order fixture that exercises what
+# the single-shock rbc_second_order.yaml cannot. Levels model, NOT
+# auto-linearized (order > 1 is levels-only); the expansion point is the steady
+# state below. Lives in tests/, not MODELS/.
+#
+# The single-shock fixture leaves three things untested. Every shock cross term
+# g_xx[i, j] with i and j distinct innovations. The Cholesky branch of the eta
+# builder, which only runs when a correlation is nonzero. And the risk
+# correction g_ss/h_ss against a full covariance rather than one variance.
+#
+# Three processes, each entering through a different nonlinearity so that no
+# cross term is zero by construction:
+#   z  TFP, multiplies the production function
+#   d  discount factor, multiplies the Euler right-hand side
+#   g  government absorption, subtracted from output through its own exp
+# All three are zero in steady state, so the deterministic steady state is the
+# textbook RBC one with gbar taken out of consumption.
+#
+# Mirrors rbc_multishock_second_order.mod equation for equation in natural time,
+# as rbc_second_order.yaml mirrors rbc_second_order.mod.
+
+name: "RBC_MULTISHOCK_SECOND_ORDER"
+
+variables:
+  c: {ss_seed: c_ss}
+  k: {ss_seed: k_ss}
+  z: {ss_seed: null} # z_ss = 0
+  d: {ss_seed: null} # d_ss = 0
+  g: {ss_seed: null} # g_ss = 0
+
+shock_map:
+  e_z: z
+  e_d: d
+  e_g: g
+
+observables: [c_obs, k_obs, g_obs]
+
+equations:
+  model:
+    euler: "c(t)**(-gamma) = beta * exp(d(t)) * c(t+1)**(-gamma) * (alpha * exp(z(t+1)) * k(t)**(alpha - 1) + 1 - delta)"
+    capital: "c(t) + k(t) + gbar * exp(g(t)) = exp(z(t)) * k(t-1)**alpha + (1 - delta) * k(t-1)"
+    z_process: "z(t) = rho_z * z(t-1) + e_z"
+    d_process: "d(t) = rho_d * d(t-1) + e_d"
+    g_process: "g(t) = rho_g * g(t-1) + e_g"
+  constraint: {}
+  observables:
+    c_obs: c(t)
+    k_obs: k(t)
+    g_obs: gbar * exp(g(t))
+
+calibration:
+  parameters:
+    beta: 0.99
+    gamma: 2.0
+    alpha: 0.33
+    delta: 0.025
+    gbar: 0.5
+    rho_z: 0.95
+    rho_d: 0.80
+    rho_g: 0.90
+    sig_z: 0.010
+    sig_d: 0.008
+    sig_g: 0.015
+    corr_zd: 0.35
+    corr_zg: -0.20
+    corr_dg: 0.15
+    # Steady state (deterministic), consistent with the calibration above:
+    #   k_ss = (alpha / (1/beta - 1 + delta))^(1/(1-alpha))
+    #   c_ss = k_ss^alpha - delta*k_ss - gbar
+    k_ss: 28.348419061048435
+    c_ss: 1.8066172319875173
+  shocks:
+    std:
+      e_z: sig_z
+      e_d: sig_d
+      e_g: sig_g
+    corr:
+      e_z, e_d: corr_zd
+      e_z, e_g: corr_zg
+      e_d, e_g: corr_dg

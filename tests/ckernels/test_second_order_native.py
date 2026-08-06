@@ -3,8 +3,9 @@
 The C kernel is the allocation-free row-major transcription of
 core.second_order.solve_second_order; here it is checked to reproduce that oracle
 to machine precision on models of different (n, nx, ny) shapes. The numpy side is
-itself pinned to Dynare in tests/core/test_second_order.py, so parity here plus
-that golden chains the native path to the independent solver.
+itself pinned to Dynare in tests/core/test_second_order_rbc.py and
+tests/core/test_second_order_multishock.py, so parity here plus those goldens
+chains the native path to the independent solver.
 """
 
 from __future__ import annotations

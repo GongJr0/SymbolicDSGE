@@ -83,25 +83,29 @@ static inline bc256 bc256_reconst(const c128 a, const c128 b) {
   return result;
 }
 
+/* Transcendentals use the polar form in j, not the idempotent projection.
+ * Projection evaluates f(a - i b) and f(a + i b) and reconstructs from their
+ * half-difference; those agree to O(step), so the subtraction cancels away the
+ * ij component the Hessian reads. The polar form reaches every slot through
+ * products, which puts the second derivative at machine precision instead of
+ * eps/step^2 above it. */
 static inline bc256 bc256_exp(const bc256 x) {
-  c128 p1, p2;
-  bc256_proj(x, &p1, &p2);
-  return bc256_reconst(c128_exp(p1), c128_exp(p2));
+  const c128 e = c128_exp(x.a);
+  return bc256_make(c128_mul(e, c128_cos(x.b)), c128_mul(e, c128_sin(x.b)));
 }
 
+/* Requires a real-dominant x.a, as bc256_sqrt does. */
 static inline bc256 bc256_log(const bc256 x) {
-  c128 p1, p2;
-  bc256_proj(x, &p1, &p2);
-  return bc256_reconst(c128_log(p1), c128_log(p2));
+  const c128 q = c128_div(x.b, x.a);
+  const c128 one_plus_q2 = c128_add(c128_from_real(1.0), c128_mul(q, q));
+  return bc256_make(
+      c128_add(c128_log(x.a), c128_real_scale(c128_log(one_plus_q2), 0.5)),
+      c128_atan(q));
 }
 
 static inline bc256 bc256_spow(const bc256 x, const f64 p) {
-  c128 p1, p2;
-  bc256_proj(x, &p1, &p2);
-  return bc256_reconst(
-      c128_spow(p1, p),
-      c128_spow(p2, p)); // Undefined for x <= 0; prefer chained multiplication
-                         // for integer powers.
+  // Undefined for x <= 0; prefer chained multiplication for integer powers.
+  return bc256_exp(bc256_real_scale(bc256_log(x), p));
 }
 
 static inline bc256 bc256_ipow(const bc256 x, i64 p) {
@@ -120,10 +124,7 @@ static inline bc256 bc256_ipow(const bc256 x, i64 p) {
 }
 
 static inline bc256 bc256_cpow(const bc256 x, const bc256 y) {
-  c128 px1, px2, py1, py2;
-  bc256_proj(x, &px1, &px2);
-  bc256_proj(y, &py1, &py2);
-  return bc256_reconst(c128_cpow(px1, py1), c128_cpow(px2, py2));
+  return bc256_exp(bc256_mul(y, bc256_log(x)));
 }
 
 /* Principal square root of x = z1 + z2 j, solved in slot:
