@@ -14,15 +14,18 @@
  *
  * Writes the converged point into `ss` (n_var); `*iters` gets the iteration
  * count. Returns one of the SDSGE_NEWTON_* codes. */
+arena_size sdsge_newton_arena_size(i64 n_var, i64 n_par);
+
 i64 sdsge_steady_state_newton(sdsge_residual_fn residual,
                               const f64 *SDSGE_RESTRICT seed,
                               const f64 *SDSGE_RESTRICT par, const i64 n_var,
                               const i64 n_par, const i64 max_iter, const f64 tol,
-                              f64 *SDSGE_RESTRICT ss, i64 *SDSGE_RESTRICT iters);
+                              f64 *SDSGE_RESTRICT ss, i64 *SDSGE_RESTRICT iters,
+                              f64 *SDSGE_RESTRICT arena,
+                              i64 *SDSGE_RESTRICT iarena);
 
 /* ERROR CODES */
 #define SDSGE_NEWTON_OK 0
-#define SDSGE_NEWTON_ALLOC_FAIL -1
 #define SDSGE_NEWTON_SINGULAR -2   /* Jacobian a - b singular */
 #define SDSGE_NEWTON_NO_CONVERGE -3 /* tol not met within max_iter (or non-finite) */
 

@@ -36,9 +36,16 @@ typedef struct {
   f64 *B; /* n_var*n_exog */
 } sdsge_solve1;
 
+/* Scratch for a whole first-order solve: the componentwise max over its stages,
+ * which run one after another off the same buffer. `arena` holds n_float f64,
+ * `iarena` n_int i64; both are caller-owned and may be reused across solves. */
+arena_size sdsge_klein_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                         i64 n_par);
+
 /* Newton-resolve the steady state from spec->ss_seed, then linearize there.
  * Writes out->ss, out->a_real and out->b_real. */
-i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out);
+i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
+                          i64 *iarena);
 
 /* QZ and post-proc on the assembled real pencil (out->a_real, out->b_real),
  * then the state space. Split from the linearization so a caller can patch the
@@ -46,10 +53,12 @@ i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out);
  *
  * out->stab is reported, never acted on: a nonzero stab still leaves f/p/A/B
  * usable and the caller decides whether that is fatal. */
-i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out);
+i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
+                            f64 *arena, i64 *iarena);
 
 /* sdsge_klein_linearize, then sdsge_klein_from_pencil. */
-i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out);
+i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
+                       i64 *iarena);
 
 /* Second-order (SGU) solve: the first-order spec plus the bicomplex residual
  * the Hessian sweep drives. Klein supplies the first order and nothing else,
@@ -80,13 +89,15 @@ typedef struct {
  * the sigma^2 risk correction. Every first-order output stays in `out1`.
  *
  * out1->stab is reported, never acted on, exactly as at first order. */
-i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
-                           sdsge_solve2 *out2);
+arena_size sdsge_sgu_klein_solve2_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                             i64 n_par, i64 n_exog);
 
-/* ERROR CODES. -1..-3 come straight off sdsge_steady_state_newton, so the
+i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
+                           sdsge_solve2 *out2, f64 *arena, i64 *iarena);
+
+/* ERROR CODES. -2 and -3 come straight off sdsge_steady_state_newton, so the
  * linearization half passes its status through unmapped. */
 #define SDSGE_KLEIN_SOLVE_OK 0
-#define SDSGE_KLEIN_SOLVE_ALLOC -1
 #define SDSGE_KLEIN_SOLVE_SS_SINGULAR -2
 #define SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE -3
 #define SDSGE_KLEIN_SOLVE_QZ -4

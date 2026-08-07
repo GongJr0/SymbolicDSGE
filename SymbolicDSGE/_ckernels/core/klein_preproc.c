@@ -1,5 +1,4 @@
 #include "klein_preproc.h"
-#include <stdlib.h>
 
 #define CJAC_STEP 1e-30
 
@@ -29,23 +28,26 @@ static void perturb_sweep(sdsge_residual_fn resid,
   }
 }
 
-i64 klein_preproc(sdsge_residual_fn resid, const f64 *SDSGE_RESTRICT ss,
-                  const f64 *SDSGE_RESTRICT par, const i64 n_var,
-                  const i64 n_par, const i64 n_eq, f64 *SDSGE_RESTRICT a,
-                  f64 *SDSGE_RESTRICT b) {
-  c128 *base = (c128 *)malloc((size_t)(n_var > 0 ? n_var : 1) * sizeof(c128));
-  c128 *par_c = (c128 *)malloc((size_t)(n_par > 0 ? n_par : 1) * sizeof(c128));
-  c128 *fwd = (c128 *)malloc((size_t)(n_var > 0 ? n_var : 1) * sizeof(c128));
-  c128 *cur = (c128 *)malloc((size_t)(n_var > 0 ? n_var : 1) * sizeof(c128));
-  c128 *out = (c128 *)malloc((size_t)(n_eq > 0 ? n_eq : 1) * sizeof(c128));
-  if (!base || !par_c || !fwd || !cur || !out) {
-    free(base);
-    free(par_c);
-    free(fwd);
-    free(cur);
-    free(out);
-    return SDSGE_PREKLEIN_ALLOC_FAIL;
-  }
+arena_size klein_preproc_arena_size(const i64 n_var, const i64 n_par,
+                                    const i64 n_eq) {
+  return make_sizer(2 * (3 * n_var + n_par + n_eq), /* base, fwd, cur, par, out */
+                    0);
+}
+
+void klein_preproc(sdsge_residual_fn resid, const f64 *SDSGE_RESTRICT ss,
+                   const f64 *SDSGE_RESTRICT par, const i64 n_var,
+                   const i64 n_par, const i64 n_eq, f64 *SDSGE_RESTRICT a,
+                   f64 *SDSGE_RESTRICT b, f64 *SDSGE_RESTRICT arena) {
+  c128 *p = (c128 *)arena;
+  c128 *base = p;
+  p += n_var;
+  c128 *par_c = p;
+  p += n_par;
+  c128 *fwd = p;
+  p += n_var;
+  c128 *cur = p;
+  p += n_var;
+  c128 *out = p;
 
   for (i64 i = 0; i < n_var; ++i) {
     base[i] = c128_from_real(ss[i]);
@@ -57,11 +59,4 @@ i64 klein_preproc(sdsge_residual_fn resid, const f64 *SDSGE_RESTRICT ss,
 
   perturb_sweep(resid, base, fwd, cur, par_c, n_var, n_eq, 1, 1.0, a, out);
   perturb_sweep(resid, base, fwd, cur, par_c, n_var, n_eq, 0, -1.0, b, out);
-
-  free(base);
-  free(par_c);
-  free(fwd);
-  free(cur);
-  free(out);
-  return SDSGE_PREKLEIN_OK;
 }

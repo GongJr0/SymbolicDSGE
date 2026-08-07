@@ -142,7 +142,7 @@ static inline int sdsge_classify(const i64 rc, const i64 stab) {
 
 static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
   const klein_spec spec = sdsge_spec_from(b);
-  const i64 rc = sdsge_klein_solve1(&spec, s);
+  const i64 rc = sdsge_klein_solve1(&spec, s, b->solve_arena, b->solve_iarena);
   return sdsge_classify(rc, s->stab);
 }
 
@@ -150,7 +150,8 @@ static inline int sdsge_solve2_run(sdsge_obj_common *b, sdsge_solve1 *s,
                                    sdsge_solve2 *s2) {
   const sgu_klein_spec spec = {.first = sdsge_spec_from(b),
                                .bc_residual = b->bc_residual};
-  const i64 rc = sdsge_sgu_klein_solve2(&spec, s, s2);
+  const i64 rc =
+      sdsge_sgu_klein_solve2(&spec, s, s2, b->solve_arena, b->solve_iarena);
   return sdsge_classify(rc, s->stab);
 }
 

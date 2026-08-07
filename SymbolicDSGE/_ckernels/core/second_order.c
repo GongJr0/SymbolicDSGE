@@ -1,18 +1,33 @@
 #include "second_order.h"
 #include "../_common/sdsge_linalg.h"
-#include <stdlib.h>
 #include <string.h>
 
-/* malloc size guard: never request 0 bytes (implementation-defined). */
-static void *so_alloc(size_t count) {
-  return malloc((count > 0 ? count : 1) * sizeof(f64));
+/* Reduced-system dimensions, shared by the sizer and the solve. */
+static i64 so_reduced(const i64 n, const i64 nx) {
+  const i64 ny = n - nx;
+  return ny * nx * (nx + 1) / 2 + nx * nx * (nx + 1) / 2;
+}
+
+arena_size sdsge_second_order_arena_size(const i64 n, const i64 nx) {
+  const i64 ny = n - nx;
+  const i64 ncols = n * nx * nx;
+  const i64 R = so_reduced(n, nx);
+  return make_sizer(ny * nx        /* gxhx */
+                        + n * nx   /* hcoef */
+                        + R * ncols /* big_q */
+                        + ncols * R /* sym */
+                        + R * R    /* qt */
+                        + 2 * R    /* q, xt */
+                        + ncols,   /* full */
+                    R /* LU pivot */);
 }
 
 i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
                        const f64 *SDSGE_RESTRICT f_xx,
                        const f64 *SDSGE_RESTRICT gx,
                        const f64 *SDSGE_RESTRICT hx, const i64 n, const i64 nx,
-                       f64 *SDSGE_RESTRICT gxx, f64 *SDSGE_RESTRICT hxx) {
+                       f64 *SDSGE_RESTRICT gxx, f64 *SDSGE_RESTRICT hxx,
+                       f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena) {
   const i64 ny = n - nx;
   const i64 n2 = 2 * n;
   /* stacked-arg block offsets in f_xx: z = [x'; y'; x; y]. */
@@ -25,21 +40,22 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
   const i64 n_red_h = nx * nx * (nx + 1) / 2;
   const i64 R = n_red_g + n_red_h; /* reduced unknowns == number of rows */
 
-  f64 *SDSGE_RESTRICT gxhx = so_alloc((size_t)(ny * nx));   /* gx @ hx  (ny, nx) */
-  f64 *SDSGE_RESTRICT hcoef = so_alloc((size_t)(n * nx));   /* fyp@gx + fxp (n, nx) */
-  f64 *SDSGE_RESTRICT big_q = so_alloc((size_t)(R * ncols)); /* (R, ncols) */
-  f64 *SDSGE_RESTRICT sym = so_alloc((size_t)(ncols * R));   /* (ncols, R) */
-  f64 *SDSGE_RESTRICT qt = so_alloc((size_t)(R * R));        /* big_q @ sym */
-  f64 *SDSGE_RESTRICT q = so_alloc((size_t)R);
-  f64 *SDSGE_RESTRICT xt = so_alloc((size_t)R);
-  f64 *SDSGE_RESTRICT full = so_alloc((size_t)ncols);
-
-  i64 status = SDSGE_SECOND_ORDER_OK;
-
-  if (!gxhx || !hcoef || !big_q || !sym || !qt || !q || !xt || !full) {
-    status = SDSGE_SECOND_ORDER_ALLOC_FAIL;
-    goto done;
-  }
+  f64 *p = arena;
+  f64 *SDSGE_RESTRICT gxhx = p; /* gx @ hx  (ny, nx) */
+  p += ny * nx;
+  f64 *SDSGE_RESTRICT hcoef = p; /* fyp@gx + fxp (n, nx) */
+  p += n * nx;
+  f64 *SDSGE_RESTRICT big_q = p; /* (R, ncols) */
+  p += R * ncols;
+  f64 *SDSGE_RESTRICT sym = p; /* (ncols, R) */
+  p += ncols * R;
+  f64 *SDSGE_RESTRICT qt = p; /* big_q @ sym */
+  p += R * R;
+  f64 *SDSGE_RESTRICT q = p;
+  p += R;
+  f64 *SDSGE_RESTRICT xt = p;
+  p += R;
+  f64 *SDSGE_RESTRICT full = p;
 
   /* big_q starts zeroed: the loop writes only the structural nonzeros (the gxx
    * block is dense, the hxx block is one line per row). */
@@ -152,17 +168,12 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
 
   /* qt = big_q @ sym  (R, R);  xt = -solve(qt, q);  full = sym @ xt. */
   sdsge_matmul(big_q, sym, qt, R, ncols, R);
-  {
-    i64 serr = sdsge_solve(qt, q, R, 1, xt);
-    if (serr == SDSGE_LU_SINGULAR) {
-      status = SDSGE_SECOND_ORDER_SINGULAR;
-      goto done;
-    }
-    if (serr != SDSGE_LU_SUCCESS) {
-      status = SDSGE_SECOND_ORDER_ALLOC_FAIL;
-      goto done;
-    }
+  /* qt is dead after the solve, so it factors in place. */
+  if (sdsge_lu_factor_inplace(qt, iarena, R) != SDSGE_LU_SUCCESS) {
+    return SDSGE_SECOND_ORDER_SINGULAR;
   }
+  sdsge_lu_solve(qt, iarena, q, xt, R, 1);
+
   for (i64 r = 0; r < R; ++r) {
     xt[r] = -xt[r];
   }
@@ -171,16 +182,17 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
   memcpy(gxx, full, (size_t)ngxx * sizeof(f64));
   memcpy(hxx, full + ngxx, (size_t)nhxx * sizeof(f64));
 
-done:
-  free(gxhx);
-  free(hcoef);
-  free(big_q);
-  free(sym);
-  free(qt);
-  free(q);
-  free(xt);
-  free(full);
-  return status;
+  return SDSGE_SECOND_ORDER_OK;
+}
+
+arena_size sdsge_second_order_risk_arena_size(const i64 n, const i64 nx,
+                                              const i64 ne) {
+  const i64 ny = n - nx;
+  return make_sizer(ny * ne         /* gxe */
+                        + nx * nx   /* g4 */
+                        + n * n     /* coeff */
+                        + 2 * n,    /* q, x */
+                    n /* LU pivot */);
 }
 
 i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
@@ -190,23 +202,22 @@ i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
                             const f64 *SDSGE_RESTRICT gxx,
                             const f64 *SDSGE_RESTRICT eta, const i64 n,
                             const i64 nx, const i64 ne, f64 *SDSGE_RESTRICT gss,
-                            f64 *SDSGE_RESTRICT hss) {
+                            f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
+                            i64 *SDSGE_RESTRICT iarena) {
   const i64 ny = n - nx;
   const i64 n2 = 2 * n;
   const i64 XP = 0, YP = nx; /* only the forward blocks enter */
 
-  f64 *SDSGE_RESTRICT gxe = so_alloc((size_t)(ny * ne)); /* gx @ eta (ny, ne) */
-  f64 *SDSGE_RESTRICT g4 = so_alloc((size_t)(nx * nx));  /* fyp[i] . gxx (nx, nx) */
-  f64 *SDSGE_RESTRICT coeff = so_alloc((size_t)(n * n)); /* [Qg | Qh] (n, n) */
-  f64 *SDSGE_RESTRICT q = so_alloc((size_t)n);
-  f64 *SDSGE_RESTRICT x = so_alloc((size_t)n);
-
-  i64 status = SDSGE_SECOND_ORDER_OK;
-
-  if (!gxe || !g4 || !coeff || !q || !x) {
-    status = SDSGE_SECOND_ORDER_ALLOC_FAIL;
-    goto done;
-  }
+  f64 *p = arena;
+  f64 *SDSGE_RESTRICT gxe = p; /* gx @ eta (ny, ne) */
+  p += ny * ne;
+  f64 *SDSGE_RESTRICT g4 = p; /* fyp[i] . gxx (nx, nx) */
+  p += nx * nx;
+  f64 *SDSGE_RESTRICT coeff = p; /* [Qg | Qh] (n, n) */
+  p += n * n;
+  f64 *SDSGE_RESTRICT q = p;
+  p += n;
+  f64 *SDSGE_RESTRICT x = p;
 
   /* gxe = gx @ eta (contiguous inputs). */
   if (ny > 0 && ne > 0) {
@@ -275,18 +286,13 @@ i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
     q[i] = t;
   }
 
-  /* x = -solve(coeff, q); gss = x[:ny], hss = x[ny:]. */
-  {
-    i64 serr = sdsge_solve(coeff, q, n, 1, x);
-    if (serr == SDSGE_LU_SINGULAR) {
-      status = SDSGE_SECOND_ORDER_SINGULAR;
-      goto done;
-    }
-    if (serr != SDSGE_LU_SUCCESS) {
-      status = SDSGE_SECOND_ORDER_ALLOC_FAIL;
-      goto done;
-    }
+  /* x = -solve(coeff, q); gss = x[:ny], hss = x[ny:]. coeff is dead after the
+   * solve, so it factors in place. */
+  if (sdsge_lu_factor_inplace(coeff, iarena, n) != SDSGE_LU_SUCCESS) {
+    return SDSGE_SECOND_ORDER_SINGULAR;
   }
+  sdsge_lu_solve(coeff, iarena, q, x, n, 1);
+
   for (i64 aa = 0; aa < ny; ++aa) {
     gss[aa] = -x[aa];
   }
@@ -294,11 +300,5 @@ i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
     hss[aa] = -x[ny + aa];
   }
 
-done:
-  free(gxe);
-  free(g4);
-  free(coeff);
-  free(q);
-  free(x);
-  return status;
+  return SDSGE_SECOND_ORDER_OK;
 }

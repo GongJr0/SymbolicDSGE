@@ -18,11 +18,14 @@
  * hxx(nx, nx, nx)  states, symmetric in the last two indices
  *
  * Returns one of the SDSGE_SECOND_ORDER_* codes. */
+arena_size sdsge_second_order_arena_size(i64 n, i64 nx);
+
 i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
                        const f64 *SDSGE_RESTRICT f_xx,
                        const f64 *SDSGE_RESTRICT gx,
                        const f64 *SDSGE_RESTRICT hx, const i64 n, const i64 nx,
-                       f64 *SDSGE_RESTRICT gxx, f64 *SDSGE_RESTRICT hxx);
+                       f64 *SDSGE_RESTRICT gxx, f64 *SDSGE_RESTRICT hxx,
+                       f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena);
 
 /* Sigma^2 risk correction (g_ss, h_ss). Parity oracle:
  * core.second_order.solve_second_order_risk. Inputs as above plus:
@@ -35,6 +38,8 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
  * hss (nx,) states risk correction
  *
  * Same return codes. */
+arena_size sdsge_second_order_risk_arena_size(i64 n, i64 nx, i64 ne);
+
 i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
                             const f64 *SDSGE_RESTRICT b,
                             const f64 *SDSGE_RESTRICT f_xx,
@@ -42,11 +47,11 @@ i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
                             const f64 *SDSGE_RESTRICT gxx,
                             const f64 *SDSGE_RESTRICT eta, const i64 n,
                             const i64 nx, const i64 ne, f64 *SDSGE_RESTRICT gss,
-                            f64 *SDSGE_RESTRICT hss);
+                            f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
+                            i64 *SDSGE_RESTRICT iarena);
 
 /* ERROR CODES */
 #define SDSGE_SECOND_ORDER_OK 0
-#define SDSGE_SECOND_ORDER_ALLOC_FAIL -1
 #define SDSGE_SECOND_ORDER_SINGULAR -2 /* symmetry-reduced system singular */
 
 #endif /* SDSGE_SECOND_ORDER_H */

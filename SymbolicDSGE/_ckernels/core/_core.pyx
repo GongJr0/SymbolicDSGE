@@ -66,24 +66,37 @@ cdef extern from "core.h" nogil:
         int64_t T, int64_t nx, int64_t ny, int64_t n_exog,
         double *x_out, double *y_out)
 
+cdef extern from "../_common/sdsge_common.h" nogil:
+    ctypedef struct arena_size:
+        int64_t n_float
+        int64_t n_int
+
 cdef extern from "bicomplex_hessian.h" nogil:
     ctypedef void (*bc_residual_fn)(
         const bc256 *fwd, const bc256 *cur, const bc256 *par, bc256 *out)
-    int64_t sdsge_bicomplex_hessian(
+    arena_size sdsge_bicomplex_hessian_arena_size(
+        int64_t n_var, int64_t n_par, int64_t n_eq)
+    void sdsge_bicomplex_hessian(
         bc_residual_fn residual, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, double *hessian)
+        int64_t n_var, int64_t n_par, int64_t n_eq, double *hessian,
+        double *arena)
 
 cdef extern from "klein_preproc.h" nogil:
     ctypedef void (*sdsge_residual_fn)(
         c128 *fwd, c128 *cur, c128 *par, c128 *out)
-    int64_t klein_preproc(
+    arena_size klein_preproc_arena_size(
+        int64_t n_var, int64_t n_par, int64_t n_eq)
+    void klein_preproc(
         sdsge_residual_fn resid, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, double *a, double *b)
+        int64_t n_var, int64_t n_par, int64_t n_eq, double *a, double *b,
+        double *arena)
 
 cdef extern from "klein_postproc.h" nogil:
+    arena_size klein_postproc_arena_size(int64_t n_s, int64_t n_cs)
     int64_t klein_postproc(
         const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
-        c128 *f, c128 *p, int64_t *stab, c128 *eig)
+        c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
+        int64_t *iarena)
 
 
 cdef extern from "klein_qz.h" nogil:
@@ -91,10 +104,11 @@ cdef extern from "klein_qz.h" nogil:
     # header. We only reinterpret the scipy cython_lapack ``zgges`` capsule
     # pointer to this type and hand it straight to the C routine.
     ctypedef void (*klein_zgges_fn)()
+    arena_size klein_qz_arena_size(int64_t n)
     int64_t c_klein_qz "klein_qz" (
-        klein_zgges_fn zgges_ptr, int64_t n, c128 *s, c128 *t, c128 *z)
+        klein_zgges_fn zgges_ptr, int64_t n, c128 *s, c128 *t, c128 *z,
+        double *arena, int64_t *iarena)
     int KLEIN_QZ_OK
-    int KLEIN_QZ_ALLOC_FAIL
     int KLEIN_QZ_LAPACK_FAIL
 
 
@@ -161,8 +175,10 @@ cdef extern from "klein_solve.h" nogil:
         double *gss
         double *hss
 
-    int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out)
-    int SDSGE_KLEIN_SOLVE_ALLOC
+    arena_size sdsge_klein_solve1_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par)
+    int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out,
+                               double *arena, int64_t *iarena)
     int SDSGE_KLEIN_SOLVE_SS_SINGULAR
     int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
     int SDSGE_KLEIN_SOLVE_QZ
@@ -171,34 +187,40 @@ cdef extern from "klein_solve.h" nogil:
     int SDSGE_KLEIN_SOLVE_SECOND_ORDER
     int SDSGE_KLEIN_SOLVE_RISK
 
+    arena_size sdsge_sgu_klein_solve2_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
+        int64_t n_exog)
     int64_t sdsge_sgu_klein_solve2(const sgu_klein_spec *spec,
-                                   sdsge_solve1 *out1, sdsge_solve2 *out2)
+                                   sdsge_solve1 *out1, sdsge_solve2 *out2,
+                                   double *arena, int64_t *iarena)
 
 cdef extern from "steady_state.h" nogil:
+    arena_size sdsge_newton_arena_size(int64_t n_var, int64_t n_par)
     int64_t sdsge_steady_state_newton(
         sdsge_residual_fn residual, const double *seed, const double *par,
         int64_t n_var, int64_t n_par, int64_t max_iter, double tol,
-        double *ss, int64_t *iters)
+        double *ss, int64_t *iters, double *arena, int64_t *iarena)
 
 
 cdef extern from "second_order.h" nogil:
+    arena_size sdsge_second_order_arena_size(int64_t n, int64_t nx)
     int64_t sdsge_second_order(
         const double *a, const double *b, const double *f_xx,
         const double *gx, const double *hx, int64_t n, int64_t nx,
-        double *gxx, double *hxx)
+        double *gxx, double *hxx, double *arena, int64_t *iarena)
+    arena_size sdsge_second_order_risk_arena_size(
+        int64_t n, int64_t nx, int64_t ne)
     int64_t sdsge_second_order_risk(
         const double *a, const double *b, const double *f_xx,
         const double *gx, const double *gxx, const double *eta,
-        int64_t n, int64_t nx, int64_t ne, double *gss, double *hss)
+        int64_t n, int64_t nx, int64_t ne, double *gss, double *hss,
+        double *arena, int64_t *iarena)
 
 
 cdef _raise_solve_error(int64_t err, str who):
     """Map a fused-solve status onto the staged shims' messages, verbatim:
-    callers match on them. An allocation failure names the fused entry point
-    rather than the stage that hit it, since every stage reports the same thing.
+    callers match on them.
     """
-    if err == SDSGE_KLEIN_SOLVE_ALLOC:
-        raise MemoryError(f"{who}: allocation failed.")
     if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
         raise ValueError("steady_state_newton: singular Jacobian (a - b).")
     if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
@@ -382,13 +404,16 @@ def klein_postprocess(s, t, z, int64_t n_states):
     cdef double complex[::1] ev = eig
     cdef int64_t stab = 0
     cdef int64_t err
+    cdef arena_size sz = klein_postproc_arena_size(n_s, n_cs)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
         err = klein_postproc(
             <c128 *>&sv[0, 0], <c128 *>&tv[0, 0], <c128 *>&zv[0, 0], n_s, n_cs,
             <c128 *>&fv[0, 0] if n_cs > 0 else NULL,
-            <c128 *>&pv[0, 0], &stab, <c128 *>&ev[0])
-    if err == -1:
-        raise MemoryError("klein_postprocess: allocation failed.")
+            <c128 *>&pv[0, 0], &stab, <c128 *>&ev[0], &arv[0], &iarv[0])
     if err == -2:
         raise ValueError(
             "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
@@ -438,13 +463,14 @@ def klein_preprocess(
     cdef const double *ss_ptr = &ssv[0] if n_var > 0 else NULL
     cdef const double *par_ptr = &parv[0] if n_par > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
-    cdef int64_t err
+    arena = np.empty(
+        klein_preproc_arena_size(n_var, n_par, n_eq).n_float, dtype=np.float64
+    )
+    cdef double[::1] arv = arena
     with nogil:
-        err = klein_preproc(
+        klein_preproc(
             resid, ss_ptr, par_ptr, n_var, n_par, n_eq,
-            &av[0, 0], &bv[0, 0])
-    if err != 0:
-        raise MemoryError("klein_preprocess: allocation failed.")
+            &av[0, 0], &bv[0, 0], &arv[0])
     return a, b
 
 
@@ -474,12 +500,16 @@ def klein_qz(a, b):
     cdef double complex[::1, :] bv = b_f
     cdef double complex[::1, :] zv = z
     cdef int64_t status
+    cdef arena_size sz = klein_qz_arena_size(n)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
         status = c_klein_qz(
             _zgges, n,
-            <c128 *>&av[0, 0], <c128 *>&bv[0, 0], <c128 *>&zv[0, 0])
-    if status == KLEIN_QZ_ALLOC_FAIL:
-        raise MemoryError("klein_qz: workspace allocation failed.")
+            <c128 *>&av[0, 0], <c128 *>&bv[0, 0], <c128 *>&zv[0, 0],
+            &arv[0], &iarv[0])
     if status != KLEIN_QZ_OK:
         raise RuntimeError("klein_qz: LAPACK zgges failed.")
     return a_f, b_f, z
@@ -494,7 +524,7 @@ def steady_state_newton(
 ):
     """Newton solve of ``F(ss, ss) = 0`` from ``seed``, driving a numba residual
     @cfunc (``build_cfunc``) by its ``.address``. The Jacobian ``a - b`` comes from
-    ``klein_preproc`` each step; the update is ``sdsge_solve``. Returns
+    ``klein_preproc`` each step; the update is an in-place LU. Returns
     ``(ss, iters)``; raises on singular Jacobian or non-convergence.
     """
     cdef int64_t n_var = seed.shape[0]
@@ -513,12 +543,15 @@ def steady_state_newton(
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     cdef int64_t iters = 0
     cdef int64_t err
+    cdef arena_size sz = sdsge_newton_arena_size(n_var, n_par)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
         err = sdsge_steady_state_newton(
             resid, seed_ptr, par_ptr, n_var, n_par, max_iter, tol,
-            ss_ptr, &iters)
-    if err == -1:
-        raise MemoryError("steady_state_newton: allocation failed.")
+            ss_ptr, &iters, &arv[0], &iarv[0])
     if err == -2:
         raise ValueError("steady_state_newton: singular Jacobian (a - b).")
     if err == -3:
@@ -613,8 +646,15 @@ def klein_solve1(
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
 
     cdef int64_t err
+    cdef arena_size sz = sdsge_klein_solve1_arena_size(
+        n_var, n_state, n_ctrl, n_par
+    )
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
-        err = sdsge_klein_solve1(&spec, &out)
+        err = sdsge_klein_solve1(&spec, &out, &arv[0], &iarv[0])
 
     _raise_solve_error(err, "klein_solve1")
     return ss, a, b, f, p, int(out.stab), eig, A, B
@@ -741,8 +781,15 @@ def sgu_klein_solve2(
     out2.hss = &hssv[0]
 
     cdef int64_t err
+    cdef arena_size sz = sdsge_sgu_klein_solve2_arena_size(
+        n_var, n_state, n_ctrl, n_par, n_exog
+    )
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
-        err = sdsge_sgu_klein_solve2(&spec, &out, &out2)
+        err = sdsge_sgu_klein_solve2(&spec, &out, &out2, &arv[0], &iarv[0])
 
     _raise_solve_error(err, "sgu_klein_solve2")
     return ss, f, p, int(out.stab), eig, gxx, hxx, gss, hss, A, B
@@ -776,12 +823,15 @@ def second_order(a, b, f_xx, gx, hx, int64_t n_state):
     cdef const double *gx_ptr = &gxv[0, 0] if ny > 0 else NULL
     cdef double *gv_ptr = &gv[0, 0, 0] if ny > 0 else NULL
     cdef int64_t err
+    cdef arena_size sz = sdsge_second_order_arena_size(n, nx)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
         err = sdsge_second_order(
             &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, &hxv[0, 0], n, nx,
-            gv_ptr, &hv[0, 0, 0])
-    if err == -1:
-        raise MemoryError("solve_second_order: allocation failed.")
+            gv_ptr, &hv[0, 0, 0], &arv[0], &iarv[0])
     if err == -2:
         raise ValueError("solve_second_order: singular symmetry-reduced system.")
     return gxx, hxx
@@ -815,12 +865,15 @@ def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
     cdef const double *eta_ptr = &etav[0, 0] if ne > 0 else NULL
     cdef double *gss_ptr = &gssv[0] if ny > 0 else NULL
     cdef int64_t err
+    cdef arena_size sz = sdsge_second_order_risk_arena_size(n, nx, ne)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
     with nogil:
         err = sdsge_second_order_risk(
             &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, gxx_ptr, eta_ptr,
-            n, nx, ne, gss_ptr, &hssv[0])
-    if err == -1:
-        raise MemoryError("solve_second_order_risk: allocation failed.")
+            n, nx, ne, gss_ptr, &hssv[0], &arv[0], &iarv[0])
     if err == -2:
         raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
     return gss, hss
@@ -964,12 +1017,15 @@ def bicomplex_hessian(
     cdef const double *ss_ptr = &steady_state[0] if n_var > 0 else NULL
     cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
     cdef bc_residual_fn residual = <bc_residual_fn><void*>residual_addr
-    cdef int64_t err
+    arena = np.empty(
+        sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_eq).n_float,
+        dtype=np.float64,
+    )
+    cdef double[::1] arv = arena
     with nogil:
-        err = sdsge_bicomplex_hessian(
-            residual, ss_ptr, par_ptr, n_var, n_par, n_eq, &hv[0, 0, 0])
-    if err != 0:
-        raise MemoryError("bicomplex_hessian: allocation failed.")
+        sdsge_bicomplex_hessian(
+            residual, ss_ptr, par_ptr, n_var, n_par, n_eq, &hv[0, 0, 0],
+            &arv[0])
     return hessian
 
 

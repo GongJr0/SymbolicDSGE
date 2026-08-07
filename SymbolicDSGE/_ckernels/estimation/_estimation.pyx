@@ -121,6 +121,8 @@ cdef extern from "estimation.h":
         double *std_q
         double *std_r
         double *filter_arena
+        double *solve_arena
+        int64_t *solve_iarena
         int64_t bk_violations
 
     ctypedef struct sdsge_linear_ctx:
@@ -170,6 +172,14 @@ cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
         int64_t n_float
         int64_t n_int
+
+
+cdef extern from "../core/klein_solve.h":
+    arena_size sdsge_klein_solve1_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par) nogil
+    arena_size sdsge_sgu_klein_solve2_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
+        int64_t n_exog) nogil
 
 
 cdef extern from "../kalman/kalman.h":
@@ -375,6 +385,16 @@ def obj_linear_base(
     cdef double[::1] filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
 
+    cdef arena_size solve_sz = sdsge_klein_solve1_arena_size(
+        n_var, n_state, n_ctrl, n_par
+    )
+    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
+    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
+    cdef double[::1] solve_arena_v = solve_arena
+    cdef int64_t[::1] solve_iarena_v = solve_iarena
+    b.solve_arena = &solve_arena_v[0]
+    b.solve_iarena = &solve_iarena_v[0]
+
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
     ctx.solve.b_real = &brv[0, 0]
@@ -509,6 +529,16 @@ def obj_extended_base(
     )
     cdef double[::1] filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
+
+    cdef arena_size solve_sz = sdsge_klein_solve1_arena_size(
+        n_var, n_state, n_ctrl, n_par
+    )
+    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
+    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
+    cdef double[::1] solve_arena_v = solve_arena
+    cdef int64_t[::1] solve_iarena_v = solve_iarena
+    b.solve_arena = &solve_arena_v[0]
+    b.solve_iarena = &solve_iarena_v[0]
 
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
@@ -677,6 +707,16 @@ def obj_unscented_base(
     )
     cdef double[::1] filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
+
+    cdef arena_size solve_sz = sdsge_sgu_klein_solve2_arena_size(
+        n_var, n_state, n_ctrl, n_par, n_exog
+    )
+    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
+    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
+    cdef double[::1] solve_arena_v = solve_arena
+    cdef int64_t[::1] solve_iarena_v = solve_iarena
+    b.solve_arena = &solve_arena_v[0]
+    b.solve_iarena = &solve_iarena_v[0]
 
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
@@ -971,6 +1011,9 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef double[::1] p_me_v
     cdef double[::1] p_mlc_v
     cdef double[::1] filter_arena_v
+    cdef double[::1] solve_arena_v
+    cdef int64_t[::1] solve_iarena_v
+    cdef arena_size solve_sz
     cdef int64_t p_nscalar = 0
     cdef int64_t p_nblocks = 0
 
@@ -1159,6 +1202,21 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     nc.keep.append(filter_arena)
     filter_arena_v = filter_arena
     b.filter_arena = &filter_arena_v[0]
+
+    if mode == "unscented":
+        solve_sz = sdsge_sgu_klein_solve2_arena_size(
+            n_var, n_state, n_ctrl, n_par, n_exog
+        )
+    else:
+        solve_sz = sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par)
+    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
+    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
+    nc.keep.append(solve_arena)
+    nc.keep.append(solve_iarena)
+    solve_arena_v = solve_arena
+    solve_iarena_v = solve_iarena
+    b.solve_arena = &solve_arena_v[0]
+    b.solve_iarena = &solve_iarena_v[0]
 
     s1.ss = &ssv2[0]
     s1.a_real = &arv[0, 0]

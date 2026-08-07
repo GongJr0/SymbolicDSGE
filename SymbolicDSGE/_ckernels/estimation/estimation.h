@@ -114,6 +114,11 @@ typedef struct {
   f64 *filter_arena; /* scratch for the filter sizeof(f64)*<filter>_arena_size()
                       */
 
+  /* Scratch for the per-draw solve, sized by sdsge_klein_solve1_arena_size or
+   * sdsge_sgu_klein_solve2_arena_size. Held for the run so no draw allocates. */
+  f64 *solve_arena;
+  i64 *solve_iarena;
+
   i64 bk_violations;
 } sdsge_obj_common;
 
