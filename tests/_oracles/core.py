@@ -135,21 +135,12 @@ def _simulate_second_order_pruned_numba(
 
 # --- core.klein --------------------------------------------------------------
 @njit
-def _evaluate_equilibrium_numeric(eq_func, fwd, cur, params, log_linear):  # type: ignore[no-untyped-def]
-    if log_linear:
-        return np.log(eq_func(np.exp(fwd), np.exp(cur), params) + 1.0)
-    return eq_func(fwd, cur, params)
-
-
-@njit
-def _complex_step_jacobian(eq_func, base_point, params, log_linear, differentiate_fwd):  # type: ignore[no-untyped-def]
+def _complex_step_jacobian(eq_func, base_point, params, differentiate_fwd):  # type: ignore[no-untyped-def]
     step = float64(1e-30)
     complex_step = complex128(1j * step)
     base_complex = np.ascontiguousarray(base_point.astype(complex128))
     params_complex = np.ascontiguousarray(params.astype(complex128))
-    base_residual = _evaluate_equilibrium_numeric(
-        eq_func, base_complex, base_complex, params_complex, log_linear
-    )
+    base_residual = eq_func(base_complex, base_complex, params_complex)
     jac = np.empty((base_residual.shape[0], base_point.shape[0]), dtype=float64)
 
     for j in range(base_point.shape[0]):
@@ -159,23 +150,17 @@ def _complex_step_jacobian(eq_func, base_point, params, log_linear, differentiat
             fwd[j] = fwd[j] + complex_step
         else:
             cur[j] = cur[j] + complex_step
-        residual = _evaluate_equilibrium_numeric(
-            eq_func, fwd, cur, params_complex, log_linear
-        )
+        residual = eq_func(fwd, cur, params_complex)
         jac[:, j] = np.imag(residual) / step
     return jac
 
 
 @njit
-def _approximate_system_numeric(eq_func, steady_state, params, log_linear):  # type: ignore[no-untyped-def]
+def _approximate_system_numeric(eq_func, steady_state, params):  # type: ignore[no-untyped-def]
     base_point = np.ascontiguousarray(steady_state.astype(float64))
     parameter_vector = np.ascontiguousarray(params.astype(float64))
-    if log_linear:
-        base_point = np.ascontiguousarray(np.log(base_point))
-    a = _complex_step_jacobian(eq_func, base_point, parameter_vector, log_linear, True)
-    b = -_complex_step_jacobian(
-        eq_func, base_point, parameter_vector, log_linear, False
-    )
+    a = _complex_step_jacobian(eq_func, base_point, parameter_vector, True)
+    b = -_complex_step_jacobian(eq_func, base_point, parameter_vector, False)
     return a, b
 
 

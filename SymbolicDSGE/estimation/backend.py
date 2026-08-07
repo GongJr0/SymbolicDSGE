@@ -515,7 +515,6 @@ class PyObjCommon:
     jac_addr: int
 
     ss_seed: NDF  # n_var: Newton seed for the steady state
-    log_linear: bool
 
     y: NDF  # T*n_obs
     P0: NDF  # n_var*n_var; UKF 2*n_state square
@@ -551,8 +550,7 @@ def build_obj_common(
     calib ordering has one origin. Runtime addresses: ``residual`` from the
     objective cfunc, ``bc_residual`` only for the unscented (second-order) path,
     ``meas``/``jac`` off the prepared run. ``ss_seed`` is resolved to canonical
-    variable order by the solver's authority; ``log_linear`` is ``False`` to match
-    the first-order ``klein_preprocess`` call. Scratch buffers and the
+    variable order by the solver's authority. Scratch buffers and the
     ``bk_violations`` output are the composer's job, not here."""
     y = prepared.y_reordered
     calib_index = build_calib_index(compiled)
@@ -572,9 +570,6 @@ def build_obj_common(
         meas_addr=int(prepared.meas_addr),
         jac_addr=int(prepared.jac_addr),
         ss_seed=np.ascontiguousarray(ss_seed_vec, dtype=np.float64),
-        # First-order klein_preprocess is called with log_linear=False
-        # (solver.py); log-linearization is handled symbolically before the solve.
-        log_linear=False,
         y=y,
         P0=prepared.P0,
         x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),

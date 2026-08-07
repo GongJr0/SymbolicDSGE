@@ -3,9 +3,10 @@
 
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
-#include "../core/bicomplex_hessian.h" /* bc_residual_fn, SDSGE_HESSIAN_STEP */
+#include "../core/bicomplex_hessian.h" /* bc_residual_fn */
 #include "../core/klein_preproc.h"     /* sdsge_residual_fn */
 #include "../core/klein_qz.h"          /* klein_zgges_fn */
+#include "../core/klein_solve.h"       /* klein specs, sdsge_solve1/2 */
 #include "../kalman/kalman.h"          /* meas_fn */
 #include "prior_program.h"             /* transform codes, dispatch */
 
@@ -79,36 +80,6 @@ typedef struct {
   i64 n_scalars;
 } sdsge_param_map;
 
-/* First-order Klein solve outputs. */
-typedef struct {
-  f64 *ss;     /* n_var: Newton-resolved steady state (from ss_seed) */
-  f64 *a_real; /* n_var*n_var */
-  f64 *b_real; /* n_var*n_var */
-  c128 *s;     /* n_var*n_var */
-  c128 *t;     /* n_var*n_var */
-  c128 *z;     /* n_var*n_var */
-  c128 *f;     /* n_ctrl*n_state */
-  c128 *p;     /* n_state*n_state */
-  c128 *eig;   /* n_var */
-  i64 stab;
-  f64 *A; /* n_var*n_var */
-  f64 *B; /* n_var*n_exog */
-} sdsge_solve1;
-
-/* Second-order (SGU) solve outputs. */
-typedef struct {
-  f64 *f_xx;         /* n_var*(2*n_var)*(2*n_var) */
-  f64 *hx_real;      /* n_state*n_state */
-  f64 *gx_real;      /* n_ctrl*n_state */
-  f64 *bx;           /* n_state*n_exog */
-  f64 *eta;          /* n_state*n_exog */
-  f64 *gxx;          /* n_ctrl*n_state*n_state */
-  f64 *hxx;          /* n_state*n_state*n_state */
-  f64 *gss;          /* n_ctrl */
-  f64 *hss;          /* n_state */
-  f64 *steady_state; /* n_var */
-} sdsge_solve2;
-
 /* Mode-independent objective context. */
 typedef struct {
   sdsge_dims dims;
@@ -121,8 +92,6 @@ typedef struct {
   meas_fn jac;
 
   const f64 *ss_seed; /* n_var: Newton seed for the steady state */
-  int log_linear;
-
   const f64 *y;  /* T*n_obs */
   const f64 *P0; /* n_var*n_var; UKF 2n_state*2n_state */
   const f64 *x0; /* n_var, or NULL */

@@ -1,18 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 from numpy import complex128, float64
 from numpy.typing import NDArray
 
-from .._ckernels.core import (
-    steady_state_newton,
-    klein_postprocess,
-    klein_preprocess,
-    klein_qz,
-)
+from .._ckernels.core import klein_solve1, sgu_klein_solve2
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -28,7 +24,11 @@ class KleinSolution:
 
     ``steady_state`` is the Newton-resolved steady state the solve linearized at
     (the seed after convergence), so second-order and measurement callers reuse
-    it instead of re-solving.
+    it instead of re-solving. ``a``/``b`` are the pencil taken there, carried for
+    the same reason: rebuilding it costs another complex-step Jacobian sweep.
+
+    ``A``/``B`` are the assembled state space, which the solve produces on the
+    way to ``p``/``f`` rather than as a separate step.
     """
 
     p: NDC
@@ -36,6 +36,10 @@ class KleinSolution:
     stab: int
     eig: NDC
     steady_state: NDF
+    a: NDF
+    b: NDF
+    A: NDF
+    B: NDF
     order: int = 1
 
 
@@ -43,8 +47,9 @@ class KleinSolution:
 class PerturbationSolution:
     """First- (+ optional second-) order perturbation solution.
 
-    A superset of :class:`~SymbolicDSGE.core.klein.KleinSolution`: it carries the
-    same first-order interface (``p`` = h_x, ``f`` = g_x, ``stab``, ``eig``) so it
+    Carries the same first-order interface as
+    :class:`~SymbolicDSGE.core.klein.KleinSolution`
+    (``p`` = h_x, ``f`` = g_x, ``stab``, ``eig``, ``steady_state``) so it
     drops into ``SolvedModel.policy`` unchanged -- every existing first-order path
     (``sim``/``irf``/``kalman``) keeps reading ``.f``/``.p``/``.stab``. The
     second-order tensors are ``None`` at ``order == 1``:
@@ -67,42 +72,17 @@ class PerturbationSolution:
     hss: NDF
 
 
-def klein_solve(
-    residual_cfunc: Any,
-    params: NDF,
-    ss_seed: NDF,
-    n_states: int,
-    *,
-    log_linear: bool = False,
-) -> KleinSolution:
-    """First-order Klein solve of the compiled model at ``params``.
+@contextmanager
+def _bk_dating_hint() -> Generator[None]:
+    """Name the model-authoring mistake behind a Blanchard-Kahn failure.
 
-    ``residual_cfunc`` is the compiled residual as a numba @cfunc
-    (``construct_objective_cfunc()``); it drives the complex-step preproc in C.
-    ``ss_seed`` seeds a Newton solve of ``F(ss, ss) = 0``; the solve linearizes
-    at the resolved steady state, which the returned :class:`KleinSolution`
-    carries in ``steady_state``.
+    The kernel reports the factor it could not invert. This is the first frame
+    that knows the factors came from a model someone wrote, so the dating that
+    fails the same way is named here rather than there.
     """
-    # Klein requires a square pencil: n_eq == n_var == len(ss_seed).
-    n_eq = np.asarray(ss_seed).shape[0]
-    ss, _ = steady_state_newton(residual_cfunc.address, ss_seed, params)
-
-    a, b = klein_preprocess(residual_cfunc.address, ss, params, n_eq, log_linear)
-    # Native QZ (LAPACK zgges via the scipy cython_lapack pointer, ordered by the
-    # Klein 'ouc' criterion) — bit-for-bit equal to the former
-    # ordqz(a, b, sort="ouc", output="complex")[0, 1, 5].
-    s, t, z = klein_qz(a, b)
     try:
-        f, p, stab, eig = klein_postprocess(
-            np.asarray(s, dtype=complex128),
-            np.asarray(t, dtype=complex128),
-            np.asarray(z, dtype=complex128),
-            n_states,
-        )
+        yield
     except ValueError as exc:
-        # The kernel reports the factor it could not invert. This is the first
-        # frame that knows the factors came from a model someone wrote, so the
-        # dating that fails the same way is named here rather than there.
         if "Blanchard-Kahn" not in str(exc):
             raise
         raise ValueError(
@@ -111,6 +91,84 @@ def klein_solve(
             f"belongs in its natural form `v(t) = rho*v(t-1) + e` rather than "
             f"`v(t+1) = rho*v(t) + e`."
         ) from exc
+
+
+def klein_solve(
+    residual_cfunc: Any,
+    params: NDF,
+    ss_seed: NDF,
+    n_states: int,
+    *,
+    n_exog: int = 0,
+) -> KleinSolution:
+    """First-order Klein solve of the compiled model at ``params``.
+
+    ``residual_cfunc`` is the compiled residual as a numba @cfunc
+    (``construct_objective_cfunc()``); it drives the complex-step preproc in C.
+    ``ss_seed`` seeds a Newton solve of ``F(ss, ss) = 0``; the solve linearizes
+    at the resolved steady state, which the returned :class:`KleinSolution`
+    carries in ``steady_state``.
+
+    One native call runs the whole solve (steady state, pencil, QZ, post-proc,
+    state space) under a single GIL release, so ``n_exog`` is needed here to size
+    the ``B`` block. A nonzero ``stab`` returns normally; the caller decides
+    whether to raise.
+    """
+    with _bk_dating_hint():
+        ss, a, b, f, p, stab, eig, A, B = klein_solve1(
+            residual_cfunc.address, ss_seed, params, n_states, n_exog
+        )
     return KleinSolution(
-        p=p, f=f, stab=stab, eig=eig, steady_state=np.asarray(ss, dtype=float64)
+        p=p, f=f, stab=stab, eig=eig, steady_state=ss, a=a, b=b, A=A, B=B
+    )
+
+
+def sgu_solve(
+    residual_cfunc: Any,
+    bc_residual_cfunc: Any,
+    params: NDF,
+    ss_seed: NDF,
+    n_states: int,
+    eta: NDF,
+    *,
+    n_exog: int = 0,
+) -> tuple[PerturbationSolution, NDF, NDF]:
+    """Second-order (SGU) solve of the compiled model at ``params``.
+
+    The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
+    is the bicomplex residual (``construct_objective_cfunc_bicomplex()``) that
+    drives the Hessian sweep, and ``eta`` is the ``(n_states, n_exog)`` shock
+    loading the risk correction integrates against.
+
+    One native call runs both orders under a single GIL release. A nonzero ``stab``
+    returns normally; the caller decides whether to raise.
+
+    ``A``/``B`` come back beside the solution. They are the
+    first-order state space, which ``SolvedModel`` already exposes directly.
+    """
+    with _bk_dating_hint():
+        ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B = sgu_klein_solve2(
+            residual_cfunc.address,
+            bc_residual_cfunc.address,
+            ss_seed,
+            params,
+            n_states,
+            eta,
+            n_exog,
+        )
+    return (
+        PerturbationSolution(
+            p=p,
+            f=f,
+            stab=stab,
+            eig=eig,
+            order=2,
+            steady_state=ss,
+            gxx=gxx,
+            hxx=hxx,
+            gss=gss,
+            hss=hss,
+        ),
+        A,
+        B,
     )

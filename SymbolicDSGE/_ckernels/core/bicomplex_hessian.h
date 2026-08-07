@@ -1,12 +1,13 @@
 #ifndef SDSGE_BICOMPLEX_HESSIAN_H
 #define SDSGE_BICOMPLEX_HESSIAN_H
+#include "../_common/sdsge_bicomplex.h"
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
-#include "../_common/sdsge_bicomplex.h"
 
 /* Second-order preproc: the residual Hessian F_xx via the bicomplex step.
  * `residual` is the numba @cfunc built with BicomplexOps, invoked by pointer
- * over bc256 buffers (each bc256 == complex128[2], the cfunc's per-element view).
+ * over bc256 buffers (each bc256 == complex128[2], the cfunc's per-element
+ * view).
  *
  * z = (fwd, cur) stacked, 2*n_var wide. Perturbing z_i on the i-unit (a.im) and
  * z_j on the j-unit (b.re), both units landing on one variable when i == j, the
@@ -14,28 +15,29 @@
  * arithmetic itself lives in the numba cfunc.
  *
  * `hessian` is (n_eq, 2*n_var, 2*n_var) row-major f64, symmetric in the last
- * two. Levels only (no log-linear wrapping at order > 1). */
+ * two. */
 
 typedef void (*bc_residual_fn)(const bc256 *fwd, const bc256 *cur,
                                const bc256 *par, bc256 *out);
 
-i64 sdsge_bicomplex_hessian(bc_residual_fn residual, const f64 *SDSGE_RESTRICT ss,
+i64 sdsge_bicomplex_hessian(bc_residual_fn residual,
+                            const f64 *SDSGE_RESTRICT ss,
                             const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
-                            i64 n_eq, f64 step, f64 *SDSGE_RESTRICT hessian);
+                            i64 n_eq, f64 *SDSGE_RESTRICT hessian);
 
-/* Default `step`, and the single source of truth for it: the Cython wrapper and
- * the native estimation objective both read this.
+/* The step, and the only source of it: the sweep reads this directly.
  *
  * The bicomplex step carries O(step^2) truncation on the diagonal (i == j puts
  * both units on one variable, and the 4th-order Taylor term then leaks into the
- * ij slot), so smaller is better. Nothing opposes it: the transcendentals are
- * cancellation-free, so there is no 1/step^2 roundoff term to trade against.
+ * ij slot). The transcendentals are cancellation-free, so there is no 1/step^2
+ * roundoff term to trade against.
  *
  * Measured on the RBC model against an exact symbolic Hessian, over entries
  * spanning 3e0 down to 9e-6, the worst relative error is O(step^2) exactly
  * (1.3e-8 at 1e-4, 1.3e-12 at 1e-6) until it reaches a few ULP at 1e-8 and then
  * stays flat to at least 1e-13. 1e-9 sits a decade inside that plateau. */
 #define SDSGE_HESSIAN_STEP 1e-9
+#define SDSGE_HESSIAN_INV_STEP2 1e18
 
 #define SDSGE_HESSIAN_OK 0
 #define SDSGE_HESSIAN_ALLOC_FAIL -1

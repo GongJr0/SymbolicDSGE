@@ -140,8 +140,8 @@ def test_printer_linearization_matches_reference(path):
 
     # Native cfunc linearization (klein_preproc complex-step) is the reference;
     # the printer's njit residual complex-stepped through the oracle must match.
-    a_ref, b_ref = klein_preprocess(cf.address, ss, par, layout.n_eq, False)
-    a_new, b_new = _approximate_system_numeric(fn, ss, par, False)
+    a_ref, b_ref = klein_preprocess(cf.address, ss, par, layout.n_eq)
+    a_new, b_new = _approximate_system_numeric(fn, ss, par)
 
     np.testing.assert_allclose(a_new, a_ref, rtol=1e-10, atol=1e-12)
     np.testing.assert_allclose(b_new, b_ref, rtol=1e-10, atol=1e-12)

@@ -49,7 +49,7 @@ def _ms_preproc(solved, compiled):
     ss = solved.policy.steady_state
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
-    a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
+    a, b = klein_preprocess(cf.address, ss, par, n_eq)
     return a, b, bicomplex_hessian(cf_bc.address, ss, par, n_eq)
 
 

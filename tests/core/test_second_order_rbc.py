@@ -127,7 +127,7 @@ def test_rbc_second_order_matches_dynare():
     )
     np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
 
-    a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
+    a, b = klein_preprocess(cf.address, ss, par, n_eq)
     sol = klein_solve(cf, par, ss, n_state)
     assert sol.stab == 0
     gx, hx = np.real(sol.f), np.real(sol.p)

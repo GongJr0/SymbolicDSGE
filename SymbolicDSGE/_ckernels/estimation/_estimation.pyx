@@ -104,7 +104,6 @@ cdef extern from "estimation.h":
         meas_fn meas
         meas_fn jac
         const double *ss_seed
-        int log_linear
         const double *y
         const double *P0
         const double *x0
@@ -144,7 +143,6 @@ cdef extern from "estimation.h":
         double *hxx
         double *gss
         double *hss
-        double *steady_state
 
     ctypedef struct sdsge_unscented_ctx:
         sdsge_obj_common base
@@ -272,7 +270,6 @@ def obj_linear_base(
     int n_state,
     int n_exog,
     int n_obs,
-    int log_linear,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
     double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
@@ -340,7 +337,6 @@ def obj_linear_base(
     b.jac = <meas_fn><void*>jac_addr
 
     b.ss_seed = &ss_seed[0]
-    b.log_linear = log_linear
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -411,7 +407,6 @@ def obj_extended_base(
     int n_state,
     int n_exog,
     int n_obs,
-    int log_linear,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
     double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
@@ -477,7 +472,6 @@ def obj_extended_base(
     b.jac = <meas_fn><void*>jac_addr
 
     b.ss_seed = &ss_seed[0]
-    b.log_linear = log_linear
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -557,9 +551,8 @@ def obj_unscented_base(
     double kappa=1.0,
 ):
     """Evaluate the native unscented objective at base calibration (n_theta == 0,
-    constant Q/R, no prior). Returns loglik. Order-2 is levels-only, so
-    ``log_linear`` is forced to 0 and the solve1 pencil (a_real/b_real) is reused
-    by the second-order kernels. Companion to ``obj_linear_base``."""
+    constant Q/R, no prior). Returns loglik. The solve1 pencil (a_real/b_real)
+    is reused by the second-order kernels. Companion to ``obj_linear_base``."""
     cdef int64_t n_var = ss_seed.shape[0]
     cdef int64_t n_par = base_calib.shape[0]
     cdef int64_t T = y.shape[0]
@@ -590,7 +583,6 @@ def obj_unscented_base(
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
     gss = np.empty(n_ctrl, dtype=np.float64)
     hss = np.empty(n_state, dtype=np.float64)
-    steady2 = np.empty(n_var, dtype=np.float64)
 
     # eta (n_state x n_exog), padding rows zeroed once. Q is constant here, so the
     # objective's runtime guard skips its own Cholesky and reads this precomputed
@@ -626,7 +618,6 @@ def obj_unscented_base(
     cdef double[:, :, ::1] hxxv = hxx
     cdef double[::1] gssv = gss
     cdef double[::1] hssv = hss
-    cdef double[::1] steady2v = steady2
     cdef double[::1] z0v = z0
 
     cdef sdsge_unscented_ctx ctx
@@ -648,7 +639,6 @@ def obj_unscented_base(
     b.jac = NULL
 
     b.ss_seed = &ss_seed[0]
-    b.log_linear = 0
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -709,7 +699,6 @@ def obj_unscented_base(
     ctx.solve2.hxx = &hxxv[0, 0, 0]
     ctx.solve2.gss = &gssv[0]
     ctx.solve2.hss = &hssv[0]
-    ctx.solve2.steady_state = &steady2v[0]
 
     ctx.z0 = &z0v[0]
     ctx.alpha = alpha
@@ -908,7 +897,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef double[:, :, ::1] hxxv
     cdef double[::1] gssv
     cdef double[::1] hssv
-    cdef double[::1] st2v
     cdef double[:, ::1] etav
     cdef double[::1] z0v
     Q = np.empty((n_exog, n_exog), dtype=np.float64)
@@ -1021,7 +1009,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     b.jac = <meas_fn><void*><size_t>base.jac_addr
 
     b.ss_seed = &ssv[0]
-    b.log_linear = int(base.log_linear)
     b.y = &yv[0, 0]
     b.P0 = &P0v[0, 0]
     b.x0 = &x0v[0]
@@ -1198,7 +1185,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
         gss = np.empty(n_ctrl, dtype=np.float64)
         hss = np.empty(n_state, dtype=np.float64)
-        steady2 = np.empty(n_var, dtype=np.float64)
         # eta (n_state x n_exog): the objective recomputes chol(Q) per eval when Q
         # varies; for constant Q it reads this precomputed factor.
         eta = np.zeros((n_state, n_exog), dtype=np.float64)
@@ -1208,7 +1194,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
             )
         z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
         for _a in (f_xx, hx_real, gx_real, bx, gxx, hxx,
-                   gss, hss, steady2, eta, z0):
+                   gss, hss, eta, z0):
             nc.keep.append(_a)
         fxxv = f_xx
         hxrv = hx_real
@@ -1218,7 +1204,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         hxxv = hxx
         gssv = gss
         hssv = hss
-        st2v = steady2
         etav = eta
         z0v = z0
         nc.uctx.solve2.f_xx = &fxxv[0, 0, 0]
@@ -1230,7 +1215,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         nc.uctx.solve2.hxx = &hxxv[0, 0, 0]
         nc.uctx.solve2.gss = &gssv[0]
         nc.uctx.solve2.hss = &hssv[0]
-        nc.uctx.solve2.steady_state = &st2v[0]
         nc.uctx.z0 = &z0v[0]
         nc.uctx.alpha = ctx_dto.alpha
         nc.uctx.beta = ctx_dto.beta

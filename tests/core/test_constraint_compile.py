@@ -197,7 +197,7 @@ def _assert_pencil_parity(compiled, ss, scale):
     rng = np.random.default_rng(0)
     for trial in range(5):
         point = ss if trial == 0 else ss + rng.normal(0, scale, n_var)
-        a_ref, b_ref = klein_preprocess(addr, point, par, n_var, False)
+        a_ref, b_ref = klein_preprocess(addr, point, par, n_var)
 
         assert np.abs(a_ref).max() > 0.0
         assert np.abs(b_ref).max() > 0.0
@@ -261,7 +261,7 @@ def test_regime_jacobians_match_the_complex_step_pencil(compiled_lead_regime):
         point = (
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
-        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var, False)
+        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var)
 
         assert np.abs(a_r[block.rows, :]).max() > 0.0
         assert np.abs(b_r[block.rows, :]).max() > 0.0
@@ -322,7 +322,7 @@ def test_regime_jacobian_cfunc_writes_both_pencil_blocks(compiled_lead_regime):
         point = (
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
-        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var, False)
+        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var)
         got = _call_jac(func, 1, point, par)
 
         assert np.abs(got).max() > 0.0
@@ -435,7 +435,7 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
     ref_cfunc = compiled_regimes.construct_objective_cfunc()
     ss_ref, _ = steady_state_newton(ref_cfunc.address, np.zeros(n_eq), par)
 
-    a_ref, b_ref = klein_preprocess(ref_cfunc.address, ss_ref, par, n_eq, False)
+    a_ref, b_ref = klein_preprocess(ref_cfunc.address, ss_ref, par, n_eq)
     c_ref = residual_eval(ref_cfunc.address, ss_ref, ss_ref, par, n_eq).real
     np.testing.assert_allclose(c_ref, 0.0, atol=1e-12)
 
@@ -443,7 +443,7 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
     expected_c = {1: 0.0, 2: -beta, 3: -2 * beta}
 
     for mask, cfunc in compiled_regimes.construct_regime_cfuncs().items():
-        a_r, b_r = klein_preprocess(cfunc.address, ss_ref, par, n_eq, False)
+        a_r, b_r = klein_preprocess(cfunc.address, ss_ref, par, n_eq)
         c_r = residual_eval(cfunc.address, ss_ref, ss_ref, par, n_eq).real
 
         # The taylor rule and its replacements are both contemporaneous, so the
