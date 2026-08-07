@@ -20,6 +20,31 @@ cdef extern from "../_common/sdsge_complex.h":
         double im
     c128 c128_sqrt(c128 a)
 
+cdef extern from "../_common/sdsge_bicomplex.h" nogil:
+    ctypedef struct bc256:
+        c128 a
+        c128 b
+    bc256 bc256_add(bc256 x, bc256 y)
+    bc256 bc256_sub(bc256 x, bc256 y)
+    bc256 bc256_neg(bc256 x)
+    bc256 bc256_mul(bc256 x, bc256 y)
+    bc256 bc256_div(bc256 x, bc256 y)
+    bc256 bc256_real_scale(bc256 x, double s)
+    bc256 bc256_i_conj(bc256 x)
+    bc256 bc256_j_conj(bc256 x)
+    bc256 bc256_conj(bc256 x)
+    bc256 bc256_exp(bc256 x)
+    bc256 bc256_log(bc256 x)
+    bc256 bc256_spow(bc256 x, double p)
+    bc256 bc256_ipow(bc256 x, int64_t p)
+    bc256 bc256_sqrt(bc256 x)
+    bc256 bc256_cpow(bc256 x, bc256 y)
+    double bc256_real(bc256 x)
+    double bc256_i(bc256 x)
+    double bc256_j(bc256 x)
+    double bc256_ij(bc256 x)
+    void bc256_proj(bc256 x, c128 *p1, c128 *p2)
+    bc256 bc256_reconst(c128 a, c128 b)
 
 cdef extern from "core.h" nogil:
     ctypedef void (*sdsge_measurement_fn)(
@@ -41,6 +66,19 @@ cdef extern from "core.h" nogil:
         int64_t T, int64_t nx, int64_t ny, int64_t n_exog,
         double *x_out, double *y_out)
 
+cdef extern from "bicomplex_hessian.h" nogil:
+    ctypedef void (*bc_residual_fn)(
+        const bc256 *fwd, const bc256 *cur, const bc256 *par, bc256 *out)
+    int64_t sdsge_bicomplex_hessian(
+        bc_residual_fn residual, const double *ss, const double *par,
+        int64_t n_var, int64_t n_par, int64_t n_eq, double *hessian)
+
+cdef extern from "klein_preproc.h" nogil:
+    ctypedef void (*sdsge_residual_fn)(
+        c128 *fwd, c128 *cur, c128 *par, c128 *out)
+    int64_t klein_preproc(
+        sdsge_residual_fn resid, const double *ss, const double *par,
+        int64_t n_var, int64_t n_par, int64_t n_eq, double *a, double *b)
 
 cdef extern from "klein_postproc.h" nogil:
     int64_t klein_postproc(
@@ -76,17 +114,14 @@ cdef extern from "spike.h" nogil:
     void spike_call(
         spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
 
-
-cdef extern from "klein_preproc.h" nogil:
-    ctypedef void (*sdsge_residual_fn)(
-        c128 *fwd, c128 *cur, c128 *par, c128 *out)
-    int64_t klein_preproc(
-        sdsge_residual_fn resid, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, double *a, double *b)
-
+cdef extern from "residual_path.h" nogil:
+    int64_t sdsge_residual_path(
+        sdsge_residual_fn resid, const c128 *cur, const c128 *fwd,
+        const c128 *par, int64_t n_steps, int64_t n_var, int64_t n_eq,
+        double *residuals)
 
 cdef extern from "klein_solve.h" nogil:
-    ctypedef struct sdsge_klein_spec:
+    ctypedef struct klein_spec:
         sdsge_residual_fn residual
         klein_zgges_fn zgges
         const double *ss_seed
@@ -96,6 +131,7 @@ cdef extern from "klein_solve.h" nogil:
         int64_t n_ctrl
         int64_t n_exog
         int64_t n_par
+
     ctypedef struct sdsge_solve1:
         double *ss
         double *a_real
@@ -109,21 +145,34 @@ cdef extern from "klein_solve.h" nogil:
         int64_t stab
         double *A
         double *B
-    int64_t sdsge_klein_solve1(const sdsge_klein_spec *spec, sdsge_solve1 *out)
+
+    ctypedef struct sgu_klein_spec:
+        klein_spec first
+        bc_residual_fn bc_residual
+
+    ctypedef struct sdsge_solve2:
+        double *f_xx
+        double *hx_real
+        double *gx_real
+        double *bx
+        double *eta
+        double *gxx
+        double *hxx
+        double *gss
+        double *hss
+
+    int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out)
     int SDSGE_KLEIN_SOLVE_ALLOC
     int SDSGE_KLEIN_SOLVE_SS_SINGULAR
     int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
     int SDSGE_KLEIN_SOLVE_QZ
     int SDSGE_KLEIN_SOLVE_SINGULAR
     int SDSGE_KLEIN_SOLVE_NO_STATES
+    int SDSGE_KLEIN_SOLVE_SECOND_ORDER
+    int SDSGE_KLEIN_SOLVE_RISK
 
-
-cdef extern from "residual_path.h" nogil:
-    int64_t sdsge_residual_path(
-        sdsge_residual_fn resid, const c128 *cur, const c128 *fwd,
-        const c128 *par, int64_t n_steps, int64_t n_var, int64_t n_eq,
-        double *residuals)
-
+    int64_t sdsge_sgu_klein_solve2(const sgu_klein_spec *spec,
+                                   sdsge_solve1 *out1, sdsge_solve2 *out2)
 
 cdef extern from "steady_state.h" nogil:
     int64_t sdsge_steady_state_newton(
@@ -143,41 +192,32 @@ cdef extern from "second_order.h" nogil:
         int64_t n, int64_t nx, int64_t ne, double *gss, double *hss)
 
 
-cdef extern from "../_common/sdsge_bicomplex.h" nogil:
-    ctypedef struct bc256:
-        c128 a
-        c128 b
-    bc256 bc256_add(bc256 x, bc256 y)
-    bc256 bc256_sub(bc256 x, bc256 y)
-    bc256 bc256_neg(bc256 x)
-    bc256 bc256_mul(bc256 x, bc256 y)
-    bc256 bc256_div(bc256 x, bc256 y)
-    bc256 bc256_real_scale(bc256 x, double s)
-    bc256 bc256_i_conj(bc256 x)
-    bc256 bc256_j_conj(bc256 x)
-    bc256 bc256_conj(bc256 x)
-    bc256 bc256_exp(bc256 x)
-    bc256 bc256_log(bc256 x)
-    bc256 bc256_spow(bc256 x, double p)
-    bc256 bc256_ipow(bc256 x, int64_t p)
-    bc256 bc256_sqrt(bc256 x)
-    bc256 bc256_cpow(bc256 x, bc256 y)
-    double bc256_real(bc256 x)
-    double bc256_i(bc256 x)
-    double bc256_j(bc256 x)
-    double bc256_ij(bc256 x)
-    void bc256_proj(bc256 x, c128 *p1, c128 *p2)
-    bc256 bc256_reconst(c128 a, c128 b)
-
-
-cdef extern from "bicomplex_hessian.h" nogil:
-    ctypedef void (*bc_residual_fn)(
-        const bc256 *fwd, const bc256 *cur, const bc256 *par, bc256 *out)
-    const double SDSGE_HESSIAN_STEP
-    int64_t sdsge_bicomplex_hessian(
-        bc_residual_fn residual, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, double step,
-        double *hessian)
+cdef _raise_solve_error(int64_t err, str who):
+    """Map a fused-solve status onto the staged shims' messages, verbatim:
+    callers match on them. An allocation failure names the fused entry point
+    rather than the stage that hit it, since every stage reports the same thing.
+    """
+    if err == SDSGE_KLEIN_SOLVE_ALLOC:
+        raise MemoryError(f"{who}: allocation failed.")
+    if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
+        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
+    if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
+        raise ValueError(
+            "steady_state_newton: did not converge within max_iter "
+            "(or the residual went non-finite)."
+        )
+    if err == SDSGE_KLEIN_SOLVE_QZ:
+        raise RuntimeError("klein_qz: LAPACK zgges failed.")
+    if err == SDSGE_KLEIN_SOLVE_SINGULAR:
+        raise ValueError(
+            "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
+        )
+    if err == SDSGE_KLEIN_SOLVE_NO_STATES:
+        raise ValueError("klein_postprocess: model has no states.")
+    if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER:
+        raise ValueError("solve_second_order: singular symmetry-reduced system.")
+    if err == SDSGE_KLEIN_SOLVE_RISK:
+        raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
 
 
 def assemble_state_space(p, f, n_state, n_control, n_exog):
@@ -547,7 +587,7 @@ def klein_solve1(
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
 
-    cdef sdsge_klein_spec spec
+    cdef klein_spec spec
     spec.residual = <sdsge_residual_fn><void*>residual_addr
     spec.zgges = _zgges
     spec.ss_seed = &seedv[0]
@@ -576,25 +616,136 @@ def klein_solve1(
     with nogil:
         err = sdsge_klein_solve1(&spec, &out)
 
-    # The staged shims' messages, verbatim: callers match on them.
-    if err == SDSGE_KLEIN_SOLVE_ALLOC:
-        raise MemoryError("klein_solve1: allocation failed.")
-    if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
-        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
-    if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
-        raise ValueError(
-            "steady_state_newton: did not converge within max_iter "
-            "(or the residual went non-finite)."
-        )
-    if err == SDSGE_KLEIN_SOLVE_QZ:
-        raise RuntimeError("klein_qz: LAPACK zgges failed.")
-    if err == SDSGE_KLEIN_SOLVE_SINGULAR:
-        raise ValueError(
-            "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
-        )
-    if err == SDSGE_KLEIN_SOLVE_NO_STATES:
-        raise ValueError("klein_postprocess: model has no states.")
+    _raise_solve_error(err, "klein_solve1")
     return ss, a, b, f, p, int(out.stab), eig, A, B
+
+
+def sgu_klein_solve2(
+    size_t residual_addr,
+    size_t bc_residual_addr,
+    seed,
+    params,
+    int64_t n_state,
+    eta,
+    int64_t n_exog=0,
+):
+    """One-shot second-order (SGU) solve, in a single GIL release.
+
+    Runs ``klein_solve1`` and then the second-order tail: the bicomplex residual
+    Hessian at the resolved steady state, the SGU tensors, and the sigma^2 risk
+    correction. ``bc_residual_addr`` is the bicomplex residual @cfunc
+    (``construct_objective_cfunc_bicomplex()``); ``eta`` is the ``(n_state,
+    n_exog)`` shock loading, whose Cholesky block only the caller can build.
+
+    Returns ``(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B)``.
+    ``stab`` is reported, never raised on.
+    """
+    cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
+    cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+    cdef int64_t n_var = seedv.shape[0]
+    cdef int64_t n_par = parv.shape[0]
+    cdef int64_t n_ctrl = n_var - n_state
+    cdef int64_t n2 = 2 * n_var
+
+    if n_state < 1:
+        raise ValueError("sgu_klein_solve2 requires n_states >= 1.")
+    if n_ctrl < 0:
+        raise ValueError("n_states exceeds the matrix dimension.")
+    if not 0 <= n_exog <= n_state:
+        raise ValueError(f"n_exog ({n_exog}) cannot exceed n_state ({n_state}).")
+
+    cdef double[:, ::1] etav = np.ascontiguousarray(eta, dtype=np.float64)
+    if etav.shape[0] != n_state or etav.shape[1] != n_exog:
+        raise ValueError(
+            f"eta has shape ({etav.shape[0]}, {etav.shape[1]}), expected "
+            f"({n_state}, {n_exog})."
+        )
+
+    ss = np.empty(n_var, dtype=np.float64)
+    a = np.empty((n_var, n_var), dtype=np.float64)
+    b = np.empty((n_var, n_var), dtype=np.float64)
+    s = np.empty((n_var, n_var), dtype=np.complex128)
+    t = np.empty((n_var, n_var), dtype=np.complex128)
+    z = np.empty((n_var, n_var), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
+    p = np.empty((n_state, n_state), dtype=np.complex128)
+    eig = np.empty(n_var, dtype=np.complex128)
+    A = np.empty((n_var, n_var), dtype=np.float64)
+    B = np.empty((n_var, n_exog), dtype=np.float64)
+
+    f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
+    hx_real = np.empty((n_state, n_state), dtype=np.float64)
+    gx_real = np.empty((n_ctrl, n_state), dtype=np.float64)
+    bx = np.empty((n_state, n_exog), dtype=np.float64)
+    gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
+    hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
+    gss = np.empty(n_ctrl, dtype=np.float64)
+    hss = np.empty(n_state, dtype=np.float64)
+
+    cdef double[::1] ssv = ss
+    cdef double[:, ::1] av = a
+    cdef double[:, ::1] bv = b
+    cdef double complex[:, ::1] sv = s
+    cdef double complex[:, ::1] tv = t
+    cdef double complex[:, ::1] zv = z
+    cdef double complex[:, ::1] fv = f
+    cdef double complex[:, ::1] pv = p
+    cdef double complex[::1] eigv = eig
+    cdef double[:, ::1] Av = A
+    cdef double[:, ::1] Bv = B
+
+    cdef double[:, :, ::1] fxxv = f_xx
+    cdef double[:, ::1] hxrv = hx_real
+    cdef double[:, ::1] gxrv = gx_real
+    cdef double[:, ::1] bxv = bx
+    cdef double[:, :, ::1] gxxv = gxx
+    cdef double[:, :, ::1] hxxv = hxx
+    cdef double[::1] gssv = gss
+    cdef double[::1] hssv = hss
+
+    cdef sgu_klein_spec spec
+    spec.first.residual = <sdsge_residual_fn><void*>residual_addr
+    spec.first.zgges = _zgges
+    spec.first.ss_seed = &seedv[0]
+    spec.first.params = &parv[0] if n_par > 0 else NULL
+    spec.first.n_var = n_var
+    spec.first.n_state = n_state
+    spec.first.n_ctrl = n_ctrl
+    spec.first.n_exog = n_exog
+    spec.first.n_par = n_par
+    spec.bc_residual = <bc_residual_fn><void*>bc_residual_addr
+
+    cdef sdsge_solve1 out
+    out.ss = &ssv[0]
+    out.a_real = &av[0, 0]
+    out.b_real = &bv[0, 0]
+    out.s = <c128 *>&sv[0, 0]
+    out.t = <c128 *>&tv[0, 0]
+    out.z = <c128 *>&zv[0, 0]
+    out.f = <c128 *>&fv[0, 0] if n_ctrl > 0 else NULL
+    out.p = <c128 *>&pv[0, 0]
+    out.eig = <c128 *>&eigv[0]
+    out.stab = 0
+    out.A = &Av[0, 0]
+    out.B = &Bv[0, 0] if n_exog > 0 else NULL
+
+    cdef sdsge_solve2 out2
+    out2.f_xx = &fxxv[0, 0, 0]
+    out2.hx_real = &hxrv[0, 0]
+    out2.gx_real = &gxrv[0, 0] if n_ctrl > 0 else NULL
+    out2.bx = &bxv[0, 0] if n_exog > 0 else NULL
+    out2.eta = &etav[0, 0] if n_exog > 0 else NULL
+    out2.gxx = &gxxv[0, 0, 0] if n_ctrl > 0 else NULL
+    out2.hxx = &hxxv[0, 0, 0]
+    out2.gss = &gssv[0] if n_ctrl > 0 else NULL
+    out2.hss = &hssv[0]
+
+    cdef int64_t err
+    with nogil:
+        err = sdsge_sgu_klein_solve2(&spec, &out, &out2)
+
+    _raise_solve_error(err, "sgu_klein_solve2")
+    return ss, f, p, int(out.stab), eig, gxx, hxx, gss, hss, A, B
 
 
 def second_order(a, b, f_xx, gx, hx, int64_t n_state):
@@ -795,13 +946,13 @@ def bicomplex_hessian(
     double[::1] steady_state,
     double[::1] params,
     int64_t n_eq,
-    double step=SDSGE_HESSIAN_STEP,
 ):
     """Residual Hessian ``F_xx`` (n_eq, 2*n_var, 2*n_var) via the bicomplex step,
     from a bicomplex residual @cfunc (``build_cfunc(..., BicomplexOps())``) given
     its ``.address``. Second-order native preproc; feeds the g_xx assembly.
 
-    ``step`` defaults to ``SDSGE_HESSIAN_STEP``; see the C header for what sets it.
+    The step is tuned and fixed at ``SDSGE_HESSIAN_STEP``;
+    see the C header for what sets it.
     """
     cdef int64_t n_var = steady_state.shape[0]
     cdef int64_t n_par = params.shape[0]
@@ -816,7 +967,7 @@ def bicomplex_hessian(
     cdef int64_t err
     with nogil:
         err = sdsge_bicomplex_hessian(
-            residual, ss_ptr, par_ptr, n_var, n_par, n_eq, step, &hv[0, 0, 0])
+            residual, ss_ptr, par_ptr, n_var, n_par, n_eq, &hv[0, 0, 0])
     if err != 0:
         raise MemoryError("bicomplex_hessian: allocation failed.")
     return hessian

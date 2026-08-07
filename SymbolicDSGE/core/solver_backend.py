@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 from numpy import complex128, float64
 from numpy.typing import NDArray
 
-from .._ckernels.core import klein_solve1
+from .._ckernels.core import klein_solve1, sgu_klein_solve2
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -70,6 +72,27 @@ class PerturbationSolution:
     hss: NDF
 
 
+@contextmanager
+def _bk_dating_hint() -> Generator[None]:
+    """Name the model-authoring mistake behind a Blanchard-Kahn failure.
+
+    The kernel reports the factor it could not invert. This is the first frame
+    that knows the factors came from a model someone wrote, so the dating that
+    fails the same way is named here rather than there.
+    """
+    try:
+        yield
+    except ValueError as exc:
+        if "Blanchard-Kahn" not in str(exc):
+            raise
+        raise ValueError(
+            f"{exc} An equation shifted forward in time fails this way too: "
+            f"the compiler lifts lags into states of its own, so a process "
+            f"belongs in its natural form `v(t) = rho*v(t-1) + e` rather than "
+            f"`v(t+1) = rho*v(t) + e`."
+        ) from exc
+
+
 def klein_solve(
     residual_cfunc: Any,
     params: NDF,
@@ -91,22 +114,61 @@ def klein_solve(
     the ``B`` block. A nonzero ``stab`` returns normally; the caller decides
     whether to raise.
     """
-    try:
+    with _bk_dating_hint():
         ss, a, b, f, p, stab, eig, A, B = klein_solve1(
             residual_cfunc.address, ss_seed, params, n_states, n_exog
         )
-    except ValueError as exc:
-        # The kernel reports the factor it could not invert. This is the first
-        # frame that knows the factors came from a model someone wrote, so the
-        # dating that fails the same way is named here rather than there.
-        if "Blanchard-Kahn" not in str(exc):
-            raise
-        raise ValueError(
-            f"{exc} An equation shifted forward in time fails this way too: "
-            f"the compiler lifts lags into states of its own, so a process "
-            f"belongs in its natural form `v(t) = rho*v(t-1) + e` rather than "
-            f"`v(t+1) = rho*v(t) + e`."
-        ) from exc
     return KleinSolution(
         p=p, f=f, stab=stab, eig=eig, steady_state=ss, a=a, b=b, A=A, B=B
+    )
+
+
+def sgu_solve(
+    residual_cfunc: Any,
+    bc_residual_cfunc: Any,
+    params: NDF,
+    ss_seed: NDF,
+    n_states: int,
+    eta: NDF,
+    *,
+    n_exog: int = 0,
+) -> tuple[PerturbationSolution, NDF, NDF]:
+    """Second-order (SGU) solve of the compiled model at ``params``.
+
+    The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
+    is the bicomplex residual (``construct_objective_cfunc_bicomplex()``) that
+    drives the Hessian sweep, and ``eta`` is the ``(n_states, n_exog)`` shock
+    loading the risk correction integrates against.
+
+    One native call runs both orders under a single GIL release. A nonzero ``stab``
+    returns normally; the caller decides whether to raise.
+
+    ``A``/``B`` come back beside the solution. They are the
+    first-order state space, which ``SolvedModel`` already exposes directly.
+    """
+    with _bk_dating_hint():
+        ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B = sgu_klein_solve2(
+            residual_cfunc.address,
+            bc_residual_cfunc.address,
+            ss_seed,
+            params,
+            n_states,
+            eta,
+            n_exog,
+        )
+    return (
+        PerturbationSolution(
+            p=p,
+            f=f,
+            stab=stab,
+            eig=eig,
+            order=2,
+            steady_state=ss,
+            gxx=gxx,
+            hxx=hxx,
+            gss=gss,
+            hss=hss,
+        ),
+        A,
+        B,
     )

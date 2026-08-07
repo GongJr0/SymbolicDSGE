@@ -3,10 +3,10 @@
 
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
-#include "../core/bicomplex_hessian.h" /* bc_residual_fn, SDSGE_HESSIAN_STEP */
+#include "../core/bicomplex_hessian.h" /* bc_residual_fn */
 #include "../core/klein_preproc.h"     /* sdsge_residual_fn */
 #include "../core/klein_qz.h"          /* klein_zgges_fn */
-#include "../core/klein_solve.h"       /* sdsge_klein_spec, sdsge_solve1 */
+#include "../core/klein_solve.h"       /* klein specs, sdsge_solve1/2 */
 #include "../kalman/kalman.h"          /* meas_fn */
 #include "prior_program.h"             /* transform codes, dispatch */
 
@@ -79,20 +79,6 @@ typedef struct {
   const sdsge_scalar_scatter *scalars; /* n_scalars */
   i64 n_scalars;
 } sdsge_param_map;
-
-/* Second-order (SGU) solve outputs. */
-typedef struct {
-  f64 *f_xx;         /* n_var*(2*n_var)*(2*n_var) */
-  f64 *hx_real;      /* n_state*n_state */
-  f64 *gx_real;      /* n_ctrl*n_state */
-  f64 *bx;           /* n_state*n_exog */
-  f64 *eta;          /* n_state*n_exog */
-  f64 *gxx;          /* n_ctrl*n_state*n_state */
-  f64 *hxx;          /* n_state*n_state*n_state */
-  f64 *gss;          /* n_ctrl */
-  f64 *hss;          /* n_state */
-  f64 *steady_state; /* n_var */
-} sdsge_solve2;
 
 /* Mode-independent objective context. */
 typedef struct {

@@ -101,6 +101,22 @@ def klein_solve1(
     assemble_state_space into one GIL release. ``stab`` is reported, not raised
     on."""
 
+def sgu_klein_solve2(
+    residual_addr: int,
+    bc_residual_addr: int,
+    seed: _F64,
+    params: _F64,
+    n_state: int,
+    eta: _F64,
+    n_exog: int = ...,
+) -> tuple[_F64, _C128, _C128, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64]:
+    """(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B) <- one-shot second-order
+    (SGU) solve.
+
+    klein_solve1 plus bicomplex_hessian, second_order and second_order_risk in
+    one GIL release. The pencil and the residual Hessian stay native. ``eta`` is
+    the (n_state, n_exog) shock loading. ``stab`` is reported, not raised on."""
+
 def second_order(
     a: _F64,
     b: _F64,
@@ -176,7 +192,6 @@ def bicomplex_hessian(
     steady_state: _F64,
     params: _F64,
     n_eq: int,
-    step: float = ...,
 ) -> _F64:
     """Residual Hessian (n_eq, 2*n_var, 2*n_var) via the bicomplex step."""
 

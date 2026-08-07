@@ -17,12 +17,7 @@ from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from .desugar import GeneratedKind, GeneratedVariable, desugar_model
 from .linearization import linearize_model
 from .solved_model import SolvedModel
-from .solver_backend import PerturbationSolution, klein_solve
-from .._ckernels.core import (
-    second_order,
-    second_order_risk,
-    bicomplex_hessian,
-)
+from .solver_backend import klein_solve, sgu_solve
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
@@ -548,38 +543,20 @@ class DSGESolver:
         risk correction into a :class:`PerturbationSolution`. Requires the native
         extension."""
 
-        n_eq = len(compiled.var_names)
-        n_state = compiled.n_state
-        cf = compiled.construct_objective_cfunc()
-        cf_bc = compiled.construct_objective_cfunc_bicomplex()
-
-        sol = klein_solve(cf, param_vec, seed, n_state, n_exog=compiled.n_exog)
-        self._raise_or_warn_stability_error(
-            sol.stab, should_raise=raise_on_bk_violation
+        pert, A, B = sgu_solve(
+            compiled.construct_objective_cfunc(),
+            compiled.construct_objective_cfunc_bicomplex(),
+            param_vec,
+            seed,
+            compiled.n_state,
+            self._build_eta(compiled),
+            n_exog=compiled.n_exog,
         )
-        ss = sol.steady_state
-        gx, hx = np.real(sol.f), np.real(sol.p)
-
-        # sol.a / sol.b are the pencil the Klein solve already took at ss.
-        f_xx = bicomplex_hessian(cf_bc.address, ss, param_vec, n_eq)
-        gxx, hxx = second_order(sol.a, sol.b, f_xx, gx, hx, n_state)
-        eta = self._build_eta(compiled)
-        gss, hss = second_order_risk(sol.a, sol.b, f_xx, gx, gxx, eta, n_state)
-
-        pert = PerturbationSolution(
-            p=sol.p,
-            f=sol.f,
-            stab=sol.stab,
-            eig=sol.eig,
-            order=2,
-            steady_state=ss,
-            gxx=gxx,
-            hxx=hxx,
-            gss=gss,
-            hss=hss,
+        self._raise_or_warn_stability_error(
+            pert.stab, should_raise=raise_on_bk_violation
         )
         # p/f are the first-order solution unchanged, so its state space stands.
-        return SolvedModel(compiled=compiled, policy=pert, A=sol.A, B=sol.B)
+        return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
 
     @staticmethod
     def _build_eta(compiled: CompiledModel) -> NDF:
