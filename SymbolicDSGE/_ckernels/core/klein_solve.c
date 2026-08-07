@@ -50,7 +50,34 @@ static inline void sdsge_bx_from_B(const f64 *SDSGE_RESTRICT B,
   }
 }
 
-i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out) {
+/* Componentwise max: the stages run one after another off the same arena. */
+static inline arena_size sdsge_max_arena(const arena_size a,
+                                         const arena_size b) {
+  return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
+}
+
+arena_size sdsge_klein_solve1_arena_size(const i64 n_var, const i64 n_state,
+                                         const i64 n_ctrl, const i64 n_par) {
+  arena_size size = sdsge_newton_arena_size(n_var, n_par);
+  size = sdsge_max_arena(size, klein_preproc_arena_size(n_var, n_par, n_var));
+  size = sdsge_max_arena(size, klein_qz_arena_size(n_var));
+  return sdsge_max_arena(size, klein_postproc_arena_size(n_state, n_ctrl));
+}
+
+arena_size sdsge_sgu_klein_solve2_arena_size(const i64 n_var, const i64 n_state,
+                                             const i64 n_ctrl, const i64 n_par,
+                                             const i64 n_exog) {
+  arena_size size =
+      sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par);
+  size = sdsge_max_arena(
+      size, sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_var));
+  size = sdsge_max_arena(size, sdsge_second_order_arena_size(n_var, n_state));
+  return sdsge_max_arena(
+      size, sdsge_second_order_risk_arena_size(n_var, n_state, n_exog));
+}
+
+i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out,
+                          f64 *arena, i64 *iarena) {
   const i64 n = spec->n_var;
 
   /* Resolve the steady state at the current params by Newton from ss_seed, then
@@ -59,28 +86,24 @@ i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out) {
   i64 iters = 0;
   const i64 rc = sdsge_steady_state_newton(
       spec->residual, spec->ss_seed, spec->params, n, spec->n_par,
-      SDSGE_SS_MAX_ITER, SDSGE_SS_TOL, out->ss, &iters);
+      SDSGE_SS_MAX_ITER, SDSGE_SS_TOL, out->ss, &iters, arena, iarena);
   if (rc != SDSGE_NEWTON_OK) {
     return rc;
   }
 
-  if (klein_preproc(spec->residual, out->ss, spec->params, n, spec->n_par, n,
-                    out->a_real, out->b_real) != SDSGE_PREKLEIN_OK) {
-    return SDSGE_KLEIN_SOLVE_ALLOC;
-  }
+  klein_preproc(spec->residual, out->ss, spec->params, n, spec->n_par, n,
+                out->a_real, out->b_real, arena);
   return SDSGE_KLEIN_SOLVE_OK;
 }
 
-i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out) {
+i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
+                            f64 *arena, i64 *iarena) {
   const i64 n = spec->n_var;
 
   sdsge_to_complex_colmajor(out->a_real, out->s, n);
   sdsge_to_complex_colmajor(out->b_real, out->t, n);
-  const i64 qz = klein_qz(spec->zgges, n, out->s, out->t, out->z);
-  if (qz == KLEIN_QZ_ALLOC_FAIL) {
-    return SDSGE_KLEIN_SOLVE_ALLOC;
-  }
-  if (qz != KLEIN_QZ_OK) {
+  if (klein_qz(spec->zgges, n, out->s, out->t, out->z, arena, iarena) !=
+      KLEIN_QZ_OK) {
     return SDSGE_KLEIN_SOLVE_QZ;
   }
 
@@ -90,11 +113,9 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out) {
   sdsge_transpose_sq(out->z, n);
 
   switch (klein_postproc(out->s, out->t, out->z, spec->n_state, spec->n_ctrl,
-                         out->f, out->p, &out->stab, out->eig)) {
+                         out->f, out->p, &out->stab, out->eig, arena, iarena)) {
   case SDSGE_KLEIN_POSTPROC_SUCCESS:
     break;
-  case SDSGE_KLEIN_POSTPROC_ALLOC_FAIL:
-    return SDSGE_KLEIN_SOLVE_ALLOC;
   case SDSGE_KLEIN_POSTPROC_INVALID:
     return SDSGE_KLEIN_SOLVE_NO_STATES;
   default:
@@ -106,19 +127,20 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out) {
   return SDSGE_KLEIN_SOLVE_OK;
 }
 
-i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out) {
-  const i64 rc = sdsge_klein_linearize(spec, out);
+i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
+                       i64 *iarena) {
+  const i64 rc = sdsge_klein_linearize(spec, out, arena, iarena);
   if (rc != SDSGE_KLEIN_SOLVE_OK) {
     return rc;
   }
-  return sdsge_klein_from_pencil(spec, out);
+  return sdsge_klein_from_pencil(spec, out, arena, iarena);
 }
 
 i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
-                           sdsge_solve2 *out2) {
+                           sdsge_solve2 *out2, f64 *arena, i64 *iarena) {
   const klein_spec *s1 = &spec->first;
 
-  const i64 rc = sdsge_klein_solve1(s1, out1);
+  const i64 rc = sdsge_klein_solve1(s1, out1, arena, iarena);
   if (rc != SDSGE_KLEIN_SOLVE_OK) {
     return rc;
   }
@@ -129,32 +151,19 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
   sdsge_real_part(out1->f, out2->gx_real, s1->n_ctrl * s1->n_state);
   sdsge_bx_from_B(out1->B, s1->n_state, s1->n_exog, out2->bx);
 
-  /* The sweep's only failure mode is allocation. */
-  if (sdsge_bicomplex_hessian(spec->bc_residual, out1->ss, s1->params,
-                              s1->n_var, s1->n_par, s1->n_var,
-                              out2->f_xx) != SDSGE_HESSIAN_OK) {
-    return SDSGE_KLEIN_SOLVE_ALLOC;
-  }
+  sdsge_bicomplex_hessian(spec->bc_residual, out1->ss, s1->params, s1->n_var,
+                          s1->n_par, s1->n_var, out2->f_xx, arena);
 
-  switch (sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx,
-                             out2->gx_real, out2->hx_real, s1->n_var,
-                             s1->n_state, out2->gxx, out2->hxx)) {
-  case SDSGE_SECOND_ORDER_OK:
-    break;
-  case SDSGE_SECOND_ORDER_ALLOC_FAIL:
-    return SDSGE_KLEIN_SOLVE_ALLOC;
-  default:
+  if (sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx, out2->gx_real,
+                         out2->hx_real, s1->n_var, s1->n_state, out2->gxx,
+                         out2->hxx, arena, iarena) != SDSGE_SECOND_ORDER_OK) {
     return SDSGE_KLEIN_SOLVE_SECOND_ORDER;
   }
 
-  switch (sdsge_second_order_risk(
-      out1->a_real, out1->b_real, out2->f_xx, out2->gx_real, out2->gxx,
-      out2->eta, s1->n_var, s1->n_state, s1->n_exog, out2->gss, out2->hss)) {
-  case SDSGE_SECOND_ORDER_OK:
-    break;
-  case SDSGE_SECOND_ORDER_ALLOC_FAIL:
-    return SDSGE_KLEIN_SOLVE_ALLOC;
-  default:
+  if (sdsge_second_order_risk(out1->a_real, out1->b_real, out2->f_xx,
+                              out2->gx_real, out2->gxx, out2->eta, s1->n_var,
+                              s1->n_state, s1->n_exog, out2->gss, out2->hss,
+                              arena, iarena) != SDSGE_SECOND_ORDER_OK) {
     return SDSGE_KLEIN_SOLVE_RISK;
   }
   return SDSGE_KLEIN_SOLVE_OK;

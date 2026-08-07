@@ -1,33 +1,47 @@
 #include "steady_state.h"
 #include "../_common/sdsge_linalg.h"
+#include "klein_preproc.h"
 #include <math.h>
-#include <stdlib.h>
+
+arena_size sdsge_newton_arena_size(const i64 n_var, const i64 n_par) {
+  const i64 own = 2 * (2 * n_var + n_par) /* x_c, out_c, par_c */
+                  + 2 * n_var             /* r, dx */
+                  + 3 * n_var * n_var;    /* a, b, J */
+  const arena_size pre = klein_preproc_arena_size(n_var, n_par, n_var);
+  return make_sizer(own + pre.n_float, n_var /* LU pivot */);
+}
 
 i64 sdsge_steady_state_newton(sdsge_residual_fn residual,
                               const f64 *SDSGE_RESTRICT seed,
                               const f64 *SDSGE_RESTRICT par, const i64 n_var,
                               const i64 n_par, const i64 max_iter, const f64 tol,
-                              f64 *SDSGE_RESTRICT ss, i64 *SDSGE_RESTRICT iters) {
+                              f64 *SDSGE_RESTRICT ss, i64 *SDSGE_RESTRICT iters,
+                              f64 *SDSGE_RESTRICT arena,
+                              i64 *SDSGE_RESTRICT iarena) {
   const i64 n = n_var;
   const i64 nn = n * n;
 
   /* n_eq == n_var: the steady-state system is square. */
-  c128 *SDSGE_RESTRICT x_c = (c128 *)malloc((size_t)(n > 0 ? n : 1) * sizeof(c128));
-  c128 *SDSGE_RESTRICT par_c =
-      (c128 *)malloc((size_t)(n_par > 0 ? n_par : 1) * sizeof(c128));
-  c128 *SDSGE_RESTRICT out_c = (c128 *)malloc((size_t)(n > 0 ? n : 1) * sizeof(c128));
-  f64 *SDSGE_RESTRICT r = (f64 *)malloc((size_t)(n > 0 ? n : 1) * sizeof(f64));
-  f64 *SDSGE_RESTRICT dx = (f64 *)malloc((size_t)(n > 0 ? n : 1) * sizeof(f64));
-  f64 *SDSGE_RESTRICT a = (f64 *)malloc((size_t)(nn > 0 ? nn : 1) * sizeof(f64));
-  f64 *SDSGE_RESTRICT b = (f64 *)malloc((size_t)(nn > 0 ? nn : 1) * sizeof(f64));
-  f64 *SDSGE_RESTRICT J = (f64 *)malloc((size_t)(nn > 0 ? nn : 1) * sizeof(f64));
+  c128 *cp = (c128 *)arena;
+  c128 *x_c = cp;
+  cp += n;
+  c128 *par_c = cp;
+  cp += n_par;
+  c128 *out_c = cp;
+  cp += n;
 
-  i64 status = SDSGE_NEWTON_NO_CONVERGE;
-
-  if (!x_c || !par_c || !out_c || !r || !dx || !a || !b || !J) {
-    status = SDSGE_NEWTON_ALLOC_FAIL;
-    goto done;
-  }
+  f64 *p = (f64 *)cp;
+  f64 *r = p;
+  p += n;
+  f64 *dx = p;
+  p += n;
+  f64 *a = p;
+  p += nn;
+  f64 *b = p;
+  p += nn;
+  f64 *J = p;
+  p += nn;
+  f64 *sweep = p;
 
   for (i64 i = 0; i < n; ++i) {
     ss[i] = seed[i];
@@ -53,45 +67,26 @@ i64 sdsge_steady_state_newton(sdsge_residual_fn residual,
       }
     }
     if (!isfinite(nrm)) {
-      status = SDSGE_NEWTON_NO_CONVERGE;
-      goto done;
+      return SDSGE_NEWTON_NO_CONVERGE;
     }
     if (nrm < tol) {
       *iters = it;
-      status = SDSGE_NEWTON_OK;
-      goto done;
+      return SDSGE_NEWTON_OK;
     }
 
     /* Jacobian of F(x, x): dF/dfwd + dF/dcur = a + (-b) = a - b. */
-    i64 perr = klein_preproc(residual, ss, par, n_var, n_par, n_var, a, b);
-    if (perr != SDSGE_PREKLEIN_OK) {
-      status = SDSGE_NEWTON_ALLOC_FAIL;
-      goto done;
-    }
+    klein_preproc(residual, ss, par, n_var, n_par, n_var, a, b, sweep);
     sdsge_vsub(a, b, J, nn);
 
-    /* dx = J^-1 r, then x -= dx. */
-    i64 serr = sdsge_solve(J, r, n, 1, dx);
-    if (serr == SDSGE_LU_SINGULAR) {
-      status = SDSGE_NEWTON_SINGULAR;
-      goto done;
+    /* dx = J^-1 r, then x -= dx. J is rebuilt next iteration, so the
+     * factorization overwrites it. */
+    if (sdsge_lu_factor_inplace(J, iarena, n) != SDSGE_LU_SUCCESS) {
+      return SDSGE_NEWTON_SINGULAR;
     }
-    if (serr != SDSGE_LU_SUCCESS) {
-      status = SDSGE_NEWTON_ALLOC_FAIL;
-      goto done;
-    }
+    sdsge_lu_solve(J, iarena, r, dx, n, 1);
     sdsge_vsub(ss, dx, ss, n);
     *iters = it + 1;
   }
 
-done:
-  free(x_c);
-  free(par_c);
-  free(out_c);
-  free(r);
-  free(dx);
-  free(a);
-  free(b);
-  free(J);
-  return status;
+  return SDSGE_NEWTON_NO_CONVERGE;
 }

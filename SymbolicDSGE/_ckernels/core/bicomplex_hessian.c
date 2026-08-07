@@ -1,5 +1,4 @@
 #include "bicomplex_hessian.h"
-#include <stdlib.h>
 
 /* Component slots of a bc256: real = a.re, i-unit = a.im, j-unit = b.re,
  * ij = b.im. Perturbations set the i/j slots of a stacked arg (fwd for idx <
@@ -23,24 +22,27 @@ static void set_j_unit(bc256 *SDSGE_RESTRICT fwd, bc256 *SDSGE_RESTRICT cur,
   }
 }
 
-i64 sdsge_bicomplex_hessian(bc_residual_fn residual,
-                            const f64 *SDSGE_RESTRICT ss,
-                            const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
-                            i64 n_eq, f64 *SDSGE_RESTRICT hessian) {
+arena_size sdsge_bicomplex_hessian_arena_size(const i64 n_var, const i64 n_par,
+                                              const i64 n_eq) {
+  return make_sizer(4 * (2 * n_var + n_par + n_eq), /* fwd, cur, par, out */
+                    0);
+}
+
+void sdsge_bicomplex_hessian(bc_residual_fn residual,
+                             const f64 *SDSGE_RESTRICT ss,
+                             const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
+                             i64 n_eq, f64 *SDSGE_RESTRICT hessian,
+                             f64 *SDSGE_RESTRICT arena) {
   const i64 n2 = 2 * n_var;
 
-  bc256 *fwd = (bc256 *)malloc((size_t)(n_var > 0 ? n_var : 1) * sizeof(bc256));
-  bc256 *cur = (bc256 *)malloc((size_t)(n_var > 0 ? n_var : 1) * sizeof(bc256));
-  bc256 *par_c =
-      (bc256 *)malloc((size_t)(n_par > 0 ? n_par : 1) * sizeof(bc256));
-  bc256 *out = (bc256 *)malloc((size_t)(n_eq > 0 ? n_eq : 1) * sizeof(bc256));
-  if (!fwd || !cur || !par_c || !out) {
-    free(fwd);
-    free(cur);
-    free(par_c);
-    free(out);
-    return SDSGE_HESSIAN_ALLOC_FAIL;
-  }
+  bc256 *bp = (bc256 *)arena;
+  bc256 *fwd = bp;
+  bp += n_var;
+  bc256 *cur = bp;
+  bp += n_var;
+  bc256 *par_c = bp;
+  bp += n_par;
+  bc256 *out = bp;
 
   /* Base: real steady state at both t+1 and t; params real. Set once. */
   for (i64 k = 0; k < n_var; ++k) {
@@ -69,10 +71,4 @@ i64 sdsge_bicomplex_hessian(bc_residual_fn residual,
       set_j_unit(fwd, cur, n_var, j, 0.0);
     }
   }
-
-  free(fwd);
-  free(cur);
-  free(par_c);
-  free(out);
-  return SDSGE_HESSIAN_OK;
 }

@@ -20,10 +20,14 @@
 typedef void (*bc_residual_fn)(const bc256 *fwd, const bc256 *cur,
                                const bc256 *par, bc256 *out);
 
-i64 sdsge_bicomplex_hessian(bc_residual_fn residual,
-                            const f64 *SDSGE_RESTRICT ss,
-                            const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
-                            i64 n_eq, f64 *SDSGE_RESTRICT hessian);
+arena_size sdsge_bicomplex_hessian_arena_size(i64 n_var, i64 n_par, i64 n_eq);
+
+/* Total: the sweep has no failure mode once its scratch comes from the caller. */
+void sdsge_bicomplex_hessian(bc_residual_fn residual,
+                             const f64 *SDSGE_RESTRICT ss,
+                             const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
+                             i64 n_eq, f64 *SDSGE_RESTRICT hessian,
+                             f64 *SDSGE_RESTRICT arena);
 
 /* The step, and the only source of it: the sweep reads this directly.
  *
@@ -38,8 +42,5 @@ i64 sdsge_bicomplex_hessian(bc_residual_fn residual,
  * stays flat to at least 1e-13. 1e-9 sits a decade inside that plateau. */
 #define SDSGE_HESSIAN_STEP 1e-9
 #define SDSGE_HESSIAN_INV_STEP2 1e18
-
-#define SDSGE_HESSIAN_OK 0
-#define SDSGE_HESSIAN_ALLOC_FAIL -1
 
 #endif /* SDSGE_BICOMPLEX_HESSIAN_H */

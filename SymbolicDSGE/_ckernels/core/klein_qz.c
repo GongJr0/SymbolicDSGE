@@ -1,7 +1,5 @@
 #include "klein_qz.h"
 
-#include <stdlib.h>
-
 /* Klein 'ouc' selection: select |alpha/beta| > 1, i.e. the generalized
  * eigenvalue lies outside the unit circle. Division-safe magnitude compare
  * (|alpha|^2 > |beta|^2); beta == 0 (infinite eigenvalue) selects true, as it
@@ -13,8 +11,16 @@ static int klein_ouc(const c128 *alpha, const c128 *beta) {
   return aa > bb;
 }
 
+arena_size klein_qz_arena_size(const i64 n) {
+  return make_sizer(2 * n + 2 * n                       /* alpha, beta */
+                        + 8 * n                         /* rwork */
+                        + 2 * KLEIN_QZ_LWORK_PER_N * n, /* work */
+                    (n + 1) / 2 /* bwork, n Fortran LOGICALs */);
+}
+
 i64 klein_qz(klein_zgges_fn zgges, i64 n, c128 *SDSGE_RESTRICT s,
-             c128 *SDSGE_RESTRICT t, c128 *SDSGE_RESTRICT z) {
+             c128 *SDSGE_RESTRICT t, c128 *SDSGE_RESTRICT z,
+             f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena) {
   if (n == 0) {
     return KLEIN_QZ_OK;
   }
@@ -32,48 +38,20 @@ i64 klein_qz(klein_zgges_fn zgges, i64 n, c128 *SDSGE_RESTRICT s,
   int ldvsl = 1;
   c128 vsl_dummy = c128_make(0.0, 0.0); /* not referenced when jobvsl = 'N' */
 
-  c128 *alpha = (c128 *)malloc((size_t)n * sizeof(c128));
-  c128 *beta = (c128 *)malloc((size_t)n * sizeof(c128));
-  f64 *rwork = (f64 *)malloc((size_t)(8 * n) * sizeof(f64));
-  int *bwork = (int *)malloc((size_t)n * sizeof(int));
-  if (alpha == NULL || beta == NULL || rwork == NULL || bwork == NULL) {
-    free(alpha);
-    free(beta);
-    free(rwork);
-    free(bwork);
-    return KLEIN_QZ_ALLOC_FAIL;
-  }
+  c128 *cp = (c128 *)arena;
+  c128 *alpha = cp;
+  cp += n;
+  c128 *beta = cp;
+  cp += n;
+  f64 *rwork = (f64 *)cp;
+  c128 *work = (c128 *)(rwork + 8 * n);
+  int *bwork = (int *)iarena;
 
-  /* Workspace query (lwork = -1): zgges writes the optimal complex work size to
-   * wq.re. */
-  c128 wq = c128_make(0.0, 0.0);
-  int lwork = -1;
-  zgges(&jobvsl, &jobvsr, &sort, &klein_ouc, &n32, s, &n32, t, &n32, &sdim,
-        alpha, beta, &vsl_dummy, &ldvsl, z, &n32, &wq, &lwork, rwork, bwork,
-        &info);
-
-  lwork = (int)wq.re;
-  if (lwork < 1) {
-    lwork = 1;
-  }
-  c128 *work = (c128 *)malloc((size_t)lwork * sizeof(c128));
-  if (work == NULL) {
-    free(alpha);
-    free(beta);
-    free(rwork);
-    free(bwork);
-    return KLEIN_QZ_ALLOC_FAIL;
-  }
+  const int lwork = (int)(KLEIN_QZ_LWORK_PER_N * n);
 
   zgges(&jobvsl, &jobvsr, &sort, &klein_ouc, &n32, s, &n32, t, &n32, &sdim,
         alpha, beta, &vsl_dummy, &ldvsl, z, &n32, work, &lwork, rwork, bwork,
         &info);
-
-  free(work);
-  free(alpha);
-  free(beta);
-  free(rwork);
-  free(bwork);
 
   return (info != 0) ? KLEIN_QZ_LAPACK_FAIL : KLEIN_QZ_OK;
 }
