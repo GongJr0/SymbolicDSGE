@@ -17,7 +17,6 @@ typedef struct {
   i64 n_ctrl;
   i64 n_exog;
   i64 n_par;
-  int log_linear;
 } sdsge_klein_spec;
 
 /* First-order Klein solve outputs; every buffer is caller-owned. */

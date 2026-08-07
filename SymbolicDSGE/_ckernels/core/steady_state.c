@@ -63,7 +63,7 @@ i64 sdsge_steady_state_newton(sdsge_residual_fn residual,
     }
 
     /* Jacobian of F(x, x): dF/dfwd + dF/dcur = a + (-b) = a - b. */
-    i64 perr = klein_preproc(residual, ss, par, n_var, n_par, n_var, 0, a, b);
+    i64 perr = klein_preproc(residual, ss, par, n_var, n_par, n_var, a, b);
     if (perr != SDSGE_PREKLEIN_OK) {
       status = SDSGE_NEWTON_ALLOC_FAIL;
       goto done;

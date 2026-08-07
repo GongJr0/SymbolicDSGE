@@ -140,8 +140,7 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
                                  .n_state = b->dims.n_state,
                                  .n_ctrl = b->dims.n_ctrl,
                                  .n_exog = b->dims.n_exog,
-                                 .n_par = b->dims.n_par,
-                                 .log_linear = b->log_linear};
+                                 .n_par = b->dims.n_par};
 
   switch (sdsge_klein_solve1(&spec, s)) {
   case SDSGE_KLEIN_SOLVE_OK:

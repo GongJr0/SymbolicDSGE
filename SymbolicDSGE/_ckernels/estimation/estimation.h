@@ -106,8 +106,6 @@ typedef struct {
   meas_fn jac;
 
   const f64 *ss_seed; /* n_var: Newton seed for the steady state */
-  int log_linear;
-
   const f64 *y;  /* T*n_obs */
   const f64 *P0; /* n_var*n_var; UKF 2n_state*2n_state */
   const f64 *x0; /* n_var, or NULL */

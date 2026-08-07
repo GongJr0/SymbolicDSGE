@@ -10,8 +10,7 @@
  *
  * Each iteration takes the exact Jacobian dF(x, x)/dx = a - b straight from
  * klein_preproc (a = dF/dfwd, b = -dF/dcur, both complex-step), forms the Newton
- * step by LU-solving (a - b) dx = F(x, x), and updates x -= dx. Levels residual
- * only (order-2 is levels-only); `log_linear` is not threaded here.
+ * step by LU-solving (a - b) dx = F(x, x), and updates x -= dx.
  *
  * Writes the converged point into `ss` (n_var); `*iters` gets the iteration
  * count. Returns one of the SDSGE_NEWTON_* codes. */

@@ -69,7 +69,6 @@ def klein_preprocess(
     steady_state: _F64,
     params: _F64,
     n_eq: int,
-    log_linear: bool,
 ) -> tuple[_F64, _F64]:
     """Complex-step (a, b) from a residual @cfunc address. Native twin of
     ``klein._approximate_system_numeric``."""
@@ -95,7 +94,6 @@ def klein_solve1(
     params: _F64,
     n_state: int,
     n_exog: int = ...,
-    log_linear: bool = ...,
 ) -> tuple[_F64, _F64, _F64, _C128, _C128, int, _C128, _F64, _F64]:
     """(ss, a, b, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 

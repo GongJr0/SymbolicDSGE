@@ -82,8 +82,7 @@ cdef extern from "klein_preproc.h" nogil:
         c128 *fwd, c128 *cur, c128 *par, c128 *out)
     int64_t klein_preproc(
         sdsge_residual_fn resid, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, int64_t log_linear,
-        double *a, double *b)
+        int64_t n_var, int64_t n_par, int64_t n_eq, double *a, double *b)
 
 
 cdef extern from "klein_solve.h" nogil:
@@ -97,7 +96,6 @@ cdef extern from "klein_solve.h" nogil:
         int64_t n_ctrl
         int64_t n_exog
         int64_t n_par
-        int log_linear
     ctypedef struct sdsge_solve1:
         double *ss
         double *a_real
@@ -381,7 +379,6 @@ def klein_preprocess(
     steady_state,
     params,
     int64_t n_eq,
-    bint log_linear,
 ):
     """Complex-step first-order pencil ``(a, b)`` from a numba residual @cfunc
     (``build_cfunc``) given its ``.address``. Native twin of
@@ -404,7 +401,7 @@ def klein_preprocess(
     cdef int64_t err
     with nogil:
         err = klein_preproc(
-            resid, ss_ptr, par_ptr, n_var, n_par, n_eq, log_linear,
+            resid, ss_ptr, par_ptr, n_var, n_par, n_eq,
             &av[0, 0], &bv[0, 0])
     if err != 0:
         raise MemoryError("klein_preprocess: allocation failed.")
@@ -498,7 +495,6 @@ def klein_solve1(
     params,
     int64_t n_state,
     int64_t n_exog=0,
-    bint log_linear=False,
 ):
     """One-shot first-order Klein solve, in a single GIL release.
 
@@ -561,7 +557,6 @@ def klein_solve1(
     spec.n_ctrl = n_ctrl
     spec.n_exog = n_exog
     spec.n_par = n_par
-    spec.log_linear = log_linear
 
     cdef sdsge_solve1 out
     out.ss = &ssv[0]

@@ -36,7 +36,7 @@ def _drive(path):
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
 
-    a, b = klein_preprocess(cf.address, ss, par, n_eq, False)
+    a, b = klein_preprocess(cf.address, ss, par, n_eq)
     sol = klein_solve(cf, par, ss, n_state)
     gx, hx = np.real(sol.f), np.real(sol.p)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)

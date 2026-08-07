@@ -104,7 +104,6 @@ cdef extern from "estimation.h":
         meas_fn meas
         meas_fn jac
         const double *ss_seed
-        int log_linear
         const double *y
         const double *P0
         const double *x0
@@ -272,7 +271,6 @@ def obj_linear_base(
     int n_state,
     int n_exog,
     int n_obs,
-    int log_linear,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
     double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
@@ -340,7 +338,6 @@ def obj_linear_base(
     b.jac = <meas_fn><void*>jac_addr
 
     b.ss_seed = &ss_seed[0]
-    b.log_linear = log_linear
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -411,7 +408,6 @@ def obj_extended_base(
     int n_state,
     int n_exog,
     int n_obs,
-    int log_linear,
     double[::1] ss_seed,        # n_var (Newton seed for the steady state)
     double[::1] base_calib,     # n_par
     double[:, ::1] Q,           # n_exog*n_exog constant
@@ -477,7 +473,6 @@ def obj_extended_base(
     b.jac = <meas_fn><void*>jac_addr
 
     b.ss_seed = &ss_seed[0]
-    b.log_linear = log_linear
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -557,9 +552,8 @@ def obj_unscented_base(
     double kappa=1.0,
 ):
     """Evaluate the native unscented objective at base calibration (n_theta == 0,
-    constant Q/R, no prior). Returns loglik. Order-2 is levels-only, so
-    ``log_linear`` is forced to 0 and the solve1 pencil (a_real/b_real) is reused
-    by the second-order kernels. Companion to ``obj_linear_base``."""
+    constant Q/R, no prior). Returns loglik. The solve1 pencil (a_real/b_real)
+    is reused by the second-order kernels. Companion to ``obj_linear_base``."""
     cdef int64_t n_var = ss_seed.shape[0]
     cdef int64_t n_par = base_calib.shape[0]
     cdef int64_t T = y.shape[0]
@@ -648,7 +642,6 @@ def obj_unscented_base(
     b.jac = NULL
 
     b.ss_seed = &ss_seed[0]
-    b.log_linear = 0
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -1021,7 +1014,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     b.jac = <meas_fn><void*><size_t>base.jac_addr
 
     b.ss_seed = &ssv[0]
-    b.log_linear = int(base.log_linear)
     b.y = &yv[0, 0]
     b.P0 = &P0v[0, 0]
     b.x0 = &x0v[0]

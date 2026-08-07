@@ -47,8 +47,7 @@ i64 sdsge_klein_linearize(const sdsge_klein_spec *spec, sdsge_solve1 *out) {
   }
 
   if (klein_preproc(spec->residual, out->ss, spec->params, n, spec->n_par, n,
-                    spec->log_linear, out->a_real,
-                    out->b_real) != SDSGE_PREKLEIN_OK) {
+                    out->a_real, out->b_real) != SDSGE_PREKLEIN_OK) {
     return SDSGE_KLEIN_SOLVE_ALLOC;
   }
   return SDSGE_KLEIN_SOLVE_OK;

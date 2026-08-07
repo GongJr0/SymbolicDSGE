@@ -9,8 +9,8 @@ typedef void (*sdsge_residual_fn)(const c128 *fwd, const c128 *cur,
 
 i64 klein_preproc(sdsge_residual_fn residual, const f64 *SDSGE_RESTRICT ss,
                   const f64 *SDSGE_RESTRICT par, const i64 n_var,
-                  const i64 n_par, const i64 n_eq, const i64 log_linear,
-                  f64 *SDSGE_RESTRICT a, f64 *SDSGE_RESTRICT b);
+                  const i64 n_par, const i64 n_eq, f64 *SDSGE_RESTRICT a,
+                  f64 *SDSGE_RESTRICT b);
 
 /* ERROR CODES */
 #define SDSGE_PREKLEIN_OK 0

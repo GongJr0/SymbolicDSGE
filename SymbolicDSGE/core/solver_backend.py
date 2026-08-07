@@ -77,7 +77,6 @@ def klein_solve(
     n_states: int,
     *,
     n_exog: int = 0,
-    log_linear: bool = False,
 ) -> KleinSolution:
     """First-order Klein solve of the compiled model at ``params``.
 
@@ -94,7 +93,7 @@ def klein_solve(
     """
     try:
         ss, a, b, f, p, stab, eig, A, B = klein_solve1(
-            residual_cfunc.address, ss_seed, params, n_states, n_exog, log_linear
+            residual_cfunc.address, ss_seed, params, n_states, n_exog
         )
     except ValueError as exc:
         # The kernel reports the factor it could not invert. This is the first

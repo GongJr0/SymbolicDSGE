@@ -99,7 +99,6 @@ def test_obj_linear_base_matches_model_kalman(bundle):
         compiled.n_state,
         compiled.n_exog,
         len(prep.observables),
-        0,  # log_linear
         steady_c,
         calib,
         Q,
@@ -151,7 +150,6 @@ def test_obj_extended_base_matches_model_kalman(bundle):
         compiled.n_state,
         compiled.n_exog,
         len(prep.observables),
-        0,  # log_linear
         steady_c,
         calib,
         Q,

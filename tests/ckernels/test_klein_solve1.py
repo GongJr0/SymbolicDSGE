@@ -9,10 +9,6 @@ rather than approximate; a tolerance would hide a real divergence.
 The ``a``/``b`` comparison is also what licenses ``_solve_second_order`` to read
 the pencil off the solution instead of rebuilding it with a second
 ``klein_preprocess``.
-
-Parity runs in levels only. The log-linear wrap expands at ``log(ss)``, which no
-shipped fixture survives; ``test_klein_preproc.py`` covers that branch on a
-hand-built residual with a positive steady state.
 """
 
 from __future__ import annotations
@@ -50,12 +46,12 @@ def _model(path):
     return compiled, par, seed
 
 
-def _staged(compiled, par, seed, log_linear):
+def _staged(compiled, par, seed):
     """The call sequence ``solver_backend.klein_solve`` ran before it was fused."""
     addr = compiled.construct_objective_cfunc().address
     n_eq = len(compiled.var_names)
     ss, _ = steady_state_newton(addr, seed, par)
-    a, b = klein_preprocess(addr, ss, par, n_eq, log_linear)
+    a, b = klein_preprocess(addr, ss, par, n_eq)
     s, t, z = klein_qz(a, b)
     f, p, stab, eig = klein_postprocess(s, t, z, compiled.n_state)
     A, B = assemble_state_space(
@@ -82,38 +78,9 @@ def test_matches_the_staged_shims_exactly(path):
         par,
         compiled.n_state,
         compiled.n_exog,
-        False,
     )
 
-    _assert_same(got, _staged(compiled, par, seed, False))
-
-
-@pytest.mark.parametrize("path", MODELS)
-def test_log_linear_flag_reaches_the_kernel(path):
-    """Pinned by failure mode, because no shipped fixture can solve in log space.
-
-    The log-linear wrap expands at ``log(ss)``, and every fixture here has at
-    least one zero steady-state entry (the deviation-form models are all zero),
-    which collapses those columns of the pencil. Identical failures still pin the
-    flag: were it dropped on the way into the spec struct, the fused call would
-    solve in levels where the staged path cannot solve in logs.
-    """
-    compiled, par, seed = _model(path)
-
-    with pytest.raises((ValueError, RuntimeError)) as fused:
-        klein_solve1(
-            compiled.construct_objective_cfunc().address,
-            seed,
-            par,
-            compiled.n_state,
-            compiled.n_exog,
-            True,
-        )
-    with pytest.raises((ValueError, RuntimeError)) as staged:
-        _staged(compiled, par, seed, True)
-
-    assert type(fused.value) is type(staged.value)
-    assert str(fused.value) == str(staged.value)
+    _assert_same(got, _staged(compiled, par, seed))
 
 
 @pytest.mark.parametrize("path", MODELS)
@@ -141,7 +108,7 @@ def test_python_wrapper_carries_the_native_outputs(path):
         sol.A,
         sol.B,
     )
-    _assert_same(got, _staged(compiled, par, seed, False))
+    _assert_same(got, _staged(compiled, par, seed))
 
 
 def test_reports_stab_instead_of_raising():

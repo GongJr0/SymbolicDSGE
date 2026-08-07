@@ -14,7 +14,7 @@
  * arithmetic itself lives in the numba cfunc.
  *
  * `hessian` is (n_eq, 2*n_var, 2*n_var) row-major f64, symmetric in the last
- * two. Levels only (no log-linear wrapping at order > 1). */
+ * two. */
 
 typedef void (*bc_residual_fn)(const bc256 *fwd, const bc256 *cur,
                                const bc256 *par, bc256 *out);
