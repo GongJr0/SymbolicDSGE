@@ -114,21 +114,22 @@ class RegimeBlock:
     residuals: list[Expr] = field(default_factory=list)
     jac_a: list[Expr] = field(default_factory=list)
     jac_b: list[Expr] = field(default_factory=list)
+    constants: list[Expr] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
-class RegimeJacobianFunc:
+class RegimePencilFunc:
     """Compiled regime pencil rows, and everything the native side needs to call them.
 
     One cfunc per regime, keyed by the same bitmask as ``regimes``, writing
-    ``[jac_a; jac_b]`` into a single ``2 * n_row * n_var`` buffer: the whole a
-    block first, then the whole b block, each row-major ``(n_row, n_var)`` and
-    ordered like ``rows``. Concatenated rather than interleaved because the two
-    halves patch into two separate copies of the reference pencil, so each row
-    is a contiguous copy on both sides.
+    ``[jac_a; jac_b; constants]`` into a single ``2 * n_row * n_var + n_row``
+    buffer: the whole a block, then the whole b block, each row-major
+    ``(n_row, n_var)`` and ordered like ``rows``, then the constants. Concatenated
+    rather than interleaved because the blocks patch into separate copies of the
+    reference pencil, so each row is a contiguous copy on every side.
 
-    ``jac_b`` carries klein_preproc's sign, so both halves drop into a reference
-    pencil copy as they are.
+    ``jac_b`` carries klein_preproc's sign and ``constants`` is unnegated, so all
+    three drop into a reference pencil copy as they are.
     """
 
     cfuncs: dict[int, Any]
@@ -150,8 +151,9 @@ class RegimeJacobianFunc:
         return int(self.rows[mask].shape[0])
 
     def n_out(self, mask: int) -> int:
-        """Length of ``out``: both blocks, ``2 * n_row * n_var``."""
-        return 2 * self.n_row(mask) * self.n_var
+        """Length of ``out``: both blocks, ``2 * n_row * n_var + n_row``."""
+        n_row = self.n_row(mask)
+        return 2 * n_row * self.n_var + n_row
 
 
 @dataclass(frozen=True)
@@ -213,7 +215,7 @@ class CompiledModel:
         return self._regime_cfuncs
 
     @cached_property
-    def _regime_jacobian_func(self) -> RegimeJacobianFunc | None:
+    def _regime_pencil_func(self) -> RegimePencilFunc | None:
         # Replaced rows of each regime pencil as one cfunc per regime, so the
         # assembly patches a reference pencil copy instead of sweeping the whole
         # regime. Both blocks share a cfunc: after the fwd fold they are
@@ -226,14 +228,20 @@ class CompiledModel:
         cfuncs: dict[int, Any] = {}
         rows: dict[int, NDArray[int64]] = {}
         for mask, block in self.regimes.items():
-            want = len(block.rows) * base.n_var
-            if len(block.jac_a) != want or len(block.jac_b) != want:
+            want_jac = len(block.rows) * base.n_var
+            want_const = len(block.rows)
+            if len(block.jac_a) != want_jac or len(block.jac_b) != want_jac:
                 raise ValueError(
                     f"Regime {mask} has {len(block.jac_a)}/{len(block.jac_b)} "
-                    f"jacobian entries, expected {want} for {len(block.rows)} "
+                    f"jacobian entries, expected {want_jac} for {len(block.rows)} "
                     f"rows over {base.n_var} variables."
                 )
-            exprs = [*block.jac_a, *block.jac_b]
+            if len(block.constants) != want_const:
+                raise ValueError(
+                    f"Regime {mask} has {len(block.constants)} constants, "
+                    f"expected {want_const} for {len(block.rows)} rows."
+                )
+            exprs = [*block.jac_a, *block.jac_b, *block.constants]
             layout = MeasurementLayout(
                 slot=base.slot,
                 n_var=base.n_var,
@@ -243,12 +251,12 @@ class CompiledModel:
             cfuncs[mask] = build_measurement_cfunc(exprs, layout)
             rows[mask] = np.asarray(block.rows, dtype=np.int64)
 
-        return RegimeJacobianFunc(
+        return RegimePencilFunc(
             cfuncs=cfuncs, rows=rows, n_var=base.n_var, n_par=base.n_par
         )
 
-    def construct_regime_jacobian_func(self) -> RegimeJacobianFunc | None:
-        return self._regime_jacobian_func
+    def construct_regime_pencil_func(self) -> RegimePencilFunc | None:
+        return self._regime_pencil_func
 
     @cached_property
     def _constraint_func(self) -> ConstraintFunc | None:

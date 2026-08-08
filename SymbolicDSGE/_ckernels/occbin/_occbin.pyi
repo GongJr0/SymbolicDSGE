@@ -7,11 +7,12 @@ must stay in sync with ``_occbin.pyx`` / ``occbin.c``; the tests guard the
 runtime behavior, not this stub.
 """
 
-from numpy import float64, int8
+from numpy import float64, int8, int64
 from numpy.typing import NDArray
 
 _F64 = NDArray[float64]
 _I8 = NDArray[int8]
+_I64 = NDArray[int64]
 
 MAX_CONSTRAINTS: int
 
@@ -27,4 +28,18 @@ def constraint_path(
 
     ``out`` may alias ``regime_in`` to latch in place; ``changed`` counts the
     periods whose mask moved.
+    """
+
+def regime_pencil(
+    pencil_addr: int,
+    rows: _I64,
+    ss: _F64,
+    par: _F64,
+    a_ref: _F64,
+    b_ref: _F64,
+) -> tuple[_F64, _F64, _F64]:
+    """(a, b, c) <- the reference pencil with ``rows`` patched by one regime.
+
+    ``pencil_addr`` of 0 is the reference regime: the copy alone, ``c`` zero.
+    ``c`` is ``(n_var,)`` and zero off ``rows``.
     """
