@@ -473,6 +473,42 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
         np.testing.assert_allclose(c_r, want, atol=1e-12)
 
 
+def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82):
+    # A regime lagging deeper than the reference makes desugar inject an aux
+    # equation into the reference model. Rows are positions in that merged order,
+    # so an aux landing anywhere but the end misplaces the patch onto a row the
+    # regime never touched, with no numerical symptom at compile time.
+    model, _ = parsed_post82
+    r, Pi = model.variables.variables[2], model.variables.variables[4]
+    solver = _with_constraints(
+        parsed_post82,
+        {"elb": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
+        {frozenset({"elb"}): {"taylor": sp.Eq(r(t), Pi(t - 1))}},
+    )
+
+    compiled = solver.compile()
+    names = list(compiled.config.equations.model)
+
+    assert "Pi_lag1" in compiled.var_names
+    assert compiled.regimes[1].rows == [names.index("taylor")]
+
+    # The rows the pencil actually moves are the rows we recorded, which is the
+    # part an index shift would break.
+    par = _params(compiled)
+    n_eq = len(compiled.var_names)
+    ref_cfunc = compiled.construct_objective_cfunc()
+    ss_ref, _ = steady_state_newton(ref_cfunc.address, np.zeros(n_eq), par)
+
+    a_ref, b_ref = klein_preprocess(ref_cfunc.address, ss_ref, par, n_eq)
+    a_r, b_r = klein_preprocess(
+        compiled.construct_regime_cfuncs()[1].address, ss_ref, par, n_eq
+    )
+    changed = np.maximum(
+        np.abs(a_r - a_ref).max(axis=1), np.abs(b_r - b_ref).max(axis=1)
+    )
+    assert np.flatnonzero(changed).tolist() == compiled.regimes[1].rows
+
+
 @pytest.fixture(scope="module")
 def compiled_rbc_obc(rbc_second_order_test_model_path):
     """Levels RBC where a bad-TFP regime shuts investment off.
