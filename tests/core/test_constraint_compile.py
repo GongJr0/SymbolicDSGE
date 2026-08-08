@@ -242,7 +242,7 @@ def compiled_lead_regime(parsed_post82):
     return solver.compile()
 
 
-def test_regime_jacobians_match_the_complex_step_pencil(compiled_lead_regime):
+def test_regime_pencil_rows_match_the_complex_step_sweep(compiled_lead_regime):
     # The blocks replace a complex-step sweep of the regime, so they have to
     # reproduce it on the replaced rows. Checked away from the steady state too:
     # a gap model sits at ss = 0, where a wrong block can still read as right.
@@ -273,7 +273,7 @@ def test_regime_jacobians_match_the_complex_step_pencil(compiled_lead_regime):
         )
 
 
-def test_regime_jacobians_fold_fwd_symbols_onto_cur(compiled_lead_regime):
+def test_regime_pencil_rows_fold_fwd_symbols_onto_cur(compiled_lead_regime):
     # The blocks are printed against a single `cur` input vector, so a surviving
     # fwd symbol would be unresolvable at emission.
     compiled = compiled_lead_regime
@@ -284,8 +284,8 @@ def test_regime_jacobians_fold_fwd_symbols_onto_cur(compiled_lead_regime):
         assert not expr.free_symbols & fwd_syms
 
 
-def _call_jac(func, mask, cur, par):
-    """The regime jacobian cfunc's output as a (2, n_row, n_var) `[a, b]` view."""
+def _call_pencil(func, mask, cur, par):
+    """The regime pencil cfunc's output split into its `(a, b, c)` blocks."""
     fn = ctypes.CFUNCTYPE(
         None,
         ctypes.POINTER(ctypes.c_double),
@@ -300,22 +300,24 @@ def _call_jac(func, mask, cur, par):
         par.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
         out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
     )
-    return out.reshape(2, func.n_row(mask), func.n_var)
+    n_row, n_var = func.n_row(mask), func.n_var
+    jac = out[: 2 * n_row * n_var].reshape(2, n_row, n_var)
+    return jac[0], jac[1], out[2 * n_row * n_var :]
 
 
-def test_regime_jacobian_cfunc_writes_both_pencil_blocks(compiled_lead_regime):
+def test_regime_pencil_cfunc_writes_every_block(compiled_lead_regime):
     # One call has to reproduce the regime's own complex-step sweep on the
-    # replaced rows, a block first then b, so the halves patch a reference
-    # pencil copy unchanged.
+    # replaced rows, a then b, plus its residual at the same point, so all three
+    # blocks patch a reference pencil copy unchanged.
     compiled = compiled_lead_regime
-    func = compiled.construct_regime_jacobian_func()
+    func = compiled.construct_regime_pencil_func()
     par = _params(compiled)
     n_var = len(compiled.var_names)
     rows = func.rows[1]
     cfunc = compiled.construct_regime_cfuncs()[1]
 
     assert func.masks == (1,)
-    assert func.n_out(1) == 2 * len(rows) * n_var
+    assert func.n_out(1) == 2 * len(rows) * n_var + len(rows)
 
     rng = np.random.default_rng(0)
     for trial in range(5):
@@ -323,15 +325,18 @@ def test_regime_jacobian_cfunc_writes_both_pencil_blocks(compiled_lead_regime):
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
         a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var)
-        got = _call_jac(func, 1, point, par)
+        c_r = residual_eval(cfunc.address, point, point, par, n_var).real
+        got_a, got_b, got_c = _call_pencil(func, 1, point, par)
 
-        assert np.abs(got).max() > 0.0
-        np.testing.assert_allclose(got[0], a_r[rows, :])
-        np.testing.assert_allclose(got[1], b_r[rows, :])
+        for block in (got_a, got_b, got_c):
+            assert np.abs(block).max() > 0.0
+        np.testing.assert_allclose(got_a, a_r[rows, :])
+        np.testing.assert_allclose(got_b, b_r[rows, :])
+        np.testing.assert_allclose(got_c, c_r[rows])
 
 
-def test_regime_jacobian_func_carries_every_regime_and_is_cached(compiled_regimes):
-    func = compiled_regimes.construct_regime_jacobian_func()
+def test_regime_pencil_func_carries_every_regime_and_is_cached(compiled_regimes):
+    func = compiled_regimes.construct_regime_pencil_func()
 
     assert func.masks == (1, 2, 3)
     assert (func.n_var, func.n_par) == (
@@ -344,10 +349,10 @@ def test_regime_jacobian_func_carries_every_regime_and_is_cached(compiled_regime
         assert func.rows[mask].tolist() == block.rows
         assert func.n_row(mask) == len(block.rows)
 
-    assert compiled_regimes.construct_regime_jacobian_func() is func
+    assert compiled_regimes.construct_regime_pencil_func() is func
 
 
-def test_regime_jacobian_rejects_a_block_that_does_not_match_its_rows(compiled_regimes):
+def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_regimes):
     # Emission is where both the block and n_var are in scope; a short block
     # would otherwise reshape into a wrong pencil rather than fail.
     broken = dataclasses.replace(
@@ -355,7 +360,17 @@ def test_regime_jacobian_rejects_a_block_that_does_not_match_its_rows(compiled_r
     )
 
     with pytest.raises(ValueError, match="expected"):
-        broken.construct_regime_jacobian_func()
+        broken.construct_regime_pencil_func()
+
+    # A full pencil row with no constant to go with it: caught on its own branch,
+    # since the jacobian check above never sees it.
+    row = [sp.Integer(0)] * len(compiled_regimes.var_names)
+    no_const = dataclasses.replace(
+        compiled_regimes, regimes={1: RegimeBlock(rows=[0], jac_a=row, jac_b=row)}
+    )
+
+    with pytest.raises(ValueError, match="constants"):
+        no_const.construct_regime_pencil_func()
 
 
 @pytest.fixture(scope="module")
@@ -579,7 +594,7 @@ def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
 def test_model_without_regimes_has_no_regime_blocks(compiled_post82):
     assert compiled_post82.regimes == {}
     assert compiled_post82.construct_regime_cfuncs() == {}
-    assert compiled_post82.construct_regime_jacobian_func() is None
+    assert compiled_post82.construct_regime_pencil_func() is None
 
 
 def test_model_without_constraints_has_no_constraint_func(compiled_post82):

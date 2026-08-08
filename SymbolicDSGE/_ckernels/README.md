@@ -11,18 +11,12 @@ _ckernels/
   __init__.py            # leaf package; no SymbolicDSGE imports
   _common/               # shared pure-C primitives (no Python, no NumPy C-API)
     sdsge_common.h       # portable macros (restrict, ...)
-    sdsge_linalg.{c,h}   # (future) matmul/cholesky/triangular solves, etc.
+    sdsge_linalg.{c,h}   # matmul/cholesky/triangular solves, etc.
   core/                  # one subsystem (also: kalman regression distributions diag)
     __init__.py          # re-exports the compiled _<name>
     _core.pyx            # thin Cython shim: NumPy buffer -> double*
     core.{c,h}           # pure-C numeric kernels
 ```
-
-Every subsystem currently holds empty placeholders (`<name>.{c,h}`,
-`_<name>.pyx`, `__init__.py`) — the scaffold, no kernels yet.
-
-One compiled extension **per subsystem** (`core/_core.pyx` → `_core`). Small
-incremental rebuilds, parallel compilation, import only what you need.
 
 ## Division of labor
 
@@ -31,9 +25,6 @@ incremental rebuilds, parallel compilation, import only what you need.
 - **Cython shim (`_<name>.pyx`)** — *only* maps NumPy memoryviews to `double*`
   and calls the C. No logic. `double[:, ::1]` validates dtype + C-contiguity and
   hands `&A[0, 0]` to C; `with nogil:` drops the GIL around the kernel.
-
-No `cimport numpy` / `import_array()` anywhere: memoryviews ride the buffer
-protocol, so NumPy's C-API never enters the build.
 
 ## Conventions
 

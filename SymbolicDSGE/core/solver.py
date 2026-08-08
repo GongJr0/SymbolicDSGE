@@ -194,7 +194,8 @@ class DSGESolver:
         ``rows`` records which reference rows the regime replaced, so the native
         assembly can patch those rows into a copy of the reference pencil instead
         of sweeping the whole regime. ``jac_a``/``jac_b`` are those rows' pencil
-        blocks, flat row-major ``(len(rows), n_var)``.
+        blocks, flat row-major ``(len(rows), n_var)``; ``constants`` is those rows'
+        residual at the expansion point, ``(len(rows),)``.
         """
         regimes = conf.equations.regime
         if not regimes:
@@ -236,8 +237,8 @@ class DSGESolver:
                     rows.append(row)
 
             # Pencils are taken at the expansion point, where fwd and cur are the
-            # same vector; differentiating before that fold is what keeps the two
-            # blocks distinct. b carries klein_preproc's sign on the cur sweep.
+            # same vector; differentiating before that fold is what keeps a and b
+            # distinct. b carries klein_preproc's sign on the cur sweep.
             replaced = [residuals[row] for row in rows]
             jac_a = [
                 sp.diff(resid, sym).subs(fwd_to_cur)  # pyright: ignore
@@ -249,9 +250,18 @@ class DSGESolver:
                 for resid in replaced
                 for sym in cur_syms
             ]
+            # The regime's own residual there, unnegated where b is negated:
+            # a E[y+] = b y - c. Zero on unreplaced rows, so only these are kept.
+            constants = [
+                resid.subs(fwd_to_cur) for resid in replaced  # pyright: ignore
+            ]
 
             compiled[sum(1 << bit[name] for name in key)] = RegimeBlock(
-                residuals=residuals, rows=rows, jac_a=jac_a, jac_b=jac_b
+                residuals=residuals,
+                rows=rows,
+                jac_a=jac_a,
+                jac_b=jac_b,
+                constants=constants,
             )
         return compiled
 
