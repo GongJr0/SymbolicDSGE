@@ -6,8 +6,8 @@
 
 /* ERROR CODES */
 
+/* -1 is unassigned: it was a complex-matrix rejection no kernel ever returned. */
 #define KF_OK 0
-#define KF_ERR_COMPLEX_MATRIX -1
 #define KF_ERR_SHAPE_MISMATCH -2
 #define KF_ERR_MATRIX_CONDITION -3
 #define KF_ERR_SINGULAR_MATRIX -4

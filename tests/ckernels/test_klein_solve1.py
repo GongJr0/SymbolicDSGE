@@ -57,7 +57,9 @@ def _staged(compiled, par, seed):
     A, B = assemble_state_space(
         p, f, compiled.n_state, n_eq - compiled.n_state, compiled.n_exog
     )
-    return ss, a, b, f, p, stab, eig, A, B
+    # The solve reports f/p real but assembles A/B from the complex pair, whose
+    # cross term Re(f)Re(p) would drop. Project after assembling, as it does.
+    return ss, a, b, np.real(f), np.real(p), stab, eig, A, B
 
 
 def _assert_same(got, want):
@@ -109,6 +111,26 @@ def test_python_wrapper_carries_the_native_outputs(path):
         sol.B,
     )
     _assert_same(got, _staged(compiled, par, seed))
+
+
+@pytest.mark.parametrize("path", MODELS)
+def test_policy_is_real(path):
+    """``f``/``p`` leave the solve projected, so no caller collapses them again."""
+    from SymbolicDSGE.core.solver_backend import klein_solve
+
+    compiled, par, seed = _model(path)
+    cfunc = compiled.construct_objective_cfunc()
+
+    _, _, _, f, p, _, _, _, _ = klein_solve1(
+        cfunc.address, seed, par, compiled.n_state, compiled.n_exog
+    )
+    assert f.dtype == np.float64
+    assert p.dtype == np.float64
+
+    sol = klein_solve(cfunc, par, seed, compiled.n_state, n_exog=compiled.n_exog)
+    assert sol.f.dtype == np.float64
+    assert sol.p.dtype == np.float64
+    assert sol.eig.dtype == np.complex128
 
 
 def test_reports_stab_instead_of_raising():

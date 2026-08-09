@@ -18,7 +18,7 @@ from ..shock_native import build_native_plan, validate_shock_specs
 from .utils import (
     NDF,
     FloatInputBinding,
-    _f64,
+    _flat_f64,
     _model_params,
     _static_binding,
 )
@@ -86,7 +86,7 @@ def lower_simulation_step(
             n_obs,
             drawn,
         )
-        steady_state = _f64(model.policy.steady_state)
+        steady_state = _flat_f64(model.policy.steady_state)
         initial_state = model._simulation_initial_state(step.kwargs["x0"])
         x0_deviation = initial_state[:n_state] - steady_state[:n_state]
         return native_step, _order2_bindings(
@@ -112,7 +112,7 @@ def _order1_bindings(
     n_exog = model.compiled.n_exog
     bindings: list[FloatInputBinding] = []
     offset = 0
-    for values in (_f64(model.A), _f64(model.B), _f64(x0)):
+    for values in (_flat_f64(model.A), _flat_f64(model.B), _flat_f64(x0)):
         if values.size:
             bindings.append(_static_binding(values, offset))
         offset += values.size
@@ -138,15 +138,15 @@ def _order2_bindings(
         raise ValueError("Native simulation order 2 requires a perturbation solution.")
     n_exog = model.compiled.n_exog
     values_by_layout = (
-        _f64(policy.p),
-        _f64(policy.f),
-        _f64(model.B[: model.compiled.n_state, :]),
-        _f64(policy.hxx),
-        _f64(policy.gxx),
-        _f64(policy.hss),
-        _f64(policy.gss),
-        _f64(steady_state),
-        _f64(x0_deviation),
+        _flat_f64(policy.p),
+        _flat_f64(policy.f),
+        _flat_f64(model.B[: model.compiled.n_state, :]),
+        _flat_f64(policy.hxx),
+        _flat_f64(policy.gxx),
+        _flat_f64(policy.hss),
+        _flat_f64(policy.gss),
+        _flat_f64(steady_state),
+        _flat_f64(x0_deviation),
     )
     bindings: list[FloatInputBinding] = []
     offset = 0

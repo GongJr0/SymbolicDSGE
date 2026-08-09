@@ -23,7 +23,7 @@ from .utils import (
     NDF,
     NDI,
     FloatInputBinding,
-    _f64,
+    _flat_f64,
     _model_params,
     _static_binding,
 )
@@ -87,12 +87,12 @@ def lower_filter_step(
         C, d = interface._get_C_d()
         x0 = _filter_x0(step.kwargs["x0"], n_var)
         before_y = (
-            _f64(interface.A),
-            _f64(interface.B),
-            _f64(C),
-            _f64(d),
-            _f64(interface.Q),
-            _f64(interface.R),
+            _flat_f64(interface.A),
+            _flat_f64(interface.B),
+            _flat_f64(C),
+            _flat_f64(d),
+            _flat_f64(interface.Q),
+            _flat_f64(interface.R),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, sum(v.size for v in before_y), n_obs
@@ -114,11 +114,11 @@ def lower_filter_step(
         x0 = _filter_x0(step.kwargs["x0"], n_var)
         params = _model_params(reference)
         before_y = (
-            _f64(interface.A),
-            _f64(interface.B),
+            _flat_f64(interface.A),
+            _flat_f64(interface.B),
             params,
-            _f64(interface.Q),
-            _f64(interface.R),
+            _flat_f64(interface.Q),
+            _flat_f64(interface.R),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, sum(v.size for v in before_y), n_obs
@@ -153,17 +153,17 @@ def lower_filter_step(
         params = _model_params(reference)
         z0 = interface._build_unscented_z0(step.kwargs["x0"])
         before_y = (
-            _f64(policy.p),
-            _f64(policy.f),
-            _f64(reference.B[:n_state, :]),
-            _f64(policy.hxx),
-            _f64(policy.gxx),
-            _f64(policy.hss),
-            _f64(policy.gss),
-            _f64(policy.steady_state),
+            _flat_f64(policy.p),
+            _flat_f64(policy.f),
+            _flat_f64(reference.B[:n_state, :]),
+            _flat_f64(policy.hxx),
+            _flat_f64(policy.gxx),
+            _flat_f64(policy.hss),
+            _flat_f64(policy.gss),
+            _flat_f64(policy.steady_state),
             params,
-            _f64(interface.Q),
-            _f64(interface.R),
+            _flat_f64(interface.Q),
+            _flat_f64(interface.R),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, sum(v.size for v in before_y), n_obs
@@ -236,7 +236,7 @@ def _filter_source_columns(
 def _filter_x0(value: ArrayLike | None, n_var: int) -> NDF:
     if value is None:
         return np.zeros(n_var, dtype=np.float64)
-    x0 = _f64(np.asarray(value, dtype=np.float64))
+    x0 = _flat_f64(np.asarray(value, dtype=np.float64))
     if x0.size != n_var:
         raise ValueError(f"Filter x0 must have length {n_var}.")
     return x0
@@ -272,7 +272,7 @@ def _filter_bindings(
     bindings: list[FloatInputBinding] = []
     offset = 0
     for values in before_y:
-        flattened = _f64(values)
+        flattened = _flat_f64(values)
         if flattened.size:
             bindings.append(_static_binding(flattened, offset))
         offset += flattened.size
@@ -281,7 +281,7 @@ def _filter_bindings(
     bindings.append(y_binding)
     offset += y_binding.n_rows * y_binding.target_row_stride
     for values in after_y:
-        flattened = _f64(values)
+        flattened = _flat_f64(values)
         if flattened.size:
             bindings.append(_static_binding(flattened, offset))
         offset += flattened.size

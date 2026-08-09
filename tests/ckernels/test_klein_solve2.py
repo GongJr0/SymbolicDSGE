@@ -54,7 +54,7 @@ def _staged(compiled, par, seed, eta):
     ss, a, b, f, p, stab, eig, A, B = klein_solve1(
         addr, seed, par, n_state, compiled.n_exog
     )
-    gx, hx = np.real(f), np.real(p)
+    gx, hx = f, p  # klein_solve1 already projects
     f_xx = bicomplex_hessian(bc_addr, ss, par, n_eq)
     gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
     gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)

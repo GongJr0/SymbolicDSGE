@@ -4,12 +4,6 @@ import numpy as np
 from typing import Any
 
 
-class ComplexMatrixError(Exception):
-    def __init__(self, *args: Any) -> None:
-        message = f"Matrix '{args[0]}' has significant imaginary parts (max abs imag: {args[1]})."
-        super().__init__(message)
-
-
 class ShapeMismatchError(Exception):
     def __init__(self, *args: Any) -> None:
         message = f"Matrix '{args[0]}' has incompatible shape. Expected: {args[1]}, got: {args[2]}."
@@ -29,8 +23,10 @@ class MemoryAllocationError(Exception):
 
 
 class ErrorCode(IntEnum):
+    """Mirrors the KF_* codes in _ckernels/kalman/kalman.h. -1 is unassigned:
+    it was a complex-matrix rejection the kernel never raised."""
+
     SUCCESS = 0
-    COMPLEX_MATRIX = -1
     SHAPE_MISMATCH = -2
     MATRIX_CONDITION = -3
     LINALG_ERROR = -4
@@ -38,9 +34,7 @@ class ErrorCode(IntEnum):
 
 
 def get_error_constructor(code: ErrorCode) -> type[Exception]:
-    if code == ErrorCode.COMPLEX_MATRIX:
-        return ComplexMatrixError
-    elif code == ErrorCode.SHAPE_MISMATCH:
+    if code == ErrorCode.SHAPE_MISMATCH:
         return ShapeMismatchError
     elif code == ErrorCode.MATRIX_CONDITION:
         return MatrixConditionError

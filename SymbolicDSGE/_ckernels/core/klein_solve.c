@@ -56,24 +56,43 @@ static inline arena_size sdsge_max_arena(const arena_size a,
   return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
 }
 
-arena_size sdsge_klein_solve1_arena_size(const i64 n_var, const i64 n_state,
-                                         const i64 n_ctrl, const i64 n_par) {
+/* f64 head reserved for the complex f/p the post-proc emits, which must outlive
+ * the post-proc's own scratch: the state-space assembly reads them after it. */
+static inline i64 sdsge_solve1_fp_reserve(const i64 n_state, const i64 n_ctrl) {
+  return 2 * (n_ctrl * n_state + n_state * n_state);
+}
+
+/* Stage max only. The reserve is added once by the public sizers, so it is never
+ * folded into a max and then compared against a later stage. */
+static inline arena_size sdsge_solve1_stage_arena(const i64 n_var,
+                                                  const i64 n_state,
+                                                  const i64 n_ctrl,
+                                                  const i64 n_par) {
   arena_size size = sdsge_newton_arena_size(n_var, n_par);
   size = sdsge_max_arena(size, klein_preproc_arena_size(n_var, n_par, n_var));
   size = sdsge_max_arena(size, klein_qz_arena_size(n_var));
   return sdsge_max_arena(size, klein_postproc_arena_size(n_state, n_ctrl));
 }
 
+arena_size sdsge_klein_solve1_arena_size(const i64 n_var, const i64 n_state,
+                                         const i64 n_ctrl, const i64 n_par) {
+  arena_size size = sdsge_solve1_stage_arena(n_var, n_state, n_ctrl, n_par);
+  size.n_float += sdsge_solve1_fp_reserve(n_state, n_ctrl);
+  return size;
+}
+
 arena_size sdsge_sgu_klein_solve2_arena_size(const i64 n_var, const i64 n_state,
                                              const i64 n_ctrl, const i64 n_par,
                                              const i64 n_exog) {
-  arena_size size =
-      sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par);
+  arena_size size = sdsge_solve1_stage_arena(n_var, n_state, n_ctrl, n_par);
   size = sdsge_max_arena(
       size, sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_var));
   size = sdsge_max_arena(size, sdsge_second_order_arena_size(n_var, n_state));
-  return sdsge_max_arena(
+  size = sdsge_max_arena(
       size, sdsge_second_order_risk_arena_size(n_var, n_state, n_exog));
+  /* Second-order stages run past the same head: solve1 is nested inside. */
+  size.n_float += sdsge_solve1_fp_reserve(n_state, n_ctrl);
+  return size;
 }
 
 i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out,
@@ -84,25 +103,32 @@ i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out,
    * linearize there. A gap model (ss = 0) seeds at 0 and converges in one step;
    * a params draw with no steady state fails and is rejected as infeasible. */
   i64 iters = 0;
+  f64 *stage = arena + sdsge_solve1_fp_reserve(spec->n_state, spec->n_ctrl);
   const i64 rc = sdsge_steady_state_newton(
       spec->residual, spec->ss_seed, spec->params, n, spec->n_par,
-      SDSGE_SS_MAX_ITER, SDSGE_SS_TOL, out->ss, &iters, arena, iarena);
+      SDSGE_SS_MAX_ITER, SDSGE_SS_TOL, out->ss, &iters, stage, iarena);
   if (rc != SDSGE_NEWTON_OK) {
     return rc;
   }
 
   klein_preproc(spec->residual, out->ss, spec->params, n, spec->n_par, n,
-                out->a_real, out->b_real, arena);
+                out->a_real, out->b_real, stage);
   return SDSGE_KLEIN_SOLVE_OK;
 }
 
 i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
                             f64 *arena, i64 *iarena) {
   const i64 n = spec->n_var;
+  const i64 n_fp = spec->n_ctrl * spec->n_state;
+
+  /* Complex f/p in the arena head, stages past it. */
+  c128 *f_cplx = (c128 *)arena;
+  c128 *p_cplx = f_cplx + n_fp;
+  f64 *stage = arena + sdsge_solve1_fp_reserve(spec->n_state, spec->n_ctrl);
 
   sdsge_to_complex_colmajor(out->a_real, out->s, n);
   sdsge_to_complex_colmajor(out->b_real, out->t, n);
-  if (klein_qz(spec->zgges, n, out->s, out->t, out->z, arena, iarena) !=
+  if (klein_qz(spec->zgges, n, out->s, out->t, out->z, stage, iarena) !=
       KLEIN_QZ_OK) {
     return SDSGE_KLEIN_SOLVE_QZ;
   }
@@ -113,7 +139,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   sdsge_transpose_sq(out->z, n);
 
   switch (klein_postproc(out->s, out->t, out->z, spec->n_state, spec->n_ctrl,
-                         out->f, out->p, &out->stab, out->eig, arena, iarena)) {
+                         f_cplx, p_cplx, &out->stab, out->eig, stage, iarena)) {
   case SDSGE_KLEIN_POSTPROC_SUCCESS:
     break;
   case SDSGE_KLEIN_POSTPROC_INVALID:
@@ -122,7 +148,15 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
     return SDSGE_KLEIN_SOLVE_SINGULAR;
   }
 
-  sdsge_assemble_state_space(out->p, out->f, spec->n_state, spec->n_ctrl,
+  if (spec->n_ctrl > 0) {
+    sdsge_real_part(f_cplx, out->f, n_fp);
+  }
+  sdsge_real_part(p_cplx, out->p, spec->n_state * spec->n_state);
+
+  /* Assembly stays complex: A's control block is Re(f @ p), which is not
+   * Re(f) @ Re(p). The cross term is roundoff here and load-bearing in the
+   * kernel's own parity test. */
+  sdsge_assemble_state_space(p_cplx, f_cplx, spec->n_state, spec->n_ctrl,
                              spec->n_exog, out->A, out->B);
   return SDSGE_KLEIN_SOLVE_OK;
 }
@@ -145,25 +179,22 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
     return rc;
   }
 
-  /* The tensors are real; p/f carry ~1e-16 imaginary roundoff from the complex
-   * Schur form. */
-  sdsge_real_part(out1->p, out2->hx_real, s1->n_state * s1->n_state);
-  sdsge_real_part(out1->f, out2->gx_real, s1->n_ctrl * s1->n_state);
+  f64 *stage = arena + sdsge_solve1_fp_reserve(s1->n_state, s1->n_ctrl);
   sdsge_bx_from_B(out1->B, s1->n_state, s1->n_exog, out2->bx);
 
   sdsge_bicomplex_hessian(spec->bc_residual, out1->ss, s1->params, s1->n_var,
-                          s1->n_par, s1->n_var, out2->f_xx, arena);
+                          s1->n_par, s1->n_var, out2->f_xx, stage);
 
-  if (sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx, out2->gx_real,
-                         out2->hx_real, s1->n_var, s1->n_state, out2->gxx,
-                         out2->hxx, arena, iarena) != SDSGE_SECOND_ORDER_OK) {
+  if (sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx, out1->f,
+                         out1->p, s1->n_var, s1->n_state, out2->gxx, out2->hxx,
+                         stage, iarena) != SDSGE_SECOND_ORDER_OK) {
     return SDSGE_KLEIN_SOLVE_SECOND_ORDER;
   }
 
-  if (sdsge_second_order_risk(out1->a_real, out1->b_real, out2->f_xx,
-                              out2->gx_real, out2->gxx, out2->eta, s1->n_var,
-                              s1->n_state, s1->n_exog, out2->gss, out2->hss,
-                              arena, iarena) != SDSGE_SECOND_ORDER_OK) {
+  if (sdsge_second_order_risk(out1->a_real, out1->b_real, out2->f_xx, out1->f,
+                              out2->gxx, out2->eta, s1->n_var, s1->n_state,
+                              s1->n_exog, out2->gss, out2->hss, stage,
+                              iarena) != SDSGE_SECOND_ORDER_OK) {
     return SDSGE_KLEIN_SOLVE_RISK;
   }
   return SDSGE_KLEIN_SOLVE_OK;

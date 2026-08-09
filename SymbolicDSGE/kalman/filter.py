@@ -1,7 +1,6 @@
 from .._ckernels.kalman import kalman_hot_loop, ukf_hot_loop, ekf_hot_loop
 from .errors import (
     ErrorCode,
-    ComplexMatrixError,
     ShapeMismatchError,
     get_error_constructor,
 )
@@ -10,17 +9,14 @@ from numba import njit
 import numpy as np
 from numpy import (
     float64,
-    complex128,
     eye,
     zeros,
-    real_if_close,
 )
 from numpy.typing import NDArray
 
 from typing import Tuple, NamedTuple
 
 NDF = NDArray[float64]
-NDC = NDArray[complex128]
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,16 +120,6 @@ def _unscented_filter_result_from_raw(
     )
 
 
-def _get_real(mat: NDC | NDF, name: str, tol: float = 1e8) -> NDF:
-    """
-    Convert a complex matrix to a real matrix if the imaginary parts are negligible.
-    """
-    res = real_if_close(mat, tol=tol)
-    if np.iscomplexobj(res):
-        raise ComplexMatrixError(name, np.max(np.abs(res.imag)))  # pyright: ignore
-    return res
-
-
 def _shape_validate(
     A: NDF,
     B: NDF,
@@ -168,18 +154,17 @@ def _sym(P: NDF) -> NDF:
 
 # Static & Parametrized Kalman Filter (written to act with SolvedModel object attributes)
 class KalmanFilter:
-    _get_real = staticmethod(_get_real)
     _shape_validate = staticmethod(_shape_validate)
 
     @staticmethod
     def run_raw(
-        A: NDF | NDC,
-        B: NDF | NDC,
-        C: NDF | NDC,
-        d: NDF | NDC,
-        Q: NDF | NDC,
-        R: NDF | NDC,
-        y: NDF | NDC,
+        A: NDF,
+        B: NDF,
+        C: NDF,
+        d: NDF,
+        Q: NDF,
+        R: NDF,
+        y: NDF,
         x0: NDF | None = None,
         P0: NDF | None = None,
         return_shocks: bool = False,
@@ -188,17 +173,6 @@ class KalmanFilter:
         _store_history: bool = True,
         _raise_on_error: bool = True,
     ) -> FilterRawResult:
-
-        # Get reals if needed
-        A = _get_real(A, "A")
-        B = _get_real(B, "B")
-        C = _get_real(C, "C")
-
-        d = _get_real(d, "d").reshape(-1)
-        Q = _get_real(Q, "Q")
-        R = _get_real(R, "R")
-
-        y = _get_real(y, "y")
 
         T, m = y.shape  # T: time steps, m: obs dim
         n = A.shape[0]  # n: state dim
@@ -214,16 +188,8 @@ class KalmanFilter:
             nmk=(n, m, k),
         )
 
-        x_prev = (
-            _get_real(x0, "x0").reshape(n)
-            if x0 is not None
-            else np.zeros((n,), dtype=float64)
-        )
-        P_prev = (
-            _get_real(P0, "P0").reshape(n, n)
-            if P0 is not None
-            else eye(n, dtype=float64) * 1e2
-        )
+        x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
+        P_prev = P0.reshape(n, n) if P0 is not None else eye(n, dtype=float64) * 1e2
 
         if symmetrize:
             P_prev = _sym(P_prev)
@@ -279,13 +245,13 @@ class KalmanFilter:
 
     @staticmethod
     def run(
-        A: NDF | NDC,
-        B: NDF | NDC,
-        C: NDF | NDC,
-        d: NDF | NDC,
-        Q: NDF | NDC,
-        R: NDF | NDC,
-        y: NDF | NDC,
+        A: NDF,
+        B: NDF,
+        C: NDF,
+        d: NDF,
+        Q: NDF,
+        R: NDF,
+        y: NDF,
         x0: NDF | None = None,
         P0: NDF | None = None,
         return_shocks: bool = False,
@@ -293,6 +259,7 @@ class KalmanFilter:
         jitter: float = 0.0,
         _store_history: bool = True,
     ) -> FilterResult:
+
         return _filter_result_from_raw(
             KalmanFilter.run_raw(
                 A=A,
@@ -314,20 +281,20 @@ class KalmanFilter:
     @staticmethod
     def run_unscented_raw(
         meas_addr: int,
-        hx: NDF | NDC,
-        gx: NDF | NDC,
-        bx: NDF | NDC,
-        hxx: NDF | NDC,
-        gxx: NDF | NDC,
-        hss: NDF | NDC,
-        gss: NDF | NDC,
-        steady_state: NDF | NDC,
-        calib_params: NDF | NDC,
-        Q: NDF | NDC,
-        R: NDF | NDC,
-        y: NDF | NDC,
-        z0: NDF | NDC,
-        P0: NDF | NDC,
+        hx: NDF,
+        gx: NDF,
+        bx: NDF,
+        hxx: NDF,
+        gxx: NDF,
+        hss: NDF,
+        gss: NDF,
+        steady_state: NDF,
+        calib_params: NDF,
+        Q: NDF,
+        R: NDF,
+        y: NDF,
+        z0: NDF,
+        P0: NDF,
         alpha: float = 1.0,
         beta: float = 2.0,
         kappa: float = 1.0,
@@ -338,22 +305,6 @@ class KalmanFilter:
     ) -> UnscentedFilterRawResult:
         if meas_addr == 0:
             raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
-
-        hx = _get_real(hx, "hx")
-        bx = _get_real(bx, "bx")
-        hxx = _get_real(hxx, "hxx")
-        hss = _get_real(hss, "hss").reshape(-1)
-        steady_state = _get_real(steady_state, "steady_state").reshape(-1)
-        calib_params = _get_real(calib_params, "calib_params").reshape(-1)
-        Q_real: NDF = _get_real(Q, "Q")  # narrow for mypy
-        R_real: NDF = _get_real(R, "R")  # narrow for mypy
-        y = _get_real(y, "y")
-        z0 = _get_real(z0, "z0").reshape(-1)
-        P0_real: NDF = _get_real(P0, "P0")  # narrow for mypy
-
-        gx = _get_real(gx, "gx")
-        gxx = _get_real(gxx, "gxx")
-        gss = _get_real(gss, "gss").reshape(-1)
 
         if hx.ndim != 2 or hx.shape[0] != hx.shape[1]:
             raise ShapeMismatchError("hx", "(n_state, n_state)", str(hx.shape))
@@ -402,9 +353,9 @@ class KalmanFilter:
             raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
 
         if symmetrize:
-            Q_real = _sym(Q)  # pyright: ignore
-            R_real = _sym(R)  # pyright: ignore
-            P0_real = _sym(P0)  # pyright: ignore
+            Q = _sym(Q)  # pyright: ignore
+            R = _sym(R)  # pyright: ignore
+            P0 = _sym(P0)  # pyright: ignore
 
         err, out = ukf_hot_loop(
             meas_addr,
@@ -417,11 +368,11 @@ class KalmanFilter:
             gss,
             steady_state,
             calib_params,
-            Q_real,
-            R_real,
+            Q,
+            R,
             y,
             z0,
-            P0_real,
+            P0,
             alpha,
             beta,
             kappa,
@@ -472,20 +423,20 @@ class KalmanFilter:
     @staticmethod
     def run_unscented(
         meas_addr: int,
-        hx: NDF | NDC,
-        gx: NDF | NDC,
-        bx: NDF | NDC,
-        hxx: NDF | NDC,
-        gxx: NDF | NDC,
-        hss: NDF | NDC,
-        gss: NDF | NDC,
-        steady_state: NDF | NDC,
-        calib_params: NDF | NDC,
-        Q: NDF | NDC,
-        R: NDF | NDC,
-        y: NDF | NDC,
-        z0: NDF | NDC,
-        P0: NDF | NDC,
+        hx: NDF,
+        gx: NDF,
+        bx: NDF,
+        hxx: NDF,
+        gxx: NDF,
+        hss: NDF,
+        gss: NDF,
+        steady_state: NDF,
+        calib_params: NDF,
+        Q: NDF,
+        R: NDF,
+        y: NDF,
+        z0: NDF,
+        P0: NDF,
         alpha: float = 1.0,
         beta: float = 2.0,
         kappa: float = 1.0,
@@ -523,12 +474,12 @@ class KalmanFilter:
     def run_extended_raw(
         meas_addr: int,
         jac_addr: int,
-        A: NDF | NDC,
-        B: NDF | NDC,
+        A: NDF,
+        B: NDF,
         calib_params: NDF,
-        Q: NDF | NDC,
-        R: NDF | NDC,
-        y: NDF | NDC,
+        Q: NDF,
+        R: NDF,
+        y: NDF,
         x0: NDF | None = None,
         P0: NDF | None = None,
         return_shocks: bool = False,
@@ -555,10 +506,10 @@ class KalmanFilter:
             - Process noise is in "shock space": Q is (k, k), B is (n, k)
 
         :param A: State transition matrix with shape (n, n).
-        :type A: NDF | NDC
+        :type A: NDF
 
         :param B: Shock loading matrix with shape (n, k).
-        :type B: NDF | NDC
+        :type B: NDF
 
         :param h: Nonlinear measurement function. Accepts (x, t) and returns y_pred with shape (m,).
         :type h: Callable[[NDF, int], NDF]
@@ -567,13 +518,13 @@ class KalmanFilter:
         :type H_jac: Callable[[NDF, int], NDF]
 
         :param Q: Shock covariance matrix with shape (k, k).
-        :type Q: NDF | NDC
+        :type Q: NDF
 
         :param R: Measurement-noise covariance matrix with shape (m, m).
-        :type R: NDF | NDC
+        :type R: NDF
 
         :param y: Observations array with shape (T, m).
-        :type y: NDF | NDC
+        :type y: NDF
 
         :param x0: Optional initial state mean x_{0|0} with shape (n,). Defaults to zeros.
         :type x0: NDF | None
@@ -595,13 +546,6 @@ class KalmanFilter:
         :type compute_y_filt: bool
         """
 
-        # Real-ify numeric inputs
-        A = _get_real(A, "A")
-        B = _get_real(B, "B")
-        Q = _get_real(Q, "Q")
-        R = _get_real(R, "R")
-        y = _get_real(y, "y")
-
         _, m = y.shape
         n = A.shape[0]
         k = B.shape[1]
@@ -617,16 +561,8 @@ class KalmanFilter:
             nmk=(n, m, k),
         )
 
-        x0 = (
-            _get_real(x0, "x0").reshape(n)
-            if x0 is not None
-            else zeros((n,), dtype=float64)
-        )
-        P0 = (
-            _get_real(P0, "P0").reshape(n, n)
-            if P0 is not None
-            else eye(n, dtype=float64) * 1e2
-        )
+        x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
+        P0 = P0.reshape(n, n) if P0 is not None else eye(n, dtype=float64) * 1e2
         if symmetrize:
             P0 = _sym(P0)
 
@@ -684,12 +620,12 @@ class KalmanFilter:
     def run_extended(
         meas_addr: int,
         jac_addr: int,
-        A: NDF | NDC,
-        B: NDF | NDC,
+        A: NDF,
+        B: NDF,
         calib_params: NDF,
-        Q: NDF | NDC,
-        R: NDF | NDC,
-        y: NDF | NDC,
+        Q: NDF,
+        R: NDF,
+        y: NDF,
         x0: NDF | None = None,
         P0: NDF | None = None,
         return_shocks: bool = False,

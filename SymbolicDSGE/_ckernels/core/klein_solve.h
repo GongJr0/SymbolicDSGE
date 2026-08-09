@@ -20,7 +20,12 @@ typedef struct {
   i64 n_par;
 } klein_spec;
 
-/* First-order Klein solve outputs; every buffer is caller-owned. */
+/* First-order Klein solve outputs; every buffer is caller-owned.
+ *
+ * `f` and `p` are real. The Schur algebra that produces them is complex, but
+ * its imaginary parts are roundoff on a real pencil and no consumer has ever
+ * read them, so the projection happens once here rather than at each use. The
+ * complex originals live in the arena and do not outlive the solve. */
 typedef struct {
   f64 *ss;     /* n_var: Newton-resolved steady state (from ss_seed) */
   f64 *a_real; /* n_var*n_var */
@@ -28,17 +33,19 @@ typedef struct {
   c128 *s;     /* n_var*n_var */
   c128 *t;     /* n_var*n_var */
   c128 *z;     /* n_var*n_var */
-  c128 *f;     /* n_ctrl*n_state, or NULL when n_ctrl == 0 */
-  c128 *p;     /* n_state*n_state */
+  f64 *f;      /* n_ctrl*n_state, or NULL when n_ctrl == 0 */
+  f64 *p;      /* n_state*n_state */
   c128 *eig;   /* n_var */
   i64 stab;
   f64 *A; /* n_var*n_var */
   f64 *B; /* n_var*n_exog */
 } sdsge_solve1;
 
-/* Scratch for a whole first-order solve: the componentwise max over its stages,
- * which run one after another off the same buffer. `arena` holds n_float f64,
- * `iarena` n_int i64; both are caller-owned and may be reused across solves. */
+/* Scratch for a whole first-order solve: a reserved head holding the complex
+ * `f`/`p` the Schur post-proc emits, then the componentwise max over the
+ * stages, which run one after another off the buffer past that head. `arena`
+ * holds n_float f64, `iarena` n_int i64; both are caller-owned and may be
+ * reused across solves. */
 arena_size sdsge_klein_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
                                          i64 n_par);
 
@@ -71,12 +78,13 @@ typedef struct {
 /* Second-order solve buffers, all caller-owned. Outputs except `eta`, which is
  * an input: the shock loading (chol of the shock covariance in the leading
  * n_exog rows) is refactored only when that covariance moves, and only the
- * caller knows whether it did. */
+ * caller knows whether it did.
+ *
+ * The first-order rules the SGU tensors are built from are `sdsge_solve1.p` and
+ * `.f`, which are already real; this struct does not restate them. */
 typedef struct {
-  f64 *f_xx;    /* n_var*(2*n_var)*(2*n_var) */
-  f64 *hx_real; /* n_state*n_state */
-  f64 *gx_real; /* n_ctrl*n_state */
-  f64 *bx;      /* n_state*n_exog */
+  f64 *f_xx; /* n_var*(2*n_var)*(2*n_var) */
+  f64 *bx;   /* n_state*n_exog */
   f64 *eta;     /* n_state*n_exog, caller-filled */
   f64 *gxx;     /* n_ctrl*n_state*n_state */
   f64 *hxx;     /* n_state*n_state*n_state */
@@ -84,9 +92,9 @@ typedef struct {
   f64 *hss;     /* n_state */
 } sdsge_solve2;
 
-/* sdsge_klein_solve1, then the second-order tail: real p/f, the state rows of
- * B, the bicomplex Hessian at the resolved steady state, the SGU tensors and
- * the sigma^2 risk correction. Every first-order output stays in `out1`.
+/* sdsge_klein_solve1, then the second-order tail: the state rows of B, the
+ * bicomplex Hessian at the resolved steady state, the SGU tensors and the
+ * sigma^2 risk correction. Every first-order output stays in `out1`.
  *
  * out1->stab is reported, never acted on, exactly as at first order. */
 arena_size sdsge_sgu_klein_solve2_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,

@@ -89,8 +89,8 @@ cdef extern from "estimation.h":
         c128 *s
         c128 *t
         c128 *z
-        c128 *f
-        c128 *p
+        double *f
+        double *p
         c128 *eig
         int64_t stab
         double *A
@@ -137,8 +137,6 @@ cdef extern from "estimation.h":
 
     ctypedef struct sdsge_solve2:
         double *f_xx
-        double *hx_real
-        double *gx_real
         double *bx
         double *eta
         double *gxx
@@ -304,8 +302,8 @@ def obj_linear_base(
     s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
-    p = np.empty((n_state, n_state), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.float64)
+    p = np.empty((n_state, n_state), dtype=np.float64)
     eig = np.empty(n_var, dtype=np.complex128)
     x0 = np.zeros(n_var, dtype=np.float64)
     A = np.empty((n_var, n_var), dtype=np.float64)
@@ -320,8 +318,8 @@ def obj_linear_base(
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
+    cdef double[:, ::1] fv = f
+    cdef double[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
     cdef double[::1] x0v = x0
     cdef double[:, ::1] Av = A
@@ -401,8 +399,8 @@ def obj_linear_base(
     ctx.solve.s = <c128*>&sv[0, 0]
     ctx.solve.t = <c128*>&tv[0, 0]
     ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = <c128*>&fv[0, 0]
-    ctx.solve.p = <c128*>&pv[0, 0]
+    ctx.solve.f = &fv[0, 0]
+    ctx.solve.p = &pv[0, 0]
     ctx.solve.eig = <c128*>&eigv[0]
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
@@ -453,8 +451,8 @@ def obj_extended_base(
     s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
-    p = np.empty((n_state, n_state), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.float64)
+    p = np.empty((n_state, n_state), dtype=np.float64)
     eig = np.empty(n_var, dtype=np.complex128)
     x0 = np.zeros(n_var, dtype=np.float64)
     A = np.empty((n_var, n_var), dtype=np.float64)
@@ -467,8 +465,8 @@ def obj_extended_base(
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
+    cdef double[:, ::1] fv = f
+    cdef double[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
     cdef double[::1] x0v = x0
     cdef double[:, ::1] Av = A
@@ -546,8 +544,8 @@ def obj_extended_base(
     ctx.solve.s = <c128*>&sv[0, 0]
     ctx.solve.t = <c128*>&tv[0, 0]
     ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = <c128*>&fv[0, 0]
-    ctx.solve.p = <c128*>&pv[0, 0]
+    ctx.solve.f = &fv[0, 0]
+    ctx.solve.p = &pv[0, 0]
     ctx.solve.eig = <c128*>&eigv[0]
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
@@ -597,8 +595,8 @@ def obj_unscented_base(
     s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
     z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
-    p = np.empty((n_state, n_state), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.float64)
+    p = np.empty((n_state, n_state), dtype=np.float64)
     eig = np.empty(n_var, dtype=np.complex128)
     x0 = np.zeros(n_var, dtype=np.float64)
     A = np.empty((n_var, n_var), dtype=np.float64)
@@ -606,8 +604,6 @@ def obj_unscented_base(
 
     # Second-order scratch.
     f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
-    hx_real = np.empty((n_state, n_state), dtype=np.float64)
-    gx_real = np.empty((n_ctrl, n_state), dtype=np.float64)
     bx = np.empty((n_state, n_exog), dtype=np.float64)
     gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
@@ -632,16 +628,14 @@ def obj_unscented_base(
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
+    cdef double[:, ::1] fv = f
+    cdef double[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
     cdef double[::1] x0v = x0
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
 
     cdef double[:, :, ::1] fxxv = f_xx
-    cdef double[:, ::1] hxrv = hx_real
-    cdef double[:, ::1] gxrv = gx_real
     cdef double[:, ::1] bxv = bx
     cdef double[:, ::1] etav = eta
     cdef double[:, :, ::1] gxxv = gxx
@@ -724,15 +718,13 @@ def obj_unscented_base(
     ctx.solve.s = <c128*>&sv[0, 0]
     ctx.solve.t = <c128*>&tv[0, 0]
     ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = <c128*>&fv[0, 0]
-    ctx.solve.p = <c128*>&pv[0, 0]
+    ctx.solve.f = &fv[0, 0]
+    ctx.solve.p = &pv[0, 0]
     ctx.solve.eig = <c128*>&eigv[0]
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
 
     ctx.solve2.f_xx = &fxxv[0, 0, 0]
-    ctx.solve2.hx_real = &hxrv[0, 0]
-    ctx.solve2.gx_real = &gxrv[0, 0]
     ctx.solve2.bx = &bxv[0, 0]
     ctx.solve2.eta = &etav[0, 0]
     ctx.solve2.gxx = &gxxv[0, 0, 0]
@@ -906,14 +898,14 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
-    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
-    p = np.empty((n_state, n_state), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.float64)
+    p = np.empty((n_state, n_state), dtype=np.float64)
     eig = np.empty(n_var, dtype=np.complex128)
     nc.keep.append(f)
     nc.keep.append(p)
     nc.keep.append(eig)
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
+    cdef double[:, ::1] fv = f
+    cdef double[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
@@ -930,8 +922,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
 
     # Unscented-only second-order scratch (allocated in that branch).
     cdef double[:, :, ::1] fxxv
-    cdef double[:, ::1] hxrv
-    cdef double[:, ::1] gxrv
     cdef double[:, ::1] bxv
     cdef double[:, :, ::1] gxxv
     cdef double[:, :, ::1] hxxv
@@ -1224,8 +1214,8 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     s1.s = <c128*>&sv[0, 0]
     s1.t = <c128*>&tv[0, 0]
     s1.z = <c128*>&zv[0, 0]
-    s1.f = <c128*>&fv[0, 0]
-    s1.p = <c128*>&pv[0, 0]
+    s1.f = &fv[0, 0]
+    s1.p = &pv[0, 0]
     s1.eig = <c128*>&eigv[0]
     s1.A = &Av[0, 0]
     s1.B = &Bv[0, 0]
@@ -1236,8 +1226,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         nc.lctx.d = &dv[0]
     elif mode == "unscented":
         f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
-        hx_real = np.empty((n_state, n_state), dtype=np.float64)
-        gx_real = np.empty((n_ctrl, n_state), dtype=np.float64)
         bx = np.empty((n_state, n_exog), dtype=np.float64)
         gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
         hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
@@ -1251,12 +1239,9 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
                 np.asarray(qs.constant, dtype=np.float64).reshape(n_exog, n_exog)
             )
         z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
-        for _a in (f_xx, hx_real, gx_real, bx, gxx, hxx,
-                   gss, hss, eta, z0):
+        for _a in (f_xx, bx, gxx, hxx, gss, hss, eta, z0):
             nc.keep.append(_a)
         fxxv = f_xx
-        hxrv = hx_real
-        gxrv = gx_real
         bxv = bx
         gxxv = gxx
         hxxv = hxx
@@ -1265,8 +1250,6 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         etav = eta
         z0v = z0
         nc.uctx.solve2.f_xx = &fxxv[0, 0, 0]
-        nc.uctx.solve2.hx_real = &hxrv[0, 0]
-        nc.uctx.solve2.gx_real = &gxrv[0, 0]
         nc.uctx.solve2.bx = &bxv[0, 0]
         nc.uctx.solve2.eta = &etav[0, 0]
         nc.uctx.solve2.gxx = &gxxv[0, 0, 0]

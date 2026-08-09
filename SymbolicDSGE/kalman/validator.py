@@ -105,9 +105,18 @@ def validate_kf_inputs(
         ("Q", Q, 2),
         ("R", R, 2),
         ("y", y, 2),
+        ("x0", x0, 1),
+        ("P0", P0, 2),
     ]:
+        if M is None:
+            continue
+
         if not isinstance(M, np.ndarray):
             raise TypeError(f"{name} must be a numpy ndarray, got {type(M).__name__}.")
+
+        if M.dtype != np.float64:
+            raise TypeError(f"{name} must be float64, got {M.dtype}.")
+
         if M.ndim != nd:
             raise ValueError(f"{name} must be {nd}D, got shape {M.shape}.")
 
@@ -131,11 +140,15 @@ def validate_kf_inputs(
 
         if not isinstance(C, np.ndarray):
             raise TypeError(f"C must be a numpy ndarray, got {type(C).__name__}.")
+        if C.dtype != np.float64:
+            raise TypeError(f"C must be float64, got {C.dtype}.")
         if C.ndim != 2:
             raise ValueError(f"C must be 2D, got shape {C.shape}.")
 
         if not isinstance(d, np.ndarray):
             raise TypeError(f"d must be a numpy ndarray, got {type(d).__name__}.")
+        if d.dtype != np.float64:
+            raise TypeError(f"d must be float64, got {d.dtype}.")
         if d.ndim not in (1, 2):
             raise ValueError(f"d must be 1D or 2D, got shape {d.shape}.")
 
@@ -322,6 +335,8 @@ def validate_ukf_inputs(
             continue
         if not isinstance(M, np.ndarray):
             raise TypeError(f"{name} must be a numpy ndarray, got {type(M).__name__}.")
+        if M.dtype != np.float64:
+            raise TypeError(f"{name} must be float64, got {M.dtype}.")
         if M.ndim != 2 or M.shape[0] != M.shape[1]:
             raise ValueError(f"{name} must be a square 2D matrix. Got shape {M.shape}.")
         if not np.isfinite(M).all():

@@ -20,7 +20,6 @@ from ..mc_constructs import MCStep
 from .utils import (
     NDF,
     FloatInputBinding,
-    _array_f64,
     _selected_shape,
     _source_binding,
 )
@@ -141,7 +140,7 @@ def _lower_wald_step(
 
 
 def _wald_target(value: object, q: int, kind: int) -> NDF:
-    target = _array_f64(np.asarray(value, dtype=np.float64))
+    target = np.asarray(value, dtype=np.float64)
     if kind == 0:
         if target.ndim != 1 or target.shape[0] != q:
             raise ValueError("Wald mean target must have one value per source column.")

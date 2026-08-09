@@ -108,7 +108,7 @@ Eigenvalues:  [0.28018451+0.j 0.83      +0.j 0.85      +0.j 2.60451546+0.j
  1.18546572+0.j] (1)
 ```
 </div>
-1. Complex numbers are an artifact of the ordered Schur solve. All relevant matrices are cast to reals with `#!python np.real_if_close`
+1. Eigenvalues stay complex because the ordered Schur solve makes the imaginary part meaningful here. The policy matrices are not: `#!python sol.policy.p` and `#!python sol.policy.f` are real, projected once inside the solve.
 
 ## Inspecting Model Dynamics
 
@@ -254,9 +254,9 @@ plt.tight_layout()
 
 This guide covers the basic capabilities and usage of `SymbolicDSGE`. Further tools include:
 
-- `SymbolicDSGE.FRED` for easy U.S. macro data retrieval
-- `SymbolicDSGE.math_utils` for basic detrending, HP filters, etc.
-- `SymbolicDSGE.KalmanFilter` for a one-sided Kalman Filter implementation. (standalone as of now but easy model integration interface will be developed)
+- `SymbolicDSGE.utils.FRED` for easy U.S. macro data retrieval
+- `SymbolicDSGE.utils.math_utils` for basic detrending, HP filters, etc.
+- `SymbolicDSGE.kalman` (integrated with `SolvedModel` via `SolvedModel.kalman`) for state estimation and filtering through KF, EKF, and UKF methods.
 
 If you've read to this point and would like to inspect/interact with the code this guide refers to, you can visit [this](../assets/guide_notebook.ipynb) link to the file.
 
