@@ -1,0 +1,110 @@
+# RBC with two occasionally binding constraints, the OccBin parity fixture.
+# Transcribes rbc_occbin.mod (Dynare's own example, itself from Guerrieri and
+# Iacoviello's occbin_20140630 package) equation for equation in natural time.
+#
+#   IRR   irreversible investment: investment cannot fall below phi times its
+#         steady state. Relaxes on the multiplier turning negative, not on the
+#         negation of its own bind condition.
+#   INEG  quadratic capital adjustment costs, charged only while investment is
+#         below steady state. Binds on a small negative threshold rather than
+#         exactly zero, which is Dynare's own numerical fudge.
+#
+# Levels model, NOT auto-linearized: every regime linearizes around the single
+# reference steady state below, which is the defining approximation of the
+# piecewise-linear method.
+#
+# The .mod writes `steady_state(Invest)` inline. There is no such operator here,
+# so the closed-form steady state is carried as parameters and referenced by
+# name. Exact for this model because its steady_state_model block is closed
+# form; a Newton-only model could not be transcribed this way.
+#
+# equations.model is the all-relaxed regime, which the compiler takes as the
+# reference. Dynare selects per equation from bind/relax tags; that algebra is
+# expanded here into one complete replacement set per binding combination, which
+# is what validate_regimes requires. The IRR and IRR+INEG variants of the
+# investment equation are identical in the .mod, so its three-way tag split
+# collapses to two.
+
+name: "RBC_OCCBIN"
+
+variables:
+  a: {ss_seed: a_ss} # a_ss = 0
+  c: {ss_seed: c_ss}
+  invest: {ss_seed: invest_ss}
+  k: {ss_seed: k_ss}
+  lam: {ss_seed: lam_ss} # lam_ss = 0
+  log_k: {ss_seed: log_k_ss}
+  log_invest: {ss_seed: log_invest_ss}
+  log_c: {ss_seed: log_c_ss}
+
+shock_map:
+  eps: a
+
+observables: [log_c_obs]
+
+equations:
+  model:
+    # Euler, the .mod's relax='INEG' variant: no adjustment costs.
+    euler: "-c(t)**(-sigma) + beta*c(t+1)**(-sigma)*(1 - delta + alpha*exp(a(t+1))*k(t)**(alpha - 1)) = -lam(t) + beta*(1 - delta)*lam(t+1)"
+    # Budget, the .mod's relax='INEG' variant.
+    budget: "c(t) + k(t) - (1 - delta)*k(t-1) = exp(a(t))*k(t-1)**alpha"
+    lom_capital: "invest(t) = k(t) - (1 - delta)*k(t-1)"
+    # Investment, the .mod's relax='IRR' variant: the multiplier is idle, so in
+    # the reference regime lam is identically zero.
+    investment: "lam(t) = 0"
+    lom_tfp: "a(t) = rho*a(t-1) + eps"
+    def_log_k: "log_k(t) = log(k(t))"
+    def_log_c: "log_c(t) = log(c(t))"
+    def_log_invest: "log_invest(t) = log(invest(t))"
+
+  constraint:
+    IRR:
+      bind: "log_invest(t) - log_invest_ss < log(phi)"
+      # Asymmetric on purpose: exit is governed by the multiplier, not by the
+      # negation of the entry condition.
+      relax: "lam(t) < 0"
+    INEG:
+      # No relax clause in the .mod either, so this takes the negated bind.
+      bind: "log_invest(t) - log_invest_ss < -0.000001"
+
+  regime:
+    IRR:
+      investment: "log_invest(t) = log(phi*invest_ss)"
+    INEG:
+      euler: "-c(t)**(-sigma)*(1 + 2*psi*(k(t)/k(t-1) - 1)/k(t-1)) + beta*c(t+1)**(-sigma)*((1 - delta) - 2*psi*(k(t+1)/k(t) - 1)*(-k(t+1)/k(t)**2) + alpha*exp(a(t+1))*k(t)**(alpha - 1)) = -lam(t) + beta*(1 - delta)*lam(t+1)"
+      budget: "c(t) + k(t) - (1 - delta)*k(t-1) + psi*(k(t)/k(t-1) - 1)**2 = exp(a(t))*k(t-1)**alpha"
+    "IRR, INEG":
+      euler: "-c(t)**(-sigma)*(1 + 2*psi*(k(t)/k(t-1) - 1)/k(t-1)) + beta*c(t+1)**(-sigma)*((1 - delta) - 2*psi*(k(t+1)/k(t) - 1)*(-k(t+1)/k(t)**2) + alpha*exp(a(t+1))*k(t)**(alpha - 1)) = -lam(t) + beta*(1 - delta)*lam(t+1)"
+      budget: "c(t) + k(t) - (1 - delta)*k(t-1) + psi*(k(t)/k(t-1) - 1)**2 = exp(a(t))*k(t-1)**alpha"
+      investment: "log_invest(t) = log(phi*invest_ss)"
+
+  observables:
+    log_c_obs: log_c(t)
+
+calibration:
+  parameters:
+    beta: 0.96
+    alpha: 0.33
+    delta: 0.10
+    sigma: 2.0
+    rho: 0.9
+    phi: 0.975
+    psi: 5.0
+    sig: 0.015
+    # Reference steady state, closed form from the .mod's steady_state_model:
+    #   k_ss      = ((1/beta - 1 + delta)/alpha)^(1/(alpha - 1))
+    #   c_ss      = k_ss^alpha - delta*k_ss
+    #   invest_ss = delta*k_ss
+    # The log_* entries are the logs of those, a_ss and lam_ss are zero.
+    a_ss: 0.0
+    c_ss: 1.1633520474676697
+    invest_ss: 0.3532878917156419
+    k_ss: 3.5328789171564186
+    lam_ss: 0.0
+    log_k_ss: 1.2621130958271916
+    log_invest_ss: -1.0404719971668541
+    log_c_ss: 0.15130553406526406
+  shocks:
+    std:
+      eps: sig
+    corr: {}
