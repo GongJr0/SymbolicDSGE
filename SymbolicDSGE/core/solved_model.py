@@ -161,7 +161,7 @@ class SolvedModel:
                 raise ValueError(
                     f"x0 must have length {n_state} or {n}, got {raw.shape[0]}."
                 )
-        x0_arr[n_state:] = x0_arr[:n_state] @ np.real_if_close(self.policy.f.T)
+        x0_arr[n_state:] = x0_arr[:n_state] @ self.policy.f.T
         return x0_arr
 
     @staticmethod
@@ -912,8 +912,8 @@ def _simulate_order1(
     )
     X = np.empty((T, model.A.shape[0]), dtype=float64)
     simulate_linear_states_into(
-        asarray(model.A, dtype=float64),
-        asarray(model.B, dtype=float64),
+        model.A,
+        model.B,
         x0_arr,
         shock_mat,
         X,
@@ -921,7 +921,7 @@ def _simulate_order1(
     return X
 
 
-def _policy_array(policy: Any, name: str) -> NDF:
+def _second_order_array(policy: Any, name: str) -> NDF:
     value = getattr(policy, name, None)
     if value is None:
         raise ValueError(f"Second order simulation requires policy.{name}.")
@@ -939,14 +939,14 @@ def _simulate_order2(
     n = model.A.shape[0]
     ny = n - n_state
     policy = model.policy
-    ss = _policy_array(policy, "steady_state")
+    ss = policy.steady_state
     ss_state = ss[:n_state]
 
     if x0 is None:
         x0_state = ss_state
     else:
         x0_state = model._simulation_initial_state(x0)[:n_state]
-    x0_dev = asarray(x0_state - ss_state, dtype=float64)
+    x0_dev = x0_state - ss_state
     shock_mat = model._simulation_shock_matrix(
         T=T,
         shocks=shocks,
@@ -954,13 +954,13 @@ def _simulate_order2(
     )
 
     x_path, y_path = simulate_second_order_pruned(
-        asarray(np.real_if_close(policy.p), dtype=float64),
-        asarray(np.real_if_close(policy.f), dtype=float64),
-        asarray(model.B[:n_state, :], dtype=float64),
-        _policy_array(policy, "hxx"),
-        _policy_array(policy, "gxx"),
-        _policy_array(policy, "hss"),
-        _policy_array(policy, "gss"),
+        policy.p,
+        policy.f,
+        model.B[:n_state, :],
+        _second_order_array(policy, "hxx"),
+        _second_order_array(policy, "gxx"),
+        _second_order_array(policy, "hss"),
+        _second_order_array(policy, "gss"),
         x0_dev,
         shock_mat,
     )

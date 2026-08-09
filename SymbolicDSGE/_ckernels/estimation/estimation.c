@@ -336,8 +336,8 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
 
   f64 ll = 0.0;
   ukf_inputs in = {.meas = b->meas,
-                   .hx = s2->hx_real,
-                   .gx = s2->gx_real,
+                   .hx = s->p,
+                   .gx = s->f,
                    .bx = s2->bx,
                    .hxx = s2->hxx,
                    .gxx = s2->gxx,

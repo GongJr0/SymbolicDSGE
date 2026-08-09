@@ -781,7 +781,7 @@ class DenHaanMarcet:
                 )
 
         n_state = self.solved.compiled.n_state
-        state0[n_state:] = state0[:n_state] @ np.real_if_close(self.solved.policy.f.T)
+        state0[n_state:] = state0[:n_state] @ self.solved.policy.f.T
         return np.ascontiguousarray(state0, dtype=np.float64)
 
     def _prepare_shock_matrix(

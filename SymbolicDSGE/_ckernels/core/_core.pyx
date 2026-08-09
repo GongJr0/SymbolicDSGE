@@ -153,8 +153,8 @@ cdef extern from "klein_solve.h" nogil:
         c128 *s
         c128 *t
         c128 *z
-        c128 *f
-        c128 *p
+        double *f
+        double *p
         c128 *eig
         int64_t stab
         double *A
@@ -166,8 +166,6 @@ cdef extern from "klein_solve.h" nogil:
 
     ctypedef struct sdsge_solve2:
         double *f_xx
-        double *hx_real
-        double *gx_real
         double *bx
         double *eta
         double *gxx
@@ -578,10 +576,12 @@ def klein_solve1(
     ``klein_postprocess`` reads row-major, so staging bridges them by copying
     where the driver transposes in place.
 
-    Returns ``(ss, a, b, f, p, stab, eig, A, B)``. ``a``/``b`` are the pencil the
-    solve linearized at, handed back so a second-order caller need not rebuild
-    it. ``stab`` is reported, never raised on: whether a Blanchard-Kahn
-    stability/uniqueness violation is fatal is the caller's decision.
+    Returns ``(ss, a, b, f, p, stab, eig, A, B)``. ``f``/``p`` are real: the
+    Schur form's imaginary parts are roundoff on a real pencil and the native
+    solve projects them once. ``a``/``b`` are the pencil the solve linearized at,
+    handed back so a second-order caller need not rebuild it. ``stab`` is
+    reported, never raised on: whether a Blanchard-Kahn stability/uniqueness
+    violation is fatal is the caller's decision.
     """
     cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
     cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
@@ -602,8 +602,8 @@ def klein_solve1(
     s = np.empty((n_var, n_var), dtype=np.complex128)
     t = np.empty((n_var, n_var), dtype=np.complex128)
     z = np.empty((n_var, n_var), dtype=np.complex128)
-    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
-    p = np.empty((n_state, n_state), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.float64)
+    p = np.empty((n_state, n_state), dtype=np.float64)
     eig = np.empty(n_var, dtype=np.complex128)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
@@ -614,8 +614,8 @@ def klein_solve1(
     cdef double complex[:, ::1] sv = s
     cdef double complex[:, ::1] tv = t
     cdef double complex[:, ::1] zv = z
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
+    cdef double[:, ::1] fv = f
+    cdef double[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
@@ -638,8 +638,8 @@ def klein_solve1(
     out.s = <c128 *>&sv[0, 0]
     out.t = <c128 *>&tv[0, 0]
     out.z = <c128 *>&zv[0, 0]
-    out.f = <c128 *>&fv[0, 0] if n_ctrl > 0 else NULL
-    out.p = <c128 *>&pv[0, 0]
+    out.f = &fv[0, 0] if n_ctrl > 0 else NULL
+    out.p = &pv[0, 0]
     out.eig = <c128 *>&eigv[0]
     out.stab = 0
     out.A = &Av[0, 0]
@@ -707,15 +707,13 @@ def sgu_klein_solve2(
     s = np.empty((n_var, n_var), dtype=np.complex128)
     t = np.empty((n_var, n_var), dtype=np.complex128)
     z = np.empty((n_var, n_var), dtype=np.complex128)
-    f = np.empty((n_ctrl, n_state), dtype=np.complex128)
-    p = np.empty((n_state, n_state), dtype=np.complex128)
+    f = np.empty((n_ctrl, n_state), dtype=np.float64)
+    p = np.empty((n_state, n_state), dtype=np.float64)
     eig = np.empty(n_var, dtype=np.complex128)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
 
     f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
-    hx_real = np.empty((n_state, n_state), dtype=np.float64)
-    gx_real = np.empty((n_ctrl, n_state), dtype=np.float64)
     bx = np.empty((n_state, n_exog), dtype=np.float64)
     gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
@@ -728,15 +726,13 @@ def sgu_klein_solve2(
     cdef double complex[:, ::1] sv = s
     cdef double complex[:, ::1] tv = t
     cdef double complex[:, ::1] zv = z
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
+    cdef double[:, ::1] fv = f
+    cdef double[:, ::1] pv = p
     cdef double complex[::1] eigv = eig
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
 
     cdef double[:, :, ::1] fxxv = f_xx
-    cdef double[:, ::1] hxrv = hx_real
-    cdef double[:, ::1] gxrv = gx_real
     cdef double[:, ::1] bxv = bx
     cdef double[:, :, ::1] gxxv = gxx
     cdef double[:, :, ::1] hxxv = hxx
@@ -762,8 +758,8 @@ def sgu_klein_solve2(
     out.s = <c128 *>&sv[0, 0]
     out.t = <c128 *>&tv[0, 0]
     out.z = <c128 *>&zv[0, 0]
-    out.f = <c128 *>&fv[0, 0] if n_ctrl > 0 else NULL
-    out.p = <c128 *>&pv[0, 0]
+    out.f = &fv[0, 0] if n_ctrl > 0 else NULL
+    out.p = &pv[0, 0]
     out.eig = <c128 *>&eigv[0]
     out.stab = 0
     out.A = &Av[0, 0]
@@ -771,8 +767,6 @@ def sgu_klein_solve2(
 
     cdef sdsge_solve2 out2
     out2.f_xx = &fxxv[0, 0, 0]
-    out2.hx_real = &hxrv[0, 0]
-    out2.gx_real = &gxrv[0, 0] if n_ctrl > 0 else NULL
     out2.bx = &bxv[0, 0] if n_exog > 0 else NULL
     out2.eta = &etav[0, 0] if n_exog > 0 else NULL
     out2.gxx = &gxxv[0, 0, 0] if n_ctrl > 0 else NULL
@@ -802,8 +796,8 @@ def second_order(a, b, f_xx, gx, hx, int64_t n_state):
     ``(ny, nx)``, ``hx`` ``(nx, nx)``. Returns ``gxx (ny, nx, nx)``,
     ``hxx (nx, nx, nx)``.
 
-    Inputs are coerced to C-contiguous f64 (``gx``/``hx`` arrive as real-part
-    views of the complex Klein solution, so a copy is expected here).
+    Inputs are coerced to C-contiguous f64; ``gx``/``hx`` are the Klein
+    solution's ``f``/``p``, already real.
     """
     cdef double[:, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
     cdef double[:, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)

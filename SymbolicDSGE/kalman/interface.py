@@ -631,11 +631,11 @@ class KalmanInterface(KalmanFilter):
         z0[:n_state] = x0_state
         return z0
 
-    def _policy_array(self, name: str) -> NDF:
-        value = getattr(self.model.policy, name, None)
+    def _ukf_array(self, name: str) -> NDF:
+        value: NDF | None = getattr(self.model.policy, name, None)
         if value is None:
             raise ValueError(f"Unscented filtering requires policy.{name}.")
-        return asarray(np.real_if_close(value), dtype=float64)
+        return value
 
     @cached_property
     def _obs_idx(self) -> dict[str, int]:
@@ -691,14 +691,14 @@ class KalmanInterface(KalmanFilter):
         n_state = self.model.compiled.n_state
         return {
             "meas_addr": self.meas_addr,
-            "hx": self._policy_array("p"),
-            "gx": self._policy_array("f"),
-            "bx": asarray(self.B[:n_state, :], dtype=float64),
-            "hxx": self._policy_array("hxx"),
-            "gxx": self._policy_array("gxx"),
-            "hss": self._policy_array("hss"),
-            "gss": self._policy_array("gss"),
-            "steady_state": self._policy_array("steady_state"),
+            "hx": self.model.policy.p,
+            "gx": self.model.policy.f,
+            "bx": self.B[:n_state, :],
+            "hxx": self._ukf_array("hxx"),
+            "gxx": self._ukf_array("gxx"),
+            "hss": self._ukf_array("hss"),
+            "gss": self._ukf_array("gss"),
+            "steady_state": self.model.policy.steady_state,
             "calib_params": self.calib_params,
             "Q": self.Q,
             "R": self.R,

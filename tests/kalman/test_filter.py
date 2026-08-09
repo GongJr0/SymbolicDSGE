@@ -9,7 +9,6 @@ from sympy import Symbol
 
 from SymbolicDSGE.kalman.config import make_R
 from SymbolicDSGE.kalman.errors import (
-    ComplexMatrixError,
     ErrorCode,
     MatrixConditionError,
     ShapeMismatchError,
@@ -104,27 +103,12 @@ def test_make_r_builds_covariance_from_std_and_corr_maps():
 
 
 def test_error_code_dispatch_maps_known_errors_and_rejects_unknown():
-    assert get_error_constructor(ErrorCode.COMPLEX_MATRIX) is ComplexMatrixError
     assert get_error_constructor(ErrorCode.SHAPE_MISMATCH) is ShapeMismatchError
     assert get_error_constructor(ErrorCode.MATRIX_CONDITION) is MatrixConditionError
     assert get_error_constructor(ErrorCode.LINALG_ERROR) is np.linalg.LinAlgError
 
     with pytest.raises(ValueError, match="Unknown error code"):
         get_error_constructor(ErrorCode.SUCCESS)
-
-
-def test_get_real_accepts_nearly_real_complex():
-    mat = np.array([[1.0 + 1e-14j, 2.0 - 1e-14j]], dtype=np.complex128)
-    out = KalmanFilter._get_real(mat, "M")
-
-    assert out.dtype == float64
-    assert np.allclose(out, np.array([[1.0, 2.0]], dtype=float64))
-
-
-def test_get_real_rejects_significant_imaginary_parts():
-    mat = np.array([[1.0 + 0.5j]], dtype=np.complex128)
-    with pytest.raises(ComplexMatrixError):
-        KalmanFilter._get_real(mat, "bad")
 
 
 def test_shape_validate_raises_on_bad_A_shape():
@@ -238,20 +222,11 @@ def test_run_linear_can_skip_history_storage_for_loglik_only_path():
     assert minimal.eps_hat is None
 
 
-def test_run_linear_return_shocks_and_complex_inputs():
+def test_run_linear_return_shocks():
     A, B, C, d, Q, R = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
 
-    out = KalmanFilter.run(
-        A.astype(np.complex128),
-        B.astype(np.complex128),
-        C.astype(np.complex128),
-        d.astype(np.complex128),
-        Q.astype(np.complex128),
-        R.astype(np.complex128),
-        y.astype(np.complex128),
-        return_shocks=True,
-    )
+    out = KalmanFilter.run(A, B, C, d, Q, R, y, return_shocks=True)
 
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)

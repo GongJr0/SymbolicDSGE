@@ -21,7 +21,6 @@ _FILL_COLUMNS = np.zeros(1, dtype=np.int64)
 _STATIC_SOURCE_STEP = -2
 
 NDF = NDArray[np.float64]
-NDC = NDArray[np.complex128]
 NDI = NDArray[np.int64]
 
 
@@ -67,17 +66,13 @@ class RegressionResultSpec:
 
 def _model_params(model: SolvedModel) -> NDF:
     parameters = model.config.calibration.parameters
-    return _f64(
+    return _flat_f64(
         np.asarray([parameters[param] for param in model.compiled.calib_params])
     )
 
 
-def _f64(values: NDF | NDC) -> NDF:
-    return _array_f64(values).reshape(-1)
-
-
-def _array_f64(values: NDF | NDC) -> NDF:
-    return np.ascontiguousarray(np.real_if_close(values), dtype=np.float64)
+def _flat_f64(values: NDF) -> NDF:
+    return values.reshape(-1)
 
 
 def _selected_shape(

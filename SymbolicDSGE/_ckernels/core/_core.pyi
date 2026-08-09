@@ -94,12 +94,13 @@ def klein_solve1(
     params: _F64,
     n_state: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, _C128, _C128, int, _C128, _F64, _F64]:
+) -> tuple[_F64, _F64, _F64, _F64, _F64, int, _C128, _F64, _F64]:
     """(ss, a, b, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
     Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
-    assemble_state_space into one GIL release. ``stab`` is reported, not raised
-    on."""
+    assemble_state_space into one GIL release. ``f``/``p`` are real; the Schur
+    form's imaginary parts are roundoff on a real pencil. ``stab`` is reported,
+    not raised on."""
 
 def sgu_klein_solve2(
     residual_addr: int,
@@ -109,7 +110,7 @@ def sgu_klein_solve2(
     n_state: int,
     eta: _F64,
     n_exog: int = ...,
-) -> tuple[_F64, _C128, _C128, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64]:
+) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64]:
     """(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B) <- one-shot second-order
     (SGU) solve.
 

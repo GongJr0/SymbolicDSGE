@@ -18,9 +18,10 @@ NDC = NDArray[complex128]
 class KleinSolution:
     """Solution of ``a E[y_{t+1}] = b y_t``: ``u_t = f s_t``, ``s_{t+1} = p s_t``.
 
-    ``p``/``f`` are complex (the imaginary parts are ~1e-16 roundoff from the
-    complex Schur form; the caller collapses them via ``real_if_close``). Stored
-    as ``SolvedModel.policy``; downstream reads only ``.f`` and ``.stab``.
+    ``p``/``f`` are real: the Schur form they come from is complex, but its
+    imaginary parts are roundoff on a real pencil and the native solve projects
+    them once. ``eig`` stays complex, where the imaginary part is the signal.
+    Stored as ``SolvedModel.policy``; downstream reads only ``.f`` and ``.stab``.
 
     ``steady_state`` is the Newton-resolved steady state the solve linearized at
     (the seed after convergence), so second-order and measurement callers reuse
@@ -31,8 +32,8 @@ class KleinSolution:
     way to ``p``/``f`` rather than as a separate step.
     """
 
-    p: NDC
-    f: NDC
+    p: NDF
+    f: NDF
     stab: int
     eig: NDC
     steady_state: NDF
@@ -60,8 +61,8 @@ class PerturbationSolution:
     ``steady_state`` is the (nonlinear) expansion point the tensors are taken at.
     """
 
-    p: NDC
-    f: NDC
+    p: NDF
+    f: NDF
     stab: int
     eig: NDC
     order: int
