@@ -66,10 +66,16 @@ class VariableLayout:
 class ConstraintFunc:
     """Compiled regime conditions, and everything the native side needs to call them.
 
-    One cfunc evaluates every condition, writing ``2 * n_constraint`` int8 flags:
-    slot ``2i`` is constraint ``i`` binding, slot ``2i + 1`` is it relaxing. The
-    C caller selects with ``next = prev ? !relax : bind``, so both flags of a
-    constraint come from a single call and share their common subexpressions.
+    One cfunc evaluates every condition, writing ``2 * n_constraint`` signed
+    distances to their boundaries, positive where the condition holds: slot
+    ``2i`` is constraint ``i`` binding, slot ``2i + 1`` is it relaxing. The C
+    caller reads the sign of the one slot the incoming regime asks about, with
+    ``next = prev ? !relax : bind``, and takes the same number as the error that
+    ranks guess-and-verify iterations.
+
+    ``inclusive`` is the bitmask of slots that hold at a distance of exactly
+    zero, the only thing a sign cannot say and the reason ``x < 0`` and ``x <=
+    0`` are distinguishable at the steady state, where they are both zero.
 
     ``names`` is declaration order, which is the regime bit order.
     """
@@ -78,11 +84,12 @@ class ConstraintFunc:
     names: tuple[str, ...]
     n_var: int
     n_par: int
+    inclusive: int
 
     @property
     def address(self) -> int:
         """Entry point of
-        ``void (*)(const double *cur, const double *par, int8_t *flags)``."""
+        ``void (*)(const double *cur, const double *par, double *err)``."""
         return int(self.cfunc.address)
 
     @property
@@ -90,7 +97,7 @@ class ConstraintFunc:
         return len(self.names)
 
     @property
-    def n_flag(self) -> int:
+    def n_cond(self) -> int:
         return 2 * len(self.names)
 
     def bind_slot(self, name: str) -> int:
@@ -265,11 +272,13 @@ class CompiledModel:
         if not self.constraint_names:
             return None
         layout = ConstraintLayout.from_compiled(self, self.constraint_names)
+        cfunc, inclusive = build_constraint_cfunc(self.constraint_exprs, layout)
         return ConstraintFunc(
-            cfunc=build_constraint_cfunc(self.constraint_exprs, layout),
+            cfunc=cfunc,
             names=self.constraint_names,
             n_var=layout.n_var,
             n_par=layout.n_par,
+            inclusive=inclusive,
         )
 
     def construct_constraint_func(self) -> ConstraintFunc | None:

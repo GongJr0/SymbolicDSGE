@@ -4,15 +4,16 @@
 #include "../_common/sdsge_common.h"
 #include "regime_pencil.h"
 
-typedef void (*sdsge_constraint_fn)(f64 *cur, f64 *par, i8 *flags);
+typedef void (*sdsge_constraint_fn)(f64 *cur, f64 *par, f64 *err);
 
 i64 sdsge_constraint_path(sdsge_constraint_fn cond,
                           f64 *SDSGE_RESTRICT path, // (T, n_var)
                           f64 *SDSGE_RESTRICT par,  // (n_par,)
                           const i8 *regime_in,      // (T,)
                           i8 *regime_out,           // (T,)
-                          i64 T, i64 n_var, i64 n_constraint);
-
+                          i64 inclusive, // Bitmask for inequality strictness
+                          f64 *SDSGE_RESTRICT max_err, i64 T, i64 n_var,
+                          i64 n_constraint);
 typedef struct {
   const regime_ctx *table;
   const f64 *f_ref;

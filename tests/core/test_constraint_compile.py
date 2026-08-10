@@ -77,7 +77,9 @@ def test_constraint_func_layout(compiled_obc):
     cf = compiled_obc.construct_constraint_func()
 
     assert cf.names == ("lo", "hi")
-    assert (cf.n_constraint, cf.n_flag) == (2, 4)
+    assert (cf.n_constraint, cf.n_cond) == (2, 4)
+    # lo relaxes on >= and hi relaxes on <=; the two bind conditions are strict.
+    assert cf.inclusive == 0b1010
     assert (cf.n_var, cf.n_par) == (
         len(compiled_obc.var_names),
         len(compiled_obc.calib_params),
@@ -97,21 +99,30 @@ def test_constraint_func_is_cached(compiled_obc):
 
 
 def _call(cf, cur, par):
+    """The signed distances the cfunc writes, one per condition slot."""
     fn = ctypes.CFUNCTYPE(
         None,
         ctypes.POINTER(ctypes.c_double),
         ctypes.POINTER(ctypes.c_double),
-        ctypes.POINTER(ctypes.c_int8),
+        ctypes.POINTER(ctypes.c_double),
     )(cf.address)
     cur = np.ascontiguousarray(cur, dtype=np.float64)
     par = np.ascontiguousarray(par, dtype=np.float64)
-    out = np.zeros(cf.n_flag, dtype=np.int8)
+    out = np.zeros(cf.n_cond, dtype=np.float64)
     fn(
         cur.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
         par.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-        out.ctypes.data_as(ctypes.POINTER(ctypes.c_int8)),
+        out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
     )
     return out
+
+
+def _flags(cf, cur, par):
+    """The 0/1 conditions the native latch reads off those distances."""
+    return [
+        int(e > 0.0 or (e == 0.0 and (cf.inclusive >> k) & 1))
+        for k, e in enumerate(_call(cf, cur, par))
+    ]
 
 
 @pytest.mark.parametrize(
@@ -131,10 +142,7 @@ def test_flags_match_the_written_conditions(compiled_obc, g, z, beta, expected):
     par = np.zeros(cf.n_par)
     par[0] = beta
 
-    out = _call(cf, cur, par)
-
-    assert out.dtype == np.int8
-    assert out.tolist() == expected
+    assert _flags(cf, cur, par) == expected
 
 
 def test_flags_match_a_lambdify_oracle(compiled_obc):
@@ -153,7 +161,62 @@ def test_flags_match_a_lambdify_oracle(compiled_obc):
             par[0] = cur[1]
 
         want = [int(bool(f(cur, par))) for f in oracle]
-        assert _call(cf, cur, par).tolist() == want
+        assert _flags(cf, cur, par) == want
+
+
+def test_distances_are_signed_and_fold_over_a_connective(compiled_obc):
+    cf = compiled_obc.construct_constraint_func()
+    cur = np.zeros(cf.n_var)
+    cur[compiled_obc.idx["g"]], cur[compiled_obc.idx["z"]] = 0.75, 2.0
+    par = np.zeros(cf.n_par)
+    par[0] = 0.5
+
+    err = _call(cf, cur, par)
+
+    # lo is g < 0 against g >= 0, so its two slots are exact opposites.
+    assert (err[0], err[1]) == (-0.75, 0.75)
+    # hi binds on z > beta (1.5 clear) and g < 1 (0.25 clear) at once, so the
+    # fold reports the branch nearest to failing.
+    assert (err[2], err[3]) == (0.25, -1.5)
+
+
+def test_a_zero_distance_is_decided_by_inclusive_alone(compiled_obc):
+    # At the origin lo's strict bind and its inclusive relax are both exactly
+    # on the boundary. This is where a simulation starts, not a corner case.
+    cf = compiled_obc.construct_constraint_func()
+    cur, par = np.zeros(cf.n_var), np.zeros(cf.n_par)
+
+    err = _call(cf, cur, par)
+
+    assert (err[0], err[1]) == (0.0, 0.0)
+    assert _flags(cf, cur, par)[:2] == [0, 1]
+
+
+def test_a_connective_mixing_strict_and_inclusive_is_rejected(parsed_post82):
+    # The fold reports one branch's distance and the caller has one bit to read
+    # zero with, so the branches may not disagree about their boundary.
+    model, _ = parsed_post82
+    g, z = (v for v in model.variables.variables[:2])
+    beta = model.parameters[0]
+    compiled = _with_constraints(
+        parsed_post82,
+        {"lo": Constraint(bind=sp.And(z(t) >= beta, g(t) < 1), relax=g(t) > 1)},
+    ).compile()
+
+    with pytest.raises(NotImplementedError, match="mixes strict and inclusive"):
+        compiled.construct_constraint_func()
+
+
+def test_an_equality_condition_has_no_distance(parsed_post82):
+    # A Relational the parser accepts and the distance encoding cannot express.
+    model, _ = parsed_post82
+    g = model.variables.variables[0]
+    compiled = _with_constraints(
+        parsed_post82, {"lo": Constraint(bind=sp.Eq(g(t), 0), relax=g(t) > 0)}
+    ).compile()
+
+    with pytest.raises(NotImplementedError, match="Equality"):
+        compiled.construct_constraint_func()
 
 
 def _params(compiled):

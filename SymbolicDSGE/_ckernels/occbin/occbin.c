@@ -3,18 +3,26 @@
 
 i64 sdsge_constraint_path(sdsge_constraint_fn cond, f64 *SDSGE_RESTRICT path,
                           f64 *SDSGE_RESTRICT par, const i8 *regime_in,
-                          i8 *regime_out, i64 T, i64 n_var, i64 n_constraint) {
-  i8 flags[4]; // 2 * MAX_CONSTRAINTS (a constraint is a relax/bind pair)
+                          i8 *regime_out, i64 inclusive,
+                          f64 *SDSGE_RESTRICT max_err, i64 T, i64 n_var,
+                          i64 n_constraint) {
+  f64 err[4]; // 2 * MAX_CONSTRAINTS (a constraint is a relax/bind pair)
   i64 changed = 0;
 
   for (i64 t = 0; t < T; ++t) {
-    cond(&path[t * n_var], par, flags);
+    cond(&path[t * n_var], par, err);
     const i8 prev = regime_in[t];
     i8 next = 0;
     for (i64 i = 0; i < n_constraint; ++i) {
       // If the previous regime was binding, check if it should relax; if it was
       // relaxing, check if it should bind
-      next |= (((prev >> i) & 1) ? !flags[2 * i + 1] : flags[2 * i]) << i;
+      const i64 slot = ((prev >> i) & 1) ? 2 * i + 1 : 2 * i;
+      const f64 e = err[slot];
+      const int fired = (e > 0.0) || (e == 0.0 && ((inclusive >> slot) & 1));
+      next |= (((prev >> i) & 1) ? !fired : fired) << i;
+      if (fired && e > *max_err) {
+        *max_err = e;
+      }
     }
     regime_out[t] = next;
     changed += (next != prev);

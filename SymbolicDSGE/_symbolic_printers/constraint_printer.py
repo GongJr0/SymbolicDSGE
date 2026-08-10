@@ -1,4 +1,14 @@
-"""Constraint expression printers for native regime callbacks."""
+"""Constraint expression printers for native regime callbacks.
+
+A condition is printed as its signed distance to its own boundary, positive
+where the condition holds, rather than as a 0/1 flag. The native latch recovers
+the flag from the sign, so the two can never disagree, and the same number is
+the error the guess-and-verify loop ranks its iterations by.
+
+Only the boundary itself is lost that way: ``x < 0`` and ``x <= 0`` are the same
+distance and differ only at zero. That is static, so it travels once as
+``inclusive`` rather than per evaluation.
+"""
 
 from __future__ import annotations
 
@@ -14,61 +24,37 @@ from .measurement_printer import F64Ops
 
 
 class ConstraintOpTable(OpTable, Protocol):
-    """Op table extended with the comparisons and connectives conditions need."""
+    """Op table extended with the connectives a distance folds over."""
 
-    def lt(self, a: str, b: str) -> str: ...
-    def le(self, a: str, b: str) -> str: ...
-    def gt(self, a: str, b: str) -> str: ...
-    def ge(self, a: str, b: str) -> str: ...
-    def eq(self, a: str, b: str) -> str: ...
-    def ne(self, a: str, b: str) -> str: ...
-    def and_(self, a: str, b: str) -> str: ...
-    def or_(self, a: str, b: str) -> str: ...
-    def not_(self, a: str) -> str: ...
+    def min_(self, a: str, b: str) -> str: ...
+    def max_(self, a: str, b: str) -> str: ...
 
 
 class ConstraintOps(F64Ops, ConstraintOpTable):
-    """Real valued backend emitting 0/1 regime flags."""
+    """Real valued backend emitting the distance to each boundary."""
 
-    def lt(self, a: str, b: str) -> str:
-        return f"({a} < {b})"
+    def min_(self, a: str, b: str) -> str:
+        return f"min({a}, {b})"
 
-    def le(self, a: str, b: str) -> str:
-        return f"({a} <= {b})"
-
-    def gt(self, a: str, b: str) -> str:
-        return f"({a} > {b})"
-
-    def ge(self, a: str, b: str) -> str:
-        return f"({a} >= {b})"
-
-    def eq(self, a: str, b: str) -> str:
-        return f"({a} == {b})"
-
-    def ne(self, a: str, b: str) -> str:
-        return f"({a} != {b})"
-
-    def and_(self, a: str, b: str) -> str:
-        return f"({a} and {b})"
-
-    def or_(self, a: str, b: str) -> str:
-        return f"({a} or {b})"
-
-    def not_(self, a: str) -> str:
-        return f"(not {a})"
-
-    def store(self, buf: str, idx: int, expr: str) -> str:
-        return f"{buf}[{idx}] = 1 if {expr} else 0"
+    def max_(self, a: str, b: str) -> str:
+        return f"max({a}, {b})"
 
 
-#: Relational node types mapped to the op that renders them.
+#: Relational node types mapped to the op that renders their distance, oriented
+#: so that a satisfied condition is positive. An equality has no distance.
 _RELATIONAL_OPS: dict[type, Callable[[ConstraintOpTable, str, str], str]] = {
-    sp.StrictLessThan: lambda ops, a, b: ops.lt(a, b),
-    sp.LessThan: lambda ops, a, b: ops.le(a, b),
-    sp.StrictGreaterThan: lambda ops, a, b: ops.gt(a, b),
-    sp.GreaterThan: lambda ops, a, b: ops.ge(a, b),
-    sp.Equality: lambda ops, a, b: ops.eq(a, b),
-    sp.Unequality: lambda ops, a, b: ops.ne(a, b),
+    sp.StrictLessThan: lambda ops, a, b: ops.sub(b, a),
+    sp.LessThan: lambda ops, a, b: ops.sub(b, a),
+    sp.StrictGreaterThan: lambda ops, a, b: ops.sub(a, b),
+    sp.GreaterThan: lambda ops, a, b: ops.sub(a, b),
+}
+
+#: Whether each relational holds *at* its boundary, where the distance is zero.
+_RELATIONAL_INCLUSIVE: dict[type, bool] = {
+    sp.StrictLessThan: False,
+    sp.LessThan: True,
+    sp.StrictGreaterThan: False,
+    sp.GreaterThan: True,
 }
 
 
@@ -82,12 +68,13 @@ class ConstraintLayout:
     constraint_names: tuple[str, ...] = ()
 
     @property
-    def n_flag(self) -> int:
+    def n_cond(self) -> int:
+        """Distances written per call: bind then relax, per constraint."""
         return 2 * len(self.constraint_names)
 
     @property
     def n_expr(self) -> int:
-        return self.n_flag
+        return self.n_cond
 
     @classmethod
     def from_compiled(
@@ -113,7 +100,7 @@ class ConstraintPrinter(ExpressionPrinter):
 
     @property
     def allocated_dtype(self) -> str:
-        return "np.int8"
+        return "np.float64"
 
     @property
     def context_name(self) -> str:
@@ -124,12 +111,19 @@ class ConstraintPrinter(ExpressionPrinter):
         if render_op is not None:
             lhs, rhs = expr.args
             return render_op(self.cops, self.render(lhs), self.render(rhs))
+        # A connective is as satisfied as its least satisfied branch, or its
+        # most satisfied one, which is the same fold the flags would have taken.
         if isinstance(expr, sp.And):
-            return self._fold(expr.args, self.cops.and_)
+            return self._fold(expr.args, self.cops.min_)
         if isinstance(expr, sp.Or):
-            return self._fold(expr.args, self.cops.or_)
+            return self._fold(expr.args, self.cops.max_)
         if isinstance(expr, sp.Not):
-            return self.cops.not_(self.render(expr.args[0]))
+            return self.cops.neg(self.render(expr.args[0]))
+        if isinstance(expr, sp.Rel):
+            raise NotImplementedError(
+                f"constraint printer: {type(expr).__name__} has no distance to "
+                f"a boundary: {expr}"
+            )
         return super().render(expr)
 
     def _fold(self, args: Any, op: Callable[[str, str], str]) -> str:
@@ -139,15 +133,51 @@ class ConstraintPrinter(ExpressionPrinter):
         return result
 
 
+def constraint_inclusive(exprs: list[Any]) -> int:
+    """Bitmask of the conditions that hold at a distance of exactly zero.
+
+    Bit ``k`` is slot ``k`` of the distance buffer. A connective's branches must
+    agree, since either of them can be the one the fold selected.
+    """
+    mask = 0
+    for k, expr in enumerate(exprs):
+        mask |= int(_inclusive(expr)) << k
+    return mask
+
+
+def _inclusive(expr: Any) -> bool:
+    at_boundary = _RELATIONAL_INCLUSIVE.get(type(expr))
+    if at_boundary is not None:
+        return at_boundary
+    if isinstance(expr, (sp.And, sp.Or)):
+        branches = {_inclusive(arg) for arg in expr.args}
+        if len(branches) != 1:
+            raise NotImplementedError(
+                f"constraint printer: {type(expr).__name__} mixes strict and "
+                f"inclusive comparisons, so its boundary is ambiguous: {expr}"
+            )
+        return branches.pop()
+    if isinstance(expr, sp.Not):
+        return not _inclusive(expr.args[0])
+    raise NotImplementedError(
+        f"constraint printer: {type(expr).__name__} has no boundary: {expr}"
+    )
+
+
 def build_constraint_cfunc(
     exprs: list[Any], layout: ConstraintLayout, ops: ConstraintOpTable | None = None
-) -> Any:
+) -> tuple[Any, int]:
+    """``(cfunc, inclusive)`` for the conditions, in bind/relax slot order.
+
+    The cfunc writes ``layout.n_cond`` distances. ``inclusive`` carries the one
+    thing their sign cannot: which conditions hold when the distance is zero.
+    """
     table: ConstraintOpTable = ConstraintOps() if ops is None else ops
     body = ConstraintPrinter(table).emit(exprs, layout, allocate=False)
     preamble = [
         f"    cur = carray(cur_ptr, ({layout.n_var},))",
         f"    par = carray(par_ptr, ({layout.n_par},))",
-        f"    out = carray(out_ptr, ({layout.n_flag},))",
+        f"    out = carray(out_ptr, ({layout.n_cond},))",
     ]
     src = "\n".join(
         [
@@ -165,6 +195,6 @@ def build_constraint_cfunc(
     sig = types.void(
         types.CPointer(types.float64),
         types.CPointer(types.float64),
-        types.CPointer(types.int8),
+        types.CPointer(types.float64),
     )
-    return cfunc(sig)(ns["_constraint_cf"])
+    return cfunc(sig)(ns["_constraint_cf"]), constraint_inclusive(exprs)

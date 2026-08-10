@@ -22,12 +22,15 @@ def constraint_path(
     par: _F64,
     regime_in: _I8,
     n_constraint: int,
+    inclusive: int,
     out: _I8 | None = ...,
-) -> tuple[_I8, int]:
-    """(regime_out, changed) <- latched regime mask over a (T, n_var) level path.
+) -> tuple[_I8, int, float]:
+    """(regime_out, changed, max_err) <- latched mask over a (T, n_var) path.
 
     ``out`` may alias ``regime_in`` to latch in place; ``changed`` counts the
-    periods whose mask moved.
+    periods whose mask moved and ``max_err`` is the largest distance that moved
+    one. ``inclusive`` is ``ConstraintFunc.inclusive``, which decides a distance
+    of exactly zero.
     """
 
 def regime_pencil(

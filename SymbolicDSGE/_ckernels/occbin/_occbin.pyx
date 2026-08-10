@@ -37,11 +37,12 @@ cdef extern from "regime_pencil.h" nogil:
 
 cdef extern from "occbin.h" nogil:
     ctypedef void (*sdsge_constraint_fn)(
-        double *cur, double *par, int8_t *flags) noexcept
+        double *cur, double *par, double *err) noexcept
     int64_t sdsge_constraint_path(
         sdsge_constraint_fn cond, double *path, double *par,
         const int8_t *regime_in, int8_t *regime_out,
-        int64_t T, int64_t n_var, int64_t n_constraint)
+        int64_t inclusive, double *max_err, int64_t T,
+        int64_t n_var, int64_t n_constraint)
     ctypedef struct occbin_ctx:
         const regime_ctx *table
         const double *f_ref
@@ -63,7 +64,7 @@ MAX_REGIME = 4
 
 
 def constraint_path(size_t cond_addr, path, par, regime_in,
-                    int64_t n_constraint, out=None):
+                    int64_t n_constraint, int64_t inclusive, out=None):
     """Latched regime mask ``(T,)`` from a constraint @cfunc over a path.
 
     ``path`` is ``(T, n_var)`` in cur-variable order and in levels, not
@@ -71,10 +72,15 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     ``(T,)`` mask over declaration-ordered constraints, which the latch carries
     across guess-and-verify iterations at a fixed period; periods never interact.
 
+    The cfunc writes signed distances, so ``inclusive``
+    (``ConstraintFunc.inclusive``) is what decides a distance of exactly zero,
+    which is where a condition written against the steady state starts.
+
     ``out`` is an optional C-contiguous int8 buffer written in place, and may be
     ``regime_in`` itself to latch in place. Other inputs are coerced. Returns
-    ``(out, changed)``, where ``changed`` counts the periods whose mask moved and
-    so is 0 exactly at a fixed point.
+    ``(out, changed, max_err)``: ``changed`` counts the periods whose mask moved
+    and so is 0 exactly at a fixed point, and ``max_err`` is the largest
+    distance that moved one, which ranks iterations that cycle.
     """
     if not 0 < n_constraint <= MAX_CONSTRAINTS:
         raise ValueError(
@@ -88,6 +94,7 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     cdef int64_t n_var = pv.shape[1]
     cdef int8_t[::1] ov
     cdef int64_t changed
+    cdef double max_err = 0.0
 
     if inv.shape[0] != T:
         raise ValueError(
@@ -108,9 +115,10 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     cdef sdsge_constraint_fn fn = <sdsge_constraint_fn><void*>cond_addr
     with nogil:
         changed = sdsge_constraint_path(
-            fn, path_ptr, par_ptr, in_ptr, out_ptr, T, n_var, n_constraint
+            fn, path_ptr, par_ptr, in_ptr, out_ptr, inclusive, &max_err,
+            T, n_var, n_constraint,
         )
-    return out, changed
+    return out, changed, max_err
 
 
 def regime_pencil(size_t pencil_addr, rows, ss, par, a_ref, b_ref):
