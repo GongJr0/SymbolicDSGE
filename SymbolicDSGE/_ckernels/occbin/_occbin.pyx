@@ -193,7 +193,16 @@ def regime_pencil(size_t pencil_addr, rows, ss, par, a_ref, b_ref):
     return a, b, c
 
 
-def occbin_recursion(a, b, c, mask, f_ref, out=None):
+def occbin_recursion_arena_size(int64_t n_var, int64_t n_state,
+                                int64_t n_ctrl):
+    """``(n_float, n_int)`` scratch ``occbin_recursion`` needs for a shape."""
+    cdef arena_size sz = sdsge_occbin_recursion_arena_size(
+        n_var, n_state, n_ctrl
+    )
+    return sz.n_float, sz.n_int
+
+
+def occbin_recursion(a, b, c, mask, f_ref, out=None, arena=None, iarena=None):
     """Piecewise-linear decision rules ``(T, n_var, n_state + 1)`` for a guess.
 
     ``a``, ``b`` and ``c`` are the regime pencils stacked by bitmask, shaped
@@ -209,6 +218,9 @@ def occbin_recursion(a, b, c, mask, f_ref, out=None):
     ``x_t`` to ``[x_{t+1}; u_t]``: ``out[t, :, :n_state] @ x_t + out[t, :,
     n_state]``, state rows first. Raises ``RuntimeError`` naming the date if a
     date's pencil is singular.
+
+    ``arena`` and ``iarena`` are optional scratch buffers, at least as long as
+    ``occbin_recursion_arena_size`` reports; both are allocated if omitted.
     """
     cdef double[:, :, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
     cdef double[:, :, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
@@ -266,10 +278,17 @@ def occbin_recursion(a, b, c, mask, f_ref, out=None):
     cdef arena_size sz = sdsge_occbin_recursion_arena_size(
         n_var, n_state, n_ctrl
     )
-    arena = np.empty(sz.n_float, dtype=np.float64)
-    iarena = np.empty(sz.n_int, dtype=np.int64)
+    if arena is None:
+        arena = np.empty(sz.n_float, dtype=np.float64)
+    if iarena is None:
+        iarena = np.empty(sz.n_int, dtype=np.int64)
     cdef double[::1] arv = arena
     cdef int64_t[::1] iav = iarena
+    if arv.shape[0] < sz.n_float or iav.shape[0] < sz.n_int:
+        raise ValueError(
+            f"arena is {arv.shape[0]}/{iav.shape[0]} floats/ints, needs "
+            f"{sz.n_float}/{sz.n_int}."
+        )
 
     cdef const int8_t *mask_ptr = &mv[0] if T > 0 else NULL
     cdef double *out_ptr = &ov[0, 0, 0] if (T * n_var * n_rhs) > 0 else NULL

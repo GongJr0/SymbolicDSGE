@@ -44,6 +44,13 @@ def regime_pencil(
     ``c`` is ``(n_var,)`` and zero off ``rows``.
     """
 
+def occbin_recursion_arena_size(
+    n_var: int,
+    n_state: int,
+    n_ctrl: int,
+) -> tuple[int, int]:
+    """(n_float, n_int) scratch ``occbin_recursion`` needs for a shape."""
+
 def occbin_recursion(
     a: _F64,
     b: _F64,
@@ -51,6 +58,8 @@ def occbin_recursion(
     mask: _I8,
     f_ref: _F64,
     out: _F64 | None = ...,
+    arena: _F64 | None = ...,
+    iarena: _I64 | None = ...,
 ) -> _F64:
     """(T, n_var, n_state + 1) rules <- pencils stacked by bitmask and a guess.
 

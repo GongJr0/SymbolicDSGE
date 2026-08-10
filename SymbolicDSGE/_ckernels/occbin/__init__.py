@@ -8,6 +8,7 @@ from ._occbin import (
     MAX_CONSTRAINTS,
     constraint_path,
     occbin_recursion,
+    occbin_recursion_arena_size,
     regime_pencil,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "MAX_CONSTRAINTS",
     "constraint_path",
     "occbin_recursion",
+    "occbin_recursion_arena_size",
     "regime_pencil",
 ]
