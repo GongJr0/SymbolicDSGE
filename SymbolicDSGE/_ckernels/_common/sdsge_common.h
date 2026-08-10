@@ -46,6 +46,25 @@ static inline arena_size make_sizer(i64 n_float, i64 n_int) {
   return (arena_size){.n_float = n_float, .n_int = n_int};
 }
 
+/* Flat buffer `any(x[i] == 0)` and `any(x[i] != 0)` checks. Returns 1 if the
+ * respective condition is satisfied for any element, 0 otherwise. */
+static inline i8 sdsge_any_zero(const f64 *x, i64 n) {
+  for (i64 i = 0; i < n; ++i) {
+    if (x[i] == 0.0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static inline i8 sdsge_any_nonzero(const f64 *x, i64 n) {
+  for (i64 i = 0; i < n; ++i) {
+    if (x[i] != 0.0) {
+      return 1;
+    }
+  }
+  return 0;
+}
 /* Portable `restrict`. */
 #if defined(__GNUC__) || defined(__clang__)
 #define SDSGE_RESTRICT __restrict__
