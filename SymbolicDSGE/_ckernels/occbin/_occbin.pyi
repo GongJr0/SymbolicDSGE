@@ -43,3 +43,18 @@ def regime_pencil(
     ``pencil_addr`` of 0 is the reference regime: the copy alone, ``c`` zero.
     ``c`` is ``(n_var,)`` and zero off ``rows``.
     """
+
+def occbin_recursion(
+    a: _F64,
+    b: _F64,
+    c: _F64,
+    mask: _I8,
+    f_ref: _F64,
+    out: _F64 | None = ...,
+) -> _F64:
+    """(T, n_var, n_state + 1) rules <- pencils stacked by bitmask and a guess.
+
+    Block ``t`` is the affine map from ``x_t`` to ``[x_{t+1}; u_t]``, state rows
+    first, with the constant in the last column. ``f_ref`` is ``(n_ctrl,
+    n_state)`` and closes the recursion past the last date.
+    """

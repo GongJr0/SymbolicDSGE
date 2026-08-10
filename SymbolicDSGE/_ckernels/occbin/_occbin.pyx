@@ -17,15 +17,7 @@ cdef extern from "../_common/sdsge_common.h" nogil:
         int64_t n_int
 
 
-cdef extern from "occbin.h" nogil:
-    ctypedef void (*sdsge_constraint_fn)(
-        double *cur, double *par, int8_t *flags) noexcept
-    int64_t sdsge_constraint_path(
-        sdsge_constraint_fn cond, double *path, double *par,
-        const int8_t *regime_in, int8_t *regime_out,
-        int64_t T, int64_t n_var, int64_t n_constraint)
-
-
+# regime_pencil.h first: occbin.h includes it and occbin_ctx holds a regime_ctx.
 cdef extern from "regime_pencil.h" nogil:
     ctypedef void (*sdsge_regime_pencil_fn)(
         const double *cur, const double *par, double *out) noexcept
@@ -43,9 +35,31 @@ cdef extern from "regime_pencil.h" nogil:
         int64_t n_var, double *arena)
 
 
+cdef extern from "occbin.h" nogil:
+    ctypedef void (*sdsge_constraint_fn)(
+        double *cur, double *par, int8_t *flags) noexcept
+    int64_t sdsge_constraint_path(
+        sdsge_constraint_fn cond, double *path, double *par,
+        const int8_t *regime_in, int8_t *regime_out,
+        int64_t T, int64_t n_var, int64_t n_constraint)
+    ctypedef struct occbin_ctx:
+        const regime_ctx *table
+        const double *f_ref
+        int64_t n_var
+        int64_t n_state
+        int64_t n_ctrl
+    arena_size sdsge_occbin_recursion_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl)
+    int64_t sdsge_occbin_recursion(
+        const occbin_ctx *ctx, const int8_t *mask, int64_t T, double *out,
+        int64_t *singular_date, double *arena, int64_t *iarena)
+    int64_t SDSGE_OCCBIN_RECURSION_OK
+
+
 #: Constraints the native flag buffer is sized for (``i8 flags[4]`` in occbin.c,
 #: two slots per constraint). Mirrors the OccBin cap in model_parser.
 MAX_CONSTRAINTS = 2
+MAX_REGIME = 4
 
 
 def constraint_path(size_t cond_addr, path, par, regime_in,
@@ -177,3 +191,117 @@ def regime_pencil(size_t pencil_addr, rows, ss, par, a_ref, b_ref):
             &ctx, ss_ptr, par_ptr, a_ptr, b_ptr, n_var, arena_ptr
         )
     return a, b, c
+
+
+def occbin_recursion(a, b, c, mask, f_ref, out=None):
+    """Piecewise-linear decision rules ``(T, n_var, n_state + 1)`` for a guess.
+
+    ``a``, ``b`` and ``c`` are the regime pencils stacked by bitmask, shaped
+    ``(n_regime, n_var, n_var)``, ``(n_regime, n_var, n_var)`` and
+    ``(n_regime, n_var)``. Slot ``m`` is what ``regime_pencil`` returns for mask
+    ``m`` and slot 0 is the reference, so ``mask`` indexes the stack directly.
+
+    ``f_ref`` is the reference control rule ``(n_ctrl, n_state)``, which closes
+    the recursion past the last date, and fixes ``n_state`` and ``n_ctrl``.
+
+    ``out`` is an optional C-contiguous ``(T, n_var, n_state + 1)`` float64
+    buffer written in place. At date ``t`` the block is the affine map from
+    ``x_t`` to ``[x_{t+1}; u_t]``: ``out[t, :, :n_state] @ x_t + out[t, :,
+    n_state]``, state rows first. Raises ``RuntimeError`` naming the date if a
+    date's pencil is singular.
+    """
+    cdef double[:, :, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
+    cdef double[:, :, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
+    cdef double[:, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
+    cdef double[:, ::1] fv = np.ascontiguousarray(f_ref, dtype=np.float64)
+    cdef const int8_t[::1] mv = np.ascontiguousarray(mask, dtype=np.int8)
+
+    cdef int64_t n_regime = av.shape[0]
+    cdef int64_t n_var = av.shape[1]
+    cdef int64_t n_ctrl = fv.shape[0]
+    cdef int64_t n_state = fv.shape[1]
+    cdef int64_t T = mv.shape[0]
+    cdef int64_t n_rhs = n_state + 1
+    cdef int64_t i
+
+    if n_regime < 1:
+        raise ValueError("a must hold at least the reference regime.")
+    if n_regime > MAX_REGIME:
+        raise ValueError(f"a holds {n_regime} regimes, at most {MAX_REGIME}.")
+    if av.shape[2] != n_var:
+        raise ValueError(
+            f"a[0] is {av.shape[1]}x{av.shape[2]}, expected square."
+        )
+    if bv.shape[0] != n_regime or bv.shape[1] != n_var or bv.shape[2] != n_var:
+        raise ValueError(
+            f"b is {bv.shape[0]}x{bv.shape[1]}x{bv.shape[2]}, expected "
+            f"{n_regime}x{n_var}x{n_var} to match a."
+        )
+    if cv.shape[0] != n_regime or cv.shape[1] != n_var:
+        raise ValueError(
+            f"c is {cv.shape[0]}x{cv.shape[1]}, expected {n_regime}x{n_var} "
+            f"to match a."
+        )
+    if n_state + n_ctrl != n_var:
+        raise ValueError(
+            f"f_ref is {n_ctrl}x{n_state}, so n_state + n_ctrl is "
+            f"{n_state + n_ctrl}, expected {n_var} to match a."
+        )
+    # The kernel indexes table[mask[t]] without a bound check.
+    for i in range(T):
+        if not 0 <= mv[i] < n_regime:
+            raise ValueError(
+                f"mask[{i}] is {mv[i]}, outside 0..{n_regime - 1}."
+            )
+
+    if out is None:
+        out = np.empty((T, n_var, n_rhs), dtype=np.float64)
+    cdef double[:, :, ::1] ov = out
+    if ov.shape[0] != T or ov.shape[1] != n_var or ov.shape[2] != n_rhs:
+        raise ValueError(
+            f"out is {ov.shape[0]}x{ov.shape[1]}x{ov.shape[2]}, expected "
+            f"{T}x{n_var}x{n_rhs}."
+        )
+
+    cdef arena_size sz = sdsge_occbin_recursion_arena_size(
+        n_var, n_state, n_ctrl
+    )
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iav = iarena
+
+    cdef const int8_t *mask_ptr = &mv[0] if T > 0 else NULL
+    cdef double *out_ptr = &ov[0, 0, 0] if (T * n_var * n_rhs) > 0 else NULL
+    cdef double *arena_ptr = &arv[0] if arv.shape[0] > 0 else NULL
+    cdef int64_t *iarena_ptr = &iav[0] if iav.shape[0] > 0 else NULL
+
+    cdef occbin_ctx ctx
+    cdef regime_ctx table[4]  # MAX_REGIME
+    cdef int64_t singular_date = -1
+    cdef int64_t status
+
+    for i in range(n_regime):
+        table[i].pencil = NULL
+        table[i].n_row = 0
+        table[i].rows = NULL
+        table[i].a = &av[i, 0, 0]
+        table[i].b = &bv[i, 0, 0]
+        table[i].c = &cv[i, 0]
+
+    ctx.table = table
+    ctx.f_ref = &fv[0, 0] if (n_ctrl * n_state) > 0 else NULL
+    ctx.n_var = n_var
+    ctx.n_state = n_state
+    ctx.n_ctrl = n_ctrl
+
+    with nogil:
+        status = sdsge_occbin_recursion(
+            &ctx, mask_ptr, T, out_ptr, &singular_date, arena_ptr, iarena_ptr
+        )
+
+    if status != SDSGE_OCCBIN_RECURSION_OK:
+        raise RuntimeError(
+            f"occbin_recursion: singular pencil at date {singular_date}."
+        )
+    return out
