@@ -23,6 +23,16 @@ typedef struct {
 } occbin_ctx;
 
 typedef struct {
+  i64 periodic_solution;  // accept the best iteration instead of failing
+  i64 periodic_threshold; // largest signed move in binding dates still a cycle
+  i64 periodic_strict;    // a repeat that is not a two-cycle is a failure
+  i64 curb_retrench;      // relax one date per pass instead of all of them
+  i64 reset_regime;       // start each shock period from the relaxed guess
+  i64 reset_check_ahead;  // a reset drops an endogenously grown horizon to T0
+  i64 algo_truncation;    // a max_iter at or below this accepts the last guess
+} occbin_opts;
+
+typedef struct {
   const occbin_ctx *model;
   sdsge_constraint_fn cond;
   f64 *par;
@@ -33,11 +43,13 @@ typedef struct {
   i64 T0; // Check ahead + 1 (additional period to append a relaxing regime if T
           // terminates in a binding regime)
   i64 T_cap;
+  occbin_opts opts;
 } occbin_run_ctx;
 
 typedef struct {
   i64 *iters;
   f64 *max_err;
+  i8 *periodic;
   i64 fail_period;
   i64 singular_date;
 } occbin_diag;
@@ -60,6 +72,7 @@ arena_size sdsge_occbin_period_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
                                           i64 T_cap, i64 max_iter);
 
 // `mask`, `T` and `path` are updated in place; `diag` is written at slot `s`.
+// Requires `max_iter >= 1`: the guess is read once before anything is weighed.
 i64 sdsge_occbin_period(const occbin_run_ctx *run,
                         const f64 *SDSGE_RESTRICT x0, // (n_state,)
                         i8 *mask,                     // (T_cap,)
@@ -69,15 +82,17 @@ i64 sdsge_occbin_period(const occbin_run_ctx *run,
 arena_size sdsge_occbin_solve_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
                                          i64 T_cap, i64 max_iter);
 
-// Requires `T0 >= 2` and `n_periods - S <= T0`.
+// Requires `T0 >= 2` and `n_periods - S <= T0`. `init_mask` is a `(T0,)` guess
+// for the first period, or NULL to start relaxed.
 i64 sdsge_occbin_solve(const occbin_run_ctx *run,
                        const f64 *shocks, // (S, n_state)
                        i64 S, i64 n_periods,
                        const f64 *x_init, // (n_state,)
+                       const i8 *init_mask,
                        f64 *out,          // (n_periods, n_var)
                        i8 *regimes,       // (S, T_cap)
                        i64 *T_used,       // (S,)
-                       occbin_diag *diag, // iters and max_err are (S,)
+                       occbin_diag *diag, // per-period arrays are (S,)
                        f64 *rule,         // (T_cap, n_var, n_state + 1) scratch
                        f64 *path,         // (T_cap, n_var) scratch
                        i8 *mask,          // (T_cap,) scratch
@@ -86,11 +101,11 @@ i64 sdsge_occbin_solve(const occbin_run_ctx *run,
 #define SDSGE_OCCBIN_RECURSION_OK 0
 #define SDSGE_OCCBIN_RECURSION_SINGULAR -2 // match code to LU factorization
 
-// return codes matching Dynare's
+// return codes (mapped to Dynare's occbin codes)
 #define SDSGE_OCCBIN_PERIOD_OK 0
-#define SDSGE_OCCBIN_PERIODIC 310
-#define SDSGE_OCCBIN_PERIODIC_LOOP 313
-#define SDSGE_OCCBIN_MAXITER 311
+#define SDSGE_OCCBIN_PERIODIC 1      // 310 in Dynare
+#define SDSGE_OCCBIN_PERIODIC_LOOP 2 // 313 in Dynare
+#define SDSGE_OCCBIN_MAXITER 3       // 311 in Dynare
 
 #define SDSGE_OCCBIN_SOLVE_OK 0
 
