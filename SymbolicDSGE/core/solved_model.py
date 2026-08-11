@@ -26,7 +26,7 @@ from SymbolicDSGE.core.sim_result import SimResult
 
 from .shock_generators import Shock, _gaussian_factor
 from .shock_plan import ShockPlan, ShockPlanEntry, validate_shock_targets
-from .solver_backend import KleinSolution, PerturbationSolution
+from .solver_backend import FirstOrderSolution, SecondOrderSolution
 
 from .compiled_model import CompiledModel
 from .config import ModelConfig, SymbolGetterDict
@@ -82,7 +82,7 @@ class MeasurementSpec(TypedDict):
 @dataclass(frozen=True)
 class SolvedModel:
     compiled: CompiledModel
-    policy: KleinSolution | PerturbationSolution
+    policy: FirstOrderSolution | SecondOrderSolution
     A: NDF
     B: NDF
 

@@ -46,6 +46,12 @@ static inline arena_size make_sizer(i64 n_float, i64 n_int) {
   return (arena_size){.n_float = n_float, .n_int = n_int};
 }
 
+/* Componentwise max: the stages run one after another off the same arena. */
+static inline arena_size sdsge_max_arena(const arena_size a,
+                                         const arena_size b) {
+  return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
+}
+
 /* Flat buffer `any(x[i] == 0)` and `any(x[i] != 0)` checks. Returns 1 if the
  * respective condition is satisfied for any element, 0 otherwise. */
 static inline i8 sdsge_any_zero(const f64 *x, i64 n) {

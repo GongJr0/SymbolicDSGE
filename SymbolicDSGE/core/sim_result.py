@@ -34,8 +34,8 @@ class SimResult:
     """A simulated path.
 
     :attr:`states` and :attr:`observables` are dicts keyed by variable name.
-    ``X`` and ``y`` are the matrices they are cut from in canonical column order.
-    ``regimes`` and ``diagnostics`` are OccBin results and raise on a model that
+    :attr:`X and :attr:`y` are the matrices they are cut from in canonical column order.
+    :attr:`regimes` and :attr:`diagnostics` are OccBin results and raise on a model that
     has no constraints.
     """
 
@@ -66,6 +66,7 @@ class SimResult:
         """Whether this path came from an OccBin solve."""
         return self._regimes is not None
 
+    @property
     def regimes(self) -> NDI:
         """``(T, H)`` accepted regime guess per period.
 
@@ -79,8 +80,9 @@ class SimResult:
             )
         return self._regimes
 
+    @property
     def diagnostics(self) -> OccBinDiagnostics:
-        """Per-period convergence record behind :meth:`regimes`."""
+        """Per-period convergence record behind :attr:`regimes`."""
         if self._diagnostics is None:
             raise ValueError(
                 "Diagnostics are an OccBin result; this model has no constraints."

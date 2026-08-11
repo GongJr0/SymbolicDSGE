@@ -94,8 +94,8 @@ def klein_solve1(
     params: _F64,
     n_state: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, _F64, _F64, int, _C128, _F64, _F64]:
-    """(ss, a, b, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
+) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64]:
+    """(ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
     Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
     assemble_state_space into one GIL release. ``f``/``p`` are real; the Schur

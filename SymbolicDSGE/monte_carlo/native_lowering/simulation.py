@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from SymbolicDSGE.core.solver_backend import PerturbationSolution
+from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
@@ -134,7 +134,7 @@ def _order2_bindings(
     T: int,
 ) -> tuple[FloatInputBinding, ...]:
     policy = model.policy
-    if not isinstance(policy, PerturbationSolution):
+    if not isinstance(policy, SecondOrderSolution):
         raise ValueError("Native simulation order 2 requires a perturbation solution.")
     n_exog = model.compiled.n_exog
     values_by_layout = (

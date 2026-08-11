@@ -673,6 +673,11 @@ class ModelParser:
         }
 
         constraint_raw = eq_data.get("constraint", {}) or {}
+        if len(constraint_raw) > 2:
+            raise NotImplementedError(
+                "OBCs are solved via OccBin of Guirreiri and Iacoviello (2015), which explicitly supports one or two constraints. "
+                "Use at most two constraints in your model configuration."
+            )
 
         constraint: dict[str, Constraint] = {}
         for name, raw_spec in constraint_raw.items():

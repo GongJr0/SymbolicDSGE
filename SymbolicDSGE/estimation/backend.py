@@ -14,7 +14,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
-    from ..core.solver_backend import PerturbationSolution
+    from ..core.solver_backend import SecondOrderSolution
 
 import numpy as np
 import pandas as pd
@@ -1038,7 +1038,7 @@ def _prepare_filter_loglik(
     elif mode == "unscented":
         # hx is (n_state, n_state); recover n_state from it so bx and the
         # augmented z0 don't need `compiled` threaded in.
-        pol = cast("PerturbationSolution", sol.policy)
+        pol = cast("SecondOrderSolution", sol.policy)
         n_state = sol.policy.p.shape[0]
         if x0 is None:
             x0_state = np.zeros((n_state,), dtype=float64)

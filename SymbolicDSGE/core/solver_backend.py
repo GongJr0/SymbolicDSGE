@@ -14,63 +14,94 @@ NDF = NDArray[float64]
 NDC = NDArray[complex128]
 
 
-@dataclass(slots=True, frozen=True)
-class KleinSolution:
-    """Solution of ``a E[y_{t+1}] = b y_t``: ``u_t = f s_t``, ``s_{t+1} = p s_t``.
+@dataclass(frozen=True)
+class BaseSolution:
+    """Base class for attributes shared across all solution methods.
 
-    ``p``/``f`` are real: the Schur form they come from is complex, but its
-    imaginary parts are roundoff on a real pencil and the native solve projects
-    them once. ``eig`` stays complex, where the imaginary part is the signal.
-    Stored as ``SolvedModel.policy``; downstream reads only ``.f`` and ``.stab``.
-
-    ``steady_state`` is the Newton-resolved steady state the solve linearized at
-    (the seed after convergence), so second-order and measurement callers reuse
-    it instead of re-solving. ``a``/``b`` are the pencil taken there, carried for
-    the same reason: rebuilding it costs another complex-step Jacobian sweep.
-
-    ``A``/``B`` are the assembled state space, which the solve produces on the
-    way to ``p``/``f`` rather than as a separate step.
+    :attr:`steady_state` is the Newton-resolved expansion point the solution is linearized at.
+    :attr:`stab` is the stability indicator: -1 = not enough stable eigenvalues, 0 = exactly right, 1 = too many stable eigenvalues.
+    :attr:`eig` is the array of eigenvalues of the linearized system.
+    :attr:`order` is the order of the solution: 1 = first-order, 2 = second-order, etc.
     """
 
-    p: NDF
-    f: NDF
-    stab: int
-    eig: NDC
     steady_state: NDF
-    a: NDF
-    b: NDF
-    A: NDF
-    B: NDF
-    order: int = 1
-
-
-@dataclass(slots=True, frozen=True)
-class PerturbationSolution:
-    """First- (+ optional second-) order perturbation solution.
-
-    Carries the same first-order interface as
-    :class:`~SymbolicDSGE.core.klein.KleinSolution`
-    (``p`` = h_x, ``f`` = g_x, ``stab``, ``eig``, ``steady_state``) so it
-    drops into ``SolvedModel.policy`` unchanged -- every existing first-order path
-    (``sim``/``irf``/``kalman``) keeps reading ``.f``/``.p``/``.stab``. The
-    second-order tensors are ``None`` at ``order == 1``:
-
-    * ``hxx`` (nx, nx, nx), ``gxx`` (ny, nx, nx) -- the state-quadratic terms;
-    * ``hss`` (nx,), ``gss`` (ny,) -- the sigma^2 risk correction.
-
-    ``steady_state`` is the (nonlinear) expansion point the tensors are taken at.
-    """
-
-    p: NDF
-    f: NDF
     stab: int
     eig: NDC
     order: int
-    steady_state: NDF
+
+
+@dataclass(frozen=True)
+class FirstOrderSolution(BaseSolution):
+    """First order solution of ``a E[y_{t+1}] = b y_t``: ``u_t = f s_t``, ``s_{t+1} = p s_t``.
+
+    ``p``/``f`` are real: the Schur form they come from is complex, but its
+    imaginary parts are roundoff on a real pencil and the native solve projects
+    them once. ``eig`` stays complex.
+
+    :attr:`p`/``f`` are the policy and transition matrices.
+    :attr:`A`/``B`` are the first-order state space. x_{t+1} = A x_t + B e_{t+1}
+
+    """
+
+    p: NDF
+    f: NDF
+    A: NDF
+    B: NDF
+
+
+@dataclass(frozen=True)
+class SecondOrderSolution(FirstOrderSolution):
+    """Second-order (SGU) solution: the first-order rule plus the corrections
+    taken at the same expansion point.
+
+    :attr:`gx` (ny, nx)/``hx`` (nx, nx) are ``f``/``p`` under SGU's names.
+    :attr:`gxx` (ny, nx, nx)/``hxx`` (nx, nx, nx) are the state-quadratic terms.
+    :attr:`gss` (ny,)/``hss`` (nx,) are the sigma^2 risk correction.
+    """
+
     gxx: NDF
     hxx: NDF
     gss: NDF
     hss: NDF
+
+    @property
+    def hx(self) -> NDF:
+        """``p`` in SGU's notation: the state transition matrix."""
+        return self.p
+
+    @property
+    def gx(self) -> NDF:
+        """``f`` in SGU's notation: the policy matrix."""
+        return self.f
+
+
+@dataclass(frozen=True)
+class PiecewiseSolution(BaseSolution):
+    """Piecewise-linear (OccBin) solution: everything a parameter draw fixes.
+
+    There is no ``A``/``B`` here. The policy is path dependent,
+    ``y_t = P_t y_{t-1} + D_t``, so the rules are built per date against a
+    guessed regime sequence rather than once, and a time-invariant state space
+    would describe a model with no constraints. What a draw does fix is the
+    pencil of every regime, since all of them linearize at the same reference
+    steady state. :attr:`steady_state`, ``stab`` and ``eig`` are that reference
+    regime's.
+
+    :attr:`a` (n_regime, n_var, n_var)/``b`` (n_regime, n_var, n_var)/``c``
+    (n_regime, n_var) are the regime pencils ``a^r E[y_{t+1}] = b^r y_t - c^r``,
+    indexed by binding bitmask, slot 0 the reference. ``c`` is the constraint's
+    whole mechanism and is zero at slot 0.
+    :attr:`f_ref` (n_ctrl, n_state)/``p_ref`` (n_state, n_state) are the
+    reference regime's rule, which the recursion takes as its terminal
+    condition: past the horizon the guess is relaxed, so the model is its own
+    unconstrained self.
+    """
+
+    a: NDF
+    b: NDF
+    c: NDF
+    f_ref: NDF
+    p_ref: NDF
 
 
 @contextmanager
@@ -101,7 +132,7 @@ def klein_solve(
     n_states: int,
     *,
     n_exog: int = 0,
-) -> KleinSolution:
+) -> FirstOrderSolution:
     """First-order Klein solve of the compiled model at ``params``.
 
     ``residual_cfunc`` is the compiled residual as a numba @cfunc
@@ -116,11 +147,11 @@ def klein_solve(
     whether to raise.
     """
     with _bk_dating_hint():
-        ss, a, b, f, p, stab, eig, A, B = klein_solve1(
+        ss, f, p, stab, eig, A, B = klein_solve1(
             residual_cfunc.address, ss_seed, params, n_states, n_exog
         )
-    return KleinSolution(
-        p=p, f=f, stab=stab, eig=eig, steady_state=ss, a=a, b=b, A=A, B=B
+    return FirstOrderSolution(
+        steady_state=ss, stab=stab, eig=eig, order=1, p=p, f=f, A=A, B=B
     )
 
 
@@ -133,7 +164,7 @@ def sgu_solve(
     eta: NDF,
     *,
     n_exog: int = 0,
-) -> tuple[PerturbationSolution, NDF, NDF]:
+) -> SecondOrderSolution:
     """Second-order (SGU) solve of the compiled model at ``params``.
 
     The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
@@ -157,19 +188,17 @@ def sgu_solve(
             eta,
             n_exog,
         )
-    return (
-        PerturbationSolution(
-            p=p,
-            f=f,
-            stab=stab,
-            eig=eig,
-            order=2,
-            steady_state=ss,
-            gxx=gxx,
-            hxx=hxx,
-            gss=gss,
-            hss=hss,
-        ),
-        A,
-        B,
+    return SecondOrderSolution(
+        steady_state=ss,
+        stab=stab,
+        eig=eig,
+        order=2,
+        p=p,
+        f=f,
+        A=A,
+        B=B,
+        gxx=gxx,
+        hxx=hxx,
+        gss=gss,
+        hss=hss,
     )

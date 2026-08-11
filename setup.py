@@ -26,6 +26,7 @@ _COMMON = os.path.join(_CKERNELS, "_common")
 _EXTRA_DEPS = {
     "estimation": ["core", "kalman", "optim", "rng"],
     "monte_carlo": ["core", "kalman", "rng", "regression", "diag"],
+    "occbin": ["core"],
 }
 
 # Subsystems whose hand-written C draws randoms through numpy's low-level RNG

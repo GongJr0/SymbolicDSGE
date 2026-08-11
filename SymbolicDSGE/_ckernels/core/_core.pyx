@@ -657,7 +657,7 @@ def klein_solve1(
         err = sdsge_klein_solve1(&spec, &out, &arv[0], &iarv[0])
 
     _raise_solve_error(err, "klein_solve1")
-    return ss, a, b, f, p, int(out.stab), eig, A, B
+    return ss, f, p, int(out.stab), eig, A, B
 
 
 def sgu_klein_solve2(

@@ -50,20 +50,14 @@ static inline void sdsge_bx_from_B(const f64 *SDSGE_RESTRICT B,
   }
 }
 
-/* Componentwise max: the stages run one after another off the same arena. */
-static inline arena_size sdsge_max_arena(const arena_size a,
-                                         const arena_size b) {
-  return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
-}
-
 /* f64 head reserved for the complex f/p the post-proc emits, which must outlive
  * the post-proc's own scratch: the state-space assembly reads them after it. */
 static inline i64 sdsge_solve1_fp_reserve(const i64 n_state, const i64 n_ctrl) {
   return 2 * (n_ctrl * n_state + n_state * n_state);
 }
 
-/* Stage max only. The reserve is added once by the public sizers, so it is never
- * folded into a max and then compared against a later stage. */
+/* Stage max only. The reserve is added once by the public sizers, so it is
+ * never folded into a max and then compared against a later stage. */
 static inline arena_size sdsge_solve1_stage_arena(const i64 n_var,
                                                   const i64 n_state,
                                                   const i64 n_ctrl,
@@ -95,8 +89,8 @@ arena_size sdsge_sgu_klein_solve2_arena_size(const i64 n_var, const i64 n_state,
   return size;
 }
 
-i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out,
-                          f64 *arena, i64 *iarena) {
+i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
+                          i64 *iarena) {
   const i64 n = spec->n_var;
 
   /* Resolve the steady state at the current params by Newton from ss_seed, then

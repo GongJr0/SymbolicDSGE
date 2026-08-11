@@ -557,7 +557,7 @@ class DSGESolver:
         risk correction into a :class:`PerturbationSolution`. Requires the native
         extension."""
 
-        pert, A, B = sgu_solve(
+        pert = sgu_solve(
             compiled.construct_objective_cfunc(),
             compiled.construct_objective_cfunc_bicomplex(),
             param_vec,
@@ -570,7 +570,7 @@ class DSGESolver:
             pert.stab, should_raise=raise_on_bk_violation
         )
         # p/f are the first-order solution unchanged, so its state space stands.
-        return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
+        return SolvedModel(compiled=compiled, policy=pert, A=pert.A, B=pert.B)
 
     @staticmethod
     def _build_eta(compiled: CompiledModel) -> NDF:

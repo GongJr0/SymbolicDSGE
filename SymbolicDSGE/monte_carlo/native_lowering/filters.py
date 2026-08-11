@@ -7,7 +7,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import ArrayLike
 
-from SymbolicDSGE.core.solver_backend import PerturbationSolution
+from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.interface import KalmanInterface
 
 from ..._ckernels.monte_carlo._runner import (
@@ -144,7 +144,7 @@ def lower_filter_step(
         if interface.return_shocks:
             raise ValueError("Unscented filtering does not support return_shocks.")
         policy = reference.policy
-        if not isinstance(policy, PerturbationSolution):
+        if not isinstance(policy, SecondOrderSolution):
             raise ValueError(
                 "Native unscented filtering requires a perturbation solution."
             )
