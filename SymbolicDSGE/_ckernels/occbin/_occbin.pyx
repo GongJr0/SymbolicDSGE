@@ -17,15 +17,7 @@ cdef extern from "../_common/sdsge_common.h" nogil:
         int64_t n_int
 
 
-cdef extern from "occbin.h" nogil:
-    ctypedef void (*sdsge_constraint_fn)(
-        double *cur, double *par, int8_t *flags) noexcept
-    int64_t sdsge_constraint_path(
-        sdsge_constraint_fn cond, double *path, double *par,
-        const int8_t *regime_in, int8_t *regime_out,
-        int64_t T, int64_t n_var, int64_t n_constraint)
-
-
+# regime_pencil.h first: occbin.h includes it and occbin_ctx holds a regime_ctx.
 cdef extern from "regime_pencil.h" nogil:
     ctypedef void (*sdsge_regime_pencil_fn)(
         const double *cur, const double *par, double *out) noexcept
@@ -43,13 +35,78 @@ cdef extern from "regime_pencil.h" nogil:
         int64_t n_var, double *arena)
 
 
-#: Constraints the native flag buffer is sized for (``i8 flags[4]`` in occbin.c,
-#: two slots per constraint). Mirrors the OccBin cap in model_parser.
+cdef extern from "occbin.h" nogil:
+    ctypedef void (*sdsge_constraint_fn)(
+        double *cur, double *par, double *err) noexcept
+    int64_t sdsge_constraint_path(
+        sdsge_constraint_fn cond, double *path, double *par,
+        const int8_t *regime_in, int8_t *regime_out,
+        int64_t inclusive, double *max_err, int64_t T,
+        int64_t n_var, int64_t n_constraint)
+    ctypedef struct occbin_ctx:
+        const regime_ctx *table
+        const double *f_ref
+        int64_t n_var
+        int64_t n_state
+        int64_t n_ctrl
+    ctypedef struct occbin_opts:
+        int64_t periodic_solution
+        int64_t periodic_threshold
+        int64_t periodic_strict
+        int64_t curb_retrench
+        int64_t reset_regime
+        int64_t reset_check_ahead
+        int64_t algo_truncation
+    ctypedef struct occbin_run_ctx:
+        const occbin_ctx *model
+        sdsge_constraint_fn cond
+        double *par
+        const double *ss
+        int64_t inclusive
+        int64_t n_constraint
+        int64_t max_iter
+        int64_t T0
+        int64_t T_cap
+        occbin_opts opts
+    ctypedef struct occbin_diag:
+        int64_t *iters
+        double *max_err
+        int8_t *periodic
+        int64_t fail_period
+        int64_t singular_date
+    arena_size sdsge_occbin_recursion_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl)
+    int64_t sdsge_occbin_recursion(
+        const occbin_ctx *ctx, const int8_t *mask, int64_t T, double *out,
+        int64_t *singular_date, double *arena, int64_t *iarena)
+    void sdsge_occbin_forward(
+        const double *rule, const double *x0, int64_t T, int64_t n_var,
+        int64_t n_state, double *path)
+    arena_size sdsge_occbin_solve_arena_size(
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t T_cap,
+        int64_t max_iter)
+    int64_t sdsge_occbin_solve(
+        const occbin_run_ctx *run, const double *shocks, int64_t S,
+        int64_t n_periods, const double *x_init, const int8_t *init_mask,
+        double *out, int8_t *regimes, int64_t *T_used, occbin_diag *diag,
+        double *rule, double *path, int8_t *mask, double *arena,
+        int64_t *iarena)
+    int64_t SDSGE_OCCBIN_RECURSION_OK
+    int64_t SDSGE_OCCBIN_RECURSION_SINGULAR
+    int64_t SDSGE_OCCBIN_PERIOD_OK
+    int64_t SDSGE_OCCBIN_PERIODIC
+    int64_t SDSGE_OCCBIN_PERIODIC_LOOP
+    int64_t SDSGE_OCCBIN_MAXITER
+
+
+#: Constraints the native distance buffer is sized for (``f64 err[4]`` in
+#: occbin.c, two slots per constraint). Mirrors the OccBin cap in model_parser.
 MAX_CONSTRAINTS = 2
+MAX_REGIME = 4
 
 
 def constraint_path(size_t cond_addr, path, par, regime_in,
-                    int64_t n_constraint, out=None):
+                    int64_t n_constraint, int64_t inclusive, out=None):
     """Latched regime mask ``(T,)`` from a constraint @cfunc over a path.
 
     ``path`` is ``(T, n_var)`` in cur-variable order and in levels, not
@@ -57,10 +114,15 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     ``(T,)`` mask over declaration-ordered constraints, which the latch carries
     across guess-and-verify iterations at a fixed period; periods never interact.
 
+    The cfunc writes signed distances, so ``inclusive``
+    (``ConstraintFunc.inclusive``) is what decides a distance of exactly zero,
+    which is where a condition written against the steady state starts.
+
     ``out`` is an optional C-contiguous int8 buffer written in place, and may be
     ``regime_in`` itself to latch in place. Other inputs are coerced. Returns
-    ``(out, changed)``, where ``changed`` counts the periods whose mask moved and
-    so is 0 exactly at a fixed point.
+    ``(out, changed, max_err)``: ``changed`` counts the periods whose mask moved
+    and so is 0 exactly at a fixed point, and ``max_err`` is the largest
+    distance that moved one, which ranks iterations that cycle.
     """
     if not 0 < n_constraint <= MAX_CONSTRAINTS:
         raise ValueError(
@@ -74,6 +136,7 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     cdef int64_t n_var = pv.shape[1]
     cdef int8_t[::1] ov
     cdef int64_t changed
+    cdef double max_err = 0.0
 
     if inv.shape[0] != T:
         raise ValueError(
@@ -94,9 +157,10 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     cdef sdsge_constraint_fn fn = <sdsge_constraint_fn><void*>cond_addr
     with nogil:
         changed = sdsge_constraint_path(
-            fn, path_ptr, par_ptr, in_ptr, out_ptr, T, n_var, n_constraint
+            fn, path_ptr, par_ptr, in_ptr, out_ptr, inclusive, &max_err,
+            T, n_var, n_constraint,
         )
-    return out, changed
+    return out, changed, max_err
 
 
 def regime_pencil(size_t pencil_addr, rows, ss, par, a_ref, b_ref):
@@ -177,3 +241,435 @@ def regime_pencil(size_t pencil_addr, rows, ss, par, a_ref, b_ref):
             &ctx, ss_ptr, par_ptr, a_ptr, b_ptr, n_var, arena_ptr
         )
     return a, b, c
+
+
+cdef _check_pencils(double[:, :, ::1] av, double[:, :, ::1] bv,
+                    double[:, ::1] cv, double[:, ::1] fv):
+    """``(n_regime, n_var, n_state, n_ctrl)`` for stacked pencils and ``f_ref``.
+
+    The kernels index the stack and partition the rows without a bound check,
+    so every shape relation they assume is settled here.
+    """
+    cdef int64_t n_regime = av.shape[0]
+    cdef int64_t n_var = av.shape[1]
+    cdef int64_t n_ctrl = fv.shape[0]
+    cdef int64_t n_state = fv.shape[1]
+
+    if n_regime < 1:
+        raise ValueError("a must hold at least the reference regime.")
+    if n_regime > MAX_REGIME:
+        raise ValueError(f"a holds {n_regime} regimes, at most {MAX_REGIME}.")
+    if av.shape[2] != n_var:
+        raise ValueError(
+            f"a[0] is {av.shape[1]}x{av.shape[2]}, expected square."
+        )
+    if bv.shape[0] != n_regime or bv.shape[1] != n_var or bv.shape[2] != n_var:
+        raise ValueError(
+            f"b is {bv.shape[0]}x{bv.shape[1]}x{bv.shape[2]}, expected "
+            f"{n_regime}x{n_var}x{n_var} to match a."
+        )
+    if cv.shape[0] != n_regime or cv.shape[1] != n_var:
+        raise ValueError(
+            f"c is {cv.shape[0]}x{cv.shape[1]}, expected {n_regime}x{n_var} "
+            f"to match a."
+        )
+    if n_state + n_ctrl != n_var:
+        raise ValueError(
+            f"f_ref is {n_ctrl}x{n_state}, so n_state + n_ctrl is "
+            f"{n_state + n_ctrl}, expected {n_var} to match a."
+        )
+    return n_regime, n_var, n_state, n_ctrl
+
+
+cdef void _fill_table(regime_ctx *table, double[:, :, ::1] av,
+                      double[:, :, ::1] bv, double[:, ::1] cv,
+                      int64_t n_regime) noexcept nogil:
+    """Point a stack-allocated table at the stacked pencils, slot by slot."""
+    cdef int64_t i
+    for i in range(n_regime):
+        table[i].pencil = NULL
+        table[i].n_row = 0
+        table[i].rows = NULL
+        table[i].a = &av[i, 0, 0]
+        table[i].b = &bv[i, 0, 0]
+        table[i].c = &cv[i, 0]
+
+
+def occbin_recursion_arena_size(int64_t n_var, int64_t n_state,
+                                int64_t n_ctrl):
+    """``(n_float, n_int)`` scratch ``occbin_recursion`` needs for a shape."""
+    cdef arena_size sz = sdsge_occbin_recursion_arena_size(
+        n_var, n_state, n_ctrl
+    )
+    return sz.n_float, sz.n_int
+
+
+def occbin_recursion(a, b, c, mask, f_ref, out=None, arena=None, iarena=None):
+    """Piecewise-linear decision rules ``(T, n_var, n_state + 1)`` for a guess.
+
+    ``a``, ``b`` and ``c`` are the regime pencils stacked by bitmask, shaped
+    ``(n_regime, n_var, n_var)``, ``(n_regime, n_var, n_var)`` and
+    ``(n_regime, n_var)``. Slot ``m`` is what ``regime_pencil`` returns for mask
+    ``m`` and slot 0 is the reference, so ``mask`` indexes the stack directly.
+
+    ``f_ref`` is the reference control rule ``(n_ctrl, n_state)``, which closes
+    the recursion past the last date, and fixes ``n_state`` and ``n_ctrl``.
+
+    ``out`` is an optional C-contiguous ``(T, n_var, n_state + 1)`` float64
+    buffer written in place. At date ``t`` the block is the affine map from
+    ``x_t`` to ``[x_{t+1}; u_t]``: ``out[t, :, :n_state] @ x_t + out[t, :,
+    n_state]``, state rows first. Raises ``RuntimeError`` naming the date if a
+    date's pencil is singular.
+
+    ``arena`` and ``iarena`` are optional scratch buffers, at least as long as
+    ``occbin_recursion_arena_size`` reports; both are allocated if omitted.
+    """
+    cdef double[:, :, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
+    cdef double[:, :, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
+    cdef double[:, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
+    cdef double[:, ::1] fv = np.ascontiguousarray(f_ref, dtype=np.float64)
+    cdef const int8_t[::1] mv = np.ascontiguousarray(mask, dtype=np.int8)
+
+    cdef int64_t n_regime, n_var, n_state, n_ctrl
+    n_regime, n_var, n_state, n_ctrl = _check_pencils(av, bv, cv, fv)
+
+    cdef int64_t T = mv.shape[0]
+    cdef int64_t n_rhs = n_state + 1
+    cdef int64_t i
+
+    # The kernel indexes table[mask[t]] without a bound check.
+    for i in range(T):
+        if not 0 <= mv[i] < n_regime:
+            raise ValueError(
+                f"mask[{i}] is {mv[i]}, outside 0..{n_regime - 1}."
+            )
+
+    if out is None:
+        out = np.empty((T, n_var, n_rhs), dtype=np.float64)
+    cdef double[:, :, ::1] ov = out
+    if ov.shape[0] != T or ov.shape[1] != n_var or ov.shape[2] != n_rhs:
+        raise ValueError(
+            f"out is {ov.shape[0]}x{ov.shape[1]}x{ov.shape[2]}, expected "
+            f"{T}x{n_var}x{n_rhs}."
+        )
+
+    cdef arena_size sz = sdsge_occbin_recursion_arena_size(
+        n_var, n_state, n_ctrl
+    )
+    if arena is None:
+        arena = np.empty(sz.n_float, dtype=np.float64)
+    if iarena is None:
+        iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iav = iarena
+    if arv.shape[0] < sz.n_float or iav.shape[0] < sz.n_int:
+        raise ValueError(
+            f"arena is {arv.shape[0]}/{iav.shape[0]} floats/ints, needs "
+            f"{sz.n_float}/{sz.n_int}."
+        )
+
+    cdef const int8_t *mask_ptr = &mv[0] if T > 0 else NULL
+    cdef double *out_ptr = &ov[0, 0, 0] if (T * n_var * n_rhs) > 0 else NULL
+    cdef double *arena_ptr = &arv[0] if arv.shape[0] > 0 else NULL
+    cdef int64_t *iarena_ptr = &iav[0] if iav.shape[0] > 0 else NULL
+
+    cdef occbin_ctx ctx
+    cdef regime_ctx table[4]  # MAX_REGIME
+    cdef int64_t singular_date = -1
+    cdef int64_t status
+
+    _fill_table(table, av, bv, cv, n_regime)
+
+    ctx.table = table
+    ctx.f_ref = &fv[0, 0] if (n_ctrl * n_state) > 0 else NULL
+    ctx.n_var = n_var
+    ctx.n_state = n_state
+    ctx.n_ctrl = n_ctrl
+
+    with nogil:
+        status = sdsge_occbin_recursion(
+            &ctx, mask_ptr, T, out_ptr, &singular_date, arena_ptr, iarena_ptr
+        )
+
+    if status != SDSGE_OCCBIN_RECURSION_OK:
+        raise RuntimeError(
+            f"occbin_recursion: singular pencil at date {singular_date}."
+        )
+    return out
+
+
+def occbin_forward(rule, x0, out=None):
+    """``(T, n_var)`` path in deviations, from decision rules and a state.
+
+    ``rule`` is a stack of blocks as ``occbin_recursion`` returns them, ``(T,
+    n_var, n_state + 1)``, and ``x0`` the ``(n_state,)`` state entering date 0.
+
+    Row ``t`` is ``[x_t; u_t]``: the state half comes from date ``t - 1``'s
+    block and the control half from date ``t``'s, which is the pairing a
+    constraint on period ``t`` reads. The state the last block implies falls off
+    the end. ``out`` is an optional C-contiguous buffer written in place.
+    """
+    cdef double[:, :, ::1] rv = np.ascontiguousarray(rule, dtype=np.float64)
+    cdef double[::1] xv = np.ascontiguousarray(x0, dtype=np.float64)
+
+    cdef int64_t T = rv.shape[0]
+    cdef int64_t n_var = rv.shape[1]
+    cdef int64_t n_state = rv.shape[2] - 1
+
+    if n_state < 0 or n_state > n_var:
+        raise ValueError(
+            f"rule is {T}x{n_var}x{rv.shape[2]}, expected a last axis in "
+            f"1..{n_var + 1}."
+        )
+    if xv.shape[0] != n_state:
+        raise ValueError(
+            f"x0 has length {xv.shape[0]}, expected {n_state} to match rule."
+        )
+
+    if out is None:
+        out = np.empty((T, n_var), dtype=np.float64)
+    cdef double[:, ::1] ov = out
+    if ov.shape[0] != T or ov.shape[1] != n_var:
+        raise ValueError(
+            f"out is {ov.shape[0]}x{ov.shape[1]}, expected {T}x{n_var}."
+        )
+
+    cdef const double *rule_ptr = &rv[0, 0, 0] if T * n_var > 0 else NULL
+    cdef const double *x_ptr = &xv[0] if n_state > 0 else NULL
+    cdef double *out_ptr = &ov[0, 0] if T * n_var > 0 else NULL
+    with nogil:
+        sdsge_occbin_forward(rule_ptr, x_ptr, T, n_var, n_state, out_ptr)
+    return out
+
+
+def occbin_solve_arena_size(int64_t n_var, int64_t n_state, int64_t n_ctrl,
+                            int64_t T_cap, int64_t max_iter):
+    """``(n_float, n_int)`` scratch ``occbin_solve`` needs for a shape."""
+    cdef arena_size sz = sdsge_occbin_solve_arena_size(
+        n_var, n_state, n_ctrl, T_cap, max_iter
+    )
+    return sz.n_float, sz.n_int
+
+
+def occbin_solve(a, b, c, f_ref, ss, par, size_t cond_addr,
+                 int64_t n_constraint, int64_t inclusive, shocks, x_init,
+                 *, int64_t T0, int64_t T_cap=-1, n_periods=None,
+                 int64_t max_iter=30, init_regime=None,
+                 bint periodic_solution=False, int64_t periodic_threshold=1,
+                 bint periodic_strict=True, bint curb_retrench=False,
+                 bint reset_regime=False, bint reset_check_ahead=False,
+                 int64_t algo_truncation=1):
+    """Piecewise path ``(n_periods, n_var)`` for a sequence of unforeseen shocks.
+
+    ``a``, ``b``, ``c`` and ``f_ref`` are the pencils and reference rule
+    ``occbin_recursion`` takes, except that the stack must be complete: the latch
+    produces every mask in ``0..2 ** n_constraint - 1``, so all of them must be
+    slots. ``ss`` is the ``(n_var,)`` reference steady state, which turns the
+    path into the levels the constraint @cfunc at ``cond_addr`` reads.
+
+    ``shocks`` is ``(S, n_state)`` in state slots, added to the carried state at
+    the head of each period. A period whose row is all zero is not re-solved:
+    the previous guess and the path it implies, both shifted forward one period,
+    already describe it. Period 0 always solves.
+
+    ``T0`` is the horizon a guess starts at and ``T_cap`` the most it may grow
+    to, one date at a time, whenever a guess still binds at its last date;
+    ``T_cap`` defaults to ``T0``, which forbids growth and forces the last date
+    relaxed instead. ``n_periods`` defaults to ``S`` and any excess is filled
+    from the tail of the last path solved. ``init_regime`` is a ``(T0,)`` guess
+    to start period 0 from, all relaxed by default.
+
+    The remaining keywords are Dynare's ``occbin.simul`` options at their own
+    defaults. ``periodic_solution`` accepts the best guess of a cycle instead of
+    failing; ``periodic_threshold`` is how far a guess may move and still count
+    as a two-cycle rather than a loop; ``periodic_strict`` refuses to weigh a
+    loop that is not one; ``curb_retrench`` relaxes one date per pass;
+    ``reset_regime`` starts every period from the relaxed guess, dropping a
+    grown horizon too when ``reset_check_ahead`` is set; and a ``max_iter`` at
+    or below ``algo_truncation`` accepts whatever the last pass produced.
+
+    Returns ``(out, regimes, diag)``. ``out`` is in deviations, ``regimes`` is
+    the ``(S, T_cap)`` accepted guess per period, and ``diag`` carries
+    ``T_used``, ``iters``, ``max_err`` and ``periodic``, one entry per period.
+    ``periodic`` is nonzero where a period was accepted under
+    ``periodic_solution``, carrying the code it would otherwise have raised.
+    Raises ``RuntimeError`` naming the period that failed to converge.
+    """
+    cdef double[:, :, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
+    cdef double[:, :, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
+    cdef double[:, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
+    cdef double[:, ::1] fv = np.ascontiguousarray(f_ref, dtype=np.float64)
+
+    cdef int64_t n_regime, n_var, n_state, n_ctrl
+    n_regime, n_var, n_state, n_ctrl = _check_pencils(av, bv, cv, fv)
+
+    if n_state < 1:
+        raise ValueError("f_ref must hold at least one state; the solve "
+                         "carries the path forward through the states.")
+    if not 0 < n_constraint <= MAX_CONSTRAINTS:
+        raise ValueError(
+            f"n_constraint must be in 1..{MAX_CONSTRAINTS}, got {n_constraint}."
+        )
+    # The latch emits every mask over n_constraint bits and the kernel indexes
+    # table[mask[t]] with it, so a partial stack would read past the table.
+    if n_regime != 1 << n_constraint:
+        raise ValueError(
+            f"a holds {n_regime} regimes, expected {1 << n_constraint} to "
+            f"cover every mask over {n_constraint} constraints."
+        )
+
+    if T_cap < 0:
+        T_cap = T0
+    if T0 < 2:
+        raise ValueError(f"T0 is {T0}, expected at least 2.")
+    if T_cap < T0:
+        raise ValueError(f"T_cap is {T_cap}, expected at least T0 of {T0}.")
+    if max_iter < 1:
+        raise ValueError(f"max_iter is {max_iter}, expected at least 1.")
+
+    cdef int8_t[::1] imv
+    cdef const int8_t *im = NULL
+    if init_regime is not None:
+        imv = np.ascontiguousarray(init_regime, dtype=np.int8)
+        if imv.shape[0] != T0:
+            raise ValueError(
+                f"init_regime has length {imv.shape[0]}, expected T0 of {T0}."
+            )
+        if np.any(np.asarray(imv) >= (1 << n_constraint)) or np.any(
+            np.asarray(imv) < 0
+        ):
+            raise ValueError(
+                f"init_regime holds a mask outside 0..{(1 << n_constraint) - 1}."
+            )
+        im = &imv[0]
+
+    cdef double[::1] ssv = np.ascontiguousarray(ss, dtype=np.float64)
+    cdef double[::1] parv = np.ascontiguousarray(par, dtype=np.float64)
+    cdef double[:, ::1] shv = np.ascontiguousarray(shocks, dtype=np.float64)
+    cdef double[::1] xv = np.ascontiguousarray(x_init, dtype=np.float64)
+    cdef int64_t S = shv.shape[0]
+
+    if ssv.shape[0] != n_var:
+        raise ValueError(
+            f"ss has length {ssv.shape[0]}, expected {n_var} to match a."
+        )
+    if S < 1:
+        raise ValueError("shocks must hold at least one period.")
+    if shv.shape[1] != n_state:
+        raise ValueError(
+            f"shocks is {S}x{shv.shape[1]}, expected {S}x{n_state} to match "
+            f"f_ref."
+        )
+    if xv.shape[0] != n_state:
+        raise ValueError(
+            f"x_init has length {xv.shape[0]}, expected {n_state} to match "
+            f"f_ref."
+        )
+
+    cdef int64_t P = S if n_periods is None else n_periods
+    if P < S:
+        raise ValueError(f"n_periods is {P}, expected at least S of {S}.")
+    # The tail is read off one path, which is only T0 long to start with.
+    if P - S > T0:
+        raise ValueError(
+            f"n_periods is {P}, at most S + T0 of {S + T0} for a tail the "
+            f"last path can fill."
+        )
+
+    out = np.empty((P, n_var), dtype=np.float64)
+    regimes = np.zeros((S, T_cap), dtype=np.int8)
+    T_used = np.zeros(S, dtype=np.int64)
+    iters = np.zeros(S, dtype=np.int64)
+    max_err = np.zeros(S, dtype=np.float64)
+    periodic = np.zeros(S, dtype=np.int8)
+    cdef double[:, ::1] ov = out
+    cdef int8_t[:, ::1] rgv = regimes
+    cdef int64_t[::1] tuv = T_used
+    cdef int64_t[::1] itv = iters
+    cdef double[::1] mev = max_err
+    cdef int8_t[::1] pev = periodic
+
+    rule = np.empty((T_cap, n_var, n_state + 1), dtype=np.float64)
+    path = np.empty((T_cap, n_var), dtype=np.float64)
+    mask = np.empty(T_cap, dtype=np.int8)
+    cdef double[:, :, ::1] rulev = rule
+    cdef double[:, ::1] pathv = path
+    cdef int8_t[::1] maskv = mask
+
+    cdef arena_size sz = sdsge_occbin_solve_arena_size(
+        n_var, n_state, n_ctrl, T_cap, max_iter
+    )
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iav = iarena
+
+    cdef occbin_ctx model
+    cdef regime_ctx table[4]  # MAX_REGIME
+    _fill_table(table, av, bv, cv, n_regime)
+    model.table = table
+    model.f_ref = &fv[0, 0] if n_ctrl * n_state > 0 else NULL
+    model.n_var = n_var
+    model.n_state = n_state
+    model.n_ctrl = n_ctrl
+
+    cdef occbin_run_ctx run
+    run.model = &model
+    run.cond = <sdsge_constraint_fn><void*>cond_addr
+    run.par = &parv[0] if parv.shape[0] > 0 else NULL
+    run.ss = &ssv[0] if n_var > 0 else NULL
+    run.inclusive = inclusive
+    run.n_constraint = n_constraint
+    run.max_iter = max_iter
+    run.T0 = T0
+    run.T_cap = T_cap
+    run.opts.periodic_solution = periodic_solution
+    run.opts.periodic_threshold = periodic_threshold
+    run.opts.periodic_strict = periodic_strict
+    run.opts.curb_retrench = curb_retrench
+    run.opts.reset_regime = reset_regime
+    run.opts.reset_check_ahead = reset_check_ahead
+    run.opts.algo_truncation = algo_truncation
+
+    cdef occbin_diag diag
+    diag.iters = &itv[0]
+    diag.max_err = &mev[0]
+    diag.periodic = &pev[0]
+    diag.fail_period = -1
+    diag.singular_date = -1
+
+    cdef int64_t status
+    with nogil:
+        status = sdsge_occbin_solve(
+            &run, &shv[0, 0], S, P, &xv[0], im, &ov[0, 0], &rgv[0, 0], &tuv[0],
+            &diag, &rulev[0, 0, 0], &pathv[0, 0], &maskv[0], &arv[0], &iav[0]
+        )
+
+    if status != SDSGE_OCCBIN_PERIOD_OK:
+        raise RuntimeError(_solve_error(status, &diag, max_iter))
+    return out, regimes, {
+        "T_used": T_used,
+        "iters": iters,
+        "max_err": max_err,
+        "periodic": periodic,
+    }
+
+
+cdef _solve_error(int64_t status, occbin_diag *diag, int64_t max_iter):
+    """Dynare's error code for a period that never settled, as a message."""
+    cdef int64_t s = diag.fail_period
+    if status == SDSGE_OCCBIN_RECURSION_SINGULAR:
+        return (
+            f"occbin_solve: singular pencil at date {diag.singular_date} of "
+            f"shock period {s}."
+        )
+    if status == SDSGE_OCCBIN_PERIODIC:
+        return f"occbin_solve: shock period {s} loops between two regimes."
+    if status == SDSGE_OCCBIN_PERIODIC_LOOP:
+        return f"occbin_solve: shock period {s} loops over guess regimes."
+    if status == SDSGE_OCCBIN_MAXITER:
+        return (
+            f"occbin_solve: shock period {s} did not converge in {max_iter} "
+            f"iterations."
+        )
+    return f"occbin_solve: shock period {s} failed with status {status}."
