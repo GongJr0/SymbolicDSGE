@@ -31,20 +31,12 @@ class OccBinDiagnostics:
 
 @dataclass(frozen=True, eq=False)
 class SimResult:
-    """A simulated path, as series by name.
+    """A simulated path.
 
-    :attr:`states` and :attr:`observables` are the two series mappings and are
-    kept apart, so a name that is both a variable and an observable stays two
-    distinct series. ``X`` and ``y`` are the matrices they are cut from, in
-    canonical column order, held so a caller wanting the whole path does not
-    have to reassemble one from the series.
-
+    :attr:`states` and :attr:`observables` are dicts keyed by variable name.
+    ``X`` and ``y`` are the matrices they are cut from in canonical column order.
     ``regimes`` and ``diagnostics`` are OccBin results and raise on a model that
-    has no constraints. Both describe the shock realization this result came
-    from rather than the model, so they belong here and not on ``SolvedModel``.
-
-    Equality is identity: the fields are arrays, so a field-wise ``==`` would
-    yield arrays rather than a bool.
+    has no constraints.
     """
 
     var_names: Sequence[str]
