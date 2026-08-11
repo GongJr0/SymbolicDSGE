@@ -77,9 +77,9 @@ def lower_filter_step(
     if len(canonical_names) != source_n_obs and requested_names is None:
         raise ValueError("Filter observations do not match the DATAGEN output.")
     source_columns = _filter_source_columns(source_names, canonical_names)
-    n_var = len(reference.compiled.var_names)
+    n_var = reference.compiled.n_var
     n_exog = reference.compiled.n_exog
-    n_par = len(reference.compiled.calib_params)
+    n_par = reference.compiled.n_par
     n_obs = len(canonical_names)
     before_y: tuple[NDF, ...]
 
@@ -149,7 +149,7 @@ def lower_filter_step(
                 "Native unscented filtering requires a perturbation solution."
             )
         n_state = reference.compiled.n_state
-        n_ctrl = n_var - n_state
+        n_ctrl = reference.compiled.n_ctrl
         params = _model_params(reference)
         z0 = interface._build_unscented_z0(step.kwargs["x0"])
         before_y = (

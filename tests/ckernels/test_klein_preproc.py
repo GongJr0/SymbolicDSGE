@@ -50,9 +50,9 @@ def test_klein_preproc_parity(path):
     par = _params(compiled)
 
     a_ref, b_ref = _approximate_system_numeric(eq_func, ss, par)
-    a, b = klein_preprocess(cf.address, ss, par, layout.n_eq)
+    a, b = klein_preprocess(cf.address, ss, par, layout.n_var)
 
-    assert a.shape == (layout.n_eq, layout.n_var)
-    assert b.shape == (layout.n_eq, layout.n_var)
+    assert a.shape == (layout.n_var, layout.n_var)
+    assert b.shape == (layout.n_var, layout.n_var)
     np.testing.assert_allclose(a, a_ref, rtol=RTOL, atol=ATOL)
     np.testing.assert_allclose(b, b_ref, rtol=RTOL, atol=ATOL)

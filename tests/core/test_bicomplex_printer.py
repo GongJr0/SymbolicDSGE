@@ -85,7 +85,7 @@ def _second_derivative(expr, x0, h=1e-4):
     """f''(x0) via the printer's bicomplex residual: perturb x on i and j, read
     the ij component / h^2."""
     x = sp.Symbol("x")
-    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0, n_eq=1)
+    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0)
     res = build_njit([expr(x)], layout, BicomplexOps())
     cur = np.array([complex(x0, h), complex(h, 0.0)], dtype=C)  # x + h*i + h*j
     out = res(np.zeros(2, C), cur, np.zeros(0, C))
@@ -107,8 +107,6 @@ def test_bicomplex_printer_second_derivative(expr, analytic, x0, tol):
 
 def test_build_cfunc_bicomplex_compiles_to_address():
     x, p = sp.symbols("x p")
-    layout = ResidualLayout(
-        slot={x: ("cur", 0), p: ("par", 0)}, n_var=1, n_par=1, n_eq=1
-    )
+    layout = ResidualLayout(slot={x: ("cur", 0), p: ("par", 0)}, n_var=1, n_par=1)
     cf = build_cfunc([p * sp.exp(x)], layout, BicomplexOps())
     assert isinstance(cf.address, int) and cf.address != 0

@@ -611,7 +611,7 @@ class KalmanInterface(KalmanFilter):
 
     def _build_unscented_z0(self, x0: NDF | None) -> NDF:
         n_state = self.model.compiled.n_state
-        n_var = len(self.model.compiled.var_names)
+        n_var = self.model.compiled.n_var
         if x0 is None:
             x0_state = np.zeros((n_state,), dtype=float64)
         else:

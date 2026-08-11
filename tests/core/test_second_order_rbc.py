@@ -112,7 +112,7 @@ def test_rbc_second_order_matches_dynare():
     assert list(compiled.var_names) == ["e_st", "k_lag1", "z_lag1", "c", "k", "z"]
 
     layout = ResidualLayout.from_compiled(compiled)
-    n_eq, n_state = layout.n_eq, compiled.n_state
+    n_eq, n_state = layout.n_var, compiled.n_state
     calib = compiled.config.calibration.parameters
     ss = _levels_steady_state(compiled)
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)

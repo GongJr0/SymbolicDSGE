@@ -126,15 +126,14 @@ class PyDims:
 
 
 def get_dims(compiled: CompiledModel, estimated_params: list[str], y: NDF) -> PyDims:
-    n_var = len(compiled.var_names)
     return PyDims(
         n_theta=len(estimated_params),
-        n_var=n_var,
+        n_var=compiled.n_var,
         n_state=compiled.n_state,
-        n_ctrl=n_var - compiled.n_state,
+        n_ctrl=compiled.n_ctrl,
         n_exog=compiled.n_exog,
         n_obs=y.shape[1],
-        n_par=len(compiled.calib_params),
+        n_par=compiled.n_par,
         T=y.shape[0],
     )
 
@@ -655,7 +654,7 @@ def _unscented_z0(compiled: CompiledModel, x0: NDF | None) -> NDF:
     ``n_state`` block or the full ``n_var`` vector (sliced to the state block);
     the tail is zeroed."""
     n_state = compiled.n_state
-    n_var = len(compiled.var_names)
+    n_var = compiled.n_var
     if x0 is None:
         x0_state = np.zeros(n_state, dtype=np.float64)
     else:

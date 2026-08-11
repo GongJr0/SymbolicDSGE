@@ -135,8 +135,12 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_jacobian_eqs=observable_jacobian_eqs,
+            n_var=len(var_order),
             n_state=layout.n_state,
             n_exog=layout.n_exog,
+            n_ctrl=len(var_order) - layout.n_state,
+            n_par=len(params),
+            n_obs=len(observable_exprs),
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
             regimes=regimes,
@@ -455,7 +459,7 @@ class DSGESolver:
         solve's steady state back in.
         """
         layout = compiled.layout
-        n_var = len(compiled.var_names)
+        n_var = compiled.n_var
         n_declared = len(layout.declared_names) - len(layout.generated)
         declared = layout.declared_names[:n_declared]
 

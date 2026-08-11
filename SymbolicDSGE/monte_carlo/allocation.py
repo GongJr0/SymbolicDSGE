@@ -216,10 +216,10 @@ def _resolve_datagen_input_asize(
         _arena.simulation_arena_size(
             model.policy.order,
             model.compiled.n_state,
-            len(model.compiled.var_names),
+            model.compiled.n_var,
             model.compiled.n_exog,
             T,
-            len(model.compiled.calib_params),
+            model.compiled.n_par,
         )
     )
     # A step that draws its own shocks needs scratch past the simulation arena.
@@ -244,20 +244,18 @@ def _resolve_filter_input_asize(
         datagen_step.step_type == "raw_model_data"
         and not datagen_step.kwargs["observable_names"]
     ):
-        n_obs = len(reference.compiled.observable_names)
+        n_obs = reference.compiled.n_obs
     else:
         n_obs = datagen_n_obs
-    n_state = reference.compiled.n_state
-    n_ctrl = len(reference.compiled.var_names) - n_state
     return _asize(
         _arena.filter_arena_size(
             step.kwargs["filter_mode"],
-            n_state,
-            n_ctrl,
+            reference.compiled.n_state,
+            reference.compiled.n_ctrl,
             reference.compiled.n_exog,
             n_obs,
             T,
-            len(reference.compiled.calib_params),
+            reference.compiled.n_par,
         )
     )
 
@@ -441,12 +439,10 @@ def _resolve_datagen_fields(
                 )
             T = int(step.kwargs["T"])
             fields: dict[str, _FieldSpec] = {
-                "states": _field((T, len(model.compiled.var_names)))
+                "states": _field((T, model.compiled.n_var))
             }
             if step.kwargs["observables"]:
-                fields["observables"] = _field(
-                    (T, len(model.compiled.observable_names))
-                )
+                fields["observables"] = _field((T, model.compiled.n_obs))
             return fields
         case "raw_model_data":
             return {
@@ -481,10 +477,10 @@ def _resolve_filter_fields(
         datagen_step.step_type == "raw_model_data"
         and not datagen_step.kwargs["observable_names"]
     ):
-        n_obs = len(reference.compiled.observable_names)
+        n_obs = reference.compiled.n_obs
     else:
         n_obs = datagen_n_obs
-    n_var = len(reference.compiled.var_names)
+    n_var = reference.compiled.n_var
 
     match step.kwargs["filter_mode"]:
         case "linear" | "extended":

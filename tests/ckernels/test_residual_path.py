@@ -21,7 +21,7 @@ def test_residual_path_matches_reference(path):
     layout = ResidualLayout.from_compiled(compiled)
     cf = build_cfunc(compiled.objective_eqs, layout)  # hold: keeps .address valid
 
-    n_var, n_eq, n_steps = layout.n_var, layout.n_eq, 20
+    n_var, n_steps = layout.n_var, 20
     rng = np.random.default_rng(3)
     cur = rng.normal(size=(n_steps, n_var)).astype(np.complex128)
     fwd = rng.normal(size=(n_steps, n_var)).astype(np.complex128)
@@ -33,11 +33,11 @@ def test_residual_path_matches_reference(path):
         dtype=np.complex128,
     )
 
-    got = residual_path(cf.address, cur, fwd, par, n_eq)
-    assert got.shape == (n_steps, n_eq)
+    got = residual_path(cf.address, cur, fwd, par, n_var)
+    assert got.shape == (n_steps, n_var)
 
     eq = compiled.equations
-    want = np.empty((n_steps, n_eq), dtype=np.float64)
+    want = np.empty((n_steps, n_var), dtype=np.float64)
     for t in range(n_steps):
         want[t] = eq(fwd[t], cur[t], par).real
 

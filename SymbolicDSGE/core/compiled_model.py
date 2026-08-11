@@ -184,8 +184,12 @@ class CompiledModel:
     # printed to a native cfunc on demand (construct_observable_jacobian_cfunc).
     observable_jacobian_eqs: list[Expr]
 
+    n_var: int
     n_state: int
     n_exog: int
+    n_ctrl: int
+    n_par: int
+    n_obs: int
 
     # Regime conditions in declaration order, bind then relax per constraint;
     # printed to a native cfunc on demand (construct_constraint_func).
@@ -210,7 +214,7 @@ class CompiledModel:
     @cached_property
     def _regime_cfuncs(self) -> dict[int, Any]:
         # One residual @cfunc per regime, sharing the reference layout: regimes
-        # replace equations by name, so n_eq/n_var/n_par are unchanged. Held here
+        # replace equations by name, so n_var/n_par are unchanged. Held here
         # so the addresses stay valid for the driver.
         layout = ResidualLayout.from_compiled(self)
         return {
@@ -328,9 +332,9 @@ class CompiledModel:
         par: Mapping[str, float] | Any,
     ) -> ND:
         par_vec = self._coerce_param_vector(par)
-        if par_vec.shape[0] != len(self.calib_params):
+        if par_vec.shape[0] != self.n_par:
             raise ValueError(
-                f"Parameter vector length {par_vec.shape[0]} != {len(self.calib_params)}"
+                f"Parameter vector length {par_vec.shape[0]} != {self.n_par}"
             )
 
         return residual_eval(
@@ -348,9 +352,9 @@ class CompiledModel:
         ss: NDF,
     ) -> tuple[NDF, NDF]:
         param_vec = self._coerce_param_vector(params)
-        if param_vec.shape[0] != len(self.calib_params):
+        if param_vec.shape[0] != self.n_par:
             raise ValueError(
-                f"Parameter vector length {param_vec.shape[0]} != {len(self.calib_params)}"
+                f"Parameter vector length {param_vec.shape[0]} != {self.n_par}"
             )
 
         meas_addr = self.construct_measurement_cfunc(observables).address
@@ -358,7 +362,7 @@ class CompiledModel:
         n_obs = len(observables)
 
         d = measurement_eval(meas_addr, ss, param_vec, n_obs)
-        C = jacobian_eval(jac_addr, ss, param_vec, n_obs, len(self.cur_syms))
+        C = jacobian_eval(jac_addr, ss, param_vec, n_obs, self.n_var)
         return C, d
 
     def _normalize_observables(
@@ -467,7 +471,7 @@ class CompiledModel:
 
         addr = self.construct_observable_jacobian_cfunc(obs).address
         n_obs = len(obs)
-        n_var = len(self.cur_syms)
+        n_var = self.n_var
 
         def jacobian_array(state: ND, params: ND) -> ND:
             return jacobian_eval(addr, state, params, n_obs, n_var)

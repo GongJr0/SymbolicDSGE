@@ -759,7 +759,7 @@ class DenHaanMarcet:
         state_path = np.asarray(states, dtype=np.float64)
         if state_path.ndim != 2:
             raise ValueError("states must be a 2D array of consecutive state vectors.")
-        n_var = len(self.solved.compiled.var_names)
+        n_var = self.solved.compiled.n_var
         if state_path.shape[0] < 2:
             raise ValueError("states must contain at least two consecutive periods.")
         if state_path.shape[1] != n_var:
@@ -1051,7 +1051,7 @@ class DenHaanMarcet:
         instrument_idx: Sequence[int | str] | None,
         include_constant: bool,
     ) -> np.ndarray:
-        n_var = len(self.solved.compiled.var_names)
+        n_var = self.solved.compiled.n_var
         if instrument_idx is None:
             out = np.arange(n_var, dtype=np.int64)
         else:
@@ -1181,7 +1181,7 @@ class DenHaanMarcet:
         if state_path.ndim != 2:
             raise ValueError("states must be a 2D array of state vectors.")
 
-        n_var = len(self.solved.compiled.var_names)
+        n_var = self.solved.compiled.n_var
         if state_path.shape[1] != n_var:
             raise ValueError(
                 f"states must have {n_var} columns in compiled variable order; "

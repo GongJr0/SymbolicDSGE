@@ -81,8 +81,8 @@ class MeasurementSpec(TypedDict):
 class SolvedModel:
     compiled: CompiledModel
     policy: KleinSolution | PerturbationSolution
-    A: ndarray
-    B: ndarray
+    A: NDF
+    B: NDF
 
     def __post_init__(self) -> None:
         if self.policy.order not in SIM_FUNC_DISPATCH:
@@ -146,7 +146,7 @@ class SolvedModel:
         return out
 
     def _simulation_initial_state(self, x0: ndarray | None = None) -> NDF:
-        n = self.A.shape[0]
+        n = self.compiled.n_var
         n_state = self.compiled.n_state
         if x0 is None:
             x0_arr = np.zeros((n,), dtype=float64)
@@ -651,7 +651,7 @@ class SolvedModel:
     def _build_measurement(
         self, spec: dict[str, MeasurementSpec]
     ) -> Tuple[NDF, NDF, list[str]]:
-        n = self.A.shape[0]
+        n = self.compiled.n_var
         obs_names = list(spec.keys())
         m = len(obs_names)
 
@@ -910,7 +910,7 @@ def _simulate_order1(
         shocks=shocks,
         shock_scale=shock_scale,
     )
-    X = np.empty((T, model.A.shape[0]), dtype=float64)
+    X = np.empty((T, model.compiled.n_var), dtype=float64)
     simulate_linear_states_into(
         model.A,
         model.B,
@@ -936,8 +936,8 @@ def _simulate_order2(
     x0: ndarray | None,
 ) -> NDF:
     n_state = model.compiled.n_state
-    n = model.A.shape[0]
-    ny = n - n_state
+    n = model.compiled.n_var
+    ny = model.compiled.n_ctrl
     policy = model.policy
     ss = policy.steady_state
     ss_state = ss[:n_state]

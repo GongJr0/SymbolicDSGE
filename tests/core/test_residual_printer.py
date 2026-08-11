@@ -24,7 +24,7 @@ C = np.complex128
 
 def _run_expr(expr: sp.Expr, order: list[sp.Symbol]):
     slot = {s: ("cur", i) for i, s in enumerate(order)}
-    layout = ResidualLayout(slot=slot, n_var=len(order), n_par=0, n_eq=1)
+    layout = ResidualLayout(slot=slot, n_var=len(order), n_par=0)
     fn = build_njit([expr], layout)
     ref = sp.lambdify(order, expr, "numpy")
 
@@ -89,7 +89,7 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
     # Repeated multiply integer powers give the correct complex step derivative
     # even where a negative base would hit the branch cut under `**`.
     x = sp.Symbol("x")
-    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0, n_eq=1)
+    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0)
     fn = build_njit([expr_factory(x)], layout)
     v0, h = -0.7, 1e-100
     out = fn(np.zeros(1, C), np.array([v0 + 1j * h], dtype=C), np.zeros(0, C))
@@ -140,7 +140,7 @@ def test_printer_linearization_matches_reference(path):
 
     # Native cfunc linearization (klein_preproc complex-step) is the reference;
     # the printer's njit residual complex-stepped through the oracle must match.
-    a_ref, b_ref = klein_preprocess(cf.address, ss, par, layout.n_eq)
+    a_ref, b_ref = klein_preprocess(cf.address, ss, par, layout.n_var)
     a_new, b_new = _approximate_system_numeric(fn, ss, par)
 
     np.testing.assert_allclose(a_new, a_ref, rtol=1e-10, atol=1e-12)

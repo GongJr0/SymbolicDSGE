@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ctypes
-from types import SimpleNamespace
 
 import numpy as np
 import sympy as sp
@@ -24,7 +23,6 @@ def test_residual_printer_build_njit_matches_sympy_values() -> None:
         slot={cur_x: ("cur", 0), cur_y: ("cur", 1), beta: ("par", 0)},
         n_var=2,
         n_par=1,
-        n_eq=2,
     )
     exprs = [
         sp.exp(cur_x) + beta * cur_y**2 - 1 / (1 + cur_x),
@@ -51,7 +49,6 @@ def test_residual_printer_build_cfunc_compiles_bicomplex() -> None:
         },
         n_var=1,
         n_par=1,
-        n_eq=1,
     )
 
     cf = build_cfunc([beta * sp.exp(fwd_x) + cur_x**2], layout, BicomplexOps())
@@ -59,23 +56,17 @@ def test_residual_printer_build_cfunc_compiles_bicomplex() -> None:
     assert isinstance(cf.address, int) and cf.address != 0
 
 
-def test_measurement_layout_normalizes_observables() -> None:
-    alpha = sp.Symbol("alpha")
-    cur_x, cur_y = sp.symbols("cur_x cur_y")
-    compiled = SimpleNamespace(
-        var_names=["x", "y"],
-        calib_params=[alpha],
-        observable_names=["obs_x", "obs_y"],
-        observable_eqs=[cur_x + alpha, cur_y * alpha],
-    )
-
-    layout = MeasurementLayout.from_compiled(compiled, ["obs_y", "obs_x"])
+def test_measurement_layout_normalizes_observables(compiled_test) -> None:
+    layout = MeasurementLayout.from_compiled(compiled_test, ["Rate", "Infl"])
 
     assert layout.observable_indices == (0, 1)
-    assert layout.n_expr == 2
-    assert layout.slot[cur_x] == ("vars", 0)
-    assert layout.slot[cur_y] == ("vars", 1)
-    assert layout.slot[alpha] == ("par", 0)
+    assert layout.n_expr == compiled_test.n_obs
+    assert layout.n_var == compiled_test.n_var
+    assert layout.n_par == compiled_test.n_par
+    for i, name in enumerate(compiled_test.var_names):
+        assert layout.slot[sp.Symbol(f"cur_{name}")] == ("vars", i)
+    for j, param in enumerate(compiled_test.calib_params):
+        assert layout.slot[param] == ("par", j)
 
 
 def test_measurement_cfunc_writes_outputs() -> None:

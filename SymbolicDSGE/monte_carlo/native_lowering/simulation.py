@@ -41,11 +41,11 @@ def lower_simulation_step(
         raise ValueError("Simulation step requires its target model.")
 
     comp = model.compiled
-    n_var = len(comp.var_names)
+    n_var = comp.n_var
     n_state = comp.n_state
-    n_ctrl = n_var - n_state
+    n_ctrl = comp.n_ctrl
     n_exog = comp.n_exog
-    n_par = len(comp.calib_params)
+    n_par = comp.n_par
     observable_names = (
         tuple(comp.observable_names) if step.kwargs["observables"] else ()
     )

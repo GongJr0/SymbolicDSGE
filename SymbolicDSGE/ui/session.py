@@ -296,7 +296,7 @@ class UISession:
         expected = (
             len(observables)
             if observables is not None
-            else len(getattr(slot.compiled, "observable_names", []))
+            else getattr(slot.compiled, "n_obs", 0)
         )
         if expected and y.shape[1] != expected:
             raise ValueError(

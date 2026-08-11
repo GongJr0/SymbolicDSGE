@@ -23,7 +23,7 @@ def _drive(path):
     model, kalman = ModelParser(path).get_all()
     compiled = DSGESolver(model, kalman).compile()
     layout = ResidualLayout.from_compiled(compiled)
-    n_eq, n_state = layout.n_eq, compiled.n_state
+    n_eq, n_state = layout.n_var, compiled.n_state
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = np.array(
