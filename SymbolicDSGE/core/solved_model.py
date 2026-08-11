@@ -22,6 +22,8 @@ from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
+from SymbolicDSGE.core.sim_result import SimResult
+
 from .shock_generators import Shock, _gaussian_factor
 from .shock_plan import ShockPlan, ShockPlanEntry, validate_shock_targets
 from .solver_backend import KleinSolution, PerturbationSolution
@@ -97,7 +99,7 @@ class SolvedModel:
         shock_scale: float = 1.0,
         x0: list[float] | ndarray | None = None,
         observables: bool = False,
-    ) -> dict[str, NDF]:
+    ) -> SimResult:
         """
         Simulate the solved DSGE model over T periods.
         Parameters
@@ -135,15 +137,18 @@ class SolvedModel:
             x0=asarray(x0, dtype=float64) if x0 is not None else None,
         )
 
-        out = {name: X[:, self.compiled.idx[name]] for name in self.compiled.var_names}
-        out["_X"] = X  # Include full state matrix for reference
-
+        y = None
         if observables:
-            Y = self._simulate_observable_matrix(X, drop_initial=False)
-            for i, name in enumerate(self.compiled.observable_names):
-                out[name] = Y[:, i]
+            y = self._simulate_observable_matrix(X, drop_initial=False)
 
-        return out
+        return SimResult(
+            var_names=self.compiled.var_names,
+            X=X,
+            observable_names=self.compiled.observable_names if observables else (),
+            y=y,
+            _regimes=None,
+            _diagnostics=None,
+        )
 
     def _simulation_initial_state(self, x0: ndarray | None = None) -> NDF:
         n = self.compiled.n_var
@@ -223,7 +228,7 @@ class SolvedModel:
 
     def irf(
         self, shocks: list[str], T: int, scale: float = 1.0, observables: bool = False
-    ) -> dict[str, NDF]:
+    ) -> SimResult:
         """
         Compute impulse response functions for specified shocks over T periods.
         Parameters
@@ -265,24 +270,32 @@ class SolvedModel:
             arr[0] = sig
             shock_spec[s] = arr
 
-        out = self.sim(
-            T,
-            shocks=shock_spec,
-            shock_scale=scale,
-            x0=None,
-            observables=observables,
+        X = self._simulate_state_matrix(
+            T=T, shocks=shock_spec, shock_scale=scale, x0=None
         )
-        if self.policy.order != 2:
-            return out
-
-        baseline = self.sim(
+        base = self._simulate_state_matrix(
             T,
             shocks=None,
             shock_scale=scale,
             x0=None,
-            observables=observables,
         )
-        return {key: value - baseline[key] for key, value in out.items()}
+
+        y = None
+        y_base = None
+        if observables:
+            y = self._simulate_observable_matrix(X, drop_initial=False)
+            y -= self._simulate_observable_matrix(base, drop_initial=False)
+
+        X -= base
+
+        return SimResult(
+            var_names=self.compiled.var_names,
+            X=X,
+            observable_names=self.compiled.observable_names if observables else (),
+            y=y,
+            _regimes=None,
+            _diagnostics=None,
+        )
 
     def transition_plot(
         self, T: int, shocks: list[str], scale: float = 1.0, observables: bool = False
@@ -308,11 +321,10 @@ class SolvedModel:
         None
         """
 
-        transitions = self.irf(shocks=shocks, T=T, scale=scale, observables=observables)
+        tr = self.irf(shocks=shocks, T=T, scale=scale, observables=observables)
         obs_vars = [v.name for v in self.compiled.config.observables]
-        transitions.pop("_X", None)
 
-        n_vars = len(transitions)
+        n_vars = tr.X.shape[1] + (tr.y.shape[1] if tr.y is not None else 0)
         fig_square = np.ceil(np.sqrt(n_vars))
 
         fig, ax = plt.subplots(
@@ -322,12 +334,12 @@ class SolvedModel:
         time = np.arange(T)
 
         # Remove unused axes
-        nplots = len(transitions)
-        while nplots < len(ax):
+        while n_vars < len(ax):
             fig.delaxes(ax[-1])
             ax = ax[:-1]
 
-        for i, (var, series) in enumerate(transitions.items()):
+        vars = tr.states | (tr.observables if tr.y is not None else {})
+        for i, (var, series) in enumerate(vars.items()):
             title_kwargs = {}
             if var in obs_vars:
                 title_kwargs = {"color": "blue", "style": "italic"}

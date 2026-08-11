@@ -257,9 +257,14 @@ class UISession:
             observables=observables,
         )
         run_id = str(uuid4())
-        sim_dict = dict(sim)
-        all_series = encode_named_arrays(sim)
+        sim_dict = sim.states
+        sim_dict["_X"] = sim.X
+        if sim.y is not None:
+            sim_dict.update(sim.observables)
+
+        all_series = encode_named_arrays(sim_dict)
         extra = self._apply_array_functions(role, sim_dict)
+
         if extra:
             all_series = all_series + encode_named_arrays(extra)
         figures = self._apply_figure_functions(role, sim_dict)

@@ -29,7 +29,7 @@ import sympy as sp
 from numba import carray, cfunc, types
 
 from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE._ckernels.occbin import (
+from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_forward,
     occbin_recursion,
     occbin_solve,

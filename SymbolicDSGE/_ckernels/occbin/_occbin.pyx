@@ -647,11 +647,12 @@ def occbin_solve(a, b, c, f_ref, ss, par, size_t cond_addr,
 
     if status != SDSGE_OCCBIN_PERIOD_OK:
         raise RuntimeError(_solve_error(status, &diag, max_iter))
-    return out, regimes, {
+    # int8 is the kernel's wire format; callers get a width that will not wrap.
+    return out, regimes.astype(np.int64), {
         "T_used": T_used,
         "iters": iters,
         "max_err": max_err,
-        "periodic": periodic,
+        "periodic": periodic.astype(np.int64),
     }
 
 

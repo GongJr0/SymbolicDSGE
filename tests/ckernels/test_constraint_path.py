@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE._ckernels.occbin import MAX_CONSTRAINTS, constraint_path
+from SymbolicDSGE._ckernels.occbin._occbin import MAX_CONSTRAINTS, constraint_path
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.config import Constraint
 
