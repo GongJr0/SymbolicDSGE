@@ -707,7 +707,9 @@ def test_a_reset_drops_a_grown_horizon_only_with_its_companion(table, solved, pa
     # A relaxed tail is the reference rule's own fixed point, so the horizon the
     # period is solved on cannot reach the dates it reports.
     np.testing.assert_array_equal(reset_out, plain_out)
-    np.testing.assert_array_equal(both_out, plain_out)
+    # ``both`` solves the same mask on the shorter horizon, so its relaxed tail
+    # is a few LU steps shorter and the two agree in exact arithmetic only.
+    np.testing.assert_allclose(both_out, plain_out, rtol=1e-12, atol=1e-12)
 
     np.testing.assert_array_equal(reset["T_used"], plain["T_used"])
     np.testing.assert_array_equal(both["T_used"], [plain["T_used"][0], SHORT])
