@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Mapping, Callable, Union
-from numpy import float64
+from numpy import float64, ndarray
 import numpy as np
 
 from .base import SolvedModel, NDF
@@ -34,7 +34,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
             Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
         ) = None,
         shock_scale: float = 1,
-        x0: NDF | None = None,
+        x0: list[float] | ndarray | None = None,
     ) -> StatePath:
         x0_arr = self._simulation_initial_state(self.policy.f, x0)
         shock_mat = simulation_shock_matrix(

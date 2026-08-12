@@ -144,10 +144,7 @@ def occbin_sim(
 
     ``check_ahead_periods`` is how far ahead a guess looks and
     ``max_check_ahead_periods`` how far it may grow, ``-1`` taking the default
-    budget. The buffers carry one date past the horizon, for the release a
-    converged guess ends on; the shim derives that, so no caller does the
-    arithmetic. Every default here is Dynare's ``occbin.simul`` default, except
+    budget. Every default here is Dynare's ``occbin.simul`` default, except
     ``max_check_ahead_periods``, which is ``inf`` there and cannot be here:
-    growth is reserved in a caller-owned arena, so it is bounded by
-    construction.
+    growth is reserved up front, so it is always bounded.
     """

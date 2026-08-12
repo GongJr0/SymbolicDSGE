@@ -537,10 +537,8 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     a guess still binds at its last date. At ``-1`` the growth budget is
     ``ceil(sqrt(check_ahead_periods))`` past the horizon; equal to
     ``check_ahead_periods`` it forbids growth and forces the last date relaxed
-    instead. Dynare's ``inf`` has no counterpart: growth is reserved in a
-    caller-owned arena, so it is bounded by construction. Buffers carry one date
-    past the horizon, for the release a converged guess ends on, and that is
-    derived here so no caller does the arithmetic.
+    instead. Dynare's ``inf`` has no counterpart: growth is reserved up front,
+    so it is always bounded here.
 
     ``n_periods`` defaults to ``S`` and any excess is filled from the tail of the
     last path solved. ``init_regime`` is one guess row per shock period, in the
@@ -550,7 +548,7 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     relax into the tail and rows longer than ``check_ahead_periods`` raise the
     horizon to their own length, both as Dynare does, so a guess round-trips
     between runs whose horizons differ. Only a row past the growth cap is an
-    error, since the arena is already allocated.
+    error.
 
     The remaining keywords are Dynare's ``occbin.simul`` options at their own
     defaults. ``periodic_solution`` accepts the best guess of a cycle instead of
@@ -562,8 +560,10 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     or below ``algo_truncation`` accepts whatever the last pass produced.
 
     Returns ``(out, regimes, diag)``. ``out`` is in deviations, ``regimes`` is
-    the ``(S, T_cap)`` accepted guess per period, and ``diag`` carries
-    ``T_used``, ``iters``, ``max_err`` and ``periodic``, one entry per period.
+    the accepted guess per period, padded to the widest horizon any period grew
+    to, and ``diag`` carries ``T_used``, ``iters``, ``max_err`` and
+    ``periodic``, one entry per period. ``T_used`` is how much of that period's
+    row is the guess and how much is padding.
     ``periodic`` is nonzero where a period was accepted under
     ``periodic_solution``, carrying the code it would otherwise have raised.
     Raises ``RuntimeError`` naming the period that failed to converge.
@@ -820,9 +820,9 @@ def occbin_solve1(size_t residual_addr, seed, params, int64_t n_state,
     """Reference solve and every regime's pencil, in a single GIL release.
 
     ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
-    ``0..2 ** n_constraint - 1``. Slot 0 is the reference regime and carries no
-    cfunc and no rows: the kernel fills it by copying the pencil the reference
-    solve linearized at, on the same path the patched regimes take.
+    ``0..2 ** n_constraint - 1``. Pass address 0 and an empty rows array for
+    slot 0: that is the reference regime, and it comes back as the pencil the
+    reference solve linearized at.
 
     Returns ``(ss, f, p, stab, eig, A, B, a, b, c)``. The leading seven are the
     reference solve, identical to ``klein_solve1``'s. ``a``/``b`` are

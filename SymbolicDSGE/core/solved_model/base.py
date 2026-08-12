@@ -68,31 +68,6 @@ class SolvedModel(ABC, Generic[Policy]):
         self.compiled = compiled
         self.policy = policy
 
-    def _simulation_initial_state(self, f: NDF, x0: ndarray | None = None) -> NDF:
-        """``x0`` widened to the full ``n_var`` layout, controls read off ``f``.
-
-        Only the projection is policy-dependent, so the caller names the rule it
-        wants: ``policy.f`` for a perturbation solve, ``f_ref`` for a piecewise
-        one. Everything else is the model's variable layout.
-        """
-        n = self.compiled.n_var
-        n_state = self.compiled.n_state
-        if x0 is None:
-            x0_arr = np.zeros((n,), dtype=float64)
-        else:
-            raw = asarray(x0, dtype=float64)
-            if raw.shape[0] == n:
-                x0_arr = raw.copy()
-            elif raw.shape[0] == n_state:
-                x0_arr = np.zeros((n,), dtype=float64)
-                x0_arr[:n_state] = raw
-            else:
-                raise ValueError(
-                    f"x0 must have length {n_state} or {n}, got {raw.shape[0]}."
-                )
-        x0_arr[n_state:] = x0_arr[:n_state] @ f.T
-        return x0_arr
-
     @abstractmethod
     def _simulate_state_matrix(
         self,
@@ -101,7 +76,7 @@ class SolvedModel(ABC, Generic[Policy]):
             Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
         ) = None,
         shock_scale: float = 1.0,
-        x0: ndarray | None = None,
+        x0: list[float] | ndarray | None = None,
     ) -> StatePath: ...
 
     def sim(
@@ -131,56 +106,25 @@ class SolvedModel(ABC, Generic[Policy]):
             A scaling factor applied to all shocks.
 
         x0 : list[float] | ndarray, optional
-            Initial state vector. If None, defaults to zero vector.
+            Initial state, in levels, of length ``n_state`` or ``n_var``. If
+            None, the model starts at its steady state.
 
         observables : bool, optional
             If True, compute and include observable variables in the output.
 
         Returns
         -------
-
-        dict[str, ndarray]
-            A dictionary mapping variable names to their simulated time series.
+        SimResult
+            The simulated path in levels, with each variable's series available
+            by name.
         """
-        X, regimes, diagnostics = self._simulate_state_matrix(
+        path = self._simulate_state_matrix(
             T=T,
             shocks=shocks,
             shock_scale=shock_scale,
-            x0=asarray(x0, dtype=float64) if x0 is not None else None,
+            x0=x0,
         )
-
-        y = None
-        if observables:
-            y = self._simulate_observable_matrix(X, drop_initial=False)
-
-        X += self.policy.steady_state  # add ss; user sees levels.
-
-        return SimResult(
-            var_names=self.compiled.var_names,
-            X=X,
-            observable_names=self.compiled.observable_names if observables else (),
-            y=y,
-            _regimes=regimes,
-            _diagnostics=diagnostics,
-        )
-
-    def _simulate_observable_matrix(
-        self,
-        states: NDF,
-        *,
-        drop_initial: bool = False,
-    ) -> NDF:
-        start = 1 if drop_initial else 0
-        y_names = self.compiled.observable_names
-        is_affine = self.config.equations.obs_is_affine
-        if all(is_affine.values()):
-            C, d = self._build_C_d_from_obs(y_names)
-            return measurement.affine_path(states, C, d, len(y_names), start)
-
-        Y = measurement.non_affine_measurement(
-            self.compiled, y_names, states + self.policy.steady_state
-        )
-        return np.ascontiguousarray(Y[start:], dtype=float64)
+        return self._assemble_simulation(path, observables=observables)
 
     def irf(
         self, shocks: list[str], T: int, scale: float = 1.0, observables: bool = False
@@ -387,6 +331,74 @@ class SolvedModel(ABC, Generic[Policy]):
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
         ).write(path)
+
+    def _simulation_initial_state(
+        self, f: NDF, x0: list[float] | ndarray | None = None
+    ) -> NDF:
+        """``x0`` in levels, converted to deviations and widened to the full ``n_var`` layout.
+
+        A caller states an initial condition the way it reads the result, so
+        ``x0`` arrives in levels and everything downstream runs in deviations.
+        ``None`` is the steady state, which is zero once converted.
+
+        A policy-dependent projection happens, therefore the caller must pass
+        the relevant policty matrix: ``policy.f`` for a perturbation solve, or
+        ``f_ref`` for a piecewise one. Everything else is the model's
+        variable layout.
+        """
+        n = self.compiled.n_var
+        n_state = self.compiled.n_state
+        if x0 is None:
+            x0_arr = np.zeros((n,), dtype=float64)
+        else:
+            raw = asarray(x0, dtype=float64)
+            if raw.shape[0] == n:
+                x0_arr = raw - self.policy.steady_state
+            elif raw.shape[0] == n_state:
+                x0_arr = np.zeros((n,), dtype=float64)
+                x0_arr[:n_state] = raw - self.policy.steady_state[:n_state]
+            else:
+                raise ValueError(
+                    f"x0 must have length {n_state} or {n}, got {raw.shape[0]}."
+                )
+        x0_arr[n_state:] = x0_arr[:n_state] @ f.T
+        return x0_arr
+
+    def _simulate_observable_matrix(
+        self,
+        states: NDF,
+        *,
+        drop_initial: bool = False,
+    ) -> NDF:
+        start = 1 if drop_initial else 0
+        y_names = self.compiled.observable_names
+        is_affine = self.config.equations.obs_is_affine
+        if all(is_affine.values()):
+            C, d = self._build_C_d_from_obs(y_names)
+            return measurement.affine_path(states, C, d, len(y_names), start)
+
+        Y = measurement.non_affine_measurement(
+            self.compiled, y_names, states + self.policy.steady_state
+        )
+        return np.ascontiguousarray(Y[start:], dtype=float64)
+
+    def _assemble_simulation(self, path: StatePath, observables: bool) -> SimResult:
+        X, regimes, diagnostics = path
+
+        y = None
+        if observables:
+            y = self._simulate_observable_matrix(X, drop_initial=False)
+
+        X += self.policy.steady_state  # add ss; user sees levels.
+
+        return SimResult(
+            var_names=self.compiled.var_names,
+            X=X,
+            observable_names=self.compiled.observable_names if observables else (),
+            y=y,
+            _regimes=regimes,
+            _diagnostics=diagnostics,
+        )
 
     def _build_C_d_from_obs(
         self,

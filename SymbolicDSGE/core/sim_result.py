@@ -15,7 +15,7 @@ NDI = NDArray[int64]
 
 @dataclass(frozen=True)
 class OccBinDiagnostics:
-    """Per-period convergence record from ``occbin_solve``, one entry per period.
+    """Per-period convergence record from a piecewise solve, one entry per date.
 
     ``T_used`` is the check-ahead horizon the period settled on, ``iters`` the
     guess-and-verify passes it took, and ``max_err`` the largest constraint

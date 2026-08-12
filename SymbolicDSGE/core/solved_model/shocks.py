@@ -54,10 +54,12 @@ def resolve_shock_plan(
     shocks: ShockSpec,
     T: int | None = None,
 ) -> ShockPlan:
-    """Resolve a shock spec against a model, once.
+    """Resolve a shock spec against a model into a reusable plan.
 
-    None of it depends on the seed, so a caller drawing many paths from one spec
-    resolves a plan and redraws from it.
+    The plan holds everything the spec and the model fix between them: which
+    exogenous columns each entry targets, the standard deviations and
+    correlations read off the calibration, and the covariance factor a joint
+    entry draws through. Drawing is separate, so one plan serves many draws.
 
     ``T`` is required only when the mapping carries live :class:`Shock` specs,
     which resolve their distribution family against a horizon.
