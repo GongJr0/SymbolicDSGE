@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from SymbolicDSGE.core.solver_backend import PerturbationSolution
+from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 
 from SymbolicDSGE._ckernels.monte_carlo._runner import (
     NativeStep,
@@ -12,6 +12,7 @@ from SymbolicDSGE._ckernels.monte_carlo._runner import (
     simulate2_step,
 )
 from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.core.solved_model.shocks import simulation_shock_matrix
 from ..allocation import StepBufferPlan
 from ..mc_constructs import MCStep
 from ..operations.utils import _clone_or_pass_shocks
@@ -64,7 +65,7 @@ def lower_simulation_step(
         native_step = simulate1_step(
             step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs
         )
-        x0 = model._simulation_initial_state(step.kwargs["x0"])
+        x0 = model._simulation_initial_state(model.policy.f, step.kwargs["x0"])
         return native_step, _order1_bindings(model, x0, shocks, shocks_batched, params)
     if order == 2:
         _check_simulation_layout(step_plan, T, n_var, n_obs)
@@ -79,7 +80,9 @@ def lower_simulation_step(
             n_obs,
         )
         steady_state = _flat_f64(model.policy.steady_state)
-        initial_state = model._simulation_initial_state(step.kwargs["x0"])
+        initial_state = model._simulation_initial_state(
+            model.policy.f, step.kwargs["x0"]
+        )
         x0_deviation = initial_state[:n_state] - steady_state[:n_state]
         return native_step, _order2_bindings(
             model,
@@ -103,7 +106,7 @@ def _order1_bindings(
     T = shocks.shape[-2]
     bindings: list[FloatInputBinding] = []
     offset = 0
-    for values in (_flat_f64(model.A), _flat_f64(model.B), _flat_f64(x0)):
+    for values in (_flat_f64(model.policy.A), _flat_f64(model.policy.B), _flat_f64(x0)):
         if values.size:
             bindings.append(_static_binding(values, offset))
         offset += values.size
@@ -124,14 +127,14 @@ def _order2_bindings(
     params: NDF,
 ) -> tuple[FloatInputBinding, ...]:
     policy = model.policy
-    if not isinstance(policy, PerturbationSolution):
+    if not isinstance(policy, SecondOrderSolution):
         raise ValueError("Native simulation order 2 requires a perturbation solution.")
     n_exog = model.compiled.n_exog
     T = shocks.shape[-2]
     values_by_layout = (
         _flat_f64(policy.p),
         _flat_f64(policy.f),
-        _flat_f64(model.B[: model.compiled.n_state, :]),
+        _flat_f64(model.policy.B[: model.compiled.n_state, :]),
         _flat_f64(policy.hxx),
         _flat_f64(policy.gxx),
         _flat_f64(policy.hss),
@@ -171,7 +174,8 @@ def _simulation_shocks(
             rep_idx=rep_idx,
             seed_increment=step.kwargs["seed_increment"],
         )
-        values[rep_idx] = model._simulation_shock_matrix(
+        values[rep_idx] = simulation_shock_matrix(
+            model.compiled,
             T,
             shocks=per_rep_shocks,
             shock_scale=shock_scale,
@@ -181,7 +185,7 @@ def _simulation_shocks(
 
 def _array_shocks(model: SolvedModel, T: int, shock_scale: float) -> NDF:
     return np.ascontiguousarray(
-        model._simulation_shock_matrix(T, shock_scale=shock_scale),
+        simulation_shock_matrix(model.compiled, T, shock_scale=shock_scale),
         dtype=np.float64,
     )
 

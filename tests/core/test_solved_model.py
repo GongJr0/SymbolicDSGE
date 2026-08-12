@@ -12,6 +12,11 @@ import sympy as sp
 from sympy import Symbol
 
 import SymbolicDSGE.core.solved_model as solved_model_module
+from SymbolicDSGE.core.sim_result import SimResult
+from SymbolicDSGE.core.solved_model import (
+    FirstOrderSolvedModel,
+    SecondOrderSolvedModel,
+)
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.core import (
     affine_observations_into,
@@ -23,6 +28,14 @@ from _oracles.core import (
 )
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.kalman.interface import KalmanInterface
+from SymbolicDSGE.core.solved_model.measurement import (
+    build_measurement,
+    non_affine_measurement,
+)
+from SymbolicDSGE.core.solved_model.shocks import (
+    shock_unpack,
+    simulation_shock_matrix,
+)
 
 
 def _raw_filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterRawResult:
@@ -95,7 +108,9 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
         idx={"e": 0, "k": 1, "c": 2},
         var_names=["e", "k", "c"],
         n_exog=1,
+        n_var=3,
         n_state=2,
+        n_ctrl=1,
         observable_names=[],
         shock_names=("eps",),
         shock_idx={"eps": 0},
@@ -104,7 +119,7 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
             calibration=SimpleNamespace(parameters={}, shock_std={}),
         ),
     )
-    solved = solved_model_module.SolvedModel(
+    solved = SecondOrderSolvedModel(
         compiled=compiled,
         policy=SimpleNamespace(
             p=hx,
@@ -115,9 +130,9 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
             hss=hss,
             gss=gss,
             steady_state=np.zeros(3, dtype=np.float64),
+            A=np.eye(3, dtype=np.float64),
+            B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),
         ),
-        A=np.eye(3, dtype=np.float64),
-        B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),
     )
     data = {
         "hx": hx,
@@ -160,11 +175,9 @@ def test_solved_model_sim_shapes_and_keys(solved_test):
     T = 12
     out = solved_test.sim(T)
 
-    assert "_X" in out
-    assert out["_X"].shape == (T, solved_test.A.shape[0])
+    assert out.X.shape == (T, solved_test.policy.A.shape[0])
     for name in solved_test.compiled.var_names:
-        assert name in out
-        assert out[name].shape == (T,)
+        assert out.states[name].shape == (T,)
 
 
 def test_linear_simulation_kernel_writes_manual_recursion() -> None:
@@ -220,17 +233,20 @@ def test_solved_model_sim_matches_manual_state_recursion(solved_test):
 
     out = solved_test.sim(T, shocks=shocks, shock_scale=0.5)
 
-    shock_mat = solved_test._simulation_shock_matrix(
+    shock_mat = simulation_shock_matrix(
+        solved_test.compiled,
         T=T,
         shocks=shocks,
         shock_scale=0.5,
     )
-    expected = np.empty_like(out["_X"])
-    previous = solved_test._simulation_initial_state(None)
+    expected = np.empty_like(out.X)
+    previous = solved_test._simulation_initial_state(solved_test.policy.f)
     for t in range(T):
-        expected[t] = solved_test.A @ previous + solved_test.B @ shock_mat[t]
+        expected[t] = (
+            solved_test.policy.A @ previous + solved_test.policy.B @ shock_mat[t]
+        )
         previous = expected[t]
-    np.testing.assert_allclose(out["_X"], expected)
+    np.testing.assert_allclose(out.X, expected)
 
 
 def test_solved_model_second_order_sim_matches_pruned_recursion() -> None:
@@ -239,7 +255,7 @@ def test_solved_model_second_order_sim_matches_pruned_recursion() -> None:
     shock = np.array([0.0, 0.05, -0.02], dtype=np.float64)
     x0 = np.array([0.2, -0.1, 99.0], dtype=np.float64)
 
-    out = solved.sim(T, shocks={"eps": shock}, x0=x0)["_X"]
+    out = solved.sim(T, shocks={"eps": shock}, x0=x0).X
     expected = _manual_second_order_path(data, shock, x0[:2])
 
     np.testing.assert_allclose(out, expected)
@@ -252,7 +268,7 @@ def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
     shock = np.array([1.0, 0.0, 0.0], dtype=np.float64)
     zero = np.zeros(T, dtype=np.float64)
 
-    out = solved.irf(shocks=["eps"], T=T)["_X"]
+    out = solved.irf(shocks=["eps"], T=T).X
     expected = _manual_second_order_path(
         data,
         shock,
@@ -271,17 +287,16 @@ def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
 def test_solved_model_sim_with_observables_includes_measurements(solved_test):
     out = solved_test.sim(10, observables=True)
     for obs in solved_test.compiled.observable_names:
-        assert obs in out
-        assert out[obs].shape == (10,)
+        assert out.observables[obs].shape == (10,)
 
 
 def test_solved_model_affine_observables_can_drop_initial_row(solved_test):
     out = solved_test.sim(10, observables=True)
 
-    Y = solved_test._simulate_observable_matrix(out["_X"], drop_initial=True)
+    Y = solved_test._simulate_observable_matrix(out.X, drop_initial=True)
 
     expected = np.column_stack(
-        [out[name][1:] for name in solved_test.compiled.observable_names]
+        [out.observables[name][1:] for name in solved_test.compiled.observable_names]
     )
     np.testing.assert_allclose(Y, expected)
 
@@ -291,30 +306,35 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
         idx={"g": 0, "x": 1},
         var_names=["g", "x"],
         n_exog=1,
+        n_var=2,
         n_state=1,
+        n_ctrl=1,
         observable_names=["Obs"],
         config=SimpleNamespace(equations=SimpleNamespace(obs_is_affine={"Obs": False})),
     )
-    solved = solved_model_module.SolvedModel(
+    solved = FirstOrderSolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(f=np.array([[0.0]], dtype=np.float64), order=1),
-        A=np.eye(2, dtype=np.float64),
-        B=np.zeros((2, 1), dtype=np.float64),
+        policy=SimpleNamespace(
+            f=np.array([[0.0]], dtype=np.float64),
+            order=1,
+            A=np.eye(2, dtype=np.float64),
+            B=np.zeros((2, 1), dtype=np.float64),
+        ),
     )
 
-    def fake_non_affine(self, y_names, state):
+    def fake_non_affine(compiled_arg, y_names, state):
         assert y_names == ["Obs"]
         return np.arange(state.shape[0], dtype=np.float64).reshape(-1, 1)
 
     monkeypatch.setattr(
-        solved_model_module.SolvedModel,
-        "_non_affine_measurement",
+        solved_model_module.measurement,
+        "non_affine_measurement",
         fake_non_affine,
     )
 
     out = solved.sim(3, observables=True)
 
-    assert np.array_equal(out["Obs"], np.array([0.0, 1.0, 2.0]))
+    assert np.array_equal(out.observables["Obs"], np.array([0.0, 1.0, 2.0]))
 
 
 def test_solved_model_irf_validation_errors(solved_test):
@@ -327,21 +347,21 @@ def test_solved_model_irf_validation_errors(solved_test):
 
 def test_solved_model_irf_runs_for_a_model_shock(solved_test):
     out = solved_test.irf(shocks=["e_u"], T=8, observables=True)
-    assert out["u"].shape == (8,)
-    assert "_X" in out
-    assert "Infl" in out and "Rate" in out
+    assert out.states["u"].shape == (8,)
+    assert out.X.shape[0] == 8
+    assert {"Infl", "Rate"} <= set(out.observables)
 
 
 def test_solved_model_transition_plot_renders_observables_and_shocks(
     solved_test, monkeypatch
 ):
     def fake_irf(self, shocks, T, scale=1.0, observables=False):
-        return {
-            "_X": np.zeros((T, 3), dtype=np.float64),
-            "Infl": np.linspace(0.0, 1.0, T),
-            "u": np.linspace(1.0, 0.0, T),
-            "x": np.linspace(-1.0, 0.0, T),
-        }
+        return SimResult(
+            var_names=("u", "x"),
+            X=np.column_stack([np.linspace(1.0, 0.0, T), np.linspace(-1.0, 0.0, T)]),
+            observable_names=("Infl",),
+            y=np.linspace(0.0, 1.0, T).reshape(-1, 1),
+        )
 
     monkeypatch.setattr(solved_model_module.SolvedModel, "irf", fake_irf)
     monkeypatch.setattr(plt, "show", lambda: None)
@@ -354,19 +374,21 @@ def test_solved_model_transition_plot_renders_observables_and_shocks(
 
 def test_solved_model_get_param_and_get_rho_helpers(solved_test):
     assert (
-        solved_test._get_param("beta")
+        solved_test.config.calibration.get_param("beta")
         == solved_test.config.calibration.parameters["beta"]
     )
-    assert solved_test._get_rho("e_u", "e_u") == 1.0
-    assert solved_test._get_rho("e_u", "e_v", default=0.0) == 0.0
+    assert solved_test.config.calibration.get_rho("e_u", "e_u") == 1.0
+    assert solved_test.config.calibration.get_rho("e_u", "e_v", default=0.0) == 0.0
 
     with pytest.raises(KeyError):
-        solved_test._get_param("not_a_param")
+        solved_test.config.calibration.get_param("not_a_param")
 
 
 def test_solved_model_get_param_default_and_configured_rho(solved_post82):
-    assert solved_post82._get_param("missing_param", default=2.5) == pytest.approx(2.5)
-    assert solved_post82._get_rho("e_g", "e_z") == pytest.approx(0.36)
+    assert solved_post82.config.calibration.get_param(
+        "missing_param", default=2.5
+    ) == pytest.approx(2.5)
+    assert solved_post82.config.calibration.get_rho("e_g", "e_z") == pytest.approx(0.36)
 
 
 def test_solved_model_build_measurement_matrices(solved_test):
@@ -374,9 +396,9 @@ def test_solved_model_build_measurement_matrices(solved_test):
         "Obs1": {"lin": {"Pi": 2.0, "x": -1.0}, "const": [1.5, "pi_mean"]},
         "Obs2": {"lin": {"r": 1.0}, "const": [0.0]},
     }
-    C, d, names = solved_test._build_measurement(spec)
+    C, d, names = build_measurement(solved_test.compiled, spec)
 
-    assert C.shape == (2, solved_test.A.shape[0])
+    assert C.shape == (2, solved_test.policy.A.shape[0])
     assert d.shape == (2,)
     assert names == ["Obs1", "Obs2"]
 
@@ -388,13 +410,15 @@ def test_solved_model_build_measurement_matrices(solved_test):
 
 def test_solved_model_build_measurement_rejects_unknown_variable(solved_test):
     with pytest.raises(KeyError, match="Variable 'ghost' not found"):
-        solved_test._build_measurement({"Obs": {"lin": {"ghost": 1.0}, "const": []}})
+        build_measurement(
+            solved_test.compiled, {"Obs": {"lin": {"ghost": 1.0}, "const": []}}
+        )
 
 
 def test_solved_model_build_C_d_from_observables(solved_test):
     C, d = solved_test._build_C_d_from_obs(solved_test.compiled.observable_names)
     m = len(solved_test.compiled.observable_names)
-    n = solved_test.A.shape[0]
+    n = solved_test.policy.A.shape[0]
 
     assert C.shape == (m, n)
     assert d.shape == (m,)
@@ -408,8 +432,8 @@ def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
         base = np.array([cov[0, 0], cov[1, 1]], dtype=float)
         return np.tile(base, (T, 1))
 
-    unpack_1 = solved_test._shock_unpack({"e_u,e_v": mv_shock})
-    unpack_2 = solved_test._shock_unpack({"e_v,e_u": mv_shock})
+    unpack_1 = shock_unpack(solved_test.compiled, {"e_u,e_v": mv_shock})
+    unpack_2 = shock_unpack(solved_test.compiled, {"e_v,e_u": mv_shock})
 
     idx_to_vec_1 = {idx: vec for idx, vec in unpack_1}
     idx_to_vec_2 = {idx: vec for idx, vec in unpack_2}
@@ -420,18 +444,18 @@ def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
 
 
 def test_solved_model_shock_unpack_univariate_callable_and_errors(solved_test):
-    out = solved_test._shock_unpack(
-        {"e_u": lambda sig: np.full((4,), sig, dtype=np.float64)}
+    out = shock_unpack(
+        solved_test.compiled, {"e_u": lambda sig: np.full((4,), sig, dtype=np.float64)}
     )
 
     assert out[0][0] == solved_test.compiled.shock_idx["e_u"]
     assert np.array_equal(out[0][1], np.full((4,), 0.50, dtype=np.float64))
 
     with pytest.raises(ValueError, match="is not a model shock"):
-        solved_test._shock_unpack({"Pi": np.ones((4,), dtype=np.float64)})
+        shock_unpack(solved_test.compiled, {"Pi": np.ones((4,), dtype=np.float64)})
 
     with pytest.raises(TypeError, match="must be a callable or ndarray"):
-        solved_test._shock_unpack({"e_u": "bad-shock"})
+        shock_unpack(solved_test.compiled, {"e_u": "bad-shock"})
 
 
 def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
@@ -439,10 +463,10 @@ def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
         return np.ones((3, 1), dtype=np.float64)
 
     with pytest.raises(ValueError, match="must return array with shape"):
-        solved_test._shock_unpack({"e_u,e_v": bad_shape})
+        shock_unpack(solved_test.compiled, {"e_u,e_v": bad_shape})
 
     with pytest.raises(TypeError, match="must be a callable or ndarray"):
-        solved_test._shock_unpack({"e_u,e_v": "bad-shock"})
+        shock_unpack(solved_test.compiled, {"e_u,e_v": "bad-shock"})
 
 
 def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
@@ -450,7 +474,7 @@ def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
     # from, so a typo is traceable to the exact grouped spec.
     arr = np.zeros((4, 2), dtype=np.float64)
     with pytest.raises(ValueError, match=r"'Pi'.*entry 'e_u,Pi'"):
-        solved_test._shock_unpack({"e_u,Pi": arr})
+        shock_unpack(solved_test.compiled, {"e_u,Pi": arr})
 
 
 def test_solved_model_shock_unpack_rejects_shock_in_two_entries(solved_test):
@@ -459,12 +483,12 @@ def test_solved_model_shock_unpack_rejects_shock_in_two_entries(solved_test):
     mv = np.zeros((4, 2), dtype=np.float64)
     uni = np.zeros((4,), dtype=np.float64)
     with pytest.raises(ValueError, match=r"'e_u' is driven by more than one"):
-        solved_test._shock_unpack({"e_u,e_v": mv, "e_u": uni})
+        shock_unpack(solved_test.compiled, {"e_u,e_v": mv, "e_u": uni})
 
 
 def test_solved_model_kalman_smoke(solved_post82):
     sim = solved_post82.sim(20, observables=True)
-    y = pd.DataFrame({"Infl": sim["Infl"], "Rate": sim["Rate"]})
+    y = pd.DataFrame({"Infl": sim.observables["Infl"], "Rate": sim.observables["Rate"]})
 
     out = solved_post82.kalman(y, observables=["Infl", "Rate"])
     assert out is not None
@@ -495,7 +519,7 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
         for i, name in enumerate(compiled.observable_names)
     }
 
-    got = solved._non_affine_measurement(y_names, state)
+    got = non_affine_measurement(solved.compiled, y_names, state)
 
     expected = np.empty((state.shape[0], len(y_names)), dtype=np.float64)
     for j, name in enumerate(y_names):
@@ -528,15 +552,19 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
     )
-    solved = solved_model_module.SolvedModel(
+    solved = FirstOrderSolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(order=1),
-        A=np.eye(1, dtype=np.float64),
-        B=np.eye(1, dtype=np.float64),
+        policy=SimpleNamespace(
+            order=1,
+            A=np.eye(1, dtype=np.float64),
+            B=np.eye(1, dtype=np.float64),
+        ),
     )
     printed = []
 
-    monkeypatch.setattr(solved_model_module, "KalmanInterface", _FakeKalmanInterface)
+    monkeypatch.setattr(
+        solved_model_module.base, "KalmanInterface", _FakeKalmanInterface
+    )
     monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
 
     out = solved.kalman(
@@ -578,14 +606,18 @@ def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
     )
-    solved = solved_model_module.SolvedModel(
+    solved = SecondOrderSolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(order=2),
-        A=np.eye(1, dtype=np.float64),
-        B=np.eye(1, dtype=np.float64),
+        policy=SimpleNamespace(
+            order=2,
+            A=np.eye(1, dtype=np.float64),
+            B=np.eye(1, dtype=np.float64),
+        ),
     )
 
-    monkeypatch.setattr(solved_model_module, "KalmanInterface", _FakeKalmanInterface)
+    monkeypatch.setattr(
+        solved_model_module.base, "KalmanInterface", _FakeKalmanInterface
+    )
 
     out = solved.kalman(
         y=np.zeros((3, 2), dtype=np.float64),
@@ -611,11 +643,13 @@ def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsA"]),
     )
-    solved = solved_model_module.SolvedModel(
+    solved = SecondOrderSolvedModel(
         compiled=compiled,
-        policy=SimpleNamespace(order=2),
-        A=np.eye(1, dtype=np.float64),
-        B=np.eye(1, dtype=np.float64),
+        policy=SimpleNamespace(
+            order=2,
+            A=np.eye(1, dtype=np.float64),
+            B=np.eye(1, dtype=np.float64),
+        ),
     )
 
     with pytest.raises(ValueError, match="return_shocks is not supported"):
@@ -654,11 +688,3 @@ def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration(
         solved.kalman_config.R,
         np.eye(3, dtype=np.float64),
     )
-
-
-def test_solved_model_to_dict_contains_main_fields(solved_test):
-    d = solved_test.to_dict()
-    assert "compiled" in d
-    assert "policy" in d
-    assert "A" in d
-    assert "B" in d

@@ -50,9 +50,9 @@ def post82_bundle(post82_test_model_path):
     )
     y = pd.DataFrame(
         {
-            "OutGap": sim["OutGap"][1:],
-            "Infl": sim["Infl"][1:],
-            "Rate": sim["Rate"][1:],
+            "OutGap": sim.observables["OutGap"][1:],
+            "Infl": sim.observables["Infl"][1:],
+            "Rate": sim.observables["Rate"][1:],
         }
     )
     return {

@@ -16,8 +16,13 @@ from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from .desugar import GeneratedKind, GeneratedVariable, desugar_model
 from .linearization import linearize_model
-from .solved_model import SolvedModel
-from .solver_backend import klein_solve, sgu_solve
+from .solved_model import SolvedModel, FirstOrderSolvedModel, SecondOrderSolvedModel
+from .solver_backend import (
+    FirstOrderSolution,
+    SecondOrderSolution,
+    klein_solve,
+    sgu_solve,
+)
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
@@ -530,7 +535,7 @@ class DSGESolver:
         param_vec: NDF,
         seed: NDF,
         raise_on_bk_violation: bool = True,
-    ) -> SolvedModel:
+    ) -> SolvedModel[FirstOrderSolution]:
         """First-order (Klein) solve."""
         sol = klein_solve(
             compiled.construct_objective_cfunc(),
@@ -542,7 +547,7 @@ class DSGESolver:
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
-        return SolvedModel(compiled=compiled, policy=sol, A=sol.A, B=sol.B)
+        return FirstOrderSolvedModel(compiled=compiled, policy=sol)
 
     def _solve_second_order(
         self,
@@ -550,7 +555,7 @@ class DSGESolver:
         param_vec: NDF,
         seed: NDF,
         raise_on_bk_violation: bool = True,
-    ) -> SolvedModel:
+    ) -> SolvedModel[SecondOrderSolution]:
         """Second-order (SGU) solve. Runs the Klein first order (which Newton-
         resolves the steady state from ``seed``), sweeps the bicomplex Hessian at
         that steady state, and assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss``
@@ -570,7 +575,7 @@ class DSGESolver:
             pert.stab, should_raise=raise_on_bk_violation
         )
         # p/f are the first-order solution unchanged, so its state space stands.
-        return SolvedModel(compiled=compiled, policy=pert, A=pert.A, B=pert.B)
+        return SecondOrderSolvedModel(compiled=compiled, policy=pert)
 
     @staticmethod
     def _build_eta(compiled: CompiledModel) -> NDF:

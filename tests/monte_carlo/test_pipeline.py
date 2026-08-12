@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE.core.sim_result import SimResult, StatePath
+from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE._diag_tests.breusch_godfrey import breusch_godfrey
 from SymbolicDSGE._diag_tests.breusch_pagan import (
     breusch_pagan,
@@ -141,11 +143,13 @@ class _FakeSolvedModel:
         del shock_scale, x0
         self._draw_shocks(shocks)
         t = np.arange(1, T + 1, dtype=np.float64)
-        return np.column_stack(
-            [
-                t + self.offset,
-                ((t % 3.0) - 1.0) + 0.5 * self.offset,
-            ]
+        return StatePath(
+            np.column_stack(
+                [
+                    t + self.offset,
+                    ((t % 3.0) - 1.0) + 0.5 * self.offset,
+                ]
+            )
         )
 
     def _simulate_observable_matrix(self, states, *, drop_initial=False):
@@ -161,23 +165,23 @@ class _FakeSolvedModel:
         x0=None,
         observables=False,
     ):
-        states = self._simulate_state_matrix(
+        states, regimes, diagnostics = self._simulate_state_matrix(
             T=T,
             shocks=shocks,
             shock_scale=shock_scale,
             x0=x0,
         )
-        out = {
-            "_X": states,
-            "x": states[:, 0],
-            "z": states[:, 1],
-        }
+        y = None
         if observables:
-            out["obs"] = self._simulate_observable_matrix(
-                states,
-                drop_initial=False,
-            )[:, 0]
-        return out
+            y = self._simulate_observable_matrix(states, drop_initial=False)
+        return SimResult(
+            var_names=("x", "z"),
+            X=states,
+            observable_names=("obs",) if observables else (),
+            y=y,
+            _regimes=regimes,
+            _diagnostics=diagnostics,
+        )
 
     def _kalman_raw(self, y, **kwargs):
         y = np.ascontiguousarray(y, dtype=np.float64)
@@ -1085,7 +1089,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
 
     config = SimpleNamespace(
         shock_map={},
-        calibration=SimpleNamespace(parameters={}, shock_std={}),
+        calibration=SimpleNamespace(parameters={}, shock_std={}, fingerprint=lambda: 0),
         equations=SimpleNamespace(obs_is_affine={"obs": True}),
     )
 
@@ -1098,22 +1102,24 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
         idx={"u": 0, "x": 1},
         var_names=["u", "x"],
         n_exog=1,
+        n_var=2,
         n_state=1,
+        n_ctrl=1,
         observable_names=["obs"],
         shock_names=("e_u",),
         shock_idx={"e_u": 0},
         config=config,
         build_affine_measurement_matrices=build_affine_measurement_matrices,
     )
-    dgp = SolvedModel(
+    dgp = FirstOrderSolvedModel(
         compiled=compiled,
         policy=SimpleNamespace(
             f=np.array([[0.0]], dtype=np.float64),
             order=1,
             steady_state=np.zeros(2, dtype=np.float64),
+            A=A,
+            B=B,
         ),
-        A=A,
-        B=B,
     )
 
     data = simulate(

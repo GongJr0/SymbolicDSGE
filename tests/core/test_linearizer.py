@@ -283,8 +283,8 @@ def test_linearize_model_marks_copy_and_solver_compiles_and_solves(tmp_path):
     # a and k each gain a lag state and the shock gains one, so 2 declared plus
     # 3 generated.
     assert compiled.n_state == 3
-    assert solved.A.shape == (5, 5)
-    assert solved.B.shape == (5, 1)
+    assert solved.policy.A.shape == (5, 5)
+    assert solved.policy.B.shape == (5, 1)
 
 
 def test_linearized_model_supports_likelihood_evaluation(tmp_path):
@@ -360,14 +360,14 @@ def test_linearizer_matches_hand_linearized_solution_matrices(tmp_path):
     assert nonlinear_solved.policy.stab == 0
     assert hand_solved.policy.stab == 0
     assert np.allclose(
-        nonlinear_solved.A,
-        hand_solved.A,
+        nonlinear_solved.policy.A,
+        hand_solved.policy.A,
         rtol=1e-10,
         atol=1e-10,
     )
     assert np.allclose(
-        nonlinear_solved.B,
-        hand_solved.B,
+        nonlinear_solved.policy.B,
+        hand_solved.policy.B,
         rtol=1e-10,
         atol=1e-10,
     )

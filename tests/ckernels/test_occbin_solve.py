@@ -1,5 +1,5 @@
 # type: ignore
-"""Native ``occbin_forward`` and ``occbin_solve``: the path and the shock loop.
+"""Native ``occbin_forward`` and ``occbin_sim``: the path and the shock loop.
 
 The forward pass has an oracle, so it is checked against one. The solve is
 checked three ways here instead. The accepted mask must equal the condition read
@@ -28,12 +28,12 @@ import pytest
 import sympy as sp
 from numba import carray, cfunc, types
 
-from SymbolicDSGE._ckernels.core import klein_solve1
+from SymbolicDSGE._ckernels.core import klein_preprocess, klein_solve1
 from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_forward,
     occbin_recursion,
-    occbin_solve,
-    occbin_solve_arena_size,
+    occbin_sim,
+    occbin_sim_arena_size,
     regime_pencil,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
@@ -87,13 +87,17 @@ def cf(compiled):
 def solved(compiled, par):
     """(ss, a_ref, b_ref, f_ref, p_ref) for the reference regime."""
     seed = DSGESolver._resolve_ss_seed(None, compiled)
-    ss, a_ref, b_ref, f_ref, p_ref, *_ = klein_solve1(
-        compiled.construct_objective_cfunc().address,
+    addr = compiled.construct_objective_cfunc().address
+    ss, f_ref, p_ref, *_ = klein_solve1(
+        addr,
         seed,
         par,
         compiled.n_state,
         compiled.n_exog,
     )
+    # The solve keeps the pencil internal, so take it at the steady state the
+    # solve resolved: the same linearization, one call later.
+    a_ref, b_ref = klein_preprocess(addr, ss, par, compiled.n_var)
     return ss, a_ref, b_ref, f_ref, p_ref
 
 
@@ -133,7 +137,7 @@ def _binding(out, solved, z_pos):
 def _solve(table, solved, par, cond_addr, n_constraint, inclusive, shocks, **kw):
     a, b, c = table
     ss, _, _, f_ref, _ = solved
-    return occbin_solve(
+    return occbin_sim(
         a,
         b,
         c,
@@ -472,7 +476,7 @@ def test_seeding_the_answer_settles_in_one_pass(table, solved, par, cf):
 
     out, regimes, diag = _run(table, solved, par, cf, shocks, **kw)
     seeded_out, seeded_reg, seeded_diag = _run(
-        table, solved, par, cf, shocks, init_regime=regimes[0], **kw
+        table, solved, par, cf, shocks, init_regime=regimes[:1], **kw
     )
 
     np.testing.assert_array_equal(seeded_out, out)
@@ -489,7 +493,7 @@ def test_a_reset_regime_throws_the_seed_away(table, solved, par, cf):
     _, regimes, _ = _run(table, solved, par, cf, shocks, **kw)
 
     _, reset_reg, reset_diag = _run(
-        table, solved, par, cf, shocks, init_regime=regimes[0], reset_regime=True, **kw
+        table, solved, par, cf, shocks, init_regime=regimes[:1], reset_regime=True, **kw
     )
 
     np.testing.assert_array_equal(reset_reg, regimes)
@@ -503,7 +507,7 @@ def test_curb_retrench_gives_up_one_date_per_pass(table, solved, par, cf):
     n_state = solved[3].shape[1]
     shocks = _shocks(n_state, 1)
     kw = {"T0": HORIZON, "n_periods": HORIZON}
-    seed = np.ones(HORIZON, dtype=np.int8)
+    seed = np.ones((1, HORIZON), dtype=np.int8)
 
     plain_out, plain_reg, plain_diag = _run(
         table, solved, par, cf, shocks, init_regime=seed, **kw
@@ -520,7 +524,7 @@ def test_curb_retrench_gives_up_one_date_per_pass(table, solved, par, cf):
 def test_an_initial_guess_of_the_wrong_length_is_rejected(table, solved, par, cf):
     n_state = solved[3].shape[1]
 
-    with pytest.raises(ValueError, match="expected T0"):
+    with pytest.raises(ValueError, match="to match T_cap"):
         _run(
             table,
             solved,
@@ -528,14 +532,14 @@ def test_an_initial_guess_of_the_wrong_length_is_rejected(table, solved, par, cf
             cf,
             _shocks(n_state, 1),
             T0=SHORT,
-            init_regime=np.zeros(SHORT + 1, dtype=np.int8),
+            init_regime=np.zeros((1, SHORT + 1), dtype=np.int8),
         )
 
 
 def test_an_initial_guess_outside_the_table_is_rejected(table, solved, par, cf):
     n_state = solved[3].shape[1]
-    seed = np.zeros(SHORT, dtype=np.int8)
-    seed[0] = 2
+    seed = np.zeros((1, SHORT), dtype=np.int8)
+    seed[0, 0] = 2
 
     with pytest.raises(ValueError, match=re.escape("outside 0..1")):
         _run(table, solved, par, cf, _shocks(n_state, 1), T0=SHORT, init_regime=seed)
@@ -725,7 +729,7 @@ def test_the_arena_formula_is_pinned():
     recursion = n_var * n_var + n_var * n_rhs + n_ctrl * n_rhs
     masks = (max_iter + 3) * T_cap + max_iter
 
-    n_float, n_int = occbin_solve_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter)
+    n_float, n_int = occbin_sim_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter)
 
     assert n_float == n_state + T_cap * n_var + max_iter + recursion
     assert n_int == n_var + 2 * max_iter + (masks + 7) // 8

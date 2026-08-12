@@ -17,6 +17,7 @@ import pytest
 
 from SymbolicDSGE._ckernels.core import (
     bicomplex_hessian,
+    klein_preprocess,
     klein_solve1,
     second_order,
     second_order_risk,
@@ -51,9 +52,10 @@ def _staged(compiled, par, seed, eta):
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
 
-    ss, a, b, f, p, stab, eig, A, B = klein_solve1(
-        addr, seed, par, n_state, compiled.n_exog
-    )
+    ss, f, p, stab, eig, A, B = klein_solve1(addr, seed, par, n_state, compiled.n_exog)
+    # The second-order stages take the pencil, which the fused solve keeps
+    # internal, so the staged reference rebuilds it at the same steady state.
+    a, b = klein_preprocess(addr, ss, par, n_eq)
     gx, hx = f, p  # klein_solve1 already projects
     f_xx = bicomplex_hessian(bc_addr, ss, par, n_eq)
     gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
@@ -92,7 +94,7 @@ def test_python_wrapper_carries_the_native_outputs(path):
     from SymbolicDSGE.core.solver_backend import sgu_solve
 
     compiled, par, seed, eta = _model(path)
-    pert, A, B = sgu_solve(
+    pert = sgu_solve(
         compiled.construct_objective_cfunc(),
         compiled.construct_objective_cfunc_bicomplex(),
         par,
@@ -113,8 +115,8 @@ def test_python_wrapper_carries_the_native_outputs(path):
         pert.hxx,
         pert.gss,
         pert.hss,
-        A,
-        B,
+        pert.A,
+        pert.B,
     )
     _assert_same(got, _staged(compiled, par, seed, eta))
 
@@ -124,7 +126,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
     """The second-order solve must not perturb the first order it is built on."""
     compiled, par, seed, eta = _model(path)
 
-    ss1, _, _, f1, p1, stab1, eig1, A1, B1 = klein_solve1(
+    ss1, f1, p1, stab1, eig1, A1, B1 = klein_solve1(
         compiled.construct_objective_cfunc().address,
         seed,
         par,

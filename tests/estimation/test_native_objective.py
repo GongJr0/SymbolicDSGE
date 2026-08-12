@@ -49,7 +49,11 @@ def bundle(post82_test_model_path):
         observables=True,
     )
     y = pd.DataFrame(
-        {"OutGap": sim["OutGap"][1:], "Infl": sim["Infl"][1:], "Rate": sim["Rate"][1:]}
+        {
+            "OutGap": sim.observables["OutGap"][1:],
+            "Infl": sim.observables["Infl"][1:],
+            "Rate": sim.observables["Rate"][1:],
+        }
     )
     return {
         "compiled": compiled,
@@ -195,7 +199,7 @@ def rbc_bundle(rbc_second_order_test_model_path):
         x0=np.asarray(solved.policy.steady_state, dtype=np.float64),
         observables=True,
     )
-    y = pd.DataFrame({"c_obs": sim["c_obs"][1:]})
+    y = pd.DataFrame({"c_obs": sim.observables["c_obs"][1:]})
     return {
         "compiled": compiled,
         "solved": solved,

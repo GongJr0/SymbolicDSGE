@@ -25,6 +25,7 @@ from numpy.typing import NDArray
 from .._ckernels.monte_carlo._runner import NativeShockPlan, shock_plan
 from ..core.shock_generators import Shock
 from ..core.shock_plan import ShockPlan, ShockPlanEntry
+from ..core.solved_model.shocks import resolve_shock_plan
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime
     from ..core.solved_model import SolvedModel
@@ -223,7 +224,7 @@ def build_native_plan(
         return None
 
     validate_shock_specs(shocks)
-    plan = model._resolve_shock_plan(shocks, T)
+    plan = resolve_shock_plan(model.compiled, shocks, T)
     entries = native_shock_entries(plan, families)
     return shock_plan(
         [entry.as_tuple() for entry in entries],
@@ -259,7 +260,7 @@ def replication_shocks(
         raise ValueError("The simulation step draws no shocks.")
 
     validate_shock_specs(shocks)
-    resolved = model._resolve_shock_plan(shocks, T)
+    resolved = resolve_shock_plan(model.compiled, shocks, T)
     plan = build_native_plan(model, step, T)
     block = (
         resolved.matrix(

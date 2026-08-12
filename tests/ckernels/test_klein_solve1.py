@@ -34,7 +34,7 @@ MODELS = [
     "MODELS/POST82.yaml",
 ]
 
-OUTPUTS = ("ss", "a", "b", "f", "p", "stab", "eig", "A", "B")
+OUTPUTS = ("ss", "f", "p", "stab", "eig", "A", "B")
 
 
 def _model(path):
@@ -52,14 +52,14 @@ def _staged(compiled, par, seed):
     n_eq = len(compiled.var_names)
     ss, _ = steady_state_newton(addr, seed, par)
     a, b = klein_preprocess(addr, ss, par, n_eq)
-    s, t, z = klein_qz(a, b)
+    s, t, z = klein_qz(a, b)  # a/b stay internal: the solve does not return them
     f, p, stab, eig = klein_postprocess(s, t, z, compiled.n_state)
     A, B = assemble_state_space(
         p, f, compiled.n_state, n_eq - compiled.n_state, compiled.n_exog
     )
     # The solve reports f/p real but assembles A/B from the complex pair, whose
     # cross term Re(f)Re(p) would drop. Project after assembling, as it does.
-    return ss, a, b, np.real(f), np.real(p), stab, eig, A, B
+    return ss, np.real(f), np.real(p), stab, eig, A, B
 
 
 def _assert_same(got, want):
@@ -86,34 +86,6 @@ def test_matches_the_staged_shims_exactly(path):
 
 
 @pytest.mark.parametrize("path", MODELS)
-def test_python_wrapper_carries_the_native_outputs(path):
-    """``klein_solve`` must hand back the pencil and state space it was given."""
-    from SymbolicDSGE.core.solver_backend import klein_solve
-
-    compiled, par, seed = _model(path)
-    sol = klein_solve(
-        compiled.construct_objective_cfunc(),
-        par,
-        seed,
-        compiled.n_state,
-        n_exog=compiled.n_exog,
-    )
-
-    got = (
-        sol.steady_state,
-        sol.a,
-        sol.b,
-        sol.f,
-        sol.p,
-        sol.stab,
-        sol.eig,
-        sol.A,
-        sol.B,
-    )
-    _assert_same(got, _staged(compiled, par, seed))
-
-
-@pytest.mark.parametrize("path", MODELS)
 def test_policy_is_real(path):
     """``f``/``p`` leave the solve projected, so no caller collapses them again."""
     from SymbolicDSGE.core.solver_backend import klein_solve
@@ -121,7 +93,7 @@ def test_policy_is_real(path):
     compiled, par, seed = _model(path)
     cfunc = compiled.construct_objective_cfunc()
 
-    _, _, _, f, p, _, _, _, _ = klein_solve1(
+    _, f, p, _, _, _, _ = klein_solve1(
         cfunc.address, seed, par, compiled.n_state, compiled.n_exog
     )
     assert f.dtype == np.float64
@@ -143,7 +115,7 @@ def test_reports_stab_instead_of_raising():
         par,
         compiled.n_state,
         compiled.n_exog,
-    )[5]
+    )[3]
 
     assert stab == 0
 

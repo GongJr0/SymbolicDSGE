@@ -96,6 +96,12 @@ def _make_stub_model(
         parameters=parameters,
         shock_std={E_U: SIG_U, E_V: SIG_V},
         shock_corr={frozenset({E_U, E_V}): RHO_UV},
+        fingerprint=lambda: hash(
+            (
+                tuple(parameters.keys()),
+                tuple(float(v) for v in parameters.values()),
+            )
+        ),
     )
     config = SimpleNamespace(
         calibration=calibration,
@@ -104,7 +110,9 @@ def _make_stub_model(
     compiled = SimpleNamespace(
         observable_names=observable_names,
         var_names=var_names,
+        n_var=3,
         n_state=2,
+        n_ctrl=1,
         n_exog=2,
     )
 
@@ -131,13 +139,13 @@ def _make_stub_model(
         )
 
     model = SimpleNamespace(
-        A=np.eye(3, dtype=FLOAT),
-        B=np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]], dtype=FLOAT),
         compiled=compiled,
         config=config,
         kalman_config=kalman_config,
         policy=SimpleNamespace(
             order=2,
+            A=np.eye(3, dtype=FLOAT),
+            B=np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]], dtype=FLOAT),
             p=np.array([[0.8, 0.1], [0.0, 0.7]], dtype=FLOAT),
             f=np.array([[0.2, 0.3]], dtype=FLOAT),
             hxx=np.zeros((2, 2, 2), dtype=FLOAT),
@@ -153,11 +161,6 @@ def _make_stub_model(
     # cache-aware construction path works against the stub.
     _cache: dict = {}
 
-    def _calibration_fingerprint():
-        p = calibration.parameters
-        return hash((tuple(p.keys()), tuple(float(v) for v in p.values())))
-
-    model._calibration_fingerprint = _calibration_fingerprint
     model._kf_cache_get = _cache.get
     model._kf_cache_put = _cache.__setitem__
     return model

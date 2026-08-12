@@ -14,7 +14,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
-    from ..core.solver_backend import SecondOrderSolution
+    from ..core.solver_backend import FirstOrderSolution, SecondOrderSolution
 
 import numpy as np
 import pandas as pd
@@ -1007,6 +1007,7 @@ def _prepare_filter_loglik(
     )
     run_filter: Callable[..., Any]
     if mode == "linear":
+        pol = cast("FirstOrderSolution", sol.policy)
         C, d = build_C_d_from_cfunc(
             prepared.meas_addr,
             prepared.jac_addr,
@@ -1016,18 +1017,19 @@ def _prepare_filter_loglik(
         )
         run_filter = KalmanFilter.run_raw
         mode_args: dict[str, Any] = {
-            "A": sol.A,
-            "B": sol.B,
+            "A": pol.A,
+            "B": pol.B,
             "C": C,
             "d": d,
             "x0": x0,
             "return_shocks": False,
         }
     elif mode == "extended":
+        pol = cast("FirstOrderSolution", sol.policy)
         run_filter = KalmanFilter.run_extended_raw
         mode_args = {
-            "A": sol.A,
-            "B": sol.B,
+            "A": pol.A,
+            "B": pol.B,
             "meas_addr": prepared.meas_addr,
             "jac_addr": prepared.jac_addr,
             "calib_params": calib_params,
@@ -1039,7 +1041,7 @@ def _prepare_filter_loglik(
         # hx is (n_state, n_state); recover n_state from it so bx and the
         # augmented z0 don't need `compiled` threaded in.
         pol = cast("SecondOrderSolution", sol.policy)
-        n_state = sol.policy.p.shape[0]
+        n_state = pol.p.shape[0]
         if x0 is None:
             x0_state = np.zeros((n_state,), dtype=float64)
         else:
@@ -1052,7 +1054,7 @@ def _prepare_filter_loglik(
             "meas_addr": prepared.meas_addr,
             "hx": pol.p,
             "gx": pol.f,
-            "bx": asarray(sol.B[:n_state, :], dtype=float64),
+            "bx": asarray(pol.B[:n_state, :], dtype=float64),
             "hxx": pol.hxx,
             "gxx": pol.gxx,
             "hss": pol.hss,

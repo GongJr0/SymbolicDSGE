@@ -74,7 +74,7 @@ def summarize_solved_model(
 ) -> dict[str, Any]:
     compiled = model.compiled
     layout = compiled.layout
-    policy_stab = getattr(model.policy, "stab", None)
+    policy = model.policy
     return {
         "role": role,
         "loaded": True,
@@ -89,10 +89,10 @@ def summarize_solved_model(
         "shock_corr_specs": _shock_corr_specs(compiled.config),
         "n_state": int(compiled.n_state),
         "n_exog": int(compiled.n_exog),
-        "A_shape": list(model.A.shape),
-        "B_shape": list(model.B.shape),
+        "A_shape": list(policy.A.shape),
+        "B_shape": list(policy.B.shape),
         "has_kalman": compiled.kalman is not None,
-        "policy": {"stab": _coerce_json_scalar(policy_stab)},
+        "policy": {"stab": _coerce_json_scalar(policy.stab)},
         "layout": {
             "declared_names": list(layout.declared_names),
             "canonical_names": list(layout.canonical_names),

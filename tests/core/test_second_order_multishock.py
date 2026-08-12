@@ -247,9 +247,7 @@ def test_multishock_second_order_deterministic_sim_matches_dynare():
     out = solved.sim(
         golden.DETERMINISTIC_SIM.shape[0] - 1,
         x0=_ms_golden_x0(solved),
-    )[
-        "_X"
-    ][:, _ms_golden_columns(solved)]
+    ).X[:, _ms_golden_columns(solved)]
 
     np.testing.assert_allclose(
         out,
@@ -271,7 +269,7 @@ def test_multishock_second_order_stochastic_sim_matches_dynare():
         shocks={
             name: golden.STOCHASTIC_SHOCKS[:, i] for i, name in enumerate(_MS_SHOCKS)
         },
-    )["_X"][:, _ms_golden_columns(solved)]
+    ).X[:, _ms_golden_columns(solved)]
 
     np.testing.assert_allclose(
         out,
@@ -286,7 +284,7 @@ def test_multishock_second_order_irf_matches_dynare():
     off-diagonals at zero and reduce to the single-shock fixture."""
     solved, _ = _solved_multishock()
 
-    out = solved.irf(list(_MS_SHOCKS), T=golden.IRF.shape[0] - 1)["_X"][
+    out = solved.irf(list(_MS_SHOCKS), T=golden.IRF.shape[0] - 1).X[
         :, _ms_golden_columns(solved)
     ]
 

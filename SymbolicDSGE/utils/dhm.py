@@ -23,6 +23,7 @@ from sympy.parsing.sympy_parser import (
 
 from ..core.shock_generators import Shock
 from ..core.solved_model import SolvedModel
+from ..core.solved_model.shocks import materialize_shocks, shock_unpack
 
 _DHMShock = Shock | Callable[[float | np.ndarray], np.ndarray] | np.ndarray
 _DHMShocks = Mapping[str, _DHMShock]
@@ -234,7 +235,7 @@ class DenHaanMarcet:
         self._focs = tuple(focs) if focs is not None else None
         self._foc_locals = dict(foc_locals) if foc_locals is not None else None
         self._t = Symbol("t", integer=True)
-        self._A_float = np.ascontiguousarray(self.solved.A, dtype=np.float64)
+        self._A_float = np.ascontiguousarray(self.solved.policy.A, dtype=np.float64)
 
     def one_sample(
         self,
@@ -258,7 +259,7 @@ class DenHaanMarcet:
         shock_mat = self._prepare_shock_matrix(T, shocks, shock_scale)
         states = _simulate_linear_states(
             self._A_float,
-            np.ascontiguousarray(self.solved.B, dtype=np.float64),
+            np.ascontiguousarray(self.solved.policy.B, dtype=np.float64),
             state0,
             shock_mat,
         )
@@ -770,7 +771,7 @@ class DenHaanMarcet:
         return np.ascontiguousarray(state_path, dtype=np.float64)
 
     def _prepare_initial_state(self, x0: np.ndarray | None) -> np.ndarray:
-        n = self.solved.A.shape[0]
+        n = self.solved.policy.A.shape[0]
         if x0 is None:
             state0 = np.zeros((n,), dtype=np.float64)
         else:
@@ -790,12 +791,12 @@ class DenHaanMarcet:
         shocks: _DHMShocks | None,
         shock_scale: float,
     ) -> np.ndarray:
-        shock_mat = np.zeros((T, self.solved.B.shape[1]), dtype=np.float64)
+        shock_mat = np.zeros((T, self.solved.policy.B.shape[1]), dtype=np.float64)
         if shocks is None:
             return shock_mat
 
-        normalized = self.solved._materialize_shocks(shocks, T)
-        for idx, shock_vals in self.solved._shock_unpack(normalized):
+        normalized = materialize_shocks(shocks, T)
+        for idx, shock_vals in shock_unpack(self.solved.compiled, normalized):
             shock_vals = np.asarray(shock_vals, dtype=np.float64).reshape(-1)
             if shock_vals.shape[0] != T:
                 raise ValueError(
@@ -956,7 +957,7 @@ class DenHaanMarcet:
         shock_mat = self._prepare_shock_matrix(observed.shape[0], shocks, shock_scale)
         states = _simulate_linear_states(
             self._A_float,
-            np.ascontiguousarray(self.solved.B, dtype=np.float64),
+            np.ascontiguousarray(self.solved.policy.B, dtype=np.float64),
             state0,
             shock_mat,
         )

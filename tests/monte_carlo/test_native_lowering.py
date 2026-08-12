@@ -9,8 +9,8 @@ from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.core.solver_backend import PerturbationSolution
+from SymbolicDSGE.core.solved_model import SecondOrderSolvedModel, SolvedModel
+from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -416,11 +416,14 @@ def test_native_lowering_runs_first_order_simulation_with_observables() -> None:
     assert native_result.status == 0
     expected = solved.sim(T, shocks=shocks, observables=True)
     for field, expected_values in (
-        ("states", expected["_X"]),
+        ("states", expected.X),
         (
             "observables",
             np.column_stack(
-                [expected[name] for name in solved.compiled.observable_names]
+                [
+                    expected.observables[name]
+                    for name in solved.compiled.observable_names
+                ]
             ),
         ),
     ):
@@ -450,12 +453,16 @@ def test_native_lowering_runs_second_order_simulation() -> None:
     compiled = SimpleNamespace(
         var_names=["e", "k", "c"],
         n_exog=1,
+        n_var=3,
         n_state=2,
+        n_ctrl=1,
+        n_par=0,
+        n_obs=0,
         observable_names=[],
         calib_params=[],
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
     )
-    policy = PerturbationSolution(
+    policy = SecondOrderSolution(
         p=hx,
         f=gx,
         stab=0,
@@ -466,13 +473,10 @@ def test_native_lowering_runs_second_order_simulation() -> None:
         hss=hss,
         gss=gss,
         steady_state=np.zeros(3, dtype=np.float64),
-    )
-    solved = SolvedModel(
-        compiled=compiled,
-        policy=policy,
         A=np.eye(3, dtype=np.float64),
         B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),
     )
+    solved = SecondOrderSolvedModel(compiled=compiled, policy=policy)
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=False)]
     )
@@ -493,7 +497,7 @@ def test_native_lowering_runs_second_order_simulation() -> None:
     )
     np.testing.assert_allclose(
         actual,
-        solved._simulate_state_matrix(6),
+        solved._simulate_state_matrix(6).X,
         rtol=1e-12,
         atol=1e-12,
     )
@@ -506,7 +510,10 @@ def test_native_lowering_runs_linear_and_extended_filters() -> None:
     T = 8
     expected_simulation = solved.sim(T, observables=True)
     expected_y = np.column_stack(
-        [expected_simulation[name] for name in solved.compiled.observable_names]
+        [
+            expected_simulation.observables[name]
+            for name in solved.compiled.observable_names
+        ]
     )
 
     for mode in ("linear", "extended"):
@@ -584,7 +591,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
 
     assert native_result.status == 0
     simulated = solved.sim(T, shocks=shocks, observables=True)
-    expected_y = np.column_stack([simulated[name] for name in requested])
+    expected_y = np.column_stack([simulated.observables[name] for name in requested])
     expected_filter = solved._kalman_raw(
         y=expected_y,
         filter_mode="linear",

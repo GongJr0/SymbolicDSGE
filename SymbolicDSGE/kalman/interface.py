@@ -96,7 +96,7 @@ class KalmanInterface(KalmanFilter):
         self.observables = obs  # reorder to canonical order
         self.y = y
 
-        self.A, self.B = model.A, model.B
+        self.A, self.B = model.policy.A, model.policy.B
 
         # C/d/Q/P0 (and, on the default path, R) are model-constant: rebuilt
         # identically on every call for a fixed calibration. Resolve them through
@@ -107,7 +107,7 @@ class KalmanInterface(KalmanFilter):
         cache_key = (
             self.mode,
             tuple(self.observables),
-            model._calibration_fingerprint(),
+            model.config.calibration.fingerprint(),
         )
         record = model._kf_cache_get(cache_key)
         if record is None:

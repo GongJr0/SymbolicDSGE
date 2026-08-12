@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Sequence
+from typing import Sequence, NamedTuple
 
 from numpy import float64, int64
 from numpy.typing import NDArray
@@ -27,6 +27,18 @@ class OccBinDiagnostics:
     iters: NDI
     max_err: NDF
     periodic: NDI
+
+
+class StatePath(NamedTuple):
+    """What one simulation produced, before it is named and dressed as a result.
+
+    The regime fields are an OccBin solve's, so a perturbation family returns
+    ``StatePath(X)`` and lets them default.
+    """
+
+    X: NDF
+    regimes: NDI | None = None
+    diagnostics: OccBinDiagnostics | None = None
 
 
 @dataclass(frozen=True, eq=False)

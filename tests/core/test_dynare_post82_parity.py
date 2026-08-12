@@ -127,7 +127,7 @@ def _x0(compiled, blocks) -> np.ndarray:
 
 
 def _path(compiled, out) -> np.ndarray:
-    return np.column_stack([out[name] for name in dyn.DECL_COLUMNS])
+    return np.column_stack([out.states[name] for name in dyn.DECL_COLUMNS])
 
 
 def _shocks(block: np.ndarray) -> dict[str, np.ndarray]:
@@ -172,7 +172,7 @@ def test_policy_shock_block_matches_ghu(blocks):
 def test_impact_on_declared_variables_matches_ghu(solved):
     # The headline. The r row is the fixed point issue #390 was opened over.
     compiled, solution = solved
-    B = np.real(solution.B)
+    B = np.real(solution.policy.B)
 
     assert np.abs(B[_declared(compiled)] - dyn.GHU_DECL).max() < TOL
     r_row = B[compiled.idx["r"]]
@@ -182,7 +182,7 @@ def test_impact_on_declared_variables_matches_ghu(solved):
 
 def test_generated_states_take_no_shock_beyond_their_own(solved):
     compiled, solution = solved
-    B = np.real(solution.B)
+    B = np.real(solution.policy.B)
     n_exog = compiled.n_exog
 
     np.testing.assert_array_equal(B[:n_exog], np.eye(n_exog))
@@ -204,7 +204,7 @@ def test_shock_covariance_matches_dynare(solved):
 def test_lag_state_rows_of_A_copy_the_policy_rows_they_lag(solved):
     # v_lag1(t+1) = v(t), so a lag row of A is that variable's policy row.
     compiled, solution = solved
-    A, f = np.real(solution.A), np.real(solution.policy.f)
+    A, f = np.real(solution.policy.A), np.real(solution.policy.f)
     n_state = compiled.layout.n_state
     lag = _lag_index(compiled)
     rows = [compiled.layout.control_names.index(v) for v in DYNARE_STATES]
@@ -217,7 +217,7 @@ def test_control_rows_of_A_are_f_composed_with_the_state_block(solved):
     # y_{t+1} = f x_{t+1}, so the controls carry no transition of their own and
     # A holds nothing beyond f and the state block.
     compiled, solution = solved
-    A, f = np.real(solution.A), np.real(solution.policy.f)
+    A, f = np.real(solution.policy.A), np.real(solution.policy.f)
     n_state = compiled.layout.n_state
 
     assert np.abs(A[n_state:] - f @ A[:n_state]).max() < TOL
@@ -225,7 +225,7 @@ def test_control_rows_of_A_are_f_composed_with_the_state_block(solved):
 
 def test_state_transition_matches_ghx(solved):
     compiled, solution = solved
-    A = np.real(solution.A)
+    A = np.real(solution.policy.A)
     lag = _lag_index(compiled)
 
     assert np.abs(A[np.ix_(lag, lag)] - dyn.GHX_DECL[_state_rows()]).max() < TOL
@@ -235,7 +235,7 @@ def test_A_on_declared_rows_is_one_transition_past_ghx(solved):
     # Our lag state at t-1 is g(t-2), so this is ghx @ ghx. It is why ghx is
     # compared against f above and never against A.
     compiled, solution = solved
-    A = np.real(solution.A)
+    A = np.real(solution.policy.A)
     block = A[np.ix_(_declared(compiled), _lag_index(compiled))]
 
     assert np.abs(block - dyn.GHX_DECL @ dyn.GHX_DECL[_state_rows()]).max() < TOL
@@ -246,7 +246,7 @@ def test_A_from_shock_states_to_declared_rows_is_ghx_ghu(solved):
     # A shock state holds its innovation for one period, so reaching a control
     # through it costs the same transition.
     compiled, solution = solved
-    A = np.real(solution.A)
+    A = np.real(solution.policy.A)
     block = A[np.ix_(_declared(compiled), _shock_index(compiled))]
 
     assert np.abs(block - dyn.GHX_DECL @ dyn.GHU_DECL[_state_rows()]).max() < TOL
@@ -256,7 +256,7 @@ def test_shock_state_rows_of_A_are_empty(solved):
     # A shock state is reached only by its own innovation, never by the state.
     compiled, solution = solved
 
-    assert np.abs(np.real(solution.A)[: compiled.n_exog]).max() < TOL
+    assert np.abs(np.real(solution.policy.A)[: compiled.n_exog]).max() < TOL
 
 
 # --- simulation -------------------------------------------------------------
@@ -313,8 +313,8 @@ def test_measurement_matrices_match_dynare(solved):
 def _filter(compiled, solution, P0):
     Q, C, d = _measurement(compiled)
     return KalmanFilter.run(
-        np.real(solution.A),
-        np.real(solution.B),
+        np.real(solution.policy.A),
+        np.real(solution.policy.B),
         C,
         d,
         Q,
@@ -326,7 +326,7 @@ def _filter(compiled, solution, P0):
 
 
 def _unconditional_P0(solution, compiled):
-    A, B = np.real(solution.A), np.real(solution.B)
+    A, B = np.real(solution.policy.A), np.real(solution.policy.B)
     Q, _, _ = _measurement(compiled)
     P0 = solve_discrete_lyapunov(A, B @ Q @ B.T)
     return 0.5 * (P0 + P0.T)
@@ -370,7 +370,7 @@ def test_prediction_is_the_transition_applied_to_the_previous_update(solved):
     # so it needs no shift and reaches the row past the end of the sample.
     compiled, solution = solved
     out = _filter(compiled, solution, _unconditional_P0(solution, compiled))
-    A = np.real(solution.A)
+    A = np.real(solution.policy.A)
 
     x_filt = np.asarray(out.x_filt)
     x_pred = np.asarray(out.x_pred)

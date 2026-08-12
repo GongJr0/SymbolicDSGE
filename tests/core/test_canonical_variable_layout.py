@@ -8,8 +8,9 @@ import pytest
 import yaml
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE.kalman.interface import KalmanInterface
+from SymbolicDSGE.core.solved_model.shocks import shock_unpack
 
 # Shock states, then lag states, then the declared variables. The states are all
 # compiler-minted: test.yaml lags u, v and r, and carries two shocks.
@@ -141,17 +142,20 @@ def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder
 
 def _stub_solved(compiled):
     n_ctrl = N_VAR - compiled.n_state
-    return SolvedModel(
+    return FirstOrderSolvedModel(
         compiled=compiled,
         policy=SimpleNamespace(
-            f=np.zeros((n_ctrl, compiled.n_state), dtype=np.float64), order=1
-        ),
-        A=np.eye(N_VAR, dtype=np.float64),
-        B=np.vstack(
-            [
-                np.eye(compiled.n_exog, dtype=np.float64),
-                np.zeros((N_VAR - compiled.n_exog, compiled.n_exog), dtype=np.float64),
-            ]
+            f=np.zeros((n_ctrl, compiled.n_state), dtype=np.float64),
+            order=1,
+            A=np.eye(N_VAR, dtype=np.float64),
+            B=np.vstack(
+                [
+                    np.eye(compiled.n_exog, dtype=np.float64),
+                    np.zeros(
+                        (N_VAR - compiled.n_exog, compiled.n_exog), dtype=np.float64
+                    ),
+                ]
+            ),
         ),
     )
 
@@ -178,11 +182,12 @@ def test_simulation_shock_unpack_accepts_shocks_by_name(tmp_path):
     compiled = _compile_misordered_test_model(tmp_path)
     solved = _stub_solved(compiled)
 
-    unpacked = solved._shock_unpack(
+    unpacked = shock_unpack(
+        solved.compiled,
         {
             "e_u": np.array([1.0, 2.0], dtype=np.float64),
             "e_v": np.array([3.0, 4.0], dtype=np.float64),
-        }
+        },
     )
 
     # Indices are columns of the (T, n_exog) shock matrix, not state positions.

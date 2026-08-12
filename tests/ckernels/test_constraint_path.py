@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE._ckernels.occbin._occbin import MAX_CONSTRAINTS, constraint_path
+from SymbolicDSGE._ckernels.occbin._occbin import constraint_path
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.config import Constraint
 
@@ -322,14 +322,14 @@ def test_empty_path_is_a_no_op(compiled, par):
     assert max_err == 0.0
 
 
-@pytest.mark.parametrize("n_constraint", [0, -1, MAX_CONSTRAINTS + 1])
+@pytest.mark.parametrize("n_constraint", [0, -1, 3])
 def test_rejects_a_constraint_count_the_distance_buffer_cannot_hold(
     compiled, par, n_constraint
 ):
     cf = compiled.construct_constraint_func()
     path = _path(compiled, [(0.0, 0.0)])
 
-    with pytest.raises(ValueError, match="n_constraint"):
+    with pytest.raises(ValueError, match="one or two constraints"):
         constraint_path(
             cf.address,
             path,

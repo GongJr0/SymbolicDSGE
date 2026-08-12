@@ -24,8 +24,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE._ckernels.occbin import occbin_solve, regime_pencil
+from SymbolicDSGE._ckernels.core import klein_preprocess, klein_solve1
+from SymbolicDSGE._ckernels.occbin import occbin_sim, regime_pencil
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_occbin as golden
 
@@ -57,13 +57,17 @@ def par(compiled):
 def solved(compiled, par):
     """(ss, a_ref, b_ref, f_ref, p_ref) for the all-relaxed reference regime."""
     seed = DSGESolver._resolve_ss_seed(None, compiled)
-    ss, a_ref, b_ref, f_ref, p_ref, *_ = klein_solve1(
-        compiled.construct_objective_cfunc().address,
+    addr = compiled.construct_objective_cfunc().address
+    ss, f_ref, p_ref, *_ = klein_solve1(
+        addr,
         seed,
         par,
         compiled.n_state,
         compiled.n_exog,
     )
+    # The solve keeps the pencil internal, so take it at the steady state the
+    # solve resolved: the same linearization, one call later.
+    a_ref, b_ref = klein_preprocess(addr, ss, par, compiled.n_var)
     return ss, a_ref, b_ref, f_ref, p_ref
 
 
@@ -99,7 +103,7 @@ def piecewise(compiled, table, solved, par, shocks):
     a, b, c = table
     ss, _, _, f_ref, _ = solved
     cf = compiled.construct_constraint_func()
-    out, regimes, diag = occbin_solve(
+    out, regimes, diag = occbin_sim(
         a,
         b,
         c,

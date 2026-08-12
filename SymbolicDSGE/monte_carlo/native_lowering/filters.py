@@ -146,7 +146,7 @@ def lower_filter_step(
         policy = reference.policy
         if not isinstance(policy, SecondOrderSolution):
             raise ValueError(
-                "Native unscented filtering requires a perturbation solution."
+                "Native unscented filtering requires a second order solution."
             )
         n_state = reference.compiled.n_state
         n_ctrl = reference.compiled.n_ctrl
@@ -155,7 +155,7 @@ def lower_filter_step(
         before_y = (
             _flat_f64(policy.p),
             _flat_f64(policy.f),
-            _flat_f64(reference.B[:n_state, :]),
+            _flat_f64(policy.B[:n_state, :]),
             _flat_f64(policy.hxx),
             _flat_f64(policy.gxx),
             _flat_f64(policy.hss),
