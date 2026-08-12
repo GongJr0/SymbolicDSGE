@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Mapping, Callable, Union
-from numpy import float64, ndarray
+from numpy import ndarray
 import numpy as np
 
 from .base import SolvedModel, NDF
@@ -37,17 +37,9 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
     ) -> StatePath:
         n_state = self.compiled.n_state
 
-        n = self.compiled.n_var
-        ny = self.compiled.n_ctrl
         policy = self.policy
-        ss = policy.steady_state
-        ss_state = ss[:n_state]
 
-        if x0 is None:
-            x0_state = ss_state
-        else:
-            x0_state = self._simulation_initial_state(policy.f, x0)[:n_state]
-        x0_dev = x0_state - ss_state
+        x0_state = self._simulation_initial_state(policy.f, x0)[:n_state]
         shock_mat = simulation_shock_matrix(
             self.compiled,
             T=T,
@@ -63,7 +55,7 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
             policy.gxx,
             policy.hss,
             policy.gss,
-            x0_dev,
+            x0_state,
             shock_mat,
         )
         return StatePath(X)

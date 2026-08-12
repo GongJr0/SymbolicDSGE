@@ -88,14 +88,11 @@ def lower_simulation_step(
             drawn,
         )
         steady_state = _flat_f64(model.policy.steady_state)
-        initial_state = model._simulation_initial_state(
-            model.policy.f, step.kwargs["x0"]
-        )
-        x0_deviation = initial_state[:n_state] - steady_state[:n_state]
+        x0_arr = model._simulation_initial_state(model.policy.f, step.kwargs["x0"])
         return native_step, _order2_bindings(
             model,
             steady_state,
-            x0_deviation,
+            x0_arr[:n_state],
             shocks,
             shocks_batched,
             params,

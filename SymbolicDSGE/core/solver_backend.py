@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
-from numpy import complex128, float64
+from numpy import complex128, float64, int64
 from numpy.typing import NDArray
 
 from .._ckernels.core import klein_solve1, sgu_klein_solve2
+from .._ckernels.occbin import occbin_solve1
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -201,4 +203,52 @@ def sgu_solve(
         hxx=hxx,
         gss=gss,
         hss=hss,
+    )
+
+
+def piecewise_solve(
+    residual_cfunc: Any,
+    pencil_addrs: Sequence[int],
+    rows: Sequence[NDArray[int64]],
+    params: NDF,
+    ss_seed: NDF,
+    n_states: int,
+    n_constraint: int,
+    *,
+    n_exog: int = 0,
+) -> PiecewiseSolution:
+    """Piecewise-linear (OccBin) solve of the compiled model at ``params``.
+
+    The reference regime is an ordinary Klein solve, and every other regime is
+    the pencil it linearized at with that regime's rows replaced. Both halves
+    run in one native call, so the reference pencil never crosses back into
+    Python between them.
+
+    ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
+    ``0..2 ** n_constraint - 1``; slot 0 is the reference and carries address 0
+    and no rows. A nonzero ``stab`` returns normally and is the reference
+    regime's: a binding regime alone is routinely indeterminate, which is not an
+    error, so only the reference verdict means anything.
+    """
+    with _bk_dating_hint():
+        ss, f, p, stab, eig, a, b, c = occbin_solve1(
+            residual_cfunc.address,
+            ss_seed,
+            params,
+            n_states,
+            pencil_addrs,
+            rows,
+            n_constraint,
+            n_exog,
+        )
+    return PiecewiseSolution(
+        steady_state=ss,
+        stab=stab,
+        eig=eig,
+        order=1,
+        a=a,
+        b=b,
+        c=c,
+        f_ref=f,
+        p_ref=p,
     )
