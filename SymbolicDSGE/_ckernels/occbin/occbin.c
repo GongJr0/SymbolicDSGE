@@ -443,7 +443,7 @@ static void sdsge_occbin_reference_step(const f64 *SDSGE_RESTRICT ref,
 }
 
 arena_size sdsge_occbin_sim_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                         i64 T_cap, i64 max_iter) {
+                                       i64 T_cap, i64 max_iter) {
   const arena_size per =
       sdsge_occbin_period_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter);
   return make_sizer(n_state + per.n_float, per.n_int);

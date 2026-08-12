@@ -114,7 +114,7 @@ i64 sdsge_simulate_second_order_pruned(
     const f64 *SDSGE_RESTRICT gxx, const f64 *SDSGE_RESTRICT hss,
     const f64 *SDSGE_RESTRICT gss, const f64 *SDSGE_RESTRICT x0,
     const f64 *SDSGE_RESTRICT shock, const i64 T, const i64 nx, const i64 ny,
-    const i64 n_exog, f64 *SDSGE_RESTRICT x_out, f64 *SDSGE_RESTRICT y_out) {
+    const i64 n_exog, f64 *SDSGE_RESTRICT out) {
 
   /* One arena holds x1_cur, x1_next, x2_cur, x2_next, and x1_outer. */
   const size_t arena_count = (size_t)(4 * nx + nx * nx);
@@ -179,7 +179,7 @@ i64 sdsge_simulate_second_order_pruned(
     x2_cur = x2_next;
     x2_next = tmp;
 
-    f64 *SDSGE_RESTRICT xt = x_out + t * nx;
+    f64 *SDSGE_RESTRICT xt = out + t * (nx + ny);
     for (i64 i = 0; i < nx; ++i) {
       xt[i] = x1_cur[i] + x2_cur[i];
     }
@@ -193,7 +193,7 @@ i64 sdsge_simulate_second_order_pruned(
         }
       }
 
-      f64 *SDSGE_RESTRICT yt = y_out + t * ny;
+      f64 *SDSGE_RESTRICT yt = xt + nx;
       for (i64 i = 0; i < ny; ++i) {
         const f64 *SDSGE_RESTRICT gxi = gx + i * nx;
         const f64 *SDSGE_RESTRICT gxxi = gxx + i * nx * nx;

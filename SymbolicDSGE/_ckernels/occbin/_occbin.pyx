@@ -10,6 +10,7 @@ from libc.stdint cimport int8_t, int64_t
 
 from cpython.pycapsule cimport PyCapsule_GetName, PyCapsule_GetPointer
 
+import math
 import numpy as np
 import scipy.linalg.cython_lapack as _cython_lapack
 
@@ -511,8 +512,9 @@ def occbin_sim_arena_size(int64_t n_var, int64_t n_state, int64_t n_ctrl,
 
 def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
                int64_t n_constraint, int64_t inclusive, shocks, x_init,
-               *, int64_t T0, int64_t T_cap=-1, n_periods=None,
-               int64_t max_iter=30, init_regime=None,
+               *,
+               int64_t check_ahead_periods=200, int64_t max_check_ahead_periods=-1,
+               n_periods=None, int64_t max_iter=30, init_regime=None,
                bint periodic_solution=False, int64_t periodic_threshold=1,
                bint periodic_strict=True, bint curb_retrench=False,
                bint reset_regime=False, bint reset_check_ahead=False,
@@ -530,14 +532,25 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     the previous guess and the path it implies, both shifted forward one period,
     already describe it. Period 0 always solves.
 
-    ``T0`` is the horizon a guess starts at and ``T_cap`` the most it may grow
-    to, one date at a time, whenever a guess still binds at its last date;
-    ``T_cap`` defaults to ``T0``, which forbids growth and forces the last date
-    relaxed instead. ``n_periods`` defaults to ``S`` and any excess is filled
-    from the tail of the last path solved. ``init_regime`` is ``(n_init,
-    T_cap)``, the layout ``regimes`` comes back in, so a run's guesses feed
-    straight back in; it may cover the leading periods only, and the rest carry
-    the previous period's guess shifted. All relaxed by default.
+    ``check_ahead_periods`` is how far ahead a guess looks and
+    ``max_check_ahead_periods`` how far it may grow, one date at a time, whenever
+    a guess still binds at its last date. At ``-1`` the growth budget is
+    ``ceil(sqrt(check_ahead_periods))`` past the horizon; equal to
+    ``check_ahead_periods`` it forbids growth and forces the last date relaxed
+    instead. Dynare's ``inf`` has no counterpart: growth is reserved in a
+    caller-owned arena, so it is bounded by construction. Buffers carry one date
+    past the horizon, for the release a converged guess ends on, and that is
+    derived here so no caller does the arithmetic.
+
+    ``n_periods`` defaults to ``S`` and any excess is filled from the tail of the
+    last path solved. ``init_regime`` is one guess row per shock period, in the
+    layout ``regimes`` comes back in, so a run's guesses feed straight back in;
+    it may cover the leading periods only, and the rest carry the previous
+    period's guess shifted. All relaxed by default. Rows shorter than the buffer
+    relax into the tail and rows longer than ``check_ahead_periods`` raise the
+    horizon to their own length, both as Dynare does, so a guess round-trips
+    between runs whose horizons differ. Only a row past the growth cap is an
+    error, since the arena is already allocated.
 
     The remaining keywords are Dynare's ``occbin.simul`` options at their own
     defaults. ``periodic_solution`` accepts the best guess of a cycle instead of
@@ -579,12 +592,28 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
             f"cover every mask over {n_constraint} constraints."
         )
 
-    if T_cap < 0:
-        T_cap = T0
-    if T0 < 2:
-        raise ValueError(f"T0 is {T0}, expected at least 2.")
-    if T_cap < T0:
-        raise ValueError(f"T_cap is {T_cap}, expected at least T0 of {T0}.")
+    if check_ahead_periods < 1:
+        raise ValueError(
+            "check_ahead_periods is how many periods ahead a guess looks, it "
+            f"must be at least 1, got {check_ahead_periods}."
+        )
+
+    cdef int64_t T0 = check_ahead_periods + 1
+    cdef int64_t T_cap
+    if max_check_ahead_periods == -1:
+        root = math.isqrt(check_ahead_periods)
+        T_cap = T0 + root + int(root * root < check_ahead_periods)
+    elif max_check_ahead_periods < check_ahead_periods:
+        raise ValueError(
+            "max_check_ahead_periods takes the default growth budget at -1. "
+            "Any other value is a horizon and must be at least "
+            f"check_ahead_periods of {check_ahead_periods}, got "
+            f"{max_check_ahead_periods}."
+        )
+    else:
+        # Equal to check_ahead_periods this lands on T0, forbidding growth.
+        T_cap = max_check_ahead_periods + 1
+
     if max_iter < 1:
         raise ValueError(f"max_iter is {max_iter}, expected at least 1.")
 
@@ -621,23 +650,34 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
                 f"init_regime is {init_arr.ndim}-D, expected one guess row per "
                 f"shock period."
             )
-        imv = init_arr
-        n_init = imv.shape[0]
+        n_init = init_arr.shape[0]
         if not 0 < n_init <= S:
             raise ValueError(
                 f"init_regime holds {n_init} shock periods, expected 1..{S}."
             )
-        if imv.shape[1] != T_cap:
+        width = init_arr.shape[1]
+        if width < 1:
+            raise ValueError("init_regime rows must cover at least one date.")
+        if width > T_cap:
             raise ValueError(
-                f"init_regime is {n_init}x{imv.shape[1]}, expected "
-                f"{n_init}x{T_cap} to match T_cap."
+                f"init_regime covers {width} dates, more than the "
+                f"{T_cap} a max_check_ahead_periods of {T_cap - 1} reserves. "
+                "Raise max_check_ahead_periods, or shorten the guess."
             )
-        if np.any(np.asarray(imv) >= (1 << n_constraint)) or np.any(
-            np.asarray(imv) < 0
-        ):
+        if np.any(init_arr >= (1 << n_constraint)) or np.any(init_arr < 0):
             raise ValueError(
                 f"init_regime holds a mask outside 0..{(1 << n_constraint) - 1}."
             )
+        # A guess is authoritative about the horizon it was solved on, as in
+        # Dynare, but only up to what the arena reserved. Short guesses relax
+        # into the tail, which is where a converged one ends anyway.
+        if width > T0:
+            T0 = width
+        if width < T_cap:
+            padded = np.zeros((n_init, T_cap), dtype=np.int8)
+            padded[:, :width] = init_arr
+            init_arr = padded
+        imv = init_arr
         im = &imv[0, 0]
 
     cdef int64_t P = S if n_periods is None else n_periods

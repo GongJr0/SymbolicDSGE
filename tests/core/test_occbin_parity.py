@@ -34,11 +34,14 @@ _MODEL = "tests/fixtures/models/rbc_occbin.yaml"
 #: Our name for each of the oracle's ``COLUMNS``, in that order.
 _OUR_COLUMNS = ("a", "c", "invest", "k", "lam", "log_k", "log_invest", "log_c")
 
-#: ``simul_check_ahead_periods`` on the golden run, and the appended date.
-_T0 = 201
+#: ``simul_check_ahead_periods`` on the golden run.
+_CHECK_AHEAD = 200
 
 #: Room for the growth Dynare allows and this run turns out not to need.
-_T_CAP = _T0 + 50
+_MAX_CHECK_AHEAD = _CHECK_AHEAD + 50
+
+#: The buffer the two above imply: the horizon plus the appended release date.
+_T0 = _CHECK_AHEAD + 1
 
 
 @pytest.fixture(scope="module")
@@ -115,8 +118,8 @@ def piecewise(compiled, table, solved, par, shocks):
         cf.inclusive,
         shocks,
         np.zeros(f_ref.shape[1]),
-        T0=_T0,
-        T_cap=_T_CAP,
+        check_ahead_periods=_CHECK_AHEAD,
+        max_check_ahead_periods=_MAX_CHECK_AHEAD,
     )
     return out + ss, regimes, diag
 

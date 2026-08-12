@@ -50,7 +50,7 @@ def simulate_second_order_pruned(
     gss: _F64,
     x0: _F64,
     shock_mat: _F64,
-) -> tuple[_F64, _F64]:
+) -> _F64:
     """Pruned second order simulation. Returns split state and jump paths."""
 
 def klein_postprocess(

@@ -153,6 +153,8 @@ class SolvedModel(ABC, Generic[Policy]):
         if observables:
             y = self._simulate_observable_matrix(X, drop_initial=False)
 
+        X += self.policy.steady_state  # add ss; user sees levels.
+
         return SimResult(
             var_names=self.compiled.var_names,
             X=X,
@@ -175,7 +177,9 @@ class SolvedModel(ABC, Generic[Policy]):
             C, d = self._build_C_d_from_obs(y_names)
             return measurement.affine_path(states, C, d, len(y_names), start)
 
-        Y = measurement.non_affine_measurement(self.compiled, y_names, states)
+        Y = measurement.non_affine_measurement(
+            self.compiled, y_names, states + self.policy.steady_state
+        )
         return np.ascontiguousarray(Y[start:], dtype=float64)
 
     def irf(

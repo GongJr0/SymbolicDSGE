@@ -55,7 +55,7 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
             shock_scale=shock_scale,
         )
 
-        x_path, y_path = simulate_second_order_pruned(
+        X = simulate_second_order_pruned(
             policy.p,
             policy.f,
             policy.B[:n_state, :],
@@ -66,9 +66,4 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
             x0_dev,
             shock_mat,
         )
-
-        X = np.empty((T, n), dtype=float64)
-        X[:, :n_state] = x_path + ss_state
-        if ny > 0:
-            X[:, n_state:] = y_path + ss[n_state:]
         return StatePath(X)

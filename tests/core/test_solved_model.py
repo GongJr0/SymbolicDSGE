@@ -319,6 +319,7 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
             order=1,
             A=np.eye(2, dtype=np.float64),
             B=np.zeros((2, 1), dtype=np.float64),
+            steady_state=np.zeros(2, dtype=np.float64),
         ),
     )
 
@@ -558,6 +559,7 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
             order=1,
             A=np.eye(1, dtype=np.float64),
             B=np.eye(1, dtype=np.float64),
+            steady_state=np.zeros(1, dtype=np.float64),
         ),
     )
     printed = []
@@ -612,6 +614,7 @@ def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
             order=2,
             A=np.eye(1, dtype=np.float64),
             B=np.eye(1, dtype=np.float64),
+            steady_state=np.zeros(1, dtype=np.float64),
         ),
     )
 
@@ -649,6 +652,7 @@ def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
             order=2,
             A=np.eye(1, dtype=np.float64),
             B=np.eye(1, dtype=np.float64),
+            steady_state=np.zeros(1, dtype=np.float64),
         ),
     )
 

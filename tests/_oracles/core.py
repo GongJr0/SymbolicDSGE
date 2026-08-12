@@ -73,7 +73,7 @@ def _simulate_second_order_pruned_numba(
     gss: NDF,
     x0: NDF,
     shock_mat: NDF,
-) -> tuple[NDF, NDF]:
+) -> NDF:
     T = shock_mat.shape[0]
     nx = hx.shape[0]
     ny = gx.shape[0]
@@ -130,7 +130,7 @@ def _simulate_second_order_pruned_numba(
                     s += 0.5 * gxx[i, j, k] * x1_outer[j, k]
             y_out[t, i] = s
 
-    return x_out, y_out
+    return np.hstack((x_out, y_out))
 
 
 # --- core.klein --------------------------------------------------------------

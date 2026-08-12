@@ -119,18 +119,18 @@ def occbin_sim(
     shocks: _F64,
     x_init: _F64,
     *,
-    T0: int,
-    T_cap: int = ...,
-    n_periods: int | None = ...,
-    max_iter: int = ...,
-    init_regime: _I64 | None = ...,
-    periodic_solution: bool = ...,
-    periodic_threshold: int = ...,
-    periodic_strict: bool = ...,
-    curb_retrench: bool = ...,
-    reset_regime: bool = ...,
-    reset_check_ahead: bool = ...,
-    algo_truncation: int = ...,
+    check_ahead_periods: int = 200,
+    max_check_ahead_periods: int = -1,
+    n_periods: int | None = None,
+    max_iter: int = 30,
+    init_regime: _I64 | None = None,
+    periodic_solution: bool = False,
+    periodic_threshold: int = 1,
+    periodic_strict: bool = True,
+    curb_retrench: bool = False,
+    reset_regime: bool = False,
+    reset_check_ahead: bool = False,
+    algo_truncation: int = 1,
 ) -> tuple[_F64, _I64, dict[str, _F64 | _I64]]:
     """(out, regimes, diag) <- pencils, a constraint and a shock sequence.
 
@@ -138,7 +138,16 @@ def occbin_sim(
     ``regimes`` the ``(S, T_cap)`` accepted guess per shock period, and ``diag``
     holds ``T_used``, ``iters``, ``max_err`` and ``periodic``, one entry per
     period. ``init_regime`` is ``(n_init, T_cap)`` in that same layout, covering
-    the leading ``n_init <= S`` periods. The pencil stack must cover every mask
-    over ``n_constraint`` constraints. The keywords past ``max_iter`` are
-    Dynare's ``occbin.simul`` options at their own defaults.
+    the leading ``n_init <= S`` periods, where ``T_cap`` is the buffer width the
+    horizons below imply. The pencil stack must cover every mask over
+    ``n_constraint`` constraints.
+
+    ``check_ahead_periods`` is how far ahead a guess looks and
+    ``max_check_ahead_periods`` how far it may grow, ``-1`` taking the default
+    budget. The buffers carry one date past the horizon, for the release a
+    converged guess ends on; the shim derives that, so no caller does the
+    arithmetic. Every default here is Dynare's ``occbin.simul`` default, except
+    ``max_check_ahead_periods``, which is ``inf`` there and cannot be here:
+    growth is reserved in a caller-owned arena, so it is bounded by
+    construction.
     """

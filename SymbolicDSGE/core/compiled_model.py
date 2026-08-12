@@ -270,11 +270,13 @@ class CompiledModel:
         return self._regime_pencil_func
 
     @cached_property
-    def _constraint_func(self) -> ConstraintFunc | None:
+    def _constraint_func(self) -> ConstraintFunc:
         # Conditions as one numba @cfunc (C ABI) for the native OccBin driver.
         # Held here so its .address stays valid for the driver.
         if not self.constraint_names:
-            return None
+            raise ValueError(
+                "Constraint function cannot be built: no constraints in compiled model."
+            )
         layout = ConstraintLayout.from_compiled(self, self.constraint_names)
         cfunc, inclusive = build_constraint_cfunc(self.constraint_exprs, layout)
         return ConstraintFunc(
@@ -285,7 +287,7 @@ class CompiledModel:
             inclusive=inclusive,
         )
 
-    def construct_constraint_func(self) -> ConstraintFunc | None:
+    def construct_constraint_func(self) -> ConstraintFunc:
         return self._constraint_func
 
     @cached_property

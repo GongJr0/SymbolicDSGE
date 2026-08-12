@@ -15,6 +15,7 @@ def _make_solved_model() -> SolvedModel:
             order=1,
             A=np.zeros((1, 1), dtype=np.float64),
             B=np.zeros((1, 1), dtype=np.float64),
+            steady_state=np.zeros(1, dtype=np.float64),
         ),
     )
 

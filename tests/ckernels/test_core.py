@@ -70,15 +70,14 @@ def test_second_order_pruned_matches_numba(
     x0 = np.ascontiguousarray(rng.standard_normal(nx) * 0.1)
     shock = np.ascontiguousarray(rng.standard_normal((T, n_exog)) * 0.1)
 
-    native_x, native_y = core.simulate_second_order_pruned(
+    native = core.simulate_second_order_pruned(
         hx, gx, bx, hxx, gxx, hss, gss, x0, shock
     )
-    ref_x, ref_y = _simulate_second_order_pruned_numba(
+    numba = _simulate_second_order_pruned_numba(
         hx, gx, bx, hxx, gxx, hss, gss, x0, shock
     )
 
-    np.testing.assert_allclose(native_x, ref_x, rtol=_RTOL, atol=_ATOL)
-    np.testing.assert_allclose(native_y, ref_y, rtol=_RTOL, atol=_ATOL)
+    np.testing.assert_allclose(native, numba, rtol=_RTOL, atol=_ATOL)
 
 
 def test_simulate_known_answer() -> None:

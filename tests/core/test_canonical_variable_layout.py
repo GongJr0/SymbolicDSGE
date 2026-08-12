@@ -156,6 +156,7 @@ def _stub_solved(compiled):
                     ),
                 ]
             ),
+            steady_state=np.zeros(N_VAR, dtype=np.float64),
         ),
     )
 
