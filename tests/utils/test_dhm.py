@@ -32,7 +32,7 @@ def test_den_haan_marcet_one_sample_matches_sim_state_path(solved_test):
     }
     dhm = DenHaanMarcet(solved_test)
 
-    expected = solved_test.sim(T, shocks=shocks)["_X"]
+    expected = solved_test.sim(T, shocks=shocks).X
     out = dhm.one_sample(
         T,
         shocks=shocks,
@@ -88,7 +88,7 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
         return np.tile(np.array([cov[0, 0], cov[0, 1]], dtype=np.float64), (T, 1))
 
     shocks = {"e_z,e_g": mv_shock}
-    expected = solved_post82.sim(T, shocks=shocks)["_X"]
+    expected = solved_post82.sim(T, shocks=shocks).X
     out = dhm.one_sample(
         T,
         shocks=shocks,
@@ -97,9 +97,13 @@ def test_den_haan_marcet_one_sample_uses_canonical_multivar_covariance(solved_po
         burn_in=1,
     )
 
-    sig_g = solved_post82._get_param(solved_post82.config.calibration.shock_std["e_g"])
-    sig_z = solved_post82._get_param(solved_post82.config.calibration.shock_std["e_z"])
-    rho_gz = solved_post82._get_rho("e_g", "e_z")
+    sig_g = solved_post82.config.calibration.get_param(
+        solved_post82.config.calibration.shock_std["e_g"]
+    )
+    sig_z = solved_post82.config.calibration.get_param(
+        solved_post82.config.calibration.shock_std["e_z"]
+    )
+    rho_gz = solved_post82.config.calibration.get_rho("e_g", "e_z")
     expected_cov = np.array(
         [
             [sig_g**2, sig_g * sig_z * rho_gz],
@@ -162,7 +166,7 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
         "e_v": np.linspace(-0.25, 0.25, T, dtype=np.float64),
     }
     dhm = DenHaanMarcet(solved_test)
-    states = solved_test.sim(T, shocks=shocks)["_X"]
+    states = solved_test.sim(T, shocks=shocks).X
     out = dhm.from_state_path(
         states,
         equation_idx=[1],
@@ -179,7 +183,9 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
     )
 
     current_states = states[:-1]
-    projected_forward = current_states @ np.asarray(solved_test.A, dtype=np.float64).T
+    projected_forward = (
+        current_states @ np.asarray(solved_test.policy.A, dtype=np.float64).T
+    )
     params = np.array(
         [
             solved_test.compiled.config.calibration.parameters[p]
@@ -213,8 +219,8 @@ def test_measurement_moment_test_single_observable_matches_manual_construction(
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, shocks=shocks, observables=True)
-    aligned_states = sim["_X"]
-    predicted_full = sim[obs_name]
+    aligned_states = sim.X
+    predicted_full = sim.observables[obs_name]
     offset = np.linspace(0.10, -0.05, T, dtype=np.float64)
     y = predicted_full + offset
 
@@ -278,7 +284,7 @@ def test_measurement_moment_test_list_returns_canonical_results(solved_test):
         )
         for idx, name in enumerate(requested)
     }
-    y = np.column_stack([sim[name] + offsets[name] for name in requested])
+    y = np.column_stack([sim.observables[name] + offsets[name] for name in requested])
 
     out = dhm.measurement_moment_test(
         y,
@@ -299,7 +305,7 @@ def test_measurement_moment_test_list_returns_canonical_results(solved_test):
         obs_name = result.observables[0]
         assert np.allclose(
             result.observed,
-            sim[obs_name] + offsets[obs_name],
+            sim.observables[obs_name] + offsets[obs_name],
         )
 
 
@@ -315,7 +321,8 @@ def test_joint_measurement_moment_test_stacks_moments_and_uses_all_observables(
     dhm = DenHaanMarcet(solved_test)
     sim = solved_test.sim(T, shocks=shocks, observables=True)
     y = {
-        obs: sim[obs] + np.linspace(0.02 * (idx + 1), -0.01, T, dtype=np.float64)
+        obs: sim.observables[obs]
+        + np.linspace(0.02 * (idx + 1), -0.01, T, dtype=np.float64)
         for idx, obs in enumerate(solved_test.compiled.observable_names)
     }
 
@@ -356,7 +363,7 @@ def test_measurement_moment_test_from_state_path_matches_simulation_path(
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, shocks=shocks, observables=True)
-    y = sim[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
+    y = sim.observables[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
 
     sim_out = dhm.measurement_moment_test(
         y,
@@ -368,7 +375,7 @@ def test_measurement_moment_test_from_state_path_matches_simulation_path(
         n_estimated_params=1,
     )
     path_out = dhm.measurement_moment_test_from_state_path(
-        sim["_X"],
+        sim.X,
         y,
         obs_name,
         instrument_idx=["u"],
@@ -396,7 +403,7 @@ def test_measurement_moment_test_accepts_shock_specs(solved_test):
         "e_v": Shock(dist="norm", seed=4),
     }
     sim = solved_test.sim(T, shocks=shock_specs, observables=True)
-    y = sim[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
+    y = sim.observables[obs_name] + np.linspace(0.03, -0.02, T, dtype=np.float64)
 
     direct = dhm.measurement_moment_test(
         y,
@@ -441,8 +448,8 @@ def test_measurement_moment_test_supports_lagged_instruments(solved_test):
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, shocks=shocks, observables=True)
-    aligned_states = sim["_X"]
-    predicted = sim[obs_name]
+    aligned_states = sim.X
+    predicted = sim.observables[obs_name]
     y = predicted + np.linspace(0.01, 0.09, T, dtype=np.float64)
 
     out = dhm.measurement_moment_test_from_state_path(
@@ -477,7 +484,7 @@ def test_measurement_moment_test_allows_measurement_override(solved_test):
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T)
-    aligned_states = sim["_X"]
+    aligned_states = sim.X
     idx_pi = solved_test.compiled.idx["Pi"]
     beta = float(
         solved_test.compiled.config.calibration.parameters[
@@ -514,7 +521,7 @@ def test_measurement_moment_test_raises_when_adjusted_df_is_not_positive(
     dhm = DenHaanMarcet(solved_test)
     obs_name = solved_test.compiled.observable_names[0]
     sim = solved_test.sim(T, observables=True)
-    y = sim[obs_name]
+    y = sim.observables[obs_name]
 
     with pytest.raises(ValueError, match="requires more moment conditions"):
         dhm.measurement_moment_test(
@@ -527,7 +534,10 @@ def test_measurement_moment_test_raises_when_adjusted_df_is_not_positive(
 
     with pytest.raises(ValueError, match="requires more moment conditions"):
         dhm.joint_measurement_moment_test(
-            {obs: sim[obs] for obs in solved_test.compiled.observable_names},
+            {
+                obs: sim.observables[obs]
+                for obs in solved_test.compiled.observable_names
+            },
             instrument_idx=["u"],
             include_constant=False,
             n_estimated_params=len(solved_test.compiled.observable_names),

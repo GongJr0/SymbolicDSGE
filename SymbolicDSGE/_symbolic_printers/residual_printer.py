@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import sympy as sp
 from numba import cfunc, njit, types
 from sympy import Symbol
 
 from .base import ExpressionPrinter, OpTable
+
+if TYPE_CHECKING:
+    from ..core.compiled_model import CompiledModel
 
 
 class C128Ops(OpTable):
@@ -106,29 +109,24 @@ class BicomplexOps(OpTable):
 class ResidualLayout:
     """Maps residual symbols to native buffer slots."""
 
-    slot: dict[Any, tuple[str, int]]
+    slot: dict[Symbol, tuple[str, int]]
     n_var: int
     n_par: int
-    n_eq: int
 
     @property
     def n_expr(self) -> int:
-        return self.n_eq
+        # One residual per variable: a system that is not square is degenerate.
+        return self.n_var
 
     @classmethod
-    def from_compiled(cls, compiled: Any) -> ResidualLayout:
-        slot: dict[Any, tuple[str, int]] = {}
+    def from_compiled(cls, compiled: CompiledModel) -> ResidualLayout:
+        slot: dict[Symbol, tuple[str, int]] = {}
         for i, name in enumerate(compiled.var_names):
             slot[Symbol(f"fwd_{name}")] = ("fwd", i)
             slot[Symbol(f"cur_{name}")] = ("cur", i)
         for j, p in enumerate(compiled.calib_params):
             slot[p] = ("par", j)
-        return cls(
-            slot=slot,
-            n_var=len(compiled.var_names),
-            n_par=len(compiled.calib_params),
-            n_eq=len(compiled.objective_eqs),
-        )
+        return cls(slot=slot, n_var=compiled.n_var, n_par=compiled.n_par)
 
 
 class ResidualPrinter(ExpressionPrinter):
@@ -171,7 +169,7 @@ def build_cfunc(
         f"    fwd = carray(fwd_ptr, ({w * layout.n_var},))",
         f"    cur = carray(cur_ptr, ({w * layout.n_var},))",
         f"    par = carray(par_ptr, ({w * layout.n_par},))",
-        f"    out = carray(out_ptr, ({w * layout.n_eq},))",
+        f"    out = carray(out_ptr, ({w * layout.n_var},))",
     ]
     src = "\n".join(
         [

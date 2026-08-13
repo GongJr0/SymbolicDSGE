@@ -1,5 +1,6 @@
 #include "occbin.h"
 #include "../_common/sdsge_linalg.h"
+#include "../core/klein_solve.h"
 #include <stddef.h> // NULL
 #include <string.h>
 
@@ -65,14 +66,16 @@ i64 sdsge_occbin_recursion(const occbin_ctx *ctx, const i8 *SDSGE_RESTRICT mask,
   const f64 *u_next = seed;
 
   for (i64 t = T - 1; t >= 0; --t) {
-    const regime_ctx *reg = &ctx->table[mask[t]];
+    const f64 *reg_a = ctx->a + mask[t] * n_var * n_var;
+    const f64 *reg_b = ctx->b + mask[t] * n_var * n_var;
+    const f64 *reg_c = ctx->c + mask[t] * n_var;
 
     for (i64 i = 0; i < n_var; ++i) {
-      const f64 *a_row = reg->a + i * n_var;
-      const f64 *b_row = reg->b + i * n_var;
+      const f64 *a_row = reg_a + i * n_var;
+      const f64 *b_row = reg_b + i * n_var;
       f64 *m_row = m + i * n_var;
       f64 *r_row = rhs + i * n_rhs;
-      f64 rc = reg->c[i];
+      f64 rc = reg_c[i];
 
       for (i64 j = 0; j < n_state; ++j) {
         m_row[j] = a_row[j];
@@ -235,26 +238,25 @@ arena_size sdsge_occbin_period_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
                     rec.n_int + 2 * max_iter + (bytes + 7) / 8);
 }
 
-i64 sdsge_occbin_period(const occbin_run_ctx *run,
-                        const f64 *SDSGE_RESTRICT x0, i8 *mask, i64 *T,
-                        f64 *rule, f64 *path, occbin_diag *diag, i64 s,
-                        f64 *arena, i64 *iarena) {
+i64 sdsge_occbin_period(const occbin_run_ctx *run, const f64 *SDSGE_RESTRICT x0,
+                        i8 *mask, i64 *T, f64 *rule, f64 *path,
+                        occbin_diag *diag, i64 s, f64 *arena, i64 *iarena) {
   const i64 n_var = run->model->n_var;
   const i64 n_state = run->model->n_state;
 
   const i64 T_cap = run->T_cap;
   const i64 max_iter = run->max_iter;
 
-  f64 *lev = arena;                          // (T_cap, n_var) levels
-  f64 *err_hist = lev + T_cap * n_var;       // (max_iter,)
-  f64 *rec = err_hist + max_iter;            // recursion scratch
-  i64 *hist_len = iarena + n_var;            // (max_iter,)
-  i64 *move_hist = hist_len + max_iter;      // (max_iter,)
-  i8 *next = (i8 *)(move_hist + max_iter);   // (T_cap,)
-  i8 *hist = next + T_cap;                   // (max_iter, T_cap)
-  i8 *binds_hist = hist + max_iter * T_cap;  // (max_iter,)
-  i8 *all_bind = binds_hist + max_iter;      // (T_cap,)
-  i8 *stay = all_bind + T_cap;               // (T_cap,)
+  f64 *lev = arena;                         // (T_cap, n_var) levels
+  f64 *err_hist = lev + T_cap * n_var;      // (max_iter,)
+  f64 *rec = err_hist + max_iter;           // recursion scratch
+  i64 *hist_len = iarena + n_var;           // (max_iter,)
+  i64 *move_hist = hist_len + max_iter;     // (max_iter,)
+  i8 *next = (i8 *)(move_hist + max_iter);  // (T_cap,)
+  i8 *hist = next + T_cap;                  // (max_iter, T_cap)
+  i8 *binds_hist = hist + max_iter * T_cap; // (max_iter,)
+  i8 *all_bind = binds_hist + max_iter;     // (T_cap,)
+  i8 *stay = all_bind + T_cap;              // (T_cap,)
 
   i64 changed = 1;
   i64 iter = 0;
@@ -345,11 +347,10 @@ i64 sdsge_occbin_period(const occbin_run_ctx *run,
   if (cycle >= 0) {
     // Only a two-cycle whose guess barely moved is periodic; every other
     // repeat is an ordinary loop over guesses.
-    const i64 two =
-        cycle == iter - 2 &&
-        sdsge_occbin_regime_move(hist + (iter - 1) * T_cap, mask, *T,
-                                 run->n_constraint) <=
-            run->opts.periodic_threshold;
+    const i64 two = cycle == iter - 2 &&
+                    sdsge_occbin_regime_move(hist + (iter - 1) * T_cap, mask,
+                                             *T, run->n_constraint) <=
+                        run->opts.periodic_threshold;
     code = two ? SDSGE_OCCBIN_PERIODIC : SDSGE_OCCBIN_PERIODIC_LOOP;
   } else if (changed) {
     code = SDSGE_OCCBIN_MAXITER;
@@ -441,18 +442,18 @@ static void sdsge_occbin_reference_step(const f64 *SDSGE_RESTRICT ref,
   }
 }
 
-arena_size sdsge_occbin_solve_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                         i64 T_cap, i64 max_iter) {
-  const arena_size per = sdsge_occbin_period_arena_size(n_var, n_state, n_ctrl,
-                                                        T_cap, max_iter);
+arena_size sdsge_occbin_sim_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                       i64 T_cap, i64 max_iter) {
+  const arena_size per =
+      sdsge_occbin_period_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter);
   return make_sizer(n_state + per.n_float, per.n_int);
 }
 
-i64 sdsge_occbin_solve(const occbin_run_ctx *run, const f64 *shocks, i64 S,
-                       i64 n_periods, const f64 *x_init, const i8 *init_mask,
-                       f64 *out, i8 *regimes, i64 *T_used, occbin_diag *diag,
-                       f64 *rule, f64 *path, i8 *mask, f64 *arena,
-                       i64 *iarena) {
+i64 sdsge_occbin_sim(const occbin_run_ctx *run, const f64 *shocks, i64 S,
+                     i64 n_periods, const f64 *x_init, const i8 *init_mask,
+                     i64 n_init, f64 *out, i8 *regimes, i64 *T_used,
+                     occbin_diag *diag, f64 *rule, f64 *path, i8 *mask,
+                     f64 *arena, i64 *iarena) {
   const i64 n_var = run->model->n_var;
   const i64 n_state = run->model->n_state;
   const i64 n_rhs = n_state + 1;
@@ -464,15 +465,17 @@ i64 sdsge_occbin_solve(const occbin_run_ctx *run, const f64 *shocks, i64 S,
   diag->fail_period = -1;
   diag->singular_date = -1;
 
-  if (init_mask != NULL) {
-    memcpy(mask, init_mask, T);
-  } else {
-    memset(mask, 0, T);
-  }
+  memset(mask, 0, run->T_cap);
   memset(path, 0, T * n_var * sizeof(f64));
   memcpy(x, x_init, n_state * sizeof(f64));
 
   for (i64 s = 0; s < S; ++s) {
+    // A supplied guess replaces the carried one. Past `n_init` the previous
+    // period's guess stands, shifted, which is where Dynare's history ends too.
+    if (s < n_init) {
+      memcpy(mask, init_mask + s * run->T_cap, run->T_cap);
+    }
+
     for (i64 j = 0; j < n_state; ++j) {
       x[j] += shocks[s * n_state + j];
     }
@@ -511,5 +514,46 @@ i64 sdsge_occbin_solve(const occbin_run_ctx *run, const f64 *shocks, i64 S,
   for (i64 t = S; t < n_periods; ++t) {
     memcpy(out + t * n_var, path + (t - S) * n_var, n_var * sizeof(f64));
   }
-  return SDSGE_OCCBIN_SOLVE_OK;
+  return SDSGE_OCCBIN_SIM_OK;
+}
+
+arena_size sdsge_occbin_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                          i64 n_par, i64 max_n_row) {
+  arena_size pencil = sdsge_regime_pencil_arena_size(n_var, max_n_row);
+  arena_size klein =
+      sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par);
+
+  // Klein and pencil are sequential, maximum of both is enough for the arena to
+  // hold either.
+  return sdsge_max_arena(klein, pencil);
+}
+
+// "Solve" means build the reference regime and the pencils for every other
+// regime. Transitions per-path are not predetermined, making "sim" the actual
+// solver.
+i64 sdsge_occbin_solve1(const occbin_solve1_spec *spec, sdsge_occbin1 *out,
+                        f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena) {
+  const i64 rc = sdsge_klein_solve1(&spec->first, &out->ref, arena, iarena);
+  if (rc != SDSGE_KLEIN_SOLVE_OK) {
+    return rc;
+  }
+
+  const i64 n_var = spec->first.n_var;
+  const i64 blk = n_var * n_var;
+
+  i64 n_regime = 1 << spec->n_constraint;
+
+  regime_ctx table[SDSGE_MAX_REGIME];
+  for (i64 m = 0; m < n_regime; ++m) {
+    table[m].pencil = spec->pencil[m];
+    table[m].n_row = spec->n_row[m];
+    table[m].rows = spec->rows[m];
+    table[m].a = out->a + m * blk;
+    table[m].b = out->b + m * blk;
+    table[m].c = out->c + m * n_var;
+  }
+
+  regime_table(table, n_regime, out->ref.ss, spec->first.params,
+               out->ref.a_real, out->ref.b_real, n_var, arena);
+  return rc;
 }

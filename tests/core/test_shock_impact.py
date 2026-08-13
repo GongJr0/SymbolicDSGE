@@ -77,8 +77,8 @@ def _worst_residual(model, compiled, solved, eps: np.ndarray) -> float:
     """
     sim = _sim(compiled, solved, eps)
     names = list(compiled.var_names)
-    path = np.column_stack([sim[name] for name in names])
-    A = np.asarray(solved.A)
+    path = np.column_stack([sim.states[name] for name in names])
+    A = np.asarray(solved.policy.A)
     params = {sym: float(value) for sym, value in model.calibration.parameters.items()}
 
     worst = 0.0
@@ -93,7 +93,7 @@ def _worst_residual(model, compiled, solved, eps: np.ndarray) -> float:
                 subs[call] = (
                     float(expected[names.index(name)])
                     if offset == 1
-                    else float(sim[name][i + offset])
+                    else float(sim.states[name][i + offset])
                 )
             for j, shock in enumerate(compiled.shock_names):
                 subs[sp.Symbol(shock)] = float(eps[i, j])
@@ -105,8 +105,8 @@ def _assert_selection(compiled, solved) -> None:
     n_exog = compiled.n_exog
     n_state = compiled.layout.n_state
 
-    np.testing.assert_array_equal(solved.B[:n_exog], np.eye(n_exog))
-    np.testing.assert_array_equal(solved.B[n_exog:n_state], 0.0)
+    np.testing.assert_array_equal(solved.policy.B[:n_exog], np.eye(n_exog))
+    np.testing.assert_array_equal(solved.policy.B[n_exog:n_state], 0.0)
 
 
 def test_impact_is_a_selection_on_the_shock_states(compiled_test, solved_test):
@@ -118,7 +118,7 @@ def test_impact_is_a_selection_on_the_shock_states(compiled_test, solved_test):
     _assert_selection(compiled_test, solved_test)
 
     # Controls are where a shock's contemporaneous effect shows up.
-    assert np.any(solved_test.B[compiled_test.layout.n_state :] != 0.0)
+    assert np.any(solved_test.policy.B[compiled_test.layout.n_state :] != 0.0)
 
 
 @pytest.mark.parametrize(
@@ -162,7 +162,9 @@ def test_non_unit_loading_scales_the_response(compiled_test, solved_test, varian
     scaled = solved.sim(T=12, shocks=keys)
 
     for name in ("u", "x", "r", "Pi"):
-        np.testing.assert_allclose(scaled[name], 2.5 * base[name], rtol=0, atol=1e-13)
+        np.testing.assert_allclose(
+            scaled.states[name], 2.5 * base.states[name], rtol=0, atol=1e-13
+        )
     _assert_selection(compiled, solved)
     assert _worst_residual(model, compiled, solved, EPS) < 1e-12
 
@@ -180,8 +182,8 @@ def test_one_shock_reaches_several_equations_contemporaneously(variant):
         T=8, shocks={name: shocks[:, j] for j, name in enumerate(compiled.shock_names)}
     )
 
-    assert sim["x"][0] == 0.0
-    assert sim["x"][1] != 0.0  # the shock lands on the date it is dated
+    assert sim.states["x"][0] == 0.0
+    assert sim.states["x"][1] != 0.0  # the shock lands on the date it is dated
     _assert_selection(compiled, solved)
     assert _worst_residual(model, compiled, solved, EPS) < 1e-12
 
@@ -199,6 +201,8 @@ def test_unnormalized_equation_keeps_its_effective_loading(
     scaled = solved.sim(T=12, shocks=keys)
 
     for name in ("u", "x", "r", "Pi"):
-        np.testing.assert_allclose(scaled[name], 1.25 * base[name], rtol=0, atol=1e-13)
+        np.testing.assert_allclose(
+            scaled.states[name], 1.25 * base.states[name], rtol=0, atol=1e-13
+        )
     _assert_selection(compiled, solved)
     assert _worst_residual(model, compiled, solved, EPS) < 1e-12

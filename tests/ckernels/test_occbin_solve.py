@@ -1,5 +1,5 @@
 # type: ignore
-"""Native ``occbin_forward`` and ``occbin_solve``: the path and the shock loop.
+"""Native ``occbin_forward`` and ``occbin_sim``: the path and the shock loop.
 
 The forward pass has an oracle, so it is checked against one. The solve is
 checked three ways here instead. The accepted mask must equal the condition read
@@ -28,12 +28,12 @@ import pytest
 import sympy as sp
 from numba import carray, cfunc, types
 
-from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE._ckernels.occbin import (
+from SymbolicDSGE._ckernels.core import klein_preprocess, klein_solve1
+from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_forward,
     occbin_recursion,
-    occbin_solve,
-    occbin_solve_arena_size,
+    occbin_sim,
+    occbin_sim_arena_size,
     regime_pencil,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
@@ -48,8 +48,13 @@ THRESHOLD = -0.005
 SHOCK = -0.01
 
 #: Long enough that the spell ends well inside it, and a start that must grow.
-HORIZON = 30
-SHORT = 8
+HORIZON = 29
+SHORT = 7
+
+#: The buffer widths those horizons imply: one release date past the guess.
+#: Masks, ``T_used`` and any path meant to line up with a mask are this long.
+HORIZON_T = HORIZON + 1
+SHORT_T = SHORT + 1
 
 # A binding run, a relapse, and a relaxed tail.
 MIXED = np.array([0, 1, 1, 1, 0, 1, 1, 0, 0, 0], dtype=np.int8)
@@ -87,13 +92,17 @@ def cf(compiled):
 def solved(compiled, par):
     """(ss, a_ref, b_ref, f_ref, p_ref) for the reference regime."""
     seed = DSGESolver._resolve_ss_seed(None, compiled)
-    ss, a_ref, b_ref, f_ref, p_ref, *_ = klein_solve1(
-        compiled.construct_objective_cfunc().address,
+    addr = compiled.construct_objective_cfunc().address
+    ss, f_ref, p_ref, *_ = klein_solve1(
+        addr,
         seed,
         par,
         compiled.n_state,
         compiled.n_exog,
     )
+    # The solve keeps the pencil internal, so take it at the steady state the
+    # solve resolved: the same linearization, one call later.
+    a_ref, b_ref = klein_preprocess(addr, ss, par, compiled.n_var)
     return ss, a_ref, b_ref, f_ref, p_ref
 
 
@@ -131,9 +140,14 @@ def _binding(out, solved, z_pos):
 
 
 def _solve(table, solved, par, cond_addr, n_constraint, inclusive, shocks, **kw):
+    # Growth is off unless a test asks for it. Letting a guess grow moves
+    # iteration counts and switches cycle detection off, which is noise for
+    # every test here except the two that are about growth.
+    if "check_ahead_periods" in kw:
+        kw.setdefault("max_check_ahead_periods", kw["check_ahead_periods"])
     a, b, c = table
     ss, _, _, f_ref, _ = solved
-    return occbin_solve(
+    return occbin_sim(
         a,
         b,
         c,
@@ -233,14 +247,16 @@ def test_the_steady_state_is_a_fixed_point(table, solved, par, cf):
     # distance is exactly zero and a strict condition does not fire.
     n_state = solved[3].shape[1]
 
-    out, regimes, diag = _run(table, solved, par, cf, np.zeros((1, n_state)), T0=SHORT)
+    out, regimes, diag = _run(
+        table, solved, par, cf, np.zeros((1, n_state)), check_ahead_periods=SHORT
+    )
 
     np.testing.assert_array_equal(out, np.zeros_like(out))
     np.testing.assert_array_equal(regimes, np.zeros_like(regimes))
     # One pass to read the path, none to correct it.
     np.testing.assert_array_equal(diag["iters"], [1])
     np.testing.assert_array_equal(diag["max_err"], [0.0])
-    np.testing.assert_array_equal(diag["T_used"], [SHORT])
+    np.testing.assert_array_equal(diag["T_used"], [SHORT_T])
 
 
 def test_the_mask_is_the_condition_read_off_its_own_path(table, solved, par, cf, z_pos):
@@ -254,15 +270,15 @@ def test_the_mask_is_the_condition_read_off_its_own_path(table, solved, par, cf,
         par,
         cf,
         _shocks(n_state, 1),
-        T0=HORIZON,
-        n_periods=HORIZON,
+        check_ahead_periods=HORIZON,
+        n_periods=HORIZON_T,
     )
 
     binding = _binding(out, solved, z_pos)
     # The spell has to start and end inside the horizon for this to say much.
-    assert 3 < binding.sum() < HORIZON
+    assert 3 < binding.sum() < HORIZON_T
     np.testing.assert_array_equal(regimes[0], binding)
-    np.testing.assert_array_equal(diag["T_used"], [HORIZON])
+    np.testing.assert_array_equal(diag["T_used"], [HORIZON_T])
     # TFP is exogenous to the regime, so the first latch already lands the
     # answer and the second only confirms it.
     np.testing.assert_array_equal(diag["iters"], [2])
@@ -279,8 +295,8 @@ def test_the_path_is_the_forward_pass_of_the_accepted_guess(table, solved, par, 
         par,
         cf,
         _shocks(n_state, 1),
-        T0=HORIZON,
-        n_periods=HORIZON,
+        check_ahead_periods=HORIZON,
+        n_periods=HORIZON_T,
     )
 
     used = int(diag["T_used"][0])
@@ -304,7 +320,7 @@ def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, pa
         par,
         cf,
         _shocks(n_state, periods),
-        T0=HORIZON,
+        check_ahead_periods=HORIZON,
         n_periods=periods,
     )
     one_out, one_reg, one_diag = _run(
@@ -313,7 +329,7 @@ def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, pa
         par,
         cf,
         _shocks(n_state, 1),
-        T0=HORIZON,
+        check_ahead_periods=HORIZON,
         n_periods=periods,
     )
 
@@ -323,17 +339,32 @@ def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, pa
         many_diag["iters"], [one_diag["iters"][0], 0, 0, 0, 0]
     )
     for s in range(periods):
-        np.testing.assert_array_equal(many_reg[s][: HORIZON - s], one_reg[0][s:])
-        np.testing.assert_array_equal(many_reg[s][HORIZON - s :], 0)
+        np.testing.assert_array_equal(many_reg[s][: HORIZON_T - s], one_reg[0][s:])
+        np.testing.assert_array_equal(many_reg[s][HORIZON_T - s :], 0)
 
 
 def test_a_short_horizon_grows_into_the_same_answer(table, solved, par, cf, z_pos):
     n_state = solved[3].shape[1]
     shocks = _shocks(n_state, 1)
 
-    long_out, _, _ = _run(table, solved, par, cf, shocks, T0=HORIZON, n_periods=HORIZON)
+    long_out, _, _ = _run(
+        table,
+        solved,
+        par,
+        cf,
+        shocks,
+        check_ahead_periods=HORIZON,
+        n_periods=HORIZON_T,
+    )
     short_out, _, short_diag = _run(
-        table, solved, par, cf, shocks, T0=SHORT, T_cap=HORIZON, n_periods=SHORT + 1
+        table,
+        solved,
+        par,
+        cf,
+        shocks,
+        check_ahead_periods=SHORT,
+        max_check_ahead_periods=HORIZON,
+        n_periods=SHORT_T,
     )
 
     # Growth stops the first date the guess relaxes, and the spell runs from
@@ -375,7 +406,7 @@ def test_a_guess_that_never_settles_reports_the_iteration_cap(table, solved, par
             1,
             0,
             _shocks(n_state, 1),
-            T0=SHORT,
+            check_ahead_periods=SHORT,
             max_iter=3,
         )
 
@@ -388,15 +419,22 @@ def test_an_incomplete_pencil_stack_is_rejected(table, solved, par, cf):
     reference_only = (a[:1], b[:1], c[:1])
 
     with pytest.raises(ValueError, match=re.escape("cover every mask over 1")):
-        _run(reference_only, solved, par, cf, _shocks(n_state, 1), T0=SHORT)
+        _run(
+            reference_only,
+            solved,
+            par,
+            cf,
+            _shocks(n_state, 1),
+            check_ahead_periods=SHORT,
+        )
 
 
-def test_a_horizon_of_one_is_rejected(table, solved, par, cf):
-    # The shift reads the date before the last to extend the path.
+def test_a_horizon_of_zero_is_rejected(table, solved, par, cf):
+    # A guess needs a date to release on, and the shift reads the one before it.
     n_state = solved[3].shape[1]
 
-    with pytest.raises(ValueError, match="expected at least 2"):
-        _run(table, solved, par, cf, _shocks(n_state, 1), T0=1)
+    with pytest.raises(ValueError, match="at least 1"):
+        _run(table, solved, par, cf, _shocks(n_state, 1), check_ahead_periods=0)
 
 
 def test_a_tail_longer_than_the_path_is_rejected(table, solved, par, cf):
@@ -409,8 +447,8 @@ def test_a_tail_longer_than_the_path_is_rejected(table, solved, par, cf):
             par,
             cf,
             _shocks(n_state, 1),
-            T0=SHORT,
-            n_periods=SHORT + 2,
+            check_ahead_periods=SHORT,
+            n_periods=SHORT_T + 2,
         )
 
 
@@ -418,7 +456,14 @@ def test_shocks_of_the_wrong_width_are_rejected(table, solved, par, cf):
     n_state = solved[3].shape[1]
 
     with pytest.raises(ValueError, match="to match f_ref"):
-        _run(table, solved, par, cf, np.zeros((1, n_state + 1)), T0=SHORT)
+        _run(
+            table,
+            solved,
+            par,
+            cf,
+            np.zeros((1, n_state + 1)),
+            check_ahead_periods=SHORT,
+        )
 
 
 def test_a_truncated_algorithm_accepts_the_guess_it_ran_out_on(table, solved, par):
@@ -434,14 +479,14 @@ def test_a_truncated_algorithm_accepts_the_guess_it_ran_out_on(table, solved, pa
         1,
         0,
         _shocks(n_state, 1),
-        T0=SHORT,
+        check_ahead_periods=SHORT,
         max_iter=1,
         algo_truncation=1,
     )
 
     # One pass, and the guess it entered on is the relaxed one it started from.
     np.testing.assert_array_equal(diag["iters"], [1])
-    np.testing.assert_array_equal(diag["T_used"], [SHORT])
+    np.testing.assert_array_equal(diag["T_used"], [SHORT_T])
     np.testing.assert_array_equal(regimes, np.zeros_like(regimes))
     np.testing.assert_array_equal(diag["periodic"], [0])
     assert np.abs(out).max() > 0.0
@@ -459,7 +504,7 @@ def test_a_max_iter_above_the_truncation_still_raises(table, solved, par):
             1,
             0,
             _shocks(n_state, 1),
-            T0=SHORT,
+            check_ahead_periods=SHORT,
             max_iter=1,
             algo_truncation=0,
         )
@@ -468,11 +513,11 @@ def test_a_max_iter_above_the_truncation_still_raises(table, solved, par):
 def test_seeding_the_answer_settles_in_one_pass(table, solved, par, cf):
     n_state = solved[3].shape[1]
     shocks = _shocks(n_state, 1)
-    kw = {"T0": HORIZON, "n_periods": HORIZON}
+    kw = {"check_ahead_periods": HORIZON, "n_periods": HORIZON_T}
 
     out, regimes, diag = _run(table, solved, par, cf, shocks, **kw)
     seeded_out, seeded_reg, seeded_diag = _run(
-        table, solved, par, cf, shocks, init_regime=regimes[0], **kw
+        table, solved, par, cf, shocks, init_regime=regimes[:1], **kw
     )
 
     np.testing.assert_array_equal(seeded_out, out)
@@ -485,11 +530,11 @@ def test_seeding_the_answer_settles_in_one_pass(table, solved, par, cf):
 def test_a_reset_regime_throws_the_seed_away(table, solved, par, cf):
     n_state = solved[3].shape[1]
     shocks = _shocks(n_state, 1)
-    kw = {"T0": HORIZON, "n_periods": HORIZON}
+    kw = {"check_ahead_periods": HORIZON, "n_periods": HORIZON_T}
     _, regimes, _ = _run(table, solved, par, cf, shocks, **kw)
 
     _, reset_reg, reset_diag = _run(
-        table, solved, par, cf, shocks, init_regime=regimes[0], reset_regime=True, **kw
+        table, solved, par, cf, shocks, init_regime=regimes[:1], reset_regime=True, **kw
     )
 
     np.testing.assert_array_equal(reset_reg, regimes)
@@ -502,8 +547,8 @@ def test_curb_retrench_gives_up_one_date_per_pass(table, solved, par, cf):
     # at once. Damping concedes the last date only, and lands the same answer.
     n_state = solved[3].shape[1]
     shocks = _shocks(n_state, 1)
-    kw = {"T0": HORIZON, "n_periods": HORIZON}
-    seed = np.ones(HORIZON, dtype=np.int8)
+    kw = {"check_ahead_periods": HORIZON, "n_periods": HORIZON_T}
+    seed = np.ones((1, HORIZON_T), dtype=np.int8)
 
     plain_out, plain_reg, plain_diag = _run(
         table, solved, par, cf, shocks, init_regime=seed, **kw
@@ -517,35 +562,49 @@ def test_curb_retrench_gives_up_one_date_per_pass(table, solved, par, cf):
     assert curbed_diag["iters"][0] > plain_diag["iters"][0]
 
 
-def test_an_initial_guess_of_the_wrong_length_is_rejected(table, solved, par, cf):
+def test_an_initial_guess_past_the_growth_cap_is_rejected(table, solved, par, cf):
+    # Shorter rows relax into the tail and longer ones raise the horizon, so the
+    # only illegal width is one the arena never reserved.
     n_state = solved[3].shape[1]
+    shocks = _shocks(n_state, 1)
+    _, regimes, _ = _run(table, solved, par, cf, shocks, check_ahead_periods=HORIZON)
+    too_long = np.zeros((1, regimes.shape[1] + 1), dtype=np.int8)
 
-    with pytest.raises(ValueError, match="expected T0"):
+    with pytest.raises(ValueError, match="more than the"):
+        _run(
+            table,
+            solved,
+            par,
+            cf,
+            shocks,
+            check_ahead_periods=HORIZON,
+            init_regime=too_long,
+        )
+
+
+def test_an_initial_guess_outside_the_table_is_rejected(table, solved, par, cf):
+    n_state = solved[3].shape[1]
+    seed = np.zeros((1, SHORT_T), dtype=np.int8)
+    seed[0, 0] = 2
+
+    with pytest.raises(ValueError, match=re.escape("outside 0..1")):
         _run(
             table,
             solved,
             par,
             cf,
             _shocks(n_state, 1),
-            T0=SHORT,
-            init_regime=np.zeros(SHORT + 1, dtype=np.int8),
+            check_ahead_periods=SHORT,
+            init_regime=seed,
         )
-
-
-def test_an_initial_guess_outside_the_table_is_rejected(table, solved, par, cf):
-    n_state = solved[3].shape[1]
-    seed = np.zeros(SHORT, dtype=np.int8)
-    seed[0] = 2
-
-    with pytest.raises(ValueError, match=re.escape("outside 0..1")):
-        _run(table, solved, par, cf, _shocks(n_state, 1), T0=SHORT, init_regime=seed)
 
 
 #: A shock deep enough that the spell the flip condition wants is unambiguous,
 #: on a horizon short enough to read whole and capped so no guess can grow into
 #: a period that stops looking for cycles.
 CYCLE_SHOCK = -0.1
-CYCLE_HORIZON = 12
+CYCLE_HORIZON = 11
+CYCLE_T = CYCLE_HORIZON + 1
 
 #: Where ``_flip`` reads capital and TFP. A cfunc cannot close over a fixture,
 #: so the positions are baked in and ``flip_par`` checks the layout agrees.
@@ -604,8 +663,8 @@ def _flip_run(table, solved, par, **kw):
         1,
         0,
         _shocks(solved[3].shape[1], 1, CYCLE_SHOCK),
-        T0=CYCLE_HORIZON,
-        T_cap=CYCLE_HORIZON,
+        check_ahead_periods=CYCLE_HORIZON,
+        max_check_ahead_periods=CYCLE_HORIZON,
         **kw,
     )
 
@@ -644,11 +703,11 @@ def test_periodic_solution_accepts_the_half_of_the_cycle_that_settles(
         table,
         solved,
         flip_par(1),
-        n_periods=CYCLE_HORIZON,
+        n_periods=CYCLE_T,
         periodic_solution=True,
     )
 
-    accepted = np.zeros(CYCLE_HORIZON, dtype=np.int8)
+    accepted = np.zeros(CYCLE_T, dtype=np.int8)
     accepted[0] = 1
     np.testing.assert_array_equal(regimes[0], accepted)
     # Flagged with the code it would otherwise have raised: 1 is Dynare's 310.
@@ -686,7 +745,11 @@ def test_a_reset_drops_a_grown_horizon_only_with_its_companion(table, solved, pa
     shocks = np.zeros((2, n_state))
     shocks[0, 0] = SHOCK
     shocks[1, 0] = 0.005
-    kw = {"T0": SHORT, "T_cap": HORIZON, "n_periods": 2}
+    kw = {
+        "check_ahead_periods": SHORT,
+        "max_check_ahead_periods": HORIZON,
+        "n_periods": 2,
+    }
 
     plain_out, _, plain = _run(table, solved, par, cf, shocks, **kw)
     reset_out, reset_reg, reset = _run(
@@ -703,7 +766,7 @@ def test_a_reset_drops_a_grown_horizon_only_with_its_companion(table, solved, pa
         **kw,
     )
 
-    assert SHORT < plain["T_used"][0] < HORIZON
+    assert SHORT_T < plain["T_used"][0] < HORIZON_T
     # A relaxed tail is the reference rule's own fixed point, so the horizon the
     # period is solved on cannot reach the dates it reports.
     np.testing.assert_array_equal(reset_out, plain_out)
@@ -712,9 +775,9 @@ def test_a_reset_drops_a_grown_horizon_only_with_its_companion(table, solved, pa
     np.testing.assert_allclose(both_out, plain_out, rtol=1e-12, atol=1e-12)
 
     np.testing.assert_array_equal(reset["T_used"], plain["T_used"])
-    np.testing.assert_array_equal(both["T_used"], [plain["T_used"][0], SHORT])
+    np.testing.assert_array_equal(both["T_used"], [plain["T_used"][0], SHORT_T])
     assert plain["iters"][1] > reset["iters"][1] == both["iters"][1] == 1
-    np.testing.assert_array_equal(reset_reg[1][SHORT:], 0)
+    np.testing.assert_array_equal(reset_reg[1][SHORT_T:], 0)
 
 
 def test_the_arena_formula_is_pinned():
@@ -725,7 +788,7 @@ def test_the_arena_formula_is_pinned():
     recursion = n_var * n_var + n_var * n_rhs + n_ctrl * n_rhs
     masks = (max_iter + 3) * T_cap + max_iter
 
-    n_float, n_int = occbin_solve_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter)
+    n_float, n_int = occbin_sim_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter)
 
     assert n_float == n_state + T_cap * n_var + max_iter + recursion
     assert n_int == n_var + 2 * max_iter + (masks + 7) // 8

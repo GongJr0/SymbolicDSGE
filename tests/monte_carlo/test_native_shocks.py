@@ -34,6 +34,7 @@ from SymbolicDSGE.monte_carlo.shock_native import (
     native_shock_scratch,
 )
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
+from SymbolicDSGE.core.solved_model.shocks import resolve_shock_plan
 
 T = 16
 
@@ -52,7 +53,7 @@ def _plan(solved, shocks, shock_scale=1.0):
 
 def _entries(solved, shocks):
     families = native_shock_families(shocks)
-    resolved = solved._resolve_shock_plan(shocks, T)
+    resolved = resolve_shock_plan(solved.compiled, shocks, T)
     return native_shock_entries(resolved, families)
 
 
@@ -250,7 +251,7 @@ def test_run_states_match_the_addressed_blocks(solved, n_rep, n_jobs) -> None:
     (entry,) = _entries(solved, shocks)
     for rep_idx in range(n_rep):
         block = plan.draw(rep_idx)[:, entry.columns]
-        expected = solved.sim(T, shocks={"e_u,e_v": block})["_X"]
+        expected = solved.sim(T, shocks={"e_u,e_v": block}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
@@ -272,7 +273,7 @@ def test_replication_shocks_reproduce_a_single_replication(solved, shocks) -> No
 
     for rep_idx in (0, 2, 4):
         drawn = replication_shocks(solved, step, rep_idx)
-        expected = solved.sim(T, shocks=drawn, shock_scale=1.0)["_X"]
+        expected = solved.sim(T, shocks=drawn, shock_scale=1.0).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
@@ -291,8 +292,8 @@ def test_unported_spec_still_runs_off_the_python_slab(solved) -> None:
     assert build_native_plan(solved, step, T) is None
 
     states = _run_states(solved, shocks, 3, 1)
-    resolved = solved._resolve_shock_plan(shocks, T)
+    resolved = resolve_shock_plan(solved.compiled, shocks, T)
     for rep_idx in range(3):
         drawn = resolved.matrix(T, 1.0, rep_idx * resolved.seeded_count)
-        expected = solved.sim(T, shocks={"e_u": drawn[:, 0]})["_X"]
+        expected = solved.sim(T, shocks={"e_u": drawn[:, 0]}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)

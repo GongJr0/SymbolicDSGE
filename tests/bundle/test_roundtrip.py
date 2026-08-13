@@ -89,7 +89,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     assert isinstance(loaded.reference, SolvedModel)
     assert loaded.dgp is None
     sim = loaded.reference.sim(8)
-    assert sim["_X"].shape[0] == 8
+    assert sim.X.shape[0] == 8
 
     # estimation
     assert loaded.estimation is not None

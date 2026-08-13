@@ -112,7 +112,7 @@ def test_rbc_second_order_matches_dynare():
     assert list(compiled.var_names) == ["e_st", "k_lag1", "z_lag1", "c", "k", "z"]
 
     layout = ResidualLayout.from_compiled(compiled)
-    n_eq, n_state = layout.n_eq, compiled.n_state
+    n_eq, n_state = layout.n_var, compiled.n_state
     calib = compiled.config.calibration.parameters
     ss = _levels_steady_state(compiled)
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
@@ -261,9 +261,7 @@ def test_rbc_second_order_deterministic_sim_matches_dynare():
     out = solved.sim(
         golden.DETERMINISTIC_SIM.shape[0] - 1,
         x0=_golden_x0(solved),
-    )[
-        "_X"
-    ][:, _golden_columns(solved)]
+    ).X[:, _golden_columns(solved)]
 
     np.testing.assert_allclose(
         out,
@@ -280,7 +278,7 @@ def test_rbc_second_order_stochastic_sim_matches_dynare():
         golden.STOCHASTIC_SIM.shape[0] - 1,
         x0=_golden_x0(solved),
         shocks={"e": golden.STOCHASTIC_SHOCKS},
-    )["_X"][:, _golden_columns(solved)]
+    ).X[:, _golden_columns(solved)]
 
     np.testing.assert_allclose(
         out,
@@ -293,6 +291,6 @@ def test_rbc_second_order_stochastic_sim_matches_dynare():
 def test_rbc_second_order_irf_matches_dynare():
     solved = _solve_rbc_second_order()
 
-    out = solved.irf(["e"], T=golden.IRF.shape[0] - 1)["_X"][:, _golden_columns(solved)]
+    out = solved.irf(["e"], T=golden.IRF.shape[0] - 1).X[:, _golden_columns(solved)]
 
     np.testing.assert_allclose(out, golden.IRF[1:], rtol=2e-6, atol=2e-6)

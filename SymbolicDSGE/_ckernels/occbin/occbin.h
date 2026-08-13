@@ -2,7 +2,13 @@
 #define SDSGE_OCCBIN_H
 
 #include "../_common/sdsge_common.h"
+#include "../core/klein_solve.h"
 #include "regime_pencil.h"
+
+// regime upper bound: 2^n_constraint with n_constraint <= 2
+// by definition for OccBin.
+#define SDSGE_MAX_CONSTRAINT 2
+#define SDSGE_MAX_REGIME (1 << SDSGE_MAX_CONSTRAINT)
 
 typedef void (*sdsge_constraint_fn)(f64 *cur, f64 *par, f64 *err);
 
@@ -14,8 +20,13 @@ i64 sdsge_constraint_path(sdsge_constraint_fn cond,
                           i64 inclusive, // Bitmask for inequality strictness
                           f64 *SDSGE_RESTRICT max_err, i64 T, i64 n_var,
                           i64 n_constraint);
+// Pencils stacked by binding bitmask, slot 0 the reference. Flat rather than a
+// regime_ctx table: those carry the build role (cfunc, rows) that is spent once
+// in regime_table, and a caller holding arrays would have to lower them again.
 typedef struct {
-  const regime_ctx *table;
+  const f64 *a; // (n_regime, n_var, n_var)
+  const f64 *b; // (n_regime, n_var, n_var)
+  const f64 *c; // (n_regime, n_var)
   const f64 *f_ref;
   i64 n_var;
   i64 n_state;
@@ -54,6 +65,22 @@ typedef struct {
   i64 singular_date;
 } occbin_diag;
 
+typedef struct {
+  klein_spec first;
+  const sdsge_regime_pencil_fn *pencil; // (n_regime,) NULL for reference regime
+  const i64 *const *rows; // (n_regime,) each points to (n_row,) indices of the
+                          // rows a regime swaps
+  const i64 *n_row;       // (n_regime,) number of rows a regime swaps
+  i64 n_constraint;       // n_regime = 2^n_constraint
+} occbin_solve1_spec;
+
+typedef struct {
+  sdsge_solve1 ref;
+  f64 *a; // (n_regime, n_var, n_var)
+  f64 *b; // (n_regime, n_var, n_var)
+  f64 *c; // (n_regime, n_var)
+} sdsge_occbin1;
+
 arena_size sdsge_occbin_recursion_arena_size(i64 n_var, i64 n_state,
                                              i64 n_ctrl);
 
@@ -79,24 +106,33 @@ i64 sdsge_occbin_period(const occbin_run_ctx *run,
                         i64 *T, f64 *rule, f64 *path, occbin_diag *diag, i64 s,
                         f64 *arena, i64 *iarena);
 
-arena_size sdsge_occbin_solve_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+arena_size sdsge_occbin_sim_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
                                          i64 T_cap, i64 max_iter);
 
-// Requires `T0 >= 2` and `n_periods - S <= T0`. `init_mask` is a `(T0,)` guess
-// for the first period, or NULL to start relaxed.
-i64 sdsge_occbin_solve(const occbin_run_ctx *run,
-                       const f64 *shocks, // (S, n_state)
-                       i64 S, i64 n_periods,
-                       const f64 *x_init, // (n_state,)
-                       const i8 *init_mask,
-                       f64 *out,          // (n_periods, n_var)
-                       i8 *regimes,       // (S, T_cap)
-                       i64 *T_used,       // (S,)
-                       occbin_diag *diag, // per-period arrays are (S,)
-                       f64 *rule,         // (T_cap, n_var, n_state + 1) scratch
-                       f64 *path,         // (T_cap, n_var) scratch
-                       i8 *mask,          // (T_cap,) scratch
-                       f64 *arena, i64 *iarena);
+// Requires `T0 >= 2` and `n_periods - S <= T0`. `init_mask` holds one guess per
+// shock period, in the layout `regimes` comes back in, for the first `n_init`
+// of them; pass NULL with `n_init` 0 to start relaxed. Periods past `n_init`
+// take the previous period's guess, shifted.
+i64 sdsge_occbin_sim(const occbin_run_ctx *run,
+                     const f64 *shocks, // (S, n_state)
+                     i64 S, i64 n_periods,
+                     const f64 *x_init,   // (n_state,)
+                     const i8 *init_mask, // (n_init, T_cap)
+                     i64 n_init,          // 0 <= n_init <= S
+                     f64 *out,            // (n_periods, n_var)
+                     i8 *regimes,       // (S, T_cap)
+                     i64 *T_used,       // (S,)
+                     occbin_diag *diag, // per-period arrays are (S,)
+                     f64 *rule,         // (T_cap, n_var, n_state + 1) scratch
+                     f64 *path,         // (T_cap, n_var) scratch
+                     i8 *mask,          // (T_cap,) scratch
+                     f64 *arena, i64 *iarena);
+
+arena_size sdsge_occbin_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                          i64 n_par, i64 max_n_row);
+
+i64 sdsge_occbin_solve1(const occbin_solve1_spec *spec, sdsge_occbin1 *out,
+                        f64 *arena, i64 *iarena);
 
 #define SDSGE_OCCBIN_RECURSION_OK 0
 #define SDSGE_OCCBIN_RECURSION_SINGULAR -2 // match code to LU factorization
@@ -107,6 +143,6 @@ i64 sdsge_occbin_solve(const occbin_run_ctx *run,
 #define SDSGE_OCCBIN_PERIODIC_LOOP 2 // 313 in Dynare
 #define SDSGE_OCCBIN_MAXITER 3       // 311 in Dynare
 
-#define SDSGE_OCCBIN_SOLVE_OK 0
+#define SDSGE_OCCBIN_SIM_OK 0
 
 #endif // SDSGE_OCCBIN_H

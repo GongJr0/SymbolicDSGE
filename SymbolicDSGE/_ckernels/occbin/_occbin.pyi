@@ -7,14 +7,15 @@ must stay in sync with ``_occbin.pyx`` / ``occbin.c``; the tests guard the
 runtime behavior, not this stub.
 """
 
-from numpy import float64, int8, int64
+from collections.abc import Sequence
+
+from numpy import complex128, float64, int8, int64
 from numpy.typing import NDArray
 
 _F64 = NDArray[float64]
+_C128 = NDArray[complex128]
 _I8 = NDArray[int8]
 _I64 = NDArray[int64]
-
-MAX_CONSTRAINTS: int
 
 def constraint_path(
     cond_addr: int,
@@ -24,7 +25,7 @@ def constraint_path(
     n_constraint: int,
     inclusive: int,
     out: _I8 | None = ...,
-) -> tuple[_I8, int, float]:
+) -> tuple[_I64, int, float]:
     """(regime_out, changed, max_err) <- latched mask over a (T, n_var) path.
 
     ``out`` may alias ``regime_in`` to latch in place; ``changed`` counts the
@@ -78,16 +79,34 @@ def occbin_forward(rule: _F64, x0: _F64, out: _F64 | None = ...) -> _F64:
     the control half from date ``t``'s.
     """
 
-def occbin_solve_arena_size(
+def occbin_solve1(
+    residual_addr: int,
+    seed: _F64,
+    params: _F64,
+    n_state: int,
+    pencil_addrs: Sequence[int],
+    rows: Sequence[_I64],
+    n_constraint: int,
+    n_exog: int = ...,
+) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64]:
+    """(ss, f, p, stab, eig, a, b, c) <- reference solve and every pencil.
+
+    ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
+    ``0..2 ** n_constraint - 1``, slot 0 the reference with address 0 and no
+    rows. ``a``/``b`` come back ``(n_regime, n_var, n_var)`` and ``c``
+    ``(n_regime, n_var)``, shaped for ``occbin_sim``.
+    """
+
+def occbin_sim_arena_size(
     n_var: int,
     n_state: int,
     n_ctrl: int,
     T_cap: int,
     max_iter: int,
 ) -> tuple[int, int]:
-    """(n_float, n_int) scratch ``occbin_solve`` needs for a shape."""
+    """(n_float, n_int) scratch ``occbin_sim`` needs for a shape."""
 
-def occbin_solve(
+def occbin_sim(
     a: _F64,
     b: _F64,
     c: _F64,
@@ -100,25 +119,32 @@ def occbin_solve(
     shocks: _F64,
     x_init: _F64,
     *,
-    T0: int,
-    T_cap: int = ...,
-    n_periods: int | None = ...,
-    max_iter: int = ...,
-    init_regime: _I8 | None = ...,
-    periodic_solution: bool = ...,
-    periodic_threshold: int = ...,
-    periodic_strict: bool = ...,
-    curb_retrench: bool = ...,
-    reset_regime: bool = ...,
-    reset_check_ahead: bool = ...,
-    algo_truncation: int = ...,
-) -> tuple[_F64, _I8, dict[str, _F64 | _I8 | _I64]]:
+    check_ahead_periods: int = 200,
+    max_check_ahead_periods: int = -1,
+    n_periods: int | None = None,
+    max_iter: int = 30,
+    init_regime: _I64 | None = None,
+    periodic_solution: bool = False,
+    periodic_threshold: int = 1,
+    periodic_strict: bool = True,
+    curb_retrench: bool = False,
+    reset_regime: bool = False,
+    reset_check_ahead: bool = False,
+    algo_truncation: int = 1,
+) -> tuple[_F64, _I64, dict[str, _F64 | _I64]]:
     """(out, regimes, diag) <- pencils, a constraint and a shock sequence.
 
     ``out`` is the ``(n_periods, n_var)`` piecewise path in deviations,
     ``regimes`` the ``(S, T_cap)`` accepted guess per shock period, and ``diag``
     holds ``T_used``, ``iters``, ``max_err`` and ``periodic``, one entry per
-    period. The pencil stack must cover every mask over ``n_constraint``
-    constraints. The keywords past ``max_iter`` are Dynare's ``occbin.simul``
-    options at their own defaults.
+    period. ``init_regime`` is ``(n_init, T_cap)`` in that same layout, covering
+    the leading ``n_init <= S`` periods, where ``T_cap`` is the buffer width the
+    horizons below imply. The pencil stack must cover every mask over
+    ``n_constraint`` constraints.
+
+    ``check_ahead_periods`` is how far ahead a guess looks and
+    ``max_check_ahead_periods`` how far it may grow, ``-1`` taking the default
+    budget. Every default here is Dynare's ``occbin.simul`` default, except
+    ``max_check_ahead_periods``, which is ``inf`` there and cannot be here:
+    growth is reserved up front, so it is always bounded.
     """

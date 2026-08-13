@@ -93,6 +93,41 @@ class Calib(Base):
     shock_std: SymbolGetterDict[Symbol, Symbol]
     shock_corr: PairGetterDict[Symbol]
 
+    def get_param(self, name: str | Symbol, default: float | None = None) -> float:
+        """A calibrated parameter's value, or ``default`` when it is absent.
+
+        Raises :class:`KeyError` with no default, since a missing parameter with
+        no fallback is a model-authoring error rather than a zero.
+        """
+        sym = Symbol(name) if isinstance(name, str) else name
+        if sym in self.parameters:
+            return float64(self.parameters[sym])
+        elif default is not None:
+            return float64(default)
+        raise KeyError(f"Parameter '{name}' not found in calibration parameters.")
+
+    def get_rho(
+        self, var1: str | Symbol, var2: str | Symbol, default: float = 0.0
+    ) -> float:
+        """The correlation between two shocks, 1.0 for a shock with itself."""
+        if var1 == var2:
+            return 1.0
+
+        corr = self.shock_corr[var1, var2]  # pyright: ignore # Overloaded __getitem__
+        if corr is not None:
+            return self.get_param(corr, default=default)
+
+        return float64(default)
+
+    def fingerprint(self) -> int:
+        """Hashable snapshot of the parameter values, for keying caches."""
+        return hash(
+            (
+                tuple(self.parameters.keys()),
+                tuple(float(v) for v in self.parameters.values()),
+            )
+        )
+
 
 @dataclass
 class Variables(Base):

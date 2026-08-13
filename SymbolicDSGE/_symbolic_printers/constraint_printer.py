@@ -13,7 +13,7 @@ distance and differ only at zero. That is static, so it travels once as
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 import sympy as sp
 from numba import cfunc, types
@@ -21,6 +21,9 @@ from sympy import Symbol
 
 from .base import ExpressionPrinter, OpTable
 from .measurement_printer import F64Ops
+
+if TYPE_CHECKING:
+    from ..core.compiled_model import CompiledModel
 
 
 class ConstraintOpTable(OpTable, Protocol):
@@ -62,7 +65,7 @@ _RELATIONAL_INCLUSIVE: dict[type, bool] = {
 class ConstraintLayout:
     """Maps constraint symbols to native buffer slots."""
 
-    slot: dict[Any, tuple[str, int]]
+    slot: dict[Symbol, tuple[str, int]]
     n_var: int
     n_par: int
     constraint_names: tuple[str, ...] = ()
@@ -78,17 +81,17 @@ class ConstraintLayout:
 
     @classmethod
     def from_compiled(
-        cls, compiled: Any, constraint_names: tuple[str, ...] | list[str]
+        cls, compiled: CompiledModel, constraint_names: tuple[str, ...] | list[str]
     ) -> ConstraintLayout:
-        slot: dict[Any, tuple[str, int]] = {}
+        slot: dict[Symbol, tuple[str, int]] = {}
         for i, name in enumerate(compiled.var_names):
             slot[Symbol(f"cur_{name}")] = ("cur", i)
         for j, p in enumerate(compiled.calib_params):
             slot[p] = ("par", j)
         return cls(
             slot=slot,
-            n_var=len(compiled.var_names),
-            n_par=len(compiled.calib_params),
+            n_var=compiled.n_var,
+            n_par=compiled.n_par,
             constraint_names=tuple(constraint_names),
         )
 

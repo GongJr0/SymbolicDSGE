@@ -45,9 +45,8 @@ i64 sdsge_simulate_second_order_pruned(
     const f64 *SDSGE_RESTRICT x0,  /* (nx,) */
     const f64 *SDSGE_RESTRICT shock, /* (T, n_exog), nullable when empty */
     i64 T, i64 nx, i64 ny, i64 n_exog,
-    f64 *SDSGE_RESTRICT x_out,  /* (T+1, nx) */
-    f64 *SDSGE_RESTRICT y_out); /* (T+1, ny), nullable when ny == 0 */
-
+    f64 *SDSGE_RESTRICT out /* (T+1, nx + ny) */
+);
 /* ERROR CODES */
 #define SDSGE_CORE_SUCCESS 0
 #define SDSGE_CORE_ALLOC_FAIL -1

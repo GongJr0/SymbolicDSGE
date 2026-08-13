@@ -50,7 +50,7 @@ def simulate_second_order_pruned(
     gss: _F64,
     x0: _F64,
     shock_mat: _F64,
-) -> tuple[_F64, _F64]:
+) -> _F64:
     """Pruned second order simulation. Returns split state and jump paths."""
 
 def klein_postprocess(
@@ -94,8 +94,8 @@ def klein_solve1(
     params: _F64,
     n_state: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, _F64, _F64, int, _C128, _F64, _F64]:
-    """(ss, a, b, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
+) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64]:
+    """(ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
     Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
     assemble_state_space into one GIL release. ``f``/``p`` are real; the Schur

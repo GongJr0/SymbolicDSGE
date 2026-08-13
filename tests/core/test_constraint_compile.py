@@ -696,10 +696,14 @@ def test_model_without_regimes_has_no_regime_blocks(compiled_post82):
     assert compiled_post82.construct_regime_pencil_func() is None
 
 
-def test_model_without_constraints_has_no_constraint_func(compiled_post82):
+def test_model_without_constraints_cannot_build_a_constraint_func(compiled_post82):
+    # The func is the OccBin driver's, so asking an unconstrained model for one
+    # is a caller error rather than an empty result.
     assert compiled_post82.constraint_names == ()
     assert compiled_post82.constraint_exprs == []
-    assert compiled_post82.construct_constraint_func() is None
+
+    with pytest.raises(ValueError, match="no constraints in compiled model"):
+        compiled_post82.construct_constraint_func()
 
 
 @pytest.mark.parametrize("offset", [1, -1])

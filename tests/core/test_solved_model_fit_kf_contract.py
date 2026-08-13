@@ -5,15 +5,18 @@ import numpy as np
 import pytest
 
 import SymbolicDSGE.core.solved_model as solved_model_module
-from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel, SolvedModel
 
 
 def _make_solved_model() -> SolvedModel:
-    return SolvedModel(
+    return FirstOrderSolvedModel(
         compiled=SimpleNamespace(var_names=["x"]),
-        policy=SimpleNamespace(order=1),
-        A=np.zeros((1, 1), dtype=np.float64),
-        B=np.zeros((1, 1), dtype=np.float64),
+        policy=SimpleNamespace(
+            order=1,
+            A=np.zeros((1, 1), dtype=np.float64),
+            B=np.zeros((1, 1), dtype=np.float64),
+            steady_state=np.zeros(1, dtype=np.float64),
+        ),
     )
 
 
@@ -46,7 +49,7 @@ def test_fit_kf_accepts_prebuilt_parametrizer(monkeypatch):
             return "fit-result"
 
     monkeypatch.setattr(
-        solved_model_module,
+        solved_model_module.base,
         "_load_sr_fit_dependencies",
         lambda: (_FakeParametrizer, _FakeSRInterface),
     )
@@ -112,7 +115,7 @@ def test_fit_kf_builds_parametrizer_when_not_provided(monkeypatch):
             return "fit-result"
 
     monkeypatch.setattr(
-        solved_model_module,
+        solved_model_module.base,
         "_load_sr_fit_dependencies",
         lambda: (_CapturingParametrizer, _FakeSRInterface),
     )

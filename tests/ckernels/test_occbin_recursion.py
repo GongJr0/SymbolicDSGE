@@ -21,8 +21,8 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE._ckernels.occbin import (
+from SymbolicDSGE._ckernels.core import klein_preprocess, klein_solve1
+from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_recursion,
     occbin_recursion_arena_size,
     regime_pencil,
@@ -63,13 +63,17 @@ def par(compiled):
 def solved(compiled, par):
     """(ss, a_ref, b_ref, f_ref, p_ref) for the reference regime."""
     seed = DSGESolver._resolve_ss_seed(None, compiled)
-    ss, a_ref, b_ref, f_ref, p_ref, *_ = klein_solve1(
-        compiled.construct_objective_cfunc().address,
+    addr = compiled.construct_objective_cfunc().address
+    ss, f_ref, p_ref, *_ = klein_solve1(
+        addr,
         seed,
         par,
         compiled.n_state,
         compiled.n_exog,
     )
+    # The solve keeps the pencil internal, so take it at the steady state the
+    # solve resolved: the same linearization, one call later.
+    a_ref, b_ref = klein_preprocess(addr, ss, par, compiled.n_var)
     # The whole point of a levels fixture: the expansion point is not the origin.
     assert np.abs(ss).max() > 1.0
     return ss, a_ref, b_ref, f_ref, p_ref

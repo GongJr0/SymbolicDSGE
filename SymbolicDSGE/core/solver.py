@@ -16,8 +16,20 @@ from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from .desugar import GeneratedKind, GeneratedVariable, desugar_model
 from .linearization import linearize_model
-from .solved_model import SolvedModel
-from .solver_backend import klein_solve, sgu_solve
+from .solved_model import (
+    SolvedModel,
+    FirstOrderSolvedModel,
+    PiecewiseSolvedModel,
+    SecondOrderSolvedModel,
+)
+from .solver_backend import (
+    FirstOrderSolution,
+    PiecewiseSolution,
+    SecondOrderSolution,
+    klein_solve,
+    piecewise_solve,
+    sgu_solve,
+)
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
@@ -135,8 +147,12 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_jacobian_eqs=observable_jacobian_eqs,
+            n_var=len(var_order),
             n_state=layout.n_state,
             n_exog=layout.n_exog,
+            n_ctrl=len(var_order) - layout.n_state,
+            n_par=len(params),
+            n_obs=len(observable_exprs),
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
             regimes=regimes,
@@ -418,6 +434,14 @@ class DSGESolver:
         if order not in (1, 2):
             raise ValueError(f"order must be 1 or 2, got {order}.")
 
+        piecewise = bool(compiled.constraint_names)
+        if piecewise and order == 2:
+            raise NotImplementedError(
+                "A model with occasionally binding constraints solves piecewise "
+                "linear, one pencil per regime, so there is no second-order "
+                "solution to take. Drop order=2, or drop equations.constraint."
+            )
+
         conf = compiled.config
         seed = self._resolve_ss_seed(ss_seed, compiled)
 
@@ -431,6 +455,10 @@ class DSGESolver:
                 [parameters[p.name] for p in compiled.calib_params], dtype=float64
             )
 
+        if piecewise:
+            return self._solve_piecewise(
+                compiled, param_vec, seed, raise_on_bk_violation
+            )
         if order == 2:
             return self._solve_second_order(
                 compiled, param_vec, seed, raise_on_bk_violation
@@ -455,7 +483,7 @@ class DSGESolver:
         solve's steady state back in.
         """
         layout = compiled.layout
-        n_var = len(compiled.var_names)
+        n_var = compiled.n_var
         n_declared = len(layout.declared_names) - len(layout.generated)
         declared = layout.declared_names[:n_declared]
 
@@ -526,7 +554,7 @@ class DSGESolver:
         param_vec: NDF,
         seed: NDF,
         raise_on_bk_violation: bool = True,
-    ) -> SolvedModel:
+    ) -> SolvedModel[FirstOrderSolution]:
         """First-order (Klein) solve."""
         sol = klein_solve(
             compiled.construct_objective_cfunc(),
@@ -538,7 +566,7 @@ class DSGESolver:
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
-        return SolvedModel(compiled=compiled, policy=sol, A=sol.A, B=sol.B)
+        return FirstOrderSolvedModel(compiled=compiled, policy=sol)
 
     def _solve_second_order(
         self,
@@ -546,14 +574,14 @@ class DSGESolver:
         param_vec: NDF,
         seed: NDF,
         raise_on_bk_violation: bool = True,
-    ) -> SolvedModel:
+    ) -> SolvedModel[SecondOrderSolution]:
         """Second-order (SGU) solve. Runs the Klein first order (which Newton-
         resolves the steady state from ``seed``), sweeps the bicomplex Hessian at
         that steady state, and assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss``
         risk correction into a :class:`PerturbationSolution`. Requires the native
         extension."""
 
-        pert, A, B = sgu_solve(
+        pert = sgu_solve(
             compiled.construct_objective_cfunc(),
             compiled.construct_objective_cfunc_bicomplex(),
             param_vec,
@@ -566,7 +594,49 @@ class DSGESolver:
             pert.stab, should_raise=raise_on_bk_violation
         )
         # p/f are the first-order solution unchanged, so its state space stands.
-        return SolvedModel(compiled=compiled, policy=pert, A=A, B=B)
+        return SecondOrderSolvedModel(compiled=compiled, policy=pert)
+
+    def _solve_piecewise(
+        self,
+        compiled: CompiledModel,
+        param_vec: NDF,
+        seed: NDF,
+        raise_on_bk_violation: bool = True,
+    ) -> SolvedModel[PiecewiseSolution]:
+        """Piecewise-linear (OccBin) solve: the reference regime and every pencil.
+
+        A draw fixes one pencil per binding combination, all linearized at the
+        same reference steady state, so the whole table is built here and the
+        per-date guess-and-verify happens in ``sim``.
+        """
+        pencil = compiled.construct_regime_pencil_func()
+        if pencil is None:  # pragma: no cover - solve() gates on the same thing
+            raise ValueError("Piecewise solve needs a model with constraints.")
+
+        n_constraint = len(compiled.constraint_names)
+        # Slot 0 is the reference regime: no cfunc, no replaced rows, so the
+        # kernel fills it with the pencil the reference solve linearized at.
+        addrs = [0] + [pencil.address(m) for m in range(1, 1 << n_constraint)]
+        rows = [np.empty(0, dtype=np.int64)] + [
+            pencil.rows[m] for m in range(1, 1 << n_constraint)
+        ]
+
+        sol = piecewise_solve(
+            compiled.construct_objective_cfunc(),
+            addrs,
+            rows,
+            param_vec,
+            seed,
+            compiled.n_state,
+            n_constraint,
+            n_exog=compiled.n_exog,
+        )
+
+        # Only the reference regime has to be determinate.
+        self._raise_or_warn_stability_error(
+            sol.stab, should_raise=raise_on_bk_violation
+        )
+        return PiecewiseSolvedModel(compiled=compiled, policy=sol)
 
     @staticmethod
     def _build_eta(compiled: CompiledModel) -> NDF:

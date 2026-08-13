@@ -13,6 +13,10 @@ one Dynare lands on. It reaches what synthetic fixtures cannot: two constraints
 interacting, a mask that changes 12 times over the run, and shock periods that
 inherit a guess from the period before rather than starting relaxed.
 
+The run is driven the way a user drives it, ``solve`` then ``sim``, and compared
+against the golden with no conversion on either side: Dynare reports levels and
+so does :attr:`SimResult.X`.
+
 The horizon is Dynare's ``simul_check_ahead_periods=200``, plus the date a
 binding guess appends, so 201. Dynare leaves ``max_check_ahead_periods`` at
 infinity, so its guess may grow; ours is capped, and the run is checked to never
@@ -24,8 +28,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE._ckernels.occbin import occbin_solve, regime_pencil
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_occbin as golden
 
@@ -34,87 +36,33 @@ _MODEL = "tests/fixtures/models/rbc_occbin.yaml"
 #: Our name for each of the oracle's ``COLUMNS``, in that order.
 _OUR_COLUMNS = ("a", "c", "invest", "k", "lam", "log_k", "log_invest", "log_c")
 
-#: ``simul_check_ahead_periods`` on the golden run, and the appended date.
-_T0 = 201
+#: ``simul_check_ahead_periods`` on the golden run.
+_CHECK_AHEAD = 200
 
 #: Room for the growth Dynare allows and this run turns out not to need.
-_T_CAP = _T0 + 50
+_MAX_CHECK_AHEAD = _CHECK_AHEAD + 50
+
+#: The buffer the two above imply: the horizon plus the appended release date.
+_T0 = _CHECK_AHEAD + 1
 
 
 @pytest.fixture(scope="module")
-def compiled():
+def solved():
+    """The model a user gets from ``solve``: constraints make it piecewise."""
     model, kalman = ModelParser(_MODEL).get_all()
-    return DSGESolver(model, kalman).compile()
+    solver = DSGESolver(model, kalman)
+    return solver.solve(solver.compile())
 
 
 @pytest.fixture(scope="module")
-def par(compiled):
-    calib = compiled.config.calibration.parameters
-    return np.array([float(calib[p]) for p in compiled.calib_params])
-
-
-@pytest.fixture(scope="module")
-def solved(compiled, par):
-    """(ss, a_ref, b_ref, f_ref, p_ref) for the all-relaxed reference regime."""
-    seed = DSGESolver._resolve_ss_seed(None, compiled)
-    ss, a_ref, b_ref, f_ref, p_ref, *_ = klein_solve1(
-        compiled.construct_objective_cfunc().address,
-        seed,
-        par,
-        compiled.n_state,
-        compiled.n_exog,
+def result(solved):
+    """Dynare's surprise sequence run through the public simulation path."""
+    return solved.sim(
+        golden.T,
+        shocks={"eps": np.ravel(golden.SHOCKS)},
+        check_ahead_periods=_CHECK_AHEAD,
+        max_check_ahead_periods=_MAX_CHECK_AHEAD,
     )
-    return ss, a_ref, b_ref, f_ref, p_ref
-
-
-@pytest.fixture(scope="module")
-def table(compiled, par, solved):
-    """(a, b, c) stacked by bitmask, IRR at bit 0 and INEG at bit 1."""
-    ss, a_ref, b_ref, _, _ = solved
-    func = compiled.construct_regime_pencil_func()
-    a = [a_ref]
-    b = [b_ref]
-    c = [np.zeros(a_ref.shape[0])]
-    for mask in (1, 2, 3):
-        a_m, b_m, c_m = regime_pencil(
-            func.address(mask), func.rows[mask], ss, par, a_ref, b_ref
-        )
-        a.append(a_m)
-        b.append(b_m)
-        c.append(c_m)
-    return np.stack(a), np.stack(b), np.stack(c)
-
-
-@pytest.fixture(scope="module")
-def shocks(solved):
-    """Dynare's surprise sequence, in the slot the TFP innovation enters."""
-    out = np.zeros((golden.T, solved[3].shape[1]))
-    out[:, 0] = np.ravel(golden.SHOCKS)
-    return out
-
-
-@pytest.fixture(scope="module")
-def piecewise(compiled, table, solved, par, shocks):
-    """(levels, regimes, diag) from the native driver over the golden shocks."""
-    a, b, c = table
-    ss, _, _, f_ref, _ = solved
-    cf = compiled.construct_constraint_func()
-    out, regimes, diag = occbin_solve(
-        a,
-        b,
-        c,
-        f_ref,
-        ss,
-        par,
-        cf.address,
-        cf.n_constraint,
-        cf.inclusive,
-        shocks,
-        np.zeros(f_ref.shape[1]),
-        T0=_T0,
-        T_cap=_T_CAP,
-    )
-    return out + ss, regimes, diag
 
 
 def _columns(levels, compiled):
@@ -123,50 +71,52 @@ def _columns(levels, compiled):
     return np.stack([levels[:, idx[name]] for name in _OUR_COLUMNS], axis=1)
 
 
-def test_the_reference_steady_state_is_dynares(compiled, solved):
-    ss = solved[0]
-    idx = compiled.layout.idx
+def test_the_reference_steady_state_is_dynares(solved):
+    idx = solved.compiled.layout.idx
+    ss = solved.policy.steady_state
     ours = np.array([ss[idx[name]] for name in _OUR_COLUMNS])
 
     np.testing.assert_allclose(ours, golden.YS, rtol=1e-14, atol=1e-14)
 
 
-def test_the_unconstrained_path_is_dynares_linear_simulation(compiled, solved, shocks):
+def test_the_unconstrained_path_is_dynares_linear_simulation(solved):
     # oo_.occbin.simul.linear: the same surprise sequence with the constraints
     # ignored, so it settles the reference pencil before any regime logic runs.
-    ss, _, _, f_ref, p_ref = solved
-    x = np.zeros(f_ref.shape[1])
-    rows = []
-    for t in range(golden.LINEAR_HEAD.shape[0]):
-        x = x + shocks[t]
-        rows.append(np.concatenate([x, f_ref @ x]))
-        x = p_ref @ x
+    pol = solved.policy
+    head = golden.LINEAR_HEAD.shape[0]
+    # The innovation enters the slot the lifted shock state occupies, which is
+    # where `sim` widens a one-shock draw to.
+    shocks = np.zeros((head, solved.compiled.n_state))
+    shocks[:, 0] = np.ravel(golden.SHOCKS)[:head]
 
-    ours = _columns(np.array(rows) + ss, compiled)
+    x = np.zeros(solved.compiled.n_state)
+    rows = []
+    for t in range(head):
+        x = x + shocks[t]
+        rows.append(np.concatenate([x, pol.f_ref @ x]))
+        x = pol.p_ref @ x
+
+    ours = _columns(np.array(rows) + pol.steady_state, solved.compiled)
 
     np.testing.assert_allclose(ours, golden.LINEAR_HEAD, rtol=1e-12, atol=1e-12)
 
 
-def test_the_piecewise_path_is_dynares(compiled, piecewise):
-    levels, _, _ = piecewise
-
-    ours = _columns(levels, compiled)
+def test_the_piecewise_path_is_dynares(solved, result):
+    ours = _columns(result.X, solved.compiled)
 
     np.testing.assert_allclose(ours, golden.PIECEWISE, rtol=1e-11, atol=1e-11)
 
 
-def test_the_realized_regime_is_dynares(piecewise):
+def test_the_realized_regime_is_dynares(result):
     # Date 0 of each period's accepted guess is what that period realizes; the
     # rest is the expectation the guess was solved under.
-    _, regimes, _ = piecewise
-
-    np.testing.assert_array_equal(regimes[:, 0], golden.REALIZED_MASK)
+    np.testing.assert_array_equal(result.regimes[:, 0], golden.REALIZED_MASK)
 
 
-def test_the_run_settles_well_inside_dynares_check_ahead(piecewise):
+def test_the_run_settles_well_inside_dynares_check_ahead(result):
     # Dynare would have grown the horizon past 200 rather than clip it, so a
     # period that reached the cap would make the two runs incomparable.
-    _, _, diag = piecewise
+    diag = result.diagnostics
 
-    np.testing.assert_array_equal(diag["T_used"], _T0)
-    assert 1 < diag["iters"].max() < 30
+    np.testing.assert_array_equal(diag.T_used, _T0)
+    assert 1 < diag.iters.max() < 30

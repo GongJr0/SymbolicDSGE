@@ -249,8 +249,8 @@ def test_compile_can_linearize_model_on_the_fly(tmp_path):
 
     assert solved_from_flag.policy.stab == 0
     assert solved_explicit.policy.stab == 0
-    assert np.allclose(solved_from_flag.A, solved_explicit.A)
-    assert np.allclose(solved_from_flag.B, solved_explicit.B)
+    assert np.allclose(solved_from_flag.policy.A, solved_explicit.policy.A)
+    assert np.allclose(solved_from_flag.policy.B, solved_explicit.policy.B)
 
 
 def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_path):

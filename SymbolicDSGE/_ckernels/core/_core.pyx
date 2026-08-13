@@ -64,7 +64,7 @@ cdef extern from "core.h" nogil:
         const double *hss, const double *gss,
         const double *x0, const double *shock,
         int64_t T, int64_t nx, int64_t ny, int64_t n_exog,
-        double *x_out, double *y_out)
+        double *out)
 
 cdef extern from "../_common/sdsge_common.h" nogil:
     ctypedef struct arena_size:
@@ -321,10 +321,8 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
     cdef const double *gxx_ptr = NULL
     cdef const double *gss_ptr = NULL
     cdef const double *shock_ptr = NULL
-    cdef double *y_ptr = NULL
-    cdef double[:, ::1] xoutv
-    cdef double[:, ::1] youtv
-    cdef double *x_ptr
+    cdef double[:, ::1] outv
+    cdef double *out_ptr = NULL
 
     if nx <= 0:
         raise ValueError("simulate_second_order_pruned requires nx >= 1.")
@@ -347,17 +345,14 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
     if shockv.shape[1] != n_exog:
         raise ValueError("shock_mat must have shape (T, n_exog).")
 
-    x_out = np.empty((T, nx), dtype=np.float64)
-    y_out = np.empty((T, ny), dtype=np.float64)
-    xoutv = x_out
-    youtv = y_out
-    x_ptr = &xoutv[0, 0]
+    out = np.empty((T, nx + ny), dtype=np.float64)
+    outv = out
+    out_ptr = &outv[0, 0]
 
     if ny > 0:
         gx_ptr = &gxv[0, 0]
         gxx_ptr = &gxxv[0, 0, 0]
         gss_ptr = &gssv[0]
-        y_ptr = &youtv[0, 0]
     if n_exog > 0:
         bx_ptr = &bxv[0, 0]
         if T > 0:
@@ -367,14 +362,14 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
         err = sdsge_simulate_second_order_pruned(
             &hxv[0, 0], gx_ptr, bx_ptr, &hxxv[0, 0, 0], gxx_ptr,
             &hssv[0], gss_ptr, &x0v[0], shock_ptr,
-            T, nx, ny, n_exog, x_ptr, y_ptr)
+            T, nx, ny, n_exog, out_ptr)
     if err == -1:
         raise MemoryError("simulate_second_order_pruned: allocation failed.")
     if err != 0:
         raise RuntimeError(
             f"simulate_second_order_pruned: native kernel failed with code {err}."
         )
-    return x_out, y_out
+    return out
 
 
 def klein_postprocess(s, t, z, int64_t n_states):
@@ -657,7 +652,7 @@ def klein_solve1(
         err = sdsge_klein_solve1(&spec, &out, &arv[0], &iarv[0])
 
     _raise_solve_error(err, "klein_solve1")
-    return ss, a, b, f, p, int(out.stab), eig, A, B
+    return ss, f, p, int(out.stab), eig, A, B
 
 
 def sgu_klein_solve2(
