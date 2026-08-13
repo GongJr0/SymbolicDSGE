@@ -34,11 +34,25 @@ i64 sdsge_constraint_path(sdsge_constraint_fn cond, f64 *SDSGE_RESTRICT path,
 }
 
 arena_size sdsge_occbin_recursion_arena_size(i64 n_var, i64 n_state,
-                                             i64 n_ctrl) {
-  const i64 n_rhs = n_state + 1;
-  return make_sizer(n_var * n_var + n_var * n_rhs + n_ctrl * n_rhs, n_var);
+                                             i64 n_exog) {
+  const i64 n_rhs = n_state + n_exog + 1;
+  return make_sizer(n_var * n_var        /* m */
+                        + n_var * n_rhs  /* rhs */
+                        + n_var * n_rhs, /* the terminal rule */
+                    n_var);
 }
 
+/* Backward pass over a guessed regime sequence.
+ *
+ * With the next date's rule y_{t+1} = P y_t + R eps_{t+1} + D, and the
+ * innovation past t unforeseen so E_t[eps_{t+1}] = 0, each date solves
+ *
+ *   (a P - b) y_t = c y_{t-1} + d eps_t - a D - cst
+ *
+ * for the whole of y_t. Only `c`'s state columns are nonzero, since a control
+ * is by definition a variable that does not occur at t-1, so the rule stays
+ * n_state wide in its lagged block. `R` never enters the backward pass: a
+ * future shock is zero in expectation, so it exists only in the forward one. */
 i64 sdsge_occbin_recursion(const occbin_ctx *ctx, const i8 *SDSGE_RESTRICT mask,
                            i64 T, f64 *SDSGE_RESTRICT out,
                            i64 *SDSGE_RESTRICT singular_date,
@@ -46,54 +60,67 @@ i64 sdsge_occbin_recursion(const occbin_ctx *ctx, const i8 *SDSGE_RESTRICT mask,
                            i64 *SDSGE_RESTRICT iarena) {
   const i64 n_var = ctx->n_var;
   const i64 n_state = ctx->n_state;
-  const i64 n_ctrl = ctx->n_ctrl;
-  const i64 n_rhs = n_state + 1;
+  const i64 n_exog = ctx->n_exog;
+  const i64 n_rhs = n_state + n_exog + 1;
+  const i64 blk = n_var * n_var;
+  const i64 last = n_rhs - 1; /* the constant column */
 
   f64 *m = arena;
-  f64 *rhs = m + n_var * n_var;
+  f64 *rhs = m + blk;
   f64 *seed = rhs + n_var * n_rhs;
   i64 *piv = iarena;
 
   *singular_date = -1;
 
-  /* Date T closes on the reference rule, restrided to match a solved block. */
-  for (i64 l = 0; l < n_ctrl; ++l) {
+  /* Date T closes on the reference rule: no shock, no constant, which is the
+   * model being its own unconstrained self once the guess is relaxed. */
+  for (i64 i = 0; i < n_var; ++i) {
     for (i64 j = 0; j < n_state; ++j) {
-      seed[l * n_rhs + j] = ctx->f_ref[l * n_state + j];
+      seed[i * n_rhs + j] = ctx->ghx_ref[i * n_state + j];
     }
-    seed[l * n_rhs + n_state] = 0.0;
+    for (i64 j = n_state; j < n_rhs; ++j) {
+      seed[i * n_rhs + j] = 0.0;
+    }
   }
-  const f64 *u_next = seed;
+  const f64 *next = seed;
 
   for (i64 t = T - 1; t >= 0; --t) {
-    const f64 *reg_a = ctx->a + mask[t] * n_var * n_var;
-    const f64 *reg_b = ctx->b + mask[t] * n_var * n_var;
-    const f64 *reg_c = ctx->c + mask[t] * n_var;
+    const f64 *reg_a = ctx->a + mask[t] * blk;
+    const f64 *reg_b = ctx->b + mask[t] * blk;
+    const f64 *reg_c = ctx->c + mask[t] * blk;
+    const f64 *reg_d = ctx->d + mask[t] * n_var * n_exog;
+    const f64 *reg_cst = ctx->cst + mask[t] * n_var;
 
     for (i64 i = 0; i < n_var; ++i) {
       const f64 *a_row = reg_a + i * n_var;
       const f64 *b_row = reg_b + i * n_var;
+      const f64 *c_row = reg_c + i * n_var;
+      const f64 *d_row = reg_d + i * n_exog;
       f64 *m_row = m + i * n_var;
       f64 *r_row = rhs + i * n_rhs;
-      f64 rc = reg_c[i];
+
+      for (i64 j = 0; j < n_var; ++j) {
+        m_row[j] = -b_row[j];
+      }
+      /* m += a @ P, and a @ D onto the constant. P is zero outside its state
+       * columns, so the inner loop stops at n_state. */
+      f64 konst = reg_cst[i];
+      for (i64 k = 0; k < n_var; ++k) {
+        const f64 a_ik = a_row[k];
+        const f64 *p_row = next + k * n_rhs;
+        for (i64 j = 0; j < n_state; ++j) {
+          m_row[j] += a_ik * p_row[j];
+        }
+        konst += a_ik * p_row[last];
+      }
 
       for (i64 j = 0; j < n_state; ++j) {
-        m_row[j] = a_row[j];
-        r_row[j] = b_row[j];
+        r_row[j] = c_row[j];
       }
-      for (i64 j = 0; j < n_ctrl; ++j) {
-        m_row[n_state + j] = -b_row[n_state + j];
+      for (i64 j = 0; j < n_exog; ++j) {
+        r_row[n_state + j] = d_row[j];
       }
-
-      for (i64 l = 0; l < n_ctrl; ++l) {
-        const f64 a_ul = a_row[n_state + l];
-        const f64 *u_row = u_next + l * n_rhs;
-        for (i64 j = 0; j < n_state; ++j) {
-          m_row[j] += a_ul * u_row[j];
-        }
-        rc += a_ul * u_row[n_state];
-      }
-      r_row[n_state] = -rc;
+      r_row[last] = -konst;
     }
 
     if (sdsge_lu_factor_inplace(m, piv, n_var) != SDSGE_LU_SUCCESS) {
@@ -103,46 +130,37 @@ i64 sdsge_occbin_recursion(const occbin_ctx *ctx, const i8 *SDSGE_RESTRICT mask,
 
     f64 *rule = out + t * n_var * n_rhs;
     sdsge_lu_solve(m, piv, rhs, rule, n_var, n_rhs);
-    u_next = rule + n_state * n_rhs;
+    next = rule;
   }
   return SDSGE_OCCBIN_RECURSION_OK;
 }
 
 void sdsge_occbin_forward(const f64 *SDSGE_RESTRICT rule,
-                          const f64 *SDSGE_RESTRICT x0, i64 T, i64 n_var,
-                          i64 n_state, f64 *SDSGE_RESTRICT path) {
-  const i64 n_rhs = n_state + 1;
-
-  if (T < 1) {
-    return; // the seed below already needs a row to write into
-  }
-  for (i64 j = 0; j < n_state; ++j) {
-    path[j] = x0[j];
-  }
+                          const f64 *SDSGE_RESTRICT x0,
+                          const f64 *SDSGE_RESTRICT eps0, i64 T, i64 n_var,
+                          i64 n_state, i64 n_exog, f64 *SDSGE_RESTRICT path) {
+  const i64 n_rhs = n_state + n_exog + 1;
+  const i64 last = n_rhs - 1;
 
   for (i64 t = 0; t < T; ++t) {
     const f64 *r = rule + t * n_var * n_rhs;
-    const f64 *x = path + t * n_var;
-    f64 *u = path + t * n_var + n_state;
+    /* x0 is y_{t-1} at the first date; after that the path is its own lag. */
+    const f64 *prev = (t == 0) ? x0 : path + (t - 1) * n_var;
+    const f64 *eps = (t == 0) ? eps0 : NULL;
+    f64 *y = path + t * n_var;
 
-    for (i64 i = n_state; i < n_var; ++i) { // n_ctrl
-      f64 acc = r[i * n_rhs + n_state];
+    for (i64 i = 0; i < n_var; ++i) {
+      const f64 *r_row = r + i * n_rhs;
+      f64 acc = r_row[last];
       for (i64 j = 0; j < n_state; ++j) {
-        acc += r[i * n_rhs + j] * x[j];
+        acc += r_row[j] * prev[j];
       }
-      u[i - n_state] = acc;
-    }
-    if (t == T - 1) {
-      break;
-    }
-
-    f64 *xn = path + (t + 1) * n_var;
-    for (i64 i = 0; i < n_state; ++i) {
-      f64 acc = r[i * n_rhs + n_state];
-      for (i64 j = 0; j < n_state; ++j) {
-        acc += r[i * n_rhs + j] * x[j];
+      if (eps != NULL) {
+        for (i64 j = 0; j < n_exog; ++j) {
+          acc += r_row[n_state + j] * eps[j];
+        }
       }
-      xn[i] = acc;
+      y[i] = acc;
     }
   }
 }
@@ -229,9 +247,9 @@ static i64 sdsge_occbin_promotable(const i64 *move, const i8 *binds, i64 iter,
 }
 
 arena_size sdsge_occbin_period_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                          i64 T_cap, i64 max_iter) {
+                                          i64 n_exog, i64 T_cap, i64 max_iter) {
   const arena_size rec =
-      sdsge_occbin_recursion_arena_size(n_var, n_state, n_ctrl);
+      sdsge_occbin_recursion_arena_size(n_var, n_state, n_exog);
   // hist, and next, all_bind and stay beside it
   const i64 bytes = (max_iter + 3) * T_cap + max_iter;
   return make_sizer(T_cap * n_var + max_iter + rec.n_float,
@@ -239,10 +257,12 @@ arena_size sdsge_occbin_period_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
 }
 
 i64 sdsge_occbin_period(const occbin_run_ctx *run, const f64 *SDSGE_RESTRICT x0,
-                        i8 *mask, i64 *T, f64 *rule, f64 *path,
-                        occbin_diag *diag, i64 s, f64 *arena, i64 *iarena) {
+                        const f64 *SDSGE_RESTRICT eps0, i8 *mask, i64 *T,
+                        f64 *rule, f64 *path, occbin_diag *diag, i64 s,
+                        f64 *arena, i64 *iarena) {
   const i64 n_var = run->model->n_var;
   const i64 n_state = run->model->n_state;
+  const i64 n_exog = run->model->n_exog;
 
   const i64 T_cap = run->T_cap;
   const i64 max_iter = run->max_iter;
@@ -295,7 +315,7 @@ i64 sdsge_occbin_period(const occbin_run_ctx *run, const f64 *SDSGE_RESTRICT x0,
       return status;
     }
 
-    sdsge_occbin_forward(rule, x0, *T, n_var, n_state, path);
+    sdsge_occbin_forward(rule, x0, eps0, *T, n_var, n_state, n_exog, path);
 
     for (i64 t = 0; t < *T; ++t) {
       for (i64 i = 0; i < n_var; ++i) {
@@ -411,7 +431,7 @@ i64 sdsge_occbin_period(const occbin_run_ctx *run, const f64 *SDSGE_RESTRICT x0,
     if (status != SDSGE_OCCBIN_RECURSION_OK) {
       return status;
     }
-    sdsge_occbin_forward(rule, x0, *T, n_var, n_state, path);
+    sdsge_occbin_forward(rule, x0, eps0, *T, n_var, n_state, n_exog, path);
   }
   diag->max_err[s] = err_hist[best];
   diag->periodic[s] = (i8)code;
@@ -422,30 +442,27 @@ i64 sdsge_occbin_period(const occbin_run_ctx *run, const f64 *SDSGE_RESTRICT x0,
    as two loops so the control rows read `next` through `next` itself. */
 static void sdsge_occbin_reference_step(const f64 *SDSGE_RESTRICT ref,
                                         const f64 *SDSGE_RESTRICT prev,
-                                        i64 n_var, i64 n_state,
+                                        i64 n_var, i64 n_state, i64 n_exog,
                                         f64 *SDSGE_RESTRICT next) {
-  const i64 n_rhs = n_state + 1;
+  const i64 n_rhs = n_state + n_exog + 1;
 
-  for (i64 i = 0; i < n_state; ++i) {
-    f64 acc = ref[i * n_rhs + n_state];
+  /* The appended date sits past the horizon, so the guess is relaxed there and
+   * no innovation reaches it: the shock columns are skipped rather than zeroed
+   * by a multiply. One loop over every row, since the rule is full width. */
+  for (i64 i = 0; i < n_var; ++i) {
+    const f64 *r = ref + i * n_rhs;
+    f64 acc = r[n_rhs - 1];
     for (i64 j = 0; j < n_state; ++j) {
-      acc += ref[i * n_rhs + j] * prev[j];
-    }
-    next[i] = acc;
-  }
-  for (i64 i = n_state; i < n_var; ++i) {
-    f64 acc = ref[i * n_rhs + n_state];
-    for (i64 j = 0; j < n_state; ++j) {
-      acc += ref[i * n_rhs + j] * next[j];
+      acc += r[j] * prev[j];
     }
     next[i] = acc;
   }
 }
 
 arena_size sdsge_occbin_sim_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                       i64 T_cap, i64 max_iter) {
-  const arena_size per =
-      sdsge_occbin_period_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter);
+                                       i64 n_exog, i64 T_cap, i64 max_iter) {
+  const arena_size per = sdsge_occbin_period_arena_size(
+      n_var, n_state, n_ctrl, n_exog, T_cap, max_iter);
   return make_sizer(n_state + per.n_float, per.n_int);
 }
 
@@ -456,7 +473,9 @@ i64 sdsge_occbin_sim(const occbin_run_ctx *run, const f64 *shocks, i64 S,
                      f64 *arena, i64 *iarena) {
   const i64 n_var = run->model->n_var;
   const i64 n_state = run->model->n_state;
-  const i64 n_rhs = n_state + 1;
+  const i64 n_exog = run->model->n_exog;
+
+  const i64 n_rhs = n_state + n_exog + 1;
   i64 T = run->T0;
 
   f64 *x = arena; // (n_state,) state entering the current shock period
@@ -476,13 +495,14 @@ i64 sdsge_occbin_sim(const occbin_run_ctx *run, const f64 *shocks, i64 S,
       memcpy(mask, init_mask + s * run->T_cap, run->T_cap);
     }
 
-    for (i64 j = 0; j < n_state; ++j) {
-      x[j] += shocks[s * n_state + j];
-    }
+    // The innovation reaches the path through the shock block now, not by
+    // being added into a state that carried it. It lands on date 0 of this
+    // period's projection and nowhere else: everything after is unforeseen.
+    const f64 *eps0 = shocks + s * n_exog;
 
-    if (s == 0 || sdsge_any_nonzero(shocks + s * n_state, n_state)) {
-      i64 status = sdsge_occbin_period(run, x, mask, &T, rule, path, diag, s,
-                                       period_arena, iarena);
+    if (s == 0 || sdsge_any_nonzero(eps0, n_exog)) {
+      i64 status = sdsge_occbin_period(run, x, eps0, mask, &T, rule, path, diag,
+                                       s, period_arena, iarena);
       if (status != SDSGE_OCCBIN_PERIOD_OK) {
         diag->fail_period = s;
         return status;
@@ -498,16 +518,18 @@ i64 sdsge_occbin_sim(const occbin_run_ctx *run, const f64 *shocks, i64 S,
     memcpy(out + s * n_var, path, n_var * sizeof(f64));
     memcpy(regimes + s * run->T_cap, mask, T);
     T_used[s] = T;
+    // What this period realized is what the next one lags, so the carry comes
+    // off row 0 before the shift moves it.
+    memcpy(x, path, n_state * sizeof(f64));
 
-    // Advance a period: guess, path and carry shift together. A converged
-    // guess is relaxed at its last date, so that block is the reference rule.
+    // Advance a period: guess and path shift together. A converged guess is
+    // relaxed at its last date, so that block is the reference rule.
     memmove(path, path + n_var, (T - 1) * n_var * sizeof(f64));
     sdsge_occbin_reference_step(rule + (T - 1) * n_var * n_rhs,
-                                path + (T - 2) * n_var, n_var, n_state,
+                                path + (T - 2) * n_var, n_var, n_state, n_exog,
                                 path + (T - 1) * n_var);
     memmove(mask, mask + 1, T - 1);
     mask[T - 1] = 0; // last period is relaxing by default
-    memcpy(x, path, n_state * sizeof(f64));
   }
 
   // The tail is what the last solved path still had left to run.
@@ -520,8 +542,7 @@ i64 sdsge_occbin_sim(const occbin_run_ctx *run, const f64 *shocks, i64 S,
 arena_size sdsge_occbin_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
                                           i64 n_par, i64 n_exog, i64 nd,
                                           i64 max_n_row) {
-  arena_size pencil =
-      sdsge_regime_pencil_arena_size(n_var, n_exog, max_n_row);
+  arena_size pencil = sdsge_regime_pencil_arena_size(n_var, n_exog, max_n_row);
   arena_size klein =
       sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par, n_exog, nd);
 

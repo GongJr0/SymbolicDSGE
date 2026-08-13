@@ -280,11 +280,10 @@ def test_linearize_model_marks_copy_and_solver_compiles_and_solves(tmp_path):
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0
-    # a and k each gain a lag state and the shock gains one, so 2 declared plus
-    # 3 generated.
-    assert compiled.n_state == 3
-    assert solved.policy.A.shape == (5, 5)
-    assert solved.policy.B.shape == (5, 1)
+    # a and k both occur at t-1, so the model is all states and no controls.
+    assert compiled.n_state == 2
+    assert solved.policy.A.shape == (2, 2)
+    assert solved.policy.B.shape == (2, 1)
 
 
 def test_linearized_model_supports_likelihood_evaluation(tmp_path):

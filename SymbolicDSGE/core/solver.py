@@ -359,19 +359,24 @@ class DSGESolver:
 
         Shocks are not variables here. They reach the residual as innovations, so
         ``n_exog`` counts the model's shocks rather than a lifted block, and the
-        state space takes its loading from the shock jacobian.
+        state space takes its loading from the shock jacobian. A state is
+        exogenous when a shock declares it as its target, which splits the state
+        block without resizing it.
         """
         declared_names = tuple(v.__name__ for v in conf.variables.variables)
 
         lagged = self._lagged_names(conf)
         state_names = tuple(name for name in declared_names if name in lagged)
-        model_names = tuple(name for name in declared_names if name not in lagged)
+        control_names = tuple(name for name in declared_names if name not in lagged)
 
-        control_names = (
-            model_names
-            if variable_order is None
-            else self._resolve_variable_order(variable_order, model_names)
-        )
+        if variable_order is not None:
+            state_names, control_names = self._resolve_variable_order(
+                variable_order,
+                state_names,
+                control_names,
+                frozenset(g.name for g in generated),
+            )
+
         canonical_names = (*state_names, *control_names)
         idx = {name: i for i, name in enumerate(canonical_names)}
 
@@ -426,28 +431,42 @@ class DSGESolver:
     @staticmethod
     def _resolve_variable_order(
         variable_order: Sequence[Function | str],
-        model_names: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        """Coerce and validate an explicit order for the control block.
+        state_names: tuple[str, ...],
+        control_names: tuple[str, ...],
+        generated: frozenset[str] = frozenset(),
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Coerce and validate an explicit order, and split it back into blocks.
 
-        The states are the compiler's own variables and always lead the canonical
-        order, so an explicit order names the variables the model declares, each
-        exactly once.
+        An order names every variable the model declares, each exactly once, and
+        leads with the states. Which variables those are follows from the model,
+        so an order chooses positions within a block rather than membership of
+        one, and it is free within each. Compiler-minted lags take the end of the
+        state block, where the default order leaves them.
         """
         var_order = tuple(DSGESolver._coerce_variable_name(v) for v in variable_order)
         if len(set(var_order)) != len(var_order):
             raise ValueError("variable_order contains duplicate variables.")
 
-        declared = set(model_names)
+        minted = tuple(name for name in state_names if name in generated)
+        declared_states = tuple(name for name in state_names if name not in generated)
+        declared = set(declared_states) | set(control_names)
         if set(var_order) != declared:
             unknown = sorted(set(var_order) - declared)
             missing = sorted(declared - set(var_order))
             raise ValueError(
                 "variable_order must name every declared model variable exactly "
                 f"once. Unknown: {unknown}. Missing: {missing}. Compiler-generated "
-                "states lead the canonical order and must not appear."
+                "lags are placed with the states and must not appear."
             )
-        return var_order
+
+        n_state = len(declared_states)
+        if set(var_order[:n_state]) != set(declared_states):
+            raise ValueError(
+                "variable_order must lead with the model's states. Expected its "
+                f"first {n_state} entries to be {list(declared_states)} in any "
+                f"order, got {list(var_order[:n_state])}."
+            )
+        return (*var_order[:n_state], *minted), var_order[n_state:]
 
     def solve(
         self,
@@ -933,4 +952,8 @@ class DSGESolver:
                     kk = int(k)
                     if kk not in allowed:
                         bad.add(kk)
+                else:
+                    raise ValueError(
+                        f"Non-integer time offset ``{k}`` found in expression {expr}. Only integer offsets are allowed."
+                    )
         return bad

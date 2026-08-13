@@ -137,10 +137,13 @@ cdef extern from "occbin.h" nogil:
         const double *a
         const double *b
         const double *c
-        const double *f_ref
+        const double *d
+        const double *cst
+        const double *ghx_ref
         int64_t n_var
         int64_t n_state
         int64_t n_ctrl
+        int64_t n_exog
     ctypedef struct occbin_opts:
         int64_t periodic_solution
         int64_t periodic_threshold
@@ -167,16 +170,16 @@ cdef extern from "occbin.h" nogil:
         int64_t fail_period
         int64_t singular_date
     arena_size sdsge_occbin_recursion_arena_size(
-        int64_t n_var, int64_t n_state, int64_t n_ctrl)
+        int64_t n_var, int64_t n_state, int64_t n_exog)
     int64_t sdsge_occbin_recursion(
         const occbin_ctx *ctx, const int8_t *mask, int64_t T, double *out,
         int64_t *singular_date, double *arena, int64_t *iarena)
     void sdsge_occbin_forward(
-        const double *rule, const double *x0, int64_t T, int64_t n_var,
-        int64_t n_state, double *path)
+        const double *rule, const double *x0, const double *eps0, int64_t T,
+        int64_t n_var, int64_t n_state, int64_t n_exog, double *path)
     arena_size sdsge_occbin_sim_arena_size(
-        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t T_cap,
-        int64_t max_iter)
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_exog,
+        int64_t T_cap, int64_t max_iter)
     int64_t sdsge_occbin_sim(
         const occbin_run_ctx *run, const double *shocks, int64_t S,
         int64_t n_periods, const double *x_init, const int8_t *init_mask,
@@ -374,16 +377,19 @@ def regime_pencil(size_t pencil_addr, rows, ss, par, a_ref, b_ref, c_ref, d_ref)
 
 
 cdef _check_pencils(double[:, :, ::1] av, double[:, :, ::1] bv,
-                    double[:, ::1] cv, double[:, ::1] fv):
-    """``(n_regime, n_var, n_state, n_ctrl)`` for stacked pencils and ``f_ref``.
+                    double[:, :, ::1] cv, double[:, :, ::1] dv,
+                    double[:, ::1] cstv, double[:, ::1] gv):
+    """``(n_regime, n_var, n_state, n_ctrl, n_exog)`` for the stacked pencils.
 
     The kernels index the stack and partition the rows without a bound check,
-    so every shape relation they assume is settled here.
+    so every shape relation they assume is settled here. ``ghx_ref`` fixes
+    ``n_state`` and ``d`` fixes ``n_exog``; everything else follows from ``a``.
     """
     cdef int64_t n_regime = av.shape[0]
     cdef int64_t n_var = av.shape[1]
-    cdef int64_t n_ctrl = fv.shape[0]
-    cdef int64_t n_state = fv.shape[1]
+    cdef int64_t n_state = gv.shape[1]
+    cdef int64_t n_ctrl = n_var - n_state
+    cdef int64_t n_exog = dv.shape[2]
 
     if n_regime < 1:
         raise ValueError("a must hold at least the reference regime.")
@@ -398,59 +404,81 @@ cdef _check_pencils(double[:, :, ::1] av, double[:, :, ::1] bv,
             f"b is {bv.shape[0]}x{bv.shape[1]}x{bv.shape[2]}, expected "
             f"{n_regime}x{n_var}x{n_var} to match a."
         )
-    if cv.shape[0] != n_regime or cv.shape[1] != n_var:
+    if cv.shape[0] != n_regime or cv.shape[1] != n_var or cv.shape[2] != n_var:
         raise ValueError(
-            f"c is {cv.shape[0]}x{cv.shape[1]}, expected {n_regime}x{n_var} "
+            f"c is {cv.shape[0]}x{cv.shape[1]}x{cv.shape[2]}, expected "
+            f"{n_regime}x{n_var}x{n_var} to match a."
+        )
+    if dv.shape[0] != n_regime or dv.shape[1] != n_var:
+        raise ValueError(
+            f"d is {dv.shape[0]}x{dv.shape[1]}x{dv.shape[2]}, expected "
+            f"{n_regime}x{n_var}x{n_exog} to match a."
+        )
+    if cstv.shape[0] != n_regime or cstv.shape[1] != n_var:
+        raise ValueError(
+            f"cst is {cstv.shape[0]}x{cstv.shape[1]}, expected "
+            f"{n_regime}x{n_var} to match a."
+        )
+    if gv.shape[0] != n_var:
+        raise ValueError(
+            f"ghx_ref is {gv.shape[0]}x{gv.shape[1]}, expected {n_var} rows "
             f"to match a."
         )
-    if n_state + n_ctrl != n_var:
+    if n_ctrl < 0:
         raise ValueError(
-            f"f_ref is {n_ctrl}x{n_state}, so n_state + n_ctrl is "
-            f"{n_state + n_ctrl}, expected {n_var} to match a."
+            f"ghx_ref has {n_state} state columns, more than a's {n_var} "
+            f"variables."
         )
-    return n_regime, n_var, n_state, n_ctrl
+    return n_regime, n_var, n_state, n_ctrl, n_exog
 
 
 def occbin_recursion_arena_size(int64_t n_var, int64_t n_state,
-                                int64_t n_ctrl):
+                                int64_t n_exog):
     """``(n_float, n_int)`` scratch ``occbin_recursion`` needs for a shape."""
     cdef arena_size sz = sdsge_occbin_recursion_arena_size(
-        n_var, n_state, n_ctrl
+        n_var, n_state, n_exog
     )
     return sz.n_float, sz.n_int
 
 
-def occbin_recursion(a, b, c, mask, f_ref, out=None, arena=None, iarena=None):
-    """Piecewise-linear decision rules ``(T, n_var, n_state + 1)`` for a guess.
+def occbin_recursion(a, b, c, d, cst, mask, ghx_ref, out=None, arena=None,
+                     iarena=None):
+    """Piecewise-linear decision rules ``(T, n_var, n_state + n_exog + 1)``.
 
-    ``a``, ``b`` and ``c`` are the regime pencils stacked by bitmask, shaped
-    ``(n_regime, n_var, n_var)``, ``(n_regime, n_var, n_var)`` and
-    ``(n_regime, n_var)``. Slot ``m`` is what ``regime_pencil`` returns for mask
-    ``m`` and slot 0 is the reference, so ``mask`` indexes the stack directly.
+    ``a``/``b``/``c``/``d``/``cst`` are the regime pencils stacked by bitmask,
+    the three date blocks ``(n_regime, n_var, n_var)``, ``d``
+    ``(n_regime, n_var, n_exog)`` and ``cst`` ``(n_regime, n_var)``. Slot ``m``
+    is what ``regime_pencil`` returns for mask ``m`` and slot 0 is the
+    reference, so ``mask`` indexes the stack directly.
 
-    ``f_ref`` is the reference control rule ``(n_ctrl, n_state)``, which closes
-    the recursion past the last date, and fixes ``n_state`` and ``n_ctrl``.
+    ``ghx_ref`` is the reference regime's whole rule ``(n_var, n_state)``, which
+    closes the recursion past the last date, and fixes ``n_state``.
 
-    ``out`` is an optional C-contiguous ``(T, n_var, n_state + 1)`` float64
-    buffer written in place. At date ``t`` the block is the affine map from
-    ``x_t`` to ``[x_{t+1}; u_t]``: ``out[t, :, :n_state] @ x_t + out[t, :,
-    n_state]``, state rows first. Raises ``RuntimeError`` naming the date if a
-    date's pencil is singular.
+    ``out`` is an optional C-contiguous ``(T, n_var, n_state + n_exog + 1)``
+    float64 buffer written in place. At date ``t`` the block is the affine map
+    from ``y_{t-1}`` to ``y_t``: the leading ``n_state`` columns act on the
+    lagged state, the next ``n_exog`` on that date's innovation, and the last is
+    the constant. Raises ``RuntimeError`` naming the date if a date's pencil is
+    singular.
 
     ``arena`` and ``iarena`` are optional scratch buffers, at least as long as
     ``occbin_recursion_arena_size`` reports; both are allocated if omitted.
     """
     cdef double[:, :, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
     cdef double[:, :, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
-    cdef double[:, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
-    cdef double[:, ::1] fv = np.ascontiguousarray(f_ref, dtype=np.float64)
+    cdef double[:, :, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
+    cdef double[:, :, ::1] dv = np.ascontiguousarray(d, dtype=np.float64)
+    cdef double[:, ::1] cstv = np.ascontiguousarray(cst, dtype=np.float64)
+    cdef double[:, ::1] gv = np.ascontiguousarray(ghx_ref, dtype=np.float64)
     cdef const int8_t[::1] mv = np.ascontiguousarray(mask, dtype=np.int8)
 
-    cdef int64_t n_regime, n_var, n_state, n_ctrl
-    n_regime, n_var, n_state, n_ctrl = _check_pencils(av, bv, cv, fv)
+    cdef int64_t n_regime, n_var, n_state, n_ctrl, n_exog
+    n_regime, n_var, n_state, n_ctrl, n_exog = _check_pencils(
+        av, bv, cv, dv, cstv, gv
+    )
 
     cdef int64_t T = mv.shape[0]
-    cdef int64_t n_rhs = n_state + 1
+    cdef int64_t n_rhs = n_state + n_exog + 1
     cdef int64_t i
 
     # The kernel indexes table[mask[t]] without a bound check.
@@ -470,7 +498,7 @@ def occbin_recursion(a, b, c, mask, f_ref, out=None, arena=None, iarena=None):
         )
 
     cdef arena_size sz = sdsge_occbin_recursion_arena_size(
-        n_var, n_state, n_ctrl
+        n_var, n_state, n_exog
     )
     if arena is None:
         arena = np.empty(sz.n_float, dtype=np.float64)
@@ -495,11 +523,14 @@ def occbin_recursion(a, b, c, mask, f_ref, out=None, arena=None, iarena=None):
 
     ctx.a = &av[0, 0, 0]
     ctx.b = &bv[0, 0, 0]
-    ctx.c = &cv[0, 0]
-    ctx.f_ref = &fv[0, 0] if (n_ctrl * n_state) > 0 else NULL
+    ctx.c = &cv[0, 0, 0]
+    ctx.d = &dv[0, 0, 0] if n_exog > 0 else NULL
+    ctx.cst = &cstv[0, 0]
+    ctx.ghx_ref = &gv[0, 0] if (n_var * n_state) > 0 else NULL
     ctx.n_var = n_var
     ctx.n_state = n_state
     ctx.n_ctrl = n_ctrl
+    ctx.n_exog = n_exog
 
     with nogil:
         status = sdsge_occbin_recursion(
@@ -513,33 +544,48 @@ def occbin_recursion(a, b, c, mask, f_ref, out=None, arena=None, iarena=None):
     return out
 
 
-def occbin_forward(rule, x0, out=None):
-    """``(T, n_var)`` path in deviations, from decision rules and a state.
+def occbin_forward(rule, x0, eps0=None, out=None):
+    """``(T, n_var)`` path in deviations, from decision rules and a lagged state.
 
-    ``rule`` is a stack of blocks as ``occbin_recursion`` returns them, ``(T,
-    n_var, n_state + 1)``, and ``x0`` the ``(n_state,)`` state entering date 0.
+    ``rule`` is a stack of blocks as ``occbin_recursion`` returns them,
+    ``(T, n_var, n_state + n_exog + 1)``, and ``x0`` the ``(n_state,)`` value of
+    the state block at ``t - 1``, so row ``t`` is the whole of ``y_t`` and the
+    seed is not itself a row.
 
-    Row ``t`` is ``[x_t; u_t]``: the state half comes from date ``t - 1``'s
-    block and the control half from date ``t``'s, which is the pairing a
-    constraint on period ``t`` reads. The state the last block implies falls off
-    the end. ``out`` is an optional C-contiguous buffer written in place.
+    ``eps0`` is the ``(n_exog,)`` innovation, and it lands on date 0 alone: a
+    shock later in a projection is unforeseen, which is what makes it zero.
+    ``None`` is a period with no innovation.
+
+    ``out`` is an optional C-contiguous buffer written in place.
     """
     cdef double[:, :, ::1] rv = np.ascontiguousarray(rule, dtype=np.float64)
     cdef double[::1] xv = np.ascontiguousarray(x0, dtype=np.float64)
 
     cdef int64_t T = rv.shape[0]
     cdef int64_t n_var = rv.shape[1]
-    cdef int64_t n_state = rv.shape[2] - 1
+    cdef int64_t n_state = xv.shape[0]
+    cdef int64_t n_exog = rv.shape[2] - n_state - 1
 
-    if n_state < 0 or n_state > n_var:
+    if n_state > n_var:
         raise ValueError(
-            f"rule is {T}x{n_var}x{rv.shape[2]}, expected a last axis in "
-            f"1..{n_var + 1}."
+            f"x0 has length {n_state}, more than rule's {n_var} variables."
         )
-    if xv.shape[0] != n_state:
+    if n_exog < 0:
         raise ValueError(
-            f"x0 has length {xv.shape[0]}, expected {n_state} to match rule."
+            f"rule is {T}x{n_var}x{rv.shape[2]}, too narrow for {n_state} "
+            f"states plus a constant."
         )
+
+    cdef double[::1] ev
+    cdef const double *eps_ptr = NULL
+    if eps0 is not None:
+        ev = np.ascontiguousarray(eps0, dtype=np.float64)
+        if ev.shape[0] != n_exog:
+            raise ValueError(
+                f"eps0 has length {ev.shape[0]}, expected {n_exog} to match "
+                f"rule's shock columns."
+            )
+        eps_ptr = &ev[0] if n_exog > 0 else NULL
 
     if out is None:
         out = np.empty((T, n_var), dtype=np.float64)
@@ -553,20 +599,22 @@ def occbin_forward(rule, x0, out=None):
     cdef const double *x_ptr = &xv[0] if n_state > 0 else NULL
     cdef double *out_ptr = &ov[0, 0] if T * n_var > 0 else NULL
     with nogil:
-        sdsge_occbin_forward(rule_ptr, x_ptr, T, n_var, n_state, out_ptr)
+        sdsge_occbin_forward(
+            rule_ptr, x_ptr, eps_ptr, T, n_var, n_state, n_exog, out_ptr
+        )
     return out
 
 
 def occbin_sim_arena_size(int64_t n_var, int64_t n_state, int64_t n_ctrl,
-                          int64_t T_cap, int64_t max_iter):
+                          int64_t n_exog, int64_t T_cap, int64_t max_iter):
     """``(n_float, n_int)`` scratch ``occbin_sim`` needs for a shape."""
     cdef arena_size sz = sdsge_occbin_sim_arena_size(
-        n_var, n_state, n_ctrl, T_cap, max_iter
+        n_var, n_state, n_ctrl, n_exog, T_cap, max_iter
     )
     return sz.n_float, sz.n_int
 
 
-def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
+def occbin_sim(a, b, c, d, cst, ghx_ref, ss, par, size_t cond_addr,
                int64_t n_constraint, int64_t inclusive, shocks, x_init,
                *,
                int64_t check_ahead_periods=200, int64_t max_check_ahead_periods=-1,
@@ -577,14 +625,15 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
                int64_t algo_truncation=1):
     """Piecewise path ``(n_periods, n_var)`` for a sequence of unforeseen shocks.
 
-    ``a``, ``b``, ``c`` and ``f_ref`` are the pencils and reference rule
+    ``a``, ``b``, ``c``, ``d``, ``cst`` and ``ghx_ref`` are the pencils and
+    reference rule
     ``occbin_recursion`` takes, except that the stack must be complete: the latch
     produces every mask in ``0..2 ** n_constraint - 1``, so all of them must be
     slots. ``ss`` is the ``(n_var,)`` reference steady state, which turns the
     path into the levels the constraint @cfunc at ``cond_addr`` reads.
 
-    ``shocks`` is ``(S, n_state)`` in state slots, added to the carried state at
-    the head of each period. A period whose row is all zero is not re-solved:
+    ``shocks`` is ``(S, n_exog)``, one innovation per period, reaching the path
+    through the shock block. A period whose row is all zero is not re-solved:
     the previous guess and the path it implies, both shifted forward one period,
     already describe it. Period 0 always solves.
 
@@ -626,14 +675,18 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     """
     cdef double[:, :, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
     cdef double[:, :, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
-    cdef double[:, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
-    cdef double[:, ::1] fv = np.ascontiguousarray(f_ref, dtype=np.float64)
+    cdef double[:, :, ::1] cv = np.ascontiguousarray(c, dtype=np.float64)
+    cdef double[:, :, ::1] dv = np.ascontiguousarray(d, dtype=np.float64)
+    cdef double[:, ::1] cstv = np.ascontiguousarray(cst, dtype=np.float64)
+    cdef double[:, ::1] gv = np.ascontiguousarray(ghx_ref, dtype=np.float64)
 
-    cdef int64_t n_regime, n_var, n_state, n_ctrl
-    n_regime, n_var, n_state, n_ctrl = _check_pencils(av, bv, cv, fv)
+    cdef int64_t n_regime, n_var, n_state, n_ctrl, n_exog
+    n_regime, n_var, n_state, n_ctrl, n_exog = _check_pencils(
+        av, bv, cv, dv, cstv, gv
+    )
 
     if n_state < 1:
-        raise ValueError("f_ref must hold at least one state; the solve "
+        raise ValueError("ghx_ref must hold at least one state; the solve "
                          "carries the path forward through the states.")
     if not 0 < n_constraint <= 2:
         raise ValueError(
@@ -685,15 +738,15 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
         )
     if S < 1:
         raise ValueError("shocks must hold at least one period.")
-    if shv.shape[1] != n_state:
+    if shv.shape[1] != n_exog:
         raise ValueError(
-            f"shocks is {S}x{shv.shape[1]}, expected {S}x{n_state} to match "
-            f"f_ref."
+            f"shocks is {S}x{shv.shape[1]}, expected {S}x{n_exog} to match "
+            f"the pencils' shock block."
         )
     if xv.shape[0] != n_state:
         raise ValueError(
             f"x_init has length {xv.shape[0]}, expected {n_state} to match "
-            f"f_ref."
+            f"ghx_ref."
         )
 
     cdef int8_t[:, ::1] imv
@@ -759,7 +812,7 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     cdef double[::1] mev = max_err
     cdef int8_t[::1] pev = periodic
 
-    rule = np.empty((T_cap, n_var, n_state + 1), dtype=np.float64)
+    rule = np.empty((T_cap, n_var, n_state + n_exog + 1), dtype=np.float64)
     path = np.empty((T_cap, n_var), dtype=np.float64)
     mask = np.empty(T_cap, dtype=np.int8)
     cdef double[:, :, ::1] rulev = rule
@@ -767,7 +820,7 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     cdef int8_t[::1] maskv = mask
 
     cdef arena_size sz = sdsge_occbin_sim_arena_size(
-        n_var, n_state, n_ctrl, T_cap, max_iter
+        n_var, n_state, n_ctrl, n_exog, T_cap, max_iter
     )
     arena = np.empty(sz.n_float, dtype=np.float64)
     iarena = np.empty(sz.n_int, dtype=np.int64)
@@ -777,8 +830,11 @@ def occbin_sim(a, b, c, f_ref, ss, par, size_t cond_addr,
     cdef occbin_ctx model
     model.a = &av[0, 0, 0]
     model.b = &bv[0, 0, 0]
-    model.c = &cv[0, 0]
-    model.f_ref = &fv[0, 0] if n_ctrl * n_state > 0 else NULL
+    model.c = &cv[0, 0, 0]
+    model.d = &dv[0, 0, 0] if n_exog > 0 else NULL
+    model.cst = &cstv[0, 0]
+    model.ghx_ref = &gv[0, 0] if n_var * n_state > 0 else NULL
+    model.n_exog = n_exog
     model.n_var = n_var
     model.n_state = n_state
     model.n_ctrl = n_ctrl
@@ -880,12 +936,16 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     slot 0: that is the reference regime, and it comes back as the pencil the
     reference solve linearized at.
 
-    Returns ``(ss, f, p, stab, eig, A, B, a, b, c)``. The leading seven are the
-    reference solve, identical to ``klein_solve1``'s. ``a``/``b`` are
-    ``(n_regime, n_var, n_var)`` and ``c`` is ``(n_regime, n_var)``, the pencils
-    ``a^r E[y_{t+1}] = b^r y_t - c^r`` that ``occbin_sim`` steps through.
-    ``stab`` is the reference regime's and is reported, never raised on: a
-    binding regime alone is routinely indeterminate and that is not an error.
+    Returns ``(ss, ghx, stab, eig, A, B, a, b, c, d, cst)``. ``ghx`` is the
+    reference regime's whole rule ``(n_var, n_state)``, which is ``p`` stacked
+    over ``f``, and ``A`` ``(n_var, n_var)``/``B`` ``(n_var, n_exog)`` are that
+    same regime's state space: the model with its constraints ignored.
+    ``a``/``b``/``c`` are ``(n_regime, n_var, n_var)``, ``d`` is
+    ``(n_regime, n_var, n_exog)`` and ``cst`` is ``(n_regime, n_var)``, the
+    pencils ``a^r E[y_{t+1}] = b^r y_t + c^r y_{t-1} + d^r eps_t - cst^r`` that
+    ``occbin_sim`` steps through. ``stab`` is the reference regime's and is
+    reported, never raised on: a binding regime alone is routinely
+    indeterminate and that is not an error.
     """
     cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
     cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
@@ -953,8 +1013,10 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     s = np.empty((nd, nd), dtype=np.complex128)
     t = np.empty((nd, nd), dtype=np.complex128)
     z = np.empty((nd, nd), dtype=np.complex128)
-    f = np.empty((n_ctrl, n_state), dtype=np.float64)
-    p = np.empty((n_state, n_state), dtype=np.float64)
+    # One buffer, not two: states lead the canonical order, so `p` is its
+    # leading n_state rows and `f` the rest, both already contiguous. The
+    # solve writes straight into the stack the recursion wants.
+    ghx = np.empty((n_var, n_state), dtype=np.float64)
     eig = np.empty(nd, dtype=np.complex128)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
@@ -973,8 +1035,7 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     cdef double complex[:, ::1] sv = s
     cdef double complex[:, ::1] tv = t
     cdef double complex[:, ::1] zv = z
-    cdef double[:, ::1] fv = f
-    cdef double[:, ::1] pv = p
+    cdef double[:, ::1] ghxv = ghx
     cdef double complex[::1] eigv = eig
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
@@ -1011,8 +1072,8 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     out.ref.s = <c128 *>&sv[0, 0]
     out.ref.t = <c128 *>&tv[0, 0]
     out.ref.z = <c128 *>&zv[0, 0]
-    out.ref.f = &fv[0, 0] if n_ctrl > 0 else NULL
-    out.ref.p = &pv[0, 0]
+    out.ref.p = &ghxv[0, 0]
+    out.ref.f = &ghxv[n_state, 0] if n_ctrl > 0 else NULL
     out.ref.eig = <c128 *>&eigv[0]
     out.ref.stab = 0
     out.ref.A = &Av[0, 0]
@@ -1036,4 +1097,4 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
         err = sdsge_occbin_solve1(&spec, &out, &arv[0], &iarv[0])
 
     _raise_klein_error(err)
-    return ss, f, p, int(out.ref.stab), eig, a, b, c, d, cst
+    return ss, ghx, int(out.ref.stab), eig, A, B, a, b, c, d, cst

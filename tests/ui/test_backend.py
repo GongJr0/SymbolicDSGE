@@ -71,8 +71,8 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert solved.status_code == 200
     solved_body = solved.json()
     assert solved_body["solved"] is True
-    # Two shock states, three lag auxes: every state is compiler-minted.
-    assert solved_body["n_state"] == 5
+    # u, v and r are lagged, so the states are three of the model's own variables.
+    assert solved_body["n_state"] == 3
     assert solved_body["n_exog"] == 2
 
     simulated = client.post(

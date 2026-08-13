@@ -127,7 +127,7 @@ def _raw_observables(reference: SolvedModel, T: int) -> NDF:
 def _shocks(reference: SolvedModel) -> dict[str, Shock]:
     return {
         name: Shock(dist="norm", seed=20_260_730 + index)
-        for index, name in enumerate(reference.compiled.layout.exo_state_names)
+        for index, name in enumerate(reference.compiled.layout.shock_names)
     }
 
 

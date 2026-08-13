@@ -108,8 +108,8 @@ def test_rbc_second_order_matches_dynare():
     independent-solver check on the actual second-order math."""
     model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
     compiled = DSGESolver(model, kalman).compile()
-    # States are all compiler-minted: the lifted shock and the two lag auxes.
-    assert list(compiled.var_names) == ["e_st", "k_lag1", "z_lag1", "c", "k", "z"]
+    # k and z occur at t-1, so they are the states and c is the only control.
+    assert list(compiled.var_names) == ["k", "z", "c"]
 
     layout = ResidualLayout.from_compiled(compiled)
     n_eq, n_state = layout.n_var, compiled.n_state
@@ -133,7 +133,7 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
 
     a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
-    sol = klein_solve(cf, par, ss, n_state)
+    sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
     assert sol.stab == 0
     gx, hx = sol.f, sol.p
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)

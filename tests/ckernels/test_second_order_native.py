@@ -42,7 +42,7 @@ def _drive(path):
     ss = DSGESolver._resolve_ss_seed(None, compiled)
 
     a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
-    sol = klein_solve(cf, par, ss, n_state)
+    sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
     gx, hx = np.real(sol.f), np.real(sol.p)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
     eta = DSGESolver._build_eta(compiled)

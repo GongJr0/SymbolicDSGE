@@ -39,13 +39,11 @@ def _rbc():
 
 
 def _perturbed(compiled, true_ss, capital, consumption, tfp):
-    """A seed off the steady state, scaling every copy of a variable alike."""
+    """A seed off the steady state, one entry per declared variable."""
     seed = true_ss.copy()
-    for name in ("k", "k_lag1"):
-        seed[compiled.idx[name]] *= capital
+    seed[compiled.idx["k"]] *= capital
     seed[compiled.idx["c"]] *= consumption
-    for name in ("z", "z_lag1"):
-        seed[compiled.idx[name]] += tfp
+    seed[compiled.idx["z"]] += tfp
     return seed
 
 

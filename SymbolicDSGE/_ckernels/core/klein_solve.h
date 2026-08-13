@@ -14,10 +14,10 @@ typedef struct {
   klein_zgges_fn zgges;
   sdsge_dgeqrf_fn dgeqrf;
   sdsge_dormqr_fn dormqr;
-  const f64 *ss_seed;   /* n_var: Newton seed for the steady state */
-  const f64 *params;    /* n_par: calib_params order */
-  const i8 *incidence;  /* n_var: SDSGE_INC_* bits, unioned over the regimes */
-  i64 n_var;            /* n_state + n_ctrl (square pencil) */
+  const f64 *ss_seed;  /* n_var: Newton seed for the steady state */
+  const f64 *params;   /* n_par: calib_params order */
+  const i8 *incidence; /* n_var: SDSGE_INC_* bits, unioned over the regimes */
+  i64 n_var;           /* n_state + n_ctrl (square pencil) */
   i64 n_state;
   i64 n_ctrl;
   i64 n_exog;
@@ -105,14 +105,14 @@ typedef struct {
  * The first-order rules the SGU tensors are built from are `sdsge_solve1.p` and
  * `.f`, which are already real; this struct does not restate them. */
 typedef struct {
-  f64 *f_xx;       /* n_var*(2*n_var)*(2*n_var) */
-  f64 *bx;         /* n_state*n_exog */
-  const f64 *chol; /* n_exog*n_exog, caller-filled */
-  f64 *eta;        /* n_state*n_exog */
-  f64 *gxx;        /* n_ctrl*n_state*n_state */
-  f64 *hxx;        /* n_state*n_state*n_state */
-  f64 *gss;        /* n_ctrl */
-  f64 *hss;        /* n_state */
+  f64 *f_xx; /* n_var*(2*n_var)*(2*n_var) */
+  f64 *bx;   /* n_state*n_exog */
+  f64 *chol; /* n_exog*n_exog, caller-filled */
+  f64 *eta;  /* n_state*n_exog */
+  f64 *gxx;  /* n_ctrl*n_state*n_state */
+  f64 *hxx;  /* n_state*n_state*n_state */
+  f64 *gss;  /* n_ctrl */
+  f64 *hss;  /* n_state */
 } sdsge_solve2;
 
 /* sdsge_klein_solve1, then the second-order tail: the state rows of B, the

@@ -322,7 +322,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   /* eta is chol(Q) in the leading n_exog rows. A constant Q is factored once at
    * compose time, so only a theta-driven Q refactors here. */
   if (!b->q_spec.is_constant) {
-    if (sdsge_chol(Q, 0.0, s2->eta, b->q_spec.K) != SDSGE_OK) {
+    if (sdsge_chol(Q, 0.0, s2->chol, b->q_spec.K) != SDSGE_OK) {
       return -INFINITY;
     }
   }

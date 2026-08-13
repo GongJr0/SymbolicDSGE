@@ -339,10 +339,8 @@ class SolvedModel(ABC, Generic[Policy]):
         ``x0`` arrives in levels and everything downstream runs in deviations.
         ``None`` is the steady state, which is zero once converted.
 
-        A policy-dependent projection happens, therefore the caller must pass
-        the relevant policty matrix: ``policy.f`` for a perturbation solve, or
-        ``f_ref`` for a piecewise one. Everything else is the model's
-        variable layout.
+        ``x0`` is the vector at ``t - 1`` and the rules read its state half, so
+        the control block comes back zero.
         """
         n = self.compiled.n_var
         n_state = self.compiled.n_state

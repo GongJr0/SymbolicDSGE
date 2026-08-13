@@ -48,6 +48,17 @@ class VariableLayout:
     depth, which is what widens a declared-order input over the generated block.
     A shock state is absent from it: it tracks an innovation, not a variable.
 
+    ``state_names`` and ``control_names`` split the canonical order at
+    ``n_state``. ``exo_state_names`` and ``endo_state_names`` split the state
+    block again, by whether a shock declares the variable as its target, and both
+    keep the order the state block is in. Being driven by a shock is what makes a
+    state exogenous, not what makes a variable a state, so a shocked variable
+    that is never lagged is a control and appears in neither.
+
+    ``n_exog`` counts the model's innovations, which is the width of the shock
+    matrix and of ``B``. It is unrelated to how many states are exogenous: one
+    shock may target several variables, and a target may be a control.
+
     ``shock_names`` names the shock columns in ``shock_map`` order, which is the
     order the compiler minted the shock states in, and ``shock_idx`` is that
     order as a lookup. A shock is named by its own symbol rather than by the
@@ -254,7 +265,7 @@ class CompiledModel:
 
         present: set[str] = set()
         for expr in exprs:
-            present.update(s.name for s in expr.free_symbols)
+            present.update(s.name for s in expr.free_symbols)  # pyright: ignore
 
         out = np.zeros(self.n_var, dtype=np.int8)
         for i, name in enumerate(self.var_names):

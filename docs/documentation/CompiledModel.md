@@ -24,10 +24,11 @@ __Layout Fields:__
 |:---------|:--------:|----------------:|
 | declared_names | `#!python tuple[str, ...]` | Variables in config declaration order. |
 | canonical_names | `#!python tuple[str, ...]` | Variables in compiled solver order. |
-| exo_state_names | `#!python tuple[str, ...]` | Shock-map targets placed in the shocked/exogenous state block. |
-| endo_state_names | `#!python tuple[str, ...]` | Unshocked variables inferred as states from model dynamics. |
+| state_names | `#!python tuple[str, ...]` | Variables occurring at `t-1`, which lead the compiled order. |
+| exo_state_names | `#!python tuple[str, ...]` | States a shock declares as its target. |
+| endo_state_names | `#!python tuple[str, ...]` | States no shock targets. |
 | control_names | `#!python tuple[str, ...]` | Variables not inferred as states. |
-| n_exog | `#!python int` | Number of shocked/exogenous state variables. |
+| n_exog | `#!python int` | Number of shocks, which is the width of `B`. |
 | n_state | `#!python int` | Total number of state variables. |
 | idx | `#!python dict[str, int]` | Variable-name to canonical index mapping. |
 
@@ -52,7 +53,7 @@ __Fields:__
 | observable_funcs | `#!python list[Callable]` | Measurement equations as `Callable`s. |
 | observable_jacobian | `#!python Callable[..., np.ndarray]` | Compiled Jacobian function of measurement equations. |
 | n_state | `#!python int` | Number of state variables in the compiled layout. |
-| n_exog | `#!python int` | Number of shocked/exogenous state variables in the compiled layout. |
+| n_exog | `#!python int` | Number of shocks driving the compiled model. |
 
 &nbsp;
 

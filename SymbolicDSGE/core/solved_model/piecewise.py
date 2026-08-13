@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 from typing import Mapping, Callable, Union
-from numpy import float64, int64, ndarray, asarray, zeros
+from numpy import float64, int64, ndarray
 from numpy.typing import NDArray
 
 from .base import SolvedModel, NDF
+from .first_order import FirstOrderSolvedModel
 from .shocks import simulation_shock_matrix
 from ..solver_backend import PiecewiseSolution
 from ..compiled_model import CompiledModel
@@ -49,18 +50,17 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         comp = self.compiled
         x0_arr = self._simulation_initial_state(x0)[: comp.n_state]
 
-        shock_mat = zeros((T, comp.n_state), dtype=float64)
-        shock_mat[:, : comp.n_exog] = simulation_shock_matrix(
-            comp, T, shocks, shock_scale
-        )
+        shock_mat = simulation_shock_matrix(comp, T, shocks, shock_scale)
 
         constraint = comp.construct_constraint_func()
 
         X, regimes, diag = occbin_sim(
             a=pol.a,
             b=pol.b,
-            c=pol.cst,  # occbin_sim's `c` is the constant, not the lag block
-            f_ref=pol.f_ref,
+            c=pol.c,
+            d=pol.d,
+            cst=pol.cst,
+            ghx_ref=pol.ghx_ref,
             ss=pol.steady_state,
             par=comp._coerce_param_vector(comp.config.calibration.parameters),
             cond_addr=constraint.address,
@@ -196,3 +196,48 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             reset_check_ahead=reset_check_ahead,
         )
         return self._assemble_simulation(path, observables)
+
+    def sim_reference(
+        self,
+        T: int,
+        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+        shock_scale: float = 1.0,
+        x0: list[float] | ndarray | None = None,
+        observables: bool = False,
+    ) -> SimResult:
+        """Simulate the reference regime (a first-order solution) over T periods, ignoring constraints.
+
+        Parameters
+        ----------
+        T : int
+            Number of time periods to simulate.
+
+        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
+            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
+            joint (multivar) shock over those variables. Each value may be a
+            :class:`Shock` distribution spec (materialized into a ``T``-horizon
+            draw here), a ``callable`` taking the shock scale and returning a
+            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
+            ``None``, all shocks are zero.
+
+        shock_scale : float, optional
+            A scaling factor applied to all shocks.
+
+        x0 : list[float] | ndarray, optional
+            Initial state, in levels, of length ``n_state`` or ``n_var``. If
+            None, the model starts at its steady state.
+
+        observables : bool, optional
+            If True, compute and include observable variables in the output.
+
+        Returns
+        -------
+        SimResult
+            The simulated path in levels, with each variable's series available
+            by name.
+
+        """
+
+        return FirstOrderSolvedModel(self.compiled, self.policy.ref).sim(
+            T, shocks, shock_scale, x0=x0, observables=observables
+        )

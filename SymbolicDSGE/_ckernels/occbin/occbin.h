@@ -24,13 +24,20 @@ i64 sdsge_constraint_path(sdsge_constraint_fn cond,
 // regime_ctx table: those carry the build role (cfunc, rows) that is spent once
 // in regime_table, and a caller holding arrays would have to lower them again.
 typedef struct {
-  const f64 *a; // (n_regime, n_var, n_var)
-  const f64 *b; // (n_regime, n_var, n_var)
-  const f64 *c; // (n_regime, n_var)
-  const f64 *f_ref;
+  const f64 *a;   // (n_regime, n_var, n_var)
+  const f64 *b;   // (n_regime, n_var, n_var)
+  const f64 *c;   // (n_regime, n_var, n_var)  lag block
+  const f64 *d;   // (n_regime, n_var, n_exog) shock block
+  const f64 *cst; // (n_regime, n_var)         constant
+  // (n_var, n_state) the reference regime's whole rule, y_t = ghx y_{t-1}.
+  // The recursion closes on it past the horizon, where the guess is relaxed.
+  // Full width rather than f_ref: the unknown is the whole vector now, so the
+  // state/control split has nothing to say here.
+  const f64 *ghx_ref;
   i64 n_var;
   i64 n_state;
   i64 n_ctrl;
+  i64 n_exog;
 } occbin_ctx;
 
 typedef struct {
@@ -84,50 +91,56 @@ typedef struct {
 } sdsge_occbin1;
 
 arena_size sdsge_occbin_recursion_arena_size(i64 n_var, i64 n_state,
-                                             i64 n_ctrl);
+                                             i64 n_exog);
 
 i64 sdsge_occbin_recursion(
     const occbin_ctx *ctx, const i8 *SDSGE_RESTRICT mask, i64 T,
-    f64 *SDSGE_RESTRICT out, // (T, n_var, n_state + 1)
+    f64 *SDSGE_RESTRICT out, // (T, n_var, n_state + n_exog + 1)
     i64 *SDSGE_RESTRICT
         singular_date, // `t` if the recursion is singular, -1 otherwise
     f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena);
 
+// `x0` is y_{t-1} at the first date, so row t of `path` is y_t and the seed is
+// not itself a row. `eps0` is (n_exog,) and lands on date 0 alone: a shock
+// later in the projection is unforeseen, which is what makes it zero here.
+// NULL for a period with no innovation.
 void sdsge_occbin_forward(const f64 *SDSGE_RESTRICT rule,
-                          const f64 *SDSGE_RESTRICT x0, i64 T, i64 n_var,
-                          i64 n_state, f64 *SDSGE_RESTRICT path);
+                          const f64 *SDSGE_RESTRICT x0,
+                          const f64 *SDSGE_RESTRICT eps0, i64 T, i64 n_var,
+                          i64 n_state, i64 n_exog, f64 *SDSGE_RESTRICT path);
 
 arena_size sdsge_occbin_period_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                          i64 T_cap, i64 max_iter);
+                                          i64 n_exog, i64 T_cap, i64 max_iter);
 
 // `mask`, `T` and `path` are updated in place; `diag` is written at slot `s`.
 // Requires `max_iter >= 1`: the guess is read once before anything is weighed.
 i64 sdsge_occbin_period(const occbin_run_ctx *run,
-                        const f64 *SDSGE_RESTRICT x0, // (n_state,)
-                        i8 *mask,                     // (T_cap,)
+                        const f64 *SDSGE_RESTRICT x0,   // (n_state,)
+                        const f64 *SDSGE_RESTRICT eps0, // (n_exog,)
+                        i8 *mask,                       // (T_cap,)
                         i64 *T, f64 *rule, f64 *path, occbin_diag *diag, i64 s,
                         f64 *arena, i64 *iarena);
 
 arena_size sdsge_occbin_sim_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                         i64 T_cap, i64 max_iter);
+                                       i64 n_exog, i64 T_cap, i64 max_iter);
 
 // Requires `T0 >= 2` and `n_periods - S <= T0`. `init_mask` holds one guess per
 // shock period, in the layout `regimes` comes back in, for the first `n_init`
 // of them; pass NULL with `n_init` 0 to start relaxed. Periods past `n_init`
 // take the previous period's guess, shifted.
 i64 sdsge_occbin_sim(const occbin_run_ctx *run,
-                     const f64 *shocks, // (S, n_state)
+                     const f64 *shocks, // (S, n_exog)
                      i64 S, i64 n_periods,
                      const f64 *x_init,   // (n_state,)
                      const i8 *init_mask, // (n_init, T_cap)
                      i64 n_init,          // 0 <= n_init <= S
                      f64 *out,            // (n_periods, n_var)
-                     i8 *regimes,       // (S, T_cap)
-                     i64 *T_used,       // (S,)
-                     occbin_diag *diag, // per-period arrays are (S,)
-                     f64 *rule,         // (T_cap, n_var, n_state + 1) scratch
-                     f64 *path,         // (T_cap, n_var) scratch
-                     i8 *mask,          // (T_cap,) scratch
+                     i8 *regimes,         // (S, T_cap)
+                     i64 *T_used,         // (S,)
+                     occbin_diag *diag,   // per-period arrays are (S,)
+                     f64 *rule, // (T_cap, n_var, n_state + n_exog + 1) scratch
+                     f64 *path,           // (T_cap, n_var) scratch
+                     i8 *mask,            // (T_cap,) scratch
                      f64 *arena, i64 *iarena);
 
 arena_size sdsge_occbin_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,

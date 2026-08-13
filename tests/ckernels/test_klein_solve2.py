@@ -52,7 +52,9 @@ def _staged(compiled, par, seed, eta):
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
 
-    ss, f, p, stab, eig, A, B = klein_solve1(addr, seed, par, n_state, compiled.n_exog)
+    ss, f, p, stab, eig, A, B = klein_solve1(
+        addr, seed, par, compiled.incidence, n_state, compiled.n_exog
+    )
     # The second-order stages take the pencil, which the fused solve keeps
     # internal, so the staged reference rebuilds it at the same steady state.
     a, b, _, _ = klein_preprocess(addr, ss, par, n_eq, compiled.n_exog)
@@ -80,6 +82,7 @@ def test_matches_the_staged_shims_exactly(path):
         compiled.construct_objective_cfunc_bicomplex().address,
         seed,
         par,
+        compiled.incidence,
         compiled.n_state,
         eta,
         compiled.n_exog,
@@ -99,6 +102,7 @@ def test_python_wrapper_carries_the_native_outputs(path):
         compiled.construct_objective_cfunc_bicomplex(),
         par,
         seed,
+        compiled.incidence,
         compiled.n_state,
         eta,
         n_exog=compiled.n_exog,
@@ -130,6 +134,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
         compiled.construct_objective_cfunc().address,
         seed,
         par,
+        compiled.incidence,
         compiled.n_state,
         compiled.n_exog,
     )
@@ -138,6 +143,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
         compiled.construct_objective_cfunc_bicomplex().address,
         seed,
         par,
+        compiled.incidence,
         compiled.n_state,
         eta,
         compiled.n_exog,
@@ -164,6 +170,7 @@ def test_rejects_an_eta_the_risk_correction_cannot_read():
             compiled.construct_objective_cfunc_bicomplex().address,
             seed,
             par,
+            compiled.incidence,
             compiled.n_state,
             eta[:-1],
             compiled.n_exog,

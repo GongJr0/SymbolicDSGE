@@ -151,6 +151,7 @@ cdef extern from "estimation.h":
     ctypedef struct sdsge_solve2:
         double *f_xx
         double *bx
+        double *chol
         double *eta
         double *gxx
         double *hxx
@@ -183,6 +184,12 @@ cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
         int64_t n_float
         int64_t n_int
+
+    int SDSGE_OK
+
+
+cdef extern from "sdsge_linalg.h":
+    int sdsge_chol(const double *S, double jitter, double *L, int64_t n) nogil
 
 
 cdef extern from "../core/klein_solve.h":
@@ -294,6 +301,14 @@ cdef object _dormqr_capsule = _cython_lapack.__pyx_capi__["dormqr"]
 cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
     _dormqr_capsule, PyCapsule_GetName(_dormqr_capsule)
 )
+
+
+cdef _factor_shock_cov(double[:, ::1] cov, double[:, ::1] out):
+    if sdsge_chol(&cov[0, 0], 0.0, &out[0, 0], cov.shape[0]) != SDSGE_OK:
+        raise ValueError(
+            "The shock covariance is not positive definite, so it has no "
+            "Cholesky factor for the solve to load the innovations through."
+        )
 
 
 def obj_linear_base(
@@ -663,17 +678,18 @@ def obj_unscented_base(
     # Second-order scratch.
     f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
     bx = np.empty((n_state, n_exog), dtype=np.float64)
+    chol = np.zeros((n_exog, n_exog), dtype=np.float64)
+    eta = np.zeros((n_state, n_exog), dtype=np.float64)
     gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
     gss = np.empty(n_ctrl, dtype=np.float64)
     hss = np.empty(n_state, dtype=np.float64)
 
-    # eta (n_state x n_exog), padding rows zeroed once. Q is constant here, so the
-    # objective's runtime guard skips its own Cholesky and reads this precomputed
-    # factor; matches DSGESolver._build_eta (np.linalg.cholesky, no jitter).
-    eta = np.zeros((n_state, n_exog), dtype=np.float64)
+    # chol (n_exog x n_exog) is the factor the solve loads the innovations
+    # through; eta (n_state x n_exog) is where it writes bx @ chol. Q is constant
+    # here, so the objective's runtime guard skips its own factorization.
     if n_exog > 0:
-        eta[:n_exog, :] = np.linalg.cholesky(np.asarray(Q))
+        _factor_shock_cov(Q, chol)
 
     # z0 = [x0[:n_state]; 0] (2*n_state); x0 is zero at base.
     z0 = np.zeros(2 * n_state, dtype=np.float64)
@@ -698,6 +714,7 @@ def obj_unscented_base(
 
     cdef double[:, :, ::1] fxxv = f_xx
     cdef double[:, ::1] bxv = bx
+    cdef double[:, ::1] cholv = chol
     cdef double[:, ::1] etav = eta
     cdef double[:, :, ::1] gxxv = gxx
     cdef double[:, :, ::1] hxxv = hxx
@@ -793,6 +810,7 @@ def obj_unscented_base(
 
     ctx.solve2.f_xx = &fxxv[0, 0, 0]
     ctx.solve2.bx = &bxv[0, 0]
+    ctx.solve2.chol = &cholv[0, 0]
     ctx.solve2.eta = &etav[0, 0]
     ctx.solve2.gxx = &gxxv[0, 0, 0]
     ctx.solve2.hxx = &hxxv[0, 0, 0]
@@ -1003,6 +1021,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     # Unscented-only second-order scratch (allocated in that branch).
     cdef double[:, :, ::1] fxxv
     cdef double[:, ::1] bxv
+    cdef double[:, ::1] cholv
     cdef double[:, :, ::1] gxxv
     cdef double[:, :, ::1] hxxv
     cdef double[::1] gssv
@@ -1318,18 +1337,23 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
         gss = np.empty(n_ctrl, dtype=np.float64)
         hss = np.empty(n_state, dtype=np.float64)
-        # eta (n_state x n_exog): the objective recomputes chol(Q) per eval when Q
-        # varies; for constant Q it reads this precomputed factor.
+        # The objective refactors chol per eval when Q varies; a constant Q is
+        # factored once here. eta is where the solve writes bx @ chol.
+        chol = np.zeros((n_exog, n_exog), dtype=np.float64)
         eta = np.zeros((n_state, n_exog), dtype=np.float64)
         if qs.is_constant and n_exog > 0:
-            eta[:n_exog, :] = np.linalg.cholesky(
-                np.asarray(qs.constant, dtype=np.float64).reshape(n_exog, n_exog)
+            _factor_shock_cov(
+                np.ascontiguousarray(qs.constant, dtype=np.float64).reshape(
+                    n_exog, n_exog
+                ),
+                chol,
             )
         z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
-        for _a in (f_xx, bx, gxx, hxx, gss, hss, eta, z0):
+        for _a in (f_xx, bx, chol, gxx, hxx, gss, hss, eta, z0):
             nc.keep.append(_a)
         fxxv = f_xx
         bxv = bx
+        cholv = chol
         gxxv = gxx
         hxxv = hxx
         gssv = gss
@@ -1338,6 +1362,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         z0v = z0
         nc.uctx.solve2.f_xx = &fxxv[0, 0, 0]
         nc.uctx.solve2.bx = &bxv[0, 0]
+        nc.uctx.solve2.chol = &cholv[0, 0]
         nc.uctx.solve2.eta = &etav[0, 0]
         nc.uctx.solve2.gxx = &gxxv[0, 0, 0]
         nc.uctx.solve2.hxx = &hxxv[0, 0, 0]

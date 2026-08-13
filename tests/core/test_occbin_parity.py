@@ -31,16 +31,6 @@ import pytest
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_occbin as golden
 
-# The recursion is still two-date: it solves `a y' = b y - cst` with a rule
-# `n_state + 1` wide, and the pencils it now receives carry a lag block and a
-# shock block it has no column for. Running it does not merely give wrong
-# numbers, it writes past the rule buffer, and the resulting heap corruption
-# surfaces as a crash in whatever allocates next. Skipped at module scope until
-# `n_rhs` widens to `n_state + n_exog + 1` and the forward pass gains `R_t eps`.
-pytestmark = pytest.mark.skip(
-    reason="occbin recursion is two-date; port to three dates in progress"
-)
-
 
 _MODEL = "tests/fixtures/models/rbc_occbin.yaml"
 
@@ -93,21 +83,19 @@ def test_the_reference_steady_state_is_dynares(solved):
 def test_the_unconstrained_path_is_dynares_linear_simulation(solved):
     # oo_.occbin.simul.linear: the same surprise sequence with the constraints
     # ignored, so it settles the reference pencil before any regime logic runs.
-    pol = solved.policy
+    # `ref` is that regime as an ordinary first-order solution, so the path is
+    # its own state space, `y_t = A y_{t-1} + B eps_t`.
+    ref = solved.policy.ref
     head = golden.LINEAR_HEAD.shape[0]
-    # The innovation enters the slot the lifted shock state occupies, which is
-    # where `sim` widens a one-shock draw to.
-    shocks = np.zeros((head, solved.compiled.n_state))
-    shocks[:, 0] = np.ravel(golden.SHOCKS)[:head]
+    eps = np.ravel(golden.SHOCKS)[:head, None]
 
-    x = np.zeros(solved.compiled.n_state)
+    y = np.zeros(solved.compiled.n_var)
     rows = []
     for t in range(head):
-        x = x + shocks[t]
-        rows.append(np.concatenate([x, pol.f_ref @ x]))
-        x = pol.p_ref @ x
+        y = ref.A @ y + ref.B @ eps[t]
+        rows.append(y)
 
-    ours = _columns(np.array(rows) + pol.steady_state, solved.compiled)
+    ours = _columns(np.array(rows) + ref.steady_state, solved.compiled)
 
     np.testing.assert_allclose(ours, golden.LINEAR_HEAD, rtol=1e-12, atol=1e-12)
 

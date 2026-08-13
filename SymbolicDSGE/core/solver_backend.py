@@ -81,23 +81,23 @@ class SecondOrderSolution(FirstOrderSolution):
 class PiecewiseSolution(BaseSolution):
     """Piecewise-linear (OccBin) solution: everything a parameter draw fixes.
 
-    There is no ``A``/``B`` here. The policy is path dependent,
-    ``y_t = P_t y_{t-1} + D_t``, so the rules are built per date against a
-    guessed regime sequence rather than once, and a time-invariant state space
-    would describe a model with no constraints. What a draw does fix is the
-    pencil of every regime, since all of them linearize at the same reference
-    steady state. :attr:`steady_state`, ``stab`` and ``eig`` are that reference
-    regime's.
+    The piecewise policy itself is path dependent, ``y_t = P_t y_{t-1} + D_t``,
+    so its rules are built per date against a guessed regime sequence rather
+    than once. What a draw does fix is the pencil of every regime, since all of
+    them linearize at the same reference steady state. :attr:`steady_state`,
+    ``stab`` and ``eig`` are that reference regime's, and so is :attr:`ref`.
 
     :attr:`a`/``b``/``c`` (n_regime, n_var, n_var) and ``d``
     (n_regime, n_var, n_exog) are the regime pencils
     ``a^r E[y_{t+1}] = b^r y_t + c^r y_{t-1} + d^r eps_t - cst^r``, indexed by
     binding bitmask, slot 0 the reference. ``cst`` (n_regime, n_var) is the
     constraint's whole mechanism and is zero at slot 0.
-    :attr:`f_ref` (n_ctrl, n_state)/``p_ref`` (n_state, n_state) are the
-    reference regime's rule, which the recursion takes as its terminal
-    condition: past the horizon the guess is relaxed, so the model is its own
-    unconstrained self.
+    :attr:`ghx_ref` (n_var, n_state) is the reference regime's whole rule, which
+    the recursion takes as its terminal condition: past the horizon the guess is
+    relaxed, so the model is its own unconstrained self.
+    :attr:`ref` is that same reference regime as an ordinary first-order
+    solution, so its ``A``/``B`` describe the model with the constraints ignored
+    and ``ghx_ref`` is ``ref.p`` stacked over ``ref.f``.
     """
 
     a: NDF
@@ -105,8 +105,8 @@ class PiecewiseSolution(BaseSolution):
     c: NDF
     d: NDF
     cst: NDF
-    f_ref: NDF
-    p_ref: NDF
+    ghx_ref: NDF
+    ref: FirstOrderSolution
 
 
 @contextmanager
@@ -238,7 +238,7 @@ def piecewise_solve(
     error, so only the reference verdict means anything.
     """
     with _bk_dating_hint():
-        ss, f, p, stab, eig, a, b, c, d, cst = occbin_solve1(
+        ss, ghx, stab, eig, A, B, a, b, c, d, cst = occbin_solve1(
             residual_cfunc.address,
             ss_seed,
             params,
@@ -259,6 +259,17 @@ def piecewise_solve(
         c=c,
         d=d,
         cst=cst,
-        f_ref=f,
-        p_ref=p,
+        ghx_ref=ghx,
+        # p and f are views into ghx: states lead the canonical order, so the
+        # stack the recursion wants is already the two blocks end to end.
+        ref=FirstOrderSolution(
+            steady_state=ss,
+            stab=stab,
+            eig=eig,
+            order=1,
+            p=ghx[:n_states],
+            f=ghx[n_states:],
+            A=A,
+            B=B,
+        ),
     )

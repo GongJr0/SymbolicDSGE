@@ -61,8 +61,9 @@ def test_compile_builds_expected_structures(compiled_test):
     c = compiled_test
     n_vars = len(c.config.variables.variables)
 
-    # test.yaml lags u, v and r and carries two shocks, so five generated states.
-    assert c.n_state == 5
+    # test.yaml lags u, v and r, so those three are the states; its two shocks
+    # are innovations rather than variables.
+    assert c.n_state == 3
     assert c.n_exog == 2
     assert len(c.var_names) == n_vars
     assert len(c.cur_syms) == n_vars
@@ -199,15 +200,9 @@ def test_compile_infers_n_state_and_n_exog(parsed_test):
 
     compiled = solver.compile()
 
-    assert compiled.n_state == 5
+    assert compiled.n_state == 3
     assert compiled.n_exog == 2
-    assert compiled.var_names[: compiled.n_state] == [
-        "e_u_st",
-        "e_v_st",
-        "u_lag1",
-        "v_lag1",
-        "r_lag1",
-    ]
+    assert compiled.var_names[: compiled.n_state] == ["u", "v", "r"]
 
 
 def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):

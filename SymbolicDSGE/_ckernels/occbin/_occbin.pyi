@@ -53,7 +53,7 @@ def regime_pencil(
 def occbin_recursion_arena_size(
     n_var: int,
     n_state: int,
-    n_ctrl: int,
+    n_exog: int,
 ) -> tuple[int, int]:
     """(n_float, n_int) scratch ``occbin_recursion`` needs for a shape."""
 
@@ -61,23 +61,31 @@ def occbin_recursion(
     a: _F64,
     b: _F64,
     c: _F64,
+    d: _F64,
+    cst: _F64,
     mask: _I8,
-    f_ref: _F64,
+    ghx_ref: _F64,
     out: _F64 | None = ...,
     arena: _F64 | None = ...,
     iarena: _I64 | None = ...,
 ) -> _F64:
-    """(T, n_var, n_state + 1) rules <- pencils stacked by bitmask and a guess.
+    """(T, n_var, n_state + n_exog + 1) rules <- pencils and a guess.
 
-    Block ``t`` is the affine map from ``x_t`` to ``[x_{t+1}; u_t]``, state rows
-    first, with the constant in the last column. ``f_ref`` is ``(n_ctrl,
+    Block ``t`` is the affine map from ``y_{t-1}`` to ``y_t``: the leading
+    ``n_state`` columns act on the lagged state, the next ``n_exog`` on that
+    date's innovation, the last is the constant. ``ghx_ref`` is ``(n_var,
     n_state)`` and closes the recursion past the last date.
     """
 
-def occbin_forward(rule: _F64, x0: _F64, out: _F64 | None = ...) -> _F64:
-    """(T, n_var) path in deviations <- a rule stack and an initial state.
+def occbin_forward(
+    rule: _F64, x0: _F64, eps0: _F64 | None = ..., out: _F64 | None = ...
+) -> _F64:
+    """(T, n_var) path in deviations <- a rule stack, a lagged state, a shock.
 
-    Row ``t`` is ``[x_t; u_t]``, the state half from date ``t - 1``'s block and
+    Row ``t`` is the whole of ``y_t``; ``x0`` is the state block at ``t - 1`` so
+    the seed is not itself a row. ``eps0`` lands on date 0 alone, since a shock
+    later in a projection is unforeseen. Row ``t`` is ``[x_t; u_t]``'s successor
+    under the same layout, the state half from date ``t - 1``'s block and
     the control half from date ``t``'s.
     """
 
@@ -91,19 +99,22 @@ def occbin_solve1(
     rows: Sequence[_I64],
     n_constraint: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64]:
-    """(ss, f, p, stab, eig, a, b, c, d, cst) <- reference solve and every pencil.
+) -> tuple[_F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64, _F64]:
+    """(ss, ghx, stab, eig, A, B, a, b, c, d, cst) <- reference solve and every pencil.
 
     ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
     ``0..2 ** n_constraint - 1``, slot 0 the reference with address 0 and no
-    rows. ``a``/``b`` come back ``(n_regime, n_var, n_var)`` and ``c``
-    ``(n_regime, n_var)``, shaped for ``occbin_sim``.
+    rows. ``ghx`` is ``(n_var, n_state)`` and ``A``/``B`` are the reference
+    regime's state space. ``a``/``b``/``c`` come back
+    ``(n_regime, n_var, n_var)``, ``d`` ``(n_regime, n_var, n_exog)`` and
+    ``cst`` ``(n_regime, n_var)``, shaped for ``occbin_sim``.
     """
 
 def occbin_sim_arena_size(
     n_var: int,
     n_state: int,
     n_ctrl: int,
+    n_exog: int,
     T_cap: int,
     max_iter: int,
 ) -> tuple[int, int]:
@@ -113,7 +124,9 @@ def occbin_sim(
     a: _F64,
     b: _F64,
     c: _F64,
-    f_ref: _F64,
+    d: _F64,
+    cst: _F64,
+    ghx_ref: _F64,
     ss: _F64,
     par: _F64,
     cond_addr: int,

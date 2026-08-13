@@ -29,29 +29,45 @@ def test_coerce_variable_name_branches():
     assert DSGESolver._coerce_variable_name(obj) == str(obj)
 
 
-_MODEL_NAMES = ("z", "k", "c")
+_STATES = ("k", "z")
+_CONTROLS = ("c", "y")
 
 
-def test_resolve_variable_order_permutes_the_declared_variables():
-    # The states are the compiler's, so an explicit order is free to permute the
-    # declared block however it likes.
-    assert DSGESolver._resolve_variable_order(["c", "z", "k"], _MODEL_NAMES) == (
-        "c",
-        "z",
-        "k",
-    )
+def test_resolve_variable_order_permutes_within_each_block():
+    # Membership is the model's, position is the caller's: both blocks come back
+    # in the order they were named.
+    assert DSGESolver._resolve_variable_order(
+        ["z", "k", "y", "c"], _STATES, _CONTROLS
+    ) == (("z", "k"), ("y", "c"))
+
+
+def test_resolve_variable_order_appends_the_minted_lags_to_the_states():
+    assert DSGESolver._resolve_variable_order(
+        ["z", "k", "c", "y"],
+        (*_STATES, "k_lag1"),
+        _CONTROLS,
+        frozenset({"k_lag1"}),
+    ) == (("z", "k", "k_lag1"), ("c", "y"))
 
 
 def test_resolve_variable_order_errors():
     with pytest.raises(ValueError, match="duplicate"):
-        DSGESolver._resolve_variable_order(["z", "z", "k"], _MODEL_NAMES)
+        DSGESolver._resolve_variable_order(["z", "z", "k", "c"], _STATES, _CONTROLS)
     with pytest.raises(ValueError, match="Unknown: \\['nope'\\]"):
-        DSGESolver._resolve_variable_order(["z", "k", "nope"], _MODEL_NAMES)
-    with pytest.raises(ValueError, match="Missing: \\['c'\\]"):
-        DSGESolver._resolve_variable_order(["z", "k"], _MODEL_NAMES)
-    # A generated state is the compiler's to place, so naming one is unknown.
+        DSGESolver._resolve_variable_order(["z", "k", "c", "nope"], _STATES, _CONTROLS)
+    with pytest.raises(ValueError, match="Missing: \\['y'\\]"):
+        DSGESolver._resolve_variable_order(["z", "k", "c"], _STATES, _CONTROLS)
+    # A minted lag is the compiler's to place, so naming one is unknown.
     with pytest.raises(ValueError, match="must not appear"):
-        DSGESolver._resolve_variable_order(["z", "k", "c", "z_lag1"], _MODEL_NAMES)
+        DSGESolver._resolve_variable_order(
+            ["z", "k", "c", "y", "k_lag1"],
+            (*_STATES, "k_lag1"),
+            _CONTROLS,
+            frozenset({"k_lag1"}),
+        )
+    # Right names, wrong blocks: a control cannot be written into the state block.
+    with pytest.raises(ValueError, match="must lead with the model's states"):
+        DSGESolver._resolve_variable_order(["z", "c", "k", "y"], _STATES, _CONTROLS)
 
 
 def test_solve_rejects_bad_order():
