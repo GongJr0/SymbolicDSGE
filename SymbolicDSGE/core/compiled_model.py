@@ -21,7 +21,14 @@ from SymbolicDSGE._symbolic_printers import (
     build_constraint_cfunc,
     build_measurement_cfunc,
 )
-from .._ckernels.core import jacobian_eval, measurement_eval, residual_eval
+from .._ckernels.core import (
+    INC_CUR,
+    INC_LAG,
+    INC_LEAD,
+    jacobian_eval,
+    measurement_eval,
+    residual_eval,
+)
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -50,8 +57,7 @@ class VariableLayout:
 
     declared_names: tuple[str, ...]
     canonical_names: tuple[str, ...]
-    exo_state_names: tuple[str, ...]
-    endo_state_names: tuple[str, ...]
+    state_names: tuple[str, ...]
     control_names: tuple[str, ...]
     n_exog: int
     n_state: int
@@ -117,10 +123,20 @@ class ConstraintFunc:
 
 @dataclass(frozen=True)
 class RegimeBlock:
+    """One regime's replaced rows, and their pencil blocks at the reference point.
+
+    ``jac_a``/``jac_b``/``jac_c`` are the replaced rows of the three date
+    Jacobians, flat row-major ``(len(rows), n_var)``, and ``jac_d`` is the shock
+    block, ``(len(rows), n_exog)``. They carry ``klein_preproc``'s signs, so the
+    row reads ``a y' = b y + c y_prev + d eps - const``.
+    """
+
     rows: list[int]
     residuals: list[Expr] = field(default_factory=list)
     jac_a: list[Expr] = field(default_factory=list)
     jac_b: list[Expr] = field(default_factory=list)
+    jac_c: list[Expr] = field(default_factory=list)
+    jac_d: list[Expr] = field(default_factory=list)
     constants: list[Expr] = field(default_factory=list)
 
 
@@ -129,19 +145,19 @@ class RegimePencilFunc:
     """Compiled regime pencil rows, and everything the native side needs to call them.
 
     One cfunc per regime, keyed by the same bitmask as ``regimes``, writing
-    ``[jac_a; jac_b; constants]`` into a single ``2 * n_row * n_var + n_row``
-    buffer: the whole a block, then the whole b block, each row-major
-    ``(n_row, n_var)`` and ordered like ``rows``, then the constants. Concatenated
+    ``[jac_a; jac_b; jac_c; jac_d; constants]`` into a single buffer: each block
+    whole and row-major, ordered like ``rows``, then the constants. Concatenated
     rather than interleaved because the blocks patch into separate copies of the
     reference pencil, so each row is a contiguous copy on every side.
 
-    ``jac_b`` carries klein_preproc's sign and ``constants`` is unnegated, so all
-    three drop into a reference pencil copy as they are.
+    ``jac_b``/``jac_c``/``jac_d`` carry klein_preproc's signs and ``constants``
+    is unnegated, so all of them drop into a reference pencil copy as they are.
     """
 
     cfuncs: dict[int, Any]
     rows: dict[int, NDArray[int64]]
     n_var: int
+    n_exog: int
     n_par: int
 
     @property
@@ -158,9 +174,10 @@ class RegimePencilFunc:
         return int(self.rows[mask].shape[0])
 
     def n_out(self, mask: int) -> int:
-        """Length of ``out``: both blocks, ``2 * n_row * n_var + n_row``."""
+        """Length of ``out``: the three date blocks, the shock block, then the
+        constants, ``n_row * (3 * n_var + n_exog + 1)``."""
         n_row = self.n_row(mask)
-        return 2 * n_row * self.n_var + n_row
+        return n_row * (3 * self.n_var + self.n_exog + 1)
 
 
 @dataclass(frozen=True)
@@ -212,6 +229,43 @@ class CompiledModel:
         return self.layout.shock_idx
 
     @cached_property
+    def incidence(self) -> NDArray[np.int8]:
+        """``(n_var,)`` of ``SDSGE_INC_*`` bits: the dates each variable occurs at.
+
+        The solve partitions the pencil on this, so it is read from the symbols
+        the equations actually contain rather than from a Jacobian's sparsity. A
+        calibration that happened to zero a coefficient would otherwise move a
+        variable between groups and resize the state vector between draws.
+
+        Unioned over the reference equations and every regime's replacements:
+        the regime pencils stack by bitmask into one array, so a regime dropping
+        the last occurrence of some ``v(t+1)`` must not give that regime a pencil
+        of its own shape.
+        """
+        bit_of = {"prev": INC_LAG, "cur": INC_CUR, "fwd": INC_LEAD}
+
+        exprs = list(self.objective_eqs)
+        for block in self.regimes.values():
+            exprs.extend(block.residuals)
+        # Observables too: the layout's own lag scan covers them, and the solve
+        # indexes `p` by `n_state` while iterating `nspred`, so the two sets
+        # disagreeing is an out-of-bounds write rather than a wrong answer.
+        exprs.extend(self.observable_eqs)
+
+        present: set[str] = set()
+        for expr in exprs:
+            present.update(s.name for s in expr.free_symbols)
+
+        out = np.zeros(self.n_var, dtype=np.int8)
+        for i, name in enumerate(self.var_names):
+            bits = 0
+            for prefix, bit in bit_of.items():
+                if f"{prefix}_{name}" in present:
+                    bits |= bit
+            out[i] = bits
+        return out
+
+    @cached_property
     def _regime_cfuncs(self) -> dict[int, Any]:
         # One residual @cfunc per regime, sharing the reference layout: regimes
         # replace equations by name, so n_var/n_par are unchanged. Held here
@@ -240,19 +294,33 @@ class CompiledModel:
         rows: dict[int, NDArray[int64]] = {}
         for mask, block in self.regimes.items():
             want_jac = len(block.rows) * base.n_var
+            want_shock = len(block.rows) * self.n_exog
             want_const = len(block.rows)
-            if len(block.jac_a) != want_jac or len(block.jac_b) != want_jac:
+            got = (len(block.jac_a), len(block.jac_b), len(block.jac_c))
+            if any(n != want_jac for n in got):
                 raise ValueError(
-                    f"Regime {mask} has {len(block.jac_a)}/{len(block.jac_b)} "
-                    f"jacobian entries, expected {want_jac} for {len(block.rows)} "
-                    f"rows over {base.n_var} variables."
+                    f"Regime {mask} has {got} a/b/c jacobian entries, expected "
+                    f"{want_jac} each for {len(block.rows)} rows over "
+                    f"{base.n_var} variables."
+                )
+            if len(block.jac_d) != want_shock:
+                raise ValueError(
+                    f"Regime {mask} has {len(block.jac_d)} shock jacobian "
+                    f"entries, expected {want_shock} for {len(block.rows)} rows "
+                    f"over {self.n_exog} shocks."
                 )
             if len(block.constants) != want_const:
                 raise ValueError(
                     f"Regime {mask} has {len(block.constants)} constants, "
                     f"expected {want_const} for {len(block.rows)} rows."
                 )
-            exprs = [*block.jac_a, *block.jac_b, *block.constants]
+            exprs = [
+                *block.jac_a,
+                *block.jac_b,
+                *block.jac_c,
+                *block.jac_d,
+                *block.constants,
+            ]
             layout = MeasurementLayout(
                 slot=base.slot,
                 n_var=base.n_var,
@@ -263,7 +331,11 @@ class CompiledModel:
             rows[mask] = np.asarray(block.rows, dtype=np.int64)
 
         return RegimePencilFunc(
-            cfuncs=cfuncs, rows=rows, n_var=base.n_var, n_par=base.n_par
+            cfuncs=cfuncs,
+            rows=rows,
+            n_var=base.n_var,
+            n_exog=self.n_exog,
+            n_par=base.n_par,
         )
 
     def construct_regime_pencil_func(self) -> RegimePencilFunc | None:
@@ -331,6 +403,8 @@ class CompiledModel:
         self,
         fwd: Any,
         cur: Any,
+        prev: Any,
+        eps: Any,
         par: Mapping[str, float] | Any,
     ) -> ND:
         par_vec = self._coerce_param_vector(par)
@@ -343,6 +417,8 @@ class CompiledModel:
             self.construct_objective_cfunc().address,
             fwd,
             cur,
+            prev,
+            eps,
             par_vec,
             len(self.objective_eqs),
         )

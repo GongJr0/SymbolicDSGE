@@ -518,10 +518,12 @@ i64 sdsge_occbin_sim(const occbin_run_ctx *run, const f64 *shocks, i64 S,
 }
 
 arena_size sdsge_occbin_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                          i64 n_par, i64 max_n_row) {
-  arena_size pencil = sdsge_regime_pencil_arena_size(n_var, max_n_row);
+                                          i64 n_par, i64 n_exog, i64 nd,
+                                          i64 max_n_row) {
+  arena_size pencil =
+      sdsge_regime_pencil_arena_size(n_var, n_exog, max_n_row);
   arena_size klein =
-      sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par);
+      sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par, n_exog, nd);
 
   // Klein and pencil are sequential, maximum of both is enough for the arena to
   // hold either.
@@ -539,6 +541,7 @@ i64 sdsge_occbin_solve1(const occbin_solve1_spec *spec, sdsge_occbin1 *out,
   }
 
   const i64 n_var = spec->first.n_var;
+  const i64 n_exog = spec->first.n_exog;
   const i64 blk = n_var * n_var;
 
   i64 n_regime = 1 << spec->n_constraint;
@@ -550,10 +553,13 @@ i64 sdsge_occbin_solve1(const occbin_solve1_spec *spec, sdsge_occbin1 *out,
     table[m].rows = spec->rows[m];
     table[m].a = out->a + m * blk;
     table[m].b = out->b + m * blk;
-    table[m].c = out->c + m * n_var;
+    table[m].c = out->c + m * blk;
+    table[m].d = out->d + m * n_var * n_exog;
+    table[m].cst = out->cst + m * n_var;
   }
 
   regime_table(table, n_regime, out->ref.ss, spec->first.params,
-               out->ref.a_real, out->ref.b_real, n_var, arena);
+               out->ref.a_real, out->ref.b_real, out->ref.c_real,
+               out->ref.d_real, n_var, n_exog, arena);
   return rc;
 }

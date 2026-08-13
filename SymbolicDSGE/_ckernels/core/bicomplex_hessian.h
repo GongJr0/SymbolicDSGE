@@ -15,18 +15,27 @@
  * arithmetic itself lives in the numba cfunc.
  *
  * `hessian` is (n_eq, 2*n_var, 2*n_var) row-major f64, symmetric in the last
- * two. */
+ * two.
+ *
+ * The sweep does not span `prev` or `eps`: it holds them at the expansion point
+ * and differentiates only the (fwd, cur) pair. Every cross-derivative involving
+ * a lag or an innovation is therefore absent from `hessian`, which is correct
+ * only while the residual has no lag or shock dependence. Widening z to
+ * 3*n_var + n_exog moves this, `f_xx`, both SGU consumers and their sizers
+ * together. */
 
 typedef void (*bc_residual_fn)(const bc256 *fwd, const bc256 *cur,
+                               const bc256 *prev, const bc256 *eps,
                                const bc256 *par, bc256 *out);
 
-arena_size sdsge_bicomplex_hessian_arena_size(i64 n_var, i64 n_par, i64 n_eq);
+arena_size sdsge_bicomplex_hessian_arena_size(i64 n_var, i64 n_par, i64 n_exog,
+                                              i64 n_eq);
 
 /* Total: the sweep has no failure mode once its scratch comes from the caller. */
 void sdsge_bicomplex_hessian(bc_residual_fn residual,
                              const f64 *SDSGE_RESTRICT ss,
                              const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
-                             i64 n_eq, f64 *SDSGE_RESTRICT hessian,
+                             i64 n_exog, i64 n_eq, f64 *SDSGE_RESTRICT hessian,
                              f64 *SDSGE_RESTRICT arena);
 
 /* The step, and the only source of it: the sweep reads this directly.

@@ -67,7 +67,10 @@ def ss_ref(compiled, par):
         seed.append(float(calib[sym]) if sym in calib else 0.0)
 
     ss, _ = steady_state_newton(
-        compiled.construct_objective_cfunc().address, np.array(seed), par
+        compiled.construct_objective_cfunc().address,
+        np.array(seed),
+        par,
+        compiled.n_exog,
     )
     # The whole point of a levels fixture: the expansion point is not the origin.
     assert np.abs(ss).max() > 1.0
@@ -77,9 +80,14 @@ def ss_ref(compiled, par):
 @pytest.fixture(scope="module")
 def reference(compiled, par, ss_ref):
     n_var = len(compiled.var_names)
-    return klein_preprocess(
-        compiled.construct_objective_cfunc().address, ss_ref, par, n_var
+    a, b, _, _ = klein_preprocess(
+        compiled.construct_objective_cfunc().address,
+        ss_ref,
+        par,
+        n_var,
+        compiled.n_exog,
     )
+    return a, b
 
 
 @pytest.fixture(scope="module")
@@ -101,7 +109,9 @@ def test_patched_rows_match_a_full_sweep_of_the_regime(compiled, par, ss_ref, pa
     a, b, _ = patched
 
     regime_cfunc = compiled.construct_regime_cfuncs()[LOW]
-    a_r, b_r = klein_preprocess(regime_cfunc.address, ss_ref, par, n_var)
+    a_r, b_r, _, _ = klein_preprocess(
+        regime_cfunc.address, ss_ref, par, n_var, compiled.n_exog
+    )
 
     np.testing.assert_allclose(a[rows], a_r[rows])
     np.testing.assert_allclose(b[rows], b_r[rows])
@@ -127,7 +137,15 @@ def test_constants_are_the_regime_residual_at_the_reference(
     _, _, c = patched
 
     regime_cfunc = compiled.construct_regime_cfuncs()[LOW]
-    c_r = residual_eval(regime_cfunc.address, ss_ref, ss_ref, par, n_var).real
+    c_r = residual_eval(
+        regime_cfunc.address,
+        ss_ref,
+        ss_ref,
+        ss_ref,
+        np.zeros(compiled.n_exog),
+        par,
+        n_var,
+    ).real
 
     want = np.zeros(n_var)
     want[rows] = c_r[rows]

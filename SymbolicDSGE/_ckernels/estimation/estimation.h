@@ -88,10 +88,13 @@ typedef struct {
   bc_residual_fn bc_residual;
 
   klein_zgges_fn zgges;
+  sdsge_dgeqrf_fn dgeqrf;
+  sdsge_dormqr_fn dormqr;
   meas_fn meas;
   meas_fn jac;
 
-  const f64 *ss_seed; /* n_var: Newton seed for the steady state */
+  const f64 *ss_seed;  /* n_var: Newton seed for the steady state */
+  const i8 *incidence; /* n_var: SDSGE_INC_* bits, unioned over the regimes */
   const f64 *y;  /* T*n_obs */
   const f64 *P0; /* n_var*n_var; UKF 2n_state*2n_state */
   const f64 *x0; /* n_var, or NULL */

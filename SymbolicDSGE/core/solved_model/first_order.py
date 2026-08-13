@@ -36,7 +36,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
         shock_scale: float = 1,
         x0: list[float] | ndarray | None = None,
     ) -> StatePath:
-        x0_arr = self._simulation_initial_state(self.policy.f, x0)
+        x0_arr = self._simulation_initial_state(x0)
         shock_mat = simulation_shock_matrix(
             self.compiled,
             T=T,

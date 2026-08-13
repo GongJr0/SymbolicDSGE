@@ -26,11 +26,11 @@ def test_bicomplex_hessian_polynomial_is_exact():
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = 2 * fwd_x**2 + 3 * fwd_x * cur_x + cur_x**3
     layout = ResidualLayout(
-        slot={fwd_x: ("fwd", 0), cur_x: ("cur", 0)}, n_var=1, n_par=0
+        slot={fwd_x: ("fwd", 0), cur_x: ("cur", 0)}, n_var=1, n_par=0, n_exog=0
     )
     cf = build_cfunc([expr], layout, BicomplexOps())  # hold: keep .address valid
 
-    H = bicomplex_hessian(cf.address, np.array([1.0]), np.zeros(0), 1)
+    H = bicomplex_hessian(cf.address, np.array([1.0]), np.zeros(0), 0, 1)
 
     expected = np.array([[[4.0, 3.0], [3.0, 6.0]]])
     np.testing.assert_allclose(H, expected, rtol=1e-6, atol=1e-7)
@@ -41,11 +41,11 @@ def test_bicomplex_hessian_transcendental():
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = fwd_x * sp.exp(cur_x)
     layout = ResidualLayout(
-        slot={fwd_x: ("fwd", 0), cur_x: ("cur", 0)}, n_var=1, n_par=0
+        slot={fwd_x: ("fwd", 0), cur_x: ("cur", 0)}, n_var=1, n_par=0, n_exog=0
     )
     cf = build_cfunc([expr], layout, BicomplexOps())
 
-    H = bicomplex_hessian(cf.address, np.array([1.0]), np.zeros(0), 1)
+    H = bicomplex_hessian(cf.address, np.array([1.0]), np.zeros(0), 0, 1)
 
     e = float(np.exp(1.0))
     expected = np.array([[[0.0, e], [e, e]]])
@@ -69,7 +69,7 @@ def test_bicomplex_hessian_linear_model_is_zero(path):
         dtype=np.float64,
     )
 
-    H = bicomplex_hessian(cf.address, ss, par, layout.n_var)
+    H = bicomplex_hessian(cf.address, ss, par, layout.n_exog, layout.n_var)
 
     n2 = 2 * layout.n_var
     assert H.shape == (layout.n_var, n2, n2)

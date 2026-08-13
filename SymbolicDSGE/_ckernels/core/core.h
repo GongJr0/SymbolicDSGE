@@ -8,11 +8,19 @@
 /* Measurement / observable-jacobian @cfunc ABI: ``void(vars*, par*, out*)``. */
 typedef void (*sdsge_measurement_fn)(f64 *vars, f64 *par, f64 *out);
 
-/* Assemble state-space */
-void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
-                                const c128 *SDSGE_RESTRICT f, const i64 n_state,
-                                const i64 n_control, const i64 n_exog,
-                                f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B);
+/* Assemble the first-order transition from the solved rule.
+ *
+ * A = [[p,   0],
+ *      [f@p, 0]]
+ *
+ * The shock loading is not assembled here. It is one solve over every variable,
+ * not a state block with the controls derived from it: an innovation reaches a
+ * control contemporaneously through whatever equation carries it, which no
+ * product of `f` with a state loading can express. The pencil stage emits it
+ * whole beside `p` and `f`. */
+void sdsge_assemble_transition(const f64 *SDSGE_RESTRICT p,
+                               const f64 *SDSGE_RESTRICT f, const i64 n_state,
+                               const i64 n_control, f64 *SDSGE_RESTRICT A);
 
 /* Linear state-space simulation kernels */
 

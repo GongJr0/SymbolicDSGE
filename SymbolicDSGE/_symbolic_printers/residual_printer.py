@@ -112,6 +112,7 @@ class ResidualLayout:
     slot: dict[Symbol, tuple[str, int]]
     n_var: int
     n_par: int
+    n_exog: int
 
     @property
     def n_expr(self) -> int:
@@ -124,9 +125,20 @@ class ResidualLayout:
         for i, name in enumerate(compiled.var_names):
             slot[Symbol(f"fwd_{name}")] = ("fwd", i)
             slot[Symbol(f"cur_{name}")] = ("cur", i)
+            slot[Symbol(f"prev_{name}")] = ("prev", i)
+
+        shock_idx = {name: i for i, name in enumerate(compiled.shock_names)}
+        for shock in compiled.config.shock_map:
+            slot[shock] = ("eps", shock_idx[shock.name])
+
         for j, p in enumerate(compiled.calib_params):
             slot[p] = ("par", j)
-        return cls(slot=slot, n_var=compiled.n_var, n_par=compiled.n_par)
+        return cls(
+            slot=slot,
+            n_var=compiled.n_var,
+            n_par=compiled.n_par,
+            n_exog=compiled.n_exog,
+        )
 
 
 class ResidualPrinter(ExpressionPrinter):
@@ -149,7 +161,7 @@ def build_njit(
             *table.prelude_imports,
             "import numpy as np",
             "",
-            "def _residual(fwd, cur, par):",
+            "def _residual(fwd, cur, prev, eps, par):",
             *body,
             "",
         ]
@@ -168,15 +180,17 @@ def build_cfunc(
     preamble = [
         f"    fwd = carray(fwd_ptr, ({w * layout.n_var},))",
         f"    cur = carray(cur_ptr, ({w * layout.n_var},))",
+        f"    prev = carray(prev_ptr, ({w * layout.n_var},))",
+        f"    eps = carray(eps_ptr, ({w * layout.n_exog},))",
         f"    par = carray(par_ptr, ({w * layout.n_par},))",
-        f"    out = carray(out_ptr, ({w * layout.n_var},))",
+        f"    out = carray(out_ptr, ({w * layout.n_expr},))",
     ]
     src = "\n".join(
         [
             *table.prelude_imports,
             "from numba import carray",
             "",
-            "def _residual_cf(fwd_ptr, cur_ptr, par_ptr, out_ptr):",
+            "def _residual_cf(fwd_ptr, cur_ptr, prev_ptr, eps_ptr, par_ptr, out_ptr):",
             *preamble,
             *body,
             "",
@@ -185,6 +199,8 @@ def build_cfunc(
     ns: dict[str, Any] = {}
     exec(src, ns)  # noqa: S102
     sig = types.void(
+        types.CPointer(types.complex128),
+        types.CPointer(types.complex128),
         types.CPointer(types.complex128),
         types.CPointer(types.complex128),
         types.CPointer(types.complex128),

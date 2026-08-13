@@ -49,10 +49,42 @@ def test_klein_preproc_parity(path):
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = _params(compiled)
 
-    a_ref, b_ref = _approximate_system_numeric(eq_func, ss, par)
-    a, b = klein_preprocess(cf.address, ss, par, layout.n_var)
+    a_ref, b_ref, c_ref, d_ref = _approximate_system_numeric(
+        eq_func, ss, par, layout.n_exog
+    )
+    a, b, c, d = klein_preprocess(cf.address, ss, par, layout.n_var, layout.n_exog)
 
     assert a.shape == (layout.n_var, layout.n_var)
     assert b.shape == (layout.n_var, layout.n_var)
+    assert c.shape == (layout.n_var, layout.n_var)
+    assert d.shape == (layout.n_var, layout.n_exog)
     np.testing.assert_allclose(a, a_ref, rtol=RTOL, atol=ATOL)
     np.testing.assert_allclose(b, b_ref, rtol=RTOL, atol=ATOL)
+    np.testing.assert_allclose(c, c_ref, rtol=RTOL, atol=ATOL)
+    np.testing.assert_allclose(d, d_ref, rtol=RTOL, atol=ATOL)
+
+
+@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
+def test_the_lag_and_shock_blocks_are_empty_while_desugar_lifts(path):
+    """The gate on the widened residual staying inert.
+
+    ``desugar`` rewrites every ``v(t-1)`` into an aux variable and every shock
+    into a state, and the compiler substitutes the shock symbols to zero, so no
+    ``prev_`` or shock symbol reaches the printed residual. Both new blocks are
+    therefore exactly zero, and ``a``/``b`` are the pencil the two-date sweep
+    produced before the widening.
+
+    This fails the moment the compiler stops lifting, which is the point: the
+    blocks going live is a change the goldens alone would not announce.
+    """
+    compiled = _compiled(path)
+    layout = ResidualLayout.from_compiled(compiled)
+    cf = build_cfunc(compiled.objective_eqs, layout)
+
+    ss = np.zeros(layout.n_var, dtype=np.float64)
+    _, _, c, d = klein_preprocess(
+        cf.address, ss, _params(compiled), layout.n_var, layout.n_exog
+    )
+
+    assert not c.any()
+    assert not d.any()

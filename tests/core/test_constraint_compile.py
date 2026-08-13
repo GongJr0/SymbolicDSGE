@@ -260,7 +260,7 @@ def _assert_pencil_parity(compiled, ss, scale):
     rng = np.random.default_rng(0)
     for trial in range(5):
         point = ss if trial == 0 else ss + rng.normal(0, scale, n_var)
-        a_ref, b_ref = klein_preprocess(addr, point, par, n_var)
+        a_ref, b_ref, _, _ = klein_preprocess(addr, point, par, n_var, compiled.n_exog)
 
         assert np.abs(a_ref).max() > 0.0
         assert np.abs(b_ref).max() > 0.0
@@ -324,7 +324,9 @@ def test_regime_pencil_rows_match_the_complex_step_sweep(compiled_lead_regime):
         point = (
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
-        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var)
+        a_r, b_r, _, _ = klein_preprocess(
+            cfunc.address, point, par, n_var, compiled.n_exog
+        )
 
         assert np.abs(a_r[block.rows, :]).max() > 0.0
         assert np.abs(b_r[block.rows, :]).max() > 0.0
@@ -387,8 +389,18 @@ def test_regime_pencil_cfunc_writes_every_block(compiled_lead_regime):
         point = (
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
-        a_r, b_r = klein_preprocess(cfunc.address, point, par, n_var)
-        c_r = residual_eval(cfunc.address, point, point, par, n_var).real
+        a_r, b_r, _, _ = klein_preprocess(
+            cfunc.address, point, par, n_var, compiled.n_exog
+        )
+        c_r = residual_eval(
+            cfunc.address,
+            point,
+            point,
+            point,
+            np.zeros(compiled.n_exog),
+            par,
+            n_var,
+        ).real
         got_a, got_b, got_c = _call_pencil(func, 1, point, par)
 
         for block in (got_a, got_b, got_c):
@@ -511,18 +523,23 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
     )
     n_eq = len(compiled_regimes.var_names)
     ref_cfunc = compiled_regimes.construct_objective_cfunc()
-    ss_ref, _ = steady_state_newton(ref_cfunc.address, np.zeros(n_eq), par)
+    n_exog = compiled_regimes.n_exog
+    ss_ref, _ = steady_state_newton(ref_cfunc.address, np.zeros(n_eq), par, n_exog)
 
-    a_ref, b_ref = klein_preprocess(ref_cfunc.address, ss_ref, par, n_eq)
-    c_ref = residual_eval(ref_cfunc.address, ss_ref, ss_ref, par, n_eq).real
+    a_ref, b_ref, _, _ = klein_preprocess(ref_cfunc.address, ss_ref, par, n_eq, n_exog)
+    c_ref = residual_eval(
+        ref_cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+    ).real
     np.testing.assert_allclose(c_ref, 0.0, atol=1e-12)
 
     beta = float(compiled_regimes.config.calibration.parameters[sp.Symbol("beta")])
     expected_c = {1: 0.0, 2: -beta, 3: -2 * beta}
 
     for mask, cfunc in compiled_regimes.construct_regime_cfuncs().items():
-        a_r, b_r = klein_preprocess(cfunc.address, ss_ref, par, n_eq)
-        c_r = residual_eval(cfunc.address, ss_ref, ss_ref, par, n_eq).real
+        a_r, b_r, _, _ = klein_preprocess(cfunc.address, ss_ref, par, n_eq, n_exog)
+        c_r = residual_eval(
+            cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+        ).real
 
         # The taylor rule and its replacements are both contemporaneous, so the
         # swap lands entirely in b; what matters is that no other row moves.
@@ -560,11 +577,19 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     par = _params(compiled)
     n_eq = len(compiled.var_names)
     ref_cfunc = compiled.construct_objective_cfunc()
-    ss_ref, _ = steady_state_newton(ref_cfunc.address, np.zeros(n_eq), par)
+    ss_ref, _ = steady_state_newton(
+        ref_cfunc.address, np.zeros(n_eq), par, compiled.n_exog
+    )
 
-    a_ref, b_ref = klein_preprocess(ref_cfunc.address, ss_ref, par, n_eq)
-    a_r, b_r = klein_preprocess(
-        compiled.construct_regime_cfuncs()[1].address, ss_ref, par, n_eq
+    a_ref, b_ref, _, _ = klein_preprocess(
+        ref_cfunc.address, ss_ref, par, n_eq, compiled.n_exog
+    )
+    a_r, b_r, _, _ = klein_preprocess(
+        compiled.construct_regime_cfuncs()[1].address,
+        ss_ref,
+        par,
+        n_eq,
+        compiled.n_exog,
     )
     changed = np.maximum(
         np.abs(a_r - a_ref).max(axis=1), np.abs(b_r - b_ref).max(axis=1)
@@ -612,6 +637,7 @@ def _rbc_steady_state(compiled):
         compiled.construct_objective_cfunc().address,
         _rbc_seed(compiled),
         _params(compiled),
+        compiled.n_exog,
     )
     return ss
 
@@ -631,11 +657,16 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     n_eq = len(compiled_rbc_obc.var_names)
 
     ref_cfunc = compiled_rbc_obc.construct_objective_cfunc()
-    ss_ref, _ = steady_state_newton(ref_cfunc.address, _rbc_seed(compiled_rbc_obc), par)
+    n_exog = compiled_rbc_obc.n_exog
+    ss_ref, _ = steady_state_newton(
+        ref_cfunc.address, _rbc_seed(compiled_rbc_obc), par, n_exog
+    )
 
     # The whole point of a levels fixture: the expansion point is not the origin.
     assert np.abs(ss_ref).max() > 1.0
-    c_ref = residual_eval(ref_cfunc.address, ss_ref, ss_ref, par, n_eq).real
+    c_ref = residual_eval(
+        ref_cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+    ).real
     np.testing.assert_allclose(c_ref, 0.0, atol=1e-10)
 
     # `euler` is row 0; the replacement k(t+1) = (1 - delta) k(t) leaves a
@@ -645,7 +676,9 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     assert expected > 0.5
 
     cfunc = compiled_rbc_obc.construct_regime_cfuncs()[1]
-    c_r = residual_eval(cfunc.address, ss_ref, ss_ref, par, n_eq).real
+    c_r = residual_eval(
+        cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+    ).real
 
     want = np.zeros(n_eq)
     want[0] = expected

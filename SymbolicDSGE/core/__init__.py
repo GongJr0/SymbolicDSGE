@@ -4,7 +4,7 @@ from .solver import DSGESolver
 from .solved_model import SolvedModel
 from .shock_generators import Shock
 from .linearization import linearize_model
-from .desugar import DesugarResult, GeneratedKind, GeneratedVariable, desugar_model
+from .desugar import DesugarResult, GeneratedVariable, desugar_model
 
 __all__ = [
     "ModelConfig",
@@ -16,5 +16,4 @@ __all__ = [
     "desugar_model",
     "DesugarResult",
     "GeneratedVariable",
-    "GeneratedKind",
 ]

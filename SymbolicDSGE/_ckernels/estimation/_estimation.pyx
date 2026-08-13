@@ -31,6 +31,9 @@ cdef extern from "estimation.h":
     ctypedef void (*sdsge_residual_fn)()
     ctypedef void (*bc_residual_fn)()
     ctypedef void (*klein_zgges_fn)()
+    ctypedef void (*sdsge_dgeqrf_fn)()
+    ctypedef void (*sdsge_dormqr_fn)()
+    int64_t sdsge_pencil_dim(const signed char *incidence, int64_t n_var)
     ctypedef void (*meas_fn)()
 
     ctypedef struct sdsge_dims:
@@ -86,6 +89,8 @@ cdef extern from "estimation.h":
         double *ss
         double *a_real
         double *b_real
+        double *c_real
+        double *d_real
         c128 *s
         c128 *t
         c128 *z
@@ -95,15 +100,23 @@ cdef extern from "estimation.h":
         int64_t stab
         double *A
         double *B
+        int64_t *order
+        int64_t n_static
+        int64_t n_pred
+        int64_t n_both
+        int64_t n_fwd
 
     ctypedef struct sdsge_obj_common:
         sdsge_dims dims
         sdsge_residual_fn residual
         bc_residual_fn bc_residual
         klein_zgges_fn zgges
+        sdsge_dgeqrf_fn dgeqrf
+        sdsge_dormqr_fn dormqr
         meas_fn meas
         meas_fn jac
         const double *ss_seed
+        const signed char *incidence
         const double *y
         const double *P0
         const double *x0
@@ -174,10 +187,11 @@ cdef extern from "sdsge_common.h":
 
 cdef extern from "../core/klein_solve.h":
     arena_size sdsge_klein_solve1_arena_size(
-        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par) nogil
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
+        int64_t n_exog, int64_t nd) nogil
     arena_size sdsge_sgu_klein_solve2_arena_size(
         int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
-        int64_t n_exog) nogil
+        int64_t n_exog, int64_t nd) nogil
 
 
 cdef extern from "../kalman/kalman.h":
@@ -270,6 +284,17 @@ cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
     _zgges_capsule, PyCapsule_GetName(_zgges_capsule)
 )
 
+# The static rotation's QR, reached the same way. `Q` is never formed: dgeqrf
+# leaves the reflectors in place and dormqr applies Q' straight to each block.
+cdef object _dgeqrf_capsule = _cython_lapack.__pyx_capi__["dgeqrf"]
+cdef sdsge_dgeqrf_fn _dgeqrf = <sdsge_dgeqrf_fn>PyCapsule_GetPointer(
+    _dgeqrf_capsule, PyCapsule_GetName(_dgeqrf_capsule)
+)
+cdef object _dormqr_capsule = _cython_lapack.__pyx_capi__["dormqr"]
+cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
+    _dormqr_capsule, PyCapsule_GetName(_dormqr_capsule)
+)
+
 
 def obj_linear_base(
     size_t residual_addr,
@@ -278,12 +303,13 @@ def obj_linear_base(
     int n_state,
     int n_exog,
     int n_obs,
-    double[::1] ss_seed,        # n_var (Newton seed for the steady state)
-    double[::1] base_calib,     # n_par
-    double[:, ::1] Q,           # n_exog*n_exog constant
-    double[:, ::1] R,           # n_obs*n_obs constant
-    double[:, ::1] y,           # T*n_obs
-    double[:, ::1] P0,          # n_var*n_var
+    double[::1] ss_seed,         # n_var (Newton seed for the steady state)
+    signed char[::1] incidence,  # n_var (SDSGE_INC_* bits)
+    double[::1] base_calib,      # n_par
+    double[:, ::1] Q,            # n_exog*n_exog constant
+    double[:, ::1] R,            # n_obs*n_obs constant
+    double[:, ::1] y,            # T*n_obs
+    double[:, ::1] P0,           # n_var*n_var
     double jitter,
     int symmetrize,
 ):
@@ -293,18 +319,22 @@ def obj_linear_base(
     cdef int64_t n_par = base_calib.shape[0]
     cdef int64_t T = y.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
+    cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
 
     # Preallocated scratch (kept alive for the whole call).
     params = np.empty(n_par, dtype=np.float64)
     ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
-    s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    c_real = np.empty((n_var, n_var), dtype=np.float64)
+    d_real = np.empty((n_var, n_exog), dtype=np.float64)
+    order = np.empty(n_var, dtype=np.int64)
+    s = np.empty((nd, nd), dtype=np.complex128, order="F")
+    t = np.empty((nd, nd), dtype=np.complex128, order="F")
+    z = np.empty((nd, nd), dtype=np.complex128, order="F")
     f = np.empty((n_ctrl, n_state), dtype=np.float64)
     p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(n_var, dtype=np.complex128)
+    eig = np.empty(nd, dtype=np.complex128)
     x0 = np.zeros(n_var, dtype=np.float64)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
@@ -315,6 +345,9 @@ def obj_linear_base(
     cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
+    cdef double[:, ::1] crealv = c_real
+    cdef double[:, ::1] drealv = d_real
+    cdef int64_t[::1] orderv = order
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
@@ -341,10 +374,13 @@ def obj_linear_base(
 
     b.residual = <sdsge_residual_fn><void*>residual_addr
     b.zgges = _zgges
+    b.dgeqrf = _dgeqrf
+    b.dormqr = _dormqr
     b.meas = <meas_fn><void*>meas_addr
     b.jac = <meas_fn><void*>jac_addr
 
     b.ss_seed = &ss_seed[0]
+    b.incidence = &incidence[0]
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -384,7 +420,7 @@ def obj_linear_base(
     b.filter_arena = &filter_arena_v[0]
 
     cdef arena_size solve_sz = sdsge_klein_solve1_arena_size(
-        n_var, n_state, n_ctrl, n_par
+        n_var, n_state, n_ctrl, n_par, n_exog, nd
     )
     solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
     solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
@@ -396,6 +432,8 @@ def obj_linear_base(
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
     ctx.solve.b_real = &brv[0, 0]
+    ctx.solve.c_real = &crealv[0, 0]
+    ctx.solve.d_real = &drealv[0, 0] if n_exog > 0 else NULL
     ctx.solve.s = <c128*>&sv[0, 0]
     ctx.solve.t = <c128*>&tv[0, 0]
     ctx.solve.z = <c128*>&zv[0, 0]
@@ -404,6 +442,7 @@ def obj_linear_base(
     ctx.solve.eig = <c128*>&eigv[0]
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
+    ctx.solve.order = &orderv[0]
 
     ctx.C = &Cv[0, 0]
     ctx.d = &dv[0]
@@ -425,12 +464,13 @@ def obj_extended_base(
     int n_state,
     int n_exog,
     int n_obs,
-    double[::1] ss_seed,        # n_var (Newton seed for the steady state)
-    double[::1] base_calib,     # n_par
-    double[:, ::1] Q,           # n_exog*n_exog constant
-    double[:, ::1] R,           # n_obs*n_obs constant
-    double[:, ::1] y,           # T*n_obs
-    double[:, ::1] P0,          # n_var*n_var
+    double[::1] ss_seed,         # n_var (Newton seed for the steady state)
+    signed char[::1] incidence,  # n_var (SDSGE_INC_* bits)
+    double[::1] base_calib,      # n_par
+    double[:, ::1] Q,            # n_exog*n_exog constant
+    double[:, ::1] R,            # n_obs*n_obs constant
+    double[:, ::1] y,            # T*n_obs
+    double[:, ::1] P0,           # n_var*n_var
     double jitter,
     int symmetrize,
 ):
@@ -442,18 +482,22 @@ def obj_extended_base(
     cdef int64_t n_par = base_calib.shape[0]
     cdef int64_t T = y.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
+    cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
 
     # Preallocated scratch (kept alive for the whole call).
     params = np.empty(n_par, dtype=np.float64)
     ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
-    s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    c_real = np.empty((n_var, n_var), dtype=np.float64)
+    d_real = np.empty((n_var, n_exog), dtype=np.float64)
+    order = np.empty(n_var, dtype=np.int64)
+    s = np.empty((nd, nd), dtype=np.complex128, order="F")
+    t = np.empty((nd, nd), dtype=np.complex128, order="F")
+    z = np.empty((nd, nd), dtype=np.complex128, order="F")
     f = np.empty((n_ctrl, n_state), dtype=np.float64)
     p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(n_var, dtype=np.complex128)
+    eig = np.empty(nd, dtype=np.complex128)
     x0 = np.zeros(n_var, dtype=np.float64)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
@@ -462,6 +506,9 @@ def obj_extended_base(
     cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
+    cdef double[:, ::1] crealv = c_real
+    cdef double[:, ::1] drealv = d_real
+    cdef int64_t[::1] orderv = order
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
@@ -486,10 +533,13 @@ def obj_extended_base(
 
     b.residual = <sdsge_residual_fn><void*>residual_addr
     b.zgges = _zgges
+    b.dgeqrf = _dgeqrf
+    b.dormqr = _dormqr
     b.meas = <meas_fn><void*>meas_addr
     b.jac = <meas_fn><void*>jac_addr
 
     b.ss_seed = &ss_seed[0]
+    b.incidence = &incidence[0]
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -529,7 +579,7 @@ def obj_extended_base(
     b.filter_arena = &filter_arena_v[0]
 
     cdef arena_size solve_sz = sdsge_klein_solve1_arena_size(
-        n_var, n_state, n_ctrl, n_par
+        n_var, n_state, n_ctrl, n_par, n_exog, nd
     )
     solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
     solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
@@ -541,6 +591,8 @@ def obj_extended_base(
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
     ctx.solve.b_real = &brv[0, 0]
+    ctx.solve.c_real = &crealv[0, 0]
+    ctx.solve.d_real = &drealv[0, 0] if n_exog > 0 else NULL
     ctx.solve.s = <c128*>&sv[0, 0]
     ctx.solve.t = <c128*>&tv[0, 0]
     ctx.solve.z = <c128*>&zv[0, 0]
@@ -549,6 +601,7 @@ def obj_extended_base(
     ctx.solve.eig = <c128*>&eigv[0]
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
+    ctx.solve.order = &orderv[0]
 
     # One-time construction seed (see obj_linear_base).
     sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
@@ -566,12 +619,13 @@ def obj_unscented_base(
     int n_state,
     int n_exog,
     int n_obs,
-    double[::1] ss_seed,        # n_var (Newton seed for the steady state)
-    double[::1] base_calib,     # n_par
-    double[:, ::1] Q,           # n_exog*n_exog constant
-    double[:, ::1] R,           # n_obs*n_obs constant
-    double[:, ::1] y,           # T*n_obs
-    double[:, ::1] P0,          # 2*n_state x 2*n_state (UKF)
+    double[::1] ss_seed,         # n_var (Newton seed for the steady state)
+    signed char[::1] incidence,  # n_var (SDSGE_INC_* bits)
+    double[::1] base_calib,      # n_par
+    double[:, ::1] Q,            # n_exog*n_exog constant
+    double[:, ::1] R,            # n_obs*n_obs constant
+    double[:, ::1] y,            # T*n_obs
+    double[:, ::1] P0,           # 2*n_state x 2*n_state (UKF)
     double jitter,
     int symmetrize,
     double alpha=1.0,
@@ -586,18 +640,22 @@ def obj_unscented_base(
     cdef int64_t T = y.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
     cdef int64_t n2 = 2 * n_var
+    cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
 
     # Preallocated scratch (kept alive for the whole call).
     params = np.empty(n_par, dtype=np.float64)
     ss = np.empty(n_var, dtype=np.float64)
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
-    s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    c_real = np.empty((n_var, n_var), dtype=np.float64)
+    d_real = np.empty((n_var, n_exog), dtype=np.float64)
+    order = np.empty(n_var, dtype=np.int64)
+    s = np.empty((nd, nd), dtype=np.complex128, order="F")
+    t = np.empty((nd, nd), dtype=np.complex128, order="F")
+    z = np.empty((nd, nd), dtype=np.complex128, order="F")
     f = np.empty((n_ctrl, n_state), dtype=np.float64)
     p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(n_var, dtype=np.complex128)
+    eig = np.empty(nd, dtype=np.complex128)
     x0 = np.zeros(n_var, dtype=np.float64)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
@@ -625,6 +683,9 @@ def obj_unscented_base(
     cdef double[::1] ssv = ss
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
+    cdef double[:, ::1] crealv = c_real
+    cdef double[:, ::1] drealv = d_real
+    cdef int64_t[::1] orderv = order
     cdef double complex[::1, :] sv = s
     cdef double complex[::1, :] tv = t
     cdef double complex[::1, :] zv = z
@@ -659,10 +720,13 @@ def obj_unscented_base(
     b.residual = <sdsge_residual_fn><void*>residual_addr
     b.bc_residual = <bc_residual_fn><void*>bc_residual_addr
     b.zgges = _zgges
+    b.dgeqrf = _dgeqrf
+    b.dormqr = _dormqr
     b.meas = <meas_fn><void*>meas_addr
     b.jac = NULL
 
     b.ss_seed = &ss_seed[0]
+    b.incidence = &incidence[0]
     b.y = &y[0, 0]
     b.P0 = &P0[0, 0]
     b.x0 = &x0v[0]
@@ -703,7 +767,7 @@ def obj_unscented_base(
     b.filter_arena = &filter_arena_v[0]
 
     cdef arena_size solve_sz = sdsge_sgu_klein_solve2_arena_size(
-        n_var, n_state, n_ctrl, n_par, n_exog
+        n_var, n_state, n_ctrl, n_par, n_exog, nd
     )
     solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
     solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
@@ -715,6 +779,8 @@ def obj_unscented_base(
     ctx.solve.ss = &ssv[0]
     ctx.solve.a_real = &arv[0, 0]
     ctx.solve.b_real = &brv[0, 0]
+    ctx.solve.c_real = &crealv[0, 0]
+    ctx.solve.d_real = &drealv[0, 0] if n_exog > 0 else NULL
     ctx.solve.s = <c128*>&sv[0, 0]
     ctx.solve.t = <c128*>&tv[0, 0]
     ctx.solve.z = <c128*>&zv[0, 0]
@@ -723,6 +789,7 @@ def obj_unscented_base(
     ctx.solve.eig = <c128*>&eigv[0]
     ctx.solve.A = &Av[0, 0]
     ctx.solve.B = &Bv[0, 0]
+    ctx.solve.order = &orderv[0]
 
     ctx.solve2.f_xx = &fxxv[0, 0, 0]
     ctx.solve2.bx = &bxv[0, 0]
@@ -856,6 +923,10 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     _ss_seed = np.ascontiguousarray(base.ss_seed, dtype=np.float64)
     nc.keep.append(_ss_seed)
     cdef double[::1] ssv = _ss_seed
+    _incidence = np.ascontiguousarray(base.incidence, dtype=np.int8)
+    nc.keep.append(_incidence)
+    cdef signed char[::1] incv = _incidence
+    cdef int64_t nd = sdsge_pencil_dim(&incv[0], n_var)
     _y = np.ascontiguousarray(base.y, dtype=np.float64)
     nc.keep.append(_y)
     cdef double[:, ::1] yv = _y
@@ -885,13 +956,22 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef double[::1] ssv2 = ss
     a_real = np.empty((n_var, n_var), dtype=np.float64)
     b_real = np.empty((n_var, n_var), dtype=np.float64)
+    c_real = np.empty((n_var, n_var), dtype=np.float64)
+    d_real = np.empty((n_var, n_exog), dtype=np.float64)
+    order = np.empty(n_var, dtype=np.int64)
     nc.keep.append(a_real)
     nc.keep.append(b_real)
+    nc.keep.append(c_real)
+    nc.keep.append(d_real)
+    nc.keep.append(order)
     cdef double[:, ::1] arv = a_real
     cdef double[:, ::1] brv = b_real
-    s = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    t = np.empty((n_var, n_var), dtype=np.complex128, order="F")
-    z = np.empty((n_var, n_var), dtype=np.complex128, order="F")
+    cdef double[:, ::1] crealv = c_real
+    cdef double[:, ::1] drealv = d_real
+    cdef int64_t[::1] orderv = order
+    s = np.empty((nd, nd), dtype=np.complex128, order="F")
+    t = np.empty((nd, nd), dtype=np.complex128, order="F")
+    z = np.empty((nd, nd), dtype=np.complex128, order="F")
     nc.keep.append(s)
     nc.keep.append(t)
     nc.keep.append(z)
@@ -900,7 +980,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef double complex[::1, :] zv = z
     f = np.empty((n_ctrl, n_state), dtype=np.float64)
     p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(n_var, dtype=np.complex128)
+    eig = np.empty(nd, dtype=np.complex128)
     nc.keep.append(f)
     nc.keep.append(p)
     nc.keep.append(eig)
@@ -1038,10 +1118,13 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     b.residual = <sdsge_residual_fn><void*><size_t>base.residual_addr
     b.bc_residual = <bc_residual_fn><void*><size_t>base.bc_residual_addr
     b.zgges = _zgges
+    b.dgeqrf = _dgeqrf
+    b.dormqr = _dormqr
     b.meas = <meas_fn><void*><size_t>base.meas_addr
     b.jac = <meas_fn><void*><size_t>base.jac_addr
 
     b.ss_seed = &ssv[0]
+    b.incidence = &incv[0]
     b.y = &yv[0, 0]
     b.P0 = &P0v[0, 0]
     b.x0 = &x0v[0]
@@ -1195,10 +1278,11 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
 
     if mode == "unscented":
         solve_sz = sdsge_sgu_klein_solve2_arena_size(
-            n_var, n_state, n_ctrl, n_par, n_exog
+            n_var, n_state, n_ctrl, n_par, n_exog, nd
         )
     else:
-        solve_sz = sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl, n_par)
+        solve_sz = sdsge_klein_solve1_arena_size(
+            n_var, n_state, n_ctrl, n_par, n_exog, nd)
     solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
     solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
     nc.keep.append(solve_arena)
@@ -1211,6 +1295,8 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     s1.ss = &ssv2[0]
     s1.a_real = &arv[0, 0]
     s1.b_real = &brv[0, 0]
+    s1.c_real = &crealv[0, 0]
+    s1.d_real = &drealv[0, 0] if n_exog > 0 else NULL
     s1.s = <c128*>&sv[0, 0]
     s1.t = <c128*>&tv[0, 0]
     s1.z = <c128*>&zv[0, 0]
@@ -1219,6 +1305,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     s1.eig = <c128*>&eigv[0]
     s1.A = &Av[0, 0]
     s1.B = &Bv[0, 0]
+    s1.order = &orderv[0]
 
     # Mode-specific ctx wiring.
     if mode == "linear":

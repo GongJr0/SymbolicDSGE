@@ -24,13 +24,19 @@ C = np.complex128
 
 def _run_expr(expr: sp.Expr, order: list[sp.Symbol]):
     slot = {s: ("cur", i) for i, s in enumerate(order)}
-    layout = ResidualLayout(slot=slot, n_var=len(order), n_par=0)
+    layout = ResidualLayout(slot=slot, n_var=len(order), n_par=0, n_exog=0)
     fn = build_njit([expr], layout)
     ref = sp.lambdify(order, expr, "numpy")
 
     def run(values: tuple[complex, ...]) -> tuple[complex, complex]:
         cur = np.array(values, dtype=C)
-        out = fn(np.zeros(len(order), C), cur, np.zeros(0, C))
+        out = fn(
+            np.zeros(len(order), C),
+            cur,
+            np.zeros(len(order), C),
+            np.zeros(0, C),
+            np.zeros(0, C),
+        )
         return complex(out[0]), complex(ref(*values))
 
     return run
@@ -89,10 +95,16 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
     # Repeated multiply integer powers give the correct complex step derivative
     # even where a negative base would hit the branch cut under `**`.
     x = sp.Symbol("x")
-    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0)
+    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0, n_exog=0)
     fn = build_njit([expr_factory(x)], layout)
     v0, h = -0.7, 1e-100
-    out = fn(np.zeros(1, C), np.array([v0 + 1j * h], dtype=C), np.zeros(0, C))
+    out = fn(
+        np.zeros(1, C),
+        np.array([v0 + 1j * h], dtype=C),
+        np.zeros(1, C),
+        np.zeros(0, C),
+        np.zeros(0, C),
+    )
     assert out[0].imag / h == pytest.approx(analytic(v0), rel=1e-10)
 
 
@@ -123,8 +135,10 @@ def test_printer_matches_reference_residual_values(path):
     for _ in range(10):
         fwd = (rng.normal(size=n) + 1j * rng.normal(size=n)).astype(C)
         cur = (rng.normal(size=n) + 1j * rng.normal(size=n)).astype(C)
-        got = fn(fwd, cur, par)
-        want = compiled.equations(fwd, cur, par)
+        prev = np.zeros_like(cur)
+        eps = np.zeros(layout.n_exog, C)
+        got = fn(fwd, cur, prev, eps, par)
+        want = compiled.equations(fwd, cur, prev, eps, par)
         np.testing.assert_allclose(got, want, rtol=1e-10, atol=1e-12)
 
 
@@ -140,11 +154,15 @@ def test_printer_linearization_matches_reference(path):
 
     # Native cfunc linearization (klein_preproc complex-step) is the reference;
     # the printer's njit residual complex-stepped through the oracle must match.
-    a_ref, b_ref = klein_preprocess(cf.address, ss, par, layout.n_var)
-    a_new, b_new = _approximate_system_numeric(fn, ss, par)
+    a_ref, b_ref, c_ref, d_ref = klein_preprocess(
+        cf.address, ss, par, layout.n_var, layout.n_exog
+    )
+    a_new, b_new, c_new, d_new = _approximate_system_numeric(fn, ss, par, layout.n_exog)
 
     np.testing.assert_allclose(a_new, a_ref, rtol=1e-10, atol=1e-12)
     np.testing.assert_allclose(b_new, b_ref, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(c_new, c_ref, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(d_new, d_ref, rtol=1e-10, atol=1e-12)
 
 
 def test_build_cfunc_compiles_to_address():

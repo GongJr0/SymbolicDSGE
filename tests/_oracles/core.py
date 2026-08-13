@@ -135,33 +135,47 @@ def _simulate_second_order_pruned_numba(
 
 # --- core.klein --------------------------------------------------------------
 @njit
-def _complex_step_jacobian(eq_func, base_point, params, differentiate_fwd):  # type: ignore[no-untyped-def]
+def _complex_step_jacobian(eq_func, base_point, params, n_exog, target):  # type: ignore[no-untyped-def]
+    """``target`` selects the date perturbed: 0 fwd, 1 cur, 2 prev, 3 eps."""
     step = float64(1e-30)
     complex_step = complex128(1j * step)
     base_complex = np.ascontiguousarray(base_point.astype(complex128))
     params_complex = np.ascontiguousarray(params.astype(complex128))
-    base_residual = eq_func(base_complex, base_complex, params_complex)
-    jac = np.empty((base_residual.shape[0], base_point.shape[0]), dtype=float64)
+    eps_base = np.zeros(n_exog, dtype=complex128)
+    base_residual = eq_func(
+        base_complex, base_complex, base_complex, eps_base, params_complex
+    )
+    n_col = n_exog if target == 3 else base_point.shape[0]
+    jac = np.empty((base_residual.shape[0], n_col), dtype=float64)
 
-    for j in range(base_point.shape[0]):
+    for j in range(n_col):
         fwd = base_complex.copy()
         cur = base_complex.copy()
-        if differentiate_fwd:
+        prev = base_complex.copy()
+        eps = eps_base.copy()
+        if target == 0:
             fwd[j] = fwd[j] + complex_step
-        else:
+        elif target == 1:
             cur[j] = cur[j] + complex_step
-        residual = eq_func(fwd, cur, params_complex)
+        elif target == 2:
+            prev[j] = prev[j] + complex_step
+        else:
+            eps[j] = complex_step
+        residual = eq_func(fwd, cur, prev, eps, params_complex)
         jac[:, j] = np.imag(residual) / step
     return jac
 
 
 @njit
-def _approximate_system_numeric(eq_func, steady_state, params):  # type: ignore[no-untyped-def]
+def _approximate_system_numeric(eq_func, steady_state, params, n_exog):  # type: ignore[no-untyped-def]
+    """(a, b, c, d) under the kernel's signs: ``a y' = b y + c y_prev + d eps``."""
     base_point = np.ascontiguousarray(steady_state.astype(float64))
     parameter_vector = np.ascontiguousarray(params.astype(float64))
-    a = _complex_step_jacobian(eq_func, base_point, parameter_vector, True)
-    b = -_complex_step_jacobian(eq_func, base_point, parameter_vector, False)
-    return a, b
+    a = _complex_step_jacobian(eq_func, base_point, parameter_vector, n_exog, 0)
+    b = -_complex_step_jacobian(eq_func, base_point, parameter_vector, n_exog, 1)
+    c = -_complex_step_jacobian(eq_func, base_point, parameter_vector, n_exog, 2)
+    d = -_complex_step_jacobian(eq_func, base_point, parameter_vector, n_exog, 3)
+    return a, b, c, d
 
 
 @njit(cache=True)

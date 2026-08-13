@@ -1,33 +1,25 @@
-"""Rewrite a model into the two-date form the solver pencil requires.
+"""Rewrite a model into the three-date form the solver pencil requires.
 
 Model equations are authored in natural time, with offsets of -1, 0 and +1 and
-shocks dated t. The pencil carries only offsets 0 and +1, and every shock has to
-reach the state space through a variable, so both are lifted here into variables
-the compiler introduces.
+shocks dated t. The residual carries all three dates and the innovations
+directly, so a single lag and a shock both reach the pencil as they are written.
 
-``v(t-n)`` becomes ``v_lag{n}(t)``, defined by the chain ``v_lag1(t+1) = v(t)``,
-``v_lag2(t+1) = v_lag1(t)`` and onward, so a deeper lag numbers its aux rather
-than stacking suffixes. A shock ``e`` becomes ``e_st(t)``, defined by
-``e_st(t+1) = e``.
-
-Lifting every shock, not only the ones that need it, is what collapses the shock
-impact block into a gather: the raw shock symbol survives in exactly one
-equation, its own, so the model's shock jacobian holds a single nonzero per
-shock column and carries no entry on a control row.
+Only depth beyond one still needs lifting: ``v(t-2)`` and deeper are outside the
+three dates, so ``v(t-n)`` for ``n >= 2`` becomes ``v_lag{n-1}(t-1)``, defined by
+the chain ``v_lag1(t) = v(t-1)``, ``v_lag2(t) = v_lag1(t-1)`` and onward. A depth
+of one mints nothing, so a model written with ordinary lags compiles to exactly
+the variables it declares.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Iterator
 
 import sympy as sp
 from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
-
-from .linearization import LinearizationMethod
 
 if TYPE_CHECKING:
     from .config import ModelConfig
@@ -35,26 +27,17 @@ if TYPE_CHECKING:
 #: ``v(t-n)`` lifts to ``f"{v}{LAG_SUFFIX}{n}"``.
 LAG_SUFFIX = "_lag"
 
-#: shock ``e`` lifts to ``f"{e}{SHOCK_SUFFIX}"``.
-SHOCK_SUFFIX = "_st"
-
-
-class GeneratedKind(StrEnum):
-    LAG = "lag"
-    SHOCK = "shock"
-
 
 @dataclass(frozen=True)
 class GeneratedVariable:
-    """A variable the desugaring introduced, and what it was minted from.
+    """A lag aux, the declared variable it tracks, and how far back it starts.
 
-    ``origin`` is the declared variable for a lag and the shock symbol's name for
-    a shock state. ``depth`` is the lag depth, 0 for a shock state.
+    ``v_lag{depth}`` holds ``origin`` at ``t - depth``, so it serves a lag of
+    ``depth + 1`` when read one date back.
     """
 
     name: str
     origin: str
-    kind: GeneratedKind
     depth: int
 
 
@@ -81,12 +64,8 @@ def lag_name(base: str, depth: int) -> str:
     return f"{base}{LAG_SUFFIX}{depth}"
 
 
-def shock_state_name(shock: str) -> str:
-    return f"{shock}{SHOCK_SUFFIX}"
-
-
 def desugar_model(conf: ModelConfig) -> DesugarResult:
-    """Lift lags and shocks into compiler-generated variables.
+    """Lift lags past the first into compiler-generated variables.
 
     Lag depths are scanned over the reference equations, every regime and the
     observables together, so a regime that lags something the reference does not
@@ -101,19 +80,12 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
     generated = _mint(conf, declared_names, depths)
     _reject_collisions(conf, generated, declared)
 
-    lag_funcs = {
-        (g.origin, g.depth): sp.Function(g.name)
-        for g in generated
-        if g.kind is GeneratedKind.LAG
-    }
-    shock_subs: dict[Symbol, Expr] = {
-        shock: sp.Function(shock_state_name(shock.name))(t) for shock in conf.shock_map
-    }
+    lag_funcs = {(g.origin, g.depth): sp.Function(g.name) for g in generated}
 
     out = deepcopy(conf)
 
     def rewrite(expr: Any) -> Any:
-        return _rewrite(expr, lag_funcs, shock_subs, declared, t)
+        return _rewrite(expr, lag_funcs, declared, t)  # pyright: ignore
 
     out.equations.model = {
         name: _rewrite_eq(eq, rewrite) for name, eq in out.equations.model.items()
@@ -125,13 +97,6 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
         }
     for obs, expr in list(out.equations.observable.items()):
         out.equations.observable[obs] = rewrite(expr)
-    if out.equations.constraint:
-        # Conditions stay contemporaneous, so only the shock lift applies; a lag
-        # in a condition is left alone for the compiler's offset check to reject.
-        for constraint in out.equations.constraint.values():
-            constraint.bind = constraint.bind.xreplace(shock_subs)
-            constraint.relax = constraint.relax.xreplace(shock_subs)
-
     _register(out, generated, t)
     return DesugarResult(config=out, generated=generated)
 
@@ -180,28 +145,19 @@ def _call_offset(
 def _mint(
     conf: ModelConfig, declared_names: list[str], depths: dict[str, int]
 ) -> tuple[GeneratedVariable, ...]:
-    # Lags in declaration order then depth, shocks in shock_map order, so the
-    # generated block is stable across runs.
+    # Lags in declaration order then depth, so the generated block is stable
+    # across runs. Depth 1 is carried by the residual's own lagged date, so the
+    # chain starts one short of the depth it serves.
     generated: list[GeneratedVariable] = []
     for base in declared_names:
-        for depth in range(1, depths.get(base, 0) + 1):
+        for depth in range(1, depths.get(base, 0)):
             generated.append(
                 GeneratedVariable(
                     name=lag_name(base, depth),
                     origin=base,
-                    kind=GeneratedKind.LAG,
                     depth=depth,
                 )
             )
-    for shock in conf.shock_map:
-        generated.append(
-            GeneratedVariable(
-                name=shock_state_name(shock.name),
-                origin=shock.name,
-                kind=GeneratedKind.SHOCK,
-                depth=0,
-            )
-        )
     return tuple(generated)
 
 
@@ -227,23 +183,23 @@ def _reject_collisions(
 def _rewrite(
     expr: Any,
     lag_funcs: dict[tuple[str, int], Function],
-    shock_subs: dict[Symbol, Expr],
     declared: set[str],
     t: Symbol,
 ) -> Any:
-    subs: dict[Any, Any] = dict(shock_subs)
+    """Depth 1 survives as written; deeper lags read their aux one date back."""
+    subs: dict[Any, Any] = {}
     for call in expr.atoms(AppliedUndef):
         info = _call_offset(call, declared, t)
         if info is None:
             continue
         name, offset = info
-        if offset < 0:
-            subs[call] = lag_funcs[(name, -offset)](t)
+        if offset < -1:
+            subs[call] = lag_funcs[(name, -offset - 1)](t - 1)  # pyright: ignore
     return expr.xreplace(subs)
 
 
 def _rewrite_eq(eq: Eq, rewrite: Any) -> Eq:
-    return sp.Eq(rewrite(eq.lhs), rewrite(eq.rhs))
+    return sp.Eq(rewrite(eq.lhs), rewrite(eq.rhs))  # pyright: ignore
 
 
 def _register(
@@ -251,21 +207,12 @@ def _register(
 ) -> None:
     """Append the aux variables and their defining equations.
 
-    Runs after the rewrite so the shock lift does not reach the aux equations and
-    turn ``e_st(t+1) = e`` into ``e_st(t+1) = e_st(t)``.
+    ``v_lag{k}(t) = v_lag{k-1}(t-1)`` is written in natural time, at the two
+    dates the residual already carries, so the chain needs no shift of its own.
     """
-    shock_by_name = {shock.name: shock for shock in conf.shock_map}
     for g in generated:
         func = sp.Function(g.name)
-        conf.variables.variables.append(func)
-
-        if g.kind is GeneratedKind.SHOCK:
-            conf.variables.ss_seed[func] = sp.Integer(0)
-            conf.variables.linearization[func] = LinearizationMethod.NONE
-            conf.equations.model[g.name] = sp.Eq(
-                func(t + 1), shock_by_name[g.origin]  # pyright: ignore[reportCallIssue]
-            )
-            continue
+        conf.variables.variables.append(func)  # pyright: ignore
 
         origin = sp.Function(g.origin)
         source = (
@@ -273,8 +220,8 @@ def _register(
         )
         # The aux tracks its origin exactly, so it shares the origin's expansion
         # point and linearization.
-        conf.variables.ss_seed[func] = conf.variables.ss_seed[origin]
-        conf.variables.linearization[func] = conf.variables.linearization[origin]
-        conf.equations.model[g.name] = sp.Eq(
-            func(t + 1), source(t)  # pyright: ignore[reportCallIssue]
+        conf.variables.ss_seed[func] = conf.variables.ss_seed[origin]  # pyright: ignore
+        conf.variables.linearization[func] = (  # pyright: ignore
+            conf.variables.linearization[origin]
         )
+        conf.equations.model[g.name] = sp.Eq(func(t), source(t - 1))  # pyright: ignore

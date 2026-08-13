@@ -33,12 +33,15 @@ def test_residual_path_matches_reference(path):
         dtype=np.complex128,
     )
 
-    got = residual_path(cf.address, cur, fwd, par, n_var)
+    prev = rng.normal(size=(n_steps, n_var)).astype(np.complex128)
+    eps = np.zeros((n_steps, layout.n_exog), dtype=np.complex128)
+
+    got = residual_path(cf.address, cur, fwd, prev, eps, par, n_var)
     assert got.shape == (n_steps, n_var)
 
     eq = compiled.equations
     want = np.empty((n_steps, n_var), dtype=np.float64)
     for t in range(n_steps):
-        want[t] = eq(fwd[t], cur[t], par).real
+        want[t] = eq(fwd[t], cur[t], prev[t], eps[t], par).real
 
     np.testing.assert_allclose(got, want, rtol=1e-10, atol=1e-12)

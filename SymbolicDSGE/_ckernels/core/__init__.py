@@ -6,7 +6,10 @@ built, importing this module (and the library) raises ``ImportError``.
 """
 
 from ._core import (
-    assemble_state_space,
+    INC_CUR,
+    INC_LAG,
+    INC_LEAD,
+    assemble_transition,
     affine_observations_into,
     bicomplex_hessian,
     jacobian_eval,
@@ -16,6 +19,7 @@ from ._core import (
     klein_solve1,
     measurement_eval,
     measurement_path,
+    pencil_dim,
     residual_eval,
     residual_path,
     second_order,
@@ -27,7 +31,10 @@ from ._core import (
 )
 
 __all__ = [
-    "assemble_state_space",
+    "INC_CUR",
+    "INC_LAG",
+    "INC_LEAD",
+    "assemble_transition",
     "affine_observations_into",
     "bicomplex_hessian",
     "jacobian_eval",
@@ -37,6 +44,7 @@ __all__ = [
     "klein_solve1",
     "measurement_eval",
     "measurement_path",
+    "pencil_dim",
     "residual_eval",
     "residual_path",
     "second_order",

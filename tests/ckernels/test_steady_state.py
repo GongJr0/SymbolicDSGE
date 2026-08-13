@@ -49,18 +49,24 @@ def _perturbed(compiled, true_ss, capital, consumption, tfp):
     return seed
 
 
-def _resid_norm(eq, ss, par):
+def _resid_norm(eq, ss, par, n_exog):
+    # The steady state holds every date at the same point, with no innovation.
+    point = ss.astype(np.complex128)
     r = eq(
-        ss.astype(np.complex128), ss.astype(np.complex128), par.astype(np.complex128)
+        point,
+        point,
+        point,
+        np.zeros(n_exog, np.complex128),
+        par.astype(np.complex128),
     )
     return float(np.max(np.abs(np.real(r))))
 
 
 def test_newton_rbc_from_exact_seed():
     _compiled, par, cf, eq, true_ss = _rbc()
-    ss, iters = steady_state_newton(cf.address, true_ss.copy(), par)
+    ss, iters = steady_state_newton(cf.address, true_ss.copy(), par, _compiled.n_exog)
     assert iters <= 2
-    assert _resid_norm(eq, ss, par) < 1e-10
+    assert _resid_norm(eq, ss, par, _compiled.n_exog) < 1e-10
     # z is exactly linear -> stays at 0; k, c match the (rounded) config to ~1e-6.
     np.testing.assert_allclose(ss, true_ss, rtol=1e-6, atol=1e-8)
 
@@ -68,9 +74,9 @@ def test_newton_rbc_from_exact_seed():
 def test_newton_rbc_from_perturbed_seed():
     compiled, par, cf, eq, true_ss = _rbc()
     seed = _perturbed(compiled, true_ss, capital=1.1, consumption=0.9, tfp=0.05)
-    ss, iters = steady_state_newton(cf.address, seed, par)
+    ss, iters = steady_state_newton(cf.address, seed, par, compiled.n_exog)
     assert 1 <= iters <= 20
-    assert _resid_norm(eq, ss, par) < 1e-10
+    assert _resid_norm(eq, ss, par, compiled.n_exog) < 1e-10
     np.testing.assert_allclose(ss, true_ss, rtol=1e-6, atol=1e-8)
 
 
@@ -80,7 +86,7 @@ def test_newton_non_convergence_raises():
     compiled, par, cf, _eq, true_ss = _rbc()
     seed = _perturbed(compiled, true_ss, capital=2.0, consumption=0.5, tfp=0.5)
     with pytest.raises(ValueError, match="did not converge"):
-        steady_state_newton(cf.address, seed, par, max_iter=1)
+        steady_state_newton(cf.address, seed, par, compiled.n_exog, max_iter=1)
 
 
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
@@ -92,6 +98,6 @@ def test_newton_linear_model_zero_steady_state(path):
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     seed = np.zeros(len(compiled.var_names), dtype=np.float64)
-    ss, iters = steady_state_newton(cf.address, seed, par)
+    ss, iters = steady_state_newton(cf.address, seed, par, compiled.n_exog)
     assert iters == 0
     np.testing.assert_allclose(ss, 0.0, atol=1e-12)

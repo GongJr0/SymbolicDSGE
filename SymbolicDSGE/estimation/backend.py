@@ -514,6 +514,7 @@ class PyObjCommon:
     jac_addr: int
 
     ss_seed: NDF  # n_var: Newton seed for the steady state
+    incidence: NDArray[np.int8]  # n_var: SDSGE_INC_* bits per variable
 
     y: NDF  # T*n_obs
     P0: NDF  # n_var*n_var; UKF 2*n_state square
@@ -569,6 +570,7 @@ def build_obj_common(
         meas_addr=int(prepared.meas_addr),
         jac_addr=int(prepared.jac_addr),
         ss_seed=np.ascontiguousarray(ss_seed_vec, dtype=np.float64),
+        incidence=compiled.incidence,
         y=y,
         P0=prepared.P0,
         x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),

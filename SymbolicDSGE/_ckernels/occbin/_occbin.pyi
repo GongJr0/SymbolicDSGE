@@ -41,11 +41,13 @@ def regime_pencil(
     par: _F64,
     a_ref: _F64,
     b_ref: _F64,
-) -> tuple[_F64, _F64, _F64]:
-    """(a, b, c) <- the reference pencil with ``rows`` patched by one regime.
+    c_ref: _F64,
+    d_ref: _F64,
+) -> tuple[_F64, _F64, _F64, _F64, _F64]:
+    """(a, b, c, d, cst) <- the reference pencil with ``rows`` patched by one regime.
 
-    ``pencil_addr`` of 0 is the reference regime: the copy alone, ``c`` zero.
-    ``c`` is ``(n_var,)`` and zero off ``rows``.
+    ``pencil_addr`` of 0 is the reference regime: the copy alone, ``cst`` zero.
+    ``cst`` is ``(n_var,)`` and zero off ``rows``.
     """
 
 def occbin_recursion_arena_size(
@@ -83,13 +85,14 @@ def occbin_solve1(
     residual_addr: int,
     seed: _F64,
     params: _F64,
+    incidence: _I8,
     n_state: int,
     pencil_addrs: Sequence[int],
     rows: Sequence[_I64],
     n_constraint: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64]:
-    """(ss, f, p, stab, eig, a, b, c) <- reference solve and every pencil.
+) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64]:
+    """(ss, f, p, stab, eig, a, b, c, d, cst) <- reference solve and every pencil.
 
     ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
     ``0..2 ** n_constraint - 1``, slot 0 the reference with address 0 and no

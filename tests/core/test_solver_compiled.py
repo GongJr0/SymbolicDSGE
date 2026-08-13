@@ -76,14 +76,16 @@ def test_compiled_equations_accept_dict_and_vector_parameters(compiled_test):
     n = len(c.var_names)
     fwd = np.zeros(n, dtype=complex)
     cur = np.zeros(n, dtype=complex)
+    prev = np.zeros(n, dtype=complex)
+    eps = np.zeros(c.n_exog, dtype=complex)
 
     par_dict = {
         p.name: float64(c.config.calibration.parameters[p]) for p in c.calib_params
     }
-    out_from_dict = c.equations(fwd, cur, par_dict)
+    out_from_dict = c.equations(fwd, cur, prev, eps, par_dict)
 
     par_vec = np.array([par_dict[p.name] for p in c.calib_params], dtype=complex)
-    out_from_vec = c.equations(fwd, cur, par_vec)
+    out_from_vec = c.equations(fwd, cur, prev, eps, par_vec)
 
     assert out_from_dict.shape == (len(c.objective_eqs),)
     assert list(map(str, out_from_dict)) == list(map(str, out_from_vec))
@@ -94,7 +96,13 @@ def test_compiled_equations_reject_bad_parameter_vector_length(compiled_test):
     n = len(c.var_names)
 
     with pytest.raises(ValueError, match="Parameter vector length"):
-        c.equations(np.zeros(n), np.zeros(n), np.zeros(len(c.calib_params) - 1))
+        c.equations(
+            np.zeros(n),
+            np.zeros(n),
+            np.zeros(n),
+            np.zeros(c.n_exog),
+            np.zeros(len(c.calib_params) - 1),
+        )
 
 
 def test_construct_measurement_array_dispatchers_are_cached(compiled_test):

@@ -194,11 +194,19 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
         dtype=np.complex128,
     )
     objective = solved_test.compiled.equations
+    # Same lag convention as _forward_residuals: the path shifted by one, with
+    # the first row its own predecessor, and no innovation.
+    n_exog = solved_test.compiled.n_exog
+    prev_states = np.empty_like(current_states)
+    prev_states[0] = current_states[0]
+    prev_states[1:] = current_states[:-1]
     manual = np.empty((T - 1, 1), dtype=np.float64)
     for t in range(T - 1):
         manual[t, 0] = objective(
             projected_forward[t].astype(np.complex128),
             current_states[t].astype(np.complex128),
+            prev_states[t].astype(np.complex128),
+            np.zeros(n_exog, dtype=np.complex128),
             params,
         )[1].real
 

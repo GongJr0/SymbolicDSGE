@@ -1,69 +1,34 @@
 #include "core.h"
 #include <stdlib.h>
 
-void sdsge_assemble_state_space(const c128 *SDSGE_RESTRICT p,
-                                const c128 *SDSGE_RESTRICT f, const i64 n_state,
-                                const i64 n_control, const i64 n_exog,
-                                f64 *SDSGE_RESTRICT A, f64 *SDSGE_RESTRICT B) {
+void sdsge_assemble_transition(const f64 *SDSGE_RESTRICT p,
+                               const f64 *SDSGE_RESTRICT f, const i64 n_state,
+                               const i64 n_control, f64 *SDSGE_RESTRICT A) {
   const i64 n_total = n_state + n_control;
 
   /*
-   * A = [[p,   0],
-   *      [f@p, 0]]
+   * A = [[p, 0],
+   *      [f, 0]]
    *
-   * Shape: n_total × n_total
+   * A state is a variable occurring at t-1, so the rule it carries already maps
+   * y_{t-1} to y_t and every row of A is a row of that rule. There is no
+   * product here: a control does not respond to the state at t, it responds to
+   * the same lagged state the transition does. The control columns are empty
+   * because nothing reads a control one period on.
    */
   for (i64 i = 0; i < n_total; ++i) {
     for (i64 j = 0; j < n_total; ++j) {
       A[i * n_total + j] = 0.0;
     }
   }
-
-  /* Top-left block: p. */
   for (i64 i = 0; i < n_state; ++i) {
     for (i64 j = 0; j < n_state; ++j) {
-      A[i * n_total + j] = c128_real(p[i * n_state + j]);
+      A[i * n_total + j] = p[i * n_state + j];
     }
   }
-
-  /* Bottom-left block: f @ p. */
   for (i64 i = 0; i < n_control; ++i) {
     for (i64 j = 0; j < n_state; ++j) {
-      c128 value = c128_mul(f[i * n_state], p[j]);
-
-      for (i64 k = 1; k < n_state; ++k) {
-        value =
-            c128_add(value, c128_mul(f[i * n_state + k], p[k * n_state + j]));
-      }
-
-      A[(n_state + i) * n_total + j] = c128_real(value);
-    }
-  }
-
-  /*
-   * B_state = [I(n_exog)]
-   *           [    0    ]
-   *
-   * B = [B_state]
-   *     [f @ B_state]
-   *
-   * Shape: n_total × n_exog
-   */
-  for (i64 i = 0; i < n_total; ++i) {
-    for (i64 j = 0; j < n_exog; ++j) {
-      B[i * n_exog + j] = 0.0;
-    }
-  }
-
-  /* B_state identity block. */
-  for (i64 i = 0; i < n_exog; ++i) {
-    B[i * n_exog + i] = 1.0;
-  }
-
-  /* Bottom block: f @ B_state == f[:, :n_exog]. */
-  for (i64 i = 0; i < n_control; ++i) {
-    for (i64 j = 0; j < n_exog; ++j) {
-      B[(n_state + i) * n_exog + j] = c128_real(f[i * n_state + j]);
+      A[(n_state + i) * n_total + j] = f[i * n_state + j];
     }
   }
 }

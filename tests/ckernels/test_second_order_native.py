@@ -41,10 +41,10 @@ def _drive(path):
     # deviation-form models -> 0). No file I/O at collection time.
     ss = DSGESolver._resolve_ss_seed(None, compiled)
 
-    a, b = klein_preprocess(cf.address, ss, par, n_eq)
+    a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
     sol = klein_solve(cf, par, ss, n_state)
     gx, hx = np.real(sol.f), np.real(sol.p)
-    f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
+    f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
     eta = DSGESolver._build_eta(compiled)
     return a, b, f_xx, gx, hx, n_state, eta
 

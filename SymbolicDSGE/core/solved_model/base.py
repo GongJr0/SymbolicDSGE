@@ -332,9 +332,7 @@ class SolvedModel(ABC, Generic[Policy]):
             solve_kwargs=solve_kwargs,
         ).write(path)
 
-    def _simulation_initial_state(
-        self, f: NDF, x0: list[float] | ndarray | None = None
-    ) -> NDF:
+    def _simulation_initial_state(self, x0: list[float] | ndarray | None = None) -> NDF:
         """``x0`` in levels, converted to deviations and widened to the full ``n_var`` layout.
 
         A caller states an initial condition the way it reads the result, so
@@ -361,7 +359,7 @@ class SolvedModel(ABC, Generic[Policy]):
                 raise ValueError(
                     f"x0 must have length {n_state} or {n}, got {raw.shape[0]}."
                 )
-        x0_arr[n_state:] = x0_arr[:n_state] @ f.T
+        x0_arr[n_state:] = 0.0
         return x0_arr
 
     def _simulate_observable_matrix(

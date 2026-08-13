@@ -23,6 +23,7 @@ def test_residual_printer_build_njit_matches_sympy_values() -> None:
         slot={cur_x: ("cur", 0), cur_y: ("cur", 1), beta: ("par", 0)},
         n_var=2,
         n_par=1,
+        n_exog=0,
     )
     exprs = [
         sp.exp(cur_x) + beta * cur_y**2 - 1 / (1 + cur_x),
@@ -32,7 +33,7 @@ def test_residual_printer_build_njit_matches_sympy_values() -> None:
     fn = build_njit(exprs, layout)
     cur = np.array([1.2 + 0.1j, 0.7 - 0.05j], dtype=C)
     par = np.array([0.8 + 0.0j], dtype=C)
-    got = fn(np.zeros(2, dtype=C), cur, par)
+    got = fn(np.zeros(2, dtype=C), cur, np.zeros(2, dtype=C), np.zeros(0, dtype=C), par)
 
     ref = sp.lambdify((cur_x, cur_y, beta), exprs, "numpy")
     want = np.asarray(ref(cur[0], cur[1], par[0]), dtype=C)
@@ -49,6 +50,7 @@ def test_residual_printer_build_cfunc_compiles_bicomplex() -> None:
         },
         n_var=1,
         n_par=1,
+        n_exog=0,
     )
 
     cf = build_cfunc([beta * sp.exp(fwd_x) + cur_x**2], layout, BicomplexOps())

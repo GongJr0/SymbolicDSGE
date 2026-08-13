@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections.abc import Sequence
 from typing import Any
 
-from numpy import complex128, float64, int64
+from numpy import complex128, float64, int8, int64
 from numpy.typing import NDArray
 
 from .._ckernels.core import klein_solve1, sgu_klein_solve2
@@ -89,10 +89,11 @@ class PiecewiseSolution(BaseSolution):
     steady state. :attr:`steady_state`, ``stab`` and ``eig`` are that reference
     regime's.
 
-    :attr:`a` (n_regime, n_var, n_var)/``b`` (n_regime, n_var, n_var)/``c``
-    (n_regime, n_var) are the regime pencils ``a^r E[y_{t+1}] = b^r y_t - c^r``,
-    indexed by binding bitmask, slot 0 the reference. ``c`` is the constraint's
-    whole mechanism and is zero at slot 0.
+    :attr:`a`/``b``/``c`` (n_regime, n_var, n_var) and ``d``
+    (n_regime, n_var, n_exog) are the regime pencils
+    ``a^r E[y_{t+1}] = b^r y_t + c^r y_{t-1} + d^r eps_t - cst^r``, indexed by
+    binding bitmask, slot 0 the reference. ``cst`` (n_regime, n_var) is the
+    constraint's whole mechanism and is zero at slot 0.
     :attr:`f_ref` (n_ctrl, n_state)/``p_ref`` (n_state, n_state) are the
     reference regime's rule, which the recursion takes as its terminal
     condition: past the horizon the guess is relaxed, so the model is its own
@@ -102,6 +103,8 @@ class PiecewiseSolution(BaseSolution):
     a: NDF
     b: NDF
     c: NDF
+    d: NDF
+    cst: NDF
     f_ref: NDF
     p_ref: NDF
 
@@ -131,6 +134,7 @@ def klein_solve(
     residual_cfunc: Any,
     params: NDF,
     ss_seed: NDF,
+    incidence: NDArray[int8],
     n_states: int,
     *,
     n_exog: int = 0,
@@ -150,7 +154,7 @@ def klein_solve(
     """
     with _bk_dating_hint():
         ss, f, p, stab, eig, A, B = klein_solve1(
-            residual_cfunc.address, ss_seed, params, n_states, n_exog
+            residual_cfunc.address, ss_seed, params, incidence, n_states, n_exog
         )
     return FirstOrderSolution(
         steady_state=ss, stab=stab, eig=eig, order=1, p=p, f=f, A=A, B=B
@@ -162,6 +166,7 @@ def sgu_solve(
     bc_residual_cfunc: Any,
     params: NDF,
     ss_seed: NDF,
+    incidence: NDArray[int8],
     n_states: int,
     eta: NDF,
     *,
@@ -186,6 +191,7 @@ def sgu_solve(
             bc_residual_cfunc.address,
             ss_seed,
             params,
+            incidence,
             n_states,
             eta,
             n_exog,
@@ -212,6 +218,7 @@ def piecewise_solve(
     rows: Sequence[NDArray[int64]],
     params: NDF,
     ss_seed: NDF,
+    incidence: NDArray[int8],
     n_states: int,
     n_constraint: int,
     *,
@@ -231,10 +238,11 @@ def piecewise_solve(
     error, so only the reference verdict means anything.
     """
     with _bk_dating_hint():
-        ss, f, p, stab, eig, a, b, c = occbin_solve1(
+        ss, f, p, stab, eig, a, b, c, d, cst = occbin_solve1(
             residual_cfunc.address,
             ss_seed,
             params,
+            incidence,
             n_states,
             pencil_addrs,
             rows,
@@ -249,6 +257,8 @@ def piecewise_solve(
         a=a,
         b=b,
         c=c,
+        d=d,
+        cst=cst,
         f_ref=f,
         p_ref=p,
     )

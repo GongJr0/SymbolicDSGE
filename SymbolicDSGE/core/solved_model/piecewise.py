@@ -47,7 +47,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     ) -> StatePath:
         pol = self.policy
         comp = self.compiled
-        x0_arr = self._simulation_initial_state(pol.f_ref, x0)[: comp.n_state]
+        x0_arr = self._simulation_initial_state(x0)[: comp.n_state]
 
         shock_mat = zeros((T, comp.n_state), dtype=float64)
         shock_mat[:, : comp.n_exog] = simulation_shock_matrix(
@@ -59,7 +59,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         X, regimes, diag = occbin_sim(
             a=pol.a,
             b=pol.b,
-            c=pol.c,
+            c=pol.cst,  # occbin_sim's `c` is the constant, not the lag block
             f_ref=pol.f_ref,
             ss=pol.steady_state,
             par=comp._coerce_param_vector(comp.config.calibration.parameters),

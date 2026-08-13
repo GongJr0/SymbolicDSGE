@@ -8,20 +8,27 @@ must stay in sync with ``_core.pyx`` / ``core.c`` and the reference oracles in
 stub.
 """
 
-from numpy import complex128, float64
+from numpy import complex128, float64, int8
 from numpy.typing import NDArray
 
 _F64 = NDArray[float64]
 _C128 = NDArray[complex128]
+_I8 = NDArray[int8]
 
-def assemble_state_space(
-    p: _C128,
-    f: _C128,
+#: ``SDSGE_INC_*`` from ``pencil.h``, re-exported so the compiler and the solve
+#: share one definition of the incidence bits.
+INC_LAG: int
+INC_CUR: int
+INC_LEAD: int
+
+def assemble_transition(
+    p: _F64,
+    f: _F64,
     n_state: int,
     n_control: int,
-    n_exog: int,
-) -> tuple[_F64, _F64]:
-    """(A, B) <- linear state space from (p, f) matrices."""
+) -> _F64:
+    """A <- the first-order transition from (p, f). The shock loading is the
+    pencil stage's own output, not assembled from these."""
 
 def simulate_linear_states_into(
     A: _F64,
@@ -69,9 +76,15 @@ def klein_preprocess(
     steady_state: _F64,
     params: _F64,
     n_eq: int,
-) -> tuple[_F64, _F64]:
-    """Complex-step (a, b) from a residual @cfunc address. Native twin of
-    ``klein._approximate_system_numeric``."""
+    n_exog: int,
+) -> tuple[_F64, _F64, _F64, _F64]:
+    """Complex-step (a, b, c, d) from a residual @cfunc address, so the system
+    reads ``a y' = b y + c y_prev + d eps``. ``d`` is (n_eq, n_exog), the rest
+    (n_eq, n_var)."""
+
+def pencil_dim(incidence: _I8, n_var: int) -> int:
+    """Pencil size ``ndynamic + n_both`` from an incidence. Not bounded by
+    n_var: a mixed lag/lead variable needs a companion row."""
 
 def klein_qz(a: _F64 | _C128, b: _F64 | _C128) -> tuple[_C128, _C128, _C128]:
     """Ordered generalized Schur (QZ) with the Klein 'ouc' ordering via LAPACK
@@ -82,23 +95,26 @@ def steady_state_newton(
     residual_addr: int,
     seed: _F64,
     params: _F64,
+    n_exog: int,
     max_iter: int = ...,
     tol: float = ...,
 ) -> tuple[_F64, int]:
-    """Newton solve of F(ss, ss) = 0 from a residual @cfunc address; returns
-    (ss, iters). Jacobian a - b via klein_preproc, step via f64 LU."""
+    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual
+    @cfunc address; returns (ss, iters). Jacobian a - b - c via klein_preproc,
+    step via f64 LU."""
 
 def klein_solve1(
     residual_addr: int,
     seed: _F64,
     params: _F64,
+    incidence: _I8,
     n_state: int,
     n_exog: int = ...,
 ) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64]:
     """(ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
     Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
-    assemble_state_space into one GIL release. ``f``/``p`` are real; the Schur
+    assemble_transition into one GIL release. ``f``/``p`` are real; the Schur
     form's imaginary parts are roundoff on a real pencil. ``stab`` is reported,
     not raised on."""
 
@@ -107,6 +123,7 @@ def sgu_klein_solve2(
     bc_residual_addr: int,
     seed: _F64,
     params: _F64,
+    incidence: _I8,
     n_state: int,
     eta: _F64,
     n_exog: int = ...,
@@ -116,7 +133,8 @@ def sgu_klein_solve2(
 
     klein_solve1 plus bicomplex_hessian, second_order and second_order_risk in
     one GIL release. The pencil and the residual Hessian stay native. ``eta`` is
-    the (n_state, n_exog) shock loading. ``stab`` is reported, not raised on."""
+    the (n_exog, n_exog) Cholesky of the shock covariance; the solve composes the
+    state loading from it. ``stab`` is reported, not raised on."""
 
 def second_order(
     a: _F64,
@@ -145,20 +163,25 @@ def residual_path(
     residual_addr: int,
     cur_states: _C128,
     fwd_states: _C128,
+    prev_states: _C128,
+    shocks: _C128,
     params: _C128,
     n_eq: int,
 ) -> _F64:
-    """Real residual matrix (n_steps, n_eq) from a residual @cfunc over a path."""
+    """Real residual matrix (n_steps, n_eq) from a residual @cfunc over a path.
+    ``prev_states`` is (n_steps, n_var) and ``shocks`` (n_steps, n_exog)."""
 
 def residual_eval(
     residual_addr: int,
     fwd: _C128,
     cur: _C128,
+    prev: _C128,
+    eps: _C128,
     params: _C128,
     n_eq: int,
 ) -> _C128:
     """Complex residual vector (n_eq,) from a residual @cfunc address at a single
-    (fwd, cur, par) point. Native twin of the old numba objective vector func."""
+    (fwd, cur, prev, eps, par) point."""
 
 def measurement_eval(
     meas_addr: int,
@@ -192,9 +215,13 @@ def bicomplex_hessian(
     residual_addr: int,
     steady_state: _F64,
     params: _F64,
+    n_exog: int,
     n_eq: int,
 ) -> _F64:
-    """Residual Hessian (n_eq, 2*n_var, 2*n_var) via the bicomplex step."""
+    """Residual Hessian (n_eq, 2*n_var, 2*n_var) via the bicomplex step.
+
+    Spans the (fwd, cur) pair only: ``prev`` is held at the steady state and
+    ``eps`` at zero, so derivatives in either are absent."""
 
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).

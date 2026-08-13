@@ -122,16 +122,21 @@ def test_rbc_second_order_matches_dynare():
     eq = compiled.equations
 
     # Steady state actually clears the residual.
+    point = ss.astype(np.complex128)
     resid = eq(
-        ss.astype(np.complex128), ss.astype(np.complex128), par.astype(np.complex128)
+        point,
+        point,
+        point,
+        np.zeros(compiled.n_exog, np.complex128),
+        par.astype(np.complex128),
     )
     np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
 
-    a, b = klein_preprocess(cf.address, ss, par, n_eq)
+    a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
     sol = klein_solve(cf, par, ss, n_state)
     assert sol.stab == 0
     gx, hx = sol.f, sol.p
-    f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
+    f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
     gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
 
     # k_lag1(t+1) = k(t), so Dynare's k' row is ours; z_lag1(t+1) = z(t) is linear.

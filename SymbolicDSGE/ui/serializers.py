@@ -96,8 +96,7 @@ def summarize_solved_model(
         "layout": {
             "declared_names": list(layout.declared_names),
             "canonical_names": list(layout.canonical_names),
-            "exo_state_names": list(layout.exo_state_names),
-            "endo_state_names": list(layout.endo_state_names),
+            "state_names": list(layout.state_names),
             "control_names": list(layout.control_names),
         },
     }

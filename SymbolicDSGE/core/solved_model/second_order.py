@@ -39,7 +39,7 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
 
         policy = self.policy
 
-        x0_state = self._simulation_initial_state(policy.f, x0)[:n_state]
+        x0_state = self._simulation_initial_state(x0)[:n_state]
         shock_mat = simulation_shock_matrix(
             self.compiled,
             T=T,

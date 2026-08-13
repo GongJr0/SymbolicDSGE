@@ -76,9 +76,11 @@ typedef struct {
 
 typedef struct {
   sdsge_solve1 ref;
-  f64 *a; // (n_regime, n_var, n_var)
-  f64 *b; // (n_regime, n_var, n_var)
-  f64 *c; // (n_regime, n_var)
+  f64 *a;   // (n_regime, n_var, n_var)
+  f64 *b;   // (n_regime, n_var, n_var)
+  f64 *c;   // (n_regime, n_var, n_var)  lag block
+  f64 *d;   // (n_regime, n_var, n_exog) shock block
+  f64 *cst; // (n_regime, n_var)         constant
 } sdsge_occbin1;
 
 arena_size sdsge_occbin_recursion_arena_size(i64 n_var, i64 n_state,
@@ -129,7 +131,8 @@ i64 sdsge_occbin_sim(const occbin_run_ctx *run,
                      f64 *arena, i64 *iarena);
 
 arena_size sdsge_occbin_solve1_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
-                                          i64 n_par, i64 max_n_row);
+                                          i64 n_par, i64 n_exog, i64 nd,
+                                          i64 max_n_row);
 
 i64 sdsge_occbin_solve1(const occbin_solve1_spec *spec, sdsge_occbin1 *out,
                         f64 *arena, i64 *iarena);

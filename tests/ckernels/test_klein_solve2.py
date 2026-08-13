@@ -55,9 +55,9 @@ def _staged(compiled, par, seed, eta):
     ss, f, p, stab, eig, A, B = klein_solve1(addr, seed, par, n_state, compiled.n_exog)
     # The second-order stages take the pencil, which the fused solve keeps
     # internal, so the staged reference rebuilds it at the same steady state.
-    a, b = klein_preprocess(addr, ss, par, n_eq)
+    a, b, _, _ = klein_preprocess(addr, ss, par, n_eq, compiled.n_exog)
     gx, hx = f, p  # klein_solve1 already projects
-    f_xx = bicomplex_hessian(bc_addr, ss, par, n_eq)
+    f_xx = bicomplex_hessian(bc_addr, ss, par, compiled.n_exog, n_eq)
     gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
     gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
     return ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B
