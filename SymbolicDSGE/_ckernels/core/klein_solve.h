@@ -129,15 +129,19 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
 /* ERROR CODES. -2 and -3 come straight off sdsge_steady_state_newton, so the
  * linearization half passes its status through unmapped. */
 #define SDSGE_KLEIN_SOLVE_OK 0
-#define SDSGE_KLEIN_SOLVE_SS_SINGULAR -2
-#define SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE -3
-#define SDSGE_KLEIN_SOLVE_QZ -4
-#define SDSGE_KLEIN_SOLVE_SINGULAR -5  /* singular z11/s11 (Blanchard-Kahn) */
-#define SDSGE_KLEIN_SOLVE_NO_STATES -6 /* stateless model */
-#define SDSGE_KLEIN_SOLVE_SECOND_ORDER -7 /* SGU system singular */
-#define SDSGE_KLEIN_SOLVE_RISK -8         /* risk-correction system singular */
-#define SDSGE_KLEIN_SOLVE_ABSENT_VAR -9   /* a variable occurs at no date */
-#define SDSGE_KLEIN_SOLVE_QR -10          /* static rotation failed */
-#define SDSGE_KLEIN_SOLVE_STATIC -11      /* static block singular */
+#define SDSGE_KLEIN_SOLVE_SS_SINGULAR -501
+#define SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE -502
+#define SDSGE_KLEIN_SOLVE_QZ -503
+#define SDSGE_KLEIN_SOLVE_SINGULAR -504  /* singular z11/s11 (Blanchard-Kahn) */
+#define SDSGE_KLEIN_SOLVE_NO_STATES -505 /* stateless model */
+#define SDSGE_KLEIN_SOLVE_SECOND_ORDER -506 /* SGU system singular */
+#define SDSGE_KLEIN_SOLVE_RISK -507         /* risk-correction system singular */
+#define SDSGE_KLEIN_SOLVE_ABSENT_VAR -508   /* a variable occurs at no date */
+#define SDSGE_KLEIN_SOLVE_QR -509           /* static rotation failed */
+#define SDSGE_KLEIN_SOLVE_STATIC -510       /* static block singular */
+/* The second-order path is unavailable, not failed: the SGU tensors and the
+ * bicomplex sweep still span two dates. Distinct from _SECOND_ORDER so a caller
+ * reporting a singular system never reports a switched-off one. */
+#define SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF -511
 
 #endif /* SDSGE_KLEIN_SOLVE_H */

@@ -18,7 +18,7 @@
 #define SDSGE_TRANSFORM_SUCCESS 0
 /* n, p, window, order, or ddof outside the range the transform is defined on.
  */
-#define SDSGE_TRANSFORM_BAD_ARG -6
+#define SDSGE_TRANSFORM_BAD_ARG -1301
 
 /* Static configuration for generic native MC transform dispatch.
  * Dynamic sample data, scratch, and output remain in caller-owned arenas. */

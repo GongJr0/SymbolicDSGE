@@ -179,6 +179,18 @@ cdef extern from "estimation.h":
     double sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const double *theta,
                                int has_priors) nogil
 
+    # The objectives behind the drivers' (x, void*ctx) ABI. Negated for the
+    # minimizers, plain for MCMC; the ctx cast lives on the C side.
+    double sdsge_min_linear_ll(const double *x, void *ctx) noexcept nogil
+    double sdsge_min_linear_lp(const double *x, void *ctx) noexcept nogil
+    double sdsge_min_extended_ll(const double *x, void *ctx) noexcept nogil
+    double sdsge_min_extended_lp(const double *x, void *ctx) noexcept nogil
+    double sdsge_min_unscented_ll(const double *x, void *ctx) noexcept nogil
+    double sdsge_min_unscented_lp(const double *x, void *ctx) noexcept nogil
+    double sdsge_post_linear(const double *x, void *ctx) noexcept nogil
+    double sdsge_post_extended(const double *x, void *ctx) noexcept nogil
+    double sdsge_post_unscented(const double *x, void *ctx) noexcept nogil
+
 
 cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
@@ -833,35 +845,6 @@ def obj_unscented_base(
 
 # --- Native MLE/MAP driver over the per-mode objective (issue #330) ----------
 #
-# Trampolines adapt each mode's objective (ctx, theta, has_priors) ABI to the
-# optimizer's (x, void*ctx) ABI, negating loglik/logpost for minimization. The
-# BK/NaN sentinel (-inf loglik) maps to +inf, which the drivers tolerate.
-
-cdef double _obj_lin_ll(const double *x, void *ctx) noexcept nogil:
-    return -sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 0)
-cdef double _obj_lin_lp(const double *x, void *ctx) noexcept nogil:
-    return -sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 1)
-cdef double _obj_ext_ll(const double *x, void *ctx) noexcept nogil:
-    return -sdsge_obj_extended(<sdsge_extended_ctx*>ctx, x, 0)
-cdef double _obj_ext_lp(const double *x, void *ctx) noexcept nogil:
-    return -sdsge_obj_extended(<sdsge_extended_ctx*>ctx, x, 1)
-cdef double _obj_unsc_ll(const double *x, void *ctx) noexcept nogil:
-    return -sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 0)
-cdef double _obj_unsc_lp(const double *x, void *ctx) noexcept nogil:
-    return -sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 1)
-
-
-# MCMC drives the objective as +logpost (no minimization negation); priors are
-# always on (MCMC requires a posterior). The -inf BK/non-finite sentinel flows
-# through unchanged and auto-rejects in the native mainloop.
-cdef double _post_lin(const double *x, void *ctx) noexcept nogil:
-    return sdsge_obj_linear(<sdsge_linear_ctx*>ctx, x, 1)
-cdef double _post_ext(const double *x, void *ctx) noexcept nogil:
-    return sdsge_obj_extended(<sdsge_extended_ctx*>ctx, x, 1)
-cdef double _post_unsc(const double *x, void *ctx) noexcept nogil:
-    return sdsge_obj_unscented(<sdsge_unscented_ctx*>ctx, x, 1)
-
-
 # numpy tags the BitGenerator capsule with this exact name; a mismatch makes
 # PyCapsule_GetPointer reject the pointer, so a foreign capsule can't be
 # dereferenced. Mirrors the rng subsystem's own unwrap.
@@ -1430,15 +1413,14 @@ def run_estimation(
             nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
     cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
 
-    # Objective trampoline for this mode: minimize -loglik / -logpost. Mode was
-    # already validated in _build_native_ctx.
+    # Mode was already validated in _build_native_ctx.
     cdef sdsge_objective_fn obj
     if mode == "linear":
-        obj = _obj_lin_lp if has_priors else _obj_lin_ll
+        obj = sdsge_min_linear_lp if has_priors else sdsge_min_linear_ll
     elif mode == "extended":
-        obj = _obj_ext_lp if has_priors else _obj_ext_ll
+        obj = sdsge_min_extended_lp if has_priors else sdsge_min_extended_ll
     else:
-        obj = _obj_unsc_lp if has_priors else _obj_unsc_ll
+        obj = sdsge_min_unscented_lp if has_priors else sdsge_min_unscented_ll
 
     cdef sdsge_lbfgsb_options lopt
     cdef sdsge_lbfgsb_result lres
@@ -1558,14 +1540,14 @@ def run_mcmc(
     cdef double[:, ::1] keptv = kept
     cdef double[::1] keptlpv = kept_lp
 
-    # +logpost trampoline for this mode (mode already validated in the builder).
+    # Mode was already validated in the builder.
     cdef sdsge_objective_fn logpost
     if mode == "linear":
-        logpost = _post_lin
+        logpost = sdsge_post_linear
     elif mode == "extended":
-        logpost = _post_ext
+        logpost = sdsge_post_extended
     else:
-        logpost = _post_unsc
+        logpost = sdsge_post_unscented
 
     cdef sdsge_mcmc_options opt
     opt.n_draws = n_draws

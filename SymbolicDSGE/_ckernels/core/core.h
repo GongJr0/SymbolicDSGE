@@ -57,6 +57,6 @@ i64 sdsge_simulate_second_order_pruned(
 );
 /* ERROR CODES */
 #define SDSGE_CORE_SUCCESS 0
-#define SDSGE_CORE_ALLOC_FAIL -1
+#define SDSGE_CORE_ALLOC_FAIL -201
 
 #endif /* SDSGE_CORE_H */

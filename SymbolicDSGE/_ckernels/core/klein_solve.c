@@ -126,7 +126,10 @@ i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
       spec->residual, spec->ss_seed, spec->params, n, spec->n_par, spec->n_exog,
       SDSGE_SS_MAX_ITER, SDSGE_SS_TOL, out->ss, &iters, stage, iarena);
   if (rc != SDSGE_NEWTON_OK) {
-    return rc;
+    /* Translated rather than forwarded: the caller reports a klein solve, and
+     * the two families no longer share numbers. */
+    return rc == SDSGE_NEWTON_SINGULAR ? SDSGE_KLEIN_SOLVE_SS_SINGULAR
+                                       : SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE;
   }
 
   klein_preproc(spec->residual, out->ss, spec->params, n, spec->n_par,
@@ -362,5 +365,5 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
   (void)out2;
   (void)arena;
   (void)iarena;
-  return SDSGE_KLEIN_SOLVE_SECOND_ORDER;
+  return SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF;
 }

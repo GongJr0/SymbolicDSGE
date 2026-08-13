@@ -28,7 +28,7 @@ i64 sdsge_steady_state_newton(sdsge_residual_fn residual,
 
 /* ERROR CODES */
 #define SDSGE_NEWTON_OK 0
-#define SDSGE_NEWTON_SINGULAR -2   /* Jacobian a - b - c singular */
-#define SDSGE_NEWTON_NO_CONVERGE -3 /* tol not met within max_iter (or non-finite) */
+#define SDSGE_NEWTON_SINGULAR -901   /* Jacobian a - b - c singular */
+#define SDSGE_NEWTON_NO_CONVERGE -902 /* tol not met within max_iter (or non-finite) */
 
 #endif /* SDSGE_STEADY_STATE_H */

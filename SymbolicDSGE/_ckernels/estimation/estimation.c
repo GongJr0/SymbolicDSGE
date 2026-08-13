@@ -373,3 +373,41 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
 }
+
+/* ---- Driver-facing closures (see estimation.h for the sign convention) ---- */
+
+f64 sdsge_min_linear_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return -sdsge_obj_linear((sdsge_linear_ctx *)ctx, x, 0);
+}
+
+f64 sdsge_min_linear_lp(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return -sdsge_obj_linear((sdsge_linear_ctx *)ctx, x, 1);
+}
+
+f64 sdsge_min_extended_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return -sdsge_obj_extended((sdsge_extended_ctx *)ctx, x, 0);
+}
+
+f64 sdsge_min_extended_lp(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return -sdsge_obj_extended((sdsge_extended_ctx *)ctx, x, 1);
+}
+
+f64 sdsge_min_unscented_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return -sdsge_obj_unscented((sdsge_unscented_ctx *)ctx, x, 0);
+}
+
+f64 sdsge_min_unscented_lp(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return -sdsge_obj_unscented((sdsge_unscented_ctx *)ctx, x, 1);
+}
+
+f64 sdsge_post_linear(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return sdsge_obj_linear((sdsge_linear_ctx *)ctx, x, 1);
+}
+
+f64 sdsge_post_extended(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return sdsge_obj_extended((sdsge_extended_ctx *)ctx, x, 1);
+}
+
+f64 sdsge_post_unscented(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return sdsge_obj_unscented((sdsge_unscented_ctx *)ctx, x, 1);
+}

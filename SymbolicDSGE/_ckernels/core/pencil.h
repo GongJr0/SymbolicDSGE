@@ -111,7 +111,7 @@ void sdsge_pencil_assemble(const f64 *SDSGE_RESTRICT a,
 
 /* ERROR CODES */
 #define SDSGE_PENCIL_OK 0
-#define SDSGE_PENCIL_ABSENT_VAR -2 /* a variable occurs at no date */
-#define SDSGE_PENCIL_QR_FAIL -3    /* LAPACK dgeqrf/dormqr info != 0 */
+#define SDSGE_PENCIL_ABSENT_VAR -601 /* a variable occurs at no date */
+#define SDSGE_PENCIL_QR_FAIL -602    /* LAPACK dgeqrf/dormqr info != 0 */
 
 #endif /* SDSGE_PENCIL_H */

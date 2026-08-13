@@ -52,6 +52,6 @@ i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
 
 /* ERROR CODES */
 #define SDSGE_SECOND_ORDER_OK 0
-#define SDSGE_SECOND_ORDER_SINGULAR -2 /* symmetry-reduced system singular */
+#define SDSGE_SECOND_ORDER_SINGULAR -801 /* symmetry-reduced system singular */
 
 #endif /* SDSGE_SECOND_ORDER_H */

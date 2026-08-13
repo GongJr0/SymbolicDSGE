@@ -47,6 +47,7 @@ cdef extern from "../_common/sdsge_bicomplex.h" nogil:
     bc256 bc256_reconst(c128 a, c128 b)
 
 cdef extern from "core.h" nogil:
+    int SDSGE_CORE_ALLOC_FAIL
     ctypedef void (*sdsge_measurement_fn)(
         double *vars, double *par, double *out) noexcept
     void sdsge_assemble_transition(
@@ -133,6 +134,8 @@ cdef extern from "klein_postproc.h" nogil:
         const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
         c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
         int64_t *iarena)
+    int SDSGE_KLEIN_POSTPROC_SINGULAR
+    int SDSGE_KLEIN_POSTPROC_INVALID
 
 
 cdef extern from "klein_qz.h" nogil:
@@ -242,6 +245,7 @@ cdef extern from "klein_solve.h" nogil:
     int SDSGE_KLEIN_SOLVE_SINGULAR
     int SDSGE_KLEIN_SOLVE_NO_STATES
     int SDSGE_KLEIN_SOLVE_SECOND_ORDER
+    int SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF
     int SDSGE_KLEIN_SOLVE_RISK
 
     arena_size sdsge_sgu_klein_solve2_arena_size(
@@ -258,9 +262,12 @@ cdef extern from "steady_state.h" nogil:
         sdsge_residual_fn residual, const double *seed, const double *par,
         int64_t n_var, int64_t n_par, int64_t n_exog, int64_t max_iter,
         double tol, double *ss, int64_t *iters, double *arena, int64_t *iarena)
+    int SDSGE_NEWTON_SINGULAR
+    int SDSGE_NEWTON_NO_CONVERGE
 
 
 cdef extern from "second_order.h" nogil:
+    int SDSGE_SECOND_ORDER_SINGULAR
     arena_size sdsge_second_order_arena_size(int64_t n, int64_t nx)
     int64_t sdsge_second_order(
         const double *a, const double *b, const double *f_xx,
@@ -296,6 +303,11 @@ cdef _raise_solve_error(int64_t err, str who):
         raise ValueError("klein_postprocess: model has no states.")
     if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER:
         raise ValueError("solve_second_order: singular symmetry-reduced system.")
+    if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF:
+        raise NotImplementedError(
+            "sgu_klein_solve2: the second-order solve is unavailable while the "
+            "SGU tensors and the residual Hessian span two dates. Use order=1."
+        )
     if err == SDSGE_KLEIN_SOLVE_RISK:
         raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
 
@@ -422,7 +434,7 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
             &hxv[0, 0], gx_ptr, bx_ptr, &hxxv[0, 0, 0], gxx_ptr,
             &hssv[0], gss_ptr, &x0v[0], shock_ptr,
             T, nx, ny, n_exog, out_ptr)
-    if err == -1:
+    if err == SDSGE_CORE_ALLOC_FAIL:
         raise MemoryError("simulate_second_order_pruned: allocation failed.")
     if err != 0:
         raise RuntimeError(
@@ -466,11 +478,11 @@ def klein_postprocess(s, t, z, int64_t n_states):
             <c128 *>&sv[0, 0], <c128 *>&tv[0, 0], <c128 *>&zv[0, 0], n_s, n_cs,
             <c128 *>&fv[0, 0] if n_cs > 0 else NULL,
             <c128 *>&pv[0, 0], &stab, <c128 *>&ev[0], &arv[0], &iarv[0])
-    if err == -2:
+    if err == SDSGE_KLEIN_POSTPROC_SINGULAR:
         raise ValueError(
             "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
         )
-    if err == -3:
+    if err == SDSGE_KLEIN_POSTPROC_INVALID:
         raise ValueError("klein_postprocess: model has no states.")
     return f, p, int(stab), eig
 
@@ -614,9 +626,9 @@ def steady_state_newton(
         err = sdsge_steady_state_newton(
             resid, seed_ptr, par_ptr, n_var, n_par, n_exog, max_iter, tol,
             ss_ptr, &iters, &arv[0], &iarv[0])
-    if err == -2:
+    if err == SDSGE_NEWTON_SINGULAR:
         raise ValueError("steady_state_newton: singular Jacobian (a - b - c).")
-    if err == -3:
+    if err == SDSGE_NEWTON_NO_CONVERGE:
         raise ValueError(
             "steady_state_newton: did not converge within max_iter "
             "(or the residual went non-finite)."
@@ -932,7 +944,7 @@ def second_order(a, b, f_xx, gx, hx, int64_t n_state):
         err = sdsge_second_order(
             &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, &hxv[0, 0], n, nx,
             gv_ptr, &hv[0, 0, 0], &arv[0], &iarv[0])
-    if err == -2:
+    if err == SDSGE_SECOND_ORDER_SINGULAR:
         raise ValueError("solve_second_order: singular symmetry-reduced system.")
     return gxx, hxx
 
@@ -974,7 +986,7 @@ def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
         err = sdsge_second_order_risk(
             &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, gxx_ptr, eta_ptr,
             n, nx, ne, gss_ptr, &hssv[0], &arv[0], &iarv[0])
-    if err == -2:
+    if err == SDSGE_SECOND_ORDER_SINGULAR:
         raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
     return gss, hss
 

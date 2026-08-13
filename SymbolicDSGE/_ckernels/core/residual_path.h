@@ -15,6 +15,6 @@ i64 sdsge_residual_path(sdsge_residual_fn resid, const c128 *SDSGE_RESTRICT cur,
                         i64 n_exog, i64 n_eq, f64 *SDSGE_RESTRICT residuals);
 
 #define SDSGE_RESIDUAL_PATH_OK 0
-#define SDSGE_RESIDUAL_PATH_ALLOC_FAIL -1
+#define SDSGE_RESIDUAL_PATH_ALLOC_FAIL -701
 
 #endif /* SDSGE_RESIDUAL_PATH_H */

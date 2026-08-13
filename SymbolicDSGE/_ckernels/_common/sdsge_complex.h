@@ -171,9 +171,7 @@ static inline c128 c128_sqrt(const c128 a) {
   return c128_make(p, q);
 }
 
-/* ERROR CODES */
-#define SDSGE_LU_SUCCESS 0
-#define SDSGE_LU_ALLOC_FAIL -1
-#define SDSGE_LU_SINGULAR -2
+/* Status codes are SDSGE_LU_* from sdsge_common.h, shared with the real
+ * factorization. */
 
 #endif /* SDSGE_COMPLEX_H */

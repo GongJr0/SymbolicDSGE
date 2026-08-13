@@ -8,10 +8,10 @@
 
 /* -1 is unassigned: it was a complex-matrix rejection no kernel ever returned. */
 #define KF_OK 0
-#define KF_ERR_SHAPE_MISMATCH -2
-#define KF_ERR_MATRIX_CONDITION -3
-#define KF_ERR_SINGULAR_MATRIX -4
-#define KF_ERR_ALLOC -5
+#define KF_ERR_SHAPE_MISMATCH -1101
+#define KF_ERR_MATRIX_CONDITION -1102
+#define KF_ERR_SINGULAR_MATRIX -1103
+#define KF_ERR_ALLOC -1104
 
 /* Kalman hot-loop helpers. Parity oracle: the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.

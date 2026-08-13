@@ -8,6 +8,7 @@
 #include "../core/klein_qz.h"          /* klein_zgges_fn */
 #include "../core/klein_solve.h"       /* klein specs, sdsge_solve1/2 */
 #include "../kalman/kalman.h"          /* meas_fn */
+#include "../optim/optim.h"            /* sdsge_objective_fn */
 #include "prior_program.h"             /* transform codes, dispatch */
 
 /* Native estimation objective context and theta-fill (issue #327). */
@@ -171,5 +172,24 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
 
 f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
                         const f64 *SDSGE_RESTRICT theta, int has_priors);
+
+/* The objectives above as `sdsge_objective_fn`: one closure ABI the optimizer
+ * and MCMC drivers can hold, with the mode's ctx recovered from `void *`.
+ *
+ * `sdsge_min_*` negate, because the drivers minimize; the -inf a rejected draw
+ * returns becomes +inf, which their line search reads as no decrease. `_ll` is
+ * the likelihood alone and `_lp` folds the log-prior in.
+ *
+ * `sdsge_post_*` are +logpost and do not negate: MCMC samples a posterior, so
+ * priors are always on and the -inf flows through to auto-reject the draw. */
+f64 sdsge_min_linear_ll(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_min_linear_lp(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_min_extended_ll(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_min_extended_lp(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_min_unscented_ll(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_min_unscented_lp(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_post_linear(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_post_extended(const f64 *SDSGE_RESTRICT x, void *ctx);
+f64 sdsge_post_unscented(const f64 *SDSGE_RESTRICT x, void *ctx);
 
 #endif /* SDSGE_ESTIMATION_H */

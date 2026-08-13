@@ -37,7 +37,7 @@ typedef struct {
 
 /* status codes for sdsge_mcmc_result.status */
 #define SDSGE_MCMC_OK 0
-#define SDSGE_MCMC_EALLOC (-1)
+#define SDSGE_MCMC_EALLOC (-1601)
 
 /* HOT LOOP DRIVER */
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,

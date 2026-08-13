@@ -151,7 +151,7 @@ i64 sdsge_occbin_solve1(const occbin_solve1_spec *spec, sdsge_occbin1 *out,
                         f64 *arena, i64 *iarena);
 
 #define SDSGE_OCCBIN_RECURSION_OK 0
-#define SDSGE_OCCBIN_RECURSION_SINGULAR -2 // match code to LU factorization
+#define SDSGE_OCCBIN_RECURSION_SINGULAR -1401 // the period's pencil is singular
 
 // return codes (mapped to Dynare's occbin codes)
 #define SDSGE_OCCBIN_PERIOD_OK 0
