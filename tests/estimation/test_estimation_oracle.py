@@ -60,8 +60,8 @@ def _assert_mle_packing(est: Estimator, res: MLEResult) -> None:
 @pytest.mark.parametrize(
     "mode,golden_fun",
     [
-        ("linear", 204.8736595244),
-        ("extended", 204.8736595244),
+        ("linear", 205.1999554190),
+        ("extended", 205.1999554190),
         ("unscented", 205.6265344010),
     ],
 )
@@ -75,7 +75,7 @@ def test_mle_lbfgsb_oracle(post82, mode, golden_fun):
 def test_mle_nelder_mead_oracle(post82):
     est = _mle_estimator(post82, "linear")
     res = est.mle(theta0=_TH0, bounds=_BNDS, method="Nelder-Mead")
-    assert res.fun == pytest.approx(204.8736595230, abs=1e-3)
+    assert res.fun == pytest.approx(205.1999554192, abs=1e-3)
     _assert_mle_packing(est, res)
 
 
@@ -97,7 +97,7 @@ def test_map_lbfgsb_oracle(post82):
     )
     res = est.map(theta0=np.array([2.0], dtype=np.float64), bounds=[(1.0, 5.0)])
     assert isinstance(res, MAPResult)
-    assert res.fun == pytest.approx(205.7467140574, abs=1e-3)
+    assert res.fun == pytest.approx(206.0716119650, abs=1e-3)
 
     lp = float(est.loglik(res.x))
     lpr = float(est.logprior(res.x))

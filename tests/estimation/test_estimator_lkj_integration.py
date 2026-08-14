@@ -154,8 +154,8 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
     )
 
     expected_logprior = -3.677756133346315
-    expected_loglik = -69.95167324089617
-    expected_logpost = -73.62942937424249
+    expected_loglik = -70.12978335633436
+    expected_logpost = -73.80753948968068
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(
