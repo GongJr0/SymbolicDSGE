@@ -469,16 +469,6 @@ class DSGESolver:
         if order not in (1, 2):
             raise ValueError(f"order must be 1 or 2, got {order}.")
 
-        if order == 2:
-            # The SGU tensors are built on a two-date pencil `a y' = b y` and
-            # the bicomplex sweep spans (fwd, cur), so neither sees the lag block
-            # or the innovations the residual carries. They widen together.
-            raise NotImplementedError(
-                "Second-order solving is unavailable while the three-date "
-                "refactor lands: the SGU tensors and the residual Hessian are "
-                "still built over two dates. Use order=1."
-            )
-
         piecewise = bool(compiled.constraint_names)
         if piecewise and order == 2:
             raise NotImplementedError(
@@ -640,9 +630,9 @@ class DSGESolver:
             compiled.construct_objective_cfunc_bicomplex(),
             param_vec,
             seed,
+            self._build_Q(compiled),
             compiled.incidence,
             compiled.n_state,
-            self._build_eta(compiled),
             n_exog=compiled.n_exog,
         )
         self._raise_or_warn_stability_error(
@@ -695,7 +685,7 @@ class DSGESolver:
         return PiecewiseSolvedModel(compiled=compiled, policy=sol)
 
     @staticmethod
-    def _build_eta(compiled: CompiledModel) -> NDF:
+    def _build_Q(compiled: CompiledModel) -> NDF:
         """Cholesky of the shock covariance, ``(n_exog, n_exog)``.
 
         The state innovation loading is ``B[:n_state] @ eta``, and ``B`` is the
@@ -731,8 +721,7 @@ class DSGESolver:
                 )
                 corr[i, j] = corr[j, i] = cij
 
-        cov = corr * np.outer(stds, stds)
-        return np.ascontiguousarray(np.linalg.cholesky(cov), dtype=float64)
+        return corr * np.outer(stds, stds)
 
     def _estimator(
         self,

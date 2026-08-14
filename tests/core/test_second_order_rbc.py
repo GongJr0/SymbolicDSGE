@@ -155,12 +155,12 @@ def test_rbc_second_order_matches_dynare():
     )
     np.testing.assert_allclose(hxx[compiled.idx["z_lag1"]], 0.0, atol=1e-12)
 
-    # Risk correction vs ghs2: eta loads the single shock (std sig) on the lifted
-    # shock state; x' = h(x) + eta @ eps.
+    # Risk correction vs ghs2. The kernel composes the loading from the state
+    # rows of B and the covariance factor, which for one shock is just its std.
     sig = float(calib[sp.Symbol("sig")])
-    eta = np.zeros((n_state, 1), dtype=np.float64)
-    eta[compiled.idx["e_st"], 0] = sig
-    gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+    chol = np.array([[sig]], dtype=np.float64)
+    bx = np.real(sol.B)[:n_state]
+    gss, hss = second_order_risk(a, b, f_xx, bx, gx, gxx, chol, n_state)
     np.testing.assert_allclose(
         [hss[compiled.idx["k_lag1"]], hss[compiled.idx["z_lag1"]], gss[ctrl["c"]]],
         golden.GHS2,

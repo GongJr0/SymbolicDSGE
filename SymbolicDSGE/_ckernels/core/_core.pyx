@@ -72,6 +72,9 @@ cdef extern from "../_common/sdsge_common.h" nogil:
         int64_t n_float
         int64_t n_int
 
+cdef extern from "sdsge_linalg.h":
+    int sdsge_chol(const double *S, double jitter, double *L, int64_t n) nogil
+
 cdef extern from "bicomplex_hessian.h" nogil:
     ctypedef void (*bc_residual_fn)(
         const bc256 *fwd, const bc256 *cur, const bc256 *prev, const bc256 *eps,
@@ -223,12 +226,10 @@ cdef extern from "klein_solve.h" nogil:
     ctypedef struct sgu_klein_spec:
         klein_spec first
         bc_residual_fn bc_residual
-
+        double *chol
     ctypedef struct sdsge_solve2:
         double *f_xx
         double *bx
-        const double *chol
-        double *eta
         double *gxx
         double *hxx
         double *gss
@@ -245,7 +246,6 @@ cdef extern from "klein_solve.h" nogil:
     int SDSGE_KLEIN_SOLVE_SINGULAR
     int SDSGE_KLEIN_SOLVE_NO_STATES
     int SDSGE_KLEIN_SOLVE_SECOND_ORDER
-    int SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF
     int SDSGE_KLEIN_SOLVE_RISK
 
     arena_size sdsge_sgu_klein_solve2_arena_size(
@@ -277,9 +277,9 @@ cdef extern from "second_order.h" nogil:
         int64_t n, int64_t nx, int64_t ne)
     int64_t sdsge_second_order_risk(
         const double *a, const double *b, const double *f_xx,
-        const double *gx, const double *gxx, const double *eta,
-        int64_t n, int64_t nx, int64_t ne, double *gss, double *hss,
-        double *arena, int64_t *iarena)
+        const double *bx, const double *gx, const double *gxx,
+        const double *chol, int64_t n, int64_t nx, int64_t ne,
+        double *gss, double *hss, double *arena, int64_t *iarena)
 
 
 cdef _raise_solve_error(int64_t err, str who):
@@ -303,11 +303,6 @@ cdef _raise_solve_error(int64_t err, str who):
         raise ValueError("klein_postprocess: model has no states.")
     if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER:
         raise ValueError("solve_second_order: singular symmetry-reduced system.")
-    if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF:
-        raise NotImplementedError(
-            "sgu_klein_solve2: the second-order solve is unavailable while the "
-            "SGU tensors and the residual Hessian span two dates. Use order=1."
-        )
     if err == SDSGE_KLEIN_SOLVE_RISK:
         raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
 
@@ -760,9 +755,9 @@ def sgu_klein_solve2(
     size_t bc_residual_addr,
     seed,
     params,
+    Q,
     incidence,
     int64_t n_state,
-    eta,
     int64_t n_exog=0,
 ):
     """One-shot second-order (SGU) solve, in a single GIL release.
@@ -770,14 +765,15 @@ def sgu_klein_solve2(
     Runs ``klein_solve1`` and then the second-order tail: the bicomplex residual
     Hessian at the resolved steady state, the SGU tensors, and the sigma^2 risk
     correction. ``bc_residual_addr`` is the bicomplex residual @cfunc
-    (``construct_objective_cfunc_bicomplex()``); ``eta`` is the ``(n_state,
-    n_exog)`` shock loading, whose Cholesky block only the caller can build.
+    (``construct_objective_cfunc_bicomplex()``); ``Q`` is the ``(n_exog,
+    n_exog)`` shock covariance, which the solve factors and loads through.
 
     Returns ``(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B)``.
     ``stab`` is reported, never raised on.
     """
     cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
     cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef int64_t n_var = seedv.shape[0]
     cdef int64_t n_par = parv.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
@@ -796,15 +792,11 @@ def sgu_klein_solve2(
             f"one and walks them by the other."
         )
 
-    cdef double[:, ::1] cholv = np.ascontiguousarray(eta, dtype=np.float64)
-    if cholv.shape[0] != n_exog or cholv.shape[1] != n_exog:
-        raise ValueError(
-            f"eta has shape ({cholv.shape[0]}, {cholv.shape[1]}), expected "
-            f"({n_exog}, {n_exog}): it is the Cholesky of the shock "
-            f"covariance, and the solve composes the state loading itself."
-        )
-    _eta = np.empty((n_state, n_exog), dtype=np.float64)
-    cdef double[:, ::1] etav = _eta
+    cdef double[:, ::1] cholv = np.empty((n_exog, n_exog), dtype=np.float64)
+    if n_exog > 0:
+        if sdsge_chol(&Qv[0, 0], 0.0, &cholv[0, 0], n_exog) != 0:
+            raise ValueError("Cholesky factorization of Q failed: "
+                             "Q is not positive definite.")
 
     ss = np.empty(n_var, dtype=np.float64)
     a = np.empty((n_var, n_var), dtype=np.float64)
@@ -864,6 +856,7 @@ def sgu_klein_solve2(
     spec.first.n_exog = n_exog
     spec.first.n_par = n_par
     spec.bc_residual = <bc_residual_fn><void*>bc_residual_addr
+    spec.chol = &cholv[0, 0] if n_exog > 0 else NULL
 
     cdef sdsge_solve1 out
     out.ss = &ssv[0]
@@ -885,8 +878,6 @@ def sgu_klein_solve2(
     cdef sdsge_solve2 out2
     out2.f_xx = &fxxv[0, 0, 0]
     out2.bx = &bxv[0, 0] if n_exog > 0 else NULL
-    out2.chol = &cholv[0, 0] if n_exog > 0 else NULL
-    out2.eta = &etav[0, 0] if n_exog > 0 else NULL
     out2.gxx = &gxxv[0, 0, 0] if n_ctrl > 0 else NULL
     out2.hxx = &hxxv[0, 0, 0]
     out2.gss = &gssv[0] if n_ctrl > 0 else NULL
@@ -949,23 +940,26 @@ def second_order(a, b, f_xx, gx, hx, int64_t n_state):
     return gxx, hxx
 
 
-def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
+def second_order_risk(a, b, f_xx, bx, gx, gxx, chol, int64_t n_state):
     """Sigma^2 risk correction ``(gss, hss)``. Parity oracle:
     ``core.second_order.solve_second_order_risk``. ``gxx`` is the second-order
-    controls ``(ny, nx, nx)``; ``eta`` the shock loading ``(nx, ne)``. Returns
-    ``gss (ny,)``, ``hss (nx,)``. Inputs coerced to C-contiguous f64.
+    controls ``(ny, nx, nx)``; ``bx`` the state rows of ``B`` ``(nx, ne)`` and
+    ``chol`` the shock covariance factor ``(ne, ne)``, which the kernel composes
+    into the loading itself. Returns ``gss (ny,)``, ``hss (nx,)``. Inputs
+    coerced to C-contiguous f64.
     """
     cdef double[:, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
     cdef double[:, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
     cdef double[:, :, ::1] fxxv = np.ascontiguousarray(f_xx, dtype=np.float64)
     cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
     cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
-    cdef double[:, ::1] etav = np.ascontiguousarray(eta, dtype=np.float64)
+    cdef double[:, ::1] bxv = np.ascontiguousarray(bx, dtype=np.float64)
+    cdef double[:, ::1] cholv = np.ascontiguousarray(chol, dtype=np.float64)
 
     cdef int64_t n = av.shape[0]
     cdef int64_t nx = n_state
     cdef int64_t ny = n - nx
-    cdef int64_t ne = etav.shape[1]
+    cdef int64_t ne = cholv.shape[1]
 
     gss = np.empty(ny, dtype=np.float64)
     hss = np.empty(nx, dtype=np.float64)
@@ -974,7 +968,8 @@ def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
 
     cdef const double *gx_ptr = &gxv[0, 0] if ny > 0 else NULL
     cdef const double *gxx_ptr = &gxxv[0, 0, 0] if ny > 0 else NULL
-    cdef const double *eta_ptr = &etav[0, 0] if ne > 0 else NULL
+    cdef const double *bx_ptr = &bxv[0, 0] if ne > 0 else NULL
+    cdef const double *chol_ptr = &cholv[0, 0] if ne > 0 else NULL
     cdef double *gss_ptr = &gssv[0] if ny > 0 else NULL
     cdef int64_t err
     cdef arena_size sz = sdsge_second_order_risk_arena_size(n, nx, ne)
@@ -984,8 +979,8 @@ def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
     cdef int64_t[::1] iarv = iarena
     with nogil:
         err = sdsge_second_order_risk(
-            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, gxx_ptr, eta_ptr,
-            n, nx, ne, gss_ptr, &hssv[0], &arv[0], &iarv[0])
+            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], bx_ptr, gx_ptr, gxx_ptr,
+            chol_ptr, n, nx, ne, gss_ptr, &hssv[0], &arv[0], &iarv[0])
     if err == SDSGE_SECOND_ORDER_SINGULAR:
         raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
     return gss, hss

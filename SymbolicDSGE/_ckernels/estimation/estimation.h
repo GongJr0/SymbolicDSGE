@@ -109,6 +109,7 @@ typedef struct {
 
   f64 *params; /* n_par; calib_params order, residual/meas argument vector */
   f64 *Q;      /* n_exog*n_exog */
+  f64 *chol;   /* n_exog*n_exog: chol(Q), refactored only when Q moves */
   f64 *R;      /* n_obs*n_obs */
   f64 *corr_q; /* n_exog*n_exog */
   f64 *corr_r; /* n_obs*n_obs */

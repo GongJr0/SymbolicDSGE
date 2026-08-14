@@ -41,11 +41,11 @@ def _model(path):
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     seed = DSGESolver._resolve_ss_seed(None, compiled)
-    eta = DSGESolver._build_eta(compiled)
-    return compiled, par, seed, eta
+    Q = DSGESolver._build_Q(compiled)
+    return compiled, par, seed, Q
 
 
-def _staged(compiled, par, seed, eta):
+def _staged(compiled, par, seed, Q):
     """The call sequence ``_solve_second_order`` ran before it was fused."""
     addr = compiled.construct_objective_cfunc().address
     bc_addr = compiled.construct_objective_cfunc_bicomplex().address
@@ -61,7 +61,11 @@ def _staged(compiled, par, seed, eta):
     gx, hx = f, p  # klein_solve1 already projects
     f_xx = bicomplex_hessian(bc_addr, ss, par, compiled.n_exog, n_eq)
     gxx, hxx = second_order(a, b, f_xx, gx, hx, n_state)
-    gss, hss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)
+    # The fused solve factors Q itself, so the staged reference has to arrive at
+    # the same factor: a different Cholesky would move gss/hss in the last bits
+    # and this comparison is exact.
+    chol = np.linalg.cholesky(Q)
+    gss, hss = second_order_risk(a, b, f_xx, B[:n_state], gx, gxx, chol, n_state)
     return ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B
 
 
@@ -75,20 +79,20 @@ def _assert_same(got, want):
 
 @pytest.mark.parametrize("path", MODELS)
 def test_matches_the_staged_shims_exactly(path):
-    compiled, par, seed, eta = _model(path)
+    compiled, par, seed, Q = _model(path)
 
     got = sgu_klein_solve2(
         compiled.construct_objective_cfunc().address,
         compiled.construct_objective_cfunc_bicomplex().address,
         seed,
         par,
+        Q,
         compiled.incidence,
         compiled.n_state,
-        eta,
         compiled.n_exog,
     )
 
-    _assert_same(got, _staged(compiled, par, seed, eta))
+    _assert_same(got, _staged(compiled, par, seed, Q))
 
 
 @pytest.mark.parametrize("path", MODELS)
@@ -96,15 +100,15 @@ def test_python_wrapper_carries_the_native_outputs(path):
     """``sgu_solve`` must hand back the tensors and state space it was given."""
     from SymbolicDSGE.core.solver_backend import sgu_solve
 
-    compiled, par, seed, eta = _model(path)
+    compiled, par, seed, Q = _model(path)
     pert = sgu_solve(
         compiled.construct_objective_cfunc(),
         compiled.construct_objective_cfunc_bicomplex(),
         par,
         seed,
+        Q,
         compiled.incidence,
         compiled.n_state,
-        eta,
         n_exog=compiled.n_exog,
     )
 
@@ -122,13 +126,13 @@ def test_python_wrapper_carries_the_native_outputs(path):
         pert.A,
         pert.B,
     )
-    _assert_same(got, _staged(compiled, par, seed, eta))
+    _assert_same(got, _staged(compiled, par, seed, Q))
 
 
 @pytest.mark.parametrize("path", MODELS)
 def test_first_order_block_matches_the_first_order_solve(path):
     """The second-order solve must not perturb the first order it is built on."""
-    compiled, par, seed, eta = _model(path)
+    compiled, par, seed, Q = _model(path)
 
     ss1, f1, p1, stab1, eig1, A1, B1 = klein_solve1(
         compiled.construct_objective_cfunc().address,
@@ -143,9 +147,9 @@ def test_first_order_block_matches_the_first_order_solve(path):
         compiled.construct_objective_cfunc_bicomplex().address,
         seed,
         par,
+        Q,
         compiled.incidence,
         compiled.n_state,
-        eta,
         compiled.n_exog,
     )
 
@@ -161,17 +165,18 @@ def test_first_order_block_matches_the_first_order_solve(path):
         np.testing.assert_array_equal(g, w, err_msg=name)
 
 
-def test_rejects_an_eta_the_risk_correction_cannot_read():
-    compiled, par, seed, eta = _model("MODELS/POST82.yaml")
+def test_rejects_a_covariance_the_solve_cannot_factor():
+    compiled, par, seed, Q = _model("MODELS/POST82.yaml")
+    singular = np.zeros_like(Q)
 
-    with pytest.raises(ValueError, match="eta has shape"):
+    with pytest.raises(ValueError, match="not positive definite"):
         sgu_klein_solve2(
             compiled.construct_objective_cfunc().address,
             compiled.construct_objective_cfunc_bicomplex().address,
             seed,
             par,
+            singular,
             compiled.incidence,
             compiled.n_state,
-            eta[:-1],
             compiled.n_exog,
         )

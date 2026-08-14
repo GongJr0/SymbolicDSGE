@@ -152,7 +152,8 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
 static inline int sdsge_solve2_run(sdsge_obj_common *b, sdsge_solve1 *s,
                                    sdsge_solve2 *s2) {
   const sgu_klein_spec spec = {.first = sdsge_spec_from(b),
-                               .bc_residual = b->bc_residual};
+                               .bc_residual = b->bc_residual,
+                               .chol = b->chol};
   const i64 rc =
       sdsge_sgu_klein_solve2(&spec, s, s2, b->solve_arena, b->solve_iarena);
   return sdsge_classify(rc, s->stab);
@@ -319,10 +320,10 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   const f64 *R =
       sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
 
-  /* eta is chol(Q) in the leading n_exog rows. A constant Q is factored once at
-   * compose time, so only a theta-driven Q refactors here. */
+  /* A constant covariance is factored once at compose time, so only a
+   * theta-driven one refactors here. */
   if (!b->q_spec.is_constant) {
-    if (sdsge_chol(Q, 0.0, s2->chol, b->q_spec.K) != SDSGE_OK) {
+    if (sdsge_chol(Q, 0.0, b->chol, b->q_spec.K) != SDSGE_OK) {
       return -INFINITY;
     }
   }
@@ -374,7 +375,8 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   return sdsge_add_lp(b, theta, ll, has_priors);
 }
 
-/* ---- Driver-facing closures (see estimation.h for the sign convention) ---- */
+/* ---- Driver-facing closures (see estimation.h for the sign convention) ----
+ */
 
 f64 sdsge_min_linear_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
   return -sdsge_obj_linear((sdsge_linear_ctx *)ctx, x, 0);

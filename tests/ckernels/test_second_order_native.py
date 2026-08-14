@@ -45,8 +45,11 @@ def _drive(path):
     sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
     gx, hx = np.real(sol.f), np.real(sol.p)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
-    eta = DSGESolver._build_eta(compiled)
-    return a, b, f_xx, gx, hx, n_state, eta
+    # The kernel composes the loading itself, so the drive hands it the two
+    # pieces and the numpy reference gets their product.
+    bx = np.real(sol.B)[:n_state]
+    chol = np.linalg.cholesky(DSGESolver._build_Q(compiled))
+    return a, b, f_xx, gx, hx, n_state, bx, chol
 
 
 @pytest.mark.parametrize(
@@ -58,7 +61,7 @@ def _drive(path):
     ],
 )
 def test_native_second_order_matches_numpy(path):
-    a, b, f_xx, gx, hx, n_state, eta = _drive(path)
+    a, b, f_xx, gx, hx, n_state, bx, chol = _drive(path)
 
     gxx_np, hxx_np = _solve_second_order_numpy(a, b, f_xx, gx, hx, n_state)
     gxx_c, hxx_c = second_order(a, b, f_xx, gx, hx, n_state)
@@ -67,8 +70,8 @@ def test_native_second_order_matches_numpy(path):
 
     # Risk correction shares the same gxx input so parity isolates the risk step.
     gss_np, hss_np = _solve_second_order_risk_numpy(
-        a, b, f_xx, gx, gxx_np, eta, n_state
+        a, b, f_xx, gx, gxx_np, bx @ chol, n_state
     )
-    gss_c, hss_c = second_order_risk(a, b, f_xx, gx, gxx_np, eta, n_state)
+    gss_c, hss_c = second_order_risk(a, b, f_xx, bx, gx, gxx_np, chol, n_state)
     np.testing.assert_allclose(gss_c, gss_np, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(hss_c, hss_np, rtol=0.0, atol=1e-12)

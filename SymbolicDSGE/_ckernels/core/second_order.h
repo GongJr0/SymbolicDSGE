@@ -30,8 +30,12 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
 /* Sigma^2 risk correction (g_ss, h_ss). Parity oracle:
  * core.second_order.solve_second_order_risk. Inputs as above plus:
  *   gxx  (ny, nx, nx)  second-order controls (from sdsge_second_order)
- *   eta  (nx, ne)      shock loading (eta @ eta^T = state innovation
- * covariance)
+ *   bx   (nx, ne)      state rows of B
+ *   chol (ne, ne)      Cholesky of the shock covariance
+ *
+ * The loading integrated against is `bx @ chol`, formed in the arena here
+ * rather than taken as an argument: `bx` exists only once the first-order solve
+ * has run, so no caller can hold it. `eta @ eta'` is then `bx Q bx'`.
  *
  * Outputs:
  * gss (ny,) controls risk correction
@@ -40,18 +44,17 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
  * Same return codes. */
 arena_size sdsge_second_order_risk_arena_size(i64 n, i64 nx, i64 ne);
 
-i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
-                            const f64 *SDSGE_RESTRICT b,
-                            const f64 *SDSGE_RESTRICT f_xx,
-                            const f64 *SDSGE_RESTRICT gx,
-                            const f64 *SDSGE_RESTRICT gxx,
-                            const f64 *SDSGE_RESTRICT eta, const i64 n,
-                            const i64 nx, const i64 ne, f64 *SDSGE_RESTRICT gss,
-                            f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
-                            i64 *SDSGE_RESTRICT iarena);
+i64 sdsge_second_order_risk(
+    const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
+    const f64 *SDSGE_RESTRICT f_xx, const f64 *SDSGE_RESTRICT bx,
+    const f64 *SDSGE_RESTRICT gx, const f64 *SDSGE_RESTRICT gxx,
+    const f64 *SDSGE_RESTRICT chol, const i64 n, const i64 nx, const i64 ne,
+    f64 *SDSGE_RESTRICT gss, f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
+    i64 *SDSGE_RESTRICT iarena);
 
 /* ERROR CODES */
 #define SDSGE_SECOND_ORDER_OK 0
-#define SDSGE_SECOND_ORDER_SINGULAR -801 /* symmetry-reduced system singular */
+#define SDSGE_SECOND_ORDER_SINGULAR -801 /* symmetry-reduced system singular   \
+                                          */
 
 #endif /* SDSGE_SECOND_ORDER_H */

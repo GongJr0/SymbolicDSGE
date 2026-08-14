@@ -12,13 +12,13 @@ arena_size sdsge_second_order_arena_size(const i64 n, const i64 nx) {
   const i64 ny = n - nx;
   const i64 ncols = n * nx * nx;
   const i64 R = so_reduced(n, nx);
-  return make_sizer(ny * nx        /* gxhx */
-                        + n * nx   /* hcoef */
+  return make_sizer(ny * nx         /* gxhx */
+                        + n * nx    /* hcoef */
                         + R * ncols /* big_q */
                         + ncols * R /* sym */
-                        + R * R    /* qt */
-                        + 2 * R    /* q, xt */
-                        + ncols,   /* full */
+                        + R * R     /* qt */
+                        + 2 * R     /* q, xt */
+                        + ncols,    /* full */
                     R /* LU pivot */);
 }
 
@@ -86,7 +86,8 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
         for (i64 k = 0; k <= j; ++k) {
           f64 *SDSGE_RESTRICT row = big_q + m * ncols;
 
-          /* gxx block: outer product fyp[i,a]*hx[b,j]*hx[c,k] (2nd) + fy (5th). */
+          /* gxx block: outer product fyp[i,a]*hx[b,j]*hx[c,k] (2nd) + fy (5th).
+           */
           for (i64 aa = 0; aa < ny; ++aa) {
             i64 base = aa * nx * nx;
             f64 fa = a[i * n + nx + aa]; /* fyp[i,aa] */
@@ -113,14 +114,14 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
           for (i64 cc = 0; cc < nx; ++cc) {
             t += fxx_i[(X + j) * n2 + (XP + cc)] * hx[cc * nx + k]; /* fxxp */
           }
-          for (i64 p = 0; p < ny; ++p) {                     /* 1st + 4th chains */
-            f64 c1 = fxx_i[(YP + p) * n2 + (X + k)];          /* fypx[i,p,k] */
-            f64 c4 = fxx_i[(Y + p) * n2 + (X + k)];           /* fyx[i,p,k] */
+          for (i64 p = 0; p < ny; ++p) {             /* 1st + 4th chains */
+            f64 c1 = fxx_i[(YP + p) * n2 + (X + k)]; /* fypx[i,p,k] */
+            f64 c4 = fxx_i[(Y + p) * n2 + (X + k)];  /* fyx[i,p,k] */
             for (i64 cc = 0; cc < ny; ++cc) {
-              c1 += fxx_i[(YP + p) * n2 + (YP + cc)] * gxhx[cc * nx + k]
-                    + fxx_i[(YP + p) * n2 + (Y + cc)] * gx[cc * nx + k];
-              c4 += fxx_i[(Y + p) * n2 + (YP + cc)] * gxhx[cc * nx + k]
-                    + fxx_i[(Y + p) * n2 + (Y + cc)] * gx[cc * nx + k];
+              c1 += fxx_i[(YP + p) * n2 + (YP + cc)] * gxhx[cc * nx + k] +
+                    fxx_i[(YP + p) * n2 + (Y + cc)] * gx[cc * nx + k];
+              c4 += fxx_i[(Y + p) * n2 + (YP + cc)] * gxhx[cc * nx + k] +
+                    fxx_i[(Y + p) * n2 + (Y + cc)] * gx[cc * nx + k];
             }
             for (i64 cc = 0; cc < nx; ++cc) {
               c1 += fxx_i[(YP + p) * n2 + (XP + cc)] * hx[cc * nx + k];
@@ -128,11 +129,11 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
             }
             t += c1 * gxhx[p * nx + j] + c4 * gx[p * nx + j];
           }
-          for (i64 p = 0; p < nx; ++p) {                     /* 6th chain */
-            f64 c6 = fxx_i[(XP + p) * n2 + (X + k)];          /* fxpx[i,p,k] */
+          for (i64 p = 0; p < nx; ++p) {             /* 6th chain */
+            f64 c6 = fxx_i[(XP + p) * n2 + (X + k)]; /* fxpx[i,p,k] */
             for (i64 cc = 0; cc < ny; ++cc) {
-              c6 += fxx_i[(XP + p) * n2 + (YP + cc)] * gxhx[cc * nx + k]
-                    + fxx_i[(XP + p) * n2 + (Y + cc)] * gx[cc * nx + k];
+              c6 += fxx_i[(XP + p) * n2 + (YP + cc)] * gxhx[cc * nx + k] +
+                    fxx_i[(XP + p) * n2 + (Y + cc)] * gx[cc * nx + k];
             }
             for (i64 cc = 0; cc < nx; ++cc) {
               c6 += fxx_i[(XP + p) * n2 + (XP + cc)] * hx[cc * nx + k];
@@ -188,36 +189,39 @@ i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
 arena_size sdsge_second_order_risk_arena_size(const i64 n, const i64 nx,
                                               const i64 ne) {
   const i64 ny = n - nx;
-  return make_sizer(ny * ne         /* gxe */
-                        + nx * nx   /* g4 */
-                        + n * n     /* coeff */
-                        + 2 * n,    /* q, x */
-                    n /* LU pivot */);
+  return make_sizer(nx * ne       // eta
+                        + ny * ne // gxe
+                        + nx * nx // g4
+                        + n * n   // coeff
+                        + 2 * n,  // q, x
+
+                    n // LU pivot
+  );
 }
 
-i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
-                            const f64 *SDSGE_RESTRICT b,
-                            const f64 *SDSGE_RESTRICT f_xx,
-                            const f64 *SDSGE_RESTRICT gx,
-                            const f64 *SDSGE_RESTRICT gxx,
-                            const f64 *SDSGE_RESTRICT eta, const i64 n,
-                            const i64 nx, const i64 ne, f64 *SDSGE_RESTRICT gss,
-                            f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
-                            i64 *SDSGE_RESTRICT iarena) {
+i64 sdsge_second_order_risk(
+    const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
+    const f64 *SDSGE_RESTRICT f_xx, const f64 *SDSGE_RESTRICT bx,
+    const f64 *SDSGE_RESTRICT gx, const f64 *SDSGE_RESTRICT gxx,
+    const f64 *SDSGE_RESTRICT chol, const i64 n, const i64 nx, const i64 ne,
+    f64 *SDSGE_RESTRICT gss, f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
+    i64 *SDSGE_RESTRICT iarena) {
   const i64 ny = n - nx;
   const i64 n2 = 2 * n;
   const i64 XP = 0, YP = nx; /* only the forward blocks enter */
 
-  f64 *p = arena;
-  f64 *SDSGE_RESTRICT gxe = p; /* gx @ eta (ny, ne) */
-  p += ny * ne;
-  f64 *SDSGE_RESTRICT g4 = p; /* fyp[i] . gxx (nx, nx) */
-  p += nx * nx;
-  f64 *SDSGE_RESTRICT coeff = p; /* [Qg | Qh] (n, n) */
-  p += n * n;
-  f64 *SDSGE_RESTRICT q = p;
-  p += n;
-  f64 *SDSGE_RESTRICT x = p;
+  f64 *SDSGE_RESTRICT eta = arena;           /* bx @ chol (nx, ne) */
+  f64 *SDSGE_RESTRICT gxe = arena + nx * ne; /* gx @ eta (ny, ne) */
+  f64 *SDSGE_RESTRICT g4 = gxe + ny * ne;    /* fyp[i] . gxx (nx, nx) */
+  f64 *SDSGE_RESTRICT coeff = g4 + nx * nx;  /* [Qg | Qh] (n, n) */
+  f64 *SDSGE_RESTRICT q = coeff + n * n;
+  f64 *SDSGE_RESTRICT x = q + n;
+
+  /* eta = bx @ chol: the state loading of the innovations, formed here because
+   * bx only exists once the first-order solve has run. */
+  if (nx > 0 && ne > 0) {
+    sdsge_matmul(bx, chol, eta, nx, ne, ne);
+  }
 
   /* gxe = gx @ eta (contiguous inputs). */
   if (ny > 0 && ne > 0) {
@@ -227,7 +231,8 @@ i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
   for (i64 i = 0; i < n; ++i) {
     const f64 *SDSGE_RESTRICT fxx_i = f_xx + i * n2 * n2;
 
-    /* --- coeff row i: Qg = fyp[i] + fy[i]  |  Qh = fyp[i]@gx + fxp[i] ------ */
+    /* --- coeff row i: Qg = fyp[i] + fy[i]  |  Qh = fyp[i]@gx + fxp[i] ------
+     */
     for (i64 aa = 0; aa < ny; ++aa) {
       /* fyp[i,aa] + fy[i,aa], fy = -b. */
       coeff[i * n + aa] = a[i * n + nx + aa] - b[i * n + nx + aa];

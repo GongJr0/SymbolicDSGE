@@ -128,6 +128,7 @@ cdef extern from "estimation.h":
         sdsge_prior_tables prior
         double *params
         double *Q
+        double *chol
         double *R
         double *corr_q
         double *corr_r
@@ -151,8 +152,6 @@ cdef extern from "estimation.h":
     ctypedef struct sdsge_solve2:
         double *f_xx
         double *bx
-        double *chol
-        double *eta
         double *gxx
         double *hxx
         double *gss
@@ -434,6 +433,7 @@ def obj_linear_base(
 
     b.params = &paramsv[0]
     b.Q = NULL
+    b.chol = NULL
     b.R = NULL
     b.corr_q = NULL
     b.corr_r = NULL
@@ -593,6 +593,7 @@ def obj_extended_base(
 
     b.params = &paramsv[0]
     b.Q = NULL
+    b.chol = NULL
     b.R = NULL
     b.corr_q = NULL
     b.corr_r = NULL
@@ -691,14 +692,12 @@ def obj_unscented_base(
     f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
     bx = np.empty((n_state, n_exog), dtype=np.float64)
     chol = np.zeros((n_exog, n_exog), dtype=np.float64)
-    eta = np.zeros((n_state, n_exog), dtype=np.float64)
     gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
     gss = np.empty(n_ctrl, dtype=np.float64)
     hss = np.empty(n_state, dtype=np.float64)
 
-    # chol (n_exog x n_exog) is the factor the solve loads the innovations
-    # through; eta (n_state x n_exog) is where it writes bx @ chol. Q is constant
+    # chol is the factor the solve loads the innovations through. Q is constant
     # here, so the objective's runtime guard skips its own factorization.
     if n_exog > 0:
         _factor_shock_cov(Q, chol)
@@ -727,7 +726,6 @@ def obj_unscented_base(
     cdef double[:, :, ::1] fxxv = f_xx
     cdef double[:, ::1] bxv = bx
     cdef double[:, ::1] cholv = chol
-    cdef double[:, ::1] etav = eta
     cdef double[:, :, ::1] gxxv = gxx
     cdef double[:, :, ::1] hxxv = hxx
     cdef double[::1] gssv = gss
@@ -782,6 +780,7 @@ def obj_unscented_base(
 
     b.params = &paramsv[0]
     b.Q = NULL
+    b.chol = &cholv[0, 0]
     b.R = NULL
     b.corr_q = NULL
     b.corr_r = NULL
@@ -822,8 +821,6 @@ def obj_unscented_base(
 
     ctx.solve2.f_xx = &fxxv[0, 0, 0]
     ctx.solve2.bx = &bxv[0, 0]
-    ctx.solve2.chol = &cholv[0, 0]
-    ctx.solve2.eta = &etav[0, 0]
     ctx.solve2.gxx = &gxxv[0, 0, 0]
     ctx.solve2.hxx = &hxxv[0, 0, 0]
     ctx.solve2.gss = &gssv[0]
@@ -1004,25 +1001,28 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     # Unscented-only second-order scratch (allocated in that branch).
     cdef double[:, :, ::1] fxxv
     cdef double[:, ::1] bxv
-    cdef double[:, ::1] cholv
     cdef double[:, :, ::1] gxxv
     cdef double[:, :, ::1] hxxv
     cdef double[::1] gssv
     cdef double[::1] hssv
-    cdef double[:, ::1] etav
     cdef double[::1] z0v
     Q = np.empty((n_exog, n_exog), dtype=np.float64)
+    # The solve loads the innovations through chol(Q). A constant covariance is
+    # factored once here; a theta-driven one refactors per evaluation.
+    chol = np.zeros((n_exog, n_exog), dtype=np.float64)
     R = np.empty((n_obs, n_obs), dtype=np.float64)
     corr_q = np.empty((n_exog, n_exog), dtype=np.float64)
     corr_r = np.empty((n_obs, n_obs), dtype=np.float64)
     std_q = np.empty(n_exog, dtype=np.float64)
     std_r = np.empty(n_obs, dtype=np.float64)
     nc.keep.append(Q)
+    nc.keep.append(chol)
     nc.keep.append(R)
     nc.keep.append(corr_q)
     nc.keep.append(corr_r)
     nc.keep.append(std_q)
     nc.keep.append(std_r)
+    cdef double[:, ::1] cholv = chol
     cdef double[:, ::1] Qv = Q
     cdef double[:, ::1] Rv = R
     cdef double[:, ::1] cqv = corr_q
@@ -1252,8 +1252,17 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         b.prior.n_scalar = 0
         b.prior.n_blocks = 0
 
+    if qs.is_constant and n_exog > 0:
+        _factor_shock_cov(
+            np.ascontiguousarray(qs.constant, dtype=np.float64).reshape(
+                n_exog, n_exog
+            ),
+            chol,
+        )
+
     b.params = &paramsv[0]
     b.Q = &Qv[0, 0]
+    b.chol = &cholv[0, 0]
     b.R = &Rv[0, 0]
     b.corr_q = &cqv[0, 0]
     b.corr_r = &crv[0, 0]
@@ -1320,33 +1329,18 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
         gss = np.empty(n_ctrl, dtype=np.float64)
         hss = np.empty(n_state, dtype=np.float64)
-        # The objective refactors chol per eval when Q varies; a constant Q is
-        # factored once here. eta is where the solve writes bx @ chol.
-        chol = np.zeros((n_exog, n_exog), dtype=np.float64)
-        eta = np.zeros((n_state, n_exog), dtype=np.float64)
-        if qs.is_constant and n_exog > 0:
-            _factor_shock_cov(
-                np.ascontiguousarray(qs.constant, dtype=np.float64).reshape(
-                    n_exog, n_exog
-                ),
-                chol,
-            )
         z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
-        for _a in (f_xx, bx, chol, gxx, hxx, gss, hss, eta, z0):
+        for _a in (f_xx, bx, gxx, hxx, gss, hss, z0):
             nc.keep.append(_a)
         fxxv = f_xx
         bxv = bx
-        cholv = chol
         gxxv = gxx
         hxxv = hxx
         gssv = gss
         hssv = hss
-        etav = eta
         z0v = z0
         nc.uctx.solve2.f_xx = &fxxv[0, 0, 0]
         nc.uctx.solve2.bx = &bxv[0, 0]
-        nc.uctx.solve2.chol = &cholv[0, 0]
-        nc.uctx.solve2.eta = &etav[0, 0]
         nc.uctx.solve2.gxx = &gxxv[0, 0, 0]
         nc.uctx.solve2.hxx = &hxxv[0, 0, 0]
         nc.uctx.solve2.gss = &gssv[0]

@@ -133,18 +133,13 @@ def test_multishock_risk_correction_matches_dynare():
     np.testing.assert_allclose(ours, golden.GHS2, rtol=5e-6, atol=1e-8)
 
 
-def test_multishock_eta_reproduces_the_calibrated_covariance():
-    """eta is a Cholesky factor, so only ``eta @ eta.T`` is meaningful, and that
-    has to be the calibrated covariance on the exog-state rows and zero below."""
+def test_multishock_Q_reproduces_the_calibrated_covariance():
+    """The stds scale it and the correlations fill it, and the solve factors it."""
     _, compiled = _solved_multishock()
-    eta = DSGESolver._build_eta(compiled)
-    n_exog = compiled.n_exog
+    Q = DSGESolver._build_Q(compiled)
 
-    assert eta.shape == (compiled.n_state, n_exog)
-    np.testing.assert_allclose(
-        eta[:n_exog] @ eta[:n_exog].T, _ms_covariance(compiled), rtol=1e-13, atol=0.0
-    )
-    np.testing.assert_array_equal(eta[n_exog:], 0.0)
+    assert Q.shape == (compiled.n_exog, compiled.n_exog)
+    np.testing.assert_allclose(Q, _ms_covariance(compiled), rtol=1e-13, atol=0.0)
 
 
 def test_multishock_risk_correction_reads_the_off_diagonals():
@@ -157,21 +152,20 @@ def test_multishock_risk_correction_reads_the_off_diagonals():
     solved, compiled = _solved_multishock()
     a, b, f_xx = _ms_preproc(solved, compiled)
     gxx = solved.policy.gxx
-    n_state, n_exog = compiled.n_state, compiled.n_exog
+    n_state = compiled.n_state
 
-    eta = DSGESolver._build_eta(compiled)
     cov = _ms_covariance(compiled)
     gx = np.real(solved.policy.f)
+    bx = np.real(solved.policy.B)[:n_state]
 
-    diag = np.zeros_like(eta)
-    diag[:n_exog, :] = np.diag(np.sqrt(np.diag(cov)))
+    chol = np.linalg.cholesky(cov)
+    diag = np.diag(np.sqrt(np.diag(cov)))
     w, v = np.linalg.eigh(cov)
-    root = np.zeros_like(eta)
-    root[:n_exog, :] = v @ np.diag(np.sqrt(w)) @ v.T
+    root = v @ np.diag(np.sqrt(w)) @ v.T
 
-    gss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)[0]
-    gss_diag = second_order_risk(a, b, f_xx, gx, gxx, diag, n_state)[0]
-    gss_root = second_order_risk(a, b, f_xx, gx, gxx, root, n_state)[0]
+    gss = second_order_risk(a, b, f_xx, bx, gx, gxx, chol, n_state)[0]
+    gss_diag = second_order_risk(a, b, f_xx, bx, gx, gxx, diag, n_state)[0]
+    gss_root = second_order_risk(a, b, f_xx, bx, gx, gxx, root, n_state)[0]
 
     assert not np.allclose(gss, gss_diag, rtol=1e-3, atol=1e-12)
     np.testing.assert_allclose(gss, gss_root, rtol=1e-10, atol=1e-15)

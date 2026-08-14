@@ -1,12 +1,12 @@
 #include "klein_solve.h"
-#include "bicomplex_hessian.h" /* sdsge_bicomplex_hessian */
-#include "core.h"              /* sdsge_assemble_transition */
-#include "klein_postproc.h"    /* klein_postproc */
-#include "klein_preproc.h"     /* klein_preproc */
 #include "../_common/sdsge_linalg.h" /* sdsge_matmul */
-#include "klein_qz.h"          /* klein_qz */
-#include "second_order.h"      /* sdsge_second_order, _risk */
-#include "steady_state.h"      /* sdsge_steady_state_newton */
+#include "bicomplex_hessian.h"       /* sdsge_bicomplex_hessian */
+#include "core.h"                    /* sdsge_assemble_transition */
+#include "klein_postproc.h"          /* klein_postproc */
+#include "klein_preproc.h"           /* klein_preproc */
+#include "klein_qz.h"                /* klein_qz */
+#include "second_order.h"            /* sdsge_second_order, _risk */
+#include "steady_state.h"            /* sdsge_steady_state_newton */
 
 /* Newton steady-state config, matching the Python solver defaults. */
 #define SDSGE_SS_MAX_ITER 50
@@ -59,9 +59,8 @@ static inline i64 sdsge_solve1_fp_reserve(const i64 n_state, const i64 n_ctrl) {
 
 /* Stage max only. The reserve is added once by the public sizers, so it is
  * never folded into a max and then compared against a later stage. */
-static inline arena_size sdsge_pencil_stage_arena(const i64 n_var,
-                                                  const i64 n_exog,
-                                                  const i64 nd) {
+static inline arena_size
+sdsge_pencil_stage_arena(const i64 n_var, const i64 n_exog, const i64 nd) {
   /* nspred and nsfwrd are each at most nd, so the partition's own counts buy
    * nothing here. Held flat rather than maxed: the rotated blocks and the
    * recovered rules coexist across the stage, and these are tens of doubles. */
@@ -81,9 +80,8 @@ static inline arena_size sdsge_pencil_stage_arena(const i64 n_var,
   return make_sizer(own + tail.n_float, tail.n_int + n_var + nd);
 }
 
-static inline arena_size sdsge_solve1_stage_arena(const i64 n_var,
-                                                  const i64 n_par,
-                                                  const i64 n_exog) {
+static inline arena_size
+sdsge_solve1_stage_arena(const i64 n_var, const i64 n_par, const i64 n_exog) {
   arena_size size = sdsge_newton_arena_size(n_var, n_par, n_exog);
   return sdsge_max_arena(size,
                          klein_preproc_arena_size(n_var, n_par, n_exog, n_var));
@@ -209,14 +207,14 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
    * so they stay one system; `b` supplies the static columns being cleared. */
   f64 *blocks[4] = {a_rot, b_rot, c_rot, d_rot};
   const i64 widths[4] = {n, n, n, ne};
-  if (sdsge_pencil_rotate_static(spec->dgeqrf, spec->dormqr, out->b_real, ord, n,
-                                 nstatic, blocks, widths, 4,
+  if (sdsge_pencil_rotate_static(spec->dgeqrf, spec->dormqr, out->b_real, ord,
+                                 n, nstatic, blocks, widths, 4,
                                  stage) != SDSGE_PENCIL_OK) {
     return SDSGE_KLEIN_SOLVE_QR;
   }
 
-  sdsge_pencil_assemble(a_rot, b_rot, c_rot, ord, n, nstatic, npred, nboth, nfwd,
-                        emat, dmat);
+  sdsge_pencil_assemble(a_rot, b_rot, c_rot, ord, n, nstatic, npred, nboth,
+                        nfwd, emat, dmat);
 
   sdsge_to_complex_colmajor(dmat, out->s, nd);
   sdsge_to_complex_colmajor(emat, out->t, nd);
@@ -339,7 +337,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   }
 
   sdsge_assemble_transition(out->p, out->f, spec->n_state, spec->n_ctrl,
-                                 out->A);
+                            out->A);
   return SDSGE_KLEIN_SOLVE_OK;
 }
 
@@ -354,16 +352,23 @@ i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
 
 i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
                            sdsge_solve2 *out2, f64 *arena, i64 *iarena) {
-  /* The SGU system is built on the two-date pencil `a y' = b y`, and the
-   * bicomplex sweep spans `(fwd, cur)` only. Neither has seen the lag block or
-   * the innovations since the residual gained them, so the tensors below would
-   * be taken against a system the model no longer is. Refused here rather than
-   * in the Python solve: the native estimation objective reaches this directly
-   * and would otherwise walk straight past a caller-side gate. */
-  (void)spec;
-  (void)out1;
-  (void)out2;
-  (void)arena;
-  (void)iarena;
-  return SDSGE_KLEIN_SOLVE_SECOND_ORDER_OFF;
+  const klein_spec *s1 = &spec->first;
+  const i64 rc = sdsge_klein_solve1(s1, out1, arena, iarena);
+  if (rc != SDSGE_KLEIN_SOLVE_OK)
+    return rc;
+
+  f64 *stage = arena + sdsge_solve1_fp_reserve(s1->n_state, s1->n_ctrl);
+  sdsge_bx_from_B(out1->B, s1->n_state, s1->n_exog, out2->bx);
+  sdsge_bicomplex_hessian(spec->bc_residual, out1->ss, s1->params, s1->n_var,
+                          s1->n_par, s1->n_exog, s1->n_var, out2->f_xx, stage);
+  if (sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx, out1->f,
+                         out1->p, s1->n_var, s1->n_state, out2->gxx, out2->hxx,
+                         stage, iarena) != SDSGE_SECOND_ORDER_OK)
+    return SDSGE_KLEIN_SOLVE_SECOND_ORDER;
+  if (sdsge_second_order_risk(out1->a_real, out1->b_real, out2->f_xx, out2->bx,
+                              out1->f, out2->gxx, spec->chol, s1->n_var,
+                              s1->n_state, s1->n_exog, out2->gss, out2->hss,
+                              stage, iarena) != SDSGE_SECOND_ORDER_OK)
+    return SDSGE_KLEIN_SOLVE_RISK;
+  return SDSGE_KLEIN_SOLVE_OK;
 }

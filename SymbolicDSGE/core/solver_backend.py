@@ -166,9 +166,9 @@ def sgu_solve(
     bc_residual_cfunc: Any,
     params: NDF,
     ss_seed: NDF,
+    Q: NDF,
     incidence: NDArray[int8],
     n_states: int,
-    eta: NDF,
     *,
     n_exog: int = 0,
 ) -> SecondOrderSolution:
@@ -176,8 +176,8 @@ def sgu_solve(
 
     The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
     is the bicomplex residual (``construct_objective_cfunc_bicomplex()``) that
-    drives the Hessian sweep, and ``eta`` is the ``(n_states, n_exog)`` shock
-    loading the risk correction integrates against.
+    drives the Hessian sweep, and ``Q`` is the ``(n_exog, n_exog)`` shock
+    covariance matrix.
 
     One native call runs both orders under a single GIL release. A nonzero ``stab``
     returns normally; the caller decides whether to raise.
@@ -191,9 +191,9 @@ def sgu_solve(
             bc_residual_cfunc.address,
             ss_seed,
             params,
+            Q,
             incidence,
             n_states,
-            eta,
             n_exog,
         )
     return SecondOrderSolution(

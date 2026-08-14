@@ -123,9 +123,9 @@ def sgu_klein_solve2(
     bc_residual_addr: int,
     seed: _F64,
     params: _F64,
+    Q: _F64,
     incidence: _I8,
     n_state: int,
-    eta: _F64,
     n_exog: int = ...,
 ) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64]:
     """(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B) <- one-shot second-order
