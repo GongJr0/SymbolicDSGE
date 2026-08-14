@@ -4,9 +4,11 @@ from enum import StrEnum
 
 
 class RegressionStatus(IntEnum):
+    """Mirrors the REGRESSION_* codes in _ckernels/regression/regression.h."""
+
     OK = 0
-    RANK_DEFICIENT = -1
-    NON_CONVERGENT = -2
+    RANK_DEFICIENT = -1501
+    NON_CONVERGENT = -1502
 
 
 class RegressionKind(StrEnum):

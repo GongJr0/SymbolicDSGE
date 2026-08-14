@@ -1078,7 +1078,10 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
 
     assert payload["test_summaries"]["diagnostic"]["statistic_ci"][0] is not None
     assert payload["test_summaries"]["diagnostic"]["rejection_ci"][0] is not None
-    assert payload["test_summaries"]["diagnostic"]["status_trace"] == [0, -1]
+    assert payload["test_summaries"]["diagnostic"]["status_trace"] == [
+        TestStatus.OK,
+        TestStatus.BAD_SHAPE,
+    ]
     assert payload["test_summaries"]["diagnostic"]["status_counts"] == {
         "OK": 1,
         "BAD_SHAPE": 1,

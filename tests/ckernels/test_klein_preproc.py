@@ -65,17 +65,13 @@ def test_klein_preproc_parity(path):
 
 
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_the_lag_and_shock_blocks_are_empty_while_desugar_lifts(path):
-    """The gate on the widened residual staying inert.
+def test_the_lag_and_shock_blocks_carry_the_model(path):
+    """Both models lag something and are driven by shocks, so both blocks are live.
 
-    ``desugar`` rewrites every ``v(t-1)`` into an aux variable and every shock
-    into a state, and the compiler substitutes the shock symbols to zero, so no
-    ``prev_`` or shock symbol reaches the printed residual. Both new blocks are
-    therefore exactly zero, and ``a``/``b`` are the pencil the two-date sweep
-    produced before the widening.
-
-    This fails the moment the compiler stops lifting, which is the point: the
-    blocks going live is a change the goldens alone would not announce.
+    A lag of one and a shock reach the printed residual as they were written, so
+    ``c`` and ``d`` are where they land. Zeros here would mean the residual lost
+    them on the way to the pencil, which the ``a``/``b`` goldens would not
+    announce.
     """
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
@@ -86,5 +82,8 @@ def test_the_lag_and_shock_blocks_are_empty_while_desugar_lifts(path):
         cf.address, ss, _params(compiled), layout.n_var, layout.n_exog
     )
 
-    assert not c.any()
-    assert not d.any()
+    assert c.any()
+    assert d.any()
+    # One column per lagged variable, one per innovation that reaches a row.
+    assert np.count_nonzero(c.any(axis=0)) == compiled.n_state
+    assert np.count_nonzero(d.any(axis=0)) == compiled.n_exog
