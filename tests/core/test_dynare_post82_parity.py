@@ -6,21 +6,16 @@ twice, both at natural dating. Goldens are transcribed in
 ``tests/_oracles/dynare_post82_first_order``, raw: nothing was re-dated,
 rescaled or reordered on the way out of Dynare.
 
-Dynare's state is the model's own lagged variables and ours is the block the
-compiler mints, so the two decision rules are related by a selection rather than
-a transform. ``ghx`` and ``ghu`` are our policy function ``f``, read on the
-declared rows against the lag and shock state columns, and ``B``'s declared rows
-are ``ghu`` outright.
+Both sides carry the same variables in the same order: Dynare's state is the
+model's own lagged variables and so is ours, so the two decision rules are
+compared outright, with no selection and no transform. ``ghx`` is ``[p; f]``
+stacked, ``ghu`` is ``B``, and ``A`` is Dynare's ``A``.
 
-Two objects are stated in Dynare's coordinates and have to be carried into ours.
-Both are exact, and both are set up from our own ``f`` rather than from a golden:
-
-* an initial condition. Dynare's ``y0`` names ``(g, z, r)`` at date 0, which our
-  state reaches only through ``f``, so the lag values behind it are a 3x3 solve.
-* ``P0``. The unconditional covariance is the same object in either state space,
-  so that case is parity outright. ``P0 = I`` is not: Dynare's own ``A``
-  annihilates its ``x`` and ``Pi`` block, which leaves ``I`` on ``(g, z, r)``,
-  and the lag covariance carrying that through ``f`` is ``inv(M) inv(M).T``.
+One quantity still does not carry, and it is a filter convention rather than a
+coordinate one. Our filter predicts before its first update, so a ``P0`` argument
+is the covariance one period behind the same argument to Dynare's. The
+unconditional covariance is a fixed point of that map, which is why it is parity
+outright while a unit prior is not.
 
 The filter goldens are Dynare's own, not a second recursion of ours: the
 likelihoods come from ``kalman_filter.m`` called directly, the state paths from
@@ -83,47 +78,19 @@ def solved():
 
 @pytest.fixture(scope="module")
 def blocks(solved):
-    """Our policy function on the rows and columns Dynare's decision rule spans."""
-    compiled, solution = solved
-    f = np.real(solution.policy.f)
-    rows = [compiled.layout.control_names.index(v) for v in dyn.DECL_COLUMNS]
-    return (
-        f[np.ix_(rows, _lag_index(compiled))],
-        f[np.ix_(rows, _shock_index(compiled))],
-    )
+    """Our decision rule: the state rows stacked over the controls, and the impact."""
+    _, solution = solved
+    ghx = np.vstack([np.real(solution.policy.p), np.real(solution.policy.f)])
+    return ghx, np.real(solution.policy.B)
 
 
 def _declared(compiled) -> list[int]:
     return [compiled.idx[v] for v in dyn.DECL_COLUMNS]
 
 
-def _lag_index(compiled) -> list[int]:
-    """Canonical positions of the lag states behind Dynare's state variables.
-
-    ``A`` is square over the canonical names, so these index rows and columns
-    alike.
-    """
-    canonical = list(compiled.layout.canonical_names)
-    return [canonical.index(f"{v}_lag1") for v in DYNARE_STATES]
-
-
-def _shock_index(compiled) -> list[int]:
-    canonical = list(compiled.layout.canonical_names)
-    return [canonical.index(f"{s}_st") for s in dyn.EXO_COLUMNS]
-
-
-def _state_rows() -> list[int]:
-    """Rows of Dynare's decision rule belonging to its own state variables."""
-    return [dyn.DECL_COLUMNS.index(v) for v in DYNARE_STATES]
-
-
-def _x0(compiled, blocks) -> np.ndarray:
-    """Dynare's ``y0`` carried into our state block."""
-    ghx, _ = blocks
-
-    x0 = np.zeros(len(compiled.var_names))
-    x0[_lag_index(compiled)] = np.linalg.solve(ghx[: len(DYNARE_STATES)], dyn.X0_STATES)
-    return x0
+def _x0() -> dict[str, float]:
+    """Dynare's ``y0``, which is our ``x0`` outright now that the states agree."""
+    return dict(zip(DYNARE_STATES, dyn.X0_STATES))
 
 
 def _path(compiled, out) -> np.ndarray:
@@ -146,9 +113,10 @@ def _measurement(compiled):
 # Nothing below means anything if the columns are not the same columns.
 
 
-def test_control_block_is_dynares_declaration_order(solved):
+def test_compiled_order_is_dynares_declaration_order(solved):
     compiled, _ = solved
-    assert compiled.layout.control_names == dyn.DECL_COLUMNS
+    assert compiled.layout.canonical_names == dyn.DECL_COLUMNS
+    assert compiled.layout.state_names == DYNARE_STATES
 
 
 def test_shock_columns_match_dynares_exogenous_order(solved):
@@ -180,15 +148,6 @@ def test_impact_on_declared_variables_matches_ghu(solved):
     assert r_row[dyn.EXO_COLUMNS.index("e_g")] == pytest.approx(0.34702357, abs=1e-8)
 
 
-def test_generated_states_take_no_shock_beyond_their_own(solved):
-    compiled, solution = solved
-    B = np.real(solution.policy.B)
-    n_exog = compiled.n_exog
-
-    np.testing.assert_array_equal(B[:n_exog], np.eye(n_exog))
-    np.testing.assert_array_equal(B[n_exog : compiled.layout.n_state], 0.0)
-
-
 def test_shock_covariance_matches_dynare(solved):
     compiled, _ = solved
     Q, _, _ = _measurement(compiled)
@@ -201,82 +160,36 @@ def test_shock_covariance_matches_dynare(solved):
 # exercises A. These state what A holds, which a path only implies.
 
 
-def test_lag_state_rows_of_A_copy_the_policy_rows_they_lag(solved):
-    # v_lag1(t+1) = v(t), so a lag row of A is that variable's policy row.
+def test_transition_matches_dynares_A(solved):
+    # A maps y_{t-1} to y_t, so its state columns are the decision rule itself
+    # and a control at t-1 reaches nothing.
     compiled, solution = solved
-    A, f = np.real(solution.policy.A), np.real(solution.policy.f)
-    n_state = compiled.layout.n_state
-    lag = _lag_index(compiled)
-    rows = [compiled.layout.control_names.index(v) for v in DYNARE_STATES]
-
-    assert np.abs(A[np.ix_(lag, range(n_state))] - f[rows]).max() < TOL
-    assert np.abs(A[lag, n_state:]).max() < TOL
-
-
-def test_control_rows_of_A_are_f_composed_with_the_state_block(solved):
-    # y_{t+1} = f x_{t+1}, so the controls carry no transition of their own and
-    # A holds nothing beyond f and the state block.
-    compiled, solution = solved
-    A, f = np.real(solution.policy.A), np.real(solution.policy.f)
+    A = np.real(solution.policy.A)
     n_state = compiled.layout.n_state
 
-    assert np.abs(A[n_state:] - f @ A[:n_state]).max() < TOL
-
-
-def test_state_transition_matches_ghx(solved):
-    compiled, solution = solved
-    A = np.real(solution.policy.A)
-    lag = _lag_index(compiled)
-
-    assert np.abs(A[np.ix_(lag, lag)] - dyn.GHX_DECL[_state_rows()]).max() < TOL
-
-
-def test_A_on_declared_rows_is_one_transition_past_ghx(solved):
-    # Our lag state at t-1 is g(t-2), so this is ghx @ ghx. It is why ghx is
-    # compared against f above and never against A.
-    compiled, solution = solved
-    A = np.real(solution.policy.A)
-    block = A[np.ix_(_declared(compiled), _lag_index(compiled))]
-
-    assert np.abs(block - dyn.GHX_DECL @ dyn.GHX_DECL[_state_rows()]).max() < TOL
-    assert np.abs(block - dyn.GHX_DECL).max() > 1.0
-
-
-def test_A_from_shock_states_to_declared_rows_is_ghx_ghu(solved):
-    # A shock state holds its innovation for one period, so reaching a control
-    # through it costs the same transition.
-    compiled, solution = solved
-    A = np.real(solution.policy.A)
-    block = A[np.ix_(_declared(compiled), _shock_index(compiled))]
-
-    assert np.abs(block - dyn.GHX_DECL @ dyn.GHU_DECL[_state_rows()]).max() < TOL
-
-
-def test_shock_state_rows_of_A_are_empty(solved):
-    # A shock state is reached only by its own innovation, never by the state.
-    compiled, solution = solved
-
-    assert np.abs(np.real(solution.policy.A)[: compiled.n_exog]).max() < TOL
+    assert np.abs(A - dyn.A_DECL).max() < TOL
+    assert np.abs(A[:, :n_state] - dyn.GHX_DECL).max() < TOL
+    assert np.abs(A[:, n_state:]).max() < TOL
 
 
 # --- simulation -------------------------------------------------------------
 
 
-def test_deterministic_path_matches_dynare(solved, blocks):
+def test_deterministic_path_matches_dynare(solved):
     # Driven by the transition alone, so it also pins the row convention: row 0
     # is the first simulated period, not the initial condition.
     compiled, solution = solved
-    out = solution.sim(T=len(dyn.DET), x0=_x0(compiled, blocks))
+    out = solution.sim(T=len(dyn.DET), x0=_x0())
 
     assert np.abs(_path(compiled, out) - dyn.DET).max() < TOL
 
 
-def test_stochastic_path_matches_dynare(solved, blocks):
+def test_stochastic_path_matches_dynare(solved):
     compiled, solution = solved
     out = solution.sim(
         T=len(dyn.STOCH),
         shocks=_shocks(dyn.SHOCK_BLOCK),
-        x0=_x0(compiled, blocks),
+        x0=_x0(),
     )
 
     assert np.abs(_path(compiled, out) - dyn.STOCH).max() < TOL
@@ -304,9 +217,6 @@ def test_measurement_matrices_match_dynare(solved):
     _, C, d = _measurement(compiled)
 
     assert np.abs(C[:, _declared(compiled)] - dyn.KF_Z).max() < TOL
-    # The generated block is unobserved, which is what makes the two filters
-    # comparable despite the state vectors differing.
-    assert np.abs(np.delete(C, _declared(compiled), axis=1)).max() < TOL
     assert np.abs(d - dyn.KF_D).max() < TOL
 
 
@@ -379,26 +289,17 @@ def test_prediction_is_the_transition_applied_to_the_previous_update(solved):
     assert np.abs((x_filt @ A.T)[:, _declared(compiled)] - dyn.FILTERED).max() < TOL
 
 
-def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(
-    solved, blocks
-):
-    # Dynare's P0 is the identity on five variables, but its transition reads
-    # only three columns, so it is a unit prior on (g, z, r) at date 0. Ours
-    # carries the same prior as the lag covariance that produces it through f.
+def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(solved):
+    # Dynare's P0 is the identity on five variables, which is the same matrix in
+    # our coordinates now, so nothing is carried across.
     #
-    # LOGLIK_FIXED_OURS, not LOGLIK_FIXED_DYNARE: the same P0 argument means the
-    # covariance one period apart on the two sides, and only the unconditional
-    # covariance is a fixed point of the map between them. Dynare's reading of
-    # this same prior is 0.558 away.
+    # LOGLIK_FIXED_OURS, not LOGLIK_FIXED_DYNARE: we predict before the first
+    # update, so the same P0 argument is the covariance one period apart on the
+    # two sides. Only the unconditional covariance is a fixed point of that map.
+    # Dynare's reading of this same prior is 0.558 away.
     compiled, solution = solved
-    ghx, _ = blocks
-    lag = _lag_index(compiled)
 
-    inverse = np.linalg.inv(ghx[: len(DYNARE_STATES)])
-    P0 = np.zeros((len(compiled.var_names),) * 2)
-    P0[np.ix_(lag, lag)] = inverse @ inverse.T
-
-    out = _filter(compiled, solution, P0)
+    out = _filter(compiled, solution, np.eye(len(compiled.var_names)))
 
     assert float(out.loglik) == pytest.approx(dyn.LOGLIK_FIXED_OURS, abs=1e-9)
     assert abs(float(out.loglik) - dyn.LOGLIK_FIXED_DYNARE) > 0.5
