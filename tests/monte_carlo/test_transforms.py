@@ -50,7 +50,7 @@ class _FakeSolvedModel(SimpleNamespace):
     """Stand-in for a SolvedModel; only the attributes used by transforms."""
 
     def __init__(self) -> None:
-        super().__init__(config=SimpleNamespace(shock_map={}))
+        super().__init__(config=SimpleNamespace(shocks=[]))
 
 
 def _context(observables: np.ndarray) -> MCContext:

@@ -25,8 +25,6 @@ __Layout Fields:__
 | declared_names | `#!python tuple[str, ...]` | Variables in config declaration order. |
 | canonical_names | `#!python tuple[str, ...]` | Variables in compiled solver order. |
 | state_names | `#!python tuple[str, ...]` | Variables occurring at `t-1`, which lead the compiled order. |
-| exo_state_names | `#!python tuple[str, ...]` | States a shock declares as its target. |
-| endo_state_names | `#!python tuple[str, ...]` | States no shock targets. |
 | control_names | `#!python tuple[str, ...]` | Variables not inferred as states. |
 | n_exog | `#!python int` | Number of shocks, which is the width of `B`. |
 | n_state | `#!python int` | Total number of state variables. |

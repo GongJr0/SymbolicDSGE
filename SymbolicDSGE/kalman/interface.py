@@ -498,7 +498,7 @@ class KalmanInterface(KalmanFilter):
         shock_std = self.model.config.calibration.shock_std
         shock_corr = self.model.config.calibration.shock_corr
 
-        shocks = list(self.model.config.shock_map)
+        shocks = list(self.model.config.shocks)
         stds = asarray(
             [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
         )

@@ -546,9 +546,7 @@ class UISession:
 
         conf = slot.solved.config
         # A spec is keyed by the shock, not by the variable the shock drives.
-        pending = [
-            str(shock) for shock in conf.shock_map if str(shock) not in raw_shocks
-        ]
+        pending = [str(shock) for shock in conf.shocks if str(shock) not in raw_shocks]
         if not pending:
             return out
 

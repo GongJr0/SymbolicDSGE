@@ -170,7 +170,7 @@ def _stub_compiled_with_sparse_q_block():
     )
     config = SimpleNamespace(
         calibration=calibration,
-        shock_map={e1: x1, e2: x2, e3: x3},
+        shocks=[e1, e2, e3],
     )
     return _with_filter_prep(
         SimpleNamespace(
@@ -897,7 +897,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     )
     compiled = _with_filter_prep(
         SimpleNamespace(
-            config=SimpleNamespace(calibration=calibration, shock_map={e1: x1, e2: x2}),
+            config=SimpleNamespace(calibration=calibration, shocks=[e1, e2]),
             calib_params=[sig1, sig2],
             kalman=SimpleNamespace(y_names=["y"]),
             observable_names=["y"],

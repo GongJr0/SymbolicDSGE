@@ -353,14 +353,14 @@ def build_q_spec(
 ) -> PyCovSpec:
     """Covariance spec for Q (shock covariance), mirroring :func:`build_Q`.
 
-    Members are the shocks in ``shock_map`` order; each std is
+    Members are the shocks in ``shocks`` order; each std is
     ``shock_std[shock]`` and each off-diagonal correlation is the ``shock_corr``
     symbol for that shock pair (absent pairs stay zero). A ``Q_corr`` CPC block
     takes the ``corr_from_block`` regime."""
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
     n_exog = compiled.n_exog
-    shocks = list(compiled.config.shock_map)
+    shocks = list(compiled.config.shocks)
     std_names = [shock_std[s].name for s in shocks]
     corr_pairs: list[tuple[int, int, str]] = []
     for i in range(n_exog):
@@ -821,7 +821,7 @@ def build_Q(
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
 
-    shocks = list(compiled.config.shock_map)
+    shocks = list(compiled.config.shocks)
 
     stds = asarray([float64(params[shock_std[s].name]) for s in shocks], dtype=float64)
 
@@ -848,7 +848,7 @@ def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
 
-    shocks = list(compiled.config.shock_map)
+    shocks = list(compiled.config.shocks)
 
     stds = sp.Matrix([shock_std[s] for s in shocks])
     corr = sp.eye(len(shocks))

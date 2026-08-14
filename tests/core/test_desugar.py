@@ -31,7 +31,7 @@ t = sp.Symbol("t", integer=True)
 NATURAL_TIME_MODEL = {
     "name": "NATURAL",
     "variables": ["u", "v", "r", "Pi", "x", "r_star"],
-    "shock_map": {"e_u": "u", "e_v": "v"},
+    "shocks": ["e_u", "e_v"],
     "observables": ["Infl", "Rate"],
     "equations": {
         "model": {
@@ -319,8 +319,8 @@ def test_source_config_is_untouched(deep):
 
 
 def test_a_second_pass_is_a_no_op(deep):
-    # Desugaring leaves every lag at depth one, so running it again finds nothing
-    # to lift. It used to raise here, back when a pass re-lifted its own auxes.
+    # Desugaring leaves every displacement at depth one, so a second pass finds
+    # nothing to lift.
     once = desugar_model(deep)
     twice = desugar_model(once.config)
 

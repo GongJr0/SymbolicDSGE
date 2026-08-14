@@ -203,8 +203,7 @@ def _reject_collisions(
     if taken:
         raise ValueError(
             f"Desugaring would generate variable(s) the model already declares: "
-            f"{taken}. Rename them, or drop the second call if this config was "
-            f"already desugared."
+            f"{taken}. Rename them."
         )
     equations = set(conf.equations.model)
     clash = sorted(g.name for g in generated if g.name in equations)

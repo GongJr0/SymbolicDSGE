@@ -224,24 +224,49 @@ def _params(compiled):
     return np.array([float(calib[p]) for p in compiled.calib_params])
 
 
+def _shock_syms(compiled):
+    return list(compiled.config.shocks)
+
+
 def _fold_to_cur(compiled):
-    fwd = [sp.Symbol(f"fwd_{name}") for name in compiled.var_names]
-    return dict(zip(fwd, compiled.cur_syms))
+    """The expansion point: every date is the same vector, the innovation zero."""
+    fold = {}
+    for prefix in ("fwd", "prev"):
+        for name, cur in zip(compiled.var_names, compiled.cur_syms):
+            fold[sp.Symbol(f"{prefix}_{name}")] = cur
+    fold.update({shock: 0.0 for shock in _shock_syms(compiled)})
+    return fold
 
 
-def _evaluate(compiled, exprs, n_row, point, par):
-    """Flat row-major jacobian exprs as an (n_row, n_var) block."""
-    args = (compiled.cur_syms, compiled.calib_params)
-    vals = [float(sp.lambdify(args, e, "numpy")(point, par)) for e in exprs]
-    return np.array(vals).reshape(n_row, len(compiled.var_names))
+def _evaluate(compiled, exprs, n_row, n_col, point, par):
+    """Flat row-major jacobian exprs as an (n_row, n_col) block.
+
+    Shocks are bound to zero rather than folded out: a nonlinear residual keeps
+    them inside a derivative taken against a variable.
+    """
+    shocks = _shock_syms(compiled)
+    args = (compiled.cur_syms, shocks, compiled.calib_params)
+    zeros = np.zeros(len(shocks))
+    vals = [float(sp.lambdify(args, e, "numpy")(point, zeros, par)) for e in exprs]
+    return np.array(vals).reshape(n_row, n_col)
 
 
 def _symbolic_pencil(compiled, residuals):
-    """(a, b) blocks by the diff-then-fold the regime blocks are emitted with."""
+    """(a, b, c, d) by the diff-then-fold the regime blocks are emitted with.
+
+    Mirrors ``DSGESolver._compile_regimes``: differentiate at each date before
+    collapsing them, and carry klein_preproc's sign on every sweep but the fwd
+    one, so the row reads ``a y' = b y + c y_prev + d eps``.
+    """
     fold = _fold_to_cur(compiled)
-    a = [sp.diff(e, s).subs(fold) for e in residuals for s in fold]
+    fwd = [sp.Symbol(f"fwd_{name}") for name in compiled.var_names]
+    prev = [sp.Symbol(f"prev_{name}") for name in compiled.var_names]
+
+    a = [sp.diff(e, s).subs(fold) for e in residuals for s in fwd]
     b = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in compiled.cur_syms]
-    return a, b
+    c = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in prev]
+    d = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in _shock_syms(compiled)]
+    return a, b, c, d
 
 
 def _assert_pencil_parity(compiled, ss, scale):
@@ -251,25 +276,27 @@ def _assert_pencil_parity(compiled, ss, scale):
     residuals = compiled.objective_eqs
     par = _params(compiled)
     n_var = len(compiled.var_names)
+    n_row, n_exog = len(residuals), compiled.n_exog
     addr = compiled.construct_objective_cfunc().address
-    a_sym, b_sym = _symbolic_pencil(compiled, residuals)
+    sym = _symbolic_pencil(compiled, residuals)
 
-    assert len(a_sym) == len(residuals) * n_var
-    assert len(b_sym) == len(residuals) * n_var
+    widths = (n_var, n_var, n_var, n_exog)
+    for block, width in zip(sym, widths):
+        assert len(block) == n_row * width
 
     rng = np.random.default_rng(0)
     for trial in range(5):
         point = ss if trial == 0 else ss + rng.normal(0, scale, n_var)
-        a_ref, b_ref, _, _ = klein_preprocess(addr, point, par, n_var, compiled.n_exog)
+        ref = klein_preprocess(addr, point, par, n_var, n_exog)
 
-        assert np.abs(a_ref).max() > 0.0
-        assert np.abs(b_ref).max() > 0.0
-        np.testing.assert_allclose(
-            _evaluate(compiled, a_sym, len(residuals), point, par), a_ref, atol=1e-10
-        )
-        np.testing.assert_allclose(
-            _evaluate(compiled, b_sym, len(residuals), point, par), b_ref, atol=1e-10
-        )
+        for name, block, got, width in zip("abcd", sym, ref, widths):
+            assert np.abs(got).max() > 0.0, name
+            np.testing.assert_allclose(
+                _evaluate(compiled, block, n_row, width, point, par),
+                got,
+                atol=1e-10,
+                err_msg=f"{name} block",
+            )
 
 
 def test_symbolic_pencil_matches_the_reference_sweep(compiled_post82):
@@ -280,16 +307,18 @@ def test_symbolic_pencil_matches_the_reference_sweep(compiled_post82):
 
 @pytest.fixture(scope="module")
 def compiled_lead_regime(parsed_post82):
-    """A replacement with leads, a lead-lead product and a nonlinear cur term.
+    """A replacement touching every date and the innovations.
 
     The constant replacements above leave ``jac_a`` identically zero, so they
     match a zero reference block no matter what the emission does. This one
-    forces both blocks nonzero and leaves fwd symbols inside the fwd derivative,
-    which is what the fold onto cur has to clean up.
+    forces all four jacobian blocks and the constant nonzero, and leaves fwd
+    symbols inside the fwd derivative, which is what the fold onto cur has to
+    clean up.
     """
     model, _ = parsed_post82
     g, z, r = model.variables.variables[:3]
     beta = model.parameters[0]
+    shock = next(iter(model.shocks))
     target = list(model.equations.model)[2]
     solver = _with_constraints(
         parsed_post82,
@@ -297,7 +326,12 @@ def compiled_lead_regime(parsed_post82):
         {
             frozenset({"lo"}): {
                 target: sp.Eq(
-                    r(t), beta * g(t + 1) * z(t + 1) + sp.exp(g(t + 1)) - r(t) ** 2
+                    r(t),
+                    beta * g(t + 1) * z(t + 1)
+                    + sp.exp(g(t + 1))
+                    - r(t) ** 2
+                    + beta * z(t - 1)
+                    + shock,
                 )
             }
         },
@@ -316,26 +350,26 @@ def test_regime_pencil_rows_match_the_complex_step_sweep(compiled_lead_regime):
     par = _params(compiled)
     cfunc = compiled.construct_regime_cfuncs()[1]
 
-    assert len(block.jac_a) == n_row * n_var
-    assert len(block.jac_b) == n_row * n_var
+    n_exog = compiled.n_exog
+    blocks = (block.jac_a, block.jac_b, block.jac_c, block.jac_d)
+    widths = (n_var, n_var, n_var, n_exog)
+    for exprs, width in zip(blocks, widths):
+        assert len(exprs) == n_row * width
 
     rng = np.random.default_rng(0)
     for trial in range(5):
         point = (
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
-        a_r, b_r, _, _ = klein_preprocess(
-            cfunc.address, point, par, n_var, compiled.n_exog
-        )
+        ref = klein_preprocess(cfunc.address, point, par, n_var, n_exog)
 
-        assert np.abs(a_r[block.rows, :]).max() > 0.0
-        assert np.abs(b_r[block.rows, :]).max() > 0.0
-        np.testing.assert_allclose(
-            _evaluate(compiled, block.jac_a, n_row, point, par), a_r[block.rows, :]
-        )
-        np.testing.assert_allclose(
-            _evaluate(compiled, block.jac_b, n_row, point, par), b_r[block.rows, :]
-        )
+        for name, exprs, got, width in zip("abcd", blocks, ref, widths):
+            assert np.abs(got[block.rows, :]).max() > 0.0, name
+            np.testing.assert_allclose(
+                _evaluate(compiled, exprs, n_row, width, point, par),
+                got[block.rows, :],
+                err_msg=f"{name} block",
+            )
 
 
 def test_regime_pencil_rows_fold_fwd_symbols_onto_cur(compiled_lead_regime):
@@ -345,7 +379,7 @@ def test_regime_pencil_rows_fold_fwd_symbols_onto_cur(compiled_lead_regime):
     block = compiled.regimes[1]
     fwd_syms = {sp.Symbol(f"fwd_{name}") for name in compiled.var_names}
 
-    for expr in block.jac_a + block.jac_b:
+    for expr in block.jac_a + block.jac_b + block.jac_c + block.jac_d:
         assert not expr.free_symbols & fwd_syms
 
 
@@ -365,49 +399,48 @@ def _call_pencil(func, mask, cur, par):
         par.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
         out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
     )
-    n_row, n_var = func.n_row(mask), func.n_var
-    jac = out[: 2 * n_row * n_var].reshape(2, n_row, n_var)
-    return jac[0], jac[1], out[2 * n_row * n_var :]
+    n_row, n_var, n_exog = func.n_row(mask), func.n_var, func.n_exog
+    dates = out[: 3 * n_row * n_var].reshape(3, n_row, n_var)
+    shock = out[3 * n_row * n_var : 3 * n_row * n_var + n_row * n_exog]
+    return (*dates, shock.reshape(n_row, n_exog), out[-n_row:])
 
 
 def test_regime_pencil_cfunc_writes_every_block(compiled_lead_regime):
     # One call has to reproduce the regime's own complex-step sweep on the
-    # replaced rows, a then b, plus its residual at the same point, so all three
-    # blocks patch a reference pencil copy unchanged.
+    # replaced rows, the three dates then the innovations, plus its residual at
+    # the same point, so every block patches a reference pencil copy unchanged.
     compiled = compiled_lead_regime
     func = compiled.construct_regime_pencil_func()
     par = _params(compiled)
-    n_var = len(compiled.var_names)
+    n_var, n_exog = len(compiled.var_names), compiled.n_exog
     rows = func.rows[1]
     cfunc = compiled.construct_regime_cfuncs()[1]
 
     assert func.masks == (1,)
-    assert func.n_out(1) == 2 * len(rows) * n_var + len(rows)
+    assert func.n_out(1) == len(rows) * (3 * n_var + n_exog + 1)
 
     rng = np.random.default_rng(0)
     for trial in range(5):
         point = (
             np.zeros(n_var) if trial == 0 else np.round(rng.normal(0, 0.3, n_var), 3)
         )
-        a_r, b_r, _, _ = klein_preprocess(
-            cfunc.address, point, par, n_var, compiled.n_exog
-        )
-        c_r = residual_eval(
+        ref = klein_preprocess(cfunc.address, point, par, n_var, n_exog)
+        const_r = residual_eval(
             cfunc.address,
             point,
             point,
             point,
-            np.zeros(compiled.n_exog),
+            np.zeros(n_exog),
             par,
             n_var,
         ).real
-        got_a, got_b, got_c = _call_pencil(func, 1, point, par)
+        got = _call_pencil(func, 1, point, par)
+        want = (*(block[rows, :] for block in ref), const_r[rows])
 
-        for block in (got_a, got_b, got_c):
-            assert np.abs(block).max() > 0.0
-        np.testing.assert_allclose(got_a, a_r[rows, :])
-        np.testing.assert_allclose(got_b, b_r[rows, :])
-        np.testing.assert_allclose(got_c, c_r[rows])
+        for name, block in zip(("a", "b", "c", "d", "const"), got):
+            assert np.abs(block).max() > 0.0, name
+        for name, block, expected in zip(("a", "b", "c", "d", "const"), got, want):
+            np.testing.assert_allclose(block, expected, err_msg=name)
 
 
 def test_regime_pencil_func_carries_every_regime_and_is_cached(compiled_regimes):
@@ -434,14 +467,28 @@ def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_reg
         compiled_regimes, regimes={1: RegimeBlock(rows=[0], jac_a=[], jac_b=[])}
     )
 
-    with pytest.raises(ValueError, match="expected"):
+    with pytest.raises(ValueError, match="a/b/c jacobian entries"):
         broken.construct_regime_pencil_func()
 
-    # A full pencil row with no constant to go with it: caught on its own branch,
-    # since the jacobian check above never sees it.
+    # The shock block is sized by n_exog rather than n_var, so it has a check of
+    # its own that the date blocks above never reach.
     row = [sp.Integer(0)] * len(compiled_regimes.var_names)
+    no_shock = dataclasses.replace(
+        compiled_regimes,
+        regimes={1: RegimeBlock(rows=[0], jac_a=row, jac_b=row, jac_c=row)},
+    )
+
+    with pytest.raises(ValueError, match="shock jacobian"):
+        no_shock.construct_regime_pencil_func()
+
+    # A full pencil row with no constant to go with it: caught on its own branch,
+    # since the jacobian checks above never see it.
+    shock_row = [sp.Integer(0)] * compiled_regimes.n_exog
     no_const = dataclasses.replace(
-        compiled_regimes, regimes={1: RegimeBlock(rows=[0], jac_a=row, jac_b=row)}
+        compiled_regimes,
+        regimes={
+            1: RegimeBlock(rows=[0], jac_a=row, jac_b=row, jac_c=row, jac_d=shock_row)
+        },
     )
 
     with pytest.raises(ValueError, match="constants"):
@@ -563,7 +610,7 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     solver = _with_constraints(
         parsed_post82,
         {"elb": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
-        {frozenset({"elb"}): {"taylor": sp.Eq(r(t), Pi(t - 1))}},
+        {frozenset({"elb"}): {"taylor": sp.Eq(r(t), Pi(t - 2))}},
     )
 
     compiled = solver.compile()
@@ -621,7 +668,7 @@ def _rbc_seed(compiled):
     """Newton seed over the compiled layout, generated variables included.
 
     A lag aux starts where its origin does, so the suffix is stripped before the
-    `<name>_ss` lookup; a shock state and an unseeded variable start at zero.
+    `<name>_ss` lookup; an unseeded variable starts at zero.
     """
     calib = compiled.config.calibration.parameters
     seeds = []
@@ -685,12 +732,12 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     np.testing.assert_allclose(c_r, want, atol=1e-10)
 
 
-def test_regime_replacements_lift_shocks_like_the_reference(parsed_post82):
-    # Regimes are desugared alongside the reference, so a shock in a replacement
-    # reaches the residual through its shock state rather than as a bare symbol.
+def test_regime_replacements_carry_shocks_like_the_reference(parsed_post82):
+    # A shock stays a bare symbol in the residual and reaches the pencil through
+    # the shock jacobian, on a replaced row exactly as on a reference one.
     model, _ = parsed_post82
     r = model.variables.variables[2]
-    shock = next(iter(model.shock_map))
+    shock = next(iter(model.shocks))
     rho_r = sp.Symbol("rho_r")
     solver = _with_constraints(
         parsed_post82,
@@ -699,12 +746,17 @@ def test_regime_replacements_lift_shocks_like_the_reference(parsed_post82):
     )
 
     compiled = solver.compile()
+    block = compiled.regimes[1]
+    residual = block.residuals[2]
 
-    cur_r, cur_shock = sp.Symbol("cur_r"), sp.Symbol(f"cur_{shock.name}_st")
-    residual = compiled.regimes[1].residuals[2]
+    assert sp.simplify(residual - (sp.Symbol("cur_r") * (1 - rho_r) - shock)) == 0
+    assert shock in residual.free_symbols
 
-    assert sp.simplify(residual - (cur_r * (1 - rho_r) - cur_shock)) == 0
-    assert shock not in residual.free_symbols
+    # d carries klein_preproc's sign, so the -shock in the residual reads +1.
+    n_exog = compiled.n_exog
+    row = block.rows.index(2)
+    shock_col = list(model.shocks).index(shock)
+    assert block.jac_d[row * n_exog + shock_col] == 1
     assert compiled.construct_regime_cfuncs()[1] is not None
 
 

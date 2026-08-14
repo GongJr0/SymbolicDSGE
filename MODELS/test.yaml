@@ -2,9 +2,9 @@ name: "TEST"
 
 variables: [u, v, r, Pi, x, r_star]
 
-shock_map:
-    e_u: u
-    e_v: v
+shocks:
+    - e_u
+    - e_v
 
 observables: [Infl, Rate]
 

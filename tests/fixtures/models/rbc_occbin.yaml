@@ -37,8 +37,8 @@ variables:
   log_invest: {ss_seed: log_invest_ss}
   log_c: {ss_seed: log_c_ss}
 
-shock_map:
-  eps: a
+shocks:
+    - eps
 
 observables: [log_c_obs]
 

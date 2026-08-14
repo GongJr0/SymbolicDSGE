@@ -142,7 +142,9 @@ class ModelConfig(Base):
     name: str
     variables: Variables
     parameters: list[Symbol]
-    shock_map: dict[Symbol, Symbol]
+    #: Innovation symbols. A shock reaches the residual as a bare symbol and
+    #: may drive any number of equations, so it names no target variable.
+    shocks: list[Symbol]
     observables: list[Symbol]
     equations: Equations
     calibration: Calib

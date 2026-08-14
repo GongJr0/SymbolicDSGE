@@ -50,22 +50,15 @@ class VariableLayout:
     the origin's steady state and takes its variance.
 
     ``state_names`` and ``control_names`` split the canonical order at
-    ``n_state``. ``exo_state_names`` and ``endo_state_names`` split the state
-    block again, by whether a shock declares the variable as its target, and both
-    keep the order the state block is in. Being driven by a shock is what makes a
-    state exogenous, not what makes a variable a state, so a shocked variable
-    that is never lagged is a control and appears in neither.
+    ``n_state``. A variable is a state when it occurs at ``t-1``, which is what
+    the pencil partition needs.
 
     ``n_exog`` counts the model's innovations, which is the width of the shock
-    matrix and of ``B``. It is unrelated to how many states are exogenous: one
-    shock may target several variables, and a target may be a control.
+    matrix and of ``B``, not a count of variables.
 
-    ``shock_names`` names the shock columns in ``shock_map`` order, which is the
-    order the compiler minted the shock states in, and ``shock_idx`` is that
-    order as a lookup. A shock is named by its own symbol rather than by the
-    variable it targets: after desugaring one shock may enter several equations,
-    and a target name would claim a scope the innovation does not have.
-    """
+    ``shock_names`` is ordered names of the shock columns.
+
+    ``shock_idx`` is the shock order order as a lookup."""
 
     declared_names: tuple[str, ...]
     canonical_names: tuple[str, ...]
@@ -232,7 +225,7 @@ class CompiledModel:
 
     @property
     def shock_names(self) -> tuple[str, ...]:
-        """Shock column names, in ``shock_map`` (and so column) order."""
+        """Shock column names, in ``shocks`` (and so column) order."""
         return self.layout.shock_names
 
     @property

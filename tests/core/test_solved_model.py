@@ -130,7 +130,7 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
         shock_names=("eps",),
         shock_idx={"eps": 0},
         config=SimpleNamespace(
-            shock_map={Symbol("eps"): Symbol("e")},
+            shocks=[Symbol("eps")],
             calibration=SimpleNamespace(parameters={}, shock_std={}),
         ),
     )
@@ -815,7 +815,7 @@ def test_non_unit_loading_scales_the_response(solved_test, variant):
 
 def test_one_shock_reaches_several_equations_contemporaneously(variant):
     # e_u drives its own process, a forward-looking equation, and a static one.
-    # None of the three is the variable shock_map names it against. This was the
+    # None of the three is the variable shocks names it against. This was the
     # awkward case when a shock had to reach the pencil through one state; it is
     # the ordinary case now that the residual carries innovations directly.
     model, compiled, solved = variant(

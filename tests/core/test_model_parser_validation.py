@@ -19,8 +19,8 @@ BASE = """
 name: MINI
 variables:
   x: {ss_seed: null}
-shock_map:
-  e: x
+shocks:
+  - e
 observables: [x_obs]
 equations:
   model:

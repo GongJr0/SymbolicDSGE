@@ -128,7 +128,7 @@ class ResidualLayout:
             slot[Symbol(f"prev_{name}")] = ("prev", i)
 
         shock_idx = {name: i for i, name in enumerate(compiled.shock_names)}
-        for shock in compiled.config.shock_map:
+        for shock in compiled.config.shocks:
             slot[shock] = ("eps", shock_idx[shock.name])
 
         for j, p in enumerate(compiled.calib_params):

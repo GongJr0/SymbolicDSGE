@@ -1491,7 +1491,7 @@ class DenHaanMarcet:
         conf = self.solved.config
         var_funcs = {v.__name__: v for v in conf.variables.variables}
         param_syms = {p.name: p for p in conf.parameters}
-        shock_syms = {s.name: s for s in conf.shock_map.keys()}
+        shock_syms = {s.name: s for s in conf.shocks}
         local_dict: dict[str, Any] = {
             "t": self._t,
             **var_funcs,

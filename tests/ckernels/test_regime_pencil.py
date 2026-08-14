@@ -57,7 +57,7 @@ def ss_ref(compiled, par):
     """Reference steady state, which every regime linearizes around.
 
     A lag aux starts where its origin does, so the suffix is stripped before the
-    `<name>_ss` lookup; a shock state and an unseeded variable start at zero.
+    `<name>_ss` lookup; an unseeded variable starts at zero.
     """
     calib = compiled.config.calibration.parameters
     seed = []

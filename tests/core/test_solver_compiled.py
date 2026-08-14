@@ -27,9 +27,9 @@ def _nonlinear_compile_yaml() -> str:
             linearization: taylor
             ss_seed: k_ss
           z: {}
-        shock_map:
-          e_a: a
-          e_z: z
+        shocks:
+          - e_a
+          - e_z
         observables: []
         equations:
           model:
@@ -210,7 +210,7 @@ def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
     deep = copy.deepcopy(model)
     t = sp.Symbol("t", integer=True)
     u = deep.variables.variables[0]
-    e_u = next(iter(deep.shock_map.keys()))
+    e_u = next(iter(deep.shocks))
     first = next(iter(deep.equations.model))
     deep.equations.model[first] = sp.Eq(u(t + 2), deep.parameters[0] * u(t) + e_u)
 

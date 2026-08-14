@@ -18,7 +18,7 @@ __Fields:__
 | name | `#!python str` | Model name. |
 | variables | `#!python Variables` | Parsed variable functions, steady state expressions, and linearization methods. |
 | parameters | `#!python list[sp.Symbol]` | Model parameters as symbols. |
-| shock_map | `#!python dict[sp.Symbol, sp.Symbol]` | Mapping from innovation symbols to their corresponding model variables. |
+| shocks | `#!python list[sp.Symbol]` | Innovation symbols, in declaration order, which is the shock column order. |
 | observables | `#!python list[sp.Symbol]` | Observable variables as symbols. |
 | equations | `#!python Equations` | `dataclass` containing model, constraint, observable equations, observable affinity flags, and observable Jacobian. |
 | calibration | `#!python Calib` | `dataclass` of parameter calibrations plus shock standard deviation and correlation parameter mappings. |

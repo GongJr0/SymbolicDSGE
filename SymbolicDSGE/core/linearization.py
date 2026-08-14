@@ -112,7 +112,7 @@ class Linearizer:
             steady_state = {var: conf.variables.ss_seed[var] for var in variable_order}
             equations = list(conf.equations.model.values())
             time_symbol = Symbol("t", integer=True)
-            shock_symbols = list(conf.shock_map.keys())
+            shock_symbols = list(conf.shocks)
 
         if method_dict is None or steady_state is None or equations is None:
             raise TypeError(

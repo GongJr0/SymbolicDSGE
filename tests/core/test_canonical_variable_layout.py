@@ -65,18 +65,6 @@ def test_compile_default_layout_canonicalizes_misordered_yaml_variables(tmp_path
     assert compiled.n_state == 3
 
 
-def test_the_state_block_splits_by_which_states_a_shock_targets(tmp_path):
-    # e_u and e_v target u and v, so r is the model's one endogenous state. The
-    # split is a partition of the state block, not a reordering of it.
-    compiled = _compile_misordered_test_model(tmp_path)
-
-    assert compiled.layout.exo_state_names == ("u", "v")
-    assert compiled.layout.endo_state_names == ("r",)
-    assert set(compiled.layout.exo_state_names) | set(
-        compiled.layout.endo_state_names
-    ) == set(compiled.layout.state_names)
-
-
 def test_a_single_depth_model_generates_no_variables(tmp_path):
     # Nothing here is displaced past one date, so the compiled set is the
     # declared set and the whole generated block is empty.
@@ -189,9 +177,6 @@ def test_explicit_order_permutes_within_each_block(tmp_path):
     assert compiled.layout.state_names == ("r", "v", "u")
     assert compiled.layout.control_names == ("r_star", "x", "Pi")
     assert compiled.var_names == ["r", "v", "u", "r_star", "x", "Pi"]
-    # The split of the state block follows the block, so an order moves it too.
-    assert compiled.layout.exo_state_names == ("v", "u")
-    assert compiled.layout.endo_state_names == ("r",)
 
 
 def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
@@ -211,8 +196,6 @@ def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
     assert compiled.layout.state_names == ("r", "v", "u", "u_lag1")
     assert compiled.layout.control_names == ("r_star", "x", "Pi")
     assert compiled.layout.generated == {"u_lag1": 3}
-    # A lag aux tracks its origin, and no shock declares it as a target.
-    assert compiled.layout.endo_state_names == ("r", "u_lag1")
 
 
 def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path):

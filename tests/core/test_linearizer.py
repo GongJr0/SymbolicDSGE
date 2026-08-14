@@ -30,8 +30,8 @@ def _nonlinear_model_yaml() -> str:
           k:
             linearization: taylor
             ss_seed: k_ss
-        shock_map:
-          e_a: a
+        shocks:
+          - e_a
         observables: [AObs]
         equations:
           model:
@@ -68,9 +68,9 @@ def _mixed_methods_nonlinear_yaml() -> str:
             linearization: taylor
             ss_seed: k_ss
           z: {}
-        shock_map:
-          e_a: a
-          e_z: z
+        shocks:
+          - e_a
+          - e_z
         observables: [ZObs]
         equations:
           model:
@@ -113,9 +113,9 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         """
         name: "HAND_LINEARIZED_EQUIVALENCE_TEST"
         variables: [a, k, z]
-        shock_map:
-          e_a: a
-          e_z: z
+        shocks:
+          - e_a
+          - e_z
         observables: [ZObs]
         equations:
           model:

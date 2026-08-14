@@ -28,10 +28,10 @@ variables:
   d: {ss_seed: null} # d_ss = 0
   g: {ss_seed: null} # g_ss = 0
 
-shock_map:
-  e_z: z
-  e_d: d
-  e_g: g
+shocks:
+    - e_z
+    - e_d
+    - e_g
 
 observables: [c_obs, k_obs, g_obs]
 

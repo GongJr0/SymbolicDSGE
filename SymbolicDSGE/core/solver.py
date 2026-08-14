@@ -223,12 +223,12 @@ class DSGESolver:
             return {}
 
         bit = {name: i for i, name in enumerate(constraint_names)}
-        shock_syms = list(conf.shock_map)
+        shock_syms = list(conf.shocks)
         # At the expansion point every date holds the same vector and the
         # innovation is zero, so the pencil blocks fold onto the cur symbols.
         at_point: dict[Any, Any] = dict(zip(fwd_syms, cur_syms))
         at_point.update(zip(prev_syms, cur_syms))
-        at_point.update({shock: 0.0 for shock in conf.shock_map})
+        at_point.update({shock: 0.0 for shock in conf.shocks})
 
         compiled: dict[int, RegimeBlock] = {}
         for key, replacements in regimes.items():
@@ -330,19 +330,16 @@ class DSGESolver:
     ) -> VariableLayout:
         """Canonical layout of a desugared model.
 
-        A variable is predetermined when it occurs at ``t-1``, which after
-        desugaring is how a lag is written rather than something a generated
-        variable stands in for. Everything else is a control.
+        A variable is predetermined when it occurs at ``t-1``. Everything else
+        is a control.
 
         Canonical order is states then controls: the pencil's own decision-rule
         ordering is derived natively from the incidence, but ``A``/``B``, ``x0``,
         ``P0`` and the filter all read the state block as a prefix.
 
-        Shocks are not variables here. They reach the residual as innovations, so
-        ``n_exog`` counts the model's shocks rather than a lifted block, and the
-        state space takes its loading from the shock jacobian. A state is
-        exogenous when a shock declares it as its target, which splits the state
-        block without resizing it.
+        Shocks are not variables here. They reach the residual as innovations,
+        so ``n_exog`` counts them and the state space takes its loading from the
+        shock jacobian.
         """
         declared_names = tuple(v.__name__ for v in conf.variables.variables)
 
@@ -361,18 +358,17 @@ class DSGESolver:
         canonical_names = (*state_names, *control_names)
         idx = {name: i for i, name in enumerate(canonical_names)}
 
-        # Shock columns follow shock_map order, which is the order the shock
-        # states were minted in. Only the keys are read: the lift keys on the
-        # shock symbol, so a shock enters any number of equations and the target
-        # a shock declares names nothing the compiler needs.
-        shock_names = tuple(shock.name for shock in conf.shock_map)
+        # Shock columns follow declaration order. A shock reaches the residual
+        # as a bare symbol and may drive any number of equations, so which
+        # variables it moves is the shock jacobian's answer, not a declared one.
+        shock_names = tuple(shock.name for shock in conf.shocks)
 
         return VariableLayout(
             declared_names=declared_names,
             canonical_names=canonical_names,
             state_names=state_names,
             control_names=control_names,
-            n_exog=len(conf.shock_map),
+            n_exog=len(conf.shocks),
             n_state=len(state_names),
             idx=idx,
             generated={g.name: idx[g.name] for g in generated},
@@ -474,13 +470,9 @@ class DSGESolver:
             raise ValueError(f"order must be 1 or 2, got {order}.")
 
         if order == 2:
-            # The SGU system is built on a two-date pencil `a y' = b y`, which
-            # stopped describing the model when lags entered the residual
-            # directly: there is a `c y_prev` term it cannot see. The bicomplex
-            # sweep is the same story, spanning (fwd, cur) only, so every
-            # cross-derivative in a lag or a shock is missing from the Hessian.
-            # Both move together, and until they do a second-order solve reads
-            # a system that no longer exists.
+            # The SGU tensors are built on a two-date pencil `a y' = b y` and
+            # the bicomplex sweep spans (fwd, cur), so neither sees the lag block
+            # or the innovations the residual carries. They widen together.
             raise NotImplementedError(
                 "Second-order solving is unavailable while the three-date "
                 "refactor lands: the SGU tensors and the residual Hessian are "
@@ -720,7 +712,7 @@ class DSGESolver:
         params = conf.calibration.parameters
         shock_std = conf.calibration.shock_std
         shock_corr = conf.calibration.shock_corr
-        innovations = list(conf.shock_map)
+        innovations = list(conf.shocks)
 
         stds = np.empty(n_exog, dtype=float64)
         for i, innov in enumerate(innovations):

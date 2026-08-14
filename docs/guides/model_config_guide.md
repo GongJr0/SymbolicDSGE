@@ -28,7 +28,7 @@ name: "Test Model"
 
 ## Variables
 
-The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping. At compile time, the solver infers its canonical layout from the model config: variables targeted by `shock_map` form the shocked/exogenous state block, dynamic equations define the remaining state variables, and all other variables are controls. Declaration order is preserved within those inferred groups.
+The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping. At compile time, the solver infers its canonical layout from the model config: a variable occurring at `t-1` is a state and every other variable is a control, states first. Declaration order is preserved within each group.
 
 If an explicit compile time `variable_order`, `n_state`, or `n_exog` is supplied, it is treated as an expectation and sanity checked against the inferred layout. A mismatch raises before solving.
 
@@ -85,10 +85,10 @@ Shocks are the symbols that represent the stochastic components of the model.
 A shock symbol is separate from its (co)variance and is used to indicate where a respective innovation should be applied in the model equations.
 
 ```yaml
-shock_map:
-    e_r: r
-    e_g: g
-    e_z: z
+shocks:
+    - e_r
+    - e_g
+    - e_z
 ```
 
 Shock realizations are only injected when the user selects them at simulation time. Therefore, declaring extra variables here and including them in the model equations can be used to test multiple shock configurations from a single model config.

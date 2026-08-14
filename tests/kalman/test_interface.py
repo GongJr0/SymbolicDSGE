@@ -105,7 +105,7 @@ def _make_stub_model(
     )
     config = SimpleNamespace(
         calibration=calibration,
-        shock_map={E_U: Symbol("u"), E_V: Symbol("v")},
+        shocks=[E_U, E_V],
     )
     compiled = SimpleNamespace(
         observable_names=observable_names,

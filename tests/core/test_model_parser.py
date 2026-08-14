@@ -78,10 +78,10 @@ variables:
   x: {ss_seed: null}
   y: {ss_seed: null}
   z: {ss_seed: null}
-shock_map:
-  e_x: x
-  e_y: y
-  e_z: z
+shocks:
+  - e_x
+  - e_y
+  - e_z
 observables: [x_obs, y_obs, z_obs]
 equations:
   model:
@@ -148,7 +148,7 @@ def _p0_model_dict(p0: dict) -> dict:
     return {
         "name": "P0TEST",
         "variables": {"x": {"ss_seed": None}, "y": {"ss_seed": None}},
-        "shock_map": {"e_x": "x", "e_y": "y"},
+        "shocks": ["e_x", "e_y"],
         "observables": ["x_obs", "y_obs"],
         "equations": {
             "model": {
@@ -288,7 +288,7 @@ def test_validate_constraints_rejects_shocks(parsed_test, side):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     a = conf.variables.variables[0]
-    shock = next(iter(conf.shock_map))
+    shock = next(iter(conf.shocks))
     conditions = {"bind": a(t) < 0, "relax": a(t) >= 0}
     conditions[side] = a(t) + shock < 0
 
@@ -419,7 +419,7 @@ def test_validate_regimes_accepts_shocks_in_replacements(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
-    shock = next(iter(conf.shock_map))
+    shock = next(iter(conf.shocks))
     target = next(iter(conf.equations.model))
     conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
     conf.equations.regime = {frozenset({"obc"}): {target: sp.Eq(var(t), shock)}}

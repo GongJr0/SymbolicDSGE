@@ -12,10 +12,10 @@ variables: [g, z, r, x, Pi]
 # sig_R, sig_g, sig_z: std devs of innovations
 # rho_gz: corr(ε_g, ε_z)
 
-shock_map:
-  e_g: g
-  e_z: z
-  e_r: r
+shocks:
+    - e_g
+    - e_z
+    - e_r
 
 observables: [OutGap, Infl, Rate]
 

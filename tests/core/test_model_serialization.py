@@ -14,7 +14,7 @@ def _model_signature(parser: ModelParser) -> dict[str, Any]:
         "name": cfg.name,
         "parameters": sorted(s.name for s in cfg.parameters),
         "observables": [s.name for s in cfg.observables],
-        "shock_map": {k.name: v.name for k, v in cfg.shock_map.items()},
+        "shocks": [s.name for s in cfg.shocks],
         "calibration": {
             k.name: float(v) for k, v in cfg.calibration.parameters.items()
         },

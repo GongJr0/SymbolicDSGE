@@ -28,11 +28,9 @@ typedef double f64;
 
 /* Status conventions, shared by every kernel in the tree.
  *
- * Zero is success, and it is the only success: a caller knows which function it
- * called, so a code that identified the module on the way out would say nothing
- * the call site does not already have. Positive is a non-error outcome that the
- * caller has to branch on (an iteration cap, a fallback, a halt). Negative is a
- * failure, and only failures are numbered.
+ * Zero is success, and it is the only success. Positive is a non-error outcome
+ * that the caller has to branch on (an iteration cap, a fallback, a halt).
+ * Negative is a failure, and only failures are numbered.
  *
  * A failure code is `-(module * 100 + code)`, where the module is a code family
  * (the header that owns it, not the directory) and the code counts from 1 within

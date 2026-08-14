@@ -2,10 +2,10 @@ name: "NK_LS_POST82"
 
 variables: [g, z, r, x, Pi]
 
-shock_map:
-  e_g: g
-  e_z: z
-  e_r: r
+shocks:
+    - e_g
+    - e_z
+    - e_r
 
 observables: [OutGap, Infl, Rate]
 
