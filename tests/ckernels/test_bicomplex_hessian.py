@@ -22,7 +22,8 @@ from SymbolicDSGE._symbolic_printers import (
 
 
 def test_bicomplex_hessian_polynomial_is_exact():
-    # Hessian over z = (fwd, cur). At ss = 1, it is [[4, 3], [3, 6]].
+    # z = (lag, cur, lead) for one variable and no shocks, so the (cur, lead)
+    # pair is the lower-right 2x2 and the untouched lag row and column are zero.
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = 2 * fwd_x**2 + 3 * fwd_x * cur_x + cur_x**3
     layout = ResidualLayout(
@@ -32,12 +33,13 @@ def test_bicomplex_hessian_polynomial_is_exact():
 
     H = bicomplex_hessian(cf.address, np.array([1.0]), np.zeros(0), 0, 1)
 
-    expected = np.array([[[4.0, 3.0], [3.0, 6.0]]])
+    # d2/dcur2 = 6, d2/dfwd2 = 4, cross = 3.
+    expected = np.array([[[0.0, 0.0, 0.0], [0.0, 6.0, 3.0], [0.0, 3.0, 4.0]]])
     np.testing.assert_allclose(H, expected, rtol=1e-6, atol=1e-7)
 
 
 def test_bicomplex_hessian_transcendental():
-    # At ss = 1, the Hessian is [[0, e], [e, e]].
+    # d2/dcur2 = e, cross = e, d2/dfwd2 = 0, in the (cur, lead) block.
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = fwd_x * sp.exp(cur_x)
     layout = ResidualLayout(
@@ -48,7 +50,7 @@ def test_bicomplex_hessian_transcendental():
     H = bicomplex_hessian(cf.address, np.array([1.0]), np.zeros(0), 0, 1)
 
     e = float(np.exp(1.0))
-    expected = np.array([[[0.0, e], [e, e]]])
+    expected = np.array([[[0.0, 0.0, 0.0], [0.0, e, e], [0.0, e, 0.0]]])
     np.testing.assert_allclose(H, expected, rtol=1e-4, atol=1e-4)
 
 
@@ -71,6 +73,6 @@ def test_bicomplex_hessian_linear_model_is_zero(path):
 
     H = bicomplex_hessian(cf.address, ss, par, layout.n_exog, layout.n_var)
 
-    n2 = 2 * layout.n_var
+    n2 = 3 * layout.n_var + layout.n_exog
     assert H.shape == (layout.n_var, n2, n2)
     np.testing.assert_allclose(H, 0.0, atol=1e-6)

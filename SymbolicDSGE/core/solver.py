@@ -151,12 +151,6 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_jacobian_eqs=observable_jacobian_eqs,
-            n_var=len(var_order),
-            n_state=layout.n_state,
-            n_exog=layout.n_exog,
-            n_ctrl=len(var_order) - layout.n_state,
-            n_par=len(params),
-            n_obs=len(observable_exprs),
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
             regimes=regimes,
@@ -341,11 +335,17 @@ class DSGESolver:
         so ``n_exog`` counts them and the state space takes its loading from the
         shock jacobian.
         """
-        declared_names = tuple(v.__name__ for v in conf.variables.variables)
+        # ``conf`` is desugared, so its variable list carries the minted names
+        # too. The canonical split spans all of them including aux variables.
+        # while ``declared_names`` keeps only the user's own, filtered by name
+        # rather than sliced off the tail.
+        all_names = tuple(v.__name__ for v in conf.variables.variables)
+        minted = frozenset(g.name for g in generated)
+        declared_names = tuple(n for n in all_names if n not in minted)
 
         lagged = self._lagged_names(conf)
-        state_names = tuple(name for name in declared_names if name in lagged)
-        control_names = tuple(name for name in declared_names if name not in lagged)
+        state_names = tuple(name for name in all_names if name in lagged)
+        control_names = tuple(name for name in all_names if name not in lagged)
 
         if variable_order is not None:
             state_names, control_names = self._resolve_variable_order(
@@ -364,14 +364,18 @@ class DSGESolver:
         shock_names = tuple(shock.name for shock in conf.shocks)
 
         return VariableLayout(
+            n_var=len(all_names),
+            n_declared=len(declared_names),
+            n_generated=len(generated),
+            n_exog=len(shock_names),
+            n_state=len(state_names),
+            n_ctrl=len(control_names),
             declared_names=declared_names,
+            generated_names=tuple(g.name for g in generated),
             canonical_names=canonical_names,
             state_names=state_names,
             control_names=control_names,
-            n_exog=len(conf.shocks),
-            n_state=len(state_names),
             idx=idx,
-            generated={g.name: idx[g.name] for g in generated},
             aux_origin={g.name: g.origin for g in generated},
             shock_names=shock_names,
             shock_idx={name: i for i, name in enumerate(shock_names)},
@@ -388,15 +392,16 @@ class DSGESolver:
         takes the origin's variance. The permutation into canonical order is a
         lossless reindex.
         """
-        n_declared = len(layout.declared_names) - len(generated)
+        n_declared = layout.n_declared
         if P0.shape != (n_declared, n_declared):
             raise ValueError(
                 f"P0 has shape {P0.shape}, expected ({n_declared}, {n_declared}) "
                 f"for the model's declared variables."
             )
 
-        declared_idx = {name: i for i, name in enumerate(layout.declared_names)}
-        wide = np.eye(len(layout.declared_names), dtype=float64)
+        full = (*layout.declared_names, *layout.generated_names)
+        declared_idx = {name: i for i, name in enumerate(full)}
+        wide = np.eye(len(full), dtype=float64)
         wide[:n_declared, :n_declared] = P0
         for g in generated:
             origin = declared_idx[g.origin]
@@ -456,11 +461,12 @@ class DSGESolver:
     ) -> SolvedModel:
         """Solve the model to first (``order=1``) or second (``order=2``) order.
 
-        ``order=1`` is the Klein linear solve (policy is a ``KleinSolution``).
-        ``order=2`` additionally computes the SGU second-order tensors and the
-        sigma^2 risk correction (policy is a ``PerturbationSolution``); it requires
-        the native extension and a nonlinear steady state (see ``_solve_second_order``).
-        The state-space ``A``/``B`` are the first-order transition in both cases.
+        ``order=1`` is the Klein linear solve (policy is a
+        ``FirstOrderSolution``). ``order=2`` additionally computes the
+        second-order tensors and the sigma^2 risk correction (policy is a
+        ``SecondOrderSolution``); it requires the native extension and a
+        nonlinear steady state (see ``_solve_second_order``). The state-space
+        ``A``/``B`` are the first-order transition in both cases.
 
         When ``raise_on_bk_violation`` is ``False`` a Klein stability/uniqueness
         failure warns instead of raising, so batch callers (e.g. an estimation
@@ -518,8 +524,7 @@ class DSGESolver:
         its origin identically and has no seed of its own to give.
         """
         layout = compiled.layout
-        n_declared = len(layout.declared_names) - len(layout.generated)
-        declared = layout.declared_names[:n_declared]
+        declared = layout.declared_names
 
         seed = DSGESolver._configured_ss_seed(compiled)
         if ss_seed is None:
@@ -527,7 +532,7 @@ class DSGESolver:
 
         if isinstance(ss_seed, Mapping):
             by_name = {str(name): float(value) for name, value in ss_seed.items()}
-            minted = sorted(set(by_name) & set(layout.generated))
+            minted = sorted(set(by_name) & set(layout.generated_names))
             if minted:
                 raise ValueError(
                     f"ss_seed names compiler-minted variable(s) {minted}, which "
@@ -619,11 +624,11 @@ class DSGESolver:
         seed: NDF,
         raise_on_bk_violation: bool = True,
     ) -> SolvedModel[SecondOrderSolution]:
-        """Second-order (SGU) solve. Runs the Klein first order (which Newton-
-        resolves the steady state from ``seed``), sweeps the bicomplex Hessian at
-        that steady state, and assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss``
-        risk correction into a :class:`PerturbationSolution`. Requires the native
-        extension."""
+        """Second-order solve. Runs the Klein first order (which Newton-resolves
+        the steady state from ``seed``), sweeps the bicomplex Hessian at that
+        steady state, and assembles the quadratic blocks over the states, the
+        shocks and their cross plus the risk correction into a
+        :class:`SecondOrderSolution`. Requires the native extension."""
 
         pert = sgu_solve(
             compiled.construct_objective_cfunc(),

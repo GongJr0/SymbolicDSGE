@@ -36,8 +36,10 @@ def simulate_linear_states_into(
     x0: _F64,
     shock_mat: _F64,
     out: _F64,
+    steady_state: _F64 | None = ...,
 ) -> None:
-    """out[(T+1, n)] <- linear state recursion. Mirrors the numba kernel."""
+    """out[(T, n)] <- linear state recursion. ``x0`` and the recursion are
+    deviations; ``steady_state`` denominates the written rows in levels."""
 
 def affine_observations_into(
     states: _F64,
@@ -50,15 +52,22 @@ def affine_observations_into(
 def simulate_second_order_pruned(
     hx: _F64,
     gx: _F64,
-    bx: _F64,
+    bu: _F64,
     hxx: _F64,
     gxx: _F64,
+    hxu: _F64,
+    gxu: _F64,
+    huu: _F64,
+    guu: _F64,
     hss: _F64,
     gss: _F64,
     x0: _F64,
     shock_mat: _F64,
+    steady_state: _F64 | None = ...,
 ) -> _F64:
-    """Pruned second order simulation. Returns split state and jump paths."""
+    """Pruned second order simulation. Returns the stacked variable path. ``bu``
+    spans every variable: a control responds to an innovation contemporaneously.
+    ``steady_state`` denominates the returned rows in levels."""
 
 def klein_postprocess(
     s: _C128,
@@ -127,14 +136,30 @@ def sgu_klein_solve2(
     incidence: _I8,
     n_state: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64]:
-    """(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B) <- one-shot second-order
-    (SGU) solve.
+) -> tuple[
+    _F64,
+    _F64,
+    _F64,
+    int,
+    _C128,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+    _F64,
+]:
+    """(ss, f, p, stab, eig, gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B) <-
+    one-shot second-order solve.
 
-    klein_solve1 plus bicomplex_hessian, second_order and second_order_risk in
-    one GIL release. The pencil and the residual Hessian stay native. ``eta`` is
-    the (n_exog, n_exog) Cholesky of the shock covariance; the solve composes the
-    state loading from it. ``stab`` is reported, not raised on."""
+    klein_solve1 plus bicomplex_hessian and second_order in one GIL release. The
+    pencil and the residual Hessian stay native. ``Q`` is the (n_exog, n_exog)
+    shock covariance, which the risk correction integrates against. ``stab`` is
+    reported, not raised on."""
 
 def second_order(
     a: _F64,
@@ -142,22 +167,12 @@ def second_order(
     f_xx: _F64,
     gx: _F64,
     hx: _F64,
+    bu: _F64,
+    Q: _F64,
     n_state: int,
-) -> tuple[_F64, _F64]:
-    """SGU second-order tensors (gxx, hxx) -- native twin of
-    core.second_order.solve_second_order."""
-
-def second_order_risk(
-    a: _F64,
-    b: _F64,
-    f_xx: _F64,
-    gx: _F64,
-    gxx: _F64,
-    eta: _F64,
-    n_state: int,
-) -> tuple[_F64, _F64]:
-    """Sigma^2 risk correction (gss, hss) -- native twin of
-    core.second_order.solve_second_order_risk."""
+) -> tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64]:
+    """Second-order policy tensors (gxx, hxx, gxu, hxu, guu, huu, gss, hss) --
+    native twin of core.second_order.solve_second_order."""
 
 def residual_path(
     residual_addr: int,
@@ -218,10 +233,11 @@ def bicomplex_hessian(
     n_exog: int,
     n_eq: int,
 ) -> _F64:
-    """Residual Hessian (n_eq, 2*n_var, 2*n_var) via the bicomplex step.
+    """Residual Hessian (n_eq, nz, nz) via the bicomplex step, over
+    ``z = (lag, cur, lead, eps)`` with ``nz = 3*n_var + n_exog``.
 
-    Spans the (fwd, cur) pair only: ``prev`` is held at the steady state and
-    ``eps`` at zero, so derivatives in either are absent."""
+    Spanning every date and the innovations is what lets the chain rule contract
+    it to state space in one step."""
 
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).

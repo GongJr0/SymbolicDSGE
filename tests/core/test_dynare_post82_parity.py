@@ -230,7 +230,7 @@ def _filter(compiled, solution, P0):
         Q,
         dyn.KF_H,
         dyn.KF_DATA,
-        x0=np.zeros(len(compiled.var_names)),
+        x0=np.zeros((compiled.n_var,), dtype=np.float64),
         P0=P0,
     )
 

@@ -53,27 +53,35 @@ class FirstOrderSolution(BaseSolution):
 
 @dataclass(frozen=True)
 class SecondOrderSolution(FirstOrderSolution):
-    """Second-order (SGU) solution: the first-order rule plus the corrections
-    taken at the same expansion point.
+    """Second-order solution: the first-order rule plus the corrections taken at
+    the same expansion point.
 
-    :attr:`gx` (ny, nx)/``hx`` (nx, nx) are ``f``/``p`` under SGU's names.
-    :attr:`gxx` (ny, nx, nx)/``hxx`` (nx, nx, nx) are the state-quadratic terms.
-    :attr:`gss` (ny,)/``hss`` (nx,) are the sigma^2 risk correction.
+    :attr:`gx` (ny, nx)/``hx`` (nx, nx) are ``f``/``p`` under the perturbation
+    notation. The quadratic terms split by which pair of arguments they weigh,
+    the shocks having their own now that they are not states:
+    :attr:`gxx` (ny, nx, nx)/``hxx`` (nx, nx, nx) over the states,
+    :attr:`gxu` (ny, nx, ne)/``hxu`` (nx, nx, ne) over a state and a shock,
+    :attr:`guu` (ny, ne, ne)/``huu`` (nx, ne, ne) over the shocks, and
+    :attr:`gss` (ny,)/``hss`` (nx,) the sigma^2 risk correction.
     """
 
     gxx: NDF
     hxx: NDF
+    gxu: NDF
+    hxu: NDF
+    guu: NDF
+    huu: NDF
     gss: NDF
     hss: NDF
 
     @property
     def hx(self) -> NDF:
-        """``p`` in SGU's notation: the state transition matrix."""
+        """``p`` in the perturbation notation: the state transition matrix."""
         return self.p
 
     @property
     def gx(self) -> NDF:
-        """``f`` in SGU's notation: the policy matrix."""
+        """``f`` in the perturbation notation: the policy matrix."""
         return self.f
 
 
@@ -172,12 +180,12 @@ def sgu_solve(
     *,
     n_exog: int = 0,
 ) -> SecondOrderSolution:
-    """Second-order (SGU) solve of the compiled model at ``params``.
+    """Second-order solve of the compiled model at ``params``.
 
     The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
     is the bicomplex residual (``construct_objective_cfunc_bicomplex()``) that
     drives the Hessian sweep, and ``Q`` is the ``(n_exog, n_exog)`` shock
-    covariance matrix.
+    covariance matrix the risk correction integrates against.
 
     One native call runs both orders under a single GIL release. A nonzero ``stab``
     returns normally; the caller decides whether to raise.
@@ -186,7 +194,23 @@ def sgu_solve(
     first-order state space, which ``SolvedModel`` already exposes directly.
     """
     with _bk_dating_hint():
-        ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B = sgu_klein_solve2(
+        (
+            ss,
+            f,
+            p,
+            stab,
+            eig,
+            gxx,
+            hxx,
+            gxu,
+            hxu,
+            guu,
+            huu,
+            gss,
+            hss,
+            A,
+            B,
+        ) = sgu_klein_solve2(
             residual_cfunc.address,
             bc_residual_cfunc.address,
             ss_seed,
@@ -207,6 +231,10 @@ def sgu_solve(
         B=B,
         gxx=gxx,
         hxx=hxx,
+        gxu=gxu,
+        hxu=hxu,
+        guu=guu,
+        huu=huu,
         gss=gss,
         hss=hss,
     )

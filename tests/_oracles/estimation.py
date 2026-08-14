@@ -387,7 +387,7 @@ def build_post82_estimator(
     model, kalman = ModelParser(str(path)).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
-    steady = np.zeros(len(compiled.var_names), dtype=np.float64)
+    steady = np.zeros(len(compiled.layout.declared_names), dtype=np.float64)
     solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     calib = compiled.config.calibration
@@ -404,7 +404,7 @@ def build_post82_estimator(
             "e_z": rng.normal(0.0, sig["e_z"], size=T),
             "e_r": rng.normal(0.0, sig["e_r"], size=T),
         },
-        x0=np.zeros(len(compiled.var_names), dtype=np.float64),
+        x0=np.zeros((compiled.n_var,), dtype=np.float64),
         observables=True,
     )
     y = pd.DataFrame(

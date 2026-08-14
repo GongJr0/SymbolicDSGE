@@ -16,7 +16,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
 
-    steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
+    steady = np.zeros((len(compiled.layout.declared_names),), dtype=np.float64)
     solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
@@ -34,7 +34,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
             "e_z": rng.normal(0.0, sig_z, size=T),
             "e_r": rng.normal(0.0, sig_r, size=T),
         },
-        x0=np.zeros((len(compiled.var_names),), dtype=np.float64),
+        x0=np.zeros((compiled.n_var,), dtype=np.float64),
         observables=True,
     )
     y = pd.DataFrame(

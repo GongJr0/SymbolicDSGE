@@ -28,19 +28,28 @@ def _simulate_linear_states_into_numba(
     x0: NDF,
     shock_mat: NDF,
     out: NDF,
+    ss: NDF,
 ) -> None:
+    """Reference for ``core.simulate_linear_states_into``. ``ss`` denominates the
+    written rows; pass zeros for deviations. The recursion runs off its own
+    deviation buffer, never off ``out``."""
     T = shock_mat.shape[0]
     n = A.shape[0]
     k = B.shape[1]
 
+    cur = x0.copy()
+    nxt = np.empty(n, dtype=np.float64)
     for t in range(T):
         for i in range(n):
             s = 0.0
             for j in range(n):
-                s += A[i, j] * (x0[j] if t == 0 else out[t - 1, j])
+                s += A[i, j] * cur[j]
             for j in range(k):
                 s += B[i, j] * shock_mat[t, j]
-            out[t, i] = s
+            nxt[i] = s
+            out[t, i] = s + ss[i]
+        for i in range(n):
+            cur[i] = nxt[i]
 
 
 @njit(cache=True)
@@ -66,71 +75,80 @@ def _affine_observations_into_numba(
 def _simulate_second_order_pruned_numba(
     hx: NDF,
     gx: NDF,
-    bx: NDF,
+    bu: NDF,
     hxx: NDF,
     gxx: NDF,
+    hxu: NDF,
+    gxu: NDF,
+    huu: NDF,
+    guu: NDF,
     hss: NDF,
     gss: NDF,
     x0: NDF,
     shock_mat: NDF,
+    ss: NDF,
 ) -> NDF:
+    """Reference for ``core.simulate_second_order_pruned``, written the way
+    Dynare's simult_.m writes the order-2 pruned branch: every row of a period
+    is one expression in the previous state and this period's innovation.
+
+    ``ss`` denominates the rows; pass zeros for deviations."""
     T = shock_mat.shape[0]
     nx = hx.shape[0]
     ny = gx.shape[0]
-    n_exog = bx.shape[1]
+    n_exog = bu.shape[1]
 
-    x_out = np.empty((T, nx), dtype=np.float64)
-    y_out = np.empty((T, ny), dtype=np.float64)
-    x1_cur = np.empty(nx, dtype=np.float64)
+    out = np.empty((T, nx + ny), dtype=np.float64)
+    x1_cur = x0.copy()
+    x2_cur = np.zeros(nx, dtype=np.float64)
     x1_next = np.empty(nx, dtype=np.float64)
-    x2_cur = np.empty(nx, dtype=np.float64)
     x2_next = np.empty(nx, dtype=np.float64)
-    x1_outer = np.empty((nx, nx), dtype=np.float64)
-
-    for i in range(nx):
-        x1_cur[i] = x0[i]
-        x2_cur[i] = 0.0
 
     for t in range(T):
-        for j in range(nx):
-            for k in range(nx):
-                x1_outer[j, k] = x1_cur[j] * x1_cur[k]
-
+        u = shock_mat[t]
         for i in range(nx):
             s1 = 0.0
             s2 = 0.5 * hss[i]
             for j in range(nx):
                 s1 += hx[i, j] * x1_cur[j]
                 s2 += hx[i, j] * x2_cur[j]
-            for j in range(n_exog):
-                s1 += bx[i, j] * shock_mat[t, j]
+            for l in range(n_exog):
+                s1 += bu[i, l] * u[l]
             for j in range(nx):
                 for k in range(nx):
-                    s2 += 0.5 * hxx[i, j, k] * x1_outer[j, k]
+                    s2 += 0.5 * hxx[i, j, k] * x1_cur[j] * x1_cur[k]
+                for l in range(n_exog):
+                    s2 += hxu[i, j, l] * x1_cur[j] * u[l]
+            for l in range(n_exog):
+                for m in range(n_exog):
+                    s2 += 0.5 * huu[i, l, m] * u[l] * u[m]
             x1_next[i] = s1
             x2_next[i] = s2
+
+        # Controls read the same previous state and the same innovation; their
+        # first-order shock response is the control rows of bu.
+        for i in range(ny):
+            s = 0.5 * gss[i]
+            for j in range(nx):
+                s += gx[i, j] * (x1_cur[j] + x2_cur[j])
+            for l in range(n_exog):
+                s += bu[nx + i, l] * u[l]
+            for j in range(nx):
+                for k in range(nx):
+                    s += 0.5 * gxx[i, j, k] * x1_cur[j] * x1_cur[k]
+                for l in range(n_exog):
+                    s += gxu[i, j, l] * x1_cur[j] * u[l]
+            for l in range(n_exog):
+                for m in range(n_exog):
+                    s += 0.5 * guu[i, l, m] * u[l] * u[m]
+            out[t, nx + i] = s + ss[nx + i]
 
         for i in range(nx):
             x1_cur[i] = x1_next[i]
             x2_cur[i] = x2_next[i]
+            out[t, i] = x1_cur[i] + x2_cur[i] + ss[i]
 
-        for i in range(nx):
-            x_out[t, i] = x1_cur[i] + x2_cur[i]
-
-        for j in range(nx):
-            for k in range(nx):
-                x1_outer[j, k] = x1_cur[j] * x1_cur[k]
-
-        for i in range(ny):
-            s = 0.5 * gss[i]
-            for j in range(nx):
-                s += gx[i, j] * x_out[t, j]
-            for j in range(nx):
-                for k in range(nx):
-                    s += 0.5 * gxx[i, j, k] * x1_outer[j, k]
-            y_out[t, i] = s
-
-    return np.hstack((x_out, y_out))
+    return out
 
 
 # --- core.klein --------------------------------------------------------------
@@ -212,201 +230,118 @@ def _klein_postprocess_numba(
 
 
 # --- core.second_order -------------------------------------------------------
-def _symmetry_matrix(nx: int, ny: int) -> NDF:
-    """SGU ``temp``: A maps the unique (j<=k) unknowns to the full stacked
-    [gxx(:); hxx(:)], imposing gxx(i,j,k)=gxx(i,k,j). Row-major flat indices."""
-    ngxx = ny * nx * nx
-    nhxx = nx * nx * nx
-    n_red_g = ny * nx * (nx + 1) // 2
-    n_red_h = nx * nx * (nx + 1) // 2
+def _zx_zu(ghx: NDF, hx: NDF, bu: NDF, nx: int, ne: int) -> tuple[NDF, NDF]:
+    """``dz/dx`` and ``dz/du`` over ``z = (lag, cur, lead, eps)``, the chain-rule
+    factors the residual Hessian contracts against."""
+    n = ghx.shape[0]
 
-    a_gxx = np.zeros((ngxx, n_red_g))
-    a_hxx = np.zeros((nhxx, n_red_h))
-    my = mx = 0
-    for k in range(nx):
-        for j in range(k, nx):  # j >= k
-            for i in range(ny):
-                a_gxx[i * nx * nx + j * nx + k, my] = 1.0
-                a_gxx[i * nx * nx + k * nx + j, my] = 1.0
-                my += 1
-            for i in range(nx):
-                a_hxx[i * nx * nx + j * nx + k, mx] = 1.0
-                a_hxx[i * nx * nx + k * nx + j, mx] = 1.0
-                mx += 1
+    zx = np.zeros((3 * n + ne, nx))
+    zx[:nx, :] = np.eye(nx)
+    zx[n : 2 * n, :] = ghx
+    zx[2 * n : 3 * n, :] = ghx @ hx
 
-    big = np.zeros((ngxx + nhxx, n_red_g + n_red_h))
-    big[:ngxx, :n_red_g] = a_gxx
-    big[ngxx:, n_red_g:] = a_hxx
-    return big
+    # The lead block walks the shock forward through the states it moved, so it
+    # takes the state rows of the impact, not the whole of it.
+    zu = np.zeros((3 * n + ne, ne))
+    zu[n : 2 * n, :] = bu
+    zu[2 * n : 3 * n, :] = ghx @ bu[:nx]
+    zu[3 * n :, :] = np.eye(ne)
+    return zx, zu
 
 
 def _solve_second_order_numpy(
-    a: NDF, b: NDF, hessian: NDF, gx: NDF, hx: NDF, n_state: int
-) -> tuple[NDF, NDF]:
-    """Numpy reference for ``core.second_order.solve_second_order``."""
+    a: NDF,
+    b: NDF,
+    hessian: NDF,
+    gx: NDF,
+    hx: NDF,
+    bu: NDF,
+    Q: NDF,
+    n_state: int,
+) -> tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF]:
+    """Numpy reference for ``core.second_order.solve_second_order``.
+
+    Returns ``(gxx, hxx, gxu, hxu, guu, huu, gss, hss)``. The lag Jacobian is
+    absent from every coefficient: y_{t-1} is the differentiation variable, so
+    it enters only through the identity block of ``zx``.
+    """
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
     f_xx = np.asarray(hessian, dtype=np.float64)
     gx = np.asarray(gx, dtype=np.float64)
     hx = np.asarray(hx, dtype=np.float64)
+    bu = np.asarray(bu, dtype=np.float64)
+    Q = np.asarray(Q, dtype=np.float64)
 
     n = a.shape[0]
     nx = int(n_state)
     ny = n - nx
+    ne = bu.shape[1]
 
-    # --- adapter: our (a, b, F_xx) -> SGU's split derivatives ----------------
-    fxp = a[:, :nx]
-    fyp = a[:, nx:]
-    fx = -b[:, :nx]
-    fy = -b[:, nx:]
+    ghx = np.vstack([hx, gx])
+    zx, zu = _zx_zu(ghx, hx, bu, nx, ne)
 
-    xp, yp = slice(0, nx), slice(nx, n)
-    x, y = slice(n, n + nx), slice(n + nx, 2 * n)
-    fypyp, fypy, fypxp, fypx = (
-        f_xx[:, yp, yp],
-        f_xx[:, yp, y],
-        f_xx[:, yp, xp],
-        f_xx[:, yp, x],
+    # A = dF/dy_t with the lead's own state dependence folded into the state
+    # columns; B = dF/dy_{t+1}.
+    amat = -b.copy()
+    amat[:, :nx] += a @ ghx
+    bmat = a
+
+    def contract(zl: NDF, zr: NDF) -> NDF:
+        return np.einsum("iuv,up,vq->ipq", f_xx, zl, zr)
+
+    # ghxx: A X + B X (hx (x) hx) = -f_xx (zx (x) zx).
+    big = n * nx * nx
+    kron_hh = np.kron(hx, hx).T
+    sysm = (
+        np.einsum("ij,kl->ikjl", amat, np.eye(nx * nx))
+        + np.einsum("ij,kl->ikjl", bmat, kron_hh)
+    ).reshape(big, big)
+    ghxx = np.linalg.solve(sysm, -contract(zx, zx).reshape(big)).reshape((n, nx, nx))
+
+    # ghxu / ghuu: A X = -f_xx (z (x) z) - B ghxx (. (x) bu).
+    rhs_xu = -contract(zx, zu).reshape(n, nx * ne) - bmat @ np.einsum(
+        "jkl,kp,lq->jpq", ghxx, hx, bu[:nx]
+    ).reshape(n, nx * ne)
+    ghxu = np.linalg.solve(amat, rhs_xu).reshape((n, nx, ne))
+
+    rhs_uu = -contract(zu, zu).reshape(n, ne * ne) - bmat @ np.einsum(
+        "jkl,kp,lq->jpq", ghxx, bu[:nx], bu[:nx]
+    ).reshape(n, ne * ne)
+    ghuu = np.linalg.solve(amat, rhs_uu).reshape((n, ne, ne))
+
+    # ghs2: (A + B) X = -(B ghuu + f_xx (zlead (x) zlead)) vec(Q). Only the lead
+    # block enters: the term is the expectation of next period's innovation.
+    zlead = np.zeros((3 * n + ne, ne))
+    zlead[2 * n : 3 * n, :] = bu
+    rhs_ss = -(
+        bmat @ ghuu.reshape(n, ne * ne) + contract(zlead, zlead).reshape(n, ne * ne)
+    ) @ Q.reshape(ne * ne)
+    ghs2 = np.linalg.solve(amat + bmat, rhs_ss)
+
+    return (
+        ghxx[nx:],
+        ghxx[:nx],
+        ghxu[nx:],
+        ghxu[:nx],
+        ghuu[nx:],
+        ghuu[:nx],
+        ghs2[nx:],
+        ghs2[:nx],
     )
-    fyyp, fyy, fyxp, fyx = f_xx[:, y, yp], f_xx[:, y, y], f_xx[:, y, xp], f_xx[:, y, x]
-    fxpyp, fxpy, fxpxp, fxpx = (
-        f_xx[:, xp, yp],
-        f_xx[:, xp, y],
-        f_xx[:, xp, xp],
-        f_xx[:, xp, x],
-    )
-    fxyp, fxy, fxxp, fxx = f_xx[:, x, yp], f_xx[:, x, y], f_xx[:, x, xp], f_xx[:, x, x]
-
-    ngxx = ny * nx * nx
-    rows = n * nx * (nx + 1) // 2
-    big_q = np.zeros((rows, n * nx * nx))
-    q = np.zeros(rows)
-    gxhx = gx @ hx  # (ny, nx)
-
-    m = 0
-    for i in range(n):
-        for j in range(nx):
-            for k in range(j + 1):  # k <= j
-                # 1st: fyp-chain, outer gx*hx_j
-                v1 = (
-                    fypyp[i] @ gxhx[:, k]
-                    + fypy[i] @ gx[:, k]
-                    + fypxp[i] @ hx[:, k]
-                    + fypx[i][:, k]
-                )
-                q[m] = v1 @ gxhx[:, j]
-
-                # 2nd: gxx coeff  fyp(i,a) hx(b,j) hx(c,k)
-                big_q[m, :ngxx] = np.einsum(
-                    "a,b,c->abc", fyp[i], hx[:, j], hx[:, k]
-                ).ravel()
-
-                # 3rd: hxx coeff  (fyp gx)(a) at (j,k)
-                h3 = np.zeros((nx, nx, nx))
-                h3[:, j, k] = fyp[i] @ gx
-                big_q[m, ngxx:] = h3.ravel()
-
-                # 4th: fy-chain, outer gx_j
-                v4 = (
-                    fyyp[i] @ gxhx[:, k]
-                    + fyy[i] @ gx[:, k]
-                    + fyxp[i] @ hx[:, k]
-                    + fyx[i][:, k]
-                )
-                q[m] += v4 @ gx[:, j]
-
-                # 5th: gxx coeff  fy(i,a) at (j,k)
-                g5 = np.zeros((ny, nx, nx))
-                g5[:, j, k] = fy[i]
-                big_q[m, :ngxx] += g5.ravel()
-
-                # 6th: fxp-chain, outer hx_j
-                v6 = (
-                    fxpyp[i] @ gxhx[:, k]
-                    + fxpy[i] @ gx[:, k]
-                    + fxpxp[i] @ hx[:, k]
-                    + fxpx[i][:, k]
-                )
-                q[m] += v6 @ hx[:, j]
-
-                # 7th: hxx coeff  fxp(i,a) at (j,k)
-                h7 = np.zeros((nx, nx, nx))
-                h7[:, j, k] = fxp[i]
-                big_q[m, ngxx:] += h7.ravel()
-
-                # 8th: raw x_j second derivatives
-                q[m] += (
-                    fxyp[i, j] @ gxhx[:, k]
-                    + fxy[i, j] @ gx[:, k]
-                    + fxxp[i, j] @ hx[:, k]
-                    + fxx[i, j, k]
-                )
-                m += 1
-
-    sym = _symmetry_matrix(nx, ny)
-    qt = big_q @ sym
-    xt = -np.linalg.solve(qt, q)
-    full = sym @ xt
-
-    gxx = full[:ngxx].reshape((ny, nx, nx))
-    hxx = full[ngxx:].reshape((nx, nx, nx))
-    return gxx, hxx
 
 
-def _solve_second_order_risk_numpy(
-    a: NDF, b: NDF, hessian: NDF, gx: NDF, gxx: NDF, eta: NDF, n_state: int
-) -> tuple[NDF, NDF]:
-    """Numpy reference for ``core.second_order.solve_second_order_risk``."""
+def first_order_residual(a: NDF, b: NDF, c: NDF, gx: NDF, hx: NDF, n_state: int) -> NDF:
+    """Linearized FOC ``a ghx hx - b ghx - c`` over the state columns -- ~0 at
+    the solution. Guards the pencil's signs independently of the second order."""
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
-    f_xx = np.asarray(hessian, dtype=np.float64)
-    gx = np.asarray(gx, dtype=np.float64)
-    gxx = np.asarray(gxx, dtype=np.float64)
-    eta = np.asarray(eta, dtype=np.float64)
-
-    n = a.shape[0]
-    nx = int(n_state)
-    ny = n - nx
-
-    fxp, fyp = a[:, :nx], a[:, nx:]
-    fy = -b[:, nx:]
-    xp, yp = slice(0, nx), slice(nx, n)
-    fypyp = f_xx[:, yp, yp]
-    fypxp = f_xx[:, yp, xp]
-    fxpyp = f_xx[:, xp, yp]
-    fxpxp = f_xx[:, xp, xp]
-
-    gxe = gx @ eta  # (ny, ne)
-    q_g = np.zeros((n, ny))
-    q_h = np.zeros((n, nx))
-    q = np.zeros(n)
-    for i in range(n):
-        q_h[i] = fyp[i] @ gx + fxp[i]  # 1st + 7th
-        q_g[i] = fyp[i] + fy[i]  # 5th + 6th
-        g4 = np.einsum("a,abc->bc", fyp[i], gxx)  # fyp . gxx over controls
-        q[i] = (
-            np.sum((fypyp[i] @ gxe) * gxe)  # 2nd
-            + np.sum((fypxp[i] @ eta) * gxe)  # 3rd
-            + np.sum((g4 @ eta) * eta)  # 4th
-            + np.sum((fxpyp[i] @ gx @ eta) * eta)  # 8th
-            + np.sum((fxpxp[i] @ eta) * eta)  # 9th
-        )
-
-    x = -np.linalg.solve(np.hstack([q_g, q_h]), q)
-    return x[:ny], x[ny:]
-
-
-def first_order_residual(a: NDF, b: NDF, gx: NDF, hx: NDF, n_state: int) -> NDF:
-    """Linearized FOC ``fyp gx hx + fy gx + fxp hx + fx`` -- ~0 at the solution.
-    Guards the adapter (block slicing + the ``-b`` sign) independently of gxx."""
-    a = np.asarray(a, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
+    c = np.asarray(c, dtype=np.float64)
     gx = np.asarray(gx, dtype=np.float64)
     hx = np.asarray(hx, dtype=np.float64)
     nx = int(n_state)
-    fxp, fyp = a[:, :nx], a[:, nx:]
-    fx, fy = -b[:, :nx], -b[:, nx:]
-    return fyp @ gx @ hx + fy @ gx + fxp @ hx + fx
+    ghx = np.vstack([hx, gx])
+    return a @ ghx @ hx - b @ ghx - c[:, :nx]
 
 
 # --- utils.dhm ---------------------------------------------------------------

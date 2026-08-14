@@ -389,9 +389,13 @@ def test_native_diagnostic_status_is_retained_not_a_runner_failure() -> None:
 
 
 def test_native_lowering_runs_first_order_simulation_with_observables() -> None:
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+    # A levels model, deliberately: with a zero steady state the native path
+    # returning deviations and solved.sim returning levels agree by accident,
+    # and the whole assertion goes blind to the steady state.
+    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
     solver = DSGESolver(model, kalman)
-    solved = solver.solve(solver.compile())
+    solved = solver.solve(solver.compile(), order=1)
+    assert np.any(solved.policy.steady_state != 0.0)
     T = 7
     shocks = {name: np.linspace(0.01, 0.03, T) for name in solved.compiled.shock_names}
     pipeline = MCPipeline(
@@ -470,6 +474,10 @@ def test_native_lowering_runs_second_order_simulation() -> None:
         order=2,
         hxx=hxx,
         gxx=gxx,
+        hxu=np.zeros((2, 2, 1), dtype=np.float64),
+        gxu=np.zeros((1, 2, 1), dtype=np.float64),
+        huu=np.zeros((2, 1, 1), dtype=np.float64),
+        guu=np.zeros((1, 1, 1), dtype=np.float64),
         hss=hss,
         gss=gss,
         steady_state=np.zeros(3, dtype=np.float64),

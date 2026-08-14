@@ -154,6 +154,10 @@ cdef extern from "estimation.h":
         double *bx
         double *gxx
         double *hxx
+        double *gxu
+        double *hxu
+        double *guu
+        double *huu
         double *gss
         double *hss
 
@@ -667,7 +671,7 @@ def obj_unscented_base(
     cdef int64_t n_par = base_calib.shape[0]
     cdef int64_t T = y.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
-    cdef int64_t n2 = 2 * n_var
+    cdef int64_t n2 = 3 * n_var + n_exog
     cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
 
     # Preallocated scratch (kept alive for the whole call).
@@ -691,16 +695,14 @@ def obj_unscented_base(
     # Second-order scratch.
     f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
     bx = np.empty((n_state, n_exog), dtype=np.float64)
-    chol = np.zeros((n_exog, n_exog), dtype=np.float64)
     gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
+    gxu = np.empty((n_ctrl, n_state, n_exog), dtype=np.float64)
+    hxu = np.empty((n_state, n_state, n_exog), dtype=np.float64)
+    guu = np.empty((n_ctrl, n_exog, n_exog), dtype=np.float64)
+    huu = np.empty((n_state, n_exog, n_exog), dtype=np.float64)
     gss = np.empty(n_ctrl, dtype=np.float64)
     hss = np.empty(n_state, dtype=np.float64)
-
-    # chol is the factor the solve loads the innovations through. Q is constant
-    # here, so the objective's runtime guard skips its own factorization.
-    if n_exog > 0:
-        _factor_shock_cov(Q, chol)
 
     # z0 = [x0[:n_state]; 0] (2*n_state); x0 is zero at base.
     z0 = np.zeros(2 * n_state, dtype=np.float64)
@@ -725,9 +727,12 @@ def obj_unscented_base(
 
     cdef double[:, :, ::1] fxxv = f_xx
     cdef double[:, ::1] bxv = bx
-    cdef double[:, ::1] cholv = chol
     cdef double[:, :, ::1] gxxv = gxx
     cdef double[:, :, ::1] hxxv = hxx
+    cdef double[:, :, ::1] gxuv = gxu
+    cdef double[:, :, ::1] hxuv = hxu
+    cdef double[:, :, ::1] guuv = guu
+    cdef double[:, :, ::1] huuv = huu
     cdef double[::1] gssv = gss
     cdef double[::1] hssv = hss
     cdef double[::1] z0v = z0
@@ -780,7 +785,7 @@ def obj_unscented_base(
 
     b.params = &paramsv[0]
     b.Q = NULL
-    b.chol = &cholv[0, 0]
+    b.chol = NULL
     b.R = NULL
     b.corr_q = NULL
     b.corr_r = NULL
@@ -823,6 +828,10 @@ def obj_unscented_base(
     ctx.solve2.bx = &bxv[0, 0]
     ctx.solve2.gxx = &gxxv[0, 0, 0]
     ctx.solve2.hxx = &hxxv[0, 0, 0]
+    ctx.solve2.gxu = &gxuv[0, 0, 0]
+    ctx.solve2.hxu = &hxuv[0, 0, 0]
+    ctx.solve2.guu = &guuv[0, 0, 0]
+    ctx.solve2.huu = &huuv[0, 0, 0]
     ctx.solve2.gss = &gssv[0]
     ctx.solve2.hss = &hssv[0]
 
@@ -912,7 +921,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef int64_t n_obs = dims.n_obs
     cdef int64_t n_par = dims.n_par
     cdef int64_t T = dims.T
-    cdef int64_t n2 = 2 * n_var
+    cdef int64_t n2 = 3 * n_var + n_exog
     nc.n_theta = n_theta
 
     # Pinned inputs. Python guarantees dtype; C-contiguity is enforced here. Each
@@ -1003,26 +1012,25 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef double[:, ::1] bxv
     cdef double[:, :, ::1] gxxv
     cdef double[:, :, ::1] hxxv
+    cdef double[:, :, ::1] gxuv
+    cdef double[:, :, ::1] hxuv
+    cdef double[:, :, ::1] guuv
+    cdef double[:, :, ::1] huuv
     cdef double[::1] gssv
     cdef double[::1] hssv
     cdef double[::1] z0v
     Q = np.empty((n_exog, n_exog), dtype=np.float64)
-    # The solve loads the innovations through chol(Q). A constant covariance is
-    # factored once here; a theta-driven one refactors per evaluation.
-    chol = np.zeros((n_exog, n_exog), dtype=np.float64)
     R = np.empty((n_obs, n_obs), dtype=np.float64)
     corr_q = np.empty((n_exog, n_exog), dtype=np.float64)
     corr_r = np.empty((n_obs, n_obs), dtype=np.float64)
     std_q = np.empty(n_exog, dtype=np.float64)
     std_r = np.empty(n_obs, dtype=np.float64)
     nc.keep.append(Q)
-    nc.keep.append(chol)
     nc.keep.append(R)
     nc.keep.append(corr_q)
     nc.keep.append(corr_r)
     nc.keep.append(std_q)
     nc.keep.append(std_r)
-    cdef double[:, ::1] cholv = chol
     cdef double[:, ::1] Qv = Q
     cdef double[:, ::1] Rv = R
     cdef double[:, ::1] cqv = corr_q
@@ -1252,17 +1260,9 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         b.prior.n_scalar = 0
         b.prior.n_blocks = 0
 
-    if qs.is_constant and n_exog > 0:
-        _factor_shock_cov(
-            np.ascontiguousarray(qs.constant, dtype=np.float64).reshape(
-                n_exog, n_exog
-            ),
-            chol,
-        )
-
     b.params = &paramsv[0]
     b.Q = &Qv[0, 0]
-    b.chol = &cholv[0, 0]
+    b.chol = NULL
     b.R = &Rv[0, 0]
     b.corr_q = &cqv[0, 0]
     b.corr_r = &crv[0, 0]
@@ -1327,15 +1327,23 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         bx = np.empty((n_state, n_exog), dtype=np.float64)
         gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
         hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
+        gxu = np.empty((n_ctrl, n_state, n_exog), dtype=np.float64)
+        hxu = np.empty((n_state, n_state, n_exog), dtype=np.float64)
+        guu = np.empty((n_ctrl, n_exog, n_exog), dtype=np.float64)
+        huu = np.empty((n_state, n_exog, n_exog), dtype=np.float64)
         gss = np.empty(n_ctrl, dtype=np.float64)
         hss = np.empty(n_state, dtype=np.float64)
         z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
-        for _a in (f_xx, bx, gxx, hxx, gss, hss, z0):
+        for _a in (f_xx, bx, gxx, hxx, gxu, hxu, guu, huu, gss, hss, z0):
             nc.keep.append(_a)
         fxxv = f_xx
         bxv = bx
         gxxv = gxx
         hxxv = hxx
+        gxuv = gxu
+        hxuv = hxu
+        guuv = guu
+        huuv = huu
         gssv = gss
         hssv = hss
         z0v = z0
@@ -1343,6 +1351,10 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         nc.uctx.solve2.bx = &bxv[0, 0]
         nc.uctx.solve2.gxx = &gxxv[0, 0, 0]
         nc.uctx.solve2.hxx = &hxxv[0, 0, 0]
+        nc.uctx.solve2.gxu = &gxuv[0, 0, 0]
+        nc.uctx.solve2.hxu = &hxuv[0, 0, 0]
+        nc.uctx.solve2.guu = &guuv[0, 0, 0]
+        nc.uctx.solve2.huu = &huuv[0, 0, 0]
         nc.uctx.solve2.gss = &gssv[0]
         nc.uctx.solve2.hss = &hssv[0]
         nc.uctx.z0 = &z0v[0]

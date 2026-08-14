@@ -1,4 +1,4 @@
-"""Second-order (SGU) solved model."""
+"""Second-order solved model."""
 
 from __future__ import annotations
 from typing import Mapping, Callable, Union
@@ -50,12 +50,17 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
         X = simulate_second_order_pruned(
             policy.p,
             policy.f,
-            policy.B[:n_state, :],
+            policy.B,
             policy.hxx,
             policy.gxx,
+            policy.hxu,
+            policy.gxu,
+            policy.huu,
+            policy.guu,
             policy.hss,
             policy.gss,
             x0_state,
             shock_mat,
+            policy.steady_state,
         )
         return StatePath(X)

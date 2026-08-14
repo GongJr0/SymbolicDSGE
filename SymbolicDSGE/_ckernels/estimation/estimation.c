@@ -150,10 +150,11 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
 }
 
 static inline int sdsge_solve2_run(sdsge_obj_common *b, sdsge_solve1 *s,
-                                   sdsge_solve2 *s2) {
+                                   sdsge_solve2 *s2,
+                                   const f64 *SDSGE_RESTRICT Q) {
   const sgu_klein_spec spec = {.first = sdsge_spec_from(b),
                                .bc_residual = b->bc_residual,
-                               .chol = b->chol};
+                               .Q = Q};
   const i64 rc =
       sdsge_sgu_klein_solve2(&spec, s, s2, b->solve_arena, b->solve_iarena);
   return sdsge_classify(rc, s->stab);
@@ -320,15 +321,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   const f64 *R =
       sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
 
-  /* A constant covariance is factored once at compose time, so only a
-   * theta-driven one refactors here. */
-  if (!b->q_spec.is_constant) {
-    if (sdsge_chol(Q, 0.0, b->chol, b->q_spec.K) != SDSGE_OK) {
-      return -INFINITY;
-    }
-  }
-
-  const int rc = sdsge_solve2_run(b, s, s2);
+  const int rc = sdsge_solve2_run(b, s, s2, Q);
 
   if (rc == SDSGE_SOLVE_BK) {
     b->bk_violations++;

@@ -1,5 +1,5 @@
-"""Native core kernels (state-space simulation, affine observations, Klein/SGU
-perturbation drivers).
+"""Native core kernels (state-space simulation, affine observations, Klein and
+second-order perturbation drivers).
 
 Re-exports the compiled ``_core`` extension, which is mandatory: if it is not
 built, importing this module (and the library) raises ``ImportError``.
@@ -23,7 +23,6 @@ from ._core import (
     residual_eval,
     residual_path,
     second_order,
-    second_order_risk,
     sgu_klein_solve2,
     simulate_linear_states_into,
     simulate_second_order_pruned,
@@ -48,7 +47,6 @@ __all__ = [
     "residual_eval",
     "residual_path",
     "second_order",
-    "second_order_risk",
     "sgu_klein_solve2",
     "simulate_linear_states_into",
     "simulate_second_order_pruned",

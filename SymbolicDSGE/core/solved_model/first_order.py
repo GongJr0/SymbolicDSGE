@@ -50,5 +50,6 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
             x0_arr,
             shock_mat,
             X,
+            self.policy.steady_state,
         )
         return StatePath(X)

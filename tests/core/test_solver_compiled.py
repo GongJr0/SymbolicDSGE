@@ -218,7 +218,7 @@ def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
 
     # A lead aux is read at t+1 and never at t-1, so it joins the controls
     # rather than widening the state block.
-    assert "u_lead1" in compiled.layout.generated
+    assert "u_lead1" in compiled.layout.generated_names
     assert "u_lead1" in compiled.layout.control_names
     assert "u_lead1" not in compiled.layout.state_names
 

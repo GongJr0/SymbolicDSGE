@@ -84,6 +84,10 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             diag["periodic"].astype(int64),
         )
 
+        # The perturbation kernels denominate their rows as they write them.
+        # occbin_sim has no steady-state argument, so this path adds it here.
+        X += pol.steady_state
+
         return StatePath(X, regimes=regimes, diagnostics=diagnostics)
 
     def sim(

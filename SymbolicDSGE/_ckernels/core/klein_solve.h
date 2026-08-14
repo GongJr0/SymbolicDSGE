@@ -85,37 +85,43 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
 i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
                        i64 *iarena);
 
-/* Second-order (SGU) solve: the first-order spec plus the bicomplex residual
- * the Hessian sweep drives. Klein supplies the first order and nothing else,
- * hence the name split. */
+/* Second-order solve: the first-order spec plus the bicomplex residual the
+ * Hessian sweep drives. Klein supplies the first order and nothing else, hence
+ * the name split. */
 typedef struct {
   klein_spec first;
   bc_residual_fn bc_residual;
-  /* n_exog*n_exog, caller-filled: the Cholesky of the shock covariance. It is
-   * refactored only when that covariance moves, and only the caller knows
-   * whether it did, so a constant covariance is factored once and held. */
-  f64 *chol;
+  /* n_exog*n_exog, caller-filled: the shock covariance. The risk correction
+   * integrates against the covariance itself, not its factor. */
+  const f64 *Q;
 } sgu_klein_spec;
 
 /* Second-order solve buffers, all caller-owned outputs.
  *
- * `bx` is the state rows of `B`, which the risk correction pairs with the
- * spec's `chol` to load the innovations. It is an output rather than a caller's
+ * `bx` is the state rows of `B`, kept because the pruned recursion loads its
+ * first-order state block with it. It is an output rather than a caller's
  * object because `B` is the solve's own.
  *
- * The first-order rules the SGU tensors are built from are `sdsge_solve1.p` and
+ * The shocks are not states at second order, so the cross and pure-shock blocks
+ * are their own tensors rather than columns of `gxx`/`hxx`.
+ *
+ * The first-order rules the tensors are built from are `sdsge_solve1.p` and
  * `.f`, which are already real; this struct does not restate them. */
 typedef struct {
-  f64 *f_xx; // n_var*(2*n_var)*(2*n_var)
+  f64 *f_xx; // n_var*(3*n_var + n_exog)*(3*n_var + n_exog)
   f64 *bx;   // n_state*n_exog
   f64 *gxx;  // n_ctrl*n_state*n_state
   f64 *hxx;  // n_state*n_state*n_state
+  f64 *gxu;  // n_ctrl*n_state*n_exog
+  f64 *hxu;  // n_state*n_state*n_exog
+  f64 *guu;  // n_ctrl*n_exog*n_exog
+  f64 *huu;  // n_state*n_exog*n_exog
   f64 *gss;  // n_ctrl
   f64 *hss;  // n_state
 } sdsge_solve2;
 
 /* sdsge_klein_solve1, then the second-order tail: the state rows of B, the
- * bicomplex Hessian at the resolved steady state, the SGU tensors and the
+ * bicomplex Hessian at the resolved steady state, the policy tensors and the
  * sigma^2 risk correction. Every first-order output stays in `out1`.
  *
  * out1->stab is reported, never acted on, exactly as at first order. */
@@ -133,7 +139,7 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
 #define SDSGE_KLEIN_SOLVE_QZ -503
 #define SDSGE_KLEIN_SOLVE_SINGULAR -504     // singular z11/s11 (Blanchard-Kahn)
 #define SDSGE_KLEIN_SOLVE_NO_STATES -505    // stateless model
-#define SDSGE_KLEIN_SOLVE_SECOND_ORDER -506 // SGU system singular
+#define SDSGE_KLEIN_SOLVE_SECOND_ORDER -506 // second-order system singular
 #define SDSGE_KLEIN_SOLVE_RISK -507         // risk-correction system singular
 #define SDSGE_KLEIN_SOLVE_ABSENT_VAR -508   // a variable occurs at no date
 #define SDSGE_KLEIN_SOLVE_QR -509           // static rotation failed

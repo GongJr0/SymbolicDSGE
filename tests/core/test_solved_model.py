@@ -96,7 +96,9 @@ def _raw_unscented_result(
 def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, dict]:
     hx = np.array([[0.5, 0.1], [0.0, 0.8]], dtype=np.float64)
     gx = np.array([[2.0, -1.0]], dtype=np.float64)
-    bx = np.array([[1.0], [0.25]], dtype=np.float64)
+    # The control row is nonzero: an innovation reaches a control
+    # contemporaneously, and a state-only loading cannot express that.
+    bu = np.array([[1.0], [0.25], [-0.4]], dtype=np.float64)
     hxx = np.array(
         [
             [[0.2, 0.1], [0.1, -0.2]],
@@ -105,6 +107,12 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
         dtype=np.float64,
     )
     gxx = np.array([[[0.4, -0.1], [-0.1, 0.2]]], dtype=np.float64)
+    # Shock-quadratic blocks: nonzero, so the fixture would catch a recursion
+    # that silently drops them.
+    hxu = np.array([[[0.05], [-0.03]], [[0.02], [0.04]]], dtype=np.float64)
+    gxu = np.array([[[-0.06], [0.01]]], dtype=np.float64)
+    huu = np.array([[[0.07]], [[-0.02]]], dtype=np.float64)
+    guu = np.array([[[0.03]]], dtype=np.float64)
     hss = np.array([0.01, -0.02], dtype=np.float64)
     gss = np.array([0.03], dtype=np.float64)
 
@@ -114,13 +122,17 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
         # Real layout rather than a stub: x0 is written in declaration order and
         # resolved through it, so a fake would let the permutation drift.
         layout=VariableLayout(
+            n_var=3,
+            n_declared=3,
+            n_generated=0,
+            n_exog=1,
+            n_state=2,
+            n_ctrl=1,
+            idx={"e": 0, "k": 1, "c": 2},
             declared_names=("e", "k", "c"),
             canonical_names=("e", "k", "c"),
             state_names=("e", "k"),
             control_names=("c",),
-            n_exog=1,
-            n_state=2,
-            idx={"e": 0, "k": 1, "c": 2},
         ),
         n_exog=1,
         n_var=3,
@@ -142,19 +154,27 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
             order=2,
             hxx=hxx,
             gxx=gxx,
+            hxu=hxu,
+            gxu=gxu,
+            huu=huu,
+            guu=guu,
             hss=hss,
             gss=gss,
             steady_state=np.zeros(3, dtype=np.float64),
             A=np.eye(3, dtype=np.float64),
-            B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),
+            B=bu,
         ),
     )
     data = {
         "hx": hx,
         "gx": gx,
-        "bx": bx,
+        "bu": bu,
         "hxx": hxx,
         "gxx": gxx,
+        "hxu": hxu,
+        "gxu": gxu,
+        "huu": huu,
+        "guu": guu,
         "hss": hss,
         "gss": gss,
     }
@@ -162,27 +182,35 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
 
 
 def _manual_second_order_path(data, shock, x0_state) -> np.ndarray:
+    """Every row of a period from the previous state and this period's shock,
+    the way Dynare's simult_.m writes the order-2 pruned branch. The controls
+    read the same previous state as the states do, not the updated one."""
     T = shock.shape[0]
+    bu = data["bu"]
     expected = np.empty((T, 3), dtype=np.float64)
     x1 = x0_state.copy()
     x2 = np.zeros(2, dtype=np.float64)
     for t in range(T):
-        outer = np.outer(x1, x1)
-        x1_next = data["hx"] @ x1 + data["bx"][:, 0] * shock[t]
+        u = shock[t]
+        xx = np.outer(x1, x1)
+        x1_next = data["hx"] @ x1 + bu[:2, 0] * u
         x2_next = (
             data["hx"] @ x2
-            + 0.5 * np.einsum("ijk,jk->i", data["hxx"], outer)
+            + 0.5 * np.einsum("ijk,jk->i", data["hxx"], xx)
+            + data["hxu"][:, :, 0] @ x1 * u
+            + 0.5 * data["huu"][:, 0, 0] * u * u
             + 0.5 * data["hss"]
         )
-        x1, x2 = x1_next, x2_next
-        state = x1 + x2
-        outer = np.outer(x1, x1)
-        expected[t, :2] = state
         expected[t, 2] = (
-            data["gx"][0] @ state
-            + 0.5 * np.sum(data["gxx"][0] * outer)
+            data["gx"][0] @ (x1 + x2)
+            + bu[2, 0] * u
+            + 0.5 * np.sum(data["gxx"][0] * xx)
+            + data["gxu"][0, :, 0] @ x1 * u
+            + 0.5 * data["guu"][0, 0, 0] * u * u
             + 0.5 * data["gss"][0]
         )
+        x1, x2 = x1_next, x2_next
+        expected[t, :2] = x1 + x2
     return expected
 
 
@@ -206,8 +234,9 @@ def test_linear_simulation_kernel_writes_manual_recursion() -> None:
     out = np.empty((shock_mat.shape[0], A.shape[0]), dtype=np.float64)
     py_out = np.empty_like(out)
 
+    zero_ss = np.zeros(A.shape[0], dtype=np.float64)
     simulate_linear_states_into(A, B, x0, shock_mat, out)
-    _simulate_linear_states_into_numba.py_func(A, B, x0, shock_mat, py_out)
+    _simulate_linear_states_into_numba.py_func(A, B, x0, shock_mat, py_out, zero_ss)
 
     expected = np.empty_like(out)
     previous = x0

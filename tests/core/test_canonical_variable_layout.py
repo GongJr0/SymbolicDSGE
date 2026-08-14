@@ -70,7 +70,7 @@ def test_a_single_depth_model_generates_no_variables(tmp_path):
     # declared set and the whole generated block is empty.
     compiled = _compile_misordered_test_model(tmp_path)
 
-    assert compiled.layout.generated == {}
+    assert compiled.layout.generated_names == ()
     assert compiled.layout.aux_origin == {}
     assert set(compiled.var_names) == set(compiled.layout.declared_names)
 
@@ -195,7 +195,15 @@ def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
 
     assert compiled.layout.state_names == ("r", "v", "u", "u_lag1")
     assert compiled.layout.control_names == ("r_star", "x", "Pi")
-    assert compiled.layout.generated == {"u_lag1": 3}
+    assert compiled.layout.generated_names == ("u_lag1",)
+    assert compiled.idx["u_lag1"] == 3
+
+    # declared_names is the user's own list and nothing else, which is what a
+    # dense ss_seed or a parse-time P0 spans. A dense x0 reaches the aux too, so
+    # it spans the concatenation, minted last.
+    layout = compiled.layout
+    assert set(layout.declared_names) == {"Pi", "x", "r_star", "u", "v", "r"}
+    assert {*layout.declared_names, *layout.generated_names} == set(compiled.var_names)
 
 
 def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path):

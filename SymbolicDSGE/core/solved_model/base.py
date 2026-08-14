@@ -353,7 +353,8 @@ class SolvedModel(ABC, Generic[Policy]):
         if x0 is None:
             return np.zeros((n,), dtype=float64)
 
-        declared = list(self.compiled.layout.declared_names)
+        layout = self.compiled.layout
+        declared = [*layout.declared_names, *layout.generated_names]
 
         x0_arr = np.zeros((n,), dtype=float64)
         if isinstance(x0, dict):
@@ -390,16 +391,21 @@ class SolvedModel(ABC, Generic[Policy]):
         *,
         drop_initial: bool = False,
     ) -> NDF:
+        """Observables along a ``states`` path. ``states`` is in levels, which is
+        what every ``_simulate_state_matrix`` returns."""
         start = 1 if drop_initial else 0
         y_names = self.compiled.observable_names
         is_affine = self.config.equations.obs_is_affine
         if all(is_affine.values()):
+            # (C, d) is linearized for a deviation argument, and stays that way
+            # because the Kalman path reads the same memoized pair. Rebasing the
+            # intercept once is what lets a level path through:
+            # d + C(x - ss) == (d - C ss) + C x.
             C, d = self._build_C_d_from_obs(y_names)
+            d = d - C @ self.policy.steady_state
             return measurement.affine_path(states, C, d, len(y_names), start)
 
-        Y = measurement.non_affine_measurement(
-            self.compiled, y_names, states + self.policy.steady_state
-        )
+        Y = measurement.non_affine_measurement(self.compiled, y_names, states)
         return np.ascontiguousarray(Y[start:], dtype=float64)
 
     def _assemble_simulation(self, path: StatePath, observables: bool) -> SimResult:
@@ -408,8 +414,6 @@ class SolvedModel(ABC, Generic[Policy]):
         y = None
         if observables:
             y = self._simulate_observable_matrix(X, drop_initial=False)
-
-        X += self.policy.steady_state  # add ss; user sees levels.
 
         return SimResult(
             var_names=self.compiled.var_names,

@@ -5,7 +5,7 @@
 #include "klein_postproc.h"          /* klein_postproc */
 #include "klein_preproc.h"           /* klein_preproc */
 #include "klein_qz.h"                /* klein_qz */
-#include "second_order.h"            /* sdsge_second_order, _risk */
+#include "second_order.h"            /* sdsge_second_order */
 #include "steady_state.h"            /* sdsge_steady_state_newton */
 
 /* Newton steady-state config, matching the Python solver defaults. */
@@ -103,9 +103,8 @@ arena_size sdsge_sgu_klein_solve2_arena_size(const i64 n_var, const i64 n_state,
   size = sdsge_max_arena(size, sdsge_pencil_stage_arena(n_var, n_exog, nd));
   size = sdsge_max_arena(
       size, sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_exog, n_var));
-  size = sdsge_max_arena(size, sdsge_second_order_arena_size(n_var, n_state));
   size = sdsge_max_arena(
-      size, sdsge_second_order_risk_arena_size(n_var, n_state, n_exog));
+      size, sdsge_second_order_arena_size(n_var, n_state, n_exog));
   /* Second-order stages run past the same head: solve1 is nested inside. */
   size.n_float += sdsge_solve1_fp_reserve(n_state, n_ctrl);
   return size;
@@ -361,14 +360,16 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
   sdsge_bx_from_B(out1->B, s1->n_state, s1->n_exog, out2->bx);
   sdsge_bicomplex_hessian(spec->bc_residual, out1->ss, s1->params, s1->n_var,
                           s1->n_par, s1->n_exog, s1->n_var, out2->f_xx, stage);
-  if (sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx, out1->f,
-                         out1->p, s1->n_var, s1->n_state, out2->gxx, out2->hxx,
-                         stage, iarena) != SDSGE_SECOND_ORDER_OK)
-    return SDSGE_KLEIN_SOLVE_SECOND_ORDER;
-  if (sdsge_second_order_risk(out1->a_real, out1->b_real, out2->f_xx, out2->bx,
-                              out1->f, out2->gxx, spec->chol, s1->n_var,
-                              s1->n_state, s1->n_exog, out2->gss, out2->hss,
-                              stage, iarena) != SDSGE_SECOND_ORDER_OK)
-    return SDSGE_KLEIN_SOLVE_RISK;
+  const i64 rc2 = sdsge_second_order(
+      out1->a_real, out1->b_real, out2->f_xx, out1->f, out1->p, out1->B,
+      spec->Q, s1->n_var, s1->n_state, s1->n_exog, out2->gxx, out2->hxx,
+      out2->gxu, out2->hxu, out2->guu, out2->huu, out2->gss, out2->hss, stage,
+      iarena);
+  if (rc2 != SDSGE_SECOND_ORDER_OK) {
+    /* Translated rather than forwarded: the caller reports a klein solve, and
+     * the two families no longer share numbers. */
+    return rc2 == SDSGE_SECOND_ORDER_RISK ? SDSGE_KLEIN_SOLVE_RISK
+                                          : SDSGE_KLEIN_SOLVE_SECOND_ORDER;
+  }
   return SDSGE_KLEIN_SOLVE_OK;
 }
