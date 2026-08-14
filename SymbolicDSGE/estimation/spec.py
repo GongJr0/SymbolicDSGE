@@ -130,6 +130,22 @@ class EstimationParameterSpec:
         )
 
 
+def _coerce_ss_seed(
+    ss_seed: Mapping[str, float] | Sequence[float] | None,
+) -> dict[str, float] | list[float] | None:
+    """A steady-state seed with JSON-safe values, in the shape it was given.
+
+    A mapping names the variables it seeds and a sequence covers the declared
+    set in order, so the two say different things and neither can be normalized
+    into the other without knowing the model.
+    """
+    if ss_seed is None:
+        return None
+    if isinstance(ss_seed, Mapping):
+        return {str(name): float(value) for name, value in ss_seed.items()}
+    return [float(x) for x in ss_seed]
+
+
 @dataclass
 class EstimationSpec:
     """Text representation of an estimation run (no observed data)."""
@@ -142,7 +158,7 @@ class EstimationSpec:
     matrix_priors: dict[str, PriorSpec] = field(default_factory=dict)
     observables: list[str] | None = None
     method_kwargs: dict[str, Any] = field(default_factory=dict)
-    ss_seed: list[float] | None = None
+    ss_seed: dict[str, float] | list[float] | None = None
     posterior_point: str = "mean"
 
     def __post_init__(self) -> None:
@@ -178,7 +194,7 @@ class EstimationSpec:
         if self.observables is not None:
             out["observables"] = list(self.observables)
         if self.ss_seed is not None:
-            out["ss_seed"] = [float(x) for x in self.ss_seed]
+            out["ss_seed"] = _coerce_ss_seed(self.ss_seed)
         return out
 
     @classmethod
@@ -198,11 +214,7 @@ class EstimationSpec:
                 else None
             ),
             method_kwargs=dict(data.get("method_kwargs", {})),
-            ss_seed=(
-                [float(x) for x in data["ss_seed"]]
-                if data.get("ss_seed") is not None
-                else None
-            ),
+            ss_seed=_coerce_ss_seed(data.get("ss_seed")),
             posterior_point=str(data.get("posterior_point", "mean")),
         )
 
@@ -218,7 +230,7 @@ class EstimationSpec:
         matrix_priors: Mapping[str, PriorSpec] | None = None,
         observables: Sequence[str] | None = None,
         method_kwargs: Mapping[str, Any] | None = None,
-        ss_seed: Sequence[float] | None = None,
+        ss_seed: Mapping[str, float] | Sequence[float] | None = None,
         posterior_point: str = "mean",
     ) -> EstimationSpec:
         """Build a spec from estimation *targets* alone, mirroring
@@ -260,7 +272,7 @@ class EstimationSpec:
             matrix_priors=dict(matrix_priors or {}),
             observables=list(observables) if observables is not None else None,
             method_kwargs=dict(method_kwargs or {}),
-            ss_seed=([float(x) for x in ss_seed] if ss_seed is not None else None),
+            ss_seed=_coerce_ss_seed(ss_seed),
             posterior_point=posterior_point,
         )
 

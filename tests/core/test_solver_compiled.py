@@ -205,18 +205,22 @@ def test_compile_infers_n_state_and_n_exog(parsed_test):
     assert compiled.var_names[: compiled.n_state] == ["u", "v", "r"]
 
 
-def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
+def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
     model, kalman = parsed_test
-    bad = copy.deepcopy(model)
+    deep = copy.deepcopy(model)
     t = sp.Symbol("t", integer=True)
-    u = bad.variables.variables[0]
-    e_u = next(iter(bad.shock_map.keys()))
-    first = next(iter(bad.equations.model))
-    bad.equations.model[first] = sp.Eq(u(t + 2), bad.parameters[0] * u(t) + e_u)
+    u = deep.variables.variables[0]
+    e_u = next(iter(deep.shock_map.keys()))
+    first = next(iter(deep.equations.model))
+    deep.equations.model[first] = sp.Eq(u(t + 2), deep.parameters[0] * u(t) + e_u)
 
-    solver = DSGESolver(bad, kalman)
-    with pytest.raises(ValueError, match="bad time offsets"):
-        solver.compile()
+    compiled = DSGESolver(deep, kalman).compile()
+
+    # A lead aux is read at t+1 and never at t-1, so it joins the controls
+    # rather than widening the state block.
+    assert "u_lead1" in compiled.layout.generated
+    assert "u_lead1" in compiled.layout.control_names
+    assert "u_lead1" not in compiled.layout.state_names
 
 
 def test_compile_can_linearize_model_on_the_fly(tmp_path):

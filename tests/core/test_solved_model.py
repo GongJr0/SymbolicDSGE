@@ -15,6 +15,7 @@ from sympy import Symbol
 from sympy.core.function import AppliedUndef
 
 import SymbolicDSGE.core.solved_model as solved_model_module
+from SymbolicDSGE.core.compiled_model import VariableLayout
 from SymbolicDSGE.core.sim_result import SimResult
 from SymbolicDSGE.core.solved_model import (
     FirstOrderSolvedModel,
@@ -110,6 +111,17 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
     compiled = SimpleNamespace(
         idx={"e": 0, "k": 1, "c": 2},
         var_names=["e", "k", "c"],
+        # Real layout rather than a stub: x0 is written in declaration order and
+        # resolved through it, so a fake would let the permutation drift.
+        layout=VariableLayout(
+            declared_names=("e", "k", "c"),
+            canonical_names=("e", "k", "c"),
+            state_names=("e", "k"),
+            control_names=("c",),
+            n_exog=1,
+            n_state=2,
+            idx={"e": 0, "k": 1, "c": 2},
+        ),
         n_exog=1,
         n_var=3,
         n_state=2,
@@ -243,7 +255,7 @@ def test_solved_model_sim_matches_manual_state_recursion(solved_test):
         shock_scale=0.5,
     )
     expected = np.empty_like(out.X)
-    previous = solved_test._simulation_initial_state()
+    previous = solved_test._initial_state()
     for t in range(T):
         expected[t] = (
             solved_test.policy.A @ previous + solved_test.policy.B @ shock_mat[t]

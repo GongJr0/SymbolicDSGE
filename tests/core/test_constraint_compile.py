@@ -739,7 +739,7 @@ def test_model_without_constraints_cannot_build_a_constraint_func(compiled_post8
         compiled_post82.construct_constraint_func()
 
 
-@pytest.mark.parametrize("offset", [1, -1])
+@pytest.mark.parametrize("offset", [1, -1, 2, -2])
 def test_conditions_reject_leads_and_lags(parsed_post82, offset):
     model, _ = parsed_post82
     g = model.variables.variables[0]
@@ -748,5 +748,5 @@ def test_conditions_reject_leads_and_lags(parsed_post82, offset):
         {"lo": Constraint(bind=g(t + offset) < 0, relax=g(t) >= 0)},
     )
 
-    with pytest.raises(ValueError, match="only reference contemporaneous variables"):
+    with pytest.raises(ValueError, match="must be contemporaneous."):
         solver.compile()

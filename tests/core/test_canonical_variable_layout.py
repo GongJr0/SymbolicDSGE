@@ -78,12 +78,12 @@ def test_the_state_block_splits_by_which_states_a_shock_targets(tmp_path):
 
 
 def test_a_single_depth_model_generates_no_variables(tmp_path):
-    # Nothing here occurs deeper than t-1 and no shock is lifted, so the compiled
-    # set is the declared set and the whole generated block is empty.
+    # Nothing here is displaced past one date, so the compiled set is the
+    # declared set and the whole generated block is empty.
     compiled = _compile_misordered_test_model(tmp_path)
 
     assert compiled.layout.generated == {}
-    assert compiled.layout.lag_origin == {}
+    assert compiled.layout.aux_origin == {}
     assert set(compiled.var_names) == set(compiled.layout.declared_names)
 
 

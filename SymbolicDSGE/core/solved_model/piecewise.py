@@ -36,7 +36,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
         ) = None,
         shock_scale: float = 1,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         *,
         check_ahead_periods: int = 200,
         max_check_ahead_periods: int = -1,
@@ -48,7 +48,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     ) -> StatePath:
         pol = self.policy
         comp = self.compiled
-        x0_arr = self._simulation_initial_state(x0)[: comp.n_state]
+        x0_arr = self._initial_state(x0)[: comp.n_state]
 
         shock_mat = simulation_shock_matrix(comp, T, shocks, shock_scale)
 
@@ -91,7 +91,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T: int,
         shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
         *,
         check_ahead_periods: int = 200,
@@ -132,11 +132,13 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             proportional to it here, since the regime a path realizes depends on
             how far the shock pushes the model.
 
-        x0 : list[float] | ndarray, optional
-            Initial state, in levels, of length ``n_state`` or ``n_var``. If
-            None, the model starts at its reference steady state. Whether a
-            constraint binds depends on where the model starts, so this is a
-            modelling choice rather than a formality.
+        x0 : dict[str, float] | list[float] | ndarray, optional
+            Initial state at ``t - 1``, in levels. A sequence covers every
+            compiled variable in declaration order, minted lags included; a
+            mapping names only the variables it sets. What it leaves out, and
+            everything when this is None, starts at the reference steady state.
+            Whether a constraint binds depends on where the model starts, so
+            this is a modelling choice rather than a formality.
 
         observables : bool, optional
             If True, compute and include observable variables in the output.
@@ -202,7 +204,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T: int,
         shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
     ) -> SimResult:
         """Simulate the reference regime (a first-order solution) over T periods, ignoring constraints.
@@ -223,9 +225,11 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         shock_scale : float, optional
             A scaling factor applied to all shocks.
 
-        x0 : list[float] | ndarray, optional
-            Initial state, in levels, of length ``n_state`` or ``n_var``. If
-            None, the model starts at its steady state.
+        x0 : dict[str, float] | list[float] | ndarray, optional
+            Initial state at ``t - 1``, in levels. A sequence covers every
+            compiled variable in declaration order, minted lags included; a
+            mapping names only the variables it sets. What it leaves out, and
+            everything when this is None, starts at the steady state.
 
         observables : bool, optional
             If True, compute and include observable variables in the output.

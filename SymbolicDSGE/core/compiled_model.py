@@ -44,9 +44,10 @@ class VariableLayout:
     into. ``generated`` maps each generated name to its canonical position, so a
     consumer hiding them filters by name or by position off the same map.
 
-    ``lag_origin`` maps each lag aux to the declared variable it tracks, at every
-    depth, which is what widens a declared-order input over the generated block.
-    A shock state is absent from it: it tracks an innovation, not a variable.
+    ``aux_origin`` maps each minted lag or lead to the declared variable it
+    tracks, at every depth, which is what widens a declared-order input over the
+    generated block. An aux sits at its origin some periods away, so it shares
+    the origin's steady state and takes its variance.
 
     ``state_names`` and ``control_names`` split the canonical order at
     ``n_state``. ``exo_state_names`` and ``endo_state_names`` split the state
@@ -74,7 +75,7 @@ class VariableLayout:
     n_state: int
     idx: dict[str, int]
     generated: dict[str, int] = field(default_factory=dict)
-    lag_origin: dict[str, str] = field(default_factory=dict)
+    aux_origin: dict[str, str] = field(default_factory=dict)
     shock_names: tuple[str, ...] = ()
     shock_idx: dict[str, int] = field(default_factory=dict)
 

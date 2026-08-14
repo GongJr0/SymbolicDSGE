@@ -65,7 +65,7 @@ def lower_simulation_step(
         native_step = simulate1_step(
             step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs
         )
-        x0 = model._simulation_initial_state(step.kwargs["x0"])
+        x0 = model._initial_state(step.kwargs["x0"])
         return native_step, _order1_bindings(model, x0, shocks, shocks_batched, params)
     if order == 2:
         _check_simulation_layout(step_plan, T, n_var, n_obs)
@@ -80,7 +80,7 @@ def lower_simulation_step(
             n_obs,
         )
         steady_state = _flat_f64(model.policy.steady_state)
-        x0_arr = model._simulation_initial_state(step.kwargs["x0"])
+        x0_arr = model._initial_state(step.kwargs["x0"])
         return native_step, _order2_bindings(
             model,
             steady_state,
