@@ -25,33 +25,40 @@ This demonstration focuses on the first case where two models are present.
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE.monte_carlo import (
+    MCPipeline,
+    custom_transform,
+    pandas_operation,
+)
+from SymbolicDSGE.monte_carlo.step_factories import (
+    kde_step,
+    postproc_step,
+    reference_filter_step,
+    simulation_step,
+    standardize_step,
+    transform_step,
+    wald_test_step,
+)
+import cProfile
 
-model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
-ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
+model, kalman = ModelParser("../../MODELS/misspec_test/reference.yaml").get_all() # (1)!
 
-# Solve the reference model
 solver = DSGESolver(model, kalman)
 compiled = solver.compile()
+ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
 reference = solver.solve(compiled, ss_seed=ss_seed)
 
-# Change parameters and re-compile to get the DGP model
-dgp_params = {str(k): v for k, v in model.calibration.parameters.items()} # (3)!
-
-dgp_params["rho_g"] = 0.90 # AR persistence param
-dgp_params["rho_z"] = 0.75 # AR persistence param
-
-dgp = solver.solve(
-    compiled,
-    parameters=dgp_params,
-    ss_seed=ss_seed,
-)
+dgp_model, dgp_kalman = ModelParser("../../MODELS/misspec_test/misspec.yaml").get_all() # (3)!
+dgp_comp = DSGESolver(dgp_model, dgp_kalman).compile()
+dgp_sol = DSGESolver(dgp_model, dgp_kalman)
+dgp = dgp_sol.solve(dgp_comp, ss_seed=ss_seed)
 
 ```
 
-1. This is the core configuration file for both models.
-2. The configuration is based on a NK3 gap model.
-3. We extract the parameters from the original config and modify them slightly.
+1. This is the reference model configuration.
+2. Both models use the same steady-state seed.
+3. The DGP has a separate, misspecified configuration.
 
 Now, we have two models to compare in a Monte Carlo experiment.
 We will determine whether the reference model is misspecified relative to the DGP using MC repeated Wald tests.
@@ -59,9 +66,6 @@ We will determine whether the reference model is misspecified relative to the DG
 ???+ note "Data Retention"
     Each step produces and records their output independently. Retaining full output resolution for every step can easily exceed available memory in consumer hardware.
     `n_retain` controls how many replications persist outside the hot loop to give more granular memory management. All steps contain an `n_retain` argument, which defaults to `-1` (retain all). Setting it to `0` retains nothing, and any positive integer retains that many evenly spaced replications.
-
-    For reference, the exact run described in this guide requires a modest 1.42 GiB at 10,000 replications. At a more realistic 100,000 replications, the same run requires 14.2 GiB.
-
 
 ## Pipeline Setup
 
@@ -74,7 +78,7 @@ n_obs = len(reference.compiled.observable_names)  # (2)!
 pipeline = MCPipeline(
     per_rep_steps=[...],  # (3)!
     postproc_steps=[...],  # (4)!
-    )
+)
 ```
 
 1. Length of each simulated sample.
@@ -94,16 +98,13 @@ The pipeline will be built using the step-generating functions under `SymbolicDS
 Using the `simulation_step` function, we generate an `MCStep` object that samples the DGP model with a given simulation specification.
 
 ```python
-from SymbolicDSGE import Shock
-from SymbolicDSGE.monte_carlo.step_factories import simulation_step
-
 datagen_step = simulation_step(
     T=T,
     target="dgp",  # (1)!
     n_retain=-1,  # (2)!
     shocks={
-        "g,z": Shock(dist="norm", multivar=True, seed=0),
-        "r": Shock(dist="norm", seed=1),
+        "e_g,e_z": Shock(dist="norm", multivar=True, seed=0),
+        "e_r": Shock(dist="norm", seed=1),
     },
     observables=True,
 )
@@ -175,8 +176,6 @@ Every test step writes a statistic, a p-value, and a status per replication. The
 Custom transforms run inside the native loop, so they are wrapped with `custom_transform` and compiled by Numba. The wrapper snapshots the function source and the globals it references so the operation can travel inside a `.sdsge` archive, and it enforces the native transform contract: exactly two positional arguments and an integer status return.
 
 ```python
-from SymbolicDSGE.monte_carlo import custom_transform
-
 @custom_transform
 def custom_standardize(sample, output) -> int:  # (1)!
     n, p = sample.shape
@@ -206,8 +205,6 @@ def custom_standardize(sample, output) -> int:  # (1)!
 With a custom function defined, the step can be created using the generic `transform_step` function.
 
 ```python
-from SymbolicDSGE.monte_carlo.step_factories import standardize_step, transform_step
-
 custom_std = transform_step(
     "custom_std",  # (1)!
     custom_standardize,  # (2)!
@@ -251,10 +248,8 @@ __Regressions Traces:__
 A custom post-processing function is defined as follows:
 
 ```python
-from SymbolicDSGE.monte_carlo import pandas_operation
-
 @pandas_operation
-def get_std_obs_mean(*, traces: dict[str, Any]) -> pd.DataFrame:
+def get_std_obs_mean(*, traces) -> pd.DataFrame:
     stacked = traces["payload.custom_std"]  # (1)!
     return pd.DataFrame({"mean": stacked.mean(axis=(0, 1))})
 ```
@@ -264,8 +259,6 @@ def get_std_obs_mean(*, traces: dict[str, Any]) -> pd.DataFrame:
 To create a step out of this function, we use `postproc_step`:
 
 ```python
-from SymbolicDSGE.monte_carlo.step_factories import kde_step, postproc_step
-
 custom_postproc = postproc_step(
     "custom_postproc",  # (1)!
     get_std_obs_mean,  # (2)!
@@ -314,35 +307,31 @@ mc = pipeline.run(
     reference=reference,
     dgp=dgp,
     n_rep=10000,
-    fail_fast=True,  # (1)!
-    n_jobs=-1,  # (2)!
-    verbosity=2,  # (3)!
-    check_memory_availability=True,  # (4)!
+    n_jobs=-1,  # (1)!
+    verbosity=2,  # (2)!
 )
 ```
 
-1. Whether to raise on the first failing replication. With `False`, failures are recorded in `MCPipelineResult.failures` and the run continues.
-2. Number of worker threads. `None` runs single-threaded, a positive value is taken literally, and a negative value resolves to `max(1, cpu_count + 1 + n_jobs)` following the joblib convention.
-3. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total and the post-processing total, `2` additionally prints per-step throughput.
-4. Whether to size the run's retained arenas before allocating them. A run that spills past physical memory warns and proceeds; one that does not fit even with swap counted raises `MemoryError` with a per-step breakdown. `False` allocates unconditionally.
+1. Number of worker threads. `None` runs single-threaded, a positive value is taken literally, and a negative value resolves to `max(1, cpu_count + 1 + n_jobs)` following the joblib convention.
+2. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total and the post-processing total, and `2` additionally prints per-step throughput.
 
 ???+ warning "Per-step Timings Require `verbosity=2`"
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.25s with 40529.48 it/s.
+>>> MC run concluded successfully in 0.33s with 29916.19 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 47156.51 worker it/s (0.21 worker-s), 40529.48 wall it/s.
-    filter: 0 failures, 2908.28 worker it/s (3.44 worker-s), 40529.48 wall it/s.
-    custom_std: 0 failures, 219709.70 worker it/s (0.05 worker-s), 40529.48 wall it/s.
-    builtin_std: 0 failures, 172673.13 worker it/s (0.06 worker-s), 40529.48 wall it/s.
-    std_innov_mean: 0 failures, 87742.76 worker it/s (0.11 worker-s), 40529.48 wall it/s.
+    datagen: 0 failures, 27987.63 worker it/s (0.36 worker-s), 29916.19 wall it/s.
+    filter: 0 failures, 2145.69 worker it/s (4.66 worker-s), 29916.19 wall it/s.
+    custom_std: 0 failures, 126337.92 worker it/s (0.08 worker-s), 29916.19 wall it/s.
+    builtin_std: 0 failures, 118365.61 worker it/s (0.08 worker-s), 29916.19 wall it/s.
+    std_innov_mean: 0 failures, 59597.31 worker it/s (0.17 worker-s), 29916.19 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0184s.
-    builtin_kde: Succeeded in 9.1390s.
+    custom_postproc: Succeeded in 0.0215s.
+    builtin_kde: Succeeded in 9.2167s.
 ```
 
 ???+ note "Worker Time vs Wall Time"
@@ -353,7 +342,7 @@ To extract the test results, their p-values, and other relevant statistics, we c
 
 ```python
 
-summary = pd.DataFrame(
+t_summary = pd.DataFrame(
     {
         name: {
             "mean_statistic": res.mean_statistic,
@@ -365,13 +354,13 @@ summary = pd.DataFrame(
         for name, res in mc.test_summaries.items()
     }
 ).T
-print(summary.round(4))
+print(t_summary.round(3))
 
 ```
 
 ```bash
 >>>                mean_statistic  mean_pval  rejection_rate  ci_low  ci_high
-std_innov_mean           2.758      0.546           0.051   0.047    0.056
+std_innov_mean           3.196      0.488           0.068   0.063    0.073
 
 ```
 

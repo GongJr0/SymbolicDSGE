@@ -43,7 +43,9 @@ This displays the parsed equations as `SymPy` objects. Variables are functions o
 
 ## Compilation
 
-Compilation converts the symbolic model to a numeric residual callback. The example is already written in gap form, so it compiles directly.
+Compilation converts the symbolic model to a numeric residual callback. It desugars longer leads and lags with auxiliary variables, derives the state and control layout from equation timing, and compiles the residual consumed by the first-order solver.
+
+If your model is written in nonlinear levels, pass `linearize=True` to `DSGESolver.compile(...)`. The example is already written in linearized gap form, so it compiles directly.
 
 ```python
 solver = DSGESolver(model, kalman)
@@ -75,7 +77,10 @@ Equations as passed to the solver:
 ```
 
 ???+ note "Variable Layout"
-    The residual callback receives numeric forward, current, and previous variable vectors, the current shock vector, and the parameter vector. Its variable layout is inferred from timing in the equations.
+    The residual callback receives numeric forward, current, and previous variable vectors, the current shock vector, and the parameter vector. A variable that occurs at `t-1` is a state, and every other variable is a control. The compiler creates any auxiliary variables needed for longer lags or leads, then places all states before controls.
+
+???+ note "Linearization"
+    With `linearize=True`, the parsed `ModelConfig` must define the linearization parameters. You can also call `SymbolicDSGE.linearize_model(...)` directly when you need the transformed symbolic configuration.
 
 ## Solution
 
@@ -92,7 +97,7 @@ print("Is stable: ", sol.policy.stab == 0)  # stable if sol.policy.stab == 0
 print("Eigenvalues: ", sol.policy.eig.round(3))
 ```
 
-`parameters=None` uses the calibration values from the model configuration. `stab == 0` indicates that the number of stable roots matches the model's state count.
+`parameters=None` uses the calibration values from the model configuration. `stab == 0` indicates that the number of stable roots matches the model's state count. The returned `SolvedModel` retains the compiled representation, its calibration, and the policy solution.
 
 <div class="annotate" markdown>
 ```
@@ -184,7 +189,7 @@ sim_df = pd.DataFrame(sim_data.states  | sim_data.observables)
 sim_df.head(10).round(3)
 ```
 
-Each value in `sim_shocks` is a `Shock` specification. `sim` supplies the horizon and uses the model's shock standard deviations and correlations to materialize it. `SimResult.states` and `SimResult.observables` expose the named columns used to construct the DataFrame.
+Each value in `sim_shocks` is a `Shock` specification. `sim` supplies the horizon and uses the model's shock standard deviations and correlations to materialize it. The lambda keeps two otherwise identical specifications separate by seed. `SimResult.states` and `SimResult.observables` expose the named columns used to construct the DataFrame.
 
 |    |      g |      z |      r |      x |     Pi |   OutGap |   Infl |   Rate |
 |---:|-------:|-------:|-------:|-------:|-------:|---------:|-------:|-------:|

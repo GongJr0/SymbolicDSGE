@@ -135,7 +135,7 @@ mc_pipeline = MCPipeline([
             "datagen",
             target="dgp",
             T=200,
-            shocks={"g,z": gz_shock, "r": r_shock},
+            shocks={"e_g,e_z": gz_shock, "r": r_shock},
         ),
         jarque_bera_test_step(
             "jb_test",
@@ -172,7 +172,7 @@ simulation = SimSpec(
     observables=True,
     shock_scale=1.0,
     shocks={
-        "r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(), # (1)!
+        "e_r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(), # (1)!
     },
 )
 
