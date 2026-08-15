@@ -53,13 +53,13 @@ SolvedModel.sim(
  Returns the simulated path defined by the given inputs.
 
 ???+ info "Univariate Shock Syntax"
-    A univariate shock is defined as a dictionary entry for the given variable. For example, if a model specifies a variable `x`
-    and a shock symbol `e_x`, the dictionary would expect `#!python {"x": ...}` where `...` is populated by a `ndarray` of shape
+    A univariate shock is defined as a dictionary entry for the innovation symbol. For example, if a model specifies a variable `x`
+    and a shock symbol `e_x`, the dictionary would expect `#!python {"e_x": ...}` where `...` is populated by a `ndarray` of shape
     `(T,)` or `(T,1)`, a univariate `Shock`, or a univariate generator callable.
 
 ???+ info "Correlated Shock Syntax"
-    To define a set of variables with nonzero shock covariance, a shared dictionary entry should be used. For example, a multivariate
-    shock to `x` and `y` should be defined as `#!python {"x,y": ...}` where `...` is populated by a multivariate `Shock`, a `(T, 2)` array, or a multivariate generator callable.
+    To define innovations with nonzero covariance, use a shared dictionary entry. For example, a multivariate
+    shock from `e_x` and `e_y` should be defined as `#!python {"e_x,e_y": ...}` where `...` is populated by a multivariate `Shock`, a `(T, 2)` array, or a multivariate generator callable.
 
     Details regarding the dictionary key scheme:
 
@@ -95,7 +95,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | T | Amount of steps to simulate the paths; excluding `x0`. |
-| shocks | `Shock`, array, or callable shock mapping keyed by exogenous variable name or comma-separated multivariate group. |
+| shocks | `Shock`, array, or callable shock mapping keyed by innovation symbol or comma-separated multivariate group. |
 | shock_scale | Scaling factor for the shocks. |
 | x0 | Initial state of model variables shaped `(n,)`. (`None` defaults to zeroes) |
 | observables | Include observable paths in the output `#!python dict` if `#!python True`. |

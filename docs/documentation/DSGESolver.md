@@ -30,7 +30,7 @@ DSGESolver.compile(
 ```
 
 ???+ note "Inferred Variable Layout"
-    `DSGESolver.compile(...)` infers the solver layout from the model config. Shock-map targets define the shocked/exogenous state block, dynamic equations define the remaining state variables, and the rest are treated as controls.
+    `DSGESolver.compile(...)` infers the solver layout from model equations, regime replacements, and observables. Variables occurring at `t-1` are states, and the rest are controls. Shocks are separate innovations: their declaration order defines shock columns, and they do not form a state block.
 
     If `#!python variable_order`, `#!python n_state`, or `#!python n_exog` are supplied, they are treated as explicit expectations. The compiler sanity-checks them against the config-derived layout and raises if they disagree.
 
@@ -40,7 +40,7 @@ Produces a `#!python CompiledModel` object using the inferred canonical variable
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| variable_order | Optional expected variable order. If supplied, it must agree with the config-derived state/exogenous grouping. |
+| variable_order | Optional expected variable order. If supplied, it must preserve the inferred grouping with states first. |
 | params_order | Custom ordering of model parameters if desired. |
 | linearize | Apply symbolic linearization to a copied model config before compilation. |
 

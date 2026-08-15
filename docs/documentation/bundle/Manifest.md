@@ -124,7 +124,7 @@ __Fields:__
 | x0 | `#!python list[float] \| None` | Initial state vector; zero vector when `None`. |
 | observables | `#!python bool` | Include observable paths in the output. |
 | shock_scale | `#!python float` | Multiplier applied to all shocks. |
-| shocks | `#!python dict[str, ShockParameters] \| None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are exogenous variable names, `"a,b"` for a joint shock. |
+| shocks | `#!python dict[str, ShockParameters] \| None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are innovation symbols, `"e_a,e_b"` for a joint shock. |
 
 ???+ info "Two dict views"
     `SimSpec.to_dict()` is the JSON form written to the manifest, where shocks stay as their `Shock.to_dict()` parameter dicts. The `Mapping` view, via `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()`, is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T` horizon draw, so the run is reproducible under a fixed seed.
