@@ -52,7 +52,6 @@ static inline i64 sdsge_simulate_order2_shock_offset(const i64 nx, const i64 ny,
          ny * n_exog * n_exog + nx + ny + (nx + ny) + nx;
 }
 
-int sdsge_mc_simulate_order1_runner(
 int sdsge_mc_simulate_order1_runner(const i64 rep_idx,
                                     f64 *SDSGE_RESTRICT float_in_work,
                                     f64 *SDSGE_RESTRICT float_out,
