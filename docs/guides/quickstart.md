@@ -18,51 +18,46 @@ The configuration files are parsed by the `#!python SymbolicDSGE.ModelParser` cl
 The class provides `#!python .get()` (model only) and `#!python .get_all()` (model + kalman config).
 
 ```python
-from SymbolicDSGE import ModelParser
+from SymbolicDSGE import ModelParser, DSGESolver, Shock
+
 from sympy import Matrix
-from warnings import simplefilter, catch_warnings
+from warnings import catch_warnings, simplefilter
 
-parsed = ModelParser("MODELS/POST82.yaml").get_all()
-model, kalman = parsed
+from numpy import ceil, sqrt
 
-with catch_warnings(): # (1)!
+import pandas as pd
+import matplotlib.pyplot as plt
+
+model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all()
+
+with catch_warnings():
+    # Equations in a sp.Matrix are deprecated, this is only used as a pretty print function
     simplefilter(action="ignore")
-    mat = Matrix(model.equations.model)
+    mat = Matrix(list(model.equations.model.values()))
 mat
 ```
 
-1. Wrapping equations in a `#!python sp.Matrix` is deprecated and used here solely for pretty-printing.
+The notebook opens `POST82.yaml` from `docs/assets`, hence its `../../MODELS` path. From the repository root, use `MODELS/POST82.yaml` instead. The warning filter is only for the `SymPy` matrix display.
 
-We've read the config and displayed the equations in a matrix:
-
-$$
-    \left[\begin{matrix}\Pi{\left(t \right)} = \beta \Pi{\left(t + 1 \right)} + \kappa x{\left(t \right)} + z{\left(t \right)}\\x{\left(t \right)} = - \tau_{inv} \left(- \Pi{\left(t + 1 \right)} + r{\left(t \right)}\right) + g{\left(t \right)} + x{\left(t + 1 \right)}\\r{\left(t \right)} = e_{R} + \rho_{r} r{\left(t - 1 \right)} + \left(1 - \rho_{r}\right) \left(\psi_{\pi} \Pi{\left(t \right)} + \psi_{x} x{\left(t \right)}\right)\\g{\left(t \right)} = e_{g} + \rho_{g} g{\left(t - 1 \right)}\\z{\left(t \right)} = e_{z} + \rho_{z} z{\left(t - 1 \right)}\end{matrix}\right]
-$$
-
-We can see that all variables are converted to `#!python SymPy` objects (symbols/functions) and are accessible through the `ModelConfig` interface.
+This displays the parsed equations as `SymPy` objects. Variables are functions of time, and the configuration retains the equations through the `ModelConfig` interface.
 
 ## Compilation
 
-In compilation, the symbolic model is projected into a functionalized and completely numeric form. Time dependent variables are separated and equations are written as lambda objectives. The first order solver consumes the compiled residual through the in house Klein pipeline.
-
-If your model is written in nonlinear levels, pass `#!python linearize=True` to `#!python DSGESolver.compile(...)`. If you need the transformed symbolic equations directly, you can also call `#!python SymbolicDSGE.core.linearize_model(...)` yourself before compilation. The example below uses a model that is already written in linearized gap form.
+Compilation converts the symbolic model to a numeric residual callback. The example is already written in gap form, so it compiles directly.
 
 ```python
-from SymbolicDSGE import DSGESolver
-
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
-    variable_order = None, # (1)!
-    params_order=None, # (2)!
-    linearize=False, # (3)!
+    variable_order=None,  # None => as specified in model config
+    params_order=None,  # None => as specified in model config
 )
 
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)))
+print("\n")
+print("Equations as passed to the solver: \n", compiled.construct_objective_cfunc())
 ```
 
-1. `#!python None | list[sp.Function | str]`. `#!python None` uses the variable order in the config file. Custom orders must declare `[*exog, *state, *control]` in that order. If groups are not contiguous or a different order is used, the compiler will raise a validation error. Within groups, any order is accepted.
-2. `#!python None | list[str]`. `#!python None` uses the parameter order in the config file.
-3. Set to `#!python True` to symbolically linearize the model config before compiling it.
+`variable_order=None` and `params_order=None` use the configuration's declared order as the fallback. The compiler derives the canonical solver layout itself.
 
 At compilation, the equations are transformed as shown in the code output:
 
@@ -70,42 +65,39 @@ At compilation, the equations are transformed as shown in the code output:
 Equations with symbols removed: 
  -beta*fwd_Pi + cur_Pi - kappa*(cur_x - cur_z)
 -cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
--cur_r*rho_r + fwd_r + (rho_r - 1)*(fwd_Pi*psi_pi + psi_x*(fwd_x - fwd_z))
--cur_g*rho_g + fwd_g
--cur_z*rho_z + fwd_z
+cur_r - e_r - prev_r*rho_r + (rho_r - 1)*(cur_Pi*psi_pi + psi_x*(cur_x - cur_z))
+cur_g - e_g - prev_g*rho_g
+cur_z - e_z - prev_z*rho_z
+
+
+Equations as passed to the solver:
+<Numba C callback '_residual_cf'>
 ```
 
 ???+ note "Variable Layout"
-    The compiler infers the canonical solver layout from the configuration. Shock-map targets form the shocked/exogenous state block, dynamic equations determine the remaining state variables, and the rest are controls.
-
-???+ note "Linearization"
-    When passing the linearization flag, the parsed `ModelConfig` must have the linearization parameters defined. (refer to the [Config Guide](./model_config_guide.md))
-    Alternatively, you can import `SymbolicDSGE.linearize_model` to use the syntax `lin_config = linearize_model(my_config)`. 
+    The residual callback receives numeric forward, current, and previous variable vectors, the current shock vector, and the parameter vector. Its variable layout is inferred from timing in the equations.
 
 ## Solution
 
 The solution step takes steady-state values and optionally parameter calibrations to provide a `#!python SolvedModel`.
 
 ```python
-from numpy import float64, array
-
 sol = solver.solve(
     compiled,
-    parameters=None, # (1)!
+    parameters=None,  # None => use "calibration" from model config
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
-print("Is stable: ", sol.policy.stab == 0)  # (2)!
-print("Eigenvalues: ", sol.policy.eig)
+
+print("Is stable: ", sol.policy.stab == 0)  # stable if sol.policy.stab == 0
+print("Eigenvalues: ", sol.policy.eig.round(3))
 ```
 
-1. `#!python None | dict[str, float]`. `#!python None` uses the values in `#!python ModelConfig.calibration`
-2. stable if `#!python sol.policy.stab == 0`
+`parameters=None` uses the calibration values from the model configuration. `stab == 0` indicates that the number of stable roots matches the model's state count.
 
 <div class="annotate" markdown>
 ```
 Is stable:  True
-Eigenvalues:  [0.28018451+0.j 0.83      +0.j 0.85      +0.j 2.60451546+0.j
- 1.18546572+0.j] (1)
+Eigenvalues:  [0.28 +0.j 0.83 +0.j 0.85 +0.j 2.605+0.j 1.185+0.j] (1)
 ```
 </div>
 1. Eigenvalues stay complex because the ordered Schur solve makes the imaginary part meaningful here. The policy matrices are not: `#!python sol.policy.p` and `#!python sol.policy.f` are real, projected once inside the solve.
@@ -117,22 +109,20 @@ While we can check the matrices directly, we can also use the built-in methods `
 ```python
 irf_dict = sol.irf(
     T=25,
-    shocks=["g", "z"],
-    scale=1.0,  # (1)!
-    observables=True,  # (2)!
+    shocks=["e_g", "e_z"],
+    scale=1.0,  # shock = sigma_var * scale
+    observables=True,  # Include observables in output
 )
 sol.transition_plot(
     T=25,
-    shocks=["g", "z"],
-    scale=1.0,
+    shocks=["e_g"],
+    scale=1,
     observables=True,
 )
-irf_dict["z"].round(3) # (3)!
+irf_dict.states["z"].round(3)
 ```
 
-1. `#!python shock = sig_var * scale`
-2. Include observables in output.
-3. Path of the variable `#!python z`.
+IRF shock names are innovation symbols, not the variables they enter. `irf` returns the shocked path minus its zero-shock baseline, so states and observables are reported as deviations from that baseline.
 
 This produces the outputs:
 ![transition_plot output](../img/qs_transition.png "transition_plot output")
@@ -146,7 +136,7 @@ array([0.64 , 0.544, 0.462, 0.393, 0.334, 0.284, 0.241, 0.205, 0.174,
 ## Simulation
 
 `#!python SolvedModel` also supplies a `#!python .sim()` method for simulations.
-The method simulates `T` steps given an initial state array and a shock specification.
+The method simulates `T` periods given an initial state and a shock specification.
 
 Shock specifications can take three basic forms.
 
@@ -154,14 +144,11 @@ Shock specifications can take three basic forms.
 - A callable returning the complete shock array: `#!python Callable[[float | ndarray], ndarray]`
 - A `#!python np.ndarray` of innovations
 
-Any specification is delivered to `.sim` in a dictionary corresponding to the variable the innovations are meant to affect.
-In case of multiple shocks with correlation the key for the dictionary uses `"g,z"` syntax. In correlated cases, `Shock` and callable values receive the model covariance matrix, while array values must have shape `(T, n_correlated_shocks)`.
+Each dictionary key is a shock symbol, such as `"e_r"`. A comma-separated key such as `"e_g,e_z"` supplies one joint specification for that group. In correlated cases, `Shock` and callable values receive the model covariance matrix, while array values must have shape `(T, n_correlated_shocks)`.
 
-`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can be passed directly to `.sim`, which materializes a `T` period draw at simulation time. The class has support for all `SciPy` distributions from the `rv_generic` and `multi_rv_generic` hierarchies. Alongside `SciPy` support, custom distributions implementing the `.rvs` method are supported through distribution `args`/`kwargs`.
+`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can be passed directly to `.sim`, which materializes a `T` period draw at simulation time. The class supports the built-in distributions and compatible SciPy distributions.
 
 ```python
-from SymbolicDSGE import Shock
-
 T = 200
 multi_shock_spec = lambda seed: Shock(
     dist="norm",
@@ -169,7 +156,7 @@ multi_shock_spec = lambda seed: Shock(
     seed=seed,
     dist_kwargs={
         "mean": [0.0, 0.0],
-    },
+    },  # loc=0.0 is the default behavior, shown here for clarity.
 )
 
 uni_shock_spec = lambda seed: Shock(
@@ -182,65 +169,49 @@ uni_shock_spec = lambda seed: Shock(
 )
 
 sim_shocks = {
-    "g,z": multi_shock_spec(seed=1),
-    "r": uni_shock_spec(seed=2),
-}
-
-```
-
-1. Notice the seed argument to the class being parametrized through a lambda. This step is not necessary for functionality. It saves the code of declaring two instances with different seeds if two shocks share distributions.
-2. Seed is passed through here, the code below would operate the same if we used `seed=1` instead of using a lambda.
-3. The `kwargs` specified here are passed to the distribution object in the backend (to `SciPy`'s `rvs` methods in this case)
-4. The value in this pair is a `Shock` object. `.sim` supplies the horizon and constructs the appropriate standard deviation or covariance from model parameters.
-
-With the shocks specified, we can simulate stochastic paths as follows:
-
-```python
-import pandas as pd
-
+    "e_g,e_z": multi_shock_spec(seed=1),
+    "e_r": uni_shock_spec(seed=2),
+}  # Generate multivariate shocks for 'g' and 'z' (rho_gz != 0)
 sim_data = sol.sim(
     T=T,
-    x0=[0.0, 0.0, 0.0, 0.0, 0.0],  # (1)!
+    x0=[0.0, 0.0, 0.0, 0.0, 0.0],  # Start at steady state
     shocks=sim_shocks,
     shock_scale=1.0,
     observables=True,
 )
-del sim_data["_X"]  # (2)!
-pd.DataFrame(sim_data).head(10).round(3)  
+
+sim_df = pd.DataFrame(sim_data.states  | sim_data.observables)
+sim_df.head(10).round(3)
 ```
 
-1. Simulation starts at steady state
-2. `"_X"` is a `ndarray` of all non-observable states for each time t. It is deleted here for code brevity in producing a `DataFrame`.
+Each value in `sim_shocks` is a `Shock` specification. `sim` supplies the horizon and uses the model's shock standard deviations and correlations to materialize it. `SimResult.states` and `SimResult.observables` expose the named columns used to construct the DataFrame.
 
 |    |      g |      z |      r |      x |     Pi |   OutGap |   Infl |   Rate |
 |---:|-------:|-------:|-------:|-------:|-------:|---------:|-------:|-------:|
-|  0 |  0.062 |  0.57  |  0.034 |  0.272 | -0.239 |    0.272 |  2.472 |  6.576 |
-|  1 |  0.111 | -0.217 | -0.094 |  0.819 |  0.825 |    0.819 |  6.729 |  6.066 |
-|  2 |  0.255 |  0.29  | -0.058 |  1.314 |  0.812 |    1.314 |  6.678 |  6.207 |
-|  3 |  0.115 |  0.47  | -0.396 |  3.018 |  2.028 |    3.018 | 11.54  |  4.856 |
-|  4 |  0.161 |  0.659 |  0.224 | -0.528 | -0.949 |   -0.528 | -0.366 |  7.336 |
-|  5 |  0.139 |  0.893 |  0.284 | -0.85  | -1.393 |   -0.85  | -2.141 |  7.576 |
-|  6 | -0.017 |  0.492 |  0.019 |  0.073 | -0.335 |    0.073 |  2.089 |  6.515 |
-|  7 | -0.101 |  0.665 |  0.116 | -0.705 | -1.092 |   -0.705 | -0.938 |  6.905 |
-|  8 | -0.077 |  0.4   |  0.023 | -0.187 | -0.467 |   -0.187 |  1.562 |  6.531 |
-|  9 | -0.204 |  0.006 | -0.134 |  0.17  |  0.133 |    0.17  |  3.964 |  5.903 |
+|  0 |  0.062 |  0.570 |  0.001 |  0.472 | -0.080 |    0.472 | 3.110 | 6.445 |
+|  1 |  0.111 | -0.217 |  0.020 |  0.128 |  0.274 |    0.128 | 4.527 | 6.518 |
+|  2 |  0.255 |  0.290 |  0.053 |  0.634 |  0.270 |    0.634 | 4.509 | 6.652 |
+|  3 |  0.115 |  0.470 | -0.118 |  1.319 |  0.674 |    1.319 | 6.127 | 5.969 |
+|  4 |  0.161 |  0.659 |  0.094 |  0.264 | -0.319 |    0.264 | 2.156 | 6.817 |
+|  5 |  0.139 |  0.893 |  0.094 |  0.312 | -0.467 |    0.312 | 1.563 | 6.815 |
+|  6 | -0.017 |  0.492 | -0.027 |  0.350 | -0.114 |    0.350 | 2.974 | 6.334 |
+|  7 | -0.101 |  0.665 | -0.033 |  0.207 | -0.365 |    0.207 | 1.969 | 6.308 |
+|  8 | -0.077 |  0.400 | -0.041 |  0.204 | -0.156 |    0.204 | 2.806 | 6.275 |
+|  9 | -0.204 |  0.006 | -0.116 |  0.059 |  0.045 |    0.059 | 3.609 | 5.976 |
 
 Alternative to a DataFrame, we can also plot the simulated paths:
 
 ```python
-from numpy import ceil, sqrt
-import matplotlib.pyplot as plt
-
-fig_square = ceil(sqrt(len(sim_data))).astype(int)
+fig_square = ceil(sqrt(len(sim_df.columns))).astype(int)
 size = (4 * fig_square, 3 * fig_square)
 fig, ax = plt.subplots(fig_square, fig_square, figsize=size)
 ax = ax.flatten()
 
-while len(ax) > len(sim_data):
+while len(ax) > len(sim_df.columns):
     fig.delaxes(ax[-1])
     ax = ax[:-1]
 
-for i, (var, path) in enumerate(sim_data.items()):
+for i, (var, path) in enumerate(sim_df.items()):
     ax[i].plot(path)
     ax[i].set_title(var)
     ax[i].grid(linestyle=":")
