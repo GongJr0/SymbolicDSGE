@@ -20,9 +20,15 @@ We use `experiment-1.sdsge` as produced by the [Bundle Authoring Guide](bundle_a
 ## Open the bundle
 
 ```python
-from SymbolicDSGE import load_bundle
+import numpy as np
 
-loaded = load_bundle("experiment-1.sdsge") # (1)!
+from SymbolicDSGE import load_bundle
+from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.estimation.results import MCMCResult, MAPResult, MLEResult
+
+from typing import cast
+
+loaded = load_bundle("experiment-1.sdsge")  # (1)!
 ```
 
 1. `load_bundle` is available from `SymbolicDSGE`; it calls `SymbolicDSGE.bundle.build_from`. Both names are interchangeable.
@@ -43,29 +49,34 @@ print("Format version:", loaded.manifest.sdsge_version)
 `reference` and `dgp` are full `SolvedModel` instances. They behave exactly like models you would have solved in process, including IRFs, simulation, and Kalman filtering.
 
 ```python
-reference = loaded.reference
+# Cast so type checkers do not treat these values as optional.
+reference = cast(SolvedModel, loaded.reference)
+dgp = cast(SolvedModel, loaded.dgp)
+
+# The `if` check narrows the type if casting is not preferred.
 if reference is not None:
     print("Stable:", reference.policy.stab == 0)
-    print("Eigenvalues:", reference.policy.eig)
-    print("A shape:", reference.A.shape)
+    print("Eigenvalues:", reference.policy.eig.round(2), "\n")
+
+if dgp is not None:
+    print("Stable:", dgp.policy.stab == 0)
+    print("Eigenvalues:", dgp.policy.eig.round(2))
 ```
 
 A quick deterministic simulation against generated shocks confirms the policy round trip:
 
 ```python
-import numpy as np
-
 T = 20
 rng = np.random.default_rng(42)
 shocks = {
-    "g,z": rng.standard_normal((T, 2)), # (1)!
+    "e_g,e_z": rng.standard_normal((T, 2)), # (1)!
 }
 sim = reference.sim(
     T=T,
     shocks=shocks,
     observables=True,
 )
-print(sim["Infl"][:5])
+print(sim.observables["Infl"][:5])
 ```
 
 1. See [`SolvedModel.sim`](../documentation/SolvedModel.md) for the shock specification grammar.
@@ -91,13 +102,6 @@ if estimation is not None:
 `estimation.result` is the first class result the run produced: a `MLEResult` for MLE, a `MAPResult` for MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces, so no manual reconstruction is needed.
 
 ```python
-from SymbolicDSGE.estimation.results import (
-    MCMCResult,
-    MAPResult,
-    MLEResult,
-)
-
-
 result = estimation.result
 if isinstance(result, MCMCResult):
     print("Acceptance:", round(result.accept_rate, 2))
@@ -131,28 +135,11 @@ if estimation.posterior is not None:
 `EstimationSpec.to_estimator_inputs()` lowers the loaded spec to concrete arguments: `estimated_params`, `theta0`, `bounds`, and `priors` as built `Prior` objects. Pass these to `DSGESolver.estimate(...)` when you want to reproduce the run or when a bundle stored the spec without a result. The lowering lives in the core library, so no `[ui]` extra is required.
 
 ```python
-from SymbolicDSGE import DSGESolver
-
 inputs = estimation.spec.to_estimator_inputs() # (1)!
-
-solver = DSGESolver(loaded.reference.config, loaded.reference.kalman_config)
-extras: dict = {} # (2)!
-if inputs.bounds is not None and estimation.spec.method != "mcmc":
-    extras["bounds"] = inputs.bounds
-
-fresh_result = solver.estimate(
-    compiled=loaded.reference.compiled, # (3)!
-    y=estimation.observed, # (4)!
-    method=estimation.spec.method,
-    estimated_params=inputs.estimated_params,
-    theta0=inputs.theta0,
-    priors=inputs.priors,
-    observables=estimation.spec.observables,
-    **extras,
-)
+inputs
 ```
 
-1. Selects `estimate=True` parameters, materializes their initials/bounds, and (for MAP/MCMC) builds a `Prior` object from each `PriorSpec`. Raises if MAP/MCMC parameters lack a prior.
+1. Selects `estimate=True` parameters, materializes their initials/bounds, and, for MAP/MCMC, builds a `Prior` object from each `PriorSpec`. Raises if MAP/MCMC parameters lack a prior.
 2. `solver.estimate` forwards `**method_kwargs` to the underlying `mle`/`map`/`mcmc` call. `bounds` is accepted by MLE/MAP but not by MCMC, so we gate it on the method.
 3. The `CompiledModel` reuses the layout `load_bundle` already produced when solving the embedded YAML. No recompile is needed.
 4. The observed matrix is the data the original run was fit against. It is already reconstructed by `load_bundle` and stored on `LoadedEstimation.observed`.
@@ -170,9 +157,8 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 mc = loaded.mc
 
 if mc is not None:
-    print("Runtime steps:", [step.name for step in mc.pipeline.per_rep_steps])
-    print("Stored graph nodes:", [n.id for n in mc.spec.nodes])
-    print("Post processing:", [step.name for step in mc.pipeline.postproc_steps])
+    print("Runtime Steps:", [step.name for step in mc.pipeline.per_rep_steps])
+    print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
 ```
 
 ### Run a Monte Carlo pipeline from a loaded bundle
@@ -180,11 +166,15 @@ if mc is not None:
 The loaded pipeline runs against the loaded models without the `[ui]` extra.
 
 ```python
-mc_result = loaded.mc.pipeline.run(
-    reference=loaded.reference,
-    dgp=loaded.dgp,
-    n_rep=loaded.mc.document["n_rep"],
-    n_jobs=-1, # (1)!
+# The pipeline's simulation datagen needs a DGP. The authoring notebook
+# bundles a model under role "dgp", so `loaded.dgp` resolves. If a bundle
+# omits `reference` or `dgp`, provide the missing model when running again.
+n_rep = mc.document["n_rep"]
+mc_result = mc.pipeline.run(
+    reference=reference,
+    dgp=dgp,
+    n_rep=n_rep,
+    n_jobs=-1,  # (1)!
     fail_fast=True,
     verbosity=1,
 )
@@ -213,13 +203,9 @@ prefills = loaded.simulation  # dict[str, SimSpec] | None
 
 if prefills is not None:
     for role, spec in prefills.items():
-        print(role, "T:", spec.T, "| shocks:", list((spec.shocks or {}).keys()))
+        print(role, "\n", spec)
 
-    # A SimSpec is a Mapping over sim's keyword arguments, so replay is a splat.
-    reference_spec = prefills.get("reference")
-    if reference_spec is not None and loaded.reference is not None:
-        result = loaded.reference.sim(**reference_spec)
-        print(result["r"][:5])
+reference.sim(**prefills["reference"]).states["r"][:5]
 ```
 
 ???+ note "Determinism"
