@@ -193,6 +193,11 @@ Run a Kalman Filter application on the observables specified.
 ???+ info "`y` Array Alignment"
     When a DataFrame is used as `y`, column names will be used to align and order observables' names and position. However, for `ndarray` inputs, the method assumes names in `observables` and columns of `y` are position-aligned.
 
+???+ info "State Units and Timing"
+    This public path returns state histories in levels. Linear and extended results record the added steady-state vector in `FilterResult.constant`; unscented results form levels in the kernel and record `NaN` there.
+
+    For linear and extended filters, `x0` and `P0` are the prior mean and covariance of the first observed state. For the unscented filter, they describe the state and covariance before the first observation.
+
 __Inputs:__
 
 | __Name__ | __Description__ |
@@ -200,11 +205,11 @@ __Inputs:__
 | y | observations to filter. |
 | filter_mode | `"linear"` for affine measurements, `"extended"` (EKF) for nonlinear measurements, or `"unscented"` (UKF), which runs against the model's second-order solution. `"unscented"` does not support `return_shocks`. Returns an `UnscentedFilterResult` instead of a `FilterResult`. |
 | observables | Name of corresponding model measurements. |
-| x0 | Initial state vector. |
+| x0 | Initial state vector. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
-| P0 | Initial state covariance override. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically. |
+| P0 | Initial state covariance override. It follows the same timing as `x0` at the first observation. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
 | R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
 | _debug | Print debug information about filter inputs if `True`. |
 
