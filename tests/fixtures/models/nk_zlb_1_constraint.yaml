@@ -1,0 +1,132 @@
+# New Keynesian model with a zero lower bound, the one-constraint OccBin parity
+# fixture. Transcribes nk_zlb_1_constraint.mod equation for equation in natural
+# time. That mod file is Willi Mutschler's Dynare implementation of the model
+# Guerrieri and Iacoviello (2015) plot in figure 5, reduced to the single run
+# the golden generator reads.
+#
+#   zlb  the nominal rate cannot fall below ZLB. Binding replaces the Taylor
+#        rule with the bound itself, which is the whole of the regime: no other
+#        equation changes.
+#
+# Levels model, NOT auto-linearized: both regimes linearize around the single
+# reference steady state, which is the defining approximation of the
+# piecewise-linear method.
+#
+# Steady states are solved, not declared. The ss_seed entries below are rounded
+# to two or three digits on purpose: they only have to put Newton in the right
+# basin, and the parity suite checks the steady state it lands on against
+# Dynare's.
+#
+# The numbers the equations themselves reference are a different matter, and
+# there are two kinds. PSI is endogenous in the upstream mod file, calibrated
+# inside its steady_state_model so that output is one; and the policy and
+# reporting rules are written against steady_state(r), steady_state(y) and
+# steady_state(pie). Neither has an equivalent here, so both sides carry the
+# same literals instead: the .mod was edited to state PSI, R_SS and Y_SS
+# outright, and steady_state(pie) is PI on both sides.
+#
+# equations.model is the relaxed regime, which the compiler takes as the
+# reference. Dynare selects the policy rule from its bind/relax tags; here the
+# binding variant is the one entry under regime.
+
+name: "NK_ZLB"
+
+variables:
+  bet: {ss_seed: bet_seed} # 0.994
+  c: {ss_seed: c_seed}
+  y: {ss_seed: y_seed}
+  l: {ss_seed: l_seed}
+  w: {ss_seed: w_seed}
+  mc: {ss_seed: mc_seed}
+  r: {ss_seed: r_seed}
+  g: {ss_seed: g_seed}
+  pie: {ss_seed: pie_seed}
+  pie_star: {ss_seed: pie_star_seed}
+  x1: {ss_seed: x1_seed}
+  x2: {ss_seed: x2_seed}
+  v: {ss_seed: v_seed}
+  pie_an: # zero at the steady state, and affine in pie, so the default seed is exact
+  r_an:
+  yhat:
+
+shocks:
+    - epsi
+
+observables: [yhat_obs]
+
+equations:
+  model:
+    euler: "c(t)**(-1) = bet(t)*c(t+1)**(-1)*r(t)/pie(t+1)"
+    labor_demand: "mc(t) = w(t)"
+    labor_supply: "w(t) = PSI*l(t)**PHI*c(t)"
+    price_setting: "EPSILON*x1(t) = (EPSILON - 1)*x2(t)"
+    price_recursion_1: "x1(t) = mc(t)*y(t)/c(t) + THETA*bet(t)*pie(t+1)**EPSILON*x1(t+1)"
+    price_recursion_2: "x2(t)/pie_star(t) = y(t)/c(t) + THETA*bet(t)*pie(t+1)**(EPSILON - 1)*x2(t+1)/pie_star(t+1)"
+    # The .mod's relax='zlb' variant: the Taylor rule is the reference regime.
+    mp_rule: "r(t) = R_SS*(pie(t)/PI)**PHI_PI*(y(t)/Y_SS)**PHI_Y"
+    gov_spending: "g(t) = G_Y*y(t)"
+    reset_price: "THETA*pie(t)**(EPSILON - 1) + (1 - THETA)*pie_star(t)**(1 - EPSILON) = 1"
+    price_dispersion: "v(t) = THETA*pie(t)**EPSILON*v(t-1) + (1 - THETA)*pie_star(t)**(-EPSILON)"
+    demand: "y(t) = c(t) + g(t)"
+    supply: "y(t) = l(t)/v(t)"
+    lom_bet: "log(bet(t)) = (1 - RHO)*log(BETA) + RHO*log(bet(t-1)) + epsi"
+    # Reporting identities. They are driven by the model and drive nothing, but
+    # Dynare carries them as endogenous variables and so does the golden.
+    rep_r_an: "r_an(t) = 400*(r(t) - ZLB)"
+    rep_pie_an: "pie_an(t) = 400*(pie(t) - PI)"
+    rep_yhat: "yhat(t) = 100*(y(t)/Y_SS - 1)"
+
+  constraint:
+    zlb:
+      bind: "r(t) <= ZLB"
+      # Stated rather than left to the negated bind, so the strict/non-strict
+      # split matches the .mod's: binding is inclusive of the bound, relaxing is
+      # not.
+      relax: "r(t) > ZLB"
+
+  regime:
+    zlb:
+      mp_rule: "r(t) = ZLB"
+
+  observables:
+    yhat_obs: yhat(t)
+
+calibration:
+  parameters:
+    BETA: 0.994
+    THETA: 0.90
+    PHI_Y: 0.25
+    PHI_PI: 2.5
+    RHO: 0.8
+    EPSILON: 6.0
+    G_Y: 0.20
+    PI: 1.005
+    PHI: 1.0
+    ZLB: 1.0
+    # Shared with the .mod literal for literal. PSI is its endogenous
+    # steady-state calibration, R_SS and Y_SS its steady_state(r) and
+    # steady_state(y); steady_state(pie) is PI on both sides.
+    PSI: 1.025740370380574
+    R_SS: 1.0110663983903418
+    Y_SS: 1.0
+    # Table 3 of the paper. The golden run is deterministic, so this reaches
+    # nothing on the parity path.
+    sig: 0.005
+    # Newton seeds, deliberately rounded. See the note at the top.
+    bet_seed: 0.99
+    c_seed: 0.8
+    y_seed: 1.0
+    l_seed: 1.0
+    w_seed: 0.83
+    mc_seed: 0.83
+    r_seed: 1.01
+    g_seed: 0.2
+    pie_seed: 1.005
+    pie_star_seed: 1.05
+    x1_seed: 13.0
+    x2_seed: 16.0
+    v_seed: 1.0
+  shocks:
+    std:
+      epsi: sig
+    corr: {}
