@@ -96,8 +96,7 @@ def summarize_solved_model(
         "layout": {
             "declared_names": list(layout.declared_names),
             "canonical_names": list(layout.canonical_names),
-            "exo_state_names": list(layout.exo_state_names),
-            "endo_state_names": list(layout.endo_state_names),
+            "state_names": list(layout.state_names),
             "control_names": list(layout.control_names),
         },
     }
@@ -119,11 +118,10 @@ def _shock_specs(model: ModelConfig) -> list[dict[str, Any]]:
     return [
         {
             "shock": str(shock),
-            "target": str(target),
             "std_param": str(std_param) if std_param is not None else None,
             "std_value": _param_value(model, std_param),
         }
-        for shock, target in model.shock_map.items()
+        for shock in model.shocks
         for std_param in [model.calibration.shock_std.get(shock)]
     ]
 
@@ -136,7 +134,7 @@ def _coerce_json_scalar(value: Any) -> Any:
 
 def _shock_corr_specs(model: ModelConfig) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    shock_order = {str(shock): i for i, shock in enumerate(model.shock_map)}
+    shock_order = {str(shock): i for i, shock in enumerate(model.shocks)}
     for pair, param in model.calibration.shock_corr.items():
         if param is None:
             continue

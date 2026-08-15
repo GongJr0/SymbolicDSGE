@@ -10,6 +10,8 @@ bit-parity, and where production dispatch routes to native.
 
 from __future__ import annotations
 
+from SymbolicDSGE.regression.enums import RegressionStatus
+
 import numpy as np
 import pytest
 
@@ -82,7 +84,7 @@ def test_chol_solve_L2_rank_deficient_matches():
     n_coef, n_L, n_dof, n_status = native_chol_solve_L2(X, y, 0.0, False)
     b_coef, b_L, b_dof, b_status = numba_chol_solve_L2(X, y, np.float64(0.0), False)
 
-    assert int(n_status) == int(b_status) == -1
+    assert int(n_status) == int(b_status) == RegressionStatus.RANK_DEFICIENT
     assert np.all(np.isnan(n_coef)) and np.all(np.isnan(b_coef))
     assert np.isnan(float(n_dof)) and np.isnan(float(b_dof))
     assert n_L.shape == b_L.shape == (0, 0)

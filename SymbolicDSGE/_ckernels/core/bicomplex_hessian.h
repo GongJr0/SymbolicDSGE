@@ -9,24 +9,29 @@
  * over bc256 buffers (each bc256 == complex128[2], the cfunc's per-element
  * view).
  *
- * z = (fwd, cur) stacked, 2*n_var wide. Perturbing z_i on the i-unit (a.im) and
- * z_j on the j-unit (b.re), both units landing on one variable when i == j, the
- * residual's ij component (b.im) / h^2 is d^2 F / dz_i dz_j. The bicomplex
- * arithmetic itself lives in the numba cfunc.
+ * z = (lag, cur, lead, eps) stacked, nz = 3*n_var + n_exog wide, which is the
+ * column order Dynare's second-order solver selects with `kk1`. Perturbing z_i
+ * on the i-unit (a.im) and z_j on the j-unit (b.re), both units landing on one
+ * slot when i == j, the residual's ij component (b.im) / h^2 is
+ * d^2 F / dz_i dz_j. The bicomplex arithmetic itself lives in the numba cfunc.
  *
- * `hessian` is (n_eq, 2*n_var, 2*n_var) row-major f64, symmetric in the last
- * two. */
+ * `hessian` is (n_eq, nz, nz) row-major f64, symmetric in the last two.
+ * Spanning every date and the innovations is what lets the chain rule contract
+ * it to state space in one step: a variable entering at all three dates is
+ * simply present in all three blocks. */
 
 typedef void (*bc_residual_fn)(const bc256 *fwd, const bc256 *cur,
+                               const bc256 *prev, const bc256 *eps,
                                const bc256 *par, bc256 *out);
 
-arena_size sdsge_bicomplex_hessian_arena_size(i64 n_var, i64 n_par, i64 n_eq);
+arena_size sdsge_bicomplex_hessian_arena_size(i64 n_var, i64 n_par, i64 n_exog,
+                                              i64 n_eq);
 
 /* Total: the sweep has no failure mode once its scratch comes from the caller. */
 void sdsge_bicomplex_hessian(bc_residual_fn residual,
                              const f64 *SDSGE_RESTRICT ss,
                              const f64 *SDSGE_RESTRICT par, i64 n_var, i64 n_par,
-                             i64 n_eq, f64 *SDSGE_RESTRICT hessian,
+                             i64 n_exog, i64 n_eq, f64 *SDSGE_RESTRICT hessian,
                              f64 *SDSGE_RESTRICT arena);
 
 /* The step, and the only source of it: the sweep reads this directly.

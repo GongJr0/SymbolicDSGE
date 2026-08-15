@@ -31,6 +31,7 @@ import pytest
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_occbin as golden
 
+
 _MODEL = "tests/fixtures/models/rbc_occbin.yaml"
 
 #: Our name for each of the oracle's ``COLUMNS``, in that order.
@@ -82,21 +83,19 @@ def test_the_reference_steady_state_is_dynares(solved):
 def test_the_unconstrained_path_is_dynares_linear_simulation(solved):
     # oo_.occbin.simul.linear: the same surprise sequence with the constraints
     # ignored, so it settles the reference pencil before any regime logic runs.
-    pol = solved.policy
+    # `ref` is that regime as an ordinary first-order solution, so the path is
+    # its own state space, `y_t = A y_{t-1} + B eps_t`.
+    ref = solved.policy.ref
     head = golden.LINEAR_HEAD.shape[0]
-    # The innovation enters the slot the lifted shock state occupies, which is
-    # where `sim` widens a one-shock draw to.
-    shocks = np.zeros((head, solved.compiled.n_state))
-    shocks[:, 0] = np.ravel(golden.SHOCKS)[:head]
+    eps = np.ravel(golden.SHOCKS)[:head, None]
 
-    x = np.zeros(solved.compiled.n_state)
+    y = np.zeros(solved.compiled.n_var)
     rows = []
     for t in range(head):
-        x = x + shocks[t]
-        rows.append(np.concatenate([x, pol.f_ref @ x]))
-        x = pol.p_ref @ x
+        y = ref.A @ y + ref.B @ eps[t]
+        rows.append(y)
 
-    ours = _columns(np.array(rows) + pol.steady_state, solved.compiled)
+    ours = _columns(np.array(rows) + ref.steady_state, solved.compiled)
 
     np.testing.assert_allclose(ours, golden.LINEAR_HEAD, rtol=1e-12, atol=1e-12)
 

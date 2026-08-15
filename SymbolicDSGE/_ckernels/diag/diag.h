@@ -14,13 +14,13 @@
  * which has the SVD-based lstsq path this side does not. */
 
 #define DIAG_OK 0
-#define DIAG_BAD_SHAPE -1
-#define DIAG_LINALG -2
-#define DIAG_UDEF_VARIANCE -3
-#define DIAG_BAD_LAG -4
-#define DIAG_INSUFFICIENT_SAMPLES -5
-#define DIAG_ITERATIVE_NONCONVERGENCE -6
-#define DIAG_BAD_PARAMETER -7
+#define DIAG_BAD_SHAPE -1001
+#define DIAG_LINALG -1002
+#define DIAG_UDEF_VARIANCE -1003
+#define DIAG_BAD_LAG -1004
+#define DIAG_INSUFFICIENT_SAMPLES -1005
+#define DIAG_ITERATIVE_NONCONVERGENCE -1006
+#define DIAG_BAD_PARAMETER -1007
 #define DIAG_FALLBACK 1
 
 /* Breusch-Godfrey LM statistic. eps(n), X(n,K). Builds the auxiliary design

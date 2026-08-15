@@ -353,14 +353,14 @@ def build_q_spec(
 ) -> PyCovSpec:
     """Covariance spec for Q (shock covariance), mirroring :func:`build_Q`.
 
-    Members are the shocks in ``shock_map`` order; each std is
+    Members are the shocks in ``shocks`` order; each std is
     ``shock_std[shock]`` and each off-diagonal correlation is the ``shock_corr``
     symbol for that shock pair (absent pairs stay zero). A ``Q_corr`` CPC block
     takes the ``corr_from_block`` regime."""
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
     n_exog = compiled.n_exog
-    shocks = list(compiled.config.shock_map)
+    shocks = list(compiled.config.shocks)
     std_names = [shock_std[s].name for s in shocks]
     corr_pairs: list[tuple[int, int, str]] = []
     for i in range(n_exog):
@@ -514,6 +514,7 @@ class PyObjCommon:
     jac_addr: int
 
     ss_seed: NDF  # n_var: Newton seed for the steady state
+    incidence: NDArray[np.int8]  # n_var: SDSGE_INC_* bits per variable
 
     y: NDF  # T*n_obs
     P0: NDF  # n_var*n_var; UKF 2*n_state square
@@ -569,6 +570,7 @@ def build_obj_common(
         meas_addr=int(prepared.meas_addr),
         jac_addr=int(prepared.jac_addr),
         ss_seed=np.ascontiguousarray(ss_seed_vec, dtype=np.float64),
+        incidence=compiled.incidence,
         y=y,
         P0=prepared.P0,
         x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),
@@ -819,7 +821,7 @@ def build_Q(
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
 
-    shocks = list(compiled.config.shock_map)
+    shocks = list(compiled.config.shocks)
 
     stds = asarray([float64(params[shock_std[s].name]) for s in shocks], dtype=float64)
 
@@ -846,7 +848,7 @@ def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
     shock_std = compiled.config.calibration.shock_std
     shock_corr = compiled.config.calibration.shock_corr
 
-    shocks = list(compiled.config.shock_map)
+    shocks = list(compiled.config.shocks)
 
     stds = sp.Matrix([shock_std[s] for s in shocks])
     corr = sp.eye(len(shocks))
@@ -1038,8 +1040,9 @@ def _prepare_filter_loglik(
             "return_shocks": False,
         }
     elif mode == "unscented":
-        # hx is (n_state, n_state); recover n_state from it so bx and the
-        # augmented z0 don't need `compiled` threaded in.
+        # p is (n_state, n_state), so the augmented z0 sizes itself off the
+        # policy without `compiled` threaded in. B is no use for this: it spans
+        # every variable, so its row count is n_var.
         pol = cast("SecondOrderSolution", sol.policy)
         n_state = pol.p.shape[0]
         if x0 is None:
@@ -1054,9 +1057,13 @@ def _prepare_filter_loglik(
             "meas_addr": prepared.meas_addr,
             "hx": pol.p,
             "gx": pol.f,
-            "bx": asarray(pol.B[:n_state, :], dtype=float64),
+            "bu": pol.B,
             "hxx": pol.hxx,
             "gxx": pol.gxx,
+            "hxu": pol.hxu,
+            "gxu": pol.gxu,
+            "huu": pol.huu,
+            "guu": pol.guu,
             "hss": pol.hss,
             "gss": pol.gss,
             "steady_state": pol.steady_state,

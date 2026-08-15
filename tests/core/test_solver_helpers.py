@@ -29,29 +29,45 @@ def test_coerce_variable_name_branches():
     assert DSGESolver._coerce_variable_name(obj) == str(obj)
 
 
-_MODEL_NAMES = ("z", "k", "c")
+_STATES = ("k", "z")
+_CONTROLS = ("c", "y")
 
 
-def test_resolve_variable_order_permutes_the_declared_variables():
-    # The states are the compiler's, so an explicit order is free to permute the
-    # declared block however it likes.
-    assert DSGESolver._resolve_variable_order(["c", "z", "k"], _MODEL_NAMES) == (
-        "c",
-        "z",
-        "k",
-    )
+def test_resolve_variable_order_permutes_within_each_block():
+    # Membership is the model's, position is the caller's: both blocks come back
+    # in the order they were named.
+    assert DSGESolver._resolve_variable_order(
+        ["z", "k", "y", "c"], _STATES, _CONTROLS
+    ) == (("z", "k"), ("y", "c"))
+
+
+def test_resolve_variable_order_appends_the_minted_lags_to_the_states():
+    assert DSGESolver._resolve_variable_order(
+        ["z", "k", "c", "y"],
+        (*_STATES, "k_lag1"),
+        _CONTROLS,
+        frozenset({"k_lag1"}),
+    ) == (("z", "k", "k_lag1"), ("c", "y"))
 
 
 def test_resolve_variable_order_errors():
     with pytest.raises(ValueError, match="duplicate"):
-        DSGESolver._resolve_variable_order(["z", "z", "k"], _MODEL_NAMES)
+        DSGESolver._resolve_variable_order(["z", "z", "k", "c"], _STATES, _CONTROLS)
     with pytest.raises(ValueError, match="Unknown: \\['nope'\\]"):
-        DSGESolver._resolve_variable_order(["z", "k", "nope"], _MODEL_NAMES)
-    with pytest.raises(ValueError, match="Missing: \\['c'\\]"):
-        DSGESolver._resolve_variable_order(["z", "k"], _MODEL_NAMES)
-    # A generated state is the compiler's to place, so naming one is unknown.
+        DSGESolver._resolve_variable_order(["z", "k", "c", "nope"], _STATES, _CONTROLS)
+    with pytest.raises(ValueError, match="Missing: \\['y'\\]"):
+        DSGESolver._resolve_variable_order(["z", "k", "c"], _STATES, _CONTROLS)
+    # A minted lag is the compiler's to place, so naming one is unknown.
     with pytest.raises(ValueError, match="must not appear"):
-        DSGESolver._resolve_variable_order(["z", "k", "c", "z_lag1"], _MODEL_NAMES)
+        DSGESolver._resolve_variable_order(
+            ["z", "k", "c", "y", "k_lag1"],
+            (*_STATES, "k_lag1"),
+            _CONTROLS,
+            frozenset({"k_lag1"}),
+        )
+    # Right names, wrong blocks: a control cannot be written into the state block.
+    with pytest.raises(ValueError, match="must lead with the model's states"):
+        DSGESolver._resolve_variable_order(["z", "c", "k", "y"], _STATES, _CONTROLS)
 
 
 def test_solve_rejects_bad_order():
@@ -65,38 +81,58 @@ def rbc_compiled(rbc_second_order_test_model_path):
     return DSGESolver(model, kalman).compile()
 
 
+@pytest.fixture
+def deep_compiled(tmp_path):
+    """MODELS/test.yaml with u lagged three deep, so the compiler mints a chain."""
+    import yaml
+
+    data = yaml.safe_load(open("MODELS/test.yaml", encoding="utf-8"))
+    data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-3) + e_u"
+    path = tmp_path / "deep_test.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    model, kalman = ModelParser(path).get_all()
+    return DSGESolver(model, kalman).compile()
+
+
 def test_ss_seed_is_written_over_the_declared_variables(rbc_compiled):
-    # Declared order is c, k, z; the compiler adds e_st, k_lag1, z_lag1.
-    seed = DSGESolver._resolve_ss_seed([1.9, 28.6, 0.0], rbc_compiled)
+    # Declared order is c, k, z, which is not the compiled order k, z, c.
+    seed = DSGESolver._resolve_ss_seed([1.9, 28.6, 0.5], rbc_compiled)
 
     idx = rbc_compiled.idx
-    assert seed[idx["k_lag1"]] == 28.6  # a lag aux shares its origin's point
-    assert seed[idx["z_lag1"]] == 0.0
-    assert seed[idx["e_st"]] == 0.0  # a shock state has no steady state
     assert seed[idx["c"]] == 1.9
+    assert seed[idx["k"]] == 28.6
+    assert seed[idx["z"]] == 0.5
 
 
-def test_ss_seed_dict_fills_the_generated_block_from_the_origin(rbc_compiled):
-    seed = DSGESolver._resolve_ss_seed({"c": 1.9, "k": 28.6}, rbc_compiled)
+def test_ss_seed_falls_to_the_config_then_to_zero(rbc_compiled):
+    # Per variable: what the dict names wins, what it does not keeps the seed
+    # the config declares, and a variable the config skips starts at zero.
+    configured = DSGESolver._resolve_ss_seed(None, rbc_compiled)
+    seed = DSGESolver._resolve_ss_seed({"k": 99.0}, rbc_compiled)
 
-    np.testing.assert_allclose(
-        seed, DSGESolver._resolve_ss_seed([1.9, 28.6, 0.0], rbc_compiled)
-    )
-    # An explicit generated entry outranks its origin.
-    override = DSGESolver._resolve_ss_seed({"k": 28.6, "k_lag1": 99.0}, rbc_compiled)
-    assert override[rbc_compiled.idx["k_lag1"]] == 99.0
-    assert override[rbc_compiled.idx["k"]] == 28.6
-
-
-def test_ss_seed_of_compiled_length_passes_through(rbc_compiled):
-    # A previous solve's steady state reads back in unchanged.
-    canonical = DSGESolver._resolve_ss_seed([1.9, 28.6, 0.0], rbc_compiled)
-
-    np.testing.assert_allclose(
-        DSGESolver._resolve_ss_seed(canonical, rbc_compiled), canonical
-    )
+    idx = rbc_compiled.idx
+    assert seed[idx["k"]] == 99.0
+    assert seed[idx["c"]] == configured[idx["c"]] != 0.0
+    assert seed[idx["z"]] == configured[idx["z"]] == 0.0
 
 
-def test_ss_seed_of_neither_length_names_both(rbc_compiled):
-    with pytest.raises(ValueError, match=r"expected \(3,\).*or \(6,\)"):
+def test_ss_seed_of_the_wrong_length_names_the_declaration_order(rbc_compiled):
+    with pytest.raises(ValueError, match=r"expected \(3,\).*\['c', 'k', 'z'\]"):
         DSGESolver._resolve_ss_seed([0.0, 1.0], rbc_compiled)
+
+
+def test_ss_seed_rejects_an_unknown_variable(rbc_compiled):
+    with pytest.raises(ValueError, match=r"does not have: \['ghost'\]"):
+        DSGESolver._resolve_ss_seed({"k": 1.0, "ghost": 2.0}, rbc_compiled)
+
+
+def test_ss_seed_seeds_a_minted_lag_through_its_origin(deep_compiled):
+    # At a steady state every date coincides, so an aux is its origin. It is not
+    # separately addressable, and seeding the origin seeds the whole chain.
+    seed = DSGESolver._resolve_ss_seed({"u": 7.0}, deep_compiled)
+
+    idx = deep_compiled.idx
+    assert seed[idx["u"]] == seed[idx["u_lag1"]] == seed[idx["u_lag2"]] == 7.0
+
+    with pytest.raises(ValueError, match="compiler-minted"):
+        DSGESolver._resolve_ss_seed({"u_lag1": 7.0}, deep_compiled)

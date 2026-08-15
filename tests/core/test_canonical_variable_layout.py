@@ -12,21 +12,9 @@ from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE.kalman.interface import KalmanInterface
 from SymbolicDSGE.core.solved_model.shocks import shock_unpack
 
-# Shock states, then lag states, then the declared variables. The states are all
-# compiler-minted: test.yaml lags u, v and r, and carries two shocks.
-EXPECTED_CANONICAL_ORDER = [
-    "e_u_st",
-    "e_v_st",
-    "u_lag1",
-    "v_lag1",
-    "r_lag1",
-    "Pi",
-    "x",
-    "r_star",
-    "u",
-    "v",
-    "r",
-]
+# States then controls, each in declaration order. test.yaml lags u, v and r,
+# so those are the states; its two shocks are innovations, not variables.
+EXPECTED_CANONICAL_ORDER = ["u", "v", "r", "Pi", "x", "r_star"]
 EXPECTED_IDX = {name: i for i, name in enumerate(EXPECTED_CANONICAL_ORDER)}
 N_VAR = len(EXPECTED_CANONICAL_ORDER)
 
@@ -36,7 +24,7 @@ def _write_misordered_test_model(tmp_path):
         data = yaml.safe_load(f)
 
     # Deliberately put controls and the unshocked variable first. The canonical
-    # layout should still lead with the generated states.
+    # layout should still lead with the states.
     data["variables"] = ["Pi", "x", "r_star", "u", "v", "r"]
     data["kalman"] = {
         "P0": {
@@ -69,39 +57,22 @@ def test_compile_default_layout_canonicalizes_misordered_yaml_variables(tmp_path
 
     assert compiled.var_names == EXPECTED_CANONICAL_ORDER
     assert compiled.idx == EXPECTED_IDX
-    assert compiled.layout.declared_names == (
-        "Pi",
-        "x",
-        "r_star",
-        "u",
-        "v",
-        "r",
-        "u_lag1",
-        "v_lag1",
-        "r_lag1",
-        "e_u_st",
-        "e_v_st",
-    )
+    assert compiled.layout.declared_names == ("Pi", "x", "r_star", "u", "v", "r")
     assert compiled.layout.canonical_names == tuple(EXPECTED_CANONICAL_ORDER)
-    assert compiled.layout.exo_state_names == ("e_u_st", "e_v_st")
-    assert compiled.layout.endo_state_names == ("u_lag1", "v_lag1", "r_lag1")
-    assert compiled.layout.control_names == ("Pi", "x", "r_star", "u", "v", "r")
+    assert compiled.layout.state_names == ("u", "v", "r")
+    assert compiled.layout.control_names == ("Pi", "x", "r_star")
     assert compiled.n_exog == 2
-    assert compiled.n_state == 5
+    assert compiled.n_state == 3
 
 
-def test_generated_variables_are_recorded_with_their_canonical_positions(tmp_path):
+def test_a_single_depth_model_generates_no_variables(tmp_path):
+    # Nothing here is displaced past one date, so the compiled set is the
+    # declared set and the whole generated block is empty.
     compiled = _compile_misordered_test_model(tmp_path)
 
-    assert compiled.layout.generated == {
-        name: EXPECTED_IDX[name]
-        for name in ("e_u_st", "e_v_st", "u_lag1", "v_lag1", "r_lag1")
-    }
-    # Every state is generated and no control is, which is what makes hiding them
-    # a single filtration.
-    assert set(compiled.layout.generated) == set(
-        EXPECTED_CANONICAL_ORDER[: compiled.n_state]
-    )
+    assert compiled.layout.generated_names == ()
+    assert compiled.layout.aux_origin == {}
+    assert set(compiled.var_names) == set(compiled.layout.declared_names)
 
 
 def test_shock_columns_are_named_by_shock_in_declaration_order(tmp_path):
@@ -170,12 +141,11 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
         ki._build_Q(),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
-    # P0 is widened over the generated variables then permuted into canonical
-    # order. A lag aux takes its origin's variance (u:1, v:2, r:3) and a shock
-    # state takes the neutral 1.0.
+    # P0 is parsed by name and permuted into canonical order, so the diagonal
+    # follows the states (u:1, v:2, r:3) and then the controls (Pi:4, x:5,
+    # r_star:6) rather than the order the yaml wrote them in.
     np.testing.assert_allclose(
-        compiled.kalman.P0,
-        np.diag([1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 1.0, 2.0, 3.0]),
+        compiled.kalman.P0, np.diag([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
     )
 
 
@@ -197,21 +167,52 @@ def test_simulation_shock_unpack_accepts_shocks_by_name(tmp_path):
     np.testing.assert_allclose(unpacked[1][1], np.array([3.0, 4.0]))
 
 
-def test_explicit_order_permutes_controls_and_leaves_the_states_alone(tmp_path):
+def test_explicit_order_permutes_within_each_block(tmp_path):
     path = _write_misordered_test_model(tmp_path)
     model, kalman = ModelParser(path).get_all()
     compiled = DSGESolver(model, kalman).compile(
         variable_order=["r", "v", "u", "r_star", "x", "Pi"],
     )
 
-    assert compiled.layout.control_names == ("r", "v", "u", "r_star", "x", "Pi")
-    assert compiled.var_names[: compiled.n_state] == [
-        "e_u_st",
-        "e_v_st",
-        "u_lag1",
-        "v_lag1",
-        "r_lag1",
-    ]
+    assert compiled.layout.state_names == ("r", "v", "u")
+    assert compiled.layout.control_names == ("r_star", "x", "Pi")
+    assert compiled.var_names == ["r", "v", "u", "r_star", "x", "Pi"]
+
+
+def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
+    # u(t-2) mints u_lag1, which is a state the model never declared. The order
+    # names what the model declares, and the minted lag closes the state block.
+    with open("MODELS/test.yaml", "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-2) + e_u"
+    path = tmp_path / "deep_test.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    model, kalman = ModelParser(path).get_all()
+    compiled = DSGESolver(model, kalman).compile(
+        variable_order=["r", "v", "u", "r_star", "x", "Pi"],
+    )
+
+    assert compiled.layout.state_names == ("r", "v", "u", "u_lag1")
+    assert compiled.layout.control_names == ("r_star", "x", "Pi")
+    assert compiled.layout.generated_names == ("u_lag1",)
+    assert compiled.idx["u_lag1"] == 3
+
+    # declared_names is the user's own list and nothing else, which is what a
+    # dense ss_seed or a parse-time P0 spans. A dense x0 reaches the aux too, so
+    # it spans the concatenation, minted last.
+    layout = compiled.layout
+    assert set(layout.declared_names) == {"Pi", "x", "r_star", "u", "v", "r"}
+    assert {*layout.declared_names, *layout.generated_names} == set(compiled.var_names)
+
+
+def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path):
+    path = _write_misordered_test_model(tmp_path)
+    model, kalman = ModelParser(path).get_all()
+    solver = DSGESolver(model, kalman)
+
+    with pytest.raises(ValueError, match="must lead with the model's states"):
+        solver.compile(variable_order=["u", "v", "Pi", "r", "x", "r_star"])
 
 
 def test_compile_rejects_an_order_naming_a_generated_state(tmp_path):

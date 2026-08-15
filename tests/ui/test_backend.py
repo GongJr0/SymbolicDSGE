@@ -55,9 +55,11 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert loaded_body["solved"] is False
     assert loaded_body["name"] == "TEST"
     assert 'name: "TEST"' in loaded_body["raw_yaml"]
+    # A shock declares no target: which variables it moves is the shock
+    # jacobian's answer, so the card carries the innovation and its std alone.
     assert loaded_body["shock_specs"] == [
-        {"shock": "e_u", "target": "u", "std_param": "sig_u", "std_value": 0.5},
-        {"shock": "e_v", "target": "v", "std_param": "sig_v", "std_value": 0.25},
+        {"shock": "e_u", "std_param": "sig_u", "std_value": 0.5},
+        {"shock": "e_v", "std_param": "sig_v", "std_value": 0.25},
     ]
     assert loaded_body["shock_corr_specs"] == []
 
@@ -71,8 +73,8 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert solved.status_code == 200
     solved_body = solved.json()
     assert solved_body["solved"] is True
-    # Two shock states, three lag auxes: every state is compiler-minted.
-    assert solved_body["n_state"] == 5
+    # u, v and r are lagged, so the states are three of the model's own variables.
+    assert solved_body["n_state"] == 3
     assert solved_body["n_exog"] == 2
 
     simulated = client.post(
@@ -1076,7 +1078,10 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
 
     assert payload["test_summaries"]["diagnostic"]["statistic_ci"][0] is not None
     assert payload["test_summaries"]["diagnostic"]["rejection_ci"][0] is not None
-    assert payload["test_summaries"]["diagnostic"]["status_trace"] == [0, -1]
+    assert payload["test_summaries"]["diagnostic"]["status_trace"] == [
+        TestStatus.OK,
+        TestStatus.BAD_SHAPE,
+    ]
     assert payload["test_summaries"]["diagnostic"]["status_counts"] == {
         "OK": 1,
         "BAD_SHAPE": 1,

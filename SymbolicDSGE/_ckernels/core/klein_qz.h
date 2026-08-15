@@ -42,7 +42,7 @@ i64 klein_qz(klein_zgges_fn zgges, i64 n, c128 *SDSGE_RESTRICT s,
              f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena);
 
 #define KLEIN_QZ_OK 0
-#define KLEIN_QZ_LAPACK_FAIL -2
+#define KLEIN_QZ_LAPACK_FAIL -401
 
 /* Provisioned zgges complex workspace, in units of n. LAPACK's documented
  optimum is `n*(nb+1)` for block size nb; 64 is the largest `nb` shipped by

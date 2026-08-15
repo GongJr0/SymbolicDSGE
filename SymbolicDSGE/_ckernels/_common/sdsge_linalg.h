@@ -115,9 +115,7 @@ i64 sdsge_solve(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
 i64 sdsge_inv(const f64 *SDSGE_RESTRICT A, const i64 n,
               f64 *SDSGE_RESTRICT Ainv);
 
-/* ERROR CODES */
-#define SDSGE_LU_SUCCESS 0
-#define SDSGE_LU_ALLOC_FAIL -1
-#define SDSGE_LU_SINGULAR -2
+/* Status codes are SDSGE_LU_* and SDSGE_NOT_PD from sdsge_common.h, shared with
+ * the complex factorization. */
 
 #endif /* SDSGE_LINALG_H */

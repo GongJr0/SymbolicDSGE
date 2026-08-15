@@ -37,6 +37,7 @@ from SymbolicDSGE._ckernels.occbin._occbin import (
     regime_pencil,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
+
 from SymbolicDSGE.core.config import Constraint
 
 t = sp.Symbol("t", integer=True)
@@ -90,34 +91,33 @@ def cf(compiled):
 
 @pytest.fixture(scope="module")
 def solved(compiled, par):
-    """(ss, a_ref, b_ref, f_ref, p_ref) for the reference regime."""
+    """(ss, reference blocks, ghx, B) for the reference regime."""
     seed = DSGESolver._resolve_ss_seed(None, compiled)
     addr = compiled.construct_objective_cfunc().address
-    ss, f_ref, p_ref, *_ = klein_solve1(
+    ss, f, p, _, _, _, B = klein_solve1(
         addr,
         seed,
         par,
+        compiled.incidence,
         compiled.n_state,
         compiled.n_exog,
     )
     # The solve keeps the pencil internal, so take it at the steady state the
     # solve resolved: the same linearization, one call later.
-    a_ref, b_ref = klein_preprocess(addr, ss, par, compiled.n_var)
-    return ss, a_ref, b_ref, f_ref, p_ref
+    ref = klein_preprocess(addr, ss, par, compiled.n_var, compiled.n_exog)
+    return ss, ref, np.vstack([p, f]), B
 
 
 @pytest.fixture(scope="module")
 def table(compiled, par, solved):
-    """(a, b, c) stacked by bitmask: slot 0 the reference, slot 1 the regime."""
-    ss, a_ref, b_ref, _, _ = solved
+    """(a, b, c, d, cst) by bitmask: slot 0 the reference, slot 1 the regime."""
+    ss, ref, _, _ = solved
     func = compiled.construct_regime_pencil_func()
-    a_low, b_low, c_low = regime_pencil(
-        func.address(LOW), func.rows[LOW], ss, par, a_ref, b_ref
-    )
-    a = np.stack([a_ref, a_low])
-    b = np.stack([b_ref, b_low])
-    c = np.stack([np.zeros_like(c_low), c_low])
-    return a, b, c
+    slots = [
+        regime_pencil(0, np.empty(0, dtype=np.int64), ss, par, *ref),
+        regime_pencil(func.address(LOW), func.rows[LOW], ss, par, *ref),
+    ]
+    return tuple(np.stack([lo[i] for lo in slots]) for i in range(5))
 
 
 @pytest.fixture(scope="module")
@@ -126,9 +126,9 @@ def z_pos(compiled):
     return compiled.layout.idx["z"]
 
 
-def _shocks(n_state, n_period, size=SHOCK):
-    """``(n_period, n_state)`` carrying one hit, in the leading shock state."""
-    out = np.zeros((n_period, n_state))
+def _shocks(solved, n_period, size=SHOCK):
+    """``(n_period, n_exog)`` carrying one hit, in the leading innovation."""
+    out = np.zeros((n_period, solved[3].shape[1]))
     out[0, 0] = size
     return out
 
@@ -145,20 +145,17 @@ def _solve(table, solved, par, cond_addr, n_constraint, inclusive, shocks, **kw)
     # every test here except the two that are about growth.
     if "check_ahead_periods" in kw:
         kw.setdefault("max_check_ahead_periods", kw["check_ahead_periods"])
-    a, b, c = table
-    ss, _, _, f_ref, _ = solved
+    ss, _, ghx, _ = solved
     return occbin_sim(
-        a,
-        b,
-        c,
-        f_ref,
+        *table,
+        ghx,
         ss,
         par,
         cond_addr,
         n_constraint,
         inclusive,
         shocks,
-        np.zeros(f_ref.shape[1]),
+        np.zeros(ghx.shape[1]),
         **kw,
     )
 
@@ -169,75 +166,80 @@ def _run(table, solved, par, cf, shocks, **kw):
     )
 
 
-def test_the_path_pairs_each_state_with_its_own_dates_control(table, solved):
-    # Row t is [x_t; u_t]: the state half is what date t-1's block produced and
-    # the control half what date t's did, which is the pairing the latch reads.
-    a, b, c = table
-    _, _, _, f_ref, _ = solved
-    n_state = f_ref.shape[1]
-    rule = occbin_recursion(a, b, c, MIXED, f_ref)
+def test_the_path_is_each_dates_block_on_the_date_before(table, solved):
+    # Row t is the whole of y_t out of date t's block, and its state half is
+    # what date t + 1 reads back as its lag. The innovation lands on date 0
+    # alone, so every later date runs on the state carry only.
+    _, _, ghx, B = solved
+    n_state, n_exog = ghx.shape[1], B.shape[1]
+    rule = occbin_recursion(*table, MIXED, ghx)
     x0 = np.arange(1.0, n_state + 1.0)
+    eps0 = np.full(n_exog, SHOCK)
 
-    path = occbin_forward(rule, x0)
+    path = occbin_forward(rule, x0, eps0)
 
     x = x0.copy()
     for date in range(rule.shape[0]):
-        y = rule[date, :, :n_state] @ x + rule[date, :, n_state]
-        np.testing.assert_allclose(path[date, :n_state], x, rtol=1e-9, atol=1e-11)
-        np.testing.assert_allclose(
-            path[date, n_state:], y[n_state:], rtol=1e-9, atol=1e-11
+        eps = eps0 if date == 0 else np.zeros(n_exog)
+        y = (
+            rule[date, :, :n_state] @ x
+            + rule[date, :, n_state : n_state + n_exog] @ eps
+            + rule[date, :, -1]
         )
+        np.testing.assert_allclose(path[date], y, rtol=1e-9, atol=1e-11)
         x = y[:n_state]
 
 
-def test_an_all_relaxed_path_walks_the_reference_rule(table, solved):
-    a, b, c = table
-    _, _, _, f_ref, p_ref = solved
-    n_state = f_ref.shape[1]
-    rule = occbin_recursion(a, b, c, np.zeros(8, dtype=np.int8), f_ref)
+def test_an_all_relaxed_path_walks_the_reference_state_space(table, solved):
+    # With no regime binding the path is the reference model's own recursion,
+    # `y_t = ghx x_{t-1} + B eps_t`, which the solve produced independently.
+    _, _, ghx, B = solved
+    n_state, n_exog = ghx.shape[1], B.shape[1]
+    rule = occbin_recursion(*table, np.zeros(8, dtype=np.int8), ghx)
     x0 = np.arange(1.0, n_state + 1.0)
+    eps0 = np.full(n_exog, SHOCK)
 
-    path = occbin_forward(rule, x0)
+    path = occbin_forward(rule, x0, eps0)
 
-    x = x0.copy()
+    y = ghx @ x0 + B @ eps0
     for date in range(8):
-        np.testing.assert_allclose(path[date, :n_state], x, rtol=1e-9, atol=1e-11)
-        np.testing.assert_allclose(
-            path[date, n_state:], f_ref @ x, rtol=1e-9, atol=1e-11
-        )
-        x = p_ref @ x
+        np.testing.assert_allclose(path[date], y, rtol=1e-9, atol=1e-11)
+        y = ghx @ y[:n_state]
 
 
 def test_forward_writes_out_in_place(table, solved):
-    a, b, c = table
-    _, _, _, f_ref, _ = solved
-    rule = occbin_recursion(a, b, c, MIXED, f_ref)
+    _, _, ghx, _ = solved
+    rule = occbin_recursion(*table, MIXED, ghx)
     n_var = rule.shape[1]
     buf = np.zeros((MIXED.size, n_var))
 
-    got = occbin_forward(rule, np.ones(f_ref.shape[1]), out=buf)
+    got = occbin_forward(rule, np.ones(ghx.shape[1]), out=buf)
 
     assert got is buf
     assert np.abs(buf).max() > 0.0
 
 
-def test_forward_rejects_an_initial_state_of_the_wrong_width(table, solved):
-    a, b, c = table
-    _, _, _, f_ref, _ = solved
-    rule = occbin_recursion(a, b, c, MIXED, f_ref)
+def test_forward_rejects_an_initial_state_wider_than_the_model(table, solved):
+    _, _, ghx, _ = solved
+    rule = occbin_recursion(*table, MIXED, ghx)
 
-    with pytest.raises(ValueError, match="expected"):
-        occbin_forward(rule, np.ones(f_ref.shape[1] + 1))
+    with pytest.raises(ValueError, match="more than rule's"):
+        occbin_forward(rule, np.ones(rule.shape[1] + 1))
+
+
+def test_forward_rejects_an_innovation_of_the_wrong_width(table, solved):
+    _, _, ghx, B = solved
+    rule = occbin_recursion(*table, MIXED, ghx)
+
+    with pytest.raises(ValueError, match="to match rule's shock columns"):
+        occbin_forward(rule, np.ones(ghx.shape[1]), np.ones(B.shape[1] + 1))
 
 
 def test_an_empty_rule_stack_is_a_no_op(table, solved):
-    # The seed writes into row 0 before the date loop runs, so a stack with no
-    # dates has to be turned away rather than seeded.
-    _, _, _, f_ref, _ = solved
-    n_state = f_ref.shape[1]
-    n_var = n_state + f_ref.shape[0]
+    _, _, ghx, B = solved
+    n_var, n_state, n_exog = ghx.shape[0], ghx.shape[1], B.shape[1]
 
-    path = occbin_forward(np.empty((0, n_var, n_state + 1)), np.ones(n_state))
+    path = occbin_forward(np.empty((0, n_var, n_state + n_exog + 1)), np.ones(n_state))
 
     assert path.shape == (0, n_var)
 
@@ -245,10 +247,10 @@ def test_an_empty_rule_stack_is_a_no_op(table, solved):
 def test_the_steady_state_is_a_fixed_point(table, solved, par, cf):
     # Nothing moves, so the constraint is read at the steady state, where the
     # distance is exactly zero and a strict condition does not fire.
-    n_state = solved[3].shape[1]
+    n_exog = solved[3].shape[1]
 
     out, regimes, diag = _run(
-        table, solved, par, cf, np.zeros((1, n_state)), check_ahead_periods=SHORT
+        table, solved, par, cf, np.zeros((1, n_exog)), check_ahead_periods=SHORT
     )
 
     np.testing.assert_array_equal(out, np.zeros_like(out))
@@ -262,14 +264,13 @@ def test_the_steady_state_is_a_fixed_point(table, solved, par, cf):
 def test_the_mask_is_the_condition_read_off_its_own_path(table, solved, par, cf, z_pos):
     # The accepted guess is a fixed point of the latch, so date by date it has
     # to agree with the condition evaluated on the path it produced.
-    n_state = solved[3].shape[1]
 
     out, regimes, diag = _run(
         table,
         solved,
         par,
         cf,
-        _shocks(n_state, 1),
+        _shocks(solved, 1),
         check_ahead_periods=HORIZON,
         n_periods=HORIZON_T,
     )
@@ -285,33 +286,32 @@ def test_the_mask_is_the_condition_read_off_its_own_path(table, solved, par, cf,
 
 
 def test_the_path_is_the_forward_pass_of_the_accepted_guess(table, solved, par, cf):
-    a, b, c = table
-    _, _, _, f_ref, _ = solved
-    n_state = f_ref.shape[1]
+    _, _, ghx, _ = solved
+    shocks = _shocks(solved, 1)
 
     out, regimes, diag = _run(
         table,
         solved,
         par,
         cf,
-        _shocks(n_state, 1),
+        shocks,
         check_ahead_periods=HORIZON,
         n_periods=HORIZON_T,
     )
 
     used = int(diag["T_used"][0])
-    rule = occbin_recursion(a, b, c, regimes[0][:used], f_ref)
-    x0 = np.zeros(n_state)
-    x0[0] = SHOCK
+    rule = occbin_recursion(*table, regimes[0][:used], ghx)
+    x0 = np.zeros(ghx.shape[1])
 
     # The same two kernels on the same inputs, so this is exact up to the LU.
-    np.testing.assert_allclose(out, occbin_forward(rule, x0), rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(
+        out, occbin_forward(rule, x0, shocks[0]), rtol=1e-13, atol=1e-13
+    )
 
 
 def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, par, cf):
     # Dynare's shockless branch. The previous guess and the path it implies
     # already describe this period, so shifting must reproduce them exactly.
-    n_state = solved[3].shape[1]
     periods = 5
 
     many_out, many_reg, many_diag = _run(
@@ -319,7 +319,7 @@ def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, pa
         solved,
         par,
         cf,
-        _shocks(n_state, periods),
+        _shocks(solved, periods),
         check_ahead_periods=HORIZON,
         n_periods=periods,
     )
@@ -328,7 +328,7 @@ def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, pa
         solved,
         par,
         cf,
-        _shocks(n_state, 1),
+        _shocks(solved, 1),
         check_ahead_periods=HORIZON,
         n_periods=periods,
     )
@@ -344,8 +344,7 @@ def test_a_period_without_a_shock_shifts_instead_of_re_solving(table, solved, pa
 
 
 def test_a_short_horizon_grows_into_the_same_answer(table, solved, par, cf, z_pos):
-    n_state = solved[3].shape[1]
-    shocks = _shocks(n_state, 1)
+    shocks = _shocks(solved, 1)
 
     long_out, _, _ = _run(
         table,
@@ -395,7 +394,6 @@ def _always_fires(cur, par, err):
 
 
 def test_a_guess_that_never_settles_reports_the_iteration_cap(table, solved, par):
-    n_state = solved[3].shape[1]
 
     with pytest.raises(RuntimeError, match="did not converge in 3 iterations"):
         _solve(
@@ -405,7 +403,7 @@ def test_a_guess_that_never_settles_reports_the_iteration_cap(table, solved, par
             _always_fires.address,
             1,
             0,
-            _shocks(n_state, 1),
+            _shocks(solved, 1),
             check_ahead_periods=SHORT,
             max_iter=3,
         )
@@ -414,9 +412,7 @@ def test_a_guess_that_never_settles_reports_the_iteration_cap(table, solved, par
 def test_an_incomplete_pencil_stack_is_rejected(table, solved, par, cf):
     # The latch emits every mask over its constraints and the kernel indexes the
     # table with it, so a missing slot would be read past the end.
-    a, b, c = table
-    n_state = solved[3].shape[1]
-    reference_only = (a[:1], b[:1], c[:1])
+    reference_only = tuple(blk[:1] for blk in table)
 
     with pytest.raises(ValueError, match=re.escape("cover every mask over 1")):
         _run(
@@ -424,21 +420,19 @@ def test_an_incomplete_pencil_stack_is_rejected(table, solved, par, cf):
             solved,
             par,
             cf,
-            _shocks(n_state, 1),
+            _shocks(solved, 1),
             check_ahead_periods=SHORT,
         )
 
 
 def test_a_horizon_of_zero_is_rejected(table, solved, par, cf):
     # A guess needs a date to release on, and the shift reads the one before it.
-    n_state = solved[3].shape[1]
 
     with pytest.raises(ValueError, match="at least 1"):
-        _run(table, solved, par, cf, _shocks(n_state, 1), check_ahead_periods=0)
+        _run(table, solved, par, cf, _shocks(solved, 1), check_ahead_periods=0)
 
 
 def test_a_tail_longer_than_the_path_is_rejected(table, solved, par, cf):
-    n_state = solved[3].shape[1]
 
     with pytest.raises(ValueError, match="at most S"):
         _run(
@@ -446,22 +440,22 @@ def test_a_tail_longer_than_the_path_is_rejected(table, solved, par, cf):
             solved,
             par,
             cf,
-            _shocks(n_state, 1),
+            _shocks(solved, 1),
             check_ahead_periods=SHORT,
             n_periods=SHORT_T + 2,
         )
 
 
 def test_shocks_of_the_wrong_width_are_rejected(table, solved, par, cf):
-    n_state = solved[3].shape[1]
+    n_exog = solved[3].shape[1]
 
-    with pytest.raises(ValueError, match="to match f_ref"):
+    with pytest.raises(ValueError, match="match the pencils' shock block"):
         _run(
             table,
             solved,
             par,
             cf,
-            np.zeros((1, n_state + 1)),
+            np.zeros((1, n_exog + 1)),
             check_ahead_periods=SHORT,
         )
 
@@ -469,7 +463,6 @@ def test_shocks_of_the_wrong_width_are_rejected(table, solved, par, cf):
 def test_a_truncated_algorithm_accepts_the_guess_it_ran_out_on(table, solved, par):
     # Dynare's algo_truncation. A max_iter at or below it means the caller
     # asked for a truncated solve, so the last guess stands instead of raising.
-    n_state = solved[3].shape[1]
 
     out, regimes, diag = _solve(
         table,
@@ -478,7 +471,7 @@ def test_a_truncated_algorithm_accepts_the_guess_it_ran_out_on(table, solved, pa
         _always_fires.address,
         1,
         0,
-        _shocks(n_state, 1),
+        _shocks(solved, 1),
         check_ahead_periods=SHORT,
         max_iter=1,
         algo_truncation=1,
@@ -493,7 +486,6 @@ def test_a_truncated_algorithm_accepts_the_guess_it_ran_out_on(table, solved, pa
 
 
 def test_a_max_iter_above_the_truncation_still_raises(table, solved, par):
-    n_state = solved[3].shape[1]
 
     with pytest.raises(RuntimeError, match="did not converge in 1 iterations"):
         _solve(
@@ -503,7 +495,7 @@ def test_a_max_iter_above_the_truncation_still_raises(table, solved, par):
             _always_fires.address,
             1,
             0,
-            _shocks(n_state, 1),
+            _shocks(solved, 1),
             check_ahead_periods=SHORT,
             max_iter=1,
             algo_truncation=0,
@@ -511,8 +503,7 @@ def test_a_max_iter_above_the_truncation_still_raises(table, solved, par):
 
 
 def test_seeding_the_answer_settles_in_one_pass(table, solved, par, cf):
-    n_state = solved[3].shape[1]
-    shocks = _shocks(n_state, 1)
+    shocks = _shocks(solved, 1)
     kw = {"check_ahead_periods": HORIZON, "n_periods": HORIZON_T}
 
     out, regimes, diag = _run(table, solved, par, cf, shocks, **kw)
@@ -528,8 +519,7 @@ def test_seeding_the_answer_settles_in_one_pass(table, solved, par, cf):
 
 
 def test_a_reset_regime_throws_the_seed_away(table, solved, par, cf):
-    n_state = solved[3].shape[1]
-    shocks = _shocks(n_state, 1)
+    shocks = _shocks(solved, 1)
     kw = {"check_ahead_periods": HORIZON, "n_periods": HORIZON_T}
     _, regimes, _ = _run(table, solved, par, cf, shocks, **kw)
 
@@ -545,8 +535,7 @@ def test_a_reset_regime_throws_the_seed_away(table, solved, par, cf):
 def test_curb_retrench_gives_up_one_date_per_pass(table, solved, par, cf):
     # Seeded with every date binding, the latch wants to relax the whole tail
     # at once. Damping concedes the last date only, and lands the same answer.
-    n_state = solved[3].shape[1]
-    shocks = _shocks(n_state, 1)
+    shocks = _shocks(solved, 1)
     kw = {"check_ahead_periods": HORIZON, "n_periods": HORIZON_T}
     seed = np.ones((1, HORIZON_T), dtype=np.int8)
 
@@ -565,8 +554,7 @@ def test_curb_retrench_gives_up_one_date_per_pass(table, solved, par, cf):
 def test_an_initial_guess_past_the_growth_cap_is_rejected(table, solved, par, cf):
     # Shorter rows relax into the tail and longer ones raise the horizon, so the
     # only illegal width is one the arena never reserved.
-    n_state = solved[3].shape[1]
-    shocks = _shocks(n_state, 1)
+    shocks = _shocks(solved, 1)
     _, regimes, _ = _run(table, solved, par, cf, shocks, check_ahead_periods=HORIZON)
     too_long = np.zeros((1, regimes.shape[1] + 1), dtype=np.int8)
 
@@ -583,7 +571,6 @@ def test_an_initial_guess_past_the_growth_cap_is_rejected(table, solved, par, cf
 
 
 def test_an_initial_guess_outside_the_table_is_rejected(table, solved, par, cf):
-    n_state = solved[3].shape[1]
     seed = np.zeros((1, SHORT_T), dtype=np.int8)
     seed[0, 0] = 2
 
@@ -593,7 +580,7 @@ def test_an_initial_guess_outside_the_table_is_rejected(table, solved, par, cf):
             solved,
             par,
             cf,
-            _shocks(n_state, 1),
+            _shocks(solved, 1),
             check_ahead_periods=SHORT,
             init_regime=seed,
         )
@@ -608,8 +595,8 @@ CYCLE_T = CYCLE_HORIZON + 1
 
 #: Where ``_flip`` reads capital and TFP. A cfunc cannot close over a fixture,
 #: so the positions are baked in and ``flip_par`` checks the layout agrees.
-_K_POS = 4
-_Z_POS = 5
+_K_POS = 0
+_Z_POS = 1
 
 
 @cfunc(_COND_SIG)
@@ -632,12 +619,12 @@ def _flip(cur, par, err):
 @pytest.fixture(scope="module")
 def flip_par(compiled, table, solved):
     """``m -> (bind, relax)``: the levels that make ``m`` leading dates bind."""
-    a, b, c = table
-    ss, _, _, f_ref, _ = solved
+    ss, _, ghx, _ = solved
     assert (compiled.layout.idx["k"], compiled.layout.idx["z"]) == (_K_POS, _Z_POS)
 
-    rule = occbin_recursion(a, b, c, np.zeros(CYCLE_HORIZON, dtype=np.int8), f_ref)
-    z = occbin_forward(rule, _cycle_state(f_ref))[:, _Z_POS] + ss[_Z_POS]
+    rule = occbin_recursion(*table, np.zeros(CYCLE_HORIZON, dtype=np.int8), ghx)
+    path = occbin_forward(rule, np.zeros(ghx.shape[1]), _cycle_eps(solved))
+    z = path[:, _Z_POS] + ss[_Z_POS]
 
     def par(m):
         # Between date m - 1 and date m of a TFP path that only recovers, so
@@ -647,11 +634,11 @@ def flip_par(compiled, table, solved):
     return par
 
 
-def _cycle_state(f_ref):
-    """The state date 0 of the swinging period enters on."""
-    x0 = np.zeros(f_ref.shape[1])
-    x0[0] = CYCLE_SHOCK
-    return x0
+def _cycle_eps(solved):
+    """The innovation date 0 of the swinging period arrives on."""
+    eps = np.zeros(solved[3].shape[1])
+    eps[0] = CYCLE_SHOCK
+    return eps
 
 
 def _flip_run(table, solved, par, **kw):
@@ -662,7 +649,7 @@ def _flip_run(table, solved, par, **kw):
         _flip.address,
         1,
         0,
-        _shocks(solved[3].shape[1], 1, CYCLE_SHOCK),
+        _shocks(solved, 1, CYCLE_SHOCK),
         check_ahead_periods=CYCLE_HORIZON,
         max_check_ahead_periods=CYCLE_HORIZON,
         **kw,
@@ -696,8 +683,7 @@ def test_periodic_solution_accepts_the_half_of_the_cycle_that_settles(
 ):
     # Of the two guesses that repeat, the one weighed is the pass that wanted no
     # new binding date, which here is the one with date 0 already binding.
-    a, b, c = table
-    f_ref = solved[3]
+    ghx = solved[2]
 
     out, regimes, diag = _flip_run(
         table,
@@ -714,9 +700,12 @@ def test_periodic_solution_accepts_the_half_of_the_cycle_that_settles(
     np.testing.assert_array_equal(diag["periodic"], [1])
     np.testing.assert_array_equal(diag["iters"], [2])
 
-    rule = occbin_recursion(a, b, c, accepted, f_ref)
+    rule = occbin_recursion(*table, accepted, ghx)
     np.testing.assert_allclose(
-        out, occbin_forward(rule, _cycle_state(f_ref)), rtol=1e-13, atol=1e-13
+        out,
+        occbin_forward(rule, np.zeros(ghx.shape[1]), _cycle_eps(solved)),
+        rtol=1e-13,
+        atol=1e-13,
     )
 
 
@@ -724,6 +713,7 @@ def test_periodic_solution_accepts_the_half_of_the_cycle_that_settles(
 def test_periodic_solution_does_not_rescue_a_wider_loop(
     table, solved, flip_par, strict
 ):
+
     # Only a two-cycle is weighed by default. Dropping strictness weighs a loop
     # as well, but only one where some pass moved the guess no further than the
     # threshold, and none of this one's did.
@@ -741,8 +731,7 @@ def test_a_reset_drops_a_grown_horizon_only_with_its_companion(table, solved, pa
     # The first shock grows the horizon to hold its spell. The second clears the
     # spell outright, so the relaxed guess is the answer: a reset lands it in one
     # pass, and only the companion flag hands back the dates the guess grew.
-    n_state = solved[3].shape[1]
-    shocks = np.zeros((2, n_state))
+    shocks = np.zeros((2, solved[3].shape[1]))
     shocks[0, 0] = SHOCK
     shocks[1, 0] = 0.005
     kw = {
@@ -783,12 +772,14 @@ def test_a_reset_drops_a_grown_horizon_only_with_its_companion(table, solved, pa
 def test_the_arena_formula_is_pinned():
     # The kernel carves nine regions out of two buffers; nothing else states
     # how big they are.
-    n_var, n_state, n_ctrl, T_cap, max_iter = 7, 3, 4, 11, 5
-    n_rhs = n_state + 1
-    recursion = n_var * n_var + n_var * n_rhs + n_ctrl * n_rhs
+    n_var, n_state, n_ctrl, n_exog, T_cap, max_iter = 7, 3, 4, 2, 11, 5
+    n_rhs = n_state + n_exog + 1
+    recursion = n_var * n_var + 2 * n_var * n_rhs
     masks = (max_iter + 3) * T_cap + max_iter
 
-    n_float, n_int = occbin_sim_arena_size(n_var, n_state, n_ctrl, T_cap, max_iter)
+    n_float, n_int = occbin_sim_arena_size(
+        n_var, n_state, n_ctrl, n_exog, T_cap, max_iter
+    )
 
     assert n_float == n_state + T_cap * n_var + max_iter + recursion
     assert n_int == n_var + 2 * max_iter + (masks + 7) // 8

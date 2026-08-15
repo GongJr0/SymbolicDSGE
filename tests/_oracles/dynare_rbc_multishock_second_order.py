@@ -7,19 +7,17 @@ here at ``%.17g``. Regenerate by rerunning that pair; only the ``.mod`` and the
 ``.m`` files are kept in the tree.
 
 This fixture exists for what the single-shock one cannot reach: the shock cross
-terms, the Cholesky branch of the eta builder, and a risk correction against a
-full covariance rather than one variance.
+terms and a risk correction against a full covariance rather than one variance.
 
 The three vocabularies here are the whole mapping, and are named on our side.
 ``DR_ROWS`` is Dynare's decision-rule row order, ``DR_STATES`` its state columns
-which are our lag auxes, and ``DR_EXO`` its exogenous columns which are our
-lifted shock states. Second-order columns are Kronecker products of those,
-column ``(i-1)*q + j`` of ``kron(A, B)`` pairing ``A(i)`` with ``B(j)``: GHXX is
+and ``DR_EXO`` its exogenous columns. Second-order columns are Kronecker
+products of those, column ``(i-1)*q + j`` of ``kron(A, B)`` pairing ``A(i)`` with ``B(j)``: GHXX is
 state by state, GHXU state by exo, GHUU exo by exo.
 
 The simulation goldens are pruned second order in column order ``[z, d, g, k,
-c]`` with ``k`` dated as the predetermined stock, our ``k_lag1``, and the path
-seeded one AR step behind the printed processes. ``SIM_X0`` is that seed as
+c]`` with ``k`` dated as the predetermined stock, and the path seeded one AR
+step behind the printed processes. ``SIM_X0`` is that seed as
 ``[z, d, g, k]``.
 """
 
@@ -30,14 +28,14 @@ import numpy as np
 # it. One list per DR row.
 #
 # The three vocabularies below are the whole mapping, and are named on our side:
-# Dynare's DR rows [k, d, g, z, c], its state columns [k, d, g, z] which are our
-# lag auxes, and its exogenous columns [e_z, e_d, e_g] which are our lifted shock
-# states. Second-order columns are Kronecker products of those, column (i-1)*q + j
+# Dynare's DR rows [k, d, g, z, c], its state columns [k, d, g, z] and its
+# exogenous columns [e_z, e_d, e_g].
+# Second-order columns are Kronecker products of those, column (i-1)*q + j
 # of kron(A, B) pairing A(i) with B(j): ghxx is state x state, ghxu state x exo,
 # ghuu exo x exo.
 DR_ROWS = ("k", "d", "g", "z", "c")
-DR_STATES = ("k_lag1", "d_lag1", "g_lag1", "z_lag1")
-DR_EXO = ("e_z_st", "e_d_st", "e_g_st")
+DR_STATES = ("k", "d", "g", "z")
+DR_EXO = ("e_z", "e_d", "e_g")
 
 GHX = [
     [0.97764956105920198, 3.0989174339781824, -0.3378547421051602, 2.0621545726769814],

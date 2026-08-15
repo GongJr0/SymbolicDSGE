@@ -16,8 +16,8 @@ static inline f64 sdsge_smooth_threshold(f64 z, f64 gamma) {
 
 typedef enum {
   REGRESSION_OK = 0,
-  REGRESSION_RANK_DEFICIENT = -1,
-  REGRESSION_NON_CONVERGENT = -2,
+  REGRESSION_RANK_DEFICIENT = -1501,
+  REGRESSION_NON_CONVERGENT = -1502,
 } RegressionStatus;
 
 /* Grid-search information criteria. Parity oracles: aic / bic / l2_loss in

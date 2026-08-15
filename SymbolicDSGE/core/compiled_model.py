@@ -21,7 +21,14 @@ from SymbolicDSGE._symbolic_printers import (
     build_constraint_cfunc,
     build_measurement_cfunc,
 )
-from .._ckernels.core import jacobian_eval, measurement_eval, residual_eval
+from .._ckernels.core import (
+    INC_CUR,
+    INC_LAG,
+    INC_LEAD,
+    jacobian_eval,
+    measurement_eval,
+    residual_eval,
+)
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -32,32 +39,54 @@ ND = NDArray
 class VariableLayout:
     """Where every compiled variable sits, and which ones the compiler minted.
 
-    ``declared_names`` is the model's own declaration order followed by the
-    generated variables, which is the order the parse-time ``P0`` is widened
-    into. ``generated`` maps each generated name to its canonical position, so a
-    consumer hiding them filters by name or by position off the same map.
+    The counts are the model's dimensions, and a consumer sizing an array takes
+    them from here rather than measuring whichever list is nearest. ``n_var`` is
+    the compiled set, ``n_declared`` the model's own variables and
+    ``n_generated`` the minted ones, so ``n_var == n_declared + n_generated``.
+    The first two coincide until the compiler mints something, which is why they
+    are separate numbers and not one: a dense ``ss_seed`` or a parse-time ``P0``
+    spans ``n_declared``, a dense ``x0`` spans ``n_var``. ``n_state`` and
+    ``n_ctrl`` split the canonical order and sum to ``n_var``.
 
-    ``lag_origin`` maps each lag aux to the declared variable it tracks, at every
-    depth, which is what widens a declared-order input over the generated block.
-    A shock state is absent from it: it tracks an innovation, not a variable.
+    ``declared_names`` is the model's own declaration order, and nothing else.
+    ``generated_names`` is the compiler's minted names in mint order, which is
+    where they sit in declaration order. Neither carries a position: a name's
+    canonical slot is ``idx``'s answer, and asking one map for two orderings is
+    what lets them drift.
 
-    ``shock_names`` names the shock columns in ``shock_map`` order, which is the
-    order the compiler minted the shock states in, and ``shock_idx`` is that
-    order as a lookup. A shock is named by its own symbol rather than by the
-    variable it targets: after desugaring one shock may enter several equations,
-    and a target name would claim a scope the innovation does not have.
-    """
+    ``aux_origin`` maps each minted lag or lead to the declared variable it
+    tracks, at every depth, which is what widens a declared-order input over the
+    generated block. An aux sits at its origin some periods away, so it shares
+    the origin's steady state and takes its variance.
+
+    ``state_names`` and ``control_names`` split the canonical order at
+    ``n_state``. A variable is a state when it occurs at ``t-1``, which is what
+    the pencil partition needs.
+
+    ``n_exog`` counts the model's innovations, which is the width of the shock
+    matrix and of ``B``, not a count of variables.
+
+    ``shock_names`` is ordered names of the shock columns.
+
+    ``shock_idx`` is that order as a lookup."""
+
+    n_var: int
+    n_declared: int
+    n_generated: int
+
+    n_exog: int
+    n_state: int
+    n_ctrl: int
+
+    idx: dict[str, int]
 
     declared_names: tuple[str, ...]
     canonical_names: tuple[str, ...]
-    exo_state_names: tuple[str, ...]
-    endo_state_names: tuple[str, ...]
+    state_names: tuple[str, ...]
     control_names: tuple[str, ...]
-    n_exog: int
-    n_state: int
-    idx: dict[str, int]
-    generated: dict[str, int] = field(default_factory=dict)
-    lag_origin: dict[str, str] = field(default_factory=dict)
+    generated_names: tuple[str, ...] = ()
+
+    aux_origin: dict[str, str] = field(default_factory=dict)
     shock_names: tuple[str, ...] = ()
     shock_idx: dict[str, int] = field(default_factory=dict)
 
@@ -117,10 +146,20 @@ class ConstraintFunc:
 
 @dataclass(frozen=True)
 class RegimeBlock:
+    """One regime's replaced rows, and their pencil blocks at the reference point.
+
+    ``jac_a``/``jac_b``/``jac_c`` are the replaced rows of the three date
+    Jacobians, flat row-major ``(len(rows), n_var)``, and ``jac_d`` is the shock
+    block, ``(len(rows), n_exog)``. They carry ``klein_preproc``'s signs, so the
+    row reads ``a y' = b y + c y_prev + d eps - const``.
+    """
+
     rows: list[int]
     residuals: list[Expr] = field(default_factory=list)
     jac_a: list[Expr] = field(default_factory=list)
     jac_b: list[Expr] = field(default_factory=list)
+    jac_c: list[Expr] = field(default_factory=list)
+    jac_d: list[Expr] = field(default_factory=list)
     constants: list[Expr] = field(default_factory=list)
 
 
@@ -129,19 +168,19 @@ class RegimePencilFunc:
     """Compiled regime pencil rows, and everything the native side needs to call them.
 
     One cfunc per regime, keyed by the same bitmask as ``regimes``, writing
-    ``[jac_a; jac_b; constants]`` into a single ``2 * n_row * n_var + n_row``
-    buffer: the whole a block, then the whole b block, each row-major
-    ``(n_row, n_var)`` and ordered like ``rows``, then the constants. Concatenated
+    ``[jac_a; jac_b; jac_c; jac_d; constants]`` into a single buffer: each block
+    whole and row-major, ordered like ``rows``, then the constants. Concatenated
     rather than interleaved because the blocks patch into separate copies of the
     reference pencil, so each row is a contiguous copy on every side.
 
-    ``jac_b`` carries klein_preproc's sign and ``constants`` is unnegated, so all
-    three drop into a reference pencil copy as they are.
+    ``jac_b``/``jac_c``/``jac_d`` carry klein_preproc's signs and ``constants``
+    is unnegated, so all of them drop into a reference pencil copy as they are.
     """
 
     cfuncs: dict[int, Any]
     rows: dict[int, NDArray[int64]]
     n_var: int
+    n_exog: int
     n_par: int
 
     @property
@@ -158,9 +197,10 @@ class RegimePencilFunc:
         return int(self.rows[mask].shape[0])
 
     def n_out(self, mask: int) -> int:
-        """Length of ``out``: both blocks, ``2 * n_row * n_var + n_row``."""
+        """Length of ``out``: the three date blocks, the shock block, then the
+        constants, ``n_row * (3 * n_var + n_exog + 1)``."""
         n_row = self.n_row(mask)
-        return 2 * n_row * self.n_var + n_row
+        return n_row * (3 * self.n_var + self.n_exog + 1)
 
 
 @dataclass(frozen=True)
@@ -184,13 +224,6 @@ class CompiledModel:
     # printed to a native cfunc on demand (construct_observable_jacobian_cfunc).
     observable_jacobian_eqs: list[Expr]
 
-    n_var: int
-    n_state: int
-    n_exog: int
-    n_ctrl: int
-    n_par: int
-    n_obs: int
-
     # Regime conditions in declaration order, bind then relax per constraint;
     # printed to a native cfunc on demand (construct_constraint_func).
     constraint_names: tuple[str, ...] = ()
@@ -202,14 +235,83 @@ class CompiledModel:
     regimes: dict[int, RegimeBlock] = field(default_factory=dict)
 
     @property
+    def n_var(self) -> int:
+        return self.layout.n_var
+
+    @property
+    def n_state(self) -> int:
+        return self.layout.n_state
+
+    @property
+    def n_ctrl(self) -> int:
+        return self.layout.n_ctrl
+
+    @property
+    def n_exog(self) -> int:
+        return self.layout.n_exog
+
+    @property
+    def n_declared(self) -> int:
+        return self.layout.n_declared
+
+    @property
+    def n_generated(self) -> int:
+        return self.layout.n_generated
+
+    @property
+    def n_par(self) -> int:
+        return len(self.calib_params)
+
+    @property
+    def n_obs(self) -> int:
+        return len(self.observable_names)
+
+    @property
     def shock_names(self) -> tuple[str, ...]:
-        """Shock column names, in ``shock_map`` (and so column) order."""
+        """Shock column names, in ``shocks`` (and so column) order."""
         return self.layout.shock_names
 
     @property
     def shock_idx(self) -> dict[str, int]:
         """``{shock name: column}`` into the ``(T, n_exog)`` shock matrix."""
         return self.layout.shock_idx
+
+    @cached_property
+    def incidence(self) -> NDArray[np.int8]:
+        """``(n_var,)`` of ``SDSGE_INC_*`` bits: the dates each variable occurs at.
+
+        The solve partitions the pencil on this, so it is read from the symbols
+        the equations actually contain rather than from a Jacobian's sparsity. A
+        calibration that happened to zero a coefficient would otherwise move a
+        variable between groups and resize the state vector between draws.
+
+        Unioned over the reference equations and every regime's replacements:
+        the regime pencils stack by bitmask into one array, so a regime dropping
+        the last occurrence of some ``v(t+1)`` must not give that regime a pencil
+        of its own shape.
+        """
+        bit_of = {"prev": INC_LAG, "cur": INC_CUR, "fwd": INC_LEAD}
+
+        exprs = list(self.objective_eqs)
+        for block in self.regimes.values():
+            exprs.extend(block.residuals)
+        # Observables too: the layout's own lag scan covers them, and the solve
+        # indexes `p` by `n_state` while iterating `nspred`, so the two sets
+        # disagreeing is an out-of-bounds write rather than a wrong answer.
+        exprs.extend(self.observable_eqs)
+
+        present: set[str] = set()
+        for expr in exprs:
+            present.update(s.name for s in expr.free_symbols)  # pyright: ignore
+
+        out = np.zeros(self.n_var, dtype=np.int8)
+        for i, name in enumerate(self.var_names):
+            bits = 0
+            for prefix, bit in bit_of.items():
+                if f"{prefix}_{name}" in present:
+                    bits |= bit
+            out[i] = bits
+        return out
 
     @cached_property
     def _regime_cfuncs(self) -> dict[int, Any]:
@@ -240,19 +342,33 @@ class CompiledModel:
         rows: dict[int, NDArray[int64]] = {}
         for mask, block in self.regimes.items():
             want_jac = len(block.rows) * base.n_var
+            want_shock = len(block.rows) * self.n_exog
             want_const = len(block.rows)
-            if len(block.jac_a) != want_jac or len(block.jac_b) != want_jac:
+            got = (len(block.jac_a), len(block.jac_b), len(block.jac_c))
+            if any(n != want_jac for n in got):
                 raise ValueError(
-                    f"Regime {mask} has {len(block.jac_a)}/{len(block.jac_b)} "
-                    f"jacobian entries, expected {want_jac} for {len(block.rows)} "
-                    f"rows over {base.n_var} variables."
+                    f"Regime {mask} has {got} a/b/c jacobian entries, expected "
+                    f"{want_jac} each for {len(block.rows)} rows over "
+                    f"{base.n_var} variables."
+                )
+            if len(block.jac_d) != want_shock:
+                raise ValueError(
+                    f"Regime {mask} has {len(block.jac_d)} shock jacobian "
+                    f"entries, expected {want_shock} for {len(block.rows)} rows "
+                    f"over {self.n_exog} shocks."
                 )
             if len(block.constants) != want_const:
                 raise ValueError(
                     f"Regime {mask} has {len(block.constants)} constants, "
                     f"expected {want_const} for {len(block.rows)} rows."
                 )
-            exprs = [*block.jac_a, *block.jac_b, *block.constants]
+            exprs = [
+                *block.jac_a,
+                *block.jac_b,
+                *block.jac_c,
+                *block.jac_d,
+                *block.constants,
+            ]
             layout = MeasurementLayout(
                 slot=base.slot,
                 n_var=base.n_var,
@@ -263,7 +379,11 @@ class CompiledModel:
             rows[mask] = np.asarray(block.rows, dtype=np.int64)
 
         return RegimePencilFunc(
-            cfuncs=cfuncs, rows=rows, n_var=base.n_var, n_par=base.n_par
+            cfuncs=cfuncs,
+            rows=rows,
+            n_var=base.n_var,
+            n_exog=self.n_exog,
+            n_par=base.n_par,
         )
 
     def construct_regime_pencil_func(self) -> RegimePencilFunc | None:
@@ -331,6 +451,8 @@ class CompiledModel:
         self,
         fwd: Any,
         cur: Any,
+        prev: Any,
+        eps: Any,
         par: Mapping[str, float] | Any,
     ) -> ND:
         par_vec = self._coerce_param_vector(par)
@@ -343,6 +465,8 @@ class CompiledModel:
             self.construct_objective_cfunc().address,
             fwd,
             cur,
+            prev,
+            eps,
             par_vec,
             len(self.objective_eqs),
         )

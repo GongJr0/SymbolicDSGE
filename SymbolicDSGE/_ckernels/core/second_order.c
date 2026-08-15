@@ -1,304 +1,341 @@
 #include "second_order.h"
-#include "../_common/sdsge_linalg.h"
-#include <string.h>
+#include "../_common/sdsge_linalg.h" /* sdsge_matmul, LU */
 
-/* Reduced-system dimensions, shared by the sizer and the solve. */
-static i64 so_reduced(const i64 n, const i64 nx) {
-  const i64 ny = n - nx;
-  return ny * nx * (nx + 1) / 2 + nx * nx * (nx + 1) / 2;
+/* Second-order perturbation by the chain rule of Juillard and Kamenik (2004),
+ * following Dynare's dyn_second_order_solver.m block for block.
+ *
+ * The Hessian `f_xx` spans z = (lag, cur, lead, eps), so the contraction to
+ * state space is one product against zx = dz/dx and zu = dz/du. Nothing is
+ * folded into a two-date form, which is what lets a variable entering at all
+ * three dates carry its own second-order terms.
+ *
+ * The lag block of the Jacobian never appears in a coefficient: y_{t-1} is the
+ * differentiation variable, so its second derivative is zero. It reaches the
+ * result only through zx's identity block. */
+
+/* out(n, cl*cr)[i, p*cr + q] = sum_{u,v} f_xx[i,u,v] Zl[u,p] Zr[v,q].
+ * `stage` is nz*cr scratch, reused per equation. */
+static void sdsge_contract2(const f64 *SDSGE_RESTRICT f_xx,
+                            const f64 *SDSGE_RESTRICT zl, const i64 cl,
+                            const f64 *SDSGE_RESTRICT zr, const i64 cr,
+                            const i64 n, const i64 nz,
+                            f64 *SDSGE_RESTRICT stage,
+                            f64 *SDSGE_RESTRICT out) {
+  for (i64 i = 0; i < n; ++i) {
+    const f64 *SDSGE_RESTRICT fi = f_xx + i * nz * nz;
+    for (i64 u = 0; u < nz; ++u) {
+      for (i64 q = 0; q < cr; ++q) {
+        f64 s = 0.0;
+        for (i64 v = 0; v < nz; ++v) {
+          s += fi[u * nz + v] * zr[v * cr + q];
+        }
+        stage[u * cr + q] = s;
+      }
+    }
+    for (i64 p = 0; p < cl; ++p) {
+      for (i64 q = 0; q < cr; ++q) {
+        f64 s = 0.0;
+        for (i64 u = 0; u < nz; ++u) {
+          s += zl[u * cl + p] * stage[u * cr + q];
+        }
+        out[i * cl * cr + p * cr + q] = s;
+      }
+    }
+  }
 }
 
-arena_size sdsge_second_order_arena_size(const i64 n, const i64 nx) {
-  const i64 ny = n - nx;
-  const i64 ncols = n * nx * nx;
-  const i64 R = so_reduced(n, nx);
-  return make_sizer(ny * nx        /* gxhx */
-                        + n * nx   /* hcoef */
-                        + R * ncols /* big_q */
-                        + ncols * R /* sym */
-                        + R * R    /* qt */
-                        + 2 * R    /* q, xt */
-                        + ncols,   /* full */
-                    R /* LU pivot */);
+/* out(n, cl*cr)[j, p*cr + q] = sum_{k,l} X[j,k,l] L[k,p] R[l,q], the
+ * A_times_B_kronecker_C of the .m. */
+static void sdsge_kron_right(const f64 *SDSGE_RESTRICT x,
+                             const f64 *SDSGE_RESTRICT l_mat, const i64 nl,
+                             const i64 cl, const f64 *SDSGE_RESTRICT r_mat,
+                             const i64 nr, const i64 cr, const i64 n,
+                             f64 *SDSGE_RESTRICT out) {
+  for (i64 j = 0; j < n; ++j) {
+    const f64 *SDSGE_RESTRICT xj = x + j * nl * nr;
+    for (i64 p = 0; p < cl; ++p) {
+      for (i64 q = 0; q < cr; ++q) {
+        f64 s = 0.0;
+        for (i64 k = 0; k < nl; ++k) {
+          const f64 lk = l_mat[k * cl + p];
+          if (lk == 0.0) {
+            continue;
+          }
+          for (i64 m = 0; m < nr; ++m) {
+            s += xj[k * nr + m] * lk * r_mat[m * cr + q];
+          }
+        }
+        out[j * cl * cr + p * cr + q] = s;
+      }
+    }
+  }
+}
+
+arena_size sdsge_second_order_arena_size(const i64 n, const i64 nx,
+                                         const i64 ne) {
+  const i64 nz = 3 * n + ne;
+  const i64 nxx = nx * nx, nxu = nx * ne, nuu = ne * ne;
+  const i64 big = n * nxx;
+  const i64 wide = nxx > nxu ? (nxx > nuu ? nxx : nuu) : (nxu > nuu ? nxu : nuu);
+  return make_sizer(n * nx            /* ghx */
+                        + 2 * n * n   /* A, Bm */
+                        + n * n       /* LU copy */
+                        + nz * nx     /* zx */
+                        + 2 * nz * ne /* zu, zlead */
+                        + n * nx      /* n-by-nx staging */
+                        + nz * wide   /* contraction stage */
+                        + 3 * n * wide /* rhs, kron staging, solution */
+                        + n * nxx     /* ghxx */
+                        + n * nuu     /* ghuu */
+                        + big * big   /* sylvester system */
+                        + 2 * big     /* its rhs and solution */
+                        + n,          /* ghs2 */
+                    big > n ? big : n);
 }
 
 i64 sdsge_second_order(const f64 *SDSGE_RESTRICT a, const f64 *SDSGE_RESTRICT b,
                        const f64 *SDSGE_RESTRICT f_xx,
-                       const f64 *SDSGE_RESTRICT gx,
-                       const f64 *SDSGE_RESTRICT hx, const i64 n, const i64 nx,
+                       const f64 *SDSGE_RESTRICT gx, const f64 *SDSGE_RESTRICT hx,
+                       const f64 *SDSGE_RESTRICT bu, const f64 *SDSGE_RESTRICT q,
+                       const i64 n, const i64 nx, const i64 ne,
                        f64 *SDSGE_RESTRICT gxx, f64 *SDSGE_RESTRICT hxx,
+                       f64 *SDSGE_RESTRICT gxu, f64 *SDSGE_RESTRICT hxu,
+                       f64 *SDSGE_RESTRICT guu, f64 *SDSGE_RESTRICT huu,
+                       f64 *SDSGE_RESTRICT gss, f64 *SDSGE_RESTRICT hss,
                        f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena) {
   const i64 ny = n - nx;
-  const i64 n2 = 2 * n;
-  /* stacked-arg block offsets in f_xx: z = [x'; y'; x; y]. */
-  const i64 XP = 0, YP = nx, X = n, Y = n + nx;
+  const i64 nz = 3 * n + ne;
+  const i64 nxx = nx * nx, nxu = nx * ne, nuu = ne * ne;
+  const i64 big = n * nxx;
+  const i64 wide = nxx > nxu ? (nxx > nuu ? nxx : nuu) : (nxu > nuu ? nxu : nuu);
+  const i64 lag = 0, cur = n, lead = 2 * n, eps = 3 * n;
+  /* The state rows of the impact, which is where a shock has to land to move
+   * anything forward. Row-major puts them at the head of bu. */
+  const f64 *bx = bu;
 
-  const i64 ngxx = ny * nx * nx;
-  const i64 nhxx = nx * nx * nx;
-  const i64 ncols = n * nx * nx; /* full unknowns: gxx block then hxx block */
-  const i64 n_red_g = ny * nx * (nx + 1) / 2;
-  const i64 n_red_h = nx * nx * (nx + 1) / 2;
-  const i64 R = n_red_g + n_red_h; /* reduced unknowns == number of rows */
-
-  f64 *p = arena;
-  f64 *SDSGE_RESTRICT gxhx = p; /* gx @ hx  (ny, nx) */
-  p += ny * nx;
-  f64 *SDSGE_RESTRICT hcoef = p; /* fyp@gx + fxp (n, nx) */
+  f64 *SDSGE_RESTRICT p = arena;
+  f64 *SDSGE_RESTRICT ghx = p;
   p += n * nx;
-  f64 *SDSGE_RESTRICT big_q = p; /* (R, ncols) */
-  p += R * ncols;
-  f64 *SDSGE_RESTRICT sym = p; /* (ncols, R) */
-  p += ncols * R;
-  f64 *SDSGE_RESTRICT qt = p; /* big_q @ sym */
-  p += R * R;
-  f64 *SDSGE_RESTRICT q = p;
-  p += R;
-  f64 *SDSGE_RESTRICT xt = p;
-  p += R;
-  f64 *SDSGE_RESTRICT full = p;
-
-  /* big_q starts zeroed: the loop writes only the structural nonzeros (the gxx
-   * block is dense, the hxx block is one line per row). */
-  memset(big_q, 0, (size_t)(R * ncols) * sizeof(f64));
-
-  /* --- loop-invariant precomputes ---------------------------------------- */
-  /* gxhx = gx @ hx  (contiguous inputs). */
-  if (ny > 0) {
-    sdsge_matmul(gx, hx, gxhx, ny, nx, nx);
-  }
-  /* hcoef[i, c] = fxp[i, c] + sum_p fyp[i, p] * gx[p, c]  (hxx-block coeff). */
-  for (i64 i = 0; i < n; ++i) {
-    for (i64 c = 0; c < nx; ++c) {
-      f64 s = a[i * n + c]; /* fxp[i, c] */
-      for (i64 p = 0; p < ny; ++p) {
-        s += a[i * n + nx + p] * gx[p * nx + c]; /* fyp[i,p] * gx[p,c] */
-      }
-      hcoef[i * nx + c] = s;
-    }
-  }
-
-  /* --- assemble big_q (R, ncols) and q (R) -------------------------------- */
-  {
-    i64 m = 0;
-    for (i64 i = 0; i < n; ++i) {
-      const f64 *SDSGE_RESTRICT fxx_i = f_xx + i * n2 * n2;
-      for (i64 j = 0; j < nx; ++j) {
-        for (i64 k = 0; k <= j; ++k) {
-          f64 *SDSGE_RESTRICT row = big_q + m * ncols;
-
-          /* gxx block: outer product fyp[i,a]*hx[b,j]*hx[c,k] (2nd) + fy (5th). */
-          for (i64 aa = 0; aa < ny; ++aa) {
-            i64 base = aa * nx * nx;
-            f64 fa = a[i * n + nx + aa]; /* fyp[i,aa] */
-            for (i64 bb = 0; bb < nx; ++bb) {
-              f64 fab = fa * hx[bb * nx + j];
-              for (i64 cc = 0; cc < nx; ++cc) {
-                row[base + bb * nx + cc] = fab * hx[cc * nx + k];
-              }
-            }
-            row[base + j * nx + k] += -b[i * n + nx + aa]; /* fy[i,aa] */
-          }
-
-          /* hxx block: line (., j, k) = hcoef[i, a]  (3rd + 7th). */
-          for (i64 aa = 0; aa < nx; ++aa) {
-            row[ngxx + aa * nx * nx + j * nx + k] = hcoef[i * nx + aa];
-          }
-
-          /* q[m]: scalar accumulation, no buffers. */
-          f64 t = fxx_i[(X + j) * n2 + (X + k)]; /* fxx[i,j,k] (8th const) */
-          for (i64 cc = 0; cc < ny; ++cc) {
-            t += fxx_i[(X + j) * n2 + (YP + cc)] * gxhx[cc * nx + k] /* fxyp */
-                 + fxx_i[(X + j) * n2 + (Y + cc)] * gx[cc * nx + k]; /* fxy */
-          }
-          for (i64 cc = 0; cc < nx; ++cc) {
-            t += fxx_i[(X + j) * n2 + (XP + cc)] * hx[cc * nx + k]; /* fxxp */
-          }
-          for (i64 p = 0; p < ny; ++p) {                     /* 1st + 4th chains */
-            f64 c1 = fxx_i[(YP + p) * n2 + (X + k)];          /* fypx[i,p,k] */
-            f64 c4 = fxx_i[(Y + p) * n2 + (X + k)];           /* fyx[i,p,k] */
-            for (i64 cc = 0; cc < ny; ++cc) {
-              c1 += fxx_i[(YP + p) * n2 + (YP + cc)] * gxhx[cc * nx + k]
-                    + fxx_i[(YP + p) * n2 + (Y + cc)] * gx[cc * nx + k];
-              c4 += fxx_i[(Y + p) * n2 + (YP + cc)] * gxhx[cc * nx + k]
-                    + fxx_i[(Y + p) * n2 + (Y + cc)] * gx[cc * nx + k];
-            }
-            for (i64 cc = 0; cc < nx; ++cc) {
-              c1 += fxx_i[(YP + p) * n2 + (XP + cc)] * hx[cc * nx + k];
-              c4 += fxx_i[(Y + p) * n2 + (XP + cc)] * hx[cc * nx + k];
-            }
-            t += c1 * gxhx[p * nx + j] + c4 * gx[p * nx + j];
-          }
-          for (i64 p = 0; p < nx; ++p) {                     /* 6th chain */
-            f64 c6 = fxx_i[(XP + p) * n2 + (X + k)];          /* fxpx[i,p,k] */
-            for (i64 cc = 0; cc < ny; ++cc) {
-              c6 += fxx_i[(XP + p) * n2 + (YP + cc)] * gxhx[cc * nx + k]
-                    + fxx_i[(XP + p) * n2 + (Y + cc)] * gx[cc * nx + k];
-            }
-            for (i64 cc = 0; cc < nx; ++cc) {
-              c6 += fxx_i[(XP + p) * n2 + (XP + cc)] * hx[cc * nx + k];
-            }
-            t += c6 * hx[p * nx + j];
-          }
-          q[m] = t;
-          ++m;
-        }
-      }
-    }
-  }
-
-  /* --- symmetry selector sym (ncols, R): maps reduced -> full ------------- */
-  memset(sym, 0, (size_t)(ncols * R) * sizeof(f64));
-  {
-    i64 my = 0, mx = 0;
-    for (i64 kk = 0; kk < nx; ++kk) {
-      for (i64 jj = kk; jj < nx; ++jj) {
-        for (i64 ii = 0; ii < ny; ++ii) {
-          sym[(ii * nx * nx + jj * nx + kk) * R + my] = 1.0;
-          sym[(ii * nx * nx + kk * nx + jj) * R + my] = 1.0;
-          ++my;
-        }
-        for (i64 ii = 0; ii < nx; ++ii) {
-          sym[(ngxx + ii * nx * nx + jj * nx + kk) * R + (n_red_g + mx)] = 1.0;
-          sym[(ngxx + ii * nx * nx + kk * nx + jj) * R + (n_red_g + mx)] = 1.0;
-          ++mx;
-        }
-      }
-    }
-  }
-
-  /* qt = big_q @ sym  (R, R);  xt = -solve(qt, q);  full = sym @ xt. */
-  sdsge_matmul(big_q, sym, qt, R, ncols, R);
-  /* qt is dead after the solve, so it factors in place. */
-  if (sdsge_lu_factor_inplace(qt, iarena, R) != SDSGE_LU_SUCCESS) {
-    return SDSGE_SECOND_ORDER_SINGULAR;
-  }
-  sdsge_lu_solve(qt, iarena, q, xt, R, 1);
-
-  for (i64 r = 0; r < R; ++r) {
-    xt[r] = -xt[r];
-  }
-  sdsge_matvec(sym, xt, full, ncols, R);
-
-  memcpy(gxx, full, (size_t)ngxx * sizeof(f64));
-  memcpy(hxx, full + ngxx, (size_t)nhxx * sizeof(f64));
-
-  return SDSGE_SECOND_ORDER_OK;
-}
-
-arena_size sdsge_second_order_risk_arena_size(const i64 n, const i64 nx,
-                                              const i64 ne) {
-  const i64 ny = n - nx;
-  return make_sizer(ny * ne         /* gxe */
-                        + nx * nx   /* g4 */
-                        + n * n     /* coeff */
-                        + 2 * n,    /* q, x */
-                    n /* LU pivot */);
-}
-
-i64 sdsge_second_order_risk(const f64 *SDSGE_RESTRICT a,
-                            const f64 *SDSGE_RESTRICT b,
-                            const f64 *SDSGE_RESTRICT f_xx,
-                            const f64 *SDSGE_RESTRICT gx,
-                            const f64 *SDSGE_RESTRICT gxx,
-                            const f64 *SDSGE_RESTRICT eta, const i64 n,
-                            const i64 nx, const i64 ne, f64 *SDSGE_RESTRICT gss,
-                            f64 *SDSGE_RESTRICT hss, f64 *SDSGE_RESTRICT arena,
-                            i64 *SDSGE_RESTRICT iarena) {
-  const i64 ny = n - nx;
-  const i64 n2 = 2 * n;
-  const i64 XP = 0, YP = nx; /* only the forward blocks enter */
-
-  f64 *p = arena;
-  f64 *SDSGE_RESTRICT gxe = p; /* gx @ eta (ny, ne) */
-  p += ny * ne;
-  f64 *SDSGE_RESTRICT g4 = p; /* fyp[i] . gxx (nx, nx) */
-  p += nx * nx;
-  f64 *SDSGE_RESTRICT coeff = p; /* [Qg | Qh] (n, n) */
+  f64 *SDSGE_RESTRICT amat = p;
   p += n * n;
-  f64 *SDSGE_RESTRICT q = p;
-  p += n;
-  f64 *SDSGE_RESTRICT x = p;
+  f64 *SDSGE_RESTRICT bmat = p;
+  p += n * n;
+  f64 *SDSGE_RESTRICT lu = p;
+  p += n * n;
+  f64 *SDSGE_RESTRICT zx = p;
+  p += nz * nx;
+  f64 *SDSGE_RESTRICT zu = p;
+  p += nz * ne;
+  f64 *SDSGE_RESTRICT zlead = p;
+  p += nz * ne;
+  f64 *SDSGE_RESTRICT nnx = p;
+  p += n * nx;
+  f64 *SDSGE_RESTRICT stage = p;
+  p += nz * wide;
+  f64 *SDSGE_RESTRICT rhs = p;
+  p += n * wide;
+  f64 *SDSGE_RESTRICT kron = p;
+  p += n * wide;
+  f64 *SDSGE_RESTRICT sol = p;
+  p += n * wide;
+  f64 *SDSGE_RESTRICT ghxx = p;
+  p += n * nxx;
+  f64 *SDSGE_RESTRICT ghuu = p;
+  p += n * nuu;
+  f64 *SDSGE_RESTRICT sys = p;
+  p += big * big;
+  f64 *SDSGE_RESTRICT sysrhs = p;
+  p += big;
+  f64 *SDSGE_RESTRICT syssol = p;
+  p += big;
+  f64 *SDSGE_RESTRICT ghs2 = p;
 
-  /* gxe = gx @ eta (contiguous inputs). */
-  if (ny > 0 && ne > 0) {
-    sdsge_matmul(gx, eta, gxe, ny, nx, ne);
+  /* ghx stacked over the canonical order: the states lead, so hx sits on top of
+   * gx and the two are contiguous views of one policy. */
+  for (i64 i = 0; i < nx * nx; ++i) {
+    ghx[i] = hx[i];
+  }
+  for (i64 i = 0; i < ny * nx; ++i) {
+    ghx[nx * nx + i] = gx[i];
   }
 
+  /* A = dF/dy_t, with the lead's own state dependence folded into the state
+   * columns; B = dF/dy_{t+1}. klein_preproc negates the cur sweep. */
+  for (i64 i = 0; i < n * n; ++i) {
+    amat[i] = -b[i];
+    bmat[i] = a[i];
+  }
+  sdsge_matmul(a, ghx, nnx, n, n, nx);
   for (i64 i = 0; i < n; ++i) {
-    const f64 *SDSGE_RESTRICT fxx_i = f_xx + i * n2 * n2;
-
-    /* --- coeff row i: Qg = fyp[i] + fy[i]  |  Qh = fyp[i]@gx + fxp[i] ------ */
-    for (i64 aa = 0; aa < ny; ++aa) {
-      /* fyp[i,aa] + fy[i,aa], fy = -b. */
-      coeff[i * n + aa] = a[i * n + nx + aa] - b[i * n + nx + aa];
+    for (i64 j = 0; j < nx; ++j) {
+      amat[i * n + j] += nnx[i * nx + j];
     }
-    for (i64 c = 0; c < nx; ++c) {
-      f64 s = a[i * n + c]; /* fxp[i, c] */
-      for (i64 p = 0; p < ny; ++p) {
-        s += a[i * n + nx + p] * gx[p * nx + c]; /* fyp[i,p] * gx[p,c] */
-      }
-      coeff[i * n + ny + c] = s;
-    }
-
-    /* --- g4[b,c] = sum_a fyp[i,a] * gxx[a,b,c]  (reused scratch) ---------- */
-    for (i64 bb = 0; bb < nx; ++bb) {
-      for (i64 cc = 0; cc < nx; ++cc) {
-        f64 s = 0.0;
-        for (i64 aa = 0; aa < ny; ++aa) {
-          s += a[i * n + nx + aa] * gxx[aa * nx * nx + bb * nx + cc];
-        }
-        g4[bb * nx + cc] = s;
-      }
-    }
-
-    /* --- q[i]: five trace terms as scalar sum_{p,e} of Hadamard products -- */
-    f64 t = 0.0;
-    for (i64 p = 0; p < ny; ++p) {
-      for (i64 e = 0; e < ne; ++e) {
-        f64 in2 = 0.0; /* 2nd: fypyp[i] @ gxe */
-        for (i64 c = 0; c < ny; ++c) {
-          in2 += fxx_i[(YP + p) * n2 + (YP + c)] * gxe[c * ne + e];
-        }
-        f64 in3 = 0.0; /* 3rd: fypxp[i] @ eta */
-        for (i64 c = 0; c < nx; ++c) {
-          in3 += fxx_i[(YP + p) * n2 + (XP + c)] * eta[c * ne + e];
-        }
-        t += (in2 + in3) * gxe[p * ne + e];
-      }
-    }
-    for (i64 p = 0; p < nx; ++p) {
-      for (i64 e = 0; e < ne; ++e) {
-        f64 in4 = 0.0; /* 4th: g4 @ eta */
-        for (i64 c = 0; c < nx; ++c) {
-          in4 += g4[p * nx + c] * eta[c * ne + e];
-        }
-        f64 in8 = 0.0; /* 8th: fxpyp[i] @ gxe */
-        for (i64 c = 0; c < ny; ++c) {
-          in8 += fxx_i[(XP + p) * n2 + (YP + c)] * gxe[c * ne + e];
-        }
-        f64 in9 = 0.0; /* 9th: fxpxp[i] @ eta */
-        for (i64 c = 0; c < nx; ++c) {
-          in9 += fxx_i[(XP + p) * n2 + (XP + c)] * eta[c * ne + e];
-        }
-        t += (in4 + in8 + in9) * eta[p * ne + e];
-      }
-    }
-    q[i] = t;
   }
 
-  /* x = -solve(coeff, q); gss = x[:ny], hss = x[ny:]. coeff is dead after the
-   * solve, so it factors in place. */
-  if (sdsge_lu_factor_inplace(coeff, iarena, n) != SDSGE_LU_SUCCESS) {
+  /* zx = dz/dx: the lag block is the state selection, the current block the
+   * rule, the lead block the rule applied twice, and the innovations do not
+   * move with the state. */
+  for (i64 i = 0; i < nz * nx; ++i) {
+    zx[i] = 0.0;
+  }
+  for (i64 i = 0; i < nx; ++i) {
+    zx[(lag + i) * nx + i] = 1.0;
+  }
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < nx; ++j) {
+      zx[(cur + i) * nx + j] = ghx[i * nx + j];
+    }
+  }
+  sdsge_matmul(ghx, hx, nnx, n, nx, nx);
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < nx; ++j) {
+      zx[(lead + i) * nx + j] = nnx[i * nx + j];
+    }
+  }
+
+  /* zu = dz/du: nothing lagged moves, the current block is the impact, the lead
+   * block carries it forward, and the innovation block is the identity. */
+  for (i64 i = 0; i < nz * ne; ++i) {
+    zu[i] = 0.0;
+    zlead[i] = 0.0;
+  }
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < ne; ++j) {
+      zu[(cur + i) * ne + j] = bu[i * ne + j];
+      zlead[(lead + i) * ne + j] = bu[i * ne + j];
+    }
+  }
+  sdsge_matmul(ghx, bx, rhs, n, nx, ne); /* ghx @ bx, staged in rhs */
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < ne; ++j) {
+      zu[(lead + i) * ne + j] = rhs[i * ne + j];
+    }
+  }
+  for (i64 i = 0; i < ne; ++i) {
+    zu[(eps + i) * ne + i] = 1.0;
+  }
+
+  /* --- ghxx: A X + B X (hx (x) hx) = -f_xx (zx (x) zx) ---------------------
+   * Solved flat rather than by gensylv: at these dimensions the system is a few
+   * dozen rows, and the Kronecker structure buys nothing back. */
+  sdsge_contract2(f_xx, zx, nx, zx, nx, n, nz, stage, rhs);
+  for (i64 i = 0; i < big; ++i) {
+    sysrhs[i] = -rhs[i];
+  }
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 k = 0; k < nx; ++k) {
+      for (i64 l = 0; l < nx; ++l) {
+        const i64 row = (i * nx + k) * nx + l;
+        for (i64 j = 0; j < n; ++j) {
+          for (i64 k2 = 0; k2 < nx; ++k2) {
+            for (i64 l2 = 0; l2 < nx; ++l2) {
+              const i64 col = (j * nx + k2) * nx + l2;
+              f64 v = bmat[i * n + j] * hx[k2 * nx + k] * hx[l2 * nx + l];
+              if (k2 == k && l2 == l) {
+                v += amat[i * n + j];
+              }
+              sys[row * big + col] = v;
+            }
+          }
+        }
+      }
+    }
+  }
+  if (sdsge_lu_factor_inplace(sys, iarena, big) != SDSGE_LU_SUCCESS) {
     return SDSGE_SECOND_ORDER_SINGULAR;
   }
-  sdsge_lu_solve(coeff, iarena, q, x, n, 1);
-
-  for (i64 aa = 0; aa < ny; ++aa) {
-    gss[aa] = -x[aa];
-  }
-  for (i64 aa = 0; aa < nx; ++aa) {
-    hss[aa] = -x[ny + aa];
+  sdsge_lu_solve(sys, iarena, sysrhs, syssol, big, 1);
+  for (i64 i = 0; i < big; ++i) {
+    ghxx[i] = syssol[i];
   }
 
+  /* A is the coefficient of every remaining block, so it factors once. */
+  for (i64 i = 0; i < n * n; ++i) {
+    lu[i] = amat[i];
+  }
+  if (sdsge_lu_factor_inplace(lu, iarena, n) != SDSGE_LU_SUCCESS) {
+    return SDSGE_SECOND_ORDER_SINGULAR;
+  }
+
+  /* --- ghxu: A X = -f_xx (zx (x) zu) - B ghxx (hx (x) bu) ------------------ */
+  sdsge_contract2(f_xx, zx, nx, zu, ne, n, nz, stage, rhs);
+  sdsge_kron_right(ghxx, hx, nx, nx, bx, nx, ne, n, kron);
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 col = 0; col < nxu; ++col) {
+      f64 s = 0.0;
+      for (i64 j = 0; j < n; ++j) {
+        s += bmat[i * n + j] * kron[j * nxu + col];
+      }
+      rhs[i * nxu + col] = -rhs[i * nxu + col] - s;
+    }
+  }
+  sdsge_lu_solve(lu, iarena, rhs, sol, n, nxu);
+  for (i64 i = 0; i < nx * nxu; ++i) {
+    hxu[i] = sol[i];
+  }
+  for (i64 i = 0; i < ny * nxu; ++i) {
+    gxu[i] = sol[nx * nxu + i];
+  }
+
+  /* --- ghuu: A X = -f_xx (zu (x) zu) - B ghxx (bu (x) bu) ------------------ */
+  sdsge_contract2(f_xx, zu, ne, zu, ne, n, nz, stage, rhs);
+  sdsge_kron_right(ghxx, bx, nx, ne, bx, nx, ne, n, kron);
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 col = 0; col < nuu; ++col) {
+      f64 s = 0.0;
+      for (i64 j = 0; j < n; ++j) {
+        s += bmat[i * n + j] * kron[j * nuu + col];
+      }
+      rhs[i * nuu + col] = -rhs[i * nuu + col] - s;
+    }
+  }
+  sdsge_lu_solve(lu, iarena, rhs, sol, n, nuu);
+  for (i64 i = 0; i < n * nuu; ++i) {
+    ghuu[i] = sol[i];
+  }
+  for (i64 i = 0; i < nx * nuu; ++i) {
+    huu[i] = sol[i];
+  }
+  for (i64 i = 0; i < ny * nuu; ++i) {
+    guu[i] = sol[nx * nuu + i];
+  }
+
+  /* --- ghs2: (A + B) X = -(B ghuu + f_xx (zlead (x) zlead)) vec(Q) ---------
+   * The risk correction is the only block that reads the covariance rather than
+   * its factor, and only the lead block of the Hessian enters: the term is the
+   * expectation of next period's innovation. */
+  sdsge_contract2(f_xx, zlead, ne, zlead, ne, n, nz, stage, kron);
+  for (i64 i = 0; i < n; ++i) {
+    f64 acc = 0.0;
+    for (i64 col = 0; col < nuu; ++col) {
+      f64 s = kron[i * nuu + col];
+      for (i64 j = 0; j < n; ++j) {
+        s += bmat[i * n + j] * ghuu[j * nuu + col];
+      }
+      acc += s * q[col];
+    }
+    rhs[i] = -acc;
+  }
+  for (i64 i = 0; i < n * n; ++i) {
+    lu[i] = amat[i] + bmat[i];
+  }
+  if (sdsge_lu_factor_inplace(lu, iarena, n) != SDSGE_LU_SUCCESS) {
+    return SDSGE_SECOND_ORDER_RISK;
+  }
+  sdsge_lu_solve(lu, iarena, rhs, ghs2, n, 1);
+  for (i64 i = 0; i < nx; ++i) {
+    hss[i] = ghs2[i];
+  }
+  for (i64 i = 0; i < ny; ++i) {
+    gss[i] = ghs2[nx + i];
+  }
+
+  /* The split is a row cut at n_state: the states lead the canonical order. */
+  for (i64 i = 0; i < nx * nxx; ++i) {
+    hxx[i] = ghxx[i];
+  }
+  for (i64 i = 0; i < ny * nxx; ++i) {
+    gxx[i] = ghxx[nx * nxx + i];
+  }
   return SDSGE_SECOND_ORDER_OK;
 }

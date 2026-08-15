@@ -412,9 +412,13 @@ class KalmanInterface(KalmanFilter):
             jac_addr=run_args.get("jac_addr", self.jac_addr),
             hx=run_args.get("hx"),
             gx=run_args.get("gx"),
-            bx=run_args.get("bx"),
+            bu=run_args.get("bu"),
             hxx=run_args.get("hxx"),
             gxx=run_args.get("gxx"),
+            hxu=run_args.get("hxu"),
+            gxu=run_args.get("gxu"),
+            huu=run_args.get("huu"),
+            guu=run_args.get("guu"),
             hss=run_args.get("hss"),
             gss=run_args.get("gss"),
             steady_state=run_args.get("steady_state"),
@@ -498,7 +502,7 @@ class KalmanInterface(KalmanFilter):
         shock_std = self.model.config.calibration.shock_std
         shock_corr = self.model.config.calibration.shock_corr
 
-        shocks = list(self.model.config.shock_map)
+        shocks = list(self.model.config.shocks)
         stds = asarray(
             [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
         )
@@ -693,9 +697,13 @@ class KalmanInterface(KalmanFilter):
             "meas_addr": self.meas_addr,
             "hx": self.model.policy.p,
             "gx": self.model.policy.f,
-            "bx": self.B[:n_state, :],
+            "bu": self.B,
             "hxx": self._ukf_array("hxx"),
             "gxx": self._ukf_array("gxx"),
+            "hxu": self._ukf_array("hxu"),
+            "gxu": self._ukf_array("gxu"),
+            "huu": self._ukf_array("huu"),
+            "guu": self._ukf_array("guu"),
             "hss": self._ukf_array("hss"),
             "gss": self._ukf_array("gss"),
             "steady_state": self.model.policy.steady_state,

@@ -13,6 +13,7 @@ import pytest
 
 diag = pytest.importorskip("SymbolicDSGE._ckernels.diag")
 
+from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests import breusch_godfrey as bg_mod
 from SymbolicDSGE._diag_tests import breusch_pagan as bp_mod
 from SymbolicDSGE._diag_tests import chow as chow_mod
@@ -264,7 +265,7 @@ def test_wald_stat_returns_linalg_error_for_singular_covariance():
     omega = np.zeros((q, q), dtype=np.float64)
     ns, nstat = diag.wald_stat_from_mean_and_cov(mean, target, omega, 50)
     rs, rstat, rdf = jit_wald_stat_from_mean_and_cov(mean, target, omega, 50)
-    assert ns == rs == -2
+    assert ns == rs == TestStatus.LINALG
     assert rdf == q
     assert np.isnan(nstat)
     assert np.isnan(rstat)
@@ -412,7 +413,7 @@ def test_jb_stat_non_finite_input_reports_undefined_variance():
         x[3] = bad
         ns, nstat = diag.jb_stat(x)
         rs, rstat = jit_jb_stat(x)
-        assert ns == rs == -3
+        assert ns == rs == TestStatus.UDEF_VARIANCE
         assert np.isnan(nstat) and np.isnan(rstat)
 
 

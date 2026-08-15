@@ -49,22 +49,28 @@ cdef extern from "../_common/sdsge_bicomplex.h" nogil:
 cdef extern from "core.h" nogil:
     ctypedef void (*sdsge_measurement_fn)(
         double *vars, double *par, double *out) noexcept
-    void sdsge_assemble_state_space(
-        const c128 *p, const c128 *f, const int64_t n_state, int64_t n_control,
-        const int64_t n_exog, double *A, double *B)
+    void sdsge_assemble_transition(
+        const double *p, const double *f, const int64_t n_state,
+        int64_t n_control, double *A)
+    arena_size sdsge_simulate_linear_states_arena_size(int64_t n)
     void sdsge_simulate_linear_states(
         const double *A, const double *B, const double *x0,
-        const double *shock, double *out, int64_t T, int64_t n, int64_t k)
+        const double *shock, const double *ss, double *out, double *arena,
+        int64_t T, int64_t n, int64_t k)
     void sdsge_affine_observations(
         const double *states, const double *C, const double *d,
         double *out, int64_t T, int64_t m, int64_t n)
-    int64_t sdsge_simulate_second_order_pruned(
-        const double *hx, const double *gx, const double *bx,
+    arena_size sdsge_simulate_second_order_pruned_arena_size(
+        int64_t nx, int64_t n_exog)
+    void sdsge_simulate_second_order_pruned(
+        const double *hx, const double *gx, const double *bu,
         const double *hxx, const double *gxx,
+        const double *hxu, const double *gxu,
+        const double *huu, const double *guu,
         const double *hss, const double *gss,
-        const double *x0, const double *shock,
-        int64_t T, int64_t nx, int64_t ny, int64_t n_exog,
-        double *out)
+        const double *x0, const double *shock, const double *ss,
+        double *out, double *arena,
+        int64_t T, int64_t nx, int64_t ny, int64_t n_exog)
 
 cdef extern from "../_common/sdsge_common.h" nogil:
     ctypedef struct arena_size:
@@ -73,23 +79,59 @@ cdef extern from "../_common/sdsge_common.h" nogil:
 
 cdef extern from "bicomplex_hessian.h" nogil:
     ctypedef void (*bc_residual_fn)(
-        const bc256 *fwd, const bc256 *cur, const bc256 *par, bc256 *out)
+        const bc256 *fwd, const bc256 *cur, const bc256 *prev, const bc256 *eps,
+        const bc256 *par, bc256 *out)
     arena_size sdsge_bicomplex_hessian_arena_size(
-        int64_t n_var, int64_t n_par, int64_t n_eq)
+        int64_t n_var, int64_t n_par, int64_t n_exog, int64_t n_eq)
     void sdsge_bicomplex_hessian(
         bc_residual_fn residual, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, double *hessian,
-        double *arena)
+        int64_t n_var, int64_t n_par, int64_t n_exog, int64_t n_eq,
+        double *hessian, double *arena)
+
+cdef extern from "pencil.h" nogil:
+    ctypedef void (*sdsge_dgeqrf_fn)()
+    ctypedef void (*sdsge_dormqr_fn)()
+    int SDSGE_INC_LAG
+    int SDSGE_INC_CUR
+    int SDSGE_INC_LEAD
+    int64_t sdsge_pencil_dim(const signed char *incidence, int64_t n_var)
+
+
+# The incidence bits are a wire format between the compiler and the solve, so
+# they are re-exported rather than restated on the Python side.
+INC_LAG = SDSGE_INC_LAG
+INC_CUR = SDSGE_INC_CUR
+INC_LEAD = SDSGE_INC_LEAD
+
+
+cdef inline int64_t _nspred(signed char[::1] incidence) noexcept:
+    """Variables occurring at t-1: the predetermined count the pencil splits on."""
+    cdef int64_t k, out = 0
+    for k in range(incidence.shape[0]):
+        if incidence[k] & SDSGE_INC_LAG:
+            out += 1
+    return out
+
+
+def pencil_dim(incidence, int64_t n_var):
+    """Size of the pencil an incidence implies, ``ndynamic + n_both``.
+
+    ``n_var`` does not bound it: a variable carrying both a lag and a lead needs
+    a companion row. Callers own the Schur and eigenvalue buffers, so they size
+    them from here."""
+    cdef signed char[::1] incv = np.ascontiguousarray(incidence, dtype=np.int8)
+    return int(sdsge_pencil_dim(&incv[0], n_var))
+
 
 cdef extern from "klein_preproc.h" nogil:
     ctypedef void (*sdsge_residual_fn)(
-        c128 *fwd, c128 *cur, c128 *par, c128 *out)
+        c128 *fwd, c128 *cur, c128 *prev, c128 *eps, c128 *par, c128 *out)
     arena_size klein_preproc_arena_size(
-        int64_t n_var, int64_t n_par, int64_t n_eq)
+        int64_t n_var, int64_t n_par, int64_t n_exog, int64_t n_eq)
     void klein_preproc(
         sdsge_residual_fn resid, const double *ss, const double *par,
-        int64_t n_var, int64_t n_par, int64_t n_eq, double *a, double *b,
-        double *arena)
+        int64_t n_var, int64_t n_par, int64_t n_exog, int64_t n_eq,
+        double *a, double *b, double *c, double *d, double *arena)
 
 cdef extern from "klein_postproc.h" nogil:
     arena_size klein_postproc_arena_size(int64_t n_s, int64_t n_cs)
@@ -97,6 +139,8 @@ cdef extern from "klein_postproc.h" nogil:
         const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
         c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
         int64_t *iarena)
+    int SDSGE_KLEIN_POSTPROC_SINGULAR
+    int SDSGE_KLEIN_POSTPROC_INVALID
 
 
 cdef extern from "klein_qz.h" nogil:
@@ -121,6 +165,17 @@ cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
     _zgges_capsule, PyCapsule_GetName(_zgges_capsule)
 )
 
+# The static rotation's QR, reached the same way. `Q` is never formed: dgeqrf
+# leaves the reflectors in place and dormqr applies Q' straight to each block.
+cdef object _dgeqrf_capsule = _cython_lapack.__pyx_capi__["dgeqrf"]
+cdef sdsge_dgeqrf_fn _dgeqrf = <sdsge_dgeqrf_fn>PyCapsule_GetPointer(
+    _dgeqrf_capsule, PyCapsule_GetName(_dgeqrf_capsule)
+)
+cdef object _dormqr_capsule = _cython_lapack.__pyx_capi__["dormqr"]
+cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
+    _dormqr_capsule, PyCapsule_GetName(_dormqr_capsule)
+)
+
 
 cdef extern from "spike.h" nogil:
     ctypedef void (*spike_residual_fn)(
@@ -131,15 +186,18 @@ cdef extern from "spike.h" nogil:
 cdef extern from "residual_path.h" nogil:
     int64_t sdsge_residual_path(
         sdsge_residual_fn resid, const c128 *cur, const c128 *fwd,
-        const c128 *par, int64_t n_steps, int64_t n_var, int64_t n_eq,
-        double *residuals)
+        const c128 *prev, const c128 *eps, const c128 *par, int64_t n_steps,
+        int64_t n_var, int64_t n_exog, int64_t n_eq, double *residuals)
 
 cdef extern from "klein_solve.h" nogil:
     ctypedef struct klein_spec:
         sdsge_residual_fn residual
         klein_zgges_fn zgges
+        sdsge_dgeqrf_fn dgeqrf
+        sdsge_dormqr_fn dormqr
         const double *ss_seed
         const double *params
+        const signed char *incidence
         int64_t n_var
         int64_t n_state
         int64_t n_ctrl
@@ -150,6 +208,8 @@ cdef extern from "klein_solve.h" nogil:
         double *ss
         double *a_real
         double *b_real
+        double *c_real
+        double *d_real
         c128 *s
         c128 *t
         c128 *z
@@ -159,22 +219,31 @@ cdef extern from "klein_solve.h" nogil:
         int64_t stab
         double *A
         double *B
+        int64_t *order
+        int64_t n_static
+        int64_t n_pred
+        int64_t n_both
+        int64_t n_fwd
 
     ctypedef struct sgu_klein_spec:
         klein_spec first
         bc_residual_fn bc_residual
-
+        const double *Q
     ctypedef struct sdsge_solve2:
         double *f_xx
         double *bx
-        double *eta
         double *gxx
         double *hxx
+        double *gxu
+        double *hxu
+        double *guu
+        double *huu
         double *gss
         double *hss
 
     arena_size sdsge_klein_solve1_arena_size(
-        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par)
+        int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
+        int64_t n_exog, int64_t nd)
     int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out,
                                double *arena, int64_t *iarena)
     int SDSGE_KLEIN_SOLVE_SS_SINGULAR
@@ -187,31 +256,32 @@ cdef extern from "klein_solve.h" nogil:
 
     arena_size sdsge_sgu_klein_solve2_arena_size(
         int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
-        int64_t n_exog)
+        int64_t n_exog, int64_t nd)
     int64_t sdsge_sgu_klein_solve2(const sgu_klein_spec *spec,
                                    sdsge_solve1 *out1, sdsge_solve2 *out2,
                                    double *arena, int64_t *iarena)
 
 cdef extern from "steady_state.h" nogil:
-    arena_size sdsge_newton_arena_size(int64_t n_var, int64_t n_par)
+    arena_size sdsge_newton_arena_size(
+        int64_t n_var, int64_t n_par, int64_t n_exog)
     int64_t sdsge_steady_state_newton(
         sdsge_residual_fn residual, const double *seed, const double *par,
-        int64_t n_var, int64_t n_par, int64_t max_iter, double tol,
-        double *ss, int64_t *iters, double *arena, int64_t *iarena)
+        int64_t n_var, int64_t n_par, int64_t n_exog, int64_t max_iter,
+        double tol, double *ss, int64_t *iters, double *arena, int64_t *iarena)
+    int SDSGE_NEWTON_SINGULAR
+    int SDSGE_NEWTON_NO_CONVERGE
 
 
 cdef extern from "second_order.h" nogil:
-    arena_size sdsge_second_order_arena_size(int64_t n, int64_t nx)
+    int SDSGE_SECOND_ORDER_SINGULAR
+    int SDSGE_SECOND_ORDER_RISK
+    arena_size sdsge_second_order_arena_size(int64_t n, int64_t nx, int64_t ne)
     int64_t sdsge_second_order(
         const double *a, const double *b, const double *f_xx,
-        const double *gx, const double *hx, int64_t n, int64_t nx,
-        double *gxx, double *hxx, double *arena, int64_t *iarena)
-    arena_size sdsge_second_order_risk_arena_size(
-        int64_t n, int64_t nx, int64_t ne)
-    int64_t sdsge_second_order_risk(
-        const double *a, const double *b, const double *f_xx,
-        const double *gx, const double *gxx, const double *eta,
-        int64_t n, int64_t nx, int64_t ne, double *gss, double *hss,
+        const double *gx, const double *hx, const double *bu, const double *q,
+        int64_t n, int64_t nx, int64_t ne,
+        double *gxx, double *hxx, double *gxu, double *hxu,
+        double *guu, double *huu, double *gss, double *hss,
         double *arena, int64_t *iarena)
 
 
@@ -235,38 +305,43 @@ cdef _raise_solve_error(int64_t err, str who):
     if err == SDSGE_KLEIN_SOLVE_NO_STATES:
         raise ValueError("klein_postprocess: model has no states.")
     if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER:
-        raise ValueError("solve_second_order: singular symmetry-reduced system.")
+        raise ValueError("solve_second_order: singular second-order system.")
     if err == SDSGE_KLEIN_SOLVE_RISK:
-        raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
+        raise ValueError("solve_second_order: singular risk-correction system.")
 
 
-def assemble_state_space(p, f, n_state, n_control, n_exog):
-    """State-space matrices ``(A, B)`` from a solution ``(p, f)``. """
-    cdef double complex[:, ::1] pv = np.ascontiguousarray(p, dtype=np.complex128)
-    cdef double complex[:, ::1] fv = np.ascontiguousarray(f, dtype=np.complex128)
+def assemble_transition(p, f, n_state, n_control):
+    """Transition matrix ``A`` from a solution ``(p, f)``.
+
+    The shock loading is not assembled from these: it is the pencil stage's own
+    output, one solve spanning every variable rather than a state block the
+    controls inherit through ``f``."""
+    cdef double[:, ::1] pv = np.ascontiguousarray(p, dtype=np.float64)
+    cdef double[:, ::1] fv = np.ascontiguousarray(f, dtype=np.float64)
 
     n = n_state + n_control
     cdef int64_t n_s = <int64_t>n_state
     cdef int64_t n_c = <int64_t>(n - n_state)
-    cdef int64_t n_e = <int64_t>n_exog
 
     A = np.empty((n, n), dtype=np.float64)
-    B = np.empty((n, n_exog), dtype=np.float64)
-
     cdef double[:, ::1] Av = A
-    cdef double[:, ::1] Bv = B
 
     with nogil:
-        sdsge_assemble_state_space(
-            <c128 *>&pv[0, 0], <c128 *>&fv[0, 0], n_s, n_c, n_e,
-            &Av[0, 0], &Bv[0, 0]
+        sdsge_assemble_transition(
+            &pv[0, 0], &fv[0, 0], n_s, n_c, &Av[0, 0]
         )
-    return A, B
+    return A
 
 
-def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):
+def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out,
+                                steady_state=None):
     """out[(T, n)] <- post-shock linear state recursion. ``out`` is the caller's
-    C-contiguous f64 output buffer, written in place; inputs are coerced."""
+    C-contiguous f64 output buffer, written in place; inputs are coerced.
+
+    ``x0`` and the recursion are always deviations. Passing ``steady_state``
+    denominates the written rows in levels, fused into the write rather than
+    added in a second pass over the buffer.
+    """
     cdef double[:, ::1] Av = np.ascontiguousarray(A, dtype=np.float64)
     cdef double[:, ::1] Bv = np.ascontiguousarray(B, dtype=np.float64)
     cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
@@ -275,9 +350,23 @@ def simulate_linear_states_into(A, B, x0, shock_mat, double[:, ::1] out):
     cdef int64_t k = Bv.shape[1]
     cdef int64_t T = shockv.shape[0]
     cdef const double *shock_ptr = &shockv[0, 0]
+
+    cdef double[::1] ssv
+    cdef const double *ss_ptr = NULL
+    if steady_state is not None:
+        ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
+        if ssv.shape[0] != n:
+            raise ValueError("steady_state must have shape (n,).")
+        ss_ptr = &ssv[0]
+
+    arena = np.empty(
+        sdsge_simulate_linear_states_arena_size(n).n_float, dtype=np.float64
+    )
+    cdef double[::1] arv = arena
     with nogil:
         sdsge_simulate_linear_states(
-            &Av[0, 0], &Bv[0, 0], &x0v[0], shock_ptr, &out[0, 0], T, n, k
+            &Av[0, 0], &Bv[0, 0], &x0v[0], shock_ptr, ss_ptr, &out[0, 0],
+            &arv[0], T, n, k
         )
 
 
@@ -298,13 +387,27 @@ def affine_observations_into(states, C, d, double[:, ::1] out):
         )
 
 
-def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
-    """Pruned second order simulation. Returns the split state and jump paths."""
+def simulate_second_order_pruned(
+    hx, gx, bu, hxx, gxx, hxu, gxu, huu, guu, hss, gss, x0, shock_mat,
+    steady_state=None,
+):
+    """Pruned second order simulation. Returns the stacked variable path.
+
+    ``bu`` spans every variable, not just the states: a control responds to an
+    innovation contemporaneously, exactly as at first order.
+
+    ``x0`` and the pruned state are always deviations. Passing ``steady_state``
+    denominates the returned rows in levels, fused into the write.
+    """
     cdef double[:, ::1] hxv = np.ascontiguousarray(hx, dtype=np.float64)
     cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
-    cdef double[:, ::1] bxv = np.ascontiguousarray(bx, dtype=np.float64)
+    cdef double[:, ::1] buv = np.ascontiguousarray(bu, dtype=np.float64)
     cdef double[:, :, ::1] hxxv = np.ascontiguousarray(hxx, dtype=np.float64)
     cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
+    cdef double[:, :, ::1] hxuv = np.ascontiguousarray(hxu, dtype=np.float64)
+    cdef double[:, :, ::1] gxuv = np.ascontiguousarray(gxu, dtype=np.float64)
+    cdef double[:, :, ::1] huuv = np.ascontiguousarray(huu, dtype=np.float64)
+    cdef double[:, :, ::1] guuv = np.ascontiguousarray(guu, dtype=np.float64)
     cdef double[::1] hssv = np.ascontiguousarray(hss, dtype=np.float64)
     cdef double[::1] gssv = np.ascontiguousarray(gss, dtype=np.float64)
     cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
@@ -312,15 +415,20 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
 
     cdef int64_t nx = hxv.shape[0]
     cdef int64_t ny = gxv.shape[0]
-    cdef int64_t n_exog = bxv.shape[1]
+    cdef int64_t n_exog = buv.shape[1]
     cdef int64_t T = shockv.shape[0]
-    cdef int64_t err
 
     cdef const double *gx_ptr = NULL
-    cdef const double *bx_ptr = NULL
+    cdef const double *bu_ptr = NULL
     cdef const double *gxx_ptr = NULL
+    cdef const double *hxu_ptr = NULL
+    cdef const double *gxu_ptr = NULL
+    cdef const double *huu_ptr = NULL
+    cdef const double *guu_ptr = NULL
     cdef const double *gss_ptr = NULL
     cdef const double *shock_ptr = NULL
+    cdef const double *ss_ptr = NULL
+    cdef double[::1] ssv
     cdef double[:, ::1] outv
     cdef double *out_ptr = NULL
 
@@ -330,12 +438,20 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
         raise ValueError("hx must have shape (nx, nx).")
     if gxv.shape[1] != nx:
         raise ValueError("gx must have shape (ny, nx).")
-    if bxv.shape[0] != nx:
-        raise ValueError("bx must have shape (nx, n_exog).")
+    if buv.shape[0] != nx + ny:
+        raise ValueError("bu must have shape (nx + ny, n_exog).")
     if hxxv.shape[0] != nx or hxxv.shape[1] != nx or hxxv.shape[2] != nx:
         raise ValueError("hxx must have shape (nx, nx, nx).")
     if gxxv.shape[0] != ny or gxxv.shape[1] != nx or gxxv.shape[2] != nx:
         raise ValueError("gxx must have shape (ny, nx, nx).")
+    if hxuv.shape[0] != nx or hxuv.shape[1] != nx or hxuv.shape[2] != n_exog:
+        raise ValueError("hxu must have shape (nx, nx, n_exog).")
+    if gxuv.shape[0] != ny or gxuv.shape[1] != nx or gxuv.shape[2] != n_exog:
+        raise ValueError("gxu must have shape (ny, nx, n_exog).")
+    if huuv.shape[0] != nx or huuv.shape[1] != n_exog or huuv.shape[2] != n_exog:
+        raise ValueError("huu must have shape (nx, n_exog, n_exog).")
+    if guuv.shape[0] != ny or guuv.shape[1] != n_exog or guuv.shape[2] != n_exog:
+        raise ValueError("guu must have shape (ny, n_exog, n_exog).")
     if hssv.shape[0] != nx:
         raise ValueError("hss must have shape (nx,).")
     if gssv.shape[0] != ny:
@@ -354,21 +470,32 @@ def simulate_second_order_pruned(hx, gx, bx, hxx, gxx, hss, gss, x0, shock_mat):
         gxx_ptr = &gxxv[0, 0, 0]
         gss_ptr = &gssv[0]
     if n_exog > 0:
-        bx_ptr = &bxv[0, 0]
+        bu_ptr = &buv[0, 0]
+        hxu_ptr = &hxuv[0, 0, 0]
+        huu_ptr = &huuv[0, 0, 0]
+        if ny > 0:
+            gxu_ptr = &gxuv[0, 0, 0]
+            guu_ptr = &guuv[0, 0, 0]
         if T > 0:
             shock_ptr = &shockv[0, 0]
 
+    if steady_state is not None:
+        ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
+        if ssv.shape[0] != nx + ny:
+            raise ValueError("steady_state must have shape (nx + ny,).")
+        ss_ptr = &ssv[0]
+
+    arena = np.empty(
+        sdsge_simulate_second_order_pruned_arena_size(nx, n_exog).n_float,
+        dtype=np.float64,
+    )
+    cdef double[::1] arv = arena
     with nogil:
-        err = sdsge_simulate_second_order_pruned(
-            &hxv[0, 0], gx_ptr, bx_ptr, &hxxv[0, 0, 0], gxx_ptr,
-            &hssv[0], gss_ptr, &x0v[0], shock_ptr,
-            T, nx, ny, n_exog, out_ptr)
-    if err == -1:
-        raise MemoryError("simulate_second_order_pruned: allocation failed.")
-    if err != 0:
-        raise RuntimeError(
-            f"simulate_second_order_pruned: native kernel failed with code {err}."
-        )
+        sdsge_simulate_second_order_pruned(
+            &hxv[0, 0], gx_ptr, bu_ptr, &hxxv[0, 0, 0], gxx_ptr,
+            hxu_ptr, gxu_ptr, huu_ptr, guu_ptr,
+            &hssv[0], gss_ptr, &x0v[0], shock_ptr, ss_ptr,
+            out_ptr, &arv[0], T, nx, ny, n_exog)
     return out
 
 
@@ -407,11 +534,11 @@ def klein_postprocess(s, t, z, int64_t n_states):
             <c128 *>&sv[0, 0], <c128 *>&tv[0, 0], <c128 *>&zv[0, 0], n_s, n_cs,
             <c128 *>&fv[0, 0] if n_cs > 0 else NULL,
             <c128 *>&pv[0, 0], &stab, <c128 *>&ev[0], &arv[0], &iarv[0])
-    if err == -2:
+    if err == SDSGE_KLEIN_POSTPROC_SINGULAR:
         raise ValueError(
             "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
         )
-    if err == -3:
+    if err == SDSGE_KLEIN_POSTPROC_INVALID:
         raise ValueError("klein_postprocess: model has no states.")
     return f, p, int(stab), eig
 
@@ -437,11 +564,13 @@ def klein_preprocess(
     steady_state,
     params,
     int64_t n_eq,
+    int64_t n_exog,
 ):
-    """Complex-step first-order pencil ``(a, b)`` from a numba residual @cfunc
-    (``build_cfunc``) given its ``.address``. Native twin of
-    ``klein._approximate_system_numeric``; ``a``/``b`` feed ``scipy.ordqz``.
-    ``a = d resid/d fwd``, ``b = -(d resid/d cur)``, each ``(n_eq, n_var)``.
+    """Complex-step Jacobian blocks ``(a, b, c, d)`` from a numba residual
+    @cfunc (``build_cfunc``) given its ``.address``. ``a = d resid/d fwd``,
+    ``b = -(d resid/d cur)``, ``c = -(d resid/d prev)``, each ``(n_eq, n_var)``,
+    and ``d = -(d resid/d eps)``, ``(n_eq, n_exog)``, so the system reads
+    ``a y' = b y + c y_prev + d eps``.
     """
     cdef double[::1] ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
     cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
@@ -450,21 +579,27 @@ def klein_preprocess(
 
     a = np.empty((n_eq, n_var), dtype=np.float64)
     b = np.empty((n_eq, n_var), dtype=np.float64)
+    c = np.empty((n_eq, n_var), dtype=np.float64)
+    d = np.empty((n_eq, n_exog), dtype=np.float64)
     cdef double[:, ::1] av = a
     cdef double[:, ::1] bv = b
+    cdef double[:, ::1] cv = c
+    cdef double[:, ::1] dv = d
 
     cdef const double *ss_ptr = &ssv[0] if n_var > 0 else NULL
     cdef const double *par_ptr = &parv[0] if n_par > 0 else NULL
+    cdef double *d_ptr = &dv[0, 0] if n_exog > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     arena = np.empty(
-        klein_preproc_arena_size(n_var, n_par, n_eq).n_float, dtype=np.float64
+        klein_preproc_arena_size(n_var, n_par, n_exog, n_eq).n_float,
+        dtype=np.float64,
     )
     cdef double[::1] arv = arena
     with nogil:
         klein_preproc(
-            resid, ss_ptr, par_ptr, n_var, n_par, n_eq,
-            &av[0, 0], &bv[0, 0], &arv[0])
-    return a, b
+            resid, ss_ptr, par_ptr, n_var, n_par, n_exog, n_eq,
+            &av[0, 0], &bv[0, 0], &cv[0, 0], d_ptr, &arv[0])
+    return a, b, c, d
 
 
 def klein_qz(a, b):
@@ -512,13 +647,15 @@ def steady_state_newton(
     size_t residual_addr,
     seed,
     params,
+    int64_t n_exog,
     int64_t max_iter=50,
     double tol=1e-12,
 ):
-    """Newton solve of ``F(ss, ss) = 0`` from ``seed``, driving a numba residual
-    @cfunc (``build_cfunc``) by its ``.address``. The Jacobian ``a - b`` comes from
-    ``klein_preproc`` each step; the update is an in-place LU. Returns
-    ``(ss, iters)``; raises on singular Jacobian or non-convergence.
+    """Newton solve of ``F(ss, ss, ss) = 0`` at a zero innovation, from ``seed``,
+    driving a numba residual @cfunc (``build_cfunc``) by its ``.address``. The
+    Jacobian ``a - b - c`` comes from ``klein_preproc`` each step; the update is
+    an in-place LU. Returns ``(ss, iters)``; raises on singular Jacobian or
+    non-convergence.
     """
     cdef int64_t n_var = seed.shape[0]
     cdef int64_t n_par = params.shape[0]
@@ -536,18 +673,18 @@ def steady_state_newton(
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     cdef int64_t iters = 0
     cdef int64_t err
-    cdef arena_size sz = sdsge_newton_arena_size(n_var, n_par)
+    cdef arena_size sz = sdsge_newton_arena_size(n_var, n_par, n_exog)
     arena = np.empty(sz.n_float, dtype=np.float64)
     iarena = np.empty(sz.n_int, dtype=np.int64)
     cdef double[::1] arv = arena
     cdef int64_t[::1] iarv = iarena
     with nogil:
         err = sdsge_steady_state_newton(
-            resid, seed_ptr, par_ptr, n_var, n_par, max_iter, tol,
+            resid, seed_ptr, par_ptr, n_var, n_par, n_exog, max_iter, tol,
             ss_ptr, &iters, &arv[0], &iarv[0])
-    if err == -2:
-        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
-    if err == -3:
+    if err == SDSGE_NEWTON_SINGULAR:
+        raise ValueError("steady_state_newton: singular Jacobian (a - b - c).")
+    if err == SDSGE_NEWTON_NO_CONVERGE:
         raise ValueError(
             "steady_state_newton: did not converge within max_iter "
             "(or the residual went non-finite)."
@@ -559,6 +696,7 @@ def klein_solve1(
     size_t residual_addr,
     seed,
     params,
+    incidence,
     int64_t n_state,
     int64_t n_exog=0,
 ):
@@ -583,29 +721,40 @@ def klein_solve1(
     cdef int64_t n_var = seedv.shape[0]
     cdef int64_t n_par = parv.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
+    cdef signed char[::1] incv = np.ascontiguousarray(incidence, dtype=np.int8)
+    cdef int64_t nd = sdsge_pencil_dim(&incv[0], n_var)
 
     if n_state < 1:
         raise ValueError("klein_solve1 requires n_states >= 1.")
     if n_ctrl < 0:
         raise ValueError("n_states exceeds the matrix dimension.")
-    if not 0 <= n_exog <= n_state:
-        raise ValueError(f"n_exog ({n_exog}) cannot exceed n_state ({n_state}).")
+    if _nspred(incv) != n_state:
+        raise ValueError(
+            f"n_state ({n_state}) disagrees with the incidence, which reports "
+            f"{_nspred(incv)} variables at t-1. The solve indexes its rules by "
+            f"one and walks them by the other."
+        )
 
     ss = np.empty(n_var, dtype=np.float64)
     a = np.empty((n_var, n_var), dtype=np.float64)
     b = np.empty((n_var, n_var), dtype=np.float64)
-    s = np.empty((n_var, n_var), dtype=np.complex128)
-    t = np.empty((n_var, n_var), dtype=np.complex128)
-    z = np.empty((n_var, n_var), dtype=np.complex128)
+    c = np.empty((n_var, n_var), dtype=np.float64)
+    d = np.empty((n_var, n_exog), dtype=np.float64)
+    s = np.empty((nd, nd), dtype=np.complex128)
+    t = np.empty((nd, nd), dtype=np.complex128)
+    z = np.empty((nd, nd), dtype=np.complex128)
     f = np.empty((n_ctrl, n_state), dtype=np.float64)
     p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(n_var, dtype=np.complex128)
+    eig = np.empty(nd, dtype=np.complex128)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
+    order = np.empty(n_var, dtype=np.int64)
 
     cdef double[::1] ssv = ss
     cdef double[:, ::1] av = a
     cdef double[:, ::1] bv = b
+    cdef double[:, ::1] cv = c
+    cdef double[:, ::1] dv = d
     cdef double complex[:, ::1] sv = s
     cdef double complex[:, ::1] tv = t
     cdef double complex[:, ::1] zv = z
@@ -614,12 +763,16 @@ def klein_solve1(
     cdef double complex[::1] eigv = eig
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
+    cdef int64_t[::1] orderv = order
 
     cdef klein_spec spec
     spec.residual = <sdsge_residual_fn><void*>residual_addr
     spec.zgges = _zgges
+    spec.dgeqrf = _dgeqrf
+    spec.dormqr = _dormqr
     spec.ss_seed = &seedv[0]
     spec.params = &parv[0] if n_par > 0 else NULL
+    spec.incidence = &incv[0]
     spec.n_var = n_var
     spec.n_state = n_state
     spec.n_ctrl = n_ctrl
@@ -630,6 +783,8 @@ def klein_solve1(
     out.ss = &ssv[0]
     out.a_real = &av[0, 0]
     out.b_real = &bv[0, 0]
+    out.c_real = &cv[0, 0]
+    out.d_real = &dv[0, 0] if n_exog > 0 else NULL
     out.s = <c128 *>&sv[0, 0]
     out.t = <c128 *>&tv[0, 0]
     out.z = <c128 *>&zv[0, 0]
@@ -639,10 +794,11 @@ def klein_solve1(
     out.stab = 0
     out.A = &Av[0, 0]
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
+    out.order = &orderv[0]
 
     cdef int64_t err
     cdef arena_size sz = sdsge_klein_solve1_arena_size(
-        n_var, n_state, n_ctrl, n_par
+        n_var, n_state, n_ctrl, n_par, n_exog, nd
     )
     arena = np.empty(sz.n_float, dtype=np.float64)
     iarena = np.empty(sz.n_int, dtype=np.int64)
@@ -660,64 +816,77 @@ def sgu_klein_solve2(
     size_t bc_residual_addr,
     seed,
     params,
+    Q,
+    incidence,
     int64_t n_state,
-    eta,
     int64_t n_exog=0,
 ):
-    """One-shot second-order (SGU) solve, in a single GIL release.
+    """One-shot second-order solve, in a single GIL release.
 
     Runs ``klein_solve1`` and then the second-order tail: the bicomplex residual
-    Hessian at the resolved steady state, the SGU tensors, and the sigma^2 risk
-    correction. ``bc_residual_addr`` is the bicomplex residual @cfunc
-    (``construct_objective_cfunc_bicomplex()``); ``eta`` is the ``(n_state,
-    n_exog)`` shock loading, whose Cholesky block only the caller can build.
+    Hessian at the resolved steady state, the policy tensors, and the sigma^2
+    risk correction. ``bc_residual_addr`` is the bicomplex residual @cfunc
+    (``construct_objective_cfunc_bicomplex()``); ``Q`` is the ``(n_exog,
+    n_exog)`` shock covariance, which the risk correction integrates against.
 
-    Returns ``(ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B)``.
+    Returns
+    ``(ss, f, p, stab, eig, gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B)``.
     ``stab`` is reported, never raised on.
     """
     cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
     cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef int64_t n_var = seedv.shape[0]
     cdef int64_t n_par = parv.shape[0]
     cdef int64_t n_ctrl = n_var - n_state
-    cdef int64_t n2 = 2 * n_var
+    cdef int64_t n2 = 3 * n_var + n_exog
+    cdef signed char[::1] incv = np.ascontiguousarray(incidence, dtype=np.int8)
+    cdef int64_t nd = sdsge_pencil_dim(&incv[0], n_var)
 
     if n_state < 1:
         raise ValueError("sgu_klein_solve2 requires n_states >= 1.")
     if n_ctrl < 0:
         raise ValueError("n_states exceeds the matrix dimension.")
-    if not 0 <= n_exog <= n_state:
-        raise ValueError(f"n_exog ({n_exog}) cannot exceed n_state ({n_state}).")
-
-    cdef double[:, ::1] etav = np.ascontiguousarray(eta, dtype=np.float64)
-    if etav.shape[0] != n_state or etav.shape[1] != n_exog:
+    if _nspred(incv) != n_state:
         raise ValueError(
-            f"eta has shape ({etav.shape[0]}, {etav.shape[1]}), expected "
-            f"({n_state}, {n_exog})."
+            f"n_state ({n_state}) disagrees with the incidence, which reports "
+            f"{_nspred(incv)} variables at t-1. The solve indexes its rules by "
+            f"one and walks them by the other."
         )
+    if Qv.shape[0] != n_exog or Qv.shape[1] != n_exog:
+        raise ValueError("Q must have shape (n_exog, n_exog).")
 
     ss = np.empty(n_var, dtype=np.float64)
     a = np.empty((n_var, n_var), dtype=np.float64)
     b = np.empty((n_var, n_var), dtype=np.float64)
-    s = np.empty((n_var, n_var), dtype=np.complex128)
-    t = np.empty((n_var, n_var), dtype=np.complex128)
-    z = np.empty((n_var, n_var), dtype=np.complex128)
+    c = np.empty((n_var, n_var), dtype=np.float64)
+    d = np.empty((n_var, n_exog), dtype=np.float64)
+    s = np.empty((nd, nd), dtype=np.complex128)
+    t = np.empty((nd, nd), dtype=np.complex128)
+    z = np.empty((nd, nd), dtype=np.complex128)
     f = np.empty((n_ctrl, n_state), dtype=np.float64)
     p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(n_var, dtype=np.complex128)
+    eig = np.empty(nd, dtype=np.complex128)
     A = np.empty((n_var, n_var), dtype=np.float64)
     B = np.empty((n_var, n_exog), dtype=np.float64)
+    order = np.empty(n_var, dtype=np.int64)
 
     f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
     bx = np.empty((n_state, n_exog), dtype=np.float64)
     gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
     hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
+    gxu = np.empty((n_ctrl, n_state, n_exog), dtype=np.float64)
+    hxu = np.empty((n_state, n_state, n_exog), dtype=np.float64)
+    guu = np.empty((n_ctrl, n_exog, n_exog), dtype=np.float64)
+    huu = np.empty((n_state, n_exog, n_exog), dtype=np.float64)
     gss = np.empty(n_ctrl, dtype=np.float64)
     hss = np.empty(n_state, dtype=np.float64)
 
     cdef double[::1] ssv = ss
     cdef double[:, ::1] av = a
     cdef double[:, ::1] bv = b
+    cdef double[:, ::1] cv = c
+    cdef double[:, ::1] dv = d
     cdef double complex[:, ::1] sv = s
     cdef double complex[:, ::1] tv = t
     cdef double complex[:, ::1] zv = z
@@ -726,30 +895,41 @@ def sgu_klein_solve2(
     cdef double complex[::1] eigv = eig
     cdef double[:, ::1] Av = A
     cdef double[:, ::1] Bv = B
+    cdef int64_t[::1] orderv = order
 
     cdef double[:, :, ::1] fxxv = f_xx
     cdef double[:, ::1] bxv = bx
     cdef double[:, :, ::1] gxxv = gxx
     cdef double[:, :, ::1] hxxv = hxx
+    cdef double[:, :, ::1] gxuv = gxu
+    cdef double[:, :, ::1] hxuv = hxu
+    cdef double[:, :, ::1] guuv = guu
+    cdef double[:, :, ::1] huuv = huu
     cdef double[::1] gssv = gss
     cdef double[::1] hssv = hss
 
     cdef sgu_klein_spec spec
     spec.first.residual = <sdsge_residual_fn><void*>residual_addr
     spec.first.zgges = _zgges
+    spec.first.dgeqrf = _dgeqrf
+    spec.first.dormqr = _dormqr
     spec.first.ss_seed = &seedv[0]
     spec.first.params = &parv[0] if n_par > 0 else NULL
+    spec.first.incidence = &incv[0]
     spec.first.n_var = n_var
     spec.first.n_state = n_state
     spec.first.n_ctrl = n_ctrl
     spec.first.n_exog = n_exog
     spec.first.n_par = n_par
     spec.bc_residual = <bc_residual_fn><void*>bc_residual_addr
+    spec.Q = &Qv[0, 0] if n_exog > 0 else NULL
 
     cdef sdsge_solve1 out
     out.ss = &ssv[0]
     out.a_real = &av[0, 0]
     out.b_real = &bv[0, 0]
+    out.c_real = &cv[0, 0]
+    out.d_real = &dv[0, 0] if n_exog > 0 else NULL
     out.s = <c128 *>&sv[0, 0]
     out.t = <c128 *>&tv[0, 0]
     out.z = <c128 *>&zv[0, 0]
@@ -759,19 +939,23 @@ def sgu_klein_solve2(
     out.stab = 0
     out.A = &Av[0, 0]
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
+    out.order = &orderv[0]
 
     cdef sdsge_solve2 out2
     out2.f_xx = &fxxv[0, 0, 0]
     out2.bx = &bxv[0, 0] if n_exog > 0 else NULL
-    out2.eta = &etav[0, 0] if n_exog > 0 else NULL
     out2.gxx = &gxxv[0, 0, 0] if n_ctrl > 0 else NULL
     out2.hxx = &hxxv[0, 0, 0]
+    out2.gxu = &gxuv[0, 0, 0] if n_ctrl > 0 and n_exog > 0 else NULL
+    out2.hxu = &hxuv[0, 0, 0] if n_exog > 0 else NULL
+    out2.guu = &guuv[0, 0, 0] if n_ctrl > 0 and n_exog > 0 else NULL
+    out2.huu = &huuv[0, 0, 0] if n_exog > 0 else NULL
     out2.gss = &gssv[0] if n_ctrl > 0 else NULL
     out2.hss = &hssv[0]
 
     cdef int64_t err
     cdef arena_size sz = sdsge_sgu_klein_solve2_arena_size(
-        n_var, n_state, n_ctrl, n_par, n_exog
+        n_var, n_state, n_ctrl, n_par, n_exog, nd
     )
     arena = np.empty(sz.n_float, dtype=np.float64)
     iarena = np.empty(sz.n_int, dtype=np.int64)
@@ -781,15 +965,19 @@ def sgu_klein_solve2(
         err = sdsge_sgu_klein_solve2(&spec, &out, &out2, &arv[0], &iarv[0])
 
     _raise_solve_error(err, "sgu_klein_solve2")
-    return ss, f, p, int(out.stab), eig, gxx, hxx, gss, hss, A, B
+    return (ss, f, p, int(out.stab), eig,
+            gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B)
 
 
-def second_order(a, b, f_xx, gx, hx, int64_t n_state):
-    """SGU second-order tensors ``(gxx, hxx)``. Parity oracle:
-    ``core.second_order.solve_second_order``. ``a``/``b`` are the first-order
-    pencil ``(n, n)``, ``f_xx`` the residual Hessian ``(n, 2n, 2n)``, ``gx``
-    ``(ny, nx)``, ``hx`` ``(nx, nx)``. Returns ``gxx (ny, nx, nx)``,
-    ``hxx (nx, nx, nx)``.
+def second_order(a, b, f_xx, gx, hx, bu, Q, int64_t n_state):
+    """Second-order policy tensors. Parity oracle:
+    ``core.second_order.solve_second_order``. ``a`` is ``dF/dy_{t+1}`` and ``b``
+    is ``-(dF/dy_t)``, both ``(n, n)``; ``f_xx`` the residual Hessian over
+    ``z = (lag, cur, lead, eps)``, ``(n, 3n+ne, 3n+ne)``; ``gx`` ``(ny, nx)``,
+    ``hx`` ``(nx, nx)``, ``bu`` the shock impact ``(n, ne)`` and ``Q`` the shock
+    covariance ``(ne, ne)``.
+
+    Returns ``(gxx, hxx, gxu, hxu, guu, huu, gss, hss)``.
 
     Inputs are coerced to C-contiguous f64; ``gx``/``hx`` are the Klein
     solution's ``f``/``p``, already real.
@@ -799,101 +987,102 @@ def second_order(a, b, f_xx, gx, hx, int64_t n_state):
     cdef double[:, :, ::1] fxxv = np.ascontiguousarray(f_xx, dtype=np.float64)
     cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
     cdef double[:, ::1] hxv = np.ascontiguousarray(hx, dtype=np.float64)
+    cdef double[:, ::1] buv = np.ascontiguousarray(bu, dtype=np.float64)
+    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
 
     cdef int64_t n = av.shape[0]
     cdef int64_t nx = n_state
     cdef int64_t ny = n - nx
+    cdef int64_t ne = buv.shape[1]
+
+    if Qv.shape[0] != ne or Qv.shape[1] != ne:
+        raise ValueError("Q must have shape (ne, ne), with ne from bu.")
+    if fxxv.shape[1] != 3 * n + ne or fxxv.shape[2] != 3 * n + ne:
+        raise ValueError("f_xx must have shape (n, 3n+ne, 3n+ne).")
 
     gxx = np.empty((ny, nx, nx), dtype=np.float64)
     hxx = np.empty((nx, nx, nx), dtype=np.float64)
-    cdef double[:, :, ::1] gv = gxx
-    cdef double[:, :, ::1] hv = hxx
+    gxu = np.empty((ny, nx, ne), dtype=np.float64)
+    hxu = np.empty((nx, nx, ne), dtype=np.float64)
+    guu = np.empty((ny, ne, ne), dtype=np.float64)
+    huu = np.empty((nx, ne, ne), dtype=np.float64)
+    gss = np.empty(ny, dtype=np.float64)
+    hss = np.empty(nx, dtype=np.float64)
+    cdef double[:, :, ::1] gxxv = gxx
+    cdef double[:, :, ::1] hxxv = hxx
+    cdef double[:, :, ::1] gxuv = gxu
+    cdef double[:, :, ::1] hxuv = hxu
+    cdef double[:, :, ::1] guuv = guu
+    cdef double[:, :, ::1] huuv = huu
+    cdef double[::1] gssv = gss
+    cdef double[::1] hssv = hss
 
     cdef const double *gx_ptr = &gxv[0, 0] if ny > 0 else NULL
-    cdef double *gv_ptr = &gv[0, 0, 0] if ny > 0 else NULL
+    cdef const double *bu_ptr = &buv[0, 0] if ne > 0 else NULL
+    cdef const double *Q_ptr = &Qv[0, 0] if ne > 0 else NULL
+    cdef double *gxx_ptr = &gxxv[0, 0, 0] if ny > 0 else NULL
+    cdef double *gxu_ptr = &gxuv[0, 0, 0] if ny > 0 and ne > 0 else NULL
+    cdef double *hxu_ptr = &hxuv[0, 0, 0] if ne > 0 else NULL
+    cdef double *guu_ptr = &guuv[0, 0, 0] if ny > 0 and ne > 0 else NULL
+    cdef double *huu_ptr = &huuv[0, 0, 0] if ne > 0 else NULL
+    cdef double *gss_ptr = &gssv[0] if ny > 0 else NULL
     cdef int64_t err
-    cdef arena_size sz = sdsge_second_order_arena_size(n, nx)
+    cdef arena_size sz = sdsge_second_order_arena_size(n, nx, ne)
     arena = np.empty(sz.n_float, dtype=np.float64)
     iarena = np.empty(sz.n_int, dtype=np.int64)
     cdef double[::1] arv = arena
     cdef int64_t[::1] iarv = iarena
     with nogil:
         err = sdsge_second_order(
-            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, &hxv[0, 0], n, nx,
-            gv_ptr, &hv[0, 0, 0], &arv[0], &iarv[0])
-    if err == -2:
-        raise ValueError("solve_second_order: singular symmetry-reduced system.")
-    return gxx, hxx
+            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, &hxv[0, 0], bu_ptr,
+            Q_ptr, n, nx, ne, gxx_ptr, &hxxv[0, 0, 0], gxu_ptr, hxu_ptr,
+            guu_ptr, huu_ptr, gss_ptr, &hssv[0], &arv[0], &iarv[0])
+    if err == SDSGE_SECOND_ORDER_SINGULAR:
+        raise ValueError("solve_second_order: singular second-order system.")
+    if err == SDSGE_SECOND_ORDER_RISK:
+        raise ValueError("solve_second_order: singular risk-correction system.")
+    return gxx, hxx, gxu, hxu, guu, huu, gss, hss
 
 
-def second_order_risk(a, b, f_xx, gx, gxx, eta, int64_t n_state):
-    """Sigma^2 risk correction ``(gss, hss)``. Parity oracle:
-    ``core.second_order.solve_second_order_risk``. ``gxx`` is the second-order
-    controls ``(ny, nx, nx)``; ``eta`` the shock loading ``(nx, ne)``. Returns
-    ``gss (ny,)``, ``hss (nx,)``. Inputs coerced to C-contiguous f64.
-    """
-    cdef double[:, ::1] av = np.ascontiguousarray(a, dtype=np.float64)
-    cdef double[:, ::1] bv = np.ascontiguousarray(b, dtype=np.float64)
-    cdef double[:, :, ::1] fxxv = np.ascontiguousarray(f_xx, dtype=np.float64)
-    cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
-    cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
-    cdef double[:, ::1] etav = np.ascontiguousarray(eta, dtype=np.float64)
-
-    cdef int64_t n = av.shape[0]
-    cdef int64_t nx = n_state
-    cdef int64_t ny = n - nx
-    cdef int64_t ne = etav.shape[1]
-
-    gss = np.empty(ny, dtype=np.float64)
-    hss = np.empty(nx, dtype=np.float64)
-    cdef double[::1] gssv = gss
-    cdef double[::1] hssv = hss
-
-    cdef const double *gx_ptr = &gxv[0, 0] if ny > 0 else NULL
-    cdef const double *gxx_ptr = &gxxv[0, 0, 0] if ny > 0 else NULL
-    cdef const double *eta_ptr = &etav[0, 0] if ne > 0 else NULL
-    cdef double *gss_ptr = &gssv[0] if ny > 0 else NULL
-    cdef int64_t err
-    cdef arena_size sz = sdsge_second_order_risk_arena_size(n, nx, ne)
-    arena = np.empty(sz.n_float, dtype=np.float64)
-    iarena = np.empty(sz.n_int, dtype=np.int64)
-    cdef double[::1] arv = arena
-    cdef int64_t[::1] iarv = iarena
-    with nogil:
-        err = sdsge_second_order_risk(
-            &av[0, 0], &bv[0, 0], &fxxv[0, 0, 0], gx_ptr, gxx_ptr, eta_ptr,
-            n, nx, ne, gss_ptr, &hssv[0], &arv[0], &iarv[0])
-    if err == -2:
-        raise ValueError("solve_second_order_risk: singular [Qg Qh] system.")
-    return gss, hss
-
-
-def residual_path(size_t residual_addr, cur_states, fwd_states, params, int64_t n_eq):
+def residual_path(
+    size_t residual_addr, cur_states, fwd_states, prev_states, shocks, params,
+    int64_t n_eq,
+):
     """Real residual matrix ``(n_steps, n_eq)`` from a residual @cfunc
     (``build_cfunc``) evaluated over a simulated path. Native backend for the
     Den Haan-Marcet moment builder, reusing the solve's cfunc so it never
-    triggers the numba residual compile. Inputs are coerced to contiguous
-    complex128 here.
+    triggers the numba residual compile. ``prev_states`` is ``(n_steps, n_var)``
+    and ``shocks`` ``(n_steps, n_exog)``, dated like the rest of the path.
+    Inputs are coerced to contiguous complex128 here.
     """
     cdef double complex[:, ::1] curv = np.ascontiguousarray(
         cur_states, dtype=np.complex128)
     cdef double complex[:, ::1] fwdv = np.ascontiguousarray(
         fwd_states, dtype=np.complex128)
+    cdef double complex[:, ::1] prevv = np.ascontiguousarray(
+        prev_states, dtype=np.complex128)
+    cdef double complex[:, ::1] epsv = np.ascontiguousarray(
+        shocks, dtype=np.complex128)
     cdef double complex[::1] parv = np.ascontiguousarray(
         params, dtype=np.complex128).reshape(-1)
     cdef int64_t n_steps = curv.shape[0]
     cdef int64_t n_var = curv.shape[1]
+    cdef int64_t n_exog = epsv.shape[1]
     residuals = np.empty((n_steps, n_eq), dtype=np.float64)
     cdef double[:, ::1] rv = residuals
 
     cdef c128 *cur_ptr = <c128 *>&curv[0, 0] if n_steps > 0 else NULL
     cdef c128 *fwd_ptr = <c128 *>&fwdv[0, 0] if n_steps > 0 else NULL
+    cdef c128 *prev_ptr = <c128 *>&prevv[0, 0] if n_steps > 0 else NULL
+    cdef c128 *eps_ptr = (
+        <c128 *>&epsv[0, 0] if n_steps > 0 and n_exog > 0 else NULL)
     cdef c128 *par_ptr = <c128 *>&parv[0] if parv.shape[0] > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     cdef int64_t err
     with nogil:
         err = sdsge_residual_path(
-            resid, cur_ptr, fwd_ptr, par_ptr, n_steps, n_var, n_eq, &rv[0, 0])
+            resid, cur_ptr, fwd_ptr, prev_ptr, eps_ptr, par_ptr, n_steps,
+            n_var, n_exog, n_eq, &rv[0, 0])
     if err != 0:
         raise MemoryError("residual_path: allocation failed.")
     return residuals
@@ -958,16 +1147,20 @@ def measurement_path(size_t meas_addr, states, par, int64_t n_obs):
     return out
 
 
-def residual_eval(size_t residual_addr, fwd, cur, params, int64_t n_eq):
-    """Complex residual vector ``F(fwd, cur, par)`` of length ``n_eq`` from a
-    residual @cfunc (``build_cfunc``) given its ``.address``. Single-point native
-    evaluation, the path ``CompiledModel.equations`` takes instead of the numba
-    vector kernel. Inputs are coerced to contiguous complex128 here.
+def residual_eval(size_t residual_addr, fwd, cur, prev, eps, params, int64_t n_eq):
+    """Complex residual vector ``F(fwd, cur, prev, eps, par)`` of length ``n_eq``
+    from a residual @cfunc (``build_cfunc``) given its ``.address``. Single-point
+    native evaluation, the path ``CompiledModel.equations`` takes instead of the
+    numba vector kernel. Inputs are coerced to contiguous complex128 here.
     """
     cdef double complex[::1] fwdv = np.ascontiguousarray(
         fwd, dtype=np.complex128).reshape(-1)
     cdef double complex[::1] curv = np.ascontiguousarray(
         cur, dtype=np.complex128).reshape(-1)
+    cdef double complex[::1] prevv = np.ascontiguousarray(
+        prev, dtype=np.complex128).reshape(-1)
+    cdef double complex[::1] epsv = np.ascontiguousarray(
+        eps, dtype=np.complex128).reshape(-1)
     cdef double complex[::1] parv = np.ascontiguousarray(
         params, dtype=np.complex128).reshape(-1)
     out = np.empty((n_eq,), dtype=np.complex128)
@@ -975,11 +1168,13 @@ def residual_eval(size_t residual_addr, fwd, cur, params, int64_t n_eq):
 
     cdef c128 *fwd_ptr = <c128 *>&fwdv[0] if fwdv.shape[0] > 0 else NULL
     cdef c128 *cur_ptr = <c128 *>&curv[0] if curv.shape[0] > 0 else NULL
+    cdef c128 *prev_ptr = <c128 *>&prevv[0] if prevv.shape[0] > 0 else NULL
+    cdef c128 *eps_ptr = <c128 *>&epsv[0] if epsv.shape[0] > 0 else NULL
     cdef c128 *par_ptr = <c128 *>&parv[0] if parv.shape[0] > 0 else NULL
     cdef c128 *out_ptr = <c128 *>&ov[0] if n_eq > 0 else NULL
     cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
     with nogil:
-        resid(fwd_ptr, cur_ptr, par_ptr, out_ptr)
+        resid(fwd_ptr, cur_ptr, prev_ptr, eps_ptr, par_ptr, out_ptr)
     return out
 
 
@@ -987,18 +1182,22 @@ def bicomplex_hessian(
     size_t residual_addr,
     double[::1] steady_state,
     double[::1] params,
+    int64_t n_exog,
     int64_t n_eq,
 ):
-    """Residual Hessian ``F_xx`` (n_eq, 2*n_var, 2*n_var) via the bicomplex step,
-    from a bicomplex residual @cfunc (``build_cfunc(..., BicomplexOps())``) given
-    its ``.address``. Second-order native preproc; feeds the g_xx assembly.
+    """Residual Hessian ``F_xx`` (n_eq, nz, nz) via the bicomplex step, from a
+    bicomplex residual @cfunc (``build_cfunc(..., BicomplexOps())``) given its
+    ``.address``. Second-order native preproc; feeds the g_xx assembly.
+
+    ``z`` is ``(lag, cur, lead, eps)`` stacked, ``nz = 3*n_var + n_exog``, which
+    is the column order Dynare's second-order solver selects.
 
     The step is tuned and fixed at ``SDSGE_HESSIAN_STEP``;
     see the C header for what sets it.
     """
     cdef int64_t n_var = steady_state.shape[0]
     cdef int64_t n_par = params.shape[0]
-    cdef int64_t n2 = 2 * n_var
+    cdef int64_t n2 = 3 * n_var + n_exog
 
     hessian = np.empty((n_eq, n2, n2), dtype=np.float64)
     cdef double[:, :, ::1] hv = hessian
@@ -1007,13 +1206,13 @@ def bicomplex_hessian(
     cdef const double *par_ptr = &params[0] if n_par > 0 else NULL
     cdef bc_residual_fn residual = <bc_residual_fn><void*>residual_addr
     arena = np.empty(
-        sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_eq).n_float,
+        sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_exog, n_eq).n_float,
         dtype=np.float64,
     )
     cdef double[::1] arv = arena
     with nogil:
         sdsge_bicomplex_hessian(
-            residual, ss_ptr, par_ptr, n_var, n_par, n_eq, &hv[0, 0, 0],
+            residual, ss_ptr, par_ptr, n_var, n_par, n_exog, n_eq, &hv[0, 0, 0],
             &arv[0])
     return hessian
 

@@ -113,9 +113,13 @@ cdef extern from "kalman.h":
         meas_fn meas
         double *hx
         double *gx
-        double *bx
+        double *bu
         double *hxx
         double *gxx
+        double *hxu
+        double *gxu
+        double *huu
+        double *guu
         double *hss
         double *gss
         double *steady_state
@@ -430,9 +434,13 @@ def ukf_hot_loop(
     size_t meas_addr,
     hx,
     gx,
-    bx,
+    bu,
     hxx,
     gxx,
+    hxu,
+    gxu,
+    huu,
+    guu,
     hss,
     gss,
     steady_state,
@@ -455,16 +463,24 @@ def ukf_hot_loop(
     ``void(double* vars, double* params, double* out)``. Array inputs are coerced
     to contiguous float64 here. Returns ``(status, out)``; the caller maps a
     nonzero status to the matching in-house exception.
+
+    ``bu`` spans every variable rather than the state block: a control responds
+    to an innovation contemporaneously. ``hxu``/``gxu`` and ``huu``/``guu`` are
+    the quadratic blocks the shocks earn once they are no longer states.
     """
     cdef double[:, ::1] hxv = np.ascontiguousarray(hx, dtype=np.float64)
     cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
-    cdef double[:, ::1] bxv = np.ascontiguousarray(bx, dtype=np.float64)
+    cdef double[:, ::1] buv = np.ascontiguousarray(bu, dtype=np.float64)
     cdef double[:, :, ::1] hxxv = np.ascontiguousarray(hxx, dtype=np.float64)
     cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
+    cdef double[:, :, ::1] hxuv = np.ascontiguousarray(hxu, dtype=np.float64)
+    cdef double[:, :, ::1] gxuv = np.ascontiguousarray(gxu, dtype=np.float64)
+    cdef double[:, :, ::1] huuv = np.ascontiguousarray(huu, dtype=np.float64)
+    cdef double[:, :, ::1] guuv = np.ascontiguousarray(guu, dtype=np.float64)
     cdef double[::1] hssv = np.ascontiguousarray(hss, dtype=np.float64)
     cdef double[::1] gssv = np.ascontiguousarray(gss, dtype=np.float64)
     cdef double[::1] steady_statev = np.ascontiguousarray(
-        steady_state, dtype=np.float64)
+            steady_state, dtype=np.float64)
     cdef double[::1] paramsv = np.ascontiguousarray(params, dtype=np.float64)
     cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
@@ -474,7 +490,7 @@ def ukf_hot_loop(
 
     cdef int64_t n_state = hxv.shape[0]
     cdef int64_t n_ctrl = gxv.shape[0]
-    cdef int64_t n_exog = bxv.shape[1]
+    cdef int64_t n_exog = buv.shape[1]
     cdef int64_t n_obs = obsv.shape[1]
     cdef int64_t n_params = paramsv.shape[0]
     cdef int64_t T = obsv.shape[0]
@@ -490,14 +506,22 @@ def ukf_hot_loop(
         raise ValueError("obs must have at least one observable column.")
     if hxv.shape[1] != n_state:
         raise ValueError("hx must have shape (n_state, n_state).")
-    if bxv.shape[0] != n_state:
-        raise ValueError("bx must have shape (n_state, n_exog).")
+    if buv.shape[0] != n_var:
+        raise ValueError("bu must have shape (n_state + n_ctrl, n_exog).")
     if gxv.shape[1] != n_state:
         raise ValueError("gx must have shape (n_ctrl, n_state).")
     if hxxv.shape[0] != n_state or hxxv.shape[1] != n_state or hxxv.shape[2] != n_state:
         raise ValueError("hxx must have shape (n_state, n_state, n_state).")
     if gxxv.shape[0] != n_ctrl or gxxv.shape[1] != n_state or gxxv.shape[2] != n_state:
         raise ValueError("gxx must have shape (n_ctrl, n_state, n_state).")
+    if hxuv.shape[0] != n_state or hxuv.shape[1] != n_state or hxuv.shape[2] != n_exog:
+        raise ValueError("hxu must have shape (n_state, n_state, n_exog).")
+    if gxuv.shape[0] != n_ctrl or gxuv.shape[1] != n_state or gxuv.shape[2] != n_exog:
+        raise ValueError("gxu must have shape (n_ctrl, n_state, n_exog).")
+    if huuv.shape[0] != n_state or huuv.shape[1] != n_exog or huuv.shape[2] != n_exog:
+        raise ValueError("huu must have shape (n_state, n_exog, n_exog).")
+    if guuv.shape[0] != n_ctrl or guuv.shape[1] != n_exog or guuv.shape[2] != n_exog:
+        raise ValueError("guu must have shape (n_ctrl, n_exog, n_exog).")
     if hssv.shape[0] != n_state:
         raise ValueError("hss must have shape (n_state,).")
     if gssv.shape[0] != n_ctrl:
@@ -551,8 +575,10 @@ def ukf_hot_loop(
     cdef ukf_inputs inp
     inp.meas = <meas_fn><void*>meas_addr
     inp.hx = &hxv[0, 0]
-    inp.bx = &bxv[0, 0] if n_exog > 0 else NULL
+    inp.bu = &buv[0, 0] if n_exog > 0 else NULL
     inp.hxx = &hxxv[0, 0, 0]
+    inp.hxu = &hxuv[0, 0, 0] if n_exog > 0 else NULL
+    inp.huu = &huuv[0, 0, 0] if n_exog > 0 else NULL
     inp.hss = &hssv[0]
     inp.steady_state = &steady_statev[0]
     inp.params = &paramsv[0] if n_params > 0 else NULL
@@ -578,10 +604,14 @@ def ukf_hot_loop(
         inp.gx = &gxv[0, 0]
         inp.gxx = &gxxv[0, 0, 0]
         inp.gss = &gssv[0]
+        inp.gxu = &gxuv[0, 0, 0] if n_exog > 0 else NULL
+        inp.guu = &guuv[0, 0, 0] if n_exog > 0 else NULL
     else:
         inp.gx = NULL
         inp.gxx = NULL
         inp.gss = NULL
+        inp.gxu = NULL
+        inp.guu = NULL
 
     cdef ukf_outputs outp
     outp.x1_pred = &x1_pred_mv[0, 0] if hist_T > 0 else NULL

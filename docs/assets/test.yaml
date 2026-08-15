@@ -2,10 +2,10 @@ name: "TEST"
 
 variables: [g, z, r, x, Pi]
 
-shock_map:
-  e_g: g
-  e_z: z
-  e_r: r
+shocks:
+    - e_g
+    - e_z
+    - e_r
 
 observables: [Infl, Rate, Out_HP]
 

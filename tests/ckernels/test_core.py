@@ -22,19 +22,42 @@ _ATOL = 1e-12
 
 
 @pytest.mark.parametrize("n, k, T", [(1, 1, 1), (3, 2, 25), (5, 5, 64), (4, 1, 9)])
-def test_simulate_matches_numba(n: int, k: int, T: int) -> None:
+@pytest.mark.parametrize("levels", [False, True])
+def test_simulate_matches_numba(n: int, k: int, T: int, levels: bool) -> None:
     rng = np.random.default_rng(n * 100 + k * 10 + T)
     A = np.ascontiguousarray(rng.standard_normal((n, n)) * (0.5 / n))
     B = np.ascontiguousarray(rng.standard_normal((n, k)))
     x0 = np.ascontiguousarray(rng.standard_normal(n))
     shock = np.ascontiguousarray(rng.standard_normal((T, k)))
+    # A nonzero ss is what separates a fused add from one folded into the
+    # recursion: pass it back through A and the path diverges.
+    ss = np.ascontiguousarray(rng.standard_normal(n)) if levels else np.zeros(n)
 
     native = np.empty((T, n))
     ref = np.empty((T, n))
-    core.simulate_linear_states_into(A, B, x0, shock, native)
-    _simulate_linear_states_into_numba(A, B, x0, shock, ref)
+    core.simulate_linear_states_into(A, B, x0, shock, native, ss if levels else None)
+    _simulate_linear_states_into_numba(A, B, x0, shock, ref, ss)
 
     np.testing.assert_allclose(native, ref, rtol=_RTOL, atol=_ATOL)
+
+
+@pytest.mark.parametrize("n, k, T", [(3, 2, 12)])
+def test_simulate_levels_is_deviations_plus_ss(n: int, k: int, T: int) -> None:
+    """The steady state offsets the rows and nothing else: it must not reach the
+    recursion, which would only be invisible if ss were a fixed point of A."""
+    rng = np.random.default_rng(7)
+    A = np.ascontiguousarray(rng.standard_normal((n, n)) * (0.5 / n))
+    B = np.ascontiguousarray(rng.standard_normal((n, k)))
+    x0 = np.ascontiguousarray(rng.standard_normal(n))
+    shock = np.ascontiguousarray(rng.standard_normal((T, k)))
+    ss = np.ascontiguousarray(rng.standard_normal(n))
+
+    dev = np.empty((T, n))
+    lvl = np.empty((T, n))
+    core.simulate_linear_states_into(A, B, x0, shock, dev)
+    core.simulate_linear_states_into(A, B, x0, shock, lvl, ss)
+
+    np.testing.assert_allclose(lvl, dev + ss, rtol=_RTOL, atol=_ATOL)
 
 
 @pytest.mark.parametrize("m, n, T", [(1, 2, 1), (3, 4, 20), (2, 5, 12)])
@@ -60,24 +83,30 @@ def test_second_order_pruned_matches_numba(
     nx: int, ny: int, n_exog: int, T: int
 ) -> None:
     rng = np.random.default_rng(nx * 1000 + ny * 100 + n_exog * 10 + T)
+    n = nx + ny
     hx = np.ascontiguousarray(rng.standard_normal((nx, nx)) * (0.25 / nx))
     gx = np.ascontiguousarray(rng.standard_normal((ny, nx)))
-    bx = np.ascontiguousarray(rng.standard_normal((nx, n_exog)))
+    bu = np.ascontiguousarray(rng.standard_normal((n, n_exog)))
     hxx = np.ascontiguousarray(rng.standard_normal((nx, nx, nx)) * 0.05)
     gxx = np.ascontiguousarray(rng.standard_normal((ny, nx, nx)) * 0.05)
+    hxu = np.ascontiguousarray(rng.standard_normal((nx, nx, n_exog)) * 0.05)
+    gxu = np.ascontiguousarray(rng.standard_normal((ny, nx, n_exog)) * 0.05)
+    huu = np.ascontiguousarray(rng.standard_normal((nx, n_exog, n_exog)) * 0.05)
+    guu = np.ascontiguousarray(rng.standard_normal((ny, n_exog, n_exog)) * 0.05)
     hss = np.ascontiguousarray(rng.standard_normal(nx) * 0.01)
     gss = np.ascontiguousarray(rng.standard_normal(ny) * 0.01)
     x0 = np.ascontiguousarray(rng.standard_normal(nx) * 0.1)
     shock = np.ascontiguousarray(rng.standard_normal((T, n_exog)) * 0.1)
+    ss = np.ascontiguousarray(rng.standard_normal(n))
 
-    native = core.simulate_second_order_pruned(
-        hx, gx, bx, hxx, gxx, hss, gss, x0, shock
-    )
-    numba = _simulate_second_order_pruned_numba(
-        hx, gx, bx, hxx, gxx, hss, gss, x0, shock
-    )
-
+    args = (hx, gx, bu, hxx, gxx, hxu, gxu, huu, guu, hss, gss, x0, shock)
+    native = core.simulate_second_order_pruned(*args, ss)
+    numba = _simulate_second_order_pruned_numba(*args, ss)
     np.testing.assert_allclose(native, numba, rtol=_RTOL, atol=_ATOL)
+
+    # Deviations are the same path without the offset.
+    dev = core.simulate_second_order_pruned(*args)
+    np.testing.assert_allclose(native, dev + ss, rtol=_RTOL, atol=_ATOL)
 
 
 def test_simulate_known_answer() -> None:
@@ -89,6 +118,10 @@ def test_simulate_known_answer() -> None:
     out = np.empty((2, 1))
     core.simulate_linear_states_into(A, B, x0, shock, out)
     np.testing.assert_allclose(out.ravel(), [2.5, 5.5])
+
+    # ss = 10 offsets both rows; it must not compound through A.
+    core.simulate_linear_states_into(A, B, x0, shock, out, np.array([10.0]))
+    np.testing.assert_allclose(out.ravel(), [12.5, 15.5])
 
 
 def test_affine_known_answer() -> None:

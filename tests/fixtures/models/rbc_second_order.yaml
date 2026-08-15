@@ -15,8 +15,8 @@ variables:
   k: {ss_seed: k_ss}
   z: {ss_seed: null} # z_ss = 0
 
-shock_map:
-  e: z
+shocks:
+    - e
 
 observables: [c_obs]
 

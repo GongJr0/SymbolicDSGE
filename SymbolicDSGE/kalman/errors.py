@@ -23,14 +23,13 @@ class MemoryAllocationError(Exception):
 
 
 class ErrorCode(IntEnum):
-    """Mirrors the KF_* codes in _ckernels/kalman/kalman.h. -1 is unassigned:
-    it was a complex-matrix rejection the kernel never raised."""
+    """Mirrors the KF_* codes in _ckernels/kalman/kalman.h."""
 
     SUCCESS = 0
-    SHAPE_MISMATCH = -2
-    MATRIX_CONDITION = -3
-    LINALG_ERROR = -4
-    ALLOC_ERROR = -5
+    SHAPE_MISMATCH = -1101
+    MATRIX_CONDITION = -1102
+    LINALG_ERROR = -1103
+    ALLOC_ERROR = -1104
 
 
 def get_error_constructor(code: ErrorCode) -> type[Exception]:

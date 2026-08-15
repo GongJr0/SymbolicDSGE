@@ -17,14 +17,12 @@ from SymbolicDSGE._ckernels.core._core import (
     bicomplex_hessian,
     klein_preprocess,
     second_order,
-    second_order_risk,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solver_backend import klein_solve
-from _oracles.core import (
-    _solve_second_order_numpy,
-    _solve_second_order_risk_numpy,
-)
+from _oracles.core import _solve_second_order_numpy
+
+_BLOCKS = ("gxx", "hxx", "gxu", "hxu", "guu", "huu", "gss", "hss")
 
 
 def _drive(path):
@@ -41,12 +39,19 @@ def _drive(path):
     # deviation-form models -> 0). No file I/O at collection time.
     ss = DSGESolver._resolve_ss_seed(None, compiled)
 
-    a, b = klein_preprocess(cf.address, ss, par, n_eq)
-    sol = klein_solve(cf, par, ss, n_state)
-    gx, hx = np.real(sol.f), np.real(sol.p)
-    f_xx = bicomplex_hessian(cf_bc.address, ss, par, n_eq)
-    eta = DSGESolver._build_eta(compiled)
-    return a, b, f_xx, gx, hx, n_state, eta
+    a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
+    sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
+    f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
+    return (
+        a,
+        b,
+        f_xx,
+        np.real(sol.f),
+        np.real(sol.p),
+        np.real(sol.B),
+        DSGESolver._build_Q(compiled),
+        n_state,
+    )
 
 
 @pytest.mark.parametrize(
@@ -58,17 +63,9 @@ def _drive(path):
     ],
 )
 def test_native_second_order_matches_numpy(path):
-    a, b, f_xx, gx, hx, n_state, eta = _drive(path)
+    args = _drive(path)
 
-    gxx_np, hxx_np = _solve_second_order_numpy(a, b, f_xx, gx, hx, n_state)
-    gxx_c, hxx_c = second_order(a, b, f_xx, gx, hx, n_state)
-    np.testing.assert_allclose(gxx_c, gxx_np, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(hxx_c, hxx_np, rtol=0.0, atol=1e-12)
-
-    # Risk correction shares the same gxx input so parity isolates the risk step.
-    gss_np, hss_np = _solve_second_order_risk_numpy(
-        a, b, f_xx, gx, gxx_np, eta, n_state
-    )
-    gss_c, hss_c = second_order_risk(a, b, f_xx, gx, gxx_np, eta, n_state)
-    np.testing.assert_allclose(gss_c, gss_np, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(hss_c, hss_np, rtol=0.0, atol=1e-12)
+    for name, native, ref in zip(
+        _BLOCKS, second_order(*args), _solve_second_order_numpy(*args)
+    ):
+        np.testing.assert_allclose(native, ref, rtol=0.0, atol=1e-12, err_msg=name)

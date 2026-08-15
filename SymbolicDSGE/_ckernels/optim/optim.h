@@ -43,6 +43,9 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                  const i64 *nbd, const sdsge_lbfgsb_options *opt,
                  sdsge_lbfgsb_result *out);
 
-#define SDSGE_OPTIM_EALLOC (-1)
+/* Optimizer status, shared with nelder_mead.h: one failure vocabulary for
+ * every driver in this directory. */
+#define SDSGE_OPTIM_EALLOC (-1701)
+#define SDSGE_OPTIM_EINVAL (-1702)
 
 #endif /* SDSGE_OPTIM_H */

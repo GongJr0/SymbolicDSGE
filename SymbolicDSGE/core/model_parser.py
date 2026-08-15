@@ -47,7 +47,7 @@ _ALLOWED_TOP_LEVEL_KEYS = (
             "name",
             "variables",
             "observables",
-            "shock_map",
+            "shocks",
             "equations",
             "calibration",
             "kalman",
@@ -199,7 +199,7 @@ class ModelParser:
         Conditions are tested on a realized path where the shocks have already
         been absorbed into the variables, so a shock cannot appear in one.
         """
-        shocks = set(conf.shock_map)
+        shocks = set(conf.shocks)
         found: set[Symbol] = set()
         for expr in exprs:
             found |= expr.free_symbols & shocks  # pyright: ignore
@@ -227,7 +227,7 @@ class ModelParser:
         time_syms = {s for c in applied for a in c.args for s in a.free_symbols}
         var_funcs = {c.func for c in applied}
 
-        declared = set(conf.parameters) | set(conf.shock_map)
+        declared = set(conf.parameters) | set(conf.shocks)
         return (var_funcs - set(conf.variables.variables)) | (
             (free - time_syms) - declared
         )
@@ -387,7 +387,7 @@ class ModelParser:
             variable_funcs,
             params,
             observables,
-            shock_map,
+            shocks,
             shock_syms,
         ) = ns
 
@@ -413,7 +413,7 @@ class ModelParser:
             name=data.get("name", "Unnamed"),
             variables=variables,
             parameters=params,
-            shock_map=shock_map,
+            shocks=shocks,
             observables=observables,
             equations=equations,
             calibration=calibration,
@@ -531,7 +531,7 @@ class ModelParser:
         list[Function],
         list[Symbol],
         list[Symbol],
-        SymbolGetterDict[Symbol, Symbol],
+        list[Symbol],
         list[Symbol],
     ]:
         ordered_var_names, _ = ModelParser._coerce_variable_data(data)
@@ -546,10 +546,8 @@ class ModelParser:
         )
         observables: list[Symbol] = list(sp.symbols(data["observables"]))
 
-        shock_map: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
-            {sp.Symbol(k): sp.Symbol(v) for k, v in data["shock_map"].items()}
-        )
-        shock_syms: list[Symbol] = list(shock_map.keys())
+        shocks: list[Symbol] = [sp.Symbol(name) for name in data["shocks"]]
+        shock_syms: list[Symbol] = list(shocks)
 
         _LOCALS: dict[str, Any] = {
             "t": t,
@@ -564,7 +562,7 @@ class ModelParser:
             variables,
             params,
             observables,
-            shock_map,
+            shocks,
             shock_syms,
         )
 

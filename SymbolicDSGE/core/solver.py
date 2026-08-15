@@ -14,7 +14,14 @@ import pandas as pd
 
 from .config import ModelConfig, SymbolGetterDict
 from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
-from .desugar import GeneratedKind, GeneratedVariable, desugar_model
+from sympy.core.function import AppliedUndef
+
+from .desugar import (
+    GeneratedVariable,
+    _call_offset,
+    _offset_expressions,
+    desugar_model,
+)
 from .linearization import linearize_model
 from .solved_model import (
     SolvedModel,
@@ -56,9 +63,8 @@ class DSGESolver:
         conf = self.model_config
         if linearize and not conf.symbolically_linearized:
             conf = linearize_model(conf)
-        # Lags and shocks become variables of their own here, so everything below
-        # this line sees a two-date model whose states are exactly the variables
-        # the compiler minted.
+
+        # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)
         conf = desugared.config
         kalman_conf = self.kalman_config
@@ -77,7 +83,7 @@ class DSGESolver:
         var_order = list(layout.canonical_names)
 
         var_funcs = [name_to_func[name] for name in var_order]
-        idx = dict(layout.idx)
+        idx = layout.idx
 
         if kalman_conf is not None:
             kalman_conf = replace(
@@ -85,22 +91,16 @@ class DSGESolver:
                 P0=self._resolve_p0(kalman_conf.P0, layout, desugared.generated),
             )
 
-        for i, residual in enumerate(residuals):
-            bad = self._bad_time_offsets(residual, var_funcs, t)
-            if bad:
-                raise ValueError(
-                    f"Equation {i} has bad time offsets {bad}. Only offsets of 0 and 1 are allowed."
-                )
-
         # Substitutions
         cur_syms = [Symbol(f"cur_{n}") for n in var_order]
         fwd_syms = [Symbol(f"fwd_{n}") for n in var_order]
+        prev_syms = [Symbol(f"prev_{n}") for n in var_order]
 
         subs_map = {}
-        for _, f, cur, fwd in zip(var_order, var_funcs, cur_syms, fwd_syms):
-
+        for f, cur, fwd, prev in zip(var_funcs, cur_syms, fwd_syms, prev_syms):
             subs_map[f(t)] = cur  # pyright: ignore
             subs_map[f(t + 1)] = fwd  # pyright: ignore
+            subs_map[f(t - 1)] = prev  # pyright: ignore
 
         if not params_order:
             params_order = [p.name for p in conf.parameters]
@@ -111,18 +111,22 @@ class DSGESolver:
             raise ValueError(f"params_order contains unknown parameters: {p_missing}")
         params = [name_to_param[name] for name in params_order]
 
-        compiled: list[Expr] = [sp.simplify(o.subs(subs_map)) for o in residuals]
-        shock_zero_subs = {shock: 0.0 for shock in conf.shock_map.keys()}
+        # Shocks stay in the residual: they reach the pencil as the innovation block
         compiled_numeric: list[Expr] = [
-            sp.simplify(expr.subs(shock_zero_subs))  # pyright: ignore
-            for expr in compiled
+            sp.simplify(o.subs(subs_map)) for o in residuals
         ]
 
         constraint_names, constraint_exprs = self._compile_constraints(
-            conf, subs_map, var_funcs, t
+            conf, subs_map, set(idx.keys()), t
         )
         regimes = self._compile_regimes(
-            conf, constraint_names, subs_map, cur_syms, fwd_syms, var_funcs, t
+            conf,
+            constraint_names,
+            subs_map,
+            cur_syms,
+            fwd_syms,
+            prev_syms,
+            t,
         )
 
         observable_exprs = [
@@ -147,12 +151,6 @@ class DSGESolver:
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
             observable_jacobian_eqs=observable_jacobian_eqs,
-            n_var=len(var_order),
-            n_state=layout.n_state,
-            n_exog=layout.n_exog,
-            n_ctrl=len(var_order) - layout.n_state,
-            n_par=len(params),
-            n_obs=len(observable_exprs),
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
             regimes=regimes,
@@ -162,7 +160,7 @@ class DSGESolver:
         self,
         conf: ModelConfig,
         subs_map: dict[Any, Symbol],
-        var_funcs: list[Function],
+        declared: set[str],
         t: Symbol,
     ) -> tuple[tuple[str, ...], list[Boolean]]:
         """Regime conditions in declaration order, bind then relax per constraint.
@@ -180,13 +178,13 @@ class DSGESolver:
         for name in names:
             constraint = constraints[name]
             for kind, cond in (("bind", constraint.bind), ("relax", constraint.relax)):
-                bad = self._bad_time_offsets(cond, var_funcs, t, allowed={0})
-                if bad:
-                    raise ValueError(
-                        f"Condition '{kind}' of constraint '{name}' has bad time "
-                        f"offsets {sorted(bad)}. Constraint conditions may only "
-                        f"reference contemporaneous variables."
-                    )
+                for call in cond.atoms(AppliedUndef):
+                    info = _call_offset(call, declared, t)
+                    if info is not None and info[1] != 0:
+                        raise ValueError(
+                            f"{kind.capitalize()}ing condition of constraint '{name}' reads {info[0]} at "
+                            f"t{info[1]:+d}. Regime conditions must be contemporaneous."
+                        )
                 exprs.append(cond.subs(subs_map))
         return names, exprs
 
@@ -197,7 +195,7 @@ class DSGESolver:
         subs_map: dict[Any, Symbol],
         cur_syms: list[Symbol],
         fwd_syms: list[Symbol],
-        var_funcs: list[Function],
+        prev_syms: list[Symbol],
         t: Symbol,
     ) -> dict[int, RegimeBlock]:
         """Regime blocks keyed by the bitmask of their binding constraints.
@@ -205,21 +203,26 @@ class DSGESolver:
         Each regime is the reference model with its replacements overlaid. Every
         replacement target is a declared model equation, so the merge keeps
         reference equation order and every regime pencil stays row-aligned with
-        the reference. Shocks are zeroed as they are on the reference residual.
+        the reference.
 
         ``rows`` records which reference rows the regime replaced, so the native
         assembly can patch those rows into a copy of the reference pencil instead
-        of sweeping the whole regime. ``jac_a``/``jac_b`` are those rows' pencil
-        blocks, flat row-major ``(len(rows), n_var)``; ``constants`` is those rows'
-        residual at the expansion point, ``(len(rows),)``.
+        of sweeping the whole regime. ``jac_a``/``jac_b``/``jac_c`` are those rows'
+        pencil blocks, flat row-major ``(len(rows), n_var)``, and ``jac_d`` is the
+        shock block, ``(len(rows), n_exog)``; ``constants`` is those rows' residual
+        at the expansion point, ``(len(rows),)``.
         """
         regimes = conf.equations.regime
         if not regimes:
             return {}
 
         bit = {name: i for i, name in enumerate(constraint_names)}
-        shock_zero_subs = {shock: 0.0 for shock in conf.shock_map}
-        fwd_to_cur = dict(zip(fwd_syms, cur_syms))
+        shock_syms = list(conf.shocks)
+        # At the expansion point every date holds the same vector and the
+        # innovation is zero, so the pencil blocks fold onto the cur symbols.
+        at_point: dict[Any, Any] = dict(zip(fwd_syms, cur_syms))
+        at_point.update(zip(prev_syms, cur_syms))
+        at_point.update({shock: 0.0 for shock in conf.shocks})
 
         compiled: dict[int, RegimeBlock] = {}
         for key, replacements in regimes.items():
@@ -238,17 +241,7 @@ class DSGESolver:
             merged = {**conf.equations.model, **replacements}
             for row, (name, eq) in enumerate(merged.items()):
                 resid = sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
-                bad = self._bad_time_offsets(resid, var_funcs, t)
-                if bad:
-                    raise ValueError(
-                        f"Equation '{name}' in regime '{label}' has bad time "
-                        f"offsets {sorted(bad)}. Only offsets of 0 and 1 are allowed."
-                    )
-                residuals.append(
-                    sp.simplify(
-                        resid.subs(subs_map).subs(shock_zero_subs)  # pyright: ignore
-                    )
-                )
+                residuals.append(sp.simplify(resid.subs(subs_map)))
                 if name in replacements:
                     rows.append(row)
 
@@ -257,26 +250,36 @@ class DSGESolver:
             # distinct. b carries klein_preproc's sign on the cur sweep.
             replaced = [residuals[row] for row in rows]
             jac_a = [
-                sp.diff(resid, sym).subs(fwd_to_cur)  # pyright: ignore
+                sp.diff(resid, sym).subs(at_point)  # pyright: ignore
                 for resid in replaced
                 for sym in fwd_syms
             ]
             jac_b = [
-                (-sp.diff(resid, sym)).subs(fwd_to_cur)  # pyright: ignore
+                (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
                 for resid in replaced
                 for sym in cur_syms
             ]
+            jac_c = [
+                (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+                for resid in replaced
+                for sym in prev_syms
+            ]
+            jac_d = [
+                (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+                for resid in replaced
+                for sym in shock_syms
+            ]
             # The regime's own residual there, unnegated where b is negated:
             # a E[y+] = b y - c. Zero on unreplaced rows, so only these are kept.
-            constants = [
-                resid.subs(fwd_to_cur) for resid in replaced  # pyright: ignore
-            ]
+            constants = [resid.subs(at_point) for resid in replaced]  # pyright: ignore
 
             compiled[sum(1 << bit[name] for name in key)] = RegimeBlock(
                 residuals=residuals,
                 rows=rows,
                 jac_a=jac_a,
                 jac_b=jac_b,
+                jac_c=jac_c,
+                jac_d=jac_d,
                 constants=constants,
             )
         return compiled
@@ -293,6 +296,26 @@ class DSGESolver:
             return str(var.func.__name__)
         return str(var)
 
+    @staticmethod
+    def _lagged_names(conf: ModelConfig) -> set[str]:
+        """Declared variables occurring at ``t-1`` anywhere in the model.
+
+        Scanned over the reference equations, every regime and the observables
+        together, so a regime that lags something the reference does not still
+        finds that variable in the state block. Read symbolically rather than off
+        a Jacobian: a calibration that happened to zero a coefficient would
+        otherwise resize the state vector between draws.
+        """
+        t = Symbol("t", integer=True)
+        declared = {v.__name__ for v in conf.variables.variables}
+        lagged: set[str] = set()
+        for expr in _offset_expressions(conf):
+            for call in expr.atoms(AppliedUndef):
+                info = _call_offset(call, declared, t)
+                if info is not None and info[1] < 0:
+                    lagged.add(info[0])
+        return lagged
+
     def _infer_variable_layout(
         self,
         conf: ModelConfig,
@@ -301,55 +324,59 @@ class DSGESolver:
     ) -> VariableLayout:
         """Canonical layout of a desugared model.
 
-        Desugaring lifts every lag and every shock into a variable of its own, and
-        after it the predetermined variables are exactly those: a lag aux is
-        pinned at t-1 by its defining equation and a shock state carries the
-        innovation. Everything the model itself declares reads as a static
-        function of them, so it lands in the control block.
+        A variable is predetermined when it occurs at ``t-1``. Everything else
+        is a control.
 
-        Canonical order is shock states, lag states, controls, which keeps the
-        shocked states leading as the impact block and ``eta`` require.
+        Canonical order is states then controls: the pencil's own decision-rule
+        ordering is derived natively from the incidence, but ``A``/``B``, ``x0``,
+        ``P0`` and the filter all read the state block as a prefix.
+
+        Shocks are not variables here. They reach the residual as innovations,
+        so ``n_exog`` counts them and the state space takes its loading from the
+        shock jacobian.
         """
-        declared_names = tuple(v.__name__ for v in conf.variables.variables)
-        generated_names = {g.name for g in generated}
+        # ``conf`` is desugared, so its variable list carries the minted names
+        # too. The canonical split spans all of them including aux variables.
+        # while ``declared_names`` keeps only the user's own, filtered by name
+        # rather than sliced off the tail.
+        all_names = tuple(v.__name__ for v in conf.variables.variables)
+        minted = frozenset(g.name for g in generated)
+        declared_names = tuple(n for n in all_names if n not in minted)
 
-        exo_state_names = tuple(
-            g.name for g in generated if g.kind is GeneratedKind.SHOCK
-        )
-        endo_state_names = tuple(
-            g.name for g in generated if g.kind is GeneratedKind.LAG
-        )
-        model_names = tuple(
-            name for name in declared_names if name not in generated_names
-        )
+        lagged = self._lagged_names(conf)
+        state_names = tuple(name for name in all_names if name in lagged)
+        control_names = tuple(name for name in all_names if name not in lagged)
 
-        control_names = (
-            model_names
-            if variable_order is None
-            else self._resolve_variable_order(variable_order, model_names)
-        )
-        canonical_names = (*exo_state_names, *endo_state_names, *control_names)
+        if variable_order is not None:
+            state_names, control_names = self._resolve_variable_order(
+                variable_order,
+                state_names,
+                control_names,
+                frozenset(g.name for g in generated),
+            )
+
+        canonical_names = (*state_names, *control_names)
         idx = {name: i for i, name in enumerate(canonical_names)}
 
-        # Shock columns follow shock_map order, which is the order the shock
-        # states were minted in. Only the keys are read: the lift keys on the
-        # shock symbol, so a shock enters any number of equations and the target
-        # a shock declares names nothing the compiler needs.
-        shock_names = tuple(shock.name for shock in conf.shock_map)
+        # Shock columns follow declaration order. A shock reaches the residual
+        # as a bare symbol and may drive any number of equations, so which
+        # variables it moves is the shock jacobian's answer, not a declared one.
+        shock_names = tuple(shock.name for shock in conf.shocks)
 
         return VariableLayout(
+            n_var=len(all_names),
+            n_declared=len(declared_names),
+            n_generated=len(generated),
+            n_exog=len(shock_names),
+            n_state=len(state_names),
+            n_ctrl=len(control_names),
             declared_names=declared_names,
+            generated_names=tuple(g.name for g in generated),
             canonical_names=canonical_names,
-            exo_state_names=exo_state_names,
-            endo_state_names=endo_state_names,
+            state_names=state_names,
             control_names=control_names,
-            n_exog=len(exo_state_names),
-            n_state=len(exo_state_names) + len(endo_state_names),
             idx=idx,
-            generated={g.name: idx[g.name] for g in generated},
-            lag_origin={
-                g.name: g.origin for g in generated if g.kind is GeneratedKind.LAG
-            },
+            aux_origin={g.name: g.origin for g in generated},
             shock_names=shock_names,
             shock_idx={name: i for i, name in enumerate(shock_names)},
         )
@@ -361,25 +388,24 @@ class DSGESolver:
         """Widen the parse-time ``P0`` over the generated variables, then permute.
 
         ``P0`` is assembled in declared variable order at parse time, before the
-        compiler mints anything. A lag aux is its origin one period back, so it
-        takes the origin's variance; a shock state takes the 1.0 an unspecified
-        entry would have carried. The permutation into canonical order is a
+        compiler mints anything. A lag aux is its origin some periods back, so it
+        takes the origin's variance. The permutation into canonical order is a
         lossless reindex.
         """
-        n_declared = len(layout.declared_names) - len(generated)
+        n_declared = layout.n_declared
         if P0.shape != (n_declared, n_declared):
             raise ValueError(
                 f"P0 has shape {P0.shape}, expected ({n_declared}, {n_declared}) "
                 f"for the model's declared variables."
             )
 
-        declared_idx = {name: i for i, name in enumerate(layout.declared_names)}
-        wide = np.eye(len(layout.declared_names), dtype=float64)
+        full = (*layout.declared_names, *layout.generated_names)
+        declared_idx = {name: i for i, name in enumerate(full)}
+        wide = np.eye(len(full), dtype=float64)
         wide[:n_declared, :n_declared] = P0
         for g in generated:
-            if g.kind is GeneratedKind.LAG:
-                origin = declared_idx[g.origin]
-                wide[declared_idx[g.name], declared_idx[g.name]] = P0[origin, origin]
+            origin = declared_idx[g.origin]
+            wide[declared_idx[g.name], declared_idx[g.name]] = P0[origin, origin]
 
         perm = [declared_idx[name] for name in layout.canonical_names]
         return wide[np.ix_(perm, perm)]
@@ -387,28 +413,42 @@ class DSGESolver:
     @staticmethod
     def _resolve_variable_order(
         variable_order: Sequence[Function | str],
-        model_names: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        """Coerce and validate an explicit order for the control block.
+        state_names: tuple[str, ...],
+        control_names: tuple[str, ...],
+        generated: frozenset[str] = frozenset(),
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Coerce and validate an explicit order, and split it back into blocks.
 
-        The states are the compiler's own variables and always lead the canonical
-        order, so an explicit order names the variables the model declares, each
-        exactly once.
+        An order names every variable the model declares, each exactly once, and
+        leads with the states. Which variables those are follows from the model,
+        so an order chooses positions within a block rather than membership of
+        one, and it is free within each. Compiler-minted lags take the end of the
+        state block, where the default order leaves them.
         """
         var_order = tuple(DSGESolver._coerce_variable_name(v) for v in variable_order)
         if len(set(var_order)) != len(var_order):
             raise ValueError("variable_order contains duplicate variables.")
 
-        declared = set(model_names)
+        minted = tuple(name for name in state_names if name in generated)
+        declared_states = tuple(name for name in state_names if name not in generated)
+        declared = set(declared_states) | set(control_names)
         if set(var_order) != declared:
             unknown = sorted(set(var_order) - declared)
             missing = sorted(declared - set(var_order))
             raise ValueError(
                 "variable_order must name every declared model variable exactly "
                 f"once. Unknown: {unknown}. Missing: {missing}. Compiler-generated "
-                "states lead the canonical order and must not appear."
+                "lags are placed with the states and must not appear."
             )
-        return var_order
+
+        n_state = len(declared_states)
+        if set(var_order[:n_state]) != set(declared_states):
+            raise ValueError(
+                "variable_order must lead with the model's states. Expected its "
+                f"first {n_state} entries to be {list(declared_states)} in any "
+                f"order, got {list(var_order[:n_state])}."
+            )
+        return (*var_order[:n_state], *minted), var_order[n_state:]
 
     def solve(
         self,
@@ -421,11 +461,12 @@ class DSGESolver:
     ) -> SolvedModel:
         """Solve the model to first (``order=1``) or second (``order=2``) order.
 
-        ``order=1`` is the Klein linear solve (policy is a ``KleinSolution``).
-        ``order=2`` additionally computes the SGU second-order tensors and the
-        sigma^2 risk correction (policy is a ``PerturbationSolution``); it requires
-        the native extension and a nonlinear steady state (see ``_solve_second_order``).
-        The state-space ``A``/``B`` are the first-order transition in both cases.
+        ``order=1`` is the Klein linear solve (policy is a
+        ``FirstOrderSolution``). ``order=2`` additionally computes the
+        second-order tensors and the sigma^2 risk correction (policy is a
+        ``SecondOrderSolution``); it requires the native extension and a
+        nonlinear steady state (see ``_solve_second_order``). The state-space
+        ``A``/``B`` are the first-order transition in both cases.
 
         When ``raise_on_bk_violation`` is ``False`` a Klein stability/uniqueness
         failure warns instead of raising, so batch callers (e.g. an estimation
@@ -467,46 +508,71 @@ class DSGESolver:
 
     @staticmethod
     def _resolve_ss_seed(
-        ss_seed: list[float] | ndarray | dict[str, float] | None,
+        ss_seed: list[float | float64] | ndarray | dict[str, float | float64] | None,
         compiled: CompiledModel,
     ) -> NDF:
         """Newton seed for the steady state, in canonical variable order.
 
-        Priority: an explicit ``ss_seed`` > the model's configured symbolic
-        ``ss_seed`` > zeros. Newton resolves ``F(ss, ss) = 0`` from here, so a
-        gap model (ss = 0) seeds at 0 and converges in one step, while a level
-        model that declares its seed in the config seeds itself.
+        Resolved per variable: an explicit ``ss_seed`` if it names the variable,
+        else the config's ``ss_seed`` expression, else zero. Newton resolves
+        ``F(ss, ss) = 0`` from here, so a gap model seeds at 0 and converges in
+        one step while a level model that declares its seed seeds itself.
 
-        A seed is written over the declared variables, and the generated block is
-        derived the way ``desugar`` derives the configured one. A compiled-length
-        array is taken as canonical order already, which is what feeds a previous
-        solve's steady state back in.
+        An explicit seed names the model's own variables, as a mapping or as a
+        dense sequence in declaration order. Compiler-minted variables are not
+        addressable: at a steady state every date coincides, so an aux equals
+        its origin identically and has no seed of its own to give.
         """
         layout = compiled.layout
-        n_var = compiled.n_var
-        n_declared = len(layout.declared_names) - len(layout.generated)
-        declared = layout.declared_names[:n_declared]
+        declared = layout.declared_names
 
-        if ss_seed is not None:
-            if isinstance(ss_seed, dict):
-                return DSGESolver._widen_ss_seed(ss_seed, compiled)
-            seed = asarray(ss_seed, dtype=float64)
-            # Newton reads this buffer natively, so a short one is an
-            # out-of-bounds read rather than an exception.
-            if seed.shape == (n_var,):
-                return seed
-            if seed.shape != (n_declared,):
+        seed = DSGESolver._configured_ss_seed(compiled)
+        if ss_seed is None:
+            return seed
+
+        if isinstance(ss_seed, Mapping):
+            by_name = {str(name): float(value) for name, value in ss_seed.items()}
+            minted = sorted(set(by_name) & set(layout.generated_names))
+            if minted:
                 raise ValueError(
-                    f"ss_seed has shape {seed.shape}, expected ({n_declared},) for "
-                    f"the declared variables {list(declared)} or ({n_var},) for the "
-                    f"compiled variables {list(compiled.var_names)}."
+                    f"ss_seed names compiler-minted variable(s) {minted}, which "
+                    f"take their origin's seed. Seed the origin instead."
                 )
-            return DSGESolver._widen_ss_seed(dict(zip(declared, seed)), compiled)
+            unknown = sorted(set(by_name) - set(declared))
+            if unknown:
+                raise ValueError(
+                    f"ss_seed names variables the model does not have: {unknown}. "
+                    f"Model variables: {list(declared)}."
+                )
+        else:
+            values = asarray(ss_seed, dtype=float64)
+            if values.shape != (len(declared),):
+                raise ValueError(
+                    f"ss_seed has shape {values.shape}, expected "
+                    f"({len(declared)},) for the model's variables in declaration "
+                    f"order: {list(declared)}. Name the variables in a dict to "
+                    f"seed only some of them."
+                )
+            by_name = dict(zip(declared, (float(v) for v in values)))
 
+        # An aux follows its origin here too, so seeding the origin seeds the
+        # whole chain off it.
+        for i, name in enumerate(compiled.var_names):
+            origin = layout.aux_origin.get(name, name)
+            if origin in by_name:
+                seed[i] = by_name[origin]
+        return seed
+
+    @staticmethod
+    def _configured_ss_seed(compiled: CompiledModel) -> NDF:
+        """The model's own symbolic ``ss_seed``, evaluated in canonical order.
+
+        A variable that declares none seeds at zero.
+        """
         conf = compiled.config
         name_to_func = {v.__name__: v for v in conf.variables.variables}
         params = conf.calibration.parameters
-        ss = np.zeros(n_var, dtype=float64)
+        ss = np.zeros(compiled.n_var, dtype=float64)
         for i, name in enumerate(compiled.var_names):
             expr = conf.variables.ss_seed[name_to_func[name]]
             if expr is None:
@@ -519,24 +585,6 @@ class DSGESolver:
                     f"ss_seed for '{name}' did not evaluate to a number: {val}"
                 ) from exc
         return ss
-
-    @staticmethod
-    def _widen_ss_seed(by_name: Mapping[str, float], compiled: CompiledModel) -> NDF:
-        """Scatter a seed keyed by variable name into canonical order.
-
-        A lag aux tracks its origin exactly, so it shares the origin's expansion
-        point; a shock state has no steady state of its own and starts at 0. An
-        entry naming a generated variable outright still wins, so a seed read
-        back off the compiled layout round-trips.
-        """
-        lag_origin = compiled.layout.lag_origin
-        return np.array(
-            [
-                by_name.get(name, by_name.get(lag_origin.get(name, name), 0.0))
-                for name in compiled.var_names
-            ],
-            dtype=float64,
-        )
 
     @staticmethod
     def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
@@ -560,6 +608,7 @@ class DSGESolver:
             compiled.construct_objective_cfunc(),
             param_vec,
             seed,
+            compiled.incidence,
             compiled.n_state,
             n_exog=compiled.n_exog,
         )
@@ -575,19 +624,20 @@ class DSGESolver:
         seed: NDF,
         raise_on_bk_violation: bool = True,
     ) -> SolvedModel[SecondOrderSolution]:
-        """Second-order (SGU) solve. Runs the Klein first order (which Newton-
-        resolves the steady state from ``seed``), sweeps the bicomplex Hessian at
-        that steady state, and assembles ``g_xx``/``h_xx`` + the ``g_ss``/``h_ss``
-        risk correction into a :class:`PerturbationSolution`. Requires the native
-        extension."""
+        """Second-order solve. Runs the Klein first order (which Newton-resolves
+        the steady state from ``seed``), sweeps the bicomplex Hessian at that
+        steady state, and assembles the quadratic blocks over the states, the
+        shocks and their cross plus the risk correction into a
+        :class:`SecondOrderSolution`. Requires the native extension."""
 
         pert = sgu_solve(
             compiled.construct_objective_cfunc(),
             compiled.construct_objective_cfunc_bicomplex(),
             param_vec,
             seed,
+            self._build_Q(compiled),
+            compiled.incidence,
             compiled.n_state,
-            self._build_eta(compiled),
             n_exog=compiled.n_exog,
         )
         self._raise_or_warn_stability_error(
@@ -627,6 +677,7 @@ class DSGESolver:
             rows,
             param_vec,
             seed,
+            compiled.incidence,
             compiled.n_state,
             n_constraint,
             n_exog=compiled.n_exog,
@@ -639,21 +690,23 @@ class DSGESolver:
         return PiecewiseSolvedModel(compiled=compiled, policy=sol)
 
     @staticmethod
-    def _build_eta(compiled: CompiledModel) -> NDF:
-        """Shock loading ``eta`` (nx x n_exog): ``eta @ eta.T`` is the state
-        innovation covariance. Stds fill the exog-state rows; correlations enter via
-        the Cholesky of the exog-shock covariance."""
+    def _build_Q(compiled: CompiledModel) -> NDF:
+        """The shock covariance, ``(n_exog, n_exog)``.
+
+        Stds scale it and correlations fill its off-diagonals. It crosses the
+        boundary whole rather than as a factor: the risk correction integrates
+        against the covariance itself, and the filters read it as ``Q``.
+        """
         conf = compiled.config
-        n_state = compiled.n_state
         n_exog = compiled.n_exog
-        eta = np.zeros((n_state, n_exog), dtype=float64)
+        eta = np.zeros((n_exog, n_exog), dtype=float64)
         if n_exog == 0:
             return eta
 
         params = conf.calibration.parameters
         shock_std = conf.calibration.shock_std
         shock_corr = conf.calibration.shock_corr
-        innovations = list(conf.shock_map)
+        innovations = list(conf.shocks)
 
         stds = np.empty(n_exog, dtype=float64)
         for i, innov in enumerate(innovations):
@@ -672,9 +725,7 @@ class DSGESolver:
                 )
                 corr[i, j] = corr[j, i] = cij
 
-        cov = corr * np.outer(stds, stds)
-        eta[:n_exog, :] = np.linalg.cholesky(cov)
-        return eta
+        return corr * np.outer(stds, stds)
 
     def _estimator(
         self,
@@ -847,32 +898,3 @@ class DSGESolver:
             ss_seed=ss_seed,
         )
         return result, solved
-
-    @staticmethod
-    def _bad_time_offsets(
-        expr: Basic,
-        var_funcs: list[Function],
-        t: Symbol,
-        allowed: set[int] | None = None,
-    ) -> set[int]:
-        allowed = {0, 1} if allowed is None else allowed
-        bad: set[int] = set()
-
-        for call in expr.atoms(sp.Function):
-            if (
-                call.func not in [vf.func for vf in var_funcs]
-                and call.func not in var_funcs
-            ):
-                continue
-
-            if not call.args:
-                continue
-
-            arg0 = call.args[0]
-            if arg0.free_symbols and t in arg0.free_symbols:
-                k = sp.simplify(arg0 - t)
-                if k.is_integer:
-                    kk = int(k)
-                    if kk not in allowed:
-                        bad.add(kk)
-        return bad

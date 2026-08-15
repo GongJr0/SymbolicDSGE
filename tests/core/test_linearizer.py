@@ -30,8 +30,8 @@ def _nonlinear_model_yaml() -> str:
           k:
             linearization: taylor
             ss_seed: k_ss
-        shock_map:
-          e_a: a
+        shocks:
+          - e_a
         observables: [AObs]
         equations:
           model:
@@ -68,9 +68,9 @@ def _mixed_methods_nonlinear_yaml() -> str:
             linearization: taylor
             ss_seed: k_ss
           z: {}
-        shock_map:
-          e_a: a
-          e_z: z
+        shocks:
+          - e_a
+          - e_z
         observables: [ZObs]
         equations:
           model:
@@ -113,9 +113,9 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         """
         name: "HAND_LINEARIZED_EQUIVALENCE_TEST"
         variables: [a, k, z]
-        shock_map:
-          e_a: a
-          e_z: z
+        shocks:
+          - e_a
+          - e_z
         observables: [ZObs]
         equations:
           model:
@@ -280,11 +280,10 @@ def test_linearize_model_marks_copy_and_solver_compiles_and_solves(tmp_path):
     solved = solver.solve(compiled)
 
     assert solved.policy.stab == 0
-    # a and k each gain a lag state and the shock gains one, so 2 declared plus
-    # 3 generated.
-    assert compiled.n_state == 3
-    assert solved.policy.A.shape == (5, 5)
-    assert solved.policy.B.shape == (5, 1)
+    # a and k both occur at t-1, so the model is all states and no controls.
+    assert compiled.n_state == 2
+    assert solved.policy.A.shape == (2, 2)
+    assert solved.policy.B.shape == (2, 1)
 
 
 def test_linearized_model_supports_likelihood_evaluation(tmp_path):
@@ -310,7 +309,7 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
         params=params,
         filter_mode="linear",
         observables=["AObs"],
-        ss_seed=np.zeros((len(compiled.var_names),), dtype=np.float64),
+        ss_seed=np.zeros((len(compiled.layout.declared_names),), dtype=np.float64),
         x0=None,
         jitter=None,
         symmetrize=None,

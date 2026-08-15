@@ -1,4 +1,5 @@
 #include "kalman.h"
+#include "../_common/sdsge_perturbation.h" /* sdsge_second_order_step */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,55 +158,30 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 kf_outputs *out) {
   const i64 n = in->n, m = in->m, k = in->k, T = in->T;
 
-  f64 *p = arena;
-  f64 *x_pred_buf = p;
-  p += n;
-  f64 *x_filt_buf = p;
-  p += n;
-  f64 *y_pred_buf = p;
-  p += m;
-  f64 *y_filt_buf = p;
-  p += m;
-  f64 *v_buf = p;
-  p += m;
-  f64 *u_buf = p;
-  p += m;
-  f64 *S_inv_v = p;
-  p += m;
-  f64 *solve_f = p;
-  p += m;
-  f64 *solve_b = p;
-  p += m;
-  f64 *P_pred_buf = p;
-  p += n * n;
-  f64 *P_filt_buf = p;
-  p += n * n;
-  f64 *KC = p;
-  p += n * n;
-  f64 *I_minus_KC = p;
-  p += n * n;
-  f64 *temp_nn = p;
-  p += n * n;
-  f64 *BQBT = p;
-  p += n * n;
-  f64 *S_buf = p;
-  p += m * m;
-  f64 *L = p;
-  p += m * m;
-  f64 *PCt = p;
-  p += n * m;
-  f64 *K = p;
-  p += n * m;
-  f64 *temp_nm = p;
-  p += n * m;
-  f64 *temp_mn = p;
-  p += m * n;
-  f64 *temp_nk = p;
-  p += n * k;
-  f64 *M = p;
-  p += k * m;
-  f64 *temp_km = p;
-  p += k * m;
+  f64 *x_pred_buf = arena;
+  f64 *x_filt_buf = x_pred_buf + n;
+  f64 *y_pred_buf = x_filt_buf + n;
+  f64 *y_filt_buf = y_pred_buf + m;
+  f64 *v_buf = y_filt_buf + m;
+  f64 *u_buf = v_buf + m;
+  f64 *S_inv_v = u_buf + m;
+  f64 *solve_f = S_inv_v + m;
+  f64 *solve_b = solve_f + m;
+  f64 *P_pred_buf = solve_b + m;
+  f64 *P_filt_buf = P_pred_buf + n * n;
+  f64 *KC = P_filt_buf + n * n;
+  f64 *I_minus_KC = KC + n * n;
+  f64 *temp_nn = I_minus_KC + n * n;
+  f64 *BQBT = temp_nn + n * n;
+  f64 *S_buf = BQBT + n * n;
+  f64 *L = S_buf + m * m;
+  f64 *PCt = L + m * m;
+  f64 *K = PCt + n * m;
+  f64 *temp_nm = K + n * m;
+  f64 *temp_mn = temp_nm + n * m;
+  f64 *temp_nk = temp_mn + m * n;
+  f64 *M = temp_nk + n * k;
+  f64 *temp_km = M + k * m;
 
   kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
   if (in->return_shocks && in->store_history)
@@ -214,18 +190,17 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   const f64 const_term = (f64)m * log(TWO_PI); /* m * log(2*pi) */
   f64 loglik = 0.0;
 
-  /* x_prev/P_prev start at the inputs, then alias the filtered scratch; each
-   * is read (into x_pred_buf / P_pred_buf) before being overwritten. */
-  const f64 *x_prev = in->x0;
-  const f64 *P_prev = in->P0;
+  /* x0/P0 are the prior for the FIRST OBSERVED state, so a period opens on the
+   * update and closes on the propagation. Dynare's kalman_filter.m is written
+   * the same way, which is what lets the same (x0, P0) mean the same thing on
+   * both sides rather than differing by one application of the transition. */
+  memcpy(x_pred_buf, in->x0, (size_t)n * sizeof(f64));
+  memcpy(P_pred_buf, in->P0, (size_t)(n * n) * sizeof(f64));
+  if (in->symmetrize)
+    sdsge_sym_inplace(P_pred_buf, n);
   int status = KF_OK;
 
   for (i64 t = 0; t < T; ++t) {
-    sdsge_matvec(in->A, x_prev, x_pred_buf, n, n);
-    kf_predict_cov(in->A, P_prev, BQBT, temp_nn, P_pred_buf, n);
-    if (in->symmetrize)
-      sdsge_sym_inplace(P_pred_buf, n);
-
     sdsge_matvec_plus_vec(in->C, x_pred_buf, in->d, y_pred_buf, m, n);
     kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
     kf_measurement_cov(in->C, P_pred_buf, in->R, temp_mn, S_buf, n, m);
@@ -270,8 +245,11 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
       memcpy(out->S + t * m * m, S_buf, (size_t)(m * m) * sizeof(f64));
     }
 
-    x_prev = x_filt_buf;
-    P_prev = P_filt_buf;
+    /* Carry the posterior forward: the next period opens on this prediction. */
+    sdsge_matvec(in->A, x_filt_buf, x_pred_buf, n, n);
+    kf_predict_cov(in->A, P_filt_buf, BQBT, temp_nn, P_pred_buf, n);
+    if (in->symmetrize)
+      sdsge_sym_inplace(P_pred_buf, n);
   }
 
   *out->loglik = loglik;
@@ -294,71 +272,47 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
                  ekf_outputs *out) {
   const i64 n = in->n, m = in->m, k = in->k, T = in->T;
 
-  f64 *p = arena;
-  f64 *x_pred_buf = p;
-  p += n;
-  f64 *x_filt_buf = p;
-  p += n;
-  f64 *y_pred_buf = p;
-  p += m;
-  f64 *v_buf = p;
-  p += m;
-  f64 *u_buf = p;
-  p += m;
-  f64 *S_inv_v = p;
-  p += m;
-  f64 *solve_f = p;
-  p += m;
-  f64 *solve_b = p;
-  p += m;
-  f64 *P_pred_buf = p;
-  p += n * n;
-  f64 *P_filt_buf = p;
-  p += n * n;
-  f64 *KC = p;
-  p += n * n;
-  f64 *I_minus_KC = p;
-  p += n * n;
-  f64 *temp_nn = p;
-  p += n * n;
-  f64 *BQBT = p;
-  p += n * n;
-  f64 *S_buf = p;
-  p += m * m;
-  f64 *L = p;
-  p += m * m;
-  f64 *PCt = p;
-  p += n * m;
-  f64 *K = p;
-  p += n * m;
-  f64 *temp_nm = p;
-  p += n * m;
-  f64 *H_buf = p;
-  p += m * n;
-  f64 *temp_mn = p;
-  p += m * n;
-  f64 *temp_nk = p;
-  p += n * k;
-  f64 *M = p;
-  p += k * m;
-  f64 *temp_km = p;
-  p += k * m;
+  f64 *x_pred_buf = arena;
+  f64 *x_filt_buf = x_pred_buf + n;
+  f64 *y_pred_buf = x_filt_buf + n;
+  f64 *v_buf = y_pred_buf + m;
+  f64 *u_buf = v_buf + m;
+  f64 *S_inv_v = u_buf + m;
+  f64 *solve_f = S_inv_v + m;
+  f64 *solve_b = solve_f + m;
+  f64 *P_pred_buf = solve_b + m;
+  f64 *P_filt_buf = P_pred_buf + n * n;
+  f64 *KC = P_filt_buf + n * n;
+  f64 *I_minus_KC = KC + n * n;
+  f64 *temp_nn = I_minus_KC + n * n;
+  f64 *BQBT = temp_nn + n * n;
+  f64 *S_buf = BQBT + n * n;
+  f64 *L = S_buf + m * m;
+  f64 *PCt = L + m * m;
+  f64 *K = PCt + n * m;
+  f64 *temp_nm = K + n * m;
+  f64 *H_buf = temp_nm + n * m;
+  f64 *temp_mn = H_buf + m * n;
+  f64 *temp_nk = temp_mn + m * n;
+  f64 *M = temp_nk + n * k;
+  f64 *temp_km = M + k * m;
 
   kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
 
   const f64 const_term = (f64)m * log(TWO_PI);
   f64 loglik = 0.0;
 
-  const f64 *x_prev = in->x0;
-  const f64 *P_prev = in->P0;
+  /* x0/P0 are the prior for the FIRST OBSERVED state, so a period opens on the
+   * update and closes on the propagation. Dynare's kalman_filter.m is written
+   * the same way, which is what lets the same (x0, P0) mean the same thing on
+   * both sides rather than differing by one application of the transition. */
+  memcpy(x_pred_buf, in->x0, (size_t)n * sizeof(f64));
+  memcpy(P_pred_buf, in->P0, (size_t)(n * n) * sizeof(f64));
+  if (in->symmetrize)
+    sdsge_sym_inplace(P_pred_buf, n);
   int status = KF_OK;
 
   for (i64 t = 0; t < T; ++t) {
-    sdsge_matvec(in->A, x_prev, x_pred_buf, n, n);
-    kf_predict_cov(in->A, P_prev, BQBT, temp_nn, P_pred_buf, n);
-    if (in->symmetrize)
-      sdsge_sym_inplace(P_pred_buf, n);
-
     /* Nonlinear measurement + relinearization at the predicted state:
      * y_pred := h(x_pred, params);  H_buf := dh/dx(x_pred, params), (m, n). */
     in->meas(x_pred_buf, in->calib_params, y_pred_buf);
@@ -410,8 +364,11 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
       memcpy(out->S + t * m * m, S_buf, (size_t)(m * m) * sizeof(f64));
     }
 
-    x_prev = x_filt_buf;
-    P_prev = P_filt_buf;
+    /* Carry the posterior forward: the next period opens on this prediction. */
+    sdsge_matvec(in->A, x_filt_buf, x_pred_buf, n, n);
+    kf_predict_cov(in->A, P_filt_buf, BQBT, temp_nn, P_pred_buf, n);
+    if (in->symmetrize)
+      sdsge_sym_inplace(P_pred_buf, n);
   }
 
   *out->loglik = loglik;
@@ -459,32 +416,6 @@ static void ukf_weighted_cov(const f64 *SDSGE_RESTRICT sigma,
   }
 }
 
-static void ukf_pruned_transition(const ukf_inputs *in,
-                                  const f64 *SDSGE_RESTRICT z,
-                                  f64 *SDSGE_RESTRICT out) {
-  const i64 ns = in->n_state;
-  const f64 *x1 = z;
-  const f64 *x2 = z + ns;
-  f64 *x1_next = out;
-  f64 *x2_next = out + ns;
-
-  for (i64 i = 0; i < ns; ++i) {
-    f64 s1 = 0.0;
-    f64 s2 = 0.5 * in->hss[i];
-    for (i64 j = 0; j < ns; ++j) {
-      const f64 hxij = in->hx[i * ns + j];
-      s1 += hxij * x1[j];
-      s2 += hxij * x2[j];
-    }
-    const f64 *hxx_i = in->hxx + i * ns * ns;
-    for (i64 j = 0; j < ns; ++j)
-      for (i64 k = 0; k < ns; ++k)
-        s2 += 0.5 * hxx_i[j * ns + k] * x1[j] * x1[k];
-    x1_next[i] = s1;
-    x2_next[i] = s2;
-  }
-}
-
 static void ukf_project_vars(const ukf_inputs *in, const f64 *SDSGE_RESTRICT z,
                              f64 *SDSGE_RESTRICT vars) {
   const i64 ns = in->n_state;
@@ -508,15 +439,22 @@ static void ukf_project_vars(const ukf_inputs *in, const f64 *SDSGE_RESTRICT z,
   }
 }
 
-static void ukf_eval_measurement_sigma(const ukf_inputs *in,
-                                       const f64 *SDSGE_RESTRICT sigma_z,
-                                       i64 n_sig, f64 *SDSGE_RESTRICT vars_buf,
-                                       f64 *SDSGE_RESTRICT sigma_y) {
-  const i64 nz = 2 * in->n_state;
-  const i64 no = in->n_obs;
+static void ukf_weighted_cross(const f64 *SDSGE_RESTRICT sigma_a,
+                               const f64 *SDSGE_RESTRICT a_mean,
+                               const f64 *SDSGE_RESTRICT sigma_y,
+                               const f64 *SDSGE_RESTRICT y_mean, f64 w0, f64 wi,
+                               i64 n_sig, i64 na, i64 no,
+                               f64 *SDSGE_RESTRICT out) {
+  sdsge_zero_mat(out, na, no);
   for (i64 r = 0; r < n_sig; ++r) {
-    ukf_project_vars(in, sigma_z + r * nz, vars_buf);
-    in->meas(vars_buf, in->params, sigma_y + r * no);
+    const f64 *ar = sigma_a + r * na;
+    const f64 *yr = sigma_y + r * no;
+    const f64 w = (r == 0) ? w0 : wi;
+    for (i64 i = 0; i < na; ++i) {
+      const f64 dai = ar[i] - a_mean[i];
+      for (i64 j = 0; j < no; ++j)
+        out[i * no + j] += w * dai * (yr[j] - y_mean[j]);
+    }
   }
 }
 
@@ -547,13 +485,6 @@ static void ukf_weighted_meas_cov_cross(const f64 *SDSGE_RESTRICT sigma_z,
   }
 }
 
-static void ukf_add_process_cov(const f64 *SDSGE_RESTRICT BQBT,
-                                f64 *SDSGE_RESTRICT P, i64 ns, i64 nz) {
-  for (i64 i = 0; i < ns; ++i)
-    for (i64 j = 0; j < ns; ++j)
-      P[i * nz + j] += BQBT[i * ns + j];
-}
-
 static void ukf_cov_update(const f64 *SDSGE_RESTRICT P_pred,
                            const f64 *SDSGE_RESTRICT K,
                            const f64 *SDSGE_RESTRICT Pzy,
@@ -568,40 +499,17 @@ static void ukf_cov_update(const f64 *SDSGE_RESTRICT P_pred,
   }
 }
 
-static void ukf_store_history(const ukf_inputs *in, const f64 *SDSGE_RESTRICT z,
-                              const f64 *SDSGE_RESTRICT P,
+static void ukf_store_history(const ukf_inputs *in,
+                              const f64 *SDSGE_RESTRICT z,
+                              const f64 *SDSGE_RESTRICT vars,
                               f64 *SDSGE_RESTRICT x1, f64 *SDSGE_RESTRICT x2,
                               f64 *SDSGE_RESTRICT x, i64 t) {
   const i64 ns = in->n_state;
-  const i64 nc = in->n_ctrl;
-  const i64 nz = 2 * ns;
-  const i64 nv = ns + nc;
-  const f64 *z1 = z;
-  const f64 *z2 = z + ns;
-  f64 *x1_row = x1 + t * ns;
-  f64 *x2_row = x2 + t * ns;
-  f64 *x_row = x + t * nv;
+  const i64 nv = ns + in->n_ctrl;
 
-  memcpy(x1_row, z1, (size_t)ns * sizeof(f64));
-  memcpy(x2_row, z2, (size_t)ns * sizeof(f64));
-
-  for (i64 i = 0; i < ns; ++i)
-    x_row[i] = in->steady_state[i] + z1[i] + z2[i];
-
-  for (i64 i = 0; i < nc; ++i) {
-    f64 s = 0.5 * in->gss[i];
-    const f64 *gx_i = in->gx + i * ns;
-    for (i64 j = 0; j < ns; ++j)
-      s += gx_i[j] * (z1[j] + z2[j]);
-    const f64 *gxx_i = in->gxx + i * ns * ns;
-    for (i64 j = 0; j < ns; ++j) {
-      for (i64 k = 0; k < ns; ++k) {
-        const f64 m2 = P[j * nz + k] + z1[j] * z1[k];
-        s += 0.5 * gxx_i[j * ns + k] * m2;
-      }
-    }
-    x_row[ns + i] = in->steady_state[ns + i] + s;
-  }
+  memcpy(x1 + t * ns, z, (size_t)ns * sizeof(f64));
+  memcpy(x2 + t * ns, z + ns, (size_t)ns * sizeof(f64));
+  memcpy(x + t * nv, vars, (size_t)nv * sizeof(f64));
 }
 
 /* Sigma-point Cholesky with an on-failure floor. Factor at the caller's jitter
@@ -625,12 +533,15 @@ static int ukf_chol_auto(const f64 *SDSGE_RESTRICT P, f64 jitter,
 arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl,
                            const i64 n_exog, const i64 n_obs) {
   const i64 nz = 2 * n_state;
-  const i64 n_sig = 2 * nz + 1;
+  const i64 na = nz + n_exog;
+  const i64 n_sig = 2 * na + 1;
   const i64 nv = n_state + n_ctrl;
 
-  return make_sizer(3 * nz + 4 * nz * nz + 2 * n_sig * nz + n_sig * n_obs +
-                        n_state * n_state + n_state * n_exog + 6 * n_obs +
-                        2 * n_obs * n_obs + 2 * nz * n_obs + nv,
+  return make_sizer(3 * nz + 4 * nz * nz + na * na + n_exog * n_exog +
+                        n_sig * na + n_sig * nz + n_sig * n_obs + 6 * n_obs +
+                        2 * n_obs * n_obs + 2 * nz * n_obs +
+                        n_sig * nv + 2 * nv + 2 * nv * n_obs + na +
+                        sdsge_second_order_step_scratch(n_state, n_exog),
                     0);
 }
 i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
@@ -641,14 +552,18 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
   const i64 no = in->n_obs;
   const i64 T = in->T;
   const i64 nz = 2 * ns;
-  const i64 n_sig = 2 * nz + 1;
+  /* The innovation is a sigma-point coordinate, not an additive covariance:
+   * ghxu and ghuu need it pointwise, and a control responds to it within the
+   * period. Dynare augments the same way (gaussian_filter_bank.m). */
+  const i64 na = nz + ne;
+  const i64 n_sig = 2 * na + 1;
   const i64 nv = ns + nc;
 
   if (in->meas == NULL || ns <= 0 || no <= 0 || nz <= 0)
     return KF_ERR_SHAPE_MISMATCH;
 
-  const f64 lambda = in->alpha * in->alpha * ((f64)nz + in->kappa) - (f64)nz;
-  const f64 scale = (f64)nz + lambda;
+  const f64 lambda = in->alpha * in->alpha * ((f64)na + in->kappa) - (f64)na;
+  const f64 scale = (f64)na + lambda;
   if (!(scale > 0.0) || !isfinite(scale))
     return KF_ERR_MATRIX_CONDITION;
   const f64 gamma = sqrt(scale);
@@ -656,56 +571,48 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
   const f64 w0_c = w0_m + (1.0 - in->alpha * in->alpha + in->beta);
   const f64 wi = 1.0 / (2.0 * scale);
 
-  f64 *p = arena;
-  f64 *z_prev = p;
-  p += nz;
-  f64 *z_pred = p;
-  p += nz;
-  f64 *z_filt = p;
-  p += nz;
-  f64 *P_prev = p;
-  p += nz * nz;
-  f64 *P_pred = p;
-  p += nz * nz;
-  f64 *P_filt = p;
-  p += nz * nz;
-  f64 *P_chol = p;
-  p += nz * nz;
-  f64 *sigma_z = p;
-  p += n_sig * nz;
-  f64 *sigma_z_next = p;
-  p += n_sig * nz;
-  f64 *sigma_y = p;
-  p += n_sig * no;
-  f64 *BQBT = p;
-  p += ns * ns;
-  f64 *temp_nk = p;
-  p += ns * ne;
-  f64 *y_pred = p;
-  p += no;
-  f64 *innov = p;
-  p += no;
-  f64 *std_innov = p;
-  p += no;
-  f64 *S_inv_v = p;
-  p += no;
-  f64 *solve_f = p;
-  p += no;
-  f64 *solve_b = p;
-  p += no;
-  f64 *S = p;
-  p += no * no;
-  f64 *L = p;
-  p += no * no;
-  f64 *Pzy = p;
-  p += nz * no;
-  f64 *K = p;
-  p += nz * no;
-  f64 *vars_buf = p;
+  f64 *z_prev = arena;
+  f64 *z_pred = z_prev + nz;
+  f64 *z_filt = z_pred + nz;
+  f64 *P_prev = z_filt + nz;
+  f64 *P_pred = P_prev + nz * nz;
+  f64 *P_filt = P_pred + nz * nz;
+  f64 *P_chol = P_filt + nz * nz;
+  f64 *A_chol = P_chol + nz * nz;
+  f64 *Q_chol = A_chol + na * na;
+  f64 *sigma_a = Q_chol + ne * ne;
+  f64 *sigma_z = sigma_a + n_sig * na;
+  f64 *sigma_y = sigma_z + n_sig * nz;
+  f64 *step = sigma_y + n_sig * no;
+  f64 *y_pred = step + sdsge_second_order_step_scratch(ns, ne);
+  f64 *innov = y_pred + no;
+  f64 *std_innov = innov + no;
+  f64 *S_inv_v = std_innov + no;
+  f64 *solve_f = S_inv_v + no;
+  f64 *solve_b = solve_f + no;
+  f64 *S = solve_b + no;
+  f64 *L = S + no * no;
+  f64 *Pzy = L + no * no;
+  f64 *K = Pzy + nz * no;
+  f64 *sigma_v = K + nz * no;
+  f64 *vars_pred = sigma_v + n_sig * nv;
+  f64 *vars_filt = vars_pred + nv;
+  f64 *Pvy = vars_filt + nv;
+  f64 *Kv = Pvy + nv * no;
+  f64 *z_aug = Kv + nv * no;
 
   memcpy(z_prev, in->z0, (size_t)nz * sizeof(f64));
   memcpy(P_prev, in->P0, (size_t)(nz * nz) * sizeof(f64));
-  kf_build_bqbt(in->bx, in->Q, temp_nk, BQBT, ns, ne);
+
+  /* Q is fixed for the run, so its factor is taken once. The augmented root is
+   * block diagonal and only its state block moves, so the innovation block is
+   * written here and never again. */
+  if (ne > 0 && ukf_chol_auto(in->Q, in->jitter, Q_chol, ne) != SDSGE_OK)
+    return KF_ERR_MATRIX_CONDITION;
+  sdsge_zero_mat(A_chol, na, na);
+  for (i64 i = 0; i < ne; ++i)
+    for (i64 j = 0; j < ne; ++j)
+      A_chol[(nz + i) * na + nz + j] = Q_chol[i * ne + j];
 
   const f64 const_term = (f64)no * log(TWO_PI);
   f64 loglik = 0.0;
@@ -716,23 +623,35 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
       status = KF_ERR_MATRIX_CONDITION;
       break;
     }
-    ukf_build_sigma_points(z_prev, P_chol, gamma, sigma_z, nz);
+    for (i64 i = 0; i < nz; ++i)
+      for (i64 j = 0; j < nz; ++j)
+        A_chol[i * na + j] = P_chol[i * nz + j];
 
-    for (i64 r = 0; r < n_sig; ++r)
-      ukf_pruned_transition(in, sigma_z + r * nz, sigma_z_next + r * nz);
+    for (i64 i = 0; i < nz; ++i)
+      z_aug[i] = z_prev[i];
+    for (i64 i = nz; i < na; ++i)
+      z_aug[i] = 0.0;
+    ukf_build_sigma_points(z_aug, A_chol, gamma, sigma_a, na);
 
-    ukf_weighted_mean(sigma_z_next, w0_m, wi, n_sig, nz, z_pred);
-    ukf_weighted_cov(sigma_z_next, z_pred, w0_c, wi, n_sig, nz, P_pred);
-    ukf_add_process_cov(BQBT, P_pred, ns, nz);
+    /* One sweep: the same point gives the state it carries forward and the
+     * observation of the period it lands in, which is the only way the
+     * measurement sees this period's innovation. */
+    for (i64 r = 0; r < n_sig; ++r) {
+      const f64 *SDSGE_RESTRICT a = sigma_a + r * na;
+      f64 *SDSGE_RESTRICT zn = sigma_z + r * nz;
+      sdsge_second_order_step(in->hx, in->gx, in->bu, in->hxx, in->gxx,
+                              in->hxu, in->gxu, in->huu, in->guu, in->hss,
+                              in->gss, a, a + ns, ne > 0 ? a + nz : NULL,
+                              in->steady_state, zn, zn + ns, sigma_v + r * nv,
+                              step, ns, nc, ne);
+      in->meas(sigma_v + r * nv, in->params, sigma_y + r * no);
+    }
+
+    ukf_weighted_mean(sigma_z, w0_m, wi, n_sig, nz, z_pred);
+    ukf_weighted_cov(sigma_z, z_pred, w0_c, wi, n_sig, nz, P_pred);
     if (in->symmetrize)
       sdsge_sym_inplace(P_pred, nz);
 
-    if (ukf_chol_auto(P_pred, in->jitter, P_chol, nz) != SDSGE_OK) {
-      status = KF_ERR_MATRIX_CONDITION;
-      break;
-    }
-    ukf_build_sigma_points(z_pred, P_chol, gamma, sigma_z, nz);
-    ukf_eval_measurement_sigma(in, sigma_z, n_sig, vars_buf, sigma_y);
     ukf_weighted_mean(sigma_y, w0_m, wi, n_sig, no, y_pred);
     ukf_weighted_meas_cov_cross(sigma_z, z_pred, sigma_y, y_pred, w0_c, wi,
                                 n_sig, nz, no, S, Pzy);
@@ -759,9 +678,20 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
                       sdsge_dot(innov, S_inv_v, no));
 
     if (in->store_history) {
-      ukf_store_history(in, z_pred, P_pred, out->x1_pred, out->x2_pred,
+      /* The variable vector is an output, not a state: it is never carried and
+       * never initialized, so it is filtered by its own gain against the same
+       * innovation rather than re-derived from z_filt. Deriving it there would
+       * drop this period's shock, which no longer exists once the sigma set has
+       * been marginalized down to the pruned state. */
+      ukf_weighted_mean(sigma_v, w0_m, wi, n_sig, nv, vars_pred);
+      ukf_weighted_cross(sigma_v, vars_pred, sigma_y, y_pred, w0_c, wi, n_sig,
+                         nv, no, Pvy);
+      kf_gain_from_pc_t(L, Pvy, solve_f, solve_b, Kv, nv, no);
+      kf_state_update(vars_pred, Kv, innov, vars_filt, nv, no);
+
+      ukf_store_history(in, z_pred, vars_pred, out->x1_pred, out->x2_pred,
                         out->x_pred, t);
-      ukf_store_history(in, z_filt, P_filt, out->x1_filt, out->x2_filt,
+      ukf_store_history(in, z_filt, vars_filt, out->x1_filt, out->x2_filt,
                         out->x_filt, t);
       memcpy(out->P_pred + t * nz * nz, P_pred,
              (size_t)(nz * nz) * sizeof(f64));

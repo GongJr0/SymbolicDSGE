@@ -1088,7 +1088,7 @@ def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
     d = np.array([1.0], dtype=np.float64)
 
     config = SimpleNamespace(
-        shock_map={},
+        shocks=[],
         calibration=SimpleNamespace(parameters={}, shock_std={}, fingerprint=lambda: 0),
         equations=SimpleNamespace(obs_is_affine={"obs": True}),
     )

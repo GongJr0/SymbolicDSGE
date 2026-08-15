@@ -7,6 +7,8 @@ in the small/medium regime (where production dispatch routes to native).
 
 from __future__ import annotations
 
+from SymbolicDSGE.regression.enums import RegressionStatus
+
 import numpy as np
 import pytest
 
@@ -75,7 +77,7 @@ def test_ols_chol_solve_rank_deficient_matches():
     y = np.ascontiguousarray(np.random.default_rng(1).normal(size=n), dtype=np.float64)
     n_coef, n_L, n_status = native_ols(X, y)
     b_coef, b_L, b_status = numba_chol_solve(X, y)
-    assert int(n_status) == int(b_status) == -1
+    assert int(n_status) == int(b_status) == RegressionStatus.RANK_DEFICIENT
     assert np.all(np.isnan(n_coef)) and np.all(np.isnan(b_coef))
     assert n_L.shape == b_L.shape == (0, 0)
 

@@ -6,8 +6,8 @@ live at once. Goldens and the orderings that map them onto our layout are in
 :mod:`_oracles.dynare_rbc_multishock_second_order`.
 
 This fixture exists for what the single-shock one in test_second_order_rbc.py
-cannot reach: every cross term between distinct innovations, the Cholesky branch
-of the eta builder, and a correlated ghs2.
+cannot reach: every cross term between distinct innovations, a full shock
+covariance, and a correlated ghs2.
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ import numpy as np
 import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
-from SymbolicDSGE._ckernels.core import second_order_risk
+from SymbolicDSGE._ckernels.core import second_order
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_multishock_second_order as golden
 
 _MULTISHOCK = "tests/fixtures/models/rbc_multishock_second_order.yaml"
-_MS_SHOCK_STATES = ("e_z_st", "e_d_st", "e_g_st")
 _MS_STDS = ("sig_z", "sig_d", "sig_g")
 _MS_CORRS = {(0, 1): "corr_zd", (0, 2): "corr_zg", (1, 2): "corr_dg"}
 _MS_SHOCKS = ("e_z", "e_d", "e_g")
+_MS_AR_STATES = ("z", "d", "g")
 
 
 def _solved_multishock():
@@ -36,8 +36,8 @@ def _solved_multishock():
 
 
 def _ms_preproc(solved, compiled):
-    """(a, b, f_xx) at the solved steady state, enough to re-run the risk
-    correction with an eta of our choosing."""
+    """(a, b, f_xx) at the solved steady state, enough to re-run the solve with a
+    covariance of our choosing."""
     par = np.array(
         [
             float(compiled.config.calibration.parameters[p])
@@ -49,13 +49,13 @@ def _ms_preproc(solved, compiled):
     ss = solved.policy.steady_state
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
-    a, b = klein_preprocess(cf.address, ss, par, n_eq)
-    return a, b, bicomplex_hessian(cf_bc.address, ss, par, n_eq)
+    a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
+    return a, b, bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
 
 
 def _ms_covariance(compiled) -> np.ndarray:
     """The 3x3 innovation covariance the yaml calibrates, read straight off the
-    parameters rather than off eta."""
+    parameters."""
     calib = compiled.config.calibration.parameters
     stds = np.array([float(calib[sp.Symbol(s)]) for s in _MS_STDS])
     corr = np.eye(3)
@@ -64,35 +64,32 @@ def _ms_covariance(compiled) -> np.ndarray:
     return corr * np.outer(stds, stds)
 
 
-def _ms_dr_row(solved, compiled, dr_row: str):
-    """(first order, second order, risk) for one Dynare DR row.
+def _stack(h: np.ndarray, g: np.ndarray) -> np.ndarray:
+    """The state and control blocks of one tensor as Dynare's stacked rule. Our
+    canonical order is states then controls, so ``compiled.idx`` indexes it."""
+    return np.concatenate([h, g])
 
-    Dynare's k row is next period's capital, which on our side is the k_lag1
-    transition row; every other DR row is one of our controls."""
-    pol = solved.policy
-    if dr_row == "k":
-        i = compiled.idx["k_lag1"]
-        return np.real(pol.p)[i], pol.hxx[i], pol.hss[i]
-    ctrl = {n: i for i, n in enumerate(compiled.var_names[compiled.n_state :])}
-    i = ctrl[dr_row]
-    return np.real(pol.f)[i], pol.gxx[i], pol.gss[i]
+
+def _ms_axes(compiled) -> tuple[list[int], list[int], list[int]]:
+    """(row, state column, shock column) permutations from our order to the
+    golden's. Dynare's k row is next period's capital, which is our k."""
+    ri = [compiled.idx[n] for n in golden.DR_ROWS]
+    si = [compiled.idx[n] for n in golden.DR_STATES]
+    ei = [compiled.shock_names.index(n) for n in golden.DR_EXO]
+    return ri, si, ei
 
 
 def test_multishock_first_order_matches_dynare():
-    """ghx and ghu with three shocks. The lifted shock states hold ghu, so the
-    two Dynare arrays are one slice of our first order rule each."""
+    """ghx and ghu with three shocks."""
     solved, compiled = _solved_multishock()
-    si = [compiled.idx[n] for n in golden.DR_STATES]
-    ei = [compiled.idx[n] for n in golden.DR_EXO]
+    pol = solved.policy
+    ri, si, ei = _ms_axes(compiled)
 
-    for r, name in enumerate(golden.DR_ROWS):
-        first, _, _ = _ms_dr_row(solved, compiled, name)
-        np.testing.assert_allclose(
-            first[si], golden.GHX[r], rtol=5e-6, atol=2e-7, err_msg=f"ghx {name}"
-        )
-        np.testing.assert_allclose(
-            first[ei], golden.GHU[r], rtol=5e-6, atol=2e-7, err_msg=f"ghu {name}"
-        )
+    ghx = _stack(np.real(pol.p), np.real(pol.f))[np.ix_(ri, si)]
+    ghu = np.real(pol.B)[np.ix_(ri, ei)]
+
+    np.testing.assert_allclose(ghx, golden.GHX, rtol=5e-6, atol=2e-7)
+    np.testing.assert_allclose(ghu, golden.GHU, rtol=5e-6, atol=2e-7)
 
 
 def test_multishock_second_order_matches_dynare():
@@ -103,20 +100,20 @@ def test_multishock_second_order_matches_dynare():
     distinct innovations, which no single-shock model has.
     """
     solved, compiled = _solved_multishock()
-    si = [compiled.idx[n] for n in golden.DR_STATES]
-    ei = [compiled.idx[n] for n in golden.DR_EXO]
+    pol = solved.policy
+    ri, si, ei = _ms_axes(compiled)
     ns, ne = len(si), len(ei)
 
-    for r, name in enumerate(golden.DR_ROWS):
-        _, tensor, _ = _ms_dr_row(solved, compiled, name)
-        for label, ix, expected, shape in (
-            ("ghxx", (si, si), golden.GHXX[r], (ns, ns)),
-            ("ghxu", (si, ei), golden.GHXU[r], (ns, ne)),
-            ("ghuu", (ei, ei), golden.GHUU[r], (ne, ne)),
-        ):
+    for label, tensor, ix, expected, shape in (
+        ("ghxx", _stack(pol.hxx, pol.gxx), (ri, si, si), golden.GHXX, (ns, ns)),
+        ("ghxu", _stack(pol.hxu, pol.gxu), (ri, si, ei), golden.GHXU, (ns, ne)),
+        ("ghuu", _stack(pol.huu, pol.guu), (ri, ei, ei), golden.GHUU, (ne, ne)),
+    ):
+        got = tensor[np.ix_(*ix)]
+        for r, name in enumerate(golden.DR_ROWS):
             np.testing.assert_allclose(
-                tensor[np.ix_(*ix)],
-                np.asarray(expected, dtype=np.float64).reshape(shape),
+                got[r],
+                np.asarray(expected[r], dtype=np.float64).reshape(shape),
                 rtol=5e-6,
                 atol=2e-7,
                 err_msg=f"{label} {name}",
@@ -126,88 +123,72 @@ def test_multishock_second_order_matches_dynare():
 def test_multishock_risk_correction_matches_dynare():
     """ghs2 against a full covariance rather than one variance. This is the only
     assertion in the file that the shock correlations reach the solution at all,
-    since eta enters nothing else."""
+    since the covariance enters nothing else."""
     solved, compiled = _solved_multishock()
-    ours = [_ms_dr_row(solved, compiled, name)[2] for name in golden.DR_ROWS]
+    ri, _, _ = _ms_axes(compiled)
+    ours = _stack(solved.policy.hss, solved.policy.gss)[ri]
 
     np.testing.assert_allclose(ours, golden.GHS2, rtol=5e-6, atol=1e-8)
 
 
-def test_multishock_eta_reproduces_the_calibrated_covariance():
-    """eta is a Cholesky factor, so only ``eta @ eta.T`` is meaningful, and that
-    has to be the calibrated covariance on the exog-state rows and zero below."""
+def test_multishock_Q_reproduces_the_calibrated_covariance():
+    """The stds scale it and the correlations fill it."""
     _, compiled = _solved_multishock()
-    eta = DSGESolver._build_eta(compiled)
-    n_exog = compiled.n_exog
+    Q = DSGESolver._build_Q(compiled)
 
-    assert eta.shape == (compiled.n_state, n_exog)
-    np.testing.assert_allclose(
-        eta[:n_exog] @ eta[:n_exog].T, _ms_covariance(compiled), rtol=1e-13, atol=0.0
-    )
-    np.testing.assert_array_equal(eta[n_exog:], 0.0)
+    assert Q.shape == (compiled.n_exog, compiled.n_exog)
+    np.testing.assert_allclose(Q, _ms_covariance(compiled), rtol=1e-13, atol=0.0)
 
 
 def test_multishock_risk_correction_reads_the_off_diagonals():
-    """The correlations have to reach g_ss, and only through ``eta @ eta.T``.
-
-    Zeroing the off-diagonals moves g_ss, so the covariance is not being read as
-    a diagonal. Refactoring the same covariance through its symmetric square root
-    instead of its Cholesky leaves g_ss alone, so nothing is reading the factor.
-    """
+    """The correlations have to reach g_ss. Zeroing the off-diagonals moves it,
+    so the covariance is not being read as a diagonal."""
     solved, compiled = _solved_multishock()
     a, b, f_xx = _ms_preproc(solved, compiled)
-    gxx = solved.policy.gxx
-    n_state, n_exog = compiled.n_state, compiled.n_exog
+    n_state = compiled.n_state
+    pol = solved.policy
+    bu = np.real(pol.B)
 
-    eta = DSGESolver._build_eta(compiled)
     cov = _ms_covariance(compiled)
-    gx = np.real(solved.policy.f)
+    gss = second_order(a, b, f_xx, pol.f, pol.p, bu, cov, n_state)[6]
+    gss_diag = second_order(
+        a, b, f_xx, pol.f, pol.p, bu, np.diag(np.diag(cov)), n_state
+    )[6]
 
-    diag = np.zeros_like(eta)
-    diag[:n_exog, :] = np.diag(np.sqrt(np.diag(cov)))
-    w, v = np.linalg.eigh(cov)
-    root = np.zeros_like(eta)
-    root[:n_exog, :] = v @ np.diag(np.sqrt(w)) @ v.T
-
-    gss = second_order_risk(a, b, f_xx, gx, gxx, eta, n_state)[0]
-    gss_diag = second_order_risk(a, b, f_xx, gx, gxx, diag, n_state)[0]
-    gss_root = second_order_risk(a, b, f_xx, gx, gxx, root, n_state)[0]
-
+    np.testing.assert_allclose(gss, pol.gss, rtol=1e-10, atol=1e-15)
     assert not np.allclose(gss, gss_diag, rtol=1e-3, atol=1e-12)
-    np.testing.assert_allclose(gss, gss_root, rtol=1e-10, atol=1e-15)
 
 
 def test_multishock_second_order_structural_invariants():
-    """The same layout facts the single-shock fixture pins, once per shock.
+    """The same layout facts the single-shock fixture pins, once per process.
 
-    Every lifted shock is exogenous and i.i.d., so it has no transition row and
-    no risk correction; every AR(1) lag row is linear, so it is flat; and
-    k_lag1(t+1) = k(t) keeps the k_lag1 state row equal to the k control row.
+    Every AR(1) is linear, so its second-order rows are flat and it takes no risk
+    correction. The tensors are symmetric in the pair they weigh.
     """
     solved, compiled = _solved_multishock()
     pol = solved.policy
-    ctrl = {n: i for i, n in enumerate(compiled.var_names[compiled.n_state :])}
 
-    np.testing.assert_allclose(pol.gxx, pol.gxx.transpose(0, 2, 1), rtol=0, atol=0)
-    np.testing.assert_allclose(pol.hxx, pol.hxx.transpose(0, 2, 1), rtol=0, atol=0)
+    # Symmetry falls out of the chain rule rather than being imposed by a
+    # symmetry-reduced system, so it holds to roundoff and not bitwise.
+    for block in (pol.gxx, pol.hxx, pol.guu, pol.huu):
+        np.testing.assert_allclose(
+            block, block.transpose(0, 2, 1), rtol=1e-12, atol=1e-14
+        )
 
-    linear = _MS_SHOCK_STATES + ("z_lag1", "d_lag1", "g_lag1")
-    for name in linear:
-        np.testing.assert_allclose(pol.hxx[compiled.idx[name]], 0.0, atol=1e-12)
-    for name in _MS_SHOCK_STATES:
-        np.testing.assert_allclose(pol.hss[compiled.idx[name]], 0.0, atol=1e-12)
-
-    np.testing.assert_allclose(
-        pol.hxx[compiled.idx["k_lag1"]], pol.gxx[ctrl["k"]], rtol=1e-12, atol=1e-14
-    )
+    for name in _MS_AR_STATES:
+        i = compiled.idx[name]
+        np.testing.assert_allclose(pol.hxx[i], 0.0, atol=1e-12)
+        np.testing.assert_allclose(pol.hxu[i], 0.0, atol=1e-12)
+        np.testing.assert_allclose(pol.huu[i], 0.0, atol=1e-12)
+        np.testing.assert_allclose(pol.hss[i], 0.0, atol=1e-12)
 
 
 # --- three correlated shocks, simulation and IRF -----------------------------
 # The decision-rule tests above verify ghxu and ghuu as arrays. They do not
 # verify that the simulator contracts them: with one innovation the cross terms
-# live inside the ghxx column the pruned recursion already touches, so a bug in
-# the cross-shock contraction passes everything in the file. These three drive
-# the order-2 recursion with all three innovations live at once.
+# are a rescaling of terms the pruned recursion already touches, so a bug in the
+# cross-shock contraction passes everything in the file. These three drive the
+# order-2 recursion with all three innovations live at once.
 #
 # Goldens come from make_rbc_multishock_second_order_sim_goldens.m, which prints
 # them ready to paste. Columns are [z, d, g, k, c] with k dated as the
@@ -215,27 +196,52 @@ def test_multishock_second_order_structural_invariants():
 
 
 def _ms_golden_columns(solved) -> list[int]:
-    """Our columns for the golden's [z, d, g, k, c]. As with the single-shock
-    goldens the reported k is the predetermined stock, which is our k_lag1."""
+    """Our columns for the golden's [z, d, g, k, c]."""
     idx = solved.compiled.idx
-    return [idx["z"], idx["d"], idx["g"], idx["k_lag1"], idx["c"]]
+    return [idx["z"], idx["d"], idx["g"], idx["k"], idx["c"]]
 
 
-def _ms_golden_x0(solved) -> np.ndarray:
-    """The golden initial condition over our state block
-    [e_z_st, e_d_st, e_g_st, k_lag1, z_lag1, d_lag1, g_lag1].
+def _ms_golden_x0(solved) -> dict[str, float]:
+    """The golden initial condition, by name.
 
-    The golden reports the three processes contemporaneously but starts the path
-    one period earlier, so each initial lag is one AR step behind its value.
+    A dense x0 would be read in declaration order, which is not our canonical
+    order, so the states are named instead.
+
+    The generator seeds Dynare's own y0 with each process one AR step back so
+    that its first simulated value is the printed one; our x0 is that y0 state.
     """
     calib = solved.compiled.config.calibration.parameters
     rho_z, rho_d, rho_g = (
         float(calib[sp.Symbol(n)]) for n in ("rho_z", "rho_d", "rho_g")
     )
     z0, d0, g0, k0 = golden.SIM_X0
-    return np.array(
-        [0.0, 0.0, 0.0, k0, z0 / rho_z, d0 / rho_d, g0 / rho_g], dtype=np.float64
-    )
+    return {
+        "k": float(k0),
+        "z": float(z0) / rho_z,
+        "d": float(d0) / rho_d,
+        "g": float(g0) / rho_g,
+    }
+
+
+_K_COL = 3
+
+
+def _golden_rows(block: np.ndarray, lead: int = 0) -> np.ndarray:
+    """The golden rows our path lines up with, in the golden's column order.
+
+    Two offsets, both from the generator rather than from the model:
+
+    * k is stored one period behind the rest, as the predetermined stock. Under
+      the old layout the lag aux ``k_lag1`` supplied that series directly; our k
+      is the contemporaneous stock, so its column is taken one row later.
+    * ``lead`` drops rows the generator simulates before ours begin. The shock
+      vector handed to Dynare starts with a zero row, so its first simulated
+      period is shock free.
+    """
+    n = len(block) - 1 - lead
+    rows = block[lead : lead + n].copy()
+    rows[:, _K_COL] = block[lead + 1 : lead + 1 + n, _K_COL]
+    return rows
 
 
 def test_multishock_second_order_deterministic_sim_matches_dynare():
@@ -251,7 +257,7 @@ def test_multishock_second_order_deterministic_sim_matches_dynare():
 
     np.testing.assert_allclose(
         out,
-        golden.DETERMINISTIC_SIM[1:],
+        _golden_rows(golden.DETERMINISTIC_SIM),
         rtol=2e-6,
         atol=2e-6,
     )
@@ -263,20 +269,17 @@ def test_multishock_second_order_stochastic_sim_matches_dynare():
     and our B is a plain selector, so the same innovations go into both sides."""
     solved, _ = _solved_multishock()
 
+    # The generator hands Dynare a leading zero shock row, so the first period
+    # it simulates is shock free. Ours has to be too, or every row is offset.
+    shocks = np.vstack([np.zeros((1, len(_MS_SHOCKS))), golden.STOCHASTIC_SHOCKS])
     out = solved.sim(
-        golden.STOCHASTIC_SIM.shape[0] - 1,
+        len(shocks),
         x0=_ms_golden_x0(solved),
-        shocks={
-            name: golden.STOCHASTIC_SHOCKS[:, i] for i, name in enumerate(_MS_SHOCKS)
-        },
+        shocks={name: shocks[:, i] for i, name in enumerate(_MS_SHOCKS)},
     ).X[:, _ms_golden_columns(solved)]
 
-    np.testing.assert_allclose(
-        out,
-        golden.STOCHASTIC_SIM[1:],
-        rtol=2e-6,
-        atol=2e-6,
-    )
+    expected = _golden_rows(golden.STOCHASTIC_SIM)
+    np.testing.assert_allclose(out[: len(expected)], expected, rtol=2e-6, atol=2e-6)
 
 
 def test_multishock_second_order_irf_matches_dynare():
@@ -284,8 +287,11 @@ def test_multishock_second_order_irf_matches_dynare():
     off-diagonals at zero and reduce to the single-shock fixture."""
     solved, _ = _solved_multishock()
 
-    out = solved.irf(list(_MS_SHOCKS), T=golden.IRF.shape[0] - 1).X[
+    # The generator impulses ex_(2), one period after its lead-in zero, while
+    # irf() impulses the first period it simulates.
+    out = solved.irf(list(_MS_SHOCKS), T=len(golden.IRF)).X[
         :, _ms_golden_columns(solved)
     ]
 
-    np.testing.assert_allclose(out, golden.IRF[1:], rtol=2e-6, atol=2e-6)
+    expected = _golden_rows(golden.IRF, lead=1)
+    np.testing.assert_allclose(out[: len(expected)], expected, rtol=2e-6, atol=2e-6)

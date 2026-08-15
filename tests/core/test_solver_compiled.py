@@ -27,9 +27,9 @@ def _nonlinear_compile_yaml() -> str:
             linearization: taylor
             ss_seed: k_ss
           z: {}
-        shock_map:
-          e_a: a
-          e_z: z
+        shocks:
+          - e_a
+          - e_z
         observables: []
         equations:
           model:
@@ -61,8 +61,9 @@ def test_compile_builds_expected_structures(compiled_test):
     c = compiled_test
     n_vars = len(c.config.variables.variables)
 
-    # test.yaml lags u, v and r and carries two shocks, so five generated states.
-    assert c.n_state == 5
+    # test.yaml lags u, v and r, so those three are the states; its two shocks
+    # are innovations rather than variables.
+    assert c.n_state == 3
     assert c.n_exog == 2
     assert len(c.var_names) == n_vars
     assert len(c.cur_syms) == n_vars
@@ -76,14 +77,16 @@ def test_compiled_equations_accept_dict_and_vector_parameters(compiled_test):
     n = len(c.var_names)
     fwd = np.zeros(n, dtype=complex)
     cur = np.zeros(n, dtype=complex)
+    prev = np.zeros(n, dtype=complex)
+    eps = np.zeros(c.n_exog, dtype=complex)
 
     par_dict = {
         p.name: float64(c.config.calibration.parameters[p]) for p in c.calib_params
     }
-    out_from_dict = c.equations(fwd, cur, par_dict)
+    out_from_dict = c.equations(fwd, cur, prev, eps, par_dict)
 
     par_vec = np.array([par_dict[p.name] for p in c.calib_params], dtype=complex)
-    out_from_vec = c.equations(fwd, cur, par_vec)
+    out_from_vec = c.equations(fwd, cur, prev, eps, par_vec)
 
     assert out_from_dict.shape == (len(c.objective_eqs),)
     assert list(map(str, out_from_dict)) == list(map(str, out_from_vec))
@@ -94,7 +97,13 @@ def test_compiled_equations_reject_bad_parameter_vector_length(compiled_test):
     n = len(c.var_names)
 
     with pytest.raises(ValueError, match="Parameter vector length"):
-        c.equations(np.zeros(n), np.zeros(n), np.zeros(len(c.calib_params) - 1))
+        c.equations(
+            np.zeros(n),
+            np.zeros(n),
+            np.zeros(n),
+            np.zeros(c.n_exog),
+            np.zeros(len(c.calib_params) - 1),
+        )
 
 
 def test_construct_measurement_array_dispatchers_are_cached(compiled_test):
@@ -191,29 +200,27 @@ def test_compile_infers_n_state_and_n_exog(parsed_test):
 
     compiled = solver.compile()
 
-    assert compiled.n_state == 5
+    assert compiled.n_state == 3
     assert compiled.n_exog == 2
-    assert compiled.var_names[: compiled.n_state] == [
-        "e_u_st",
-        "e_v_st",
-        "u_lag1",
-        "v_lag1",
-        "r_lag1",
-    ]
+    assert compiled.var_names[: compiled.n_state] == ["u", "v", "r"]
 
 
-def test_compile_rejects_equations_with_time_offsets_beyond_one(parsed_test):
+def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
     model, kalman = parsed_test
-    bad = copy.deepcopy(model)
+    deep = copy.deepcopy(model)
     t = sp.Symbol("t", integer=True)
-    u = bad.variables.variables[0]
-    e_u = next(iter(bad.shock_map.keys()))
-    first = next(iter(bad.equations.model))
-    bad.equations.model[first] = sp.Eq(u(t + 2), bad.parameters[0] * u(t) + e_u)
+    u = deep.variables.variables[0]
+    e_u = next(iter(deep.shocks))
+    first = next(iter(deep.equations.model))
+    deep.equations.model[first] = sp.Eq(u(t + 2), deep.parameters[0] * u(t) + e_u)
 
-    solver = DSGESolver(bad, kalman)
-    with pytest.raises(ValueError, match="bad time offsets"):
-        solver.compile()
+    compiled = DSGESolver(deep, kalman).compile()
+
+    # A lead aux is read at t+1 and never at t-1, so it joins the controls
+    # rather than widening the state block.
+    assert "u_lead1" in compiled.layout.generated_names
+    assert "u_lead1" in compiled.layout.control_names
+    assert "u_lead1" not in compiled.layout.state_names
 
 
 def test_compile_can_linearize_model_on_the_fly(tmp_path):

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections.abc import Sequence
 from typing import Any
 
-from numpy import complex128, float64, int64
+from numpy import complex128, float64, int8, int64
 from numpy.typing import NDArray
 
 from .._ckernels.core import klein_solve1, sgu_klein_solve2
@@ -53,27 +53,35 @@ class FirstOrderSolution(BaseSolution):
 
 @dataclass(frozen=True)
 class SecondOrderSolution(FirstOrderSolution):
-    """Second-order (SGU) solution: the first-order rule plus the corrections
-    taken at the same expansion point.
+    """Second-order solution: the first-order rule plus the corrections taken at
+    the same expansion point.
 
-    :attr:`gx` (ny, nx)/``hx`` (nx, nx) are ``f``/``p`` under SGU's names.
-    :attr:`gxx` (ny, nx, nx)/``hxx`` (nx, nx, nx) are the state-quadratic terms.
-    :attr:`gss` (ny,)/``hss`` (nx,) are the sigma^2 risk correction.
+    :attr:`gx` (ny, nx)/``hx`` (nx, nx) are ``f``/``p`` under the perturbation
+    notation. The quadratic terms split by which pair of arguments they weigh,
+    the shocks having their own now that they are not states:
+    :attr:`gxx` (ny, nx, nx)/``hxx`` (nx, nx, nx) over the states,
+    :attr:`gxu` (ny, nx, ne)/``hxu`` (nx, nx, ne) over a state and a shock,
+    :attr:`guu` (ny, ne, ne)/``huu`` (nx, ne, ne) over the shocks, and
+    :attr:`gss` (ny,)/``hss`` (nx,) the sigma^2 risk correction.
     """
 
     gxx: NDF
     hxx: NDF
+    gxu: NDF
+    hxu: NDF
+    guu: NDF
+    huu: NDF
     gss: NDF
     hss: NDF
 
     @property
     def hx(self) -> NDF:
-        """``p`` in SGU's notation: the state transition matrix."""
+        """``p`` in the perturbation notation: the state transition matrix."""
         return self.p
 
     @property
     def gx(self) -> NDF:
-        """``f`` in SGU's notation: the policy matrix."""
+        """``f`` in the perturbation notation: the policy matrix."""
         return self.f
 
 
@@ -81,29 +89,32 @@ class SecondOrderSolution(FirstOrderSolution):
 class PiecewiseSolution(BaseSolution):
     """Piecewise-linear (OccBin) solution: everything a parameter draw fixes.
 
-    There is no ``A``/``B`` here. The policy is path dependent,
-    ``y_t = P_t y_{t-1} + D_t``, so the rules are built per date against a
-    guessed regime sequence rather than once, and a time-invariant state space
-    would describe a model with no constraints. What a draw does fix is the
-    pencil of every regime, since all of them linearize at the same reference
-    steady state. :attr:`steady_state`, ``stab`` and ``eig`` are that reference
-    regime's.
+    The piecewise policy itself is path dependent, ``y_t = P_t y_{t-1} + D_t``,
+    so its rules are built per date against a guessed regime sequence rather
+    than once. What a draw does fix is the pencil of every regime, since all of
+    them linearize at the same reference steady state. :attr:`steady_state`,
+    ``stab`` and ``eig`` are that reference regime's, and so is :attr:`ref`.
 
-    :attr:`a` (n_regime, n_var, n_var)/``b`` (n_regime, n_var, n_var)/``c``
-    (n_regime, n_var) are the regime pencils ``a^r E[y_{t+1}] = b^r y_t - c^r``,
-    indexed by binding bitmask, slot 0 the reference. ``c`` is the constraint's
-    whole mechanism and is zero at slot 0.
-    :attr:`f_ref` (n_ctrl, n_state)/``p_ref`` (n_state, n_state) are the
-    reference regime's rule, which the recursion takes as its terminal
-    condition: past the horizon the guess is relaxed, so the model is its own
-    unconstrained self.
+    :attr:`a`/``b``/``c`` (n_regime, n_var, n_var) and ``d``
+    (n_regime, n_var, n_exog) are the regime pencils
+    ``a^r E[y_{t+1}] = b^r y_t + c^r y_{t-1} + d^r eps_t - cst^r``, indexed by
+    binding bitmask, slot 0 the reference. ``cst`` (n_regime, n_var) is the
+    constraint's whole mechanism and is zero at slot 0.
+    :attr:`ghx_ref` (n_var, n_state) is the reference regime's whole rule, which
+    the recursion takes as its terminal condition: past the horizon the guess is
+    relaxed, so the model is its own unconstrained self.
+    :attr:`ref` is that same reference regime as an ordinary first-order
+    solution, so its ``A``/``B`` describe the model with the constraints ignored
+    and ``ghx_ref`` is ``ref.p`` stacked over ``ref.f``.
     """
 
     a: NDF
     b: NDF
     c: NDF
-    f_ref: NDF
-    p_ref: NDF
+    d: NDF
+    cst: NDF
+    ghx_ref: NDF
+    ref: FirstOrderSolution
 
 
 @contextmanager
@@ -131,6 +142,7 @@ def klein_solve(
     residual_cfunc: Any,
     params: NDF,
     ss_seed: NDF,
+    incidence: NDArray[int8],
     n_states: int,
     *,
     n_exog: int = 0,
@@ -150,7 +162,7 @@ def klein_solve(
     """
     with _bk_dating_hint():
         ss, f, p, stab, eig, A, B = klein_solve1(
-            residual_cfunc.address, ss_seed, params, n_states, n_exog
+            residual_cfunc.address, ss_seed, params, incidence, n_states, n_exog
         )
     return FirstOrderSolution(
         steady_state=ss, stab=stab, eig=eig, order=1, p=p, f=f, A=A, B=B
@@ -162,17 +174,18 @@ def sgu_solve(
     bc_residual_cfunc: Any,
     params: NDF,
     ss_seed: NDF,
+    Q: NDF,
+    incidence: NDArray[int8],
     n_states: int,
-    eta: NDF,
     *,
     n_exog: int = 0,
 ) -> SecondOrderSolution:
-    """Second-order (SGU) solve of the compiled model at ``params``.
+    """Second-order solve of the compiled model at ``params``.
 
     The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
     is the bicomplex residual (``construct_objective_cfunc_bicomplex()``) that
-    drives the Hessian sweep, and ``eta`` is the ``(n_states, n_exog)`` shock
-    loading the risk correction integrates against.
+    drives the Hessian sweep, and ``Q`` is the ``(n_exog, n_exog)`` shock
+    covariance matrix the risk correction integrates against.
 
     One native call runs both orders under a single GIL release. A nonzero ``stab``
     returns normally; the caller decides whether to raise.
@@ -181,13 +194,30 @@ def sgu_solve(
     first-order state space, which ``SolvedModel`` already exposes directly.
     """
     with _bk_dating_hint():
-        ss, f, p, stab, eig, gxx, hxx, gss, hss, A, B = sgu_klein_solve2(
+        (
+            ss,
+            f,
+            p,
+            stab,
+            eig,
+            gxx,
+            hxx,
+            gxu,
+            hxu,
+            guu,
+            huu,
+            gss,
+            hss,
+            A,
+            B,
+        ) = sgu_klein_solve2(
             residual_cfunc.address,
             bc_residual_cfunc.address,
             ss_seed,
             params,
+            Q,
+            incidence,
             n_states,
-            eta,
             n_exog,
         )
     return SecondOrderSolution(
@@ -201,6 +231,10 @@ def sgu_solve(
         B=B,
         gxx=gxx,
         hxx=hxx,
+        gxu=gxu,
+        hxu=hxu,
+        guu=guu,
+        huu=huu,
         gss=gss,
         hss=hss,
     )
@@ -212,6 +246,7 @@ def piecewise_solve(
     rows: Sequence[NDArray[int64]],
     params: NDF,
     ss_seed: NDF,
+    incidence: NDArray[int8],
     n_states: int,
     n_constraint: int,
     *,
@@ -231,10 +266,11 @@ def piecewise_solve(
     error, so only the reference verdict means anything.
     """
     with _bk_dating_hint():
-        ss, f, p, stab, eig, a, b, c = occbin_solve1(
+        ss, ghx, stab, eig, A, B, a, b, c, d, cst = occbin_solve1(
             residual_cfunc.address,
             ss_seed,
             params,
+            incidence,
             n_states,
             pencil_addrs,
             rows,
@@ -249,6 +285,19 @@ def piecewise_solve(
         a=a,
         b=b,
         c=c,
-        f_ref=f,
-        p_ref=p,
+        d=d,
+        cst=cst,
+        ghx_ref=ghx,
+        # p and f are views into ghx: states lead the canonical order, so the
+        # stack the recursion wants is already the two blocks end to end.
+        ref=FirstOrderSolution(
+            steady_state=ss,
+            stab=stab,
+            eig=eig,
+            order=1,
+            p=ghx[:n_states],
+            f=ghx[n_states:],
+            A=A,
+            B=B,
+        ),
     )

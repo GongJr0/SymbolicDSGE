@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 from typing import Mapping, Callable, Union
-from numpy import float64, int64, ndarray, asarray, zeros
+from numpy import float64, int64, ndarray
 from numpy.typing import NDArray
 
 from .base import SolvedModel, NDF
+from .first_order import FirstOrderSolvedModel
 from .shocks import simulation_shock_matrix
 from ..solver_backend import PiecewiseSolution
 from ..compiled_model import CompiledModel
@@ -35,7 +36,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
         ) = None,
         shock_scale: float = 1,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         *,
         check_ahead_periods: int = 200,
         max_check_ahead_periods: int = -1,
@@ -47,12 +48,9 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     ) -> StatePath:
         pol = self.policy
         comp = self.compiled
-        x0_arr = self._simulation_initial_state(pol.f_ref, x0)[: comp.n_state]
+        x0_arr = self._initial_state(x0)[: comp.n_state]
 
-        shock_mat = zeros((T, comp.n_state), dtype=float64)
-        shock_mat[:, : comp.n_exog] = simulation_shock_matrix(
-            comp, T, shocks, shock_scale
-        )
+        shock_mat = simulation_shock_matrix(comp, T, shocks, shock_scale)
 
         constraint = comp.construct_constraint_func()
 
@@ -60,7 +58,9 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             a=pol.a,
             b=pol.b,
             c=pol.c,
-            f_ref=pol.f_ref,
+            d=pol.d,
+            cst=pol.cst,
+            ghx_ref=pol.ghx_ref,
             ss=pol.steady_state,
             par=comp._coerce_param_vector(comp.config.calibration.parameters),
             cond_addr=constraint.address,
@@ -84,6 +84,10 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             diag["periodic"].astype(int64),
         )
 
+        # The perturbation kernels denominate their rows as they write them.
+        # occbin_sim has no steady-state argument, so this path adds it here.
+        X += pol.steady_state
+
         return StatePath(X, regimes=regimes, diagnostics=diagnostics)
 
     def sim(
@@ -91,7 +95,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T: int,
         shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
         *,
         check_ahead_periods: int = 200,
@@ -132,11 +136,13 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             proportional to it here, since the regime a path realizes depends on
             how far the shock pushes the model.
 
-        x0 : list[float] | ndarray, optional
-            Initial state, in levels, of length ``n_state`` or ``n_var``. If
-            None, the model starts at its reference steady state. Whether a
-            constraint binds depends on where the model starts, so this is a
-            modelling choice rather than a formality.
+        x0 : dict[str, float] | list[float] | ndarray, optional
+            Initial state at ``t - 1``, in levels. A sequence covers every
+            compiled variable in declaration order, minted lags included; a
+            mapping names only the variables it sets. What it leaves out, and
+            everything when this is None, starts at the reference steady state.
+            Whether a constraint binds depends on where the model starts, so
+            this is a modelling choice rather than a formality.
 
         observables : bool, optional
             If True, compute and include observable variables in the output.
@@ -196,3 +202,50 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             reset_check_ahead=reset_check_ahead,
         )
         return self._assemble_simulation(path, observables)
+
+    def sim_reference(
+        self,
+        T: int,
+        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+        shock_scale: float = 1.0,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        observables: bool = False,
+    ) -> SimResult:
+        """Simulate the reference regime (a first-order solution) over T periods, ignoring constraints.
+
+        Parameters
+        ----------
+        T : int
+            Number of time periods to simulate.
+
+        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
+            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
+            joint (multivar) shock over those variables. Each value may be a
+            :class:`Shock` distribution spec (materialized into a ``T``-horizon
+            draw here), a ``callable`` taking the shock scale and returning a
+            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
+            ``None``, all shocks are zero.
+
+        shock_scale : float, optional
+            A scaling factor applied to all shocks.
+
+        x0 : dict[str, float] | list[float] | ndarray, optional
+            Initial state at ``t - 1``, in levels. A sequence covers every
+            compiled variable in declaration order, minted lags included; a
+            mapping names only the variables it sets. What it leaves out, and
+            everything when this is None, starts at the steady state.
+
+        observables : bool, optional
+            If True, compute and include observable variables in the output.
+
+        Returns
+        -------
+        SimResult
+            The simulated path in levels, with each variable's series available
+            by name.
+
+        """
+
+        return FirstOrderSolvedModel(self.compiled, self.policy.ref).sim(
+            T, shocks, shock_scale, x0=x0, observables=observables
+        )

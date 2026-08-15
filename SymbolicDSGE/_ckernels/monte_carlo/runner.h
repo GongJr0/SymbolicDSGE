@@ -71,7 +71,7 @@ typedef struct {
 #define SDSGE_MC_NOT_RUN INT64_MIN
 #define SDSGE_MC_RUN_OK 0
 #define SDSGE_MC_RUN_HALTED 1
-#define SDSGE_MC_RUN_BAD_ARG -1
+#define SDSGE_MC_RUN_BAD_ARG -1201
 
 /* Native execution plan. The compiler owns the descriptor array, all step
  * contexts, and every Cython backing array referenced by them for as long as

@@ -34,9 +34,9 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
             Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
         ) = None,
         shock_scale: float = 1,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath:
-        x0_arr = self._simulation_initial_state(self.policy.f, x0)
+        x0_arr = self._initial_state(x0)
         shock_mat = simulation_shock_matrix(
             self.compiled,
             T=T,
@@ -50,5 +50,6 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
             x0_arr,
             shock_mat,
             X,
+            self.policy.steady_state,
         )
         return StatePath(X)

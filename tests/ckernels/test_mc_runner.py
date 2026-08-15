@@ -121,7 +121,9 @@ def test_runner_fail_fast_sanitizes_failed_and_skipped_retained_rows() -> None:
     assert result.status == 1
     assert 0 <= result.halt_rep_idx < 5
     assert result.halt_step_idx == 0
-    assert result.halt_status == -6
+    # SDSGE_TRANSFORM_BAD_ARG, _ckernels/monte_carlo/transforms.h.
+    bad_arg = -1301
+    assert result.halt_status == bad_arg
     assert set(allocation.failure_step_by_rep.tolist()) <= {0, not_run}
-    assert set(allocation.failure_status_by_rep.tolist()) <= {-6, not_run}
+    assert set(allocation.failure_status_by_rep.tolist()) <= {bad_arg, not_run}
     assert np.isnan(allocation.steps["diff"].float_retained).all()

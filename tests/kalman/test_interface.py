@@ -105,7 +105,7 @@ def _make_stub_model(
     )
     config = SimpleNamespace(
         calibration=calibration,
-        shock_map={E_U: Symbol("u"), E_V: Symbol("v")},
+        shocks=[E_U, E_V],
     )
     compiled = SimpleNamespace(
         observable_names=observable_names,
@@ -150,6 +150,10 @@ def _make_stub_model(
             f=np.array([[0.2, 0.3]], dtype=FLOAT),
             hxx=np.zeros((2, 2, 2), dtype=FLOAT),
             gxx=np.zeros((1, 2, 2), dtype=FLOAT),
+            hxu=np.zeros((2, 2, 2), dtype=FLOAT),
+            gxu=np.zeros((1, 2, 2), dtype=FLOAT),
+            huu=np.zeros((2, 2, 2), dtype=FLOAT),
+            guu=np.zeros((1, 2, 2), dtype=FLOAT),
             hss=np.array([0.01, 0.02], dtype=FLOAT),
             gss=np.array([0.03], dtype=FLOAT),
             steady_state=np.array([1.0, 2.0, 3.0], dtype=FLOAT),
@@ -621,7 +625,7 @@ def test_filter_dispatches_unscented_and_populates_debug_info(monkeypatch):
     run_args = captured["run_unscented_raw"]
     assert run_args["meas_addr"] == 123
     assert np.array_equal(run_args["z0"], np.array([0.2, 0.3, 0.0, 0.0]))
-    assert np.array_equal(run_args["bx"], np.eye(2, dtype=FLOAT))
+    assert np.array_equal(run_args["bu"], ki.model.policy.B)
     assert np.array_equal(run_args["steady_state"], np.array([1.0, 2.0, 3.0]))
     assert run_args["alpha"] == pytest.approx(1.0)
     assert run_args["beta"] == pytest.approx(2.0)
@@ -674,3 +678,105 @@ def test_filter_uses_current_self_r_after_validated_args_access(monkeypatch):
     ki.filter(x0=np.zeros((3,), dtype=FLOAT))
 
     assert np.array_equal(captured["R"], np.diag([0.3, 0.7]).astype(FLOAT))
+
+
+def _levels_rbc_solved(order: int):
+    """The RBC at a nonzero steady state, with a one-observable Kalman config.
+
+    POST82 is deviation form, so every existing filter test runs where levels
+    and gaps coincide and cannot see which one it was handed. This fixture is
+    the opposite: c_ss is far from zero, so the two are distinguishable.
+    """
+    from pathlib import Path
+    from SymbolicDSGE import ModelParser, DSGESolver
+    from SymbolicDSGE.kalman.config import KalmanConfig
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "models"
+        / "rbc_second_order.yaml"
+    )
+    model, _ = ModelParser(path).get_all()
+    n_var = len(model.variables.variables)
+    kalman = KalmanConfig(
+        R=np.array([[0.01]], dtype=FLOAT),
+        P0=(0.1 * np.eye(n_var)).astype(FLOAT),
+    )
+    solver = DSGESolver(model, kalman)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled, order=order)
+    rng = np.random.default_rng(20260815)
+    ss_c = float(solved.policy.steady_state[compiled.idx["c"]])
+    y = ss_c + rng.normal(0.0, 0.01, size=(12, 1))
+    return solved, y
+
+
+def test_solved_model_filter_reports_levels_at_both_orders():
+    """The public filter path is in levels whatever the order, and says so.
+
+    ``constant`` is what distinguishes the two routes: the linear filter runs in
+    gaps and this layer adds the expansion point, so it reports what it added.
+    The unscented kernel forms levels itself, because its measurement is
+    evaluated at them, so there is nothing left for this layer to add and it
+    reports NaN rather than claiming zero.
+    """
+    pytest.importorskip("SymbolicDSGE._ckernels.kalman")
+
+    solved1, y1 = _levels_rbc_solved(1)
+    lin = solved1.kalman(y=y1, filter_mode="linear", observables=["c_obs"])
+    ss1 = np.asarray(solved1.policy.steady_state, dtype=FLOAT)
+
+    np.testing.assert_allclose(lin.constant, ss1, rtol=0, atol=0)
+    assert np.any(ss1 != 0.0)
+    # Levels, not gaps: the filtered consumption sits at its steady state, not
+    # near zero.
+    c = solved1.compiled.idx["c"]
+    assert abs(float(np.mean(lin.x_filt[:, c])) - ss1[c]) < 0.5 * abs(ss1[c])
+
+    solved2, y2 = _levels_rbc_solved(2)
+    ukf = solved2.kalman(y=y2, filter_mode="unscented", observables=["c_obs"])
+
+    assert np.all(np.isnan(ukf.constant))
+    ss2 = np.asarray(solved2.policy.steady_state, dtype=FLOAT)
+    assert abs(float(np.mean(ukf.x_filt[:, c])) - ss2[c]) < 0.5 * abs(ss2[c])
+
+
+def test_filter_classes_leave_the_constant_to_the_caller():
+    """Reaching the filter directly keeps the recursion's own units.
+
+    Omitting ``steady_state`` returns gaps with a zero constant; supplying it
+    shifts the state series and records the shift. Nothing else moves.
+    """
+    pytest.importorskip("SymbolicDSGE._ckernels.kalman")
+    from SymbolicDSGE import DSGESolver
+    from SymbolicDSGE.kalman.filter import KalmanFilter
+
+    solved, y = _levels_rbc_solved(1)
+    pol = solved.policy
+    C, d = solved._build_C_d_from_obs(["c_obs"])
+    Q = np.asarray(DSGESolver._build_Q(solved.compiled), dtype=FLOAT)
+    n_var = solved.compiled.n_var
+    args = dict(
+        A=np.real(pol.A),
+        B=np.real(pol.B),
+        C=C,
+        d=d,
+        Q=Q,
+        R=np.array([[0.01]], dtype=FLOAT),
+        y=y,
+        x0=np.zeros(n_var, dtype=FLOAT),
+        P0=0.1 * np.eye(n_var, dtype=FLOAT),
+    )
+    gaps = KalmanFilter.run(**args)
+    levels = KalmanFilter.run(**args, steady_state=pol.steady_state)
+
+    np.testing.assert_allclose(gaps.constant, np.zeros(n_var), rtol=0, atol=0)
+    np.testing.assert_allclose(levels.constant, pol.steady_state, rtol=0, atol=0)
+    np.testing.assert_allclose(
+        levels.x_filt, gaps.x_filt + pol.steady_state, rtol=0, atol=0
+    )
+    # The observation series carry their own constant through d, so they do not
+    # move with this one.
+    np.testing.assert_allclose(levels.y_pred, gaps.y_pred, rtol=0, atol=0)
+    np.testing.assert_allclose(levels.loglik, gaps.loglik, rtol=0, atol=0)

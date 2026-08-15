@@ -29,7 +29,7 @@ def bundle(post82_test_model_path):
     model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
-    steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
+    steady = np.zeros((compiled.n_declared,), dtype=np.float64)
     solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
@@ -45,7 +45,7 @@ def bundle(post82_test_model_path):
             "e_z": rng.normal(0.0, sig["e_z"], size=T),
             "e_r": rng.normal(0.0, sig["e_r"], size=T),
         },
-        x0=np.zeros((len(compiled.var_names),), dtype=np.float64),
+        x0=np.zeros((compiled.n_var,), dtype=np.float64),
         observables=True,
     )
     y = pd.DataFrame(
@@ -104,6 +104,7 @@ def test_obj_linear_base_matches_model_kalman(bundle):
         compiled.n_exog,
         len(prep.observables),
         steady_c,
+        compiled.incidence,
         calib,
         Q,
         R,
@@ -155,6 +156,7 @@ def test_obj_extended_base_matches_model_kalman(bundle):
         compiled.n_exog,
         len(prep.observables),
         steady_c,
+        compiled.incidence,
         calib,
         Q,
         R,
@@ -185,25 +187,27 @@ def rbc_bundle(rbc_second_order_test_model_path):
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
 
-    # Levels model: seed Newton from the resolved steady state, not zeros.
-    seed = np.asarray(
-        solver.solve(compiled=compiled, order=2).policy.steady_state, dtype=np.float64
-    )
-    solved = solver.solve(compiled=compiled, ss_seed=seed, order=2)
+    # Levels model, but the config's own ss_seed already resolves Newton to the
+    # steady state, so the solve needs no help. Feeding a resolved steady state
+    # back in as a dense seed would not work anyway: it comes back in canonical
+    # order and a dense seed is read in declaration order.
+    solved = solver.solve(compiled=compiled, order=2)
 
     T = 40
     rng = np.random.default_rng(20260303)
+    # x0 defaults to the steady state.
     sim = solved.sim(
         T=T,
         shocks={"e": rng.normal(0.0, 0.01, size=T)},
-        x0=np.asarray(solved.policy.steady_state, dtype=np.float64),
         observables=True,
     )
     y = pd.DataFrame({"c_obs": sim.observables["c_obs"][1:]})
     return {
         "compiled": compiled,
         "solved": solved,
-        "seed": seed,
+        # The native kernel indexes its Newton seed by canonical position, which
+        # is the order a resolved steady state comes back in.
+        "seed": np.asarray(solved.policy.steady_state, dtype=np.float64),
         "y": y,
         "R": R,
     }
@@ -239,6 +243,7 @@ def test_obj_unscented_base_matches_model_kalman(rbc_bundle):
         compiled.n_exog,
         len(obs),
         cc(seed, dtype=np.float64),
+        compiled.incidence,
         calib,
         Q,
         cc(R, dtype=np.float64),

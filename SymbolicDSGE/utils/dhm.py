@@ -831,16 +831,30 @@ class DenHaanMarcet:
         Uses the native ``residual_path`` kernel driven by the solve's residual
         @cfunc, reusing that cached cfunc so it never triggers a numba residual
         compile. Inputs are coerced to contiguous complex128 inside the kernel.
+
+        The lagged date is the path shifted by one, with the first row its own
+        predecessor: a path starting at the steady state satisfies that exactly.
+        Innovations are zero, so the residual is read along the realized path
+        rather than against the draws that produced it.
         """
         compiled = self.solved.compiled
         n_eq = len(compiled.objective_eqs)
         cfunc = compiled.construct_objective_cfunc()
+
+        prev_states = np.empty_like(current_states)
+        prev_states[0] = current_states[0]
+        prev_states[1:] = current_states[:-1]
+        shocks = np.zeros(
+            (current_states.shape[0], compiled.n_exog), dtype=np.complex128
+        )
         return cast(
             np.ndarray,
             residual_path(
                 cfunc.address,
                 current_states,
                 forward_states,
+                prev_states,
+                shocks,
                 self._param_vector_complex(),
                 n_eq,
             ),
@@ -1477,7 +1491,7 @@ class DenHaanMarcet:
         conf = self.solved.config
         var_funcs = {v.__name__: v for v in conf.variables.variables}
         param_syms = {p.name: p for p in conf.parameters}
-        shock_syms = {s.name: s for s in conf.shock_map.keys()}
+        shock_syms = {s.name: s for s in conf.shocks}
         local_dict: dict[str, Any] = {
             "t": self._t,
             **var_funcs,

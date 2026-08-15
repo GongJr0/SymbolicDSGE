@@ -153,11 +153,15 @@ def lower_filter_step(
         params = _model_params(reference)
         z0 = interface._build_unscented_z0(step.kwargs["x0"])
         before_y = (
-            _flat_f64(policy.p),
-            _flat_f64(policy.f),
-            _flat_f64(policy.B[:n_state, :]),
+            _flat_f64(policy.hx),
+            _flat_f64(policy.gx),
+            _flat_f64(policy.B),
             _flat_f64(policy.hxx),
             _flat_f64(policy.gxx),
+            _flat_f64(policy.hxu),
+            _flat_f64(policy.gxu),
+            _flat_f64(policy.huu),
+            _flat_f64(policy.guu),
             _flat_f64(policy.hss),
             _flat_f64(policy.gss),
             _flat_f64(policy.steady_state),

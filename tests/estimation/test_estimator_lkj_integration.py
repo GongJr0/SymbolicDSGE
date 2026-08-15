@@ -16,7 +16,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
 
-    steady = np.zeros((len(compiled.var_names),), dtype=np.float64)
+    steady = np.zeros((len(compiled.layout.declared_names),), dtype=np.float64)
     solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
@@ -34,7 +34,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
             "e_z": rng.normal(0.0, sig_z, size=T),
             "e_r": rng.normal(0.0, sig_r, size=T),
         },
-        x0=np.zeros((len(compiled.var_names),), dtype=np.float64),
+        x0=np.zeros((compiled.n_var,), dtype=np.float64),
         observables=True,
     )
     y = pd.DataFrame(
@@ -153,9 +153,14 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
         size=theta0.shape[0],
     )
 
+    # expected_logprior is a parity target: the packed native prior and the
+    # Python path must agree on it, and neither sees the filter, so it does not
+    # move when the filter does. The other two are regression anchors of our own
+    # output, not oracles; their correctness rests upstream on the POST82 Dynare
+    # parity, and they are recomputed whenever the filter contract changes.
     expected_logprior = -3.677756133346315
-    expected_loglik = -69.95167324089617
-    expected_logpost = -73.62942937424249
+    expected_loglik = -71.32113940094544
+    expected_logpost = -74.99889553429176
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(

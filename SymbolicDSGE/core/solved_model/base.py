@@ -76,7 +76,7 @@ class SolvedModel(ABC, Generic[Policy]):
             Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
         ) = None,
         shock_scale: float = 1.0,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath: ...
 
     def sim(
@@ -84,7 +84,7 @@ class SolvedModel(ABC, Generic[Policy]):
         T: int,
         shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
-        x0: list[float] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
     ) -> SimResult:
         """
@@ -105,9 +105,12 @@ class SolvedModel(ABC, Generic[Policy]):
         shock_scale : float, optional
             A scaling factor applied to all shocks.
 
-        x0 : list[float] | ndarray, optional
-            Initial state, in levels, of length ``n_state`` or ``n_var``. If
-            None, the model starts at its steady state.
+        x0 : dict[str, float] | list[float] | ndarray, optional
+            Initial state at ``t - 1``, in levels. ``None`` initiates
+            the simulation at the model's steady state. A sequence covers
+            every compiled variable in declaration order, including
+            generated lags. A mapping sets variables by name, omitted
+            variables start at their steady state.
 
         observables : bool, optional
             If True, compute and include observable variables in the output.
@@ -332,37 +335,55 @@ class SolvedModel(ABC, Generic[Policy]):
             solve_kwargs=solve_kwargs,
         ).write(path)
 
-    def _simulation_initial_state(
-        self, f: NDF, x0: list[float] | ndarray | None = None
+    def _initial_state(
+        self,
+        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> NDF:
-        """``x0`` in levels, converted to deviations and widened to the full ``n_var`` layout.
+        """Level ``x0`` in declaration order, converted to deviations in canonical order.
 
-        A caller states an initial condition the way it reads the result, so
-        ``x0`` arrives in levels and everything downstream runs in deviations.
-        ``None`` is the steady state, which is zero once converted.
+        ``None`` sets all variables to their steady state.
 
-        A policy-dependent projection happens, therefore the caller must pass
-        the relevant policty matrix: ``policy.f`` for a perturbation solve, or
-        ``f_ref`` for a piecewise one. Everything else is the model's
-        variable layout.
+        A sequence input must specify the whole compiled set in declaration order,
+        including generated lags. A mapping names the variables it sets and starts
+        the rest at their steady state.
         """
+
         n = self.compiled.n_var
-        n_state = self.compiled.n_state
+
         if x0 is None:
-            x0_arr = np.zeros((n,), dtype=float64)
-        else:
-            raw = asarray(x0, dtype=float64)
-            if raw.shape[0] == n:
-                x0_arr = raw - self.policy.steady_state
-            elif raw.shape[0] == n_state:
-                x0_arr = np.zeros((n,), dtype=float64)
-                x0_arr[:n_state] = raw - self.policy.steady_state[:n_state]
-            else:
+            return np.zeros((n,), dtype=float64)
+
+        layout = self.compiled.layout
+        declared = [*layout.declared_names, *layout.generated_names]
+
+        x0_arr = np.zeros((n,), dtype=float64)
+        if isinstance(x0, dict):
+            if unk := set(x0) - set(declared):
                 raise ValueError(
-                    f"x0 must have length {n_state} or {n}, got {raw.shape[0]}."
+                    f"x0 contains unknown variable names: {unk}. "
+                    f"Model variables: {declared}."
                 )
-        x0_arr[n_state:] = x0_arr[:n_state] @ f.T
-        return x0_arr
+
+            # An unnamed variable keeps the zero deviation it starts at, which
+            # is its steady state.
+            for i, name in enumerate(self.compiled.var_names):
+                if name in x0:
+                    x0_arr[i] = float64(x0[name]) - self.policy.steady_state[i]
+            return x0_arr
+
+        if len(x0) != n:
+            raise ValueError(
+                "x0 must be a complete list/array in declaration order, or a dict mapping variable names to values. "
+                f"Got a list/array of length {len(x0)} for a model with {n} variables. "
+                "For a sparse specification, use a dictionary mapping variable names to their initial values. "
+                f"Model variables: {declared}."
+            )
+
+        # Declaration order in, canonical order out.
+        for i in range(n):
+            x0_arr[self.compiled.idx[declared[i]]] = float64(x0[i])
+
+        return x0_arr - self.policy.steady_state
 
     def _simulate_observable_matrix(
         self,
@@ -370,16 +391,21 @@ class SolvedModel(ABC, Generic[Policy]):
         *,
         drop_initial: bool = False,
     ) -> NDF:
+        """Observables along a ``states`` path. ``states`` is in levels, which is
+        what every ``_simulate_state_matrix`` returns."""
         start = 1 if drop_initial else 0
         y_names = self.compiled.observable_names
         is_affine = self.config.equations.obs_is_affine
         if all(is_affine.values()):
+            # (C, d) is linearized for a deviation argument, and stays that way
+            # because the Kalman path reads the same memoized pair. Rebasing the
+            # intercept once is what lets a level path through:
+            # d + C(x - ss) == (d - C ss) + C x.
             C, d = self._build_C_d_from_obs(y_names)
+            d = d - C @ self.policy.steady_state
             return measurement.affine_path(states, C, d, len(y_names), start)
 
-        Y = measurement.non_affine_measurement(
-            self.compiled, y_names, states + self.policy.steady_state
-        )
+        Y = measurement.non_affine_measurement(self.compiled, y_names, states)
         return np.ascontiguousarray(Y[start:], dtype=float64)
 
     def _assemble_simulation(self, path: StatePath, observables: bool) -> SimResult:
@@ -388,8 +414,6 @@ class SolvedModel(ABC, Generic[Policy]):
         y = None
         if observables:
             y = self._simulate_observable_matrix(X, drop_initial=False)
-
-        X += self.policy.steady_state  # add ss; user sees levels.
 
         return SimResult(
             var_names=self.compiled.var_names,
@@ -443,8 +467,13 @@ class SolvedModel(ABC, Generic[Policy]):
             _debug=_debug,
         )
         if isinstance(raw, UnscentedFilterRawResult):
+            # Already levels: the unscented kernel forms them for its own
+            # measurement, so there is no constant left for this layer to add.
             return _unscented_filter_result_from_raw(raw)
-        return _filter_result_from_raw(raw)
+        # A solved model knows its expansion point, so the public path reports
+        # levels at every order. Callers reaching the filter classes directly
+        # pass their own, or keep the gaps the recursion produces.
+        return _filter_result_from_raw(raw, self.policy.steady_state)
 
     def _kalman_raw(
         self,

@@ -66,9 +66,15 @@ def _ukf_system_1d():
         "meas_addr": _ukf_measurement.address,
         "hx": np.array([[0.65]], dtype=float64),
         "gx": np.array([[1.5]], dtype=float64),
-        "bx": np.array([[1.0]], dtype=float64),
+        # bu spans every variable: a control responds to an innovation
+        # contemporaneously, which a state-only loading cannot express.
+        "bu": np.array([[1.0], [-0.4]], dtype=float64),
         "hxx": np.array([[[0.05]]], dtype=float64),
         "gxx": np.array([[[0.1]]], dtype=float64),
+        "hxu": np.array([[[0.06]]], dtype=float64),
+        "gxu": np.array([[[-0.03]]], dtype=float64),
+        "huu": np.array([[[0.08]]], dtype=float64),
+        "guu": np.array([[[0.02]]], dtype=float64),
         "hss": np.array([0.02], dtype=float64),
         "gss": np.array([0.04], dtype=float64),
         "steady_state": np.array([2.0, 3.0], dtype=float64),
@@ -142,8 +148,11 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     assert out.eps_hat is None
     assert np.isfinite(out.loglik)
 
-    # x_{0| -1} = A x0
-    assert np.allclose(out.x_pred[0], A @ x0)
+    # x0 is the prior for the first observed state, so the first prediction is
+    # x0 itself; A only enters from the second period on.
+    assert np.allclose(out.x_pred[0], x0)
+    assert np.allclose(out.P_pred[0], P0)
+    assert np.allclose(out.x_pred[1], A @ out.x_filt[0])
     assert np.allclose(out.y_pred[0], C @ out.x_pred[0] + d)
     assert np.allclose(out.P_filt, np.transpose(out.P_filt, (0, 2, 1)))
 
@@ -487,3 +496,140 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
     assert np.allclose(out.loglik, out_true.loglik)
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)
+
+
+def _linear_ukf_pair():
+    """A model with no curvature, as the same system in both filters' terms.
+
+    ``_ukf_measurement`` is ``vars[0] + params[0] * vars[1]``, which is affine,
+    so the linear filter reads it as ``d + C x`` with ``d`` carrying the steady
+    state the UKF applies inside its projection.
+
+    The UKF's transition is [[hx, 0], [gx, 0]] once every quadratic block is
+    zero, and its shock loading is ``bu`` whole: exactly the ``A``/``B`` the
+    linear filter takes. The control column of ``A`` is zero, so neither the
+    control entry of ``x0`` nor the control block of the linear ``P0`` reaches
+    the recursion.
+
+    The two priors are dated one period apart, and deliberately so. A UKF's
+    ``z0`` is the state *before* the first observation, because an observable
+    does not exist until the law of motion has run: it depends on this period's
+    innovation. A linear filter's ``x0`` is the prior for the first observed
+    state, because its state vector already contains the observables. Dynare
+    carries the same split between ``gaussian_filter.m`` and
+    ``kalman_filter.m`` for the same reason. So the linear side is handed
+    ``z0`` advanced by one prediction, which is what makes the two describe the
+    same data.
+    """
+    hx = np.array([[0.65]], dtype=float64)
+    gx = np.array([[1.5]], dtype=float64)
+    bu = np.array([[1.0], [-0.4]], dtype=float64)
+    steady_state = np.array([2.0, 3.0], dtype=float64)
+    params = np.array([0.25], dtype=float64)
+    Q = np.array([[0.03]], dtype=float64)
+    R = np.array([[0.2]], dtype=float64)
+    y = np.array([[2.8], [2.7], [2.65], [2.6]], dtype=float64)
+    p0_state = 0.4
+
+    unscented = {
+        "meas_addr": _ukf_measurement.address,
+        "hx": hx,
+        "gx": gx,
+        "bu": bu,
+        "hxx": np.zeros((1, 1, 1), dtype=float64),
+        "gxx": np.zeros((1, 1, 1), dtype=float64),
+        "hxu": np.zeros((1, 1, 1), dtype=float64),
+        "gxu": np.zeros((1, 1, 1), dtype=float64),
+        "huu": np.zeros((1, 1, 1), dtype=float64),
+        "guu": np.zeros((1, 1, 1), dtype=float64),
+        "hss": np.zeros(1, dtype=float64),
+        "gss": np.zeros(1, dtype=float64),
+        "steady_state": steady_state,
+        "calib_params": params,
+        "Q": Q,
+        "R": R,
+        "y": y,
+        # x2 is identically zero on a linear model, so its prior variance is
+        # too. The jittered Cholesky is what makes that factorable, and it is
+        # the only reason the two runs are not bit-identical.
+        "z0": np.array([0.1, 0.0], dtype=float64),
+        "P0": np.diag(np.array([p0_state, 0.0], dtype=float64)),
+        "alpha": 1.0,
+        "beta": 2.0,
+        "kappa": 1.0,
+        "jitter": 1e-12,
+        "symmetrize": True,
+    }
+    A = np.array([[0.65, 0.0], [1.5, 0.0]], dtype=float64)
+    z0 = unscented["z0"]
+    P0_ukf = unscented["P0"]
+    linear = {
+        "A": A,
+        "B": bu,
+        "C": np.array([[1.0, params[0]]], dtype=float64),
+        "d": np.array([steady_state[0] + params[0] * steady_state[1]], dtype=float64),
+        "Q": Q,
+        "R": R,
+        "y": y,
+        "x0": A @ z0,
+        "P0": A @ P0_ukf @ A.T + bu @ Q @ bu.T,
+        "symmetrize": True,
+        "jitter": 1e-12,
+    }
+    return unscented, linear, steady_state
+
+
+def test_unscented_reduces_to_the_linear_filter_without_curvature():
+    """With every second-order block zero the UKF is the linear filter.
+
+    The unscented transform is exact for an affine map, so this is an equality
+    and not an approximation. It is the only check that reaches the filter's
+    arithmetic rather than its shapes, and it pins the pieces a pruned
+    recursion is easiest to get wrong: that a control responds to this period's
+    innovation at all, and that the innovation enters as a sigma-point
+    coordinate rather than as an additive covariance.
+    """
+    pytest.importorskip("SymbolicDSGE._ckernels.kalman")
+    unscented, linear, steady_state = _linear_ukf_pair()
+
+    ukf = KalmanFilter.run_unscented(**unscented)
+    kf = KalmanFilter.run(**linear)
+
+    assert ukf.loglik == pytest.approx(kf.loglik, rel=1e-9, abs=1e-9)
+    np.testing.assert_allclose(ukf.y_pred, kf.y_pred, rtol=1e-8, atol=1e-9)
+    np.testing.assert_allclose(ukf.innov, kf.innov, rtol=1e-8, atol=1e-9)
+    np.testing.assert_allclose(ukf.S, kf.S, rtol=1e-8, atol=1e-9)
+
+    # The steady state is added because the UKF reports levels and the linear
+    # filter gaps; that asymmetry is a known API split, not something this test
+    # is asserting about. The control row is the payload: it is where a
+    # contemporaneous shock response would go missing.
+    np.testing.assert_allclose(
+        ukf.x_filt, kf.x_filt + steady_state, rtol=1e-7, atol=1e-9
+    )
+
+
+def test_unscented_without_curvature_still_moves_with_the_shock_loading():
+    """Guards the test above against passing on a degenerate system.
+
+    If the control row of ``bu`` were dropped, the equivalence would still hold
+    for any model whose controls do not respond to innovations. Perturbing that
+    row has to move both filters, and by the same amount.
+    """
+    pytest.importorskip("SymbolicDSGE._ckernels.kalman")
+    unscented, linear, _ = _linear_ukf_pair()
+    base = KalmanFilter.run_unscented(**unscented).loglik
+
+    bumped = np.array([[1.0], [-1.9]], dtype=float64)
+    unscented["bu"] = bumped
+    linear["B"] = bumped
+    # The linear prior is derived from the UKF's, so it moves with the loading.
+    linear["P0"] = (
+        linear["A"] @ unscented["P0"] @ linear["A"].T
+        + bumped @ unscented["Q"] @ bumped.T
+    )
+    moved_ukf = KalmanFilter.run_unscented(**unscented).loglik
+    moved_kf = KalmanFilter.run(**linear).loglik
+
+    assert not np.isclose(moved_ukf, base, rtol=1e-6)
+    assert moved_ukf == pytest.approx(moved_kf, rel=1e-9, abs=1e-9)
