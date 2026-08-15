@@ -179,6 +179,7 @@ nav:
       - Shock: documentation/Shock.md
       - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
+      - SimResult: documentation/SimResult.md
       - Model Solutions:
           - FirstOrderSolution: documentation/model_solutions/FirstOrderSolution.md
           - SecondOrderSolution: documentation/model_solutions/SecondOrderSolution.md
