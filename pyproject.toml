@@ -74,13 +74,13 @@ dev = [
     "pip>=26.2.1",
     "jupyterlab-execute-time>=3.3.0",
     "httpx2>=2.7.0",
-    "setuptools>=82.0.1",
+    "setuptools>=84.0.0",
     "cython-lint>=0.21.0",
     "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
-requires = ["setuptools>=65.5.1", "wheel", "Cython>=3.0.11", "numpy>=2.4.6", "scipy>=1.16.3"]
+requires = ["setuptools>=84.0.0", "wheel", "Cython>=3.0.11", "numpy>=2.4.6", "scipy>=1.16.3"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
