@@ -25,7 +25,7 @@ __Inputs:__
 |:---------|----------------:|
 | target | Which solved model to simulate: `"dgp"` (default) or `"reference"`. |
 | T | Number of simulated periods, excluding the initial state. |
-| shocks | Shock mapping resolved once and redrawn per replication. Use the same key convention as `SolvedModel.sim(...)`, including grouped keys such as `"g,z"`. With `None`, the simulation is deterministic. |
+| shocks | Shock mapping resolved once and redrawn per replication. Use innovation symbol keys, including grouped keys such as `"e_g,e_z"`. With `None`, the simulation is deterministic. |
 | shock_scale | Shock scaling passed into `SolvedModel.sim(...)`. |
 | x0 | Optional initial state. |
 | observables | If `True`, observable paths are produced alongside states, and downstream steps may read `field="observables"`. |

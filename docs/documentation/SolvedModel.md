@@ -5,20 +5,23 @@ tags:
 # SolvedModel
 
 ```python
-@dataclass(frozen=True)
-class SolvedModel()
+FirstOrderSolvedModel(SolvedModel[FirstOrderSolution])
+SecondOrderSolvedModel(SolvedModel[SecondOrderSolution])
+PiecewiseSolvedModel(SolvedModel[PiecewiseSolution])
 ```
 
-`SolvedModel` contains the policy/transition matrices and relevant methods.
+`SolvedModel` instances contain a compiled model, its typed policy solution, and the methods that operate on that policy.
+
+???+ info "Type Parameterization"
+    `SolvedModel` is a generic class parameterized by the solution type.
+    Methods implemented for specific solution types are documented as `SolvedModel[SolutionType].method`. Methods that are solution-type agnostic are documented as `SolvedModel.method`.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | compiled | `#!python CompiledModel` | The compiled model object that resulted in the current solution. |
-| policy | `#!python KleinSolution` | First order solver output containing policy matrices, stability diagnostics, and eigenvalues. |
-| A | `#!python np.ndarray` | The discovered state-transition matrix. |
-| B | `#!python np.ndarray` | The discovered innovation impact matrix. |
+| policy | `#!python FirstOrderSolution \| SecondOrderSolution \| PiecewiseSolution` | Solver output containing the policy data for this model. |
 
 &nbsp;
 
@@ -35,11 +38,11 @@ __Methods:__
 ```python
 SolvedModel.sim(
     T: int,
-    shocks: dict[str, Shock | Callable | np.ndarray] | None = None, # (1)!
+    shocks: Mapping[str, Shock | Callable | np.ndarray] | None = None, # (1)!
     shock_scale: float = 1.0, # (2)!
-    x0: list[float] | np.ndarray | None = None,
+    x0: dict[str, float] | list[float] | np.ndarray | None = None,
     observables: bool = False
-) -> dict[str, np.ndarray[float]]
+) -> SimResult
 ```
 
  1. The dictionary values can be populated by:
@@ -53,19 +56,19 @@ SolvedModel.sim(
  Returns the simulated path defined by the given inputs.
 
 ???+ info "Univariate Shock Syntax"
-    A univariate shock is defined as a dictionary entry for the given variable. For example, if a model specifies a variable `x`
-    and a shock symbol `e_x`, the dictionary would expect `#!python {"x": ...}` where `...` is populated by a `ndarray` of shape
+    A univariate shock is defined as a dictionary entry for the innovation symbol. For example, if a model specifies a variable `x`
+    and a shock symbol `e_x`, the dictionary expects `#!python {"e_x": ...}` where `...` is populated by a `ndarray` of shape
     `(T,)` or `(T,1)`, a univariate `Shock`, or a univariate generator callable.
 
 ???+ info "Correlated Shock Syntax"
-    To define a set of variables with nonzero shock covariance, a shared dictionary entry should be used. For example, a multivariate
-    shock to `x` and `y` should be defined as `#!python {"x,y": ...}` where `...` is populated by a multivariate `Shock`, a `(T, 2)` array, or a multivariate generator callable.
+    To define innovations with nonzero covariance, use a shared dictionary entry. For example, a multivariate
+    shock from `e_x` and `e_y` should be defined as `#!python {"e_x,e_y": ...}` where `...` is populated by a multivariate `Shock`, a `(T, 2)` array, or a multivariate generator callable.
 
     Details regarding the dictionary key scheme:
 
-    - Variable names are parsed by splitting on commas; surrounding whitespace is stripped.
-    - Multiple variables can be chained as required. There is no variable count limitation.
-    - The ordering of variables in the key does __not__ affect simulation results.
+    - Shock symbols are parsed by splitting on commas; surrounding whitespace is stripped.
+    - Multiple shock symbols can be chained as required. There is no limit on their number.
+    - The ordering of shock symbols in the key does __not__ affect simulation results.
     - Shock realizations are always aligned with the innovation ordering defined at model configuration or compilation (`B` matrix order).
 
 ??? info "Multivariate Shock Canonicalization and Reproducibility"
@@ -94,20 +97,35 @@ __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| T | Amount of steps to simulate the paths; excluding `x0`. |
-| shocks | `Shock`, array, or callable shock mapping keyed by exogenous variable name or comma-separated multivariate group. |
+| T | Number of periods to simulate. The result has `T` rows. |
+| shocks | `Shock`, array, or callable shock mapping keyed by innovation symbol or comma-separated multivariate group. |
 | shock_scale | Scaling factor for the shocks. |
-| x0 | Initial state of model variables shaped `(n,)`. (`None` defaults to zeroes) |
-| observables | Include observable paths in the output `#!python dict` if `#!python True`. |
-
-???+ info "Period Specification"
-    Index 0 of the output will always be an initial state. (default or specified) The input `T` will result on `T+1` array indices from index 0 to `T`.
+| x0 | Initial level state at `t - 1`. A dense sequence covers all compiled variables in declaration order, including generated lags. A mapping may specify only selected variables; omitted variables start at their steady state. |
+| observables | Include observable paths in the result if `#!python True`. |
 
 __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python dict[str, np.ndarray[float]]` | Arrays of paths paired with their corresponding variables. The key `#!python "_X"` contains the full state matrix. (Shape `(T+1, n)`) |
+| `#!python SimResult` | Simulated level paths. `states` maps variable names to columns of `X`; `observables` and `y` are available when requested. |
+
+&nbsp;
+
+## `SolvedModel[PiecewiseSolution].sim_reference`
+
+```python
+SolvedModel[PiecewiseSolution].sim_reference(
+    T: int,
+    shocks: Mapping[str, Shock | Callable | np.ndarray] | None = None,
+    shock_scale: float = 1.0,
+    x0: dict[str, float] | list[float] | np.ndarray | None = None,
+    observables: bool = False,
+) -> SimResult
+```
+
+Simulate the unconstrained first-order reference policy of a piecewise model. This method accepts the same inputs as `SolvedModel.sim(...)`, but ignores every constraint and does not run the OccBin regime search.
+
+The result contains the reference policy's level path. It has no `regimes` or `diagnostics`, because it is an ordinary first-order simulation.
 
 &nbsp;
 
@@ -193,6 +211,11 @@ Run a Kalman Filter application on the observables specified.
 ???+ info "`y` Array Alignment"
     When a DataFrame is used as `y`, column names will be used to align and order observables' names and position. However, for `ndarray` inputs, the method assumes names in `observables` and columns of `y` are position-aligned.
 
+???+ info "State Units and Timing"
+    This public path returns state histories in levels. Linear and extended results record the added steady-state vector in `FilterResult.constant`; unscented results form levels in the kernel and record `NaN` there.
+
+    For linear and extended filters, `x0` and `P0` are the prior mean and covariance of the first observed state. For the unscented filter, they describe the state and covariance before the first observation.
+
 __Inputs:__
 
 | __Name__ | __Description__ |
@@ -200,11 +223,11 @@ __Inputs:__
 | y | observations to filter. |
 | filter_mode | `"linear"` for affine measurements, `"extended"` (EKF) for nonlinear measurements, or `"unscented"` (UKF), which runs against the model's second-order solution. `"unscented"` does not support `return_shocks`. Returns an `UnscentedFilterResult` instead of a `FilterResult`. |
 | observables | Name of corresponding model measurements. |
-| x0 | Initial state vector. |
+| x0 | Initial state vector. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
-| P0 | Initial state covariance override. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically. |
+| P0 | Initial state covariance override. It follows the same timing as `x0` at the first observation. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
 | R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
 | _debug | Print debug information about filter inputs if `True`. |
 

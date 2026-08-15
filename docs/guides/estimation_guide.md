@@ -23,18 +23,26 @@ We will cover:
 
 ```python
 from SymbolicDSGE import ModelParser, DSGESolver
+from SymbolicDSGE.utils import FRED
+from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
+from SymbolicDSGE.bayesian import make_prior
+from SymbolicDSGE.estimation import MCMCResult
 
-parsed = ModelParser("MODELS/POST82.yaml").get_all()
-model, kalman = parsed
+from typing import cast
+
+import numpy as np
+import pandas as pd
+
+model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all()
 
 solver = DSGESolver(model, kalman)
-compiled = solver.compile()
+comp = solver.compile()
 ```
 
 `compile()` infers the solver variable layout from the model config. If you supply `#!python variable_order`, `#!python n_state`, or `#!python n_exog`, they are checked against the inferred layout and a mismatch raises before the model is solved.
 
 ???+ note "Data Input"
-    In this example, observed "measurements" are pulled from `FRED` and transformed into model units first. In this guide we assume you already have `observed` as a `DataFrame` with observable columns.
+    The companion notebook retrieves FRED data, constructs the POST82 gap variables, and supplies inflation and the policy rate as level observables. It sets `FRED_KEY` in the environment or a `.env` file. This guide assumes the resulting `observed` `DataFrame` is already available.
 
 ## Prior Specification
 
@@ -42,20 +50,16 @@ Priors are objects we use to define our "prior beliefs" about a parameter. To gi
 In theory, $\beta$ can be any number such that $\beta \in (0,1)$. However, we know that $\beta$ should reside more or less within $0.95 \pm 0.05$. We can use a prior on $\beta$ to penalize the optimizer when it strays further away from our belief to ensure our parameter estimations remain economically interpretable. In `SymbolicDSGE` priors can be defined with the `make_prior` function as such:
 
 ```python
-from SymbolicDSGE.bayesian import make_prior
-
 beta_prior = make_prior(
     distribution="beta", # (1)!
     parameters={"a": 200 * 0.971, "b": 200 * 0.029}, # (2)!
     transform="logit", # (3)!
-    transform_kwargs={} # (4)!
 )
 ```
 
 1. Distribution in parameter space.
 2. Parameters of the distribution. This yields a Beta distribution with heavily concentrated probability mass around the mean of 0.971.
 3. Transform function mapping the parameter space to the unconstrained optimizer space. Here, `logit` maps `(0, 1) -> (-inf, inf)`.
-4. Parameters of the transform function are passed here if necessary.
 
 The prior specification defines `Distribution`s such that the optimizer can interact with the distribution object on the unconstrained space.
 For example, in order to optimize in an unbounded search space $\R = (-\infty, \infty)$ we can use any distribution of our choosing regardless of the bounds,
@@ -76,9 +80,10 @@ Using `make_prior` we can define individual priors for each parameter we wish to
 
 ```python
 prior_spec = {
+    # (0, 1)
     "beta": make_prior(
         "beta",
-        parameters={"a": 200*0.971, "b": 200*0.029},
+        parameters={"a": 200 * 0.971, "b": 200 * 0.029},
         transform="logit", # (1)!
     ),
     "kappa": make_prior(
@@ -113,18 +118,20 @@ The estimation process is carried out by `DSGESolver.estimate()` and `DSGESolver
 
 ```python
 res, sol = solver.estimate_and_solve(
-    compiled=compiled,
+    compiled=comp,
     filter_mode="linear", # (1)!
-    y=observed, # (2)!
+    y=observed.loc[observed.index >= "1984-01-01", :], # (2)!
     observables=["Infl", "Rate"], # (3)!
     method="mcmc", # (4)!
     priors=prior_spec,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
-    posterior_point='mean', # (5)!
+    posterior_point="mean", # (5)!
     n_draws=100_000, # (6)!
     burn_in=10_000, # (7)!
     thin=1, # (8)!
 )
+
+res = cast(MCMCResult, res)
 ```
 
 1. Mode of the Kalman Filter used to compute the likelihood. Chosen from `{'linear', 'extended', 'unscented'}`.
@@ -137,7 +144,7 @@ res, sol = solver.estimate_and_solve(
 8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
 
 ```text
-MCMC sampling concluded in 7.58 seconds with 14509.21 iterations per second.
+MCMC sampling concluded in 7.58 seconds with 14504.47 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 
@@ -154,24 +161,33 @@ The estimation will return a `MCMCResult` or `OptimizationResult` depending on t
 
 - Order of parameters in the sample array(s)
 - Each sample drawn (if multiple are drawn)
-- Log-Likelihood of each sample
+- Log posterior of each retained sample
 
 The result objects are a raw outlook into the estimator internals during the method run. Information regarding the parameters selected can be derived from a result object; or the `SolvedModel` objects can be directly inspected via `SolvedModel.config.calibration.parameters`.
 
 Below is a snippet creating a "summary" report given a result object:
 
 ```python
-import numpy as np
-import pandas as pd
+param_names = res.param_names
+best_idx = np.argmax(res.logpost_trace)
+
+post_mean = np.mean(res.samples, axis=0)
+loglik = np.mean(res.logpost_trace)
+accept_rate = res.accept_rate
+n_draws = res.n_draws
+burn_in = res.burn_in
+thin = res.thin
+
+param_to_val = dict(zip(param_names, post_mean))
 
 pd.Series(
     {
-        **dict(zip(res.param_names, np.mean(res.samples, axis=0))),  # (1)!
-        "loglik": np.mean(res.logpost_trace),
-        "accept_rate": res.accept_rate,  # (2)!
-        "n_draws": res.n_draws,
-        "burn_in": res.burn_in,
-        "thin": res.thin,
+        **param_to_val,  # (1)!
+        "loglik": loglik,
+        "accept_rate": accept_rate,  # (2)!
+        "n_draws": n_draws,
+        "burn_in": burn_in,
+        "thin": thin,
     }
 ).round(3)
 ```
@@ -181,24 +197,24 @@ pd.Series(
 
 ```text
 beta                0.971
-rho_r               0.813
-rho_g               0.869
-rho_z               0.859
-psi_pi              3.256
-psi_x               0.341
-kappa               0.458
-tau_inv             0.984
-rho_gz              0.034
-rho_gr              0.774
-rho_zr             -0.336
-meas_rho_ir        -0.055
-sig_r               0.112
-sig_g               0.166
-sig_z               0.645
-meas_infl           1.138
-meas_rate           0.044
-loglik           -251.538
-accept_rate         0.135
+rho_r               0.806
+rho_g               0.862
+rho_z               0.862
+psi_pi              3.308
+psi_x               0.339
+kappa               0.480
+tau_inv             0.973
+rho_gz             -0.008
+rho_gr             -0.354
+rho_zr              0.190
+meas_rho_ir        -0.191
+sig_r               0.083
+sig_g               0.162
+sig_z               0.658
+meas_infl           1.278
+meas_rate           0.042
+loglik           -246.682
+accept_rate         0.206
 n_draws        100000.000
 burn_in         10000.000
 thin                1.000
@@ -270,7 +286,7 @@ res.logpost_trace_plot() # (1)!
     - `MAP`: MAP is similar to MLE in the sense that it returns a single set of parameters maximizing a given objective. However, MAP has prior beliefs in the objective function. Therefore, the maximization yields a result both respecting the plain likelihood and our beliefs regarding parameters.
     - `MCMC`: MCMC is a sampling method aimed to generate a posterior distribution using our prior beliefs and the likelihood. Effectively, MCMC samples multiple parameter sets sampled with respect to priors and computes their likelihood. In this case, we no longer have a maximization problem; we create a sampled distribution and use a point in said distribution as the parameters. This approach often yields more stable parameter compositions and allows more freedom regarding exactly which "point" to select as the parameters.
 
-???+ warning "Estimating Components of Symmetric Positice Definite Matrices"
+???+ warning "Estimating Components of Symmetric Positive Definite Matrices"
     The model and kalman config provides two covariance matrices specified with parameters for standard deviations and the correlation coefficients. These are `Q` and `R` explaining the covariance of shocks and measurement noise respectively. To ensure estimation of any component in these matrices yields a valid covariance matrix, there's logic implemented around estimation to transform these variables. It is recommended to estimate the correlation block of these marices together using the reserved estimation keys: `<R/Q>_corr`. Standard deviations are estimated as scalars and in cases where they lack a prior, the estimation defaults to a log transform ensuring positivity.
 
 ## Further Steps

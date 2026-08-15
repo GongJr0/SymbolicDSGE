@@ -22,18 +22,28 @@ We start from `MODELS/POST82.yaml` (also used in the [Quick Start](quickstart.md
 We initialize a `BundleBuilder` to store all upcoming components. A model is then defined and solved to be attached to the bundle. You can refer to the [Quick Start](quickstart.md) for details on basic model authoring and solving.
 
 ```python
-from SymbolicDSGE import DSGESolver, ModelParser, BundleBuilder
-from numpy import array, float64
+import io
 
-bundle = BundleBuilder(created_by="experiment-1") # (1)!
+import numpy as np
+import pandas as pd
 
-parser = ModelParser("MODELS/POST82.yaml") # (2)!
+from SymbolicDSGE import BundleBuilder, DSGESolver, Estimator, ModelParser, Shock
+from SymbolicDSGE.bayesian import make_prior
+from SymbolicDSGE.bundle import SimSpec
+
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    simulation_step,
+)
+
+bundle = BundleBuilder(created_by="experiment-1")  # (1)!
+
+parser = ModelParser("../../MODELS/POST82.yaml")  # (2)!
 model, kalman = parser.get_all()
 
 solver = DSGESolver(model, kalman)
-compiled = solver.compile(
-    linearize=False, # (3)!
-)
+compiled = solver.compile(linearize=False)  # (3)!
 sol = solver.solve(
     compiled,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
@@ -46,6 +56,11 @@ bundle.add_model(
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 
+# The `dgp` passed to `mc_pipeline.run(...)` is a runtime-only argument; it is
+# NOT persisted by `add_mc`. To make `loaded.dgp` resolve, the DGP model must be
+# bundled explicitly under role "dgp". Here the experiment uses the same model as
+# its DGP, so we ship the same YAML (in a misspecification study this would be a
+# different model's source).
 bundle.add_model(
     "dgp",
     model.source_yaml,
@@ -71,10 +86,6 @@ We define a small MCMC run estimating `psi_pi` and `psi_x` against synthetic obs
 You can refer to the [Estimation Guide](estimation_guide.md) and [API Reference](../documentation/Estimator.md) for details on the `Estimator` API usage.
 
 ```python
-import numpy as np
-from SymbolicDSGE import Estimator
-from SymbolicDSGE.bayesian import make_prior
-
 priors = {
     "psi_pi": make_prior(
         distribution="normal",
@@ -103,6 +114,7 @@ res = estim.mcmc(  # (1)!
     thin=2,
 )
 
+# Add the estimation to the bundle with results
 bundle.add_estimation(  # (2)!
     source=estim,
     result=res,
@@ -113,7 +125,7 @@ bundle.add_estimation(  # (2)!
 2. `add_estimation` can bundle live results and initialized `Estimator` instances. These are converted to readable specifications for storage. Bundling live objects does not make the final bundle depend on unreadable binary objects.
 
 ???+ note "Estimation Methods"
-    MCMC returns a special result object `MCMCResult` while MLE and MAP both return `OptimizationResult`. The bundler handles both cases.
+    MCMC returns `MCMCResult`, MLE returns `MLEResult`, and MAP returns `MAPResult`. The bundler handles all three cases.
 
 ## Build a Monte Carlo pipeline
 
@@ -130,20 +142,19 @@ from SymbolicDSGE.monte_carlo.step_factories import (  # (1)!
 gz_shock = Shock(seed=0, multivar=True, dist="norm")  # (2)!
 r_shock = Shock(seed=1, multivar=False, dist="t", dist_kwargs={"df": 3})
 
-mc_pipeline = MCPipeline([
+mc_pipeline = MCPipeline(
+    [
         simulation_step(
             "datagen",
             target="dgp",
             T=200,
-            shocks={"g,z": gz_shock, "r": r_shock},
+            shocks={"e_g,e_z": gz_shock, "e_r": r_shock},
         ),
         jarque_bera_test_step(
-            "jb_test",
-            source="datagen",  # (3)!
-            field="observables",
-            column=0,
+            "jb_test", source="datagen", field="observables", column=0  # (3)!
         ),
-])
+    ]
+)
 mc_res = mc_pipeline.run(
     reference=sol,
     dgp=sol,
@@ -152,6 +163,7 @@ mc_res = mc_pipeline.run(
     verbosity=2,
 )
 
+# Add the Monte Carlo pipeline to the bundle
 bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 ```
 
@@ -164,15 +176,12 @@ bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 Simulation prefills ride inline in the manifest, keyed by role. They control what the GUI's Outputs tab prefills when the receiver opens the bundle on `sdsge-ui`. A `SimSpec`'s fields are exactly the keyword arguments of `SolvedModel.sim`, and each shock is stored as its `Shock.to_dict()` parameters. No live `Shock` is serialized.
 
 ```python
-from SymbolicDSGE.bundle import SimSpec
-from SymbolicDSGE.core.shock_generators import Shock
-
 simulation = SimSpec(
     T=200,
     observables=True,
     shock_scale=1.0,
     shocks={
-        "r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(), # (1)!
+        "e_r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(),  # (1)!
     },
 )
 
@@ -186,13 +195,12 @@ bundle.set_simulation("reference", simulation)
 `add_raw_data` covers any extra CSV files you want to ship in `data/`. They are not interpreted by the loader. They are passthrough storage for context the receiver may want.
 
 ```python
-import io
-import pandas as pd
-
-aux = pd.DataFrame({
-    "date": pd.date_range("2000-01-01", periods=40, freq="QS"),
-    "gdp_growth": rng.standard_normal(40),
-})
+aux = pd.DataFrame(
+    {
+        "date": pd.date_range("2000-01-01", periods=40, freq="QS"),
+        "gdp_growth": rng.standard_normal(40),
+    }
+)
 csv_buf = io.StringIO()
 aux.to_csv(csv_buf, index=False)
 
@@ -212,8 +220,7 @@ bundle.add_raw_data(
 The bundle is written to disk as a zip file that's aliased as a `.sdsge` file.
 
 ```python
-bundle_path = bundle.write("experiment-1.sdsge")
-print(f"Bundle written to {bundle_path}")
+bundle.write("experiment-1.sdsge")
 ```
 
 ## Inspect the result

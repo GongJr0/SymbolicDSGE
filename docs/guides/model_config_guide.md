@@ -23,33 +23,40 @@ The ordering of top level fields does not matter for the parser. Component order
 To start with, the configuration accepts a `name` field to specify the model's alias. This name is accessible in the parsed model but never used; it remains in the model object as a reference for users.
 
 ```yaml
-name: "Test Model"
+name: Test Model
 ```
 
 ## Variables
 
-The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping. At compile time, the solver infers its canonical layout from the model config: a variable occurring at `t-1` is a state and every other variable is a control, states first. Declaration order is preserved within each group.
-
-If an explicit compile time `variable_order`, `n_state`, or `n_exog` is supplied, it is treated as an expectation and sanity checked against the inferred layout. A mismatch raises before solving.
+The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping.
 
 When using a mapping instead of a list, each variable can specify a preferred linearization method and the parameter corresponding to its steady state level. This additional information is only used when linearizing a nonlinear model.
 
 Variables are declared as follows:
 
 ```yaml
-variables: [g, z, r, Pi, x]  # as list
+variables: [g, z, r_shadow, r, Pi, x]  # as list
 variables: # as mapping
     g: # (1)!
     z:
+    r_shadow:
     r:
         linearization: log  # (2)!
         ss_seed: r_star # (3)!
     ...
 ```
 
-1. Exongenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
+1. Exogenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
 2. Can be one of `log`, `taylor`, or `none`.
 3. Newton seed for the steady state. Omitted seeds at zero. Doubles as the expansion point under `log` or `taylor`.
+
+???+ info "Ordering Convention"
+    At compile time, the solver infers its canonical layout from the model config: after auxiliaries are generated (where necessary), a variable occurring at `t-1` is a state and every other variable is a control. During model compilation the canonical order is derived as `[states; controls]`.
+
+    You need not know or check the internal ordering to interact with methods requiring parameters supplied as a vector. The primary parameters needing ordered input are `x0` (initial state) and `ss_seed` (steady state solver seed). Both of which accept a dictionary mapping names to values. For dense vector inputs:
+
+    - `x0` requires all variables, including auxiliaries in the order `[declared_variables; generated_auxiliaries]`.
+    - `ss_seed` requires all declared variables (the `variables` field) in declaration order.
 
 ## Parameters
 
@@ -79,7 +86,7 @@ calibration:
 ## Shocks
 
 ???+ note "Wording Convention"
-    This guide uses the term "(co)variance" to refer to a shock term's variance/covariance parameters for brevity. It's important to note that `SymbolicDSGE` expects __standard deviations__ and __correlation coefficients__ in the configuration.
+    This guide uses the term "(co)variance" to refer to shock variance and covariance parameters for brevity. It's important to note that `SymbolicDSGE` expects __standard deviations__ and __correlation coefficients__ in the configuration.
 
 Shocks are the symbols that represent the stochastic components of the model.
 A shock symbol is separate from its (co)variance and is used to indicate where a respective innovation should be applied in the model equations.
@@ -98,7 +105,7 @@ Shock realizations are only injected when the user selects them at simulation ti
 Observables map model units to real life variables via equations. For the `observables` field we only declare the names we desire to use as observable variables.
 
 ```yaml
-observables: [Infl, Rate]
+observables: [OutGap, Infl, Rate]
 ```
 
 ## Equations
@@ -116,54 +123,66 @@ The equations field treats all variables as a function of time; to refer to past
 
 ### Model Equations
 
-This field contains the state-space definition. Equations are supplied as a mapping from equation name to equation, forming all necessary interactions.
+This field contains the elementary state-space definition. Equations are supplied as a mapping from equation name to equation, forming all necessary interactions.
 
 ```yaml
 equations:
     model:
-        nkpc: "Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)" # (1)!
+        nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t) # (1)!
 
-        euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)" # (2)!
+        euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t) # (2)!
 
-        taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r" # (3)!
+        taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r # (3)!
 
-        g_process: "g(t) = rho_g*g(t-1) + e_g" # (4)!
+        rate_link: r(t) = r_shadow(t) # (4)!
 
-        z_process: "z(t) = rho_z*z(t-1) + e_z" # (5)!
+        g_process: g(t) = rho_g*g(t-1) + e_g # (5)!
+
+        z_process: z(t) = rho_z*z(t-1) + e_z # (6)!
     constraint: ...
     observables: ...
 ```
 
 1. New Keynesian Phillips Curve (NKPC)
 2. IS/Euler Equation
-3. Taylor Rule
-4. Demand Shock
-5. Cost-Push Shock
+3. Shadow Taylor rule
+4. Actual policy rate outside the binding regime
+5. Demand shock
+6. Cost-push shock
 
-Here, we use these variables and parameters that we defined to create the namespace.
+???+ info "Timing of Equations"
+    The solver adopts the three-date system allowing `{-1, 0, +1}` time indices in the system. However, leads and lags past the three-date system are handled through auxiliary variables. For any configuration where higher-offsets are used, expect the post-config outputs to represent the complete state-space system with auxiliary variables.
+    Variable generation happens at compile-time (See [`DSGESolver.compile`](../documentation/DSGESolver.md)), you can access `CompiledModel.layout.generated_names`, or from a `SolvedModel` object, `SolvedModel.layout.generated_names`. `declared_names` available from the same objects will return the initial variable names, in the order they were declared in the config.
 
 ### Constraints
 
-The `constraint` field stores piecewise OBC definitions. It maps a model variable name to one or more `{condition: alternative_expression}` entries. Conditions are parsed as `SymPy` relational expressions, alternatives are parsed as `SymPy` expressions, and both are validated against the model namespace. OBCs are parsed and validated, but the solver does not enforce them.
+The `constraint` field stores named piecewise OBC conditions. Each condition defines `bind` and, optionally, `relax` expressions. Conditions are parsed as `SymPy` relational expressions and must be contemporaneous. The corresponding `regime` entry replaces model equations when that condition binds.
 
 ```yaml
 equations:
     model:
-        nkpc: "Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)"
+        nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
 
-        euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)"
+        euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
-        taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r"
+        taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
 
-        g_process: "g(t) = rho_g*g(t-1) + e_g"
+        rate_link: r(t) = r_shadow(t)
 
-        z_process: "z(t) = rho_z*z(t-1) + e_z"
+        g_process: g(t) = rho_g*g(t-1) + e_g
+
+        z_process: z(t) = rho_z*z(t-1) + e_z
     constraint:
-        r:
-            r(t) >= 0: 0
-            r(t) <= r_star: r_star
+        ZLB:
+            bind: r_shadow(t) < 0
+            relax: r_shadow(t) >= 0 # (1)!
+    regime:
+        ZLB:
+            rate_link: r(t) = 0
     observables: ...
 ```
+
+1. The binding regime pins the actual policy rate while the shadow rate determines whether the constraint binds. If `relax` is omitted, the parser derives it as `Not(bind)`.
 
 ### Observables
 
@@ -172,24 +191,35 @@ This field contains the mappings of model variables to real-life observed variab
 ```yaml
 equations:
     model:
-        nkpc: "Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)"
+        nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
 
-        euler: "x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)"
+        euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
 
-        taylor: "r(t) = rho_r*r(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r"
+        taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
 
-        g_process: "g(t) = rho_g*g(t-1) + e_g"
+        rate_link: r(t) = r_shadow(t)
 
-        z_process: "z(t) = rho_z*z(t-1) + e_z"
-    constraint: {...}
+        g_process: g(t) = rho_g*g(t-1) + e_g
+
+        z_process: z(t) = rho_z*z(t-1) + e_z
+    constraint:
+        ZLB:
+            bind: r_shadow(t) < 0
+            relax: r_shadow(t) >= 0
+    regime:
+        ZLB:
+            rate_link: r(t) = 0
     observables:
-        Infl: 4*Pi(t) + pi_star # (1)!
+        OutGap: x(t) # (1)!
 
-        Rate: 4*r(t) + (r_star + pi_star) # (2)!
+        Infl: 4*Pi(t) + pi_star # (2)!
+
+        Rate: 4*r(t) + (r_star + pi_star) # (3)!
 ```
 
-1. Annualized inflation from quarterly gap
-2. Annualized nominal rate from quarterly gap.
+1. Output gap is a direct mapping of the model variable to the observable.
+2. Annualized inflation from quarterly gap
+3. Annualized nominal rate from quarterly gap.
 
 ## Calibration
 
@@ -243,7 +273,7 @@ The shocks section maps shock (co)variances to the corresponding terms in model 
     To align with `SciPy` distributions' signatures, the standard deviations of stochastic terms are used instead of the variance.
 
 ???+ info "Shock Selection at Simulations"
-    At simulation time, shocks are specified by the exogenous state variable names (e.g., `g`, `z`) or by grouped keys (`#!python "g,z"`), not by the innovation symbols (`e_g`)
+    At simulation time, shocks are specified by the name of the shock itself (e.g., `e_g`, `e_z` instead of `g`, `z`) or by grouped keys (`#!python "e_g,e_z"`). The latter allows a multivariate distribution to be specified for all, or a subset of, the shocks in the model.
 
 ```yaml
 calibration:

@@ -26,7 +26,9 @@ __Fields:__
 | y_pred | `#!python np.ndarray` | Predicted observation. Shape `(T, m)`. |
 | y_filt | `#!python np.ndarray` | Filtered observation. Shape `(T, m)`. |
 | innov | `#!python np.ndarray` | Innovations (measurement residuals). Shape `(T, m)`. |
+| std_innov | `#!python np.ndarray` | Innovations standardized by their covariance. Shape `(T, m)`. |
 | S | `#!python np.ndarray` | Innovation covariance. Shape `(T, m, m)`. |
+| constant | `#!python np.ndarray` | State offset added to report levels. Zero indicates gaps; `NaN` indicates that the unscented kernel formed levels itself. |
 | loglik | `#!python float` | Total log-likelihood of observed data under the filter. |
 | eps_hat | `#!python np.ndarray | None` | Estimated shocks (`None` unless `return_shocks=True`). |
 
@@ -53,6 +55,7 @@ KalmanFilter.run(
     return_shocks: bool = False,
     symmetrize: bool = True,
     jitter: float = 0.0,
+    steady_state: np.ndarray[float64] | None = None,
 ) -> FilterResult
 ```
 
@@ -69,11 +72,12 @@ __Inputs:__
 | Q | Shock covariance matrix. |
 | R | Observation-noise covariance matrix. |
 | y | Observed data over time. |
-| x0 | Initial state mean. Defaults to zero vector. |
-| P0 | Initial state covariance. Defaults to large diagonal. |
+| x0 | Prior state mean for the first observation. Defaults to zero. |
+| P0 | Prior state covariance for the first observation. Defaults to a large diagonal. |
 | return_shocks | If `#!python True`, compute and return estimated shocks. |
 | symmetrize | Symmetrize covariance matrices each step if `#!python True`. |
 | jitter | Jitter term added to $S_t$ when Cholesky factorization fails. |
+| steady_state | Optional state offset. When supplied, `x_pred` and `x_filt` are returned in levels and recorded as `FilterResult.constant`; otherwise they are gaps. |
 
 &nbsp;
 
@@ -93,10 +97,13 @@ KalmanFilter.run_extended(
     symmetrize: bool = True,
     jitter: float = 0.0,
     compute_y_filt: bool = True,
+    steady_state: np.ndarray[float64] | None = None,
 ) -> FilterResult
 ```
 
 Apply an extended Kalman Filter with linear transition and nonlinear measurement function. `#!python h` and `#!python H_jac` are evaluated at each predicted state and receive unpacked state values plus `#!python calib_params`.
+
+`x0` and `P0` are the prior mean and covariance for the first observation. The optional `steady_state` argument has the same level reporting behavior as `KalmanFilter.run(...)`.
 
 ???+ note "Jitter"
     Though its default is 0.0, running the method with a small jitter is strongly recommended. Using 1e-8 (or similar) can prevent fallback to matrix inversion when Cholesky fails. (Inversion much slower in comparison)
@@ -138,6 +145,8 @@ KalmanFilter.run_unscented(
 2. Covariance of the augmented state, shape `#!python (2 * n_state, 2 * n_state)`.
 
 Apply an unscented Kalman Filter (UKF) against a second-order model solution. The state/control policy tensors (`#!python hx`, `#!python gx`, `#!python bx`, `#!python hxx`, `#!python gxx`, `#!python hss`, `#!python gss`) and `#!python steady_state` come from an `#!python order=2` solve; the measurement is propagated through the sigma points via `#!python meas_addr`, so no observation Jacobian is required. `#!python alpha`, `#!python beta`, and `#!python kappa` are the sigma-point tuning parameters. `#!python return_shocks` is not supported.
+
+`z0` and `P0` describe the state and covariance before the first observation. The UKF returns state paths in levels and sets `FilterResult.constant` to `NaN`, because the kernel applies no separate result-layer offset.
 
 __Returns:__
 

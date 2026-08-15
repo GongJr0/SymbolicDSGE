@@ -179,6 +179,11 @@ nav:
       - Shock: documentation/Shock.md
       - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
+      - SimResult: documentation/SimResult.md
+      - Model Solutions:
+          - FirstOrderSolution: documentation/model_solutions/FirstOrderSolution.md
+          - SecondOrderSolution: documentation/model_solutions/SecondOrderSolution.md
+          - PiecewiseSolution: documentation/model_solutions/PiecewiseSolution.md
       - Regression:
           - Overview: documentation/regression/index.md
           - Regression Results: documentation/regression/results.md
