@@ -67,17 +67,22 @@ _MAX_CHECK_AHEAD = _CHECK_AHEAD + 50
 #: The buffer the two above imply: the horizon plus the appended release date.
 _T0 = _CHECK_AHEAD + 1
 
-#: Neither side holds an exact steady state to be compared against: ``x1`` and
-#: ``x2`` are ill conditioned in double precision, so Dynare's own values are 63
-#: and 75 ulps from a 50-digit evaluation of its ``steady_state_model`` and ours
-#: are further out still. The oracle's docstring carries the arithmetic. That
-#: conditioning is the floor here, together with the 400x and 100x rescalings
-#: ``r_an``, ``pie_an`` and ``yhat`` apply, which turn ``r``'s 4e-16 into 2e-13
-#: by arithmetic rather than by error. Every other column agrees to 5e-15 or
-#: better, so these numbers are not measuring the dynamics: the worst element
-#: sits at 4.5e-13 and the tolerances below leave it a factor of six.
-_RTOL = 1e-13
-_ATOL = 1e-12
+#: What sets this number is not the dynamics. Thirteen of the sixteen columns
+#: agree to 5e-15 or better; the floor comes from ``x1`` and ``x2``, which are
+#: ill conditioned in double precision to the point that Dynare's own values are
+#: 63 and 75 ulps from a 50-digit evaluation of its ``steady_state_model`` (the
+#: oracle's docstring carries that arithmetic), and from ``r_an``, ``pie_an`` and
+#: ``yhat``, which rescale ``r``, ``pie`` and ``y`` by 400, 400 and 100 and so
+#: report a last-bit disagreement as 1e-13.
+#:
+#: That second group is why this is 1e-11 and not the 1e-12 the local numbers
+#: invite. The quantity being amplified is where each side's Newton stops, which
+#: is not platform invariant: ``y`` stops 1.0e-15 out on x86_64 Windows and
+#: 1.1e-14 on the Linux CI runner, so ``yhat`` reports 1.0e-13 on one and 1.1e-12
+#: on the other. A tolerance measured on one platform in the 1e-13 to 1e-12 band
+#: is measuring that runner's libm, and it fails on the next one. The worst
+#: element observed anywhere is 1.2e-12, which this leaves a factor of eight.
+_TOL = 1e-11
 
 
 @pytest.fixture(scope="module")
@@ -110,7 +115,7 @@ def test_the_reference_steady_state_is_dynares(solved):
     ss = solved.policy.steady_state
     ours = np.array([ss[idx[name]] for name in _OUR_COLUMNS])
 
-    np.testing.assert_allclose(ours, golden.YS, rtol=_RTOL, atol=_ATOL)
+    np.testing.assert_allclose(ours, golden.YS, rtol=_TOL, atol=_TOL)
 
 
 def test_the_unconstrained_path_is_dynares_linear_simulation(solved):
@@ -123,13 +128,13 @@ def test_the_unconstrained_path_is_dynares_linear_simulation(solved):
         solved.compiled,
     )
 
-    np.testing.assert_allclose(ours, golden.LINEAR, rtol=_RTOL, atol=_ATOL)
+    np.testing.assert_allclose(ours, golden.LINEAR, rtol=_TOL, atol=_TOL)
 
 
 def test_the_piecewise_path_is_dynares(solved, result):
     ours = _columns(result.X, solved.compiled)
 
-    np.testing.assert_allclose(ours, golden.PIECEWISE, rtol=_RTOL, atol=_ATOL)
+    np.testing.assert_allclose(ours, golden.PIECEWISE, rtol=_TOL, atol=_TOL)
 
 
 def test_the_realized_regime_is_dynares(result):

@@ -69,8 +69,10 @@ in float64 lands 64 ulps out on its own, so the error is in the expression rathe
 than in whoever solves it. The cause is subtractive cancellation in the
 denominator ``1 - THETA*bet*pie**(EPSILON-1)``, which is 0.083 while the product
 it subtracts is 0.917: rounding in that product comes out ten times larger in the
-difference. ``pie_star`` is 7 ulps out and enters linearly. Our Newton stops 176
-ulps out on ``x2``, of the same order and for the same reason.
+difference. ``pie_star`` is 7 ulps out and enters linearly. Our Newton stops of
+the same order out on ``x2``, 176 ulps on the machine this was transcribed on,
+and where it stops moves with the platform's libm: the parity suite's tolerance
+is set for that spread rather than for any one measurement of it.
 
 That conditioning is the floor for every comparison against these arrays, along
 with the reporting rows: ``r_an`` and ``pie_an`` scale by 400 and ``yhat`` by
