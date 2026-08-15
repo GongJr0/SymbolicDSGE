@@ -22,10 +22,12 @@ int sdsge_mc_payload_runner(const i64 rep_idx,
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
 }
 
-int sdsge_mc_raw_model_data_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+int sdsge_mc_raw_model_data_runner(const i64 rep_idx,
+                                   f64 *SDSGE_RESTRICT float_in_work,
+                                   f64 *SDSGE_RESTRICT float_out,
+                                   i64 *SDSGE_RESTRICT int_work,
+                                   i64 *SDSGE_RESTRICT int_out,
+                                   const void *ctx_ptr) {
   const sdsge_mc_raw_model_data_step_ctx *ctx = ctx_ptr;
   (void)float_in_work;
   (void)int_work;
@@ -51,9 +53,12 @@ static inline i64 sdsge_simulate_order2_shock_offset(const i64 nx, const i64 ny,
 }
 
 int sdsge_mc_simulate_order1_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+int sdsge_mc_simulate_order1_runner(const i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx_ptr) {
   const sdsge_mc_simulate_order1_step_ctx *ctx = ctx_ptr;
   (void)int_work;
   if (ctx->shocks != NULL) {
@@ -66,44 +71,49 @@ int sdsge_mc_simulate_order1_runner(
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
 }
 
-int sdsge_mc_simulate_order2_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+int sdsge_mc_simulate_order2_runner(const i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx_ptr) {
   const sdsge_mc_simulate_order2_step_ctx *ctx = ctx_ptr;
   (void)int_work;
   if (ctx->shocks != NULL) {
-    sdsge_mc_shock_draw(ctx->shocks, rep_idx,
-                        float_in_work + ctx->shock_scratch_offset,
-                        float_in_work + sdsge_simulate_order2_shock_offset(
-                                            ctx->n_state, ctx->n_ctrl,
-                                            ctx->n_exog));
+    sdsge_mc_shock_draw(
+        ctx->shocks, rep_idx, float_in_work + ctx->shock_scratch_offset,
+        float_in_work + sdsge_simulate_order2_shock_offset(
+                            ctx->n_state, ctx->n_ctrl, ctx->n_exog));
   }
   sdsge_simulate_order2_step(float_in_work, ctx->measurement, ctx->T,
-                             ctx->n_state, ctx->n_ctrl, ctx->n_exog,
-                             ctx->n_par, ctx->m, float_out);
+                             ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_par,
+                             ctx->m, float_out);
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
 }
 
-int sdsge_mc_filter_linear_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+int sdsge_mc_filter_linear_runner(const i64 rep_idx,
+                                  f64 *SDSGE_RESTRICT float_in_work,
+                                  f64 *SDSGE_RESTRICT float_out,
+                                  i64 *SDSGE_RESTRICT int_work,
+                                  i64 *SDSGE_RESTRICT int_out,
+                                  const void *ctx_ptr) {
   const sdsge_mc_filter_linear_step_ctx *ctx = ctx_ptr;
   const i64 input_size =
       sdsge_filter_linear_input_arena_size(ctx->n, ctx->m, ctx->k, ctx->T);
   (void)rep_idx;
   (void)int_work;
   const int status = sdsge_filter_linear_step(
-      float_in_work, float_in_work + input_size, ctx->T, ctx->n, ctx->m,
-      ctx->k, ctx->symmetrize, ctx->jitter, ctx->return_shocks, float_out);
+      float_in_work, float_in_work + input_size, ctx->T, ctx->n, ctx->m, ctx->k,
+      ctx->symmetrize, ctx->jitter, ctx->return_shocks, float_out);
   return sdsge_mc_finish_status(status, int_out);
 }
 
-int sdsge_mc_filter_extended_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+int sdsge_mc_filter_extended_runner(const i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx_ptr) {
   const sdsge_mc_filter_extended_step_ctx *ctx = ctx_ptr;
   const i64 input_size = sdsge_filter_extended_input_arena_size(
       ctx->n, ctx->m, ctx->k, ctx->T, ctx->n_par);
@@ -116,14 +126,15 @@ int sdsge_mc_filter_extended_runner(
   return sdsge_mc_finish_status(status, int_out);
 }
 
-int sdsge_mc_filter_unscented_runner(
-    const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx_ptr) {
+int sdsge_mc_filter_unscented_runner(const i64 rep_idx,
+                                     f64 *SDSGE_RESTRICT float_in_work,
+                                     f64 *SDSGE_RESTRICT float_out,
+                                     i64 *SDSGE_RESTRICT int_work,
+                                     i64 *SDSGE_RESTRICT int_out,
+                                     const void *ctx_ptr) {
   const sdsge_mc_filter_unscented_step_ctx *ctx = ctx_ptr;
   const i64 input_size = sdsge_filter_unscented_input_arena_size(
-      ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->T,
-      ctx->n_par);
+      ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->T, ctx->n_par);
   (void)rep_idx;
   (void)int_work;
   const int status = (int)sdsge_filter_unscented_step(
@@ -142,13 +153,13 @@ void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, const i64 n,
            (size_t)n * sizeof(f64));
 }
 
-void sdsge_raw_model_data_step(
-    const f64 *SDSGE_RESTRICT states_input, const i64 n_states,
-    const int states_batched,
-    f64 *SDSGE_RESTRICT states_output,
-    const f64 *SDSGE_RESTRICT observables_input, const i64 n_observables,
-    const int observables_batched, const i64 rep_idx,
-    f64 *SDSGE_RESTRICT observables_output) {
+void sdsge_raw_model_data_step(const f64 *SDSGE_RESTRICT states_input,
+                               const i64 n_states, const int states_batched,
+                               f64 *SDSGE_RESTRICT states_output,
+                               const f64 *SDSGE_RESTRICT observables_input,
+                               const i64 n_observables,
+                               const int observables_batched, const i64 rep_idx,
+                               f64 *SDSGE_RESTRICT observables_output) {
   if (n_states > 0)
     memcpy(states_output,
            states_input + (states_batched ? rep_idx * n_states : 0),
@@ -234,14 +245,14 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
   }
 }
 
-i64 sdsge_filter_linear_input_arena_size(const i64 n, const i64 m,
-                                          const i64 k, const i64 T) {
+i64 sdsge_filter_linear_input_arena_size(const i64 n, const i64 m, const i64 k,
+                                         const i64 T) {
   return n * n + n * k + m * n + m + k * k + m * m + T * m + n + n * n;
 }
 
-i64 sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
-                                           const i64 k, const i64 T,
-                                           const int return_shocks) {
+i64 sdsge_filter_linear_output_arena_size(const i64 n, const i64 m, const i64 k,
+                                          const i64 T,
+                                          const int return_shocks) {
   return 2 * T * n + 2 * T * n * n + 4 * T * m + T * m * m +
          (return_shocks ? T * k : 0) + 1;
 }
@@ -261,28 +272,18 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *y = R + m * m;
   const f64 *x0 = y + T * m;
   const f64 *P0 = x0 + n;
-  f64 *p = output_arena;
-  kf_outputs out = {.x_pred = p};
-  p += T * n;
-  out.x_filt = p;
-  p += T * n;
-  out.P_pred = p;
-  p += T * n * n;
-  out.P_filt = p;
-  p += T * n * n;
-  out.y_pred = p;
-  p += T * m;
-  out.y_filt = p;
-  p += T * m;
-  out.innov = p;
-  p += T * m;
-  out.std_innov = p;
-  p += T * m;
-  out.S = p;
-  p += T * m * m;
-  out.eps_hat = return_shocks ? p : NULL;
-  p += return_shocks ? T * k : 0;
-  out.loglik = p;
+  kf_outputs out = {.x_pred = output_arena};
+  out.x_filt = out.x_pred + T * n;
+  out.P_pred = out.x_filt + T * n;
+  out.P_filt = out.P_pred + T * n * n;
+  out.y_pred = out.P_filt + T * n * n;
+  out.y_filt = out.y_pred + T * m;
+  out.innov = out.y_filt + T * m;
+  out.std_innov = out.innov + T * m;
+  out.S = out.std_innov + T * m;
+  f64 *eps_hat_slot = out.S + T * m * m;
+  out.eps_hat = return_shocks ? eps_hat_slot : NULL;
+  out.loglik = eps_hat_slot + (return_shocks ? T * k : 0);
 
   const kf_inputs in = {.n = n,
                         .m = m,
@@ -305,14 +306,14 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
 }
 
 i64 sdsge_filter_extended_input_arena_size(const i64 n, const i64 m,
-                                            const i64 k, const i64 T,
-                                            const i64 n_par) {
+                                           const i64 k, const i64 T,
+                                           const i64 n_par) {
   return n * n + n * k + n_par + k * k + m * m + T * m + n + n * n;
 }
 
 i64 sdsge_filter_extended_output_arena_size(const i64 n, const i64 m,
-                                             const i64 k, const i64 T,
-                                             const int return_shocks) {
+                                            const i64 k, const i64 T,
+                                            const int return_shocks) {
   return sdsge_filter_linear_output_arena_size(n, m, k, T, return_shocks);
 }
 
@@ -332,28 +333,18 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *y = R + m * m;
   const f64 *x0 = y + T * m;
   const f64 *P0 = x0 + n;
-  f64 *p = output_arena;
-  ekf_outputs out = {.x_pred = p};
-  p += T * n;
-  out.x_filt = p;
-  p += T * n;
-  out.P_pred = p;
-  p += T * n * n;
-  out.P_filt = p;
-  p += T * n * n;
-  out.y_pred = p;
-  p += T * m;
-  out.y_filt = p;
-  p += T * m;
-  out.innov = p;
-  p += T * m;
-  out.std_innov = p;
-  p += T * m;
-  out.S = p;
-  p += T * m * m;
-  out.eps_hat = return_shocks ? p : NULL;
-  p += return_shocks ? T * k : 0;
-  out.loglik = p;
+  ekf_outputs out = {.x_pred = output_arena};
+  out.x_filt = out.x_pred + T * n;
+  out.P_pred = out.x_filt + T * n;
+  out.P_filt = out.P_pred + T * n * n;
+  out.y_pred = out.P_filt + T * n * n;
+  out.y_filt = out.y_pred + T * m;
+  out.innov = out.y_filt + T * m;
+  out.std_innov = out.innov + T * m;
+  out.S = out.std_innov + T * m;
+  f64 *eps_hat_slot = out.S + T * m * m;
+  out.eps_hat = return_shocks ? eps_hat_slot : NULL;
+  out.loglik = eps_hat_slot + (return_shocks ? T * k : 0);
 
   const ekf_inputs in = {.meas = meas,
                          .jac = jac,
@@ -378,44 +369,46 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
   return ekf_hot_loop(&in, scratch_arena, &out);
 }
 
-i64 sdsge_filter_unscented_input_arena_size(const i64 n_state,
-                                             const i64 n_ctrl,
-                                             const i64 n_exog,
-                                             const i64 n_obs, const i64 T,
-                                             const i64 n_par) {
+i64 sdsge_filter_unscented_input_arena_size(const i64 n_state, const i64 n_ctrl,
+                                            const i64 n_exog, const i64 n_obs,
+                                            const i64 T, const i64 n_par) {
   const i64 nz = 2 * n_state;
-  return n_state * n_state + n_ctrl * n_state + n_state * n_exog +
-         n_state * n_state * n_state + n_ctrl * n_state * n_state + n_state +
-         n_ctrl + n_state + n_ctrl + n_par + n_exog * n_exog + n_obs * n_obs +
+  const i64 n_var = n_state + n_ctrl;
+  return n_state * n_state + n_ctrl * n_state + n_var * n_exog +
+         n_state * n_state * n_state + n_ctrl * n_state * n_state +
+         n_state * n_state * n_exog + n_ctrl * n_state * n_exog +
+         n_state * n_exog * n_exog + n_ctrl * n_exog * n_exog + n_state +
+         n_ctrl + n_var + n_par + n_exog * n_exog + n_obs * n_obs +
          T * n_obs + nz + nz * nz;
 }
 
 i64 sdsge_filter_unscented_output_arena_size(const i64 n_state,
-                                              const i64 n_ctrl,
-                                              const i64 n_obs, const i64 T) {
+                                             const i64 n_ctrl, const i64 n_obs,
+                                             const i64 T) {
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
   return 2 * T * n_var + 2 * T * nz * nz + 4 * T * n_obs + T * n_obs * n_obs +
          4 * T * n_state + 1;
 }
 
-i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
-                                f64 *SDSGE_RESTRICT scratch_arena,
-                                const meas_fn meas, const i64 T,
-                                const i64 n_state, const i64 n_ctrl,
-                                const i64 n_exog, const i64 n_obs,
-                                const i64 n_par, const f64 alpha,
-                                const f64 beta, const f64 kappa,
-                                const int symmetrize, const f64 jitter,
-                                f64 *SDSGE_RESTRICT output_arena) {
+i64 sdsge_filter_unscented_step(
+    const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
+    const meas_fn meas, const i64 T, const i64 n_state, const i64 n_ctrl,
+    const i64 n_exog, const i64 n_obs, const i64 n_par, const f64 alpha,
+    const f64 beta, const f64 kappa, const int symmetrize, const f64 jitter,
+    f64 *SDSGE_RESTRICT output_arena) {
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
   const f64 *hx = input_arena;
   const f64 *gx = hx + n_state * n_state;
-  const f64 *bx = gx + n_ctrl * n_state;
-  const f64 *hxx = bx + n_state * n_exog;
+  const f64 *bu = gx + n_ctrl * n_state;
+  const f64 *hxx = bu + n_var * n_exog;
   const f64 *gxx = hxx + n_state * n_state * n_state;
-  const f64 *hss = gxx + n_ctrl * n_state * n_state;
+  const f64 *hxu = gxx + n_ctrl * n_state * n_state;
+  const f64 *gxu = hxu + n_state * n_state * n_exog;
+  const f64 *huu = gxu + n_ctrl * n_state * n_exog;
+  const f64 *guu = huu + n_state * n_exog * n_exog;
+  const f64 *hss = guu + n_ctrl * n_exog * n_exog;
   const f64 *gss = hss + n_state;
   const f64 *steady_state = gss + n_ctrl;
   const f64 *params = steady_state + n_var;
@@ -424,41 +417,31 @@ i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *obs = R + n_obs * n_obs;
   const f64 *z0 = obs + T * n_obs;
   const f64 *P0 = z0 + nz;
-  f64 *p = output_arena;
-  ukf_outputs out = {.x_pred = p};
-  p += T * n_var;
-  out.x_filt = p;
-  p += T * n_var;
-  out.P_pred = p;
-  p += T * nz * nz;
-  out.P_filt = p;
-  p += T * nz * nz;
-  out.y_pred = p;
-  p += T * n_obs;
-  out.y_filt = p;
-  p += T * n_obs;
-  out.innov = p;
-  p += T * n_obs;
-  out.std_innov = p;
-  p += T * n_obs;
-  out.S = p;
-  p += T * n_obs * n_obs;
-  out.loglik = p;
-  p += 1;
-  out.x1_pred = p;
-  p += T * n_state;
-  out.x2_pred = p;
-  p += T * n_state;
-  out.x1_filt = p;
-  p += T * n_state;
-  out.x2_filt = p;
+  ukf_outputs out = {.x_pred = output_arena};
+  out.x_filt = out.x_pred + T * n_var;
+  out.P_pred = out.x_filt + T * n_var;
+  out.P_filt = out.P_pred + T * nz * nz;
+  out.y_pred = out.P_filt + T * nz * nz;
+  out.y_filt = out.y_pred + T * n_obs;
+  out.innov = out.y_filt + T * n_obs;
+  out.std_innov = out.innov + T * n_obs;
+  out.S = out.std_innov + T * n_obs;
+  out.loglik = out.S + T * n_obs * n_obs;
+  out.x1_pred = out.loglik + 1;
+  out.x2_pred = out.x1_pred + T * n_state;
+  out.x1_filt = out.x2_pred + T * n_state;
+  out.x2_filt = out.x1_filt + T * n_state;
 
   const ukf_inputs in = {.meas = meas,
                          .hx = hx,
                          .gx = gx,
-                         .bx = bx,
+                         .bu = bu,
                          .hxx = hxx,
                          .gxx = gxx,
+                         .hxu = hxu,
+                         .gxu = gxu,
+                         .huu = huu,
+                         .guu = guu,
                          .hss = hss,
                          .gss = gss,
                          .steady_state = steady_state,

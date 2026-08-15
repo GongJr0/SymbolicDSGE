@@ -34,13 +34,10 @@ Nothing here reimplements a Kalman recursion. The likelihoods come from Dynare's
 on ``post82_kf.mod``. A golden produced by a second recursion of our own would
 only establish that the same loop can be written twice.
 
-Both filters run the same recursion with mirrored loop invariants.
-``kalman_filter.m`` carries the prediction and folds the update into the
-transition, so ``a`` is ``a_{t|t-1}`` throughout and ``a_{t|t}`` lives for one
-line. Ours carries the update and predicts at the top. ``P0`` is the covariance
-of whichever invariant the loop is entered on, so the argument names covariances
-one period apart. The constants record that rather than picking a side:
-``LOGLIK_FIXED_DYNARE`` and ``LOGLIK_FIXED_OURS`` differ by ``0.558`` here.
+Both filters open a period on the update and close it on the transition, so
+``a`` is ``a_{t|t-1}`` on entry and ``P0`` is the covariance of the first
+observed state on both sides. Any prior therefore agrees, not only the
+unconditional one.
 
 Three observables, unit measurement standard deviations, the observation at
 ``t`` paired to the state at ``t``.
@@ -713,7 +710,6 @@ P0_FIXED = np.eye(5)
 #: the second and third constants measure.
 LOGLIK_UNCOND = np.float64(-50.31748737607382)
 LOGLIK_FIXED_DYNARE = np.float64(-51.88310609247723)
-LOGLIK_FIXED_OURS = np.float64(-51.3247664768915)
 
 #: The same three period by period, one row each, in that order.
 LIKK = np.array(

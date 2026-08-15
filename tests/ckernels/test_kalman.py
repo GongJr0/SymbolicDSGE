@@ -145,13 +145,18 @@ def test_kalman_non_pd_returns_error_code() -> None:
     assert status == ErrorCode.MATRIX_CONDITION
 
 
-def test_ukf_returns_projected_model_variable_history() -> None:
+def test_ukf_returns_model_variable_history() -> None:
     T = 4
     hx = _c([[0.55]])
     gx = _c([[2.0]])
-    bx = _c([[1.0]])
+    # bu spans every variable: the control takes its own shock loading.
+    bu = _c([[1.0], [-0.3]])
     hxx = _c([[[0.1]]])
     gxx = _c([[[0.4]]])
+    hxu = _c([[[0.05]]])
+    gxu = _c([[[-0.02]]])
+    huu = _c([[[0.07]]])
+    guu = _c([[[0.03]]])
     hss = _c([0.03])
     gss = _c([0.2])
     steady_state = _c([10.0, 20.0])
@@ -166,9 +171,13 @@ def test_ukf_returns_projected_model_variable_history() -> None:
         _ukf_measure_first_var.address,
         hx,
         gx,
-        bx,
+        bu,
         hxx,
         gxx,
+        hxu,
+        gxu,
+        huu,
+        guu,
         hss,
         gss,
         steady_state,
@@ -216,21 +225,22 @@ def test_ukf_returns_projected_model_variable_history() -> None:
         rtol=_RTOL,
         atol=_ATOL,
     )
-    np.testing.assert_allclose(
-        x_pred[:, 1],
-        steady_state[1]
-        + 0.5 * gss[0]
-        + gx[0, 0] * (x1_pred[:, 0] + x2_pred[:, 0])
-        + 0.5 * gxx[0, 0, 0] * (P_pred[:, 0, 0] + x1_pred[:, 0] ** 2),
-        rtol=_RTOL,
-        atol=_ATOL,
-    )
-    np.testing.assert_allclose(
-        x_filt[:, 1],
+    # The control column is no longer a closed form in the pruned state. It is
+    # the filter's own output, carrying this period's innovation through the
+    # sigma set, so a control that responds to a shock cannot be reproduced by
+    # projecting x1/x2. Restating a formula here is what made this assertion
+    # track the implementation rather than the contract; its content is pinned
+    # against the linear Kalman filter in tests/kalman/test_filter.py.
+    #
+    # What still holds exactly is that projecting is *not* what happens: with a
+    # nonzero control row in bu, the two differ.
+    naive = (
         steady_state[1]
         + 0.5 * gss[0]
         + gx[0, 0] * (x1_filt[:, 0] + x2_filt[:, 0])
-        + 0.5 * gxx[0, 0, 0] * (P_filt[:, 0, 0] + x1_filt[:, 0] ** 2),
-        rtol=_RTOL,
-        atol=_ATOL,
+        + 0.5 * gxx[0, 0, 0] * (P_filt[:, 0, 0] + x1_filt[:, 0] ** 2)
     )
+    assert bu[1, 0] != 0.0
+    assert not np.allclose(x_filt[:, 1], naive, rtol=1e-6, atol=1e-9)
+    assert np.all(np.isfinite(x_pred[:, 1]))
+    assert np.all(np.isfinite(x_filt[:, 1]))

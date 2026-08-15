@@ -1040,8 +1040,9 @@ def _prepare_filter_loglik(
             "return_shocks": False,
         }
     elif mode == "unscented":
-        # hx is (n_state, n_state); recover n_state from it so bx and the
-        # augmented z0 don't need `compiled` threaded in.
+        # p is (n_state, n_state), so the augmented z0 sizes itself off the
+        # policy without `compiled` threaded in. B is no use for this: it spans
+        # every variable, so its row count is n_var.
         pol = cast("SecondOrderSolution", sol.policy)
         n_state = pol.p.shape[0]
         if x0 is None:
@@ -1056,9 +1057,13 @@ def _prepare_filter_loglik(
             "meas_addr": prepared.meas_addr,
             "hx": pol.p,
             "gx": pol.f,
-            "bx": asarray(pol.B[:n_state, :], dtype=float64),
+            "bu": pol.B,
             "hxx": pol.hxx,
             "gxx": pol.gxx,
+            "hxu": pol.hxu,
+            "gxu": pol.gxu,
+            "huu": pol.huu,
+            "guu": pol.guu,
             "hss": pol.hss,
             "gss": pol.gss,
             "steady_state": pol.steady_state,

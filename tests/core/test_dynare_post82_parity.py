@@ -293,13 +293,12 @@ def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(solved
     # Dynare's P0 is the identity on five variables, which is the same matrix in
     # our coordinates now, so nothing is carried across.
     #
-    # LOGLIK_FIXED_OURS, not LOGLIK_FIXED_DYNARE: we predict before the first
-    # update, so the same P0 argument is the covariance one period apart on the
-    # two sides. Only the unconditional covariance is a fixed point of that map.
-    # Dynare's reading of this same prior is 0.558 away.
+    # An arbitrary prior, not the unconditional one: both loops now open on the
+    # update, so P0 is the covariance of the same state on both sides and any
+    # prior agrees. Under a predict-first loop only the unconditional covariance
+    # did, being the one fixed point of the prediction map.
     compiled, solution = solved
 
     out = _filter(compiled, solution, np.eye(len(compiled.var_names)))
 
-    assert float(out.loglik) == pytest.approx(dyn.LOGLIK_FIXED_OURS, abs=1e-9)
-    assert abs(float(out.loglik) - dyn.LOGLIK_FIXED_DYNARE) > 0.5
+    assert float(out.loglik) == pytest.approx(dyn.LOGLIK_FIXED_DYNARE, abs=1e-9)

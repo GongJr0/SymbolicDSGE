@@ -95,12 +95,10 @@ def ekf_reference(
     const = m * np.log(2.0 * np.pi)
     eye_n = np.eye(n, dtype=float64)
 
-    for t in range(T):
-        x_pred = A @ x_prev
-        P_pred = A @ P_prev @ A.T + BQBt
-        if symmetrize:
-            P_pred = _sym(P_pred)
+    # x0/P0 are the prior for the first observed state: update, then predict.
+    x_pred, P_pred = x_prev, P_prev
 
+    for t in range(T):
         y_pred = np.asarray(h(x_pred, params), dtype=float64).reshape(m)
         H = np.asarray(H_jac(x_pred, params), dtype=float64).reshape(m, n)
 
@@ -148,8 +146,10 @@ def ekf_reference(
             std_innov_h[t] = u
             S_h[t] = S
 
-        x_prev = x_filt
-        P_prev = P_filt
+        x_pred = A @ x_filt
+        P_pred = A @ P_filt @ A.T + BQBt
+        if symmetrize:
+            P_pred = _sym(P_pred)
 
     return FilterRawResult(
         status=0,
@@ -225,12 +225,10 @@ def kf_reference(
     const = m * np.log(2.0 * np.pi)
     eye_n = np.eye(n, dtype=float64)
 
-    for t in range(T):
-        x_pred = A @ x_prev
-        P_pred = A @ P_prev @ A.T + BQBt
-        if symmetrize:
-            P_pred = _sym(P_pred)
+    # x0/P0 are the prior for the first observed state: update, then predict.
+    x_pred, P_pred = x_prev, P_prev
 
+    for t in range(T):
         y_pred = C @ x_pred + d
         v = y[t] - y_pred
         S = C @ P_pred @ C.T + R
@@ -273,8 +271,10 @@ def kf_reference(
             std_innov_h[t] = u
             S_h[t] = S
 
-        x_prev = x_filt
-        P_prev = P_filt
+        x_pred = A @ x_filt
+        P_pred = A @ P_filt @ A.T + BQBt
+        if symmetrize:
+            P_pred = _sym(P_pred)
 
     return (
         x_pred_h,

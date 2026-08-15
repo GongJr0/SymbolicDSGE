@@ -6,7 +6,8 @@
 
 /* ERROR CODES */
 
-/* -1 is unassigned: it was a complex-matrix rejection no kernel ever returned. */
+/* -1 is unassigned: it was a complex-matrix rejection no kernel ever
+ * returned.*/
 #define KF_OK 0
 #define KF_ERR_SHAPE_MISMATCH -1101
 #define KF_ERR_MATRIX_CONDITION -1102
@@ -153,9 +154,13 @@ typedef struct {
   meas_fn meas;
   const f64 *hx;
   const f64 *gx;
-  const f64 *bx;
+  const f64 *bu;
   const f64 *hxx;
   const f64 *gxx;
+  const f64 *hxu;
+  const f64 *gxu;
+  const f64 *huu;
+  const f64 *guu;
   const f64 *hss;
   const f64 *gss;
   const f64 *steady_state;
@@ -203,8 +208,8 @@ typedef struct {
   f64 *loglik;
 } ukf_outputs;
 
-arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl,
-                           const i64 n_exog, const i64 n_obs);
+arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl, const i64 n_exog,
+                          const i64 n_obs);
 i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
                  ukf_outputs *out);
 

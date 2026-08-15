@@ -691,12 +691,11 @@ class DSGESolver:
 
     @staticmethod
     def _build_Q(compiled: CompiledModel) -> NDF:
-        """Cholesky of the shock covariance, ``(n_exog, n_exog)``.
+        """The shock covariance, ``(n_exog, n_exog)``.
 
-        The state innovation loading is ``B[:n_state] @ eta``, and ``B`` is the
-        solve's own output, so what crosses the boundary is the covariance factor
-        alone and the solve composes it. Stds scale the factor; correlations
-        enter through the covariance it is taken of.
+        Stds scale it and correlations fill its off-diagonals. It crosses the
+        boundary whole rather than as a factor: the risk correction integrates
+        against the covariance itself, and the filters read it as ``Q``.
         """
         conf = compiled.config
         n_exog = compiled.n_exog

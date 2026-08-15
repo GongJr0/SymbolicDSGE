@@ -152,9 +152,8 @@ static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
 static inline int sdsge_solve2_run(sdsge_obj_common *b, sdsge_solve1 *s,
                                    sdsge_solve2 *s2,
                                    const f64 *SDSGE_RESTRICT Q) {
-  const sgu_klein_spec spec = {.first = sdsge_spec_from(b),
-                               .bc_residual = b->bc_residual,
-                               .Q = Q};
+  const sgu_klein_spec spec = {
+      .first = sdsge_spec_from(b), .bc_residual = b->bc_residual, .Q = Q};
   const i64 rc =
       sdsge_sgu_klein_solve2(&spec, s, s2, b->solve_arena, b->solve_iarena);
   return sdsge_classify(rc, s->stab);
@@ -335,9 +334,13 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   ukf_inputs in = {.meas = b->meas,
                    .hx = s->p,
                    .gx = s->f,
-                   .bx = s2->bx,
+                   .bu = s->B,
                    .hxx = s2->hxx,
                    .gxx = s2->gxx,
+                   .hxu = s2->hxu,
+                   .gxu = s2->gxu,
+                   .huu = s2->huu,
+                   .guu = s2->guu,
                    .hss = s2->hss,
                    .gss = s2->gss,
                    .steady_state = s->ss,

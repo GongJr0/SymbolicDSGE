@@ -35,6 +35,15 @@ class FilterResult:
     S: NDF
 
     loglik: float64
+
+    #: ``(n_var,)``: the offset this layer added to ``x_pred``/``x_filt``, so a
+    #: caller can tell which convention it was handed and recover the other.
+    #: Zero when no ``steady_state`` was supplied and the series are gaps. NaN
+    #: when the series are levels but the offset was not applied here: the
+    #: unscented kernel forms levels itself, because its measurement is
+    #: evaluated at them, so there is no constant for this layer to report.
+    constant: NDF
+
     eps_hat: NDF | None = None
 
 
@@ -82,10 +91,28 @@ class UnscentedFilterRawResult(NamedTuple):
     status: int
 
 
-def _filter_result_from_raw(raw: FilterRawResult) -> FilterResult:
+def _filter_result_from_raw(
+    raw: FilterRawResult, steady_state: NDF | None = None
+) -> FilterResult:
+    """Pack a raw run, adding ``steady_state`` to the state series if given.
+
+    The recursion runs in gaps and the constant is applied once here, which is
+    where Dynare applies it too (``store_smoother_results.m``). Only the state
+    series move: the observation series already carry their own constant
+    through ``d``.
+    """
+    n_var = raw.x_pred.shape[1]
+    if steady_state is None:
+        constant = np.zeros(n_var, dtype=float64)
+        x_pred, x_filt = raw.x_pred, raw.x_filt
+    else:
+        constant = np.asarray(steady_state, dtype=float64).reshape(n_var)
+        x_pred = raw.x_pred + constant
+        x_filt = raw.x_filt + constant
     return FilterResult(
-        x_pred=raw.x_pred,
-        x_filt=raw.x_filt,
+        constant=constant,
+        x_pred=x_pred,
+        x_filt=x_filt,
         P_pred=raw.P_pred,
         P_filt=raw.P_filt,
         y_pred=raw.y_pred,
@@ -101,7 +128,11 @@ def _filter_result_from_raw(raw: FilterRawResult) -> FilterResult:
 def _unscented_filter_result_from_raw(
     raw: UnscentedFilterRawResult,
 ) -> UnscentedFilterResult:
+    # The kernel already reports levels, so no constant was applied here and
+    # there is none to hand back. NaN says that, where a zero would claim the
+    # series are gaps and a None would break the field's type.
     return UnscentedFilterResult(
+        constant=np.full(raw.x_pred.shape[1], np.nan, dtype=float64),
         x_pred=raw.x_pred,
         x_filt=raw.x_filt,
         x1_pred=raw.x1_pred,
@@ -258,8 +289,14 @@ class KalmanFilter:
         symmetrize: bool = True,
         jitter: float = 0.0,
         _store_history: bool = True,
+        steady_state: NDF | None = None,
     ) -> FilterResult:
+        """Linear Kalman filter, packed.
 
+        ``steady_state`` is optional and additive: supply it and the state
+        series come back in levels with the offset recorded on the result;
+        omit it and they stay gaps, which is what the recursion produces.
+        """
         return _filter_result_from_raw(
             KalmanFilter.run_raw(
                 A=A,
@@ -275,7 +312,8 @@ class KalmanFilter:
                 symmetrize=symmetrize,
                 jitter=jitter,
                 _store_history=_store_history,
-            )
+            ),
+            steady_state,
         )
 
     @staticmethod
@@ -283,9 +321,13 @@ class KalmanFilter:
         meas_addr: int,
         hx: NDF,
         gx: NDF,
-        bx: NDF,
+        bu: NDF,
         hxx: NDF,
         gxx: NDF,
+        hxu: NDF,
+        gxu: NDF,
+        huu: NDF,
+        guu: NDF,
         hss: NDF,
         gss: NDF,
         steady_state: NDF,
@@ -309,11 +351,12 @@ class KalmanFilter:
         if hx.ndim != 2 or hx.shape[0] != hx.shape[1]:
             raise ShapeMismatchError("hx", "(n_state, n_state)", str(hx.shape))
         n_state = hx.shape[0]
+        n_var = n_state + gx.shape[0]
         n_z = 2 * n_state
 
-        if bx.ndim != 2 or bx.shape[0] != n_state:
-            raise ShapeMismatchError("bx", f"({n_state}, n_exog)", str(bx.shape))
-        n_exog = bx.shape[1]
+        if bu.ndim != 2 or bu.shape[0] != n_var:
+            raise ShapeMismatchError("bu", f"({n_var}, n_exog)", str(bu.shape))
+        n_exog = bu.shape[1]
 
         if gx.ndim != 2 or gx.shape[1] != n_state:
             raise ShapeMismatchError("gx", f"(n_ctrl, {n_state})", str(gx.shape))
@@ -331,6 +374,30 @@ class KalmanFilter:
                 "gxx",
                 f"({n_ctrl}, {n_state}, {n_state})",
                 str(gxx.shape),
+            )
+        if hxu.shape != (n_state, n_state, n_exog):
+            raise ShapeMismatchError(
+                "hxu",
+                f"({n_state}, {n_state}, {n_exog})",
+                str(hxu.shape),
+            )
+        if gxu.shape != (n_ctrl, n_state, n_exog):
+            raise ShapeMismatchError(
+                "gxu",
+                f"({n_ctrl}, {n_state}, {n_exog})",
+                str(gxu.shape),
+            )
+        if huu.shape != (n_state, n_exog, n_exog):
+            raise ShapeMismatchError(
+                "huu",
+                f"({n_state}, {n_exog}, {n_exog})",
+                str(huu.shape),
+            )
+        if guu.shape != (n_ctrl, n_exog, n_exog):
+            raise ShapeMismatchError(
+                "guu",
+                f"({n_ctrl}, {n_exog}, {n_exog})",
+                str(guu.shape),
             )
         if hss.shape != (n_state,):
             raise ShapeMismatchError("hss", f"({n_state},)", str(hss.shape))
@@ -361,9 +428,13 @@ class KalmanFilter:
             meas_addr,
             hx,
             gx,
-            bx,
+            bu,
             hxx,
             gxx,
+            hxu,
+            gxu,
+            huu,
+            guu,
             hss,
             gss,
             steady_state,
@@ -425,9 +496,13 @@ class KalmanFilter:
         meas_addr: int,
         hx: NDF,
         gx: NDF,
-        bx: NDF,
+        bu: NDF,
         hxx: NDF,
         gxx: NDF,
+        hxu: NDF,
+        gxu: NDF,
+        huu: NDF,
+        guu: NDF,
         hss: NDF,
         gss: NDF,
         steady_state: NDF,
@@ -449,9 +524,13 @@ class KalmanFilter:
                 meas_addr=meas_addr,
                 hx=hx,
                 gx=gx,
-                bx=bx,
+                bu=bu,
                 hxx=hxx,
                 gxx=gxx,
+                hxu=hxu,
+                gxu=gxu,
+                huu=huu,
+                guu=guu,
                 hss=hss,
                 gss=gss,
                 steady_state=steady_state,
@@ -633,7 +712,14 @@ class KalmanFilter:
         jitter: float = 0.0,
         compute_y_filt: bool = True,
         _store_history: bool = True,
+        steady_state: NDF | None = None,
     ) -> FilterResult:
+        """Extended Kalman filter, packed.
+
+        ``steady_state`` is optional and additive: supply it and the state
+        series come back in levels with the offset recorded on the result;
+        omit it and they stay gaps, which is what the recursion produces.
+        """
         return _filter_result_from_raw(
             KalmanFilter.run_extended_raw(
                 meas_addr=meas_addr,
@@ -651,5 +737,6 @@ class KalmanFilter:
                 jitter=jitter,
                 compute_y_filt=compute_y_filt,
                 _store_history=_store_history,
-            )
+            ),
+            steady_state,
         )

@@ -153,9 +153,14 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
         size=theta0.shape[0],
     )
 
+    # expected_logprior is a parity target: the packed native prior and the
+    # Python path must agree on it, and neither sees the filter, so it does not
+    # move when the filter does. The other two are regression anchors of our own
+    # output, not oracles; their correctness rests upstream on the POST82 Dynare
+    # parity, and they are recomputed whenever the filter contract changes.
     expected_logprior = -3.677756133346315
-    expected_loglik = -70.12978335633436
-    expected_logpost = -73.80753948968068
+    expected_loglik = -71.32113940094544
+    expected_logpost = -74.99889553429176
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(

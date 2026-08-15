@@ -4,6 +4,7 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
 #include "../_common/sdsge_linalg.h"
+#include "../_common/sdsge_perturbation.h" /* sdsge_second_order_step */
 
 /* Measurement / observable-jacobian @cfunc ABI: ``void(vars*, par*, out*)``. */
 typedef void (*sdsge_measurement_fn)(f64 *vars, f64 *par, f64 *out);
@@ -53,22 +54,6 @@ void sdsge_affine_observations(const f64 *SDSGE_RESTRICT
                                f64 *SDSGE_RESTRICT out,     /* (T, m) */
                                i64 T, i64 m, i64 n);
 
-/* Pruned second order simulation (Kim-Kim-Schaumburg, as Dynare's simult_.m
- * writes it at order 2).
- *
- * Every row of a period is one expression in the previous state and this
- * period's innovation: `out[t]` is the whole variable vector, states first.
- * The controls are not derived from the updated state -- an innovation reaches
- * a control contemporaneously, which is why `bu` spans every variable and not
- * just the state block, exactly as at first order.
- *
- * The quadratic terms are evaluated at the first-order state alone; that, and
- * nothing else, is the pruning. `ghxu` carries no 1/2: the cross pair is
- * counted once.
- *
- * `ss` denominates the rows exactly as at first order: NULL leaves them
- * deviations, a pointer makes them levels. The pruned state the recursion
- * carries is always a deviation. */
 arena_size sdsge_simulate_second_order_pruned_arena_size(i64 nx, i64 n_exog);
 
 /* Total: the recursion has no failure mode once its scratch comes from the

@@ -467,8 +467,13 @@ class SolvedModel(ABC, Generic[Policy]):
             _debug=_debug,
         )
         if isinstance(raw, UnscentedFilterRawResult):
+            # Already levels: the unscented kernel forms them for its own
+            # measurement, so there is no constant left for this layer to add.
             return _unscented_filter_result_from_raw(raw)
-        return _filter_result_from_raw(raw)
+        # A solved model knows its expansion point, so the public path reports
+        # levels at every order. Callers reaching the filter classes directly
+        # pass their own, or keep the gaps the recursion produces.
+        return _filter_result_from_raw(raw, self.policy.steady_state)
 
     def _kalman_raw(
         self,

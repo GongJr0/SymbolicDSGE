@@ -29,9 +29,13 @@ class _KalmanDebugInfo:
     jac_addr: int | None = None
     hx: NDF | None = None
     gx: NDF | None = None
-    bx: NDF | None = None
+    bu: NDF | None = None
     hxx: NDF | None = None
     gxx: NDF | None = None
+    hxu: NDF | None = None
+    gxu: NDF | None = None
+    huu: NDF | None = None
+    guu: NDF | None = None
     hss: NDF | None = None
     gss: NDF | None = None
     steady_state: NDF | None = None
