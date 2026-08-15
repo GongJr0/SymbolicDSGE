@@ -606,3 +606,6 @@ class SolvedModel(ABC, Generic[Policy]):
     @cached_property
     def _kf_cache(self) -> dict[tuple, _KFMatrices]:
         return {}
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.compiled.config.name})"

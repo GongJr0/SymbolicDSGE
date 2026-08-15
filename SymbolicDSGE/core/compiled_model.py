@@ -203,7 +203,7 @@ class RegimePencilFunc:
         return n_row * (3 * self.n_var + self.n_exog + 1)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class CompiledModel:
     config: ModelConfig
     kalman: KalmanConfig | None
@@ -607,3 +607,6 @@ class CompiledModel:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.config.name})"
