@@ -137,7 +137,7 @@ class Variables(Base):
     linearization: FunctionGetterDict[Function, LinearizationMethod]
 
 
-@dataclass
+@dataclass(repr=False)
 class ModelConfig(Base):
     name: str
     variables: Variables
@@ -155,3 +155,6 @@ class ModelConfig(Base):
     #: (avoiding the staleness window between solve and save). ``None`` for
     #: programmatic construction.
     source_yaml: str | None = None
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.name})"

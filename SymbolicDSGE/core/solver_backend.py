@@ -16,7 +16,7 @@ NDF = NDArray[float64]
 NDC = NDArray[complex128]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class BaseSolution:
     """Base class for attributes shared across all solution methods.
 
@@ -32,7 +32,7 @@ class BaseSolution:
     order: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class FirstOrderSolution(BaseSolution):
     """First order solution of ``a E[y_{t+1}] = b y_t``: ``u_t = f s_t``, ``s_{t+1} = p s_t``.
 
@@ -51,7 +51,7 @@ class FirstOrderSolution(BaseSolution):
     B: NDF
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class SecondOrderSolution(FirstOrderSolution):
     """Second-order solution: the first-order rule plus the corrections taken at
     the same expansion point.
@@ -85,7 +85,7 @@ class SecondOrderSolution(FirstOrderSolution):
         return self.f
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class PiecewiseSolution(BaseSolution):
     """Piecewise-linear (OccBin) solution: everything a parameter draw fixes.
 
