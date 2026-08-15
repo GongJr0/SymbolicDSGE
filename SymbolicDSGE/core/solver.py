@@ -478,9 +478,9 @@ class DSGESolver:
         piecewise = bool(compiled.constraint_names)
         if piecewise and order == 2:
             raise NotImplementedError(
-                "A model with occasionally binding constraints solves piecewise "
-                "linear, one pencil per regime, so there is no second-order "
-                "solution to take. Drop order=2, or drop equations.constraint."
+                "A model with constraints is solved with OccBin piecewise linearization, "
+                "order=2 is not supported in such a case. Use order=1 or remove the "
+                "constraints from the model specification."
             )
 
         conf = compiled.config
