@@ -2,6 +2,7 @@
 #define SDSGE_PERTURBATION_H
 
 #include "sdsge_common.h"
+#include <stddef.h>
 
 /* One period of the pruned second-order law of motion, as Dynare's
  * local_state_space_iteration_2 writes it: from the previous pruned state and
