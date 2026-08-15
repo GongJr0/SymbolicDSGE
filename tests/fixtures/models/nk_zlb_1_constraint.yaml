@@ -112,6 +112,8 @@ calibration:
     # Table 3 of the paper. The golden run is deterministic, so this reaches
     # nothing on the parity path.
     sig: 0.005
+    # Measurement error on yhat_obs, for the filter block below.
+    meas_yhat: 0.01
     # Newton seeds, deliberately rounded. See the note at the top.
     bet_seed: 0.99
     c_seed: 0.8
@@ -130,3 +132,11 @@ calibration:
     std:
       epsi: sig
     corr: {}
+
+# Filtering a constrained model runs against the reference regime, so this block
+# reaches nothing the Dynare goldens cover. P0 is omitted and defaults to the
+# identity.
+kalman:
+  R:
+    std:
+      yhat_obs: meas_yhat
