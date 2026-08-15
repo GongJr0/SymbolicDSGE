@@ -218,7 +218,7 @@ export function EstimationView({
                 adapt,
                 proposal_scale: proposalScale,
               }
-            : { options: { maxiter: maxIter } },
+            : { maxiter: maxIter },
         compile_kwargs: {},
         steady_state: null,
         posterior_point: posteriorPoint,

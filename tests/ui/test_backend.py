@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
@@ -316,7 +317,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
                 "upper": 1.0,
             }
         ],
-        "method_kwargs": {"options": {"maxiter": 25}},
+        "method_kwargs": {"maxiter": 25},
     }
     response = client.post("/api/run/estimation", json=request)
 
@@ -329,7 +330,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert captured["theta0"] == {"beta": 0.99}
     assert captured["estimated_params"] == ["beta"]
     assert captured["bounds"] == [(0.9, 1.0)]
-    assert captured["options"] == {"maxiter": 25}
+    assert captured["maxiter"] == 25
 
     invalid = client.post(
         "/api/run/estimation",
@@ -1267,3 +1268,89 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
     )
     assert run.status_code == 400
     assert "zscore" in run.json()["detail"]["message"]
+
+
+@pytest.mark.parametrize("method", ["mle", "map"])
+def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, method):
+    """The kwargs the form posts must bind to the method that receives them.
+
+    ``DSGESolver.estimate`` declares ``**method_kwargs``, so a fake standing in
+    for it accepts anything and a wrong shape reaches no receiver until the run
+    itself raises. The receiver is one level down, and binding against it is
+    what makes a renamed or wrapped parameter fail here.
+    """
+    import inspect
+
+    from SymbolicDSGE.estimation.estimator import Estimator
+
+    app = create_app()
+    client = TestClient(app)
+    assert (
+        client.post(
+            "/api/model/load-yaml",
+            json={"role": "reference", "path": "MODELS/test.yaml"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/model/solve",
+            json={"role": "reference", "compile_kwargs": {}},
+        ).status_code
+        == 200
+    )
+
+    slot = app.state.ui_session._slot("reference")
+    captured: dict[str, object] = {}
+
+    def fake_estimate(**kwargs):
+        captured.update(kwargs)
+        return MLEResult(
+            x=np.array([0.98], dtype=np.float64),
+            theta={"beta": np.float64(0.98)},
+            success=True,
+            message="converged",
+            fun=np.float64(1.25),
+            nfev=4,
+            nit=2,
+            optimizer_config={},
+            loglik=np.float64(-1.25),
+        )
+
+    monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
+    response = client.post(
+        "/api/run/estimation",
+        json={
+            "role": "reference",
+            "method": method,
+            "y": [[0.1], [0.2], [0.3]],
+            "observables": ["Obs"],
+            "parameters": [
+                {
+                    "name": "beta",
+                    "estimate": True,
+                    "initial": 0.99,
+                    "lower": 0.9,
+                    "upper": 1.0,
+                    # MAP requires a prior per estimated parameter; MLE ignores it.
+                    "prior": {
+                        "distribution": "normal",
+                        "parameters": {"mean": 0.99, "std": 0.01},
+                        "transform": "identity",
+                    },
+                }
+            ],
+            # The shape EstimationView.tsx posts for mle and map.
+            "method_kwargs": {"maxiter": 25},
+        },
+    )
+    assert response.status_code == 200
+
+    # Whatever is not one of estimate's own parameters is forwarded verbatim to
+    # the optimizer, so that is the set the optimizer has to accept.
+    own = set(inspect.signature(slot.solver.__class__.estimate).parameters)
+    forwarded = {k: v for k, v in captured.items() if k not in own}
+    assert forwarded, "nothing was forwarded, so the binding below proves nothing"
+
+    target = Estimator.mle if method == "mle" else Estimator.map
+    inspect.signature(target).bind_partial(Estimator, **forwarded)
