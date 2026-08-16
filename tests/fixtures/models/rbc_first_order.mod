@@ -1,5 +1,5 @@
 // Canonical RBC (CRRA utility, Cobb-Douglas production, one TFP shock) for
-// generating FIRST-ORDER goldens under Octave + Dynare -- NOT shipped in the
+// generating FIRST-ORDER goldens under Octave + Dynare; NOT shipped in the
 // library MODELS/. Run:  dynare rbc_first_order.mod noclearall
 // then:                 make_rbc_first_order_goldens
 //
@@ -9,6 +9,9 @@
 // k(t)/z(t)). Order 1 is split from the order-2 generator because it carries
 // different content: decision-rule matrices and Kalman filter goldens, neither
 // of which the order-2 script produces.
+//
+// This model is authored by Ege Güney Kıymaç for SymbolicDSGE and is distributed
+// under the MIT license.
 
 var c k z;
 varexo e;

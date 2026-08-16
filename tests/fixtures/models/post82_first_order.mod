@@ -14,6 +14,9 @@
 // pi_star and r_star do not appear in the model block. They are the measurement
 // intercepts for Infl and Rate and are declared so the golden script can read
 // them off M_.params rather than repeating the calibration.
+//
+// This model is authored by Ege Güney Kıymaç for SymbolicDSGE and is distributed
+// under the MIT license.
 
 var g z r x Pi;
 varexo e_g e_z e_r;

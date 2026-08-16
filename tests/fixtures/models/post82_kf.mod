@@ -20,6 +20,9 @@
 // Measurement error is declared in the shocks block on the observed variables,
 // which is how a calibrated model carries an H. sig_me = 1 matches the yaml's
 // unit measurement standard deviations and zero measurement correlations.
+//
+// This model is authored by Ege Güney Kıymaç for SymbolicDSGE and is distributed
+// under the MIT license.
 
 var g z r x Pi OutGap Infl Rate;
 varexo e_g e_z e_r;

@@ -1,5 +1,5 @@
 // RBC with three correlated shocks, for generating second-order goldens under
-// Octave + Dynare -- NOT shipped in the library MODELS/. Run:
+// Octave + Dynare; NOT shipped in the library MODELS/. Run:
 //   dynare rbc_multishock_second_order.mod noclearall
 //   make_rbc_multishock_second_order_goldens
 //
