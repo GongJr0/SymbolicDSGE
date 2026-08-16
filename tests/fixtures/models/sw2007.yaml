@@ -1,0 +1,195 @@
+# Linear Smets and Wouters (2007), translated from sw2007.mod for the
+# benchmark fixture. The Dynare model's local # coefficients are materialized
+# below at the supplied calibration. The equation system and shock calibration
+# otherwise match the Dynare fixture one for one.
+
+name: SW2007
+
+variables: [rep_labobs, rep_robs, rep_pinfobs, rep_dy,
+            rep_dc, rep_dinve, rep_dw, ewma, epinfma,
+            zcapf, rkf, kf, pkf, cf, invef, yf, labf,
+            wf, rrf, mc, zcap, rk, k, pk, c, inve, y,
+            lab, pinf, w, r, a, b, g, qs, ms, spinf,
+            sw, kpf, kp]
+
+shocks: [ea, eb, eg, eqs, em, epinf, ew]
+
+observables: [dy, dc, dinve, labobs, pinfobs, dw, robs]
+
+equations:
+  model:
+    flex_labor_foc: a(t) = calfa*rkf(t) + (1 - calfa)*wf(t)
+    flex_utilization: zcapf(t) = (1 / (czcap / (1 - czcap))) * rkf(t)
+    flex_capital_foc: rkf(t) = wf(t) + labf(t) - kf(t)
+    flex_capital_services: kf(t) = kpf(t-1) + zcapf(t)
+    flex_investment: >-
+      invef(t) = (1 / (1 + cbetabar*cgamma)) * (
+      invef(t-1) + cbetabar*cgamma*invef(t+1)
+      + (1 / (cgamma^2*csadjcost))*pkf(t)) + qs(t)
+    flex_capital_value: >-
+      pkf(t) = -rrf(t)
+      + (1 / ((1 - chabb / cgamma) / (csigma*(1 + chabb / cgamma))))*b(t)
+      + (crk / (crk + (1 - ctou)))*rkf(t+1)
+      + ((1 - ctou) / (crk + (1 - ctou)))*pkf(t+1)
+    flex_consumption: >-
+      cf(t) = (chabb / cgamma) / (1 + chabb / cgamma)*cf(t-1)
+      + (1 / (1 + chabb / cgamma))*cf(t+1)
+      + ((csigma - 1)*cwhlc / (csigma*(1 + chabb / cgamma)))*(labf(t) - labf(t+1))
+      - (1 - chabb / cgamma) / (csigma*(1 + chabb / cgamma))*rrf(t) + b(t)
+    flex_resource: yf(t) = ccy*cf(t) + ciy*invef(t) + g(t) + crkky*zcapf(t)
+    flex_production: yf(t) = cfc*(calfa*kf(t) + (1 - calfa)*labf(t) + a(t))
+    flex_wage: >-
+      wf(t) = csigl*labf(t) + (1 / (1 - chabb / cgamma))*cf(t)
+      - (chabb / cgamma) / (1 - chabb / cgamma)*cf(t-1)
+    flex_capital_lom: kpf(t) = (1 - cikbar)*kpf(t-1) + cikbar*invef(t) + cikbar*cgamma^2*csadjcost*qs(t)
+
+
+    sticky_labor_foc: mc(t) = calfa*rk(t) + (1 - calfa)*w(t) - a(t)
+    sticky_utilization: zcap(t) = (1 / (czcap / (1 - czcap))) * rk(t)
+    sticky_capital_foc: rk(t) = w(t) + lab(t) - k(t)
+    sticky_capital_services: k(t) = kp(t-1) + zcap(t)
+    sticky_investment: >-
+      inve(t) = (1 / (1 + cbetabar*cgamma)) * (
+      inve(t-1) + cbetabar*cgamma*inve(t+1)
+      + (1 / (cgamma^2*csadjcost))*pk(t)) + qs(t)
+    sticky_capital_value: >-
+      pk(t) = -r(t) + pinf(t+1)
+      + (1 / ((1 - chabb / cgamma) / (csigma*(1 + chabb / cgamma))))*b(t)
+      + (crk / (crk + (1 - ctou)))*rk(t+1)
+      + ((1 - ctou) / (crk + (1 - ctou)))*pk(t+1)
+    sticky_consumption: >-
+      c(t) = (chabb / cgamma) / (1 + chabb / cgamma)*c(t-1)
+      + (1 / (1 + chabb / cgamma))*c(t+1)
+      + ((csigma - 1)*cwhlc / (csigma*(1 + chabb / cgamma)))*(lab(t) - lab(t+1))
+      - (1 - chabb / cgamma) / (csigma*(1 + chabb / cgamma))*(r(t) - pinf(t+1))
+      + b(t)
+    sticky_resource: y(t) = ccy*c(t) + ciy*inve(t) + g(t) + crkky*zcap(t)
+    sticky_production: y(t) = cfc*(calfa*k(t) + (1 - calfa)*lab(t) + a(t))
+    price_phillips: >-
+      pinf(t) = (1 / (1 + cbetabar*cgamma*cindp)) * (
+      cbetabar*cgamma*pinf(t+1) + cindp*pinf(t-1)
+      + ((1 - cprobp)*(1 - cbetabar*cgamma*cprobp) / cprobp)
+      / ((cfc - 1)*curvp + 1)*mc(t)) + spinf(t)
+    wage_phillips: >-
+      w(t) = (1 / (1 + cbetabar*cgamma))*w(t-1)
+      + (cbetabar*cgamma / (1 + cbetabar*cgamma))*w(t+1)
+      + (cindw / (1 + cbetabar*cgamma))*pinf(t-1)
+      - (1 + cbetabar*cgamma*cindw) / (1 + cbetabar*cgamma)*pinf(t)
+      + (cbetabar*cgamma / (1 + cbetabar*cgamma))*pinf(t+1)
+      + ((1 - cprobw)*(1 - cbetabar*cgamma*cprobw) / ((1 + cbetabar*cgamma)*cprobw))
+      * (1 / ((clandaw - 1)*curvw + 1)) * (
+      csigl*lab(t) + (1 / (1 - chabb / cgamma))*c(t)
+      - (chabb / cgamma) / (1 - chabb / cgamma)*c(t-1) - w(t)) + sw(t)
+    taylor_rule: >-
+      r(t) = crpi*(1 - crr)*pinf(t) + cry*(1 - crr)*(y(t) - yf(t))
+      + crdy*(y(t) - yf(t) - y(t-1) + yf(t-1)) + crr*r(t-1) + ms(t)
+    productivity: a(t) = crhoa*a(t-1) + ea
+    risk_premium: b(t) = crhob*b(t-1) + eb
+    spending: g(t) = crhog*g(t-1) + eg + cgy*ea
+    investment_technology: qs(t) = crhoqs*qs(t-1) + eqs
+    monetary_policy: ms(t) = crhoms*ms(t-1) + em
+    price_markup: spinf(t) = crhopinf*spinf(t-1) + epinfma(t) - cmap*epinfma(t-1)
+    price_markup_ma: epinfma(t) = epinf
+    wage_markup: sw(t) = crhow*sw(t-1) + ewma(t) - cmaw*ewma(t-1)
+    wage_markup_ma: ewma(t) = ew
+    sticky_capital_lom: kp(t) = (1 - cikbar)*kp(t-1) + cikbar*inve(t) + cikbar*cgamma^2*csadjcost*qs(t)
+    observation_output: rep_dy(t) = y(t) - y(t-1) + ctrend
+    observation_consumption: rep_dc(t) = c(t) - c(t-1) + ctrend
+    observation_investment: rep_dinve(t) = inve(t) - inve(t-1) + ctrend
+    observation_wage: rep_dw(t) = w(t) - w(t-1) + ctrend
+    observation_inflation: rep_pinfobs(t) = pinf(t) + constepinf
+    observation_rate: rep_robs(t) = r(t) + conster
+    observation_hours: rep_labobs(t) = lab(t) + constelab
+
+  constraint: {}
+
+  observables:
+    dy: rep_dy(t)
+    dc: rep_dc(t)
+    dinve: rep_dinve(t)
+    labobs: rep_labobs(t)
+    pinfobs: rep_pinfobs(t)
+    dw: rep_dw(t)
+    robs: rep_robs(t)
+
+calibration:
+  parameters:
+    curvw: 10.0
+    cgy: 0.51
+    curvp: 10.0
+    constelab: 0.0
+    constepinf: 0.7
+    constebeta: 0.742
+    cmaw: 0.0
+    cmap: 0.0
+    calfa: 0.24
+    czcap: 0.2696
+    csadjcost: 6.0144
+    ctou: 0.025
+    csigma: 1.5
+    chabb: 0.6361
+    cfc: 1.5
+    cindw: 0.3243
+    cprobw: 0.8087
+    cindp: 0.47
+    cprobp: 0.6
+    csigl: 1.9423
+    clandaw: 1.5
+    crpi: 1.488
+    crdy: 0.2347
+    cry: 0.0593
+    crr: 0.8762
+    crhoa: 0.9977
+    crhob: 0.5799
+    crhog: 0.9957
+    crhoqs: 0.7165
+    crhoms: 0.0
+    crhopinf: 0.0
+    crhow: 0.0
+    ctrend: 0.3982
+    cg: 0.18
+    cbetabar: 0.9867350192621207
+    cgamma: 1.003982
+    crk: 0.03844330593212242
+    cikbar: 0.028867051401319843
+    ciy: 0.18093345073603445
+    ccy: 0.6390665492639656
+    crkky: 0.23999999999999994
+    cwhlc: 0.7928230123297981
+    conster: 2.0537409073646984
+    sig_ea: 0.4618
+    sig_eb: 1.8513
+    sig_eg: 0.609
+    sig_eqs: 0.6017
+    sig_em: 0.2397
+    sig_epinf: 0.1455
+    sig_ew: 0.2089
+    meas_dy: 0.0
+    meas_dc: 0.0
+    meas_dinve: 0.0
+    meas_labobs: 0.0
+    meas_pinfobs: 0.0
+    meas_dw: 0.0
+    meas_robs: 0.0
+  shocks:
+    std:
+      ea: sig_ea
+      eb: sig_eb
+      eg: sig_eg
+      eqs: sig_eqs
+      em: sig_em
+      epinf: sig_epinf
+      ew: sig_ew
+    corr: {}
+
+kalman:
+  R:
+    std:
+      dy: meas_dy
+      dc: meas_dc
+      dinve: meas_dinve
+      labobs: meas_labobs
+      pinfobs: meas_pinfobs
+      dw: meas_dw
+      robs: meas_robs
+    corr: {}
