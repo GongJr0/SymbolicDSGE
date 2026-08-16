@@ -16,6 +16,7 @@ import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import steady_state_newton
 from SymbolicDSGE.core import DSGESolver, ModelParser
+from _oracles.core import compiled_residual
 
 
 def _rbc():
@@ -24,7 +25,7 @@ def _rbc():
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
-    eq = compiled.equations
+    eq = compiled_residual(compiled)
     # The seed sizes the solve, so it spans the compiled layout: a lag aux sits
     # where its origin does, the lifted shock and tfp at 0.
     levels = {

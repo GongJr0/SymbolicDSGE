@@ -16,6 +16,8 @@ from numba import njit
 from numpy import complex128, float64
 from numpy.typing import NDArray
 
+from SymbolicDSGE._ckernels.core import residual_eval
+
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
 
@@ -367,3 +369,22 @@ def _forward_residuals_numba(
         for k in range(n_eq):
             residuals[t, k] = residual_vec[k].real
     return residuals
+
+
+# --- compiled residual evaluator ---------------------------------------------
+def compiled_residual(compiled) -> Callable[..., NDC]:
+    """``F(fwd, cur, prev, eps, par)`` for a compiled model, as an ndarray.
+
+    Unlike the rest of this module this wraps the native kernel rather than
+    reimplementing it. The library evaluates residuals only from C, passing the
+    cfunc address around, so no Python-level evaluator survives on
+    ``CompiledModel``; the residual parity tests need one to compare against and
+    this is it.
+    """
+    addr = compiled.construct_objective_cfunc().address
+    n_eq = len(compiled.objective_eqs)
+
+    def residual(fwd, cur, prev, eps, par):
+        return residual_eval(addr, fwd, cur, prev, eps, par, n_eq)
+
+    return residual
