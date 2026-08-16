@@ -98,7 +98,7 @@ def solved(compiled, par):
         addr,
         seed,
         par,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         compiled.n_exog,
     )

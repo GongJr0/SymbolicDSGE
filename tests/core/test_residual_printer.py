@@ -11,7 +11,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE._ckernels.core import klein_preprocess
+from SymbolicDSGE._ckernels.core import klein_preprocess, residual_eval
 from _oracles.core import _approximate_system_numeric
 from SymbolicDSGE._symbolic_printers import (
     ResidualLayout,
@@ -138,7 +138,15 @@ def test_printer_matches_reference_residual_values(path):
         prev = np.zeros_like(cur)
         eps = np.zeros(layout.n_exog, C)
         got = fn(fwd, cur, prev, eps, par)
-        want = compiled.equations(fwd, cur, prev, eps, par)
+        want = residual_eval(
+            compiled.construct_objective_cfunc().address,
+            fwd,
+            cur,
+            prev,
+            eps,
+            par,
+            len(compiled.objective_eqs),
+        )
         np.testing.assert_allclose(got, want, rtol=1e-10, atol=1e-12)
 
 

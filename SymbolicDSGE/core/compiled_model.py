@@ -27,7 +27,6 @@ from .._ckernels.core import (
     INC_LEAD,
     jacobian_eval,
     measurement_eval,
-    residual_eval,
 )
 
 NDF = NDArray[float64]
@@ -277,7 +276,7 @@ class CompiledModel:
         return self.layout.shock_idx
 
     @cached_property
-    def incidence(self) -> NDArray[np.int8]:
+    def _incidence(self) -> NDArray[np.int8]:
         """``(n_var,)`` of ``SDSGE_INC_*`` bits: the dates each variable occurs at.
 
         The solve partitions the pencil on this, so it is read from the symbols
@@ -446,30 +445,6 @@ class CompiledModel:
             return np.asarray(vals)
 
         return np.asarray(par)
-
-    def equations(
-        self,
-        fwd: Any,
-        cur: Any,
-        prev: Any,
-        eps: Any,
-        par: Mapping[str, float] | Any,
-    ) -> ND:
-        par_vec = self._coerce_param_vector(par)
-        if par_vec.shape[0] != self.n_par:
-            raise ValueError(
-                f"Parameter vector length {par_vec.shape[0]} != {self.n_par}"
-            )
-
-        return residual_eval(
-            self.construct_objective_cfunc().address,
-            fwd,
-            cur,
-            prev,
-            eps,
-            par_vec,
-            len(self.objective_eqs),
-        )
 
     def build_affine_measurement_matrices(
         self,

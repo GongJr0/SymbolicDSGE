@@ -46,11 +46,11 @@ __Properties:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | name | `#!python str` | Step name. |
-| step_type | `#!python str \| None` | Serializable step kind when known. |
+| step_type | `#!python str | None` | Serializable step kind when known. |
 | is_root | `#!python bool` | `True` when the node has no inputs. |
 | is_leaf | `#!python bool` | `True` when no other node consumes this node. |
 | parents | `#!python tuple[str, ...]` | De-duplicated producer names in leg order. |
-| primary_parent | `#!python str \| None` | Structural parent used when serializing the graph spec. |
+| primary_parent | `#!python str | None` | Structural parent used when serializing the graph spec. |
 
 ## `PipelineGraph`
 

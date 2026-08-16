@@ -16,11 +16,11 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | created_by | `#!python str` | Library version string. Defaults to `"SymbolicDSGE <version>"` when produced by `BundleBuilder`. |
-| created_at | `#!python str \| None` | UTC ISO-8601 timestamp set at write time. |
+| created_at | `#!python str | None` | UTC ISO-8601 timestamp set at write time. |
 | sdsge_version | `#!python int` | Format version the bundle was written at. Bumped on every manifest change. |
 | last_breaking_version | `#!python int` | Version at which the format last broke, as of writing. A reader needs to be at least this version. |
 | members | `#!python list[Member]` | Member inventory. Every archive entry has one. |
-| simulation | `#!python dict[str, SimSpec] \| None` | Inline simulation prefills keyed by role (no separate member). |
+| simulation | `#!python dict[str, SimSpec] | None` | Inline simulation prefills keyed by role (no separate member). |
 | checksums | `#!python dict[str, str]` | SHA-256 hex digests keyed by member path. |
 
 __Methods:__
@@ -76,8 +76,8 @@ __Fields:__
 | path | `#!python str` | POSIX path inside the archive (e.g. `model/reference.yaml`). |
 | kind | `#!python str` | Semantic kind. One of `MEMBER_KINDS` (see below). |
 | format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"`. Inferred from `path` extension when omitted on construction. |
-| role | `#!python str \| None` | `"reference"` / `"dgp"` for model members. |
-| columns | `#!python list[str] \| None` | Column names for tabular members (e.g. observable names on `estimation_data`). |
+| role | `#!python str | None` | `"reference"` / `"dgp"` for model members. |
+| columns | `#!python list[str] | None` | Column names for tabular members (e.g. observable names on `estimation_data`). |
 | options | `#!python dict[str, Any]` | Kind-specific metadata. For `model_config` this carries `compile_kwargs` / `solve_kwargs`. |
 
 __Recognized kinds (`MEMBER_KINDS`):__
@@ -87,7 +87,7 @@ __Recognized kinds (`MEMBER_KINDS`):__
 | `model_config` | YAML configuration for a role. |
 | `raw_data` | Raw observable file (CSV or Parquet). |
 | `estimation_spec` | `EstimationSpec` JSON. |
-| `estimation_result` | Wrapped `{"type": "mcmc" \| "optimization", "data": {...}}`. |
+| `estimation_result` | Wrapped `{"type": "mcmc" | "optimization", "data": {...}}`. |
 | `estimation_data` | Observed `y` matrix (CSV or Parquet). |
 | `estimation_trace` | MCMC posterior columns (CSV or Parquet). |
 | `mc_pipeline` | `PipelineSpec` JSON. |
@@ -121,10 +121,10 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | T | `#!python int` | Periods to simulate. |
-| x0 | `#!python list[float] \| None` | Initial state vector; zero vector when `None`. |
+| x0 | `#!python list[float] | None` | Initial state vector; zero vector when `None`. |
 | observables | `#!python bool` | Include observable paths in the output. |
 | shock_scale | `#!python float` | Multiplier applied to all shocks. |
-| shocks | `#!python dict[str, ShockParameters] \| None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are innovation symbols, `"e_a,e_b"` for a joint shock. |
+| shocks | `#!python dict[str, ShockParameters] | None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are innovation symbols, `"e_a,e_b"` for a joint shock. |
 
 ???+ info "Two dict views"
     `SimSpec.to_dict()` is the JSON form written to the manifest, where shocks stay as their `Shock.to_dict()` parameter dicts. The `Mapping` view, via `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()`, is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T` horizon draw, so the run is reproducible under a fixed seed.
@@ -143,7 +143,7 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | dist | `#!python str` | Distribution name: `"norm"` / `"t"` / `"uni"`. |
 | multivar | `#!python bool` | Joint (multivariate) shock when `True`. |
-| seed | `#!python int \| None` | RNG seed for reproducibility. |
+| seed | `#!python int | None` | RNG seed for reproducibility. |
 | dist_args | `#!python list[Any]` | Positional distribution arguments in JSON form. |
 | dist_kwargs | `#!python dict[str, Any]` | Distribution keyword arguments (e.g. `loc`, `df`, `mean`). |
 

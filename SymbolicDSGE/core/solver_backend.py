@@ -116,6 +116,16 @@ class PiecewiseSolution(BaseSolution):
     ghx_ref: NDF
     ref: FirstOrderSolution
 
+    @property
+    def A(self) -> NDF:
+        """The reference regime's state transition matrix."""
+        return self.ref.A
+
+    @property
+    def B(self) -> NDF:
+        """The reference regime's shock impact matrix."""
+        return self.ref.B
+
 
 @contextmanager
 def _bk_dating_hint() -> Generator[None]:

@@ -12,6 +12,7 @@ import pytest
 from SymbolicDSGE._ckernels.core._core import residual_path
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
+from _oracles.core import compiled_residual
 
 
 @pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
@@ -39,7 +40,7 @@ def test_residual_path_matches_reference(path):
     got = residual_path(cf.address, cur, fwd, prev, eps, par, n_var)
     assert got.shape == (n_steps, n_var)
 
-    eq = compiled.equations
+    eq = compiled_residual(compiled)
     want = np.empty((n_steps, n_var), dtype=np.float64)
     for t in range(n_steps):
         want[t] = eq(fwd[t], cur[t], prev[t], eps[t], par).real

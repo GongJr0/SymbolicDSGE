@@ -47,7 +47,9 @@ ND = NDArray
 
 
 class DSGESolver:
-    def __init__(self, model_config: ModelConfig, kalman_config: KalmanConfig) -> None:
+    def __init__(
+        self, model_config: ModelConfig, kalman_config: KalmanConfig | None
+    ) -> None:
         self.model_config = model_config
         self.kalman_config = kalman_config
         self.t = sp.Symbol("t", integer=True)
@@ -478,9 +480,9 @@ class DSGESolver:
         piecewise = bool(compiled.constraint_names)
         if piecewise and order == 2:
             raise NotImplementedError(
-                "A model with occasionally binding constraints solves piecewise "
-                "linear, one pencil per regime, so there is no second-order "
-                "solution to take. Drop order=2, or drop equations.constraint."
+                "A model with constraints is solved with OccBin piecewise linearization, "
+                "order=2 is not supported in such a case. Use order=1 or remove the "
+                "constraints from the model specification."
             )
 
         conf = compiled.config
@@ -608,7 +610,7 @@ class DSGESolver:
             compiled.construct_objective_cfunc(),
             param_vec,
             seed,
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             n_exog=compiled.n_exog,
         )
@@ -636,7 +638,7 @@ class DSGESolver:
             param_vec,
             seed,
             self._build_Q(compiled),
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             n_exog=compiled.n_exog,
         )
@@ -677,7 +679,7 @@ class DSGESolver:
             rows,
             param_vec,
             seed,
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             n_constraint,
             n_exog=compiled.n_exog,

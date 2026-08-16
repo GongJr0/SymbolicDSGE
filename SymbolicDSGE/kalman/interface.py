@@ -77,16 +77,21 @@ class KalmanInterface(KalmanFilter):
     ) -> None:
 
         self.model = model
-        kf_cfg = model.kalman_config
-        if kf_cfg is None:
-            raise ValueError("A Kalman filter configuration is required for filtering.")
-        self._kalman = kf_cfg
+        if model.kalman_config is None and R is None:
+            raise ValueError(
+                "R must be provided in symbolic or scalar form, either through the "
+                "model's Kalman configuration or as a parameter override."
+            )
+
+        self._kalman = model.kalman_config
 
         self.mode = FilterMode(filter_mode)
+        kP0 = self._kalman.P0 if self._kalman is not None else None
         self.P0 = _resolve_P0(
             self.mode,
             model.compiled.n_state,
-            P0 if P0 is not None else self._kalman.P0,
+            model.compiled.n_var,
+            kP0 if P0 is None else P0,
         )
 
         obs, y = self._reorder_obs(observables, y)
@@ -454,6 +459,10 @@ class KalmanInterface(KalmanFilter):
             return validated_R
 
         conf = self.kalman_config
+        if conf is None:  # pragma: no cover - gated in KalmanInterface.__init__
+            raise ValueError(
+                "R must be provided when the model has no Kalman configuration."
+            )
 
         std_map = conf.R_std_param_map
         corr_map = conf.R_corr_param_map
@@ -650,7 +659,7 @@ class KalmanInterface(KalmanFilter):
         return self.model.config
 
     @cached_property
-    def kalman_config(self) -> KalmanConfig:
+    def kalman_config(self) -> KalmanConfig | None:
         return self._kalman
 
     @property
@@ -715,11 +724,16 @@ class KalmanInterface(KalmanFilter):
         }
 
 
-def _resolve_P0(mode: FilterMode, n_state: int, P0: NDF) -> NDF:
+def _resolve_P0(mode: FilterMode, n_state: int, n_var: int, P0: NDF | None) -> NDF:
     if mode != FilterMode.UNSCENTED:
-        return P0
+        if P0 is not None:
+            return P0
+        else:
+            return np.eye(n_var, dtype=float64)
 
     out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
-    out[:n_state, :n_state] = P0[:n_state, :n_state]
+
+    if P0 is not None:
+        out[:n_state, :n_state] = P0[:n_state, :n_state]
     out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
     return out

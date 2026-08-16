@@ -15,7 +15,7 @@ import numpy as np
 import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
-from SymbolicDSGE._ckernels.core import second_order
+from SymbolicDSGE._ckernels.core import residual_eval, second_order
 from SymbolicDSGE._symbolic_printers import ResidualLayout
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solver_backend import klein_solve
@@ -142,21 +142,22 @@ def test_rbc_second_order_matches_dynare():
 
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
-    eq = compiled.equations
 
     # Steady state actually clears the residual.
     point = ss.astype(np.complex128)
-    resid = eq(
+    resid = residual_eval(
+        cf.address,
         point,
         point,
         point,
         np.zeros(compiled.n_exog, np.complex128),
         par.astype(np.complex128),
+        len(compiled.objective_eqs),
     )
     np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
 
     a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
-    sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
+    sol = klein_solve(cf, par, ss, compiled._incidence, n_state, n_exog=compiled.n_exog)
     assert sol.stab == 0
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
     gxx, hxx, gxu, hxu, guu, huu, gss, hss = second_order(

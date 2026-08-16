@@ -37,7 +37,7 @@ def _drive(path):
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
 
     a, b, c, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
-    sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
+    sol = klein_solve(cf, par, ss, compiled._incidence, n_state, n_exog=compiled.n_exog)
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
     return (
         a,

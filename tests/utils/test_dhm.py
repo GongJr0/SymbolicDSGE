@@ -6,6 +6,7 @@ import pytest
 
 from SymbolicDSGE import DSGESolver, ModelParser, Shock
 from SymbolicDSGE.utils.dhm import DenHaanMarcet
+from _oracles.core import compiled_residual
 
 
 @pytest.fixture(scope="module")
@@ -193,7 +194,7 @@ def test_den_haan_marcet_conditional_expectation_uses_projected_forward_states(
         ],
         dtype=np.complex128,
     )
-    objective = solved_test.compiled.equations
+    objective = compiled_residual(solved_test.compiled)
     # Same lag convention as _forward_residuals: the path shifted by one, with
     # the first row its own predecessor, and no innovation.
     n_exog = solved_test.compiled.n_exog

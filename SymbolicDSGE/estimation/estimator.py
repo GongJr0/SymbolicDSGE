@@ -44,11 +44,6 @@ from .backend import (
 NDF = NDArray[np.float64]
 
 
-class MissingConfigError(Exception):
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
 class Estimator:
     """
     Estimation interface exposing three public methods:
@@ -106,13 +101,13 @@ class Estimator:
         self.solver = solver
         self.compiled = compiled
 
-        kalman = compiled.kalman
-        if kalman is None:
-            raise MissingConfigError(
-                "Estimation requires a Kalman configuration; the compiled model has none. "
-                "The likelihood is a Kalman filter loglik and cannot be formed without it."
+        if compiled.kalman is None and R is None:
+            raise ValueError(
+                "R must be provided in symbolic or scalar form, either through the "
+                "model's Kalman configuration or as a parameter override."
             )
-        self.kalman = kalman
+
+        self.kalman = compiled.kalman
 
         self.observables = observables
         self.filter_mode = filter_mode
@@ -153,11 +148,17 @@ class Estimator:
         # name; fold it so those correlations take the CPC block, not scalar tanh.
         requested_names_raw = self._promote_full_dense_corr_sets(requested_names_raw)
 
-        r_is_target = ("R_corr" in requested_names_raw) or any(
-            name
-            for name in requested_names_raw
-            if name in (self.kalman.R_param_names or [])
-        )
+        r_block_target = "R_corr" in requested_names_raw
+        if self.kalman is not None:
+            r_component_target = any(
+                name
+                for name in requested_names_raw
+                if name in (self.kalman.R_param_names or [])
+            )
+        else:
+            r_component_target = False
+
+        r_is_target = r_block_target or r_component_target
 
         if r_is_target and self.R is not None:
             raise ValueError(
@@ -562,6 +563,10 @@ class Estimator:
         )
 
     def _resolve_R(self) -> MatrixPriorBlock:
+        if self.kalman is None:
+            raise ValueError(
+                "Block estimation of R requires a KalmanConfig to specify symbolic R std/correlation metadata."
+            )
         labels = self._prepared_filter.observables
         std_param_map = self.kalman.R_std_param_map
         corr_param_map = self.kalman.R_corr_param_map
