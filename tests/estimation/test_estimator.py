@@ -19,7 +19,6 @@ from SymbolicDSGE.bayesian.transforms import (
     TanhTransform,
 )
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
-from SymbolicDSGE.estimation.estimator import MissingConfigError
 from SymbolicDSGE.estimation.backend import MatrixPriorBlock
 
 
@@ -52,10 +51,16 @@ def _with_filter_prep(compiled):
     )
     if not hasattr(compiled, "n_state"):
         compiled.n_state = len(compiled.var_names)
+    if not hasattr(compiled, "n_var"):
+        compiled.n_var = len(compiled.var_names)
     if getattr(compiled.kalman, "P0", None) is None:
         compiled.kalman.P0 = np.eye(len(compiled.var_names), dtype=np.float64)
     if not hasattr(compiled.kalman, "R_param_names"):
         compiled.kalman.R_param_names = None
+    if not hasattr(compiled.kalman, "R_std_param_map"):
+        compiled.kalman.R_std_param_map = None
+    if getattr(compiled.kalman, "R", None) is None:
+        compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
     return compiled
 
 
@@ -756,9 +761,10 @@ def test_resolve_r_and_effective_observables_error_paths():
         observable_names=["y"],
         kalman=None,
     )
-    # A Kalman configuration is now non-negotiable: the estimator fails fast at
-    # construction rather than lazily when the R block is resolved.
-    with pytest.raises(MissingConfigError, match="Kalman configuration"):
+    # Without a config there is nothing to build R from, so the estimator fails
+    # fast at construction rather than lazily when the R block is resolved. P0
+    # has a default and is not part of the demand.
+    with pytest.raises(ValueError, match="R must be provided"):
         Estimator(
             solver=SimpleNamespace(),
             compiled=compiled_no_kalman,

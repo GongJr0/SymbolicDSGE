@@ -233,7 +233,10 @@ def test_obj_unscented_base_matches_model_kalman(rbc_bundle):
     # UKF augments the state: the native filter reads a 2*n_state P0, the block
     # expansion the interface applies for the oracle.
     P0_base = np.ascontiguousarray(compiled.kalman.P0[:n_state, :n_state])
-    P0_ukf = cc(_resolve_P0(FilterMode.UNSCENTED, n_state, P0_base), dtype=np.float64)
+    P0_ukf = cc(
+        _resolve_P0(FilterMode.UNSCENTED, n_state, compiled.n_var, P0_base),
+        dtype=np.float64,
+    )
 
     ll, bk = obj_unscented_base(
         compiled.construct_objective_cfunc().address,

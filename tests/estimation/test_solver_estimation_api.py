@@ -56,10 +56,16 @@ def _with_filter_prep(compiled):
     )
     if not hasattr(compiled, "n_state"):
         compiled.n_state = len(compiled.var_names)
+    if not hasattr(compiled, "n_var"):
+        compiled.n_var = len(compiled.var_names)
     if getattr(compiled.kalman, "P0", None) is None:
         compiled.kalman.P0 = np.eye(len(compiled.var_names), dtype=np.float64)
     if not hasattr(compiled.kalman, "R_param_names"):
         compiled.kalman.R_param_names = None
+    if not hasattr(compiled.kalman, "R_std_param_map"):
+        compiled.kalman.R_std_param_map = None
+    if getattr(compiled.kalman, "R", None) is None:
+        compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
     return compiled
 
 

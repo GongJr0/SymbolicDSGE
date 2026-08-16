@@ -27,13 +27,13 @@ __Fields:__
 | raw_residuals | `#!python np.ndarray` | Explicit copy of the raw residual matrix for downstream diagnostics. Shape `(n_obs, n_eq)`. |
 | instruments | `#!python np.ndarray` | Realized instrument matrix. Shape `(n_obs, n_inst)`. |
 | states | `#!python np.ndarray` | State matrix used to evaluate the test. Shape `(T+1, n)` for simulation-driven runs. |
-| shock_matrix | `#!python np.ndarray \| None` | Realized shock matrix used by `#!python one_sample`. `#!python None` for `#!python from_state_path`. |
+| shock_matrix | `#!python np.ndarray | None` | Realized shock matrix used by `#!python one_sample`. `#!python None` for `#!python from_state_path`. |
 | variables | `#!python list[str]` | Ordering of state columns in `states`. Matches compiled variable order. |
 | equation_idx | `#!python np.ndarray` | Equation indices used in fallback compiled-equation mode, or a sequential index for custom FOCs. |
 | instrument_idx | `#!python np.ndarray` | Instrument indices resolved against compiled variable order. |
 | include_constant | `#!python bool` | Whether a constant instrument was included. |
 | burn_in | `#!python int` | Number of leading transitions excluded from the test. |
-| foc_expressions | `#!python tuple[str, ...] \| None` | Normalized custom FOC expressions used for the run. `#!python None` in compiled-equation mode. |
+| foc_expressions | `#!python tuple[str, ...] | None` | Normalized custom FOC expressions used for the run. `#!python None` in compiled-equation mode. |
 
 &nbsp;
 
@@ -58,7 +58,7 @@ __Fields:__
 | raw_residuals | `#!python np.ndarray` | Residual matrices stacked by replication. Shape `(n_rep, n_obs, n_eq)`. |
 | variables | `#!python list[str]` | Ordering of state columns shared by every replication. |
 | equation_idx | `#!python np.ndarray` | Equation indices used in the repeated test application. |
-| foc_expressions | `#!python tuple[str, ...] \| None` | Normalized custom FOC expressions used for the Monte Carlo run. |
+| foc_expressions | `#!python tuple[str, ...] | None` | Normalized custom FOC expressions used for the Monte Carlo run. |
 
 &nbsp;
 
@@ -88,7 +88,7 @@ __Fields:__
 | measurement_errors | `#!python np.ndarray` | Difference `observed - predicted_measurements`. |
 | instruments | `#!python np.ndarray` | Realized instrument matrix. Shape `(n_obs, n_inst)`. |
 | states | `#!python np.ndarray` | Aligned state matrix used to construct measurements and instruments. Shape `(T, n)` after dropping any initial-condition row. |
-| shock_matrix | `#!python np.ndarray \| None` | Realized shock matrix used by simulation-driven measurement tests. `#!python None` for the `#!python *_from_state_path` routes. |
+| shock_matrix | `#!python np.ndarray | None` | Realized shock matrix used by simulation-driven measurement tests. `#!python None` for the `#!python *_from_state_path` routes. |
 | variables | `#!python list[str]` | Ordering of state columns in `states`. Matches compiled variable order. |
 | observables | `#!python list[str]` | Observable names represented in the result. Length 1 for per-observable tests and length `n_meas` for joint tests. |
 | instrument_idx | `#!python np.ndarray` | Instrument indices resolved against compiled variable order. |
@@ -340,7 +340,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python MeasurementMomentResult \| list[MeasurementMomentResult]` | Returns a single result when `#!python observable` is a string, or one result per requested observable when a sequence is supplied. |
+| `#!python MeasurementMomentResult | list[MeasurementMomentResult]` | Returns a single result when `#!python observable` is a string, or one result per requested observable when a sequence is supplied. |
 
 &nbsp;
 
@@ -392,7 +392,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python MeasurementMomentResult \| list[MeasurementMomentResult]` | Returns a single result when `#!python observable` is a string, or one result per requested observable when a sequence is supplied. `#!python shock_matrix` is `#!python None` in this route. |
+| `#!python MeasurementMomentResult | list[MeasurementMomentResult]` | Returns a single result when `#!python observable` is a string, or one result per requested observable when a sequence is supplied. `#!python shock_matrix` is `#!python None` in this route. |
 
 &nbsp;
 

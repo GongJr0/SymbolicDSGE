@@ -47,7 +47,9 @@ ND = NDArray
 
 
 class DSGESolver:
-    def __init__(self, model_config: ModelConfig, kalman_config: KalmanConfig) -> None:
+    def __init__(
+        self, model_config: ModelConfig, kalman_config: KalmanConfig | None
+    ) -> None:
         self.model_config = model_config
         self.kalman_config = kalman_config
         self.t = sp.Symbol("t", integer=True)

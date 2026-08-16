@@ -382,7 +382,7 @@ def build_q_spec(
 def build_r_spec(
     *,
     compiled: CompiledModel,
-    kalman: KalmanConfig,
+    kalman: KalmanConfig | None,
     observables: Sequence[str],
     calib_index: Mapping[str, int],
     param_index: Mapping[str, int],
@@ -399,8 +399,7 @@ def build_r_spec(
     pair. An ``R_corr`` CPC block takes the ``corr_from_block`` regime."""
     n_obs = len(observables)
     obs_list = list(observables)
-    if R_override is not None or kalman.R_std_param_map is None:
-        # Forced-constant: an override, or a fixed R with no named std map.
+    if R_override is not None:
         constant = build_R(compiled, kalman, obs_list, base_dict, R_override=R_override)
         empty_i = np.empty(0, dtype=np.int64)
         return PyCovSpec(
@@ -415,24 +414,47 @@ def build_r_spec(
             pair_j=empty_i,
             pair_slot=empty_i,
         )
-    std_map = kalman.R_std_param_map
-    corr_map = kalman.R_corr_param_map or {}
-    std_names = [std_map[obs] for obs in obs_list]
-    corr_pairs: list[tuple[int, int, str]] = []
-    for i in range(n_obs):
-        for j in range(i + 1, n_obs):
-            pname = corr_map.get(frozenset({obs_list[i], obs_list[j]}), None)
-            if pname is not None:
-                corr_pairs.append((i, j, pname))
-    return _assemble_cov_spec(
-        K=n_obs,
-        std_names=std_names,
-        corr_pairs=corr_pairs,
-        block=matrix_blocks.get("R_corr"),
-        calib_index=calib_index,
-        param_index=param_index,
-        constant_fn=lambda: build_R(compiled, kalman, obs_list, base_dict),
-    )
+
+    if kalman is not None:
+        if kalman.R_std_param_map is None:
+            # Forced-constant: an override, or a fixed R with no named std map.
+            constant = build_R(
+                compiled, kalman, obs_list, base_dict, R_override=R_override
+            )
+            empty_i = np.empty(0, dtype=np.int64)
+            return PyCovSpec(
+                is_constant=True,
+                constant=np.ascontiguousarray(constant, dtype=np.float64),
+                K=n_obs,
+                std_slots=empty_i,
+                corr_from_block=False,
+                block_theta_off=0,
+                block_theta_len=0,
+                pair_i=empty_i,
+                pair_j=empty_i,
+                pair_slot=empty_i,
+            )
+        else:
+            std_map = kalman.R_std_param_map
+            corr_map = kalman.R_corr_param_map or {}
+            std_names = [std_map[obs] for obs in obs_list]
+            corr_pairs: list[tuple[int, int, str]] = []
+            for i in range(n_obs):
+                for j in range(i + 1, n_obs):
+                    pname = corr_map.get(frozenset({obs_list[i], obs_list[j]}), None)
+                    if pname is not None:
+                        corr_pairs.append((i, j, pname))
+            return _assemble_cov_spec(
+                K=n_obs,
+                std_names=std_names,
+                corr_pairs=corr_pairs,
+                block=matrix_blocks.get("R_corr"),
+                calib_index=calib_index,
+                param_index=param_index,
+                constant_fn=lambda: build_R(compiled, kalman, obs_list, base_dict),
+            )
+    else:
+        raise ValueError("A override for R or a KalmanConfig specifying R is required.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -531,7 +553,7 @@ class PyObjCommon:
 def build_obj_common(
     *,
     compiled: CompiledModel,
-    kalman: KalmanConfig,
+    kalman: KalmanConfig | None,
     prepared: PreparedFilterRun,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
@@ -781,7 +803,7 @@ def reorder_observables(
 
 def build_R(
     compiled: CompiledModel,
-    kalman: KalmanConfig,
+    kalman: KalmanConfig | None,
     observables: list[str],
     params: Mapping[str, float64],
     *,
@@ -799,6 +821,12 @@ def build_R(
         if R.shape != (m, m):
             raise ValueError(f"Provided R has shape {R.shape}, expected ({m}, {m}).")
         return R
+
+    if kalman is None:
+        raise ValueError(
+            "KalmanConfig is required to build R from config parameters."
+            "Supply an R override or add a kalman config to the model specification."
+        )
 
     if kalman.R_std_param_map is not None:
         return build_R_from_config_params(
@@ -889,7 +917,7 @@ def resolve_filter_options(
 def prepare_filter_run(
     *,
     compiled: CompiledModel,
-    kalman: KalmanConfig,
+    kalman: KalmanConfig | None,
     y: NDF | pd.DataFrame,
     observables: list[str] | None,
     filter_mode: str,
@@ -902,6 +930,10 @@ def prepare_filter_run(
 
     kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
 
+    kP0 = None
+    if kalman is not None:
+        kP0 = kalman.P0
+
     return PreparedFilterRun(
         observables=obs,
         y_reordered=y_reordered,
@@ -911,7 +943,8 @@ def prepare_filter_run(
         P0=_resolve_P0(
             FilterMode(mode),
             compiled.n_state,
-            kalman.P0 if P0 is None else P0,
+            compiled.n_var,
+            kP0 if P0 is None else P0,
         ),
         kf_jitter=kf_jitter,
         kf_sym=kf_sym,
@@ -1089,7 +1122,7 @@ def evaluate_loglik(
     *,
     solver: DSGESolver,
     compiled: CompiledModel,
-    kalman: KalmanConfig,
+    kalman: KalmanConfig | None,
     y: NDF | pd.DataFrame,
     params: Mapping[str, float64],
     filter_mode: str,

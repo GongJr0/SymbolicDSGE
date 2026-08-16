@@ -26,7 +26,7 @@ __Fields:__
 | default | `#!python Any` | Default value. |
 | required | `#!python bool` | Whether the field is required. |
 | options | `#!python tuple[str, ...]` | Allowed options for select-like fields. |
-| minimum | `#!python float \| None` | Optional numeric lower bound. |
+| minimum | `#!python float | None` | Optional numeric lower bound. |
 | when | `#!python tuple[str, ...]` | Conditional display metadata. |
 
 __Methods:__
@@ -78,7 +78,7 @@ __Fields:__
 | factory | `#!python Callable[..., MCStep]` | Step factory used by `build(...)`. |
 | fields | `#!python tuple[FieldSpec, ...]` | Declared configurable fields. Any `source_bindings` are prepended here at construction. |
 | source_bindings | `#!python tuple[SourceBinding, ...]` | Upstream-input bindings, expanded into `fields` as source, field, and column selectors. |
-| compile_params | `#!python Callable \| None` | Optional parameter normalization hook. Simulation compilation uses only explicit `shocks` or `shock_registry` parameters. |
+| compile_params | `#!python Callable | None` | Optional parameter normalization hook. Simulation compilation uses only explicit `shocks` or `shock_registry` parameters. |
 
 __Properties:__
 

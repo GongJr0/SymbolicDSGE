@@ -377,8 +377,10 @@ def test_resolve_p0_passes_through_for_linear_and_extended():
     # P0 is now a static ndarray on the config (canonical order); the linear and
     # extended paths use it verbatim. Construction/validation live at parse time.
     P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)
-    assert np.array_equal(interface_module._resolve_P0(FilterMode.LINEAR, 2, P0), P0)
-    assert np.array_equal(interface_module._resolve_P0(FilterMode.EXTENDED, 2, P0), P0)
+    assert np.array_equal(interface_module._resolve_P0(FilterMode.LINEAR, 2, 3, P0), P0)
+    assert np.array_equal(
+        interface_module._resolve_P0(FilterMode.EXTENDED, 2, 3, P0), P0
+    )
 
 
 def test_resolve_p0_embeds_state_block_with_identity_for_unscented():
@@ -386,7 +388,7 @@ def test_resolve_p0_embeds_state_block_with_identity_for_unscented():
     # taking the top-left n_state block of the full-variable P0.
     P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)  # 3 model vars, n_state=2
     assert np.array_equal(
-        interface_module._resolve_P0(FilterMode.UNSCENTED, 2, P0),
+        interface_module._resolve_P0(FilterMode.UNSCENTED, 2, 3, P0),
         np.diag([2.0, 6.0, 1.0, 1.0]).astype(FLOAT),
     )
 
@@ -462,16 +464,46 @@ def test_reorder_obs_rejects_invalid_inputs(observables, y, match):
         ki._reorder_obs(observables, y)
 
 
-def test_kalman_config_required_at_construction():
-    # A missing Kalman config is rejected at construction, not on property access.
-    with pytest.raises(
-        ValueError, match="A Kalman filter configuration is required for filtering"
-    ):
+def test_kalman_config_is_required_only_for_R():
+    # R is the one input with no default. P0 has one, so a missing config
+    # rejects R alone, at construction rather than on property access.
+    with pytest.raises(ValueError, match="R must be provided"):
         KalmanInterface(
             model=_make_stub_model(kalman_config=None),
             observables=["ObsA"],
             y=np.array([[1.0], [2.0]], dtype=FLOAT),
         )
+
+
+def test_kalman_config_is_optional_when_R_is_supplied():
+    R = np.array([[4.0]], dtype=FLOAT)
+
+    ki = KalmanInterface(
+        model=_make_stub_model(kalman_config=None),
+        observables=["ObsA"],
+        y=np.array([[1.0], [2.0]], dtype=FLOAT),
+        R=R,
+    )
+
+    assert ki.kalman_config is None
+    assert np.array_equal(ki.R, R)
+    # No config and no override leaves P0 at its default over the model's
+    # variables, which is what makes it optional rather than merely absent.
+    assert np.array_equal(ki.P0, np.eye(3, dtype=FLOAT))
+
+
+def test_a_configured_p0_reaches_the_filter():
+    # The config's P0 is not the identity, so substituting the default would
+    # show here. A fixture whose P0 is identity-valued cannot see the difference.
+    model = _make_stub_model()
+
+    ki = KalmanInterface(
+        model=model,
+        observables=["ObsA", "ObsB"],
+        y=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=FLOAT),
+    )
+
+    assert np.array_equal(ki.P0, model.kalman_config.P0)
 
 
 def test_filter_dispatches_linear_run_and_populates_debug_info(monkeypatch):

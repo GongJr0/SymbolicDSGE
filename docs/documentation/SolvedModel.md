@@ -21,7 +21,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | compiled | `#!python CompiledModel` | The compiled model object that resulted in the current solution. |
-| policy | `#!python FirstOrderSolution \| SecondOrderSolution \| PiecewiseSolution` | Solver output containing the policy data for this model. |
+| policy | `#!python FirstOrderSolution | SecondOrderSolution | PiecewiseSolution` | Solver output containing the policy data for this model. |
 
 &nbsp;
 

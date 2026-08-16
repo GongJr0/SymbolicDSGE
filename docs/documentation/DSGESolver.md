@@ -5,7 +5,7 @@ tags:
 # DSGESolver
 
 ```python
-class DSGESolver(model_config: ModelConfig, kalman_config: KalmanConfig)
+class DSGESolver(model_config: ModelConfig, kalman_config: KalmanConfig | None)
 ```
 
 Class responsible for model compilation and solution.
@@ -15,7 +15,7 @@ __Attributes:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | model_config | `#!python ModelConfig` | Configuration object to be compiled/solved. |
-| kalman_config | `#!python KalmanConfig` | Kalman Filter configuration object. |
+| kalman_config | `#!python KalmanConfig | None` | Kalman Filter configuration object. `None` when the model declares no `kalman:` block. |
 | t | `#!python sp.Symbol` | Time symbol used in model components. |
 
 __Methods:__

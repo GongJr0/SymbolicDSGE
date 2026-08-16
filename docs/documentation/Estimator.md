@@ -207,8 +207,8 @@ Estimator.mcmc(
 MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native optimizer's result struct; scipy is not involved.
 
 ### OptimizationResult
-| __Field__ | __Type__ | __Description__ |
-|:----------|:--------:|----------------:|
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
 | kind | `#!python str` | `"mle"` or `"map"` |
 | x | `#!python np.ndarray` | Optimized unconstrained vector |
 | theta | `#!python dict[str, float]` | Optimized constrained parameters |
@@ -222,8 +222,8 @@ MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native opt
 | nit | `#!python int | None` | Iterations |
 
 ### MCMCResult
-| __Field__ | __Type__ | __Description__ |
-|:----------|:--------:|----------------:|
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
 | param_names | `#!python list[str]` | Parameter order for samples |
 | samples | `#!python np.ndarray` | Retained posterior samples |
 | logpost_trace | `#!python np.ndarray` | Posterior trace for retained samples |

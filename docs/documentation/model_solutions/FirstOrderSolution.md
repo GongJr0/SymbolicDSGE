@@ -20,8 +20,8 @@ class FirstOrderSolution(
 
 First-order policy data returned by the Klein solver. `FirstOrderSolution` extends `BaseSolution`; all inherited fields are repeated here for reference. Its rule is `u(t) = f s(t)` and `s(t+1) = p s(t)`.
 
-| Field | Type | Description |
-|:------|:-----|:------------|
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
 | `steady_state` | `ndarray[float]`, shape `(n_var,)` | Newton-resolved expansion point of the solution. |
 | `stab` | `int` | Stability indicator: `-1` means too few stable eigenvalues, `0` means the required number, and `1` means too many. |
 | `eig` | `ndarray[complex]` | Eigenvalues of the linearized system. |
