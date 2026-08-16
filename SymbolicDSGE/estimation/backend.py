@@ -592,7 +592,7 @@ def build_obj_common(
         meas_addr=int(prepared.meas_addr),
         jac_addr=int(prepared.jac_addr),
         ss_seed=np.ascontiguousarray(ss_seed_vec, dtype=np.float64),
-        incidence=compiled.incidence,
+        incidence=compiled._incidence,
         y=y,
         P0=prepared.P0,
         x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),

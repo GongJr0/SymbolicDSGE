@@ -68,7 +68,7 @@ def _staged(compiled, par, seed, Q):
     n_state = compiled.n_state
 
     ss, f, p, stab, eig, A, B = klein_solve1(
-        addr, seed, par, compiled.incidence, n_state, compiled.n_exog
+        addr, seed, par, compiled._incidence, n_state, compiled.n_exog
     )
     # The second-order stage takes the pencil, which the fused solve keeps
     # internal, so the staged reference rebuilds it at the same steady state.
@@ -96,7 +96,7 @@ def test_matches_the_staged_shims_exactly(path):
         seed,
         par,
         Q,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         compiled.n_exog,
     )
@@ -116,7 +116,7 @@ def test_python_wrapper_carries_the_native_outputs(path):
         par,
         seed,
         Q,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         n_exog=compiled.n_exog,
     )
@@ -151,7 +151,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
         compiled.construct_objective_cfunc().address,
         seed,
         par,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         compiled.n_exog,
     )
@@ -161,7 +161,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
         seed,
         par,
         Q,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         compiled.n_exog,
     )
@@ -193,7 +193,7 @@ def test_rejects_a_covariance_of_the_wrong_shape():
             seed,
             par,
             np.eye(compiled.n_exog + 1),
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             compiled.n_exog,
         )

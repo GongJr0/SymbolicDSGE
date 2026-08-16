@@ -610,7 +610,7 @@ class DSGESolver:
             compiled.construct_objective_cfunc(),
             param_vec,
             seed,
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             n_exog=compiled.n_exog,
         )
@@ -638,7 +638,7 @@ class DSGESolver:
             param_vec,
             seed,
             self._build_Q(compiled),
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             n_exog=compiled.n_exog,
         )
@@ -679,7 +679,7 @@ class DSGESolver:
             rows,
             param_vec,
             seed,
-            compiled.incidence,
+            compiled._incidence,
             compiled.n_state,
             n_constraint,
             n_exog=compiled.n_exog,

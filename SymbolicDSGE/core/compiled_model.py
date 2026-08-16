@@ -276,7 +276,7 @@ class CompiledModel:
         return self.layout.shock_idx
 
     @cached_property
-    def incidence(self) -> NDArray[np.int8]:
+    def _incidence(self) -> NDArray[np.int8]:
         """``(n_var,)`` of ``SDSGE_INC_*`` bits: the dates each variable occurs at.
 
         The solve partitions the pencil on this, so it is read from the symbols

@@ -157,7 +157,7 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
 
     a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
-    sol = klein_solve(cf, par, ss, compiled.incidence, n_state, n_exog=compiled.n_exog)
+    sol = klein_solve(cf, par, ss, compiled._incidence, n_state, n_exog=compiled.n_exog)
     assert sol.stab == 0
     f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
     gxx, hxx, gxu, hxu, guu, huu, gss, hss = second_order(

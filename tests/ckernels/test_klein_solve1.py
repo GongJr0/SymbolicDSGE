@@ -43,13 +43,13 @@ def test_policy_is_real(path):
     cfunc = compiled.construct_objective_cfunc()
 
     _, f, p, _, _, _, _ = klein_solve1(
-        cfunc.address, seed, par, compiled.incidence, compiled.n_state, compiled.n_exog
+        cfunc.address, seed, par, compiled._incidence, compiled.n_state, compiled.n_exog
     )
     assert f.dtype == np.float64
     assert p.dtype == np.float64
 
     sol = klein_solve(
-        cfunc, par, seed, compiled.incidence, compiled.n_state, n_exog=compiled.n_exog
+        cfunc, par, seed, compiled._incidence, compiled.n_state, n_exog=compiled.n_exog
     )
     assert sol.f.dtype == np.float64
     assert sol.p.dtype == np.float64
@@ -65,7 +65,7 @@ def test_the_transition_reads_only_the_state_columns(path):
         compiled.construct_objective_cfunc(),
         par,
         seed,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         n_exog=compiled.n_exog,
     )
@@ -84,7 +84,7 @@ def test_reports_stab_instead_of_raising():
         compiled.construct_objective_cfunc().address,
         seed,
         par,
-        compiled.incidence,
+        compiled._incidence,
         compiled.n_state,
         compiled.n_exog,
     )[3]
@@ -108,7 +108,7 @@ def test_rejects_dimensions_the_solve_cannot_hold(dims, match):
             compiled.construct_objective_cfunc().address,
             seed,
             par,
-            compiled.incidence,
+            compiled._incidence,
             n_state,
             n_exog,
         )
