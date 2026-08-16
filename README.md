@@ -154,7 +154,7 @@ Eigenvalues:  [0.28 +0.j 0.83 +0.j 0.85 +0.j 2.605+0.j 1.185+0.j]
 # Plot IRFs (single or multi shock)
 sol.transition_plot(
     T=25,
-    shocks=["g", "z"],
+    shocks=["e_g", "e_z"],
     scale=1.0,
     observables=True,
 )
