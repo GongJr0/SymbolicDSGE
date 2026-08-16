@@ -23,8 +23,14 @@ from __future__ import annotations
 import cmath
 
 from numba import njit
+from typing import TypedDict, Literal
 
-_INLINE = {"inline": "always"}
+
+class _InlineOptions(TypedDict):
+    inline: Literal["always"]
+
+
+_INLINE = _InlineOptions(inline="always")
 
 
 @njit(**_INLINE)

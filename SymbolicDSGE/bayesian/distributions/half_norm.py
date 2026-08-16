@@ -1,6 +1,6 @@
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
-from typing import TypedDict, cast, overload, Callable
+from typing import TypedDict, overload, Callable, cast
 
 import numpy as np
 from numpy import float64
@@ -75,8 +75,8 @@ class HalfNormal(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _logpdf_scalar(x, self._std))
-        return cast(VecF64, _logpdf_vectorized(x, self._std))
+            return _logpdf_scalar(x, self._std)
+        return _logpdf_vectorized(x, self._std)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -88,8 +88,8 @@ class HalfNormal(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(x, self._std))
-        return cast(VecF64, _grad_logpdf_vectorized(x, self._std))
+            return _grad_logpdf_scalar(x, self._std)
+        return _grad_logpdf_vectorized(x, self._std)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -119,7 +119,7 @@ class HalfNormal(Distribution[float64, VecF64]):
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._std, size, rng))
+        return _rvs(self._std, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__

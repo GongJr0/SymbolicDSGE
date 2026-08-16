@@ -3,7 +3,7 @@ from ..support import OutOfSupportError, Support
 
 import numpy as np
 from numpy import float64
-from typing import TypedDict, overload, cast
+from typing import TypedDict, overload
 from scipy.special import ndtr, ndtri
 from numba import njit
 
@@ -75,8 +75,8 @@ class Normal(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _logpdf_scalar(self._mean, self._var, x))
-        return cast(VecF64, _logpdf_vectorized(self._mean, self._var, x))
+            return _logpdf_scalar(self._mean, self._var, x)
+        return _logpdf_vectorized(self._mean, self._var, x)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -88,8 +88,8 @@ class Normal(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(self._mean, self._var, x))
-        return cast(VecF64, _grad_logpdf_vectorized(self._mean, self._var, x))
+            return _grad_logpdf_scalar(self._mean, self._var, x)
+        return _grad_logpdf_vectorized(self._mean, self._var, x)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -111,7 +111,7 @@ class Normal(Distribution[float64, VecF64]):
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._mean, self._std, size, rng))
+        return _rvs(self._mean, self._std, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__

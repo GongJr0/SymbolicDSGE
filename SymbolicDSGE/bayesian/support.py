@@ -88,27 +88,21 @@ class Support:
     def contains(self, x: FLOAT_VEC_SCA) -> bool:
         if isinstance(x, (float64, float)):
             x = float64(x)
-            return cast(
-                bool,
-                _contains_scalar(
-                    self.low, self.high, self.low_inclusive, self.high_inclusive, x
-                ),
+            return _contains_scalar(
+                self.low, self.high, self.low_inclusive, self.high_inclusive, x
             )
         x = x.astype(float64)
-        return cast(
-            bool,
-            _contains_vectorized(
-                self.low, self.high, self.low_inclusive, self.high_inclusive, x
-            ),
+        return _contains_vectorized(
+            self.low, self.high, self.low_inclusive, self.high_inclusive, x
         )
 
     def at_boundary(self, x: FLOAT_VEC_SCA, bound: Literal["high", "low"]) -> bool:
         lim = self.low if bound == "low" else self.high
         if isinstance(x, (float64, float)):
             x = float64(x)
-            return cast(bool, _at_boundary_scalar(x, bound, lim))
+            return _at_boundary_scalar(x, bound, lim)
         x = x.astype(float64)
-        return cast(bool, _at_boundary_vectorized(x, bound, lim))
+        return _at_boundary_vectorized(x, bound, lim)
 
     def contains_support(self, other: "Support") -> bool:
         # Ignore inclusivity, eps injection should handle boundary cases

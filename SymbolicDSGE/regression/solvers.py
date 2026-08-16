@@ -106,10 +106,10 @@ def chol_solve(X: NDF, y: NDF) -> tuple[NDF, NDF, int]:
             RANK_DEFICIENT,
         )
 
-    L = cholesky(G)
+    L = asarray(cholesky(G), dtype=float64)
     z = solve(L, g)
     coef: NDF = asarray(solve(L.T, z), dtype=float64)
-    return coef, L, OK  # pyright: ignore
+    return coef, L, OK
 
 
 @njit(cache=True)
@@ -138,7 +138,7 @@ def chol_solve_L2(
         dof = float64(0.0)
         for i in range(p):
             dof += smoother[i, i]
-        L = cholesky(G)
+        L = asarray(cholesky(G), dtype=float64)
         z = solve(L, g)
         coef: NDF = asarray(solve(L.T, z), dtype=float64)
         return coef, L, dof, OK  # pyright: ignore

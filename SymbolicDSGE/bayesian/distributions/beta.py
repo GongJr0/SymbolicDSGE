@@ -18,7 +18,7 @@ from scipy.special import betainc, betaincinv
 from numba import njit
 
 
-from typing import TypedDict, cast, overload
+from typing import TypedDict, overload
 
 
 class BetaParams(TypedDict):
@@ -36,12 +36,12 @@ BETA_DEFAULTS = BetaParams(
 
 @njit(cache=True)
 def _logpdf_scalar(a: float64, b: float64, log_norm: float64, x: float64) -> float64:
-    return x_logy_scalar(a - 1.0, x) + xlog1py_scalar(b - 1.0, -x) - log_norm  # type: ignore
+    return x_logy_scalar(a - 1.0, x) + xlog1py_scalar(b - 1.0, -x) - log_norm
 
 
 @njit(cache=True)
 def _logpdf_vectorized(a: float64, b: float64, log_norm: float64, x: VecF64) -> VecF64:
-    return x_logy_vectorized(a - 1.0, x) + xlog1py_vectorized(b - 1.0, -x) - log_norm  # type: ignore
+    return x_logy_vectorized(a - 1.0, x) + xlog1py_vectorized(b - 1.0, -x) - log_norm
 
 
 @njit(cache=True)
@@ -84,8 +84,8 @@ class Beta(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _logpdf_scalar(self._a, self._b, self._log_norm, x))
-        return cast(VecF64, _logpdf_vectorized(self._a, self._b, self._log_norm, x))
+            return _logpdf_scalar(self._a, self._b, self._log_norm, x)
+        return _logpdf_vectorized(self._a, self._b, self._log_norm, x)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -97,8 +97,8 @@ class Beta(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(self._a, self._b, x))
-        return cast(VecF64, _grad_logpdf_vectorized(self._a, self._b, x))
+            return _grad_logpdf_scalar(self._a, self._b, x)
+        return _grad_logpdf_vectorized(self._a, self._b, x)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -126,11 +126,11 @@ class Beta(Distribution[float64, VecF64]):
     def ppf(self, q: float64 | VecF64) -> float64 | VecF64:
         return float64(betaincinv(self._a, self._b, q))
 
-    def rvs(self, size: Size = None, random_state: RandomState = None) -> VecF64:
+    def rvs(self, size: Size = (1,), random_state: RandomState = None) -> VecF64:
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._a, self._b, size, rng))
+        return _rvs(self._a, self._b, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__
