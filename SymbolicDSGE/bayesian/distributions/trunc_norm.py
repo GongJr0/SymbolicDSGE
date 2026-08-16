@@ -14,7 +14,7 @@ import numpy as np
 from numpy import float64
 from numba import njit
 from scipy.stats import truncnorm
-from typing import TypedDict, Tuple, overload, cast
+from typing import TypedDict, Tuple, overload
 
 
 class TruncNormParams(TypedDict):
@@ -102,12 +102,8 @@ class TruncNormal(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(
-                float64, _logpdf_scalar(x, self._mean, self._std, self._log_norm)
-            )
-        return cast(
-            VecF64, _logpdf_vectorized(x, self._mean, self._std, self._log_norm)
-        )
+            return _logpdf_scalar(x, self._mean, self._std, self._log_norm)
+        return _logpdf_vectorized(x, self._mean, self._std, self._log_norm)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -121,8 +117,8 @@ class TruncNormal(Distribution[float64, VecF64]):
         # Assume gradient at bounds is approaching from the defined region (+ for lower bound, - for upper bound).
         # This avoids non-finite gradients at bounds but isn't mathematically exact.
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(x, self._mean, self._std))
-        return cast(VecF64, _grad_logpdf_vectorized(x, self._mean, self._std))
+            return _grad_logpdf_scalar(x, self._mean, self._std)
+        return _grad_logpdf_vectorized(x, self._mean, self._std)
 
     @overload
     def cdf(self, x: float64) -> float64: ...

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from numba import njit
 import numpy as np
 from numpy import float64, asarray
@@ -109,7 +110,7 @@ def chol_solve(X: NDF, y: NDF) -> tuple[NDF, NDF, int]:
     L = cholesky(G)
     z = solve(L, g)
     coef: NDF = asarray(solve(L.T, z), dtype=float64)
-    return coef, L, OK  # pyright: ignore
+    return coef, cast(NDF, L), OK
 
 
 @njit(cache=True)
@@ -141,7 +142,7 @@ def chol_solve_L2(
         L = cholesky(G)
         z = solve(L, g)
         coef: NDF = asarray(solve(L.T, z), dtype=float64)
-        return coef, L, dof, OK  # pyright: ignore
+        return coef, cast(NDF, L), dof, OK  # pyright: ignore
     except Exception:
         return (
             np.full(p, np.nan, dtype=float64),

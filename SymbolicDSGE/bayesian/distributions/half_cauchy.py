@@ -5,7 +5,7 @@ import numpy as np
 from numpy import float64
 from numba import njit
 
-from typing import TypedDict, cast, overload
+from typing import TypedDict, overload
 
 
 class HalfCauchyParams(TypedDict):
@@ -64,8 +64,8 @@ class HalfCauchy(Distribution):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _logpdf_scalar(x, self._gamma))
-        return cast(VecF64, _logpdf_vectorized(x, self._gamma))
+            return _logpdf_scalar(x, self._gamma)
+        return _logpdf_vectorized(x, self._gamma)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -77,8 +77,8 @@ class HalfCauchy(Distribution):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(x, self._gamma))
-        return cast(VecF64, _grad_logpdf_vectorized(x, self._gamma))
+            return _grad_logpdf_scalar(x, self._gamma)
+        return _grad_logpdf_vectorized(x, self._gamma)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -104,7 +104,7 @@ class HalfCauchy(Distribution):
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._gamma, size, rng))
+        return _rvs(self._gamma, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__

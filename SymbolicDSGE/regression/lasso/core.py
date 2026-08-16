@@ -417,7 +417,7 @@ def lasso_gs(
     G = np.ascontiguousarray(G * scale, dtype=np.float64)
     c = np.ascontiguousarray(c * scale, dtype=np.float64)
 
-    lam_grid = log_grid(start, stop, num)
+    lam_grid = log_grid(float64(start), float64(stop), num)
     n, k = x_fit.shape[0], G.shape[0]
     if use_scalar_path(n, k):
         lam_path, beta_path, status = _lars_lasso_gram_native(
@@ -436,7 +436,9 @@ def lasso_gs(
         beta_grid = lasso_path_eval(lam_path, beta_path, lam_grid)
 
     if intercept:
-        coef_grid = _restore_intercept_path(beta_grid, x_mean, y_mean)
+        coef_grid = _restore_intercept_path(
+            beta_grid, x_mean, y_mean  # pyright: ignore
+        )
         design, variables = _add_intercept(x, variables)
     else:
         coef_grid = beta_grid
@@ -463,7 +465,7 @@ def lasso_gs(
         objective_trace=objective_trace,
         knot_lambdas=lam_path,
         knot_coefficients=(
-            _restore_intercept_path(beta_path, x_mean, y_mean)
+            _restore_intercept_path(beta_path, x_mean, y_mean)  # pyright: ignore
             if intercept
             else beta_path
         ),

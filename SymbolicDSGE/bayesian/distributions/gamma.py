@@ -16,7 +16,7 @@ import math
 from numba import njit
 
 
-from typing import TypedDict, cast, overload
+from typing import TypedDict, overload
 
 
 class GammaParams(TypedDict):
@@ -43,7 +43,7 @@ def _logpdf_scalar(
 def _logpdf_vectorized(
     a: float64, theta: float64, log_norm: float64, x: VecF64
 ) -> VecF64:
-    return (x_logy_vectorized(a - 1.0, x) - x / theta - log_norm).astype(float64)  # type: ignore
+    return (x_logy_vectorized(a - 1.0, x) - x / theta - log_norm).astype(float64)
 
 
 @njit(cache=True)
@@ -99,10 +99,8 @@ class Gamma(Distribution[float64, VecF64]):
             raise OutOfSupportError(x, support)
 
         if isinstance(x, float64):
-            return cast(
-                float64, _logpdf_scalar(self._a, self._theta, self._log_norm, x)
-            )
-        return cast(VecF64, _logpdf_vectorized(self._a, self._theta, self._log_norm, x))
+            return _logpdf_scalar(self._a, self._theta, self._log_norm, x)
+        return _logpdf_vectorized(self._a, self._theta, self._log_norm, x)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -114,8 +112,8 @@ class Gamma(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(self._a, self._theta, x))
-        return cast(VecF64, _grad_logpdf_vectorized(self._a, self._theta, x))
+            return _grad_logpdf_scalar(self._a, self._theta, x)
+        return _grad_logpdf_vectorized(self._a, self._theta, x)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -137,7 +135,7 @@ class Gamma(Distribution[float64, VecF64]):
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._a, self._theta, size, rng))
+        return _rvs(self._a, self._theta, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__

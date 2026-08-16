@@ -7,7 +7,7 @@ from scipy.special import gammaincc, gammainccinv
 import math
 from numba import njit
 
-from typing import TypedDict, cast, overload
+from typing import TypedDict, overload
 
 
 class InvGammaParams(TypedDict):
@@ -92,12 +92,8 @@ class InvGamma(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(
-                float64, _logpdf_scalar(self._a, self._beta, self._log_prefactor, x)
-            )
-        return cast(
-            VecF64, _logpdf_vectorized(self._a, self._beta, self._log_prefactor, x)
-        )
+            return _logpdf_scalar(self._a, self._beta, self._log_prefactor, x)
+        return _logpdf_vectorized(self._a, self._beta, self._log_prefactor, x)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -109,8 +105,8 @@ class InvGamma(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(self._a, self._beta, x))
-        return cast(VecF64, _grad_logpdf_vectorized(self._a, self._beta, x))
+            return _grad_logpdf_scalar(self._a, self._beta, x)
+        return _grad_logpdf_vectorized(self._a, self._beta, x)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -133,7 +129,7 @@ class InvGamma(Distribution[float64, VecF64]):
         if isinstance(size, int):
             size = (size,)
 
-        return cast(VecF64, _rvs(self._a, self._beta, size, rng))
+        return _rvs(self._a, self._beta, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__

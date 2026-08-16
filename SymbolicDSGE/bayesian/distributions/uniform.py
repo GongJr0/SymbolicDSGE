@@ -78,8 +78,8 @@ class Uniform(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _logpdf_scalar(self._low, self._high, self._width, x))
-        return cast(VecF64, _logpdf_vectorized(self._low, self._high, self._width, x))
+            return _logpdf_scalar(self._low, self._high, self._width, x)
+        return _logpdf_vectorized(self._low, self._high, self._width, x)
 
     @overload
     def grad_logpdf(self, x: float64) -> float64: ...
@@ -91,8 +91,8 @@ class Uniform(Distribution[float64, VecF64]):
         if not support.contains(x):
             raise OutOfSupportError(x, support)
         if isinstance(x, float64):
-            return cast(float64, _grad_logpdf_scalar(self._low, self._high, x))
-        return cast(VecF64, _grad_logpdf_vectorized(self._low, self._high, x))
+            return _grad_logpdf_scalar(self._low, self._high, x)
+        return _grad_logpdf_vectorized(self._low, self._high, x)
 
     @overload
     def cdf(self, x: float64) -> float64: ...
@@ -128,7 +128,7 @@ class Uniform(Distribution[float64, VecF64]):
         rng = self._rng_with_fallback(random_state, self._random_state)
         if isinstance(size, int):
             size = (size,)
-        return cast(VecF64, _rvs(self._low, self._high, size, rng))
+        return _rvs(self._low, self._high, size, rng)
 
     def __repr__(self) -> str:
         return self.__class__.__name__
