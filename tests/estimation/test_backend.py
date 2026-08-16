@@ -232,7 +232,6 @@ def test_build_R_override_and_config_branches():
     compiled = SimpleNamespace(observable_names=["Infl", "Rate", "Out"])
     kalman = KalmanConfig(
         R=None,
-        P0=np.eye(1, dtype=np.float64),
         R_std_param_map={"Infl": "s_i", "Rate": "s_r", "Out": "s_o"},
         R_corr_param_map={},
     )
@@ -265,13 +264,12 @@ def test_build_R_override_and_config_branches():
         R=np.array(
             [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
         ),
-        P0=np.eye(1, dtype=np.float64),
     )
     out_const = backend.build_R(compiled, const_kalman, ["Rate", "Infl"], {})
     assert np.allclose(out_const, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
 
     # No override, no maps, no constant R: genuinely unavailable.
-    empty_kalman = KalmanConfig(R=None, P0=np.eye(1, dtype=np.float64))
+    empty_kalman = KalmanConfig(R=None)
     with pytest.raises(ValueError, match="R is not available"):
         backend.build_R(compiled, empty_kalman, ["Infl", "Rate"], {})
 
@@ -588,11 +586,7 @@ def rbc_ukf_bundle():
         / "rbc_second_order.yaml"
     )
     model, _ = ModelParser(path).get_all()
-    n_var = len(model.variables.variables)
-    kalman = KalmanConfig(
-        R=np.array([[0.01]], dtype=np.float64),
-        P0=(0.1 * np.eye(n_var)).astype(np.float64),
-    )
+    kalman = KalmanConfig(R=np.array([[0.01]], dtype=np.float64))
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     solved = solver.solve(compiled=compiled, order=2)

@@ -15,8 +15,8 @@ from sympy import Symbol
 
 from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.estimation import backend
+from SymbolicDSGE._ckernels.kalman import stationary_covariance
 from SymbolicDSGE.kalman.config import KalmanConfig
-from SymbolicDSGE.kalman.interface import FilterMode, _resolve_P0
 from SymbolicDSGE._ckernels.estimation._estimation import (
     obj_extended_base,
     obj_linear_base,
@@ -57,8 +57,6 @@ def bundle(post82_test_model_path):
     )
     return {
         "compiled": compiled,
-        # compile widens P0 over the generated variables, so the filter reads the
-        # compiled config rather than the parse-time one.
         "kalman": compiled.kalman,
         "solved": solved,
         "steady": steady,
@@ -91,9 +89,10 @@ def test_obj_linear_base_matches_model_kalman(bundle):
     calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
     steady_c = cc(steady, dtype=np.float64)
     y_c = cc(prep.y_reordered, dtype=np.float64)
-    P0 = cc(prep.P0, dtype=np.float64)
-
     n_var = len(compiled.var_names)
+    p0_err, P0 = stationary_covariance(solved.policy.A, solved.policy.B, Q)
+    assert p0_err == 0
+    P0 = cc(P0, dtype=np.float64)
     assert P0.shape == (n_var, n_var)
 
     ll, bk = obj_linear_base(
@@ -146,7 +145,9 @@ def test_obj_extended_base_matches_model_kalman(bundle):
     calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
     steady_c = cc(steady, dtype=np.float64)
     y_c = cc(prep.y_reordered, dtype=np.float64)
-    P0 = cc(prep.P0, dtype=np.float64)
+    p0_err, P0 = stationary_covariance(solved.policy.A, solved.policy.B, Q)
+    assert p0_err == 0
+    P0 = cc(P0, dtype=np.float64)
 
     ll, bk = obj_extended_base(
         compiled.construct_objective_cfunc().address,
@@ -176,14 +177,12 @@ def test_obj_extended_base_matches_model_kalman(bundle):
 @pytest.fixture(scope="module")
 def rbc_bundle(rbc_second_order_test_model_path):
     """Second-order RBC (levels model, nonzero steady state) for the unscented
-    parity. The fixture has no kalman section, so a minimal config is supplied:
-    a uniform-diagonal P0 over the declared variables and a scalar measurement
-    noise. ``compile`` widens and permutes that P0, so the test reads the state
-    block back off the compiled config."""
+    parity. The fixture has no kalman section, so a scalar measurement-noise
+    configuration is supplied. The test derives its P0 from the solved policy,
+    matching the runtime default."""
     model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    n_var = 3  # declared: z, k, c
     R = np.array([[1e-4]], dtype=np.float64)
-    kalman = KalmanConfig(R=R, P0=np.eye(n_var, dtype=np.float64) * 0.1)
+    kalman = KalmanConfig(R=R)
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
 
@@ -230,13 +229,14 @@ def test_obj_unscented_base_matches_model_kalman(rbc_bundle):
     calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
     y_c = np.array(y.to_numpy(), dtype=np.float64, copy=True)
 
-    # UKF augments the state: the native filter reads a 2*n_state P0, the block
-    # expansion the interface applies for the oracle.
-    P0_base = np.ascontiguousarray(compiled.kalman.P0[:n_state, :n_state])
-    P0_ukf = cc(
-        _resolve_P0(FilterMode.UNSCENTED, n_state, compiled.n_var, P0_base),
-        dtype=np.float64,
+    # UKF augments the state. Its default P0 uses the stationary first-order
+    # covariance in the first block and zeros in the second-order block.
+    p0_err, P0_state = stationary_covariance(
+        solved.policy.hx, solved.policy.B[:n_state, :], Q
     )
+    assert p0_err == 0
+    P0_ukf = np.zeros((2 * n_state, 2 * n_state), dtype=np.float64)
+    P0_ukf[:n_state, :n_state] = P0_state
 
     ll, bk = obj_unscented_base(
         compiled.construct_objective_cfunc().address,

@@ -159,8 +159,8 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
     # output, not oracles; their correctness rests upstream on the POST82 Dynare
     # parity, and they are recomputed whenever the filter contract changes.
     expected_logprior = -3.677756133346315
-    expected_loglik = -71.32113940094544
-    expected_logpost = -74.99889553429176
+    expected_loglik = -68.50851499458923
+    expected_logpost = -72.18627112793555
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(

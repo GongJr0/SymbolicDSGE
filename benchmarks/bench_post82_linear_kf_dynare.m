@@ -53,7 +53,9 @@ function bench_post82_linear_kf_dynare(workdir, warmup, reps, output_path)
   Y = [OutGap, Infl, Rate]' - d * ones(1, numel(OutGap));
   periods = size(Y, 2);
 
-  % Match the stationary covariance passed to the native public kalman call.
+  % `kalman_filter` requires an explicit P0. The full endogenous-state
+  % realization used here is larger than Dynare's reduced state transition,
+  % so derive its stationary covariance directly.
   P0 = R * Q * R';
   A_power = A;
   for i = 1:60

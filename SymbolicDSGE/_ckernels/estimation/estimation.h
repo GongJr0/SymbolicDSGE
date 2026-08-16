@@ -96,11 +96,12 @@ typedef struct {
 
   const f64 *ss_seed;  /* n_var: Newton seed for the steady state */
   const i8 *incidence; /* n_var: SDSGE_INC_* bits, unioned over the regimes */
-  const f64 *y;  /* T*n_obs */
-  const f64 *P0; /* n_var*n_var; UKF 2n_state*2n_state */
+  const f64 *y;        /* T*n_obs */
+  f64 *P0;       /* explicit n_var*n_var prior; NULL derives it after solve */
   const f64 *x0; /* n_var, or NULL */
   f64 jitter;
   int symmetrize;
+  int derive_P0; /* if P0 is NULL, derive it from the stationary covariance */
 
   sdsge_param_map pmap;
   sdsge_cov_spec q_spec;
@@ -117,10 +118,13 @@ typedef struct {
   f64 *std_r;  /* n_obs */
 
   f64 *filter_arena; /* scratch for the filter sizeof(f64)*<filter>_arena_size()
+                        reused for the P0 == NULL case, which occurs before the
+                        filter.
                       */
 
   /* Scratch for the per-draw solve, sized by sdsge_klein_solve1_arena_size or
-   * sdsge_sgu_klein_solve2_arena_size. Held for the run so no draw allocates. */
+   * sdsge_sgu_klein_solve2_arena_size. Held for the run so no draw allocates.
+   */
   f64 *solve_arena;
   i64 *solve_iarena;
 

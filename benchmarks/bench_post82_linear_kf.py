@@ -39,7 +39,6 @@ from pathlib import Path
 
 import numpy as np
 from scipy.io import loadmat
-from scipy.linalg import solve_discrete_lyapunov
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -74,11 +73,10 @@ class NativeCase:
     Q: np.ndarray
     R: np.ndarray
     y: np.ndarray
-    P0: np.ndarray
 
 
 def _prepare(periods: int) -> NativeCase:
-    """Build the solved model, deterministic panel, and stationary covariance."""
+    """Build the solved model and deterministic panel."""
     model, kalman = ModelParser(MODEL).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
@@ -114,8 +112,6 @@ def _prepare(periods: int) -> NativeCase:
     Q = np.asarray(backend.build_Q(compiled, base_params), dtype=np.float64)
     A = np.asarray(solved.policy.A, dtype=np.float64)
     B = np.asarray(solved.policy.B, dtype=np.float64)
-    P0 = solve_discrete_lyapunov(A, B @ Q @ B.T)
-    P0 = 0.5 * (P0 + P0.T)
     C, d = compiled.build_affine_measurement_matrices(
         base_params, OBSERVABLES, np.asarray(solved.policy.steady_state)
     )
@@ -129,7 +125,6 @@ def _prepare(periods: int) -> NativeCase:
         Q=Q,
         R=R,
         y=y,
-        P0=P0,
     )
 
 
@@ -165,7 +160,7 @@ def _time_native(case: NativeCase, warmup: int, reps: int) -> dict:
             case.Q,
             case.R,
             case.y,
-            P0=case.P0,
+            P0=None,
             _store_history=False,
         )
 
@@ -174,7 +169,7 @@ def _time_native(case: NativeCase, warmup: int, reps: int) -> dict:
             case.y,
             filter_mode="linear",
             observables=OBSERVABLES,
-            P0=case.P0,
+            P0=None,
         )
 
     loglik_times, loglik_result = _time(loglik_only, warmup, reps)

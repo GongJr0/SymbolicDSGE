@@ -13,6 +13,7 @@
 #define KF_ERR_MATRIX_CONDITION -1102
 #define KF_ERR_SINGULAR_MATRIX -1103
 #define KF_ERR_ALLOC -1104
+#define KF_ERR_LYAPUNOV_CONVERGENCE -1105
 
 /* Kalman hot-loop helpers. Parity oracle: the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.
@@ -66,6 +67,17 @@ void kf_joseph_cov(const f64 *K, const f64 *C, const f64 *P_pred, const f64 *R,
 /* out(n,n) := sym(B(n,k) Q(k,k) B^T), via temp_nk(n,k) */
 void kf_build_bqbt(const f64 *B, const f64 *Q, f64 *temp_nk, f64 *out, i64 n,
                    i64 k);
+
+/* Solve the discrete Lyapunov equation
+ *
+ *   P = A P A^T + B Q B^T
+ *
+ * by matrix doubling. Returns KF_OK or KF_ERR_LYAPUNOV_CONVERGENCE when
+ * the iteration does not reach `tol` within `max_iter`. */
+arena_size kf_stationary_covariance_arena_size(i64 n, i64 k);
+int kf_stationary_covariance(const f64 *A, const f64 *B, const f64 *Q, f64 tol,
+                             i64 max_iter, f64 *SDSGE_RESTRICT arena,
+                             f64 *SDSGE_RESTRICT out, i64 n, i64 k);
 
 /* out(k,m) := Q(k,k) @ (B^T C^T)(k,m), via temp_km(k,m) */
 void kf_build_shock_projection(const f64 *B, const f64 *C, const f64 *Q,

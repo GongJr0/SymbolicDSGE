@@ -87,12 +87,6 @@ class DSGESolver:
         var_funcs = [name_to_func[name] for name in var_order]
         idx = layout.idx
 
-        if kalman_conf is not None:
-            kalman_conf = replace(
-                kalman_conf,
-                P0=self._resolve_p0(kalman_conf.P0, layout, desugared.generated),
-            )
-
         # Substitutions
         cur_syms = [Symbol(f"cur_{n}") for n in var_order]
         fwd_syms = [Symbol(f"fwd_{n}") for n in var_order]

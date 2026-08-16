@@ -1356,13 +1356,9 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     rbc_second_order_test_model_path,
 ) -> None:
     model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    n_declared = len(model.variables.variables)
     solver = DSGESolver(
         model,
-        KalmanConfig(
-            R=np.array([[0.01]], dtype=np.float64),
-            P0=0.1 * np.eye(n_declared, dtype=np.float64),
-        ),
+        KalmanConfig(R=np.array([[0.01]], dtype=np.float64)),
     )
     compiled = solver.compile()
     reference = solver.solve(compiled=compiled, order=2)

@@ -1,4 +1,9 @@
-from .._ckernels.kalman import kalman_hot_loop, ukf_hot_loop, ekf_hot_loop
+from .._ckernels.kalman import (
+    stationary_covariance,
+    kalman_hot_loop,
+    ukf_hot_loop,
+    ekf_hot_loop,
+)
 from .errors import (
     ErrorCode,
     ShapeMismatchError,
@@ -183,6 +188,57 @@ def _sym(P: NDF) -> NDF:
     return 0.5 * (P + P.T)
 
 
+def _initialize_P0(
+    P0: NDF | None, A: NDF, B: NDF, Q: NDF, n: int, symmetrize: bool
+) -> NDF:
+    """Initialize the state covariance matrix P0.
+
+    If P0 is provided, it is used as is. If not, the stationary covariance
+    is computed from A, B, and Q. If that fails, a large diagonal matrix is
+    returned.
+    """
+    if P0 is not None:
+        P0 = P0.reshape(n, n)
+        if symmetrize:
+            return _sym(P0)
+        return P0
+    else:
+        err, P0 = stationary_covariance(A, B, Q)
+        if err != 0:
+            P0 = np.eye(n, dtype=float64)
+        return P0
+
+
+def _initalize_P0_unscented(
+    P0: NDF | None,
+    A: NDF,
+    B: NDF,
+    Q: NDF,
+    n_state: int,
+    symmetrize: bool,
+) -> NDF:
+    """Initialize the state covariance matrix P0 for the unscented Kalman filter.
+
+    If P0 is provided, it is used as is. If not, a large diagonal matrix is
+    returned.
+    """
+    n_z = 2 * n_state
+    out = np.zeros((n_z, n_z), dtype=float64)
+    if P0 is not None:
+        if P0.shape == (n_z, n_z):
+            out[:] = P0
+        else:
+            out[:n_state, :n_state] = P0.reshape(n_state, n_state)
+        if symmetrize:
+            out = _sym(out)
+    else:
+        err, P = stationary_covariance(A, B, Q)
+        if err != 0:
+            P = np.eye(n_state, dtype=float64)
+        out[:n_state, :n_state] = P
+    return out
+
+
 # Static & Parametrized Kalman Filter (written to act with SolvedModel object attributes)
 class KalmanFilter:
     _shape_validate = staticmethod(_shape_validate)
@@ -220,10 +276,7 @@ class KalmanFilter:
         )
 
         x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
-        P_prev = P0.reshape(n, n) if P0 is not None else eye(n, dtype=float64) * 1e2
-
-        if symmetrize:
-            P_prev = _sym(P_prev)
+        P_prev = _initialize_P0(P0, A, B, Q, n, symmetrize)
 
         err, out = kalman_hot_loop(
             T,
@@ -336,7 +389,7 @@ class KalmanFilter:
         R: NDF,
         y: NDF,
         z0: NDF,
-        P0: NDF,
+        P0: NDF | None,
         alpha: float = 1.0,
         beta: float = 2.0,
         kappa: float = 1.0,
@@ -416,13 +469,14 @@ class KalmanFilter:
             raise ShapeMismatchError("R", f"({n_obs}, {n_obs})", str(R.shape))
         if z0.shape != (n_z,):
             raise ShapeMismatchError("z0", f"({n_z},)", str(z0.shape))
+
+        P0 = _initalize_P0_unscented(P0, hx, bu[:n_state, :], Q, n_state, symmetrize)
         if P0.shape != (n_z, n_z):
             raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
 
         if symmetrize:
             Q = _sym(Q)  # pyright: ignore
             R = _sym(R)  # pyright: ignore
-            P0 = _sym(P0)  # pyright: ignore
 
         err, out = ukf_hot_loop(
             meas_addr,
@@ -641,10 +695,7 @@ class KalmanFilter:
         )
 
         x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
-        P0 = P0.reshape(n, n) if P0 is not None else eye(n, dtype=float64) * 1e2
-        if symmetrize:
-            P0 = _sym(P0)
-
+        P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
         err, out = ekf_hot_loop(
             meas_addr,
             jac_addr,

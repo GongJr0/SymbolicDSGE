@@ -626,13 +626,9 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
 
 def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
     model, _ = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
-    n_var = len(model.variables.variables)
     solver = DSGESolver(
         model,
-        KalmanConfig(
-            R=np.array([[0.01]], dtype=np.float64),
-            P0=0.1 * np.eye(n_var, dtype=np.float64),
-        ),
+        KalmanConfig(R=np.array([[0.01]], dtype=np.float64)),
     )
     solved = solver.solve(solver.compile(), order=2)
     T = 5

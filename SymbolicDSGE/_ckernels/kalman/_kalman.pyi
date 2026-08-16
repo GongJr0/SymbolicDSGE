@@ -35,6 +35,15 @@ def kalman_hot_loop(
 ]:
     """Run the linear Kalman filter; mirrors numba ``_kalman_hot_loop``."""
 
+def stationary_covariance(
+    A: _F64,
+    B: _F64,
+    Q: _F64,
+    tolerance: float = ...,
+    max_iterations: int = ...,
+) -> tuple[int, _F64]:
+    """Solve ``P = A P A.T + B Q B.T`` and return ``(status, P)``."""
+
 def ekf_hot_loop(
     meas_addr: int,
     jac_addr: int,

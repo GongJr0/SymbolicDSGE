@@ -78,7 +78,7 @@ class PreparedFilterRun:
     mode: str
     meas_addr: int
     jac_addr: int
-    P0: NDF
+    P0: NDF | None
     kf_jitter: float64
     kf_sym: bool
 
@@ -539,7 +539,7 @@ class PyObjCommon:
     incidence: NDArray[np.int8]  # n_var: SDSGE_INC_* bits per variable
 
     y: NDF  # T*n_obs
-    P0: NDF  # n_var*n_var; UKF 2*n_state square
+    P0: NDF | None  # n_var*n_var; UKF 2*n_state square
     x0: NDF | None  # n_var, or None
     jitter: float
     symmetrize: bool
@@ -929,23 +929,13 @@ def prepare_filter_run(
     mode = filter_mode
 
     kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
-
-    kP0 = None
-    if kalman is not None:
-        kP0 = kalman.P0
-
     return PreparedFilterRun(
         observables=obs,
         y_reordered=y_reordered,
         mode=mode,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         jac_addr=compiled.construct_observable_jacobian_cfunc(obs).address,
-        P0=_resolve_P0(
-            FilterMode(mode),
-            compiled.n_state,
-            compiled.n_var,
-            kP0 if P0 is None else P0,
-        ),
+        P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
         kf_jitter=kf_jitter,
         kf_sym=kf_sym,
     )

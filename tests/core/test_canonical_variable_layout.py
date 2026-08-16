@@ -26,20 +26,6 @@ def _write_misordered_test_model(tmp_path):
     # Deliberately put controls and the unshocked variable first. The canonical
     # layout should still lead with the states.
     data["variables"] = ["Pi", "x", "r_star", "u", "v", "r"]
-    data["kalman"] = {
-        "P0": {
-            "mode": "diag",
-            "diag": {
-                "u": 1.0,
-                "v": 2.0,
-                "r": 3.0,
-                "Pi": 4.0,
-                "x": 5.0,
-                "r_star": 6.0,
-            },
-        },
-    }
-
     path = tmp_path / "misordered_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return path
@@ -141,12 +127,6 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
         ki._build_Q(),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
-    # P0 is parsed by name and permuted into canonical order, so the diagonal
-    # follows the states (u:1, v:2, r:3) and then the controls (Pi:4, x:5,
-    # r_star:6) rather than the order the yaml wrote them in.
-    np.testing.assert_allclose(
-        compiled.kalman.P0, np.diag([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    )
 
 
 def test_simulation_shock_unpack_accepts_shocks_by_name(tmp_path):
@@ -198,9 +178,8 @@ def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
     assert compiled.layout.generated_names == ("u_lag1",)
     assert compiled.idx["u_lag1"] == 3
 
-    # declared_names is the user's own list and nothing else, which is what a
-    # dense ss_seed or a parse-time P0 spans. A dense x0 reaches the aux too, so
-    # it spans the concatenation, minted last.
+    # declared_names is the user's own list and nothing else. A dense x0 reaches
+    # the aux too, so it spans the concatenation, minted last.
     layout = compiled.layout
     assert set(layout.declared_names) == {"Pi", "x", "r_star", "u", "v", "r"}
     assert {*layout.declared_names, *layout.generated_names} == set(compiled.var_names)
