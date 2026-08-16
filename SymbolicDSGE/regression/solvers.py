@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
 from numba import njit
 import numpy as np
 from numpy import float64, asarray
@@ -107,10 +106,10 @@ def chol_solve(X: NDF, y: NDF) -> tuple[NDF, NDF, int]:
             RANK_DEFICIENT,
         )
 
-    L = cholesky(G)
+    L = asarray(cholesky(G), dtype=float64)
     z = solve(L, g)
     coef: NDF = asarray(solve(L.T, z), dtype=float64)
-    return coef, cast(NDF, L), OK
+    return coef, L, OK
 
 
 @njit(cache=True)
@@ -139,10 +138,10 @@ def chol_solve_L2(
         dof = float64(0.0)
         for i in range(p):
             dof += smoother[i, i]
-        L = cholesky(G)
+        L = asarray(cholesky(G), dtype=float64)
         z = solve(L, g)
         coef: NDF = asarray(solve(L.T, z), dtype=float64)
-        return coef, cast(NDF, L), dof, OK  # pyright: ignore
+        return coef, L, dof, OK  # pyright: ignore
     except Exception:
         return (
             np.full(p, np.nan, dtype=float64),
