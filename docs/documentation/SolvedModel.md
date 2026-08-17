@@ -192,9 +192,9 @@ SolvedModel.kalman(
     observables: list[str] | None = None, # (1)!
     x0: ndarray | None = None, # (2)!
     jitter: float | None = None, # (3)!
-    symmetrize: bool | None = None, # (4)!
+    symmetrize: bool = False,
+    joseph_cov: bool = True,
     return_shocks: bool = False,
-    P0: ndarray | None = None, # (5)!
     R: ndarray | None = None,
     _debug: bool = False
 ) -> FilterResult | UnscentedFilterResult
@@ -203,8 +203,6 @@ SolvedModel.kalman(
 1. `None`: Use all compiled observables in model order.
 2. `None`: Use a zero vector.
 3. `None`: Use `0.0`.
-4. `None`: Use `False`.
-5. `None`: Use `P0` from `KalmanConfig` (the parsed diagonal matrix).
 
 Run a Kalman Filter application on the observables specified.
 
@@ -226,6 +224,7 @@ __Inputs:__
 | x0 | Initial state vector. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
+| joseph_cov | Use Joseph form for covariance update if `True`. `filter_mode == "unscented"` has it's own update mechanism and will ignore this parameter. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
 | P0 | Initial state covariance override. It follows the same timing as `x0` at the first observation. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
 | R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |

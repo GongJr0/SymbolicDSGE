@@ -8,7 +8,7 @@ from sympy import Symbol
 
 import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.core.solver import DSGESolver
-from SymbolicDSGE.estimation.estimator import Estimator
+from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult
 
 
@@ -206,7 +206,7 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
     # A log-transformed prior means the dict theta0 (given in parameter space) is
     # mapped through the transform to the unconstrained theta the driver expects;
     # a positive psi_pi must land in a finite basin rather than blowing up.
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
@@ -227,7 +227,7 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
 
 
 def _normal_prior(mean, std):
-    return Estimator.make_prior(
+    return make_prior(
         distribution="normal",
         parameters={"mean": mean, "std": std},
         transform="identity",

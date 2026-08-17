@@ -14,7 +14,8 @@ reference_filter_step(
     P0: ndarray | None = None,
     R: ndarray | None = None,
     jitter: float | None = None,
-    symmetrize: bool | None = None,
+    symmetrize: bool = True,
+    joseph_cov: bool = True,
     return_shocks: bool = False,
 ) -> MCStep
 ```
@@ -34,7 +35,8 @@ __Inputs:__
 | P0 | `None` | Initial state covariance override with the same timing as `x0`. `None` uses the `P0` matrix from the reference model's `KalmanConfig`. |
 | R | `None` | Measurement error covariance override. |
 | jitter | `None` | Filter jitter override. |
-| symmetrize | `None` | Symmetrization override. |
+| symmetrize | `True` | Symmetrize covariance matrices during filtering. |
+| joseph_cov | `True` | Use the Joseph covariance update for linear and extended filtering. Set it to `False` for the simplified update, which is faster but less numerically robust. It does not affect unscented filtering. |
 | return_shocks | `False` | Return shock estimates when supported by the selected filter mode. |
 
 __Downstream Fields:__

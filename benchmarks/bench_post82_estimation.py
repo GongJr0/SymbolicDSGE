@@ -37,7 +37,7 @@ SHOCK_NAMES = ["e_g", "e_z", "e_r"]
 
 sys.path.insert(0, str(ROOT))
 from SymbolicDSGE import DSGESolver, ModelParser  # noqa: E402
-from SymbolicDSGE.estimation import Estimator  # noqa: E402
+from SymbolicDSGE.estimation import Estimator, make_prior  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,7 @@ def _make_estimator(
     priors = None
     if routine == "map":
         priors = {
-            "psi_pi": Estimator.make_prior(
+            "psi_pi": make_prior(
                 distribution="normal",
                 parameters={"mean": 2.0, "std": 0.5},
                 transform="identity",

@@ -14,6 +14,7 @@ from SymbolicDSGE import Estimator
     Most users should call [`DSGESolver.estimate`](./DSGESolver.md) or [`DSGESolver.estimate_and_solve`](./DSGESolver.md) instead of constructing `Estimator` directly.
 
 ## Constructor
+
 ```python
 Estimator(
     *,
@@ -27,7 +28,8 @@ Estimator(
     ss_seed: np.ndarray | dict[str, float] | None = None,
     x0: np.ndarray | None = None,
     jitter: float | None = None,
-    symmetrize: bool | None = None,
+    symmetrize: bool = True,
+    joseph_cov: bool = True,
     R: np.ndarray | None = None, # (5)!
     P0: np.ndarray | None = None, # (7)!
 )
@@ -44,73 +46,10 @@ Estimator(
 ???+ info "Filter Initial Conditions"
     In linear and extended likelihoods, `x0` and `P0` are the prior mean and covariance for the first observation. In unscented likelihoods, they describe the state and covariance before the first observation.
 
-## Utility
-```python
-Estimator.make_prior(
-    *,
-    distribution: str, # (1)!
-    parameters: dict[str, Any],
-    transform: str, # (2)!
-    transform_kwargs: dict[str, Any] | None = None,
-) -> Prior
-```
-
-1. Distribution family string.
-2. Transform method string.
-
-Equivalent to `#!python SymbolicDSGE.bayesian.make_prior(...)`.
-
-&nbsp;
-
-```python
-Estimator.to_spec(
-    *,
-    method: str | None = None, # (1)!
-    result: OptimizationResult | MCMCResult | None = None, # (2)!
-    priors: Mapping[str, PriorSpec] | None = None, # (3)!
-    observables: Sequence[str] | None = None,
-    method_kwargs: Mapping[str, Any] | None = None,
-    posterior_point: str = "mean",
-) -> EstimationSpec
-```
-
-1. `"mle"`, `"map"`, or `"mcmc"`. Required when `result` is omitted.
-2. Optional live result. When supplied, the method, method kwargs, and bounds are inferred from the result unless explicitly overridden.
-3. `PriorSpec` per estimated parameter. Required for `"map"` / `"mcmc"` when priors cannot be inferred from the live estimator priors.
-
-Project the estimator's configuration to a serializable [`EstimationSpec`](./bundle/index.md#estimation-spec-and-result-types) for bundling. The estimated parameter names, their calibration values as `initial`, and the observables are captured automatically; `method`, `method_kwargs`, and `bounds` can be supplied directly or inferred from `result`.
-
-```python
-spec = estimator.to_spec(
-    method="map",
-    priors={
-        "psi_pi": PriorSpec(distribution="normal", parameters={"mean": 1.5, "std": 0.25}),
-        "psi_x":  PriorSpec(distribution="normal", parameters={"mean": 0.5, "std": 0.2}),
-    },
-)
-```
-
-???+ info "Counterpart on the loading side"
-    `#!python loaded.estimation.spec.to_estimator_inputs()` is the inverse. It lowers a loaded spec back to concrete arguments for `#!python DSGESolver.estimate(...)`. See [`EstimatorInputs`](./bundle/index.md#estimation-spec-and-result-types).
-
-__Inputs:__
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| method | Estimation method recorded on the spec. Required when `result` is omitted. |
-| result | Optional live `OptimizationResult` or `MCMCResult` used to infer method, method kwargs, and bounds. |
-| priors | `PriorSpec` per estimated parameter; required for `"map"` / `"mcmc"` when not inferred from live estimator priors. |
-| observables | Override the estimator's observables; defaults to `Estimator.observables`. |
-| method_kwargs | Method-specific kwargs (e.g. optimizer options). |
-| posterior_point | `"mean"`, `"map"`, or `"last"`. How the GUI summarizes an MCMC run. |
-
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python EstimationSpec` | Serializable spec ready for `#!python BundleBuilder.add_estimation(...)`. |
+`joseph_cov=True` uses the Joseph covariance update for linear and extended likelihoods. Set it to `False` for the simplified update, which is faster but less numerically robust. It does not affect unscented likelihoods.
 
 ## Likelihood / Posterior Evaluation
+
 ```python
 Estimator.theta0() -> np.ndarray
 Estimator.loglik(theta: np.ndarray) -> float
@@ -122,6 +61,7 @@ Estimator.logpost(theta: np.ndarray) -> float
     `theta` is unconstrained internal space. Estimator applies prior transforms to map between unconstrained `theta` and constrained model parameters.
 
 ## MLE
+
 ```python
 Estimator.mle(
     *,
@@ -146,6 +86,7 @@ Estimator.mle(
 4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
 
 ## MAP
+
 ```python
 Estimator.map(
     *,
@@ -173,6 +114,7 @@ Estimator.map(
     `mle` and `map` run entirely in the native backend, which ships a curated set of optimizers with no scipy fallback. Only `#!python "L-BFGS-B"` (default; quasi-Newton with a finite-difference gradient) and `#!python "Nelder-Mead"` (gradient-free) are supported; any other `method` raises. Each optimizer's tuning parameters are passed as explicit keyword arguments: the L-BFGS-B group (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`) and the Nelder-Mead group (`xatol`, `fatol`).
 
 ## MCMC
+
 ```python
 Estimator.mcmc(
     *,
@@ -204,9 +146,11 @@ Estimator.mcmc(
     `random_state` seeds the native sampler, which advances numpy's own PCG64 stream. A fixed `random_state` reproduces the native chain exactly; that chain is statistically equivalent to the pre-native numpy sampler, not bit-identical to it.
 
 ## Result Objects
+
 MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native optimizer's result struct; scipy is not involved.
 
 ### OptimizationResult
+
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | kind | `#!python str` | `"mle"` or `"map"` |
@@ -222,6 +166,7 @@ MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native opt
 | nit | `#!python int | None` | Iterations |
 
 ### MCMCResult
+
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | param_names | `#!python list[str]` | Parameter order for samples |

@@ -910,7 +910,7 @@ def build_C_d_from_cfunc(
 
 def resolve_filter_options(
     jitter: float | float64 | None,
-    symmetrize: bool | None,
+    symmetrize: bool,
 ) -> tuple[float64, bool]:
     kf_jitter = float64(0.0) if jitter is None else float64(jitter)
     kf_sym = False if symmetrize is None else bool(symmetrize)
@@ -925,7 +925,7 @@ def prepare_filter_run(
     observables: list[str] | None,
     filter_mode: str,
     jitter: float | float64 | None,
-    symmetrize: bool | None,
+    symmetrize: bool,
     joseph_cov: bool = True,
     P0: NDF | None = None,
 ) -> PreparedFilterRun:
@@ -1127,7 +1127,7 @@ def evaluate_loglik(
     ss_seed: NDF | dict[str, float] | None,
     x0: NDF | None,
     jitter: float | float64 | None,
-    symmetrize: bool | None,
+    symmetrize: bool = True,
     joseph_cov: bool = True,
     R: NDF | None,
     P0: NDF | None = None,

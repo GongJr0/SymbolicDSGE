@@ -54,6 +54,7 @@ KalmanFilter.run(
     P0: np.ndarray[float64] | None = None,
     return_shocks: bool = False,
     symmetrize: bool = True,
+    joseph_cov: bool = True,
     jitter: float = 0.0,
     steady_state: np.ndarray[float64] | None = None,
 ) -> FilterResult
@@ -76,6 +77,7 @@ __Inputs:__
 | P0 | Prior state covariance for the first observation. Defaults to a large diagonal. |
 | return_shocks | If `#!python True`, compute and return estimated shocks. |
 | symmetrize | Symmetrize covariance matrices each step if `#!python True`. |
+| joseph_cov | Use the Joseph covariance update if `#!python True`. Set it to `#!python False` for the simplified update, which is faster but less numerically robust. |
 | jitter | Jitter term added to $S_t$ when Cholesky factorization fails. |
 | steady_state | Optional state offset. When supplied, `x_pred` and `x_filt` are returned in levels and recorded as `FilterResult.constant`; otherwise they are gaps. |
 
@@ -95,6 +97,7 @@ KalmanFilter.run_extended(
     P0: np.ndarray[float64] | None = None,
     return_shocks: bool = False,
     symmetrize: bool = True,
+    joseph_cov: bool = True,
     jitter: float = 0.0,
     compute_y_filt: bool = True,
     steady_state: np.ndarray[float64] | None = None,

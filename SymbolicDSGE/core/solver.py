@@ -736,7 +736,7 @@ class DSGESolver:
         x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
-        symmetrize: bool | None = None,
+        symmetrize: bool = True,
         R: NDArray | None = None,
     ) -> "Estimator":
         # Lazy import prevents a solver->estimation->solver import cycle.
@@ -787,7 +787,7 @@ class DSGESolver:
         x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
-        symmetrize: bool | None = None,
+        symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
     ) -> Any:
@@ -837,7 +837,7 @@ class DSGESolver:
         x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
-        symmetrize: bool | None = None,
+        symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
     ) -> tuple[Any, SolvedModel]:

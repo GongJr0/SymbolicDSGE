@@ -9,7 +9,7 @@ from sympy import Matrix, Symbol
 
 import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
-from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms import (
     AffineLogitTransform,
@@ -277,7 +277,7 @@ def test_mle_records_optimizer_config(post82_estimator):
 
 
 def _normal_prior(mean, std):
-    return Estimator.make_prior(
+    return make_prior(
         distribution="normal",
         parameters={"mean": mean, "std": std},
         transform="identity",
@@ -381,7 +381,7 @@ def test_mcmc_clones_generator_input_state(mcmc_estimator):
 
 
 def test_estimator_make_prior_utility():
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
@@ -436,7 +436,7 @@ def test_estimation_reports_warning_count_once(post82_estimator, capsys):
 
 
 def test_theta_to_params_uses_prior_inverse_transform():
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
@@ -453,7 +453,7 @@ def test_theta_to_params_uses_prior_inverse_transform():
 
 
 def test_params_to_theta_applies_forward_transform_for_mapping():
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
@@ -493,7 +493,7 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block():
 
 
 def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="lkj_chol",
         parameters={"eta": 2.0, "K": 2},
         transform="cholesky_corr",
@@ -600,7 +600,7 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
 def test_mcmc_reports_samples_in_constrained_space_for_log_transform(post82_estimator):
     # sig_r is a shock std (positive support -> Log transform), so mcmc must report
     # its samples in constrained (positive) space, not the unconstrained draw space.
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
@@ -624,7 +624,7 @@ def test_loglik_overrides_parameters_per_candidate(monkeypatch):
         return float64(0.0)
 
     monkeypatch.setattr(est_backend, "evaluate_loglik", _capture)
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
@@ -1084,7 +1084,7 @@ def test_mle_full_dense_corr_set_promotes_to_cpc_block():
 def test_spd_std_member_rejects_conflicting_prior_transform():
     # An Identity-transform prior on a variance would map onto R, not (0, inf),
     # breaking the shared theta<->param map; rejected once, at construction.
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
@@ -1100,7 +1100,7 @@ def test_spd_std_member_rejects_conflicting_prior_transform():
 
 
 def test_logprior_base_branch_and_logpost(monkeypatch):
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",

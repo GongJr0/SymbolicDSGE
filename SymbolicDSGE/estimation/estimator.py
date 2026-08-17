@@ -52,23 +52,6 @@ class Estimator:
     - adaptive random-walk Metropolis MCMC (`mcmc`)
     """
 
-    @staticmethod
-    def make_prior(
-        *,
-        distribution: str,
-        parameters: dict[str, Any],
-        transform: str,
-        transform_kwargs: dict[str, Any] | None = None,
-    ) -> Prior:
-        from ..bayesian.priors import make_prior as _make_prior
-
-        return _make_prior(
-            distribution=distribution,
-            parameters=parameters,
-            transform=transform,
-            transform_kwargs=transform_kwargs,
-        )
-
     @property
     def _reserved_matrix_keys(self) -> tuple[MatrixPriorKey, MatrixPriorKey]:
         return ("R_corr", "Q_corr")
@@ -94,7 +77,7 @@ class Estimator:
         ss_seed: NDF | dict[str, float] | None = None,
         x0: NDF | None = None,
         jitter: float | float64 | None = None,
-        symmetrize: bool | None = None,
+        symmetrize: bool = True,
         joseph_cov: bool = True,
         R: NDF | None = None,
         P0: NDF | None = None,

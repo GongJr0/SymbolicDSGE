@@ -24,7 +24,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult, MAPResult
 
 # The ``post82`` fixture lives in tests/estimation/conftest.py.
@@ -86,7 +86,7 @@ def test_mle_nelder_mead_oracle(post82):
 
 
 def test_map_lbfgsb_oracle(post82):
-    prior = Estimator.make_prior(
+    prior = make_prior(
         distribution="normal",
         parameters={"mean": 2.0, "std": 0.5},
         transform="identity",

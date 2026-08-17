@@ -56,29 +56,11 @@ kalman:
 
 ## State Covariance
 
-State Covariance ($P$) defines the inter-state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an optional initial guess $P_0$ is provided through the configuration. `P0` supports diagonal matrices and identity initialization. `P0` defaults to an identity matrix if not specified. Initial guesses are not relevant beyond an often short burn in period, but a well specified $P_0$ guess can help convergence speeds. In the config we define a parent `P0:` and populate the following fields:
-
-```yaml
-kalman:
-    P0:
-        mode: diag # (1)!
-        diag: # (2)!
-            g: 1.0
-            z: 1.0
-            r: 1.0
-            Pi: 1.0
-            x: 1.0
-```
-
-1. `P0` construction mode. `#!python "eye"` uses $I_n$ while `#!python "diag"` constructs the matrix from below defined diagonal values. 
-2. Diagonal entries of the covariance matrix.
-
-???+ note "Diagonal Values"
-    The `diag` field is directly used as the matrix values. Therefore, entries in the `diag` field correspond to variances instead of standard deviations.
+State Covariance ($P$) defines the inter-state variation through a covariance matrix. $P$ is an inferred parameter in Kalman Filters, but an optional initial guess $P_0$ is provided through `SolvedModel.kalman(..., P0=...)`. If `P0` is not provided, the filter use the stationary covariance of the state transition. This is computed by solving the discrete Lyapunov equation $P = A P A^\top + Q$ where $A$ is the state transition matrix and $Q$ is the process noise covariance.
 
 ## Filter Options
 
-`jitter` and `symmetrize` are runtime options on `SolvedModel.kalman(...)`. `jitter` is added to covariance matrices if their Cholesky decomposition fails. `symmetrize=True` applies $(M + M^\top)/2$ to covariance matrices during filtering.
+`jitter`, `symmetrize`, and `joseph_cov` are runtime options on `SolvedModel.kalman(...)`. `jitter` is added to covariance matrices if their Cholesky decomposition fails. `symmetrize=True` applies $(M + M^\top)/2$ to covariance matrices during filtering. `joseph_cov=True` uses the Joseph covariance update; set it to `False` for the faster, simplified update when its lower numerical robustness is acceptable. It applies to linear and extended filtering only.
 
 ## Conclusion
 

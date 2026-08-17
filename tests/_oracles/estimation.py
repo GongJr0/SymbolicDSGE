@@ -379,7 +379,7 @@ def build_post82_estimator(
     from sympy import Symbol
 
     from SymbolicDSGE import ModelParser, DSGESolver
-    from SymbolicDSGE.estimation import Estimator
+    from SymbolicDSGE.estimation import Estimator, make_prior
 
     path = (
         Path(__file__).resolve().parent.parent / "fixtures" / "models" / "POST82.yaml"
@@ -417,12 +417,12 @@ def build_post82_estimator(
 
     if priors is None:
         priors = {
-            "psi_pi": Estimator.make_prior(
+            "psi_pi": make_prior(
                 distribution="normal",
                 parameters={"mean": 2.0, "std": 0.5},
                 transform="identity",
             ),
-            "rho_r": Estimator.make_prior(
+            "rho_r": make_prior(
                 distribution="normal",
                 parameters={"mean": 0.8, "std": 0.1},
                 transform="identity",
