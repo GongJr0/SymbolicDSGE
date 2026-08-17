@@ -58,6 +58,7 @@ typedef struct {
   i64 m;
   i64 k;
   int symmetrize;
+  int joseph_cov;
   f64 jitter;
   int return_shocks;
 } sdsge_mc_filter_linear_step_ctx;
@@ -71,6 +72,7 @@ typedef struct {
   i64 k;
   i64 n_par;
   int symmetrize;
+  int joseph_cov;
   f64 jitter;
   int return_shocks;
 } sdsge_mc_filter_extended_step_ctx;
@@ -97,33 +99,45 @@ int sdsge_mc_payload_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                             f64 *SDSGE_RESTRICT float_out,
                             i64 *SDSGE_RESTRICT int_work,
                             i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_raw_model_data_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_simulate_order1_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_simulate_order2_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_filter_linear_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_filter_extended_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
-int sdsge_mc_filter_unscented_runner(
-    i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
-    f64 *SDSGE_RESTRICT float_out, i64 *SDSGE_RESTRICT int_work,
-    i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_raw_model_data_runner(i64 rep_idx,
+                                   f64 *SDSGE_RESTRICT float_in_work,
+                                   f64 *SDSGE_RESTRICT float_out,
+                                   i64 *SDSGE_RESTRICT int_work,
+                                   i64 *SDSGE_RESTRICT int_out,
+                                   const void *ctx);
+int sdsge_mc_simulate_order1_runner(i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx);
+int sdsge_mc_simulate_order2_runner(i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx);
+int sdsge_mc_filter_linear_runner(i64 rep_idx,
+                                  f64 *SDSGE_RESTRICT float_in_work,
+                                  f64 *SDSGE_RESTRICT float_out,
+                                  i64 *SDSGE_RESTRICT int_work,
+                                  i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_filter_extended_runner(i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx);
+int sdsge_mc_filter_unscented_runner(i64 rep_idx,
+                                     f64 *SDSGE_RESTRICT float_in_work,
+                                     f64 *SDSGE_RESTRICT float_out,
+                                     i64 *SDSGE_RESTRICT int_work,
+                                     i64 *SDSGE_RESTRICT int_out,
+                                     const void *ctx);
 
 /* Payload materialization. ``input_batched`` selects input[rep_idx] from a
- * leading replication axis; otherwise the same input span is copied each time. */
+ * leading replication axis; otherwise the same input span is copied each time.
+ */
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, i64 n,
                             int input_batched, i64 rep_idx,
                             f64 *SDSGE_RESTRICT output);
@@ -175,35 +189,34 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
  * eps_hat (when return_shocks), loglik]. */
 i64 sdsge_filter_linear_input_arena_size(i64 n, i64 m, i64 k, i64 T);
 i64 sdsge_filter_linear_output_arena_size(i64 n, i64 m, i64 k, i64 T,
-                                           int return_shocks);
+                                          int return_shocks);
 int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT scratch_arena, i64 T, i64 n,
-                             i64 m, i64 k, int symmetrize, f64 jitter,
-                             int return_shocks,
+                             i64 m, i64 k, int symmetrize, int joseph_cov,
+                             f64 jitter, int return_shocks,
                              f64 *SDSGE_RESTRICT output_arena);
 
 /* Extended filter input is [A(n,n), B(n,k), params(n_par), Q(k,k), R(m,m),
  * y(T,m), x0(n), P0(n,n)]. Output has the linear filter layout. */
 i64 sdsge_filter_extended_input_arena_size(i64 n, i64 m, i64 k, i64 T,
-                                            i64 n_par);
+                                           i64 n_par);
 i64 sdsge_filter_extended_output_arena_size(i64 n, i64 m, i64 k, i64 T,
-                                             int return_shocks);
+                                            int return_shocks);
 int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                                f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                meas_fn jac, i64 T, i64 n, i64 m, i64 k,
-                               i64 n_par, int symmetrize, f64 jitter,
-                               int return_shocks,
+                               i64 n_par, int symmetrize, int joseph_cov,
+                               f64 jitter, int return_shocks,
                                f64 *SDSGE_RESTRICT output_arena);
 
 /* Unscented input is [hx(ns,ns), gx(nc,ns), bx(ns,ne), hxx(ns,ns,ns),
  * gxx(nc,ns,ns), hss(ns), gss(nc), steady_state(ns+nc), params(n_par),
  * Q(ne,ne), R(no,no), obs(T,no), z0(2*ns), P0(2*ns,2*ns)]. Output follows
  * UnscentedFilterRawResult field order, omitting eps_hat (always None). */
-i64 sdsge_filter_unscented_input_arena_size(i64 n_state, i64 n_ctrl,
-                                             i64 n_exog, i64 n_obs, i64 T,
-                                             i64 n_par);
-i64 sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
-                                              i64 n_obs, i64 T);
+i64 sdsge_filter_unscented_input_arena_size(i64 n_state, i64 n_ctrl, i64 n_exog,
+                                            i64 n_obs, i64 T, i64 n_par);
+i64 sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl, i64 n_obs,
+                                             i64 T);
 i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
                                 f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                 i64 T, i64 n_state, i64 n_ctrl, i64 n_exog,

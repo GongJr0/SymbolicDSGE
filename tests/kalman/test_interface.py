@@ -266,23 +266,9 @@ def test_interface_init_raises_if_reordering_fails(monkeypatch):
         )
 
 
-def test_get_symmetrize_and_jitter_cover_overrides_and_defaults():
-    ki = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=None,
-                symmetrize=None,
-                P0=np.eye(3, dtype=FLOAT),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
+def test_get_jitter_cover_overrides_and_defaults():
+    ki = _make_shell()
 
-    assert ki._get_symmetrize(True) is True
-    assert ki._get_symmetrize(None) is False
     assert ki._get_jitter(0.25) == pytest.approx(0.25)
     assert ki._get_jitter(None) == pytest.approx(0.0)
 

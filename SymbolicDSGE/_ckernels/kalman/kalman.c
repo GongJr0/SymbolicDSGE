@@ -112,6 +112,13 @@ void kf_joseph_cov(const f64 *SDSGE_RESTRICT K, const f64 *SDSGE_RESTRICT C,
   }
 }
 
+void kf_simple_cov(const f64 *SDSGE_RESTRICT K, const f64 *SDSGE_RESTRICT PCt,
+                   const f64 *SDSGE_RESTRICT P_pred, f64 *SDSGE_RESTRICT out,
+                   i64 n, i64 m) {
+  sdsge_matmul_abt(K, PCt, out, n, m, n);
+  sdsge_vsub(P_pred, out, out, n * n);
+}
+
 void kf_build_bqbt(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RESTRICT Q,
                    f64 *SDSGE_RESTRICT temp_nk, f64 *SDSGE_RESTRICT out, i64 n,
                    i64 k) {
@@ -212,15 +219,14 @@ void kf_build_shock_projection(const f64 *SDSGE_RESTRICT B,
 }
 
 arena_size kf_arena_size(const i64 n, const i64 m, const i64 k) {
-  return make_sizer(
-      2 * n + 7 * m    /* vectors + triangular-solve scratch */
-          + 6 * n * n  /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
-          + 2 * m * m  /* S_buf, L */
-          + 3 * n * m  /* PCt, K, temp_nm */
-          + m * n      /* temp_mn */
-          + n * k      /* temp_nk */
-          + 2 * k * m, /* M, temp_km */
-      0);
+  return make_sizer(2 * n + 7 * m    /* vectors + triangular-solve scratch */
+                        + 6 * n * n  /* covariance work, retained capacity */
+                        + 2 * m * m  /* S_buf, L */
+                        + 3 * n * m  /* gain work, retained capacity */
+                        + m * n      /* temp_mn */
+                        + n * k      /* temp_nk */
+                        + 2 * k * m, /* M, temp_km */
+                    0);
 }
 int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 kf_outputs *out) {
@@ -245,8 +251,7 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *L = S_buf + m * m;
   f64 *PCt = L + m * m;
   f64 *K = PCt + n * m;
-  f64 *temp_nm = K + n * m;
-  f64 *temp_mn = temp_nm + n * m;
+  f64 *temp_mn = K + n * m;
   f64 *temp_nk = temp_mn + m * n;
   f64 *M = temp_nk + n * k;
   f64 *temp_km = M + k * m;
@@ -264,10 +269,8 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
    * both sides rather than differing by one application of the transition. */
   memcpy(x_pred_buf, in->x0, (size_t)n * sizeof(f64));
   memcpy(P_pred_buf, in->P0, (size_t)(n * n) * sizeof(f64));
-  if (in->symmetrize)
-    sdsge_sym_inplace(P_pred_buf, n);
-  int status = KF_OK;
 
+  int status = KF_OK;
   for (i64 t = 0; t < T; ++t) {
     sdsge_matvec_plus_vec(in->C, x_pred_buf, in->d, y_pred_buf, m, n);
     kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
@@ -287,8 +290,13 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
     kf_gain_from_pc_t(L, PCt, solve_f, solve_b, K, n, m);
 
     kf_state_update(x_pred_buf, K, v_buf, x_filt_buf, n, m);
-    kf_joseph_cov(K, in->C, P_pred_buf, in->R, KC, I_minus_KC, temp_nn, temp_nm,
-                  P_filt_buf, n, m);
+    if (in->joseph_cov) {
+      kf_joseph_cov(K, in->C, P_pred_buf, in->R, KC, I_minus_KC, temp_nn,
+                    temp_mn, P_filt_buf, n, m);
+    } else {
+      kf_simple_cov(K, PCt, P_pred_buf, P_filt_buf, n, m);
+    }
+
     if (in->symmetrize)
       sdsge_sym_inplace(P_filt_buf, n);
 
@@ -403,8 +411,14 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
     kf_gain_from_pc_t(L, PCt, solve_f, solve_b, K, n, m);
 
     kf_state_update(x_pred_buf, K, v_buf, x_filt_buf, n, m);
-    kf_joseph_cov(K, H_buf, P_pred_buf, in->R, KC, I_minus_KC, temp_nn, temp_nm,
-                  P_filt_buf, n, m);
+
+    if (in->joseph_cov) {
+      kf_joseph_cov(K, H_buf, P_pred_buf, in->R, KC, I_minus_KC, temp_nn,
+                    temp_nm, P_filt_buf, n, m);
+    } else {
+      kf_simple_cov(K, PCt, P_pred_buf, P_filt_buf, n, m);
+    }
+
     if (in->symmetrize)
       sdsge_sym_inplace(P_filt_buf, n);
 

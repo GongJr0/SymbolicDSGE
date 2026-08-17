@@ -1,0 +1,59 @@
+name: Ireland2004
+
+variables: [a, e, z, x, pihat, yhat, ghat, rhat, robs, r_annual,
+            pi_annual]
+
+shocks: [eps_a, eps_e, eps_z, eps_r]
+
+observables: [obs_gobs, obs_piobs]
+
+equations:
+  model:
+    preference_shock: a(t) = rho_a*a(t-1)+eps_a
+    cost_push_shock: e(t) = rho_e*e(t-1)+eps_e
+    technology_shock: z(t) = eps_z
+    is_curve: x(t) = alpha_x*x(t-1)+(1-alpha_x)*x(t+1)-(rhat(t)-pihat(t+1))+(1-omega)*(1-rho_a)*a(t)
+    phillips: pihat(t) = beta*(alpha_pi*pihat(t-1)+(1-alpha_pi)*pihat(t+1))+psi*x(t)-e(t)
+    output_gap: x(t) = yhat(t)-omega*a(t)
+    output_growth: ghat(t) = yhat(t)-yhat(t-1)+z(t)
+    policy: rhat(t)-rhat(t-1) = rho_pi*pihat(t)+rho_g*ghat(t)+rho_x*x(t)+eps_r
+    observed_rate: robs(t) = rhat(t)
+    annual_rate: r_annual(t) = 4*rhat(t)
+    annual_inflation: pi_annual(t) = 4*pihat(t)
+  constraint: {}
+  observables:
+    obs_gobs: ghat(t)
+    obs_piobs: pihat(t)
+
+calibration:
+  parameters:
+    beta: 0.99
+    alpha_x: 0.00001
+    alpha_pi: 0.00001
+    rho_a: 0.9048
+    rho_e: 0.9907
+    omega: 0.0581
+    psi: 0.1
+    rho_pi: 0.3866
+    rho_g: 0.3960
+    rho_x: 0.1654
+    sig_eps_a: 0.0302
+    sig_eps_e: 0.0002
+    sig_eps_z: 0.0089
+    sig_eps_r: 0.0028
+    meas_obs_gobs: 0.0
+    meas_obs_piobs: 0.0
+  shocks:
+    std:
+      eps_a: sig_eps_a
+      eps_e: sig_eps_e
+      eps_z: sig_eps_z
+      eps_r: sig_eps_r
+    corr: {}
+
+kalman:
+  R:
+    std:
+      obs_gobs: meas_obs_gobs
+      obs_piobs: meas_obs_piobs
+    corr: {}

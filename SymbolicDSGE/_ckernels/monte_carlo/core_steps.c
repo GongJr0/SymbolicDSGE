@@ -103,7 +103,8 @@ int sdsge_mc_filter_linear_runner(const i64 rep_idx,
   (void)int_work;
   const int status = sdsge_filter_linear_step(
       float_in_work, float_in_work + input_size, ctx->T, ctx->n, ctx->m, ctx->k,
-      ctx->symmetrize, ctx->jitter, ctx->return_shocks, float_out);
+      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, ctx->return_shocks,
+      float_out);
   return sdsge_mc_finish_status(status, int_out);
 }
 
@@ -121,7 +122,8 @@ int sdsge_mc_filter_extended_runner(const i64 rep_idx,
   const int status = sdsge_filter_extended_step(
       float_in_work, float_in_work + input_size, ctx->measurement,
       ctx->jacobian, ctx->T, ctx->n, ctx->m, ctx->k, ctx->n_par,
-      ctx->symmetrize, ctx->jitter, ctx->return_shocks, float_out);
+      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, ctx->return_shocks,
+      float_out);
   return sdsge_mc_finish_status(status, int_out);
 }
 
@@ -189,8 +191,8 @@ void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
   f64 *SDSGE_RESTRICT states = simout;
   f64 *SDSGE_RESTRICT observables = simout + T * n;
 
-  sdsge_simulate_linear_states(A, B, x0, shock, steady_state, states, scratch, T,
-                               n, k);
+  sdsge_simulate_linear_states(A, B, x0, shock, steady_state, states, scratch,
+                               T, n, k);
 
   if (m > 0) {
     for (i64 t = 0; t < T; ++t) {
@@ -259,8 +261,8 @@ i64 sdsge_filter_linear_output_arena_size(const i64 n, const i64 m, const i64 k,
 int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT scratch_arena, const i64 T,
                              const i64 n, const i64 m, const i64 k,
-                             const int symmetrize, const f64 jitter,
-                             const int return_shocks,
+                             const int symmetrize, const int joseph_cov,
+                             const f64 jitter, const int return_shocks,
                              f64 *SDSGE_RESTRICT output_arena) {
   const f64 *A = input_arena;
   const f64 *B = A + n * n;
@@ -298,6 +300,7 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                         .x0 = x0,
                         .P0 = P0,
                         .symmetrize = symmetrize,
+                        .joseph_cov = joseph_cov,
                         .jitter = jitter,
                         .return_shocks = return_shocks,
                         .store_history = 1};
@@ -321,8 +324,8 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                                const meas_fn meas, const meas_fn jac,
                                const i64 T, const i64 n, const i64 m,
                                const i64 k, const i64 n_par,
-                               const int symmetrize, const f64 jitter,
-                               const int return_shocks,
+                               const int symmetrize, const int joseph_cov,
+                               const f64 jitter, const int return_shocks,
                                f64 *SDSGE_RESTRICT output_arena) {
   const f64 *A = input_arena;
   const f64 *B = A + n * n;
@@ -362,6 +365,7 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                          .n_par = n_par,
                          .jitter = jitter,
                          .symmetrize = symmetrize,
+                         .joseph_cov = joseph_cov,
                          .compute_y_filt = 1,
                          .return_shocks = return_shocks,
                          .store_history = 1};
@@ -377,8 +381,8 @@ i64 sdsge_filter_unscented_input_arena_size(const i64 n_state, const i64 n_ctrl,
          n_state * n_state * n_state + n_ctrl * n_state * n_state +
          n_state * n_state * n_exog + n_ctrl * n_state * n_exog +
          n_state * n_exog * n_exog + n_ctrl * n_exog * n_exog + n_state +
-         n_ctrl + n_var + n_par + n_exog * n_exog + n_obs * n_obs +
-         T * n_obs + nz + nz * nz;
+         n_ctrl + n_var + n_par + n_exog * n_exog + n_obs * n_obs + T * n_obs +
+         nz + nz * nz;
 }
 
 i64 sdsge_filter_unscented_output_arena_size(const i64 n_state,

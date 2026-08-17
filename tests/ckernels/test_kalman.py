@@ -69,6 +69,7 @@ def _ukf_measure_first_var(model_vars, _params, out):
     "n, m, k, T", [(2, 1, 1, 20), (4, 2, 2, 50), (3, 3, 1, 30), (5, 2, 3, 40)]
 )
 @pytest.mark.parametrize("symmetrize", [True, False])
+@pytest.mark.parametrize("joseph_cov", [True, False])
 @pytest.mark.parametrize("return_shocks", [True, False])
 @pytest.mark.parametrize("store_history", [True, False])
 def test_kalman_matches_oracle(
@@ -77,6 +78,7 @@ def test_kalman_matches_oracle(
     k: int,
     T: int,
     symmetrize: bool,
+    joseph_cov: bool,
     return_shocks: bool,
     store_history: bool,
 ) -> None:
@@ -96,6 +98,7 @@ def test_kalman_matches_oracle(
         x0,
         P0,
         symmetrize,
+        joseph_cov,
         0.0,
         return_shocks,
         store_history,
@@ -136,6 +139,7 @@ def test_kalman_non_pd_returns_error_code() -> None:
         _c(rng.standard_normal((T, m))),
         _c([0.0]),
         _c([[1.0]]),
+        True,
         True,
         0.0,
         False,

@@ -180,6 +180,7 @@ def kf_reference(
     x0: NDF,
     P0: NDF,
     symmetrize: bool,
+    joseph_cov: bool,
     jitter: float,
     return_shocks: bool = False,
     store_history: bool = True,
@@ -248,8 +249,11 @@ def kf_reference(
         K = solve_triangular(L.T, gain_u, lower=False).T
 
         x_filt = x_pred + K @ v
-        I_minus_KC = eye_n - K @ C
-        P_filt = I_minus_KC @ P_pred @ I_minus_KC.T + K @ R @ K.T
+        if joseph_cov:
+            I_minus_KC = eye_n - K @ C
+            P_filt = I_minus_KC @ P_pred @ I_minus_KC.T + K @ R @ K.T
+        else:
+            P_filt = P_pred - K @ PCt.T
         if symmetrize:
             P_filt = _sym(P_filt)
 

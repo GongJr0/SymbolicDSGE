@@ -95,6 +95,7 @@ class Estimator:
         x0: NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool | None = None,
+        joseph_cov: bool = True,
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
@@ -117,6 +118,7 @@ class Estimator:
         self.x0 = x0
         self.jitter = jitter
         self.symmetrize = symmetrize
+        self.joseph_cov = bool(joseph_cov)
         self.R = R
         self.P0 = P0
 
@@ -128,6 +130,7 @@ class Estimator:
             filter_mode=self.filter_mode,
             jitter=jitter,
             symmetrize=symmetrize,
+            joseph_cov=self.joseph_cov,
             P0=P0,
         )
         self.y = self._prepared_filter.y_reordered  # Don't use user order directly.
@@ -952,6 +955,7 @@ class Estimator:
             x0=self.x0,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
+            joseph_cov=self.joseph_cov,
             R=self.R,
             P0=self.P0,
             prepared=self._prepared_filter,

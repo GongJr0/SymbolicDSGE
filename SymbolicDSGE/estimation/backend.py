@@ -81,6 +81,7 @@ class PreparedFilterRun:
     P0: NDF | None
     kf_jitter: float64
     kf_sym: bool
+    kf_joseph_cov: bool
 
 
 # ---------------------------------------------------------------------------
@@ -543,6 +544,7 @@ class PyObjCommon:
     x0: NDF | None  # n_var, or None
     jitter: float
     symmetrize: bool
+    joseph_cov: bool
 
     pmap: PyParamMap
     q_spec: PyCovSpec
@@ -598,6 +600,7 @@ def build_obj_common(
         x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),
         jitter=float(prepared.kf_jitter),
         symmetrize=bool(prepared.kf_sym),
+        joseph_cov=bool(prepared.kf_joseph_cov),
         pmap=build_param_map(
             compiled=compiled,
             param_names=param_names,
@@ -923,6 +926,7 @@ def prepare_filter_run(
     filter_mode: str,
     jitter: float | float64 | None,
     symmetrize: bool | None,
+    joseph_cov: bool = True,
     P0: NDF | None = None,
 ) -> PreparedFilterRun:
     obs, y_reordered = reorder_observables(compiled, observables, y)
@@ -938,6 +942,7 @@ def prepare_filter_run(
         P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
         kf_jitter=kf_jitter,
         kf_sym=kf_sym,
+        kf_joseph_cov=bool(joseph_cov),
     )
 
 
@@ -1032,6 +1037,7 @@ def _prepare_filter_loglik(
     )
     run_filter: Callable[..., Any]
     if mode == "linear":
+        common["joseph_cov"] = prepared.kf_joseph_cov
         pol = cast("FirstOrderSolution", sol.policy)
         C, d = build_C_d_from_cfunc(
             prepared.meas_addr,
@@ -1050,6 +1056,7 @@ def _prepare_filter_loglik(
             "return_shocks": False,
         }
     elif mode == "extended":
+        common["joseph_cov"] = prepared.kf_joseph_cov
         pol = cast("FirstOrderSolution", sol.policy)
         run_filter = KalmanFilter.run_extended_raw
         mode_args = {
@@ -1121,6 +1128,7 @@ def evaluate_loglik(
     x0: NDF | None,
     jitter: float | float64 | None,
     symmetrize: bool | None,
+    joseph_cov: bool = True,
     R: NDF | None,
     P0: NDF | None = None,
     prepared: PreparedFilterRun | None = None,
@@ -1137,6 +1145,7 @@ def evaluate_loglik(
             filter_mode=filter_mode,
             jitter=jitter,
             symmetrize=symmetrize,
+            joseph_cov=joseph_cov,
             P0=P0,
         )
     )

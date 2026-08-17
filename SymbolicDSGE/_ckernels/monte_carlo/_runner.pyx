@@ -225,6 +225,7 @@ cdef extern from "core_steps.h":
         int64_t m
         int64_t k
         int symmetrize
+        int joseph_cov
         double jitter
         int return_shocks
 
@@ -237,6 +238,7 @@ cdef extern from "core_steps.h":
         int64_t k
         int64_t n_par
         int symmetrize
+        int joseph_cov
         double jitter
         int return_shocks
 
@@ -1124,6 +1126,7 @@ def filter_linear_step(
     int64_t n_obs,
     int64_t n_exog,
     bint symmetrize=False,
+    bint joseph_cov=True,
     double jitter=0.0,
     bint return_shocks=False,
 ):
@@ -1138,6 +1141,7 @@ def filter_linear_step(
     step._filter_linear_ctx.m = n_obs
     step._filter_linear_ctx.k = n_exog
     step._filter_linear_ctx.symmetrize = symmetrize
+    step._filter_linear_ctx.joseph_cov = joseph_cov
     step._filter_linear_ctx.jitter = jitter
     step._filter_linear_ctx.return_shocks = return_shocks
     step._bind(
@@ -1170,6 +1174,7 @@ def filter_extended_step(
     int64_t n_exog,
     int64_t n_par,
     bint symmetrize=False,
+    bint joseph_cov=True,
     double jitter=0.0,
     bint return_shocks=False,
 ):
@@ -1189,6 +1194,7 @@ def filter_extended_step(
     step._filter_extended_ctx.k = n_exog
     step._filter_extended_ctx.n_par = n_par
     step._filter_extended_ctx.symmetrize = symmetrize
+    step._filter_extended_ctx.joseph_cov = joseph_cov
     step._filter_extended_ctx.jitter = jitter
     step._filter_extended_ctx.return_shocks = return_shocks
     step._bind(

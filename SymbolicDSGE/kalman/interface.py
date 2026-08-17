@@ -75,7 +75,8 @@ class KalmanInterface(KalmanFilter):
         R: NDF | None = None,
         P0: NDF | None = None,
         jitter: Float64Like | None = None,
-        symmetrize: bool | None = None,
+        joseph_cov: bool = True,
+        symmetrize: bool = False,
         return_shocks: bool = False,
     ) -> None:
 
@@ -153,7 +154,8 @@ class KalmanInterface(KalmanFilter):
         self.ukf_kappa = 1.0
 
         self.jitter = self._get_jitter(jitter)
-        self.symmetrize = self._get_symmetrize(symmetrize)
+        self.symmetrize = bool(symmetrize)
+        self.joseph_cov = bool(joseph_cov)
         self.return_shocks = bool(return_shocks)
 
         self._debug_info: _KalmanDebugInfo | None = None
@@ -264,6 +266,7 @@ class KalmanInterface(KalmanFilter):
             x0=x0,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
+            joseph_cov=self.joseph_cov,
             return_shocks=self.return_shocks,
         )
         if _debug:
@@ -320,6 +323,7 @@ class KalmanInterface(KalmanFilter):
             x0=x0,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
+            joseph_cov=self.joseph_cov,
             return_shocks=self.return_shocks,
         )
         if _debug:
@@ -463,9 +467,6 @@ class KalmanInterface(KalmanFilter):
             beta=self.ukf_beta if self.mode == FilterMode.UNSCENTED else None,
             kappa=self.ukf_kappa if self.mode == FilterMode.UNSCENTED else None,
         )
-
-    def _get_symmetrize(self, symmetrize_arg: bool | None) -> bool:
-        return bool(symmetrize_arg) if symmetrize_arg is not None else False
 
     def _get_jitter(self, jitter_arg: Float64Like | None) -> float64:
         return float64(jitter_arg) if jitter_arg is not None else float64(0.0)

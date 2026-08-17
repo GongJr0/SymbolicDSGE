@@ -122,6 +122,7 @@ cdef extern from "estimation.h":
         const double *x0
         double jitter
         int symmetrize
+        int joseph_cov
         int derive_P0
         sdsge_param_map pmap
         sdsge_cov_spec q_spec
@@ -417,6 +418,7 @@ def obj_linear_base(
     b.x0 = &x0v[0]
     b.jitter = jitter
     b.symmetrize = symmetrize
+    b.joseph_cov = 1
 
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
@@ -577,6 +579,7 @@ def obj_extended_base(
     b.x0 = &x0v[0]
     b.jitter = jitter
     b.symmetrize = symmetrize
+    b.joseph_cov = 1
 
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
@@ -765,6 +768,7 @@ def obj_unscented_base(
     b.x0 = &x0v[0]
     b.jitter = jitter
     b.symmetrize = symmetrize
+    b.joseph_cov = 1
 
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
@@ -1147,6 +1151,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     b.x0 = &x0v[0]
     b.jitter = base.jitter
     b.symmetrize = int(base.symmetrize)
+    b.joseph_cov = int(base.joseph_cov)
     b.derive_P0 = derive_P0
 
     b.pmap.base_params = &bpv[0]

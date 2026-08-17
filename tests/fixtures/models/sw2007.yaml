@@ -5,8 +5,7 @@
 
 name: SW2007
 
-variables: [rep_labobs, rep_robs, rep_pinfobs, rep_dy,
-            rep_dc, rep_dinve, rep_dw, ewma, epinfma,
+variables: [rep_dy, rep_dc, rep_dinve, rep_dw, ewma, epinfma,
             zcapf, rkf, kf, pkf, cf, invef, yf, labf,
             wf, rrf, mc, zcap, rk, k, pk, c, inve, y,
             lab, pinf, w, r, a, b, g, qs, ms, spinf,
@@ -97,9 +96,6 @@ equations:
     observation_consumption: rep_dc(t) = c(t) - c(t-1) + ctrend
     observation_investment: rep_dinve(t) = inve(t) - inve(t-1) + ctrend
     observation_wage: rep_dw(t) = w(t) - w(t-1) + ctrend
-    observation_inflation: rep_pinfobs(t) = pinf(t) + constepinf
-    observation_rate: rep_robs(t) = r(t) + conster
-    observation_hours: rep_labobs(t) = lab(t) + constelab
 
   constraint: {}
 
@@ -107,10 +103,10 @@ equations:
     dy: rep_dy(t)
     dc: rep_dc(t)
     dinve: rep_dinve(t)
-    labobs: rep_labobs(t)
-    pinfobs: rep_pinfobs(t)
+    labobs: lab(t) + constelab
+    pinfobs: pinf(t) + constepinf
     dw: rep_dw(t)
-    robs: rep_robs(t)
+    robs: r(t) + conster
 
 calibration:
   parameters:

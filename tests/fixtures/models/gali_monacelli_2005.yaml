@@ -1,0 +1,55 @@
+name: GaliMonacelli2005
+
+variables: [pih, x, y, ynat, rnat, r, s, pi, ystar, pistar, n, nx, real_wage,
+            a, c]
+
+shocks: [eps_star, eps_a]
+
+observables: [obs_pi, obs_r]
+
+equations:
+  model:
+    is_curve: x(t) = x(t+1) - (r(t)-pih(t+1)-rnat(t))
+    phillips: pih(t) = beta*pih(t+1) + kappa_a*x(t)
+    natural_rate: rnat(t) = -(1-rhoa)*a(t)
+    natural_output: ynat(t) = a(t)
+    output_gap: x(t) = y(t)-ynat(t)
+    output: y(t) = ystar(t)+s(t)
+    cpi_inflation: pi(t) = pih(t) + alpha*(s(t)-s(t-1))
+    foreign_inflation: pistar(t) = 0
+    employment: y(t) = a(t)+n(t)
+    net_exports: nx(t) = 0
+    consumption: y(t) = c(t)+alpha*s(t)
+    real_wage: real_wage(t) = c(t)+phi*n(t)
+    technology: a(t) = rhoa*a(t-1)+eps_a
+    foreign_output: ystar(t) = rhoy*ystar(t-1)+eps_star
+    policy: pih(t) = 0
+  constraint: {}
+  observables:
+    obs_pi: pi(t)
+    obs_r: r(t)
+
+calibration:
+  parameters:
+    beta: 0.99
+    alpha: 0.4
+    phi: 3.0
+    rhoa: 0.9
+    rhoy: 0.86
+    kappa_a: 0.3433333333333333
+    sig_eps_star: 1.0
+    sig_eps_a: 1.0
+    meas_obs_pi: 0.0
+    meas_obs_r: 0.0
+  shocks:
+    std:
+      eps_star: sig_eps_star
+      eps_a: sig_eps_a
+    corr: {}
+
+kalman:
+  R:
+    std:
+      obs_pi: meas_obs_pi
+      obs_r: meas_obs_r
+    corr: {}

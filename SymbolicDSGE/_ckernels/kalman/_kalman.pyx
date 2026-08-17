@@ -37,6 +37,7 @@ cdef extern from "kalman.h":
         double *x0
         double *P0
         int symmetrize
+        int joseph_cov
         double jitter
         int return_shocks
         int store_history
@@ -100,6 +101,7 @@ cdef extern from "kalman.h":
         int64_t n_par
         double jitter
         int symmetrize
+        int joseph_cov
         int compute_y_filt
         int return_shocks
         int store_history
@@ -202,6 +204,7 @@ def kalman_hot_loop(
     y,
     x0, P0,
     bint symmetrize,
+    bint joseph_cov,
     double jitter,
     bint return_shocks=False,
     bint store_history=True,
@@ -272,6 +275,7 @@ def kalman_hot_loop(
     inp.x0 = &x0v[0]
     inp.P0 = &P0v[0, 0]
     inp.symmetrize = symmetrize
+    inp.joseph_cov = joseph_cov
     inp.jitter = jitter
     inp.return_shocks = return_shocks
     inp.store_history = store_history
@@ -367,6 +371,7 @@ def ekf_hot_loop(
     y,
     x0, P0,
     bint symmetrize,
+    bint joseph_cov,
     double jitter,
     bint compute_y_filt=True,
     bint return_shocks=False,
@@ -453,6 +458,7 @@ def ekf_hot_loop(
     inp.n_par = n_par
     inp.jitter = jitter
     inp.symmetrize = symmetrize
+    inp.joseph_cov = joseph_cov
     inp.compute_y_filt = compute_y_filt
     inp.return_shocks = return_shocks
     inp.store_history = store_history

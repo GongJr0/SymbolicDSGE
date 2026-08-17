@@ -101,6 +101,7 @@ typedef struct {
   const f64 *x0; /* n_var, or NULL */
   f64 jitter;
   int symmetrize;
+  int joseph_cov;
   int derive_P0; /* if P0 is NULL, derive it from the stationary covariance */
 
   sdsge_param_map pmap;

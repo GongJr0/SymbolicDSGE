@@ -1,15 +1,15 @@
-function bench_sw2007_linear_kf_dynare(workdir, warmup, reps, output_path)
-% Benchmark Dynare's SW2007 likelihood and smoother entries.
+function bench_fixture_linear_kf_dynare(workdir, model_file, obs_names, data_file, warmup, reps, output_path)
+% Benchmark Dynare's direct Kalman likelihood and smoother for one fixture.
 
-  if nargin ~= 4
-    error('Expected workdir, warmup, reps, and output_path.');
+  if nargin ~= 7
+    error('Expected workdir, model file, observables, data file, warmup, reps, and output path.');
   end
 
   previous_dir = pwd;
   restore_dir = onCleanup(@() cd(previous_dir));
   cd(workdir);
 
-  dynare sw2007.mod noclearall nograph;
+  dynare(model_file, 'noclearall', 'nograph');
   global M_ options_ oo_ estim_params_ bayestopt_
   options_.order = 1;
   options_.noprint = 1;
@@ -19,7 +19,6 @@ function bench_sw2007_linear_kf_dynare(workdir, warmup, reps, output_path)
   end
 
   endo_names = cellstr(M_.endo_names);
-  obs_names = {'dy', 'dc', 'dinve', 'labobs', 'pinfobs', 'dw', 'robs'};
   n_endo = M_.endo_nbr;
   n_exo = M_.exo_nbr;
   n_obs = numel(obs_names);
@@ -50,9 +49,14 @@ function bench_sw2007_linear_kf_dynare(workdir, warmup, reps, output_path)
     H = zeros(n_obs, n_obs);
   end
 
-  run('sw2007_kf_data.m');
-  Y = [dy, dc, dinve, labobs, pinfobs, dw, robs]' - d * ones(1, numel(dy));
-  periods = size(Y, 2);
+  run(data_file);
+  first_series = eval(obs_names{1});
+  periods = numel(first_series);
+  Y = zeros(n_obs, periods);
+  for i = 1:n_obs
+    series = eval(obs_names{i});
+    Y(i, :) = series(:)'-d(i);
+  end
 
   P0 = R * Q * R';
   A_power = A;
@@ -78,7 +82,7 @@ function bench_sw2007_linear_kf_dynare(workdir, warmup, reps, output_path)
     likelihood_times(i) = toc(started);
   end
 
-  options_.datafile = 'sw2007_kf_data';
+  options_.datafile = data_file(1:end-2);
   options_.first_obs = 1;
   options_.nobs = periods;
   options_.prefilter = 0;
