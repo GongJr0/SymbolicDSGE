@@ -264,5 +264,7 @@ nav:
           - KalmanFilter: documentation/utilities/KalmanFilter.md
           - math_utils: documentation/utilities/math_utils.md
           - DenHaanMarcet: documentation/utilities/DenHaanMarcet.md
+  - Benchmarks:
+      - Linear Kalman Filter: benchmarks/linear_kf.md
   - Contact: contact.md
   - Contributing: contributing.md
