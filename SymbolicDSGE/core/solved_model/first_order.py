@@ -52,4 +52,4 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
             X,
             self.policy.steady_state,
         )
-        return StatePath(X)
+        return StatePath(X, shocks=shock_mat)

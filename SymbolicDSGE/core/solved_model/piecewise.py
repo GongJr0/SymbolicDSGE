@@ -88,7 +88,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         # occbin_sim has no steady-state argument, so this path adds it here.
         X += pol.steady_state
 
-        return StatePath(X, regimes=regimes, diagnostics=diagnostics)
+        return StatePath(X, shocks=shock_mat, regimes=regimes, diagnostics=diagnostics)
 
     def sim(
         self,

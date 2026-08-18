@@ -173,10 +173,10 @@ class SolvedModel(ABC, Generic[Policy]):
             arr[0] = sig
             shock_spec[s] = arr
 
-        X, regimes, diagnostics = self._simulate_state_matrix(
+        X, shock_path, regimes, diagnostics = self._simulate_state_matrix(
             T=T, shocks=shock_spec, shock_scale=scale, x0=None
         )
-        base_X, _, _ = self._simulate_state_matrix(
+        base_X, _, _, _ = self._simulate_state_matrix(
             T,
             shocks=None,
             shock_scale=scale,
@@ -195,6 +195,7 @@ class SolvedModel(ABC, Generic[Policy]):
         return SimResult(
             var_names=self.compiled.var_names,
             X=X,
+            shocks=shock_path,
             observable_names=self.compiled.observable_names if observables else (),
             y=y,
             _regimes=regimes,
@@ -409,7 +410,7 @@ class SolvedModel(ABC, Generic[Policy]):
         return np.ascontiguousarray(Y[start:], dtype=float64)
 
     def _assemble_simulation(self, path: StatePath, observables: bool) -> SimResult:
-        X, regimes, diagnostics = path
+        X, shocks, regimes, diagnostics = path
 
         y = None
         if observables:
@@ -418,6 +419,7 @@ class SolvedModel(ABC, Generic[Policy]):
         return SimResult(
             var_names=self.compiled.var_names,
             X=X,
+            shocks=shocks,
             observable_names=self.compiled.observable_names if observables else (),
             y=y,
             _regimes=regimes,

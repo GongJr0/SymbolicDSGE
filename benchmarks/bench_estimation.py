@@ -1,4 +1,4 @@
-"""Benchmark POST82 maximum likelihood and MAP estimation against Dynare.
+"""Benchmark maximum likelihood and MAP estimation against Dynare.
 
 The timed native entries are ``Estimator.mle`` and ``Estimator.map``. Dynare
 preprocesses and executes one initial estimation outside the timer, then the
@@ -16,7 +16,6 @@ import contextlib
 from contextlib import nullcontext
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,14 +29,12 @@ from scipy.io import loadmat
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES = ROOT / "tests" / "fixtures" / "models"
-MODEL = FIXTURES / "POST82.yaml"
-DYNARE_MODEL = FIXTURES / "post82_kf.mod"
-OBSERVABLES = ["OutGap", "Infl", "Rate"]
-SHOCK_NAMES = ["e_g", "e_z", "e_r"]
-
 sys.path.insert(0, str(ROOT))
-from SymbolicDSGE import DSGESolver, ModelParser  # noqa: E402
-from SymbolicDSGE.estimation import Estimator, make_prior  # noqa: E402
+
+from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE.core.compiled_model import CompiledModel
+from SymbolicDSGE.estimation.results import OptimizationResult
+from SymbolicDSGE.estimation import Estimator, make_prior
 
 
 @dataclass(frozen=True)
@@ -45,11 +42,71 @@ class Routine:
     names: tuple[str, ...]
     theta0: tuple[float, ...]
     bounds: tuple[tuple[float, float], ...]
+    probes: tuple[tuple[float, ...], ...]
+    priors: tuple["Prior", ...] = ()
 
 
-ROUTINES = {
-    "mle": Routine(("psi_pi", "rho_r"), (2.0, 0.8), ((1.0, 5.0), (0.0, 0.99))),
-    "map": Routine(("psi_pi",), (2.0,), ((1.0, 5.0),)),
+@dataclass(frozen=True)
+class Prior:
+    name: str
+    distribution: str
+    parameters: tuple[tuple[str, float], ...]
+    transform: str
+    dynare_density: str
+
+
+@dataclass(frozen=True)
+class CaseSpec:
+    label: str
+    yaml_name: str
+    mod_name: str
+    native_observables: tuple[str, ...]
+    dynare_observables: tuple[str, ...]
+    shock_names: tuple[str, ...]
+    data_file: str
+    routines: dict[str, Routine]
+    seed: int = 0
+    dynare_remove: tuple[str, ...] = ()
+    zero_r_replacements: tuple[tuple[str, str], ...] = ()
+
+
+CASES = {
+    "post82": CaseSpec(
+        label="POST82",
+        yaml_name="POST82.yaml",
+        mod_name="post82_kf.mod",
+        native_observables=("OutGap", "Infl", "Rate"),
+        dynare_observables=("OutGap", "Infl", "Rate"),
+        shock_names=("e_g", "e_z", "e_r"),
+        data_file="post82_estimation_data",
+        routines={
+            "mle": Routine(
+                ("psi_pi", "rho_r"),
+                (2.0, 0.8),
+                ((1.0, 5.0), (0.0, 0.99)),
+                ((2.0, 0.8), (2.5, 0.75)),
+            ),
+            "map": Routine(
+                ("psi_pi",),
+                (2.0,),
+                ((1.0, 5.0),),
+                ((2.0,), (2.5,)),
+                priors=(
+                    Prior(
+                        name="psi_pi",
+                        distribution="normal",
+                        parameters=(("mean", 2.0), ("std", 0.5)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                ),
+            ),
+        },
+        dynare_remove=(
+            "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
+        ),
+        zero_r_replacements=(("sig_me  = 1.00;", "sig_me  = 0.00;"),),
+    ),
 }
 
 
@@ -61,73 +118,66 @@ def _matlab_matrix(values: np.ndarray) -> str:
     return "[" + "; ".join(" ".join(f"{x:.17g}" for x in row) for row in values) + "]"
 
 
-def _prepare(periods: int) -> tuple[object, object, np.ndarray]:
-    model, kalman = ModelParser(MODEL).get_all()
+@dataclass
+class NativeCase:
+    solver: DSGESolver
+    compiled: CompiledModel
+    y: np.ndarray
+
+
+def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
+    model, kalman = ModelParser(FIXTURES / spec.yaml_name).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     solved = solver.solve(compiled=compiled, order=1)
-    base = np.array(
-        [
-            [0.25, -0.10, 0.40],
-            [-0.70, 0.55, -0.15],
-            [0.10, 0.20, 0.00],
-            [0.60, -0.35, 0.25],
-            [-0.20, 0.05, -0.50],
-            [0.00, 0.30, 0.10],
-            [0.35, -0.45, 0.20],
-            [-0.45, 0.15, -0.30],
-            [0.15, 0.60, 0.05],
-            [-0.10, -0.25, 0.35],
-            [0.05, 0.40, -0.20],
-            [0.20, -0.05, 0.15],
-        ],
-        dtype=np.float64,
-    )
-    shocks = np.resize(base, (periods, len(SHOCK_NAMES)))
     sim = solved.sim(
         T=periods,
-        shocks={name: shocks[:, i] for i, name in enumerate(SHOCK_NAMES)},
+        shocks={
+            ",".join(spec.shock_names): Shock("norm", multivar=True, seed=spec.seed)
+        },
         observables=True,
     )
-    y = np.column_stack([np.asarray(sim.observables[name]) for name in OBSERVABLES])
-    return solver, compiled, y
+    y = np.column_stack(
+        [np.asarray(sim.observables[name]) for name in spec.native_observables]
+    )
+    return NativeCase(solver=solver, compiled=compiled, y=y)
 
 
 def _make_estimator(
-    solver: object,
-    compiled: object,
-    y: np.ndarray,
-    routine: str,
-    zero_r: bool,
+    case: CaseSpec, native: NativeCase, routine: str, zero_r: bool
 ) -> Estimator:
-    spec = ROUTINES[routine]
-    priors = None
-    if routine == "map":
-        priors = {
-            "psi_pi": make_prior(
-                distribution="normal",
-                parameters={"mean": 2.0, "std": 0.5},
-                transform="identity",
-            )
-        }
+    spec = case.routines[routine]
+    priors = {
+        prior.name: make_prior(
+            distribution=prior.distribution,
+            parameters=dict(prior.parameters),
+            transform=prior.transform,
+        )
+        for prior in spec.priors
+    } or None
     return Estimator(
-        solver=solver,
-        compiled=compiled,
-        y=y,
-        observables=OBSERVABLES,
+        solver=native.solver,
+        compiled=native.compiled,
+        y=native.y,
+        observables=list(case.native_observables),
         filter_mode="linear",
         estimated_params=list(spec.names),
         priors=priors,
-        ss_seed=np.zeros(len(compiled.var_names), dtype=np.float64),
+        ss_seed=np.zeros(len(native.compiled.var_names), dtype=np.float64),
         R=(
-            np.zeros((len(OBSERVABLES), len(OBSERVABLES)), dtype=np.float64)
+            np.zeros(
+                (len(case.native_observables), len(case.native_observables)),
+                dtype=np.float64,
+            )
             if zero_r
             else None
         ),
+        joseph_cov=False,
+        symmetrize=False,
     )
 
 
-def _time(fn, warmup: int, reps: int) -> tuple[np.ndarray, object]:
+def _time(fn, warmup: int, reps: int) -> tuple[np.ndarray, OptimizationResult]:
     for _ in range(warmup):
         fn()
     times = np.empty(reps, dtype=np.float64)
@@ -141,21 +191,24 @@ def _time(fn, warmup: int, reps: int) -> tuple[np.ndarray, object]:
 
 
 def _native(
-    solver: object,
-    compiled: object,
-    y: np.ndarray,
+    case: CaseSpec,
+    native: NativeCase,
     routine: str,
     warmup: int,
     reps: int,
     zero_r: bool,
 ) -> dict:
-    estimator = _make_estimator(solver, compiled, y, routine, zero_r)
-    spec = ROUTINES[routine]
+    estimator = _make_estimator(case, native, routine, zero_r)
+    spec = case.routines[routine]
     theta0 = np.asarray(spec.theta0, dtype=np.float64)
     if routine == "mle":
-        fn = lambda: estimator.mle(theta0=theta0, bounds=spec.bounds)
+        fn = lambda: estimator.mle(
+            theta0=theta0, bounds=spec.bounds, method="Nelder-Mead"
+        )
     else:
-        fn = lambda: estimator.map(theta0=theta0, bounds=spec.bounds)
+        fn = lambda: estimator.map(
+            theta0=theta0, bounds=spec.bounds, method="Nelder-Mead"
+        )
     with (
         open(os.devnull, "w", encoding="utf-8") as sink,
         contextlib.redirect_stdout(sink),
@@ -164,11 +217,7 @@ def _native(
     theta = np.asarray(result.x, dtype=np.float64)
     loglik = float(estimator.loglik(theta))
     logprior = float(estimator.logprior(theta))
-    probes = (
-        np.array([[2.0, 2.5], [0.8, 0.75]], dtype=np.float64)
-        if routine == "mle"
-        else np.array([[2.0, 2.5]], dtype=np.float64)
-    )
+    probes = np.asarray(spec.probes, dtype=np.float64).T
     target = np.array(
         [
             (
@@ -204,28 +253,38 @@ def _native(
     }
 
 
-def _write_data(y: np.ndarray, path: Path) -> None:
-    lines = ["% Generated by bench_post82_estimation.py. Do not edit."]
-    for column, name in enumerate(OBSERVABLES):
+def _write_data(case: CaseSpec, y: np.ndarray, path: Path) -> None:
+    lines = ["% Generated by bench_estimation.py. Do not edit."]
+    for column, name in enumerate(case.dynare_observables):
         lines.extend((f"{name} = [", *(f"{v:.17g}" for v in y[:, column]), "];"))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_model(routine: str, path: Path, periods: int, zero_r: bool) -> None:
-    source = DYNARE_MODEL.read_text(encoding="utf-8")
-    source = source.replace(
-        "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
-        "",
-    )
+def _dynare_estimated_params(spec: Routine) -> str:
+    priors = {prior.name: prior for prior in spec.priors}
+    lines = []
+    for name, initial, bounds in zip(spec.names, spec.theta0, spec.bounds, strict=True):
+        line = f"{name}, {initial:.17g}, {bounds[0]:.17g}, {bounds[1]:.17g}"
+        if prior := priors.get(name):
+            line += ", " + prior.dynare_density
+            line += ", " + ", ".join(f"{value:.17g}" for _, value in prior.parameters)
+        lines.append(line + ";")
+    return "\n".join(lines)
+
+
+def _write_model(
+    case: CaseSpec, routine: str, path: Path, periods: int, zero_r: bool
+) -> None:
+    source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
+    for statement in case.dynare_remove:
+        source = source.replace(statement, "")
     if zero_r:
-        source = source.replace("sig_me  = 1.00;", "sig_me  = 0.00;")
-    if routine == "mle":
-        estimated = "psi_pi, 2.0, 1.0, 5.0;\nrho_r, 0.8, 0.0, 0.99;"
-    else:
-        estimated = "psi_pi, 2.0, 1.0, 5.0, normal_pdf, 2.0, 0.5;"
+        for old, new in case.zero_r_replacements:
+            source = source.replace(old, new)
+    estimated = _dynare_estimated_params(case.routines[routine])
     source += (
         "\nestimated_params;\n" + estimated + "\nend;\n"
-        "estimation(datafile = post82_estimation_data, nobs = "
+        f"estimation(datafile = {case.data_file}, nobs = "
         + str(periods)
         + ", mode_compute = 4, mh_replic = 0, cova_compute = 0);\n"
     )
@@ -234,6 +293,8 @@ def _write_model(routine: str, path: Path, periods: int, zero_r: bool) -> None:
 
 def _run_dynare(
     runtime: str,
+    case_name: str,
+    case: CaseSpec,
     routine: str,
     y: np.ndarray,
     probes: np.ndarray,
@@ -254,13 +315,14 @@ def _run_dynare(
         prefix=f"dynare-{routine}-{runtime}-", dir=output_dir
     ) as tmp:
         workdir = Path(tmp)
-        model_name = f"post82_estimation_{routine}"
-        _write_model(routine, workdir / f"{model_name}.mod", y.shape[0], zero_r)
-        _write_data(y, workdir / "post82_estimation_data.m")
+        model_name = f"{case_name}_estimation_{routine}"
+        _write_model(case, routine, workdir / f"{model_name}.mod", y.shape[0], zero_r)
+        _write_data(case, y, workdir / f"{case.data_file}.m")
         expression = (
             f"addpath('{_quoted_matlab(dynare_path)}'); addpath('{_quoted_matlab(SCRIPT_DIR)}'); "
-            f"bench_post82_estimation_dynare('{_quoted_matlab(workdir)}', '{model_name}', "
-            f"{_matlab_matrix(probes)}, {warmup}, {reps}, '{_quoted_matlab(result_path)}');"
+            f"bench_estimation_dynare('{_quoted_matlab(workdir)}', '{model_name}', "
+            f"{_matlab_matrix(probes)}, {int(routine == 'map')}, {warmup}, {reps}, "
+            f"'{_quoted_matlab(result_path)}');"
         )
         command = (
             [matlab_bin, "-batch", expression]
@@ -326,7 +388,13 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--reps", type=int, default=5)
     parser.add_argument(
-        "--routines", nargs="+", choices=sorted(ROUTINES), default=["mle", "map"]
+        "--cases", nargs="+", choices=tuple(CASES), default=tuple(CASES)
+    )
+    parser.add_argument(
+        "--routines",
+        nargs="+",
+        choices=sorted({name for case in CASES.values() for name in case.routines}),
+        default=["mle", "map"],
     )
     parser.add_argument(
         "--runtimes",
@@ -337,7 +405,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--dynare-matlab-path", default="")
     parser.add_argument("--matlab-bin", default="matlab")
-    parser.add_argument("--octave-bin", default="octave-cli")
+    parser.add_argument("--octave-bin", default="octave")
     parser.add_argument(
         "--zero-r",
         action="store_true",
@@ -357,59 +425,78 @@ def main() -> int:
             else (SCRIPT_DIR / args.output_dir).resolve()
         )
         if args.output_dir
-        else tempfile.TemporaryDirectory(prefix="symbolicdsge-post82-estimation-")
+        else tempfile.TemporaryDirectory(prefix="symbolicdsge-estimation-")
     )
     with context as output_path:
-        output_dir = Path(output_path)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        solver, compiled, y = _prepare(args.periods)
-        print(
-            f"POST82 estimation: periods={args.periods} warmup={args.warmup} reps={args.reps}"
-        )
-        print(
-            "Setup, preprocessing, input generation, and warmup are outside the timer."
-        )
-        for routine in args.routines:
-            native = _native(
-                solver, compiled, y, routine, args.warmup, args.reps, args.zero_r
-            )
-            np.savez(output_dir / f"native_{routine}.npz", **native)
-            dynare = {}
-            for runtime in (item for item in args.runtimes if item != "native"):
-                raw = loadmat(
-                    _run_dynare(
-                        runtime,
-                        routine,
-                        y,
-                        native["probes"],
-                        output_dir,
-                        args.warmup,
-                        args.reps,
-                        args.dynare_matlab_path,
-                        args.matlab_bin,
-                        args.octave_bin,
-                        args.zero_r,
-                    ),
-                    squeeze_me=True,
+        root_output = Path(output_path)
+        root_output.mkdir(parents=True, exist_ok=True)
+        for case_index, case_name in enumerate(args.cases):
+            case = CASES[case_name]
+            unknown_routines = set(args.routines) - set(case.routines)
+            if unknown_routines:
+                parser.error(
+                    f"{case_name} does not define: {', '.join(sorted(unknown_routines))}"
                 )
-                dynare[runtime] = {
-                    "times": np.asarray(raw["times"], dtype=np.float64).reshape(-1),
-                    "objective_times": np.asarray(
-                        raw["objective_times"], dtype=np.float64
-                    ).reshape(-1),
-                    "theta": np.asarray(raw["theta"], dtype=np.float64).reshape(-1),
-                    "terminal_target": float(
-                        np.asarray(raw["terminal_target"]).squeeze()
-                    ),
-                    "probe_target": np.asarray(
-                        raw["probe_target"], dtype=np.float64
-                    ).reshape(-1),
-                }
-            _print_table(routine, native, dynare)
+            output_dir = root_output / case_name
+            output_dir.mkdir(exist_ok=True)
+            native_case = _prepare(case, args.periods)
+            print(
+                f"{case.label} estimation: periods={args.periods} warmup={args.warmup} reps={args.reps}"
+            )
+            print(
+                "Setup, preprocessing, input generation, and warmup are outside the timer."
+            )
+            for routine in args.routines:
+                native = _native(
+                    case,
+                    native_case,
+                    routine,
+                    args.warmup,
+                    args.reps,
+                    args.zero_r,
+                )
+                np.savez(output_dir / f"native_{routine}.npz", **native)
+                dynare = {}
+                for runtime in (item for item in args.runtimes if item != "native"):
+                    raw = loadmat(
+                        _run_dynare(
+                            runtime,
+                            case_name,
+                            case,
+                            routine,
+                            native_case.y,
+                            native["probes"],
+                            output_dir,
+                            args.warmup,
+                            args.reps,
+                            args.dynare_matlab_path,
+                            args.matlab_bin,
+                            args.octave_bin,
+                            args.zero_r,
+                        ),
+                        squeeze_me=True,
+                    )
+                    dynare[runtime] = {
+                        "times": np.asarray(raw["times"], dtype=np.float64).reshape(-1),
+                        "objective_times": np.asarray(
+                            raw["objective_times"], dtype=np.float64
+                        ).reshape(-1),
+                        "theta": np.asarray(raw["theta"], dtype=np.float64).reshape(-1),
+                        "terminal_target": float(
+                            np.asarray(raw["terminal_target"]).squeeze()
+                        ),
+                        "probe_target": np.asarray(
+                            raw["probe_target"], dtype=np.float64
+                        ).reshape(-1),
+                    }
+                _print_table(routine, native, dynare)
+            if case_index != len(args.cases) - 1:
+                print()
         if args.output_dir:
-            (output_dir / "metadata.json").write_text(
+            (root_output / "metadata.json").write_text(
                 json.dumps(
                     {
+                        "cases": args.cases,
                         "periods": args.periods,
                         "warmup": args.warmup,
                         "reps": args.reps,

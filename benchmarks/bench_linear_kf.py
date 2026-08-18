@@ -27,7 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES = ROOT / "tests" / "fixtures" / "models"
 
 sys.path.insert(0, str(ROOT))
-from SymbolicDSGE import DSGESolver, ModelParser, SolvedModel
+from SymbolicDSGE import DSGESolver, ModelParser, SolvedModel, Shock
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.filter import FilterResult, KalmanFilter
 
@@ -126,34 +126,6 @@ def _max_abs(left: np.ndarray | float, right: np.ndarray | float) -> float:
     return float(np.max(np.abs(np.asarray(left) - np.asarray(right))))
 
 
-def _draw_shocks(spec: CaseSpec, periods: int, Q: np.ndarray) -> np.ndarray:
-    if spec.shock_mode == "post82":
-        base = np.array(
-            [
-                [0.25, -0.10, 0.40],
-                [-0.70, 0.55, -0.15],
-                [0.10, 0.20, 0.00],
-                [0.60, -0.35, 0.25],
-                [-0.20, 0.05, -0.50],
-                [0.00, 0.30, 0.10],
-                [0.35, -0.45, 0.20],
-                [-0.45, 0.15, -0.30],
-                [0.15, 0.60, 0.05],
-                [-0.10, -0.25, 0.35],
-                [0.05, 0.40, -0.20],
-                [0.20, -0.05, 0.15],
-            ],
-            dtype=np.float64,
-        )
-        return np.resize(base, (periods, len(spec.shock_names)))
-    draws = np.random.default_rng(spec.seed).normal(
-        size=(periods, len(spec.shock_names))
-    )
-    if spec.shock_mode == "normal_quarter":
-        return 0.25 * draws
-    return draws @ np.linalg.cholesky(Q).T
-
-
 def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
     model, kalman = ModelParser(FIXTURES / spec.yaml_name).get_all()
     solver = DSGESolver(model, kalman)
@@ -162,10 +134,11 @@ def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
 
     base_params = backend.extract_base_params(compiled)
     Q = np.asarray(backend.build_Q(compiled, base_params), dtype=np.float64)
-    shocks = _draw_shocks(spec, periods, Q)
     sim = solved.sim(
         T=periods,
-        shocks={name: shocks[:, index] for index, name in enumerate(spec.shock_names)},
+        shocks={
+            ",".join(spec.shock_names): Shock("norm", multivar=True, seed=spec.seed)
+        },
         observables=True,
     )
     y = np.column_stack(
