@@ -65,7 +65,7 @@ _REGIME_SHIFT_CONDITIONAL: TypeAlias = Relational | And | Or | Not
 
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
 _ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
-_ALLOWED_KALMAN_KEYS = frozenset({"P0", "R"})
+_ALLOWED_KALMAN_KEYS = frozenset({"R"})
 _ALLOWED_P0_KEYS = frozenset({"mode", "diag"})
 _ALLOWED_R_KEYS = frozenset({"std", "corr"})
 
