@@ -123,7 +123,7 @@ def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
     solved = solver.solve(compiled=compiled, order=1)
 
     base_params = backend.extract_base_params(compiled)
-    Q = np.asarray(backend.build_Q(compiled, base_params), dtype=np.float64)
+    Q = backend.build_Q(compiled, base_params)
     sim = solved.sim(
         T=periods,
         shocks={
@@ -134,23 +134,20 @@ def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
     if sim.y is None:
         raise RuntimeError("Simulation did not return observables.")
     observable_names = tuple(sim.observable_names)
-    y = np.asarray(sim.y, dtype=np.float64)
+    y = sim.y
     C, d = compiled.build_affine_measurement_matrices(
         base_params,
         list(observable_names),
-        np.asarray(solved.policy.steady_state),
+        solved.policy.steady_state,
     )
     return NativeCase(
         solved=solved,
-        A=np.asarray(solved.policy.A, dtype=np.float64),
-        B=np.asarray(solved.policy.B, dtype=np.float64),
-        C=np.asarray(C, dtype=np.float64),
-        d=np.asarray(d, dtype=np.float64),
+        A=solved.policy.A,
+        B=solved.policy.B,
+        C=C,
+        d=d,
         Q=Q,
-        R=np.asarray(
-            backend.build_R(compiled, kalman, list(observable_names), base_params),
-            dtype=np.float64,
-        ),
+        R=backend.build_R(compiled, kalman, list(observable_names), base_params),
         y=y,
         observable_names=observable_names,
         state_names=tuple(compiled.var_names),
@@ -214,8 +211,8 @@ def _time_native(
         "loglik_times": loglik_times,
         "history_times": history_times,
         "loglik": float(loglik_result.loglik),
-        "x_pred": np.asarray(history_result.x_pred, dtype=np.float64),
-        "x_filt": np.asarray(history_result.x_filt, dtype=np.float64),
+        "x_pred": history_result.x_pred,
+        "x_filt": history_result.x_filt,
     }
 
 
