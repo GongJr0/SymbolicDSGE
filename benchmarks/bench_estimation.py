@@ -22,6 +22,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from scipy.io import loadmat
@@ -68,8 +69,91 @@ class CaseSpec:
     zero_r_replacements: tuple[tuple[str, str], ...] = ()
 
 
+@dataclass(frozen=True)
+class OptimizerProfile:
+    dynare_mode_compute: int
+    native_method: Literal["L-BFGS-B", "Nelder-Mead"]
+    native_options: tuple[tuple[str, int | float], ...]
+    dynare_optim_options: tuple[tuple[str, int | float], ...]
+    maxfun_factor: int | None = None
+
+    def native_kwargs(self, n_params: int) -> dict[str, int | float]:
+        options = dict(self.native_options)
+        if self.maxfun_factor is not None:
+            options["maxfun"] = self.maxfun_factor * n_params
+        return options
+
+    def dynare_optim(self) -> str:
+        options = list(self.dynare_optim_options)
+        if self.maxfun_factor is not None:
+            options.append(("MaxFunEvalFactor", self.maxfun_factor))
+        return ", ".join(
+            (
+                f"'{name}', {value:.17g}"
+                if isinstance(value, float)
+                else f"'{name}', {value}"
+            )
+            for name, value in options
+        )
+
+
+OPTIMIZER_PROFILES = {
+    # csminwel uses a full BFGS inverse-Hessian update. L-BFGS-B has no
+    # equivalent initial-Hessian control, but these align the exposed limits,
+    # function-progress threshold, and forward finite-difference step.
+    4: OptimizerProfile(
+        dynare_mode_compute=4,
+        native_method="L-BFGS-B",
+        native_options=(
+            ("maxiter", 1000),
+            ("maxfun", 0),
+            ("factr", 1e-7 / np.finfo(np.float64).eps),
+            ("pgtol", 0.0),
+            ("fd_step", 1e-6),
+        ),
+        dynare_optim_options=(
+            ("MaxIter", 1000),
+            ("TolFun", 1e-7),
+            ("NumgradAlgorithm", 2),
+            ("NumgradEpsilon", 1e-6),
+        ),
+    ),
+    # fminsearch uses the host MATLAB or Octave Nelder-Mead implementation.
+    7: OptimizerProfile(
+        dynare_mode_compute=7,
+        native_method="Nelder-Mead",
+        native_options=(
+            ("maxiter", 6000),
+            ("maxfun", 1_000_000),
+            ("xatol", 1e-6),
+            ("fatol", 1e-8),
+        ),
+        dynare_optim_options=(
+            ("MaxIter", 6000),
+            ("MaxFunEvals", 1_000_000),
+            ("TolFun", 1e-8),
+            ("TolX", 1e-6),
+        ),
+    ),
+    # Dynare's shared Nelder-Mead implementation. Its default evaluation cap
+    # is 500 times the parameter count.
+    8: OptimizerProfile(
+        dynare_mode_compute=8,
+        native_method="Nelder-Mead",
+        native_options=(("maxiter", 10_000), ("xatol", 1e-4), ("fatol", 1e-4)),
+        dynare_optim_options=(
+            ("MaxIter", 10_000),
+            ("TolFun", 1e-4),
+            ("TolX", 1e-4),
+            ("InitialSimplexSize", 0.05),
+        ),
+        maxfun_factor=500,
+    ),
+}
+
+
 CASES = {
-    "lb2004": CaseSpec(
+    "ls2004": CaseSpec(
         label="Lubik-Schorfheide 2004",
         yaml_name="POST82.yaml",
         mod_name="post82_kf.mod",
@@ -331,17 +415,25 @@ def _native(
     warmup: int,
     reps: int,
     zero_r: bool,
+    optimizer: OptimizerProfile,
 ) -> dict:
     estimator = _make_estimator(case, native, routine, zero_r)
     spec = case.routines[routine]
     theta0 = np.asarray(spec.theta0, dtype=np.float64)
+    optimizer_kwargs = optimizer.native_kwargs(len(spec.names))
     if routine == "mle":
         fn = lambda: estimator.mle(
-            theta0=theta0, bounds=spec.bounds, method="Nelder-Mead"
+            theta0=theta0,
+            bounds=spec.bounds,
+            method=optimizer.native_method,
+            **optimizer_kwargs,
         )
     else:
         fn = lambda: estimator.map(
-            theta0=theta0, bounds=spec.bounds, method="Nelder-Mead"
+            theta0=theta0,
+            bounds=spec.bounds,
+            method=optimizer.native_method,
+            **optimizer_kwargs,
         )
     with (
         open(os.devnull, "w", encoding="utf-8") as sink,
@@ -414,7 +506,12 @@ def _dynare_estimated_params(spec: Routine) -> str:
 
 
 def _write_model(
-    case: CaseSpec, routine: str, path: Path, periods: int, zero_r: bool
+    case: CaseSpec,
+    routine: str,
+    path: Path,
+    periods: int,
+    zero_r: bool,
+    optimizer: OptimizerProfile,
 ) -> None:
     source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
     for statement in case.dynare_remove:
@@ -427,7 +524,9 @@ def _write_model(
         "\nestimated_params;\n" + estimated + "\nend;\n"
         f"estimation(datafile = {case.data_file}, nobs = "
         + str(periods)
-        + ", mode_compute = 4, mh_replic = 0, cova_compute = 0);\n"
+        + f", mode_compute = {optimizer.dynare_mode_compute}, "
+        + f"optim = ({optimizer.dynare_optim()}), mh_replic = 0, "
+        + "cova_compute = 0);\n"
     )
     path.write_text(source, encoding="utf-8")
 
@@ -447,6 +546,7 @@ def _run_dynare(
     matlab_bin: str,
     octave_bin: str,
     zero_r: bool,
+    optimizer: OptimizerProfile,
 ) -> Path:
     root = Path(dynare_path).resolve().parent
     platform = "matlab" if runtime == "matlab" else "octave"
@@ -458,7 +558,14 @@ def _run_dynare(
     ) as tmp:
         workdir = Path(tmp)
         model_name = f"{case_name}_estimation_{routine}"
-        _write_model(case, routine, workdir / f"{model_name}.mod", y.shape[0], zero_r)
+        _write_model(
+            case,
+            routine,
+            workdir / f"{model_name}.mod",
+            y.shape[0],
+            zero_r,
+            optimizer,
+        )
         _write_data(
             _dynare_observable_names(case, native_observable_names),
             y,
@@ -500,10 +607,11 @@ def _print_table(routine: str, native: dict, dynare: dict[str, dict]) -> None:
     )
     for runtime, result in dynare.items():
         median = float(np.median(result["times"]))
+        nfev = int(np.median(result["nfev"]))
         delta = float(np.max(np.abs(native["theta"] - result["theta"])))
         objective_delta = abs(native["terminal_target"] - result["terminal_target"])
         print(
-            f"{'Dynare-' + runtime:<26} {median * 1e3:12.2f} {median / native_median:9.2f}x {'n/a':>8} {delta:20.3e} {objective_delta:20.3e}"
+            f"{'Dynare-' + runtime:<26} {median * 1e3:12.2f} {median / native_median:9.2f}x {nfev:8d} {delta:20.3e} {objective_delta:20.3e}"
         )
     print(
         f"native log likelihood: {native['loglik']:.12g}  native log prior: {native['logprior']:.12g}"
@@ -553,6 +661,16 @@ def main() -> int:
     parser.add_argument("--matlab-bin", default="matlab")
     parser.add_argument("--octave-bin", default="octave")
     parser.add_argument(
+        "--dynare-mode-compute",
+        type=int,
+        choices=tuple(OPTIMIZER_PROFILES),
+        default=4,
+        help=(
+            "Paired optimizer profile: 4 is L-BFGS-B/csminwel, "
+            "7 and 8 are Nelder-Mead (default: 4)."
+        ),
+    )
+    parser.add_argument(
         "--zero-r",
         action="store_true",
         help="Override the calibrated measurement covariance with R = 0 on both sides.",
@@ -564,6 +682,7 @@ def main() -> int:
         )
     if set(args.runtimes) - {"native"} and not args.dynare_matlab_path:
         parser.error("--dynare-matlab-path is required for Dynare runtimes")
+    optimizer = OPTIMIZER_PROFILES[args.dynare_mode_compute]
     context = (
         nullcontext(
             args.output_dir.resolve()
@@ -592,6 +711,10 @@ def main() -> int:
             print(
                 "Setup, preprocessing, input generation, and warmup are outside the timer."
             )
+            print(
+                f"Optimizer profile: SymbolicDSGE {optimizer.native_method}, "
+                f"Dynare mode_compute={optimizer.dynare_mode_compute}."
+            )
             for routine in args.routines:
                 native = _native(
                     case,
@@ -600,6 +723,7 @@ def main() -> int:
                     args.warmup,
                     args.reps,
                     args.zero_r,
+                    optimizer,
                 )
                 np.savez(output_dir / f"native_{routine}.npz", **native)
                 dynare = {}
@@ -620,11 +744,13 @@ def main() -> int:
                             args.matlab_bin,
                             args.octave_bin,
                             args.zero_r,
+                            optimizer,
                         ),
                         squeeze_me=True,
                     )
                     dynare[runtime] = {
                         "times": np.asarray(raw["times"], dtype=np.float64).reshape(-1),
+                        "nfev": np.asarray(raw["nfev"], dtype=np.int64).reshape(-1),
                         "objective_times": np.asarray(
                             raw["objective_times"], dtype=np.float64
                         ).reshape(-1),
@@ -648,6 +774,13 @@ def main() -> int:
                         "warmup": args.warmup,
                         "reps": args.reps,
                         "zero_r": args.zero_r,
+                        "optimizer": {
+                            "dynare_mode_compute": optimizer.dynare_mode_compute,
+                            "native_method": optimizer.native_method,
+                            "native_options": dict(optimizer.native_options),
+                            "native_maxfun_factor": optimizer.maxfun_factor,
+                            "dynare_optim": optimizer.dynare_optim(),
+                        },
                     },
                     indent=2,
                 )

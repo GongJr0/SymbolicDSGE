@@ -37,6 +37,7 @@ function bench_estimation_dynare(workdir, model_name, probes, include_prior, war
     dynare_estimation({}, M_.dname);
   end
   times = zeros(reps, 1);
+  nfev = zeros(reps, 1);
   theta = zeros(size(probes, 1), 1);
   for i = 1:reps
     M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
@@ -45,12 +46,13 @@ function bench_estimation_dynare(workdir, model_name, probes, include_prior, war
     dynare_estimation({}, M_.dname);
     times(i) = toc(started);
     theta = oo_.posterior.optimization.mode(:);
+    nfev(i) = oo_.posterior.optimization.optimization_info.funcCount;
   end
   M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
   bayestopt_ = bayestopt0; dataset_ = dataset0; dataset_info = dataset_info0;
   terminal_target = benchmark_target(theta, M_, estim_params_, oo_, options_, bayestopt_, include_prior);
   measurement_covariance = M_.H;
-  save('-v7', output_path, 'times', 'objective_times', 'theta', 'terminal_target', 'probe_target', 'measurement_covariance');
+  save('-v7', output_path, 'times', 'nfev', 'objective_times', 'theta', 'terminal_target', 'probe_target', 'measurement_covariance');
 end
 
 function target = benchmark_target(theta, M, estim_params, oo, options, bayestopt, include_prior)
