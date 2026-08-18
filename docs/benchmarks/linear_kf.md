@@ -32,7 +32,7 @@ Since SymbolicDSGE does not implement a Kalman smoother as of version `2.0.0.dev
 
 The second-case is not a fair comparison by any means. A filter and smoother are not equal in per-step workload.
 Additionally, for `T` observations, a filter will run `T` iterations while a smoother runs `2T` or `2T-1`.
-Since Dynare exposes filter traces through their `calib_smoother` and `evaluate_smoother`, this measurement does compare the runtime of obtaining predicted and filtered states in either library.However, the comparison does not aim to imply a conclusion about the performance of Dynare's smoother implementation or claim that SymbolicDSGE has equivalent functionality.
+Since Dynare exposes filter traces through their `calib_smoother` and `evaluate_smoother`, this measurement does compare the runtime of obtaining predicted and filtered states in either library. However, the comparison does not aim to imply a conclusion about the performance of Dynare's smoother implementation or claim that SymbolicDSGE has equivalent functionality.
 
 ???+ info "Matching Dynare's defaults"
     SymbolicDSGE's defaults largely overlap with Dynare's, with the main difference being the *Joseph form* covariance update.
@@ -105,7 +105,7 @@ options_.filter_step_ahead = 1;  % (4)!
 
 ```
 
-1. `lik_init=1` is Dynare's filter initalization specifier for `P0`. The [Dynare Manual](https://www.dynare.org/manual/the-model-file.html#lik_init%20=%20INTEGER) recommendeds `1` for stationary models, which uses the same unconditional covariance calculation SymbolicDSGE executes.
+1. `lik_init=1` is Dynare's filter initalization specifier for `P0`. The [Dynare Manual](https://www.dynare.org/manual/the-model-file.html#lik_init%20=%20INTEGER) recommends `1` for stationary models, which uses the same unconditional covariance calculation SymbolicDSGE executes.
 2. `kalman_algo` chooses the underlying filter implementation the method resolves to, `1` is the linear Gaussian multivariate filter.
 3. Enables the calculation of filtered variables. Corresponds to SymbolicDSGE's `x_filt`
 4. Enables the calculation of predicted variables. Corresponds to SymbolicDSGE's `x_pred`
@@ -169,7 +169,7 @@ SymbolicDSGE retains filter histories. Dynare's closest public alternative is `c
 ???+ note "Note on Octave"
 
     This section will briefly discuss the outcomes of the Octave comparison and leave the technical details to the MATLAB discussion.
-    In all tested mdoel sizes SymbolicDSGE performs better than Octave + Dynare.
+    In all tested model sizes SymbolicDSGE performs better than Octave + Dynare.
     Being an open-source alternative, SymbolicDSGE is therefore seen as a definite contender in scenarios where a MATLAB license is not available.
     However, the performance curve clearly shows that SymbolicDSGE will be slower than Octave given a sufficiently large model.
 
@@ -191,7 +191,7 @@ Smets-Wouters (2007) is the clear example; MATLAB + Dynare at those sizes run 2x
 While the exact point where BLAS overtakes hand-written C will depend on the system, it is clear that past-medium scale, Dynare should be the library of choice for numerical workflows.
 
 For fast-iterating research work, scratch models, and extensive estimation routines for smaller core models (like a NK3 base), SymbolicDSGE is thought to be a contender.
-This is not definitive proof of any performance outcome, however it shows that a quick benchmark of SymbolicDSGE against Dynare before a large workflow can be informative and beneficial to determine which library better suites the task.
+This is not definitive proof of any performance outcome, however it shows that a quick benchmark of SymbolicDSGE against Dynare before a large workflow can be informative and beneficial to determine which library better suits the task.
 
 ???+ note "Preparation for Large Workflows"
     If you're planning to use SymbolicDSGE for a large estimation workflow or Monte Carlo pipeline, it is recommended to clone the repository and build the Cython extension targeting your architecture. (`-march=native` as a compiler flag.)
