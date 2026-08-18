@@ -88,12 +88,3 @@ kalman:
       Infl, Rate: meas_rho_ir
       Infl, Out_HP: meas_rho_io
       Rate, Out_HP: meas_rho_or
-  P0:
-    mode: diag
-    diag:
-      g: 1.0
-      z: 1.0
-      r: 1.0
-      Pi: 1.0
-      x: 1.0
-

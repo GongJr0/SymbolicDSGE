@@ -8,13 +8,9 @@
       
       
       
-        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/2.0.0.dev8/guides/monte_carlo_guide/">
+        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/2.0.0.dev8/benchmarks/linear_kf/">
       
       
-        <link rel="prev" href="../estimation_guide/">
-      
-      
-        <link rel="next" href="../bundle_authoring_guide/">
       
       
         
@@ -25,7 +21,7 @@
     
     
       
-        <title>Monte Carlo Guide - SymbolicDSGE Documentation</title>
+        <title>Linear Kalman Filter Benchmark - SymbolicDSGE Documentation</title>
       
     
     
@@ -119,7 +115,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#monte-carlo-pipeline-guide" class="md-skip">
+        <a href="#linear-kalman-filter-benchmark" class="md-skip">
           Skip to content
         </a>
       
@@ -158,7 +154,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Monte Carlo Guide
+              Linear Kalman Filter Benchmark
             
           </span>
         </div>
@@ -731,20 +727,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -765,7 +759,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -783,7 +777,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../model_config_guide/" class="md-nav__link">
+      <a href="../../guides/model_config_guide/" class="md-nav__link">
         
   
   
@@ -811,7 +805,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../quickstart/" class="md-nav__link">
+      <a href="../../guides/quickstart/" class="md-nav__link">
         
   
   
@@ -839,7 +833,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kalman_config_guide/" class="md-nav__link">
+      <a href="../../guides/kalman_config_guide/" class="md-nav__link">
         
   
   
@@ -867,7 +861,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../estimation_guide/" class="md-nav__link">
+      <a href="../../guides/estimation_guide/" class="md-nav__link">
         
   
   
@@ -892,37 +886,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Monte Carlo Guide
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../guides/monte_carlo_guide/" class="md-nav__link">
         
   
   
@@ -938,142 +905,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#model-instantiation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Model Instantiation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pipeline-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pipeline Setup
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Pipeline Setup">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#data-generation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data Generation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#filtering" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Filtering
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#testing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Testing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#built-in-and-custom-transforms" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Built-in and Custom Transforms
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#post-processing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Post-Processing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complete-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complete Pipeline
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running-the-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running the Pipeline
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#conclusion" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conclusion
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1086,7 +917,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../bundle_authoring_guide/" class="md-nav__link">
+      <a href="../../guides/bundle_authoring_guide/" class="md-nav__link">
         
   
   
@@ -1114,7 +945,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../bundle_loading_guide/" class="md-nav__link">
+      <a href="../../guides/bundle_loading_guide/" class="md-nav__link">
         
   
   
@@ -4287,10 +4118,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#model-instantiation" class="md-nav__link">
+  <a href="#model-shapes-and-compilation-differences" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Model Instantiation
+        Model Shapes and Compilation Differences
       
     </span>
   </a>
@@ -4298,77 +4129,33 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pipeline-setup" class="md-nav__link">
+  <a href="#dynares-kalman-filter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pipeline Setup
+        Dynare's Kalman Filter
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Pipeline Setup">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmark Setup">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#data-generation" class="md-nav__link">
+  <a href="#run-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Data Generation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#filtering" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Filtering
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#testing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Testing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#built-in-and-custom-transforms" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Built-in and Custom Transforms
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#post-processing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Post-Processing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complete-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complete Pipeline
+        Run Configuration
       
     </span>
   </a>
@@ -4381,21 +4168,60 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#running-the-pipeline" class="md-nav__link">
+  <a href="#results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running the Pipeline
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Shapes
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#conclusion" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#likelihood-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Conclusion
+        Likelihood Only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retained-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retained History
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outlook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outlook
       
     </span>
   </a>
@@ -4428,364 +4254,330 @@
         
       
       
-        <span class="md-tag md-tag-icon md-tag--guide">guide</span>
+        <span class="md-tag md-tag-icon md-tag--info">info</span>
       
     
   </nav>
 
 
 
-<h1 id="monte-carlo-pipeline-guide">Monte Carlo Pipeline Guide</h1>
-<details class="tip">
+<h1 id="linear-kalman-filter-benchmark">Linear Kalman Filter Benchmark</h1>
+<details class="tip" open="open">
 <summary><strong>TL;DR</strong></summary>
-<p>You can find a demonstration notebook <a href="../../assets/monte_carlo.ipynb">here</a>.</p>
+<p>If you're not interested in the details, you can skip to the <a href="#results">results</a>.
+However, it's recommended to give a quick skip since not all comparisons are measuring equivalent algorithms.</p>
 </details>
-<details class="warning" open="open">
-<summary>Read the Quickstart and Kalman Guides</summary>
-<p>This guide assumes familiarity with <code>SolvedModel.sim(...)</code>, <code>Shock</code>, and <code>SolvedModel.kalman(...)</code>.</p>
+<p>The linear Gaussian Kalman filter (KF) is the backbone of many DSGE applications. 
+It provides state estimation, and is the main likelihood engine of choice for linear first-order DSGE models.
+Therefore, the performance of a library's KF has direct and noticeable implications on estimation workflows.
+This benchmark compares the SymbolicDSGE KF implementation against Dynare's on multiple published models.</p>
+<h2 id="model-shapes-and-compilation-differences">Model Shapes and Compilation Differences</h2>
+<p>Dynare handles observables differently than SymbolicDSGE. In Dynare, observables are defined in the model block, increasing the state-space dimension of the model.
+SymbolicDSGE treats observables as <em>deterministic functions of the state</em>, hence observables do not enter the state-space. However, SymbolicDSGE only allows current-period states into observables, making auxiliary states necessary for some models.
+Conversely, SymbolicDSGE routinely has more parameters for an equivalent model due to the KF's measurement covariance <code>R</code> being treated as a symbolic and estimable component. Each member of the <code>R</code> matrix, when declared, are separate parameters in SymbolicDSGE, while Dynare allows scalar initialization of the covariance matrix.
+Differences in model dimensions are reported, but benchmarks do not try to equalize the state-space dimensions. Efficiency of the model representation is considered part of the library's performance.</p>
+<h2 id="dynares-kalman-filter">Dynare's Kalman Filter</h2>
+<p>Dynare implements the Kalman filter as a likelihood engine, and chooses to derive predicted, filtered, and smoothed states from a Kalman smoother.
+SymbolicDSGE has a general-purpose Kalman filter that's capable of being likelihood-only, but also can return a complete filter history.
+Since SymbolicDSGE does not implement a Kalman smoother as of version <code>2.0.0.dev8</code> (version of execution), the benchmark compares two separate cases:</p>
+<ol>
+<li>SymbolicDSGE's likelihood-only KF against Dynare's likelihood-only KF.</li>
+<li>SymbolicDSGE's full-history KF against Dynare's smoother.</li>
+</ol>
+<p>The second-case is not a fair comparison by any means. A filter and smoother are not equal in per-step workload.
+Additionally, for <code>T</code> observations, a filter will run <code>T</code> iterations while a smoother runs <code>2T</code> or <code>2T-1</code>.
+Since Dynare exposes filter traces through their <code>calib_smoother</code> and <code>evaluate_smoother</code>, this measurement does compare the runtime of obtaining predicted and filtered states in either library. However, the comparison does not aim to imply a conclusion about the performance of Dynare's smoother implementation or claim that SymbolicDSGE has equivalent functionality.</p>
+<details class="info" open="open">
+<summary>Matching Dynare's defaults</summary>
+<p>SymbolicDSGE's defaults largely overlap with Dynare's, with the main difference being the <em>Joseph form</em> covariance update.
+The Joseph update is numerically robust, but expensive.
+Dynare uses the simple covariance update, and SymbolicDSGE matches that with <code>joseph_cov=False</code>.</p>
 </details>
-<p>This guides demonstrates the setup of an example Monte Carlo experiment.
-The <code>monte_carlo</code> module is written for two cases:</p>
-<ol>
-<li>Comparing two models: a reference and data-generating model.</li>
-<li>Comparing a reference model to raw data.</li>
-</ol>
-<p>This demonstration focuses on the first case where two models are present.</p>
-<h2 id="model-instantiation">Model Instantiation</h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE</span><span class="w"> </span><span class="kn">import</span> <span class="n">DSGESolver</span><span class="p">,</span> <span class="n">ModelParser</span><span class="p">,</span> <span class="n">Shock</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.monte_carlo</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">MCPipeline</span><span class="p">,</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">custom_transform</span><span class="p">,</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">pandas_operation</span><span class="p">,</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.monte_carlo.step_factories</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">kde_step</span><span class="p">,</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">postproc_step</span><span class="p">,</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">reference_filter_step</span><span class="p">,</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">simulation_step</span><span class="p">,</span>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">standardize_step</span><span class="p">,</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">transform_step</span><span class="p">,</span>
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">wald_test_step</span><span class="p">,</span>
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="p">)</span>
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="kn">import</span><span class="w"> </span><span class="nn">cProfile</span>
-</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
-</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="n">model</span><span class="p">,</span> <span class="n">kalman</span> <span class="o">=</span> <span class="n">ModelParser</span><span class="p">(</span><span class="s2">&quot;../../MODELS/misspec_test/reference.yaml&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_all</span><span class="p">()</span> <span class="c1"># (1)!</span>
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>
-</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="n">solver</span> <span class="o">=</span> <span class="n">DSGESolver</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">kalman</span><span class="p">)</span>
-</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="n">compiled</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">compile</span><span class="p">()</span>
-</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="n">ss_seed</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="n">reference</span> <span class="o">=</span> <span class="n">solver</span><span class="o">.</span><span class="n">solve</span><span class="p">(</span><span class="n">compiled</span><span class="p">,</span> <span class="n">ss_seed</span><span class="o">=</span><span class="n">ss_seed</span><span class="p">)</span>
-</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>
-</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="n">dgp_model</span><span class="p">,</span> <span class="n">dgp_kalman</span> <span class="o">=</span> <span class="n">ModelParser</span><span class="p">(</span><span class="s2">&quot;../../MODELS/misspec_test/misspec.yaml&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_all</span><span class="p">()</span> <span class="c1"># (3)!</span>
-</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="n">dgp_comp</span> <span class="o">=</span> <span class="n">DSGESolver</span><span class="p">(</span><span class="n">dgp_model</span><span class="p">,</span> <span class="n">dgp_kalman</span><span class="p">)</span><span class="o">.</span><span class="n">compile</span><span class="p">()</span>
-</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="n">dgp_sol</span> <span class="o">=</span> <span class="n">DSGESolver</span><span class="p">(</span><span class="n">dgp_model</span><span class="p">,</span> <span class="n">dgp_kalman</span><span class="p">)</span>
-</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="n">dgp</span> <span class="o">=</span> <span class="n">dgp_sol</span><span class="o">.</span><span class="n">solve</span><span class="p">(</span><span class="n">dgp_comp</span><span class="p">,</span> <span class="n">ss_seed</span><span class="o">=</span><span class="n">ss_seed</span><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li>This is the reference model configuration.</li>
-<li>Both models use the same steady-state seed.</li>
-<li>The DGP has a separate, misspecified configuration.</li>
-</ol>
-<p>Now, we have two models to compare in a Monte Carlo experiment.
-We will determine whether the reference model is misspecified relative to the DGP using MC repeated Wald tests.</p>
-<details class="note" open="open">
-<summary>Data Retention</summary>
-<p>Each step produces and records their output independently. Retaining full output resolution for every step can easily exceed available memory in consumer hardware.
-<code>n_retain</code> controls how many replications persist outside the hot loop to give more granular memory management. All steps contain an <code>n_retain</code> argument, which defaults to <code>-1</code> (retain all). Setting it to <code>0</code> retains nothing, and any positive integer retains that many evenly spaced replications.</p>
-</details>
-<h2 id="pipeline-setup">Pipeline Setup</h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.monte_carlo</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCPipeline</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">T</span> <span class="o">=</span> <span class="mi">200</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">n_obs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">reference</span><span class="o">.</span><span class="n">compiled</span><span class="o">.</span><span class="n">observable_names</span><span class="p">)</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">MCPipeline</span><span class="p">(</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">per_rep_steps</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">],</span>  <span class="c1"># (3)!</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">postproc_steps</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">],</span>  <span class="c1"># (4)!</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li>Length of each simulated sample.</li>
-<li>Number of observables the model(s) have.</li>
-<li>Steps here are executed per replication.</li>
-<li>This field is reserved for <code>POSTPROC</code> steps; these execute once after the replication loop concludes.</li>
-</ol>
-<p><code>MCPipeline</code> is used to compile the steps that need to be executed for each repetition.
-Every step of <code>MCPipeline</code> must be an <code>MCStep</code> object.
-The pipeline will be built using the step-generating functions under <code>SymbolicDSGE.monte_carlo.step_factories</code>.</p>
-<h3 id="data-generation">Data Generation</h3>
-<details class="warning" open="open">
-<summary>Step Ordering</summary>
-<p>Data generation is done exactly once, in the first step of the pipeline.</p>
-</details>
-<p>Using the <code>simulation_step</code> function, we generate an <code>MCStep</code> object that samples the DGP model with a given simulation specification.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">datagen_step</span> <span class="o">=</span> <span class="n">simulation_step</span><span class="p">(</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">T</span><span class="o">=</span><span class="n">T</span><span class="p">,</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">target</span><span class="o">=</span><span class="s2">&quot;dgp&quot;</span><span class="p">,</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">n_retain</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">shocks</span><span class="o">=</span><span class="p">{</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="s2">&quot;e_g,e_z&quot;</span><span class="p">:</span> <span class="n">Shock</span><span class="p">(</span><span class="n">dist</span><span class="o">=</span><span class="s2">&quot;norm&quot;</span><span class="p">,</span> <span class="n">multivar</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="s2">&quot;e_r&quot;</span><span class="p">:</span> <span class="n">Shock</span><span class="p">(</span><span class="n">dist</span><span class="o">=</span><span class="s2">&quot;norm&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="p">},</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">observables</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li><code>target</code> can be either <code>"reference"</code> or <code>"dgp"</code> and defaults to <code>"dgp"</code>. It selects which model role is simulated.</li>
-</ol>
-<details class="note" open="open">
-<summary>Replication Streams</summary>
-<p>Normal and uniform shocks are drawn inside the native loop. Each replication addresses its own stream of a counter based engine keyed on the specification's seed and its position in the mapping, so replications never overlap and two specifications sharing a seed stay independent.</p>
-<p>A seeded specification replays bit for bit across runs, and the result does not depend on <code>n_rep</code> or <code>n_jobs</code>. A specification with <code>seed=None</code> draws from a fresh key each run.</p>
-</details>
-<p><code>simulation_step</code> forwards <code>T</code>, <code>shocks</code>, <code>shock_scale</code>, <code>x0</code>, and <code>observables</code> to <code>SolvedModel.sim(...)</code>. It adds <code>target</code>, which selects the model role.
-The <code>shocks</code> argument follows the same dictionary convention as <code>SolvedModel.sim(...)</code>. Each MC iteration runs the selected model with this specification and passes the output data downstream.</p>
-<p>To inspect one replication on its own, <code>replication_shocks</code> hands back the exact shock paths that replication saw, keyed the same way the specification is:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.monte_carlo</span><span class="w"> </span><span class="kn">import</span> <span class="n">replication_shocks</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">shocks</span> <span class="o">=</span> <span class="n">replication_shocks</span><span class="p">(</span><span class="n">dgp</span><span class="p">,</span> <span class="n">datagen_step</span><span class="p">,</span> <span class="n">rep_idx</span><span class="o">=</span><span class="mi">417</span><span class="p">)</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">sample</span> <span class="o">=</span> <span class="n">dgp</span><span class="o">.</span><span class="n">sim</span><span class="p">(</span><span class="n">T</span><span class="o">=</span><span class="n">T</span><span class="p">,</span> <span class="n">shocks</span><span class="o">=</span><span class="n">shocks</span><span class="p">,</span> <span class="n">shock_scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
-</span></code></pre></div>
-<p>Scaling is already applied to what comes back, which is why <code>shock_scale</code> is <code>1.0</code> above. Only seeded specifications are reproducible this way; one with <code>seed=None</code> was drawn from a key the run discarded.</p>
-<h3 id="filtering">Filtering</h3>
-<p>The first step after datagen is filtering the reference model using a Kalman filter against the DGP simulated observables.
-<code>reference_filter_step</code> is a pre-built function configuring the reference model's Kalman filter to be run per iteration for this purpose.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.monte_carlo.step_factories</span><span class="w"> </span><span class="kn">import</span> <span class="n">reference_filter_step</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">kf_step</span> <span class="o">=</span> <span class="n">reference_filter_step</span><span class="p">()</span>
-</span></code></pre></div>
-<p><code>reference_filter_step</code> accepts <code>filter_mode</code>, <code>observables</code>, <code>x0</code>, <code>P0</code>, <code>R</code>, <code>jitter</code>, <code>symmetrize</code>, <code>joseph_cov</code>, and <code>return_shocks</code>, mirroring the <code>SolvedModel.kalman</code> configuration.</p>
-<h3 id="testing">Testing</h3>
-<p>With filtered outputs, we run a test step using the <code>wald_test_step</code> function.
-<code>kind = "mean"</code> and <code>target = np.zeros(n_obs)</code> tests the first moment of the standardized innovations against a zero vector.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">SymbolicDSGE.monte_carlo.step_factories</span><span class="w"> </span><span class="kn">import</span> <span class="n">wald_test_step</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">mean_test_step</span> <span class="o">=</span> <span class="n">wald_test_step</span><span class="p">(</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="s2">&quot;std_innov_mean&quot;</span><span class="p">,</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">source</span><span class="o">=</span><span class="s2">&quot;filter&quot;</span><span class="p">,</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">field</span><span class="o">=</span><span class="s2">&quot;std_innov&quot;</span><span class="p">,</span>  <span class="c1"># (3)!</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">target</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_obs</span><span class="p">),</span>  <span class="c1"># (4)!</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">,</span>  <span class="c1"># (5)!</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="n">burn_in</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>  <span class="c1"># (6)!</span>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li>Name of the step. (This will be used as the key to access the results)</li>
-<li>Producer step to read from. In this case, it is the Kalman filter (named <code>"filter"</code> by default).</li>
-<li>Field in the producer's output. <code>std_innov</code> is the standardized innovations of the Kalman filter.</li>
-<li>Target to test against. In this case we're testing if the mean of each observable is zero.</li>
-<li>Kind of the wald test. Available inputs are: <code>Literal["mean", "covariance", "second_moment"]</code>.</li>
-<li>Number of periods to discard before running the tests.</li>
-</ol>
-<p>Every test step writes a statistic, a p-value, and a status per replication. These are aggregated into an MC summary once the loop concludes.</p>
-<h3 id="built-in-and-custom-transforms">Built-in and Custom Transforms</h3>
-<p>Custom transforms run inside the native loop, so they are wrapped with <code>custom_transform</code> and compiled by Numba. The wrapper snapshots the function source and the globals it references so the operation can travel inside a <code>.sdsge</code> archive, and it enforces the native transform contract: exactly two positional arguments and an integer status return.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nd">@custom_transform</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">custom_standardize</span><span class="p">(</span><span class="n">sample</span><span class="p">,</span> <span class="n">output</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">n</span><span class="p">,</span> <span class="n">p</span> <span class="o">=</span> <span class="n">sample</span><span class="o">.</span><span class="n">shape</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>        <span class="n">mean</span> <span class="o">=</span> <span class="mf">0.0</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>            <span class="n">mean</span> <span class="o">+=</span> <span class="n">sample</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="n">mean</span> <span class="o">/=</span> <span class="n">n</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="n">var</span> <span class="o">=</span> <span class="mf">0.0</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>            <span class="n">var</span> <span class="o">+=</span> <span class="p">(</span><span class="n">sample</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">-</span> <span class="n">mean</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
-</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>        <span class="n">std</span> <span class="o">=</span> <span class="p">(</span><span class="n">var</span> <span class="o">/</span> <span class="n">n</span><span class="p">)</span> <span class="o">**</span> <span class="mf">0.5</span>
-</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
-</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>            <span class="n">output</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">sample</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">-</span> <span class="n">mean</span><span class="p">)</span> <span class="o">/</span> <span class="n">std</span>
-</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>
-</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="k">return</span> <span class="mi">0</span>  <span class="c1"># (2)!</span>
-</span></code></pre></div>
-<ol>
-<li><code>sample</code> is the C-contiguous 2D <code>float64</code> slice selected for the current replication, <code>output</code> is the buffer the function writes into. Both are supplied by the runner; the function never allocates.</li>
-<li><code>0</code> marks success. Any other value marks the replication as failed for this step.</li>
-</ol>
-<details class="note" open="open">
-<summary>Built-in Transforms</summary>
-<p>There are multiple built-in transforms available in <code>SymbolicDSGE</code> and <a href="../../documentation/monte_carlo/operations/transforms/standardize/">standardization</a> is one of them. All built-in transforms are documented and <code>standardize_step</code> is used as an example in this guide.</p>
-</details>
-<p>With a custom function defined, the step can be created using the generic <code>transform_step</code> function.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">custom_std</span> <span class="o">=</span> <span class="n">transform_step</span><span class="p">(</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="s2">&quot;custom_std&quot;</span><span class="p">,</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">custom_standardize</span><span class="p">,</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">source</span><span class="o">=</span><span class="s2">&quot;filter&quot;</span><span class="p">,</span>  <span class="c1"># (3)!</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">field</span><span class="o">=</span><span class="s2">&quot;innov&quot;</span><span class="p">,</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="n">T</span><span class="p">,</span> <span class="n">n_obs</span><span class="p">),</span>  <span class="c1"># (4)!</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="p">)</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">builtin_std</span> <span class="o">=</span> <span class="n">standardize_step</span><span class="p">(</span>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="s2">&quot;builtin_std&quot;</span><span class="p">,</span>
-</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">source</span><span class="o">=</span><span class="s2">&quot;filter&quot;</span><span class="p">,</span>
-</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">field</span><span class="o">=</span><span class="s2">&quot;innov&quot;</span><span class="p">,</span>  <span class="c1"># (5)!</span>
-</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li>Name of the step. It becomes the trace key <code>payload.custom_std</code>.</li>
-<li>The function to be executed. A bare function is wrapped in <code>NumbaCustomFunc</code> automatically.</li>
-<li><code>source</code> and <code>field</code> select the upstream array. <code>columns</code>, <code>burn_in</code>, and <code>drop_initial</code> narrow it further.</li>
-<li>Required. The output buffer is planned before the run starts, so the transform must declare the exact <code>(rows, columns)</code> it writes.</li>
-<li>In this case, the <code>innov</code> attribute (raw innovations) of the filter output is used.</li>
-</ol>
-<h3 id="post-processing">Post-Processing</h3>
-<p>Post-processing is executed separately from the replication loop. The <code>kde_step</code> function is the only built-in. Custom post-processing steps stay in plain Python and are encapsulated by a <code>pandas_operation</code> decorator, which extends the numeric namespace with allowed <code>pandas</code> functionality. Post-processing functions do not see individual replications. Instead, they receive a flattened <code>traces</code> dictionary containing transform payloads, test results, and regression results.</p>
-<p>Access to a given array follows a <code>"."</code> separated path, for example, the custom standardization step (which is a payload) is accessed as <code>traces["payload.custom_std"]</code>. Payload traces are stacked across retained replications, so a transform writing <code>(T, p)</code> per replication appears as <code>(n_retained, T, p)</code>. The same stacked arrays are on the result as <code>result.transform_outputs["custom_std"]</code>. Test and regression results are structured:</p>
-<p><strong>Test Traces:</strong></p>
+<h2 id="benchmark-setup">Benchmark Setup</h2>
+<p>The benchmark times the filters only. The preparation, including solution and compilation, are not included in both libraries. Seeds are fixed and the absolute maximum difference between results are reported alongside the timing. There are 5 models, each published and fairly well-known; all models are tested for both likelihood-only and full-history filtering.
+In increasing model complexity, the models are:</p>
 <ul>
-<li><code>"test.{name}.pval"</code>: Array of p-values for each replication.</li>
-<li><code>"test.{name}.statistic"</code>: Array of test statistics for each replication.</li>
-<li><code>"test.{name}.status"</code>: Array of test statuses for each replication.</li>
+<li><a href="https://github.com/GongJr0/SymbolicDSGE/blob/main/tests/fixtures/models/post82_first_order.mod" target="_blank" rel="noopener">Lubik and Schorfheide (2004) - POST82 Calibration</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Ireland_2004/Ireland_2004.mod" target="_blank" rel="noopener">Ireland (2004)</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Gali_Monacelli_2005/Gali_Monacelli_2005.mod" target="_blank" rel="noopener">Gali and Monacelli (2005)</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Gali_2015/Gali_2015_chapter_3.mod" target="_blank" rel="noopener">Gali (2015) - Chapter 3</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Smets_Wouters_2007/Smets_Wouters_2007.mod" target="_blank" rel="noopener">Smets and Wouters (2007)</a></li>
 </ul>
-<p><strong>Regressions Traces:</strong></p>
+<blockquote>
+<p>All models except Lubik-Schorfheide (2004) are taken from Johannes Pfeifer's <code>DSGE_mod</code> and are distributed under the <a href="https://www.gnu.org/licenses/gpl-3.0.en.html" target="_blank" rel="noopener">GNU General Public License v3.0</a>. The <code>.mod</code> files are originally written for reproduction; each of the used scripts remove the workflows and keep the model definitions. The Lubik-Schorfheide (2004) model is distributed under the <a href="https://opensource.org/license/mit/" target="_blank" rel="noopener">MIT License</a>.</p>
+</blockquote>
+<p>The benchmark script is available in <a href="https://github.com/GongJr0/SymbolicDSGE" target="_blank" rel="noopener">SymbolicDSGE's GitHub repository</a> and is runnable from the repo root:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>./benchmarks/bench_linear_kf.py<span class="w"> </span>--help
+</span></code></pre></div>
+<h3 id="run-configuration">Run Configuration</h3>
+<p>Each bencmark runs on a simulated sample of 200 observations with 200 repetitions. Simulation outputs are produced by SymbolicDSGE once in preparation, and consequent repetitions do not redraw. Three warmup runs are performed for both libraries before timing.</p>
+<p>The commands being timed are:</p>
+<p><strong>SymbolicDSGE</strong></p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">KalmanFilter</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>            <span class="k">case</span><span class="o">.</span><span class="n">A</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">B</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">C</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">d</span><span class="p">,</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>            <span class="k">case</span><span class="o">.</span><span class="n">Q</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">R</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">y</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>            <span class="n">P0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="c1"># (1)!</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>            <span class="n">_store_history</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="c1"># (2)!</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>            <span class="n">symmetrize</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># (3)!</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>            <span class="n">joseph_cov</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="p">)</span>
+</span></code></pre></div>
+<ol>
+<li>Executes a Lyapunov solve to use stationary state covariance; Dynare does the same.</li>
+<li><code>True</code> when full-history is being timed</li>
+<li>Default is <code>True</code>, disabled to match Dynare</li>
+</ol>
+<p><strong>Dynare</strong></p>
+<div class="language-matlab highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c">% Loglik only filter</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">kalman_filter</span><span class="p">(</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">      </span><span class="n">Y</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">periods</span><span class="p">,</span><span class="w"> </span><span class="nb">zeros</span><span class="p">(</span><span class="n">n_endo</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="n">P0</span><span class="p">,</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="mf">1e-10</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="n">Q</span><span class="p">,</span><span class="w"> </span><span class="n">R</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">,</span><span class="w"> </span><span class="n">Z</span><span class="p">,</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="n">n_endo</span><span class="p">,</span><span class="w"> </span><span class="n">n_obs</span><span class="p">,</span><span class="w"> </span><span class="n">n_exo</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c">% Full history</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">options_</span><span class="p">.</span><span class="n">lik_init</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (1)!</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">options_</span><span class="p">.</span><span class="n">kalman_algo</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (2)!</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">options_</span><span class="p">.</span><span class="n">first_obs</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">options_</span><span class="p">.</span><span class="n">nobs</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">periods</span><span class="p">;</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">options_</span><span class="p">.</span><span class="n">prefilter</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">options_</span><span class="p">.</span><span class="n">filtered_vars</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (3)!</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">options_</span><span class="p">.</span><span class="n">filter_step_ahead</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (4)!</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">[</span><span class="n">oo_</span><span class="p">,</span><span class="w"> </span><span class="n">M_</span><span class="p">,</span><span class="w"> </span><span class="n">options_</span><span class="p">,</span><span class="w"> </span><span class="n">bayestopt_</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">evaluate_smoother</span><span class="p">(</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">        </span><span class="s">&#39;calibration&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">var_list_</span><span class="p">,</span><span class="w"> </span><span class="n">M_</span><span class="p">,</span><span class="w"> </span><span class="n">oo_</span><span class="p">,</span><span class="w"> </span><span class="n">options_</span><span class="p">,</span><span class="w"> </span><span class="n">bayestopt_</span><span class="p">,</span><span class="w"> </span><span class="n">estim_params_</span><span class="p">);</span>
+</span></code></pre></div>
+<ol>
+<li><code>lik_init=1</code> is Dynare's filter initalization specifier for <code>P0</code>. The <a href="https://www.dynare.org/manual/the-model-file.html#lik_init%20=%20INTEGER" target="_blank" rel="noopener">Dynare Manual</a> recommends <code>1</code> for stationary models, which uses the same unconditional covariance calculation SymbolicDSGE executes.</li>
+<li><code>kalman_algo</code> chooses the underlying filter implementation the method resolves to, <code>1</code> is the linear Gaussian multivariate filter.</li>
+<li>Enables the calculation of filtered variables. Corresponds to SymbolicDSGE's <code>x_filt</code></li>
+<li>Enables the calculation of predicted variables. Corresponds to SymbolicDSGE's <code>x_pred</code></li>
+</ol>
+<p>The benchmark runs on the following hardware and software configuration:</p>
 <ul>
-<li><code>"regression.{name}.coef"</code>: 2D array of regression coefficients for each replication.</li>
-<li><code>"regression.{name}.r2"</code>: Array of R-squared values for each replication.</li>
-<li><code>"regression.{name}.status"</code>: Array of regression statuses for each replication.</li>
+<li>CPU: Intel(R) Core(TM) i9-10900K CPU @ 4.90GHz</li>
+<li>MEM: 32GB DDR4 2933MHz</li>
+<li>OS: Windows 11 Pro 22H2</li>
+<li>Python: <code>cpython 3.11.14</code></li>
+<li>SymbolicDSGE: <code>2.0.0.dev8</code></li>
+<li>Dynare: <code>7.1</code></li>
+<li>Dynare Runtimes: MATLAB R2026a, Octave 11.3.0</li>
+<li>MATLAB BLAS/LAPACK: Intel openMKL build 20241031 (LAPACK 3.11.0)</li>
+<li>Octave BLAS/LAPACK: OpenBLAS 0.3.31 (LAPACK 3.12.0)</li>
 </ul>
-<p>A custom post-processing function is defined as follows:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nd">@pandas_operation</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_std_obs_mean</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">traces</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">stacked</span> <span class="o">=</span> <span class="n">traces</span><span class="p">[</span><span class="s2">&quot;payload.custom_std&quot;</span><span class="p">]</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;mean&quot;</span><span class="p">:</span> <span class="n">stacked</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))})</span>
-</span></code></pre></div>
-<ol>
-<li>Shape <code>(n_retained, T, n_obs)</code>. Averaging over the first two axes gives the per-observable mean across the experiment.</li>
-</ol>
-<p>To create a step out of this function, we use <code>postproc_step</code>:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">custom_postproc</span> <span class="o">=</span> <span class="n">postproc_step</span><span class="p">(</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="s2">&quot;custom_postproc&quot;</span><span class="p">,</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">get_std_obs_mean</span><span class="p">,</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">)</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="n">builtin_kde</span> <span class="o">=</span> <span class="n">kde_step</span><span class="p">(</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="s2">&quot;builtin_kde&quot;</span><span class="p">,</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">trace</span><span class="o">=</span><span class="s2">&quot;payload.builtin_std&quot;</span><span class="p">,</span>  <span class="c1"># (3)!</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="n">grid_points</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>  <span class="c1"># (4)!</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li>Name of the step. It is the key the artifact is stored under in <code>MCPipelineResult.postproc</code>.</li>
-<li>The function to be executed. Any callable with the signature of a custom post-processing function can be used here.</li>
-<li>The trace to be used for the KDE. This is a payload in this case, but it can also be a test or regression result.</li>
-<li>The number of grid points to use for the KDE. This is only applicable to the built-in KDE step.</li>
-</ol>
-<details class="tip" open="open">
-<summary>Render Hints</summary>
-<p>Wrapping a returned artifact in <code>Summary(value, title=...)</code> or <code>Raw(value)</code> tells downstream consumers such as the GUI how to display it. Both are exported from <code>SymbolicDSGE.monte_carlo</code> and are optional; returning a bare object is fine.</p>
-</details>
-<h3 id="complete-pipeline">Complete Pipeline</h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">MCPipeline</span><span class="p">(</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">per_rep_steps</span><span class="o">=</span><span class="p">[</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">datagen_step</span><span class="p">,</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">kf_step</span><span class="p">,</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">custom_std</span><span class="p">,</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">builtin_std</span><span class="p">,</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">mean_test_step</span><span class="p">,</span>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="p">],</span>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">postproc_steps</span><span class="o">=</span><span class="p">[</span>
-</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">custom_postproc</span><span class="p">,</span>
-</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="n">builtin_kde</span><span class="p">,</span>
-</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="p">])</span>
-</span></code></pre></div>
-<h2 id="running-the-pipeline">Running the Pipeline</h2>
-<p>The <code>MCPipeline</code> object explains the procedure that will run per iteration.
-<code>MCPipeline.run</code> lowers that procedure to native kernels and executes it repeatedly.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">mc</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">reference</span><span class="o">=</span><span class="n">reference</span><span class="p">,</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">dgp</span><span class="o">=</span><span class="n">dgp</span><span class="p">,</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">n_rep</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">n_jobs</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># (1)!</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">verbosity</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>  <span class="c1"># (2)!</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="p">)</span>
-</span></code></pre></div>
-<ol>
-<li>Number of worker threads. <code>None</code> runs single-threaded, a positive value is taken literally, and a negative value resolves to <code>max(1, cpu_count + 1 + n_jobs)</code> following the joblib convention.</li>
-<li>Verbosity level for logging output <code>{0, 1, 2}</code>. <code>0</code> prints nothing, <code>1</code> prints the run total and the post-processing total, and <code>2</code> additionally prints per-step throughput.</li>
-</ol>
-<details class="warning" open="open">
-<summary>Per-step Timings Require <code>verbosity=2</code></summary>
-<p>The native loop only collects per-step profiling when it is asked to. At any lower verbosity <code>meta.step_elapsed_s</code>, <code>meta.step_counts</code>, and <code>meta.step_failures</code> are empty dictionaries.</p>
-</details>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>&gt;&gt;&gt;<span class="w"> </span>MC<span class="w"> </span>run<span class="w"> </span>concluded<span class="w"> </span>successfully<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">0</span>.33s<span class="w"> </span>with<span class="w"> </span><span class="m">29916</span>.19<span class="w"> </span>it/s.
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>Per-step<span class="w"> </span>Report:
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span>datagen:<span class="w"> </span><span class="m">0</span><span class="w"> </span>failures,<span class="w"> </span><span class="m">27987</span>.63<span class="w"> </span>worker<span class="w"> </span>it/s<span class="w"> </span><span class="o">(</span><span class="m">0</span>.36<span class="w"> </span>worker-s<span class="o">)</span>,<span class="w"> </span><span class="m">29916</span>.19<span class="w"> </span>wall<span class="w"> </span>it/s.
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span>filter:<span class="w"> </span><span class="m">0</span><span class="w"> </span>failures,<span class="w"> </span><span class="m">2145</span>.69<span class="w"> </span>worker<span class="w"> </span>it/s<span class="w"> </span><span class="o">(</span><span class="m">4</span>.66<span class="w"> </span>worker-s<span class="o">)</span>,<span class="w"> </span><span class="m">29916</span>.19<span class="w"> </span>wall<span class="w"> </span>it/s.
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">    </span>custom_std:<span class="w"> </span><span class="m">0</span><span class="w"> </span>failures,<span class="w"> </span><span class="m">126337</span>.92<span class="w"> </span>worker<span class="w"> </span>it/s<span class="w"> </span><span class="o">(</span><span class="m">0</span>.08<span class="w"> </span>worker-s<span class="o">)</span>,<span class="w"> </span><span class="m">29916</span>.19<span class="w"> </span>wall<span class="w"> </span>it/s.
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">    </span>builtin_std:<span class="w"> </span><span class="m">0</span><span class="w"> </span>failures,<span class="w"> </span><span class="m">118365</span>.61<span class="w"> </span>worker<span class="w"> </span>it/s<span class="w"> </span><span class="o">(</span><span class="m">0</span>.08<span class="w"> </span>worker-s<span class="o">)</span>,<span class="w"> </span><span class="m">29916</span>.19<span class="w"> </span>wall<span class="w"> </span>it/s.
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">    </span>std_innov_mean:<span class="w"> </span><span class="m">0</span><span class="w"> </span>failures,<span class="w"> </span><span class="m">59597</span>.31<span class="w"> </span>worker<span class="w"> </span>it/s<span class="w"> </span><span class="o">(</span><span class="m">0</span>.17<span class="w"> </span>worker-s<span class="o">)</span>,<span class="w"> </span><span class="m">29916</span>.19<span class="w"> </span>wall<span class="w"> </span>it/s.
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>Post-processing<span class="w"> </span>Report:
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>
-</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">    </span>custom_postproc:<span class="w"> </span>Succeeded<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">0</span>.0215s.
-</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">    </span>builtin_kde:<span class="w"> </span>Succeeded<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">9</span>.2167s.
-</span></code></pre></div>
+<p>The following metrics are reported for each benchmark:</p>
+<ul>
+<li>Median: the median runtime in microseconds.</li>
+<li>Runtime Ratio D/S (<code>SymbolicDSGE = 1</code>): The runtime ratio of Dynare over SymbolicDSGE. (&gt; 1 means SymbolicDSGE is faster).</li>
+<li><code>max |Δ ...|</code>: the maximum absolute difference in between the two libraries's outputs.</li>
+</ul>
+<h2 id="results">Results</h2>
+<h3 id="model-shapes">Model Shapes</h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: center;">Declared variables S/D</th>
+<th style="text-align: center;">Filter state dimension S/D</th>
+<th style="text-align: center;">Predetermined variables S/D</th>
+<th style="text-align: center;">Observables S/D</th>
+<th style="text-align: center;">Shocks S/D</th>
+<th style="text-align: center;">Parameters S/D</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lubik-Schorfheide (2004)</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">20/15</td>
+</tr>
+<tr>
+<td>Ireland (2004)</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: center;">6/6</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">4/4</td>
+<td style="text-align: center;">16/10</td>
+</tr>
+<tr>
+<td>Gali-Monacelli (2005)</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">10/9</td>
+</tr>
+<tr>
+<td>Gali (2015), Ch. 3</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: center;">5/5</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">19/12</td>
+</tr>
+<tr>
+<td>Smets-Wouters (2007)</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: center;">20/20</td>
+<td style="text-align: center;">7/7</td>
+<td style="text-align: center;">7/7</td>
+<td style="text-align: center;">57/34</td>
+</tr>
+</tbody>
+</table>
+<h3 id="likelihood-only">Likelihood Only</h3>
+<p>Each Dynare runtime cell reports <code>median μs (D/S)</code>. The final column is the maximum absolute log-likelihood difference over MATLAB and Octave.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: center;">Filter states S/D</th>
+<th style="text-align: right;">SymbolicDSGE μs</th>
+<th style="text-align: right;">Dynare MATLAB μs (D/S)</th>
+<th style="text-align: right;">Dynare Octave μs (D/S)</th>
+<th style="text-align: right;">max |Δ loglik|</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lubik-Schorfheide (2004)</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: right;">119.40</td>
+<td style="text-align: right;">1,421.15 (11.90×)</td>
+<td style="text-align: right;">20,081.52 (168.19×)</td>
+<td style="text-align: right;">3.411e-13</td>
+</tr>
+<tr>
+<td>Ireland (2004)</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: right;">351.10</td>
+<td style="text-align: right;">1,301.30 (3.71×)</td>
+<td style="text-align: right;">18,696.43 (53.25×)</td>
+<td style="text-align: right;">1.592e-12</td>
+</tr>
+<tr>
+<td>Gali-Monacelli (2005)</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: right;">643.00</td>
+<td style="text-align: right;">1,703.85 (2.65×)</td>
+<td style="text-align: right;">18,992.07 (29.54×)</td>
+<td style="text-align: right;">9.877e-13</td>
+</tr>
+<tr>
+<td>Gali (2015), Ch. 3</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: right;">1,158.10</td>
+<td style="text-align: right;">2,248.85 (1.94×)</td>
+<td style="text-align: right;">20,075.08 (17.33×)</td>
+<td style="text-align: right;">3.411e-13</td>
+</tr>
+<tr>
+<td>Smets-Wouters (2007)</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: right;">7,549.70</td>
+<td style="text-align: right;">3,515.60 (0.47×)</td>
+<td style="text-align: right;">24,098.04 (3.21×)</td>
+<td style="text-align: right;">1.116e-10</td>
+</tr>
+</tbody>
+</table>
+<h3 id="retained-history">Retained History</h3>
+<p>SymbolicDSGE retains filter histories. Dynare's closest public alternative is <code>calib_smoother</code>, which also computes smoothed paths, so this is not an equivalent workload. Each Dynare runtime cell reports <code>median μs (D/S)</code>. The final columns are maxima over MATLAB and Octave.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: center;">Filter states S/D</th>
+<th style="text-align: right;">SymbolicDSGE μs</th>
+<th style="text-align: right;">Dynare MATLAB smoother μs (D/S)</th>
+<th style="text-align: right;">Dynare Octave smoother μs (D/S)</th>
+<th style="text-align: right;">max |Δ updated|</th>
+<th style="text-align: right;">max |Δ predicted|</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lubik-Schorfheide (2004)</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: right;">252.15</td>
+<td style="text-align: right;">14,769.60 (58.57×)</td>
+<td style="text-align: right;">96,778.99 (383.82×)</td>
+<td style="text-align: right;">1.846e-15</td>
+<td style="text-align: right;">1.721e-15</td>
+</tr>
+<tr>
+<td>Ireland (2004)</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: right;">671.30</td>
+<td style="text-align: right;">14,598.60 (21.75x)</td>
+<td style="text-align: right;">89,367.63 (133.13x)</td>
+<td style="text-align: right;">1.103e-14</td>
+<td style="text-align: right;">9.989e-15</td>
+</tr>
+<tr>
+<td>Gali-Monacelli (2005)</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: right;">1,201.90</td>
+<td style="text-align: right;">15,163.00 (12.65×)</td>
+<td style="text-align: right;">91,416.48 (76.06×)</td>
+<td style="text-align: right;">5.884e-14</td>
+<td style="text-align: right;">5.063e-14</td>
+</tr>
+<tr>
+<td>Gali (2015), Ch. 3</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: right;">2,191.30</td>
+<td style="text-align: right;">16,820.15 (7.68×)</td>
+<td style="text-align: right;">99,310.52 (45.32×)</td>
+<td style="text-align: right;">1.279e-13</td>
+<td style="text-align: right;">1.048e-13</td>
+</tr>
+<tr>
+<td>Smets-Wouters (2007)</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: right;">13,171.15</td>
+<td style="text-align: right;">25,777.80 (1.90×)</td>
+<td style="text-align: right;">185,365.44 (13.39×)</td>
+<td style="text-align: right;">6.295e-11</td>
+<td style="text-align: right;">6.237e-11</td>
+</tr>
+</tbody>
+</table>
+<h2 id="outlook">Outlook</h2>
 <details class="note" open="open">
-<summary>Worker Time vs Wall Time</summary>
-<p>Worker rates divide by the time summed across threads, so they describe the cost of a step. Wall rates divide by the elapsed run time, so they describe what the step contributed to the observed duration. The two coincide when <code>n_jobs</code> resolves to <code>1</code>.</p>
+<summary>Note on Octave</summary>
+<p>This section will briefly discuss the outcomes of the Octave comparison and leave the technical details to the MATLAB discussion.
+In all tested model sizes SymbolicDSGE performs better than Octave + Dynare.
+Being an open-source alternative, SymbolicDSGE is therefore seen as a definite contender in scenarios where a MATLAB license is not available.
+However, the performance curve clearly shows that SymbolicDSGE will be slower than Octave given a sufficiently large model.</p>
 </details>
-<p>This returns a <code>MCPipelineResult</code> object containing test summaries for each test step executed in the pipeline.
-To extract the test results, their p-values, and other relevant statistics, we can access the test summaries by key (step names).</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">t_summary</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="p">{</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>        <span class="n">name</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>            <span class="s2">&quot;mean_statistic&quot;</span><span class="p">:</span> <span class="n">res</span><span class="o">.</span><span class="n">mean_statistic</span><span class="p">,</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>            <span class="s2">&quot;mean_pval&quot;</span><span class="p">:</span> <span class="n">res</span><span class="o">.</span><span class="n">mean_pval</span><span class="p">,</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>            <span class="s2">&quot;rejection_rate&quot;</span><span class="p">:</span> <span class="n">res</span><span class="o">.</span><span class="n">rejection_rate</span><span class="p">,</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>            <span class="s2">&quot;ci_low&quot;</span><span class="p">:</span> <span class="n">res</span><span class="o">.</span><span class="n">pval_confidence_interval</span><span class="p">()[</span><span class="mi">0</span><span class="p">],</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>            <span class="s2">&quot;ci_high&quot;</span><span class="p">:</span> <span class="n">res</span><span class="o">.</span><span class="n">pval_confidence_interval</span><span class="p">()[</span><span class="mi">1</span><span class="p">],</span>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>        <span class="p">}</span>
-</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">mc</span><span class="o">.</span><span class="n">test_summaries</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
-</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    <span class="p">}</span>
-</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="p">)</span><span class="o">.</span><span class="n">T</span>
-</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="nb">print</span><span class="p">(</span><span class="n">t_summary</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
-</span></code></pre></div>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>&gt;&gt;&gt;<span class="w">                </span>mean_statistic<span class="w">  </span>mean_pval<span class="w">  </span>rejection_rate<span class="w">  </span>ci_low<span class="w">  </span>ci_high
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>std_innov_mean<span class="w">           </span><span class="m">3</span>.196<span class="w">      </span><span class="m">0</span>.488<span class="w">           </span><span class="m">0</span>.068<span class="w">   </span><span class="m">0</span>.063<span class="w">    </span><span class="m">0</span>.073
-</span></code></pre></div>
-<p>Regression results are accessed similarly in <code>MCPipelineResult.regression_summaries</code>, and post-processing artifacts are accessed by key in <code>MCPipelineResult.postproc: dict[str, Any]</code>.</p>
-<details class="tip" open="open">
-<summary>Retaining Fewer Replications</summary>
-<p>Large runs can routinely exceed hardware memory in size requirements. It is strongly recommended to set <code>n_retain=0</code> for intermediate steps that are not needed for later
-analysis or post-processing. This will allow you to retain much more replications for steps you care about before running out of memory. <code>n_retain=0</code> will not make the data unavailable to downstream steps, all data makes it through the pipeline, but non-retained replications are discarded after used. <code>n_retain=-1</code> is the default and retains all replications.</p>
+<p>While targeting a small subset of models, the benchmark suggests a coherent performance conclusion.
+SymbolicDSGE prefers hand-written kernels over BLAS where possible; as opposed to Dynare, which uses the BLAS implementation of the underlying MATLAB (or Octave) build.
+At small sizes calling into BLAS can be a noticable portion of a routine's runtime since the actual algebra is very small.
+SymbolicDSGE does not have this overhead, plausibly giving it an advantage for small-to-medium scale models.</p>
+<p>Moreover, allocations and memory operations in MATLAB (a dynamically typed language) can be slower than their C counterparts.
+For a smaller model, this also is a considerable portion of the runtime.
+See SymbolicDSGE's Lubik-Schorfheide (2004) runs, the only difference between likelihood-only and full history runs are a set of <code>memcpy</code> operations recording the current state in a given iteration.
+This alone doubles the runtime for a Lubik-Schorfheide (2004)-sized model in SymbolicDSGE.
+Again, the memory operations will be less and less noticable as the model sizes increase and linear algebra becomes the dominating factor in the hot path.</p>
+<p>Both of the above points are plausible advantages of SymbolicDSGE in smaller models.
+MATLAB's advantages, on the other hand, show up in larger models where highly optimized and potentially mutli-threaded BLAS routines begin to amortize their overhead.
+Smets-Wouters (2007) is the clear example; MATLAB + Dynare at those sizes run 2x faster than SymbolicDSGE.
+While the exact point where BLAS overtakes hand-written C will depend on the system, it is clear that past-medium scale, Dynare should be the library of choice for numerical workflows.</p>
+<p>For fast-iterating research work, scratch models, and extensive estimation routines for smaller core models (like a NK3 base), SymbolicDSGE is thought to be a contender.
+This is not definitive proof of any performance outcome, however it shows that a quick benchmark of SymbolicDSGE against Dynare before a large workflow can be informative and beneficial to determine which library better suits the task.</p>
+<details class="note" open="open">
+<summary>Preparation for Large Workflows</summary>
+<p>If you're planning to use SymbolicDSGE for a large estimation workflow or Monte Carlo pipeline, it is recommended to clone the repository and build the Cython extension targeting your architecture. (<code>-march=native</code> as a compiler flag.)
+All results here are derived from the <code>release</code> build of SymbolicDSGE and have no architecture specific optimizations.</p>
 </details>
-<details class="tip" open="open">
-<summary>Sizing a Run Before It Allocates</summary>
-<p><code>MCPipeline.validate_memory_requirements</code> takes the arguments <code>run</code> takes and reports what they would allocate, broken down by step. <code>run</code> performs the same check unless <code>check_memory_availability=False</code>. If a run is provably too large (meaning your RAM and swap combined are smaller than the required allocation), a <code>MemoryError</code> will block the run instead of seeing it crash hours later. <code>check_memory_availability=False</code> also disables this behavior.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">print</span><span class="p">(</span><span class="n">pipeline</span><span class="o">.</span><span class="n">validate_memory_requirements</span><span class="p">(</span><span class="n">reference</span><span class="o">=</span><span class="n">reference</span><span class="p">,</span> <span class="n">dgp</span><span class="o">=</span><span class="n">dgp</span><span class="p">,</span> <span class="n">n_rep</span><span class="o">=</span><span class="mi">400_000</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=-</span><span class="mi">1</span><span class="p">))</span>
-</span></code></pre></div>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>&gt;&gt;&gt;<span class="w"> </span>Memory<span class="w"> </span>Availability<span class="w"> </span>Error:
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">    </span>step<span class="w">               </span>per<span class="w"> </span>rep<span class="w">   </span>retained<span class="w">  </span>n_retain
-</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span>datagen<span class="w">          </span><span class="m">12</span>.50<span class="w"> </span>KiB<span class="w">   </span><span class="m">4</span>.77<span class="w"> </span>GiB<span class="w">        </span>-1
-</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span>filter<span class="w">          </span><span class="m">126</span>.57<span class="w"> </span>KiB<span class="w">  </span><span class="m">48</span>.28<span class="w"> </span>GiB<span class="w">        </span>-1
-</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span>custom_std<span class="w">        </span><span class="m">4</span>.69<span class="w"> </span>KiB<span class="w">   </span><span class="m">1</span>.79<span class="w"> </span>GiB<span class="w">        </span>-1
-</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span>builtin_std<span class="w">       </span><span class="m">4</span>.69<span class="w"> </span>KiB<span class="w">   </span><span class="m">1</span>.79<span class="w"> </span>GiB<span class="w">        </span>-1
-</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span>std_innov_mean<span class="w">        </span><span class="m">16</span><span class="w"> </span>B<span class="w">   </span><span class="m">6</span>.10<span class="w"> </span>MiB<span class="w">        </span>-1
-</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span>-----------------------------------------------
-</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">    </span>worker<span class="w"> </span>lanes<span class="w"> </span><span class="o">(</span>x20<span class="o">)</span><span class="w">           </span><span class="m">3</span>.57<span class="w"> </span>MiB
-</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span>run<span class="w"> </span>metadata<span class="w">                </span><span class="m">36</span>.62<span class="w"> </span>MiB
-</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span>allocated<span class="w">                   </span><span class="m">56</span>.67<span class="w"> </span>GiB
-</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w">    </span>reserve<span class="w"> </span><span class="o">(</span><span class="m">1</span>.00<span class="w"> </span>GiB<span class="w"> </span>+<span class="w"> </span><span class="m">2</span>.5%<span class="o">)</span><span class="w">    </span><span class="m">2</span>.42<span class="w"> </span>GiB
-</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">    </span>total<span class="w">                       </span><span class="m">59</span>.09<span class="w"> </span>GiB
-</span><span id="__span-16-14"><a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="w">    </span>available<span class="w">                    </span><span class="m">9</span>.55<span class="w"> </span>GiB
-</span><span id="__span-16-15"><a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="w">    </span>ceiling<span class="w"> </span><span class="o">(</span>+<span class="w"> </span>swap<span class="w"> </span>free<span class="o">)</span><span class="w">       </span><span class="m">24</span>.03<span class="w"> </span>GiB
-</span><span id="__span-16-16"><a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>
-</span><span id="__span-16-17"><a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a>MemoryError:<span class="w"> </span>This<span class="w"> </span>run<span class="w"> </span>requires<span class="w"> </span><span class="m">59</span>.09<span class="w"> </span>GiB,<span class="w"> </span>which<span class="w"> </span>does<span class="w"> </span>not<span class="w"> </span>fit<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">9</span>.55<span class="w"> </span>GiB<span class="w"> </span>free<span class="w"> </span>RAM<span class="w"> </span>
-</span><span id="__span-16-18"><a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a>+<span class="w"> </span><span class="m">14</span>.48<span class="w"> </span>GiB<span class="w"> </span>free<span class="w"> </span>swap.<span class="w"> </span>Lower<span class="w"> </span>n_retain<span class="w"> </span>or<span class="w"> </span>n_rep,<span class="w"> </span>or<span class="w"> </span>pass<span class="w"> </span><span class="nv">check_memory_availability</span><span class="o">=</span>False<span class="w"> </span>to<span class="w"> </span>run<span class="w"> </span>anyway.
-</span></code></pre></div>
-<p><code>allocated</code> is what the run commits, and it is exact. The <code>reserve</code> on top of it is held for the process that hosts the run rather than for the arenas: the interpreter growing as results are read back, a notebook kernel holding its own copy, and the allocator's transient peaks. None of that scales with the size of the run, which is why the reserve is a flat floor plus a small fraction instead of a multiple. A shock specification the native draw cannot reproduce adds a <code>prematerialized shocks</code> row, which is an <code>(n_rep, T, n_exog)</code> array built in Python before the loop starts.</p>
-<p>Passing <code>available</code> means the run no longer fits in physical memory and will page, which costs throughput. Passing <code>ceiling</code> means it does not fit even with swap counted. At that point, a mid-run crash is significantly more likely, and this is the point where <code>MCPipeline.run</code> raises <code>MemoryError</code>.</p>
-</details>
-<h2 id="conclusion">Conclusion</h2>
-<p>This guide demonstrates the usage of basic MC functionality through the pre-configured steps available in the library.
-Custom transforms are available through <code>transform_step(...)</code> and bundle-safe custom operations can be wrapped with <code>custom_transform</code> or <code>pandas_operation</code>. See the <a href="../../documentation/monte_carlo/custom_ops/">Monte Carlo custom operation API reference</a> for the current contract.</p>
-<p>For future reference or a ready-made boilerplate, you can visit <a href="../../assets/monte_carlo.ipynb">this</a> link to access a notebook containing the process outlined in this guide.</p>
-<p><a class="md-button" download="" href="../../assets/monte_carlo.ipynb">Download MC Guide Notebook</a></p>
 
 
 
@@ -4815,44 +4607,6 @@ Custom transforms are available through <code>transform_step(...)</code> and bun
       
         <footer class="md-footer">
   
-    
-      
-      <nav class="md-footer__inner md-grid" aria-label="Footer" >
-        
-          
-          <a href="../estimation_guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Estimation Guide">
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
-            </div>
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Previous
-              </span>
-              <div class="md-ellipsis">
-                Estimation Guide
-              </div>
-            </div>
-          </a>
-        
-        
-          
-          <a href="../bundle_authoring_guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Bundle Authoring Guide">
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Next
-              </span>
-              <div class="md-ellipsis">
-                Bundle Authoring Guide
-              </div>
-            </div>
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
-            </div>
-          </a>
-        
-      </nav>
     
   
   <div class="md-footer-meta md-typeset">
