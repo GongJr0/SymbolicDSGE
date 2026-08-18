@@ -13,6 +13,8 @@ function bench_fixture_linear_kf_dynare(workdir, model_file, obs_names, data_fil
   global M_ options_ oo_ estim_params_ bayestopt_
   options_.order = 1;
   options_.noprint = 1;
+  options_.lik_init = 1;
+  options_.kalman_algo = 1;
   [info, oo_, options_, M_] = stoch_simul(M_, options_, oo_, []);
   if info(1) ~= 0
     error('Dynare stochastic solver failed with code %d.', info(1));
@@ -109,6 +111,14 @@ function bench_fixture_linear_kf_dynare(workdir, model_file, obs_names, data_fil
   end
   loglik = -negloglik;
   state_names = endo_names;
+  declared_endo_nbr = M_.orig_endo_nbr;
+  filter_state_nbr = n_endo;
+  predetermined_nbr = numel(state_var);
+  observable_nbr = n_obs;
+  shock_nbr = M_.exo_nbr;
+  parameter_nbr = M_.param_nbr;
   save('-v7', output_path, 'likelihood_times', 'smoother_times', 'loglik', ...
-       'updated', 'filtered', 'state_names');
+       'updated', 'filtered', 'state_names', 'declared_endo_nbr', ...
+       'filter_state_nbr', 'predetermined_nbr', 'observable_nbr', ...
+       'shock_nbr', 'parameter_nbr');
 end

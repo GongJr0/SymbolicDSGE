@@ -30,11 +30,9 @@ parameters sigma $\sigma$
            eta $\eta$
            gamma $\gamma$
            phi $\varphi$
-           epsilon $\varepsilon$
            theta $\theta$
            beta $\beta$
            alpha $\alpha$
-           phi_pi $\phi_\pi$
            rhoa $\rho_a$
            rhoy $\rho_y$
            ;
@@ -43,11 +41,9 @@ sigma = 1;
 eta = 1;
 gamma = 1;
 phi = 3;
-epsilon = 6;
 theta = 0.75;
 beta = 0.99;
 alpha = 0.4;
-phi_pi = 1.5;
 rhoa = 0.9;
 rhoy = 0.86;
 

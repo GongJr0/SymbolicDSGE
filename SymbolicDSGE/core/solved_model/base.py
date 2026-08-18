@@ -449,6 +449,7 @@ class SolvedModel(ABC, Generic[Policy]):
         x0: NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = False,
+        joseph_cov: bool = True,
         return_shocks: bool = False,
         P0: NDF | None = None,
         R: NDF | None = None,

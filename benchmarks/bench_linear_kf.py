@@ -47,8 +47,8 @@ class CaseSpec:
 
 
 CASES = {
-    "post82": CaseSpec(
-        label="POST82",
+    "ls2004": CaseSpec(
+        label="Lubik-Schorfheide 2004",
         yaml_name="POST82.yaml",
         mod_name="post82_kf.mod",
         native_observables=("OutGap", "Infl", "Rate"),
@@ -218,7 +218,9 @@ def _time(fn, warmup: int, reps: int) -> tuple[np.ndarray, FilterResult]:
     return times, result
 
 
-def _time_native(spec: CaseSpec, case: NativeCase, warmup: int, reps: int) -> dict:
+def _time_native(
+    spec: CaseSpec, case: NativeCase, warmup: int, reps: int, use_joseph: bool
+) -> dict:
     def loglik_only() -> FilterResult:
         return KalmanFilter.run(
             case.A,
@@ -230,6 +232,8 @@ def _time_native(spec: CaseSpec, case: NativeCase, warmup: int, reps: int) -> di
             case.y,
             P0=None,
             _store_history=False,
+            symmetrize=False,
+            joseph_cov=use_joseph,
         )
 
     def filter_history() -> FilterResult:
@@ -238,6 +242,8 @@ def _time_native(spec: CaseSpec, case: NativeCase, warmup: int, reps: int) -> di
             filter_mode="linear",
             observables=list(spec.native_observables),
             P0=None,
+            symmetrize=False,
+            joseph_cov=False,
         )
 
     loglik_times, loglik_result = _time(loglik_only, warmup, reps)
@@ -251,13 +257,26 @@ def _time_native(spec: CaseSpec, case: NativeCase, warmup: int, reps: int) -> di
     }
 
 
-def _save_native(result: dict, output_dir: Path) -> None:
+def _native_model_info(spec: CaseSpec, case: NativeCase) -> dict[str, int]:
+    compiled = case.solved.compiled
+    return {
+        "declared_variables": compiled.n_var,
+        "filter_state_dimension": case.A.shape[0],
+        "predetermined_variables": compiled.n_state,
+        "observables": len(spec.native_observables),
+        "shocks": compiled.n_exog,
+        "parameters": compiled.n_par,
+    }
+
+
+def _save_native(result: dict, output_dir: Path, model_info: dict[str, int]) -> None:
     np.savez(output_dir / "native.npz", **result)
     metadata = {
         "runtime": "SymbolicDSGE native",
         "loglik_only_entry_point": "KalmanFilter.run(_store_history=False)",
         "filter_history_entry_point": "FirstOrderSolvedModel.kalman",
         "repetitions": int(result["loglik_times"].size),
+        "model_dimensions": model_info,
     }
     (output_dir / "native.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
@@ -329,6 +348,14 @@ def _report_dynare(
         "max_abs_loglik": _max_abs(native["loglik"], float(np.asarray(raw["loglik"]))),
         "max_abs_updated": _max_abs(native["x_filt"], updated),
         "max_abs_filtered": _max_abs(native["x_pred"][1:], filtered[:-1]),
+        "model_info": {
+            "declared_variables": int(np.asarray(raw["declared_endo_nbr"])),
+            "filter_state_dimension": int(np.asarray(raw["filter_state_nbr"])),
+            "predetermined_variables": int(np.asarray(raw["predetermined_nbr"])),
+            "observables": int(np.asarray(raw["observable_nbr"])),
+            "shocks": int(np.asarray(raw["shock_nbr"])),
+            "parameters": int(np.asarray(raw["parameter_nbr"])),
+        },
     }
 
 
@@ -337,7 +364,11 @@ def _us(seconds: float) -> str:
 
 
 def _print_tables(
-    args: argparse.Namespace, spec: CaseSpec, native: dict, reports: dict[str, dict]
+    args: argparse.Namespace,
+    spec: CaseSpec,
+    case: NativeCase,
+    native: dict,
+    reports: dict[str, dict],
 ) -> None:
     loglik_median = float(np.median(native["loglik_times"]))
     history_median = float(np.median(native["history_times"]))
@@ -345,6 +376,30 @@ def _print_tables(
         f"{spec.label} linear KF: periods={args.periods} warmup={args.warmup} reps={args.reps}\n"
         "Setup is outside the timer: parse, compile or preprocess, solve, input generation, and warmup. Times are microseconds per call.\n"
     )
+    native_info = _native_model_info(spec, case)
+    dynare_info = next(iter(reports.values()))["model_info"] if reports else None
+    print("Model dimensions:")
+    header = f"{'quantity':<29} {'SymbolicDSGE':>14} {'Dynare':>14}"
+    print(header)
+    print("-" * len(header))
+    rows = (
+        ("Declared model variables", "declared_variables"),
+        ("Filter state dimension", "filter_state_dimension"),
+        ("Predetermined variables", "predetermined_variables"),
+        ("Selected observables", "observables"),
+        ("Shocks", "shocks"),
+        ("Declared parameters", "parameters"),
+    )
+    for label, key in rows:
+        dynare_value = str(dynare_info[key]) if dynare_info is not None else "not run"
+        print(f"{label:<29} {native_info[key]:14d} {dynare_value:>14}")
+    if dynare_info is not None:
+        print(
+            "Dynare's filter state dimension is its preprocessed endogenous count, "
+            "including reported observables and any auxiliary variables."
+        )
+    print()
+
     header = (
         f"{'runtime':<39} {'median':>12} {'speedup':>10} {'max |delta loglik|':>20}"
     )
@@ -395,6 +450,7 @@ def main() -> int:
     parser.add_argument("--dynare-matlab-path", default="")
     parser.add_argument("--matlab-bin", default="matlab")
     parser.add_argument("--octave-bin", default="octave")
+    parser.add_argument("--use-joseph", action="store_true")
     args = parser.parse_args()
     if args.periods < 1 or args.warmup < 0 or args.reps < 1:
         parser.error(
@@ -422,8 +478,8 @@ def main() -> int:
             output_dir = root_output / case_name
             output_dir.mkdir(exist_ok=True)
             case = _prepare(spec, args.periods)
-            native = _time_native(spec, case, args.warmup, args.reps)
-            _save_native(native, output_dir)
+            native = _time_native(spec, case, args.warmup, args.reps, args.use_joseph)
+            _save_native(native, output_dir, _native_model_info(spec, case))
             reports = {
                 runtime: _report_dynare(
                     spec,
@@ -444,7 +500,7 @@ def main() -> int:
                 for runtime in args.runtimes
                 if runtime != "native"
             }
-            _print_tables(args, spec, native, reports)
+            _print_tables(args, spec, case, native, reports)
             if case_name != args.cases[-1]:
                 print()
     return 0
