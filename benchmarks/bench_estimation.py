@@ -69,8 +69,8 @@ class CaseSpec:
 
 
 CASES = {
-    "post82": CaseSpec(
-        label="POST82",
+    "lb2004": CaseSpec(
+        label="Lubik-Schorfheide 2004",
         yaml_name="POST82.yaml",
         mod_name="post82_kf.mod",
         data_file="post82_estimation_data",
@@ -101,6 +101,138 @@ CASES = {
             "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
         ),
         zero_r_replacements=(("sig_me  = 1.00;", "sig_me  = 0.00;"),),
+    ),
+    "sw2007": CaseSpec(
+        label="SW2007",
+        yaml_name="sw2007.yaml",
+        mod_name="sw2007.mod",
+        data_file="sw2007_estimation_data",
+        routines={
+            "mle": Routine(
+                ("crpi", "crr"),
+                (1.488, 0.8762),
+                ((1.0, 3.0), (0.0, 0.99)),
+                ((1.488, 0.8762), (1.7, 0.8)),
+            ),
+            "map": Routine(
+                ("crpi",),
+                (1.488,),
+                ((1.0, 3.0),),
+                ((1.488,), (1.7,)),
+                priors=(
+                    Prior(
+                        name="crpi",
+                        distribution="normal",
+                        parameters=(("mean", 1.5), ("std", 0.25)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                ),
+            ),
+        },
+        seed=2007,
+        dynare_remove=(
+            "calib_smoother(datafile = sw2007_kf_data, filtered_vars, filter_step_ahead = [1]);",
+        ),
+    ),
+    "g2015": CaseSpec(
+        label="Gali 2015",
+        yaml_name="gali_2015.yaml",
+        mod_name="gali_2015.mod",
+        data_file="gali_2015_estimation_data",
+        routines={
+            "mle": Routine(
+                ("phi_pi", "rho_a"),
+                (1.5, 0.9),
+                ((1.01, 3.0), (0.0, 0.99)),
+                ((1.5, 0.9), (1.75, 0.8)),
+            ),
+            "map": Routine(
+                ("phi_pi",),
+                (1.5,),
+                ((1.01, 3.0),),
+                ((1.5,), (1.75,)),
+                priors=(
+                    Prior(
+                        name="phi_pi",
+                        distribution="normal",
+                        parameters=(("mean", 1.5), ("std", 0.25)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                ),
+            ),
+        },
+        seed=2015,
+        native_to_dynare_observable=(
+            ("obs_pi_ann", "pi_ann"),
+            ("obs_i_ann", "i_ann"),
+        ),
+    ),
+    "gm2005": CaseSpec(
+        label="Gali-Monacelli 2005",
+        yaml_name="gali_monacelli_2005.yaml",
+        mod_name="gali_monacelli_2005.mod",
+        data_file="gali_monacelli_2005_estimation_data",
+        routines={
+            "mle": Routine(
+                ("phi", "rhoa"),
+                (3.0, 0.9),
+                ((1.0, 10.0), (0.0, 0.99)),
+                ((3.0, 0.9), (2.5, 0.8)),
+            ),
+            "map": Routine(
+                ("phi",),
+                (3.0,),
+                ((1.0, 10.0),),
+                ((3.0,), (2.5,)),
+                priors=(
+                    Prior(
+                        name="phi",
+                        distribution="normal",
+                        parameters=(("mean", 3.0), ("std", 0.5)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                ),
+            ),
+        },
+        seed=2005,
+        native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
+    ),
+    "i2004": CaseSpec(
+        label="Ireland 2004",
+        yaml_name="ireland_2004.yaml",
+        mod_name="ireland_2004.mod",
+        data_file="ireland_2004_estimation_data",
+        routines={
+            "mle": Routine(
+                ("rho_a", "rho_e"),
+                (0.9048, 0.9907),
+                ((0.0, 0.99), (0.0, 0.999)),
+                ((0.9048, 0.9907), (0.8, 0.95)),
+            ),
+            "map": Routine(
+                ("rho_a",),
+                (0.9048,),
+                ((0.0, 0.99),),
+                ((0.9048,), (0.8,)),
+                priors=(
+                    Prior(
+                        name="rho_a",
+                        distribution="normal",
+                        parameters=(("mean", 0.9), ("std", 0.05)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                ),
+            ),
+        },
+        seed=2004,
+        native_to_dynare_observable=(
+            ("obs_gobs", "gobs"),
+            ("obs_piobs", "piobs"),
+        ),
     ),
 }
 
