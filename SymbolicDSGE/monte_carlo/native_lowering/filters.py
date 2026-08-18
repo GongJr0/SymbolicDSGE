@@ -71,6 +71,7 @@ def lower_filter_step(
         P0=step.kwargs["P0"],
         jitter=step.kwargs["jitter"],
         symmetrize=step.kwargs["symmetrize"],
+        joseph_cov=step.kwargs["joseph_cov"],
         return_shocks=step.kwargs["return_shocks"],
     )
     canonical_names = tuple(interface.observables)
@@ -105,6 +106,7 @@ def lower_filter_step(
                 n_obs,
                 n_exog,
                 interface.symmetrize,
+                interface.joseph_cov,
                 float(interface.jitter),
                 interface.return_shocks,
             ),
@@ -134,6 +136,7 @@ def lower_filter_step(
                 n_exog,
                 n_par,
                 interface.symmetrize,
+                interface.joseph_cov,
                 float(interface.jitter),
                 interface.return_shocks,
             ),

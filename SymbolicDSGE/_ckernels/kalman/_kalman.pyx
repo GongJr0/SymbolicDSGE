@@ -37,6 +37,7 @@ cdef extern from "kalman.h":
         double *x0
         double *P0
         int symmetrize
+        int joseph_cov
         double jitter
         int return_shocks
         int store_history
@@ -59,6 +60,21 @@ cdef extern from "kalman.h":
         const kf_inputs *inp,
         double *arena,
         kf_outputs *outp,
+    ) nogil
+    arena_size kf_stationary_covariance_arena_size(
+        int64_t n,
+        int64_t k,
+    ) nogil
+    int kf_stationary_covariance(
+        const double *A,
+        const double *B,
+        const double *Q,
+        double tolerance,
+        int64_t max_iterations,
+        double *arena,
+        double *out,
+        int64_t n,
+        int64_t k,
     ) nogil
 
     ctypedef void (*meas_fn)(
@@ -85,6 +101,7 @@ cdef extern from "kalman.h":
         int64_t n_par
         double jitter
         int symmetrize
+        int joseph_cov
         int compute_y_filt
         int return_shocks
         int store_history
@@ -187,6 +204,7 @@ def kalman_hot_loop(
     y,
     x0, P0,
     bint symmetrize,
+    bint joseph_cov,
     double jitter,
     bint return_shocks=False,
     bint store_history=True,
@@ -257,6 +275,7 @@ def kalman_hot_loop(
     inp.x0 = &x0v[0]
     inp.P0 = &P0v[0, 0]
     inp.symmetrize = symmetrize
+    inp.joseph_cov = joseph_cov
     inp.jitter = jitter
     inp.return_shocks = return_shocks
     inp.store_history = store_history
@@ -296,6 +315,53 @@ def kalman_hot_loop(
     )
 
 
+def stationary_covariance(
+    A,
+    B,
+    Q,
+    double tolerance=1e-12,
+    int64_t max_iterations=64,
+):
+    """Solve ``P = A P A.T + B Q B.T`` and return ``(status, P)``."""
+    cdef double[:, ::1] Av = np.ascontiguousarray(A, dtype=np.float64)
+    cdef double[:, ::1] Bv = np.ascontiguousarray(B, dtype=np.float64)
+    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
+    cdef int64_t n = Av.shape[0]
+    cdef int64_t k = Bv.shape[1]
+
+    if n <= 0 or k <= 0:
+        raise ValueError("A and B must have positive state and shock dimensions.")
+    if Av.shape[1] != n:
+        raise ValueError("A must be square.")
+    if Bv.shape[0] != n:
+        raise ValueError("B must have the same row count as A.")
+    if Qv.shape[0] != k or Qv.shape[1] != k:
+        raise ValueError("Q must be square with dimension B.shape[1].")
+
+    P = np.empty((n, n), dtype=np.float64)
+    arena = np.empty(
+        kf_stationary_covariance_arena_size(n, k).n_float,
+        dtype=np.float64,
+    )
+
+    cdef double[:, ::1] Pv = P
+    cdef double[::1] arena_mv = arena
+    cdef int status
+    with nogil:
+        status = kf_stationary_covariance(
+            &Av[0, 0],
+            &Bv[0, 0],
+            &Qv[0, 0],
+            tolerance,
+            max_iterations,
+            &arena_mv[0],
+            &Pv[0, 0],
+            n,
+            k,
+        )
+    return status, P
+
+
 def ekf_hot_loop(
     size_t meas_addr,
     size_t jac_addr,
@@ -305,6 +371,7 @@ def ekf_hot_loop(
     y,
     x0, P0,
     bint symmetrize,
+    bint joseph_cov,
     double jitter,
     bint compute_y_filt=True,
     bint return_shocks=False,
@@ -391,6 +458,7 @@ def ekf_hot_loop(
     inp.n_par = n_par
     inp.jitter = jitter
     inp.symmetrize = symmetrize
+    inp.joseph_cov = joseph_cov
     inp.compute_y_filt = compute_y_filt
     inp.return_shocks = return_shocks
     inp.store_history = store_history

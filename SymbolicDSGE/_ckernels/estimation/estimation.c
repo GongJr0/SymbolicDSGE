@@ -1,5 +1,6 @@
 #include "estimation.h"
 #include "../core/klein_solve.h"
+#include "../kalman/kalman.h"
 
 /* sdsge_classify outcomes. */
 #define SDSGE_SOLVE_OK 0
@@ -211,6 +212,16 @@ static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
   b->jac(s->ss, b->params, ctx->C);
 }
 
+static inline i64 sdsge_resolve_stationary_p0(sdsge_obj_common *b,
+                                              const sdsge_solve1 *s,
+                                              const f64 *SDSGE_RESTRICT Q) {
+  if (!b->derive_P0) {
+    return KF_OK;
+  }
+  return kf_stationary_covariance(s->A, s->B, Q, 1e-12, 64, b->filter_arena,
+                                  b->P0, b->dims.n_var, b->dims.n_exog);
+}
+
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                      int has_priors) {
   sdsge_obj_common *b = &ctx->base;
@@ -232,6 +243,11 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   }
   sdsge_build_measurement(ctx);
 
+  i64 p0_rc = sdsge_resolve_stationary_p0(b, s, Q);
+  if (p0_rc != KF_OK) {
+    return -INFINITY;
+  }
+
   f64 ll = 0.0;
   kf_inputs in = {.n = b->dims.n_var,
                   .m = b->dims.n_obs,
@@ -247,6 +263,7 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                   .x0 = b->x0,
                   .P0 = b->P0,
                   .symmetrize = b->symmetrize,
+                  .joseph_cov = b->joseph_cov,
                   .jitter = b->jitter,
                   .return_shocks = 0,
                   .store_history = 0};
@@ -277,6 +294,10 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
     return -INFINITY;
   }
 
+  i64 p0_rc = sdsge_resolve_stationary_p0(b, s, Q);
+  if (p0_rc != KF_OK) {
+    return -INFINITY;
+  }
   /* No precomputed (C, d): the EKF relinearizes each step via the meas / jac
    * cfuncs at the running state estimate. */
   f64 ll = 0.0;
@@ -297,6 +318,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                    .n_par = b->dims.n_par,
                    .jitter = b->jitter,
                    .symmetrize = b->symmetrize,
+                   .joseph_cov = b->joseph_cov,
                    .compute_y_filt = 0,
                    .return_shocks = 0,
                    .store_history = 0};

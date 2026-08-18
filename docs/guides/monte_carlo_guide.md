@@ -142,7 +142,7 @@ from SymbolicDSGE.monte_carlo.step_factories import reference_filter_step
 kf_step = reference_filter_step()
 ```
 
-`reference_filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
+`reference_filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, `joseph_cov`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
 
 ### Testing
 

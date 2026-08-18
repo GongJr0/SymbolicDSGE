@@ -78,9 +78,10 @@ class PreparedFilterRun:
     mode: str
     meas_addr: int
     jac_addr: int
-    P0: NDF
+    P0: NDF | None
     kf_jitter: float64
     kf_sym: bool
+    kf_joseph_cov: bool
 
 
 # ---------------------------------------------------------------------------
@@ -539,10 +540,11 @@ class PyObjCommon:
     incidence: NDArray[np.int8]  # n_var: SDSGE_INC_* bits per variable
 
     y: NDF  # T*n_obs
-    P0: NDF  # n_var*n_var; UKF 2*n_state square
+    P0: NDF | None  # n_var*n_var; UKF 2*n_state square
     x0: NDF | None  # n_var, or None
     jitter: float
     symmetrize: bool
+    joseph_cov: bool
 
     pmap: PyParamMap
     q_spec: PyCovSpec
@@ -598,6 +600,7 @@ def build_obj_common(
         x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),
         jitter=float(prepared.kf_jitter),
         symmetrize=bool(prepared.kf_sym),
+        joseph_cov=bool(prepared.kf_joseph_cov),
         pmap=build_param_map(
             compiled=compiled,
             param_names=param_names,
@@ -907,7 +910,7 @@ def build_C_d_from_cfunc(
 
 def resolve_filter_options(
     jitter: float | float64 | None,
-    symmetrize: bool | None,
+    symmetrize: bool,
 ) -> tuple[float64, bool]:
     kf_jitter = float64(0.0) if jitter is None else float64(jitter)
     kf_sym = False if symmetrize is None else bool(symmetrize)
@@ -922,32 +925,24 @@ def prepare_filter_run(
     observables: list[str] | None,
     filter_mode: str,
     jitter: float | float64 | None,
-    symmetrize: bool | None,
+    symmetrize: bool,
+    joseph_cov: bool = True,
     P0: NDF | None = None,
 ) -> PreparedFilterRun:
     obs, y_reordered = reorder_observables(compiled, observables, y)
     mode = filter_mode
 
     kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
-
-    kP0 = None
-    if kalman is not None:
-        kP0 = kalman.P0
-
     return PreparedFilterRun(
         observables=obs,
         y_reordered=y_reordered,
         mode=mode,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         jac_addr=compiled.construct_observable_jacobian_cfunc(obs).address,
-        P0=_resolve_P0(
-            FilterMode(mode),
-            compiled.n_state,
-            compiled.n_var,
-            kP0 if P0 is None else P0,
-        ),
+        P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
         kf_jitter=kf_jitter,
         kf_sym=kf_sym,
+        kf_joseph_cov=bool(joseph_cov),
     )
 
 
@@ -1042,6 +1037,7 @@ def _prepare_filter_loglik(
     )
     run_filter: Callable[..., Any]
     if mode == "linear":
+        common["joseph_cov"] = prepared.kf_joseph_cov
         pol = cast("FirstOrderSolution", sol.policy)
         C, d = build_C_d_from_cfunc(
             prepared.meas_addr,
@@ -1060,6 +1056,7 @@ def _prepare_filter_loglik(
             "return_shocks": False,
         }
     elif mode == "extended":
+        common["joseph_cov"] = prepared.kf_joseph_cov
         pol = cast("FirstOrderSolution", sol.policy)
         run_filter = KalmanFilter.run_extended_raw
         mode_args = {
@@ -1130,7 +1127,8 @@ def evaluate_loglik(
     ss_seed: NDF | dict[str, float] | None,
     x0: NDF | None,
     jitter: float | float64 | None,
-    symmetrize: bool | None,
+    symmetrize: bool = True,
+    joseph_cov: bool = True,
     R: NDF | None,
     P0: NDF | None = None,
     prepared: PreparedFilterRun | None = None,
@@ -1147,6 +1145,7 @@ def evaluate_loglik(
             filter_mode=filter_mode,
             jitter=jitter,
             symmetrize=symmetrize,
+            joseph_cov=joseph_cov,
             P0=P0,
         )
     )

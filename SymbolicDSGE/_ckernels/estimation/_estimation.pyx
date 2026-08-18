@@ -118,10 +118,12 @@ cdef extern from "estimation.h":
         const double *ss_seed
         const signed char *incidence
         const double *y
-        const double *P0
+        double *P0
         const double *x0
         double jitter
         int symmetrize
+        int joseph_cov
+        int derive_P0
         sdsge_param_map pmap
         sdsge_cov_spec q_spec
         sdsge_cov_spec r_spec
@@ -416,6 +418,7 @@ def obj_linear_base(
     b.x0 = &x0v[0]
     b.jitter = jitter
     b.symmetrize = symmetrize
+    b.joseph_cov = 1
 
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
@@ -576,6 +579,7 @@ def obj_extended_base(
     b.x0 = &x0v[0]
     b.jitter = jitter
     b.symmetrize = symmetrize
+    b.joseph_cov = 1
 
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
@@ -764,6 +768,7 @@ def obj_unscented_base(
     b.x0 = &x0v[0]
     b.jitter = jitter
     b.symmetrize = symmetrize
+    b.joseph_cov = 1
 
     b.pmap.base_params = &base_calib[0]
     b.pmap.scalars = NULL
@@ -922,6 +927,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     cdef int64_t n_par = dims.n_par
     cdef int64_t T = dims.T
     cdef int64_t n2 = 3 * n_var + n_exog
+    cdef int derive_P0
     nc.n_theta = n_theta
 
     # Pinned inputs. Python guarantees dtype; C-contiguity is enforced here. Each
@@ -937,7 +943,12 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     _y = np.ascontiguousarray(base.y, dtype=np.float64)
     nc.keep.append(_y)
     cdef double[:, ::1] yv = _y
-    _P0 = np.ascontiguousarray(base.P0, dtype=np.float64)
+    if base.P0 is None:
+        _P0 = np.zeros((n_var, n_var), dtype=np.float64)
+        derive_P0 = 1
+    else:
+        _P0 = np.ascontiguousarray(base.P0, dtype=np.float64)
+        derive_P0 = 0
     nc.keep.append(_P0)
     cdef double[:, ::1] P0v = _P0
     _bp = np.ascontiguousarray(base.pmap.base_params, dtype=np.float64)
@@ -1140,6 +1151,8 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     b.x0 = &x0v[0]
     b.jitter = base.jitter
     b.symmetrize = int(base.symmetrize)
+    b.joseph_cov = int(base.joseph_cov)
+    b.derive_P0 = derive_P0
 
     b.pmap.base_params = &bpv[0]
     b.pmap.scalars = scalars_c if n_scalars > 0 else NULL

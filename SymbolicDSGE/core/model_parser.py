@@ -33,7 +33,7 @@ from .config import (
     PairGetterDict,
     FunctionGetterDict,
 )
-from ..kalman.config import KalmanConfig, make_R, make_P0
+from ..kalman.config import KalmanConfig, make_R
 from .linearization import LinearizationMethod
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
@@ -963,11 +963,8 @@ class ModelParser:
             R_std_param_map = None
             R_corr_param_map = {}
 
-        P0 = make_P0(P0_mode, P0_diag, declared_var_names)
-
         return KalmanConfig(
             R=R,
-            P0=P0,
             R_param_names=R_param_names,
             R_std_param_map=R_std_param_map,
             R_corr_param_map=R_corr_param_map,

@@ -26,14 +26,24 @@ def kalman_hot_loop(
     x0: _F64,
     P0: _F64,
     symmetrize: bool,
+    joseph_cov: bool,
     jitter: float,
-    return_shocks: bool = ...,
-    store_history: bool = ...,
+    return_shocks: bool = False,
+    store_history: bool = True,
 ) -> tuple[
     int,
     tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
 ]:
     """Run the linear Kalman filter; mirrors numba ``_kalman_hot_loop``."""
+
+def stationary_covariance(
+    A: _F64,
+    B: _F64,
+    Q: _F64,
+    tolerance: float = ...,
+    max_iterations: int = ...,
+) -> tuple[int, _F64]:
+    """Solve ``P = A P A.T + B Q B.T`` and return ``(status, P)``."""
 
 def ekf_hot_loop(
     meas_addr: int,
@@ -47,10 +57,11 @@ def ekf_hot_loop(
     x0: _F64,
     P0: _F64,
     symmetrize: bool,
+    joseph_cov: bool,
     jitter: float,
-    compute_y_filt: bool = ...,
-    return_shocks: bool = ...,
-    store_history: bool = ...,
+    compute_y_filt: bool = True,
+    return_shocks: bool = False,
+    store_history: bool = True,
 ) -> tuple[
     int,
     tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
@@ -82,8 +93,8 @@ def ukf_hot_loop(
     beta: float,
     kappa: float,
     jitter: float,
-    symmetrize: bool = ...,
-    store_history: bool = ...,
+    symmetrize: bool = True,
+    store_history: bool = True,
 ) -> tuple[
     int,
     tuple[

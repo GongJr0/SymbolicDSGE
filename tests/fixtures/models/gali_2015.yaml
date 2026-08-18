@@ -1,0 +1,71 @@
+name: Gali2015
+
+variables: [pi, y_gap, y_nat, y, yhat, r_nat, r_real, i, n, m_real,
+            m_growth_ann, nu, a, r_real_ann, r_nat_ann, z, c,
+            w_real, mu, mu_hat]
+
+shocks: [eps_a, eps_nu, eps_z]
+
+observables: [obs_pi_ann, obs_i_ann]
+
+equations:
+  model:
+    phillips: pi(t) = betta*pi(t+1) + kappa*y_gap(t)
+    is_curve: y_gap(t) = -(i(t)-pi(t+1)-r_nat(t))/siggma + y_gap(t+1)
+    interest_rule: i(t) = phi_pi*pi(t) + phi_y*yhat(t) + nu(t)
+    natural_rate: r_nat(t) = -siggma*psi_n_ya*(1-rho_a)*a(t) + (1-rho_z)*z(t)
+    real_rate: r_real(t) = i(t)-pi(t+1)
+    natural_output: y_nat(t) = psi_n_ya*a(t)
+    output_gap: y_gap(t) = y(t)-y_nat(t)
+    monetary_shock: nu(t) = rho_nu*nu(t-1) + eps_nu
+    technology: a(t) = rho_a*a(t-1) + eps_a
+    production: y(t) = a(t)+(1-alppha)*n(t)
+    preference_shock: z(t) = rho_z*z(t-1) - eps_z
+    money_growth: m_growth_ann(t) = 4*(y(t)-y(t-1)-eta*(i(t)-i(t-1))+pi(t))
+    money_demand: m_real(t) = y(t)-eta*i(t)
+    annual_real_rate: r_real_ann(t) = 4*r_real(t)
+    annual_natural_rate: r_nat_ann(t) = 4*r_nat(t)
+    output_deviation: yhat(t) = y(t)
+    resource_constraint: y(t) = c(t)
+    real_wage: w_real(t) = siggma*c(t) + varphi*n(t)
+    markup: mu(t) = -(siggma+(varphi+alppha)/(1-alppha))*y(t) + (1+varphi)/(1-alppha)*a(t)
+    markup_gap: mu_hat(t) = -(siggma+(varphi+alppha)/(1-alppha))*y_gap(t)
+  constraint: {}
+  observables:
+    obs_pi_ann: 4*pi(t)
+    obs_i_ann: 4*i(t)
+
+calibration:
+  parameters:
+    alppha: 0.25
+    betta: 0.99
+    rho_a: 0.9
+    rho_nu: 0.5
+    rho_z: 0.5
+    siggma: 1.0
+    varphi: 5.0
+    phi_pi: 1.5
+    phi_y: 0.125
+    eta: 3.77
+    epsilon: 9.0
+    theta: 0.75
+    psi_n_ya: 1.0
+    kappa: 0.17166666666666666
+    sig_eps_a: 1.0
+    sig_eps_nu: 0.25
+    sig_eps_z: 0.5
+    meas_obs_pi_ann: 0.0
+    meas_obs_i_ann: 0.0
+  shocks:
+    std:
+      eps_a: sig_eps_a
+      eps_nu: sig_eps_nu
+      eps_z: sig_eps_z
+    corr: {}
+
+kalman:
+  R:
+    std:
+      obs_pi_ann: meas_obs_pi_ann
+      obs_i_ann: meas_obs_i_ann
+    corr: {}

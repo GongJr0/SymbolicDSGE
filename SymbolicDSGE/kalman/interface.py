@@ -7,6 +7,7 @@ from .filter import (
     _filter_result_from_raw,
     _unscented_filter_result_from_raw,
 )
+from .._ckernels.kalman import stationary_covariance
 from .config import KalmanConfig, make_R
 from .validator import (
     validate_kf_inputs,
@@ -45,16 +46,18 @@ class _KFMatrices:
 
     Stored on the :class:`SolvedModel` (see ``SolvedModel._kf_cache``) and shared
     across repeated filter calls so the per-call interface stops rebuilding
-    ``Q``/``R`` for a fixed calibration. ``C``/``d`` are cached separately
-    (``SolvedModel._cd_cache``, via ``_get_C_d``). ``R_const`` is filled lazily on
-    the first constant-R call for the key (a key first seen via a user-supplied or
-    estimated ``R`` leaves it ``None``). ``validated`` flips to ``True`` once the
-    constant covariances pass the symmetry / non-negative-diagonal checks, letting
-    subsequent constant-R calls skip them.
+    ``Q``/``R``/default ``P0`` for a fixed calibration. ``C``/``d`` are cached
+    separately (``SolvedModel._cd_cache``, via ``_get_C_d``). ``R_const`` is
+    filled lazily on the first constant-R call for the key (a key first seen via a
+    user-supplied or estimated ``R`` leaves it ``None``). ``P0_default`` is
+    likewise populated only when no explicit P0 was supplied. ``validated`` flips
+    to ``True`` once the constant covariances pass the symmetry and nonnegative
+    diagonal checks, letting subsequent constant-R calls skip them.
     """
 
     Q: NDF
     R_const: NDF | None = None
+    P0_default: NDF | None = None
     validated: bool = False
 
 
@@ -72,7 +75,8 @@ class KalmanInterface(KalmanFilter):
         R: NDF | None = None,
         P0: NDF | None = None,
         jitter: Float64Like | None = None,
-        symmetrize: bool | None = None,
+        joseph_cov: bool = True,
+        symmetrize: bool = False,
         return_shocks: bool = False,
     ) -> None:
 
@@ -86,13 +90,6 @@ class KalmanInterface(KalmanFilter):
         self._kalman = model.kalman_config
 
         self.mode = FilterMode(filter_mode)
-        kP0 = self._kalman.P0 if self._kalman is not None else None
-        self.P0 = _resolve_P0(
-            self.mode,
-            model.compiled.n_state,
-            model.compiled.n_var,
-            kP0 if P0 is None else P0,
-        )
 
         obs, y = self._reorder_obs(observables, y)
         if obs is None:
@@ -122,6 +119,22 @@ class KalmanInterface(KalmanFilter):
 
         self.Q = record.Q
 
+        default_P0 = record.P0_default
+        if P0 is None and default_P0 is None:
+            default_P0 = self._build_default_P0()
+            record.P0_default = default_P0
+        if P0 is None:
+            if default_P0 is None:
+                raise RuntimeError("Default P0 construction returned no covariance.")
+            self.P0: NDF = default_P0
+        else:
+            resolved_P0 = _resolve_P0(
+                self.mode, model.compiled.n_state, model.compiled.n_var, P0
+            )
+            if resolved_P0 is None:
+                raise RuntimeError("Explicit P0 resolution returned no covariance.")
+            self.P0 = resolved_P0
+
         self._uses_const_R = R is None
 
         if self._uses_const_R:
@@ -141,10 +154,29 @@ class KalmanInterface(KalmanFilter):
         self.ukf_kappa = 1.0
 
         self.jitter = self._get_jitter(jitter)
-        self.symmetrize = self._get_symmetrize(symmetrize)
+        self.symmetrize = bool(symmetrize)
+        self.joseph_cov = bool(joseph_cov)
         self.return_shocks = bool(return_shocks)
 
         self._debug_info: _KalmanDebugInfo | None = None
+
+    def _build_default_P0(self) -> NDF:
+        if self.mode == FilterMode.UNSCENTED:
+            n_state = self.model.compiled.n_state
+            err, state_P0 = stationary_covariance(
+                self.model.policy.p, self.B[:n_state, :], self.Q
+            )
+            if err != 0:
+                state_P0 = np.eye(n_state, dtype=float64)
+            P0 = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
+            P0[:n_state, :n_state] = state_P0
+            return P0
+
+        n_var = self.model.compiled.n_var
+        err, P0 = stationary_covariance(self.A, self.B, self.Q)
+        if err != 0:
+            return np.eye(n_var, dtype=float64)
+        return P0
 
     def filter(
         self,
@@ -234,6 +266,7 @@ class KalmanInterface(KalmanFilter):
             x0=x0,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
+            joseph_cov=self.joseph_cov,
             return_shocks=self.return_shocks,
         )
         if _debug:
@@ -290,6 +323,7 @@ class KalmanInterface(KalmanFilter):
             x0=x0,
             jitter=self.jitter,
             symmetrize=self.symmetrize,
+            joseph_cov=self.joseph_cov,
             return_shocks=self.return_shocks,
         )
         if _debug:
@@ -433,9 +467,6 @@ class KalmanInterface(KalmanFilter):
             beta=self.ukf_beta if self.mode == FilterMode.UNSCENTED else None,
             kappa=self.ukf_kappa if self.mode == FilterMode.UNSCENTED else None,
         )
-
-    def _get_symmetrize(self, symmetrize_arg: bool | None) -> bool:
-        return bool(symmetrize_arg) if symmetrize_arg is not None else False
 
     def _get_jitter(self, jitter_arg: Float64Like | None) -> float64:
         return float64(jitter_arg) if jitter_arg is not None else float64(0.0)
@@ -724,16 +755,14 @@ class KalmanInterface(KalmanFilter):
         }
 
 
-def _resolve_P0(mode: FilterMode, n_state: int, n_var: int, P0: NDF | None) -> NDF:
+def _resolve_P0(
+    mode: FilterMode, n_state: int, n_var: int, P0: NDF | None
+) -> NDF | None:
+    if P0 is None:
+        return None
     if mode != FilterMode.UNSCENTED:
-        if P0 is not None:
-            return P0
-        else:
-            return np.eye(n_var, dtype=float64)
+        return P0
 
     out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
-
-    if P0 is not None:
-        out[:n_state, :n_state] = P0[:n_state, :n_state]
-    out[n_state:, n_state:] = np.eye(n_state, dtype=float64)
+    out[:n_state, :n_state] = P0[:n_state, :n_state]
     return out

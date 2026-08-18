@@ -291,9 +291,8 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
 
     model, _ = ModelParser(path).get_all()
     linearized = linearize_model(model)
-    # The nonlinear fixture has no `kalman:` block, so supply a config directly:
-    # 2 model variables (a, k) -> P0 is 2x2, 1 observable (AObs) -> R is 1x1.
-    kalman = KalmanConfig(R=np.eye(1, dtype=np.float64), P0=np.eye(2, dtype=np.float64))
+    # The nonlinear fixture has no `kalman:` block, so supply R directly.
+    kalman = KalmanConfig(R=np.eye(1, dtype=np.float64))
     solver = DSGESolver(linearized, kalman)
     compiled = solver.compile()
 

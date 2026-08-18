@@ -101,7 +101,7 @@ DSGESolver.estimate(
     x0: np.ndarray | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
-    symmetrize: bool | None = None,
+    symmetrize: bool = True, 
     R: np.ndarray | None = None, # (2)!
     **method_kwargs: Any,
 ) -> MCMCResult | OptimizationResult
@@ -141,7 +141,7 @@ DSGESolver.estimate_and_solve(
     x0: np.ndarray | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
-    symmetrize: bool | None = None,
+    symmetrize: bool = True, 
     R: np.ndarray | None = None,
     **method_kwargs: Any,
 ) -> tuple[MCMCResult | OptimizationResult, SolvedModel]

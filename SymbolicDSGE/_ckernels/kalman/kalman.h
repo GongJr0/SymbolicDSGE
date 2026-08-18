@@ -13,6 +13,7 @@
 #define KF_ERR_MATRIX_CONDITION -1102
 #define KF_ERR_SINGULAR_MATRIX -1103
 #define KF_ERR_ALLOC -1104
+#define KF_ERR_LYAPUNOV_CONVERGENCE -1105
 
 /* Kalman hot-loop helpers. Parity oracle: the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.
@@ -63,9 +64,26 @@ void kf_joseph_cov(const f64 *K, const f64 *C, const f64 *P_pred, const f64 *R,
                    f64 *KC, f64 *I_minus_KC, f64 *temp_nn, f64 *temp_nm,
                    f64 *out, i64 n, i64 m);
 
+/* Simplified covariance update:
+ *   out(n,n) := P_pred - K(n,m) (P_pred C^T)^T
+ * PCt is P_pred C^T, computed before the gain. */
+void kf_simple_cov(const f64 *K, const f64 *PCt, const f64 *P_pred, f64 *out,
+                   i64 n, i64 m);
+
 /* out(n,n) := sym(B(n,k) Q(k,k) B^T), via temp_nk(n,k) */
 void kf_build_bqbt(const f64 *B, const f64 *Q, f64 *temp_nk, f64 *out, i64 n,
                    i64 k);
+
+/* Solve the discrete Lyapunov equation
+ *
+ *   P = A P A^T + B Q B^T
+ *
+ * by matrix doubling. Returns KF_OK or KF_ERR_LYAPUNOV_CONVERGENCE when
+ * the iteration does not reach `tol` within `max_iter`. */
+arena_size kf_stationary_covariance_arena_size(i64 n, i64 k);
+int kf_stationary_covariance(const f64 *A, const f64 *B, const f64 *Q, f64 tol,
+                             i64 max_iter, f64 *SDSGE_RESTRICT arena,
+                             f64 *SDSGE_RESTRICT out, i64 n, i64 k);
 
 /* out(k,m) := Q(k,k) @ (B^T C^T)(k,m), via temp_km(k,m) */
 void kf_build_shock_projection(const f64 *B, const f64 *C, const f64 *Q,
@@ -89,6 +107,7 @@ typedef struct {
   const f64 *x0;     /* (n,)   initial state mean */
   const f64 *P0;     /* (n, n) initial state covariance (pre-symmetrized) */
   int symmetrize;    /* symmetrize P/S each step (0/1) */
+  int joseph_cov;    /* use Joseph form for P update (0/1) */
   f64 jitter;        /* diagonal jitter for the Cholesky */
   int return_shocks; /* compute eps_hat (0/1) */
   int store_history; /* fill the per-step history arrays (0/1) */
@@ -128,7 +147,7 @@ typedef struct {
   const f64 *P0; /* (n, n) initial state covariance (pre-symmetrized) */
   i64 T, n, m, k, n_par;
   f64 jitter;
-  int symmetrize, compute_y_filt, return_shocks, store_history;
+  int symmetrize, joseph_cov, compute_y_filt, return_shocks, store_history;
 } ekf_inputs;
 
 typedef struct {

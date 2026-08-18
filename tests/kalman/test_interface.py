@@ -133,7 +133,6 @@ def _make_stub_model(
             R=np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT),
             jitter=0.125,
             symmetrize=True,
-            P0=np.diag([2.0, 6.0, 10.0]).astype(FLOAT),
             R_std_param_map=None,
             R_corr_param_map=None,
         )
@@ -205,7 +204,7 @@ def test_interface_init_reorders_obs_and_builds_state_space():
         ki.Q,
         np.array([[0.04, 0.015], [0.015, 0.09]], dtype=FLOAT),
     )
-    assert np.array_equal(ki.P0, np.diag([2.0, 6.0, 10.0]).astype(FLOAT))
+    assert np.array_equal(ki.P0, np.eye(3, dtype=FLOAT))
     assert np.array_equal(
         ki.R,
         np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT),
@@ -267,23 +266,9 @@ def test_interface_init_raises_if_reordering_fails(monkeypatch):
         )
 
 
-def test_get_symmetrize_and_jitter_cover_overrides_and_defaults():
-    ki = _make_shell(
-        _make_stub_model(
-            kalman_config=SimpleNamespace(
-                y_names=["ObsA"],
-                R=np.array([[1.0]], dtype=FLOAT),
-                jitter=None,
-                symmetrize=None,
-                P0=np.eye(3, dtype=FLOAT),
-                R_std_param_map=None,
-                R_corr_param_map=None,
-            )
-        )
-    )
+def test_get_jitter_cover_overrides_and_defaults():
+    ki = _make_shell()
 
-    assert ki._get_symmetrize(True) is True
-    assert ki._get_symmetrize(None) is False
     assert ki._get_jitter(0.25) == pytest.approx(0.25)
     assert ki._get_jitter(None) == pytest.approx(0.0)
 
@@ -362,7 +347,6 @@ def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
         R=None,
         jitter=0.0,
         symmetrize=False,
-        P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
         R_std_param_map=None,
         R_corr_param_map=None,
     )
@@ -374,8 +358,7 @@ def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
 
 
 def test_resolve_p0_passes_through_for_linear_and_extended():
-    # P0 is now a static ndarray on the config (canonical order); the linear and
-    # extended paths use it verbatim. Construction/validation live at parse time.
+    # Explicit runtime P0 values pass through linear and extended paths verbatim.
     P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)
     assert np.array_equal(interface_module._resolve_P0(FilterMode.LINEAR, 2, 3, P0), P0)
     assert np.array_equal(
@@ -383,13 +366,13 @@ def test_resolve_p0_passes_through_for_linear_and_extended():
     )
 
 
-def test_resolve_p0_embeds_state_block_with_identity_for_unscented():
-    # Unscented embedding is a runtime structural step: blkdiag(P0_state, I),
-    # taking the top-left n_state block of the full-variable P0.
+def test_resolve_p0_embeds_state_block_for_unscented():
+    # Unscented embedding carries the supplied first-order state block. The
+    # second-order block starts at zero.
     P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)  # 3 model vars, n_state=2
     assert np.array_equal(
         interface_module._resolve_P0(FilterMode.UNSCENTED, 2, 3, P0),
-        np.diag([2.0, 6.0, 1.0, 1.0]).astype(FLOAT),
+        np.diag([2.0, 6.0, 0.0, 0.0]).astype(FLOAT),
     )
 
 
@@ -415,7 +398,6 @@ def test_reorder_obs_uses_defaults_and_aligns_dataframe_and_ndarray_inputs():
                 R=np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT),
                 jitter=0.0,
                 symmetrize=False,
-                P0=np.eye(3, dtype=FLOAT),
                 R_std_param_map=None,
                 R_corr_param_map=None,
             )
@@ -487,23 +469,21 @@ def test_kalman_config_is_optional_when_R_is_supplied():
 
     assert ki.kalman_config is None
     assert np.array_equal(ki.R, R)
-    # No config and no override leaves P0 at its default over the model's
-    # variables, which is what makes it optional rather than merely absent.
     assert np.array_equal(ki.P0, np.eye(3, dtype=FLOAT))
 
 
-def test_a_configured_p0_reaches_the_filter():
-    # The config's P0 is not the identity, so substituting the default would
-    # show here. A fixture whose P0 is identity-valued cannot see the difference.
+def test_an_explicit_p0_reaches_the_filter():
+    P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)
     model = _make_stub_model()
 
     ki = KalmanInterface(
         model=model,
         observables=["ObsA", "ObsB"],
         y=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=FLOAT),
+        P0=P0,
     )
 
-    assert np.array_equal(ki.P0, model.kalman_config.P0)
+    assert np.array_equal(ki.P0, P0)
 
 
 def test_filter_dispatches_linear_run_and_populates_debug_info(monkeypatch):
@@ -730,11 +710,7 @@ def _levels_rbc_solved(order: int):
         / "rbc_second_order.yaml"
     )
     model, _ = ModelParser(path).get_all()
-    n_var = len(model.variables.variables)
-    kalman = KalmanConfig(
-        R=np.array([[0.01]], dtype=FLOAT),
-        P0=(0.1 * np.eye(n_var)).astype(FLOAT),
-    )
+    kalman = KalmanConfig(R=np.array([[0.01]], dtype=FLOAT))
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     solved = solver.solve(compiled=compiled, order=order)
