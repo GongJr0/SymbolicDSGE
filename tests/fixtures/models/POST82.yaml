@@ -76,11 +76,3 @@ kalman:
       Infl, Rate: meas_rho_ir
       OutGap, Infl: meas_rho_gi
       OutGap, Rate: meas_rho_gr
-  P0:
-    mode: diag
-    diag:
-      g: 1.0
-      z: 1.0
-      r: 1.0
-      Pi: 1.0
-      x: 1.0

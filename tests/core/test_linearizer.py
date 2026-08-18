@@ -101,9 +101,6 @@ def _mixed_methods_nonlinear_yaml() -> str:
             std:
               ZObs: meas_z
             corr: {}
-          P0:
-            mode: eye
-            diag: {}
         """
     )
 
@@ -146,9 +143,6 @@ def _mixed_methods_hand_linearized_yaml() -> str:
             std:
               ZObs: meas_z
             corr: {}
-          P0:
-            mode: eye
-            diag: {}
         """
     )
 
