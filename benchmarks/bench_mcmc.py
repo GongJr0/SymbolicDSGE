@@ -360,13 +360,83 @@ def _run_dynare(
 
 
 def _summary(samples: np.ndarray) -> dict[str, np.ndarray]:
+    std = np.std(samples, axis=0, ddof=1)
+    ess = _effective_sample_size(samples)
+    mcse = np.full(ess.shape, np.nan, dtype=np.float64)
+    positive_ess = ess > 0.0
+    mcse[positive_ess] = std[positive_ess] / np.sqrt(ess[positive_ess])
+    quantiles = (0.05, 0.50, 0.95)
+    quantile_values = np.quantile(samples, quantiles, axis=0)
+    quantile_mcse = _quantile_mcse(samples, quantiles)
     return {
+        "std": std,
         "mean": np.mean(samples, axis=0),
-        "std": np.std(samples, axis=0, ddof=1),
-        "q05": np.quantile(samples, 0.05, axis=0),
-        "q50": np.quantile(samples, 0.50, axis=0),
-        "q95": np.quantile(samples, 0.95, axis=0),
+        "q05": quantile_values[0],
+        "q50": quantile_values[1],
+        "q95": quantile_values[2],
+        "q05_mcse": quantile_mcse[0],
+        "q50_mcse": quantile_mcse[1],
+        "q95_mcse": quantile_mcse[2],
+        "ess": ess,
+        "mcse": mcse,
     }
+
+
+def _effective_sample_size(samples: np.ndarray) -> np.ndarray:
+    """Geyer's initial-positive-sequence ESS for each single-chain column."""
+    n_draws, n_params = samples.shape
+    ess = np.zeros(n_params, dtype=np.float64)
+    if n_draws < 3:
+        return ess
+
+    n_fft = 1 << (2 * n_draws - 1).bit_length()
+    for index in range(n_params):
+        centered = samples[:, index] - np.mean(samples[:, index])
+        autocov = np.fft.irfft(np.abs(np.fft.rfft(centered, n=n_fft)) ** 2, n=n_fft)[
+            :n_draws
+        ]
+        autocov /= np.arange(n_draws, 0, -1, dtype=np.float64)
+        if autocov[0] <= np.finfo(np.float64).eps:
+            continue
+        rho = autocov / autocov[0]
+        pair_sum = rho[1:-1:2] + rho[2::2]
+        nonpositive = np.flatnonzero(pair_sum <= 0.0)
+        if nonpositive.size:
+            pair_sum = pair_sum[: nonpositive[0]]
+        tau = 1.0 + 2.0 * float(np.sum(pair_sum))
+        ess[index] = min(float(n_draws), float(n_draws) / tau)
+    return ess
+
+
+def _quantile_mcse(samples: np.ndarray, quantiles: tuple[float, ...]) -> np.ndarray:
+    """Estimate quantile MCSEs with square-root-sized contiguous batches."""
+    n_draws, n_params = samples.shape
+    n_batches = int(np.sqrt(n_draws))
+    batch_size = n_draws // n_batches if n_batches else 0
+    mcse = np.full((len(quantiles), n_params), np.nan, dtype=np.float64)
+    if n_batches < 2 or batch_size < 2:
+        return mcse
+
+    batches = samples[: n_batches * batch_size].reshape(n_batches, batch_size, n_params)
+    for index, quantile in enumerate(quantiles):
+        batch_quantiles = np.quantile(batches, quantile, axis=1)
+        mcse[index] = np.std(batch_quantiles, axis=0, ddof=1) / np.sqrt(n_batches)
+    return mcse
+
+
+def _normalized_delta(
+    native_values: np.ndarray,
+    runtime_values: np.ndarray,
+    native_mcse: np.ndarray,
+    runtime_mcse: np.ndarray,
+) -> np.ndarray:
+    combined_mcse = np.hypot(native_mcse, runtime_mcse)
+    normalized = np.full(combined_mcse.shape, np.nan, dtype=np.float64)
+    valid = combined_mcse > 0.0
+    normalized[valid] = (
+        np.abs(native_values[valid] - runtime_values[valid]) / combined_mcse[valid]
+    )
+    return normalized
 
 
 def _print_report(
@@ -387,35 +457,61 @@ def _print_report(
         "schedules and RNGs differ, so posterior summaries are descriptive."
     )
     native_median = float(np.median(native["times"]))
-    header = f"{'runtime':<18} {'median s':>12} {'draws / s':>12} {'acceptance':>12}"
+    native_ess = _effective_sample_size(native["samples"])
+    header = (
+        f"{'runtime':<18} {'median s':>12} {'draws / s':>12} "
+        f"{'acceptance':>12} {'min ESS':>12} {'min ESS / s':>14}"
+    )
     print("\n" + header)
     print("-" * len(header))
     print(
-        f"{'SymbolicDSGE':<18} {native_median:12.3f} {draws / native_median:12.1f} {native['accept_rate']:12.3f}"
+        f"{'SymbolicDSGE':<18} {native_median:12.3f} {draws / native_median:12.1f} "
+        f"{native['accept_rate']:12.3f} {np.min(native_ess):12.1f} "
+        f"{np.min(native_ess) / native_median:14.1f}"
     )
     for runtime, result in dynare.items():
         median = float(np.median(result["times"]))
+        ess = _effective_sample_size(result["samples"])
         print(
-            f"{'Dynare-' + runtime:<18} {median:12.3f} {draws / median:12.1f} {result['accept_rate']:12.3f}"
+            f"{'Dynare-' + runtime:<18} {median:12.3f} {draws / median:12.1f} "
+            f"{result['accept_rate']:12.3f} {np.min(ess):12.1f} "
+            f"{np.min(ess) / median:14.1f}"
         )
 
     native_summary = _summary(native["samples"])
     for runtime, result in dynare.items():
         result["summary"] = _summary(result["samples"])
-    print("\nPosterior summaries: max absolute difference from SymbolicDSGE")
-    header = f"{'parameter':<16} {'runtime':<18} {'mean':>12} {'std':>12} {'q05':>12} {'q50':>12} {'q95':>12}"
+    print(
+        "\nPosterior comparisons: std is absolute; mean and quantiles are "
+        "|delta| / combined MCSE"
+    )
+    header = (
+        f"{'parameter':<16} {'runtime':<18} {'mean / MCSE':>14} {'std delta':>12} "
+        f"{'q05 / MCSE':>14} {'q50 / MCSE':>14} {'q95 / MCSE':>14} "
+        f"{'ESS native':>12} {'ESS runtime':>12}"
+    )
     print(header)
     print("-" * len(header))
     for index, name in enumerate(estimated_params):
         for runtime, result in dynare.items():
             summary = result["summary"]
-            deltas = [
-                abs(float(native_summary[key][index] - summary[key][index]))
-                for key in ("mean", "std", "q05", "q50", "q95")
-            ]
+            normalized = {
+                key: _normalized_delta(
+                    native_summary[key],
+                    summary[key],
+                    native_summary["mcse" if key == "mean" else f"{key}_mcse"],
+                    summary["mcse" if key == "mean" else f"{key}_mcse"],
+                )
+                for key in ("mean", "q05", "q50", "q95")
+            }
+            std_delta = abs(float(native_summary["std"][index] - summary["std"][index]))
             print(
                 f"{name:<16} {'Dynare-' + runtime:<18} "
-                + " ".join(f"{delta:12.3e}" for delta in deltas)
+                + f"{normalized['mean'][index]:14.3f} {std_delta:12.3e} "
+                + " ".join(
+                    f"{normalized[key][index]:14.3f}" for key in ("q05", "q50", "q95")
+                )
+                + f" {native_summary['ess'][index]:12.1f} {summary['ess'][index]:12.1f}"
             )
 
 
