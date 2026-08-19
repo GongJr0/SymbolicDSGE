@@ -1342,7 +1342,7 @@ class Estimator:
         out = run_mcmc(
             ctx,
             mode,
-            np.ascontiguousarray(current, dtype=float64),
+            current,
             rng,
             n_draws=n_draws,
             burn_in=burn_in,
