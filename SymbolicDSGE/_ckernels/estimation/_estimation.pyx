@@ -27,6 +27,28 @@ cdef extern from "../_common/sdsge_complex.h":
         double im
 
 
+cdef extern from "optim.h":
+    ctypedef double (*sdsge_objective_fn)(const double *x, void *ctx) noexcept nogil
+
+    ctypedef struct sdsge_optim_options:
+        int64_t m
+        int64_t maxiter
+        int64_t maxfun
+        int64_t maxls
+        double factr
+        double pgtol
+        double fd_step
+        double xatol
+        double fatol
+
+    ctypedef struct sdsge_optim_result:
+        int64_t status
+        int64_t nfev
+        int64_t nit
+        double fun
+        int success
+        const char *message
+
 cdef extern from "estimation.h":
     ctypedef void (*sdsge_residual_fn)()
     ctypedef void (*bc_residual_fn)()
@@ -172,6 +194,15 @@ cdef extern from "estimation.h":
         double beta
         double kappa
 
+    ctypedef struct sdsge_estimation_options:
+        int filter_mode
+        int method
+        int has_priors
+        const double *lo
+        const double *hi
+        const int64_t *nbd
+        sdsge_optim_options optim
+
     void sdsge_init_params(double *params, const double *base_params,
                            int64_t n_par) nogil
     void sdsge_scatter_params(sdsge_obj_common *base, const double *theta) nogil
@@ -184,18 +215,13 @@ cdef extern from "estimation.h":
     double sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const double *theta,
                                int has_priors) nogil
 
-    # The objectives behind the drivers' (x, void*ctx) ABI. Negated for the
-    # minimizers, plain for MCMC; the ctx cast lives on the C side.
-    double sdsge_min_linear_ll(const double *x, void *ctx) noexcept nogil
-    double sdsge_min_linear_lp(const double *x, void *ctx) noexcept nogil
-    double sdsge_min_extended_ll(const double *x, void *ctx) noexcept nogil
-    double sdsge_min_extended_lp(const double *x, void *ctx) noexcept nogil
-    double sdsge_min_unscented_ll(const double *x, void *ctx) noexcept nogil
-    double sdsge_min_unscented_lp(const double *x, void *ctx) noexcept nogil
     double sdsge_post_linear(const double *x, void *ctx) noexcept nogil
     double sdsge_post_extended(const double *x, void *ctx) noexcept nogil
     double sdsge_post_unscented(const double *x, void *ctx) noexcept nogil
 
+    void sdsge_run_estimation(void *ctx, int64_t n_theta, double *theta,
+                              const sdsge_estimation_options *opt,
+                              sdsge_optim_result *out) noexcept nogil
 
 cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
@@ -226,54 +252,6 @@ cdef extern from "../kalman/kalman.h":
     ) nogil
 
 
-cdef extern from "optim.h":
-    ctypedef double (*sdsge_objective_fn)(const double *x, void *ctx) noexcept nogil
-
-    ctypedef struct sdsge_lbfgsb_options:
-        int64_t m
-        int64_t maxiter
-        int64_t maxfun
-        int64_t maxls
-        double factr
-        double pgtol
-        double fd_step
-
-    ctypedef struct sdsge_lbfgsb_result:
-        int64_t status
-        int64_t nfev
-        int64_t nit
-        double fun
-        int success
-        const char *message
-
-    int64_t sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
-                         double *x, const double *lo, const double *hi,
-                         const int64_t *nbd, const sdsge_lbfgsb_options *opt,
-                         sdsge_lbfgsb_result *out) nogil
-
-
-cdef extern from "nelder_mead.h":
-    ctypedef struct sdsge_neldermead_options:
-        int64_t maxiter
-        int64_t maxfun
-        double xatol
-        double fatol
-
-    ctypedef struct sdsge_neldermead_result:
-        int64_t status
-        int64_t nfev
-        int64_t nit
-        double fun
-        int success
-        const char *message
-
-    int64_t sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
-                             double *x, const double *lo, const double *hi,
-                             const int64_t *nbd,
-                             const sdsge_neldermead_options *opt,
-                             sdsge_neldermead_result *out) nogil
-
-
 cdef extern from "mcmc.h":
     ctypedef struct sdsge_mcmc_options:
         int64_t n_draws
@@ -284,6 +262,8 @@ cdef extern from "mcmc.h":
         int64_t adapt_interval
         double adapt_epsilon
         double proposal_scale
+        double hessian_fd_step_scale
+        double hessian_fd_absolute_floor
 
     ctypedef struct sdsge_mcmc_buffers:
         double *kept
@@ -299,6 +279,7 @@ cdef extern from "mcmc.h":
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                            bitgen_t *bg, const double *theta0, int64_t d,
                            const sdsge_mcmc_options *opt,
+                           const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
                            sdsge_mcmc_result *out) nogil
 
@@ -1432,77 +1413,56 @@ def run_estimation(
             nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
     cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
 
-    # Mode was already validated in _build_native_ctx.
-    cdef sdsge_objective_fn obj
+    cdef int filter_mode
     if mode == "linear":
-        obj = sdsge_min_linear_lp if has_priors else sdsge_min_linear_ll
+        filter_mode = 0
     elif mode == "extended":
-        obj = sdsge_min_extended_lp if has_priors else sdsge_min_extended_ll
+        filter_mode = 1
     else:
-        obj = sdsge_min_unscented_lp if has_priors else sdsge_min_unscented_ll
+        filter_mode = 2
 
-    cdef sdsge_lbfgsb_options lopt
-    cdef sdsge_lbfgsb_result lres
-    cdef sdsge_neldermead_options nopt
-    cdef sdsge_neldermead_result nres
-    cdef int64_t status = 0
-    cdef int64_t nfev = 0
-    cdef int64_t nit = 0
-    cdef double fun = 0.0
-    cdef int success = 0
-    cdef bytes message = b""
-    cdef double lpr = 0.0
-
+    cdef int estimation_method
     if method == "L-BFGS-B":
-        lopt.m = m
-        lopt.maxiter = maxiter
-        lopt.maxfun = maxfun
-        lopt.maxls = maxls
-        lopt.factr = factr
-        lopt.pgtol = pgtol
-        lopt.fd_step = fd_step
-        with nogil:
-            sdsge_lbfgsb(obj, ctxp, n_theta, &xv[0], &lo[0], &hi[0],
-                         nbd_ptr, &lopt, &lres)
-        status = lres.status
-        nfev = lres.nfev
-        nit = lres.nit
-        fun = lres.fun
-        success = lres.success
-        message = (<bytes>lres.message) if lres.message != NULL else b""
+        estimation_method = 0
     elif method == "Nelder-Mead":
-        nopt.maxiter = maxiter
-        nopt.maxfun = maxfun
-        nopt.xatol = xatol
-        nopt.fatol = fatol
-        with nogil:
-            sdsge_neldermead(obj, ctxp, n_theta, &xv[0], &lo[0],
-                             &hi[0], nbd_ptr, &nopt, &nres)
-        status = nres.status
-        nfev = nres.nfev
-        nit = nres.nit
-        fun = nres.fun
-        success = nres.success
-        message = (<bytes>nres.message) if nres.message != NULL else b""
+        estimation_method = 1
     else:
         raise ValueError(f"unsupported native method {method!r}")
-    # Resolve the named params (scatter x_best -> params) and, for MAP, the
-    # log-prior at x_best. Scatter / prior only, no filter. nc (hence the scatter
-    # table) stays alive as a local through this call.
+
+    cdef sdsge_estimation_options est_opt
+    est_opt.filter_mode = filter_mode
+    est_opt.method = estimation_method
+    est_opt.has_priors = has_priors
+    est_opt.lo = &lo[0]
+    est_opt.hi = &hi[0]
+    est_opt.nbd = nbd_ptr
+    est_opt.optim.m = m
+    est_opt.optim.maxiter = maxiter
+    est_opt.optim.maxfun = maxfun
+    est_opt.optim.maxls = maxls
+    est_opt.optim.factr = factr
+    est_opt.optim.pgtol = pgtol
+    est_opt.optim.fd_step = fd_step
+    est_opt.optim.xatol = xatol
+    est_opt.optim.fatol = fatol
+
+    cdef sdsge_optim_result res
+    cdef double lpr = 0.0
+
     with nogil:
-        sdsge_scatter_params(b, &xv[0])
+        sdsge_run_estimation(ctxp, n_theta, &xv[0], &est_opt, &res)
         if has_priors:
             lpr = sdsge_logprior_at(b, &xv[0])
     params_out = np.array(nc.params, dtype=np.float64, copy=True)
 
     return {
         "x": x,
-        "fun": fun,
-        "nfev": int(nfev),
-        "nit": int(nit),
-        "success": bool(success),
-        "status": int(status),
-        "message": message.decode(),
+        "fun": res.fun,
+        "nfev": int(res.nfev),
+        "nit": int(res.nit),
+        "success": bool(res.success),
+        "status": int(res.status),
+        "message": (<bytes>res.message).decode() if res.message != NULL else "",
         "bk_violations": int(b.bk_violations),
         "params": params_out,
         "logprior": float(lpr),
@@ -1522,6 +1482,19 @@ def run_mcmc(
     int64_t adapt_interval=25,
     double proposal_scale=0.1,
     double adapt_epsilon=1e-8,
+    double hessian_fd_step_scale=1.0,
+    double hessian_fd_absolute_floor=0.1,
+    str map_method="L-BFGS-B",
+    map_bounds=None,
+    int map_m=10,
+    int map_maxiter=15000,
+    int map_maxfun=15000,
+    int map_maxls=20,
+    double map_factr=1e7,
+    double map_pgtol=1e-5,
+    double map_fd_step=0.0,
+    double map_xatol=1e-4,
+    double map_fatol=1e-4,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented +logpost objective (issue #331). Marshals the mode's context DTO
@@ -1539,6 +1512,8 @@ def run_mcmc(
         raise ValueError("thin must be positive.")
     if adapt_interval <= 0:
         raise ValueError("adapt_interval must be positive.")
+    if hessian_fd_step_scale <= 0.0 or hessian_fd_absolute_floor <= 0.0:
+        raise ValueError("Hessian finite-difference settings must be positive.")
 
     cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
     cdef sdsge_obj_common *b = nc.b
@@ -1553,20 +1528,65 @@ def run_mcmc(
 
     cdef double[::1] th0v = np.ascontiguousarray(theta0, dtype=np.float64)
 
+    cdef double[::1] map_lo = np.zeros(d, dtype=np.float64)
+    cdef double[::1] map_hi = np.zeros(d, dtype=np.float64)
+    cdef int64_t[::1] map_nbd = np.zeros(d, dtype=np.int64)
+    cdef int has_map_bounds = map_bounds is not None
+    cdef int64_t bi
+    if has_map_bounds:
+        for bi in range(d):
+            lb, ub = map_bounds[bi]
+            has_lo = lb is not None
+            has_hi = ub is not None
+            if has_lo:
+                map_lo[bi] = lb
+            if has_hi:
+                map_hi[bi] = ub
+            map_nbd[bi] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
+    cdef const int64_t *map_nbd_ptr = &map_nbd[0] if has_map_bounds else NULL
+
     # Output buffers (Python-owned; native fills them).
     kept = np.empty((n_draws, d), dtype=np.float64)
     kept_lp = np.empty(n_draws, dtype=np.float64)
     cdef double[:, ::1] keptv = kept
     cdef double[::1] keptlpv = kept_lp
 
-    # Mode was already validated in the builder.
+    cdef int filter_mode
     cdef sdsge_objective_fn logpost
     if mode == "linear":
+        filter_mode = 0
         logpost = sdsge_post_linear
     elif mode == "extended":
+        filter_mode = 1
         logpost = sdsge_post_extended
     else:
+        filter_mode = 2
         logpost = sdsge_post_unscented
+
+    cdef int estimation_method
+    if map_method == "L-BFGS-B":
+        estimation_method = 0
+    elif map_method == "Nelder-Mead":
+        estimation_method = 1
+    else:
+        raise ValueError(f"unsupported native method {map_method!r}")
+
+    cdef sdsge_estimation_options map_opt
+    map_opt.filter_mode = filter_mode
+    map_opt.method = estimation_method
+    map_opt.has_priors = 1
+    map_opt.lo = &map_lo[0]
+    map_opt.hi = &map_hi[0]
+    map_opt.nbd = map_nbd_ptr
+    map_opt.optim.m = map_m
+    map_opt.optim.maxiter = map_maxiter
+    map_opt.optim.maxfun = map_maxfun
+    map_opt.optim.maxls = map_maxls
+    map_opt.optim.factr = map_factr
+    map_opt.optim.pgtol = map_pgtol
+    map_opt.optim.fd_step = map_fd_step
+    map_opt.optim.xatol = map_xatol
+    map_opt.optim.fatol = map_fatol
 
     cdef sdsge_mcmc_options opt
     opt.n_draws = n_draws
@@ -1577,6 +1597,8 @@ def run_mcmc(
     opt.adapt_interval = adapt_interval
     opt.adapt_epsilon = adapt_epsilon
     opt.proposal_scale = proposal_scale
+    opt.hessian_fd_step_scale = hessian_fd_step_scale
+    opt.hessian_fd_absolute_floor = hessian_fd_absolute_floor
 
     cdef sdsge_mcmc_buffers buf
     buf.kept = &keptv[0, 0]
@@ -1585,7 +1607,8 @@ def run_mcmc(
     cdef sdsge_mcmc_result res
     b.bk_violations = 0
     with nogil:
-        sdsge_mcmc_run(logpost, ctxp, bg, &th0v[0], d, &opt, &buf, &res)
+        sdsge_mcmc_run(logpost, ctxp, bg, &th0v[0], d, &opt, &map_opt,
+                       &buf, &res)
 
     if res.status != 0:
         raise MemoryError(

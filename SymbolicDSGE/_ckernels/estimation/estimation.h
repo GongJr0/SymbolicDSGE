@@ -15,10 +15,30 @@
 
 /* Filter mode. */
 typedef enum {
-  SDSGE_FILTER_LINEAR = 0,
-  SDSGE_FILTER_EXTENDED = 1,
-  SDSGE_FILTER_UNSCENTED = 2
+  FILTER_LINEAR = 0,
+  FILTER_EXTENDED = 1,
+  FILTER_UNSCENTED = 2
 } sdsge_filter_mode;
+
+/* Optimizer selection shared by point estimation and MCMC's MAP setup. */
+typedef enum {
+  ESTIMATION_LBFGSB = 0,
+  ESTIMATION_NELDER_MEAD = 1
+} sdsge_estimation_method;
+
+/* Native counterpart of run_estimation's optimizer arguments. `nbd == NULL`
+ * denotes unbounded optimization; otherwise it uses the L-BFGS-B convention
+ * {0 none, 1 lower, 2 both, 3 upper}. The caller owns theta and all bound
+ * buffers for the duration of the call. */
+typedef struct {
+  sdsge_filter_mode filter_mode;
+  sdsge_estimation_method method;
+  int has_priors;
+  const f64 *lo;
+  const f64 *hi;
+  const i64 *nbd;
+  sdsge_optim_options optim;
+} sdsge_estimation_options;
 
 /* Q or R covariance build spec. */
 typedef struct {
@@ -169,6 +189,14 @@ void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
                           const f64 *SDSGE_RESTRICT theta);
 f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
                       const f64 *SDSGE_RESTRICT theta);
+
+/* Minimize the configured likelihood or negative log posterior in place.
+ * `ctx` must point to the filter-mode context selected by opt->filter_mode;
+ * theta has length n_theta. `has_priors` selects the posterior objective.
+ * The caller owns theta, options, and all bound buffers for the call. */
+void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
+                          const sdsge_estimation_options *opt,
+                          sdsge_optim_result *out);
 
 /* Per-flavor objective: theta -> loglik (+ logprior if has_priors). */
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
