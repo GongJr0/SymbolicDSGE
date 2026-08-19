@@ -98,17 +98,7 @@ def run_mcmc(
     adapt_epsilon: float = ...,
     hessian_fd_step_scale: float = ...,
     hessian_fd_absolute_floor: float = ...,
-    map_method: str = ...,
-    map_bounds: Sequence[tuple[float | None, float | None]] | None = ...,
-    map_m: int = ...,
-    map_maxiter: int = ...,
-    map_maxfun: int = ...,
-    map_maxls: int = ...,
-    map_factr: float = ...,
-    map_pgtol: float = ...,
-    map_fd_step: float = ...,
-    map_xatol: float = ...,
-    map_fatol: float = ...,
+    map_options: dict[str, Any] | None = ...,
 ) -> dict[str, Any]: ...
 
 class NativeLogpost:

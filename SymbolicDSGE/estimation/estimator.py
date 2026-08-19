@@ -1310,6 +1310,9 @@ class Estimator:
         adapt_interval: int = 25,
         proposal_scale: float = 0.1,
         adapt_epsilon: float = 1e-8,
+        map_options: dict[str, Any] | None = None,
+        hessian_fd_step_scale: float = 1.0,
+        hessian_fd_absolute_floor: float = 0.1,
     ) -> MCMCResult:
         if n_draws <= 0:
             raise ValueError("n_draws must be positive.")
@@ -1352,6 +1355,9 @@ class Estimator:
             adapt_interval=adapt_interval,
             proposal_scale=proposal_scale,
             adapt_epsilon=adapt_epsilon,
+            map_options=map_options,
+            hessian_fd_step_scale=hessian_fd_step_scale,
+            hessian_fd_absolute_floor=hessian_fd_absolute_floor,
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 

@@ -404,6 +404,7 @@ def test_solved_model_transition_plot_renders_observables_and_shocks(
         return SimResult(
             var_names=("u", "x"),
             X=np.column_stack([np.linspace(1.0, 0.0, T), np.linspace(-1.0, 0.0, T)]),
+            shocks=np.zeros((T, 1), dtype=np.float64),
             observable_names=("Infl",),
             y=np.linspace(0.0, 1.0, T).reshape(-1, 1),
         )

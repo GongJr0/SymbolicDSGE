@@ -1484,17 +1484,7 @@ def run_mcmc(
     double adapt_epsilon=1e-8,
     double hessian_fd_step_scale=1.0,
     double hessian_fd_absolute_floor=0.1,
-    str map_method="L-BFGS-B",
-    map_bounds=None,
-    int map_m=10,
-    int map_maxiter=15000,
-    int map_maxfun=15000,
-    int map_maxls=20,
-    double map_factr=1e7,
-    double map_pgtol=1e-5,
-    double map_fd_step=0.0,
-    double map_xatol=1e-4,
-    double map_fatol=1e-4,
+    dict map_options=None,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented +logpost objective (issue #331). Marshals the mode's context DTO
@@ -1514,6 +1504,16 @@ def run_mcmc(
         raise ValueError("adapt_interval must be positive.")
     if hessian_fd_step_scale <= 0.0 or hessian_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
+    if map_options is None:
+        map_options = {}
+    unknown_map_options = set(map_options) - {
+        "method", "bounds", "m", "maxiter", "maxfun", "maxls", "factr",
+        "pgtol", "fd_step", "xatol", "fatol",
+    }
+    if unknown_map_options:
+        raise ValueError(
+            f"unsupported MAP option(s): {sorted(unknown_map_options)!r}"
+        )
 
     cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
     cdef sdsge_obj_common *b = nc.b
@@ -1528,6 +1528,17 @@ def run_mcmc(
 
     cdef double[::1] th0v = np.ascontiguousarray(theta0, dtype=np.float64)
 
+    cdef str map_method = map_options.get("method", "L-BFGS-B")
+    cdef object map_bounds = map_options.get("bounds")
+    cdef int64_t map_m = map_options.get("m", 10)
+    cdef int64_t map_maxiter = map_options.get("maxiter", 15000)
+    cdef int64_t map_maxfun = map_options.get("maxfun", 15000)
+    cdef int64_t map_maxls = map_options.get("maxls", 20)
+    cdef double map_factr = map_options.get("factr", 1e7)
+    cdef double map_pgtol = map_options.get("pgtol", 1e-5)
+    cdef double map_fd_step = map_options.get("fd_step", 0.0)
+    cdef double map_xatol = map_options.get("xatol", 1e-4)
+    cdef double map_fatol = map_options.get("fatol", 1e-4)
     cdef double[::1] map_lo = np.zeros(d, dtype=np.float64)
     cdef double[::1] map_hi = np.zeros(d, dtype=np.float64)
     cdef int64_t[::1] map_nbd = np.zeros(d, dtype=np.int64)
