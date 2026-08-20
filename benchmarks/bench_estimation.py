@@ -166,15 +166,22 @@ CASES = {
                 ((2.0, 0.8), (2.5, 0.75)),
             ),
             "map": Routine(
-                ("psi_pi",),
-                (2.0,),
-                ((1.0, 5.0),),
-                ((2.0,), (2.5,)),
+                ("psi_pi", "rho_r"),
+                (2.0, 0.8),
+                ((1.0, 5.0), (0.0, 0.99)),
+                ((2.0, 0.8), (2.5, 0.75)),
                 priors=(
                     Prior(
                         name="psi_pi",
                         distribution="normal",
                         parameters=(("mean", 2.0), ("std", 0.5)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                    Prior(
+                        name="rho_r",
+                        distribution="normal",
+                        parameters=(("mean", 0.8), ("std", 0.1)),
                         transform="identity",
                         dynare_density="normal_pdf",
                     ),
@@ -199,15 +206,22 @@ CASES = {
                 ((1.488, 0.8762), (1.7, 0.8)),
             ),
             "map": Routine(
-                ("crpi",),
-                (1.488,),
-                ((1.0, 3.0),),
-                ((1.488,), (1.7,)),
+                ("crpi", "crr"),
+                (1.488, 0.8762),
+                ((1.0, 3.0), (0.0, 0.99)),
+                ((1.488, 0.8762), (1.7, 0.8)),
                 priors=(
                     Prior(
                         name="crpi",
                         distribution="normal",
                         parameters=(("mean", 1.5), ("std", 0.25)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                    Prior(
+                        name="crr",
+                        distribution="normal",
+                        parameters=(("mean", 0.8762), ("std", 0.1)),
                         transform="identity",
                         dynare_density="normal_pdf",
                     ),
@@ -232,15 +246,22 @@ CASES = {
                 ((1.5, 0.9), (1.75, 0.8)),
             ),
             "map": Routine(
-                ("phi_pi",),
-                (1.5,),
-                ((1.01, 3.0),),
-                ((1.5,), (1.75,)),
+                ("phi_pi", "rho_a"),
+                (1.5, 0.9),
+                ((1.01, 3.0), (0.0, 0.99)),
+                ((1.5, 0.9), (1.75, 0.8)),
                 priors=(
                     Prior(
                         name="phi_pi",
                         distribution="normal",
                         parameters=(("mean", 1.5), ("std", 0.25)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                    Prior(
+                        name="rho_a",
+                        distribution="normal",
+                        parameters=(("mean", 0.9), ("std", 0.1)),
                         transform="identity",
                         dynare_density="normal_pdf",
                     ),
@@ -266,15 +287,22 @@ CASES = {
                 ((3.0, 0.9), (2.5, 0.8)),
             ),
             "map": Routine(
-                ("phi",),
-                (3.0,),
-                ((1.0, 10.0),),
-                ((3.0,), (2.5,)),
+                ("phi", "rhoa"),
+                (3.0, 0.9),
+                ((1.0, 10.0), (0.0, 0.99)),
+                ((3.0, 0.9), (2.5, 0.8)),
                 priors=(
                     Prior(
                         name="phi",
                         distribution="normal",
                         parameters=(("mean", 3.0), ("std", 0.5)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                    Prior(
+                        name="rhoa",
+                        distribution="normal",
+                        parameters=(("mean", 0.9), ("std", 0.1)),
                         transform="identity",
                         dynare_density="normal_pdf",
                     ),
@@ -297,15 +325,22 @@ CASES = {
                 ((0.9048, 0.9907), (0.8, 0.95)),
             ),
             "map": Routine(
-                ("rho_a",),
-                (0.9048,),
-                ((0.0, 0.99),),
-                ((0.9048,), (0.8,)),
+                ("rho_a", "rho_e"),
+                (0.9048, 0.9907),
+                ((0.0, 0.99), (0.0, 0.999)),
+                ((0.9048, 0.9907), (0.8, 0.95)),
                 priors=(
                     Prior(
                         name="rho_a",
                         distribution="normal",
                         parameters=(("mean", 0.9), ("std", 0.05)),
+                        transform="identity",
+                        dynare_density="normal_pdf",
+                    ),
+                    Prior(
+                        name="rho_e",
+                        distribution="normal",
+                        parameters=(("mean", 0.9907), ("std", 0.05)),
                         transform="identity",
                         dynare_density="normal_pdf",
                     ),
@@ -599,19 +634,22 @@ def _run_dynare(
 def _print_table(routine: str, native: dict, dynare: dict[str, dict]) -> None:
     native_median = float(np.median(native["times"]))
     print(f"\n{routine.upper()}: implementation-specific optimizer")
-    header = f"{'runtime':<26} {'median ms':>12} {'speedup':>10} {'nfev':>8} {'max |delta theta|':>20} {'|delta terminal obj|':>20}"
+    header = f"{'runtime':<26} {'median ms':>12} {'speedup':>10} {'nfev':>8} {'nit':>8} {'max |delta theta|':>20} {'|delta terminal obj|':>20}"
     print(header)
     print("-" * len(header))
+    native_nit = "n/a" if native["nit"] < 0 else str(native["nit"])
     print(
-        f"{'SymbolicDSGE':<26} {native_median * 1e3:12.2f} {'1.00x':>10} {native['nfev']:8d} {'0.000e+00':>20} {'0.000e+00':>20}"
+        f"{'SymbolicDSGE':<26} {native_median * 1e3:12.2f} {'1.00x':>10} {native['nfev']:8d} {native_nit:>8} {'0.000e+00':>20} {'0.000e+00':>20}"
     )
     for runtime, result in dynare.items():
         median = float(np.median(result["times"]))
         nfev = int(np.median(result["nfev"]))
+        nit_value = float(np.median(result["nit"]))
+        nit = "n/a" if not np.isfinite(nit_value) else str(int(nit_value))
         delta = float(np.max(np.abs(native["theta"] - result["theta"])))
         objective_delta = abs(native["terminal_target"] - result["terminal_target"])
         print(
-            f"{'Dynare-' + runtime:<26} {median * 1e3:12.2f} {median / native_median:9.2f}x {nfev:8d} {delta:20.3e} {objective_delta:20.3e}"
+            f"{'Dynare-' + runtime:<26} {median * 1e3:12.2f} {median / native_median:9.2f}x {nfev:8d} {nit:>8} {delta:20.3e} {objective_delta:20.3e}"
         )
     print(
         f"native log likelihood: {native['loglik']:.12g}  native log prior: {native['logprior']:.12g}"
@@ -751,6 +789,7 @@ def main() -> int:
                     dynare[runtime] = {
                         "times": np.asarray(raw["times"], dtype=np.float64).reshape(-1),
                         "nfev": np.asarray(raw["nfev"], dtype=np.int64).reshape(-1),
+                        "nit": np.asarray(raw["nit"], dtype=np.float64).reshape(-1),
                         "objective_times": np.asarray(
                             raw["objective_times"], dtype=np.float64
                         ).reshape(-1),

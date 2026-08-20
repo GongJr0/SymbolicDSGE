@@ -1,13 +1,13 @@
 ---
 tags:
-    - info
+    - benchmark
 ---
 
 # Linear Kalman Filter Benchmark
 
 ???+ tip "__TL;DR__"
     If you're not interested in the details, you can skip to the [results](#results).
-    However, it's recommended to give a quick skip since not all comparisons are measuring equivalent algorithms.
+    However, it's recommended to give a quick skim since not all comparisons are measuring equivalent algorithms.
 
 The linear Gaussian Kalman filter (KF) is the backbone of many DSGE applications. 
 It provides state estimation, and is the main likelihood engine of choice for linear first-order DSGE models.
@@ -50,8 +50,17 @@ In increasing model complexity, the models are:
 - [Gali (2015) - Chapter 3](https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Gali_2015/Gali_2015_chapter_3.mod)
 - [Smets and Wouters (2007)](https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Smets_Wouters_2007/Smets_Wouters_2007.mod)
 
-> All models except Lubik-Schorfheide (2004) are taken from Johannes Pfeifer's `DSGE_mod` and are distributed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). The `.mod` files are originally written for reproduction; each of the used scripts remove the workflows and keep the model definitions. The Lubik-Schorfheide (2004) model is distributed under the [MIT License](https://opensource.org/license/mit/).
+> All models except Lubik-Schorfheide (2004) are taken from Johannes Pfeifer's `DSGE_mod` and are distributed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). The `.mod` files are originally written for reproduction; each of the used scripts remove the original workflows and keep the model definitions. The Lubik-Schorfheide (2004) model is hand-transcribed and distributed under the [MIT License](https://opensource.org/license/mit/).
 
+### Model Shapes
+
+| Model                    | Declared variables S/D | Filter state dimension S/D | Predetermined variables S/D | Observables S/D | Shocks S/D | Parameters S/D |
+|--------------------------|:----------------------:|:--------------------------:|:---------------------------:|:---------------:|:----------:|:--------------:|
+| Lubik-Schorfheide (2004) |         5 / 8          |           5 / 8            |             3/3             |       3/3       |    3/3     |     20/15      |
+| Ireland (2004)           |        11 / 13         |          11 / 13           |             6/6             |       2/2       |    4/4     |     16/10      |
+| Gali-Monacelli (2005)    |        15 / 15         |          15 / 15           |             3/3             |       2/2       |    2/2     |      10/9      |
+| Gali (2015), Ch. 3       |        20 / 22         |          20 / 22           |             5/5             |       2/2       |    3/3     |     19/12      |
+| Smets-Wouters (2007)     |        37 / 40         |          37 / 40           |            20/20            |       7/7       |    7/7     |     57/34      |
 
 The benchmark script is available in [SymbolicDSGE's GitHub repository](https://github.com/GongJr0/SymbolicDSGE) and is runnable from the repo root:
 
@@ -130,39 +139,381 @@ The following metrics are reported for each benchmark:
 
 ## Results
 
-### Model Shapes
-
-| Model                    | Declared variables S/D | Filter state dimension S/D | Predetermined variables S/D | Observables S/D | Shocks S/D | Parameters S/D |
-|--------------------------|:----------------------:|:--------------------------:|:---------------------------:|:---------------:|:----------:|:--------------:|
-| Lubik-Schorfheide (2004) |         5 / 8          |           5 / 8            |             3/3             |       3/3       |    3/3     |     20/15      |
-| Ireland (2004)           |        11 / 13         |          11 / 13           |             6/6             |       2/2       |    4/4     |     16/10      |
-| Gali-Monacelli (2005)    |        15 / 15         |          15 / 15           |             3/3             |       2/2       |    2/2     |      10/9      |
-| Gali (2015), Ch. 3       |        20 / 22         |          20 / 22           |             5/5             |       2/2       |    3/3     |     19/12      |
-| Smets-Wouters (2007)     |        37 / 40         |          37 / 40           |            20/20            |       7/7       |    7/7     |     57/34      |
-
 ### Likelihood Only
 
-Each Dynare runtime cell reports `median μs (D/S)`. The final column is the maximum absolute log-likelihood difference over MATLAB and Octave.
+```vegalite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "background": null,
+  "description": "Filter runtime comparison.",
+  "data": {
+    "values": [
+      {"model":"LS 2004","runtime":119.70,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"LS 2004","runtime":1408.80,"implementation":"Dynare MATLAB", "label": "11.77x"},
+      {"model":"LS 2004","runtime":18526.91,"implementation":"Dynare Octave", "label": "154.78x"},
 
-| Model                    | Filter states S/D | SymbolicDSGE μs | Dynare MATLAB μs (D/S) | Dynare Octave μs (D/S) | max \|Δ loglik\| |
-|--------------------------|:-----------------:|----------------:|-----------------------:|-----------------------:|-----------------:|
-| Lubik-Schorfheide (2004) |       5 / 8       |          119.70 |      1,408.80 (11.77×) |    18,526.91 (154.78×) |        2.274e-13 |
-| Ireland (2004)           |      11 / 13      |          351.10 |       1,301.30 (3.71×) |     18,696.43 (53.25×) |        1.592e-12 |
-| Gali-Monacelli (2005)    |      15 / 15      |          643.00 |       1,703.85 (2.65×) |     18,992.07 (29.54×) |        9.877e-13 |
-| Gali (2015), Ch. 3       |      20 / 22      |        1,158.10 |       2,248.85 (1.94×) |     20,075.08 (17.33×) |        3.411e-13 |
-| Smets-Wouters (2007)     |      37 / 40      |        7,549.70 |       3,515.60 (0.47×) |      24,098.04 (3.21×) |        1.116e-10 |
+      {"model":"Ireland 2004","runtime":351.10,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Ireland 2004","runtime":1301.30,"implementation":"Dynare MATLAB", "label": "3.71x"},
+      {"model":"Ireland 2004","runtime":18696.43,"implementation":"Dynare Octave", "label": "53.25x"},
+
+      {"model":"GM 2005","runtime":643.00,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"GM 2005","runtime":1703.85,"implementation":"Dynare MATLAB", "label": "2.65x"},
+      {"model":"GM 2005","runtime":18992.07,"implementation":"Dynare Octave", "label": "29.54x"},
+
+      {"model":"Gali Ch. 3","runtime":1158.10,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Gali Ch. 3","runtime":2248.85,"implementation":"Dynare MATLAB", "label": "1.94x"},
+      {"model":"Gali Ch. 3","runtime":20075.08,"implementation":"Dynare Octave", "label": "17.33x"},
+
+      {"model":"SW 2007","runtime":7549.70,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"SW 2007","runtime":3515.60,"implementation":"Dynare MATLAB", "label": "0.47x"},
+      {"model":"SW 2007","runtime":24098.04,"implementation":"Dynare Octave", "label": "3.21x"}
+    ]
+  },
+
+  "transform": [
+    {"calculate": "100", "as": "baseline"}
+  ],
+  "layer": [
+  {
+    "mark": {
+      "type": "bar"
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ],
+        "axis": {
+          "title": null,
+          "labelAngle": 0
+        }
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        },
+        "axis": {
+          "title": "Runtime (μs, log scale)",
+          "values": [100, 1000, 10000, 100000, 1000000]
+        }
+      },
+
+      "y2": {
+        "field": "baseline"
+      },
+
+      "color": {
+        "field": "implementation",
+        "type": "nominal",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ],
+        "legend": {
+          "title": null,
+          "orient": "top"
+        }
+      },
+
+      "tooltip": [
+        {
+          "field": "model",
+          "type": "nominal",
+          "title": "Model"
+        },
+        {
+          "field": "implementation",
+          "type": "nominal",
+          "title": "Implementation"
+        },
+        {
+          "field": "runtime",
+          "type": "quantitative",
+          "title": "Runtime (μs)",
+          "format": ",.2f"
+        }
+      ]
+    }
+  },
+
+  {
+    "mark": {
+      "type": "text",
+      "fontWeight": "bold",
+      "dy": -7
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ]
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        }
+      },
+
+      "text": {
+        "field": "label",
+        "type": "nominal"
+      }
+    }
+  }
+],
+
+  "config": {
+    "view": {
+      "fill": null,
+      "stroke": null
+    },
+    "axis": {"labelFontSize": 13, "titleFontSize": 14},
+    "axisX": {"labelFontWeight": "bold", "labelFontSize": 14},
+    "axisY": {"titleFontWeight": "bold"},
+    "legend": {"labelFontSize": 14},
+    "text": {"fontSize": 12}
+  }
+}
+
+```
+
+??? note "Data (Likelihood Only)"
+    Each Dynare runtime cell reports `median μs (D/S)`. The final column is the maximum absolute log-likelihood difference over MATLAB and Octave.
+
+    | Model                    | Filter states S/D | SymbolicDSGE μs | Dynare MATLAB μs (D/S) | Dynare Octave μs (D/S) | max \|Δ loglik\| |
+    |--------------------------|:-----------------:|----------------:|-----------------------:|-----------------------:|-----------------:|
+    | Lubik-Schorfheide (2004) |       5 / 8       |          119.70 |      1,408.80 (11.77×) |    18,526.91 (154.78×) |        2.274e-13 |
+    | Ireland (2004)           |      11 / 13      |          351.10 |       1,301.30 (3.71×) |     18,696.43 (53.25×) |        1.592e-12 |
+    | Gali-Monacelli (2005)    |      15 / 15      |          643.00 |       1,703.85 (2.65×) |     18,992.07 (29.54×) |        9.877e-13 |
+    | Gali (2015), Ch. 3       |      20 / 22      |        1,158.10 |       2,248.85 (1.94×) |     20,075.08 (17.33×) |        3.411e-13 |
+    | Smets-Wouters (2007)     |      37 / 40      |        7,549.70 |       3,515.60 (0.47×) |      24,098.04 (3.21×) |        1.116e-10 |
 
 ### Retained History
 
-SymbolicDSGE retains filter histories. Dynare's closest public alternative is `calib_smoother`, which also computes smoothed paths, so this is not an equivalent workload. Each Dynare runtime cell reports `median μs (D/S)`. The final columns are maxima over MATLAB and Octave.
+```vegalite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "background": null,
+  "description": "Smoother runtime comparison.",
+  "data": {
+    "values": [
+      {"model":"LS 2004","runtime":255.35,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"LS 2004","runtime":14150.15,"implementation":"Dynare MATLAB", "label": "55.41x"},
+      {"model":"LS 2004","runtime":98107.34,"implementation":"Dynare Octave", "label": "384.21x"},
 
-| Model                    | Filter states S/D | SymbolicDSGE μs | Dynare MATLAB smoother μs (D/S) | Dynare Octave smoother μs (D/S) | max \|Δ updated\| | max \|Δ predicted\| |
-|--------------------------|:-----------------:|----------------:|--------------------------------:|--------------------------------:|------------------:|--------------------:|
-| Lubik-Schorfheide (2004) |       5 / 8       |          255.35 |              14,150.15 (55.41×) |             98,107.34 (384.21×) |         3.553e-15 |           3.553e-15 |
-| Ireland (2004)           |      11 / 13      |          671.30 |              14,598.60 (21.75x) |             89,367.63 (133.13x) |         1.103e-14 |           9.989e-15 |
-| Gali-Monacelli (2005)    |      15 / 15      |        1,201.90 |              15,163.00 (12.65×) |              91,416.48 (76.06×) |         5.884e-14 |           5.063e-14 |
-| Gali (2015), Ch. 3       |      20 / 22      |        2,191.30 |               16,820.15 (7.68×) |              99,310.52 (45.32×) |         1.279e-13 |           1.048e-13 |
-| Smets-Wouters (2007)     |      37 / 40      |       13,171.15 |               25,777.80 (1.90×) |             185,365.44 (13.39×) |         6.295e-11 |           6.237e-11 |
+      {"model":"Ireland 2004","runtime":671.30,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Ireland 2004","runtime":14598.60,"implementation":"Dynare MATLAB", "label": "21.75x"},
+      {"model":"Ireland 2004","runtime":89367.63,"implementation":"Dynare Octave", "label": "133.13x"},
+
+      {"model":"GM 2005","runtime":1201.90,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"GM 2005","runtime":15163.00,"implementation":"Dynare MATLAB", "label": "12.65x"},
+      {"model":"GM 2005","runtime":91416.48,"implementation":"Dynare Octave", "label": "76.06x"},
+
+      {"model":"Gali Ch. 3","runtime":2191.30,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Gali Ch. 3","runtime":16820.15,"implementation":"Dynare MATLAB", "label": "7.68x"},
+      {"model":"Gali Ch. 3","runtime":99310.52,"implementation":"Dynare Octave", "label": "45.32x"},
+
+      {"model":"SW 2007","runtime":13171.15,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"SW 2007","runtime":25777.80,"implementation":"Dynare MATLAB", "label": "1.90x"},
+      {"model":"SW 2007","runtime":185365.44,"implementation":"Dynare Octave", "label": "13.39x"}
+    ]
+  },
+
+  "transform": [
+    {"calculate": "100", "as": "baseline"}
+  ],
+
+  "layer": [
+  {
+    "mark": {
+      "type": "bar"
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ],
+        "axis": {
+          "title": null,
+          "labelAngle": 0
+        }
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        },
+        "axis": {
+          "title": "Runtime (μs, log scale)",
+          "values": [100, 1000, 10000, 100000, 1000000]
+        }
+      },
+
+      "y2": {
+        "field": "baseline"
+      },
+
+      "color": {
+        "field": "implementation",
+        "type": "nominal",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ],
+        "legend": {
+          "title": null,
+          "orient": "top"
+        }
+      },
+
+      "tooltip": [
+        {
+          "field": "model",
+          "type": "nominal",
+          "title": "Model"
+        },
+        {
+          "field": "implementation",
+          "type": "nominal",
+          "title": "Implementation"
+        },
+        {
+          "field": "runtime",
+          "type": "quantitative",
+          "title": "Runtime (μs)",
+          "format": ",.2f"
+        }
+      ]
+    }
+  },
+
+  {
+    "mark": {
+      "type": "text",
+      "fontWeight": "bold",
+      "dy": -7
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ]
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        }
+      },
+
+      "text": {
+        "field": "label",
+        "type": "nominal"
+      }
+    }
+  }
+],
+
+  "config": {
+    "view": {
+      "fill": null,
+      "stroke": null
+    },
+    "axis": {"labelFontSize": 13, "titleFontSize": 14},
+    "axisX": {"labelFontWeight": "bold", "labelFontSize": 14},
+    "axisY": {"titleFontWeight": "bold"},
+    "legend": {"labelFontSize": 14},
+    "text": {"fontSize": 12}
+  }
+}
+```
+
+??? note "Data (Retained History)"
+    SymbolicDSGE retains filter histories. Dynare's closest public alternative is `calib_smoother`, which also computes smoothed paths, so this is not an equivalent workload. Each Dynare runtime cell reports `median μs (D/S)`. The final columns are maxima over MATLAB and Octave.
+
+    | Model                    | Filter states S/D | SymbolicDSGE μs | Dynare MATLAB smoother μs (D/S) | Dynare Octave smoother μs (D/S) | max \|Δ updated\| | max \|Δ predicted\| |
+    |--------------------------|:-----------------:|----------------:|--------------------------------:|--------------------------------:|------------------:|--------------------:|
+    | Lubik-Schorfheide (2004) |       5 / 8       |          255.35 |              14,150.15 (55.41×) |             98,107.34 (384.21×) |         3.553e-15 |           3.553e-15 |
+    | Ireland (2004)           |      11 / 13      |          671.30 |              14,598.60 (21.75x) |             89,367.63 (133.13x) |         1.103e-14 |           9.989e-15 |
+    | Gali-Monacelli (2005)    |      15 / 15      |        1,201.90 |              15,163.00 (12.65×) |              91,416.48 (76.06×) |         5.884e-14 |           5.063e-14 |
+    | Gali (2015), Ch. 3       |      20 / 22      |        2,191.30 |               16,820.15 (7.68×) |              99,310.52 (45.32×) |         1.279e-13 |           1.048e-13 |
+    | Smets-Wouters (2007)     |      37 / 40      |       13,171.15 |               25,777.80 (1.90×) |             185,365.44 (13.39×) |         6.295e-11 |           6.237e-11 |
 
 ## Outlook
 
@@ -194,5 +545,7 @@ For fast-iterating research work, scratch models, and extensive estimation routi
 This is not definitive proof of any performance outcome, however it shows that a quick benchmark of SymbolicDSGE against Dynare before a large workflow can be informative and beneficial to determine which library better suits the task.
 
 ???+ note "Preparation for Large Workflows"
-    If you're planning to use SymbolicDSGE for a large estimation workflow or Monte Carlo pipeline, it is recommended to clone the repository and build the Cython extension targeting your architecture. (`-march=native` as a compiler flag.)
-    All results here are derived from the `release` build of SymbolicDSGE and have no architecture specific optimizations.
+    If cross-system reproducibility is not a concern, it is recommended to clone the SymbolicDSGE repository and build the cython extensions from source.
+    This will allow you to enable architecture-dependent optimizations (i.e. `-march=native`) and can significantly improve vectorization, helping SymbolicDSGE's performance in larger models.
+    Running the benchmark with said local build will give you a better idea of what you can squeeze out of SymbolicDSGE on a given system.
+    Results in this benchmark do not use local optimizations.
