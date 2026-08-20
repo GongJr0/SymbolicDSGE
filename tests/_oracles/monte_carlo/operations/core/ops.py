@@ -38,13 +38,13 @@ def simulate(
         rep_idx=rep_idx,
         seed_increment=seed_increment,
     )
-    path, _, _ = model._simulate_state_matrix(
+    path = model._simulate_state_matrix(
         T=T,
         shocks=sim_shocks,
         shock_scale=shock_scale,
         x0=x0,
     )
-    states = np.ascontiguousarray(path, dtype=np.float64)
+    states = np.ascontiguousarray(path.X, dtype=np.float64)
     obs_names = (
         tuple(getattr(model.compiled, "observable_names", ())) if observables else ()
     )

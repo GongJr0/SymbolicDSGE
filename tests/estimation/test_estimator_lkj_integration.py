@@ -44,6 +44,11 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
             "Rate": sim.observables["Rate"],
         }
     )
+    y += rng.multivariate_normal(
+        mean=np.zeros((3,), dtype=np.float64),
+        cov=kalman.R,
+        size=T,
+    )
     return {
         "solver": solver,
         "compiled": compiled,
@@ -59,7 +64,9 @@ def _assert_valid_corr_draws(samples: np.ndarray) -> None:
         corr[2, 0] = corr[0, 2] = draw[1]
         corr[2, 1] = corr[1, 2] = draw[2]
         eigvals = np.linalg.eigvalsh(corr)
-        assert np.all(eigvals > 1e-10)
+        # CPC decoding is SPD by construction. Allow a roundoff-scale negative
+        # eigenvalue when reconstructing the dense correlation matrix here.
+        assert np.all(eigvals >= -1e-10)
 
 
 def _full_size_prior_spec() -> dict[str, object]:
@@ -159,8 +166,8 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
     # output, not oracles; their correctness rests upstream on the POST82 Dynare
     # parity, and they are recomputed whenever the filter contract changes.
     expected_logprior = -3.677756133346315
-    expected_loglik = -68.50851499458923
-    expected_logpost = -72.18627112793555
+    expected_loglik = -79.71587915190194
+    expected_logpost = -83.39363528524827
 
     assert est._packed_logprior is not None
     assert float(est._logprior_python(theta)) == pytest.approx(

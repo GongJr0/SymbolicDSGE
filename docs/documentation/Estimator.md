@@ -128,6 +128,9 @@ Estimator.mcmc(
     adapt_interval: int = 25,
     proposal_scale: float = 0.1,
     adapt_epsilon: float = 1e-8,
+    map_options: dict[str, Any] | None = None,
+    hessian_fd_step_scale: float = 1.0,
+    hessian_fd_absolute_floor: float = 0.1,
 ) -> MCMCResult
 ```
 

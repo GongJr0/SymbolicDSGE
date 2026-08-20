@@ -13,24 +13,30 @@
  * the caller's closure. */
 typedef f64 (*sdsge_objective_fn)(const f64 *SDSGE_RESTRICT x, void *ctx);
 
+/* Shared optimizer inputs. Each driver reads only its relevant fields:
+ * L-BFGS-B uses m, maxiter, maxfun, maxls, factr, pgtol, and fd_step;
+ * Nelder-Mead uses maxiter, maxfun, xatol, and fatol. */
 typedef struct {
   i64 m;        /* limited-memory history length (L-BFGS-B) */
-  i64 maxiter;  /* iteration cap (NEW_X boundaries) */
+  i64 maxiter;  /* iteration cap */
   i64 maxfun;   /* objective-evaluation cap */
-  i64 maxls;    /* max line-search steps per iteration */
-  f64 factr;    /* stop when f-progress <= factr*eps_machine */
-  f64 pgtol;    /* stop when the projected gradient inf-norm <= pgtol */
-  f64 fd_step;  /* forward-difference step; <= 0 -> sqrt(eps)*max(1,|x|) default */
-} sdsge_lbfgsb_options;
+  i64 maxls;    /* max line-search steps (L-BFGS-B) */
+  f64 factr;    /* L-BFGS-B f-progress tolerance multiplier */
+  f64 pgtol;    /* L-BFGS-B projected-gradient tolerance */
+  f64 fd_step;  /* L-BFGS-B forward-difference step; <= 0 uses its default */
+  f64 xatol;    /* Nelder-Mead simplex-position tolerance */
+  f64 fatol;    /* Nelder-Mead objective tolerance */
+} sdsge_optim_options;
 
+/* Shared optimizer outputs. `status` remains driver-specific. */
 typedef struct {
-  i64 status;          /* raw L-BFGS-B task code at exit */
+  i64 status;
   i64 nfev;            /* objective evaluations */
   i64 nit;             /* iterations */
   f64 fun;             /* objective at the returned x */
-  int success;         /* converged (grad/f test) vs stopped/error */
-  const char *message; /* static string, keyed off status */
-} sdsge_lbfgsb_result;
+  int success;
+  const char *message; /* static string, keyed off driver status */
+} sdsge_optim_result;
 
 /* L-BFGS-B on a box-bounded objective. `x` is start -> optimum (length n).
  * Bounds: lo[i]/hi[i] gated by nbd[i] in {0 none, 1 lower, 2 both, 3 upper};
@@ -40,8 +46,8 @@ typedef struct {
  * workspace allocation. */
 i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                  f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
-                 const i64 *nbd, const sdsge_lbfgsb_options *opt,
-                 sdsge_lbfgsb_result *out);
+                 const i64 *nbd, const sdsge_optim_options *opt,
+                 sdsge_optim_result *out);
 
 /* Optimizer status, shared with nelder_mead.h: one failure vocabulary for
  * every driver in this directory. */

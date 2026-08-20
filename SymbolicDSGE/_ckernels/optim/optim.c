@@ -13,7 +13,8 @@
 #define TASK_CONVERGENCE 4
 #define TASK_STOP 5
 
-/* Stop-reason message codes we inject at NEW_X boundaries (mirror StatusMsg). */
+/* Stop-reason message codes we inject at NEW_X boundaries (mirror StatusMsg).
+ */
 #define MSG_STOP_ITER 502  /* nfev over maxfun */
 #define MSG_STOP_ITERC 504 /* nit over maxiter */
 
@@ -61,8 +62,8 @@ static void sdsge_fd_grad(sdsge_objective_fn obj, void *ctx, i64 n, f64 *x,
 
 i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                  f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
-                 const i64 *nbd_in, const sdsge_lbfgsb_options *opt,
-                 sdsge_lbfgsb_result *out) {
+                 const i64 *nbd_in, const sdsge_optim_options *opt,
+                 sdsge_optim_result *out) {
   const i64 N = n;
   const i64 m = opt->m;
   const i64 maxls = opt->maxls;
@@ -72,19 +73,12 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
   /* Workspace (sizes per scipy's _lbfgsb_py wrapper). One allocation, freed on
    * return; the reverse-communication loop itself allocates nothing. */
   const size_t wa_len = (size_t)(2 * m * N + 5 * N + 11 * m * m + 8 * m);
-  f64 *wa = (f64 *)malloc(wa_len * sizeof(f64));
-  f64 *g = (f64 *)malloc((size_t)N * sizeof(f64));
-  f64 *l = (f64 *)malloc((size_t)N * sizeof(f64));
-  f64 *u = (f64 *)malloc((size_t)N * sizeof(f64));
-  i64 *iwa = (i64 *)malloc((size_t)(3 * N) * sizeof(i64));
-  i64 *nbd = (i64 *)malloc((size_t)N * sizeof(i64));
-  if (!wa || !g || !l || !u || !iwa || !nbd) {
-    free(wa);
-    free(g);
-    free(l);
-    free(u);
-    free(iwa);
-    free(nbd);
+
+  f64 *arena = (f64 *)malloc((wa_len + 3 * N) * sizeof(f64));
+  i64 *iarena = (i64 *)malloc((4 * N) * sizeof(i64));
+  if (!arena || !iarena) {
+    free(arena);
+    free(iarena);
     if (out) {
       out->status = SDSGE_OPTIM_EALLOC;
       out->success = 0;
@@ -95,6 +89,14 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
     }
     return SDSGE_OPTIM_EALLOC;
   }
+
+  f64 *wa = arena;
+  f64 *g = wa + wa_len;
+  f64 *l = g + N;
+  f64 *u = l + N;
+
+  i64 *iwa = iarena;
+  i64 *nbd = iwa + 3 * N;
 
   for (i64 i = 0; i < N; ++i) {
     l[i] = lo ? lo[i] : 0.0;
@@ -145,11 +147,7 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
     out->message = sdsge_lbfgsb_message(status);
   }
 
-  free(wa);
-  free(g);
-  free(l);
-  free(u);
-  free(iwa);
-  free(nbd);
+  free(arena);
+  free(iarena);
   return status;
 }

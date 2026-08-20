@@ -17,7 +17,7 @@ import numpy as np
 cdef extern from "optim.h":
     ctypedef double (*sdsge_objective_fn)(const double *x, void *ctx) noexcept nogil
 
-    ctypedef struct sdsge_lbfgsb_options:
+    ctypedef struct sdsge_optim_options:
         int64_t m
         int64_t maxiter
         int64_t maxfun
@@ -25,8 +25,10 @@ cdef extern from "optim.h":
         double factr
         double pgtol
         double fd_step
+        double xatol
+        double fatol
 
-    ctypedef struct sdsge_lbfgsb_result:
+    ctypedef struct sdsge_optim_result:
         int64_t status
         int64_t nfev
         int64_t nit
@@ -36,30 +38,16 @@ cdef extern from "optim.h":
 
     int64_t sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
                          double *x, const double *lo, const double *hi,
-                         const int64_t *nbd, const sdsge_lbfgsb_options *opt,
-                         sdsge_lbfgsb_result *out) nogil
+                         const int64_t *nbd, const sdsge_optim_options *opt,
+                         sdsge_optim_result *out) nogil
 
 
 cdef extern from "nelder_mead.h":
-    ctypedef struct sdsge_neldermead_options:
-        int64_t maxiter
-        int64_t maxfun
-        double xatol
-        double fatol
-
-    ctypedef struct sdsge_neldermead_result:
-        int64_t status
-        int64_t nfev
-        int64_t nit
-        double fun
-        int success
-        const char *message
-
     int64_t sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
                              double *x, const double *lo, const double *hi,
                              const int64_t *nbd,
-                             const sdsge_neldermead_options *opt,
-                             sdsge_neldermead_result *out) nogil
+                             const sdsge_optim_options *opt,
+                             sdsge_optim_result *out) nogil
 
 
 # --- Benchmark objectives (match sdsge_objective_fn) --------------------------
@@ -173,7 +161,7 @@ def run_lbfgsb(
 
     cdef sdsge_objective_fn obj = _objective(objective)
 
-    cdef sdsge_lbfgsb_options opt
+    cdef sdsge_optim_options opt
     opt.m = m
     opt.maxiter = maxiter
     opt.maxfun = maxfun
@@ -182,7 +170,7 @@ def run_lbfgsb(
     opt.pgtol = pgtol
     opt.fd_step = fd_step
 
-    cdef sdsge_lbfgsb_result res
+    cdef sdsge_optim_result res
     cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
 
     with nogil:
@@ -246,13 +234,13 @@ def run_neldermead(
 
     cdef sdsge_objective_fn obj = _objective(objective)
 
-    cdef sdsge_neldermead_options opt
+    cdef sdsge_optim_options opt
     opt.maxiter = maxiter
     opt.maxfun = maxfun
     opt.xatol = xatol
     opt.fatol = fatol
 
-    cdef sdsge_neldermead_result res
+    cdef sdsge_optim_result res
     cdef const int64_t *nbd_ptr = &nbd[0] if has_bounds else NULL
 
     with nogil:

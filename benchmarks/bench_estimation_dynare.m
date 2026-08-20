@@ -1,4 +1,4 @@
-function bench_post82_estimation_dynare(workdir, model_name, probes, warmup, reps, output_path)
+function bench_estimation_dynare(workdir, model_name, probes, include_prior, warmup, reps, output_path)
   previous_dir = pwd;
   restore_dir = onCleanup(@() cd(previous_dir));
   cd(workdir);
@@ -11,13 +11,13 @@ function bench_post82_estimation_dynare(workdir, model_name, probes, warmup, rep
   for i = 1:size(probes, 2)
     M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
     bayestopt_ = bayestopt0; dataset_ = dataset0; dataset_info = dataset_info0;
-    probe_target(i) = benchmark_target(probes(:, i), M_, estim_params_, oo_, options_, bayestopt_);
+    probe_target(i) = benchmark_target(probes(:, i), M_, estim_params_, oo_, options_, bayestopt_, include_prior);
   end
   for i = 1:warmup
     for j = 1:size(probes, 2)
       M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
       bayestopt_ = bayestopt0; dataset_ = dataset0; dataset_info = dataset_info0;
-      benchmark_target(probes(:, j), M_, estim_params_, oo_, options_, bayestopt_);
+      benchmark_target(probes(:, j), M_, estim_params_, oo_, options_, bayestopt_, include_prior);
     end
   end
   objective_times = zeros(reps, 1);
@@ -26,7 +26,7 @@ function bench_post82_estimation_dynare(workdir, model_name, probes, warmup, rep
     for j = 1:size(probes, 2)
       M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
       bayestopt_ = bayestopt0; dataset_ = dataset0; dataset_info = dataset_info0;
-      benchmark_target(probes(:, j), M_, estim_params_, oo_, options_, bayestopt_);
+      benchmark_target(probes(:, j), M_, estim_params_, oo_, options_, bayestopt_, include_prior);
     end
     objective_times(i) = toc(started) / size(probes, 2);
   end
@@ -37,6 +37,8 @@ function bench_post82_estimation_dynare(workdir, model_name, probes, warmup, rep
     dynare_estimation({}, M_.dname);
   end
   times = zeros(reps, 1);
+  nfev = zeros(reps, 1);
+  nit = zeros(reps, 1);
   theta = zeros(size(probes, 1), 1);
   for i = 1:reps
     M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
@@ -45,15 +47,18 @@ function bench_post82_estimation_dynare(workdir, model_name, probes, warmup, rep
     dynare_estimation({}, M_.dname);
     times(i) = toc(started);
     theta = oo_.posterior.optimization.mode(:);
+    nfev(i) = oo_.posterior.optimization.optimization_info.funcCount;
+    nit(i) = oo_.posterior.optimization.optimization_info.iterations;
   end
   M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
   bayestopt_ = bayestopt0; dataset_ = dataset0; dataset_info = dataset_info0;
-  terminal_target = benchmark_target(theta, M_, estim_params_, oo_, options_, bayestopt_);
+  terminal_target = benchmark_target(theta, M_, estim_params_, oo_, options_, bayestopt_, include_prior);
   measurement_covariance = M_.H;
-  save('-v7', output_path, 'times', 'objective_times', 'theta', 'terminal_target', 'probe_target', 'measurement_covariance');
+  save('-v7', output_path, 'times', 'nfev', 'nit', 'objective_times', 'theta', 'terminal_target', 'probe_target', 'measurement_covariance');
 end
 
-function target = benchmark_target(theta, M, estim_params, oo, options, bayestopt)
+function target = benchmark_target(theta, M, estim_params, oo, options, bayestopt, include_prior)
+  logprior = evaluate_prior(theta, M, estim_params, oo, options, bayestopt);
   loglik = evaluate_likelihood(theta, M, estim_params, oo, options, bayestopt);
-  target = loglik + evaluate_prior(theta, M, estim_params, oo, options, bayestopt);
+  target = loglik + include_prior*logprior;
 end

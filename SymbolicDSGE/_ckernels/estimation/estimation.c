@@ -1,6 +1,9 @@
 #include "estimation.h"
 #include "../core/klein_solve.h"
 #include "../kalman/kalman.h"
+#include "../optim/nelder_mead.h"
+#include "../optim/optim.h"
+#include <math.h>
 
 /* sdsge_classify outcomes. */
 #define SDSGE_SOLVE_OK 0
@@ -430,4 +433,34 @@ f64 sdsge_post_extended(const f64 *SDSGE_RESTRICT x, void *ctx) {
 
 f64 sdsge_post_unscented(const f64 *SDSGE_RESTRICT x, void *ctx) {
   return sdsge_obj_unscented((sdsge_unscented_ctx *)ctx, x, 1);
+}
+
+static const sdsge_objective_fn obj_table[2][3] = {
+    {sdsge_min_linear_ll, sdsge_min_extended_ll, sdsge_min_unscented_ll},
+    {sdsge_min_linear_lp, sdsge_min_extended_lp, sdsge_min_unscented_lp}};
+
+void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
+                          const sdsge_estimation_options *opt,
+                          sdsge_optim_result *out) {
+
+  const sdsge_objective_fn obj = obj_table[opt->has_priors][opt->filter_mode];
+  switch (opt->method) {
+  case ESTIMATION_LBFGSB:
+    sdsge_lbfgsb(obj, ctx, n_theta, theta, opt->lo, opt->hi, opt->nbd,
+                 &opt->optim, out);
+    break;
+  case ESTIMATION_NELDER_MEAD:
+    sdsge_neldermead(obj, ctx, n_theta, theta, opt->lo, opt->hi, opt->nbd,
+                     &opt->optim, out);
+    break;
+  default:
+    out->status = SDSGE_OPTIM_EINVAL;
+    out->success = 0;
+    out->message = "ERROR: unknown estimation method";
+    out->nfev = 0;
+    out->nit = 0;
+    out->fun = NAN;
+  }
+
+  sdsge_scatter_params((sdsge_obj_common *)ctx, theta);
 }

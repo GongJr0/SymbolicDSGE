@@ -143,13 +143,15 @@ class _FakeSolvedModel:
         del shock_scale, x0
         self._draw_shocks(shocks)
         t = np.arange(1, T + 1, dtype=np.float64)
+        shock_path = np.zeros((T, self.compiled.n_exog), dtype=np.float64)
         return StatePath(
             np.column_stack(
                 [
                     t + self.offset,
                     ((t % 3.0) - 1.0) + 0.5 * self.offset,
                 ]
-            )
+            ),
+            shocks=shock_path,
         )
 
     def _simulate_observable_matrix(self, states, *, drop_initial=False):
@@ -165,22 +167,24 @@ class _FakeSolvedModel:
         x0=None,
         observables=False,
     ):
-        states, regimes, diagnostics = self._simulate_state_matrix(
+        path = self._simulate_state_matrix(
             T=T,
             shocks=shocks,
             shock_scale=shock_scale,
             x0=x0,
         )
+        states = path.X
         y = None
         if observables:
             y = self._simulate_observable_matrix(states, drop_initial=False)
         return SimResult(
             var_names=("x", "z"),
             X=states,
+            shocks=path.shocks,
             observable_names=("obs",) if observables else (),
             y=y,
-            _regimes=regimes,
-            _diagnostics=diagnostics,
+            _regimes=path.regimes,
+            _diagnostics=path.diagnostics,
         )
 
     def _kalman_raw(self, y, **kwargs):

@@ -27,7 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES = ROOT / "tests" / "fixtures" / "models"
 
 sys.path.insert(0, str(ROOT))
-from SymbolicDSGE import DSGESolver, ModelParser, SolvedModel
+from SymbolicDSGE import DSGESolver, ModelParser, SolvedModel, Shock
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.filter import FilterResult, KalmanFilter
 
@@ -37,12 +37,9 @@ class CaseSpec:
     label: str
     yaml_name: str
     mod_name: str
-    native_observables: tuple[str, ...]
-    dynare_observables: tuple[str, ...]
-    shock_names: tuple[str, ...]
     seed: int
     dynare_data_file: str = "fixture_kf_data.m"
-    shock_mode: str = "q_scaled"
+    native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
     native_to_dynare_state: tuple[tuple[str, str], ...] = ()
 
 
@@ -51,23 +48,15 @@ CASES = {
         label="Lubik-Schorfheide 2004",
         yaml_name="POST82.yaml",
         mod_name="post82_kf.mod",
-        native_observables=("OutGap", "Infl", "Rate"),
-        dynare_observables=("OutGap", "Infl", "Rate"),
-        shock_names=("e_g", "e_z", "e_r"),
         seed=1982,
         dynare_data_file="post82_kf_data.m",
-        shock_mode="post82",
     ),
     "sw2007": CaseSpec(
         label="SW2007",
         yaml_name="sw2007.yaml",
         mod_name="sw2007.mod",
-        native_observables=("dy", "dc", "dinve", "labobs", "pinfobs", "dw", "robs"),
-        dynare_observables=("dy", "dc", "dinve", "labobs", "pinfobs", "dw", "robs"),
-        shock_names=("ea", "eb", "eg", "eqs", "em", "epinf", "ew"),
         seed=2007,
         dynare_data_file="sw2007_kf_data.m",
-        shock_mode="normal_quarter",
         native_to_dynare_state=(
             ("rep_dy", "dy"),
             ("rep_dc", "dc"),
@@ -79,28 +68,28 @@ CASES = {
         label="Gali 2015",
         yaml_name="gali_2015.yaml",
         mod_name="gali_2015.mod",
-        native_observables=("obs_pi_ann", "obs_i_ann"),
-        dynare_observables=("pi_ann", "i_ann"),
-        shock_names=("eps_a", "eps_nu", "eps_z"),
         seed=2015,
+        native_to_dynare_observable=(
+            ("obs_pi_ann", "pi_ann"),
+            ("obs_i_ann", "i_ann"),
+        ),
     ),
     "gm2005": CaseSpec(
         label="Gali-Monacelli 2005",
         yaml_name="gali_monacelli_2005.yaml",
         mod_name="gali_monacelli_2005.mod",
-        native_observables=("obs_pi", "obs_r"),
-        dynare_observables=("pi", "r"),
-        shock_names=("eps_star", "eps_a"),
         seed=2005,
+        native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
     ),
     "i2004": CaseSpec(
         label="Ireland 2004",
         yaml_name="ireland_2004.yaml",
         mod_name="ireland_2004.mod",
-        native_observables=("obs_gobs", "obs_piobs"),
-        dynare_observables=("gobs", "piobs"),
-        shock_names=("eps_a", "eps_e", "eps_z", "eps_r"),
         seed=2004,
+        native_to_dynare_observable=(
+            ("obs_gobs", "gobs"),
+            ("obs_piobs", "piobs"),
+        ),
     ),
 }
 
@@ -115,6 +104,7 @@ class NativeCase:
     Q: np.ndarray
     R: np.ndarray
     y: np.ndarray
+    observable_names: tuple[str, ...]
     state_names: tuple[str, ...]
 
 
@@ -126,34 +116,6 @@ def _max_abs(left: np.ndarray | float, right: np.ndarray | float) -> float:
     return float(np.max(np.abs(np.asarray(left) - np.asarray(right))))
 
 
-def _draw_shocks(spec: CaseSpec, periods: int, Q: np.ndarray) -> np.ndarray:
-    if spec.shock_mode == "post82":
-        base = np.array(
-            [
-                [0.25, -0.10, 0.40],
-                [-0.70, 0.55, -0.15],
-                [0.10, 0.20, 0.00],
-                [0.60, -0.35, 0.25],
-                [-0.20, 0.05, -0.50],
-                [0.00, 0.30, 0.10],
-                [0.35, -0.45, 0.20],
-                [-0.45, 0.15, -0.30],
-                [0.15, 0.60, 0.05],
-                [-0.10, -0.25, 0.35],
-                [0.05, 0.40, -0.20],
-                [0.20, -0.05, 0.15],
-            ],
-            dtype=np.float64,
-        )
-        return np.resize(base, (periods, len(spec.shock_names)))
-    draws = np.random.default_rng(spec.seed).normal(
-        size=(periods, len(spec.shock_names))
-    )
-    if spec.shock_mode == "normal_quarter":
-        return 0.25 * draws
-    return draws @ np.linalg.cholesky(Q).T
-
-
 def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
     model, kalman = ModelParser(FIXTURES / spec.yaml_name).get_all()
     solver = DSGESolver(model, kalman)
@@ -161,45 +123,42 @@ def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
     solved = solver.solve(compiled=compiled, order=1)
 
     base_params = backend.extract_base_params(compiled)
-    Q = np.asarray(backend.build_Q(compiled, base_params), dtype=np.float64)
-    shocks = _draw_shocks(spec, periods, Q)
+    Q = backend.build_Q(compiled, base_params)
     sim = solved.sim(
         T=periods,
-        shocks={name: shocks[:, index] for index, name in enumerate(spec.shock_names)},
+        shocks={
+            ",".join(compiled.shock_names): Shock("norm", multivar=True, seed=spec.seed)
+        },
         observables=True,
     )
-    y = np.column_stack(
-        [
-            np.asarray(sim.observables[name], dtype=np.float64)
-            for name in spec.native_observables
-        ]
-    )
+    if sim.y is None:
+        raise RuntimeError("Simulation did not return observables.")
+    observable_names = tuple(sim.observable_names)
+    y = sim.y
     C, d = compiled.build_affine_measurement_matrices(
         base_params,
-        list(spec.native_observables),
-        np.asarray(solved.policy.steady_state),
+        list(observable_names),
+        solved.policy.steady_state,
     )
     return NativeCase(
         solved=solved,
-        A=np.asarray(solved.policy.A, dtype=np.float64),
-        B=np.asarray(solved.policy.B, dtype=np.float64),
-        C=np.asarray(C, dtype=np.float64),
-        d=np.asarray(d, dtype=np.float64),
+        A=solved.policy.A,
+        B=solved.policy.B,
+        C=C,
+        d=d,
         Q=Q,
-        R=np.asarray(
-            backend.build_R(
-                compiled, kalman, list(spec.native_observables), base_params
-            ),
-            dtype=np.float64,
-        ),
+        R=backend.build_R(compiled, kalman, list(observable_names), base_params),
         y=y,
+        observable_names=observable_names,
         state_names=tuple(compiled.var_names),
     )
 
 
-def _write_dynare_data(spec: CaseSpec, y_values: np.ndarray, path: Path) -> None:
+def _write_dynare_data(
+    observable_names: tuple[str, ...], y_values: np.ndarray, path: Path
+) -> None:
     lines = ["% Generated by bench_linear_kf.py. Do not edit."]
-    for column, name in enumerate(spec.dynare_observables):
+    for column, name in enumerate(observable_names):
         values = "\n".join(f"{value:.17g}" for value in y_values[:, column])
         lines.extend((f"{name} = [", values, "];"))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -240,7 +199,7 @@ def _time_native(
         return case.solved.kalman(
             case.y,
             filter_mode="linear",
-            observables=list(spec.native_observables),
+            observables=list(case.observable_names),
             P0=None,
             symmetrize=False,
             joseph_cov=False,
@@ -252,8 +211,8 @@ def _time_native(
         "loglik_times": loglik_times,
         "history_times": history_times,
         "loglik": float(loglik_result.loglik),
-        "x_pred": np.asarray(history_result.x_pred, dtype=np.float64),
-        "x_filt": np.asarray(history_result.x_filt, dtype=np.float64),
+        "x_pred": history_result.x_pred,
+        "x_filt": history_result.x_filt,
     }
 
 
@@ -263,7 +222,7 @@ def _native_model_info(spec: CaseSpec, case: NativeCase) -> dict[str, int]:
         "declared_variables": compiled.n_var,
         "filter_state_dimension": case.A.shape[0],
         "predetermined_variables": compiled.n_state,
-        "observables": len(spec.native_observables),
+        "observables": len(case.observable_names),
         "shocks": compiled.n_exog,
         "parameters": compiled.n_par,
     }
@@ -285,10 +244,18 @@ def _matlab_cellstr(values: tuple[str, ...]) -> str:
     return "{" + ", ".join(f"'{value}'" for value in values) + "}"
 
 
+def _dynare_observable_names(
+    spec: CaseSpec, native_observable_names: tuple[str, ...]
+) -> tuple[str, ...]:
+    observable_map = dict(spec.native_to_dynare_observable)
+    return tuple(observable_map.get(name, name) for name in native_observable_names)
+
+
 def _run_dynare(
     runtime: str,
     spec: CaseSpec,
     output_dir: Path,
+    native_observable_names: tuple[str, ...],
     y_values: np.ndarray,
     warmup: int,
     reps: int,
@@ -310,12 +277,15 @@ def _run_dynare(
         workdir = Path(temporary_dir)
         shutil.copy2(FIXTURES / spec.mod_name, workdir / spec.mod_name)
         data_file = spec.dynare_data_file
-        _write_dynare_data(spec, y_values, workdir / data_file)
+        dynare_observable_names = _dynare_observable_names(
+            spec, native_observable_names
+        )
+        _write_dynare_data(dynare_observable_names, y_values, workdir / data_file)
         expression = (
             f"addpath('{_quoted_matlab(dynare_matlab_path)}'); "
             f"addpath('{_quoted_matlab(runner.parent)}'); "
             f"bench_linear_kf_dynare('{_quoted_matlab(workdir)}', "
-            f"'{spec.mod_name}', {_matlab_cellstr(spec.dynare_observables)}, "
+            f"'{spec.mod_name}', {_matlab_cellstr(dynare_observable_names)}, "
             f"'{data_file}', {warmup}, {reps}, '{_quoted_matlab(result_path)}');"
         )
         command = (
@@ -487,6 +457,7 @@ def main() -> int:
                         runtime,
                         spec,
                         output_dir,
+                        case.observable_names,
                         case.y,
                         args.warmup,
                         args.reps,

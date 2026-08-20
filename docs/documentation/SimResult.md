@@ -9,6 +9,7 @@ tags:
 class SimResult(
     var_names: Sequence[str],
     X: ndarray,
+    shocks: ndarray,
     observable_names: Sequence[str] = (),
     y: ndarray | None = None,
 )
@@ -22,6 +23,7 @@ The result returned by `SolvedModel.sim(...)` and `SolvedModel.irf(...)`. Simula
 |:---------|:--------:|----------------:|
 | `var_names` | `Sequence[str]` | Names of the state-path columns, in compiled canonical order. |
 | `X` | `ndarray[float]`, shape `(T, n_var)` | Full state path. Each row is one simulated period. |
+| `shocks` | `ndarray[float]`, shape `(T, n_shock)` | Shock path. Each row is one simulated period. |
 | `observable_names` | `Sequence[str]` | Names of the observable-path columns, in observable order. Empty when observables were not requested. |
 | `y` | `ndarray[float] | None`, shape `(T, n_obs)` | Observable path when requested with `observables=True`; otherwise `None`. |
 

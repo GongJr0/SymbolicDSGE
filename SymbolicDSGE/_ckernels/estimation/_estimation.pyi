@@ -96,6 +96,9 @@ def run_mcmc(
     adapt_interval: int = ...,
     proposal_scale: float = ...,
     adapt_epsilon: float = ...,
+    hessian_fd_step_scale: float = ...,
+    hessian_fd_absolute_floor: float = ...,
+    map_options: dict[str, Any] | None = ...,
 ) -> dict[str, Any]: ...
 
 class NativeLogpost:

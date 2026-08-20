@@ -37,6 +37,7 @@ class StatePath(NamedTuple):
     """
 
     X: NDF
+    shocks: NDF
     regimes: NDI | None = None
     diagnostics: OccBinDiagnostics | None = None
 
@@ -53,6 +54,7 @@ class SimResult:
 
     var_names: Sequence[str]
     X: NDF
+    shocks: NDF
     observable_names: Sequence[str] = ()
     y: NDF | None = None
     _regimes: NDI | None = None

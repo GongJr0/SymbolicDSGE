@@ -50,6 +50,7 @@ theme:
       info: octicons/info-16
       guide: material/notebook
       doc: material/file-document
+      benchmark: fontawesome/solid/chart-line
     set:
       - material
       - octicons
@@ -62,6 +63,9 @@ extra_javascript:
   - javascripts/katex.js
   - https://unpkg.com/katex@0/dist/katex.min.js
   - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+  - https://cdn.jsdelivr.net/npm/vega@5
+  - https://cdn.jsdelivr.net/npm/vega-lite@5
+  - https://cdn.jsdelivr.net/npm/vega-embed@6
 
 extra:
   scope: /SymbolicDSGE/
@@ -82,6 +86,8 @@ extra:
     info: info
     guide: guide
     doc: doc
+    benchmark: benchmark
+
 
   version:
     provider: mike
@@ -115,6 +121,7 @@ plugins:
         target: _blank
   - search
   - tags
+  - charts
   - mike:
       alias_type: symlink
       redirect_template: null
@@ -142,9 +149,14 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
 
+  - pymdownx.superfences:
+      custom_fences:
+        - name: vegalite
+          class: vegalite
+          format: !!python/name:mkdocs_charts_plugin.fences.fence_vegalite
+
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
   - pymdownx.tabbed
 
 nav:
@@ -266,5 +278,6 @@ nav:
           - DenHaanMarcet: documentation/utilities/DenHaanMarcet.md
   - Benchmarks:
       - Linear Kalman Filter: benchmarks/linear_kf.md
+      - Point Estimation: benchmarks/point_estimation.md
   - Contact: contact.md
   - Contributing: contributing.md

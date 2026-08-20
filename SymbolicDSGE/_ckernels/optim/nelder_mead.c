@@ -47,7 +47,7 @@ static void nm_sort(f64 *sim, f64 *fsim, i64 np1, i64 n, f64 *tmprow) {
   }
 }
 
-static void nm_fill_error(sdsge_neldermead_result *out, i64 status,
+static void nm_fill_error(sdsge_optim_result *out, i64 status,
                           const char *message) {
   if (out) {
     out->status = status;
@@ -61,8 +61,8 @@ static void nm_fill_error(sdsge_neldermead_result *out, i64 status,
 
 i64 sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                      f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
-                     const i64 *nbd, const sdsge_neldermead_options *opt,
-                     sdsge_neldermead_result *out) {
+                     const i64 *nbd, const sdsge_optim_options *opt,
+                     sdsge_optim_result *out) {
   if (n < 1) {
     nm_fill_error(out, SDSGE_OPTIM_EINVAL, "ERROR: n must be >= 1");
     return SDSGE_OPTIM_EINVAL;

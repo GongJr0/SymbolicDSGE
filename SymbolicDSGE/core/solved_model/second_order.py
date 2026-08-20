@@ -63,4 +63,4 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
             shock_mat,
             policy.steady_state,
         )
-        return StatePath(X)
+        return StatePath(X, shocks=shock_mat)
