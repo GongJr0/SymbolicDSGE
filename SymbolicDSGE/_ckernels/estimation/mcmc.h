@@ -15,7 +15,7 @@ typedef struct {
   i64 thin;
   int adapt;
   i64 adapt_start;
-  i64 adapt_interval; /* update the proposal cov every interval-th step (>= 1)*/
+  i64 adapt_interval; /* unread: the proposal cov is rebuilt every step */
   f64 adapt_epsilon;
   f64 proposal_scale;
   f64 hessian_fd_step_scale;
@@ -48,11 +48,12 @@ typedef struct {
  * Hessian. The factor satisfies factor * factor^T = H^-1, where
  * H = -d^2 logpost(theta). `fd_step_scale` and `fd_absolute_floor` define
  * h_i = max(abs(theta_i), fd_absolute_floor) * DBL_EPSILON^(1/6) *
- * fd_step_scale. The caller owns the d*d row-major `factor` output. */
+ * fd_step_scale. The caller owns the d*d row-major `factor` output and
+ * supplies `work`, at least 4*d + 2*d*d f64 of scratch. */
 i64 sdsge_mcmc_hessian_proposal_factor(sdsge_objective_fn logpost,
                                        void *obj_ctx, const f64 *theta, i64 d,
                                        f64 fd_step_scale, f64 fd_absolute_floor,
-                                       f64 *factor);
+                                       f64 *factor, f64 *work);
 
 /* HOT LOOP DRIVER */
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,

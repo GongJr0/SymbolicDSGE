@@ -349,7 +349,7 @@ class Estimator:
             if hasattr(prior_obj, "transform"):
                 tr = cast(Transform, getattr(prior_obj, "transform"))
                 sup = tr.support
-                if not (sup.low == low and sup.high == high):
+                if not (sup.low >= low and sup.high <= high):
                     raise ValueError(
                         f"Prior on SPD parameter '{name}' uses a transform constraining "
                         f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
