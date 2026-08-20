@@ -4,3 +4,18 @@
   font-feature-settings: "kern", "liga";
   font-variant-ligatures: normal;
 }
+
+/* Chart text and axis furniture track the Material palette (SVG renderer),
+   overriding the vega theme's #fff/#000 */
+.vega-embed g.mark-text text {
+  fill: var(--md-default-fg-color);
+}
+
+.vega-embed g.role-axis-domain line,
+.vega-embed g.role-axis-tick line {
+  stroke: var(--md-default-fg-color--lighter);
+}
+
+.vega-embed g.role-axis-grid line {
+  stroke: var(--md-default-fg-color--lightest);
+}
