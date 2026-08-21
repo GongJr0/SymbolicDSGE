@@ -1,7 +1,8 @@
 # Linear Smets and Wouters (2007), translated from sw2007.mod for the
-# benchmark fixture. The Dynare model's local # coefficients are materialized
-# below at the supplied calibration. The equation system and shock calibration
-# otherwise match the Dynare fixture one for one.
+# benchmark fixture. The Dynare model's local (#) coefficients are declared as
+# derived calibration entries below, so they track the base parameters they are
+# built from. The equation system and shock calibration match the Dynare
+# fixture one for one.
 
 name: SW2007
 
@@ -144,15 +145,26 @@ calibration:
     crhow: 0.0
     ctrend: 0.3982
     cg: 0.18
-    cbetabar: 0.9867350192621207
-    cgamma: 1.003982
-    crk: 0.03844330593212242
-    cikbar: 0.028867051401319843
-    ciy: 0.18093345073603445
-    ccy: 0.6390665492639656
-    crkky: 0.23999999999999994
-    cwhlc: 0.7928230123297981
-    conster: 2.0537409073646984
+    # Parameter dependencies, transcribed from the model-local (#) block of
+    # sw2007.mod, which takes them from usmodel_stst.mod.
+    cpie: 1+constepinf/100                      # gross inflation rate
+    cgamma: 1+ctrend/100                        # gross growth rate
+    cbeta: 1/(1+constebeta/100)                 # discount factor
+    clandap: cfc                                # fixed cost share, gross price markup
+    cbetabar: cbeta*cgamma^(-csigma)            # growth-adjusted discount factor
+    cr: cpie/(cbeta*cgamma^(-csigma))           # steady state gross real interest rate
+    crk: (cbeta^(-1))*(cgamma^csigma) - (1-ctou)   # R^k steady state rental rate
+    cw: (calfa^calfa*(1-calfa)^(1-calfa)/(clandap*crk^calfa))^(1/(1-calfa))   # steady state real wage
+    cikbar: 1-(1-ctou)/cgamma                   # (1-k_1) in the capital law of motion
+    cik: (1-(1-ctou)/cgamma)*cgamma             # investment to capital ratio
+    clk: ((1-calfa)/calfa)*(crk/cw)             # labor to capital ratio
+    cky: cfc*(clk)^(calfa-1)                    # capital to output ratio
+    ciy: cik*cky                                # investment to output ratio
+    ccy: 1-cg-cik*cky                           # consumption to output ratio
+    crkky: crk*cky                              # z_y
+    cwhlc: (1/clandaw)*(1-calfa)/calfa*crk*cky/ccy   # W^h L / C, used in the Euler equation
+    cwly: 1-crk*cky                             # unused, kept to match the Dynare block
+    conster: (cr-1)*100                         # steady state federal funds rate
     sig_ea: 0.4618
     sig_eb: 1.8513
     sig_eg: 0.609

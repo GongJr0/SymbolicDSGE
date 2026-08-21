@@ -9,18 +9,18 @@ observables: [obs_pi, obs_r]
 
 equations:
   model:
-    is_curve: x(t) = x(t+1) - (r(t)-pih(t+1)-rnat(t))
+    is_curve: x(t) = x(t+1) - sigma_a^(-1)*(r(t)-pih(t+1)-rnat(t))
     phillips: pih(t) = beta*pih(t+1) + kappa_a*x(t)
-    natural_rate: rnat(t) = -(1-rhoa)*a(t)
-    natural_output: ynat(t) = a(t)
+    natural_rate: rnat(t) = -sigma_a*Gamma*(1-rhoa)*a(t) + alpha*sigma_a*(Theta+Psi)*(ystar(t+1)-ystar(t))
+    natural_output: ynat(t) = Gamma*a(t) + alpha*Psi*ystar(t)
     output_gap: x(t) = y(t)-ynat(t)
-    output: y(t) = ystar(t)+s(t)
+    output: y(t) = ystar(t) + sigma_a^(-1)*s(t)
     cpi_inflation: pi(t) = pih(t) + alpha*(s(t)-s(t-1))
     foreign_inflation: pistar(t) = 0
     employment: y(t) = a(t)+n(t)
-    net_exports: nx(t) = 0
-    consumption: y(t) = c(t)+alpha*s(t)
-    real_wage: real_wage(t) = c(t)+phi*n(t)
+    net_exports: nx(t) = alpha*(omega/sigma-1)*s(t)
+    consumption: y(t) = c(t) + alpha*omega/sigma*s(t)
+    real_wage: real_wage(t) = sigma*c(t) + phi*n(t)
     technology: a(t) = rhoa*a(t-1)+eps_a
     foreign_output: ystar(t) = rhoy*ystar(t-1)+eps_star
     policy: pih(t) = 0
@@ -36,7 +36,20 @@ calibration:
     phi: 3.0
     rhoa: 0.9
     rhoy: 0.86
-    kappa_a: 0.3433333333333333
+    sigma: 1.0
+    eta: 1.0
+    gamma: 1.0
+    theta: 0.75
+    # Model-local (#) coefficients from gali_monacelli_2005.mod. Dynare's
+    # `lambda` is a Python keyword in our expression grammar, so it is
+    # spelled `lambda_`.
+    omega: sigma*gamma + (1-alpha)*(sigma*eta-1)
+    sigma_a: sigma/((1-alpha)+alpha*omega)
+    Theta: (sigma*gamma-1)+(1-alpha)*(sigma*eta-1)
+    lambda_: (1-(beta*theta))*(1-theta)/theta
+    kappa_a: lambda_*(sigma_a+phi)
+    Gamma: (1+phi)/(sigma_a+phi)
+    Psi: -Theta*sigma_a/(sigma_a+phi)
     sig_eps_star: 1.0
     sig_eps_a: 1.0
     meas_obs_pi: 0.0
