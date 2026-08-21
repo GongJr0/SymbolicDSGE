@@ -41,20 +41,7 @@ typedef struct {
 /* status codes for sdsge_mcmc_result.status */
 #define SDSGE_MCMC_OK 0
 #define SDSGE_MCMC_EALLOC (-1601)
-#define SDSGE_MCMC_EHESSIAN (-1602)
-#define SDSGE_MCMC_ENOTSPD (-1603)
 #define SDSGE_MCMC_EMAP (-1604)
-
-/* Build an unscaled proposal factor at `theta` from the negative-log-posterior
- * Hessian. The factor satisfies factor * factor^T = H^-1, where
- * H = -d^2 logpost(theta). `fd_step_scale` and `fd_absolute_floor` define
- * h_i = max(abs(theta_i), fd_absolute_floor) * DBL_EPSILON^(1/6) *
- * fd_step_scale. The caller owns the d*d row-major `factor` output and
- * supplies `work`, at least 4*d + 2*d*d f64 of scratch. */
-i64 sdsge_mcmc_hessian_proposal_factor(sdsge_objective_fn logpost,
-                                       void *obj_ctx, const f64 *theta, i64 d,
-                                       f64 fd_step_scale, f64 fd_absolute_floor,
-                                       f64 *factor, f64 *work);
 
 /* HOT LOOP DRIVER */
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,

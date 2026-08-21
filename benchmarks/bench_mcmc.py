@@ -7,13 +7,18 @@ are outside the timer. Both samplers use adaptive random-walk MH, but their
 RNGs and adaptation schedules differ, so this reports marginal posterior
 summaries rather than path parity.
 
-The two timers do not cover the same work. ``Estimator.mcmc`` finds its own MAP
-and builds the finite-difference Hessian its proposal starts from inside the
-timed call, where Dynare arrives with both already computed. The Hessian alone
-costs ``d * (d + 1)`` likelihood evaluations, negligible at one estimated
-parameter and comparable to the whole sampling run at sw2007's 34, so read
-``draws / s`` as the cost of a chain plus its setup on this side and a chain
-alone on Dynare's.
+The MAP is found once per case, before either timer starts, and both runtimes
+begin every chain from it. The native side takes it as ``theta0`` under
+``compute_map=False``; Dynare reads it from the mode file, whose ``xparam1`` the
+setup pass's own estimate is overwritten with.
+
+Each side then rebuilds the proposal Hessian at that shared mode inside its own
+timed call, the native kernel as part of ``run_mcmc`` and Dynare through the
+same ``hessian.m`` call ``dynare_estimation_1`` makes, which ``mode_compute =
+0`` would otherwise skip in favour of reading one off disk. Both use the
+Abramowitz and Stegun 25.3.23 / 25.3.27 stencil at the same step, so both cost
+``d * (d + 1) + 1`` likelihood evaluations and ``draws / s`` covers the same
+work on either side.
 
 Every case estimates its model's full structural parameter set: each calibrated
 parameter that is not a shock standard deviation, a shock correlation, or a
@@ -47,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.io import loadmat
+from scipy.io import loadmat, savemat
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -239,6 +244,27 @@ def _make_estimator(targets: Targets, compiled, solved, y: np.ndarray, observabl
     )
 
 
+def _posterior_mode(targets: Targets, compiled, solved, y, observables):
+    """The MAP both runtimes start from, found once and outside every timer.
+
+    Letting each side find its own would compare two chains that began in
+    different places, and letting the native side find it per rep would time
+    the same optimization once per rep against a Dynare that reads its own from
+    a file.
+    """
+    estimator = _make_estimator(targets, compiled, solved, y, observables)
+    with (
+        open(os.devnull, "w", encoding="utf-8") as sink,
+        contextlib.redirect_stdout(sink),
+    ):
+        result = estimator.map(
+            theta0=dict(zip(targets.names, targets.values, strict=True))
+        )
+    if not result.success:
+        raise RuntimeError(f"MAP did not converge before sampling: {result.message}")
+    return result
+
+
 def _run_native(
     targets: Targets,
     compiled,
@@ -254,15 +280,16 @@ def _run_native(
     adapt: bool,
     adapt_start: int,
     hessian_step_scale: float,
+    mode,
 ) -> dict[str, np.ndarray | float]:
     estimator = _make_estimator(targets, compiled, solved, y, observables)
-    theta0 = dict(zip(targets.names, targets.values, strict=True))
 
     def run(chain_seed: int):
         return estimator.mcmc(
             n_draws=draws,
             burn_in=burn_in,
-            theta0=theta0,
+            theta0=mode.x,
+            compute_map=False,
             random_state=chain_seed,
             proposal_scale=proposal_scale,
             adapt=adapt,
@@ -295,6 +322,25 @@ def _write_data(path: Path, observables: tuple[str, ...], y: np.ndarray) -> None
     for column, name in enumerate(observables):
         lines.extend((f"{name} = [", *(f"{v:.17g}" for v in y[:, column]), "];"))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_shared_mode(path: Path, targets: Targets, mode) -> None:
+    """The shared MAP, written for the MATLAB side to match up by name.
+
+    Dynare's own parameter order is whatever its mode file records, so the names
+    travel with the values rather than the two sides agreeing on an ordering.
+    """
+    savemat(
+        str(path),
+        {
+            "xparam1": np.asarray(
+                [float(mode.theta[name]) for name in targets.names], dtype=np.float64
+            ).reshape(-1, 1),
+            "parameter_names": np.array(
+                [np.str_(name) for name in targets.names], dtype=object
+            ).reshape(-1, 1),
+        },
+    )
 
 
 def _dynare_estimated_params(targets: Targets) -> str:
@@ -343,6 +389,7 @@ def _run_dynare(
     adapt: bool,
     adapt_start: int,
     hessian_step_scale: float,
+    mode,
     dynare_path: str,
     matlab_bin: str,
     octave_bin: str,
@@ -367,12 +414,14 @@ def _run_dynare(
         _write_data(
             workdir / f"{case.data_file}.m", _dynare_observables(case, observables), y
         )
+        shared_mode_path = workdir / "shared_mode.mat"
+        _write_shared_mode(shared_mode_path, targets, mode)
         expression = (
             f"addpath('{_quoted_matlab(dynare_path)}'); "
             f"addpath('{_quoted_matlab(SCRIPT_DIR)}', '-begin'); "
             f"bench_mcmc_dynare('{_quoted_matlab(workdir)}', '{model_name}', "
             f"{draws}, {burn_in}, {warmup}, {reps}, {seed}, {int(adapt)}, {adapt_start}, "
-            f"'{_quoted_matlab(result_path)}');"
+            f"'{_quoted_matlab(shared_mode_path)}', '{_quoted_matlab(result_path)}');"
         )
         command = (
             [matlab_bin, "-batch", expression]
@@ -486,9 +535,10 @@ def _print_report(
         f"retained draws={draws} burn-in={burn_in} reps={len(native['times'])}"
     )
     print(
-        "Mode and Hessian setup are outside Dynare's timer. Both chains use "
-        "adaptive random-walk MH from the shared start draw, but their update "
-        "schedules and RNGs differ, so posterior summaries are descriptive."
+        "Both runtimes start from one MAP, found outside every timer, and each "
+        "rebuilds its proposal Hessian at that mode inside its own timed call. "
+        "Their update schedules and RNGs differ, so posterior summaries are "
+        "descriptive."
     )
     native_median = float(np.median(native["times"]))
     native_ess = _effective_sample_size(native["samples"])
@@ -615,6 +665,7 @@ def main() -> int:
             output_dir.mkdir(exist_ok=True)
             compiled, solved, y, observables = _prepare(case, args.periods)
             targets = _estimation_targets(compiled, args.prior_scale)
+            mode = _posterior_mode(targets, compiled, solved, y, observables)
             native = _run_native(
                 targets,
                 compiled,
@@ -630,6 +681,7 @@ def main() -> int:
                 not args.no_native_adapt,
                 args.adapt_start,
                 args.hessian_step_scale,
+                mode,
             )
             np.savez(output_dir / "native.npz", **native)
             dynare: dict[str, dict] = {}
@@ -651,6 +703,7 @@ def main() -> int:
                         not args.no_native_adapt,
                         args.adapt_start,
                         args.hessian_step_scale,
+                        mode,
                         args.dynare_matlab_path,
                         args.matlab_bin,
                         args.octave_bin,

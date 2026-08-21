@@ -38,6 +38,9 @@ typedef struct {
   const f64 *hi;
   const i64 *nbd;
   sdsge_optim_options optim;
+  int compute_cov;          /* fill the result's vcov / se */
+  f64 cov_fd_step_scale;    /* as sdsge_estimation_cov_factor's fd_step_scale */
+  f64 cov_fd_absolute_floor; /* as its fd_absolute_floor */
 } sdsge_estimation_options;
 
 /* Q or R covariance build spec. */
@@ -78,6 +81,10 @@ typedef struct {
   const f64 *matrix_etas;          /* n_blocks */
   const f64 *matrix_log_constants; /* n_blocks */
   i64 n_blocks;
+  /* Which density the prior evaluates to; see sdsge_logprior_program. Set per
+   * entry point: the sampler walks theta and takes it, a maximizer reporting a
+   * parameter value does not, because the jacobian moves the mode. */
+  int include_logjac;
 } sdsge_prior_tables;
 
 /* Model and data dimensions. */
@@ -190,13 +197,45 @@ void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
 f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
                       const f64 *SDSGE_RESTRICT theta);
 
+/* Status codes for the covariance, reported separately from the optimizer's. */
+#define SDSGE_ESTIMATION_OK 0
+#define SDSGE_ESTIMATION_EALLOC (-1800)
+#define SDSGE_ESTIMATION_EHESSIAN (-1801)
+#define SDSGE_ESTIMATION_ENOTSPD (-1802)
+
+/* Covariance of the estimate at `theta`, in factored form: `factor` satisfies
+ * factor * factor^T = H^-1, where H = -d^2 logpost(theta). `fd_step_scale` and
+ * `fd_absolute_floor` define h_i = max(abs(theta_i), fd_absolute_floor) *
+ * DBL_EPSILON^(1/6) * fd_step_scale. The caller owns the d*d row-major
+ * `factor` output and supplies `work`, at least 4*d + 2*d*d f64 of scratch. */
+i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
+                                const f64 *SDSGE_RESTRICT theta, i64 d,
+                                f64 fd_step_scale, f64 fd_absolute_floor,
+                                f64 *SDSGE_RESTRICT factor,
+                                f64 *SDSGE_RESTRICT work);
+
+/* What an estimation call returns: the optimizer's own result, plus the
+ * asymptotic covariance of the point it found. `vcov` (n_theta*n_theta,
+ * row-major) is caller-owned and may be NULL, which reads the same as
+ * opt->compute_cov == 0. It is the covariance of theta, the vector the
+ * optimizer moves, which is also the space the sampler's proposal wants;
+ * carrying it into the caller's own parameter space is the caller's job.
+ * `cov_status` is deliberately not the optimizer's: a Hessian that is not
+ * positive definite at the optimum leaves NaN behind and says so there, while
+ * the estimate itself stands. */
+typedef struct {
+  sdsge_optim_result base;
+  f64 *vcov;
+  i64 cov_status;
+} sdsge_estimation_result;
+
 /* Minimize the configured likelihood or negative log posterior in place.
  * `ctx` must point to the filter-mode context selected by opt->filter_mode;
  * theta has length n_theta. `has_priors` selects the posterior objective.
  * The caller owns theta, options, and all bound buffers for the call. */
 void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
                           const sdsge_estimation_options *opt,
-                          sdsge_optim_result *out);
+                          sdsge_estimation_result *out);
 
 /* Per-flavor objective: theta -> loglik (+ logprior if has_priors). */
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,

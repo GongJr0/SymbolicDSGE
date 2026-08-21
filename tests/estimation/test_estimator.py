@@ -1,5 +1,4 @@
 # type: ignore
-import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -363,6 +362,54 @@ def test_mcmc_accepts_a_map_result_as_its_starting_mode(mcmc_estimator):
     assert np.array_equal(from_array.samples, from_dict.samples)
 
 
+def test_mle_reports_the_covariance_at_the_optimum(post82_estimator):
+    """Uncertainty is on by default, and se is the root of vcov's diagonal
+    wherever the transforms are the identity."""
+    est = post82_estimator()
+    res = est.mle(bounds=[(1.0, 5.0), (0.0, 0.99)])
+
+    assert res.cov_status == 0
+    assert res.vcov.shape == (len(res.theta), len(res.theta))
+    assert np.all(np.isfinite(res.vcov))
+    assert set(res.se) == set(res.theta)
+    assert np.allclose(res.vcov, res.vcov.T)
+    for i, name in enumerate(res.theta):
+        assert float(res.se[name]) == pytest.approx(float(np.sqrt(res.vcov[i, i])))
+
+
+def test_mle_covariance_is_opt_out_and_does_not_move_the_estimate(post82_estimator):
+    est = post82_estimator()
+    kw = dict(bounds=[(1.0, 5.0), (0.0, 0.99)])
+    with_cov = est.mle(**kw)
+    without = est.mle(cov=False, **kw)
+
+    assert without.vcov is None
+    assert without.se is None
+    assert without.cov_status == 0
+    assert without.theta == with_cov.theta
+
+
+def test_se_is_in_the_space_theta_reports(post82_estimator):
+    """`sig_r` carries a Log transform, so its se is not sqrt(diag(vcov)): the
+    covariance is over theta and has to cross the transform to sit beside a
+    constrained value."""
+    est = post82_estimator(estimated_params=("psi_pi", "sig_r"))
+    res = est.mle()
+    names = list(res.theta)
+    assert [type(est._param_transforms[n]).__name__ for n in names] == [
+        "Identity",
+        "LogTransform",
+    ]
+
+    se_theta = np.sqrt(np.diag(res.vcov))
+    # d exp(t)/dt is exp(t), which is the constrained value itself
+    assert float(res.se["psi_pi"]) == pytest.approx(float(se_theta[0]))
+    assert float(res.se["sig_r"]) == pytest.approx(
+        float(res.theta["sig_r"]) * float(se_theta[1]), rel=1e-6
+    )
+    assert float(res.se["sig_r"]) != pytest.approx(float(se_theta[1]))
+
+
 def test_map_without_priors_raises(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
@@ -435,38 +482,6 @@ def test_estimator_make_prior_utility():
         transform="identity",
     )
     assert isinstance(prior, Prior)
-
-
-def test_safe_loglik_invalidates_system_exit(monkeypatch):
-    def _boom(**kwargs):
-        raise SystemExit("invertibility violation")
-
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _boom)
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    val = est._safe_loglik(np.array([0.0], dtype=np.float64))
-    assert np.isneginf(val)
-
-
-def test_safe_loglik_invalidates_warning_signal(monkeypatch):
-    def _warn_only(**kwargs):
-        warnings.warn("unstable candidate", RuntimeWarning)
-        return float64(0.0)
-
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _warn_only)
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    val = est._safe_loglik(np.array([0.0], dtype=np.float64))
-    assert np.isneginf(val)
-    assert est._warning_signal_count >= 1
 
 
 def test_estimation_reports_warning_count_once(post82_estimator, capsys):
@@ -684,8 +699,8 @@ def test_loglik_overrides_parameters_per_candidate(monkeypatch):
         estimated_params=["a"],
         priors={"a": prior},
     )
-    _ = est._safe_loglik(np.array([-1.0], dtype=np.float64))
-    _ = est._safe_loglik(np.array([1.0], dtype=np.float64))
+    _ = est.loglik(np.array([-1.0], dtype=np.float64))
+    _ = est.loglik(np.array([1.0], dtype=np.float64))
 
     assert len(seen) == 2
     assert seen[0] == pytest.approx(np.exp(-1.0))
@@ -883,21 +898,6 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
     est.priors = {"ghost": _QuadraticPrior(mean=0.0, weight=1.0)}
     with pytest.raises(KeyError, match="unknown parameter"):
         est.logprior(np.array([0.0], dtype=np.float64))
-
-    def _warn(th):
-        warnings.warn("unstable", RuntimeWarning)
-        return float64(0.0)
-
-    est._logpost = _warn
-    assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
-
-    est._logpost = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
-    assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
-
-    est.logprior = lambda th: float64(np.inf)
-    assert np.isneginf(est._safe_logprior(np.array([0.0], dtype=np.float64)))
-    est.logprior = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
-    assert np.isneginf(est._safe_logprior(np.array([0.0], dtype=np.float64)))
 
 
 def test_mcmc_validation_branches(monkeypatch):

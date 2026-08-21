@@ -142,19 +142,23 @@ int kf_stationary_covariance(const f64 *SDSGE_RESTRICT A,
                              const f64 *SDSGE_RESTRICT B,
                              const f64 *SDSGE_RESTRICT Q, f64 tol, i64 max_iter,
                              f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT out,
-                             i64 n, i64 k) {
+                             i64 n, i64 k, i64 ld_out) {
   f64 *BQBT = arena;
   f64 *A_power = BQBT + n * n;
   f64 *temp_nn = A_power + n * n;
   f64 *residual = temp_nn + n * n;
   f64 *temp_nk = residual + n * n;
+  /* The iteration runs packed in the caller's own buffer: an n*n block always
+   * fits inside n rows of stride ld_out >= n. It is expanded in place at the
+   * end rather than staged through scratch. */
+  f64 *P = out;
 
   kf_build_bqbt(B, Q, temp_nk, BQBT, n, k);
-  memcpy(out, BQBT, (size_t)(n * n) * sizeof(f64));
+  memcpy(P, BQBT, (size_t)(n * n) * sizeof(f64));
   memcpy(A_power, A, (size_t)(n * n) * sizeof(f64));
 
   for (i64 iter = 0; iter < max_iter; ++iter) {
-    sdsge_matmul(A_power, out, temp_nn, n, n, n);
+    sdsge_matmul(A_power, P, temp_nn, n, n, n);
     sdsge_matmul_abt(temp_nn, A_power, residual, n, n, n);
 
     f64 correction_norm = 0.0;
@@ -165,25 +169,25 @@ int kf_stationary_covariance(const f64 *SDSGE_RESTRICT A,
       const f64 correction = fabs(residual[i]);
       if (correction > correction_norm)
         correction_norm = correction;
-      out[i] += residual[i];
-      if (!isfinite(out[i]))
+      P[i] += residual[i];
+      if (!isfinite(P[i]))
         return KF_ERR_LYAPUNOV_CONVERGENCE;
-      const f64 covariance = fabs(out[i]);
+      const f64 covariance = fabs(P[i]);
       if (covariance > covariance_norm)
         covariance_norm = covariance;
     }
-    sdsge_sym_inplace(out, n);
+    sdsge_sym_inplace(P, n);
 
     if (!isfinite(correction_norm) || !isfinite(covariance_norm))
       return KF_ERR_LYAPUNOV_CONVERGENCE;
 
     if (correction_norm <= tol * fmax(1.0, covariance_norm)) {
-      sdsge_matmul(A, out, temp_nn, n, n, n);
+      sdsge_matmul(A, P, temp_nn, n, n, n);
       sdsge_matmul_abt(temp_nn, A, residual, n, n, n);
 
       f64 residual_norm = 0.0;
       for (i64 i = 0; i < n * n; ++i) {
-        const f64 difference = out[i] - residual[i] - BQBT[i];
+        const f64 difference = P[i] - residual[i] - BQBT[i];
         if (!isfinite(difference))
           return KF_ERR_LYAPUNOV_CONVERGENCE;
         const f64 entry = fabs(difference);
@@ -191,8 +195,20 @@ int kf_stationary_covariance(const f64 *SDSGE_RESTRICT A,
           residual_norm = entry;
       }
       if (isfinite(residual_norm) &&
-          residual_norm <= tol * fmax(1.0, covariance_norm))
+          residual_norm <= tol * fmax(1.0, covariance_norm)) {
+        /* Expand the packed result into the stride, last row first: row r
+         * lands at r*ld_out, at or past the r*n it came from, so descending
+         * order never overwrites a row still waiting to move. Each row's tail
+         * is zeroed behind it, which is what makes the unscented P0's
+         * second-order quadrant zero rather than iteration debris. */
+        for (i64 r = n - 1; r >= 0; --r) {
+          memmove(out + r * ld_out, P + r * n, (size_t)n * sizeof(f64));
+          for (i64 c = n; c < ld_out; ++c) {
+            out[r * ld_out + c] = 0.0;
+          }
+        }
         return KF_OK;
+      }
     }
 
     sdsge_matmul(A_power, A_power, temp_nn, n, n, n);

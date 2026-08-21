@@ -66,7 +66,13 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
 /* Full packed log-prior (per-replication hot path). scalar_*_params are
  * row-major n_scalar x stride; each block's z is the contiguous theta run
  * theta[matrix_offsets[b] .. +matrix_lengths[b]). Returns the scalar logprior,
- * or NaN if any term is NaN. */
+ * or NaN if any term is NaN.
+ *
+ * `include_logjac` chooses which density this is. With it, the result is the
+ * prior over theta, the change-of-variables density the sampler walks. Without
+ * it, the result is the prior over the parameters themselves, evaluated at the
+ * theta that maps to them. The two have different modes: a maximizer reporting
+ * a parameter value wants the second, a sampler drawing theta wants the first. */
 f64 sdsge_logprior_program(
     f64 *SDSGE_RESTRICT theta, i64 *SDSGE_RESTRICT scalar_indices,
     i64 *SDSGE_RESTRICT scalar_dist_codes,
@@ -75,7 +81,7 @@ f64 sdsge_logprior_program(
     f64 *SDSGE_RESTRICT scalar_transform_params, i64 n_scalar,
     i64 *SDSGE_RESTRICT matrix_offsets, i64 *SDSGE_RESTRICT matrix_dims,
     i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
-    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks);
+    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, int include_logjac);
 
 /* Unconstrained (z, std) -> full covariance via the correlation Cholesky factor.
  * scratch_M is K*K workspace for L; out receives the K*K covariance (row-major). */

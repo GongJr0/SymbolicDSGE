@@ -79,11 +79,22 @@ void kf_build_bqbt(const f64 *B, const f64 *Q, f64 *temp_nk, f64 *out, i64 n,
  *   P = A P A^T + B Q B^T
  *
  * by matrix doubling. Returns KF_OK or KF_ERR_LYAPUNOV_CONVERGENCE when
- * the iteration does not reach `tol` within `max_iter`. */
+ * the iteration does not reach `tol` within `max_iter`.
+ *
+ * `ld_out` is the destination's full row width, not the block's: consecutive
+ * rows of `out` sit `ld_out` apart, so an n*n answer can land in the leading
+ * block of a wider matrix. The unscented filter's P0 is one n_state block at
+ * the corner of a 2*n_state square, so it passes 2*n_state. Pass `n` for a
+ * packed destination.
+ *
+ * `out` is also the iteration's working buffer, which makes it the caller's
+ * for the whole call: the first n rows are written across their full width,
+ * columns n..ld_out are zeroed behind the expansion, and a run that does not
+ * converge leaves the last iterate there rather than the previous contents. */
 arena_size kf_stationary_covariance_arena_size(i64 n, i64 k);
 int kf_stationary_covariance(const f64 *A, const f64 *B, const f64 *Q, f64 tol,
                              i64 max_iter, f64 *SDSGE_RESTRICT arena,
-                             f64 *SDSGE_RESTRICT out, i64 n, i64 k);
+                             f64 *SDSGE_RESTRICT out, i64 n, i64 k, i64 ld_out);
 
 /* out(k,m) := Q(k,k) @ (B^T C^T)(k,m), via temp_km(k,m) */
 void kf_build_shock_projection(const f64 *B, const f64 *C, const f64 *Q,

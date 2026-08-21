@@ -75,6 +75,7 @@ cdef extern from "kalman.h":
         double *out,
         int64_t n,
         int64_t k,
+        int64_t ld_out,
     ) nogil
 
     ctypedef void (*meas_fn)(
@@ -358,6 +359,7 @@ def stationary_covariance(
             &Pv[0, 0],
             n,
             k,
+            n,
         )
     return status, P
 

@@ -77,100 +77,6 @@ static inline void sdsge_proposal_factor(const f64 *SDSGE_RESTRICT C, i64 d,
   memcpy(L, Ltmp, d * d * sizeof(f64));
 }
 
-/* Hessian-derived initial proposal factor. This is intentionally separate from
- * the sampling loop: callers may prepare it once at a MAP point and reuse it
- * across chains. The objective returns +logpost, so every finite-difference
- * expression below is written directly for H = -d^2 logpost.
- *
- * The off-diagonal stencil matches Dynare's hessian.m: it reuses the two
- * coordinate-direction evaluations and needs only the (++), (--) pair for
- * each i < j. After H = L L^T, solving L^T X = I gives X X^T = H^-1. */
-i64 sdsge_mcmc_hessian_proposal_factor(sdsge_objective_fn logpost,
-                                       void *obj_ctx,
-                                       const f64 *SDSGE_RESTRICT theta, i64 d,
-                                       f64 fd_step_scale, f64 fd_absolute_floor,
-                                       f64 *SDSGE_RESTRICT factor,
-                                       f64 *SDSGE_RESTRICT work) {
-  if (d <= 0 || fd_step_scale <= 0.0 || fd_absolute_floor <= 0.0) {
-    return SDSGE_MCMC_EHESSIAN;
-  }
-  const f64 fd_relative_step = sqrt(cbrt(DBL_EPSILON)) * fd_step_scale;
-  if (!isfinite(fd_relative_step) || fd_relative_step <= 0.0) {
-    return SDSGE_MCMC_EHESSIAN;
-  }
-
-  const size_t nv = (size_t)d;
-  const size_t nm = nv * nv;
-
-  f64 *x = work;
-  f64 *h = x + nv;
-  f64 *plus = h + nv;
-  f64 *minus = plus + nv;
-  f64 *H = minus + nv;
-  f64 *L = H + nm;
-
-  memcpy(x, theta, nv * sizeof(f64));
-  const f64 lp0 = logpost(theta, obj_ctx);
-  if (!isfinite(lp0)) {
-    return SDSGE_MCMC_EHESSIAN;
-  }
-
-  for (i64 i = 0; i < d; ++i) {
-    h[i] = fmax(fabs(theta[i]), fd_absolute_floor) * fd_relative_step;
-    if (!isfinite(h[i]) || h[i] == 0.0) {
-      return SDSGE_MCMC_EHESSIAN;
-    }
-
-    x[i] = theta[i] + h[i];
-    plus[i] = logpost(x, obj_ctx);
-    x[i] = theta[i] - h[i];
-    minus[i] = logpost(x, obj_ctx);
-    x[i] = theta[i];
-    if (!isfinite(plus[i]) || !isfinite(minus[i])) {
-      return SDSGE_MCMC_EHESSIAN;
-    }
-  }
-
-  for (i64 i = 0; i < d; ++i) {
-    H[i * d + i] = (2.0 * lp0 - plus[i] - minus[i]) / (h[i] * h[i]);
-    for (i64 j = i + 1; j < d; ++j) {
-      x[i] = theta[i] + h[i];
-      x[j] = theta[j] + h[j];
-      const f64 lp_pp = logpost(x, obj_ctx);
-      x[i] = theta[i] - h[i];
-      x[j] = theta[j] - h[j];
-      const f64 lp_mm = logpost(x, obj_ctx);
-      x[i] = theta[i];
-      x[j] = theta[j];
-      if (!isfinite(lp_pp) || !isfinite(lp_mm)) {
-        return SDSGE_MCMC_EHESSIAN;
-      }
-
-      const f64 hij = (-lp_pp - lp_mm + plus[i] + minus[i] + plus[j] +
-                       minus[j] - 2.0 * lp0) /
-                      (2.0 * h[i] * h[j]);
-      H[i * d + j] = hij;
-      H[j * d + i] = hij;
-    }
-  }
-
-  if (sdsge_chol(H, 0.0, L, d) != SDSGE_OK) {
-    return SDSGE_MCMC_ENOTSPD;
-  }
-
-  for (i64 j = 0; j < d; ++j) {
-    for (i64 i = 0; i < d; ++i) {
-      x[i] = i == j ? 1.0 : 0.0;
-    }
-    sdsge_backward_subst_chol_t(L, x, x, d);
-    for (i64 i = 0; i < d; ++i) {
-      factor[i * d + j] = x[i];
-    }
-  }
-
-  return SDSGE_MCMC_OK;
-}
-
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
                    const sdsge_mcmc_options *opt,
@@ -215,28 +121,30 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   memcpy(current, theta0, d * sizeof(f64));
   if (opt->needs_map) {
 
-    sdsge_optim_result map_out;
+    /* The sampler builds its own factor below, so the MAP call is asked for
+     * the point only; vcov stays NULL. */
+    sdsge_estimation_result map_out;
+    map_out.vcov = NULL;
     sdsge_run_estimation(obj_ctx, d, current, map_opt, &map_out);
-    if (!map_out.success) {
+    if (!map_out.base.success) {
       out->status = SDSGE_MCMC_EMAP;
-      out->message = map_out.message != NULL ? map_out.message : "MAP failed";
+      out->message =
+          map_out.base.message != NULL ? map_out.base.message : "MAP failed";
       free(work);
       return SDSGE_MCMC_EMAP;
     }
   }
 
-  // The allocation past `L` is dead at hessian_proposal_factor, and it is the
-  // exact size needed for the hessian. `prop` is therefore passed to the
-  // hessian proposal factor as the work buffer, and `L` is the output.
+  // The allocation past `L` is dead at cov_factor time, and it is the exact
+  // size the factor needs. `prop` is therefore passed as the work buffer, and
+  // `L` is the output.
   f64 *hessian_work = prop;
-  const i64 hessian_status = sdsge_mcmc_hessian_proposal_factor(
+  const i64 hessian_status = sdsge_estimation_cov_factor(
       logpost, obj_ctx, current, d, opt->hessian_fd_step_scale,
       opt->hessian_fd_absolute_floor, L, hessian_work);
-  if (hessian_status != SDSGE_MCMC_OK) {
+  if (hessian_status != SDSGE_ESTIMATION_OK) {
     out->status = hessian_status;
-    out->message = hessian_status == SDSGE_MCMC_EALLOC
-                       ? "MCMC Hessian workspace allocation failed"
-                   : hessian_status == SDSGE_MCMC_ENOTSPD
+    out->message = hessian_status == SDSGE_ESTIMATION_ENOTSPD
                        ? "MAP Hessian is not positive definite"
                        : "MCMC Hessian construction failed";
     free(work);

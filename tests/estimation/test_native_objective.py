@@ -1,9 +1,11 @@
-"""Parity: native linear objective vs the model Kalman loglik.
+"""Parity: the native objective vs the model Kalman loglik, one per filter mode.
 
-First native-objective slice: n_theta == 0 (base calibration), constant Q/R, no
-prior. The native ``obj_linear_base`` runs the full solve -> filter -> loglik in
-C; it must match ``SolvedModel.kalman(...).loglik`` (the same oracle the linear
-backend test uses).
+``NativeLogpost`` marshals a context the same way ``Estimator`` does and calls
+the same C objective the estimation and sampling drivers call, so the linear and
+extended cases pin the whole native path from marshalling through solve, filter
+and loglik against ``SolvedModel.kalman(...).loglik``, the oracle the backend
+tests use. Each estimates one parameter and evaluates at its calibrated value,
+so the resolved parameter vector is the base calibration.
 """
 
 from __future__ import annotations
@@ -14,14 +16,28 @@ import pytest
 from sympy import Symbol
 
 from SymbolicDSGE import ModelParser, DSGESolver
-from SymbolicDSGE.estimation import backend
-from SymbolicDSGE._ckernels.kalman import stationary_covariance
 from SymbolicDSGE.kalman.config import KalmanConfig
-from SymbolicDSGE._ckernels.estimation._estimation import (
-    obj_extended_base,
-    obj_linear_base,
-    obj_unscented_base,
-)
+from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE._ckernels.estimation._estimation import NativeLogpost
+
+
+def _native_loglik(
+    *, solver, compiled, y, observables, filter_mode, estimated, ss_seed, **kwargs
+) -> float:
+    """The native loglik at the base calibration, through the production path."""
+    est = Estimator(
+        solver=solver,
+        compiled=compiled,
+        y=y,
+        observables=list(observables),
+        filter_mode=filter_mode,
+        estimated_params=[estimated],
+        ss_seed=ss_seed,
+        **kwargs,
+    )
+    ctx, mode = est._build_native_context()
+    theta0 = np.ascontiguousarray(est.resolve_theta0(None), dtype=np.float64)
+    return float(NativeLogpost(ctx, mode).loglik(theta0))
 
 
 @pytest.fixture(scope="module")
@@ -58,138 +74,48 @@ def bundle(post82_test_model_path):
     return {
         "compiled": compiled,
         "kalman": compiled.kalman,
+        "solver": solver,
         "solved": solved,
         "steady": steady,
         "y": y,
     }
 
 
-def test_obj_linear_base_matches_model_kalman(bundle):
-    compiled = bundle["compiled"]
-    kalman = bundle["kalman"]
-    solved = bundle["solved"]
-    steady = bundle["steady"]
-    y = bundle["y"]
+@pytest.mark.parametrize("filter_mode", ["linear", "extended"])
+def test_native_objective_matches_model_kalman(bundle, filter_mode):
     obs = ["Infl", "Rate"]
-
-    base = backend.extract_base_params(compiled)
-    prep = backend.prepare_filter_run(
-        compiled=compiled,
-        kalman=kalman,
-        y=y,
+    ll = _native_loglik(
+        solver=bundle["solver"],
+        compiled=bundle["compiled"],
+        y=bundle["y"],
         observables=obs,
-        filter_mode="linear",
-        jitter=None,
-        symmetrize=None,
+        filter_mode=filter_mode,
+        estimated="psi_pi",
+        ss_seed=bundle["steady"],
+    )
+    ll_model = (
+        bundle["solved"]
+        .kalman(y=bundle["y"], filter_mode=filter_mode, observables=obs)
+        .loglik
     )
 
-    cc = np.ascontiguousarray
-    Q = cc(backend.build_Q(compiled, base), dtype=np.float64)
-    R = cc(backend.build_R(compiled, kalman, prep.observables, base), dtype=np.float64)
-    calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
-    steady_c = cc(steady, dtype=np.float64)
-    y_c = cc(prep.y_reordered, dtype=np.float64)
-    n_var = len(compiled.var_names)
-    p0_err, P0 = stationary_covariance(solved.policy.A, solved.policy.B, Q)
-    assert p0_err == 0
-    P0 = cc(P0, dtype=np.float64)
-    assert P0.shape == (n_var, n_var)
-
-    ll, bk = obj_linear_base(
-        compiled.construct_objective_cfunc().address,
-        prep.meas_addr,
-        prep.jac_addr,
-        compiled.n_state,
-        compiled.n_exog,
-        len(prep.observables),
-        steady_c,
-        compiled._incidence,
-        calib,
-        Q,
-        R,
-        y_c,
-        P0,
-        float(prep.kf_jitter),
-        int(prep.kf_sym),
-    )
-
-    ll_model = solved.kalman(y=y, filter_mode="linear", observables=obs).loglik
-
-    assert bk == 0
+    # A Blanchard-Kahn failure returns -inf rather than a wrong number, so a
+    # finite value is the observable form of the old bk == 0 assertion.
     assert np.isfinite(ll)
-    np.testing.assert_allclose(ll, ll_model, rtol=1e-9, atol=1e-9)
-
-
-def test_obj_extended_base_matches_model_kalman(bundle):
-    compiled = bundle["compiled"]
-    kalman = bundle["kalman"]
-    solved = bundle["solved"]
-    steady = bundle["steady"]
-    y = bundle["y"]
-    obs = ["Infl", "Rate"]
-
-    base = backend.extract_base_params(compiled)
-    prep = backend.prepare_filter_run(
-        compiled=compiled,
-        kalman=kalman,
-        y=y,
-        observables=obs,
-        filter_mode="extended",
-        jitter=None,
-        symmetrize=None,
-    )
-
-    cc = np.ascontiguousarray
-    Q = cc(backend.build_Q(compiled, base), dtype=np.float64)
-    R = cc(backend.build_R(compiled, kalman, prep.observables, base), dtype=np.float64)
-    calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
-    steady_c = cc(steady, dtype=np.float64)
-    y_c = cc(prep.y_reordered, dtype=np.float64)
-    p0_err, P0 = stationary_covariance(solved.policy.A, solved.policy.B, Q)
-    assert p0_err == 0
-    P0 = cc(P0, dtype=np.float64)
-
-    ll, bk = obj_extended_base(
-        compiled.construct_objective_cfunc().address,
-        prep.meas_addr,
-        prep.jac_addr,
-        compiled.n_state,
-        compiled.n_exog,
-        len(prep.observables),
-        steady_c,
-        compiled._incidence,
-        calib,
-        Q,
-        R,
-        y_c,
-        P0,
-        float(prep.kf_jitter),
-        int(prep.kf_sym),
-    )
-
-    ll_model = solved.kalman(y=y, filter_mode="extended", observables=obs).loglik
-
-    assert bk == 0
-    assert np.isfinite(ll)
-    np.testing.assert_allclose(ll, ll_model, rtol=1e-9, atol=1e-9)
+    np.testing.assert_allclose(ll, float(ll_model), rtol=1e-9, atol=1e-9)
 
 
 @pytest.fixture(scope="module")
 def rbc_bundle(rbc_second_order_test_model_path):
     """Second-order RBC (levels model, nonzero steady state) for the unscented
     parity. The fixture has no kalman section, so a scalar measurement-noise
-    configuration is supplied. The test derives its P0 from the solved policy,
-    matching the runtime default."""
+    configuration is supplied."""
     model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
     R = np.array([[1e-4]], dtype=np.float64)
-    kalman = KalmanConfig(R=R)
-    solver = DSGESolver(model, kalman)
+    solver = DSGESolver(model, KalmanConfig(R=R))
     compiled = solver.compile()
 
-    # Levels model, but the config's own ss_seed already resolves Newton to the
-    # steady state, so the solve needs no help. Feeding a resolved steady state
-    # back in as a dense seed would not work anyway: it comes back in canonical
-    # order and a dense seed is read in declaration order.
+    # The config's own ss_seed resolves Newton here, so the solve needs no help.
     solved = solver.solve(compiled=compiled, order=2)
 
     T = 40
@@ -200,70 +126,42 @@ def rbc_bundle(rbc_second_order_test_model_path):
         shocks={"e": rng.normal(0.0, 0.01, size=T)},
         observables=True,
     )
-    y = pd.DataFrame({"c_obs": sim.observables["c_obs"][1:]})
     return {
         "compiled": compiled,
+        "solver": solver,
         "solved": solved,
-        # The native kernel indexes its Newton seed by canonical position, which
-        # is the order a resolved steady state comes back in.
-        "seed": np.asarray(solved.policy.steady_state, dtype=np.float64),
-        "y": y,
+        "y": pd.DataFrame({"c_obs": sim.observables["c_obs"][1:]}),
         "R": R,
     }
 
 
-def test_obj_unscented_base_matches_model_kalman(rbc_bundle):
-    compiled = rbc_bundle["compiled"]
-    solved = rbc_bundle["solved"]
-    seed = rbc_bundle["seed"]
-    y = rbc_bundle["y"]
-    R = rbc_bundle["R"]
+def test_native_unscented_objective_matches_model_kalman(rbc_bundle):
+
     obs = ["c_obs"]
-    n_state = compiled.n_state
-    jitter, symmetrize = 1e-8, 1
-
-    base = backend.extract_base_params(compiled)
-
-    cc = np.ascontiguousarray
-    Q = cc(backend.build_Q(compiled, base), dtype=np.float64)
-    calib = cc(backend.build_calib_param_vector(compiled, base), dtype=np.float64)
-    y_c = np.array(y.to_numpy(), dtype=np.float64, copy=True)
-
-    # UKF augments the state. Its default P0 uses the stationary first-order
-    # covariance in the first block and zeros in the second-order block.
-    p0_err, P0_state = stationary_covariance(
-        solved.policy.hx, solved.policy.B[:n_state, :], Q
-    )
-    assert p0_err == 0
-    P0_ukf = np.zeros((2 * n_state, 2 * n_state), dtype=np.float64)
-    P0_ukf[:n_state, :n_state] = P0_state
-
-    ll, bk = obj_unscented_base(
-        compiled.construct_objective_cfunc().address,
-        compiled.construct_objective_cfunc_bicomplex().address,
-        compiled.construct_measurement_cfunc(obs).address,
-        n_state,
-        compiled.n_exog,
-        len(obs),
-        cc(seed, dtype=np.float64),
-        compiled._incidence,
-        calib,
-        Q,
-        cc(R, dtype=np.float64),
-        y_c,
-        P0_ukf,
-        float(jitter),
-        int(symmetrize),
-    )
-
-    ll_model = solved.kalman(
-        y=y,
-        filter_mode="unscented",
+    jitter, symmetrize = 1e-8, True
+    ll = _native_loglik(
+        solver=rbc_bundle["solver"],
+        compiled=rbc_bundle["compiled"],
+        y=rbc_bundle["y"],
         observables=obs,
+        filter_mode="unscented",
+        estimated="rho",
+        ss_seed=None,
+        R=rbc_bundle["R"],
         jitter=jitter,
-        symmetrize=bool(symmetrize),
-    ).loglik
+        symmetrize=symmetrize,
+    )
+    ll_model = (
+        rbc_bundle["solved"]
+        .kalman(
+            y=rbc_bundle["y"],
+            filter_mode="unscented",
+            observables=obs,
+            jitter=jitter,
+            symmetrize=symmetrize,
+        )
+        .loglik
+    )
 
-    assert bk == 0
     assert np.isfinite(ll)
-    np.testing.assert_allclose(ll, ll_model, rtol=1e-9, atol=1e-9)
+    np.testing.assert_allclose(ll, float(ll_model), rtol=1e-9, atol=1e-9)
