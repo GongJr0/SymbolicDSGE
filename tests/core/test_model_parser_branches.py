@@ -46,7 +46,7 @@ def test_load_yaml_rejects_non_mapping_root(tmp_path):
 
 def test_sympy_parsers_relational_and_expr_guards():
     locals_ = {"x": sp.Symbol("x"), "y": sp.Symbol("y")}
-    get_expr, get_relational, _get_eq = ModelParser._sympy_parsers(locals_)
+    get_expr, get_relational, _get_eq = ModelParser._sympy_parsers(locals_, {})
 
     rel = get_relational("x > y")
     assert rel.rel_op == ">"
