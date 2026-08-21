@@ -93,22 +93,31 @@ Estimator.map(
     theta0: np.ndarray | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
-    m: int = 10, # (3)!
+    jacobian: bool = False,  # (3)!
+    m: int = 10, # (4)!
     maxiter: int = 15000,
     maxfun: int = 15000,
     maxls: int = 20,
     factr: float = 1e7,
     pgtol: float = 1e-5,
     fd_step: float = 0.0,
-    xatol: float = 1e-4, # (4)!
+    xatol: float = 1e-4, # (5)!
     fatol: float = 1e-4,
 ) -> OptimizationResult
 ```
 
 1. Requires non-`None` priors at estimator construction.
 2. Native optimizer. Only the two listed are supported; see the note below.
+3. Includes the jacobian term arising from the prior transformations of random variables.
+
 3. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
 4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
+
+???+ note "On the Jacobian Parameter"
+    When `False`, the MAP transformations are treated as simple coordinate changes, consistent with point estimation.
+    When `True`, the MAP transformations treat theta as a random variable and include the jacobian term to perserve the proabilistic interpretation of the posterior.
+    Practically, set `jacobian=True` when passing the MAP estimates to `Estimator.mcmc` as `theta0` for the proposal covariance.
+    For one-off point estimation, `jacobian=False` correctly finds the mode of the posterior in constrained space (the parameters as specified), the transforms only serve to move where that search occurs.
 
 ???+ note "Native optimizer set"
     `mle` and `map` run entirely in the native backend, which ships a curated set of optimizers with no scipy fallback. Only `#!python "L-BFGS-B"` (default; quasi-Newton with a finite-difference gradient) and `#!python "Nelder-Mead"` (gradient-free) are supported; any other `method` raises. Each optimizer's tuning parameters are passed as explicit keyword arguments: the L-BFGS-B group (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`) and the Nelder-Mead group (`xatol`, `fatol`).

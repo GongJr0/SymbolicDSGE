@@ -699,10 +699,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         b.r_spec.pair_slot = &r_ps_v[0] if r_np > 0 else NULL
 
     b.prior.has_prior = has_prior
-    # The prior over the parameters. run_mcmc turns the jacobian on, because a
-    # chain walking theta needs the density theta actually has, and the two do
-    # not share a mode.
-    b.prior.include_logjac = 0
+
     if has_prior:
         _psi = np.ascontiguousarray(pr.scalar_indices, dtype=np.int64)
         _psdc = np.ascontiguousarray(pr.scalar_dist_codes, dtype=np.int64)
@@ -860,6 +857,7 @@ def run_estimation(
     double[::1] theta0,
     bounds=None,
     bint has_priors=False,
+    bint include_logjac=False,
     int m=10,
     int maxiter=15000,
     int maxfun=15000,
@@ -889,6 +887,8 @@ def run_estimation(
     ``cov_status``; the estimate itself is unaffected."""
     cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
     cdef sdsge_obj_common *b = nc.b
+    b.prior.include_logjac = include_logjac
+
     cdef void *ctxp = nc.ctxp
     cdef int64_t n_theta = nc.n_theta
 

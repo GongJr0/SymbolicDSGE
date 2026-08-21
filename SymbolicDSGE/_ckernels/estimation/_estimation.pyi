@@ -22,6 +22,7 @@ def run_estimation(
     theta0: _F64,
     bounds: Sequence[tuple[float | None, float | None]] | None = None,
     has_priors: bool = False,
+    include_logjac: bool = False,
     m: int = 10,
     maxiter: int = 15000,
     maxfun: int = 15000,

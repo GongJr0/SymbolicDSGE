@@ -410,6 +410,64 @@ def test_se_is_in_the_space_theta_reports(post82_estimator):
     assert float(res.se["sig_r"]) != pytest.approx(float(se_theta[1]))
 
 
+@pytest.fixture
+def transformed_estimator(post82_estimator):
+    """``rho_r`` under a logit, ``psi_pi`` under the identity.
+
+    A non-identity transform is what makes the two prior densities differ: with
+    everything on the identity the jacobian is zero and there is nothing for
+    these tests to see.
+    """
+    return post82_estimator(
+        estimated_params=("psi_pi", "rho_r"),
+        priors={
+            "psi_pi": make_prior(
+                distribution="normal",
+                parameters={"mean": 2.19, "std": 0.5},
+                transform="identity",
+            ),
+            "rho_r": make_prior(
+                distribution="beta",
+                parameters={"a": 8.0, "b": 2.0},
+                transform="logit",
+            ),
+        },
+    )
+
+
+def test_map_include_logjac_selects_a_different_mode(transformed_estimator):
+    """The jacobian moves the mode, which is the whole reason for the flag."""
+    over_params = transformed_estimator.map(cov=False)
+    over_theta = transformed_estimator.map(cov=False, jacobian=True)
+
+    assert over_params.success and over_theta.success
+    assert not np.allclose(over_params.x, over_theta.x)
+    # the coupling carries: psi_pi is on the identity and still moves
+    assert float(over_params.theta["psi_pi"]) != pytest.approx(
+        float(over_theta.theta["psi_pi"])
+    )
+
+
+def test_map_with_logjac_is_the_mode_the_sampler_starts_from(transformed_estimator):
+    """``jacobian=True`` is what makes a precomputed mode reusable.
+
+    The chain walks theta, so the MAP it finds for itself carries the jacobian.
+    A mode found without it starts the chain somewhere else.
+    """
+    kw = dict(n_draws=30, burn_in=5, random_state=11, hessian_fd_step_scale=0.5)
+    found = transformed_estimator.mcmc(**kw)
+
+    over_theta = transformed_estimator.map(cov=False, jacobian=True)
+    reused = transformed_estimator.mcmc(theta0=over_theta.x, compute_map=False, **kw)
+    assert np.array_equal(found.samples, reused.samples)
+
+    over_params = transformed_estimator.map(cov=False)
+    mismatched = transformed_estimator.mcmc(
+        theta0=over_params.x, compute_map=False, **kw
+    )
+    assert not np.array_equal(found.samples, mismatched.samples)
+
+
 def test_map_without_priors_raises(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
