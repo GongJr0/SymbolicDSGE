@@ -49,8 +49,12 @@ calibration:
     eta: 3.77
     epsilon: 9.0
     theta: 0.75
-    psi_n_ya: 1.0
-    kappa: 0.17166666666666666
+    # Model-local (#) coefficients from gali_2015.mod. Dynare's `lambda` is a
+    # Python keyword in our expression grammar, so it is spelled `lambda_`.
+    Omega: (1-alppha)/(1-alppha+alppha*epsilon)
+    psi_n_ya: (1+varphi)/(siggma*(1-alppha)+varphi+alppha)
+    lambda_: (1-theta)*(1-betta*theta)/theta*Omega
+    kappa: lambda_*(siggma+(varphi+alppha)/(1-alppha))
     sig_eps_a: 1.0
     sig_eps_nu: 0.25
     sig_eps_z: 0.5

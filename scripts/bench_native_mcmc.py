@@ -206,7 +206,6 @@ def _build_case(
         thin=1,
         adapt=adapt,
         adapt_start=100,
-        adapt_interval=25,
         proposal_scale=proposal_scale,
         adapt_epsilon=1e-8,
     )

@@ -75,8 +75,7 @@ class DSGESolver:
 
         # Convert model to minimization problem
         residuals = [
-            sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
-            for eq in conf.equations.model.values()
+            eq.lhs - eq.rhs for eq in conf.equations.model.values()  # pyright: ignore
         ]
 
         name_to_func = {v.__name__: v for v in ordered_variables}
@@ -92,6 +91,9 @@ class DSGESolver:
         fwd_syms = [Symbol(f"fwd_{n}") for n in var_order]
         prev_syms = [Symbol(f"prev_{n}") for n in var_order]
 
+        # Keys are exact applied calls and no key occurs in any value, so
+        # xreplace's single structural pass is correct here and far cheaper
+        # than the semantic matching subs performs.
         subs_map = {}
         for f, cur, fwd, prev in zip(var_funcs, cur_syms, fwd_syms, prev_syms):
             subs_map[f(t)] = cur  # pyright: ignore
@@ -108,9 +110,7 @@ class DSGESolver:
         params = [name_to_param[name] for name in params_order]
 
         # Shocks stay in the residual: they reach the pencil as the innovation block
-        compiled_numeric: list[Expr] = [
-            sp.simplify(o.subs(subs_map)) for o in residuals
-        ]
+        compiled_numeric: list[Expr] = [o.xreplace(subs_map) for o in residuals]
 
         constraint_names, constraint_exprs = self._compile_constraints(
             conf, subs_map, set(idx.keys()), t
@@ -126,8 +126,7 @@ class DSGESolver:
         )
 
         observable_exprs = [
-            sp.simplify(expr.subs(subs_map))
-            for expr in conf.equations.observable.values()
+            expr.xreplace(subs_map) for expr in conf.equations.observable.values()
         ]
         # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
         # demand via CompiledModel.construct_observable_jacobian_cfunc.
@@ -236,8 +235,8 @@ class DSGESolver:
             rows: list[int] = []
             merged = {**conf.equations.model, **replacements}
             for row, (name, eq) in enumerate(merged.items()):
-                resid = sp.simplify(eq.lhs - eq.rhs)  # pyright: ignore
-                residuals.append(sp.simplify(resid.subs(subs_map)))
+                resid = eq.lhs - eq.rhs  # pyright: ignore
+                residuals.append(resid.xreplace(subs_map))
                 if name in replacements:
                     rows.append(row)
 
@@ -883,14 +882,20 @@ class DSGESolver:
                 raise ValueError(
                     "posterior_point must be one of {'mean', 'last', 'map', 'mode'}."
                 )
-            solve_params = est.theta_to_params(est.params_to_theta(theta_star))
+            # The round trip projects a posterior summary back onto the
+            # transforms, which matters for a mean that lands off a correlation
+            # block's manifold; the estimated names are read back off it.
+            projected = est.theta_to_params(est.params_to_theta(theta_star))
+            solve_params = {name: projected[name] for name in est.param_names}
         else:
             raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
 
+        # Sync writes the estimated values into the calibration, which is where
+        # `solve` reads its full parameter vector from; passing them again would
+        # only re-supply what was just installed.
         self._sync_calibration_with_params(compiled, solve_params)
         solved = self.solve(
             compiled=compiled,
-            parameters={k: float(v) for k, v in solve_params.items()},
             ss_seed=ss_seed,
         )
         return result, solved

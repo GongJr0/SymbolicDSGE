@@ -240,7 +240,7 @@ f64 sdsge_logprior_program(
     f64 *SDSGE_RESTRICT scalar_transform_params, i64 n_scalar,
     i64 *SDSGE_RESTRICT matrix_offsets, i64 *SDSGE_RESTRICT matrix_dims,
     i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
-    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks) {
+    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, int include_logjac) {
   f64 lp = 0.0;
 
   for (i64 i = 0; i < n_scalar; ++i) {
@@ -258,7 +258,7 @@ f64 sdsge_logprior_program(
     if (isnan(logp)) {
       return NAN;
     }
-    lp += logp + logjac;
+    lp += include_logjac ? logp + logjac : logp;
   }
 
   for (i64 b = 0; b < n_blocks; ++b) {
@@ -268,6 +268,12 @@ f64 sdsge_logprior_program(
                                  matrix_log_constants[b], &block_lp);
     if (isnan(block_lp)) {
       return NAN;
+    }
+    /* The block logpdf folds its own jacobian in; take it back out rather than
+     * duplicate the density kernel for the two cases. */
+    if (!include_logjac) {
+      block_lp -= sdsge_lkj_chol_logjac_return(theta + matrix_offsets[b],
+                                               matrix_dims[b], matrix_lengths[b]);
     }
     lp += block_lp;
   }

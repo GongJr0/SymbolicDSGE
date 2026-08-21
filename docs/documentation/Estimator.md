@@ -93,22 +93,31 @@ Estimator.map(
     theta0: np.ndarray | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
-    m: int = 10, # (3)!
+    jacobian: bool = False,  # (3)!
+    m: int = 10, # (4)!
     maxiter: int = 15000,
     maxfun: int = 15000,
     maxls: int = 20,
     factr: float = 1e7,
     pgtol: float = 1e-5,
     fd_step: float = 0.0,
-    xatol: float = 1e-4, # (4)!
+    xatol: float = 1e-4, # (5)!
     fatol: float = 1e-4,
 ) -> OptimizationResult
 ```
 
 1. Requires non-`None` priors at estimator construction.
 2. Native optimizer. Only the two listed are supported; see the note below.
+3. Includes the jacobian term arising from the prior transformations of random variables.
+
 3. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
 4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
+
+???+ note "On the Jacobian Parameter"
+    When `False`, the MAP transformations are treated as simple coordinate changes, consistent with point estimation.
+    When `True`, the MAP transformations treat theta as a random variable and include the jacobian term to perserve the proabilistic interpretation of the posterior.
+    Practically, set `jacobian=True` when passing the MAP estimates to `Estimator.mcmc` as `theta0` for the proposal covariance.
+    For one-off point estimation, `jacobian=False` correctly finds the mode of the posterior in constrained space (the parameters as specified), the transforms only serve to move where that search occurs.
 
 ???+ note "Native optimizer set"
     `mle` and `map` run entirely in the native backend, which ships a curated set of optimizers with no scipy fallback. Only `#!python "L-BFGS-B"` (default; quasi-Newton with a finite-difference gradient) and `#!python "Nelder-Mead"` (gradient-free) are supported; any other `method` raises. Each optimizer's tuning parameters are passed as explicit keyword arguments: the L-BFGS-B group (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`) and the Nelder-Mead group (`xatol`, `fatol`).
@@ -121,14 +130,14 @@ Estimator.mcmc(
     n_draws: int, # (1)!
     burn_in: int = 1000, # (2)!
     thin: int = 1, # (3)!
-    theta0: np.ndarray | None = None,
+    theta0: np.ndarray | None = None, # (4)!
     random_state: int | np.random.Generator | None = None,
-    adapt: bool = True, # (4)!
+    adapt: bool = True, 
     adapt_start: int = 100,
-    adapt_interval: int = 25,
     proposal_scale: float = 0.1,
     adapt_epsilon: float = 1e-8,
-    map_options: dict[str, Any] | None = None,
+    compute_map: bool = True,
+    map_options: dict[str, Any] | None = None,  # (5)!
     hessian_fd_step_scale: float = 1.0,
     hessian_fd_absolute_floor: float = 0.1,
 ) -> MCMCResult
@@ -137,7 +146,9 @@ Estimator.mcmc(
 1. Number of retained posterior draws.
 2. Number of initial iterations discarded.
 3. Retain every `thin`-th iteration after burn-in.
-4. Adaptive covariance updates are performed during burn-in only.
+4. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
+The proposal covariance will use the MAP point to compute the Hessian if `compute_map=True`.
+5. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
 
 ???+ note "Thinning Semantics"
     Thinning is applied after burn-in using `(t - burn_in) % thin == 0`.
@@ -158,7 +169,7 @@ MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native opt
 |:---------|:--------:|----------------:|
 | kind | `#!python str` | `"mle"` or `"map"` |
 | x | `#!python np.ndarray` | Optimized unconstrained vector |
-| theta | `#!python dict[str, float]` | Optimized constrained parameters |
+| theta | `#!python dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
 | success | `#!python bool` | Optimizer convergence flag |
 | message | `#!python str` | Optimizer status message |
 | fun | `#!python float` | Objective value at optimum |

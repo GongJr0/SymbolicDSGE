@@ -236,9 +236,13 @@ class Linearizer:
         zero_subs = {call: sp.Integer(0) for call in transformed_calls}
 
         residual_at_zero = transformed_expr.xreplace(zero_subs)
-        residual_at_expansion_point = sp.simplify(
-            residual_at_zero.subs(self._shock_zero_substitutions())
+        residual_at_expansion_point = residual_at_zero.xreplace(
+            self._shock_zero_substitutions()
         )
+        if require_zero_at_expansion_point and residual_at_expansion_point != 0:
+            # Structural cancellation covers the usual case; simplify is the
+            # fallback that decides whether a survivor is genuinely nonzero.
+            residual_at_expansion_point = sp.simplify(residual_at_expansion_point)
         if require_zero_at_expansion_point and residual_at_expansion_point != 0:
             prefix = (
                 f"Equation {equation_index} does not vanish at the supplied steady state"
@@ -266,11 +270,13 @@ class Linearizer:
                 eq.rhs
             )  # pyright: ignore[arg-type]
 
-            lhs_expansion_point = sp.simplify(lhs_at_zero.subs(shock_zero_subs))
-            rhs_expansion_point = sp.simplify(rhs_at_zero.subs(shock_zero_subs))
-            residual_at_expansion_point = sp.simplify(
-                lhs_expansion_point - rhs_expansion_point
-            )
+            lhs_expansion_point = lhs_at_zero.xreplace(shock_zero_subs)
+            rhs_expansion_point = rhs_at_zero.xreplace(shock_zero_subs)
+            residual_at_expansion_point = lhs_expansion_point - rhs_expansion_point
+            if residual_at_expansion_point != 0:
+                # Structural cancellation covers the usual case; simplify is the
+                # fallback that decides whether a survivor is genuinely nonzero.
+                residual_at_expansion_point = sp.simplify(residual_at_expansion_point)
             if residual_at_expansion_point != 0:
                 raise ValueError(
                     f"Equation {idx} does not vanish at the supplied steady state: {residual_at_expansion_point}"
@@ -278,8 +284,8 @@ class Linearizer:
 
             out.append(
                 sp.Eq(
-                    sp.simplify(linear_lhs - lhs_expansion_point),
-                    sp.simplify(linear_rhs - rhs_expansion_point),
+                    linear_lhs - lhs_expansion_point,
+                    linear_rhs - rhs_expansion_point,
                 )
             )
         return out

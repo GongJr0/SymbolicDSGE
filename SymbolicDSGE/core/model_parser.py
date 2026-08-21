@@ -84,6 +84,20 @@ def _caller_stacklevel() -> int:
     return level
 
 
+def _parse_in(text: str, _LOCALS: dict[str, Any]) -> Basic:
+    """Parse ``text`` against the config namespace.
+
+    ``evaluate=False`` preserves the authored form rather than SymPy's
+    canonical rearrangement of it.
+    """
+    return sp.parse_expr(
+        text,
+        local_dict=_LOCALS,
+        evaluate=False,
+        transformations=_GLOBAL_TRANSFORMATIONS,
+    )
+
+
 def _check_connective_parens(expr: str) -> None:
     """Require each ``&``/``|`` in a condition to join parenthesized relations.
 
@@ -378,7 +392,6 @@ class ModelParser:
     def from_yaml(self) -> tuple[dict, ParsedConfig]:
         data = self._load_yaml(self.config_path)
         self._validate_schema(data)
-        self._require_calibrated_params(data)
 
         ns = self._build_namespace(data)
         (
@@ -391,8 +404,13 @@ class ModelParser:
             shock_syms,
         ) = ns
 
-        # SymPy parsing helpers bound to this namespace
-        _get_expr, _get_relational, _get_eq = self._sympy_parsers(_LOCALS)
+        # Locals resolve before any field is parsed, so the helpers below can
+        # eliminate them from everything they build.
+        parameters, local_subs = self._resolve_calibration_locals(data, _LOCALS)
+        self._require_calibrated_params(data, local_subs)
+        params = [param for param in params if param not in local_subs]
+
+        _get_expr, _get_relational, _get_eq = self._sympy_parsers(_LOCALS, local_subs)
 
         variables = self._parse_variables(
             data, _LOCALS, ordered_var_names, variable_funcs, _get_expr
@@ -400,7 +418,6 @@ class ModelParser:
         equations = self._parse_equations(
             data, _LOCALS, ordered_var_names, _get_eq, _get_relational, _get_expr
         )
-        parameters = self._parse_parameters(data, _LOCALS)
 
         shock_std, shock_corr = self._parse_shock_calibration(data, _LOCALS, shock_syms)
         calibration = Calib(
@@ -439,11 +456,17 @@ class ModelParser:
         data_out = copy.deepcopy(self.raw_data)
 
         if config is not None:
-            normalized_params = {
-                str(k): round(float(v), digits)
-                for k, v in config.calibration.parameters.items()
-            }
-            data_out.setdefault("calibration", {})["parameters"] = normalized_params
+            # Update in place: derived entries carry no value to write back and
+            # the equations dumped alongside them still reference their names.
+            params_out = data_out.setdefault("calibration", {}).setdefault(
+                "parameters", {}
+            )
+            params_out.update(
+                {
+                    str(k): round(float(v), digits)
+                    for k, v in config.calibration.parameters.items()
+                }
+            )
 
         for key in ("variables", "observables"):
             if isinstance(data_out.get(key), list):
@@ -600,30 +623,29 @@ class ModelParser:
     @staticmethod
     def _sympy_parsers(
         _LOCALS: dict[str, Any],
+        local_subs: dict[Symbol, Expr],
     ) -> tuple[
         Callable[[str], Expr],
         Callable[[str], _REGIME_SHIFT_CONDITIONAL],
         Callable[[str], Eq],
     ]:
+        """Parsing helpers bound to the config namespace.
+
+        ``local_subs`` maps each derived calibration entry to its formula over
+        base parameters. Applying it here is what keeps derived names out of
+        the parsed config: every symbolic field the parser builds passes
+        through one of these three.
+        """
+
         def _get_expr(expr: str) -> Expr:
-            out = sp.parse_expr(
-                expr,
-                local_dict=_LOCALS,
-                evaluate=False,
-                transformations=_GLOBAL_TRANSFORMATIONS,
-            )
+            out = _parse_in(expr, _LOCALS).xreplace(local_subs)
             if not isinstance(out, Expr):
                 raise TypeError(f"Expression is not a valid SymPy Expr: {expr!r}")
             return out
 
         def _get_relational(expr: str) -> _REGIME_SHIFT_CONDITIONAL:
             _check_connective_parens(expr)
-            out = sp.parse_expr(
-                expr,
-                local_dict=_LOCALS,
-                evaluate=False,
-                transformations=_GLOBAL_TRANSFORMATIONS,
-            )
+            out = _parse_in(expr, _LOCALS).xreplace(local_subs)
             if not isinstance(out, _REGIME_SHIFT_CONDITIONAL):
                 raise TypeError(f"Constraint is not a valid SymPy Relational: {expr!r}")
             return out
@@ -635,18 +657,8 @@ class ModelParser:
             parts = [p.strip() for p in expr.split("=", maxsplit=2)]
             if len(parts) != 2:
                 raise ValueError(f"Equation must contain exactly one '=': {expr!r}")
-            lhs = sp.parse_expr(
-                parts[0],
-                local_dict=_LOCALS,
-                evaluate=False,
-                transformations=_GLOBAL_TRANSFORMATIONS,
-            )
-            rhs = sp.parse_expr(
-                parts[1],
-                local_dict=_LOCALS,
-                evaluate=False,
-                transformations=_GLOBAL_TRANSFORMATIONS,
-            )
+            lhs = _parse_in(parts[0], _LOCALS).xreplace(local_subs)
+            rhs = _parse_in(parts[1], _LOCALS).xreplace(local_subs)
             out = sp.Eq(lhs, rhs)
             if not isinstance(out, Eq):
                 raise TypeError(f"Not a valid equality: {expr!r}")
@@ -804,17 +816,58 @@ class ModelParser:
         )
 
     @staticmethod
-    def _parse_parameters(
+    def _resolve_calibration_locals(
         data: dict[str, Any], _LOCALS: dict[str, Any]
-    ) -> SymbolGetterDict[Symbol, float64]:
+    ) -> tuple[SymbolGetterDict[Symbol, float64], dict[Symbol, Expr]]:
+        """Split ``calibration.parameters`` into values and derived locals.
+
+        An entry carrying free symbols names a formula over other parameters
+        rather than a value, in the manner of a Dynare ``#`` definition. Such
+        an entry never reaches the model: the returned map rewrites it away
+        wherever it is referenced, leaving the base parameters behind it, so
+        estimating those base parameters moves the formula with them.
+        """
         calib = data.get("calibration", {}).get("parameters", {}) or {}
-        param_names = calib.keys()
-        return SymbolGetterDict(
-            {
-                _LOCALS[param_name]: float64(calib[param_name])
-                for param_name in param_names
-            }
-        )
+        param_syms = {_LOCALS[name] for name in calib}
+
+        values: dict[Symbol, float64] = {}
+        local_subs: dict[Symbol, Expr] = {}
+        for name, raw in calib.items():
+            expr = _parse_in(str(raw), _LOCALS)
+            if not isinstance(expr, Expr):
+                raise TypeError(
+                    f"Calibration entry '{name}' is not a valid SymPy Expr: {raw!r}"
+                )
+            if applied := expr.atoms(AppliedUndef):
+                raise ValueError(
+                    f"Calibration entry '{name}' references model variable(s): "
+                    f"{sorted(map(str, applied))}"
+                )
+            if unknown := expr.free_symbols - param_syms:
+                raise ValueError(
+                    f"Calibration entry '{name}' references undeclared "
+                    f"parameter(s): {sorted(map(str, unknown))}"
+                )
+            if expr.free_symbols:
+                local_subs[_LOCALS[name]] = expr
+            else:
+                values[_LOCALS[name]] = float64(expr)
+
+        # A local may cite another. Each pass composes one level of nesting, so
+        # their count bounds how many it can take to reach base parameters.
+        derived = set(local_subs)
+        for _ in range(len(local_subs)):
+            if not any(e.free_symbols & derived for e in local_subs.values()):
+                break
+            local_subs = {s: e.xreplace(local_subs) for s, e in local_subs.items()}
+
+        if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
+            raise ValueError(
+                "Calibration entries reference each other in a cycle: "
+                + ", ".join(sorted(s.name for s in cyclic))
+            )
+
+        return SymbolGetterDict(values), local_subs
 
     @staticmethod
     def _parse_shock_calibration(
@@ -971,7 +1024,15 @@ class ModelParser:
         )
 
     @staticmethod
-    def _require_calibrated_params(data: dict[str, Any]) -> None:
+    def _require_calibrated_params(
+        data: dict[str, Any], local_subs: dict[Symbol, Expr]
+    ) -> None:
+        """Check the blocks that reference a parameter by name.
+
+        Unlike an equation, these carry a bare name rather than an expression,
+        so the name has to be one a value can be read from: a derived entry
+        resolves to a formula and leaves nothing to build a covariance out of.
+        """
         calib = data.get("calibration", {}).get("parameters", {}) or {}
 
         referenced: set[str] = set()
@@ -992,6 +1053,14 @@ class ModelParser:
             raise ValueError(
                 "Config references parameter(s) not declared in `calibration.parameters`: "
                 + ", ".join(unknown)
+            )
+
+        named_locals = sorted(referenced & {sym.name for sym in local_subs})
+        if named_locals:
+            raise ValueError(
+                "Shock and measurement blocks reference a parameter by name, so "
+                "they cannot name a derived calibration entry: "
+                + ", ".join(named_locals)
             )
 
     @staticmethod

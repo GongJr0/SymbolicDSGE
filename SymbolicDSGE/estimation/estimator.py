@@ -208,7 +208,6 @@ class Estimator:
             matrix_blocks=self._matrix_blocks,
             matrix_member_names=self._matrix_member_names,
         )
-        self._warning_signal_count = 0
 
     def _spd_member_names(self) -> tuple[set[str], set[str]]:
         """Names of the SPD-relevant std (diagonal) and correlation (off-diagonal)
@@ -349,7 +348,7 @@ class Estimator:
             if hasattr(prior_obj, "transform"):
                 tr = cast(Transform, getattr(prior_obj, "transform"))
                 sup = tr.support
-                if not (sup.low == low and sup.high == high):
+                if not (sup.low >= low and sup.high <= high):
                     raise ValueError(
                         f"Prior on SPD parameter '{name}' uses a transform constraining "
                         f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
@@ -999,40 +998,6 @@ class Estimator:
     def logpost(self, theta: NDF) -> float64:
         return float64(self.loglik(theta) + self.logprior(theta))
 
-    def _logpost(self, theta: NDF) -> float64:
-        # Single ``_resolve_theta`` pass shared by the loglik and the Q
-        # correlation block (cheaper than ``logpost``, which resolves twice).
-        params, matrices = self._resolve_theta(theta)
-        return float64(
-            self._loglik_from_params(params, q_corr=matrices.get("Q_corr"))
-            + self.logprior(theta)
-        )
-
-    def _eval_with_warning_capture(
-        self, fn: Callable[[NDF], float64], theta: NDF
-    ) -> tuple[float64, int]:
-        # A misconfigured model can emit a warning on every evaluation; left to
-        # print, thousands of them flood the console and can take an IPython
-        # kernel down on its output-buffer limit. Intercept at the source: a
-        # counting ``showwarning`` tallies each warning and discards it, so
-        # nothing is printed and nothing is retained (O(1) memory, no per-eval
-        # buffer scan). stderr is deliberately left alone. Genuine errors there
-        # halt the evaluation and are caught by the callers.
-        signals = 0
-
-        def _count(*_args: Any, **_kwargs: Any) -> None:
-            nonlocal signals
-            signals += 1
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.showwarning = _count
-            val = float64(fn(theta))
-        return val, int(signals)
-
-    def _reset_search_warning_count(self) -> None:
-        self._warning_signal_count = 0
-
     def _report_search_warning_count(self, kind: str, n_err: int) -> None:
         print(
             f"[Estimator:{kind}] BK stability warnings encountered during search: {n_err}"
@@ -1045,35 +1010,6 @@ class Estimator:
         bitgen = type(rng.bit_generator)()
         bitgen.state = deepcopy(rng.bit_generator.state)
         return np.random.Generator(bitgen)
-
-    def _safe_loglik(self, theta: NDF) -> float64:
-        try:
-            ll, n_signals = self._eval_with_warning_capture(self.loglik, theta)
-            self._warning_signal_count += n_signals
-            if n_signals > 0 or not np.isfinite(ll):
-                return float64(-np.inf)
-            return float64(ll)
-        except BaseException:
-            return float64(-np.inf)
-
-    def _safe_logpost(self, theta: NDF) -> float64:
-        try:
-            lp, n_signals = self._eval_with_warning_capture(self._logpost, theta)
-            self._warning_signal_count += n_signals
-            if n_signals > 0 or not np.isfinite(lp):
-                return float64(-np.inf)
-            return float64(lp)
-        except BaseException:
-            return float64(-np.inf)
-
-    def _safe_logprior(self, theta: NDF) -> float64:
-        try:
-            lp = float64(self.logprior(theta))
-            if not np.isfinite(lp):
-                return float64(-np.inf)
-            return lp
-        except BaseException:
-            return float64(-np.inf)
 
     @staticmethod
     def _serialize_bounds(
@@ -1094,16 +1030,21 @@ class Estimator:
         config: Mapping[str, Any] | None = None,
     ) -> OptimizationResult:
         x = asarray(res["x"], dtype=float64)
-        # res["params"] is the calib-order parameter vector at x_best; name it to
-        # match the dict shape theta_to_params produced.
-        theta = {
-            str(name): float64(value)
-            for name, value in zip(self.compiled.calib_params, res["params"])
-        }
+        # res["params"] is the calib-order parameter vector at x_best. Only the
+        # estimated names are this result's own; every other parameter sits at
+        # the calibration it entered with and belongs to the model, not here.
+        params_at_x = dict(
+            zip((str(name) for name in self.compiled.calib_params), res["params"])
+        )
+        theta = {name: float64(params_at_x[name]) for name in self.param_names}
 
+        vcov = res.get("vcov")
         common: dict[str, Any] = dict(
             x=x,
             theta=theta,
+            vcov=vcov,
+            se=self._se_in_param_space(x, vcov),
+            cov_status=int(res.get("cov_status", 0)),
             success=bool(res["success"]),
             message=str(res["message"]),
             fun=float64(res["fun"]),
@@ -1116,6 +1057,41 @@ class Estimator:
         if kind == "map":
             return MAPResult(**common, logpost=-res["fun"], logprior=res["logprior"])
         raise ValueError(f"unknown result kind {kind!r}")
+
+    def _se_in_param_space(self, x: NDF, vcov: NDF | None) -> dict[str, float64] | None:
+        """Standard errors in the space ``theta`` reports, not the one they were
+        computed in.
+
+        The Hessian is taken over the unconstrained vector, which is the space
+        the sampler's proposal wants, so ``vcov`` carries theta's units. Beside a
+        parameter's value a reader expects that parameter's own scale, so the
+        covariance is pushed through the transform's Jacobian first. The Jacobian
+        is taken by finite difference rather than read off a diagonal: a
+        correlation block maps several theta entries onto several members at
+        once, and has no diagonal to read.
+        """
+        if vcov is None:
+            return None
+
+        names = list(self.param_names)
+        base = self.theta_to_params(x)
+        step = np.sqrt(np.finfo(float64).eps)
+        jac = np.zeros((len(names), len(names)), dtype=float64)
+        for j in range(len(names)):
+            h = step * max(abs(float(x[j])), 1.0)
+            probe = np.array(x, dtype=float64, copy=True)
+            probe[j] += h
+            moved = self.theta_to_params(probe)
+            for i, name in enumerate(names):
+                jac[i, j] = (float64(moved[name]) - float64(base[name])) / h
+
+        variance = np.diag(jac @ np.asarray(vcov, dtype=float64) @ jac.T)
+        return {
+            name: (
+                float64(np.sqrt(variance[i])) if variance[i] >= 0.0 else float64(np.nan)
+            )
+            for i, name in enumerate(names)
+        }
 
     def _build_native_context(
         self,
@@ -1156,7 +1132,8 @@ class Estimator:
     def _point_estimate(
         self,
         routine: Literal["mle", "map"],
-        has_priors: int,
+        has_priors: bool,
+        include_logjac: bool = False,
         theta0: NDF | Mapping[str, float] | None = None,
         bounds: Sequence[tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
@@ -1169,6 +1146,9 @@ class Estimator:
         fd_step: float = 0.0,
         xatol: float = 1e-4,
         fatol: float = 1e-4,
+        cov: bool = True,
+        cov_fd_step_scale: float = 1.0,
+        cov_fd_absolute_floor: float = 0.1,
     ) -> OptimizationResult:
         init = self.resolve_theta0(theta0)
         if routine == "map":
@@ -1180,6 +1160,7 @@ class Estimator:
             ctx,
             mode,
             method,
+            include_logjac=include_logjac,
             theta0=init,
             bounds=bounds,
             has_priors=has_priors,
@@ -1192,6 +1173,9 @@ class Estimator:
             fd_step=fd_step,
             xatol=xatol,
             fatol=fatol,
+            compute_cov=cov,
+            cov_fd_step_scale=cov_fd_step_scale,
+            cov_fd_absolute_floor=cov_fd_absolute_floor,
         )
 
         out = self._pack_opt_result(
@@ -1231,6 +1215,9 @@ class Estimator:
         fd_step: float = 0.0,
         xatol: float = 1e-4,
         fatol: float = 1e-4,
+        cov: bool = True,
+        cov_fd_step_scale: float = 1.0,
+        cov_fd_absolute_floor: float = 0.1,
     ) -> MLEResult:
         if self.priors is not None:
             warnings.warn(
@@ -1242,7 +1229,8 @@ class Estimator:
             MLEResult,
             self._point_estimate(
                 routine="mle",
-                has_priors=0,
+                has_priors=False,
+                include_logjac=False,
                 theta0=theta0,
                 bounds=bounds,
                 method=method,
@@ -1255,6 +1243,9 @@ class Estimator:
                 fd_step=fd_step,
                 xatol=xatol,
                 fatol=fatol,
+                cov=cov,
+                cov_fd_step_scale=cov_fd_step_scale,
+                cov_fd_absolute_floor=cov_fd_absolute_floor,
             ),
         )
 
@@ -1264,6 +1255,7 @@ class Estimator:
         theta0: NDF | Mapping[str, float] | None = None,
         bounds: Sequence[tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
+        jacobian: bool = False,
         m: int = 10,
         maxiter: int = 15000,
         maxfun: int = 15000,
@@ -1273,6 +1265,9 @@ class Estimator:
         fd_step: float = 0.0,
         xatol: float = 1e-4,
         fatol: float = 1e-4,
+        cov: bool = True,
+        cov_fd_step_scale: float = 1.0,
+        cov_fd_absolute_floor: float = 0.1,
     ) -> MAPResult:
         if self.priors is None:
             raise ValueError("MAP requires priors. No priors were provided.")
@@ -1281,7 +1276,8 @@ class Estimator:
             MAPResult,
             self._point_estimate(
                 routine="map",
-                has_priors=1,
+                has_priors=True,
+                include_logjac=jacobian,
                 theta0=theta0,
                 bounds=bounds,
                 method=method,
@@ -1294,6 +1290,9 @@ class Estimator:
                 fd_step=fd_step,
                 xatol=xatol,
                 fatol=fatol,
+                cov=cov,
+                cov_fd_step_scale=cov_fd_step_scale,
+                cov_fd_absolute_floor=cov_fd_absolute_floor,
             ),
         )
 
@@ -1307,21 +1306,13 @@ class Estimator:
         random_state: int | np.random.Generator | None = None,
         adapt: bool = True,
         adapt_start: int = 100,
-        adapt_interval: int = 25,
         proposal_scale: float = 0.1,
         adapt_epsilon: float = 1e-8,
+        compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
         hessian_fd_step_scale: float = 1.0,
         hessian_fd_absolute_floor: float = 0.1,
     ) -> MCMCResult:
-        if n_draws <= 0:
-            raise ValueError("n_draws must be positive.")
-        if burn_in < 0:
-            raise ValueError("burn_in must be non-negative.")
-        if thin <= 0:
-            raise ValueError("thin must be positive.")
-        if adapt_interval <= 0:
-            raise ValueError("adapt_interval must be positive.")
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
 
@@ -1350,11 +1341,11 @@ class Estimator:
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
-            adapt=int(adapt),
+            adapt=adapt,
             adapt_start=adapt_start,
-            adapt_interval=adapt_interval,
             proposal_scale=proposal_scale,
             adapt_epsilon=adapt_epsilon,
+            compute_map=compute_map,
             map_options=map_options,
             hessian_fd_step_scale=hessian_fd_step_scale,
             hessian_fd_absolute_floor=hessian_fd_absolute_floor,
@@ -1386,9 +1377,9 @@ class Estimator:
             sampler_config={
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
-                "adapt_interval": int(adapt_interval),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
+                "compute_map": bool(compute_map),
                 "random_state": (
                     int(random_state)
                     if isinstance(random_state, (int, np.integer))

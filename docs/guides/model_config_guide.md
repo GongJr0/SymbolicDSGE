@@ -79,6 +79,22 @@ calibration:
         tau_inv: 1.86
 ```
 
+???+ info "Configuration Local Parameters"
+    While all parameter declarations are required to reduce to scalar values, it is possible to declare expressions as functions of other parameters.
+    This allows simplifying model defintions by assigning a name to lengthy parameter expressions.
+    For example:
+    
+    ```yaml
+    calibration:
+        parameters:
+            x: 1/3
+            y: 2*x + 1
+    ```
+    In the above example, `y` appearing in any part of the `equations` field will be substituted with `2 * x + 1`.
+    After a model is parsed, `y` will not be available as a parameter in the calibration field.
+    Consquently, `y` is not an estimable parameter.
+    Estimating `x` is the only way to determine the value of `y` in this example.
+
 ???+ note "Calibration Values"
     `SymbolicDSGE` currently expects each parameter to have known values.
     These calibration values are used as defaults and as initial guesses for estimation workflows (`mle`, `map`, `mcmc`) when no explicit `theta0` is supplied.

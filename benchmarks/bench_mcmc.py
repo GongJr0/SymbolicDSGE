@@ -1,4 +1,4 @@
-"""Benchmark POST82 random-walk MCMC against Dynare.
+"""Benchmark random-walk MCMC against Dynare.
 
 The timed entries are the public ``Estimator.mcmc`` method and Dynare's
 ``dynare_estimation`` sampling phase. Dynare's posterior-mode and Hessian
@@ -6,6 +6,32 @@ setup, native parse/compile/solve, data generation, and optional warmup chains
 are outside the timer. Both samplers use adaptive random-walk MH, but their
 RNGs and adaptation schedules differ, so this reports marginal posterior
 summaries rather than path parity.
+
+The MAP is found once per case, before either timer starts, and both runtimes
+begin every chain from it. The native side takes it as ``theta0`` under
+``compute_map=False``; Dynare reads it from the mode file, whose ``xparam1`` the
+setup pass's own estimate is overwritten with.
+
+Each side then rebuilds the proposal Hessian at that shared mode inside its own
+timed call, the native kernel as part of ``run_mcmc`` and Dynare through the
+same ``hessian.m`` call ``dynare_estimation_1`` makes, which ``mode_compute =
+0`` would otherwise skip in favour of reading one off disk. Both use the
+Abramowitz and Stegun 25.3.23 / 25.3.27 stencil at the same step, so both cost
+``d * (d + 1) + 1`` likelihood evaluations and ``draws / s`` covers the same
+work on either side.
+
+Every case estimates its model's full structural parameter set: each calibrated
+parameter that is not a shock standard deviation, a shock correlation, or a
+measurement-error entry of R. The priors come from the calibration itself, one
+normal per parameter centered on the calibrated value with a standard deviation
+of ``--prior-scale`` times its magnitude.
+
+The .mod files reach the same set from the other side. A coefficient the .mod
+computes as a model-local is a derived calibration entry in the yaml, so both
+runtimes rebuild it from the same base parameters and a draw moves the same
+coefficients on either side. The temporary copy of the .mod only drops the
+statements listed in ``dynare_remove`` and appends the estimation block, and
+nothing is written back to the fixture.
 
 Raw outputs are discarded unless ``--output-dir`` is supplied. Relative output
 paths are resolved from this benchmark's directory.
@@ -26,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.io import loadmat
+from scipy.io import loadmat, savemat
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -36,14 +62,23 @@ sys.path.insert(0, str(ROOT))
 from SymbolicDSGE import DSGESolver, ModelParser, Shock
 from SymbolicDSGE.estimation import Estimator, make_prior
 
+PRIOR_DISTRIBUTION = "normal"
+PRIOR_TRANSFORM = "identity"
+DYNARE_PRIOR_DENSITY = "normal_pdf"
 
-@dataclass(frozen=True)
-class Prior:
-    name: str
-    distribution: str
-    parameters: tuple[tuple[str, float], ...]
-    transform: str
-    dynare_density: str
+# Both samplers draw their initial proposal from a finite-difference Hessian at
+# the mode, and they already agree on how wide that step is: Dynare's
+# hessian.m steps by eps^(1/6) * gstep(2) with a floor of sqrt(gstep(1)), and
+# the native kernel steps by sqrt(cbrt(eps)) * scale with a floor of 0.1, which
+# is the same 2.4607e-3 and the same 0.1 under the shipped defaults.
+#
+# The default is too wide for sw2007, whose crhoa sits 0.0023 below the unit
+# root: the upward probe lands at 1.00003, and the Blanchard-Kahn failure there
+# is fatal to both runtimes. Native aborts the chain outright; Dynare fills hh
+# with non-finite entries, which inv() spreads into a jumping covariance that
+# chol rejects. Narrowing it keeps the probe inside the stable region. One
+# scale drives both sides so the two proposals stay comparable.
+HESSIAN_STEP_SCALE = 0.5
 
 
 @dataclass(frozen=True)
@@ -52,12 +87,21 @@ class CaseSpec:
     yaml_name: str
     mod_name: str
     data_file: str
-    theta0: tuple[float, ...]
-    priors: tuple[Prior, ...]
-    estimated_params: tuple[str, ...] = ()
     seed: int = 0
     native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
     dynare_remove: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Targets:
+    """The estimated parameters, their calibrated values, and prior widths."""
+
+    names: tuple[str, ...]
+    values: tuple[float, ...]
+    stds: tuple[float, ...]
+
+    def value_of(self, name: str) -> float:
+        return self.values[self.names.index(name)]
 
 
 CASES = {
@@ -66,16 +110,6 @@ CASES = {
         yaml_name="POST82.yaml",
         mod_name="post82_kf.mod",
         data_file="post82_mcmc_data",
-        theta0=(2.0,),
-        priors=(
-            Prior(
-                name="psi_pi",
-                distribution="normal",
-                parameters=(("mean", 2.0), ("std", 0.5)),
-                transform="identity",
-                dynare_density="normal_pdf",
-            ),
-        ),
         dynare_remove=(
             "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
         ),
@@ -85,16 +119,6 @@ CASES = {
         yaml_name="sw2007.yaml",
         mod_name="sw2007.mod",
         data_file="sw2007_mcmc_data",
-        theta0=(1.488,),
-        priors=(
-            Prior(
-                name="crpi",
-                distribution="normal",
-                parameters=(("mean", 1.5), ("std", 0.25)),
-                transform="identity",
-                dynare_density="normal_pdf",
-            ),
-        ),
         seed=2007,
         dynare_remove=(
             "calib_smoother(datafile = sw2007_kf_data, filtered_vars, filter_step_ahead = [1]);",
@@ -105,16 +129,6 @@ CASES = {
         yaml_name="gali_2015.yaml",
         mod_name="gali_2015.mod",
         data_file="gali_2015_mcmc_data",
-        theta0=(1.5,),
-        priors=(
-            Prior(
-                name="phi_pi",
-                distribution="normal",
-                parameters=(("mean", 1.5), ("std", 0.25)),
-                transform="identity",
-                dynare_density="normal_pdf",
-            ),
-        ),
         seed=2015,
         native_to_dynare_observable=(
             ("obs_pi_ann", "pi_ann"),
@@ -126,16 +140,6 @@ CASES = {
         yaml_name="gali_monacelli_2005.yaml",
         mod_name="gali_monacelli_2005.mod",
         data_file="gali_monacelli_2005_mcmc_data",
-        theta0=(3.0,),
-        priors=(
-            Prior(
-                name="phi",
-                distribution="normal",
-                parameters=(("mean", 3.0), ("std", 0.5)),
-                transform="identity",
-                dynare_density="normal_pdf",
-            ),
-        ),
         seed=2005,
         native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
     ),
@@ -144,16 +148,6 @@ CASES = {
         yaml_name="ireland_2004.yaml",
         mod_name="ireland_2004.mod",
         data_file="ireland_2004_mcmc_data",
-        theta0=(0.9048,),
-        priors=(
-            Prior(
-                name="rho_a",
-                distribution="normal",
-                parameters=(("mean", 0.9), ("std", 0.05)),
-                transform="identity",
-                dynare_density="normal_pdf",
-            ),
-        ),
         seed=2004,
         native_to_dynare_observable=(
             ("obs_gobs", "gobs"),
@@ -163,10 +157,38 @@ CASES = {
 }
 
 
-def _estimated_params(case: CaseSpec) -> tuple[str, ...]:
-    if case.estimated_params:
-        return case.estimated_params
-    return tuple(prior.name for prior in case.priors)
+def _estimation_targets(compiled, prior_scale: float) -> Targets:
+    """Every structural parameter of the model, with a prior built from its
+    calibrated value.
+
+    Shock standard deviations, shock correlations and the measurement-error
+    entries of R are left out: they carry a role-authoritative constraining
+    transform on this side and reach Dynare through stderr and corr entries
+    rather than by name, so estimating them would compare two different
+    parameterizations. A parameter calibrated at zero takes ``prior_scale``
+    itself as its prior standard deviation, since scaling would leave it with
+    no width at all.
+    """
+    calibration = compiled.config.calibration
+    excluded = {
+        symbol.name
+        for mapping in (calibration.shock_std, calibration.shock_corr)
+        for symbol in (mapping or {}).values()
+        if symbol is not None
+    }
+    excluded |= set(getattr(compiled.kalman, "R_param_names", None) or ())
+    names = tuple(
+        str(param) for param in compiled.calib_params if str(param) not in excluded
+    )
+    values = tuple(float(calibration.parameters[name]) for name in names)
+    return Targets(
+        names=names,
+        values=values,
+        stds=tuple(
+            prior_scale * abs(value) if value != 0.0 else prior_scale
+            for value in values
+        ),
+    )
 
 
 def _dynare_observables(
@@ -197,14 +219,16 @@ def _prepare(case: CaseSpec, periods: int):
     return compiled, solved, sim.y, tuple(sim.observable_names)
 
 
-def _make_estimator(case: CaseSpec, compiled, solved, y: np.ndarray, observables):
+def _make_estimator(targets: Targets, compiled, solved, y: np.ndarray, observables):
     priors = {
-        prior.name: make_prior(
-            distribution=prior.distribution,
-            parameters=dict(prior.parameters),
-            transform=prior.transform,
+        name: make_prior(
+            distribution=PRIOR_DISTRIBUTION,
+            parameters={"mean": mean, "std": std},
+            transform=PRIOR_TRANSFORM,
         )
-        for prior in case.priors
+        for name, mean, std in zip(
+            targets.names, targets.values, targets.stds, strict=True
+        )
     }
     return Estimator(
         solver=solved,
@@ -212,7 +236,7 @@ def _make_estimator(case: CaseSpec, compiled, solved, y: np.ndarray, observables
         y=y,
         observables=list(observables),
         filter_mode="linear",
-        estimated_params=list(case.estimated_params) or None,
+        estimated_params=list(targets.names),
         priors=priors,
         ss_seed=np.zeros(len(compiled.var_names), dtype=np.float64),
         joseph_cov=False,
@@ -220,8 +244,29 @@ def _make_estimator(case: CaseSpec, compiled, solved, y: np.ndarray, observables
     )
 
 
+def _posterior_mode(targets: Targets, compiled, solved, y, observables):
+    """The MAP both runtimes start from, found once and outside every timer.
+
+    Letting each side find its own would compare two chains that began in
+    different places, and letting the native side find it per rep would time
+    the same optimization once per rep against a Dynare that reads its own from
+    a file.
+    """
+    estimator = _make_estimator(targets, compiled, solved, y, observables)
+    with (
+        open(os.devnull, "w", encoding="utf-8") as sink,
+        contextlib.redirect_stdout(sink),
+    ):
+        result = estimator.map(
+            theta0=dict(zip(targets.names, targets.values, strict=True))
+        )
+    if not result.success:
+        raise RuntimeError(f"MAP did not converge before sampling: {result.message}")
+    return result
+
+
 def _run_native(
-    case: CaseSpec,
+    targets: Targets,
     compiled,
     solved,
     y: np.ndarray,
@@ -234,19 +279,22 @@ def _run_native(
     proposal_scale: float,
     adapt: bool,
     adapt_start: int,
+    hessian_step_scale: float,
+    mode,
 ) -> dict[str, np.ndarray | float]:
-    estimator = _make_estimator(case, compiled, solved, y, observables)
-    theta0 = np.asarray(case.theta0, dtype=np.float64)
+    estimator = _make_estimator(targets, compiled, solved, y, observables)
 
     def run(chain_seed: int):
         return estimator.mcmc(
             n_draws=draws,
             burn_in=burn_in,
-            theta0=theta0,
+            theta0=mode.x,
+            compute_map=False,
             random_state=chain_seed,
             proposal_scale=proposal_scale,
             adapt=adapt,
             adapt_start=adapt_start,
+            hessian_fd_step_scale=hessian_step_scale,
         )
 
     with (
@@ -276,25 +324,49 @@ def _write_data(path: Path, observables: tuple[str, ...], y: np.ndarray) -> None
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _dynare_estimated_params(case: CaseSpec) -> str:
-    priors = {prior.name: prior for prior in case.priors}
-    lines = []
-    for name, initial in zip(_estimated_params(case), case.theta0, strict=True):
-        prior = priors[name]
-        line = f"{name}, {initial:.17g}, , , {prior.dynare_density}"
-        line += ", " + ", ".join(f"{value:.17g}" for _, value in prior.parameters)
-        lines.append(line + ";")
-    return "\n".join(lines)
+def _write_shared_mode(path: Path, targets: Targets, mode) -> None:
+    """The shared MAP, written for the MATLAB side to match up by name.
+
+    Dynare's own parameter order is whatever its mode file records, so the names
+    travel with the values rather than the two sides agreeing on an ordering.
+    """
+    savemat(
+        str(path),
+        {
+            "xparam1": np.asarray(
+                [float(mode.theta[name]) for name in targets.names], dtype=np.float64
+            ).reshape(-1, 1),
+            "parameter_names": np.array(
+                [np.str_(name) for name in targets.names], dtype=object
+            ).reshape(-1, 1),
+        },
+    )
 
 
-def _write_model(case: CaseSpec, path: Path, periods: int) -> None:
+def _dynare_estimated_params(targets: Targets) -> str:
+    return "\n".join(
+        f"{name}, {value:.17g}, , , {DYNARE_PRIOR_DENSITY}, {value:.17g}, {std:.17g};"
+        for name, value, std in zip(
+            targets.names, targets.values, targets.stds, strict=True
+        )
+    )
+
+
+def _write_model(
+    case: CaseSpec,
+    path: Path,
+    periods: int,
+    targets: Targets,
+    hessian_step_scale: float,
+) -> None:
     source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
     for statement in case.dynare_remove:
         source = source.replace(statement, "")
     source += (
         "\nestimated_params;\n"
-        + _dynare_estimated_params(case)
+        + _dynare_estimated_params(targets)
         + "\nend;\n"
+        + f"options_.gstep(2) = {hessian_step_scale:.17g};\n"
         + f"estimation(datafile = {case.data_file}, nobs = {periods}, "
         + "mode_compute = 4, cova_compute = 1, mh_replic = 0);\n"
     )
@@ -305,6 +377,7 @@ def _run_dynare(
     runtime: str,
     case_name: str,
     case: CaseSpec,
+    targets: Targets,
     y: np.ndarray,
     observables: tuple[str, ...],
     output_dir: Path,
@@ -315,6 +388,8 @@ def _run_dynare(
     seed: int,
     adapt: bool,
     adapt_start: int,
+    hessian_step_scale: float,
+    mode,
     dynare_path: str,
     matlab_bin: str,
     octave_bin: str,
@@ -329,16 +404,24 @@ def _run_dynare(
     ) as tmp:
         workdir = Path(tmp)
         model_name = f"{case_name}_mcmc"
-        _write_model(case, workdir / f"{model_name}.mod", y.shape[0])
+        _write_model(
+            case,
+            workdir / f"{model_name}.mod",
+            y.shape[0],
+            targets,
+            hessian_step_scale,
+        )
         _write_data(
             workdir / f"{case.data_file}.m", _dynare_observables(case, observables), y
         )
+        shared_mode_path = workdir / "shared_mode.mat"
+        _write_shared_mode(shared_mode_path, targets, mode)
         expression = (
             f"addpath('{_quoted_matlab(dynare_path)}'); "
             f"addpath('{_quoted_matlab(SCRIPT_DIR)}', '-begin'); "
             f"bench_mcmc_dynare('{_quoted_matlab(workdir)}', '{model_name}', "
             f"{draws}, {burn_in}, {warmup}, {reps}, {seed}, {int(adapt)}, {adapt_start}, "
-            f"'{_quoted_matlab(result_path)}');"
+            f"'{_quoted_matlab(shared_mode_path)}', '{_quoted_matlab(result_path)}');"
         )
         command = (
             [matlab_bin, "-batch", expression]
@@ -448,13 +531,14 @@ def _print_report(
     dynare: dict,
 ):
     print(
-        f"{case.label} MCMC: retained draws={draws} burn-in={burn_in} "
-        f"reps={len(native['times'])}"
+        f"{case.label} MCMC: {len(estimated_params)} estimated parameters, "
+        f"retained draws={draws} burn-in={burn_in} reps={len(native['times'])}"
     )
     print(
-        "Mode and Hessian setup are outside Dynare's timer. Both chains use "
-        "adaptive random-walk MH from the shared start draw, but their update "
-        "schedules and RNGs differ, so posterior summaries are descriptive."
+        "Both runtimes start from one MAP, found outside every timer, and each "
+        "rebuilds its proposal Hessian at that mode inside its own timed call. "
+        "Their update schedules and RNGs differ, so posterior summaries are "
+        "descriptive."
     )
     native_median = float(np.median(native["times"]))
     native_ess = _effective_sample_size(native["samples"])
@@ -524,8 +608,10 @@ def main() -> int:
     parser.add_argument("--reps", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--native-proposal-scale", type=float, default=0.1)
+    parser.add_argument("--prior-scale", type=float, default=0.05)
     parser.add_argument("--no-native-adapt", action="store_true")
     parser.add_argument("--adapt-start", type=int, default=100)
+    parser.add_argument("--hessian-step-scale", type=float, default=HESSIAN_STEP_SCALE)
     parser.add_argument(
         "--cases", nargs="+", choices=tuple(CASES), default=tuple(CASES)
     )
@@ -552,8 +638,12 @@ def main() -> int:
         )
     if args.native_proposal_scale <= 0:
         parser.error("--native-proposal-scale must be positive")
+    if args.prior_scale <= 0:
+        parser.error("--prior-scale must be positive")
     if args.adapt_start < 0:
         parser.error("--adapt-start must be nonnegative")
+    if args.hessian_step_scale <= 0:
+        parser.error("--hessian-step-scale must be positive")
     if set(args.runtimes) - {"native"} and not args.dynare_matlab_path:
         parser.error("--dynare-matlab-path is required for Dynare runtimes")
 
@@ -571,17 +661,13 @@ def main() -> int:
         root_output.mkdir(parents=True, exist_ok=True)
         for case_name in args.cases:
             case = CASES[case_name]
-            estimated_params = _estimated_params(case)
-            if len(case.theta0) != len(estimated_params):
-                parser.error(
-                    f"{case_name} has {len(estimated_params)} estimated parameters but "
-                    f"{len(case.theta0)} initial values"
-                )
             output_dir = root_output / case_name
             output_dir.mkdir(exist_ok=True)
             compiled, solved, y, observables = _prepare(case, args.periods)
+            targets = _estimation_targets(compiled, args.prior_scale)
+            mode = _posterior_mode(targets, compiled, solved, y, observables)
             native = _run_native(
-                case,
+                targets,
                 compiled,
                 solved,
                 y,
@@ -594,6 +680,8 @@ def main() -> int:
                 args.native_proposal_scale,
                 not args.no_native_adapt,
                 args.adapt_start,
+                args.hessian_step_scale,
+                mode,
             )
             np.savez(output_dir / "native.npz", **native)
             dynare: dict[str, dict] = {}
@@ -603,6 +691,7 @@ def main() -> int:
                         runtime,
                         case_name,
                         case,
+                        targets,
                         y,
                         observables,
                         output_dir,
@@ -613,6 +702,8 @@ def main() -> int:
                         args.seed,
                         not args.no_native_adapt,
                         args.adapt_start,
+                        args.hessian_step_scale,
+                        mode,
                         args.dynare_matlab_path,
                         args.matlab_bin,
                         args.octave_bin,
@@ -620,7 +711,7 @@ def main() -> int:
                     squeeze_me=False,
                 )
                 samples = np.asarray(raw["samples"], dtype=np.float64).reshape(
-                    -1, len(estimated_params)
+                    -1, len(targets.names)
                 )
                 dynare[runtime] = {
                     "times": np.asarray(raw["times"], dtype=np.float64).reshape(-1),
@@ -629,7 +720,7 @@ def main() -> int:
                 }
             _print_report(
                 case,
-                estimated_params,
+                targets.names,
                 args.draws,
                 args.burn_in,
                 native,
@@ -647,8 +738,10 @@ def main() -> int:
                         "reps": args.reps,
                         "seed": args.seed,
                         "native_proposal_scale": args.native_proposal_scale,
+                        "prior_scale": args.prior_scale,
                         "native_adapt": not args.no_native_adapt,
                         "adapt_start": args.adapt_start,
+                        "hessian_step_scale": args.hessian_step_scale,
                     },
                     indent=2,
                 )

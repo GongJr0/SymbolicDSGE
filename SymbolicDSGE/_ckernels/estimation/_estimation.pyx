@@ -106,6 +106,7 @@ cdef extern from "estimation.h":
         const double *matrix_etas
         const double *matrix_log_constants
         int64_t n_blocks
+        int include_logjac
 
     ctypedef struct sdsge_solve1:
         double *ss
@@ -202,6 +203,14 @@ cdef extern from "estimation.h":
         const double *hi
         const int64_t *nbd
         sdsge_optim_options optim
+        int compute_cov
+        double cov_fd_step_scale
+        double cov_fd_absolute_floor
+
+    ctypedef struct sdsge_estimation_result:
+        sdsge_optim_result base
+        double *vcov
+        int64_t cov_status
 
     void sdsge_init_params(double *params, const double *base_params,
                            int64_t n_par) nogil
@@ -221,7 +230,7 @@ cdef extern from "estimation.h":
 
     void sdsge_run_estimation(void *ctx, int64_t n_theta, double *theta,
                               const sdsge_estimation_options *opt,
-                              sdsge_optim_result *out) noexcept nogil
+                              sdsge_estimation_result *out) noexcept nogil
 
 cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
@@ -257,9 +266,9 @@ cdef extern from "mcmc.h":
         int64_t n_draws
         int64_t burn_in
         int64_t thin
+        int needs_map
         int adapt
         int64_t adapt_start
-        int64_t adapt_interval
         double adapt_epsilon
         double proposal_scale
         double hessian_fd_step_scale
@@ -277,8 +286,8 @@ cdef extern from "mcmc.h":
         const char *message
 
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
-                           bitgen_t *bg, const double *theta0, int64_t d,
-                           const sdsge_mcmc_options *opt,
+                           bitgen_t *bg, const double *theta0,
+                           int64_t d, const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
                            sdsge_mcmc_result *out) nogil
@@ -307,533 +316,6 @@ cdef _factor_shock_cov(double[:, ::1] cov, double[:, ::1] out):
             "The shock covariance is not positive definite, so it has no "
             "Cholesky factor for the solve to load the innovations through."
         )
-
-
-def obj_linear_base(
-    size_t residual_addr,
-    size_t meas_addr,
-    size_t jac_addr,
-    int n_state,
-    int n_exog,
-    int n_obs,
-    double[::1] ss_seed,         # n_var (Newton seed for the steady state)
-    signed char[::1] incidence,  # n_var (SDSGE_INC_* bits)
-    double[::1] base_calib,      # n_par
-    double[:, ::1] Q,            # n_exog*n_exog constant
-    double[:, ::1] R,            # n_obs*n_obs constant
-    double[:, ::1] y,            # T*n_obs
-    double[:, ::1] P0,           # n_var*n_var
-    double jitter,
-    int symmetrize,
-):
-    """Evaluate the native linear objective at base calibration (n_theta == 0,
-    constant Q/R, no prior). Returns loglik. Composer for the first parity."""
-    cdef int64_t n_var = ss_seed.shape[0]
-    cdef int64_t n_par = base_calib.shape[0]
-    cdef int64_t T = y.shape[0]
-    cdef int64_t n_ctrl = n_var - n_state
-    cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
-
-    # Preallocated scratch (kept alive for the whole call).
-    params = np.empty(n_par, dtype=np.float64)
-    ss = np.empty(n_var, dtype=np.float64)
-    a_real = np.empty((n_var, n_var), dtype=np.float64)
-    b_real = np.empty((n_var, n_var), dtype=np.float64)
-    c_real = np.empty((n_var, n_var), dtype=np.float64)
-    d_real = np.empty((n_var, n_exog), dtype=np.float64)
-    order = np.empty(n_var, dtype=np.int64)
-    s = np.empty((nd, nd), dtype=np.complex128, order="F")
-    t = np.empty((nd, nd), dtype=np.complex128, order="F")
-    z = np.empty((nd, nd), dtype=np.complex128, order="F")
-    f = np.empty((n_ctrl, n_state), dtype=np.float64)
-    p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(nd, dtype=np.complex128)
-    x0 = np.zeros(n_var, dtype=np.float64)
-    A = np.empty((n_var, n_var), dtype=np.float64)
-    B = np.empty((n_var, n_exog), dtype=np.float64)
-    C = np.empty((n_obs, n_var), dtype=np.float64)
-    d = np.empty(n_obs, dtype=np.float64)
-
-    cdef double[::1] paramsv = params
-    cdef double[::1] ssv = ss
-    cdef double[:, ::1] arv = a_real
-    cdef double[:, ::1] brv = b_real
-    cdef double[:, ::1] crealv = c_real
-    cdef double[:, ::1] drealv = d_real
-    cdef int64_t[::1] orderv = order
-    cdef double complex[::1, :] sv = s
-    cdef double complex[::1, :] tv = t
-    cdef double complex[::1, :] zv = z
-    cdef double[:, ::1] fv = f
-    cdef double[:, ::1] pv = p
-    cdef double complex[::1] eigv = eig
-    cdef double[::1] x0v = x0
-    cdef double[:, ::1] Av = A
-    cdef double[:, ::1] Bv = B
-    cdef double[:, ::1] Cv = C
-    cdef double[::1] dv = d
-
-    cdef sdsge_linear_ctx ctx
-    cdef sdsge_obj_common *b = &ctx.base
-
-    b.dims.n_theta = 0
-    b.dims.n_var = n_var
-    b.dims.n_state = n_state
-    b.dims.n_ctrl = n_ctrl
-    b.dims.n_exog = n_exog
-    b.dims.n_obs = n_obs
-    b.dims.n_par = n_par
-    b.dims.T = T
-
-    b.residual = <sdsge_residual_fn><void*>residual_addr
-    b.zgges = _zgges
-    b.dgeqrf = _dgeqrf
-    b.dormqr = _dormqr
-    b.meas = <meas_fn><void*>meas_addr
-    b.jac = <meas_fn><void*>jac_addr
-
-    b.ss_seed = &ss_seed[0]
-    b.incidence = &incidence[0]
-    b.y = &y[0, 0]
-    b.P0 = &P0[0, 0]
-    b.x0 = &x0v[0]
-    b.jitter = jitter
-    b.symmetrize = symmetrize
-    b.joseph_cov = 1
-
-    b.pmap.base_params = &base_calib[0]
-    b.pmap.scalars = NULL
-    b.pmap.n_scalars = 0
-
-    b.q_spec.is_constant = 1
-    b.q_spec.constant = &Q[0, 0]
-    b.q_spec.K = n_exog
-    b.q_spec.corr_from_block = 0
-    b.q_spec.n_pairs = 0
-
-    b.r_spec.is_constant = 1
-    b.r_spec.constant = &R[0, 0]
-    b.r_spec.K = n_obs
-    b.r_spec.corr_from_block = 0
-    b.r_spec.n_pairs = 0
-
-    b.prior.has_prior = 0
-
-    b.params = &paramsv[0]
-    b.Q = NULL
-    b.chol = NULL
-    b.R = NULL
-    b.corr_q = NULL
-    b.corr_r = NULL
-    b.std_q = NULL
-    b.std_r = NULL
-    b.bk_violations = 0
-    filter_arena = np.empty(
-        kf_arena_size(n_var, n_obs, n_exog).n_float, dtype=np.float64
-    )
-    cdef double[::1] filter_arena_v = filter_arena
-    b.filter_arena = &filter_arena_v[0]
-
-    cdef arena_size solve_sz = sdsge_klein_solve1_arena_size(
-        n_var, n_state, n_ctrl, n_par, n_exog, nd
-    )
-    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
-    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
-    cdef double[::1] solve_arena_v = solve_arena
-    cdef int64_t[::1] solve_iarena_v = solve_iarena
-    b.solve_arena = &solve_arena_v[0]
-    b.solve_iarena = &solve_iarena_v[0]
-
-    ctx.solve.ss = &ssv[0]
-    ctx.solve.a_real = &arv[0, 0]
-    ctx.solve.b_real = &brv[0, 0]
-    ctx.solve.c_real = &crealv[0, 0]
-    ctx.solve.d_real = &drealv[0, 0] if n_exog > 0 else NULL
-    ctx.solve.s = <c128*>&sv[0, 0]
-    ctx.solve.t = <c128*>&tv[0, 0]
-    ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = &fv[0, 0]
-    ctx.solve.p = &pv[0, 0]
-    ctx.solve.eig = <c128*>&eigv[0]
-    ctx.solve.A = &Av[0, 0]
-    ctx.solve.B = &Bv[0, 0]
-    ctx.solve.order = &orderv[0]
-
-    ctx.C = &Cv[0, 0]
-    ctx.d = &dv[0]
-
-    # One-time construction seed: fill the calibrated baseline (the per-eval fill
-    # only touches estimated slots, of which there are none here).
-    sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
-
-    cdef double ll
-    with nogil:
-        ll = sdsge_obj_linear(&ctx, NULL, 0)
-    return ll, int(b.bk_violations)
-
-
-def obj_extended_base(
-    size_t residual_addr,
-    size_t meas_addr,
-    size_t jac_addr,
-    int n_state,
-    int n_exog,
-    int n_obs,
-    double[::1] ss_seed,         # n_var (Newton seed for the steady state)
-    signed char[::1] incidence,  # n_var (SDSGE_INC_* bits)
-    double[::1] base_calib,      # n_par
-    double[:, ::1] Q,            # n_exog*n_exog constant
-    double[:, ::1] R,            # n_obs*n_obs constant
-    double[:, ::1] y,            # T*n_obs
-    double[:, ::1] P0,           # n_var*n_var
-    double jitter,
-    int symmetrize,
-):
-    """Evaluate the native extended objective at base calibration (n_theta == 0,
-    constant Q/R, no prior). Returns loglik. Same as ``obj_linear_base`` minus the
-    (C, d) buffers: the EKF relinearizes the measurement each step via the meas /
-    jac cfuncs at the running state estimate."""
-    cdef int64_t n_var = ss_seed.shape[0]
-    cdef int64_t n_par = base_calib.shape[0]
-    cdef int64_t T = y.shape[0]
-    cdef int64_t n_ctrl = n_var - n_state
-    cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
-
-    # Preallocated scratch (kept alive for the whole call).
-    params = np.empty(n_par, dtype=np.float64)
-    ss = np.empty(n_var, dtype=np.float64)
-    a_real = np.empty((n_var, n_var), dtype=np.float64)
-    b_real = np.empty((n_var, n_var), dtype=np.float64)
-    c_real = np.empty((n_var, n_var), dtype=np.float64)
-    d_real = np.empty((n_var, n_exog), dtype=np.float64)
-    order = np.empty(n_var, dtype=np.int64)
-    s = np.empty((nd, nd), dtype=np.complex128, order="F")
-    t = np.empty((nd, nd), dtype=np.complex128, order="F")
-    z = np.empty((nd, nd), dtype=np.complex128, order="F")
-    f = np.empty((n_ctrl, n_state), dtype=np.float64)
-    p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(nd, dtype=np.complex128)
-    x0 = np.zeros(n_var, dtype=np.float64)
-    A = np.empty((n_var, n_var), dtype=np.float64)
-    B = np.empty((n_var, n_exog), dtype=np.float64)
-
-    cdef double[::1] paramsv = params
-    cdef double[::1] ssv = ss
-    cdef double[:, ::1] arv = a_real
-    cdef double[:, ::1] brv = b_real
-    cdef double[:, ::1] crealv = c_real
-    cdef double[:, ::1] drealv = d_real
-    cdef int64_t[::1] orderv = order
-    cdef double complex[::1, :] sv = s
-    cdef double complex[::1, :] tv = t
-    cdef double complex[::1, :] zv = z
-    cdef double[:, ::1] fv = f
-    cdef double[:, ::1] pv = p
-    cdef double complex[::1] eigv = eig
-    cdef double[::1] x0v = x0
-    cdef double[:, ::1] Av = A
-    cdef double[:, ::1] Bv = B
-
-    cdef sdsge_extended_ctx ctx
-    cdef sdsge_obj_common *b = &ctx.base
-
-    b.dims.n_theta = 0
-    b.dims.n_var = n_var
-    b.dims.n_state = n_state
-    b.dims.n_ctrl = n_ctrl
-    b.dims.n_exog = n_exog
-    b.dims.n_obs = n_obs
-    b.dims.n_par = n_par
-    b.dims.T = T
-
-    b.residual = <sdsge_residual_fn><void*>residual_addr
-    b.zgges = _zgges
-    b.dgeqrf = _dgeqrf
-    b.dormqr = _dormqr
-    b.meas = <meas_fn><void*>meas_addr
-    b.jac = <meas_fn><void*>jac_addr
-
-    b.ss_seed = &ss_seed[0]
-    b.incidence = &incidence[0]
-    b.y = &y[0, 0]
-    b.P0 = &P0[0, 0]
-    b.x0 = &x0v[0]
-    b.jitter = jitter
-    b.symmetrize = symmetrize
-    b.joseph_cov = 1
-
-    b.pmap.base_params = &base_calib[0]
-    b.pmap.scalars = NULL
-    b.pmap.n_scalars = 0
-
-    b.q_spec.is_constant = 1
-    b.q_spec.constant = &Q[0, 0]
-    b.q_spec.K = n_exog
-    b.q_spec.corr_from_block = 0
-    b.q_spec.n_pairs = 0
-
-    b.r_spec.is_constant = 1
-    b.r_spec.constant = &R[0, 0]
-    b.r_spec.K = n_obs
-    b.r_spec.corr_from_block = 0
-    b.r_spec.n_pairs = 0
-
-    b.prior.has_prior = 0
-
-    b.params = &paramsv[0]
-    b.Q = NULL
-    b.chol = NULL
-    b.R = NULL
-    b.corr_q = NULL
-    b.corr_r = NULL
-    b.std_q = NULL
-    b.std_r = NULL
-    b.bk_violations = 0
-    filter_arena = np.empty(
-        ekf_arena_size(n_var, n_obs, n_exog).n_float, dtype=np.float64
-    )
-    cdef double[::1] filter_arena_v = filter_arena
-    b.filter_arena = &filter_arena_v[0]
-
-    cdef arena_size solve_sz = sdsge_klein_solve1_arena_size(
-        n_var, n_state, n_ctrl, n_par, n_exog, nd
-    )
-    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
-    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
-    cdef double[::1] solve_arena_v = solve_arena
-    cdef int64_t[::1] solve_iarena_v = solve_iarena
-    b.solve_arena = &solve_arena_v[0]
-    b.solve_iarena = &solve_iarena_v[0]
-
-    ctx.solve.ss = &ssv[0]
-    ctx.solve.a_real = &arv[0, 0]
-    ctx.solve.b_real = &brv[0, 0]
-    ctx.solve.c_real = &crealv[0, 0]
-    ctx.solve.d_real = &drealv[0, 0] if n_exog > 0 else NULL
-    ctx.solve.s = <c128*>&sv[0, 0]
-    ctx.solve.t = <c128*>&tv[0, 0]
-    ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = &fv[0, 0]
-    ctx.solve.p = &pv[0, 0]
-    ctx.solve.eig = <c128*>&eigv[0]
-    ctx.solve.A = &Av[0, 0]
-    ctx.solve.B = &Bv[0, 0]
-    ctx.solve.order = &orderv[0]
-
-    # One-time construction seed (see obj_linear_base).
-    sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
-
-    cdef double ll
-    with nogil:
-        ll = sdsge_obj_extended(&ctx, NULL, 0)
-    return ll, int(b.bk_violations)
-
-
-def obj_unscented_base(
-    size_t residual_addr,
-    size_t bc_residual_addr,
-    size_t meas_addr,
-    int n_state,
-    int n_exog,
-    int n_obs,
-    double[::1] ss_seed,         # n_var (Newton seed for the steady state)
-    signed char[::1] incidence,  # n_var (SDSGE_INC_* bits)
-    double[::1] base_calib,      # n_par
-    double[:, ::1] Q,            # n_exog*n_exog constant
-    double[:, ::1] R,            # n_obs*n_obs constant
-    double[:, ::1] y,            # T*n_obs
-    double[:, ::1] P0,           # 2*n_state x 2*n_state (UKF)
-    double jitter,
-    int symmetrize,
-    double alpha=1.0,
-    double beta=2.0,
-    double kappa=1.0,
-):
-    """Evaluate the native unscented objective at base calibration (n_theta == 0,
-    constant Q/R, no prior). Returns loglik. The solve1 pencil (a_real/b_real)
-    is reused by the second-order kernels. Companion to ``obj_linear_base``."""
-    cdef int64_t n_var = ss_seed.shape[0]
-    cdef int64_t n_par = base_calib.shape[0]
-    cdef int64_t T = y.shape[0]
-    cdef int64_t n_ctrl = n_var - n_state
-    cdef int64_t n2 = 3 * n_var + n_exog
-    cdef int64_t nd = sdsge_pencil_dim(&incidence[0], n_var)
-
-    # Preallocated scratch (kept alive for the whole call).
-    params = np.empty(n_par, dtype=np.float64)
-    ss = np.empty(n_var, dtype=np.float64)
-    a_real = np.empty((n_var, n_var), dtype=np.float64)
-    b_real = np.empty((n_var, n_var), dtype=np.float64)
-    c_real = np.empty((n_var, n_var), dtype=np.float64)
-    d_real = np.empty((n_var, n_exog), dtype=np.float64)
-    order = np.empty(n_var, dtype=np.int64)
-    s = np.empty((nd, nd), dtype=np.complex128, order="F")
-    t = np.empty((nd, nd), dtype=np.complex128, order="F")
-    z = np.empty((nd, nd), dtype=np.complex128, order="F")
-    f = np.empty((n_ctrl, n_state), dtype=np.float64)
-    p = np.empty((n_state, n_state), dtype=np.float64)
-    eig = np.empty(nd, dtype=np.complex128)
-    x0 = np.zeros(n_var, dtype=np.float64)
-    A = np.empty((n_var, n_var), dtype=np.float64)
-    B = np.empty((n_var, n_exog), dtype=np.float64)
-
-    # Second-order scratch.
-    f_xx = np.empty((n_var, n2, n2), dtype=np.float64)
-    bx = np.empty((n_state, n_exog), dtype=np.float64)
-    gxx = np.empty((n_ctrl, n_state, n_state), dtype=np.float64)
-    hxx = np.empty((n_state, n_state, n_state), dtype=np.float64)
-    gxu = np.empty((n_ctrl, n_state, n_exog), dtype=np.float64)
-    hxu = np.empty((n_state, n_state, n_exog), dtype=np.float64)
-    guu = np.empty((n_ctrl, n_exog, n_exog), dtype=np.float64)
-    huu = np.empty((n_state, n_exog, n_exog), dtype=np.float64)
-    gss = np.empty(n_ctrl, dtype=np.float64)
-    hss = np.empty(n_state, dtype=np.float64)
-
-    # z0 = [x0[:n_state]; 0] (2*n_state); x0 is zero at base.
-    z0 = np.zeros(2 * n_state, dtype=np.float64)
-    z0[:n_state] = x0[:n_state]
-
-    cdef double[::1] paramsv = params
-    cdef double[::1] ssv = ss
-    cdef double[:, ::1] arv = a_real
-    cdef double[:, ::1] brv = b_real
-    cdef double[:, ::1] crealv = c_real
-    cdef double[:, ::1] drealv = d_real
-    cdef int64_t[::1] orderv = order
-    cdef double complex[::1, :] sv = s
-    cdef double complex[::1, :] tv = t
-    cdef double complex[::1, :] zv = z
-    cdef double[:, ::1] fv = f
-    cdef double[:, ::1] pv = p
-    cdef double complex[::1] eigv = eig
-    cdef double[::1] x0v = x0
-    cdef double[:, ::1] Av = A
-    cdef double[:, ::1] Bv = B
-
-    cdef double[:, :, ::1] fxxv = f_xx
-    cdef double[:, ::1] bxv = bx
-    cdef double[:, :, ::1] gxxv = gxx
-    cdef double[:, :, ::1] hxxv = hxx
-    cdef double[:, :, ::1] gxuv = gxu
-    cdef double[:, :, ::1] hxuv = hxu
-    cdef double[:, :, ::1] guuv = guu
-    cdef double[:, :, ::1] huuv = huu
-    cdef double[::1] gssv = gss
-    cdef double[::1] hssv = hss
-    cdef double[::1] z0v = z0
-
-    cdef sdsge_unscented_ctx ctx
-    cdef sdsge_obj_common *b = &ctx.base
-
-    b.dims.n_theta = 0
-    b.dims.n_var = n_var
-    b.dims.n_state = n_state
-    b.dims.n_ctrl = n_ctrl
-    b.dims.n_exog = n_exog
-    b.dims.n_obs = n_obs
-    b.dims.n_par = n_par
-    b.dims.T = T
-
-    b.residual = <sdsge_residual_fn><void*>residual_addr
-    b.bc_residual = <bc_residual_fn><void*>bc_residual_addr
-    b.zgges = _zgges
-    b.dgeqrf = _dgeqrf
-    b.dormqr = _dormqr
-    b.meas = <meas_fn><void*>meas_addr
-    b.jac = NULL
-
-    b.ss_seed = &ss_seed[0]
-    b.incidence = &incidence[0]
-    b.y = &y[0, 0]
-    b.P0 = &P0[0, 0]
-    b.x0 = &x0v[0]
-    b.jitter = jitter
-    b.symmetrize = symmetrize
-    b.joseph_cov = 1
-
-    b.pmap.base_params = &base_calib[0]
-    b.pmap.scalars = NULL
-    b.pmap.n_scalars = 0
-
-    b.q_spec.is_constant = 1
-    b.q_spec.constant = &Q[0, 0]
-    b.q_spec.K = n_exog
-    b.q_spec.corr_from_block = 0
-    b.q_spec.n_pairs = 0
-
-    b.r_spec.is_constant = 1
-    b.r_spec.constant = &R[0, 0]
-    b.r_spec.K = n_obs
-    b.r_spec.corr_from_block = 0
-    b.r_spec.n_pairs = 0
-
-    b.prior.has_prior = 0
-
-    b.params = &paramsv[0]
-    b.Q = NULL
-    b.chol = NULL
-    b.R = NULL
-    b.corr_q = NULL
-    b.corr_r = NULL
-    b.std_q = NULL
-    b.std_r = NULL
-    b.bk_violations = 0
-    filter_arena = np.empty(
-        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float,
-        dtype=np.float64,
-    )
-    cdef double[::1] filter_arena_v = filter_arena
-    b.filter_arena = &filter_arena_v[0]
-
-    cdef arena_size solve_sz = sdsge_sgu_klein_solve2_arena_size(
-        n_var, n_state, n_ctrl, n_par, n_exog, nd
-    )
-    solve_arena = np.empty(solve_sz.n_float, dtype=np.float64)
-    solve_iarena = np.empty(solve_sz.n_int, dtype=np.int64)
-    cdef double[::1] solve_arena_v = solve_arena
-    cdef int64_t[::1] solve_iarena_v = solve_iarena
-    b.solve_arena = &solve_arena_v[0]
-    b.solve_iarena = &solve_iarena_v[0]
-
-    ctx.solve.ss = &ssv[0]
-    ctx.solve.a_real = &arv[0, 0]
-    ctx.solve.b_real = &brv[0, 0]
-    ctx.solve.c_real = &crealv[0, 0]
-    ctx.solve.d_real = &drealv[0, 0] if n_exog > 0 else NULL
-    ctx.solve.s = <c128*>&sv[0, 0]
-    ctx.solve.t = <c128*>&tv[0, 0]
-    ctx.solve.z = <c128*>&zv[0, 0]
-    ctx.solve.f = &fv[0, 0]
-    ctx.solve.p = &pv[0, 0]
-    ctx.solve.eig = <c128*>&eigv[0]
-    ctx.solve.A = &Av[0, 0]
-    ctx.solve.B = &Bv[0, 0]
-    ctx.solve.order = &orderv[0]
-
-    ctx.solve2.f_xx = &fxxv[0, 0, 0]
-    ctx.solve2.bx = &bxv[0, 0]
-    ctx.solve2.gxx = &gxxv[0, 0, 0]
-    ctx.solve2.hxx = &hxxv[0, 0, 0]
-    ctx.solve2.gxu = &gxuv[0, 0, 0]
-    ctx.solve2.hxu = &hxuv[0, 0, 0]
-    ctx.solve2.guu = &guuv[0, 0, 0]
-    ctx.solve2.huu = &huuv[0, 0, 0]
-    ctx.solve2.gss = &gssv[0]
-    ctx.solve2.hss = &hssv[0]
-
-    ctx.z0 = &z0v[0]
-    ctx.alpha = alpha
-    ctx.beta = beta
-    ctx.kappa = kappa
-
-    # One-time construction seed (see obj_linear_base).
-    sdsge_init_params(&paramsv[0], &base_calib[0], n_par)
-
-    cdef double ll
-    with nogil:
-        ll = sdsge_obj_unscented(&ctx, NULL, 0)
-    return ll, int(b.bk_violations)
-
 
 # --- Native MLE/MAP driver over the per-mode objective (issue #330) ----------
 #
@@ -924,8 +406,13 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     _y = np.ascontiguousarray(base.y, dtype=np.float64)
     nc.keep.append(_y)
     cdef double[:, ::1] yv = _y
+    # P0 is square in the *filter's* dimension, not the model's: the unscented
+    # filter runs on the augmented state, so its P0 is 2*n_state a side while
+    # the other two are n_var. Sizing this from n_var alone hands the UKF a
+    # buffer shorter than it reads.
+    cdef int64_t n_filter = 2 * n_state if mode == "unscented" else n_var
     if base.P0 is None:
-        _P0 = np.zeros((n_var, n_var), dtype=np.float64)
+        _P0 = np.zeros((n_filter, n_filter), dtype=np.float64)
         derive_P0 = 1
     else:
         _P0 = np.ascontiguousarray(base.P0, dtype=np.float64)
@@ -1212,6 +699,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         b.r_spec.pair_slot = &r_ps_v[0] if r_np > 0 else NULL
 
     b.prior.has_prior = has_prior
+
     if has_prior:
         _psi = np.ascontiguousarray(pr.scalar_indices, dtype=np.int64)
         _psdc = np.ascontiguousarray(pr.scalar_dist_codes, dtype=np.int64)
@@ -1368,7 +856,8 @@ def run_estimation(
     str method,
     double[::1] theta0,
     bounds=None,
-    int has_priors=0,
+    bint has_priors=False,
+    bint include_logjac=False,
     int m=10,
     int maxiter=15000,
     int maxfun=15000,
@@ -1378,6 +867,9 @@ def run_estimation(
     double fd_step=0.0,
     double xatol=1e-4,
     double fatol=1e-4,
+    bint compute_cov=True,
+    double cov_fd_step_scale=1.0,
+    double cov_fd_absolute_floor=0.1,
 ):
     """Native MLE/MAP over the linear / extended / unscented objective. Marshal
     the mode's context DTO into its C ctx, then minimize ``-loglik``
@@ -1385,9 +877,18 @@ def run_estimation(
     L-BFGS-B / Nelder-Mead driver. Returns the driver result plus ``params`` (the
     named parameter vector scattered at x_best) and ``logprior`` (MAP), all
     resolved natively with no filter re-eval. The base marshaling is shared; only
-    the ctx struct, objective, and mode scratch differ per ``mode``."""
+    the ctx struct, objective, and mode scratch differ per ``mode``.
+
+    ``compute_cov`` also returns ``vcov``, the asymptotic covariance at the
+    optimum, from a finite-difference Hessian costing
+    ``n_theta * (n_theta + 1) + 1`` further objective evaluations. It is the
+    covariance of theta, the vector minimized here. A Hessian that is not
+    positive definite there leaves NaN throughout and reports it on
+    ``cov_status``; the estimate itself is unaffected."""
     cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
     cdef sdsge_obj_common *b = nc.b
+    b.prior.include_logjac = include_logjac
+
     cdef void *ctxp = nc.ctxp
     cdef int64_t n_theta = nc.n_theta
 
@@ -1446,7 +947,15 @@ def run_estimation(
     est_opt.optim.xatol = xatol
     est_opt.optim.fatol = fatol
 
-    cdef sdsge_optim_result res
+    est_opt.compute_cov = compute_cov
+    est_opt.cov_fd_step_scale = cov_fd_step_scale
+    est_opt.cov_fd_absolute_floor = cov_fd_absolute_floor
+
+    vcov = np.empty((n_theta, n_theta), dtype=np.float64)
+    cdef double[:, ::1] vcovv = vcov
+
+    cdef sdsge_estimation_result res
+    res.vcov = &vcovv[0, 0]
     cdef double lpr = 0.0
 
     with nogil:
@@ -1457,15 +966,19 @@ def run_estimation(
 
     return {
         "x": x,
-        "fun": res.fun,
-        "nfev": int(res.nfev),
-        "nit": int(res.nit),
-        "success": bool(res.success),
-        "status": int(res.status),
-        "message": (<bytes>res.message).decode() if res.message != NULL else "",
+        "fun": res.base.fun,
+        "nfev": int(res.base.nfev),
+        "nit": int(res.base.nit),
+        "success": bool(res.base.success),
+        "status": int(res.base.status),
+        "message": (
+            (<bytes>res.base.message).decode() if res.base.message != NULL else ""
+        ),
         "bk_violations": int(b.bk_violations),
         "params": params_out,
         "logprior": float(lpr),
+        "vcov": vcov if compute_cov else None,
+        "cov_status": int(res.cov_status),
     }
 
 
@@ -1477,13 +990,13 @@ def run_mcmc(
     int64_t n_draws,
     int64_t burn_in=1000,
     int64_t thin=1,
-    int adapt=1,
+    bint adapt=True,
     int64_t adapt_start=100,
-    int64_t adapt_interval=25,
     double proposal_scale=0.1,
     double adapt_epsilon=1e-8,
     double hessian_fd_step_scale=1.0,
     double hessian_fd_absolute_floor=0.1,
+    bint compute_map=True,
     dict map_options=None,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
@@ -1493,15 +1006,18 @@ def run_mcmc(
     / BK counters. ``rng`` must be a numpy ``Generator``; it is held for the whole
     native run (the ``bitgen_t*`` is borrowed). Draws stay bit-exact numpy; the
     proposal (Cholesky) and covariance adaptation are native (statistical, not
-    bit, equivalence with the numpy chain)."""
+    bit, equivalence with the numpy chain).
+
+    ``theta0`` is where the chain begins. With ``compute_map`` the MAP is found
+    from it first and the chain begins at the mode instead; without, ``theta0``
+    is taken to be that mode already and the proposal Hessian is built there."""
+
     if n_draws <= 0:
         raise ValueError("n_draws must be positive.")
     if burn_in < 0:
         raise ValueError("burn_in must be non-negative.")
     if thin <= 0:
         raise ValueError("thin must be positive.")
-    if adapt_interval <= 0:
-        raise ValueError("adapt_interval must be positive.")
     if hessian_fd_step_scale <= 0.0 or hessian_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
     if map_options is None:
@@ -1521,6 +1037,10 @@ def run_mcmc(
     cdef int64_t d = nc.n_theta
     if d <= 0:
         raise ValueError("No estimated parameters were provided.")
+
+    # The chain and the MAP it starts from both walk theta, so both want the
+    # change-of-variables density rather than the prior over the parameters.
+    b.prior.include_logjac = 1
 
     # Borrow numpy's PCG64 state. `rng` is an argument, so its reference is held
     # for the whole call, including the nogil run below (the pointer is borrowed).
@@ -1603,9 +1123,9 @@ def run_mcmc(
     opt.n_draws = n_draws
     opt.burn_in = burn_in
     opt.thin = thin
+    opt.needs_map = compute_map
     opt.adapt = adapt
     opt.adapt_start = adapt_start
-    opt.adapt_interval = adapt_interval
     opt.adapt_epsilon = adapt_epsilon
     opt.proposal_scale = proposal_scale
     opt.hessian_fd_step_scale = hessian_fd_step_scale
@@ -1652,6 +1172,9 @@ cdef class NativeLogpost:
 
     def __cinit__(self, object ctx_dto, str mode):
         self.nc = _build_native_ctx(ctx_dto, mode)
+        # `logpost` here is a density over theta, which is the chain's own
+        # target, so it carries the jacobian the same way run_mcmc's does.
+        self.nc.b.prior.include_logjac = 1
         self.mode = mode
 
     cdef double _eval(self, const double *theta, int has_priors):

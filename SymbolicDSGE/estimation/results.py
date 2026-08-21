@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -24,6 +24,19 @@ class OptimizationResult:
     #: Call configuration for the ``mle``/``map`` run (optimizer ``method``,
     #: ``bounds``, ``options``) — recorded so the run is reconstructable.
     optimizer_config: dict[str, Any]
+    #: Asymptotic covariance at the optimum, from the finite-difference Hessian
+    #: there. It describes ``x``, the unconstrained vector, so its rows and
+    #: columns follow ``list(theta)`` and it is the covariance an MCMC proposal
+    #: wants. ``None`` when the run was asked not to compute it; NaN throughout
+    #: when it was asked and the Hessian at the optimum is not positive definite.
+    vcov: NDF | None = field(default=None, kw_only=True)
+    #: Standard errors keyed like ``theta`` and in the same constrained space,
+    #: so ``theta[name]`` and ``se[name]`` are read together. Derived from
+    #: ``vcov`` through the prior transforms' Jacobian, which is why this is not
+    #: simply ``sqrt(diag(vcov))`` unless every transform is the identity.
+    se: dict[str, float64] | None = field(default=None, kw_only=True)
+    #: 0 when the covariance was produced, otherwise why it was not.
+    cov_status: int = field(default=0, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -43,6 +56,13 @@ class MLEResult(OptimizationResult):
             "nfev": int(self.nfev),
             "nit": int(self.nit) if self.nit is not None else None,
             "optimizer_config": dict(self.optimizer_config),
+            "vcov": self.vcov.tolist() if self.vcov is not None else None,
+            "se": (
+                {k: float(v) for k, v in self.se.items()}
+                if self.se is not None
+                else None
+            ),
+            "cov_status": int(self.cov_status),
             "loglik": float(self.loglik),
         }
 
@@ -58,6 +78,17 @@ class MLEResult(OptimizationResult):
             nfev=int(data["nfev"]),
             nit=int(data["nit"]) if data["nit"] is not None else None,
             optimizer_config=dict(data.get("optimizer_config", {})),
+            vcov=(
+                np.asarray(data["vcov"], dtype=float64)
+                if data.get("vcov") is not None
+                else None
+            ),
+            se=(
+                {k: float64(v) for k, v in data["se"].items()}
+                if data.get("se") is not None
+                else None
+            ),
+            cov_status=int(data.get("cov_status", 0)),
             loglik=float64(data["loglik"]),
         )
 
@@ -80,6 +111,13 @@ class MAPResult(OptimizationResult):
             "nfev": int(self.nfev),
             "nit": int(self.nit) if self.nit is not None else None,
             "optimizer_config": dict(self.optimizer_config),
+            "vcov": self.vcov.tolist() if self.vcov is not None else None,
+            "se": (
+                {k: float(v) for k, v in self.se.items()}
+                if self.se is not None
+                else None
+            ),
+            "cov_status": int(self.cov_status),
             "logpost": float(self.logpost),
             "logprior": float(self.logprior),
         }
@@ -96,6 +134,17 @@ class MAPResult(OptimizationResult):
             nfev=int(data["nfev"]),
             nit=int(data["nit"]) if data["nit"] is not None else None,
             optimizer_config=dict(data.get("optimizer_config", {})),
+            vcov=(
+                np.asarray(data["vcov"], dtype=float64)
+                if data.get("vcov") is not None
+                else None
+            ),
+            se=(
+                {k: float64(v) for k, v in data["se"].items()}
+                if data.get("se") is not None
+                else None
+            ),
+            cov_status=int(data.get("cov_status", 0)),
             logpost=float64(data["logpost"]),
             logprior=float64(data["logprior"]),
         )

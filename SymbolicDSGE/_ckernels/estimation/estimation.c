@@ -3,7 +3,14 @@
 #include "../kalman/kalman.h"
 #include "../optim/nelder_mead.h"
 #include "../optim/optim.h"
+#include <float.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Direct includes for the primitives used here (native-include hygiene). */
+#include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
+                                        sdsge_matmul_abt */
 
 /* sdsge_classify outcomes. */
 #define SDSGE_SOLVE_OK 0
@@ -181,7 +188,7 @@ static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
       (f64 *)pr->scalar_transform_params, pr->n_scalar,
       (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
       (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks);
+      (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
   if (!isfinite(lp)) {
     return -INFINITY;
   }
@@ -202,7 +209,7 @@ f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
       (f64 *)pr->scalar_transform_params, pr->n_scalar,
       (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
       (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks);
+      (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
 }
 
 /* Linear measurement (C, d) from the meas / jac cfuncs at the linearization
@@ -216,13 +223,15 @@ static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
 }
 
 static inline i64 sdsge_resolve_stationary_p0(sdsge_obj_common *b,
-                                              const sdsge_solve1 *s,
-                                              const f64 *SDSGE_RESTRICT Q) {
+                                              const f64 *SDSGE_RESTRICT A,
+                                              const f64 *SDSGE_RESTRICT B,
+                                              const f64 *SDSGE_RESTRICT Q,
+                                              const i64 n, const i64 ld_out) {
   if (!b->derive_P0) {
     return KF_OK;
   }
-  return kf_stationary_covariance(s->A, s->B, Q, 1e-12, 64, b->filter_arena,
-                                  b->P0, b->dims.n_var, b->dims.n_exog);
+  return kf_stationary_covariance(A, B, Q, 1e-12, 64, b->filter_arena, b->P0, n,
+                                  b->dims.n_exog, ld_out);
 }
 
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
@@ -246,7 +255,8 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   }
   sdsge_build_measurement(ctx);
 
-  i64 p0_rc = sdsge_resolve_stationary_p0(b, s, Q);
+  i64 p0_rc = sdsge_resolve_stationary_p0(b, s->A, s->B, Q, b->dims.n_var,
+                                          b->dims.n_var);
   if (p0_rc != KF_OK) {
     return -INFINITY;
   }
@@ -297,7 +307,9 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
     return -INFINITY;
   }
 
-  i64 p0_rc = sdsge_resolve_stationary_p0(b, s, Q);
+  i64 p0_rc = sdsge_resolve_stationary_p0(b, s->A, s->B, Q, b->dims.n_var,
+                                          b->dims.n_var);
+
   if (p0_rc != KF_OK) {
     return -INFINITY;
   }
@@ -352,6 +364,11 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
     return -INFINITY;
   }
   if (rc != SDSGE_SOLVE_OK) {
+    return -INFINITY;
+  }
+  i64 p0_rc = sdsge_resolve_stationary_p0(b, s->p, s->B, Q, b->dims.n_state,
+                                          2 * b->dims.n_state);
+  if (p0_rc != KF_OK) {
     return -INFINITY;
   }
 
@@ -439,28 +456,186 @@ static const sdsge_objective_fn obj_table[2][3] = {
     {sdsge_min_linear_ll, sdsge_min_extended_ll, sdsge_min_unscented_ll},
     {sdsge_min_linear_lp, sdsge_min_extended_lp, sdsge_min_unscented_lp}};
 
+/* The likelihood alone, unnegated. sdsge_post_* already covers the with-priors
+ * row; these three complete the table the covariance needs, which is the +value
+ * objective rather than the one the optimizer minimizes. */
+static f64 sdsge_pos_linear_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return sdsge_obj_linear((sdsge_linear_ctx *)ctx, x, 0);
+}
+
+static f64 sdsge_pos_extended_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return sdsge_obj_extended((sdsge_extended_ctx *)ctx, x, 0);
+}
+
+static f64 sdsge_pos_unscented_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
+  return sdsge_obj_unscented((sdsge_unscented_ctx *)ctx, x, 0);
+}
+
+static const sdsge_objective_fn pos_table[2][3] = {
+    {sdsge_pos_linear_ll, sdsge_pos_extended_ll, sdsge_pos_unscented_ll},
+    {sdsge_post_linear, sdsge_post_extended, sdsge_post_unscented}};
+
+/* Covariance of an estimate at `theta`, in factored form. Separate from every
+ * driver that wants it: the optimizer takes it as the asymptotic covariance of
+ * the point it just found, and the sampler takes it as the proposal it starts
+ * from, at a mode either found here or supplied. The objective returns
+ * +logpost, so every finite-difference expression below is written directly
+ * for H = -d^2 logpost.
+ *
+ * The off-diagonal stencil matches Dynare's hessian.m: it reuses the two
+ * coordinate-direction evaluations and needs only the (++), (--) pair for
+ * each i < j. After H = L L^T, solving L^T X = I gives X X^T = H^-1. */
+i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
+                                const f64 *SDSGE_RESTRICT theta, i64 d,
+                                f64 fd_step_scale, f64 fd_absolute_floor,
+                                f64 *SDSGE_RESTRICT factor,
+                                f64 *SDSGE_RESTRICT work) {
+  if (d <= 0 || fd_step_scale <= 0.0 || fd_absolute_floor <= 0.0) {
+    return SDSGE_ESTIMATION_EHESSIAN;
+  }
+  const f64 fd_relative_step = sqrt(cbrt(DBL_EPSILON)) * fd_step_scale;
+  if (!isfinite(fd_relative_step) || fd_relative_step <= 0.0) {
+    return SDSGE_ESTIMATION_EHESSIAN;
+  }
+
+  const size_t nv = (size_t)d;
+  const size_t nm = nv * nv;
+
+  f64 *x = work;
+  f64 *h = x + nv;
+  f64 *plus = h + nv;
+  f64 *minus = plus + nv;
+  f64 *H = minus + nv;
+  f64 *L = H + nm;
+
+  memcpy(x, theta, nv * sizeof(f64));
+  const f64 lp0 = logpost(theta, obj_ctx);
+  if (!isfinite(lp0)) {
+    return SDSGE_ESTIMATION_EHESSIAN;
+  }
+
+  for (i64 i = 0; i < d; ++i) {
+    h[i] = fmax(fabs(theta[i]), fd_absolute_floor) * fd_relative_step;
+    if (!isfinite(h[i]) || h[i] == 0.0) {
+      return SDSGE_ESTIMATION_EHESSIAN;
+    }
+
+    x[i] = theta[i] + h[i];
+    plus[i] = logpost(x, obj_ctx);
+    x[i] = theta[i] - h[i];
+    minus[i] = logpost(x, obj_ctx);
+    x[i] = theta[i];
+    if (!isfinite(plus[i]) || !isfinite(minus[i])) {
+      return SDSGE_ESTIMATION_EHESSIAN;
+    }
+  }
+
+  for (i64 i = 0; i < d; ++i) {
+    H[i * d + i] = (2.0 * lp0 - plus[i] - minus[i]) / (h[i] * h[i]);
+    for (i64 j = i + 1; j < d; ++j) {
+      x[i] = theta[i] + h[i];
+      x[j] = theta[j] + h[j];
+      const f64 lp_pp = logpost(x, obj_ctx);
+      x[i] = theta[i] - h[i];
+      x[j] = theta[j] - h[j];
+      const f64 lp_mm = logpost(x, obj_ctx);
+      x[i] = theta[i];
+      x[j] = theta[j];
+      if (!isfinite(lp_pp) || !isfinite(lp_mm)) {
+        return SDSGE_ESTIMATION_EHESSIAN;
+      }
+
+      const f64 hij = (-lp_pp - lp_mm + plus[i] + minus[i] + plus[j] +
+                       minus[j] - 2.0 * lp0) /
+                      (2.0 * h[i] * h[j]);
+      H[i * d + j] = hij;
+      H[j * d + i] = hij;
+    }
+  }
+
+  if (sdsge_chol(H, 0.0, L, d) != SDSGE_OK) {
+    return SDSGE_ESTIMATION_ENOTSPD;
+  }
+
+  for (i64 j = 0; j < d; ++j) {
+    for (i64 i = 0; i < d; ++i) {
+      x[i] = i == j ? 1.0 : 0.0;
+    }
+    sdsge_backward_subst_chol_t(L, x, x, d);
+    for (i64 i = 0; i < d; ++i) {
+      factor[i * d + j] = x[i];
+    }
+  }
+
+  return SDSGE_ESTIMATION_OK;
+}
+
+/* vcov = L L^T for the factor at `theta`. The buffer is filled with NaN first,
+ * so every failure below is a report rather than a half-written answer. */
+static void sdsge_fill_cov(void *ctx, i64 d, const f64 *SDSGE_RESTRICT theta,
+                           const sdsge_estimation_options *opt,
+                           sdsge_estimation_result *out) {
+  const size_t nm = (size_t)d * (size_t)d;
+  for (size_t i = 0; i < nm; ++i) {
+    out->vcov[i] = NAN;
+  }
+  if (!out->base.success) {
+    out->cov_status = SDSGE_ESTIMATION_EHESSIAN;
+    return;
+  }
+
+  /* The factor, then sdsge_estimation_cov_factor's documented scratch. */
+  f64 *scratch = (f64 *)malloc((3 * nm + 4 * (size_t)d) * sizeof(f64));
+  if (scratch == NULL) {
+    out->cov_status = SDSGE_ESTIMATION_EALLOC;
+    return;
+  }
+  f64 *factor = scratch;
+  f64 *work = scratch + nm;
+
+  const i64 status = sdsge_estimation_cov_factor(
+      pos_table[opt->has_priors][opt->filter_mode], ctx, theta, d,
+      opt->cov_fd_step_scale, opt->cov_fd_absolute_floor, factor, work);
+  if (status != SDSGE_ESTIMATION_OK) {
+    out->cov_status = status;
+    free(scratch);
+    return;
+  }
+
+  sdsge_matmul_abt(factor, factor, out->vcov, d, d, d);
+  out->cov_status = SDSGE_ESTIMATION_OK;
+  free(scratch);
+}
+
 void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
                           const sdsge_estimation_options *opt,
-                          sdsge_optim_result *out) {
+                          sdsge_estimation_result *out) {
 
   const sdsge_objective_fn obj = obj_table[opt->has_priors][opt->filter_mode];
   switch (opt->method) {
   case ESTIMATION_LBFGSB:
     sdsge_lbfgsb(obj, ctx, n_theta, theta, opt->lo, opt->hi, opt->nbd,
-                 &opt->optim, out);
+                 &opt->optim, &out->base);
     break;
   case ESTIMATION_NELDER_MEAD:
     sdsge_neldermead(obj, ctx, n_theta, theta, opt->lo, opt->hi, opt->nbd,
-                     &opt->optim, out);
+                     &opt->optim, &out->base);
     break;
   default:
-    out->status = SDSGE_OPTIM_EINVAL;
-    out->success = 0;
-    out->message = "ERROR: unknown estimation method";
-    out->nfev = 0;
-    out->nit = 0;
-    out->fun = NAN;
+    out->base.status = SDSGE_OPTIM_EINVAL;
+    out->base.success = 0;
+    out->base.message = "ERROR: unknown estimation method";
+    out->base.nfev = 0;
+    out->base.nit = 0;
+    out->base.fun = NAN;
   }
 
+  out->cov_status = SDSGE_ESTIMATION_OK;
+  if (opt->compute_cov && out->vcov != NULL) {
+    sdsge_fill_cov(ctx, n_theta, theta, opt, out);
+  }
+
+  /* Last, not before the covariance: its probes scatter perturbed params, and
+   * callers read the ctx expecting it to sit at the returned theta. */
   sdsge_scatter_params((sdsge_obj_common *)ctx, theta);
 }

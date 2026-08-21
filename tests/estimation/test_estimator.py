@@ -1,5 +1,4 @@
 # type: ignore
-import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -305,14 +304,168 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert set(cfg) == {
         "adapt",
         "adapt_start",
-        "adapt_interval",
         "proposal_scale",
         "adapt_epsilon",
+        "compute_map",
         "random_state",
     }
+    assert cfg["compute_map"] is True
     # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
     assert "n_draws" not in cfg
     assert out.to_meta().sampler_config == cfg
+
+
+def test_mcmc_rejects_invalid_draw_counts(mcmc_estimator):
+    """``run_mcmc`` owns these, so they raise past ``_build_native_context``."""
+    with pytest.raises(ValueError, match="n_draws must be positive"):
+        mcmc_estimator.mcmc(n_draws=0)
+    with pytest.raises(ValueError, match="burn_in must be non-negative"):
+        mcmc_estimator.mcmc(n_draws=1, burn_in=-1)
+    with pytest.raises(ValueError, match="thin must be positive"):
+        mcmc_estimator.mcmc(n_draws=1, thin=0)
+
+
+_MCMC_KW = dict(n_draws=25, burn_in=5, random_state=7)
+#: A start the MAP actually walks away from. Most points near the POST82 mode
+#: are stationary for L-BFGS-B, which would leave the comparisons below unable
+#: to tell a skipped MAP from a MAP that ran and moved nothing.
+_OFF_MODE = {"psi_pi": 2.4, "rho_r": 0.85}
+
+
+def test_mcmc_skipping_the_map_leaves_the_chain_at_theta0(mcmc_estimator):
+    """The flag has to move where the chain starts, or it is doing nothing."""
+    found = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=True, **_MCMC_KW)
+    supplied = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=False, **_MCMC_KW)
+
+    assert not np.array_equal(found.samples, supplied.samples)
+    assert found.sampler_config["compute_map"] is True
+    assert supplied.sampler_config["compute_map"] is False
+
+
+def test_mcmc_precomputed_mode_reproduces_the_internal_map_chain(mcmc_estimator):
+    """Skipping the MAP changes who finds the mode, not the chain that follows."""
+    found = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=True, **_MCMC_KW)
+    mode = mcmc_estimator.map(theta0=_OFF_MODE)
+    supplied = mcmc_estimator.mcmc(theta0=mode.x, compute_map=False, **_MCMC_KW)
+
+    assert np.array_equal(found.samples, supplied.samples)
+
+
+def test_mcmc_accepts_a_map_result_as_its_starting_mode(mcmc_estimator):
+    """``MAPResult.theta`` names exactly the estimated set, so it is a theta0."""
+    mode = mcmc_estimator.map(theta0=_OFF_MODE)
+    assert set(mode.theta) == set(mcmc_estimator.param_names)
+
+    from_array = mcmc_estimator.mcmc(theta0=mode.x, compute_map=False, **_MCMC_KW)
+    from_dict = mcmc_estimator.mcmc(theta0=mode.theta, compute_map=False, **_MCMC_KW)
+
+    assert np.array_equal(from_array.samples, from_dict.samples)
+
+
+def test_mle_reports_the_covariance_at_the_optimum(post82_estimator):
+    """Uncertainty is on by default, and se is the root of vcov's diagonal
+    wherever the transforms are the identity."""
+    est = post82_estimator()
+    res = est.mle(bounds=[(1.0, 5.0), (0.0, 0.99)])
+
+    assert res.cov_status == 0
+    assert res.vcov.shape == (len(res.theta), len(res.theta))
+    assert np.all(np.isfinite(res.vcov))
+    assert set(res.se) == set(res.theta)
+    assert np.allclose(res.vcov, res.vcov.T)
+    for i, name in enumerate(res.theta):
+        assert float(res.se[name]) == pytest.approx(float(np.sqrt(res.vcov[i, i])))
+
+
+def test_mle_covariance_is_opt_out_and_does_not_move_the_estimate(post82_estimator):
+    est = post82_estimator()
+    kw = dict(bounds=[(1.0, 5.0), (0.0, 0.99)])
+    with_cov = est.mle(**kw)
+    without = est.mle(cov=False, **kw)
+
+    assert without.vcov is None
+    assert without.se is None
+    assert without.cov_status == 0
+    assert without.theta == with_cov.theta
+
+
+def test_se_is_in_the_space_theta_reports(post82_estimator):
+    """`sig_r` carries a Log transform, so its se is not sqrt(diag(vcov)): the
+    covariance is over theta and has to cross the transform to sit beside a
+    constrained value."""
+    est = post82_estimator(estimated_params=("psi_pi", "sig_r"))
+    res = est.mle()
+    names = list(res.theta)
+    assert [type(est._param_transforms[n]).__name__ for n in names] == [
+        "Identity",
+        "LogTransform",
+    ]
+
+    se_theta = np.sqrt(np.diag(res.vcov))
+    # d exp(t)/dt is exp(t), which is the constrained value itself
+    assert float(res.se["psi_pi"]) == pytest.approx(float(se_theta[0]))
+    assert float(res.se["sig_r"]) == pytest.approx(
+        float(res.theta["sig_r"]) * float(se_theta[1]), rel=1e-6
+    )
+    assert float(res.se["sig_r"]) != pytest.approx(float(se_theta[1]))
+
+
+@pytest.fixture
+def transformed_estimator(post82_estimator):
+    """``rho_r`` under a logit, ``psi_pi`` under the identity.
+
+    A non-identity transform is what makes the two prior densities differ: with
+    everything on the identity the jacobian is zero and there is nothing for
+    these tests to see.
+    """
+    return post82_estimator(
+        estimated_params=("psi_pi", "rho_r"),
+        priors={
+            "psi_pi": make_prior(
+                distribution="normal",
+                parameters={"mean": 2.19, "std": 0.5},
+                transform="identity",
+            ),
+            "rho_r": make_prior(
+                distribution="beta",
+                parameters={"a": 8.0, "b": 2.0},
+                transform="logit",
+            ),
+        },
+    )
+
+
+def test_map_include_logjac_selects_a_different_mode(transformed_estimator):
+    """The jacobian moves the mode, which is the whole reason for the flag."""
+    over_params = transformed_estimator.map(cov=False)
+    over_theta = transformed_estimator.map(cov=False, jacobian=True)
+
+    assert over_params.success and over_theta.success
+    assert not np.allclose(over_params.x, over_theta.x)
+    # the coupling carries: psi_pi is on the identity and still moves
+    assert float(over_params.theta["psi_pi"]) != pytest.approx(
+        float(over_theta.theta["psi_pi"])
+    )
+
+
+def test_map_with_logjac_is_the_mode_the_sampler_starts_from(transformed_estimator):
+    """``jacobian=True`` is what makes a precomputed mode reusable.
+
+    The chain walks theta, so the MAP it finds for itself carries the jacobian.
+    A mode found without it starts the chain somewhere else.
+    """
+    kw = dict(n_draws=30, burn_in=5, random_state=11, hessian_fd_step_scale=0.5)
+    found = transformed_estimator.mcmc(**kw)
+
+    over_theta = transformed_estimator.map(cov=False, jacobian=True)
+    reused = transformed_estimator.mcmc(theta0=over_theta.x, compute_map=False, **kw)
+    assert np.array_equal(found.samples, reused.samples)
+
+    over_params = transformed_estimator.map(cov=False)
+    mismatched = transformed_estimator.mcmc(
+        theta0=over_params.x, compute_map=False, **kw
+    )
+    assert not np.array_equal(found.samples, mismatched.samples)
 
 
 def test_map_without_priors_raises(monkeypatch):
@@ -387,38 +540,6 @@ def test_estimator_make_prior_utility():
         transform="identity",
     )
     assert isinstance(prior, Prior)
-
-
-def test_safe_loglik_invalidates_system_exit(monkeypatch):
-    def _boom(**kwargs):
-        raise SystemExit("invertibility violation")
-
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _boom)
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    val = est._safe_loglik(np.array([0.0], dtype=np.float64))
-    assert np.isneginf(val)
-
-
-def test_safe_loglik_invalidates_warning_signal(monkeypatch):
-    def _warn_only(**kwargs):
-        warnings.warn("unstable candidate", RuntimeWarning)
-        return float64(0.0)
-
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _warn_only)
-    est = Estimator(
-        solver=SimpleNamespace(),
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    val = est._safe_loglik(np.array([0.0], dtype=np.float64))
-    assert np.isneginf(val)
-    assert est._warning_signal_count >= 1
 
 
 def test_estimation_reports_warning_count_once(post82_estimator, capsys):
@@ -636,8 +757,8 @@ def test_loglik_overrides_parameters_per_candidate(monkeypatch):
         estimated_params=["a"],
         priors={"a": prior},
     )
-    _ = est._safe_loglik(np.array([-1.0], dtype=np.float64))
-    _ = est._safe_loglik(np.array([1.0], dtype=np.float64))
+    _ = est.loglik(np.array([-1.0], dtype=np.float64))
+    _ = est.loglik(np.array([1.0], dtype=np.float64))
 
     assert len(seen) == 2
     assert seen[0] == pytest.approx(np.exp(-1.0))
@@ -836,21 +957,6 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
     with pytest.raises(KeyError, match="unknown parameter"):
         est.logprior(np.array([0.0], dtype=np.float64))
 
-    def _warn(th):
-        warnings.warn("unstable", RuntimeWarning)
-        return float64(0.0)
-
-    est._logpost = _warn
-    assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
-
-    est._logpost = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
-    assert np.isneginf(est._safe_logpost(np.array([0.0], dtype=np.float64)))
-
-    est.logprior = lambda th: float64(np.inf)
-    assert np.isneginf(est._safe_logprior(np.array([0.0], dtype=np.float64)))
-    est.logprior = lambda th: (_ for _ in ()).throw(RuntimeError("boom"))
-    assert np.isneginf(est._safe_logprior(np.array([0.0], dtype=np.float64)))
-
 
 def test_mcmc_validation_branches(monkeypatch):
     monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
@@ -861,13 +967,6 @@ def test_mcmc_validation_branches(monkeypatch):
         estimated_params=["a"],
         priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
     )
-
-    with pytest.raises(ValueError, match="n_draws must be positive"):
-        est.mcmc(n_draws=0)
-    with pytest.raises(ValueError, match="burn_in must be non-negative"):
-        est.mcmc(n_draws=1, burn_in=-1)
-    with pytest.raises(ValueError, match="thin must be positive"):
-        est.mcmc(n_draws=1, thin=0)
 
     est_no_priors = Estimator(
         solver=SimpleNamespace(),
@@ -1152,6 +1251,5 @@ def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated)
         random_state=123,
         adapt=True,
         adapt_start=0,
-        adapt_interval=1,
     )
     assert out.samples.shape == (10, len(estimated))

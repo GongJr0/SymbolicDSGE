@@ -30,7 +30,7 @@ cdef extern from "prior_program.h":
         double *scalar_transform_params, int64_t n_scalar,
         int64_t *matrix_offsets, int64_t *matrix_dims, int64_t *matrix_lengths,
         double *matrix_etas, double *matrix_log_constants,
-        int64_t n_blocks) nogil
+        int64_t n_blocks, int include_logjac) nogil
     void sdsge_cov_from_unconstrained(double *z, double *std, int64_t K,
                                       double *scratch_M, double *out) nogil
     void sdsge_unconstrained_from_corr_chol(double *L, int64_t K,
@@ -88,7 +88,13 @@ def logprior_program(double[::1] theta,
     """Full packed log-prior. Returns the scalar logprior (NaN -> numba fallback).
 
     Each block's z is the contiguous theta run starting at ``matrix_offsets[b]``
-    of length ``matrix_lengths[b]``, read straight off ``theta`` in the kernel."""
+    of length ``matrix_lengths[b]``, read straight off ``theta`` in the kernel.
+
+    The jacobian is always on here: this is the fast path for the density over
+    theta, and its fallback builds the same thing out of the Prior objects,
+    which carry it. The two have to answer alike or the result would depend on
+    which branch ran. The C objectives choose per entry point instead, off
+    ``sdsge_prior_tables.include_logjac``."""
     cdef int64_t n_scalar = scalar_indices.shape[0]
     cdef int64_t n_blocks = matrix_dims.shape[0]
 
@@ -107,7 +113,7 @@ def logprior_program(double[::1] theta,
     cdef double out
     with nogil:
         out = sdsge_logprior_program(theta_p, si, sdc, stc, sdp, stp, n_scalar,
-                                     mo, md, ml, me, mlc, n_blocks)
+                                     mo, md, ml, me, mlc, n_blocks, 1)
     return out
 
 
