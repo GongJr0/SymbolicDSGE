@@ -305,14 +305,62 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert set(cfg) == {
         "adapt",
         "adapt_start",
-        "adapt_interval",
         "proposal_scale",
         "adapt_epsilon",
+        "compute_map",
         "random_state",
     }
+    assert cfg["compute_map"] is True
     # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
     assert "n_draws" not in cfg
     assert out.to_meta().sampler_config == cfg
+
+
+def test_mcmc_rejects_invalid_draw_counts(mcmc_estimator):
+    """``run_mcmc`` owns these, so they raise past ``_build_native_context``."""
+    with pytest.raises(ValueError, match="n_draws must be positive"):
+        mcmc_estimator.mcmc(n_draws=0)
+    with pytest.raises(ValueError, match="burn_in must be non-negative"):
+        mcmc_estimator.mcmc(n_draws=1, burn_in=-1)
+    with pytest.raises(ValueError, match="thin must be positive"):
+        mcmc_estimator.mcmc(n_draws=1, thin=0)
+
+
+_MCMC_KW = dict(n_draws=25, burn_in=5, random_state=7)
+#: A start the MAP actually walks away from. Most points near the POST82 mode
+#: are stationary for L-BFGS-B, which would leave the comparisons below unable
+#: to tell a skipped MAP from a MAP that ran and moved nothing.
+_OFF_MODE = {"psi_pi": 2.4, "rho_r": 0.85}
+
+
+def test_mcmc_skipping_the_map_leaves_the_chain_at_theta0(mcmc_estimator):
+    """The flag has to move where the chain starts, or it is doing nothing."""
+    found = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=True, **_MCMC_KW)
+    supplied = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=False, **_MCMC_KW)
+
+    assert not np.array_equal(found.samples, supplied.samples)
+    assert found.sampler_config["compute_map"] is True
+    assert supplied.sampler_config["compute_map"] is False
+
+
+def test_mcmc_precomputed_mode_reproduces_the_internal_map_chain(mcmc_estimator):
+    """Skipping the MAP changes who finds the mode, not the chain that follows."""
+    found = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=True, **_MCMC_KW)
+    mode = mcmc_estimator.map(theta0=_OFF_MODE)
+    supplied = mcmc_estimator.mcmc(theta0=mode.x, compute_map=False, **_MCMC_KW)
+
+    assert np.array_equal(found.samples, supplied.samples)
+
+
+def test_mcmc_accepts_a_map_result_as_its_starting_mode(mcmc_estimator):
+    """``MAPResult.theta`` names exactly the estimated set, so it is a theta0."""
+    mode = mcmc_estimator.map(theta0=_OFF_MODE)
+    assert set(mode.theta) == set(mcmc_estimator.param_names)
+
+    from_array = mcmc_estimator.mcmc(theta0=mode.x, compute_map=False, **_MCMC_KW)
+    from_dict = mcmc_estimator.mcmc(theta0=mode.theta, compute_map=False, **_MCMC_KW)
+
+    assert np.array_equal(from_array.samples, from_dict.samples)
 
 
 def test_map_without_priors_raises(monkeypatch):
@@ -862,13 +910,6 @@ def test_mcmc_validation_branches(monkeypatch):
         priors={"a": _QuadraticPrior(mean=0.0, weight=1.0)},
     )
 
-    with pytest.raises(ValueError, match="n_draws must be positive"):
-        est.mcmc(n_draws=0)
-    with pytest.raises(ValueError, match="burn_in must be non-negative"):
-        est.mcmc(n_draws=1, burn_in=-1)
-    with pytest.raises(ValueError, match="thin must be positive"):
-        est.mcmc(n_draws=1, thin=0)
-
     est_no_priors = Estimator(
         solver=SimpleNamespace(),
         compiled=_stub_compiled(),
@@ -1152,6 +1193,5 @@ def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated)
         random_state=123,
         adapt=True,
         adapt_start=0,
-        adapt_interval=1,
     )
     assert out.samples.shape == (10, len(estimated))

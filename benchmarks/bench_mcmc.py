@@ -11,7 +11,7 @@ The two timers do not cover the same work. ``Estimator.mcmc`` finds its own MAP
 and builds the finite-difference Hessian its proposal starts from inside the
 timed call, where Dynare arrives with both already computed. The Hessian alone
 costs ``d * (d + 1)`` likelihood evaluations, negligible at one estimated
-parameter and comparable to the whole sampling run at sw2007's 43, so read
+parameter and comparable to the whole sampling run at sw2007's 34, so read
 ``draws / s`` as the cost of a chain plus its setup on this side and a chain
 alone on Dynare's.
 
@@ -21,11 +21,12 @@ measurement-error entry of R. The priors come from the calibration itself, one
 normal per parameter centered on the calibrated value with a standard deviation
 of ``--prior-scale`` times its magnitude.
 
-The .mod files reach the same set from the other side. Where a yaml carries a
-free parameter that the .mod computes as a model-local, the temporary copy of
-the .mod drops that local and declares the name as a parameter, so a draw moves
-the same coefficients in both runtimes. Nothing is written back to the fixture,
-and the copy runs no statement the unpatched file would not.
+The .mod files reach the same set from the other side. A coefficient the .mod
+computes as a model-local is a derived calibration entry in the yaml, so both
+runtimes rebuild it from the same base parameters and a draw moves the same
+coefficients on either side. The temporary copy of the .mod only drops the
+statements listed in ``dynare_remove`` and appends the estimation block, and
+nothing is written back to the fixture.
 
 Raw outputs are discarded unless ``--output-dir`` is supplied. Relative output
 paths are resolved from this benchmark's directory.
@@ -38,7 +39,6 @@ import contextlib
 from contextlib import nullcontext
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -52,7 +52,6 @@ from scipy.io import loadmat
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES = ROOT / "tests" / "fixtures" / "models"
-MODEL_STATEMENT = "model(linear);"
 sys.path.insert(0, str(ROOT))
 
 from SymbolicDSGE import DSGESolver, ModelParser, Shock
@@ -86,10 +85,6 @@ class CaseSpec:
     seed: int = 0
     native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
     dynare_remove: tuple[str, ...] = ()
-    dynare_replace: tuple[tuple[str, str], ...] = ()
-    # Model-locals to delete from the .mod copy. The ones the yaml calibrates
-    # are redeclared as parameters; the rest only fed those, so they go too.
-    dynare_locals: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,36 +118,6 @@ CASES = {
         dynare_remove=(
             "calib_smoother(datafile = sw2007_kf_data, filtered_vars, filter_step_ahead = [1]);",
         ),
-        # conster is a free parameter once its model-local is gone, so the
-        # steady state of robs reads it rather than rebuilding it from the
-        # discount, growth and inflation parameters.
-        dynare_replace=(
-            (
-                "robs = (((1+constepinf/100)/((1/(1+constebeta/100))"
-                "*(1+ctrend/100)^(-csigma)))-1)*100;",
-                "robs = conster;",
-            ),
-        ),
-        dynare_locals=(
-            "cpie",
-            "cgamma",
-            "cbeta",
-            "clandap",
-            "cbetabar",
-            "cr",
-            "crk",
-            "cw",
-            "cikbar",
-            "cik",
-            "clk",
-            "cky",
-            "ciy",
-            "ccy",
-            "crkky",
-            "cwhlc",
-            "cwly",
-            "conster",
-        ),
     ),
     "g2015": CaseSpec(
         label="Gali 2015",
@@ -164,7 +129,6 @@ CASES = {
             ("obs_pi_ann", "pi_ann"),
             ("obs_i_ann", "i_ann"),
         ),
-        dynare_locals=("Omega", "psi_n_ya", "lambda", "kappa"),
     ),
     "gm2005": CaseSpec(
         label="Gali-Monacelli 2005",
@@ -173,10 +137,6 @@ CASES = {
         data_file="gali_monacelli_2005_mcmc_data",
         seed=2005,
         native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
-        # The surviving locals sit at sigma = eta = gamma = 1, where omega,
-        # sigma_a, Theta, Gamma and Psi are constants: only kappa_a moves with
-        # an estimated parameter, and the yaml calibrates it directly.
-        dynare_locals=("lambda", "kappa_a"),
     ),
     "i2004": CaseSpec(
         label="Ireland 2004",
@@ -346,44 +306,6 @@ def _dynare_estimated_params(targets: Targets) -> str:
     )
 
 
-def _promote_dynare_locals(case: CaseSpec, source: str, targets: Targets) -> str:
-    """Drop the listed model-locals, declaring the estimated ones as parameters.
-
-    A local the yaml calibrates is a free parameter on the native side, so
-    leaving Dynare to rebuild it from other estimated parameters would move a
-    coefficient the native draw holds fixed. The locals that only fed those
-    definitions go with them.
-    """
-    declared: list[str] = []
-    for name in case.dynare_locals:
-        pattern = re.compile(
-            rf"^[ \t]*#[ \t]*{re.escape(name)}[ \t]*=[^;]*;.*\n", re.MULTILINE
-        )
-        source, count = pattern.subn("", source)
-        if count != 1:
-            raise RuntimeError(
-                f"{case.mod_name} defines the model-local '{name}' {count} times."
-            )
-        if name in targets.names:
-            declared.append(name)
-    if not declared:
-        return source
-
-    block = (
-        "parameters "
-        + " ".join(declared)
-        + ";\n"
-        + "\n".join(f"{name} = {targets.value_of(name):.17g};" for name in declared)
-        + "\n\n"
-    )
-    patched = source.replace(MODEL_STATEMENT, block + MODEL_STATEMENT, 1)
-    if patched == source:
-        raise RuntimeError(
-            f"{case.mod_name} has no '{MODEL_STATEMENT}' to declare parameters before."
-        )
-    return patched
-
-
 def _write_model(
     case: CaseSpec,
     path: Path,
@@ -394,11 +316,6 @@ def _write_model(
     source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
     for statement in case.dynare_remove:
         source = source.replace(statement, "")
-    for statement, replacement in case.dynare_replace:
-        if statement not in source:
-            raise RuntimeError(f"{case.mod_name} has no statement '{statement}'.")
-        source = source.replace(statement, replacement)
-    source = _promote_dynare_locals(case, source, targets)
     source += (
         "\nestimated_params;\n"
         + _dynare_estimated_params(targets)

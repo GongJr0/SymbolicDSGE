@@ -257,9 +257,9 @@ cdef extern from "mcmc.h":
         int64_t n_draws
         int64_t burn_in
         int64_t thin
+        int needs_map
         int adapt
         int64_t adapt_start
-        int64_t adapt_interval
         double adapt_epsilon
         double proposal_scale
         double hessian_fd_step_scale
@@ -277,8 +277,8 @@ cdef extern from "mcmc.h":
         const char *message
 
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
-                           bitgen_t *bg, const double *theta0, int64_t d,
-                           const sdsge_mcmc_options *opt,
+                           bitgen_t *bg, const double *theta0,
+                           int64_t d, const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
                            sdsge_mcmc_result *out) nogil
@@ -1477,13 +1477,13 @@ def run_mcmc(
     int64_t n_draws,
     int64_t burn_in=1000,
     int64_t thin=1,
-    int adapt=1,
+    bint adapt=True,
     int64_t adapt_start=100,
-    int64_t adapt_interval=25,
     double proposal_scale=0.1,
     double adapt_epsilon=1e-8,
     double hessian_fd_step_scale=1.0,
     double hessian_fd_absolute_floor=0.1,
+    bint compute_map=True,
     dict map_options=None,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
@@ -1493,15 +1493,18 @@ def run_mcmc(
     / BK counters. ``rng`` must be a numpy ``Generator``; it is held for the whole
     native run (the ``bitgen_t*`` is borrowed). Draws stay bit-exact numpy; the
     proposal (Cholesky) and covariance adaptation are native (statistical, not
-    bit, equivalence with the numpy chain)."""
+    bit, equivalence with the numpy chain).
+
+    ``theta0`` is where the chain begins. With ``compute_map`` the MAP is found
+    from it first and the chain begins at the mode instead; without, ``theta0``
+    is taken to be that mode already and the proposal Hessian is built there."""
+
     if n_draws <= 0:
         raise ValueError("n_draws must be positive.")
     if burn_in < 0:
         raise ValueError("burn_in must be non-negative.")
     if thin <= 0:
         raise ValueError("thin must be positive.")
-    if adapt_interval <= 0:
-        raise ValueError("adapt_interval must be positive.")
     if hessian_fd_step_scale <= 0.0 or hessian_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
     if map_options is None:
@@ -1603,9 +1606,9 @@ def run_mcmc(
     opt.n_draws = n_draws
     opt.burn_in = burn_in
     opt.thin = thin
+    opt.needs_map = compute_map
     opt.adapt = adapt
     opt.adapt_start = adapt_start
-    opt.adapt_interval = adapt_interval
     opt.adapt_epsilon = adapt_epsilon
     opt.proposal_scale = proposal_scale
     opt.hessian_fd_step_scale = hessian_fd_step_scale

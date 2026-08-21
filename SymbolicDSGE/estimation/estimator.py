@@ -1094,12 +1094,13 @@ class Estimator:
         config: Mapping[str, Any] | None = None,
     ) -> OptimizationResult:
         x = asarray(res["x"], dtype=float64)
-        # res["params"] is the calib-order parameter vector at x_best; name it to
-        # match the dict shape theta_to_params produced.
-        theta = {
-            str(name): float64(value)
-            for name, value in zip(self.compiled.calib_params, res["params"])
-        }
+        # res["params"] is the calib-order parameter vector at x_best. Only the
+        # estimated names are this result's own; every other parameter sits at
+        # the calibration it entered with and belongs to the model, not here.
+        params_at_x = dict(
+            zip((str(name) for name in self.compiled.calib_params), res["params"])
+        )
+        theta = {name: float64(params_at_x[name]) for name in self.param_names}
 
         common: dict[str, Any] = dict(
             x=x,
@@ -1307,21 +1308,13 @@ class Estimator:
         random_state: int | np.random.Generator | None = None,
         adapt: bool = True,
         adapt_start: int = 100,
-        adapt_interval: int = 25,
         proposal_scale: float = 0.1,
         adapt_epsilon: float = 1e-8,
+        compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
         hessian_fd_step_scale: float = 1.0,
         hessian_fd_absolute_floor: float = 0.1,
     ) -> MCMCResult:
-        if n_draws <= 0:
-            raise ValueError("n_draws must be positive.")
-        if burn_in < 0:
-            raise ValueError("burn_in must be non-negative.")
-        if thin <= 0:
-            raise ValueError("thin must be positive.")
-        if adapt_interval <= 0:
-            raise ValueError("adapt_interval must be positive.")
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
 
@@ -1350,11 +1343,11 @@ class Estimator:
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
-            adapt=int(adapt),
+            adapt=adapt,
             adapt_start=adapt_start,
-            adapt_interval=adapt_interval,
             proposal_scale=proposal_scale,
             adapt_epsilon=adapt_epsilon,
+            compute_map=compute_map,
             map_options=map_options,
             hessian_fd_step_scale=hessian_fd_step_scale,
             hessian_fd_absolute_floor=hessian_fd_absolute_floor,
@@ -1386,9 +1379,9 @@ class Estimator:
             sampler_config={
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
-                "adapt_interval": int(adapt_interval),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
+                "compute_map": bool(compute_map),
                 "random_state": (
                     int(random_state)
                     if isinstance(random_state, (int, np.integer))

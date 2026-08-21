@@ -172,7 +172,8 @@ i64 sdsge_mcmc_hessian_proposal_factor(sdsge_objective_fn logpost,
 }
 
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
-                   const f64 *theta0, i64 d, const sdsge_mcmc_options *opt,
+                   const f64 *SDSGE_RESTRICT theta0, i64 d,
+                   const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out) {
   const i64 total_steps = opt->burn_in + opt->n_draws * opt->thin;
@@ -206,15 +207,22 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   /* Initial proposal: cov0 = scale * H^-1, L = chol(cov0). The Hessian is
    * computed at the MAP as a finite-difference approximation of the negative
    * log-posterior.
+   *
+   * MAP is only computed if the user did not supply a mode for the Hessian
+   * proposal factor.
    */
-  sdsge_optim_result map_out;
+
   memcpy(current, theta0, d * sizeof(f64));
-  sdsge_run_estimation(obj_ctx, d, current, map_opt, &map_out);
-  if (!map_out.success) {
-    out->status = SDSGE_MCMC_EMAP;
-    out->message = map_out.message != NULL ? map_out.message : "MAP failed";
-    free(work);
-    return SDSGE_MCMC_EMAP;
+  if (opt->needs_map) {
+
+    sdsge_optim_result map_out;
+    sdsge_run_estimation(obj_ctx, d, current, map_opt, &map_out);
+    if (!map_out.success) {
+      out->status = SDSGE_MCMC_EMAP;
+      out->message = map_out.message != NULL ? map_out.message : "MAP failed";
+      free(work);
+      return SDSGE_MCMC_EMAP;
+    }
   }
 
   // The allocation past `L` is dead at hessian_proposal_factor, and it is the
@@ -272,8 +280,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
 
     /* Haario adaptation over the whole chain: below adapt_start only the
-     * running mean accumulates, above it the covariance recursion runs and the
-     * factor is refactored every step. */
+     * running mean accumulates, above it the covariance recursion runs and
+     * the factor is refactored every step. */
     if (opt->adapt) {
       ++n;
       if (n <= opt->adapt_start) {

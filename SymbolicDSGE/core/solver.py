@@ -882,14 +882,20 @@ class DSGESolver:
                 raise ValueError(
                     "posterior_point must be one of {'mean', 'last', 'map', 'mode'}."
                 )
-            solve_params = est.theta_to_params(est.params_to_theta(theta_star))
+            # The round trip projects a posterior summary back onto the
+            # transforms, which matters for a mean that lands off a correlation
+            # block's manifold; the estimated names are read back off it.
+            projected = est.theta_to_params(est.params_to_theta(theta_star))
+            solve_params = {name: projected[name] for name in est.param_names}
         else:
             raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
 
+        # Sync writes the estimated values into the calibration, which is where
+        # `solve` reads its full parameter vector from; passing them again would
+        # only re-supply what was just installed.
         self._sync_calibration_with_params(compiled, solve_params)
         solved = self.solve(
             compiled=compiled,
-            parameters={k: float(v) for k, v in solve_params.items()},
             ss_seed=ss_seed,
         )
         return result, solved

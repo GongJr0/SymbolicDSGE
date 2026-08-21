@@ -144,7 +144,11 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
 
     def fake_solve(compiled, *, parameters=None, ss_seed=None):
         captured["parameters"] = parameters
-        return SimpleNamespace(params=parameters)
+        captured["calibration"] = {
+            getattr(k, "name", k): float(v)
+            for k, v in compiled.config.calibration.parameters.items()
+        }
+        return SimpleNamespace(params=captured["calibration"])
 
     monkeypatch.setattr(solver, "solve", fake_solve)
 
@@ -159,10 +163,13 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
         bounds=[(1.0, 5.0), (0.0, 0.99)],
     )
     assert isinstance(result, MLEResult)
-    # estimate_and_solve threads the estimated point into solve as plain floats
-    assert "psi_pi" in captured["parameters"] and "rho_r" in captured["parameters"]
-    assert captured["parameters"] == {k: float(v) for k, v in result.theta.items()}
-    assert solved.params == captured["parameters"]
+    # The estimated point reaches solve through the calibration, not a kwarg,
+    # and the result names only what was estimated.
+    assert captured["parameters"] is None
+    assert set(result.theta) == {"psi_pi", "rho_r"}
+    for name, value in result.theta.items():
+        assert captured["calibration"][name] == pytest.approx(float(value))
+    assert solved.params == captured["calibration"]
 
 
 def test_solver_estimate_accepts_theta0_dictionary(post82):
@@ -241,7 +248,11 @@ def test_solver_estimate_and_solve_mcmc(post82, monkeypatch):
 
     def fake_solve(compiled, *, parameters=None, ss_seed=None):
         captured["parameters"] = parameters
-        return SimpleNamespace(params=parameters)
+        captured["calibration"] = {
+            getattr(k, "name", k): float(v)
+            for k, v in compiled.config.calibration.parameters.items()
+        }
+        return SimpleNamespace(params=captured["calibration"])
 
     monkeypatch.setattr(solver, "solve", fake_solve)
 
@@ -260,8 +271,8 @@ def test_solver_estimate_and_solve_mcmc(post82, monkeypatch):
     )
 
     assert result.samples.shape == (30, 1)
-    assert "psi_pi" in captured["parameters"]
-    assert solved.params == captured["parameters"]
+    assert "psi_pi" in captured["calibration"]
+    assert solved.params == captured["calibration"]
 
 
 def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
@@ -273,7 +284,11 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
 
     def fake_solve(compiled, *, parameters=None, ss_seed=None):
         captured["parameters"] = parameters
-        return SimpleNamespace(params=parameters)
+        captured["calibration"] = {
+            getattr(k, "name", k): float(v)
+            for k, v in compiled.config.calibration.parameters.items()
+        }
+        return SimpleNamespace(params=captured["calibration"])
 
     monkeypatch.setattr(solver, "solve", fake_solve)
 
@@ -292,13 +307,14 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
     )
 
     assert result.samples.shape == (20, 1)
-    assert "psi_pi" in captured["parameters"]
-    # non-estimated params thread through the solve at their calibration values
+    assert "psi_pi" in captured["calibration"]
+    # only the estimated name is written back, so the rest still read at the
+    # calibration they entered with
     sym_map = {
         getattr(k, "name", k): v
         for k, v in post82["compiled"].config.calibration.parameters.items()
     }
-    assert float(captured["parameters"]["rho_r"]) == pytest.approx(
+    assert float(captured["calibration"]["rho_r"]) == pytest.approx(
         float(sym_map["rho_r"])
     )
-    assert solved.params == captured["parameters"]
+    assert solved.params == captured["calibration"]

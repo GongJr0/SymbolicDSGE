@@ -51,9 +51,9 @@ def _mle_estimator(post82, mode: str) -> Estimator:
 
 def _assert_theta_named(est: Estimator, res) -> None:
     expected = est.theta_to_params(res.x)
-    assert res.theta.keys() == expected.keys()
-    for name, value in expected.items():
-        assert float(res.theta[name]) == pytest.approx(float(value), abs=1e-9)
+    assert list(res.theta) == list(est.param_names)
+    for name in est.param_names:
+        assert float(res.theta[name]) == pytest.approx(float(expected[name]), abs=1e-9)
 
 
 def _assert_mle_packing(est: Estimator, res: MLEResult) -> None:
