@@ -1310,8 +1310,9 @@ class Estimator:
         adapt_epsilon: float = 1e-8,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
-        hessian_fd_step_scale: float = 1.0,
-        hessian_fd_absolute_floor: float = 0.1,
+        proposal_cov: NDF | None = None,
+        cov_fd_step_scale: float = 1.0,
+        cov_fd_absolute_floor: float = 0.1,
     ) -> MCMCResult:
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
@@ -1344,11 +1345,12 @@ class Estimator:
             adapt=adapt,
             adapt_start=adapt_start,
             proposal_scale=proposal_scale,
+            proposal_cov=proposal_cov,
+            cov_fd_step_scale=cov_fd_step_scale,
+            cov_fd_absolute_floor=cov_fd_absolute_floor,
             adapt_epsilon=adapt_epsilon,
             compute_map=compute_map,
             map_options=map_options,
-            hessian_fd_step_scale=hessian_fd_step_scale,
-            hessian_fd_absolute_floor=hessian_fd_absolute_floor,
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
@@ -1366,6 +1368,11 @@ class Estimator:
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
 
+        if map_options is None:
+            map_options = {}
+        if map_options.get("bounds") is not None:
+            map_options["bounds"] = self._serialize_bounds(map_options["bounds"])
+
         result = MCMCResult(
             param_names=list(self.param_names),
             samples=kept_params,
@@ -1375,11 +1382,18 @@ class Estimator:
             burn_in=burn_in,
             thin=thin,
             sampler_config={
+                "theta0": theta0.tolist() if isinstance(theta0, np.ndarray) else theta0,
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),
+                "map_options": dict(map_options) if map_options is not None else None,
+                "proposal_cov": (
+                    proposal_cov.tolist() if proposal_cov is not None else None
+                ),
+                "cov_fd_step_scale": float(cov_fd_step_scale),
+                "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
                 "random_state": (
                     int(random_state)
                     if isinstance(random_state, (int, np.integer))

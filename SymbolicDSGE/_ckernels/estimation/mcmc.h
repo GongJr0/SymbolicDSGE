@@ -15,10 +15,15 @@ typedef struct {
   i64 thin;
   int needs_map; // False if user supplied a mode for the hessian proposal
                  // factor. Otherwise, MAP is computed inside the MCMC driver.
+
   int adapt;
   i64 adapt_start;
   f64 adapt_epsilon;
   f64 proposal_scale;
+  int needs_hessian; // False if user supplied a hessian for the hessian
+                     // proposal factor. Otherwise, Hessian is computed inside
+                     // the MCMC driver.
+
   f64 hessian_fd_step_scale;
   f64 hessian_fd_absolute_floor;
 } sdsge_mcmc_options;
@@ -46,6 +51,7 @@ typedef struct {
 /* HOT LOOP DRIVER */
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
+                   const f64 *SDSGE_RESTRICT hessian,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out);

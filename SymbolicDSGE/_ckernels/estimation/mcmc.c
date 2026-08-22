@@ -79,6 +79,7 @@ static inline void sdsge_proposal_factor(const f64 *SDSGE_RESTRICT C, i64 d,
 
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
+                   const f64 *SDSGE_RESTRICT hessian,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out) {
@@ -135,22 +136,39 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
   }
 
-  // The allocation past `L` is dead at cov_factor time, and it is the exact
-  // size the factor needs. `prop` is therefore passed as the work buffer, and
-  // `L` is the output.
-  f64 *hessian_work = prop;
-  const i64 hessian_status = sdsge_estimation_cov_factor(
-      logpost, obj_ctx, current, d, opt->hessian_fd_step_scale,
-      opt->hessian_fd_absolute_floor, L, hessian_work);
-  if (hessian_status != SDSGE_ESTIMATION_OK) {
-    out->status = hessian_status;
-    out->message = hessian_status == SDSGE_ESTIMATION_ENOTSPD
-                       ? "MAP Hessian is not positive definite"
-                       : "MCMC Hessian construction failed";
-    free(work);
-    return hessian_status;
+  // needs_hessian are guaranteed to be True if needs_map is
+  // True. This block being separately gated allows a user to skip the MAP and
+  // get the Hessian at a user-supplied point, never to skip both unless the
+  // hessian itself is supplied.
+  if (opt->needs_hessian) {
+    // The allocation past `L` is dead at cov_factor time, and it is the exact
+    // size the factor needs. `prop` is therefore passed as the work buffer, and
+    // `L` is the output.
+    f64 *hessian_work = prop;
+    const i64 hessian_status = sdsge_estimation_cov_factor(
+        logpost, obj_ctx, current, d, opt->hessian_fd_step_scale,
+        opt->hessian_fd_absolute_floor, L, hessian_work);
+    if (hessian_status != SDSGE_ESTIMATION_OK) {
+      out->status = hessian_status;
+      out->message = hessian_status == SDSGE_ESTIMATION_ENOTSPD
+                         ? "MAP Hessian is not positive definite"
+                         : "MCMC Hessian construction failed";
+      free(work);
+      return hessian_status;
+    }
+    sdsge_matmul_abt(L, L, C, d, d, d);
+
+  } else {
+    // User supplied a Hessian; factor it for the proposal and copy directly
+    // into the covariance buffer.
+    if (sdsge_chol_upper(hessian, 0.0, L, d) != SDSGE_OK) {
+      out->status = SDSGE_ESTIMATION_ENOTSPD;
+      out->message = "User-supplied Hessian is not positive definite";
+      free(work);
+      return SDSGE_ESTIMATION_ENOTSPD;
+    }
+    memcpy(C, hessian, nm * sizeof(f64));
   }
-  sdsge_matmul_abt(L, L, C, d, d, d);
 
   const f64 factor_scale = sqrt(scale);
   for (i64 i = 0; i < d * d; ++i) {

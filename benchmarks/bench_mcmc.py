@@ -294,7 +294,7 @@ def _run_native(
             proposal_scale=proposal_scale,
             adapt=adapt,
             adapt_start=adapt_start,
-            hessian_fd_step_scale=hessian_step_scale,
+            cov_fd_step_scale=hessian_step_scale,
         )
 
     with (

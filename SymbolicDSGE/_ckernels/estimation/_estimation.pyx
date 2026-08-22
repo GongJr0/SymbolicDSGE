@@ -271,6 +271,7 @@ cdef extern from "mcmc.h":
         int64_t adapt_start
         double adapt_epsilon
         double proposal_scale
+        int needs_hessian
         double hessian_fd_step_scale
         double hessian_fd_absolute_floor
 
@@ -287,7 +288,8 @@ cdef extern from "mcmc.h":
 
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                            bitgen_t *bg, const double *theta0,
-                           int64_t d, const sdsge_mcmc_options *opt,
+                           int64_t d, const double *hessian,
+                           const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
                            sdsge_mcmc_result *out) nogil
@@ -993,9 +995,10 @@ def run_mcmc(
     bint adapt=True,
     int64_t adapt_start=100,
     double proposal_scale=0.1,
+    proposal_cov=None,
+    double cov_fd_step_scale=1.0,
+    double cov_fd_absolute_floor=0.1,
     double adapt_epsilon=1e-8,
-    double hessian_fd_step_scale=1.0,
-    double hessian_fd_absolute_floor=0.1,
     bint compute_map=True,
     dict map_options=None,
 ):
@@ -1018,7 +1021,7 @@ def run_mcmc(
         raise ValueError("burn_in must be non-negative.")
     if thin <= 0:
         raise ValueError("thin must be positive.")
-    if hessian_fd_step_scale <= 0.0 or hessian_fd_absolute_floor <= 0.0:
+    if cov_fd_step_scale <= 0.0 or cov_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
     if map_options is None:
         map_options = {}
@@ -1038,6 +1041,25 @@ def run_mcmc(
     if d <= 0:
         raise ValueError("No estimated parameters were provided.")
 
+    cdef bint needs_hessian = True
+    if proposal_cov is not None:
+        needs_hessian = False
+        if compute_map:
+            raise ValueError(
+                    "``compute_map=True`` will overwrite the proposal covariance. "
+                    "To manually provide a proposal covariance, "
+                    "set ``compute_map=False``."
+                    )
+        proposal_cov = np.ascontiguousarray(proposal_cov, dtype=np.float64)
+        if proposal_cov.shape != (d, d):
+            raise ValueError(
+                "proposal_cov must be square with elements row and column counts "
+                "equal to the number of estimated parameters. "
+                f"Expected shape ({d}, {d}), got {proposal_cov.shape}."
+            )
+    else:
+        proposal_cov = np.zeros((d, d), dtype=np.float64)
+
     # The chain and the MAP it starts from both walk theta, so both want the
     # change-of-variables density rather than the prior over the parameters.
     b.prior.include_logjac = 1
@@ -1047,6 +1069,7 @@ def run_mcmc(
     cdef bitgen_t *bg = _bitgen_ptr(rng)
 
     cdef double[::1] th0v = np.ascontiguousarray(theta0, dtype=np.float64)
+    cdef double[:, ::1] pcovv = proposal_cov
 
     cdef str map_method = map_options.get("method", "L-BFGS-B")
     cdef object map_bounds = map_options.get("bounds")
@@ -1128,8 +1151,9 @@ def run_mcmc(
     opt.adapt_start = adapt_start
     opt.adapt_epsilon = adapt_epsilon
     opt.proposal_scale = proposal_scale
-    opt.hessian_fd_step_scale = hessian_fd_step_scale
-    opt.hessian_fd_absolute_floor = hessian_fd_absolute_floor
+    opt.needs_hessian = needs_hessian
+    opt.hessian_fd_step_scale = cov_fd_step_scale
+    opt.hessian_fd_absolute_floor = cov_fd_absolute_floor
 
     cdef sdsge_mcmc_buffers buf
     buf.kept = &keptv[0, 0]
@@ -1138,7 +1162,7 @@ def run_mcmc(
     cdef sdsge_mcmc_result res
     b.bk_violations = 0
     with nogil:
-        sdsge_mcmc_run(logpost, ctxp, bg, &th0v[0], d, &opt, &map_opt,
+        sdsge_mcmc_run(logpost, ctxp, bg, &th0v[0], d, &pcovv[0, 0], &opt, &map_opt,
                        &buf, &res)
 
     if res.status != 0:
