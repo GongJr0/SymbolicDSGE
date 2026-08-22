@@ -302,12 +302,16 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert cfg["random_state"] == 7
     assert cfg["proposal_scale"] == 0.2
     assert set(cfg) == {
+        "theta0",
         "adapt",
         "adapt_start",
         "proposal_scale",
         "adapt_epsilon",
         "compute_map",
+        "map_options",
         "proposal_cov",
+        "cov_fd_step_scale",
+        "cov_fd_absolute_floor",
         "random_state",
     }
     assert cfg["compute_map"] is True

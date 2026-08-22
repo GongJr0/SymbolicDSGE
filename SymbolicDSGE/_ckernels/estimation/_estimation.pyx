@@ -1041,19 +1041,24 @@ def run_mcmc(
     if d <= 0:
         raise ValueError("No estimated parameters were provided.")
 
+    cdef bint needs_hessian = True
     if proposal_cov is not None:
+        needs_hessian = False
         if compute_map:
             raise ValueError(
                     "``compute_map=True`` will overwrite the proposal covariance. "
                     "To manually provide a proposal covariance, "
                     "set ``compute_map=False``."
                     )
+        proposal_cov = np.ascontiguousarray(proposal_cov, dtype=np.float64)
         if proposal_cov.shape != (d, d):
             raise ValueError(
                 "proposal_cov must be square with elements row and column counts "
                 "equal to the number of estimated parameters. "
                 f"Expected shape ({d}, {d}), got {proposal_cov.shape}."
             )
+    else:
+        proposal_cov = np.zeros((d, d), dtype=np.float64)
 
     # The chain and the MAP it starts from both walk theta, so both want the
     # change-of-variables density rather than the prior over the parameters.
@@ -1064,15 +1069,7 @@ def run_mcmc(
     cdef bitgen_t *bg = _bitgen_ptr(rng)
 
     cdef double[::1] th0v = np.ascontiguousarray(theta0, dtype=np.float64)
-
-    cdef bint needs_hessian = True
-    if proposal_cov is not None:
-        needs_hessian = False
-        pcov = np.ascontiguousarray(proposal_cov, dtype=np.float64)
-    else:
-        pcov = np.zeros((d, d), dtype=np.float64)
-
-    cdef double[:, ::1] pcovv = pcov
+    cdef double[:, ::1] pcovv = proposal_cov
 
     cdef str map_method = map_options.get("method", "L-BFGS-B")
     cdef object map_bounds = map_options.get("bounds")

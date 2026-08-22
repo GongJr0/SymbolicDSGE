@@ -1368,6 +1368,11 @@ class Estimator:
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
 
+        if map_options is None:
+            map_options = {}
+        if map_options.get("bounds") is not None:
+            map_options["bounds"] = self._serialize_bounds(map_options["bounds"])
+
         result = MCMCResult(
             param_names=list(self.param_names),
             samples=kept_params,
@@ -1377,12 +1382,18 @@ class Estimator:
             burn_in=burn_in,
             thin=thin,
             sampler_config={
+                "theta0": theta0.tolist() if isinstance(theta0, np.ndarray) else theta0,
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),
-                "proposal_cov": proposal_cov,
+                "map_options": dict(map_options) if map_options is not None else None,
+                "proposal_cov": (
+                    proposal_cov.tolist() if proposal_cov is not None else None
+                ),
+                "cov_fd_step_scale": float(cov_fd_step_scale),
+                "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
                 "random_state": (
                     int(random_state)
                     if isinstance(random_state, (int, np.integer))
