@@ -154,6 +154,37 @@ int sdsge_chol(const f64 *SDSGE_RESTRICT S, f64 jitter, f64 *SDSGE_RESTRICT L,
   return SDSGE_OK;
 }
 
+int sdsge_chol_upper(const f64 *SDSGE_RESTRICT S, f64 jitter,
+                     f64 *SDSGE_RESTRICT U, i64 n) {
+  sdsge_zero_mat(U, n, n);
+  f64 scale = 0.0;
+  for (i64 i = 0; i < n; ++i) {
+    f64 d = S[i * n + i];
+    if (jitter > 0.0)
+      d += jitter;
+    if (d > scale)
+      scale = d;
+  }
+  const f64 pivot_tol = scale * (f64)n * DBL_EPSILON;
+  for (i64 i = n - 1; i >= 0; --i) {
+    for (i64 j = n - 1; j >= i; --j) {
+      f64 s = S[i * n + j];
+      if (i == j && jitter > 0.0)
+        s += jitter;
+      for (i64 k = j + 1; k < n; ++k)
+        s -= U[i * n + k] * U[j * n + k];
+      if (i == j) {
+        if (s <= pivot_tol)
+          return SDSGE_NOT_PD;
+        U[i * n + j] = sqrt(s);
+      } else {
+        U[i * n + j] = s / U[j * n + j];
+      }
+    }
+  }
+  return SDSGE_OK;
+}
+
 /* out may alias b: out[i] is written only after reading b[i], and the loop
  * reads out[j] for j < i, which were already written this call. */
 void sdsge_forward_subst(const f64 *SDSGE_RESTRICT L, const f64 *b, f64 *out,

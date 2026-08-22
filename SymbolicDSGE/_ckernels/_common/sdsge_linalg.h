@@ -5,7 +5,8 @@
 
 /* Dense linear-algebra primitives shared across the native subsystems. Plain C
  * on C-contiguous, row-major f64 buffers; no CPython, NumPy, or BLAS. Buffers
- * are caller-allocated and never alias unless a function documents otherwise. */
+ * are caller-allocated and never alias unless a function documents otherwise.
+ */
 
 /* out(r,c) := 0 */
 void sdsge_zero_mat(f64 *out, i64 r, i64 c);
@@ -45,13 +46,14 @@ f64 sdsge_dot(const f64 *a, const f64 *b, i64 n);
 /* 2 * sum(log(diag(L))) for lower-triangular L(n,n) */
 f64 sdsge_logdet_from_chol(const f64 *L, i64 n);
 
-/* Lower Cholesky L(n,n) of S(n,n) (+ jitter on the diagonal). Returns SDSGE_OK,
- * or SDSGE_NOT_PD if S is not positive definite. Pass jitter == 0 for a plain
- * factorization. */
+/* Lower Cholesky L(n,n) and Uppoer Cholesky U(n,n) of S(n,n) (+ jitter on the
+ * diagonal). Returns SDSGE_OK, or SDSGE_NOT_PD if S is not positive definite.
+ * Pass jitter == 0 for a plain factorization. */
 int sdsge_chol(const f64 *S, f64 jitter, f64 *L, i64 n);
+int sdsge_chol_upper(const f64 *S, f64 jitter, f64 *U, i64 n);
 
-/* Solve L(n,n) x = b(n) for lower-triangular L; writes x into out(n). out may
- * alias b. */
+/* Solve L(n,n) x = b(n) for lower-triangular L; writes x into out(n). out
+ * may alias b. */
 void sdsge_forward_subst(const f64 *L, const f64 *b, f64 *out, i64 n);
 
 /* Solve L^T x = b using lower-triangular L(n,n); writes x into out(n). out may

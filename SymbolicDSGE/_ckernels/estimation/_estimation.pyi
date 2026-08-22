@@ -47,9 +47,10 @@ def run_mcmc(
     adapt: bool = True,
     adapt_start: int = 100,
     proposal_scale: float = 0.1,
+    proposal_cov: _F64 | None = None,
+    cov_fd_step_scale: float = 1.0,
+    cov_fd_absolute_floor: float = 0.1,
     adapt_epsilon: float = 1e-8,
-    hessian_fd_step_scale: float = 1.0,
-    hessian_fd_absolute_floor: float = 0.1,
     compute_map: bool = True,
     map_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]: ...

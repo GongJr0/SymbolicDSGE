@@ -138,8 +138,9 @@ Estimator.mcmc(
     adapt_epsilon: float = 1e-8,
     compute_map: bool = True,
     map_options: dict[str, Any] | None = None,  # (5)!
-    hessian_fd_step_scale: float = 1.0,
-    hessian_fd_absolute_floor: float = 0.1,
+    proposal_cov: np.ndarray | None = None,  # (6)!
+    cov_fd_step_scale: float = 1.0,
+    cov_fd_absolute_floor: float = 0.1,
 ) -> MCMCResult
 ```
 
@@ -149,15 +150,13 @@ Estimator.mcmc(
 4. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
 The proposal covariance will use the MAP point to compute the Hessian if `compute_map=True`.
 5. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
+6. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
 
 ???+ note "Thinning Semantics"
     Thinning is applied after burn-in using `(t - burn_in) % thin == 0`.
 
 ???+ note "MCMC Sample Space"
     `MCMCResult.samples` are returned in constrained parameter space (parameter names), not raw unconstrained `theta`.
-
-???+ note "Reproducibility"
-    `random_state` seeds the native sampler, which advances numpy's own PCG64 stream. A fixed `random_state` reproduces the native chain exactly; that chain is statistically equivalent to the pre-native numpy sampler, not bit-identical to it.
 
 ## Result Objects
 

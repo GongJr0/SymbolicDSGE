@@ -1310,8 +1310,9 @@ class Estimator:
         adapt_epsilon: float = 1e-8,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
-        hessian_fd_step_scale: float = 1.0,
-        hessian_fd_absolute_floor: float = 0.1,
+        proposal_cov: NDF | None = None,
+        cov_fd_step_scale: float = 1.0,
+        cov_fd_absolute_floor: float = 0.1,
     ) -> MCMCResult:
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
@@ -1344,11 +1345,12 @@ class Estimator:
             adapt=adapt,
             adapt_start=adapt_start,
             proposal_scale=proposal_scale,
+            proposal_cov=proposal_cov,
+            cov_fd_step_scale=cov_fd_step_scale,
+            cov_fd_absolute_floor=cov_fd_absolute_floor,
             adapt_epsilon=adapt_epsilon,
             compute_map=compute_map,
             map_options=map_options,
-            hessian_fd_step_scale=hessian_fd_step_scale,
-            hessian_fd_absolute_floor=hessian_fd_absolute_floor,
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
@@ -1380,6 +1382,7 @@ class Estimator:
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),
+                "proposal_cov": proposal_cov,
                 "random_state": (
                     int(random_state)
                     if isinstance(random_state, (int, np.integer))
