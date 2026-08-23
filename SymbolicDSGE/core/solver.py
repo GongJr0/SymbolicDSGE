@@ -881,11 +881,7 @@ class DSGESolver:
                 raise ValueError(
                     "posterior_point must be one of {'mean', 'last', 'map', 'mode'}."
                 )
-            # The round trip projects a posterior summary back onto the
-            # transforms, which matters for a mean that lands off a correlation
-            # block's manifold; the estimated names are read back off it.
-            projected = est.theta_to_params(est.params_to_theta(theta_star))
-            solve_params = {name: projected[name] for name in est.param_names}
+            solve_params = dict(zip(est.param_names, (float64(v) for v in theta_star)))
         else:
             raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
 

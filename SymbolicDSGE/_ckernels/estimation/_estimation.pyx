@@ -210,6 +210,7 @@ cdef extern from "estimation.h":
     ctypedef struct sdsge_estimation_result:
         sdsge_optim_result base
         double *vcov
+        double *se
         int64_t cov_status
 
     void sdsge_init_params(double *params, const double *base_params,
@@ -957,10 +958,14 @@ def run_estimation(
     est_opt.cov_fd_absolute_floor = cov_fd_absolute_floor
 
     vcov = np.empty((n_theta, n_theta), dtype=np.float64)
+    se = np.empty(n_theta, dtype=np.float64)
     cdef double[:, ::1] vcovv = vcov
+    cdef double[::1] sev = se
 
     cdef sdsge_estimation_result res
     res.vcov = &vcovv[0, 0]
+    res.se = &sev[0]
+
     cdef double lpr = 0.0
 
     with nogil:
@@ -983,6 +988,7 @@ def run_estimation(
         "params": params_out,
         "logprior": float(lpr),
         "vcov": vcov if compute_cov else None,
+        "se": se if compute_cov else None,
         "cov_status": int(res.cov_status),
     }
 
@@ -1223,7 +1229,7 @@ def loglik(object ctx_dto, str mode, theta not None):
     return np.float64(out)
 
 
-def logpost(object ctx_dto, str mode, theta not None, bint include_logjac=False):
+def logpost(object ctx_dto, str mode, theta not None, bint jacobian=False):
     """Log-posterior at ``theta``. ``include_logjac`` picks the density: with
     it, the density over theta the sampler walks; without, the prior over the
     parameters read at ``theta``. Equals the log-likelihood when the run carries
@@ -1241,7 +1247,7 @@ def logpost(object ctx_dto, str mode, theta not None, bint include_logjac=False)
     )
     cdef double out
     nc.b.bk_violations = 0
-    nc.b.prior.include_logjac = include_logjac
+    nc.b.prior.include_logjac = jacobian
     with nogil:
         out = fn(&thetav[0], ctxp)
     return np.float64(out)

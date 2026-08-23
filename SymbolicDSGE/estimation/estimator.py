@@ -830,12 +830,18 @@ class Estimator:
         the zero its support excludes. The support is the role's, so this holds
         for an MLE start as much as a MAP one.
         """
-        params = self.theta_to_params(theta)
         invalid: list[str] = []
-        for name in self.param_names:
-            value = float64(params[name])
-            support = self._param_transforms[name].support
-            if not np.isfinite(value) or not support.contains(value):
+        for i, name in enumerate(self.param_names):
+            z = float64(theta[i])
+            if not np.isfinite(z):
+                invalid.append(f"{name}={z}")
+                continue
+            if name in self._matrix_member_names:
+                # A block's run decodes to a valid correlation for any finite z.
+                continue
+            transform = self._param_transforms[name]
+            value = float64(transform.safe_inverse(z))
+            if not np.isfinite(value) or not transform.support.contains(value):
                 invalid.append(f"{name}={value}")
         if invalid:
             raise ValueError(
@@ -877,13 +883,11 @@ class Estimator:
             )
         return out
 
-    def _resolve_theta(self, theta: NDF) -> tuple[dict[str, float64], dict[str, NDF]]:
-        """Single materialization site for a theta draw.
+    def theta_to_params(self, theta: NDF) -> dict[str, float64]:
+        """A theta draw as the named parameters, over the base calibration.
 
-        Returns the named parameter dict (the boundary view every caller expects)
-        alongside the matrix blocks it built on the way — keyed by reserved matrix
-        key ("Q_corr"/"R_corr"). The hot path takes the matrices straight to the
-        Q/R assembly instead of re-gathering them from the named scalars.
+        A CPC block's members come off the correlation its run decodes to;
+        every other estimated entry comes through its own inverse transform.
         """
         theta = asarray(theta, dtype=float64)
         if theta.ndim != 1:
@@ -893,12 +897,10 @@ class Estimator:
                 f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
             )
         full = dict(self._base_params)
-        matrices: dict[str, NDF] = {}
         handled = np.zeros((len(self.param_names),), dtype=bool)
-        for key, block in self._matrix_blocks.items():
+        for block in self._matrix_blocks.values():
             theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
             corr, _ = self._block_corr_from_theta(block, theta_block)
-            matrices[key] = corr
             member_vals = corr[block.positions[:, 0], block.positions[:, 1]]
             for name, val in zip(block.member_names, member_vals):
                 full[name] = float64(val)
@@ -910,10 +912,7 @@ class Estimator:
             full[name] = float64(
                 self._param_transforms[name].safe_inverse(float64(theta[i]))
             )
-        return full, matrices
-
-    def theta_to_params(self, theta: NDF) -> dict[str, float64]:
-        return self._resolve_theta(theta)[0]
+        return full
 
     def loglik(self, theta: NDF) -> float64:
         ctx, mode = self._build_native_context()
@@ -979,11 +978,12 @@ class Estimator:
         theta = {name: float64(params_at_x[name]) for name in self.param_names}
 
         vcov = res.get("vcov")
+        se = res.get("se")
         common: dict[str, Any] = dict(
             x=x,
             theta=theta,
             vcov=vcov,
-            se=self._se_in_param_space(x, vcov),
+            se=dict(zip(self.param_names, se)) if se is not None else None,
             cov_status=int(res.get("cov_status", 0)),
             success=bool(res["success"]),
             message=str(res["message"]),
@@ -997,41 +997,6 @@ class Estimator:
         if kind == "map":
             return MAPResult(**common, logpost=-res["fun"], logprior=res["logprior"])
         raise ValueError(f"unknown result kind {kind!r}")
-
-    def _se_in_param_space(self, x: NDF, vcov: NDF | None) -> dict[str, float64] | None:
-        """Standard errors in the space ``theta`` reports, not the one they were
-        computed in.
-
-        The Hessian is taken over the unconstrained vector, which is the space
-        the sampler's proposal wants, so ``vcov`` carries theta's units. Beside a
-        parameter's value a reader expects that parameter's own scale, so the
-        covariance is pushed through the transform's Jacobian first. The Jacobian
-        is taken by finite difference rather than read off a diagonal: a
-        correlation block maps several theta entries onto several members at
-        once, and has no diagonal to read.
-        """
-        if vcov is None:
-            return None
-
-        names = list(self.param_names)
-        base = self.theta_to_params(x)
-        step = np.sqrt(np.finfo(float64).eps)
-        jac = np.zeros((len(names), len(names)), dtype=float64)
-        for j in range(len(names)):
-            h = step * max(abs(float(x[j])), 1.0)
-            probe = np.array(x, dtype=float64, copy=True)
-            probe[j] += h
-            moved = self.theta_to_params(probe)
-            for i, name in enumerate(names):
-                jac[i, j] = (float64(moved[name]) - float64(base[name])) / h
-
-        variance = np.diag(jac @ np.asarray(vcov, dtype=float64) @ jac.T)
-        return {
-            name: (
-                float64(np.sqrt(variance[i])) if variance[i] >= 0.0 else float64(np.nan)
-            )
-            for i, name in enumerate(names)
-        }
 
     def _build_native_context(
         self,
