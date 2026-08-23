@@ -34,6 +34,7 @@ def _mcmc_result() -> MCMCResult:
         param_names=["a"],
         samples=np.zeros((2, 1), dtype=float64),
         logpost_trace=np.zeros(2, dtype=float64),
+        logjac_trace=np.zeros(2, dtype=float64),
         accept_rate=float64(0.5),
         n_draws=2,
         burn_in=1,

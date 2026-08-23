@@ -31,6 +31,7 @@ typedef struct {
 typedef struct {
   f64 *kept;
   f64 *kept_lp;
+  f64 *kept_lj;
 } sdsge_mcmc_buffers;
 
 /* MCMC OUTPUTS */

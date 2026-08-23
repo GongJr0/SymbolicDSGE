@@ -243,6 +243,7 @@ def test_ui_estimation_serializes_mcmc_traces_for_charts() -> None:
         param_names=["beta", "sigma"],
         samples=np.array([[0.98, 1.1], [0.99, 1.0]], dtype=np.float64),
         logpost_trace=np.array([-3.0, -2.5], dtype=np.float64),
+        logjac_trace=np.array([-0.1, -0.2], dtype=np.float64),
         accept_rate=np.float64(0.5),
         n_draws=2,
         burn_in=1,

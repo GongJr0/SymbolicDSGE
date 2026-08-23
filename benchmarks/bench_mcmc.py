@@ -1,24 +1,23 @@
 """Benchmark random-walk MCMC against Dynare.
 
 The timed entries are the public ``Estimator.mcmc`` method and Dynare's
-``dynare_estimation`` sampling phase. Dynare's posterior-mode and Hessian
-setup, native parse/compile/solve, data generation, and optional warmup chains
-are outside the timer. Both samplers use adaptive random-walk MH, but their
-RNGs and adaptation schedules differ, so this reports marginal posterior
-summaries rather than path parity.
+``dynare_estimation`` sampling phase. Dynare's posterior-mode setup, native
+parse/compile/solve, the shared mode and proposal covariance, data generation,
+and optional warmup chains are outside the timer. Both samplers use adaptive
+random-walk MH, but their RNGs and adaptation schedules differ, so this reports
+marginal posterior summaries rather than path parity.
 
 The MAP is found once per case, before either timer starts, and both runtimes
 begin every chain from it. The native side takes it as ``theta0`` under
 ``compute_map=False``; Dynare reads it from the mode file, whose ``xparam1`` the
 setup pass's own estimate is overwritten with.
 
-Each side then rebuilds the proposal Hessian at that shared mode inside its own
-timed call, the native kernel as part of ``run_mcmc`` and Dynare through the
-same ``hessian.m`` call ``dynare_estimation_1`` makes, which ``mode_compute =
-0`` would otherwise skip in favour of reading one off disk. Both use the
-Abramowitz and Stegun 25.3.23 / 25.3.27 stencil at the same step, so both cost
-``d * (d + 1) + 1`` likelihood evaluations and ``draws / s`` covers the same
-work on either side.
+That same MAP call returns the covariance at the mode, and both runtimes sample
+with it, so neither timed call builds a Hessian and ``draws / s`` covers
+sampling alone. The native side takes it as ``proposal_cov``; Dynare reads its
+inverse off the mode file as ``hh``, which ``dynare_estimation_1`` inverts back
+into the jumping covariance. The setup pass runs under ``cova_compute = 0``, so
+Dynare never builds one either.
 
 Every case estimates its model's full structural parameter set: each calibrated
 parameter that is not a shock standard deviation, a shock correlation, or a
@@ -66,18 +65,11 @@ PRIOR_DISTRIBUTION = "normal"
 PRIOR_TRANSFORM = "identity"
 DYNARE_PRIOR_DENSITY = "normal_pdf"
 
-# Both samplers draw their initial proposal from a finite-difference Hessian at
-# the mode, and they already agree on how wide that step is: Dynare's
-# hessian.m steps by eps^(1/6) * gstep(2) with a floor of sqrt(gstep(1)), and
-# the native kernel steps by sqrt(cbrt(eps)) * scale with a floor of 0.1, which
-# is the same 2.4607e-3 and the same 0.1 under the shipped defaults.
-#
-# The default is too wide for sw2007, whose crhoa sits 0.0023 below the unit
-# root: the upward probe lands at 1.00003, and the Blanchard-Kahn failure there
-# is fatal to both runtimes. Native aborts the chain outright; Dynare fills hh
-# with non-finite entries, which inv() spreads into a jumping covariance that
-# chol rejects. Narrowing it keeps the probe inside the stable region. One
-# scale drives both sides so the two proposals stay comparable.
+# The shared proposal covariance comes from a finite-difference Hessian at the
+# mode, and this scales its step. The shipped default is too wide for sw2007,
+# whose crhoa sits 0.0023 below the unit root: the upward probe lands at
+# 1.00003, and the Blanchard-Kahn failure there leaves the covariance NaN
+# throughout. Narrowing it keeps the probe inside the stable region.
 HESSIAN_STEP_SCALE = 0.5
 
 
@@ -244,8 +236,11 @@ def _make_estimator(targets: Targets, compiled, solved, y: np.ndarray, observabl
     )
 
 
-def _posterior_mode(targets: Targets, compiled, solved, y, observables):
-    """The MAP both runtimes start from, found once and outside every timer.
+def _posterior_mode(
+    targets: Targets, compiled, solved, y, observables, hessian_step_scale: float
+):
+    """The MAP both runtimes start from and the covariance both propose with,
+    found once and outside every timer.
 
     Letting each side find its own would compare two chains that began in
     different places, and letting the native side find it per rep would time
@@ -258,11 +253,27 @@ def _posterior_mode(targets: Targets, compiled, solved, y, observables):
         contextlib.redirect_stdout(sink),
     ):
         result = estimator.map(
-            theta0=dict(zip(targets.names, targets.values, strict=True))
+            theta0=dict(zip(targets.names, targets.values, strict=True)),
+            cov_fd_step_scale=hessian_step_scale,
         )
     if not result.success:
         raise RuntimeError(f"MAP did not converge before sampling: {result.message}")
+    if result.vcov is None or not np.all(np.isfinite(result.vcov)):
+        raise RuntimeError(
+            "The MAP found no usable proposal covariance at the mode "
+            f"(cov_status={result.cov_status})."
+        )
     return result
+
+
+def _proposal_covariance(targets: Targets, mode) -> np.ndarray:
+    """``mode.vcov`` reordered to follow ``targets.names``.
+
+    It describes ``mode.x``, so its rows and columns follow the estimator's own
+    parameter order, while both runtimes take the proposal by name.
+    """
+    order = [list(mode.theta).index(name) for name in targets.names]
+    return np.asarray(mode.vcov, dtype=np.float64)[np.ix_(order, order)]
 
 
 def _run_native(
@@ -279,10 +290,10 @@ def _run_native(
     proposal_scale: float,
     adapt: bool,
     adapt_start: int,
-    hessian_step_scale: float,
     mode,
 ) -> dict[str, np.ndarray | float]:
     estimator = _make_estimator(targets, compiled, solved, y, observables)
+    proposal_cov = _proposal_covariance(targets, mode)
 
     def run(chain_seed: int):
         return estimator.mcmc(
@@ -294,7 +305,7 @@ def _run_native(
             proposal_scale=proposal_scale,
             adapt=adapt,
             adapt_start=adapt_start,
-            cov_fd_step_scale=hessian_step_scale,
+            proposal_cov=proposal_cov,
         )
 
     with (
@@ -325,7 +336,8 @@ def _write_data(path: Path, observables: tuple[str, ...], y: np.ndarray) -> None
 
 
 def _write_shared_mode(path: Path, targets: Targets, mode) -> None:
-    """The shared MAP, written for the MATLAB side to match up by name.
+    """The shared MAP and proposal covariance, written for the MATLAB side to
+    match up by name.
 
     Dynare's own parameter order is whatever its mode file records, so the names
     travel with the values rather than the two sides agreeing on an ordering.
@@ -336,6 +348,7 @@ def _write_shared_mode(path: Path, targets: Targets, mode) -> None:
             "xparam1": np.asarray(
                 [float(mode.theta[name]) for name in targets.names], dtype=np.float64
             ).reshape(-1, 1),
+            "proposal_cov": _proposal_covariance(targets, mode),
             "parameter_names": np.array(
                 [np.str_(name) for name in targets.names], dtype=object
             ).reshape(-1, 1),
@@ -352,13 +365,7 @@ def _dynare_estimated_params(targets: Targets) -> str:
     )
 
 
-def _write_model(
-    case: CaseSpec,
-    path: Path,
-    periods: int,
-    targets: Targets,
-    hessian_step_scale: float,
-) -> None:
+def _write_model(case: CaseSpec, path: Path, periods: int, targets: Targets) -> None:
     source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
     for statement in case.dynare_remove:
         source = source.replace(statement, "")
@@ -366,9 +373,8 @@ def _write_model(
         "\nestimated_params;\n"
         + _dynare_estimated_params(targets)
         + "\nend;\n"
-        + f"options_.gstep(2) = {hessian_step_scale:.17g};\n"
         + f"estimation(datafile = {case.data_file}, nobs = {periods}, "
-        + "mode_compute = 4, cova_compute = 1, mh_replic = 0);\n"
+        + "mode_compute = 4, cova_compute = 0, mh_replic = 0);\n"
     )
     path.write_text(source, encoding="utf-8")
 
@@ -388,7 +394,6 @@ def _run_dynare(
     seed: int,
     adapt: bool,
     adapt_start: int,
-    hessian_step_scale: float,
     mode,
     dynare_path: str,
     matlab_bin: str,
@@ -404,13 +409,7 @@ def _run_dynare(
     ) as tmp:
         workdir = Path(tmp)
         model_name = f"{case_name}_mcmc"
-        _write_model(
-            case,
-            workdir / f"{model_name}.mod",
-            y.shape[0],
-            targets,
-            hessian_step_scale,
-        )
+        _write_model(case, workdir / f"{model_name}.mod", y.shape[0], targets)
         _write_data(
             workdir / f"{case.data_file}.m", _dynare_observables(case, observables), y
         )
@@ -535,10 +534,10 @@ def _print_report(
         f"retained draws={draws} burn-in={burn_in} reps={len(native['times'])}"
     )
     print(
-        "Both runtimes start from one MAP, found outside every timer, and each "
-        "rebuilds its proposal Hessian at that mode inside its own timed call. "
-        "Their update schedules and RNGs differ, so posterior summaries are "
-        "descriptive."
+        "Both runtimes start from one MAP and propose from the covariance found "
+        "at it, both outside every timer, so neither timed call builds a "
+        "Hessian. Their update schedules and RNGs differ, so posterior "
+        "summaries are descriptive."
     )
     native_median = float(np.median(native["times"]))
     native_ess = _effective_sample_size(native["samples"])
@@ -665,7 +664,9 @@ def main() -> int:
             output_dir.mkdir(exist_ok=True)
             compiled, solved, y, observables = _prepare(case, args.periods)
             targets = _estimation_targets(compiled, args.prior_scale)
-            mode = _posterior_mode(targets, compiled, solved, y, observables)
+            mode = _posterior_mode(
+                targets, compiled, solved, y, observables, args.hessian_step_scale
+            )
             native = _run_native(
                 targets,
                 compiled,
@@ -680,7 +681,6 @@ def main() -> int:
                 args.native_proposal_scale,
                 not args.no_native_adapt,
                 args.adapt_start,
-                args.hessian_step_scale,
                 mode,
             )
             np.savez(output_dir / "native.npz", **native)
@@ -702,7 +702,6 @@ def main() -> int:
                         args.seed,
                         not args.no_native_adapt,
                         args.adapt_start,
-                        args.hessian_step_scale,
                         mode,
                         args.dynare_matlab_path,
                         args.matlab_bin,

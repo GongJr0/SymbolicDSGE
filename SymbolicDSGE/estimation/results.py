@@ -155,6 +155,7 @@ class MCMCResult:
     param_names: list[str]
     samples: NDF
     logpost_trace: NDF
+    logjac_trace: NDF
     accept_rate: float64
     n_draws: int
     burn_in: int
@@ -166,8 +167,9 @@ class MCMCResult:
     def to_meta(self) -> "MCMCResultMeta":
         """Project to the scalar text metadata carried in a ``.sdsge`` bundle.
 
-        Bulk ``samples`` / ``logpost_trace`` are not included — pair this with
-        :meth:`posterior_arrays` when bundling so they ride a sibling member.
+        Bulk ``samples`` / ``logpost_trace`` / ``logjac_trace`` are not
+        included. Pair this with :meth:`posterior_arrays` when bundling so they
+        ride a sibling member.
         The ``sampler_config`` is preserved.
         """
         from .spec import MCMCResultMeta
@@ -184,11 +186,15 @@ class MCMCResult:
     def posterior_arrays(self) -> dict[str, NDF]:
         """Bulk posterior columns keyed for :func:`SymbolicDSGE.bundle.trace_to_json`.
 
-        ``{"samples": (n_draws, n_params), "logpost": (n_draws,)}`` — the shape
-        :class:`BundleBuilder` expects as ``posterior`` and the loader returns in
-        ``LoadedEstimation.posterior``.
+        ``{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac":
+        (n_draws,)}``, the shape :class:`BundleBuilder` expects as ``posterior``
+        and the loader returns in ``LoadedEstimation.posterior``.
         """
-        return {"samples": self.samples, "logpost": self.logpost_trace}
+        return {
+            "samples": self.samples,
+            "logpost": self.logpost_trace,
+            "logjac": self.logjac_trace,
+        }
 
     @staticmethod
     def _validate_hpd_alpha(alpha: float) -> float64:

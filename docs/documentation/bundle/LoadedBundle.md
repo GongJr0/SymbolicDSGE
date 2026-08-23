@@ -41,7 +41,7 @@ __Fields:__
 | spec | `#!python EstimationSpec` | The text-only run specification. Always present when `LoadedEstimation` is. |
 | result | `#!python OptimizationResult | MCMCResult | None` | The reconstructed first-class result: an `OptimizationResult` (MLE/MAP) or `MCMCResult` (MCMC), rebuilt from the stored metadata and, for MCMC, the `posterior` traces. `None` when the bundle carries no estimation result. |
 | observed | `#!python NDArray[np.float64] | None` | Observed `y` matrix shaped `(n, k)`, reconstructed from the CSV or Parquet member. |
-| posterior | `#!python dict[str, NDArray] | None` | MCMC posterior columns, conventionally `{"samples": (n_draws, n_params), "logpost": (n_draws,)}`. |
+| posterior | `#!python dict[str, NDArray] | None` | MCMC posterior columns, `{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac": (n_draws,)}`. |
 
 ???+ note "Results Come Back Reconstructed"
     `result` is the same first-class object the run produced. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces. If an estimation was bundled with results, read `loaded.estimation.result` directly. The raw `posterior` columns stay on `LoadedEstimation.posterior` for callers that want the arrays.

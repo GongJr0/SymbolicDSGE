@@ -6,7 +6,7 @@ its pydantic request models in :mod:`SymbolicDSGE.ui.schemas` and converts via
 :meth:`EstimationRunRequest.to_core`. This is the text representation a
 ``.sdsge`` bundle stores for the estimation tab.
 
-Bulk arrays (observed data ``y``, MCMC ``samples`` and ``logpost_trace``) are
+Bulk arrays (observed data ``y``, MCMC ``samples``, ``logpost_trace``, and ``logjac_trace``) are
 not carried here — they ride sibling Parquet members and pair with this
 metadata at load time, mirroring the
 :mod:`SymbolicDSGE.monte_carlo.serialize` split.
@@ -348,7 +348,7 @@ class EstimationSpec:
 class MCMCResultMeta:
     """Text-only metadata for an :class:`MCMCResult`.
 
-    Bulk ``samples`` (``n_draws × len(param_names)``) and ``logpost_trace`` ride
+    Bulk ``samples`` (``n_draws × len(param_names)``), ``logpost_trace``, and `logjac_trace``` ride
     a sibling Parquet member via :func:`SymbolicDSGE.bundle.trace_to_json`;
     pairing this metadata with that trace dict reconstructs the full result.
     """

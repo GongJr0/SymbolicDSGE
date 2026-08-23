@@ -46,7 +46,7 @@ class LoadedEstimation:
 
     ``result`` is a first-class :class:`OptimizationResult` / :class:`MCMCResult`
     (rebuilt from the stored metadata + posterior traces), not the on-disk
-    ``*Meta`` shape. ``posterior`` still carries the raw ``samples``/``logpost``
+    ``*Meta`` shape. ``posterior`` still carries the raw ``samples``/``logpost``/``logjac``
     columns for callers that want them directly.
     """
 
@@ -220,15 +220,21 @@ def _rebuild_mcmc_result(
     ride the parquet trace member.
     """
     meta = MCMCResultMeta.from_dict(data)
-    if posterior is None or "samples" not in posterior or "logpost" not in posterior:
+    if (
+        posterior is None
+        or "samples" not in posterior
+        or "logpost" not in posterior
+        or "logjac" not in posterior
+    ):
         raise ValueError(
             "MCMC bundle result requires an 'estimation_trace' member carrying "
-            "'samples' and 'logpost' columns."
+            "'samples', 'logpost', and 'logjac' columns."
         )
     return MCMCResult(
         param_names=meta.param_names,
         samples=np.asarray(posterior["samples"], dtype=np.float64),
         logpost_trace=np.asarray(posterior["logpost"], dtype=np.float64),
+        logjac_trace=np.asarray(posterior["logjac"], dtype=np.float64),
         accept_rate=np.float64(meta.accept_rate),
         n_draws=meta.n_draws,
         burn_in=meta.burn_in,

@@ -56,6 +56,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     posterior = {
         "samples": rng.standard_normal((20, 2)),
         "logpost": rng.standard_normal(20),
+        "logjac": rng.standard_normal(20),
     }
     result_meta = MCMCResultMeta(
         param_names=["beta", "sigma"],
@@ -122,11 +123,13 @@ def test_emit_wire_mle_result() -> None:
 def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
     rng = np.random.default_rng(7)
     samples = rng.standard_normal((30, 2))
-    logpost = rng.standard_normal(30)
+    logpost = (rng.standard_normal(30),)
+    logjac = rng.standard_normal(30)
     live = MCMCResult(
         param_names=["beta", "sigma"],
         samples=samples,
         logpost_trace=logpost,
+        logjac_trace=logjac,
         accept_rate=np.float64(0.31),
         n_draws=30,
         burn_in=5,
@@ -139,7 +142,7 @@ def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
         burn_in=5,
         thin=1,
     )
-    traces = {"samples": samples, "logpost_trace": logpost}
+    traces = {"samples": samples, "logpost_trace": logpost, "logjac_trace": logjac}
     assert emit_estimation_wire(live) == emit_estimation_wire(meta, traces=traces)
 
 
