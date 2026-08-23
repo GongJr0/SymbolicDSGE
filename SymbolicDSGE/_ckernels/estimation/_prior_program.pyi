@@ -7,6 +7,8 @@ exist solely for the LSP / mypy. They must stay in sync with
 behavior, not this stub.
 """
 
+from typing import Any
+
 from numpy import float64, int64
 from numpy.typing import NDArray
 
@@ -33,6 +35,8 @@ def logprior_program(
     matrix_lengths: _I64,
     matrix_etas: _F64,
     matrix_log_constants: _F64,
+    include_logjac: bool = True,
 ) -> float: ...
+def logprior(tables: Any, theta: _F64, include_logjac: bool = False) -> float64: ...
 def cov_from_unconstrained(z: _F64, std: _F64) -> tuple[_F64, _F64]: ...
 def unconstrained_from_corr_chol(L: _F64) -> _F64: ...

@@ -97,7 +97,6 @@ def test_the_estimation_likelihood_runs_on_a_constrained_model(solved, observati
     compiled = solver.compile()
 
     est = Estimator(
-        solver=solver,
         compiled=compiled,
         y=observations,
         filter_mode="linear",

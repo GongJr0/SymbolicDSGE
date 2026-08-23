@@ -34,8 +34,6 @@ from ..bayesian.transforms.upper_bounded import UpperBoundedTransform
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
 
-from .._ckernels.estimation import logprior_program
-
 
 class DistCode(IntEnum):
     """Integer dispatch codes for scalar prior families in the packed kernel.
@@ -81,45 +79,45 @@ N_DIST_PARAMS = 5
 N_TRANSFORM_PARAMS = 3
 
 
-@dataclass(frozen=True)
-class PackedLogPrior:
-    scalar_indices: NDI
-    scalar_dist_codes: NDI
-    scalar_transform_codes: NDI
-    scalar_dist_params: NDF
-    scalar_transform_params: NDF
-    matrix_offsets: NDI
-    matrix_dims: NDI
-    matrix_lengths: NDI
-    matrix_etas: NDF
-    matrix_log_constants: NDF
-    prior_keys: tuple[str, ...]
-    prior_object_ids: tuple[int, ...]
+@dataclass(frozen=True, slots=True)
+class PyPriorTables:
+    """Mirror of ``sdsge_prior_tables``: packed log-prior program arguments.
 
-    def matches(self, priors: Mapping[str, Any] | None) -> bool:
-        if priors is None:
-            return False
-        if tuple(priors.keys()) != self.prior_keys:
-            return False
-        return (
-            tuple(id(priors[key]) for key in self.prior_keys) == self.prior_object_ids
-        )
+    ``has_prior`` gates the whole block. Scalar columns run to ``n_scalar`` =
+    ``len(scalar_indices)``; ``scalar_dist_params`` is n_scalar*5 and
+    ``scalar_transform_params`` n_scalar*3, both read row-major flat by C.
+    Matrix (CPC/LKJ) block columns run to ``n_blocks`` =
+    ``len(matrix_offsets)``."""
 
-    def logpdf(self, theta: NDF) -> float64:
-        return float64(
-            logprior_program(
-                np.ascontiguousarray(theta, dtype=float64),
-                self.scalar_indices,
-                self.scalar_dist_codes,
-                self.scalar_transform_codes,
-                self.scalar_dist_params,
-                self.scalar_transform_params,
-                self.matrix_offsets,
-                self.matrix_dims,
-                self.matrix_lengths,
-                self.matrix_etas,
-                self.matrix_log_constants,
-            )
+    has_prior: bool
+    scalar_indices: NDI  # n_scalar
+    scalar_dist_codes: NDI  # n_scalar
+    scalar_transform_codes: NDI  # n_scalar
+    scalar_dist_params: NDF  # n_scalar*5
+    scalar_transform_params: NDF  # n_scalar*3
+    matrix_offsets: NDI  # n_blocks
+    matrix_dims: NDI  # n_blocks
+    matrix_lengths: NDI  # n_blocks
+    matrix_etas: NDF  # n_blocks
+    matrix_log_constants: NDF  # n_blocks
+
+    @classmethod
+    def empty(cls) -> "PyPriorTables":
+        """The disabled table: no priors, or a prior the packer could not
+        represent. Every column is length zero, so the kernel sums nothing."""
+        empty_i = np.empty(0, dtype=np.int64)
+        return cls(
+            has_prior=False,
+            scalar_indices=empty_i,
+            scalar_dist_codes=empty_i,
+            scalar_transform_codes=empty_i,
+            scalar_dist_params=np.empty((0, N_DIST_PARAMS), dtype=float64),
+            scalar_transform_params=np.empty((0, N_TRANSFORM_PARAMS), dtype=float64),
+            matrix_offsets=empty_i,
+            matrix_dims=empty_i,
+            matrix_lengths=empty_i,
+            matrix_etas=np.empty(0, dtype=float64),
+            matrix_log_constants=np.empty(0, dtype=float64),
         )
 
 
@@ -129,7 +127,7 @@ def build_packed_logprior(
     param_index: Mapping[str, int],
     matrix_blocks: Mapping[str, Any],
     matrix_member_names: set[str],
-) -> PackedLogPrior | None:
+) -> PyPriorTables | None:
     if priors is None:
         return None
 
@@ -148,12 +146,25 @@ def build_packed_logprior(
     for name, prior in priors.items():
         if name in matrix_blocks:
             block = matrix_blocks[name]
+            # A matrix key may be given as a bare LKJChol; the block carries the
+            # coerced Prior, so read that and fall back to the raw entry.
+            block_prior = getattr(block, "prior", None)
+            if block_prior is not None:
+                prior = block_prior
             if not isinstance(prior, Prior):
-                return None
+                raise TypeError(
+                    f"Prior on matrix key '{name}' must be an LKJChol "
+                    f"distribution or a Prior wrapping one; got "
+                    f"{type(prior).__name__}."
+                )
             if not isinstance(prior.dist, LKJChol) or not isinstance(
                 prior.transform, CholeskyCorrTransform
             ):
-                return None
+                raise TypeError(
+                    f"Prior on matrix key '{name}' must pair LKJChol with "
+                    f"CholeskyCorrTransform; got {type(prior.dist).__name__} "
+                    f"and {type(prior.transform).__name__}."
+                )
             dim = int(block.dim)
             sl = block.theta_slice
             matrix_offsets.append(int(sl.start))
@@ -167,14 +178,26 @@ def build_packed_logprior(
         if name in matrix_member_names:
             continue
         if name not in param_index:
-            return None
+            raise ValueError(f"Prior on '{name}', which is not an estimated parameter.")
         if not isinstance(prior, Prior):
-            return None
+            raise TypeError(
+                f"Prior on '{name}' must be a Prior; got {type(prior).__name__}."
+            )
 
         dist_code, dist_params = _pack_distribution(prior.dist)
         transform_code, transform_params = _pack_transform(prior.transform)
-        if dist_code is None or transform_code is None:
-            return None
+        if dist_code is None:
+            raise TypeError(
+                f"Prior on '{name}' uses distribution "
+                f"{type(prior.dist).__name__}, which the native prior program "
+                f"has no code for."
+            )
+        if transform_code is None:
+            raise TypeError(
+                f"Prior on '{name}' uses transform "
+                f"{type(prior.transform).__name__}, which the native prior "
+                f"program has no code for."
+            )
 
         scalar_indices.append(int(param_index[name]))
         scalar_dist_codes.append(dist_code)
@@ -184,7 +207,8 @@ def build_packed_logprior(
 
     n_scalar = len(scalar_indices)
 
-    return PackedLogPrior(
+    return PyPriorTables(
+        has_prior=True,
         scalar_indices=np.asarray(scalar_indices, dtype=np.int64),
         scalar_dist_codes=np.asarray(scalar_dist_codes, dtype=np.int64),
         scalar_transform_codes=np.asarray(scalar_transform_codes, dtype=np.int64),
@@ -201,8 +225,6 @@ def build_packed_logprior(
         matrix_lengths=np.asarray(matrix_lengths, dtype=np.int64),
         matrix_etas=np.asarray(matrix_etas, dtype=float64),
         matrix_log_constants=np.asarray(matrix_log_constants, dtype=float64),
-        prior_keys=tuple(priors.keys()),
-        prior_object_ids=tuple(id(prior) for prior in priors.values()),
     )
 
 

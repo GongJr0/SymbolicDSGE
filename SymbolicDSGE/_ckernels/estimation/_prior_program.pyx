@@ -74,7 +74,7 @@ def lkj_chol_logpdf_from_z(double[::1] z, int64_t dim, int64_t length,
     return out
 
 
-def logprior_program(double[::1] theta,
+def logprior_program(theta not None,
                      int64_t[::1] scalar_indices,
                      int64_t[::1] scalar_dist_codes,
                      int64_t[::1] scalar_transform_codes,
@@ -84,21 +84,21 @@ def logprior_program(double[::1] theta,
                      int64_t[::1] matrix_dims,
                      int64_t[::1] matrix_lengths,
                      double[::1] matrix_etas,
-                     double[::1] matrix_log_constants):
+                     double[::1] matrix_log_constants,
+                     bint include_logjac=True):
     """Full packed log-prior. Returns the scalar logprior (NaN -> numba fallback).
 
     Each block's z is the contiguous theta run starting at ``matrix_offsets[b]``
     of length ``matrix_lengths[b]``, read straight off ``theta`` in the kernel.
 
-    The jacobian is always on here: this is the fast path for the density over
-    theta, and its fallback builds the same thing out of the Prior objects,
-    which carry it. The two have to answer alike or the result would depend on
-    which branch ran. The C objectives choose per entry point instead, off
-    ``sdsge_prior_tables.include_logjac``."""
+    ``include_logjac`` picks the density: with it, the prior over theta, the
+    change of variables a sampler walks; without, the prior over the parameters
+    read at that theta. The C objectives make the same choice per entry point,
+    off ``sdsge_prior_tables.include_logjac``."""
     cdef int64_t n_scalar = scalar_indices.shape[0]
     cdef int64_t n_blocks = matrix_dims.shape[0]
 
-    cdef double *theta_p = &theta[0] if theta.shape[0] > 0 else NULL
+    cdef double[::1] thetav = np.ascontiguousarray(theta, dtype=np.float64)
     cdef int64_t *si = &scalar_indices[0] if n_scalar > 0 else NULL
     cdef int64_t *sdc = &scalar_dist_codes[0] if n_scalar > 0 else NULL
     cdef int64_t *stc = &scalar_transform_codes[0] if n_scalar > 0 else NULL
@@ -112,9 +112,30 @@ def logprior_program(double[::1] theta,
 
     cdef double out
     with nogil:
-        out = sdsge_logprior_program(theta_p, si, sdc, stc, sdp, stp, n_scalar,
-                                     mo, md, ml, me, mlc, n_blocks, 1)
+        out = sdsge_logprior_program(&thetav[0], si, sdc, stc, sdp, stp, n_scalar,
+                                     mo, md, ml, me, mlc, n_blocks, include_logjac)
     return out
+
+
+def logprior(object tables, theta not None, bint include_logjac=False):
+    """The packed log-prior at ``theta``, read off an ``sdsge_prior_tables``
+    mirror rather than eleven loose arrays. ``tables.has_prior`` is not consulted
+    here: a disabled table carries zero-length columns, so the kernel sums
+    nothing and returns 0.0."""
+    return np.float64(logprior_program(
+        theta,
+        tables.scalar_indices,
+        tables.scalar_dist_codes,
+        tables.scalar_transform_codes,
+        tables.scalar_dist_params,
+        tables.scalar_transform_params,
+        tables.matrix_offsets,
+        tables.matrix_dims,
+        tables.matrix_lengths,
+        tables.matrix_etas,
+        tables.matrix_log_constants,
+        include_logjac,
+    ))
 
 
 def cov_from_unconstrained(z, std):

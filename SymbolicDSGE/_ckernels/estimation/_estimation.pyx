@@ -224,6 +224,8 @@ cdef extern from "estimation.h":
     double sdsge_obj_unscented(sdsge_unscented_ctx *ctx, const double *theta,
                                int has_priors) nogil
 
+    sdsge_objective_fn sdsge_select_objective(int negate, int has_priors,
+                                              int filter_mode) nogil
     double sdsge_post_linear(const double *x, void *ctx) noexcept nogil
     double sdsge_post_extended(const double *x, void *ctx) noexcept nogil
     double sdsge_post_unscented(const double *x, void *ctx) noexcept nogil
@@ -1186,45 +1188,60 @@ def run_mcmc(
     }
 
 
-cdef class NativeLogpost:
-    """Single-eval handle over a built native objective context.
+cdef int _filter_mode_code(str mode):
+    if mode == "linear":
+        return 0
+    if mode == "extended":
+        return 1
+    return 2
 
-    ``logpost(theta)`` / ``loglik(theta)`` return the native objective at
-    ``theta``, the exact value run_mcmc / run_estimation evaluate per step
-    (``+logpost`` / ``+loglik`` form; ``-inf`` on a BK or non-finite solve). The
-    ctx is marshalled once at construction and each call re-solves at ``theta``.
+# Point objectives at an arbitrary theta. Each call marshals its own context
+# from the DTO and drops it on return, so nothing is shared between calls: the
+# scratch arenas, `include_logjac` and the BK counter are all call-local, and
+# concurrent callers cannot reach each other's state. The cost is one full
+# marshal per evaluation, which is the trade for having no lifetime to manage.
 
-    This is the seam parity tests drive a Python reference chain through, not
-    the estimation hot path."""
-    cdef _NativeCtx nc
-    cdef str mode
 
-    def __cinit__(self, object ctx_dto, str mode):
-        self.nc = _build_native_ctx(ctx_dto, mode)
-        # `logpost` here is a density over theta, which is the chain's own
-        # target, so it carries the jacobian the same way run_mcmc's does.
-        self.nc.b.prior.include_logjac = 1
-        self.mode = mode
+def loglik(object ctx_dto, str mode, theta not None):
+    """Log-likelihood at ``theta`` (the unconstrained vector). The prior is not
+    evaluated, so this is the same quantity the MLE objective maximizes."""
+    cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
+    cdef double[::1] thetav = np.ascontiguousarray(theta, dtype=np.float64)
 
-    cdef double _eval(self, const double *theta, int has_priors):
-        cdef void *ctxp = self.nc.ctxp
-        if self.mode == "linear":
-            return sdsge_obj_linear(<sdsge_linear_ctx*>ctxp, theta, has_priors)
-        elif self.mode == "extended":
-            return sdsge_obj_extended(<sdsge_extended_ctx*>ctxp, theta, has_priors)
-        else:
-            return sdsge_obj_unscented(<sdsge_unscented_ctx*>ctxp, theta, has_priors)
+    if thetav.shape[0] != nc.n_theta:
+        raise ValueError(
+            "theta length does not match the estimated parameter count."
+        )
+    cdef void *ctxp = nc.ctxp
+    cdef sdsge_objective_fn fn = sdsge_select_objective(
+        0, 0, _filter_mode_code(mode)
+    )
+    cdef double out
+    nc.b.bk_violations = 0
+    with nogil:
+        out = fn(&thetav[0], ctxp)
+    return np.float64(out)
 
-    def loglik(self, double[::1] theta not None):
-        if theta.shape[0] != self.nc.n_theta:
-            raise ValueError(
-                "theta length does not match the estimated parameter count."
-            )
-        return float(self._eval(&theta[0], 0))
 
-    def logpost(self, double[::1] theta not None):
-        if theta.shape[0] != self.nc.n_theta:
-            raise ValueError(
-                "theta length does not match the estimated parameter count."
-            )
-        return float(self._eval(&theta[0], 1))
+def logpost(object ctx_dto, str mode, theta not None, bint include_logjac=False):
+    """Log-posterior at ``theta``. ``include_logjac`` picks the density: with
+    it, the density over theta the sampler walks; without, the prior over the
+    parameters read at ``theta``. Equals the log-likelihood when the run carries
+    no prior."""
+    cdef _NativeCtx nc = _build_native_ctx(ctx_dto, mode)
+    cdef double[::1] thetav = np.ascontiguousarray(theta, dtype=np.float64)
+
+    if thetav.shape[0] != nc.n_theta:
+        raise ValueError(
+            "theta length does not match the estimated parameter count."
+        )
+    cdef void *ctxp = nc.ctxp
+    cdef sdsge_objective_fn fn = sdsge_select_objective(
+        0, nc.has_prior, _filter_mode_code(mode)
+    )
+    cdef double out
+    nc.b.bk_violations = 0
+    nc.b.prior.include_logjac = include_logjac
+    with nogil:
+        out = fn(&thetav[0], ctxp)
+    return np.float64(out)

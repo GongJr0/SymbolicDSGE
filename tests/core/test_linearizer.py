@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import sympy as sp
 
-import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
 from SymbolicDSGE.core.linearization import Linearizer
+from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.kalman.config import KalmanConfig
 
 
@@ -290,26 +290,17 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
     solver = DSGESolver(linearized, kalman)
     compiled = solver.compile()
 
-    params = {
-        p.name: float(linearized.calibration.parameters[p])
-        for p in linearized.parameters
-    }
-    loglik = est_backend.evaluate_loglik(
-        solver=solver,
+    est = Estimator(
         compiled=compiled,
-        kalman=compiled.kalman,
         y=np.zeros((6, 1), dtype=np.float64),
-        params=params,
-        filter_mode="linear",
         observables=["AObs"],
+        filter_mode="linear",
+        estimated_params=[linearized.parameters[0].name],
         ss_seed=np.zeros((len(compiled.layout.declared_names),), dtype=np.float64),
-        x0=None,
-        jitter=None,
-        symmetrize=None,
         R=np.eye(1, dtype=np.float64),
     )
 
-    assert np.isfinite(loglik)
+    assert np.isfinite(float(est.loglik(est.theta0())))
 
 
 def test_linearizer_accepts_model_config_directly(tmp_path):

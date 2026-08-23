@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import warnings
 from time import perf_counter
-from typing import Any, Callable, Literal, Mapping, Sequence, cast
+from typing import Any, Literal, Mapping, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -19,11 +19,16 @@ from ..bayesian.transforms.tanh import TanhTransform
 from ..bayesian.transforms.transform import Transform
 
 from ..core.compiled_model import CompiledModel
-from ..core.solver import DSGESolver
 
-from .._ckernels.estimation import run_estimation, run_mcmc
+from .._ckernels.estimation import (
+    run_estimation,
+    run_mcmc,
+    loglik,
+    logpost,
+    logprior,
+)
 
-from .prior_program import PackedLogPrior, build_packed_logprior
+from .prior_program import PyPriorTables, build_packed_logprior
 from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
 from .spec import EstimationSpec, PriorSpec
 
@@ -67,7 +72,6 @@ class Estimator:
     def __init__(
         self,
         *,
-        solver: DSGESolver,
         compiled: CompiledModel,
         y: NDF | pd.DataFrame,
         observables: list[str] | None = None,
@@ -82,9 +86,8 @@ class Estimator:
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
-        self.solver = solver
-        self.compiled = compiled
 
+        self.compiled = compiled
         if compiled.kalman is None and R is None:
             raise ValueError(
                 "R must be provided in symbolic or scalar form, either through the "
@@ -99,8 +102,6 @@ class Estimator:
 
         self.ss_seed = ss_seed
         self.x0 = x0
-        self.jitter = jitter
-        self.symmetrize = symmetrize
         self.joseph_cov = bool(joseph_cov)
         self.R = R
         self.P0 = P0
@@ -202,7 +203,7 @@ class Estimator:
                 continue
             # Plain calibration parameter: honor an explicit prior transform.
             self._param_transforms[name] = self._prior_transform_or(name, identity)
-        self._packed_logprior: PackedLogPrior | None = build_packed_logprior(
+        self._packed_logprior: PyPriorTables | None = build_packed_logprior(
             priors=self.priors,
             param_index=self._param_index,
             matrix_blocks=self._matrix_blocks,
@@ -820,31 +821,26 @@ class Estimator:
             )
         return asarray(theta0, dtype=float64)
 
-    def _validate_prior_initial_guess(self, theta: NDF) -> None:
-        """Fail fast when the initial guess sits outside the priors' support or
-        breaks a prior transform. No-op when no priors are set."""
-        if self.priors is None:
-            return
+    def _validate_theta0(self, theta: NDF) -> None:
+        """Fail fast on an initial guess the objective cannot score.
+
+        A transform's inverse lands inside its own support, so a theta only
+        arrives unusable by being non-finite itself or by saturating its
+        transform: a std that overflows to infinity, or one that underflows to
+        the zero its support excludes. The support is the role's, so this holds
+        for an MLE start as much as a MAP one.
+        """
         params = self.theta_to_params(theta)
         invalid: list[str] = []
-        for name, prior in self.priors.items():
-            if name not in params:
-                continue
-            val = float64(params[name])
-            try:
-                if hasattr(prior, "transform"):
-                    z = float64(
-                        cast(Transform, getattr(prior, "transform")).safe_forward(val)
-                    )
-                else:
-                    z = val
-                prior.logpdf(z)
-            except Exception as exc:  # pragma: no cover - exact type is prior-dependent
-                invalid.append(f"{name}={val} ({type(exc).__name__}: {exc})")
+        for name in self.param_names:
+            value = float64(params[name])
+            support = self._param_transforms[name].support
+            if not np.isfinite(value) or not support.contains(value):
+                invalid.append(f"{name}={value}")
         if invalid:
             raise ValueError(
-                "Initial calibration values are incompatible with the provided "
-                "priors or their transforms: " + ", ".join(invalid)
+                "Initial guess maps to parameter values the objective cannot "
+                "score: " + ", ".join(invalid)
             )
 
     def params_to_theta(self, params: Mapping[str, float] | NDF) -> NDF:
@@ -919,84 +915,28 @@ class Estimator:
     def theta_to_params(self, theta: NDF) -> dict[str, float64]:
         return self._resolve_theta(theta)[0]
 
-    def _loglik_from_params(
-        self,
-        params: Mapping[str, float64],
-        *,
-        q_corr: NDF | None = None,
-    ) -> float64:
-        return backend.evaluate_loglik(
-            solver=self.solver,
-            compiled=self.compiled,
-            kalman=self.kalman,
-            y=self.y,
-            params=params,
-            filter_mode=self.filter_mode,
-            observables=self.observables,
-            ss_seed=self.ss_seed,
-            x0=self.x0,
-            jitter=self.jitter,
-            symmetrize=self.symmetrize,
-            joseph_cov=self.joseph_cov,
-            R=self.R,
-            P0=self.P0,
-            prepared=self._prepared_filter,
-            q_corr=q_corr,
-        )
-
     def loglik(self, theta: NDF) -> float64:
-        params, matrices = self._resolve_theta(theta)
-        return self._loglik_from_params(params, q_corr=matrices.get("Q_corr"))
+        ctx, mode = self._build_native_context()
+        return loglik(ctx, mode, theta)
 
-    def _logprior_python(self, theta: NDF) -> float64:
-        if self.priors is None:
-            return float64(0.0)
-        lp = float64(0.0)
-        for block in self._matrix_blocks.values():
-            if block.prior is None:
-                # Prior-free block (pure CPC reparameterization) contributes no
-                # density -- a flat prior over the correlation manifold.
-                continue
-            theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
-            lp += float64(block.prior.logpdf(theta_block))
-
-        for name, prior in self.priors.items():
-            if name in self._matrix_blocks or name in self._matrix_member_names:
-                continue
-            if name in self._param_index:
-                z = float64(theta[self._param_index[name]])
-            elif name in self._base_params:
-                x0 = float64(self._base_params[name])
-                if hasattr(prior, "transform"):
-                    z = float64(
-                        cast(Transform, getattr(prior, "transform")).safe_forward(x0)
-                    )
-                else:
-                    z = x0
-            else:
-                raise KeyError(f"Prior specified for unknown parameter '{name}'.")
-            lp += float64(prior.logpdf(z))
-        return lp
-
-    def logprior(self, theta: NDF) -> float64:
-        if self.priors is None:
-            return float64(0.0)
+    def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
         theta = asarray(theta, dtype=float64)
         if theta.ndim != 1:
             raise ValueError("theta must be a 1D array.")
         if theta.shape[0] != len(self.param_names):
+            # The kernel indexes theta by the packed tables' slots, so a short
+            # vector reads past its end.
             raise ValueError(
                 f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
             )
         packed = self._packed_logprior
-        if packed is not None and packed.matches(self.priors):
-            lp_fast = float64(packed.logpdf(theta))
-            if not np.isnan(lp_fast):
-                return lp_fast
-        return self._logprior_python(theta)
+        if packed is None:
+            return float64(0.0)
+        return logprior(packed, theta, include_logjac)
 
-    def logpost(self, theta: NDF) -> float64:
-        return float64(self.loglik(theta) + self.logprior(theta))
+    def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
+        ctx, mode = self._build_native_context()
+        return logpost(ctx, mode, theta, include_logjac)
 
     def _report_search_warning_count(self, kind: str, n_err: int) -> None:
         print(
@@ -1151,8 +1091,7 @@ class Estimator:
         cov_fd_absolute_floor: float = 0.1,
     ) -> OptimizationResult:
         init = self.resolve_theta0(theta0)
-        if routine == "map":
-            self._validate_prior_initial_guess(init)
+        self._validate_theta0(init)
 
         ctx, mode = self._build_native_context()
 
@@ -1324,7 +1263,7 @@ class Estimator:
         )
 
         current = self.resolve_theta0(theta0)
-        self._validate_prior_initial_guess(current)
+        self._validate_theta0(current)
         if current.shape[0] == 0:
             raise ValueError("No estimated parameters were provided.")
 

@@ -6,27 +6,9 @@ import pytest
 from numpy import float64
 from sympy import Symbol
 
-import SymbolicDSGE.estimation.backend as est_backend
 from SymbolicDSGE.core.solver import DSGESolver
 from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult
-
-
-class _UnitIntervalPrior:
-    def logpdf(self, x):
-        x = float64(x)
-        if not (0.0 < x < 1.0):
-            raise ValueError("out of support")
-        return float64(0.0)
-
-
-class _QuadraticPrior:
-    def __init__(self, mean: float, weight: float):
-        self.mean = float64(mean)
-        self.weight = float64(weight)
-
-    def logpdf(self, x):
-        return float64(-self.weight * (float64(x) - self.mean) ** 2)
 
 
 def _make_solver() -> DSGESolver:
@@ -40,8 +22,8 @@ def _with_filter_prep(compiled):
     """Complete a stub with the surface Estimator's construction-time filter prep
     needs. ``Estimator.__init__`` builds the filter run unconditionally now (the
     old duck-typed guard is gone), so every stub must satisfy
-    ``prepare_filter_run``. These tests fake ``evaluate_loglik``, so the cfunc
-    addresses and P0 are never evaluated; they only have to exist."""
+    ``prepare_filter_run``. No test on a stub evaluates an objective, so the cfunc
+    addresses and P0 are never read; they only have to exist."""
     if not hasattr(compiled, "observable_names"):
         compiled.observable_names = ["y"]
     if not hasattr(compiled, "var_names"):
@@ -102,11 +84,6 @@ def _make_compiled_two(a0: float = 0.0, b0: float = 3.0):
     )
 
 
-def _fake_loglik(**kwargs):
-    a = float64(kwargs["params"]["a"])
-    return float64(-((a - 2.0) ** 2))
-
-
 def test_solver_exposes_private_estimator_factory():
     solver = _make_solver()
     compiled = _make_compiled(0.0)
@@ -122,18 +99,19 @@ def test_solver_exposes_private_estimator_factory():
 def test_solver_estimate_validates_config_initial_guess_against_prior(post82):
     solver = post82["solver"]
 
-    # map validates the initial guess against the priors' support before the
-    # search; a psi_pi of 2.0 sits outside the unit interval.
-    with pytest.raises(ValueError, match="incompatible with the provided priors"):
+    # The prior's transform is the parameter's domain, so map rejects an initial
+    # guess outside it before the search: psi_pi is positive under the log
+    # transform its gamma prior carries, and the config starts it at -1.0.
+    with pytest.raises(ValueError, match="out of support"):
         solver.estimate(
             compiled=post82["compiled"],
             y=post82["y"],
             method="map",
             observables=post82["obs"],
             estimated_params=["psi_pi"],
-            priors={"psi_pi": _UnitIntervalPrior()},
+            priors={"psi_pi": make_prior("gamma", {"mean": 2.0, "std": 0.5}, "log")},
             ss_seed=post82["steady"],
-            theta0={"psi_pi": 2.0},
+            theta0={"psi_pi": -1.0},
         )
 
 
@@ -190,10 +168,9 @@ def test_solver_estimate_accepts_theta0_dictionary(post82):
     assert "psi_pi" in out.theta and "rho_r" in out.theta
 
 
-def test_solver_estimate_rejects_incomplete_theta0_dictionary(monkeypatch):
+def test_solver_estimate_rejects_incomplete_theta0_dictionary():
     solver = _make_solver()
     compiled = _make_compiled(0.0)
-    monkeypatch.setattr(est_backend, "evaluate_loglik", _fake_loglik)
 
     with pytest.raises(ValueError, match="missing estimated parameters"):
         solver.estimate(
