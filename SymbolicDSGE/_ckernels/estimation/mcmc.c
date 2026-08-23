@@ -6,11 +6,13 @@
 #include <string.h>
 
 /* Direct includes for the primitives used here (native-include hygiene). */
+#include "../_common/sdsge_common.h" /* max_i64 */
 #include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
                                         sdsge_matmul_abt, sdsge_matvec */
 #include "../optim/optim.h"          /* sdsge_optim_result */
 #include "../rng/rng.h" /* sdsge_rng_standard_{normal,uniform}_fill */
 #include "estimation.h" /* sdsge_run_estimation, sdsge_objective_fn */
+#include "prior_program.h"
 
 /* Native adaptive random-walk Metropolis mainloop (issue #331).
  *
@@ -77,6 +79,71 @@ static inline void sdsge_proposal_factor(const f64 *SDSGE_RESTRICT C, i64 d,
   memcpy(L, Ltmp, d * d * sizeof(f64));
 }
 
+/* A spec whose correlation is a live CPC block, the only shape the keep-time
+ * inversion has work to do on and the only one that needs block scratch. */
+static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
+  return !sp->is_constant && sp->corr_from_block;
+}
+
+/* One draw, out of the sampler's unconstrained theta and into the parameters
+ * themselves: every estimated scalar through its inverse transform, every CPC
+ * block through the correlation its z encodes. Returns the log-jacobian the
+ * prior carries at this theta, which is what the chain's logpost folded in
+ * (include_logjac == 1) and what the caller takes back out to report a density
+ * over the parameters.
+ *
+ * The two passes read different tables on purpose. Values come off the param
+ * map and the cov specs, which cover every estimated entry; the jacobian comes
+ * off the prior tables, which cover only the entries carrying a density. A std
+ * with no prior still walks in log space, and a CPC block with no LKJ is still
+ * a reparameterization, so neither is reported raw, and neither owes a
+ * jacobian. ``Lblk`` is scratch for the widest block's Cholesky factor. */
+static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
+                                                const f64 *SDSGE_RESTRICT theta,
+                                                f64 *SDSGE_RESTRICT Lblk,
+                                                f64 *SDSGE_RESTRICT out) {
+  const sdsge_prior_tables *pr = &b->prior;
+  f64 lj = 0.0;
+  f64 x, logjac;
+
+  for (i64 i = 0; i < b->pmap.n_scalars; ++i) {
+    const sdsge_scalar_scatter *sc = &b->pmap.scalars[i];
+    sdsge_transform_inverse_and_logjac(sc->transform_code, sc->transform_params,
+                                       theta[sc->theta_idx], &x, &logjac);
+    out[sc->theta_idx] = x;
+  }
+
+  for (i64 i = 0; i < pr->n_scalar; ++i) {
+    sdsge_transform_inverse_and_logjac(
+        pr->scalar_transform_codes[i],
+        pr->scalar_transform_params + i * SDSGE_N_TRANSFORM_PARAMS,
+        theta[pr->scalar_indices[i]], &x, &logjac);
+    lj += logjac;
+  }
+
+  const sdsge_cov_spec *specs[2] = {&b->q_spec, &b->r_spec};
+  for (i64 s = 0; s < 2; ++s) {
+    const sdsge_cov_spec *sp = specs[s];
+    if (!sdsge_spec_has_block(sp)) {
+      continue;
+    }
+    f64 block_lj;
+    sdsge_corr_entries_from_unconstrained(theta + sp->block_theta_off, sp->K,
+                                          Lblk, out + sp->block_theta_off,
+                                          &block_lj);
+    /* Only a block carrying an LKJ put a jacobian into the logpost, and the
+     * prior tables list exactly those. */
+    for (i64 k = 0; k < pr->n_blocks; ++k) {
+      if (pr->matrix_offsets[k] == sp->block_theta_off) {
+        lj += block_lj;
+        break;
+      }
+    }
+  }
+
+  return lj;
+}
+
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
                    const f64 *SDSGE_RESTRICT hessian,
@@ -90,10 +157,20 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   out->status = SDSGE_MCMC_OK;
   out->message = "ok";
 
-  /* One workspace allocation up front (never inside the loop), freed on return.
-   * 6 vectors of d + 4 matrices of d*d. */
+  /* Widest CPC block the keep-time inversion has to factor. */
+  const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
+  const i64 kblk =
+      max_i64(sdsge_spec_has_block(&cb->q_spec) ? cb->q_spec.K : 0,
+              sdsge_spec_has_block(&cb->r_spec) ? cb->r_spec.K : 0);
+
+  /* One workspace allocation up front, freed on return.
+   * 5 vectors of d and 3 matrices of d*d. The last matrix is the refactor
+   * scratch, dead by the time a draw is kept, so the block inversion borrows
+   * it; it is widened only when K*K outgrows d*d, which takes a block estimated
+   * with nothing alongside it. */
   const size_t nm = d * d;
-  f64 *work = (f64 *)malloc((5 * d + 3 * nm) * sizeof(f64));
+  const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
+  f64 *work = (f64 *)malloc((5 * d + 2 * nm + nlast) * sizeof(f64));
   if (work == NULL) {
     out->status = SDSGE_MCMC_EALLOC;
     out->message = "mcmc workspace allocation failed";
@@ -121,7 +198,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
 
   memcpy(current, theta0, d * sizeof(f64));
   if (opt->needs_map) {
-
     /* The sampler builds its own factor below, so the MAP call is asked for
      * the point only; vcov stays NULL. */
     sdsge_estimation_result map_out;
@@ -136,7 +212,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
   }
 
-  // needs_hessian are guaranteed to be True if needs_map is
+  // needs_hessian is guaranteed to be True if needs_map is
   // True. This block being separately gated allows a user to skip the MAP and
   // get the Hessian at a user-supplied point, never to skip both unless the
   // hessian itself is supplied.
@@ -222,8 +298,10 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
 
     /* Keep post-burn-in draws at the thinning cadence. */
     if (t >= opt->burn_in && (t - opt->burn_in) % opt->thin == 0) {
-      memcpy(&buf->kept[keep_i * d], current, d * sizeof(f64));
-      buf->kept_lp[keep_i] = cur_lp;
+      f64 lj = sdsge_unconstrained_to_params(cb, current, Ltmp,
+                                             &buf->kept[keep_i * d]);
+      buf->kept_lp[keep_i] = cur_lp - lj;
+      buf->kept_lj[keep_i] = lj;
       ++keep_i;
     }
   }

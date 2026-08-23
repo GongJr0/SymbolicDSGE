@@ -150,6 +150,7 @@ export interface EstimationRunResult {
     posterior_std?: Record<string, number>;
     samples?: Record<string, number[]>;
     logpost_trace?: number[];
+    logjac_trace?: number[];
     accept_rate?: number;
     n_draws?: number;
     burn_in?: number;

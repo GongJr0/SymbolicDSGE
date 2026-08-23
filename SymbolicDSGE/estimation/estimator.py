@@ -1355,14 +1355,7 @@ class Estimator:
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
         total_steps = int(out["total_steps"])
-        kept = out["samples_theta"]
-
-        # kept draws walk theta space; map each to the named parameters.
-        kept_params = np.empty_like(kept, dtype=float64)
-        for i in range(n_draws):
-            p = self.theta_to_params(kept[i])
-            for j, name in enumerate(self.param_names):
-                kept_params[i, j] = float64(p[name])
+        kept = out["samples"]
 
         print(
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
@@ -1375,8 +1368,9 @@ class Estimator:
 
         result = MCMCResult(
             param_names=list(self.param_names),
-            samples=kept_params,
+            samples=kept,
             logpost_trace=out["logpost_trace"],
+            logjac_trace=out["logjac_trace"],
             accept_rate=float64(out["n_accepted"] / total_steps),
             n_draws=n_draws,
             burn_in=burn_in,

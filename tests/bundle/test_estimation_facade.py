@@ -128,6 +128,7 @@ def test_facade_flattens_mcmc_run_with_posterior() -> None:
         param_names=["a"],
         samples=rng.standard_normal((10, 1)),
         logpost_trace=rng.standard_normal(10),
+        logjac_trace=rng.standard_normal(10),
         accept_rate=float64(0.4),
         n_draws=10,
         burn_in=2,

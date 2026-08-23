@@ -125,7 +125,7 @@ if estimation.posterior is not None:
 ```
 
 1. Shape is `(n_periods, n_observables)` with column order matching `estimation.spec.observables`.
-2. The same arrays already power `result.samples` / `result.logpost_trace`; `estimation.posterior` exposes them raw for callers who want the columns directly. The `logpost` key holds the one dimensional log posterior trace.
+2. The same arrays already power `result.samples` / `result.logpost_trace` / `result.logjac_trace`; `estimation.posterior` exposes them raw for callers who want the columns directly. The `logpost` and `logjac` keys hold the one dimensional log posterior and log jacobian traces.
 
 ???+ tip "MCMC diagnostics are ready to use"
     A loaded MCMC `result` is a live `MCMCResult`. The loader already paired the metadata with the `posterior` traces. Call diagnostics on it directly (`result.hpd_intervals(...)`, `result.posterior_traces()`, `result.joint_hpd_set(...)`); there is no rebuild step.

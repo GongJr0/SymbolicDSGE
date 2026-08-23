@@ -278,6 +278,7 @@ cdef extern from "mcmc.h":
     ctypedef struct sdsge_mcmc_buffers:
         double *kept
         double *kept_lp
+        double *kept_lj
 
     ctypedef struct sdsge_mcmc_result:
         int64_t n_accepted
@@ -1102,8 +1103,10 @@ def run_mcmc(
     # Output buffers (Python-owned; native fills them).
     kept = np.empty((n_draws, d), dtype=np.float64)
     kept_lp = np.empty(n_draws, dtype=np.float64)
+    kept_lj = np.empty(n_draws, dtype=np.float64)
     cdef double[:, ::1] keptv = kept
     cdef double[::1] keptlpv = kept_lp
+    cdef double[::1] keptljv = kept_lj
 
     cdef int filter_mode
     cdef sdsge_objective_fn logpost
@@ -1158,6 +1161,7 @@ def run_mcmc(
     cdef sdsge_mcmc_buffers buf
     buf.kept = &keptv[0, 0]
     buf.kept_lp = &keptlpv[0]
+    buf.kept_lj = &keptljv[0]
 
     cdef sdsge_mcmc_result res
     b.bk_violations = 0
@@ -1173,8 +1177,9 @@ def run_mcmc(
         )
 
     return {
-        "samples_theta": kept,
+        "samples": kept,
         "logpost_trace": kept_lp,
+        "logjac_trace": kept_lj,
         "n_accepted": int(res.n_accepted),
         "total_steps": int(res.total_steps),
         "bk_violations": int(b.bk_violations),

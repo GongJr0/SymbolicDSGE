@@ -38,8 +38,9 @@ f64 sdsge_std_norm_cdf(f64 x) { return 0.5 * (1.0 + erf(x / SQRT2)); }
 
 f64 sdsge_std_norm_logpdf(f64 x) { return -0.5 * x * x - 0.5 * log(TWO_PI); }
 
-void sdsge_transform_inverse_and_logjac(i64 code, f64 *SDSGE_RESTRICT params,
-                                        f64 z, f64 *SDSGE_RESTRICT out_x,
+void sdsge_transform_inverse_and_logjac(i64 code,
+                                        const f64 *SDSGE_RESTRICT params, f64 z,
+                                        f64 *SDSGE_RESTRICT out_x,
                                         f64 *SDSGE_RESTRICT out_logjac) {
 
   switch (code) {
@@ -227,20 +228,23 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
 }
 
 /* Packed log-prior driver: the per-replication hot path. Mirrors the numba
- * _evaluate_logprior_program -- sums the scalar terms (inverse-transform z -> x,
- * then dist logpdf + transform log-jacobian) and the LKJ matrix blocks, and
+ * _evaluate_logprior_program -- sums the scalar terms (inverse-transform z ->
+ * x, then dist logpdf + transform log-jacobian) and the LKJ matrix blocks, and
  * short-circuits to NaN the moment any term is NaN. Each block's unconstrained
  * z occupies a contiguous run theta[offset .. offset+length), so the block is
  * read straight off theta by base-pointer offset (no gather, no scratch). */
-f64 sdsge_logprior_program(
-    f64 *SDSGE_RESTRICT theta, i64 *SDSGE_RESTRICT scalar_indices,
-    i64 *SDSGE_RESTRICT scalar_dist_codes,
-    i64 *SDSGE_RESTRICT scalar_transform_codes,
-    f64 *SDSGE_RESTRICT scalar_dist_params,
-    f64 *SDSGE_RESTRICT scalar_transform_params, i64 n_scalar,
-    i64 *SDSGE_RESTRICT matrix_offsets, i64 *SDSGE_RESTRICT matrix_dims,
-    i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
-    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, int include_logjac) {
+f64 sdsge_logprior_program(f64 *SDSGE_RESTRICT theta,
+                           i64 *SDSGE_RESTRICT scalar_indices,
+                           i64 *SDSGE_RESTRICT scalar_dist_codes,
+                           i64 *SDSGE_RESTRICT scalar_transform_codes,
+                           f64 *SDSGE_RESTRICT scalar_dist_params,
+                           f64 *SDSGE_RESTRICT scalar_transform_params,
+                           i64 n_scalar, i64 *SDSGE_RESTRICT matrix_offsets,
+                           i64 *SDSGE_RESTRICT matrix_dims,
+                           i64 *SDSGE_RESTRICT matrix_lengths,
+                           f64 *SDSGE_RESTRICT matrix_etas,
+                           f64 *SDSGE_RESTRICT matrix_log_constants,
+                           i64 n_blocks, int include_logjac) {
   f64 lp = 0.0;
 
   for (i64 i = 0; i < n_scalar; ++i) {
@@ -272,8 +276,8 @@ f64 sdsge_logprior_program(
     /* The block logpdf folds its own jacobian in; take it back out rather than
      * duplicate the density kernel for the two cases. */
     if (!include_logjac) {
-      block_lp -= sdsge_lkj_chol_logjac_return(theta + matrix_offsets[b],
-                                               matrix_dims[b], matrix_lengths[b]);
+      block_lp -= sdsge_lkj_chol_logjac_return(
+          theta + matrix_offsets[b], matrix_dims[b], matrix_lengths[b]);
     }
     lp += block_lp;
   }
@@ -315,11 +319,55 @@ void sdsge_cov_from_unconstrained(const f64 *SDSGE_RESTRICT z,
   }
 }
 
+/* Unconstrained -> the block's packed correlation entries, with the LKJ
+ * log-jacobian taken from the same sweep. The Cholesky recursion is
+ * sdsge_cov_from_unconstrained's at std == 1, where the covariance it would
+ * form is the correlation itself, so only the K(K-1)/2 lower-triangle entries
+ * are written and no K*K output is needed. The jacobian rides the
+ * multiplicative remainder sdsge_lkj_chol_logjac_return carries, separate from
+ * the subtractive one the factor needs, so the two kernels answer alike.
+ * ``L`` is K*K scratch; ``out`` receives the entries in the (row, col) order
+ * the block's theta run carries. */
+void sdsge_corr_entries_from_unconstrained(const f64 *SDSGE_RESTRICT z,
+                                           const i64 K, f64 *SDSGE_RESTRICT L,
+                                           f64 *SDSGE_RESTRICT out,
+                                           f64 *SDSGE_RESTRICT out_logjac) {
+  f64 logjac = 0.0;
+  i64 idx = 0;
+  i64 k = 0;
+  for (i64 i = 0; i < K; ++i) {
+    const i64 ri = i * K;
+
+    f64 rem = 1.0;
+    f64 remj = 1.0;
+    for (i64 j = 0; j < i; ++j) {
+      const f64 cpc = tanh(z[idx++]);
+      const f64 v = sqrt(max_f64(1e-14, rem)) * cpc;
+      L[ri + j] = v;
+      rem -= v * v;
+      logjac += 0.5 * log(max_f64(remj, 1e-300));
+      logjac += log1p(-(cpc * cpc));
+      remj *= (1.0 - cpc * cpc);
+    }
+    L[ri + i] = sqrt(max_f64(1e-14, rem));
+
+    for (i64 j = 0; j < i; ++j) {
+      const i64 rj = j * K;
+      f64 s = 0.0;
+      for (i64 c = 0; c <= j; ++c)
+        s += L[ri + c] * L[rj + c];
+      out[k++] = s;
+    }
+  }
+  *out_logjac = logjac;
+}
+
 /* Inverse of the Cholesky stage of sdsge_cov_from_unconstrained: correlation
  * Cholesky factor L (K*K, row-major) -> unconstrained CPC values out_z
  * (length K(K-1)/2). Recovers each partial correlation as L[k,j] / sqrt(rem),
  * clamps to the open unit interval, and applies atanh. */
-void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L, const i64 K,
+void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L,
+                                        const i64 K,
                                         f64 *SDSGE_RESTRICT out_z) {
   i64 idx = 0;
   for (i64 k = 1; k < K; ++k) {

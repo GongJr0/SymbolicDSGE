@@ -125,6 +125,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
     posterior = {
         "samples": rng.standard_normal((20, 2)),
         "logpost": rng.standard_normal(20),
+        "logjac": rng.standard_normal(20),
     }
     result_meta = MCMCResultMeta(
         param_names=["beta", "sigma"],

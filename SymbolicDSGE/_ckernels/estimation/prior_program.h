@@ -48,8 +48,9 @@ f64 sdsge_std_norm_logpdf(f64 x);
 /* Leaf dispatchers. `code` is an i64 (the value arrives from an int64 array);
  * it is matched against the Sdsge*Code enum constants. Out-of-support / unknown
  * codes write NaN, the agreed "fall back to the Python path" sentinel. */
-void sdsge_transform_inverse_and_logjac(i64 code, f64 *SDSGE_RESTRICT params,
-                                        f64 z, f64 *SDSGE_RESTRICT out_x,
+void sdsge_transform_inverse_and_logjac(i64 code,
+                                        const f64 *SDSGE_RESTRICT params, f64 z,
+                                        f64 *SDSGE_RESTRICT out_x,
                                         f64 *SDSGE_RESTRICT out_logjac);
 void sdsge_dist_logpdf(i64 code, f64 *SDSGE_RESTRICT params, f64 x,
                        f64 *SDSGE_RESTRICT out_logpdf);
@@ -72,7 +73,8 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
  * prior over theta, the change-of-variables density the sampler walks. Without
  * it, the result is the prior over the parameters themselves, evaluated at the
  * theta that maps to them. The two have different modes: a maximizer reporting
- * a parameter value wants the second, a sampler drawing theta wants the first. */
+ * a parameter value wants the second, a sampler drawing theta wants the first.
+ */
 f64 sdsge_logprior_program(
     f64 *SDSGE_RESTRICT theta, i64 *SDSGE_RESTRICT scalar_indices,
     i64 *SDSGE_RESTRICT scalar_dist_codes,
@@ -83,17 +85,28 @@ f64 sdsge_logprior_program(
     i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
     f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, int include_logjac);
 
-/* Unconstrained (z, std) -> full covariance via the correlation Cholesky factor.
- * scratch_M is K*K workspace for L; out receives the K*K covariance (row-major). */
+/* Unconstrained (z, std) -> full covariance via the correlation Cholesky
+ * factor. scratch_M is K*K workspace for L; out receives the K*K covariance
+ * (row-major). */
 void sdsge_cov_from_unconstrained(const f64 *SDSGE_RESTRICT z,
                                   const f64 *SDSGE_RESTRICT std, const i64 K,
                                   f64 *SDSGE_RESTRICT scratch_M,
                                   f64 *SDSGE_RESTRICT out);
 
+/* Unconstrained -> the block's K(K-1)/2 packed correlation entries (the same
+ * Cholesky recursion at std == 1) and, from the same sweep, the LKJ
+ * log-jacobian sdsge_lkj_chol_logjac_return returns. scratch_M is K*K
+ * workspace for L; out receives the entries in (row, col) order. */
+void sdsge_corr_entries_from_unconstrained(const f64 *SDSGE_RESTRICT z,
+                                           const i64 K,
+                                           f64 *SDSGE_RESTRICT scratch_M,
+                                           f64 *SDSGE_RESTRICT out,
+                                           f64 *SDSGE_RESTRICT out_logjac);
+
 /* Inverse of the Cholesky stage: correlation Cholesky factor L (K*K, row-major)
  * -> unconstrained CPC values out_z (length K(K-1)/2), via the stick-breaking
  * remainder and atanh. */
-void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L, const i64 K,
-                                        f64 *SDSGE_RESTRICT out_z);
+void sdsge_unconstrained_from_corr_chol(const f64 *SDSGE_RESTRICT L,
+                                        const i64 K, f64 *SDSGE_RESTRICT out_z);
 
 #endif /* SDSGE_PRIOR_PROGRAM_H */

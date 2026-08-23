@@ -102,8 +102,9 @@ def emit_estimation_wire(
     - a live :class:`OptimizationResult` / :class:`MCMCResult` (in-process path);
     - or an :class:`OptimizationResultMeta` / :class:`MCMCResultMeta` from a
       loaded ``.sdsge`` bundle (repaint path). For MCMC, the bundle path must
-      supply ``traces`` carrying the ``samples`` (2-D) and ``logpost_trace``
-      / ``logpost`` (1-D) arrays decoded from the Parquet member.
+      supply ``traces`` carrying the ``samples`` (2-D) and the ``logpost_trace``
+      / ``logpost`` and ``logjac_trace`` / ``logjac`` (1-D) arrays decoded from
+      the Parquet member.
 
     Dispatches by direct ``isinstance`` so mypy can narrow within each branch;
     the meta dataclasses and live result classes overlap perfectly on the
@@ -147,19 +148,25 @@ def _emit_mcmc_wire(
 ) -> dict[str, Any]:
     samples_src = getattr(obj, "samples", None)
     logpost_src = getattr(obj, "logpost_trace", None)
+    logjac_src = getattr(obj, "logjac_trace", None)
+
     if samples_src is None and traces is not None:
         samples_src = traces.get("samples")
     if logpost_src is None and traces is not None:
         # Bundle authoring convention uses "logpost" (natural column name);
         # the live MCMCResult class exposes "logpost_trace". Accept either.
         logpost_src = traces.get("logpost_trace", traces.get("logpost"))
-    if samples_src is None or logpost_src is None:
+    if logjac_src is None and traces is not None:
+        logjac_src = traces.get("logjac_trace", traces.get("logjac"))
+    if samples_src is None or logpost_src is None or logjac_src is None:
         raise ValueError(
-            "MCMC wire emission requires 'samples' and 'logpost_trace'/'logpost' "
-            "— supply them on the object or via the 'traces' mapping."
+            "MCMC wire emission requires 'samples', 'logpost_trace'/'logpost', "
+            "and 'logjac_trace'/'logjac'. Supply them on the object or via the "
+            "'traces' mapping."
         )
     samples = np.asarray(samples_src, dtype=np.float64)
     logpost = np.asarray(logpost_src, dtype=np.float64)
+    logjac = np.asarray(logjac_src, dtype=np.float64)
     return {
         "kind": "mcmc",
         "param_names": list(obj.param_names),
@@ -176,6 +183,7 @@ def _emit_mcmc_wire(
             for index, name in enumerate(obj.param_names)
         },
         "logpost_trace": logpost.tolist(),
+        "logjac_trace": logjac.tolist(),
         "accept_rate": float(obj.accept_rate),
         "n_draws": int(obj.n_draws),
         "burn_in": int(obj.burn_in),

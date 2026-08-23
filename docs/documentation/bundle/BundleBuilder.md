@@ -109,7 +109,7 @@ Add the estimation tab. `source` may be an `EstimationSpec` or a live `Estimator
 | result | Either a live `OptimizationResult` / `MCMCResult` returned by `Estimator.mle(...)`, `Estimator.map(...)`, `Estimator.mcmc(...)`, or `DSGESolver.estimate(...)`, or its projected `OptimizationResultMeta` / `MCMCResultMeta`. Live results are projected internally. |
 | observed | Observed `y` matrix shaped `(n, k)`. |
 | observable_names | List of `k` observable names matching the matrix columns. Stored on the manifest member for semantic-header CSV authoring. |
-| posterior | MCMC posterior columns, typically `{"samples": (n_draws, n_params), "logpost": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key. Auto-filled when `result` is a live `MCMCResult`. |
+| posterior | MCMC posterior columns, `{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key, and either `logjac` or `logjac_trace`. All three are required to load the bundle back into an `MCMCResult`. Auto-filled when `result` is a live `MCMCResult`. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
 
 ???+ tip "Live-result fast path"

@@ -31,9 +31,9 @@ Estimation specs and archive metadata live in `SymbolicDSGE.estimation.spec`. Li
 | `EstimationSpec.to_estimator_inputs()` | Lower a spec to concrete `EstimatorInputs` for a run. Builds `Prior` objects from each `PriorSpec`. |
 | `EstimatorInputs` | Concrete arguments lowered from `EstimationSpec`: `estimated_params`, `theta0`, `priors`, and `bounds`. Directly feedable to `DSGESolver.estimate(...)`. |
 | `OptimizationResultMeta` | Archive metadata for `OptimizationResult` (`kind`, `theta`, `success`, `message`, `fun`, `loglik`, `logprior`, `logpost`, `nfev`, `nit`). |
-| `MCMCResultMeta` | Archive metadata for `MCMCResult` (`param_names`, `accept_rate`, `n_draws`, `burn_in`, `thin`). Bulk `samples` and `logpost_trace` ride a Parquet member alongside the metadata and pair with it at load time. |
+| `MCMCResultMeta` | Archive metadata for `MCMCResult` (`param_names`, `accept_rate`, `n_draws`, `burn_in`, `thin`). Bulk `samples`, `logpost_trace`, and `logjac_trace` ride a Parquet member alongside the metadata and pair with it at load time. |
 
-Live `OptimizationResult` and `MCMCResult` carry `.to_meta()` projections; `MCMCResult.posterior_arrays()` returns the bulk `{"samples", "logpost"}` dict the bundle expects. See [`Estimator.to_spec`](../Estimator.md) for the estimator-side spec projection.
+Live `OptimizationResult` and `MCMCResult` carry `.to_meta()` projections; `MCMCResult.posterior_arrays()` returns the bulk `{"samples", "logpost", "logjac"}` dict the bundle expects. See [`Estimator.to_spec`](../Estimator.md) for the estimator-side spec projection.
 
 ???+ tip "Authoring fast paths"
     - `Estimator.to_spec(method="map", priors={...})` snapshots an `Estimator`'s configuration into an `EstimationSpec` for bundling.

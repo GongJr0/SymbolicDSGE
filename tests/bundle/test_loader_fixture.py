@@ -81,6 +81,7 @@ def test_rebuild_mcmc_result_ok():
     posterior = {
         "samples": np.zeros((3, 1), dtype=np.float64),
         "logpost": np.zeros(3, dtype=np.float64),
+        "logjac": np.zeros(3, dtype=np.float64),
     }
     res = L._rebuild_mcmc_result(_MCMC_META, posterior)
     assert isinstance(res, MCMCResult)

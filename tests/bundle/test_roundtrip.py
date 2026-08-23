@@ -37,6 +37,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     posterior = {
         "samples": rng.standard_normal((50, 2)),
         "logpost": rng.standard_normal(50),
+        "logjac": rng.standard_normal(50),
     }
     result_meta = MCMCResultMeta(
         param_names=["beta", "sigma"],
@@ -106,6 +107,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     np.testing.assert_allclose(
         loaded.estimation.posterior["logpost"], posterior["logpost"]
     )
+    np.testing.assert_allclose(
+        loaded.estimation.posterior["logjac"], posterior["logjac"]
+    )
 
     # monte carlo
     assert loaded.mc is not None
@@ -133,6 +137,7 @@ def test_add_estimation_accepts_live_mcmc_result() -> None:
         param_names=["a", "b"],
         samples=rng.standard_normal((5, 2)),
         logpost_trace=rng.standard_normal(5),
+        logjac_trace=rng.standard_normal(5),
         accept_rate=np.float64(0.4),
         n_draws=5,
         burn_in=0,

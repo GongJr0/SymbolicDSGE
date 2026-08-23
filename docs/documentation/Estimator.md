@@ -184,14 +184,15 @@ MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native opt
 |:---------|:--------:|----------------:|
 | param_names | `#!python list[str]` | Parameter order for samples |
 | samples | `#!python np.ndarray` | Retained posterior samples |
-| logpost_trace | `#!python np.ndarray` | Posterior trace for retained samples |
+| logpost_trace | `#!python np.ndarray` | Posterior trace for retained samples, as a density over the parameters |
+| logjac_trace | `#!python np.ndarray` | Log-jacobian of the prior transforms at each retained draw; add it to `logpost_trace` for the unconstrained density the sampler walked |
 | accept_rate | `#!python float` | Acceptance ratio |
 | n_draws | `#!python int` | Retained draw count |
 | burn_in | `#!python int` | Burn-in iterations |
 | thin | `#!python int` | Thinning interval |
 
 ???+ tip "Projecting to bundle metadata"
-    Both result classes expose a `#!python .to_meta()` method that returns the matching `#!python OptimizationResultMeta` / `#!python MCMCResultMeta` for `.sdsge` storage. `MCMCResult` additionally exposes `#!python .posterior_arrays()` returning `#!python {"samples": ..., "logpost": ...}`, the bulk dict the bundle expects as `posterior`. `#!python BundleBuilder.add_estimation(result=...)` accepts the live result directly and calls both for you. See [`BundleBuilder`](./bundle/BundleBuilder.md#bundlebuilderadd_estimation).
+    Both result classes expose a `#!python .to_meta()` method that returns the matching `#!python OptimizationResultMeta` / `#!python MCMCResultMeta` for `.sdsge` storage. `MCMCResult` additionally exposes `#!python .posterior_arrays()` returning `#!python {"samples": ..., "logpost": ..., "logjac": ...}`, the bulk dict the bundle expects as `posterior`. `#!python BundleBuilder.add_estimation(result=...)` accepts the live result directly and calls both for you. See [`BundleBuilder`](./bundle/BundleBuilder.md#bundlebuilderadd_estimation).
 
 __Methods:__
 

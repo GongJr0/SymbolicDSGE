@@ -11,11 +11,13 @@ def _result(
     *,
     samples: np.ndarray,
     logpost: np.ndarray,
+    logjac: np.ndarray,
 ) -> MCMCResult:
     return MCMCResult(
         param_names=["a", "b"],
         samples=np.asarray(samples, dtype=np.float64),
         logpost_trace=np.asarray(logpost, dtype=np.float64),
+        logjac_trace=np.asarray(logjac, dtype=np.float64),
         accept_rate=np.float64(0.25),
         n_draws=int(samples.shape[0]),
         burn_in=10,
@@ -36,6 +38,7 @@ def test_hpd_intervals_returns_shortest_marginal_windows():
             dtype=np.float64,
         ),
         logpost=np.array([0.0, 1.0, 3.0, 2.0, -1.0], dtype=np.float64),
+        logjac=np.zeros((5,), dtype=np.float64),
     )
 
     out = res.hpd_intervals(alpha=0.4)
@@ -57,6 +60,7 @@ def test_joint_hpd_set_keeps_highest_logpost_draws():
             dtype=np.float64,
         ),
         logpost=np.array([0.0, 1.0, 3.0, 2.0, -1.0], dtype=np.float64),
+        logjac=np.zeros((5,), dtype=np.float64),
     )
 
     samples_hpd, logpost_hpd, threshold, idx = res.joint_hpd_set(alpha=0.4)
@@ -89,6 +93,7 @@ def test_joint_hpd_set_includes_all_boundary_ties():
             dtype=np.float64,
         ),
         logpost=np.array([3.0, 2.0, 2.0, 1.0], dtype=np.float64),
+        logjac=np.zeros((4,), dtype=np.float64),
     )
 
     samples_hpd, logpost_hpd, threshold, idx = res.joint_hpd_set(alpha=0.5)
@@ -104,6 +109,7 @@ def test_hpd_methods_validate_alpha(alpha):
     res = _result(
         samples=np.array([[0.0, 0.0], [1.0, 1.0]], dtype=np.float64),
         logpost=np.array([0.0, 1.0], dtype=np.float64),
+        logjac=np.zeros((2,), dtype=np.float64),
     )
 
     with pytest.raises(ValueError, match="0 <= alpha < 1"):
@@ -116,6 +122,7 @@ def test_hpd_validation_and_window_full_draws_branches():
     res = _result(
         samples=np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64),
         logpost=np.array([0.0, 1.0], dtype=np.float64),
+        logjac=np.zeros((2,), dtype=np.float64),
     )
 
     assert MCMCResult._validate_hpd_alpha(0.5) == pytest.approx(0.5)
@@ -139,6 +146,7 @@ def test_validate_samples_error_branches(samples, param_names, match):
         param_names=param_names,
         samples=samples,
         logpost_trace=np.array([0.0, 1.0], dtype=np.float64),
+        logjac_trace=np.array([0.0, 1.0], dtype=np.float64),
         accept_rate=np.float64(0.5),
         n_draws=2,
         burn_in=0,
@@ -153,6 +161,7 @@ def test_joint_hpd_set_validates_logpost_trace_shape():
         param_names=["a", "b"],
         samples=np.ones((2, 2), dtype=np.float64),
         logpost_trace=np.ones((2, 1), dtype=np.float64),
+        logjac_trace=np.ones((2, 1), dtype=np.float64),
         accept_rate=np.float64(0.5),
         n_draws=2,
         burn_in=0,
@@ -189,6 +198,7 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
             dtype=np.float64,
         ),
         logpost_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
+        logjac_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
         accept_rate=np.float64(0.5),
         n_draws=3,
         burn_in=0,
@@ -250,7 +260,8 @@ def test_mle_result_to_dict_roundtrips():
 def test_mcmc_result_to_meta_and_posterior_arrays():
     samples = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64)
     logpost = np.array([-1.0, -2.0], dtype=np.float64)
-    res = _result(samples=samples, logpost=logpost)
+    logjac = np.array([0.0, 0.0], dtype=np.float64)
+    res = _result(samples=samples, logpost=logpost, logjac=logjac)
 
     meta = res.to_meta()
     assert isinstance(meta, MCMCResultMeta)
@@ -259,6 +270,7 @@ def test_mcmc_result_to_meta_and_posterior_arrays():
     assert (meta.n_draws, meta.burn_in, meta.thin) == (2, 10, 2)
 
     arrays = res.posterior_arrays()
-    assert set(arrays) == {"samples", "logpost"}
+    assert set(arrays) == {"samples", "logpost", "logjac"}
     np.testing.assert_array_equal(arrays["samples"], samples)
     np.testing.assert_array_equal(arrays["logpost"], logpost)
+    np.testing.assert_array_equal(arrays["logjac"], logjac)
