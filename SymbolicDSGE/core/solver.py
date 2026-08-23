@@ -742,7 +742,6 @@ class DSGESolver:
         from ..estimation import Estimator
 
         return Estimator(
-            solver=self,
             compiled=compiled,
             y=y,
             observables=observables,

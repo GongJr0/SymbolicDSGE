@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 import numpy as np
 import pandas as pd
-import sympy as sp
 from numpy import asarray, float64
 from numpy.typing import NDArray
 from sympy import Symbol
@@ -31,7 +30,7 @@ from .._ckernels.estimation import (
 from ..bayesian.priors import Prior
 from .prior_program import (
     _pack_transform,
-    PackedLogPrior,
+    PyPriorTables,
     N_DIST_PARAMS,
     N_TRANSFORM_PARAMS,
 )
@@ -39,7 +38,6 @@ from ..core.compiled_model import CompiledModel
 from ..core.config import SymbolGetterDict
 from ..core.solver import DSGESolver
 from ..kalman.config import KalmanConfig, make_R
-from ..kalman.filter import KalmanFilter
 from ..kalman.interface import _resolve_P0
 from ..kalman.validator import FilterMode
 
@@ -459,67 +457,6 @@ def build_r_spec(
 
 
 @dataclass(frozen=True, slots=True)
-class PyPriorTables:
-    """Mirror of ``sdsge_prior_tables``: packed log-prior program arguments.
-
-    ``has_prior`` gates the whole block. Scalar columns run to ``n_scalar`` =
-    ``len(scalar_indices)``; ``scalar_dist_params`` is flattened n_scalar*5 and
-    ``scalar_transform_params`` n_scalar*3. Matrix (CPC/LKJ) block columns run to
-    ``n_blocks`` = ``len(matrix_offsets)``."""
-
-    has_prior: bool
-    scalar_indices: NDI  # n_scalar
-    scalar_dist_codes: NDI  # n_scalar
-    scalar_transform_codes: NDI  # n_scalar
-    scalar_dist_params: NDF  # n_scalar*5
-    scalar_transform_params: NDF  # n_scalar*3
-    matrix_offsets: NDI  # n_blocks
-    matrix_dims: NDI  # n_blocks
-    matrix_lengths: NDI  # n_blocks
-    matrix_etas: NDF  # n_blocks
-    matrix_log_constants: NDF  # n_blocks
-
-
-def build_prior_tables(packed: PackedLogPrior | None) -> PyPriorTables:
-    """Project the packed log-prior onto the ``sdsge_prior_tables`` DTO.
-
-    ``build_packed_logprior`` already does the name->index resolution and packing;
-    this only reshapes it into the struct mirror and gates it with ``has_prior``.
-    ``None`` (no priors, or a prior the packer could not represent) yields an
-    empty, disabled table, which is exactly the MLE case. The packed 2-D
-    ``scalar_dist_params`` (n_scalar*5) and ``scalar_transform_params``
-    (n_scalar*3) are carried as-is; C reads them row-major flat."""
-    if packed is None:
-        empty_i = np.empty(0, dtype=np.int64)
-        return PyPriorTables(
-            has_prior=False,
-            scalar_indices=empty_i,
-            scalar_dist_codes=empty_i,
-            scalar_transform_codes=empty_i,
-            scalar_dist_params=np.empty((0, N_DIST_PARAMS), dtype=np.float64),
-            scalar_transform_params=np.empty((0, N_TRANSFORM_PARAMS), dtype=np.float64),
-            matrix_offsets=empty_i,
-            matrix_dims=empty_i,
-            matrix_lengths=empty_i,
-            matrix_etas=np.empty(0, dtype=np.float64),
-            matrix_log_constants=np.empty(0, dtype=np.float64),
-        )
-    return PyPriorTables(
-        has_prior=True,
-        scalar_indices=packed.scalar_indices,
-        scalar_dist_codes=packed.scalar_dist_codes,
-        scalar_transform_codes=packed.scalar_transform_codes,
-        scalar_dist_params=packed.scalar_dist_params,
-        scalar_transform_params=packed.scalar_transform_params,
-        matrix_offsets=packed.matrix_offsets,
-        matrix_dims=packed.matrix_dims,
-        matrix_lengths=packed.matrix_lengths,
-        matrix_etas=packed.matrix_etas,
-        matrix_log_constants=packed.matrix_log_constants,
-    )
-
-
-@dataclass(frozen=True, slots=True)
 class PyObjCommon:
     """Mirror of ``sdsge_obj_common``: the mode-independent objective inputs.
 
@@ -562,7 +499,7 @@ def build_obj_common(
     matrix_member_names: set[str],
     matrix_blocks: Mapping[str, MatrixPriorBlock],
     param_transforms: Mapping[str, Any],
-    packed_logprior: PackedLogPrior | None,
+    packed_logprior: PyPriorTables | None,
     ss_seed: Any,
     x0: NDF | None,
     R_override: NDF | None,
@@ -626,7 +563,7 @@ def build_obj_common(
             base_dict=base_dict,
             R_override=R_override,
         ),
-        prior=build_prior_tables(packed_logprior),
+        prior=packed_logprior if packed_logprior is not None else PyPriorTables.empty(),
     )
 
 
@@ -726,31 +663,6 @@ def build_unscented_context(
 def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:
     params = compiled.config.calibration.parameters
     return {str(k): float64(v) for k, v in params.items()}
-
-
-def build_full_params(
-    base_params: Mapping[str, float64],
-    estimated_names: Sequence[str],
-    theta: NDF,
-) -> dict[str, float64]:
-    if theta.ndim != 1:
-        raise ValueError("theta must be a 1D array.")
-    if len(theta) != len(estimated_names):
-        raise ValueError(
-            f"theta length {len(theta)} does not match estimated parameter count {len(estimated_names)}."
-        )
-    full = dict(base_params)
-    for i, name in enumerate(estimated_names):
-        full[name] = float64(theta[i])
-    return full
-
-
-def build_calib_param_vector(
-    compiled: CompiledModel,
-    params: Mapping[str, float64],
-) -> NDF:
-    names = [str(p) for p in compiled.calib_params]
-    return asarray([float64(params[name]) for name in names], dtype=float64)
 
 
 def reorder_observables(
@@ -875,39 +787,6 @@ def build_Q(
     return np.outer(stds, stds) * corr
 
 
-def build_Q_symbolic(compiled: CompiledModel) -> sp.Matrix:
-    shock_std = compiled.config.calibration.shock_std
-    shock_corr = compiled.config.calibration.shock_corr
-
-    shocks = list(compiled.config.shocks)
-
-    stds = sp.Matrix([shock_std[s] for s in shocks])
-    corr = sp.eye(len(shocks))
-
-    n = len(stds)
-    for i in range(n):
-        for j in range(i + 1, n):
-            pair = frozenset({shocks[i], shocks[j]})
-            corr_sym = shock_corr.get(pair, None)
-            corr_ij = corr_sym if corr_sym is not None else 0.0
-            corr[i, j] = corr_ij
-            corr[j, i] = corr_ij
-    return (stds * stds.T).multiply_elementwise(corr)
-
-
-def build_C_d_from_cfunc(
-    meas_addr: int,
-    jac_addr: int,
-    ss: NDF,
-    calib_params: NDF,
-    n_obs: int,
-) -> tuple[NDF, NDF]:
-    n_var = ss.shape[0]
-    d = measurement_eval(meas_addr, ss, calib_params, n_obs)
-    C = jacobian_eval(jac_addr, ss, calib_params, n_obs, n_var)
-    return C, d
-
-
 def resolve_filter_options(
     jitter: float | float64 | None,
     symmetrize: bool,
@@ -980,197 +859,6 @@ def build_R_from_config_params(
     return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
 
-def _get_solution(
-    *,
-    solver: DSGESolver,
-    compiled: CompiledModel,
-    params: Mapping[str, float64],
-    mode: str,
-    ss_seed: NDF | dict[str, float] | None,
-    raise_on_bk_violation: bool = True,
-) -> Any:
-    """Solve the model to the order the filter mode requires.
-
-    Unscented filtering consumes the second-order policy tensors (``order=2``);
-    the linear and extended filters use the first-order ``A``/``B`` (``order=1``).
-    The single ``mode -> order`` authority, so it cannot drift from the field
-    reads in :func:`_prepare_filter_loglik`. ``raise_on_bk_violation`` reaches the
-    solver unchanged: ``False`` for the warning-counted search path, ``True`` for
-    the one-shot R estimators (which catch the raise and fall back to diagonal R).
-    """
-    return solver.solve(
-        compiled=compiled,
-        order=2 if mode == "unscented" else 1,
-        parameters={k: float(v) for k, v in params.items()},
-        ss_seed=ss_seed,
-        raise_on_bk_violation=raise_on_bk_violation,
-    )
-
-
-def _prepare_filter_loglik(
-    *,
-    sol: SolvedModel,
-    prepared: PreparedFilterRun,
-    Q: NDF,
-    calib_params: NDF,
-    x0: NDF | None,
-    raise_on_error: bool,
-) -> Callable[[NDF], float64]:
-    """Bind a prepared filter run to a closure ``R -> loglik``.
-
-    The single filter-mode dispatch: builds the linear measurement ``(C, d)``
-    once (hoisted out of any R-optimization loop), picks the matching
-    ``KalmanFilter`` entry point, and raises on an unknown mode. The returned
-    closure runs that filter for a given ``R`` and returns its log-likelihood.
-    ``raise_on_error`` reaches the filter unchanged: ``False`` for the
-    warning-counted search path, ``True`` for the one-shot R estimators.
-    """
-    mode = prepared.mode
-    common: dict[str, Any] = dict(
-        Q=Q,
-        y=prepared.y_reordered,
-        P0=prepared.P0,
-        jitter=float(prepared.kf_jitter),
-        symmetrize=prepared.kf_sym,
-        _store_history=False,
-        _raise_on_error=raise_on_error,
-    )
-    run_filter: Callable[..., Any]
-    if mode == "linear":
-        common["joseph_cov"] = prepared.kf_joseph_cov
-        pol = cast("FirstOrderSolution", sol.policy)
-        C, d = build_C_d_from_cfunc(
-            prepared.meas_addr,
-            prepared.jac_addr,
-            sol.policy.steady_state,
-            calib_params,
-            prepared.y_reordered.shape[1],
-        )
-        run_filter = KalmanFilter.run_raw
-        mode_args: dict[str, Any] = {
-            "A": pol.A,
-            "B": pol.B,
-            "C": C,
-            "d": d,
-            "x0": x0,
-            "return_shocks": False,
-        }
-    elif mode == "extended":
-        common["joseph_cov"] = prepared.kf_joseph_cov
-        pol = cast("FirstOrderSolution", sol.policy)
-        run_filter = KalmanFilter.run_extended_raw
-        mode_args = {
-            "A": pol.A,
-            "B": pol.B,
-            "meas_addr": prepared.meas_addr,
-            "jac_addr": prepared.jac_addr,
-            "calib_params": calib_params,
-            "compute_y_filt": False,
-            "x0": x0,
-            "return_shocks": False,
-        }
-    elif mode == "unscented":
-        # p is (n_state, n_state), so the augmented z0 sizes itself off the
-        # policy without `compiled` threaded in. B is no use for this: it spans
-        # every variable, so its row count is n_var.
-        pol = cast("SecondOrderSolution", sol.policy)
-        n_state = pol.p.shape[0]
-        if x0 is None:
-            x0_state = np.zeros((n_state,), dtype=float64)
-        else:
-            raw = asarray(x0, dtype=float64)
-            x0_state = raw[:n_state] if raw.shape[0] != n_state else raw
-        z0 = np.zeros((2 * n_state,), dtype=float64)
-        z0[:n_state] = x0_state
-        run_filter = KalmanFilter.run_unscented_raw
-        mode_args = {
-            "meas_addr": prepared.meas_addr,
-            "hx": pol.p,
-            "gx": pol.f,
-            "bu": pol.B,
-            "hxx": pol.hxx,
-            "gxx": pol.gxx,
-            "hxu": pol.hxu,
-            "gxu": pol.gxu,
-            "huu": pol.huu,
-            "guu": pol.guu,
-            "hss": pol.hss,
-            "gss": pol.gss,
-            "steady_state": pol.steady_state,
-            "calib_params": calib_params,
-            "z0": z0,
-        }
-    else:
-        raise ValueError(f"Unrecognized filter_mode: {mode!r}")
-
-    def loglik_of_R(R: NDF) -> float64:
-        run = run_filter(R=R, **mode_args, **common)
-        # A run that errored (e.g. a singular covariance) returns the partial
-        # accumulation up to the failure; treat it as infeasible, not a valid
-        # likelihood, so the search rejects the draw instead of chasing garbage.
-        if run.status != 0:
-            return float64(-np.inf)
-        return float64(run.loglik)
-
-    return loglik_of_R
-
-
-def evaluate_loglik(
-    *,
-    solver: DSGESolver,
-    compiled: CompiledModel,
-    kalman: KalmanConfig | None,
-    y: NDF | pd.DataFrame,
-    params: Mapping[str, float64],
-    filter_mode: str,
-    observables: list[str] | None,
-    ss_seed: NDF | dict[str, float] | None,
-    x0: NDF | None,
-    jitter: float | float64 | None,
-    symmetrize: bool = True,
-    joseph_cov: bool = True,
-    R: NDF | None,
-    P0: NDF | None = None,
-    prepared: PreparedFilterRun | None = None,
-    q_corr: NDF | None = None,
-) -> float64:
-    prepared_run = (
-        prepared
-        if prepared is not None
-        else prepare_filter_run(
-            compiled=compiled,
-            kalman=kalman,
-            y=y,
-            observables=observables,
-            filter_mode=filter_mode,
-            jitter=jitter,
-            symmetrize=symmetrize,
-            joseph_cov=joseph_cov,
-            P0=P0,
-        )
-    )
-    sol = _get_solution(
-        solver=solver,
-        compiled=compiled,
-        params=params,
-        mode=prepared_run.mode,
-        ss_seed=ss_seed,
-        raise_on_bk_violation=False,
-    )
-    Q = build_Q(compiled, params, corr=q_corr)
-    R_mat = build_R(compiled, kalman, prepared_run.observables, params, R_override=R)
-    calib_params = build_calib_param_vector(compiled, params)
-    loglik_of_R = _prepare_filter_loglik(
-        sol=sol,
-        prepared=prepared_run,
-        Q=Q,
-        calib_params=calib_params,
-        x0=x0,
-        raise_on_error=False,
-    )
-    return loglik_of_R(R_mat)
-
-
 def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:
     """Map unconstrained z in R^(K(K-1)/2) -> valid corr Cholesky factor."""
     expected = (K * (K - 1)) // 2
@@ -1213,17 +901,3 @@ def _unconstrained_from_corr(corr: NDF) -> NDF:
     except np.linalg.LinAlgError as exc:
         raise ValueError("Correlation matrix must be positive definite.") from exc
     return _unconstrained_from_corr_chol(L)
-
-
-def evaluate_logprior(
-    params: Mapping[str, float64],
-    priors: Mapping[str, Prior] | None,
-) -> float64:
-    if priors is None:
-        return float64(0.0)
-    lp = float64(0.0)
-    for name, prior in priors.items():
-        if name not in params:
-            raise KeyError(f"Prior specified for unknown parameter '{name}'.")
-        lp += float64(prior.logpdf(float64(params[name])))
-    return lp

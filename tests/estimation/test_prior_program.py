@@ -15,6 +15,9 @@ from SymbolicDSGE.estimation.prior_program import (
     _pack_transform,
     build_packed_logprior,
 )
+from SymbolicDSGE._ckernels.estimation import (
+    logprior,
+)
 from _oracles.estimation import (
     _dist_logpdf,
     _evaluate_logprior_program,
@@ -163,9 +166,9 @@ def test_packed_scalar_prior_unit_matches_python_golden(name, prior, z, expected
     assert float(prior.logpdf(np.float64(z))) == pytest.approx(
         expected, rel=1e-13, abs=1e-13
     )
-    assert float(packed.logpdf(np.asarray([z], dtype=np.float64))) == pytest.approx(
-        expected, rel=1e-13, abs=1e-13
-    )
+    assert float(
+        logprior(packed, np.asarray([z], dtype=np.float64), True)
+    ) == pytest.approx(expected, rel=1e-13, abs=1e-13)
 
 
 def test_packed_scalar_program_matches_python_golden_sum():
@@ -188,7 +191,7 @@ def test_packed_scalar_program_matches_python_golden_sum():
             expected_parts[i], rel=1e-13, abs=1e-13
         )
     assert sum(expected_parts) == pytest.approx(expected_total, rel=1e-15, abs=1e-15)
-    assert float(packed.logpdf(theta)) == pytest.approx(
+    assert float(logprior(packed, theta, True)) == pytest.approx(
         expected_total, rel=1e-13, abs=1e-13
     )
 
@@ -215,10 +218,12 @@ def test_packed_lkj_block_unit_matches_python_golden():
 
     assert packed is not None
     assert float(prior.logpdf(theta)) == pytest.approx(expected, rel=1e-13, abs=1e-13)
-    assert float(packed.logpdf(theta)) == pytest.approx(expected, rel=1e-13, abs=1e-13)
+    assert float(logprior(packed, theta, True)) == pytest.approx(
+        expected, rel=1e-13, abs=1e-13
+    )
 
 
-def test_packed_logprior_matches_cache_identity_and_rejects_unsupported_specs():
+def test_packed_logprior_rejects_unsupported_specs():
     prior = make_prior(
         "normal",
         {"mean": 0.0, "std": 1.0, "random_state": 1},
@@ -241,56 +246,39 @@ def test_packed_logprior_matches_cache_identity_and_rejects_unsupported_specs():
         is None
     )
     assert packed is not None
-    assert packed.matches({"rho": prior})
-    assert not packed.matches(None)
-    assert not packed.matches({"other": prior})
-    assert not packed.matches(
-        {
-            "rho": make_prior(
-                "normal",
-                {"mean": 0.0, "std": 1.0, "random_state": 2},
-                "identity",
-            )
-        }
-    )
 
     block = SimpleNamespace(dim=2, theta_slice=slice(0, 1))
-    assert (
+    with pytest.raises(TypeError, match="must be an LKJChol"):
         build_packed_logprior(
             priors={"corr": object()},
             param_index={},
             matrix_blocks={"corr": block},
             matrix_member_names=set(),
         )
-        is None
-    )
-    assert (
+    with pytest.raises(TypeError, match="must pair LKJChol"):
         build_packed_logprior(
             priors={"corr": prior},
             param_index={},
             matrix_blocks={"corr": block},
             matrix_member_names=set(),
         )
-        is None
-    )
-    assert (
+    with pytest.raises(ValueError, match="not an estimated parameter"):
         build_packed_logprior(
             priors={"rho": prior},
             param_index={},
             matrix_blocks={},
             matrix_member_names=set(),
         )
-        is None
-    )
-    assert (
+    with pytest.raises(TypeError, match="must be a Prior"):
         build_packed_logprior(
             priors={"rho": object()},
             param_index={"rho": 0},
             matrix_blocks={},
             matrix_member_names=set(),
         )
-        is None
-    )
+
+    # A block member is packed by its block, so its own entry is skipped
+    # before anything looks at what it holds.
     assert (
         build_packed_logprior(
             priors={"rho": object()},
@@ -309,15 +297,13 @@ def test_packed_logprior_matches_cache_identity_and_rejects_unsupported_specs():
         "identity",
     )
     object.__setattr__(unsupported_dist_prior, "dist", object())
-    assert (
+    with pytest.raises(TypeError, match="has no code for"):
         build_packed_logprior(
             priors={"rho": unsupported_dist_prior},
             param_index={"rho": 0},
             matrix_blocks={},
             matrix_member_names=set(),
         )
-        is None
-    )
 
 
 def test_prior_program_scalar_transform_helpers_cover_all_branches():

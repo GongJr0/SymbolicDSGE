@@ -76,7 +76,6 @@ def post82_estimator(post82):
 
     def _make(mode="linear", estimated_params=("psi_pi", "rho_r"), priors=None):
         return Estimator(
-            solver=post82["solver"],
             compiled=post82["compiled"],
             y=post82["y"],
             observables=post82["obs"],

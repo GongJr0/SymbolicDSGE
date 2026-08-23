@@ -475,6 +475,16 @@ static const sdsge_objective_fn pos_table[2][3] = {
     {sdsge_pos_linear_ll, sdsge_pos_extended_ll, sdsge_pos_unscented_ll},
     {sdsge_post_linear, sdsge_post_extended, sdsge_post_unscented}};
 
+/* The tables as one lookup. `negate` picks the minimized form a driver wants
+ * over the +value form a reported density wants. Callers outside this file go
+ * through here rather than re-spelling which symbol belongs to which mode, and
+ * it is what reaches the likelihood row, whose entries are file-static. */
+sdsge_objective_fn sdsge_select_objective(int negate, int has_priors,
+                                          int filter_mode) {
+  return negate ? obj_table[has_priors][filter_mode]
+                : pos_table[has_priors][filter_mode];
+}
+
 /* Covariance of an estimate at `theta`, in factored form. Separate from every
  * driver that wants it: the optimizer takes it as the asymptotic covariance of
  * the point it just found, and the sampler takes it as the proposal it starts

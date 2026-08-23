@@ -65,7 +65,6 @@ def _stub_compiled() -> SimpleNamespace:
 
 def _estimator() -> Estimator:
     return Estimator(
-        solver=SimpleNamespace(),
         compiled=_stub_compiled(),
         y=np.zeros((6, 1), dtype=np.float64),
         observables=["y"],

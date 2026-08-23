@@ -265,4 +265,10 @@ f64 sdsge_post_linear(const f64 *SDSGE_RESTRICT x, void *ctx);
 f64 sdsge_post_extended(const f64 *SDSGE_RESTRICT x, void *ctx);
 f64 sdsge_post_unscented(const f64 *SDSGE_RESTRICT x, void *ctx);
 
+/* Objective for one (sign, priors, mode) triple. `negate` selects the drivers'
+ * minimized form over the +value one; `filter_mode` is an `sdsge_filter_mode`.
+ * The +value likelihood row is file-static, so this is the only way to it. */
+sdsge_objective_fn sdsge_select_objective(int negate, int has_priors,
+                                          int filter_mode);
+
 #endif /* SDSGE_ESTIMATION_H */

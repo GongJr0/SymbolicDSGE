@@ -18,15 +18,13 @@ from sympy import Symbol
 from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.estimation import Estimator
-from SymbolicDSGE._ckernels.estimation._estimation import NativeLogpost
 
 
 def _native_loglik(
-    *, solver, compiled, y, observables, filter_mode, estimated, ss_seed, **kwargs
+    *, compiled, y, observables, filter_mode, estimated, ss_seed, **kwargs
 ) -> float:
     """The native loglik at the base calibration, through the production path."""
     est = Estimator(
-        solver=solver,
         compiled=compiled,
         y=y,
         observables=list(observables),
@@ -35,9 +33,8 @@ def _native_loglik(
         ss_seed=ss_seed,
         **kwargs,
     )
-    ctx, mode = est._build_native_context()
     theta0 = np.ascontiguousarray(est.resolve_theta0(None), dtype=np.float64)
-    return float(NativeLogpost(ctx, mode).loglik(theta0))
+    return est.loglik(theta0)
 
 
 @pytest.fixture(scope="module")
@@ -85,7 +82,6 @@ def bundle(post82_test_model_path):
 def test_native_objective_matches_model_kalman(bundle, filter_mode):
     obs = ["Infl", "Rate"]
     ll = _native_loglik(
-        solver=bundle["solver"],
         compiled=bundle["compiled"],
         y=bundle["y"],
         observables=obs,
@@ -140,7 +136,6 @@ def test_native_unscented_objective_matches_model_kalman(rbc_bundle):
     obs = ["c_obs"]
     jitter, symmetrize = 1e-8, True
     ll = _native_loglik(
-        solver=rbc_bundle["solver"],
         compiled=rbc_bundle["compiled"],
         y=rbc_bundle["y"],
         observables=obs,

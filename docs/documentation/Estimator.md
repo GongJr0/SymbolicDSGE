@@ -18,11 +18,10 @@ from SymbolicDSGE import Estimator
 ```python
 Estimator(
     *,
-    solver: DSGESolver, # (1)!
-    compiled: CompiledModel, # (2)!
-    y: np.ndarray | pd.DataFrame, # (3)!
+    compiled: CompiledModel, # (1)!
+    y: np.ndarray | pd.DataFrame, # (2)!
     observables: list[str] | None = None,
-    filter_mode: str = "linear", # (6)!
+    filter_mode: str = "linear", # (3)!
     estimated_params: Sequence[str] | None = None,
     priors: Mapping[str, Prior] | None = None, # (4)!
     ss_seed: np.ndarray | dict[str, float] | None = None,
@@ -31,17 +30,16 @@ Estimator(
     symmetrize: bool = True,
     joseph_cov: bool = True,
     R: np.ndarray | None = None, # (5)!
-    P0: np.ndarray | None = None, # (7)!
+    P0: np.ndarray | None = None, # (6)!
 )
 ```
 
-1. Existing solver instance.
-2. Compiled model from `DSGESolver.compile(...)`.
-3. Measurement data for Kalman likelihood.
+1. Compiled model from `DSGESolver.compile(...)`.
+2. Measurement data for Kalman likelihood.
+3. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
 4. Required for `map(...)` and `mcmc(...)`.
 5. Optional constant observation-covariance override. If omitted, `R` comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
-6. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
-7. Optional initial state-covariance override. If omitted, `P0` comes from the Kalman config. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
+6. Optional initial state-covariance override. If omitted, `P0` comes from the Kalman config. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
 
 ???+ info "Filter Initial Conditions"
     In linear and extended likelihoods, `x0` and `P0` are the prior mean and covariance for the first observation. In unscented likelihoods, they describe the state and covariance before the first observation.
@@ -51,14 +49,19 @@ Estimator(
 ## Likelihood / Posterior Evaluation
 
 ```python
-Estimator.theta0() -> np.ndarray
 Estimator.loglik(theta: np.ndarray) -> float
-Estimator.logprior(theta: np.ndarray) -> float
-Estimator.logpost(theta: np.ndarray) -> float
+Estimator.logprior(theta: np.ndarray, include_logjac: bool = False) -> float
+Estimator.logpost(theta: np.ndarray, include_logjac: bool = False) -> float
 ```
 
 ???+ note "Optimization Space"
-    `theta` is unconstrained internal space. Estimator applies prior transforms to map between unconstrained `theta` and constrained model parameters.
+    `theta` is the unconstrained vector the optimizer and the sampler search over. The evaluators above take it as given: the mapping to model parameters happens inside the native objective, once per evaluation. Convert explicitly with `theta_to_params` and `params_to_theta`.
+
+    The mapping is assigned by role, not by prior. A shock or measurement standard deviation is log-transformed and a correlation block is reparameterized whether or not either carries a prior, which is what keeps an MLE search, where there are no priors at all, inside the model's valid region.
+
+???+ note "Log-Jacobian"
+    `include_logjac` controls whether the prior's transformation is treated as a coordinate change (`False`) or as a change of random variable (`True`).
+    See the [map()](#map) note on the jacobian parameter for more details.
 
 ## MLE
 

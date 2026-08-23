@@ -146,7 +146,6 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
 ):
     prior_spec = _full_size_prior_spec()
     est = Estimator(
-        solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -160,29 +159,22 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
         size=theta0.shape[0],
     )
 
-    # expected_logprior is a parity target: the packed native prior and the
-    # Python path must agree on it, and neither sees the filter, so it does not
-    # move when the filter does. The other two are regression anchors of our own
-    # output, not oracles; their correctness rests upstream on the POST82 Dynare
-    # parity, and they are recomputed whenever the filter contract changes.
+    # expected_logprior does not see the filter, so it does not move when the
+    # filter does. All three are regression anchors of our own output, not
+    # oracles; their correctness rests upstream on the POST82 Dynare parity, and
+    # they are recomputed whenever the filter contract changes.
     expected_logprior = -3.677756133346315
     expected_loglik = -79.71587915190194
     expected_logpost = -83.39363528524827
 
     assert est._packed_logprior is not None
-    assert float(est._logprior_python(theta)) == pytest.approx(
-        expected_logprior, rel=1e-13, abs=1e-13
-    )
-    assert float(est._packed_logprior.logpdf(theta)) == pytest.approx(
-        expected_logprior, rel=1e-13, abs=1e-13
-    )
-    assert float(est.logprior(theta)) == pytest.approx(
+    assert float(est.logprior(theta, True)) == pytest.approx(
         expected_logprior, rel=1e-13, abs=1e-13
     )
     assert float(est.loglik(theta)) == pytest.approx(
         expected_loglik, rel=1e-13, abs=1e-13
     )
-    assert float(est.logpost(theta)) == pytest.approx(
+    assert float(est.logpost(theta, True)) == pytest.approx(
         expected_logpost, rel=1e-13, abs=1e-13
     )
 
@@ -193,7 +185,6 @@ def test_mle_interacting_scalar_corrs_without_prior_hit_spd_gate(dense_lkj_bundl
     # per-parameter tanh cannot guarantee joint SPD, so it fails fast toward Q_corr.
     with pytest.raises(ValueError, match="joint positive-definiteness"):
         Estimator(
-            solver=dense_lkj_bundle["solver"],
             compiled=dense_lkj_bundle["compiled"],
             y=dense_lkj_bundle["y"],
             ss_seed=dense_lkj_bundle["steady"],
@@ -205,7 +196,6 @@ def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
     # All three dense Q correlations estimated prior-free fold into a Q_corr CPC
     # block (SPD by construction) instead of tripping the gate.
     est = Estimator(
-        solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -218,7 +208,6 @@ def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
     prior_spec = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     est = Estimator(
-        solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -261,7 +250,6 @@ def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
     from SymbolicDSGE.estimation.spec import EstimationSpec
 
     est = Estimator(
-        solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -290,7 +278,6 @@ def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
 def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
     prior_spec = {"Q_corr": LKJChol(eta=2.0, K=3, random_state=None)}
     est = Estimator(
-        solver=dense_lkj_bundle["solver"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],

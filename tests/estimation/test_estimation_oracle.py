@@ -38,7 +38,6 @@ def _mle_estimator(post82, mode: str) -> Estimator:
     if mode == "unscented":
         P0 = np.eye(len(post82["compiled"].var_names), dtype=np.float64)
     return Estimator(
-        solver=post82["solver"],
         compiled=post82["compiled"],
         y=post82["y"],
         observables=post82["obs"],
@@ -92,7 +91,6 @@ def test_map_lbfgsb_oracle(post82):
         transform="identity",
     )
     est = Estimator(
-        solver=post82["solver"],
         compiled=post82["compiled"],
         y=post82["y"],
         observables=post82["obs"],
