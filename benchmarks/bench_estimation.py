@@ -110,6 +110,7 @@ OPTIMIZER_PROFILES = {
             ("factr", 1e-7 / np.finfo(np.float64).eps),
             ("pgtol", 0.0),
             ("fd_step", 1e-6),
+            ("cov", False),
         ),
         dynare_optim_options=(
             ("MaxIter", 1000),
@@ -127,6 +128,7 @@ OPTIMIZER_PROFILES = {
             ("maxfun", 1_000_000),
             ("xatol", 1e-6),
             ("fatol", 1e-8),
+            ("cov", False),
         ),
         dynare_optim_options=(
             ("MaxIter", 6000),
@@ -140,7 +142,12 @@ OPTIMIZER_PROFILES = {
     8: OptimizerProfile(
         dynare_mode_compute=8,
         native_method="Nelder-Mead",
-        native_options=(("maxiter", 10_000), ("xatol", 1e-4), ("fatol", 1e-4)),
+        native_options=(
+            ("maxiter", 10_000),
+            ("xatol", 1e-4),
+            ("fatol", 1e-4),
+            ("cov", False),
+        ),
         dynare_optim_options=(
             ("MaxIter", 10_000),
             ("TolFun", 1e-4),
@@ -409,7 +416,6 @@ def _make_estimator(
         for prior in spec.priors
     } or None
     return Estimator(
-        solver=native.solver,
         compiled=native.compiled,
         y=native.y,
         observables=list(native.observable_names),
