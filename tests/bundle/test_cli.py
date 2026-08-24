@@ -52,11 +52,17 @@ def _baseline_dir(tmp_path: Path, *, with_estimation: bool = True) -> Path:
     )
     if with_estimation:
         spec = {
-            "method": "mle",
-            "parameters": [{"name": "beta", "initial": 0.99, "estimate": True}],
-            "method_kwargs": {},
-            "compile_kwargs": {},
-            "posterior_point": "mean",
+            "observables": list(_OBSERVABLES),
+            "filter_mode": "linear",
+            "P0": None,
+            "R": None,
+            "estimated_params": ["beta"],
+            "priors": None,
+            "ss_seed": None,
+            "x0": None,
+            "jitter": 0.0,
+            "symmetrize": True,
+            "joseph_cov": True,
         }
         _write_text(src / "estimation" / "spec.json", json.dumps(spec))
         matrix = np.arange(12, dtype=np.float64).reshape(6, len(_OBSERVABLES))
@@ -105,9 +111,8 @@ def test_compile_observed_round_trips_through_loader(tmp_path: Path) -> None:
     out = compile_directory(src, tmp_path / "obs.sdsge")
     loaded = build_from(out)
     assert loaded.estimation is not None
-    assert loaded.estimation.observed is not None
     expected = np.arange(12, dtype=np.float64).reshape(6, len(_OBSERVABLES))
-    np.testing.assert_allclose(loaded.estimation.observed, expected)
+    np.testing.assert_allclose(np.asarray(loaded.estimation.spec.y), expected)
 
 
 def test_compile_csv_only_keeps_csv_member(tmp_path: Path) -> None:
@@ -208,8 +213,10 @@ def test_decompile_then_recompile_yields_equivalent_bundle(tmp_path: Path) -> No
     loaded2 = build_from(pass2)
 
     assert loaded2.simulation is not None and loaded2.simulation["reference"].T == 8
-    np.testing.assert_allclose(loaded1.estimation.observed, loaded2.estimation.observed)
-    assert loaded1.estimation.spec.to_dict() == loaded2.estimation.spec.to_dict()
+    np.testing.assert_allclose(
+        np.asarray(loaded1.estimation.spec.y), np.asarray(loaded2.estimation.spec.y)
+    )
+    assert loaded1.estimation.spec.params == loaded2.estimation.spec.params
 
 
 def test_decompile_csv_mode_rewrites_parquet_member_to_csv(tmp_path: Path) -> None:

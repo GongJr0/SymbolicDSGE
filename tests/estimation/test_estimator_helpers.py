@@ -7,10 +7,8 @@ import pytest
 from numpy import float64
 
 from SymbolicDSGE.estimation import backend
-from SymbolicDSGE.estimation.estimator import (
-    Estimator,
-    _method_from_result,
-)
+from SymbolicDSGE.estimation.estimator import Estimator
+from SymbolicDSGE.ui.estimation import _method_from_result
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 
 

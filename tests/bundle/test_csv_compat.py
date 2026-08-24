@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import numpy as np
@@ -14,9 +16,10 @@ from SymbolicDSGE.bundle.parquet import (
     csv_to_columns,
     trace_to_csv,
 )
+from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import (
-    EstimationParameterSpec,
-    EstimationSpec,
+    EstimatorParams,
+    EstimatorSpec,
     MCMCResultMeta,
 )
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
@@ -75,9 +78,7 @@ def test_trace_to_csv_rejects_mismatched_lengths() -> None:
 def test_builder_writes_observed_with_semantic_headers() -> None:
     matrix = np.array([[1.0, 2.0], [3.0, 4.0]])
     builder = BundleBuilder().add_estimation(
-        _estimation_spec(),
-        observed=matrix,
-        observable_names=["gdp", "infl"],
+        _estimation_spec(matrix, observables=("gdp", "infl")),
         as_parquet=False,
     )
     manifest, files = builder.build()
@@ -92,26 +93,30 @@ def test_builder_writes_observed_with_semantic_headers() -> None:
 
 
 def test_builder_writes_posterior_and_mc_traces_as_csv() -> None:
-    posterior = {
-        "samples": np.array([[1.0, 2.0], [3.0, 4.0]]),
-        "logpost": np.array([-1.0, -2.0]),
-    }
+    result = MCMCResult(
+        param_names=["beta", "sigma"],
+        samples=np.array([[1.0, 2.0], [3.0, 4.0]]),
+        logpost_trace=np.array([-1.0, -2.0]),
+        logjac_trace=np.array([0.0, 0.0]),
+        accept_rate=np.float64(0.5),
+        n_draws=2,
+        burn_in=0,
+        thin=1,
+    )
     builder = BundleBuilder().add_estimation(
-        _estimation_spec(), posterior=posterior, as_parquet=False
+        _estimation_spec(), result=result, as_parquet=False
     )
     _, files = builder.build()
     assert "estimation/posterior.csv" in files
     header = files["estimation/posterior.csv"].decode("utf-8").splitlines()[0]
-    assert header == "samples.0,samples.1,logpost"
+    assert header == "samples.0,samples.1,logpost,logjac"
 
 
 def test_builder_observable_names_length_must_match_matrix() -> None:
     builder = BundleBuilder()
     with pytest.raises(ValueError):
         builder.add_estimation(
-            _estimation_spec(),
-            observed=np.zeros((3, 2)),
-            observable_names=["only_one"],
+            _estimation_spec(np.zeros((3, 2)), observables=("only_one",)),
             as_parquet=False,
         )
 
@@ -127,9 +132,12 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
         "logpost": rng.standard_normal(20),
         "logjac": rng.standard_normal(20),
     }
-    result_meta = MCMCResultMeta(
+    result = MCMCResult(
         param_names=["beta", "sigma"],
-        accept_rate=0.25,
+        samples=posterior["samples"],
+        logpost_trace=posterior["logpost"],
+        logjac_trace=posterior["logjac"],
+        accept_rate=np.float64(0.25),
         n_draws=20,
         burn_in=5,
         thin=1,
@@ -138,14 +146,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
     target = (
         BundleBuilder(created_by="csv-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(
-            _estimation_spec(),
-            result=result_meta,
-            observed=observed,
-            observable_names=["Infl", "Rate"],
-            posterior=posterior,
-            as_parquet=False,
-        )
+        .add_estimation(_estimation_spec(observed), result=result, as_parquet=False)
         .add_mc(
             PipelineSpec(
                 nodes=[
@@ -160,14 +161,11 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
 
     loaded = build_from(target)
     assert loaded.estimation is not None
-    assert loaded.estimation.observed is not None
-    np.testing.assert_allclose(loaded.estimation.observed, observed)
-    assert loaded.estimation.posterior is not None
+    np.testing.assert_allclose(np.asarray(loaded.estimation.spec.y), observed)
+    assert isinstance(loaded.estimation.result, MCMCResult)
+    np.testing.assert_allclose(loaded.estimation.result.samples, posterior["samples"])
     np.testing.assert_allclose(
-        loaded.estimation.posterior["samples"], posterior["samples"]
-    )
-    np.testing.assert_allclose(
-        loaded.estimation.posterior["logpost"], posterior["logpost"]
+        loaded.estimation.result.logpost_trace, posterior["logpost"]
     )
 
 
@@ -181,7 +179,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
         }
     )
 
-    spec = _estimation_spec()
+    spec = _estimation_spec(observables=("gdp", "infl"))
     manifest = Manifest(
         created_by="hand-zipped",
         members=[
@@ -192,10 +190,17 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
                 columns=["gdp", "infl"],
             ),
             Member(path="estimation/posterior.csv", kind="estimation_trace"),
+            Member(
+                path="model/reference.yaml",
+                kind="model_config",
+                role="reference",
+                options={"compile_kwargs": {}},
+            ),
         ],
     )
     files = {
-        "estimation/spec.json": spec.to_json().encode("utf-8"),
+        "model/reference.yaml": _MODEL_YAML.encode("utf-8"),
+        "estimation/spec.json": json.dumps(spec.params).encode("utf-8"),
         "estimation/observed.csv": observed_csv,
         "estimation/posterior.csv": posterior_csv,
     }
@@ -204,15 +209,9 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
 
     loaded = build_from(archive_path)
     assert loaded.estimation is not None
-    assert loaded.estimation.observed is not None
     np.testing.assert_allclose(
-        loaded.estimation.observed,
+        np.asarray(loaded.estimation.spec.y),
         np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]),
-    )
-    assert loaded.estimation.posterior is not None
-    np.testing.assert_allclose(
-        loaded.estimation.posterior["samples"],
-        np.array([[0.9, 0.1], [0.95, 0.12], [0.98, 0.11]]),
     )
 
 
@@ -220,11 +219,9 @@ def test_observed_csv_with_nan_round_trips_to_nan(tmp_path: Path) -> None:
     matrix = np.array([[1.0, np.nan], [2.0, 3.0]])
     target = (
         BundleBuilder()
+        .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
-            _estimation_spec(),
-            observed=matrix,
-            observable_names=["a", "b"],
-            as_parquet=False,
+            _estimation_spec(matrix, observables=("a", "b")), as_parquet=False
         )
         .write(tmp_path / "nan.sdsge")
     )
@@ -235,23 +232,32 @@ def test_observed_csv_with_nan_round_trips_to_nan(tmp_path: Path) -> None:
 
     loaded = build_from(target)
     assert loaded.estimation is not None
-    assert loaded.estimation.observed is not None
-    assert np.isnan(loaded.estimation.observed[0, 1])
-    np.testing.assert_allclose(
-        loaded.estimation.observed[~np.isnan(loaded.estimation.observed)],
-        np.array([1.0, 2.0, 3.0]),
-    )
+    y = np.asarray(loaded.estimation.spec.y)
+    assert np.isnan(y[0, 1])
+    np.testing.assert_allclose(y[~np.isnan(y)], np.array([1.0, 2.0, 3.0]))
 
 
 # -- helpers ----------------------------------------------------------------
 
 
-def _estimation_spec() -> EstimationSpec:
-    return EstimationSpec(
-        method="mcmc",
-        parameters=[
-            EstimationParameterSpec(name="beta", initial=0.99, estimate=True),
-            EstimationParameterSpec(name="sigma", initial=1.0, estimate=True),
-        ],
-        observables=["Infl", "Rate"],
+def _estimation_spec(y=None, *, observables=("Infl", "Rate")) -> EstimatorSpec:
+    return EstimatorSpec(
+        y=(
+            np.zeros((2, len(observables))).tolist()
+            if y is None
+            else np.asarray(y).tolist()
+        ),
+        params=EstimatorParams(
+            observables=list(observables),
+            filter_mode="linear",
+            P0=None,
+            R=None,
+            estimated_params=["beta", "sigma"],
+            priors=None,
+            ss_seed=None,
+            x0=None,
+            jitter=0.0,
+            symmetrize=True,
+            joseph_cov=True,
+        ),
     )

@@ -49,19 +49,19 @@ def test_prior_to_spec_round_trips(
     )
     spec = prior.to_spec()
 
-    assert spec.distribution == distribution
-    assert spec.parameters == parameters
-    assert spec.transform == transform
-    assert spec.transform_kwargs == transform_kwargs
+    assert spec["distribution"] == distribution
+    assert spec["parameters"] == parameters
+    assert spec["transform"] == transform
+    assert spec["transform_kwargs"] == transform_kwargs
 
     # Rebuilding from the emitted spec yields an identical spec (lossless).
     rebuilt = make_prior(
-        distribution=spec.distribution,
-        parameters=spec.parameters,
-        transform=spec.transform,
-        transform_kwargs=spec.transform_kwargs,
+        distribution=spec["distribution"],
+        parameters=spec["parameters"],
+        transform=spec["transform"],
+        transform_kwargs=spec["transform_kwargs"],
     ).to_spec()
-    assert rebuilt.to_dict() == spec.to_dict()
+    assert rebuilt == spec
 
 
 def test_trivial_transforms_to_spec():
@@ -101,14 +101,14 @@ def test_lkj_prior_to_spec_round_trips():
         transform_kwargs={"K": 3},
     )
     spec = prior.to_spec()
-    assert spec.distribution == "lkj_chol"
-    assert spec.parameters == {"eta": 2.0, "K": 3}
-    assert spec.transform == "cholesky_corr"
-    assert spec.transform_kwargs == {"K": 3}
+    assert spec["distribution"] == "lkj_chol"
+    assert spec["parameters"] == {"eta": 2.0, "K": 3}
+    assert spec["transform"] == "cholesky_corr"
+    assert spec["transform_kwargs"] == {"K": 3}
     rebuilt = make_prior(
-        distribution=spec.distribution,
-        parameters=spec.parameters,
-        transform=spec.transform,
-        transform_kwargs=spec.transform_kwargs,
+        distribution=spec["distribution"],
+        parameters=spec["parameters"],
+        transform=spec["transform"],
+        transform_kwargs=spec["transform_kwargs"],
     ).to_spec()
-    assert rebuilt.to_dict() == spec.to_dict()
+    assert rebuilt == spec

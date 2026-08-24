@@ -356,7 +356,7 @@ class Estimator:
         sup = tr.support
         if not (sup.low >= low and sup.high <= high):
             warnings.warn(
-                f"SPD parameter '{name}' uses {type(tr).__name__} trasform constraining "
+                f"SPD parameter '{name}' uses {type(tr).__name__} transform constraining "
                 f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
                 f"requires a constraint to ({low}, {high}). The default role "
                 f"transform ({type(default).__name__}) is used instead.",
@@ -445,15 +445,26 @@ class Estimator:
 
     @staticmethod
     def _is_lkj_prior(name: str, prior: Prior) -> Prior:
-        dist_lkj = isinstance(prior.dist, LKJChol)
-        transform_chol = isinstance(prior.transform, CholeskyCorrTransform)
+        dist = prior.dist
+        transform = prior.transform
 
-        if (not dist_lkj) or (not transform_chol):
+        if not isinstance(dist, LKJChol) or not isinstance(
+            transform, CholeskyCorrTransform
+        ):
             raise ValueError(
                 f"Block correlation estimation {name} requires a LKJChol distribution and a "
                 "CholeskyCorrTransform. Got "
                 f"distribution={type(prior.dist).__name__}, "
                 f"transform={type(prior.transform).__name__}."
+            )
+        # make_prior reconciles the two Ks; a Prior built directly can disagree,
+        # and the transform's K is what sizes the block's correlation factor.
+        dist_k = int(getattr(dist, "_K", -1))
+        if dist_k != transform.K:
+            raise ValueError(
+                f"Block correlation estimation {name} requires matching K between the "
+                f"LKJChol distribution and its CholeskyCorrTransform. Got "
+                f"distribution K={dist_k}, transform K={transform.K}."
             )
         return prior
 

@@ -180,29 +180,26 @@ def _stub_compiled_with_sparse_q_block():
     )
 
 
-def test_to_spec_captures_targets_initials_and_method():
-    from SymbolicDSGE.estimation.spec import EstimationSpec, PriorSpec
+def test_to_spec_captures_construction_state():
+    from SymbolicDSGE.estimation.spec import EstimatorSpec
 
     est = Estimator(
         compiled=_stub_compiled(),
         y=np.zeros((3, 1), dtype=np.float64),
+        observables=["y"],
         estimated_params=["a"],
     )
 
-    spec = est.to_spec(
-        method="mle",
-        priors={"a": PriorSpec(distribution="normal", parameters={"loc": 0.0})},
-        observables=["y"],
-    )
+    spec = est.to_spec()
 
-    assert isinstance(spec, EstimationSpec)
-    assert spec.method == "mle"
-    assert [p.name for p in spec.parameters] == ["a"]
-    param = spec.parameters[0]
-    assert param.estimate is True
-    assert param.initial == 0.0  # pulled from calibration via _base_params
-    assert param.prior is not None and param.prior.distribution == "normal"
-    assert spec.observables == ["y"]
+    assert isinstance(spec, EstimatorSpec)
+    assert spec.params["estimated_params"] == ["a"]
+    assert spec.params["observables"] == ["y"]
+    assert spec.params["filter_mode"] == "linear"
+    assert spec.params["priors"] is None
+    assert spec.y == np.zeros((3, 1)).tolist()
+    # the run is not construction state, so nothing about a method is here
+    assert "method" not in spec.params
 
 
 def test_to_spec_reverses_live_scalar_priors():
@@ -222,13 +219,12 @@ def test_to_spec_reverses_live_scalar_priors():
         },
     )
 
-    spec = est.to_spec(method="map")  # no explicit priors -> auto-reversed
+    spec = est.to_spec()  # live Prior objects reversed to their specs
 
-    param = spec.parameters[0]
-    assert param.name == "a"
-    assert param.prior is not None
-    assert param.prior.distribution == "normal"
-    assert param.prior.parameters == {"mean": 0.0, "std": 1.0}
+    prior = spec.params["priors"]["a"]
+    assert prior["distribution"] == "normal"
+    assert prior["parameters"] == {"mean": 0.0, "std": 1.0}
+    assert prior["transform"] == "identity"
 
 
 def test_mle_records_optimizer_config(post82_estimator):
@@ -254,9 +250,15 @@ def test_mle_records_optimizer_config(post82_estimator):
         "fd_step",
         "xatol",
         "fatol",
+        "jacobian",
+        "cov",
+        "cov_fd_step_scale",
+        "cov_fd_absolute_floor",
     }
-    # config survives projection to the serializable dict
-    assert out.to_dict()["optimizer_config"] == cfg
+    # the starting point is run context too, so it rides the config
+    assert "theta0" in cfg
+    # config survives projection to the serializable document
+    assert out.to_spec()["optimizer_config"] == cfg
 
 
 def _normal_prior(mean, std):
@@ -303,7 +305,7 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert cfg["proposal_cov"] is None
     # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
     assert "n_draws" not in cfg
-    assert out.to_meta().sampler_config == cfg
+    assert out.to_spec().meta["sampler_config"] == cfg
 
 
 def test_mcmc_rejects_invalid_draw_counts(mcmc_estimator):
@@ -687,7 +689,10 @@ def test_params_to_theta_applies_forward_transform_for_mapping():
 
 
 def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block():
-    prior = LKJChol(eta=2.0, K=2, random_state=None)
+    prior = Prior(
+        dist=LKJChol(eta=2.0, K=2, random_state=None),
+        transform=CholeskyCorrTransform(K=2),
+    )
     est = Estimator(
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
@@ -703,9 +708,11 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block():
     assert params["meas_a"] == pytest.approx(1.0)
     assert params["meas_b"] == pytest.approx(1.0)
 
-    Lcorr = est_backend._corr_chol_from_unconstrained(theta, K=2)
-    logdet = CholeskyCorrTransform(K=2).log_det_abs_jacobian_inverse(theta)
-    assert est.logprior(theta, True) == pytest.approx(prior.logpdf(Lcorr) + logdet)
+    # The block owns its member's density; the packed-program parity for it is
+    # asserted against a real model in test_estimator_lkj_integration.
+    block = est._matrix_blocks["R_corr"]
+    assert block.member_names == ["meas_rho_ab"]
+    assert block.prior is prior
 
 
 def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
@@ -721,13 +728,9 @@ def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
         priors={"R_corr": prior},
     )
 
-    theta = np.array([0.25], dtype=np.float64)
-    Lcorr = CholeskyCorrTransform(K=2).inverse(theta)
-    expected = prior.dist.logpdf(Lcorr) + prior.transform.log_det_abs_jacobian_inverse(
-        theta
-    )
-
-    assert est.logprior(theta, True) == pytest.approx(expected)
+    block = est._matrix_blocks["R_corr"]
+    assert isinstance(block.prior.transform, CholeskyCorrTransform)
+    assert block.prior.transform.K == 2
 
 
 def test_matrix_key_in_estimated_params_expands_to_member_names():
@@ -735,7 +738,12 @@ def test_matrix_key_in_estimated_params_expands_to_member_names():
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
         estimated_params=["R_corr"],
-        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
+        priors={
+            "R_corr": Prior(
+                dist=LKJChol(eta=2.0, K=2, random_state=None),
+                transform=CholeskyCorrTransform(K=2),
+            )
+        },
     )
 
     assert est.param_names == ["meas_rho_ab"]
@@ -748,7 +756,10 @@ def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
         y=np.zeros((4, 2), dtype=np.float64),
         estimated_params=None,
         priors={
-            "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
+            "R_corr": Prior(
+                dist=LKJChol(eta=2.0, K=2, random_state=None),
+                transform=CholeskyCorrTransform(K=2),
+            ),
             "meas_a": make_prior("log_normal", {"mean": 0.0, "std": 1.0}, "log"),
         },
     )
@@ -757,19 +768,22 @@ def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
     assert list(est.priors.keys()) == ["R_corr", "meas_a"]
 
 
-def test_extra_priors_outside_estimated_params_are_ignored():
-    est = Estimator(
-        compiled=_stub_compiled_with_dense_r_block(),
-        y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R_corr"],
-        priors={
-            "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
-            "meas_a": make_prior("log_normal", {"mean": 0.0, "std": 1.0}, "log"),
-        },
-    )
-
-    assert est.param_names == ["meas_rho_ab"]
-    assert list(est.priors.keys()) == ["R_corr"]
+def test_priors_outside_estimated_params_are_rejected():
+    # A prior on something not being estimated is a mistake, not a no-op: it
+    # would otherwise be dropped and the run would silently ignore it.
+    with pytest.raises(ValueError, match="not in the estimated parameters"):
+        Estimator(
+            compiled=_stub_compiled_with_dense_r_block(),
+            y=np.zeros((4, 2), dtype=np.float64),
+            estimated_params=["R_corr"],
+            priors={
+                "R_corr": Prior(
+                    dist=LKJChol(eta=2.0, K=2, random_state=None),
+                    transform=CholeskyCorrTransform(K=2),
+                ),
+                "meas_a": make_prior("log_normal", {"mean": 0.0, "std": 1.0}, "log"),
+            },
+        )
 
 
 def test_matrix_prior_overlap_with_scalar_component_prior_raises():
@@ -779,7 +793,10 @@ def test_matrix_prior_overlap_with_scalar_component_prior_raises():
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params=["R_corr"],
             priors={
-                "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
+                "R_corr": Prior(
+                    dist=LKJChol(eta=2.0, K=2, random_state=None),
+                    transform=CholeskyCorrTransform(K=2),
+                ),
                 "meas_rho_ab": make_prior(
                     "normal", {"mean": 0.0, "std": 1.0}, "identity"
                 ),
@@ -799,7 +816,12 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
             compiled=_stub_compiled_with_sparse_q_block(),
             y=np.zeros((4, 1), dtype=np.float64),
             estimated_params=["Q_corr"],
-            priors={"Q_corr": LKJChol(eta=2.0, K=3, random_state=None)},
+            priors={
+                "Q_corr": Prior(
+                    dist=LKJChol(eta=2.0, K=3, random_state=None),
+                    transform=CholeskyCorrTransform(K=3),
+                )
+            },
         )
 
     msg = str(excinfo.value)
@@ -850,7 +872,7 @@ def test_loglik_reads_theta_through_the_parameter_transform(post82_estimator):
 
 
 def test_estimator_constructor_and_lkj_prior_validation_error_branches():
-    with pytest.raises(ValueError, match="Unknown estimated parameters"):
+    with pytest.raises(ValueError, match="are not estimable targets"):
         Estimator(
             compiled=_stub_compiled(),
             y=np.zeros((3, 1), dtype=np.float64),
@@ -862,10 +884,15 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params=["R_corr", "meas_rho_ab"],
-            priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
+            priors={
+                "R_corr": Prior(
+                    dist=LKJChol(eta=2.0, K=2, random_state=None),
+                    transform=CholeskyCorrTransform(K=2),
+                )
+            },
         )
 
-    with pytest.raises(TypeError, match="CholeskyCorrTransform"):
+    with pytest.raises(ValueError, match="CholeskyCorrTransform"):
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
@@ -881,7 +908,7 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             },
         )
 
-    with pytest.raises(TypeError, match="matching K values"):
+    with pytest.raises(ValueError, match="matching K between"):
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
@@ -894,7 +921,7 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             },
         )
 
-    with pytest.raises(TypeError, match="must be an LKJChol"):
+    with pytest.raises(ValueError, match="requires a LKJChol distribution"):
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
@@ -1024,11 +1051,6 @@ def test_theta_conversion_logprior_and_safe_wrapper_error_branches():
     with pytest.raises(ValueError, match="does not match estimated parameter count"):
         est.theta_to_params(np.array([1.0, 2.0], dtype=np.float64))
 
-    with pytest.raises(ValueError, match="theta must be a 1D array"):
-        est.logprior(np.array([[0.0]], dtype=np.float64))
-    with pytest.raises(ValueError, match="does not match estimated parameter count"):
-        est.logprior(np.array([0.0, 1.0], dtype=np.float64))
-
 
 def test_mcmc_validation_branches():
     est = Estimator(
@@ -1116,7 +1138,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     est_base.priors = {"R_corr": object()}
     monkeypatch.setattr(
         est_base,
-        "_coerce_lkj_prior",
+        "_is_lkj_prior",
         lambda name, prior_obj: SimpleNamespace(
             dist=SimpleNamespace(_K=1), logpdf=lambda z: float64(0.0)
         ),
@@ -1133,7 +1155,12 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         theta_slice=slice(0, 0),
         prior=None,
     )
-    est_base.priors = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
+    est_base.priors = {
+        "R_corr": Prior(
+            dist=LKJChol(eta=2.0, K=3, random_state=None),
+            transform=CholeskyCorrTransform(K=3),
+        )
+    }
     monkeypatch.setattr(est_base, "_resolve_R", lambda params=None: res_short)
     with pytest.raises(ValueError, match="dense correlation block"):
         est_base._build_matrix_prior_blocks()
@@ -1144,7 +1171,12 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         std_param_map={"A": "sig_a", "B": "sig_b"},
         corr_param_map={frozenset(("B", "A")): "rho_ba"},
     )
-    est_base.priors = {"R_corr": LKJChol(eta=2.0, K=2, random_state=None)}
+    est_base.priors = {
+        "R_corr": Prior(
+            dist=LKJChol(eta=2.0, K=2, random_state=None),
+            transform=CholeskyCorrTransform(K=2),
+        )
+    }
     monkeypatch.setattr(est_base, "_resolve_R", lambda params=None: res_missing)
     with pytest.raises(ValueError, match="Missing from estimated_params"):
         est_base._build_matrix_prior_blocks()
@@ -1171,8 +1203,14 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         prior=None,
     )
     est.priors = {
-        "R_corr": LKJChol(eta=2.0, K=2, random_state=None),
-        "Q_corr": LKJChol(eta=2.0, K=2, random_state=None),
+        "R_corr": Prior(
+            dist=LKJChol(eta=2.0, K=2, random_state=None),
+            transform=CholeskyCorrTransform(K=2),
+        ),
+        "Q_corr": Prior(
+            dist=LKJChol(eta=2.0, K=2, random_state=None),
+            transform=CholeskyCorrTransform(K=2),
+        ),
     }
     est._requested_reserved_keys = ("R_corr", "Q_corr")
     monkeypatch.setattr(est, "_resolve_R", lambda params=None: r_resolution)
@@ -1185,7 +1223,12 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         y=np.zeros((4, 2), dtype=np.float64),
         estimated_params=["R_corr"],
     )
-    est_k.priors = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
+    est_k.priors = {
+        "R_corr": Prior(
+            dist=LKJChol(eta=2.0, K=3, random_state=None),
+            transform=CholeskyCorrTransform(K=3),
+        )
+    }
     monkeypatch.setattr(est_k, "_resolve_R", lambda params=None: r_resolution)
     with pytest.raises(ValueError, match="has K=3"):
         est_k._build_matrix_prior_blocks()
@@ -1199,7 +1242,12 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
         estimated_params=["R_corr"],
-        priors={"R_corr": LKJChol(eta=2.0, K=2, random_state=None)},
+        priors={
+            "R_corr": Prior(
+                dist=LKJChol(eta=2.0, K=2, random_state=None),
+                transform=CholeskyCorrTransform(K=2),
+            )
+        },
     )
     good_block = good_est._matrix_blocks["R_corr"]
     bad_corr = np.array([[1.0, 1.2], [1.2, 1.0]], dtype=np.float64)
@@ -1242,21 +1290,22 @@ def test_mle_full_dense_corr_set_promotes_to_cpc_block():
     assert isinstance(est._param_transforms["meas_rho_ab"], Identity)
 
 
-def test_spd_std_member_rejects_conflicting_prior_transform():
+def test_spd_std_member_warns_on_conflicting_prior_transform():
     # An Identity-transform prior on a variance would map onto R, not (0, inf),
-    # breaking the shared theta<->param map; rejected once, at construction.
+    # so the role default is substituted and the substitution is announced.
     prior = make_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
     )
-    with pytest.raises(ValueError, match="requires a constraint to"):
-        Estimator(
+    with pytest.warns(UserWarning, match="requires a constraint to"):
+        est = Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params=["meas_a"],
             priors={"meas_a": prior},
         )
+    assert isinstance(est._param_transforms["meas_a"], LogTransform)
 
 
 @pytest.mark.parametrize("include_logjac", [False, True])

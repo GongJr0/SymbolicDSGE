@@ -105,19 +105,21 @@ def test_facade_flattens_optimization_run() -> None:
     )
     _, files = builder.build()
 
+    # the spec carries construction state only
     spec = json.loads(files["estimation/spec.json"])
-    assert spec["method"] == "map"
-    # method kwargs folded from the result's optimizer_config (bounds excluded)
-    assert spec["method_kwargs"] == {"method": "L-BFGS-B", "options": {"maxiter": 20}}
-    param = spec["parameters"][0]
-    assert param["name"] == "a"
-    assert param["initial"] == 0.3  # from calibration
-    assert (param["lower"], param["upper"]) == (-1.0, 1.0)  # folded from bounds
-    assert param["prior"]["distribution"] == "normal"  # reversed from live Prior
+    assert spec["estimated_params"] == ["a"]
+    assert spec["observables"] == ["y"]
+    assert spec["priors"]["a"]["distribution"] == "normal"  # reversed from live Prior
+    assert "method" not in spec and "method_kwargs" not in spec
 
-    # result + observed members written
+    # the run's own arguments ride the result
     result_doc = json.loads(files["estimation/result.json"])
     assert result_doc["type"] == "map"
+    config = result_doc["data"]["optimizer_config"]
+    assert config["method"] == "L-BFGS-B"
+    assert config["bounds"] == [[-1.0, 1.0]]
+    assert config["options"]["maxiter"] == 20
+
     assert "estimation/observed.parquet" in files
 
 
@@ -139,12 +141,14 @@ def test_facade_flattens_mcmc_run_with_posterior() -> None:
     _, files = builder.build()
 
     spec = json.loads(files["estimation/spec.json"])
-    assert spec["method"] == "mcmc"
-    # n_draws/burn_in/thin + sampler tuning all surface as method kwargs
-    assert spec["method_kwargs"]["n_draws"] == 10
-    assert spec["method_kwargs"]["burn_in"] == 2
-    assert spec["method_kwargs"]["proposal_scale"] == 0.2
-    assert spec["method_kwargs"]["random_state"] == 7
+    assert spec["estimated_params"] == ["a"]
+
+    # draw counts and sampler tuning ride the result's meta, not the spec
+    meta = json.loads(files["estimation/result.json"])["data"]
+    assert meta["n_draws"] == 10
+    assert meta["burn_in"] == 2
+    assert meta["sampler_config"]["proposal_scale"] == 0.2
+    assert meta["sampler_config"]["random_state"] == 7
 
     # posterior auto-extracted from the live result
     assert "estimation/posterior.parquet" in files

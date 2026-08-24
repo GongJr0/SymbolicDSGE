@@ -223,7 +223,7 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
         EstimationParameterSpec(name="sigma", estimate=False, initial=1.0),
     ]
 
-    names, theta0, priors, bounds = build_estimation_inputs(parameters, method="map")
+    names, theta0, priors, bounds = build_estimation_inputs(parameters, routine="map")
 
     assert names == ["beta"]
     assert theta0 == {"beta": 0.99}
@@ -234,7 +234,7 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
     with np.testing.assert_raises_regex(ValueError, "Select at least one parameter"):
         build_estimation_inputs(
             [EstimationParameterSpec(name="beta", initial=0.99)],
-            method="mle",
+            routine="mle",
         )
 
 

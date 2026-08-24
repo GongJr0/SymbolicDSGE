@@ -31,9 +31,9 @@ def test_build_from_fixture_end_to_end():
     # estimation: MCMC result rebuilt from metadata + posterior traces
     assert isinstance(loaded.estimation, LoadedEstimation)
     assert isinstance(loaded.estimation.result, MCMCResult)
-    assert loaded.estimation.observed is not None
-    assert loaded.estimation.observed.ndim == 2
-    assert loaded.estimation.posterior is not None
+    y = np.asarray(loaded.estimation.spec.y)
+    assert y.ndim == 2
+    assert loaded.estimation.result.samples.ndim == 2
     # monte carlo: runnable pipeline + document + traces
     assert isinstance(loaded.mc, LoadedMC)
     assert loaded.mc.pipeline is not None
@@ -63,7 +63,7 @@ _MCMC_META = {
 
 
 def test_rebuild_optimization_result():
-    res = MAPResult.from_dict(_OPT_META)
+    res = MAPResult.from_spec(_OPT_META)
     assert isinstance(res, (MAPResult, OptimizationResult))
     assert res.theta["a"] == pytest.approx(1.0)
     assert np.allclose(res.x, [1.0, -2.0])
@@ -94,28 +94,55 @@ def test_load_estimation_optimization_result_dispatch():
     spec_member = SimpleNamespace(path="spec.json")
     result_member = SimpleNamespace(path="result.json")
 
+    data_member = SimpleNamespace(path="observed.csv", format="csv", columns=None)
+
     def members_by_kind(kind):
         if kind == "estimation_spec":
             return [spec_member]
         if kind == "estimation_result":
             return [result_member]
+        if kind == "estimation_data":
+            return [data_member]
         return []
 
     manifest = SimpleNamespace(members_by_kind=members_by_kind)
-    spec_json = (
-        '{"method": "mle", '
-        '"parameters": [{"name": "a", "initial": 0.0, "estimate": true}]}'
+    spec_json = json.dumps(
+        {
+            "observables": None,
+            "filter_mode": "linear",
+            "P0": None,
+            "R": None,
+            "estimated_params": ["a"],
+            "priors": None,
+            "ss_seed": None,
+            "x0": None,
+            "jitter": 0.0,
+            "symmetrize": True,
+            "joseph_cov": True,
+        }
     )
     result_json = json.dumps({"type": "map", "data": _OPT_META})
 
     archive = SimpleNamespace(
-        read_text=lambda path: spec_json if path == "spec.json" else result_json
+        read_text=lambda path: spec_json if path == "spec.json" else result_json,
+        read=lambda path: b"y.0\n1.0\n2.0\n",
     )
+    reference = SimpleNamespace(compiled=object())
 
-    loaded = L._load_estimation(archive, manifest)
+    loaded = L._load_estimation(archive, manifest, reference)
     assert isinstance(loaded.result, OptimizationResult)
-    assert loaded.observed is None
-    assert loaded.posterior is None
+    assert loaded.spec.y == [[1.0], [2.0]]
+
+    # An estimation section is not loadable without a model to bind to, nor
+    # without the data the estimator conditions on.
+    with pytest.raises(ValueError, match="no reference model"):
+        L._load_estimation(archive, manifest, None)
+
+    bare = SimpleNamespace(
+        members_by_kind=lambda kind: [spec_member] if kind == "estimation_spec" else []
+    )
+    with pytest.raises(ValueError, match="estimation_data"):
+        L._load_estimation(archive, bare, reference)
 
 
 def test_load_mc_postproc_nan_fallback(monkeypatch):

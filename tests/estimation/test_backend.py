@@ -146,6 +146,7 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
         compiled=compiled,
         y=post82_bundle["y"],
         observables=["Infl", "Rate"],
+        estimated_params=["psi_pi", "rho_r"],
         ss_seed=post82_bundle["steady"],
     )
 
