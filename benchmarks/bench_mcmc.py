@@ -223,7 +223,6 @@ def _make_estimator(targets: Targets, compiled, solved, y: np.ndarray, observabl
         )
     }
     return Estimator(
-        solver=solved,
         compiled=compiled,
         y=y,
         observables=list(observables),
