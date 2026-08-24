@@ -79,12 +79,6 @@ static inline void sdsge_proposal_factor(const f64 *SDSGE_RESTRICT C, i64 d,
   memcpy(L, Ltmp, d * d * sizeof(f64));
 }
 
-/* A spec whose correlation is a live CPC block, the only shape the keep-time
- * inversion has work to do on and the only one that needs block scratch. */
-static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
-  return !sp->is_constant && sp->corr_from_block;
-}
-
 /* One draw, out of the sampler's unconstrained theta and into the parameters
  * themselves: every estimated scalar through its inverse transform, every CPC
  * block through the correlation its z encodes. Returns the log-jacobian the

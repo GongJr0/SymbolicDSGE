@@ -50,17 +50,17 @@ Estimator(
 
 ```python
 Estimator.loglik(theta: np.ndarray) -> float
-Estimator.logprior(theta: np.ndarray, include_logjac: bool = False) -> float
-Estimator.logpost(theta: np.ndarray, include_logjac: bool = False) -> float
+Estimator.logprior(theta: np.ndarray, jacobian: bool = False) -> float
+Estimator.logpost(theta: np.ndarray, jacobian: bool = False) -> float
 ```
 
 ???+ note "Optimization Space"
-    `theta` is the unconstrained vector the optimizer and the sampler search over. The evaluators above take it as given: the mapping to model parameters happens inside the native objective, once per evaluation. Convert explicitly with `theta_to_params` and `params_to_theta`.
+    `theta` is the vector space the optimizer and the sampler search in: steps, proposals and the covariance are all taken there, unconstrained wherever the parameter itself is constrained and identical to it elsewhere. Results come back mapped, so `OptimizationResult.theta` and `MCMCResult.samples` are named parameters and nothing asks a caller to convert them. The evaluators above are the one place a raw theta is the argument; `theta_to_params` and `params_to_theta` convert explicitly.
 
     The mapping is assigned by role, not by prior. A shock or measurement standard deviation is log-transformed and a correlation block is reparameterized whether or not either carries a prior, which is what keeps an MLE search, where there are no priors at all, inside the model's valid region.
 
 ???+ note "Log-Jacobian"
-    `include_logjac` controls whether the prior's transformation is treated as a coordinate change (`False`) or as a change of random variable (`True`).
+    `jacobian` controls whether the prior's transformation is treated as a coordinate change (`False`) or as a change of random variable (`True`).
     See the [map()](#map) note on the jacobian parameter for more details.
 
 ## MLE

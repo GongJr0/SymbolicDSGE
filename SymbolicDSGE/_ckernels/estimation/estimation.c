@@ -11,6 +11,8 @@
 /* Direct includes for the primitives used here (native-include hygiene). */
 #include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
                                         sdsge_matmul_abt */
+#include "prior_program.h" /* sdsge_transform_inverse_and_logjac,
+                              sdsge_corr_entries_from_unconstrained */
 
 /* sdsge_classify outcomes. */
 #define SDSGE_SOLVE_OK 0
@@ -617,6 +619,117 @@ static void sdsge_fill_cov(void *ctx, i64 d, const f64 *SDSGE_RESTRICT theta,
   free(scratch);
 }
 
+/* Standard errors in the caller's parameter space, from the theta-space
+ * covariance. The jacobian of theta -> parameters is block diagonal: a scalar
+ * depends on its own theta entry alone and a CPC block on its own run, so no
+ * d*d jacobian is ever formed and V's cross terms never reach a diagonal
+ * entry. A scalar's row is |dx/dz|, which the transform's own log-jacobian
+ * already carries, exact and free; only a block is differenced, over the
+ * entries kernel. Filled with NaN first, and a covariance that failed is NaN
+ * already, so both it and a negative variance report themselves in place with
+ * no status to consult. */
+static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
+                          const f64 *SDSGE_RESTRICT theta,
+                          const f64 *SDSGE_RESTRICT vcov,
+                          f64 *SDSGE_RESTRICT out_se) {
+  for (i64 i = 0; i < d; ++i) {
+    out_se[i] = NAN;
+  }
+
+  f64 x, logjac;
+  for (i64 s = 0; s < b->pmap.n_scalars; ++s) {
+    const sdsge_scalar_scatter *sc = &b->pmap.scalars[s];
+    const i64 idx = sc->theta_idx;
+    sdsge_transform_inverse_and_logjac(sc->transform_code, sc->transform_params,
+                                       theta[idx], &x, &logjac);
+    const f64 v = vcov[idx * d + idx];
+    if (v >= 0.0) {
+      out_se[idx] = exp(logjac) * sqrt(v);
+    }
+  }
+
+  const sdsge_cov_spec *specs[2] = {&b->q_spec, &b->r_spec};
+  i64 lmax = 0;
+  i64 kmax = 0;
+  for (int sp = 0; sp < 2; ++sp) {
+    if (!sdsge_spec_has_block(specs[sp])) {
+      continue;
+    }
+    lmax = max_i64(lmax, specs[sp]->block_theta_len);
+    kmax = max_i64(kmax, specs[sp]->K);
+  }
+  if (lmax == 0) {
+    return;
+  }
+
+  const size_t need =
+      (size_t)(2 * lmax * lmax + 3 * lmax + kmax * kmax) * sizeof(f64);
+  f64 *scratch = (f64 *)malloc(need);
+  if (scratch == NULL) {
+    return;
+  }
+  f64 *jac = scratch;                  /* L*L: d(corr entries) / dz */
+  f64 *jv = jac + lmax * lmax;         /* L*L: jac * V_block */
+  f64 *probe = jv + lmax * lmax;       /* L: the perturbed z */
+  f64 *plus = probe + lmax;            /* L */
+  f64 *minus = plus + lmax;            /* L */
+  f64 *chol = minus + lmax;            /* K*K: the entries kernel's factor */
+
+  /* Central difference of a closed-form algebraic map, so the step is the
+   * first-derivative optimum and not opt->cov_fd_step_scale, which is tuned
+   * for a second derivative of the filter. */
+  const f64 step = cbrt(DBL_EPSILON);
+
+  for (int sp = 0; sp < 2; ++sp) {
+    const sdsge_cov_spec *spec = specs[sp];
+    if (!sdsge_spec_has_block(spec)) {
+      continue;
+    }
+    const i64 off = spec->block_theta_off;
+    const i64 len = spec->block_theta_len;
+    const f64 *z = theta + off;
+    f64 unused_logjac;
+
+    for (i64 j = 0; j < len; ++j) {
+      const f64 h = step * max_f64(fabs(z[j]), 1.0);
+      for (i64 c = 0; c < len; ++c) {
+        probe[c] = z[c];
+      }
+      probe[j] = z[j] + h;
+      sdsge_corr_entries_from_unconstrained(probe, spec->K, chol, plus,
+                                            &unused_logjac);
+      probe[j] = z[j] - h;
+      sdsge_corr_entries_from_unconstrained(probe, spec->K, chol, minus,
+                                            &unused_logjac);
+      const f64 scale = 0.5 / h;
+      for (i64 i = 0; i < len; ++i) {
+        jac[i * len + j] = (plus[i] - minus[i]) * scale;
+      }
+    }
+
+    for (i64 i = 0; i < len; ++i) {
+      for (i64 j = 0; j < len; ++j) {
+        f64 acc = 0.0;
+        for (i64 k = 0; k < len; ++k) {
+          acc += jac[i * len + k] * vcov[(off + k) * d + off + j];
+        }
+        jv[i * len + j] = acc;
+      }
+    }
+    for (i64 i = 0; i < len; ++i) {
+      f64 var = 0.0;
+      for (i64 j = 0; j < len; ++j) {
+        var += jv[i * len + j] * jac[i * len + j];
+      }
+      if (var >= 0.0) {
+        out_se[off + i] = sqrt(var);
+      }
+    }
+  }
+
+  free(scratch);
+}
+
 void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
                           const sdsge_estimation_options *opt,
                           sdsge_estimation_result *out) {
@@ -643,6 +756,10 @@ void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
   out->cov_status = SDSGE_ESTIMATION_OK;
   if (opt->compute_cov && out->vcov != NULL) {
     sdsge_fill_cov(ctx, n_theta, theta, opt, out);
+    if (out->se != NULL) {
+      sdsge_fill_se((const sdsge_obj_common *)ctx, n_theta, theta, out->vcov,
+                    out->se);
+    }
   }
 
   /* Last, not before the covariance: its probes scatter perturbed params, and

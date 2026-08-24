@@ -117,7 +117,7 @@ def logprior_program(theta not None,
     return out
 
 
-def logprior(object tables, theta not None, bint include_logjac=False):
+def logprior(object tables, theta not None, bint jacobian=False):
     """The packed log-prior at ``theta``, read off an ``sdsge_prior_tables``
     mirror rather than eleven loose arrays. ``tables.has_prior`` is not consulted
     here: a disabled table carries zero-length columns, so the kernel sums
@@ -134,7 +134,7 @@ def logprior(object tables, theta not None, bint include_logjac=False):
         tables.matrix_lengths,
         tables.matrix_etas,
         tables.matrix_log_constants,
-        include_logjac,
+        jacobian,
     ))
 
 

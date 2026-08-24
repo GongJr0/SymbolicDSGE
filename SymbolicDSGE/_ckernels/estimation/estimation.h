@@ -38,8 +38,8 @@ typedef struct {
   const f64 *hi;
   const i64 *nbd;
   sdsge_optim_options optim;
-  int compute_cov;          /* fill the result's vcov / se */
-  f64 cov_fd_step_scale;    /* as sdsge_estimation_cov_factor's fd_step_scale */
+  int compute_cov;       /* fill the result's vcov / se */
+  f64 cov_fd_step_scale; /* as sdsge_estimation_cov_factor's fd_step_scale */
   f64 cov_fd_absolute_floor; /* as its fd_absolute_floor */
 } sdsge_estimation_options;
 
@@ -57,6 +57,12 @@ typedef struct {
   const i64 *pair_slot; /* n_pairs */
   i64 n_pairs;
 } sdsge_cov_spec;
+
+/* A spec whose correlation is a live CPC block: the only shape that owns a run
+ * of theta, and so the only one a theta -> parameters map has work to do on. */
+static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
+  return !sp->is_constant && sp->corr_from_block;
+}
 
 /* One estimated scalar's theta -> params scatter. */
 typedef struct {
@@ -226,6 +232,7 @@ i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
 typedef struct {
   sdsge_optim_result base;
   f64 *vcov;
+  f64 *se;
   i64 cov_status;
 } sdsge_estimation_result;
 
