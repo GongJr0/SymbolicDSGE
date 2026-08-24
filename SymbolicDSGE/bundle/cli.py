@@ -41,11 +41,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.model_parser import ModelParser
-from ..estimation.results import MLEResult, MAPResult
-from ..estimation.spec import (
-    EstimationSpec,
-    MCMCResultMeta,
-)
+from ..estimation.spec import EstimatorParams, EstimatorSpec
 from ..monte_carlo.spec import PipelineSpec
 from .builder import BundleBuilder
 from .container import BundleArchive
@@ -250,43 +246,41 @@ def _compile_estimation(
     spec_path = est_dir / "spec.json"
     if not spec_path.exists():
         raise CompileError(f"{est_dir}/ is present but spec.json is missing.")
-    spec = EstimationSpec.from_json(spec_path.read_text(encoding="utf-8"))
-
-    result: MLEResult | MAPResult | MCMCResultMeta | None = None
-    result_path = est_dir / "result.json"
-    if result_path.exists():
-        payload = json.loads(result_path.read_text(encoding="utf-8"))
-        data = payload["data"]
-        if (typ := payload.get("type")) == "mcmc":
-            result = MCMCResultMeta.from_dict(data)
-        elif typ == "mle":
-            result = MLEResult.from_dict(data)
-        else:
-            result = MAPResult.from_dict(data)
+    params = cast(EstimatorParams, json.loads(spec_path.read_text(encoding="utf-8")))
 
     expected_observables = model_observables.get("reference") or model_observables.get(
         "dgp"
     )
-
-    observed: NDArray[np.float64] | None = None
-    observable_names: list[str] | None = None
     obs_path = _pick_one_of(est_dir, "observed")
-    if obs_path is not None:
-        observed, observable_names = _load_observed(obs_path, expected_observables)
-
-    posterior: dict[str, NDArray[Any]] | None = None
-    post_path = _pick_one_of(est_dir, "posterior")
-    if post_path is not None:
-        posterior = _load_posterior(post_path)
-
+    if obs_path is None:
+        raise CompileError(
+            f"{est_dir}/ is present but observed.csv/observed.parquet is missing."
+        )
+    observed, _ = _load_observed(obs_path, expected_observables)
     builder.add_estimation(
-        spec,
-        result=result,
-        observed=observed,
-        observable_names=observable_names,
-        posterior=posterior,
+        EstimatorSpec(y=observed.tolist(), params=params),
         as_parquet=not csv_only,
     )
+
+    # Pre-split result + posterior authoring: embed verbatim via add_member
+    # (the in-code add_estimation takes a live result and splits it).
+    result_path = est_dir / "result.json"
+    if result_path.exists():
+        builder.add_member(
+            Member(path="estimation/result.json", kind="estimation_result"),
+            result_path.read_bytes(),
+        )
+
+    post_path = _pick_one_of(est_dir, "posterior")
+    if post_path is not None:
+        target = (
+            "estimation/posterior.csv"
+            if post_path.suffix == ".csv"
+            else "estimation/posterior.parquet"
+        )
+        builder.add_member(
+            Member(path=target, kind="estimation_trace"), post_path.read_bytes()
+        )
 
 
 def _compile_mc(builder: BundleBuilder, mc_dir: Path, *, csv_only: bool) -> None:
@@ -375,10 +369,6 @@ def _load_observed(
         ]
     )
     return matrix, inferred
-
-
-def _load_posterior(path: Path) -> dict[str, NDArray[Any]]:
-    return collapse_columns(_read_columns(path))
 
 
 def _read_columns(path: Path) -> dict[str, list[Any]]:

@@ -134,7 +134,7 @@ Estimator.mcmc(
     burn_in: int = 1000, # (2)!
     thin: int = 1, # (3)!
     theta0: np.ndarray | None = None, # (4)!
-    random_state: int | np.random.Generator | None = None,
+    random_state: int | None = None,
     adapt: bool = True, 
     adapt_start: int = 100,
     proposal_scale: float = 0.1,

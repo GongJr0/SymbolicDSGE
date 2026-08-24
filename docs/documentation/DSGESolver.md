@@ -91,7 +91,7 @@ DSGESolver.estimate(
     *,
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
-    method: Literal["mle", "map", "mcmc"] = "mle",
+    routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: np.ndarray | Mapping[str, float] | None = None, # (1)!
     observables: list[str] | None = None,
     filter_mode: str = "linear", # (3)!
@@ -115,13 +115,21 @@ DSGESolver.estimate(
     `#!python filter_mode` is an explicit choice and is no longer inferred. Use `#!python "linear"` when all selected measurement equations are affine, `#!python "extended"` for nonlinear measurements, and `#!python "unscented"` to run the UKF. The `#!python "unscented"` mode solves the model to second order internally and is the only mode that consumes the perturbation policy tensors.
 
 ???+ note "Point Estimation Result"
-    `method="mle"` and `method="map"` return `SymbolicDSGE.OptimizationResult`. They run entirely in the native backend, whose optimizer set is `#!python "L-BFGS-B"` (default) and `#!python "Nelder-Mead"`; passing any other optimizer raises. See [`Estimator`](./Estimator.md#mle) for the per-optimizer keyword arguments.
+    `routine="mle"` and `routine="map"` return `SymbolicDSGE.OptimizationResult`. They run entirely in the native backend, whose optimizer set is `#!python "L-BFGS-B"` (default) and `#!python "Nelder-Mead"`; passing any other optimizer raises. See [`Estimator`](./Estimator.md#mle) for the per-optimizer keyword arguments.
 
-__Method kwargs:__
+???+ note "Method Kwarg Destinations
+    method kwargs are forwarded to the underlying optimizer routine.
+    The destination depends on the `#!python routine`:
 
-- `#!python method="mle"`: forwarded to `Estimator.mle(...)`
-- `#!python method="map"`: forwarded to `Estimator.map(...)`
-- `#!python method="mcmc"`: forwarded to `Estimator.mcmc(...)`
+   - `#!python routine="mle"`: forwarded to `Estimator.mle(...)`
+   - `#!python routine="map"`: forwarded to `Estimator.map(...)`
+   - `#!python routine="mcmc"`: forwarded to `Estimator.mcmc(...)`
+
+???+ note "`routine` vs `method`"
+    `#!python routine` picks which estimation routine runs; `#!python method` is
+    the optimizer name `Estimator.mle`/`Estimator.map` take, and reaches them
+    through `#!python **method_kwargs`. The two were one parameter before, which
+    made the optimizer choice unreachable from this entry point.
 
 &nbsp;
 
@@ -130,7 +138,7 @@ DSGESolver.estimate_and_solve(
     *,
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
-    method: Literal["mle", "map", "mcmc"] = "mle",
+    routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: np.ndarray | Mapping[str, float] | None = None,
     posterior_point: str = "mean",
     observables: list[str] | None = None,
@@ -149,7 +157,7 @@ DSGESolver.estimate_and_solve(
 
 Runs estimation and then solves the model at the estimated parameter point.
 
-For `#!python method="mcmc"`, `#!python posterior_point` selects the parameter point used for solving:
+For `#!python routine="mcmc"`, `#!python posterior_point` selects the parameter point used for solving:
 
 - `#!python "mean"`: posterior sample mean
 - `#!python "last"`: last retained sample

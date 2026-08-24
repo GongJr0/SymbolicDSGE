@@ -26,7 +26,9 @@ TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
 }
 
 
-def get_transform(method: str) -> type[Transform]:
+def get_transform(method: str | None) -> type[Transform]:
+    if method is None:
+        return Identity
     if method not in TRANSFORM_METHOD_DISPATCH:
         raise ValueError(
             f"Unsupported transform method: {method}\n please choose from: {list(TRANSFORM_METHOD_DISPATCH.values())}"

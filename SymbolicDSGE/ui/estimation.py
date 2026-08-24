@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -9,15 +9,11 @@ from ..bayesian.distributions.param_builder import DIST_PARAMS_DISPATCH
 from ..bayesian.transforms.transform_dispatch import (
     TRANSFORM_METHOD_DISPATCH,
 )
+from ..bayesian.priors import Prior, make_prior
+from ..core.compiled_model import CompiledModel
+from ..estimation.backend import extract_base_params
 from ..estimation.results import MLEResult, MAPResult, MCMCResult, OptimizationResult
-from ..estimation.spec import (
-    EstimationParameterSpec as CoreEstimationParameterSpec,
-)
-
-from ..estimation.spec import (
-    EstimationSpec,
-    MCMCResultMeta,
-)
+from ..estimation.spec import EstimatorSpec
 
 from .schemas import EstimationParameterSpec
 
@@ -60,61 +56,78 @@ def estimation_catalog() -> dict[str, Any]:
 def build_estimation_inputs(
     parameters: list[EstimationParameterSpec],
     *,
-    method: str,
+    routine: str,
 ) -> tuple[
     list[str],
     dict[str, float],
-    dict[str, Any] | None,
+    dict[str, Prior] | None,
     list[tuple[float | None, float | None]] | None,
 ]:
-    """Lower UI estimation parameters to Estimator inputs.
+    """Lower the GUI parameter table to ``Estimator`` arguments.
 
-    Thin adapter: converts the pydantic request models to the core
-    :class:`~SymbolicDSGE.estimation.spec.EstimationSpec` and delegates the
-    compilation to :meth:`EstimationSpec.to_estimator_inputs`. The empty-selection
-    guard keeps the GUI-facing message.
+    Selects the rows the user ticked and splits them into the four arguments a
+    run takes: the estimated names, their starting values, the built priors
+    (MAP/MCMC only, where every selected row must carry one), and the bounds.
+    ``bounds`` stays ``None`` unless some row sets one, matching what
+    :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate` expects. The GUI never
+    offers the reserved matrix keys, so every row here is a scalar parameter.
     """
-    if not any(parameter.estimate for parameter in parameters):
+    active = [parameter for parameter in parameters if parameter.estimate]
+    if not active:
         raise ValueError("Select at least one parameter to estimate.")
 
-    spec = EstimationSpec(
-        method=method,
-        parameters=[
-            CoreEstimationParameterSpec.from_dict(parameter.model_dump())
-            for parameter in parameters
-        ],
+    names = [parameter.name for parameter in active]
+    if len(set(names)) != len(names):
+        raise ValueError("Estimated parameter names must be unique.")
+
+    theta0 = {parameter.name: float(parameter.initial) for parameter in active}
+
+    bounds = [(parameter.lower, parameter.upper) for parameter in active]
+    bound_arg = (
+        bounds
+        if any(low is not None or high is not None for low, high in bounds)
+        else None
     )
-    inputs = spec.to_estimator_inputs()
-    # The UI path never carries matrix priors, so theta0 is always derived.
-    assert inputs.theta0 is not None
-    return inputs.estimated_params, inputs.theta0, inputs.priors, inputs.bounds
+
+    priors: dict[str, Prior] | None = None
+    if routine in {"map", "mcmc"}:
+        priors = {}
+        for parameter in active:
+            if parameter.prior is None:
+                raise ValueError(
+                    f"Parameter '{parameter.name}' requires a prior for "
+                    f"{routine.upper()}."
+                )
+            priors[parameter.name] = make_prior(
+                distribution=parameter.prior.distribution,
+                parameters=dict(parameter.prior.parameters),
+                transform=parameter.prior.transform,
+                transform_kwargs=dict(parameter.prior.transform_kwargs),
+            )
+
+    return names, theta0, priors, bound_arg
 
 
 def emit_estimation_wire(
-    obj: MLEResult | MAPResult | MCMCResult | MCMCResultMeta,
+    obj: MLEResult | MAPResult | MCMCResult,
     *,
     traces: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Render an estimation result (live or loaded-bundle metadata) to the wire dict.
+    """Render an estimation result to the wire dict.
 
-    Single source of truth for the estimation tab's wire shape. Accepts:
+    Single source of truth for the estimation tab's wire shape, shared by the
+    in-process run and a result rebuilt from a ``.sdsge`` bundle, which arrives
+    as the same live class. ``traces`` remains accepted so an MCMC result whose
+    bulk columns were read separately can supply ``samples`` and the
+    ``logpost_trace``/``logpost`` and ``logjac_trace``/``logjac`` arrays.
 
-    - a live :class:`OptimizationResult` / :class:`MCMCResult` (in-process path);
-    - or an :class:`OptimizationResultMeta` / :class:`MCMCResultMeta` from a
-      loaded ``.sdsge`` bundle (repaint path). For MCMC, the bundle path must
-      supply ``traces`` carrying the ``samples`` (2-D) and the ``logpost_trace``
-      / ``logpost`` and ``logjac_trace`` / ``logjac`` (1-D) arrays decoded from
-      the Parquet member.
-
-    Dispatches by direct ``isinstance`` so mypy can narrow within each branch;
-    the meta dataclasses and live result classes overlap perfectly on the
-    scalar slice each helper reads.
+    Dispatches by direct ``isinstance`` so mypy can narrow within each branch.
     """
     if isinstance(obj, MLEResult):
         return _emit_mle_wire(obj)
     if isinstance(obj, MAPResult):
         return _emit_map_wire(obj)
-    if isinstance(obj, (MCMCResult, MCMCResultMeta)):
+    if isinstance(obj, MCMCResult):
         return _emit_mcmc_wire(obj, traces)
     raise TypeError(f"Unsupported estimation result type: {type(obj).__name__}")
 
@@ -143,7 +156,7 @@ def _emit_map_wire(obj: MAPResult) -> dict[str, Any]:
 
 
 def _emit_mcmc_wire(
-    obj: MCMCResult | MCMCResultMeta,
+    obj: MCMCResult,
     traces: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     samples_src = getattr(obj, "samples", None)
@@ -205,3 +218,80 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {str(key): _json_value(item) for key, item in value.items()}
     return value
+
+
+def _method_from_result(
+    result: MLEResult | MAPResult | MCMCResult | None,
+) -> str | None:
+    """The estimation method (``mle``/``map``/``mcmc``) implied by a result."""
+    if result is None:
+        return None
+    if isinstance(result, MCMCResult):
+        return "mcmc"
+    if isinstance(result, MLEResult):
+        return "mle"
+    if isinstance(result, MAPResult):
+        return "map"
+    raise TypeError(f"Unsupported estimation result type: {type(result).__name__}")
+
+
+def _bounds_from_result(
+    result: MLEResult | MAPResult | MCMCResult | None,
+    param_names: Sequence[str],
+) -> dict[str, tuple[float | None, float | None]]:
+    """Per-parameter bounds recorded on an optimization result (empty otherwise)."""
+    if isinstance(result, OptimizationResult):
+        raw = result.optimizer_config.get("bounds")
+        if raw:
+            return {name: (pair[0], pair[1]) for name, pair in zip(param_names, raw)}
+    return {}
+
+
+def build_estimation_prefill(
+    spec: EstimatorSpec,
+    result: MLEResult | MAPResult | MCMCResult | None,
+    compiled: CompiledModel,
+) -> dict[str, Any]:
+    """Seed the estimation form from a bundle's stored run.
+
+    The GUI's parameter table spans every calibration parameter, ticked or not,
+    which no single stored artifact carries: the spec names only what was
+    estimated and holds the priors, the model supplies the full roster and each
+    row's starting value, and the run's optimizer config is where bounds were
+    recorded. This assembles the three into the shape the run request posts back,
+    observed data included, so the tab repaints without re-running.
+    """
+    params = spec.params
+    estimated = list(params["estimated_params"] or [])
+    priors = dict(params["priors"] or {})
+    bounds = _bounds_from_result(result, estimated)
+    base = extract_base_params(compiled)
+
+    rows: list[dict[str, Any]] = []
+    for name, value in base.items():
+        low, high = bounds.get(name, (None, None))
+        rows.append(
+            {
+                "name": name,
+                "estimate": name in estimated,
+                "initial": float(value),
+                "lower": low,
+                "upper": high,
+                "prior": priors.get(name),
+            }
+        )
+
+    # Reserved matrix keys are block targets, not calibration parameters, so they
+    # have no row of their own and ride alongside the table.
+    matrix_priors = {
+        target: prior for target, prior in priors.items() if target not in base
+    }
+
+    return {
+        "method": _method_from_result(result) or "mle",
+        "y": spec.y,
+        "observables": params["observables"],
+        "parameters": rows,
+        "matrix_priors": matrix_priors or None,
+        "ss_seed": params["ss_seed"],
+    }

@@ -631,26 +631,6 @@ def test_mcmc_seed_zero_is_exactly_reproducible(mcmc_estimator):
     assert out1.accept_rate == pytest.approx(out2.accept_rate)
 
 
-def test_mcmc_clones_generator_input_state(mcmc_estimator):
-    shared_rng = np.random.default_rng(123)
-    kwargs = dict(
-        n_draws=30,
-        burn_in=30,
-        thin=1,
-        theta0=np.array([2.0, 0.8], dtype=np.float64),
-        random_state=shared_rng,
-        adapt=True,
-    )
-    out1 = mcmc_estimator.mcmc(**kwargs)
-    out2 = mcmc_estimator.mcmc(**kwargs)
-
-    assert np.array_equal(out1.samples, out2.samples)
-    assert np.array_equal(out1.logpost_trace, out2.logpost_trace)
-    assert out1.accept_rate == pytest.approx(out2.accept_rate)
-    # the caller's generator is snapshotted, not consumed
-    assert shared_rng.random() == pytest.approx(np.random.default_rng(123).random())
-
-
 def test_estimator_make_prior_utility():
     prior = make_prior(
         distribution="normal",

@@ -30,6 +30,7 @@ from .._ckernels.estimation import (
 from ..bayesian.priors import Prior
 from .prior_program import (
     _pack_transform,
+    build_packed_logprior,
     PyPriorTables,
     N_DIST_PARAMS,
     N_TRANSFORM_PARAMS,
@@ -499,7 +500,7 @@ def build_obj_common(
     matrix_member_names: set[str],
     matrix_blocks: Mapping[str, MatrixPriorBlock],
     param_transforms: Mapping[str, Any],
-    packed_logprior: PyPriorTables | None,
+    priors: Mapping[str, Prior] | None,
     ss_seed: Any,
     x0: NDF | None,
     R_override: NDF | None,
@@ -508,7 +509,9 @@ def build_obj_common(
 
     The single orchestration point for the input tables: it builds one
     ``calib_index`` and threads it through the param map and both cov specs so the
-    calib ordering has one origin. Runtime addresses: ``residual`` from the
+    calib ordering has one origin, and lowers ``priors`` to the packed log-prior
+    program here rather than taking pre-built tables, so every table the native
+    objective reads is produced in one place. Runtime addresses: ``residual`` from the
     objective cfunc, ``bc_residual`` only for the unscented (second-order) path,
     ``meas``/``jac`` off the prepared run. ``ss_seed`` is resolved to canonical
     variable order by the solver's authority. Scratch buffers and the
@@ -523,6 +526,12 @@ def build_obj_common(
         else 0
     )
     ss_seed_vec = DSGESolver._resolve_ss_seed(ss_seed, compiled)
+    prior_tables = build_packed_logprior(
+        priors=priors,
+        param_index=param_index,
+        matrix_blocks=matrix_blocks,
+        matrix_member_names=matrix_member_names,
+    )
 
     return PyObjCommon(
         dims=get_dims(compiled, list(param_names), y),
@@ -563,7 +572,7 @@ def build_obj_common(
             base_dict=base_dict,
             R_override=R_override,
         ),
-        prior=packed_logprior if packed_logprior is not None else PyPriorTables.empty(),
+        prior=prior_tables if prior_tables is not None else PyPriorTables.empty(),
     )
 
 
@@ -667,7 +676,7 @@ def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:
 
 def reorder_observables(
     compiled: CompiledModel,
-    observables: list[str] | None,
+    observables: Sequence[str] | None,
     y: NDF | pd.DataFrame,
 ) -> tuple[list[str], NDF]:
     canon = compiled.observable_names
@@ -801,7 +810,7 @@ def prepare_filter_run(
     compiled: CompiledModel,
     kalman: KalmanConfig | None,
     y: NDF | pd.DataFrame,
-    observables: list[str] | None,
+    observables: Sequence[str] | None,
     filter_mode: str,
     jitter: float | float64 | None,
     symmetrize: bool,

@@ -17,13 +17,19 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from ..core.compiled_model import CompiledModel
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import DSGESolver
+from ..estimation.estimator import Estimator
 from ..estimation.results import MCMCResult, MLEResult, MAPResult
 from ..estimation.spec import (
-    EstimationSpec,
+    EstimatorParams,
+    EstimatorSpec,
+    MLEResultSpec,
+    MAPResultSpec,
     MCMCResultMeta,
+    MCMCResultSpec,
 )
 from ..monte_carlo.serialize import pipeline_result_wire
 from ..monte_carlo.spec import PipelineSpec
@@ -46,14 +52,26 @@ class LoadedEstimation:
 
     ``result`` is a first-class :class:`OptimizationResult` / :class:`MCMCResult`
     (rebuilt from the stored metadata + posterior traces), not the on-disk
-    ``*Meta`` shape. ``posterior`` still carries the raw ``samples``/``logpost``/``logjac``
-    columns for callers that want them directly.
+    document shape. ``estimator`` is the live object the ``spec`` describes,
+    bound to the reference model the bundle was loaded with.
     """
 
-    spec: EstimationSpec
+    spec: EstimatorSpec
+    _compiled: CompiledModel
     result: MLEResult | MAPResult | MCMCResult | None = None
-    observed: NDArray[Any] | None = None
-    posterior: dict[str, NDArray[Any]] | None = None
+    _estimator: Estimator | None = field(default=None, init=False, repr=False)
+
+    @property
+    def estimator(self) -> Estimator:
+        """The live estimator this spec describes, built on first access.
+
+        Deferred rather than built at load: ``Estimator`` construction compiles
+        the measurement and observable-jacobian cfuncs, which a caller that only
+        reads ``result`` never needs.
+        """
+        if self._estimator is None:
+            self._estimator = Estimator.from_spec(self.spec, self._compiled)
+        return self._estimator
 
 
 @dataclass
@@ -109,11 +127,12 @@ def build_from(path: str | Path) -> LoadedBundle:
     """Open a ``.sdsge`` bundle and rebuild its in-code objects."""
     archive = BundleArchive.open(path)
     manifest = archive.manifest
+    reference = _load_model(archive, manifest, "reference")
     return LoadedBundle(
         manifest=manifest,
-        reference=_load_model(archive, manifest, "reference"),
+        reference=reference,
         dgp=_load_model(archive, manifest, "dgp"),
-        estimation=_load_estimation(archive, manifest),
+        estimation=_load_estimation(archive, manifest, reference),
         mc=_load_mc(archive, manifest),
         simulation=manifest.simulation,
     )
@@ -147,7 +166,7 @@ def _load_columns(archive: BundleArchive, member: Member) -> dict[str, list[Any]
     )
 
 
-def _stack_observed(cols: dict[str, list[Any]], member: Member) -> NDArray[np.float64]:
+def _stack_observed(cols: dict[str, list[Any]], member: Member) -> list[list[float]]:
     """Reconstruct the observed ``(n, k)`` matrix from CSV or Parquet columns.
 
     Handles both the mechanical ``y.{j}`` layout (Parquet path and CSV without
@@ -157,9 +176,14 @@ def _stack_observed(cols: dict[str, list[Any]], member: Member) -> NDArray[np.fl
     collapsed = collapse_columns(cols)
     y = collapsed.get("y")
     if isinstance(y, np.ndarray) and y.ndim == 2:
-        return y.astype(np.float64, copy=False)
+        return cast(list[list[float]], y.tolist())
     if member.columns:
-        return np.column_stack([_float_column(cols[name]) for name in member.columns])
+        return cast(
+            list[list[float]],
+            np.column_stack(
+                [_float_column(cols[name]) for name in member.columns]
+            ).tolist(),
+        )
     raise ValueError(
         f"Cannot reconstruct observed matrix from {member.path!r}: no 'y.*' "
         f"columns and no Member.columns metadata to stack semantic headers."
@@ -172,19 +196,26 @@ def _float_column(values: list[Any]) -> NDArray[np.float64]:
 
 
 def _load_estimation(
-    archive: BundleArchive, manifest: Manifest
+    archive: BundleArchive, manifest: Manifest, reference: SolvedModel | None
 ) -> LoadedEstimation | None:
-    spec_members = manifest.members_by_kind("estimation_spec")
-    if not spec_members:
+    param_members = manifest.members_by_kind("estimation_spec")
+    if not param_members:
         return None
-    spec = EstimationSpec.from_json(archive.read_text(spec_members[0].path))
-
-    observed: NDArray[Any] | None = None
-    data_members = manifest.members_by_kind("estimation_data")
-    if data_members:
-        observed = _stack_observed(
-            _load_columns(archive, data_members[0]), data_members[0]
+    if reference is None:
+        raise ValueError(
+            "Bundle carries an estimation section but no reference model, so the "
+            "estimator it describes cannot be bound to one."
         )
+    data_members = manifest.members_by_kind("estimation_data")
+    if not data_members:
+        raise ValueError(
+            "Bundle carries an estimation section but no 'estimation_data' member; "
+            "an estimator is not defined without the data it conditions on."
+        )
+
+    params = cast(EstimatorParams, json.loads(archive.read_text(param_members[0].path)))
+    y = _stack_observed(_load_columns(archive, data_members[0]), data_members[0])
+    spec = EstimatorSpec(y=y, params=params)
 
     # Load the posterior first: the MCMC result is rebuilt from metadata + these
     # traces (the optimization result needs no traces).
@@ -201,13 +232,11 @@ def _load_estimation(
         if (typ := payload.get("type")) == "mcmc":
             result = _rebuild_mcmc_result(data, posterior)
         elif typ == "mle":
-            result = MLEResult.from_dict(data)
+            result = MLEResult.from_spec(cast(MLEResultSpec, data))
         elif typ == "map":
-            result = MAPResult.from_dict(data)
+            result = MAPResult.from_spec(cast(MAPResultSpec, data))
 
-    return LoadedEstimation(
-        spec=spec, result=result, observed=observed, posterior=posterior
-    )
+    return LoadedEstimation(spec=spec, _compiled=reference.compiled, result=result)
 
 
 def _rebuild_mcmc_result(
@@ -219,7 +248,7 @@ def _rebuild_mcmc_result(
     scalar metadata rides the JSON member, the ``samples``/``logpost`` columns
     ride the parquet trace member.
     """
-    meta = MCMCResultMeta.from_dict(data)
+    meta = cast(MCMCResultMeta, data)
     if (
         posterior is None
         or "samples" not in posterior
@@ -230,17 +259,13 @@ def _rebuild_mcmc_result(
             "MCMC bundle result requires an 'estimation_trace' member carrying "
             "'samples', 'logpost', and 'logjac' columns."
         )
-    return MCMCResult(
-        param_names=meta.param_names,
-        samples=np.asarray(posterior["samples"], dtype=np.float64),
-        logpost_trace=np.asarray(posterior["logpost"], dtype=np.float64),
-        logjac_trace=np.asarray(posterior["logjac"], dtype=np.float64),
-        accept_rate=np.float64(meta.accept_rate),
-        n_draws=meta.n_draws,
-        burn_in=meta.burn_in,
-        thin=meta.thin,
-        sampler_config=dict(meta.sampler_config),
+    spec = MCMCResultSpec(
+        samples=posterior["samples"].tolist(),
+        logpost_trace=posterior["logpost"].tolist(),
+        logjac_trace=posterior["logjac"].tolist(),
+        meta=meta,
     )
+    return MCMCResult.from_spec(spec)
 
 
 def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
