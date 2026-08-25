@@ -21,17 +21,13 @@ from numpy import ndarray
 from ..core.shock_generators import Shock, ShockParameters
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 2
+SDSGE_FORMAT_VERSION = 3
 
 #: The version at which the format last broke. A reader rejects bundles older
 #: than this, and each bundle records its own so a reader can tell a version it
-#: predates from a version that merely postdates it: a bump that breaks nothing
-#: leaves this alone and stays readable by older libraries.
-#:
-#: 2: shock specifications are keyed by shock name rather than by the variable
-#: the shock drives, so a version 1 bundle's ``simulation`` and ``mc_pipeline``
-#: name shocks that no longer resolve.
-SDSGE_LAST_BREAKING_VERSION = 2
+#: predates from a version that postdates it: a bump that breaks nothing
+#: leaves this alone and stays readable by older versions.
+SDSGE_LAST_BREAKING_VERSION = 3
 
 MemberKind = Literal[
     "model_config",
