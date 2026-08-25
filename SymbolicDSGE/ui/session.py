@@ -413,6 +413,12 @@ class UISession:
             )
         if bounds is not None and request.routine in {"mle", "map"}:
             kwargs["bounds"] = bounds
+        # JSON has no arrays, so a proposal covariance arrives as nested lists
+        # while the sampler takes a memoryview over one.
+        if kwargs.get("proposal_cov") is not None:
+            kwargs["proposal_cov"] = np.asarray(
+                kwargs["proposal_cov"], dtype=np.float64
+            )
 
         common: dict[str, Any] = {
             "compiled": slot.compiled,

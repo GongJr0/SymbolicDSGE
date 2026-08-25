@@ -1,22 +1,20 @@
 import { Play, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Line } from "react-chartjs-2";
-import { getEstimationCatalog, runEstimation } from "./api";
-import {
-  clearEstimationWorkspace,
-  loadEstimationWorkspace,
-  saveEstimationWorkspace,
-  WORKSPACE_VERSION,
-} from "./estimationPersistence";
+import { getEstimationCatalog, putWorkspaceView, runEstimation } from "./api";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
 import type {
   EstimationCatalog,
   EstimationMethod,
   EstimationParameterSpec,
-  EstimationRunResult,
+  EstimationResultWire,
+  EstimationViewState,
+  EstimationViewsByRole,
+  MapOptions,
   ModelSummary,
   Role,
+  SessionWorkspace,
 } from "./types";
 
 // Mirrors the estimator's own kwarg defaults, so an untouched form runs what
@@ -41,6 +39,29 @@ const DEFAULTS = {
   adaptStart: 100,
   adaptEpsilon: 1e-8,
   posteriorPoint: "mean",
+  cov: true,
+  jacobian: false,
+  computeMap: true,
+  covFdStepScale: 1.0,
+  covFdAbsoluteFloor: 0.1,
+  mapOptions: null as MapOptions | null,
+  proposalCov: null as number[][] | null,
+};
+
+// What the sampler falls back to for the MAP presolve when `map_options` is
+// absent. Shares the optimizer defaults above, under the estimator's own key
+// names, since the dict reaches `run_mcmc` unmapped.
+const MAP_OPTION_DEFAULTS: Required<Omit<MapOptions, "bounds">> = {
+  method: DEFAULTS.optimizer,
+  m: DEFAULTS.m,
+  maxiter: DEFAULTS.maxIter,
+  maxfun: DEFAULTS.maxFun,
+  maxls: DEFAULTS.maxLs,
+  factr: DEFAULTS.factr,
+  pgtol: DEFAULTS.pgtol,
+  fd_step: DEFAULTS.fdStep,
+  xatol: DEFAULTS.xatol,
+  fatol: DEFAULTS.fatol,
 };
 
 // `cov_status` codes from _ckernels/estimation/estimation.h, as reasons.
@@ -54,11 +75,13 @@ export function EstimationView({
   hidden,
   role,
   model,
+  workspace,
   onSessionRefresh,
 }: {
   hidden?: boolean;
   role: Role;
   model: ModelSummary;
+  workspace: SessionWorkspace | null;
   onSessionRefresh: () => Promise<void>;
 }) {
   const [catalog, setCatalog] = useState<EstimationCatalog | null>(null);
@@ -86,10 +109,19 @@ export function EstimationView({
   const [adaptStart, setAdaptStart] = useState(DEFAULTS.adaptStart);
   const [adaptEpsilon, setAdaptEpsilon] = useState(DEFAULTS.adaptEpsilon);
   const [posteriorPoint, setPosteriorPoint] = useState(DEFAULTS.posteriorPoint);
+  const [cov, setCov] = useState(DEFAULTS.cov);
+  const [jacobian, setJacobian] = useState(DEFAULTS.jacobian);
+  const [computeMap, setComputeMap] = useState(DEFAULTS.computeMap);
+  const [covFdStepScale, setCovFdStepScale] = useState(DEFAULTS.covFdStepScale);
+  const [covFdAbsoluteFloor, setCovFdAbsoluteFloor] = useState(
+    DEFAULTS.covFdAbsoluteFloor,
+  );
+  const [mapOptions, setMapOptions] = useState(DEFAULTS.mapOptions);
+  const [proposalCov, setProposalCov] = useState(DEFAULTS.proposalCov);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(false);
-  const [result, setResult] = useState<EstimationRunResult | null>(null);
+  const [result, setResult] = useState<EstimationResultWire | null>(null);
   const [modeFolded, setModeFolded] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
@@ -113,107 +145,126 @@ export function EstimationView({
     return () => window.cancelAnimationFrame(frame);
   }, [hidden]);
 
-  const parameterKey = Object.keys(model.parameter_values ?? {}).join(",");
-  const observableKey = (model.observables ?? []).join(",");
-  const modelKey = JSON.stringify({
-    role,
-    source: model.source ?? null,
-    parameters: parameterKey,
-    observables: observableKey,
-  });
+  // Seeded once from the session, then owned by this component. Later session
+  // reads carry back only what was PUT from here, so re-reading them would
+  // fight the user's typing.
+  const viewsRef = useRef<EstimationViewsByRole>({});
 
   useEffect(() => {
-    if (catalog === null) return;
-    let cancelled = false;
+    if (catalog === null || workspace === null || hydrated) return;
     const values = model.parameter_values ?? {};
     const names = model.observables ?? [];
-    setHydrated(false);
-    void loadEstimationWorkspace(role)
-      .catch(() => null)
-      .then((workspace) => {
-        if (cancelled) return;
-        if (workspace !== null && workspace.modelKey === modelKey) {
-          setMethod(workspace.method);
-          setParameters(workspace.parameters);
-          setSelected(workspace.selected);
-          setObservables(workspace.observables);
-          setDataVectors(workspace.dataVectors);
-          setOptimizer(workspace.optimizer);
-          setMaxIter(workspace.maxIter);
-          setMaxFun(workspace.maxFun);
-          setM(workspace.m);
-          setMaxLs(workspace.maxLs);
-          setFactr(workspace.factr);
-          setPgtol(workspace.pgtol);
-          setFdStep(workspace.fdStep);
-          setXatol(workspace.xatol);
-          setFatol(workspace.fatol);
-          setNDraws(workspace.nDraws);
-          setBurnIn(workspace.burnIn);
-          setThin(workspace.thin);
-          setSeed(workspace.seed);
-          setProposalScale(workspace.proposalScale);
-          setAdapt(workspace.adapt);
-          setAdaptStart(workspace.adaptStart);
-          setAdaptEpsilon(workspace.adaptEpsilon);
-          setPosteriorPoint(workspace.posteriorPoint);
-          setResult(workspace.result);
-          setModeFolded(workspace.modeFolded);
-        } else {
-          setParameters(
-            Object.entries(values).map(([name, value]) =>
-              makeParameter(name, value, catalog),
-            ),
-          );
-          setSelected(Object.keys(values)[0] ?? null);
-          setObservables(names.join(", "));
-          setDataVectors(Object.fromEntries(names.map((name) => [name, ""])));
-          setResult(null);
-        }
-        setHydrated(true);
-      });
-    return () => {
-      cancelled = true;
+    viewsRef.current = workspace.estimation?.view ?? {};
+    // Merge over the defaults rather than requiring every field: a bundle
+    // fills only what it can speak to, and a control added later still opens
+    // at its default instead of undefined.
+    const stored = viewsRef.current[role];
+    const base: EstimationViewState = {
+      ...DEFAULTS,
+      method: "mle",
+      parameters: Object.entries(values).map(([name, value]) =>
+        makeParameter(name, value, catalog),
+      ),
+      selected: Object.keys(values)[0] ?? null,
+      observables: names.join(", "),
+      dataVectors: Object.fromEntries(names.map((name) => [name, ""])),
+      modeFolded: false,
     };
-  }, [catalog, modelKey, role]);
+    applyView({ ...base, ...stored });
+    setResult(workspace.estimation?.result ?? null);
+    setHydrated(true);
+  }, [catalog, hydrated, model, role, workspace]);
+
+  // Switching role swaps in that role's form without touching the other's.
+  useEffect(() => {
+    if (!hydrated) return;
+    applyView({ ...currentView(), ...viewsRef.current[role] });
+    // Only on a role change: the deps are deliberately not the form fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  function currentView(): EstimationViewState {
+    return {
+      method,
+      parameters,
+      selected,
+      observables,
+      dataVectors,
+      optimizer,
+      maxIter,
+      maxFun,
+      m,
+      maxLs,
+      factr,
+      pgtol,
+      fdStep,
+      xatol,
+      fatol,
+      nDraws,
+      burnIn,
+      thin,
+      seed,
+      proposalScale,
+      adapt,
+      adaptStart,
+      adaptEpsilon,
+      posteriorPoint,
+      cov,
+      jacobian,
+      computeMap,
+      covFdStepScale,
+      covFdAbsoluteFloor,
+      mapOptions,
+      proposalCov,
+      modeFolded,
+    };
+  }
+
+  function applyView(view: EstimationViewState) {
+    setMethod(view.method);
+    setParameters(view.parameters);
+    setSelected(view.selected);
+    setObservables(view.observables);
+    setDataVectors(view.dataVectors);
+    setOptimizer(view.optimizer);
+    setMaxIter(view.maxIter);
+    setMaxFun(view.maxFun);
+    setM(view.m);
+    setMaxLs(view.maxLs);
+    setFactr(view.factr);
+    setPgtol(view.pgtol);
+    setFdStep(view.fdStep);
+    setXatol(view.xatol);
+    setFatol(view.fatol);
+    setNDraws(view.nDraws);
+    setBurnIn(view.burnIn);
+    setThin(view.thin);
+    setSeed(view.seed);
+    setProposalScale(view.proposalScale);
+    setAdapt(view.adapt);
+    setAdaptStart(view.adaptStart);
+    setAdaptEpsilon(view.adaptEpsilon);
+    setPosteriorPoint(view.posteriorPoint);
+    setCov(view.cov);
+    setJacobian(view.jacobian);
+    setComputeMap(view.computeMap);
+    setCovFdStepScale(view.covFdStepScale);
+    setCovFdAbsoluteFloor(view.covFdAbsoluteFloor);
+    setMapOptions(view.mapOptions);
+    setProposalCov(view.proposalCov);
+    setModeFolded(view.modeFolded);
+  }
 
   useEffect(() => {
     if (!hydrated) return;
     const timeout = window.setTimeout(() => {
-      void saveEstimationWorkspace({
-        version: WORKSPACE_VERSION,
-        role,
-        modelKey,
-        method,
-        parameters,
-        selected,
-        observables,
-        dataVectors,
-        optimizer,
-        maxIter,
-        maxFun,
-        m,
-        maxLs,
-        factr,
-        pgtol,
-        fdStep,
-        xatol,
-        fatol,
-        nDraws,
-        burnIn,
-        thin,
-        seed,
-        proposalScale,
-        adapt,
-        adaptStart,
-        adaptEpsilon,
-        posteriorPoint,
-        result,
-        modeFolded,
-      }).catch((reason: unknown) => {
-        setNotice(reason instanceof Error ? reason.message : String(reason));
-        setError(true);
-      });
+      viewsRef.current = { ...viewsRef.current, [role]: currentView() };
+      void putWorkspaceView("estimation", viewsRef.current).catch(
+        (reason: unknown) => {
+          setNotice(reason instanceof Error ? reason.message : String(reason));
+          setError(true);
+        },
+      );
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [
@@ -221,26 +272,31 @@ export function EstimationView({
     adaptEpsilon,
     adaptStart,
     burnIn,
+    computeMap,
+    cov,
+    covFdAbsoluteFloor,
+    covFdStepScale,
     dataVectors,
     factr,
     fatol,
     fdStep,
     hydrated,
+    jacobian,
     m,
+    mapOptions,
     maxFun,
     maxIter,
     maxLs,
     method,
     modeFolded,
-    modelKey,
     nDraws,
     observables,
     optimizer,
     parameters,
     pgtol,
     posteriorPoint,
+    proposalCov,
     proposalScale,
-    result,
     role,
     seed,
     selected,
@@ -296,7 +352,11 @@ export function EstimationView({
                 ...(adapt
                   ? { adapt_start: adaptStart, adapt_epsilon: adaptEpsilon }
                   : {}),
-                compute_map: true,
+                compute_map: computeMap,
+                cov_fd_step_scale: covFdStepScale,
+                cov_fd_absolute_floor: covFdAbsoluteFloor,
+                ...(mapOptions === null ? {} : { map_options: mapOptions }),
+                ...(proposalCov === null ? {} : { proposal_cov: proposalCov }),
               }
             : {
                 method: optimizer,
@@ -305,14 +365,18 @@ export function EstimationView({
                 ...(optimizer === "Nelder-Mead"
                   ? { xatol, fatol }
                   : { m, maxls: maxLs, factr, pgtol, fd_step: fdStep }),
-                cov: true,
+                cov,
+                cov_fd_step_scale: covFdStepScale,
+                cov_fd_absolute_floor: covFdAbsoluteFloor,
+                // Only MAP takes it; mle has no such parameter.
+                ...(method === "map" ? { jacobian } : {}),
               },
         compile_kwargs: {},
         ss_seed: null,
         posterior_point: posteriorPoint,
         estimate_and_solve: estimateAndSolve,
       });
-      setResult(output);
+      setResult(output.result);
       if (estimateAndSolve) await onSessionRefresh();
       setNotice(
         estimateAndSolve
@@ -379,11 +443,20 @@ export function EstimationView({
     setAdaptStart(DEFAULTS.adaptStart);
     setAdaptEpsilon(DEFAULTS.adaptEpsilon);
     setPosteriorPoint(DEFAULTS.posteriorPoint);
+    setCov(DEFAULTS.cov);
+    setJacobian(DEFAULTS.jacobian);
+    setComputeMap(DEFAULTS.computeMap);
+    setCovFdStepScale(DEFAULTS.covFdStepScale);
+    setCovFdAbsoluteFloor(DEFAULTS.covFdAbsoluteFloor);
+    setMapOptions(DEFAULTS.mapOptions);
+    setProposalCov(DEFAULTS.proposalCov);
     setResult(null);
     setModeFolded(false);
     setWorkspaceRevision((current) => current + 1);
     try {
-      await clearEstimationWorkspace(role);
+      const { [role]: _cleared, ...rest } = viewsRef.current;
+      viewsRef.current = rest;
+      await putWorkspaceView("estimation", viewsRef.current);
       setNotice("Estimation workspace cleared.");
       setError(false);
     } catch (reason) {
@@ -457,6 +530,19 @@ export function EstimationView({
                       />
                     </>
                   )}
+                  {computeMap !== DEFAULTS.computeMap && (
+                    <SwitchField
+                      label="Start from MAP"
+                      value={computeMap}
+                      onChange={setComputeMap}
+                    />
+                  )}
+                  <CovarianceFields
+                    stepScale={covFdStepScale}
+                    absoluteFloor={covFdAbsoluteFloor}
+                    onStepScale={setCovFdStepScale}
+                    onAbsoluteFloor={setCovFdAbsoluteFloor}
+                  />
                 </>
               ) : (
                 <>
@@ -499,9 +585,38 @@ export function EstimationView({
                       <NumberField label="FD step" value={fdStep} onChange={setFdStep} />
                     </>
                   )}
+                  {cov !== DEFAULTS.cov && (
+                    <SwitchField
+                      label="Standard errors"
+                      value={cov}
+                      onChange={setCov}
+                    />
+                  )}
+                  {method === "map" && jacobian !== DEFAULTS.jacobian && (
+                    <SwitchField
+                      label="Include log-jacobian"
+                      value={jacobian}
+                      onChange={setJacobian}
+                    />
+                  )}
+                  <CovarianceFields
+                    stepScale={covFdStepScale}
+                    absoluteFloor={covFdAbsoluteFloor}
+                    onStepScale={setCovFdStepScale}
+                    onAbsoluteFloor={setCovFdAbsoluteFloor}
+                  />
                 </>
               )}
             </div>
+            {method === "mcmc" && computeMap && (
+              <MapOptionsPanel
+                options={{ ...MAP_OPTION_DEFAULTS, ...(mapOptions ?? {}) }}
+                optimizers={catalog?.optimizer_methods ?? [DEFAULTS.optimizer]}
+                onChange={(update) =>
+                  setMapOptions({ ...(mapOptions ?? {}), ...update })
+                }
+              />
+            )}
           </div>
           <div className="estimation-data-section">
             <header>
@@ -616,6 +731,7 @@ export function EstimationView({
           method={method}
           catalog={catalog}
           result={result}
+          solved={model.solved ?? false}
           chartRevision={chartRevision}
           onChange={(update) => updateParameter(active.name, update)}
           onPriorChange={(update) => updatePrior(active.name, update)}
@@ -655,6 +771,7 @@ function ParameterDetails({
   method,
   catalog,
   result,
+  solved,
   chartRevision,
   onChange,
   onPriorChange,
@@ -662,7 +779,8 @@ function ParameterDetails({
   parameter: EstimationParameterSpec;
   method: EstimationMethod;
   catalog: EstimationCatalog | null;
-  result: EstimationRunResult | null;
+  result: EstimationResultWire | null;
+  solved: boolean;
   chartRevision: number;
   onChange: (update: Partial<EstimationParameterSpec>) => void;
   onPriorChange: (
@@ -671,12 +789,12 @@ function ParameterDetails({
 }) {
   const prior = parameter.prior;
   const estimatedValue =
-    result?.result.theta?.[parameter.name] ??
-    result?.result.posterior_mean?.[parameter.name];
+    result?.theta?.[parameter.name] ??
+    result?.posterior_mean?.[parameter.name];
   // A null `se` means the run computed no covariance, which shows the same as
   // having no result field at all.
-  const standardErrors = result?.result.se ?? undefined;
-  const covStatus = result?.result.cov_status ?? 0;
+  const standardErrors = result?.se ?? undefined;
+  const covStatus = result?.cov_status ?? 0;
   return (
     <div className="estimation-details">
       <label className="switch-row estimation-estimate-switch">
@@ -778,7 +896,7 @@ function ParameterDetails({
         <section className="estimation-result">
           <h3>Latest Result</h3>
           <div className="estimation-result-grid">
-            <ResultValue label="Method" value={result.method.toUpperCase()} />
+            <ResultValue label="Method" value={methodOf(result).toUpperCase()} />
             <ResultValue label="Estimate" value={format(estimatedValue)} />
             {standardErrors !== undefined && (
               <ResultValue
@@ -786,26 +904,26 @@ function ParameterDetails({
                 value={format(standardErrors[parameter.name])}
               />
             )}
-            <ResultValue label="Solved" value={result.solved ? "yes" : "no"} />
-            {result.result.accept_rate !== undefined && (
+            <ResultValue label="Solved" value={solved ? "yes" : "no"} />
+            {result.accept_rate !== undefined && (
               <ResultValue
                 label="Acceptance"
-                value={format(result.result.accept_rate)}
+                value={format(result.accept_rate)}
               />
             )}
-            {result.result.loglik !== undefined && (
-              <ResultValue label="Log likelihood" value={format(result.result.loglik)} />
+            {result.loglik !== undefined && (
+              <ResultValue label="Log likelihood" value={format(result.loglik)} />
             )}
-            {result.result.logpost !== undefined && (
-              <ResultValue label="Log posterior" value={format(result.result.logpost)} />
+            {result.logpost !== undefined && (
+              <ResultValue label="Log posterior" value={format(result.logpost)} />
             )}
-            {result.result.logprior !== undefined && (
-              <ResultValue label="Log prior" value={format(result.result.logprior)} />
+            {result.logprior !== undefined && (
+              <ResultValue label="Log prior" value={format(result.logprior)} />
             )}
-            {result.result.logpost_mean !== undefined && (
+            {result.logpost_mean !== undefined && (
               <ResultValue
                 label="Mean log posterior"
-                value={format(result.result.logpost_mean)}
+                value={format(result.logpost_mean)}
               />
             )}
           </div>
@@ -816,9 +934,9 @@ function ParameterDetails({
               }.`}
             </span>
           )}
-          {result.method === "mcmc" && (
+          {methodOf(result) === "mcmc" && (
             <MCMCCharts
-              key={`${result.run_id}:${parameter.name}`}
+              key={`${chartRevision}:${parameter.name}`}
               chartRevision={chartRevision}
               result={result}
               parameter={parameter.name}
@@ -827,6 +945,143 @@ function ParameterDetails({
         </section>
       )}
     </div>
+  );
+}
+
+/** The MAP presolve's optimizer options.
+ *
+ * A second full option set that only matters when the chain starts from a MAP
+ * estimate, so it folds away rather than crowding the sampler's own fields.
+ * Stays null until touched, which leaves the sampler on its own defaults.
+ */
+function MapOptionsPanel({
+  options,
+  optimizers,
+  onChange,
+}: {
+  options: Required<Omit<MapOptions, "bounds">>;
+  optimizers: string[];
+  onChange: (update: MapOptions) => void;
+}) {
+  return (
+    <details className="estimation-suboptions">
+      <summary>MAP start options</summary>
+      <div className="estimation-method-fields">
+        <label>
+          Optimizer
+          <select
+            value={options.method}
+            onChange={(event) => onChange({ method: event.target.value })}
+          >
+            {optimizers.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        <NumberField
+          label="Max iterations"
+          value={options.maxiter}
+          onChange={(maxiter) => onChange({ maxiter })}
+        />
+        <NumberField
+          label="Max evaluations"
+          value={options.maxfun}
+          onChange={(maxfun) => onChange({ maxfun })}
+        />
+        {options.method === "Nelder-Mead" ? (
+          <>
+            <NumberField
+              label="xatol"
+              value={options.xatol}
+              onChange={(xatol) => onChange({ xatol })}
+            />
+            <NumberField
+              label="fatol"
+              value={options.fatol}
+              onChange={(fatol) => onChange({ fatol })}
+            />
+          </>
+        ) : (
+          <>
+            <NumberField
+              label="History size"
+              value={options.m}
+              onChange={(m) => onChange({ m })}
+            />
+            <NumberField
+              label="Max line search"
+              value={options.maxls}
+              onChange={(maxls) => onChange({ maxls })}
+            />
+            <NumberField
+              label="factr"
+              value={options.factr}
+              onChange={(factr) => onChange({ factr })}
+            />
+            <NumberField
+              label="pgtol"
+              value={options.pgtol}
+              onChange={(pgtol) => onChange({ pgtol })}
+            />
+            <NumberField
+              label="FD step"
+              value={options.fd_step}
+              onChange={(fd_step) => onChange({ fd_step })}
+            />
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function SwitchField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="switch-row">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={value}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
+  );
+}
+
+/** The finite-difference covariance steps, shown only once a run has moved
+ * one off its default. Both routines take them, so both render this. */
+function CovarianceFields({
+  stepScale,
+  absoluteFloor,
+  onStepScale,
+  onAbsoluteFloor,
+}: {
+  stepScale: number;
+  absoluteFloor: number;
+  onStepScale: (value: number) => void;
+  onAbsoluteFloor: (value: number) => void;
+}) {
+  return (
+    <>
+      {stepScale !== DEFAULTS.covFdStepScale && (
+        <NumberField label="Cov FD scale" value={stepScale} onChange={onStepScale} />
+      )}
+      {absoluteFloor !== DEFAULTS.covFdAbsoluteFloor && (
+        <NumberField
+          label="Cov FD floor"
+          value={absoluteFloor}
+          onChange={onAbsoluteFloor}
+        />
+      )}
+    </>
   );
 }
 
@@ -874,6 +1129,16 @@ function OptionalNumberField({
   );
 }
 
+/** The routine a result came from, read off the wire it produced.
+ *
+ * Only the MCMC wire names itself; a point estimate is told apart by which
+ * objective it carries, exactly as the emitter decides which one to write.
+ */
+function methodOf(result: EstimationResultWire): EstimationMethod {
+  if (result.kind === "mcmc") return "mcmc";
+  return result.logpost === undefined ? "mle" : "map";
+}
+
 function ResultValue({ label, value }: { label: string; value: string }) {
   return (
     <span>
@@ -888,12 +1153,12 @@ function MCMCCharts({
   parameter,
   chartRevision,
 }: {
-  result: EstimationRunResult;
+  result: EstimationResultWire;
   parameter: string;
   chartRevision: number;
 }) {
-  const trace = result.result.logpost_trace ?? [];
-  const samples = result.result.samples?.[parameter] ?? [];
+  const trace = result.logpost_trace ?? [];
+  const samples = result.samples?.[parameter] ?? [];
   const histogram = useMemo(() => makeHistogram(samples), [samples]);
   const tracePlot = useMemo(() => downsampleTrace(trace), [trace]);
   const options = {
@@ -914,7 +1179,7 @@ function MCMCCharts({
           <h4>Log-posterior trace</h4>
           <div>
             <Line
-              key={`trace:${result.run_id}:${chartRevision}`}
+              key={`trace:${chartRevision}`}
               redraw
               data={{
                 labels: tracePlot.indices.map((index) => String(index + 1)),
@@ -940,7 +1205,7 @@ function MCMCCharts({
           <h4>{parameter} posterior distribution</h4>
           <div>
             <Line
-              key={`posterior:${result.run_id}:${parameter}:${chartRevision}`}
+              key={`posterior:${parameter}:${chartRevision}`}
               redraw
               data={{
                 labels: histogram.labels,

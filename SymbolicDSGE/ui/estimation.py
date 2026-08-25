@@ -283,6 +283,104 @@ def _bounds_from_result(
     return {}
 
 
+#: View field <- the option key an optimization run recorded it under.
+#: ``cov`` and the two ``cov_fd_*`` scalars have no control on a fresh form;
+#: they are carried so a bundled run re-runs as it ran.
+_OPTIMIZER_VIEW_KNOBS = {
+    "maxIter": "maxiter",
+    "maxFun": "maxfun",
+    "m": "m",
+    "maxLs": "maxls",
+    "factr": "factr",
+    "pgtol": "pgtol",
+    "fdStep": "fd_step",
+    "xatol": "xatol",
+    "fatol": "fatol",
+    "cov": "cov",
+    "jacobian": "jacobian",
+    "covFdStepScale": "cov_fd_step_scale",
+    "covFdAbsoluteFloor": "cov_fd_absolute_floor",
+}
+
+#: View field <- the argument an MCMC run recorded it under. ``mapOptions``
+#: and ``proposalCov`` are the two that cannot be a scalar control.
+_SAMPLER_VIEW_KNOBS = {
+    "seed": "random_state",
+    "proposalScale": "proposal_scale",
+    "adapt": "adapt",
+    "adaptStart": "adapt_start",
+    "adaptEpsilon": "adapt_epsilon",
+    "computeMap": "compute_map",
+    "mapOptions": "map_options",
+    "proposalCov": "proposal_cov",
+    "covFdStepScale": "cov_fd_step_scale",
+    "covFdAbsoluteFloor": "cov_fd_absolute_floor",
+}
+
+
+def _run_config(
+    result: MLEResult | MAPResult | MCMCResult | None,
+) -> Mapping[str, Any]:
+    """The call arguments a run recorded, whichever routine made it."""
+    if isinstance(result, MCMCResult):
+        return result.sampler_config or {}
+    if isinstance(result, OptimizationResult):
+        return result.optimizer_config or {}
+    return {}
+
+
+def _knobs_from_result(
+    result: MLEResult | MAPResult | MCMCResult | None,
+) -> dict[str, Any]:
+    """A run's own settings, in the view's field names.
+
+    A bundle reproduces only if the form re-posts what the run was made with,
+    down to the options it renders no control for. A key the run did not
+    record is left out, so the form falls back to its own default rather than
+    inventing a value the run never used.
+    """
+    config = _run_config(result)
+    if isinstance(result, MCMCResult):
+        knobs = {
+            view: config[key]
+            for view, key in _SAMPLER_VIEW_KNOBS.items()
+            if key in config
+        }
+        # Draw counts live on the result itself, not among the call arguments.
+        return knobs | {
+            "nDraws": int(result.n_draws),
+            "burnIn": int(result.burn_in),
+            "thin": int(result.thin),
+        }
+    options = config.get("options") or {}
+    knobs = {
+        view: options[key]
+        for view, key in _OPTIMIZER_VIEW_KNOBS.items()
+        if key in options
+    }
+    if (method := config.get("method")) is not None:
+        knobs["optimizer"] = method
+    return knobs
+
+
+def _theta0_from_result(
+    result: MLEResult | MAPResult | MCMCResult | None,
+    param_names: Sequence[str],
+) -> dict[str, float]:
+    """The starting point the run used, per estimated parameter.
+
+    Recorded as a vector ordered like the estimated names, or as the mapping
+    it was given as. Without it the form would seed from the model's
+    calibration, which is not where the stored run started.
+    """
+    raw = _run_config(result).get("theta0")
+    if raw is None:
+        return {}
+    if isinstance(raw, Mapping):
+        return {str(name): float(value) for name, value in raw.items()}
+    return {name: float(value) for name, value in zip(param_names, raw)}
+
+
 def estimator_spec_wire(spec: EstimatorSpec) -> dict[str, Any]:
     """An :class:`EstimatorSpec` as JSON, verbatim.
 
@@ -304,13 +402,18 @@ def build_estimation_prefill(
     which no single stored artifact carries: the spec names only what was
     estimated and holds the priors, the model supplies the full roster and each
     row's starting value, and the run's optimizer config is where bounds were
-    recorded. This assembles the three into the shape the run request posts back,
-    observed data included, so the tab repaints without re-running.
+    recorded. This assembles the three into the tab's own view shape, so a
+    bundle launch and a client update deliver the same thing to the same slot.
+
+    Only the fields a bundle can speak to are filled; the form merges what
+    arrives over its own defaults, so a key a run never recorded is left out
+    rather than invented here.
     """
     params = spec.params
     estimated = list(params["estimated_params"] or [])
     priors = dict(params["priors"] or {})
     bounds = _bounds_from_result(result, estimated)
+    theta0 = _theta0_from_result(result, estimated)
     base = extract_base_params(compiled)
 
     rows: list[dict[str, Any]] = []
@@ -320,24 +423,38 @@ def build_estimation_prefill(
             {
                 "name": name,
                 "estimate": name in estimated,
-                "initial": float(value),
+                # Where the run started, falling back to the model's
+                # calibration for a row the run did not estimate.
+                "initial": float(theta0.get(name, value)),
                 "lower": low,
                 "upper": high,
                 "prior": priors.get(name),
             }
         )
 
-    # Reserved matrix keys are block targets, not calibration parameters, so they
-    # have no row of their own and ride alongside the table.
-    matrix_priors = {
-        target: prior for target, prior in priors.items() if target not in base
-    }
-
+    # ``ss_seed`` and the reserved matrix keys' priors stay on the spec: the
+    # form renders neither, and the view does not restate what it cannot edit.
+    observable_names = list(params["observables"] or [])
     return {
         "method": _method_from_result(result) or "mle",
-        "y": spec.y,
-        "observables": params["observables"],
         "parameters": rows,
-        "matrix_priors": matrix_priors or None,
-        "ss_seed": params["ss_seed"],
+        "selected": rows[0]["name"] if rows else None,
+        "observables": ", ".join(observable_names),
+        "dataVectors": _data_vectors(spec.y, observable_names),
+        "modeFolded": False,
+        **_knobs_from_result(result),
+    }
+
+
+def _data_vectors(
+    y: Sequence[Sequence[float]], observables: Sequence[str]
+) -> dict[str, str]:
+    """Observed data as the per-column text the form's textareas hold.
+
+    The form edits one newline-separated column per observable, which is what
+    it posts back as a matrix, so the seed has to arrive already split.
+    """
+    return {
+        name: "\n".join(repr(float(row[index])) for row in y)
+        for index, name in enumerate(observables)
     }

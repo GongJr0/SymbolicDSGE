@@ -21,7 +21,11 @@ from SymbolicDSGE.estimation.spec import (
 )
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 from SymbolicDSGE.ui import build_workspace, create_app, serve_from
-from SymbolicDSGE.ui.estimation import emit_estimation_wire, serialize_estimation_result
+from SymbolicDSGE.ui.estimation import (
+    build_estimation_prefill,
+    emit_estimation_wire,
+    serialize_estimation_result,
+)
 from SymbolicDSGE.ui.session import TabState, UISession, Workspace
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
@@ -332,12 +336,17 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # bulk traces survived round-trip into the wire dict
     assert len(ws.estimation.result["samples"]["beta"]) == 20
 
-    # The view is the pair projected into what the form posts back.
+    # The view is the pair projected into the form's own shape, per role.
     assert ws.estimation.view is not None
-    assert ws.estimation.view["method"] == "mcmc"  # inferred from the result type
-    rows = {row["name"]: row for row in ws.estimation.view["parameters"]}
+    view = ws.estimation.view["reference"]
+    assert view["method"] == "mcmc"  # inferred from the result type
+    rows = {row["name"]: row for row in view["parameters"]}
     assert rows["beta"]["estimate"] and rows["sigma"]["estimate"]
-    assert len(ws.estimation.view["y"]) == 10  # observed data prefill
+    # Observed data arrives already split into the form's per-column text.
+    assert view["observables"] == "Infl, Rate"
+    assert len(view["dataVectors"]["Infl"].splitlines()) == 10
+    # The run's own settings come back, so re-running reproduces it.
+    assert (view["nDraws"], view["burnIn"], view["thin"]) == (20, 5, 1)
 
     assert ws.mc.spec is not None
     assert ws.mc.result is None  # no MC result was attached at build time
@@ -345,6 +354,61 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     assert ws.simulation is not None
     assert ws.simulation["reference"]["T"] == 8
     assert ws.simulation["reference"]["shocks"]["u"]["seed"] == 42
+
+
+def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
+    """A bundled experiment has to re-run as it ran, not at form defaults.
+
+    Includes the options the form renders no control for: leaving those to
+    default would silently substitute a different run behind an unchanged
+    screen.
+    """
+    parser = ModelParser.from_string(_MODEL_YAML)
+    model, kalman = parser.get_all()
+    compiled = DSGESolver(model, kalman).compile()
+    result = MAPResult(
+        x=np.array([0.97]),
+        theta={"beta": np.float64(0.97)},
+        success=True,
+        message="ok",
+        fun=np.float64(1.0),
+        nfev=9,
+        nit=3,
+        optimizer_config={
+            "theta0": [0.93],
+            "method": "Nelder-Mead",
+            "bounds": [[0.9, 0.999]],
+            "options": {
+                "maxiter": 250,
+                "xatol": 1e-7,
+                "jacobian": True,
+                "cov": False,
+                "cov_fd_step_scale": 2.5,
+            },
+        },
+        logpost=np.float64(-1.0),
+        logprior=np.float64(-0.1),
+    )
+    spec = EstimatorSpec(
+        y=[[1.0, 2.0]],
+        params=_estimation_spec([[1.0, 2.0]]).params | {"estimated_params": ["beta"]},
+    )
+
+    view = build_estimation_prefill(spec, result, compiled)
+
+    assert view["method"] == "map"
+    assert view["optimizer"] == "Nelder-Mead"
+    assert (view["maxIter"], view["xatol"]) == (250, 1e-7)
+    # Rendered no control on a fresh form; carried anyway.
+    assert view["jacobian"] is True
+    assert view["cov"] is False
+    assert view["covFdStepScale"] == 2.5
+    # The run's own starting point, not the model's calibration.
+    beta = next(row for row in view["parameters"] if row["name"] == "beta")
+    assert beta["initial"] == 0.93
+    assert (beta["lower"], beta["upper"]) == (0.9, 0.999)
+    # A key the run never recorded stays absent, for the form to default.
+    assert "factr" not in view and "pgtol" not in view
 
 
 def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(

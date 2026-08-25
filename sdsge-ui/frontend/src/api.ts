@@ -5,7 +5,7 @@ import type {
   EstimationCatalog,
   EstimationRunRequest,
   EstimationRunResult,
-  EstimationViewState,
+  EstimationViewsByRole,
   MCViewState,
   ModelSummary,
   MCCatalog,
@@ -56,7 +56,7 @@ export function getSession(): Promise<SessionSummary> {
  */
 export function putWorkspaceView(
   tab: WorkspaceTab,
-  view: EstimationViewState | MCViewState | null,
+  view: EstimationViewsByRole | MCViewState | null,
 ): Promise<{ tab: WorkspaceTab }> {
   return requestJson<{ tab: WorkspaceTab }>("/api/session/workspace", {
     method: "PUT",

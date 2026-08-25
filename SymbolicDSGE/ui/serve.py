@@ -93,11 +93,15 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
         if loaded.estimation.result is not None:
             estimation.result = emit_estimation_wire(loaded.estimation.result)
         if loaded.reference is not None:
-            estimation.view = build_estimation_prefill(
-                loaded.estimation.spec,
-                loaded.estimation.result,
-                loaded.reference.compiled,
-            )
+            # The form is per-role, so the view is keyed by it. A bundle holds
+            # one estimation, tied to the reference model it was run against.
+            estimation.view = {
+                "reference": build_estimation_prefill(
+                    loaded.estimation.spec,
+                    loaded.estimation.result,
+                    loaded.reference.compiled,
+                )
+            }
 
     mc = TabState()
     if loaded.mc is not None:

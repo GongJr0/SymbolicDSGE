@@ -1021,6 +1021,27 @@ label {
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
 }
 
+.estimation-suboptions {
+  /* No fill of its own: it sits on whichever section encloses it, so the
+     stroke is what marks its bounds and neither theme needs a background. */
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.estimation-suboptions > summary {
+  color: #475569;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.estimation-suboptions[open] > summary {
+  margin-bottom: 8px;
+}
+
 .estimation-data-section {
   display: grid;
   gap: 8px;
@@ -2453,6 +2474,16 @@ button.mc-palette-tab.active .mc-palette-tab-count {
 .theme-dark .estimation-chart {
   background: #152032;
   border-color: #334155;
+}
+
+.theme-dark .estimation-suboptions {
+  border-color: #334155;
+}
+
+/* The enclosing section mutes its own text, which the summary should not
+   inherit: it titles the panel, so it reads at the page's foreground. */
+.theme-dark .estimation-suboptions > summary {
+  color: #e2e8f0;
 }
 
 .theme-dark .estimation-details h3,

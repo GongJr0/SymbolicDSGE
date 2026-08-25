@@ -68,6 +68,21 @@ export type WorkspaceTab = "estimation" | "mc";
  * without a backend change. Carries no result: that is the tab's `result`
  * slot, which only a run fills.
  */
+export interface MapOptions {
+  method?: string;
+  m?: number;
+  maxiter?: number;
+  maxfun?: number;
+  maxls?: number;
+  factr?: number;
+  pgtol?: number;
+  fd_step?: number;
+  xatol?: number;
+  fatol?: number;
+  // Carried through untouched; the sampler's own tab renders no bounds table.
+  bounds?: Array<[number | null, number | null]> | null;
+}
+
 export interface EstimationViewState {
   method: EstimationMethod;
   parameters: EstimationParameterSpec[];
@@ -93,6 +108,20 @@ export interface EstimationViewState {
   adaptStart: number;
   adaptEpsilon: number;
   posteriorPoint: string;
+  // No control on a fresh form. A bundle whose run set one away from its
+  // default reveals it, so what is on screen is what will run.
+  cov: boolean;
+  jacobian: boolean;
+  computeMap: boolean;
+  covFdStepScale: number;
+  covFdAbsoluteFloor: number;
+  // The MAP presolve's own optimizer options, passed to the sampler verbatim,
+  // so the keys are the estimator's rather than the form's. Null until
+  // touched, which leaves the estimator on its own defaults. Every field is
+  // optional: a run records only what it was given.
+  mapOptions: MapOptions | null;
+  // Restored and re-posted, but too structured for a scalar control.
+  proposalCov: number[][] | null;
   modeFolded: boolean;
 }
 
@@ -127,10 +156,18 @@ export interface WorkspaceTabState<TResult, TView> {
  * Lives in the server process, which the refresh does not restart, so this is
  * the whole restore mechanism: nothing is kept on the client.
  */
+/** Estimation views keyed by role: the form is per-role, the tab's other two
+ * slots are not (a bundle holds one estimation, against the reference model).
+ * Partial per role so a bundle can fill only what it knows and the form merges
+ * the rest from its own defaults. */
+export type EstimationViewsByRole = Partial<
+  Record<Role, Partial<EstimationViewState>>
+>;
+
 export interface SessionWorkspace {
   estimation?: WorkspaceTabState<
     EstimationRunResult["result"],
-    EstimationViewState
+    EstimationViewsByRole
   >;
   mc?: WorkspaceTabState<MCPipelineResult, MCViewState>;
   simulation?: Partial<Record<Role, Record<string, unknown>>>;
@@ -203,6 +240,11 @@ export interface EstimationRunRequest {
   posterior_point: string;
   estimate_and_solve: boolean;
 }
+
+/** A result as the wire carries it: what the run produced, with none of the
+ * session framing (`run_id`, `role`, `solved`) the run envelope adds. This is
+ * the shape the workspace's `result` slot holds. */
+export type EstimationResultWire = EstimationRunResult["result"];
 
 export interface EstimationRunResult {
   run_id: string;

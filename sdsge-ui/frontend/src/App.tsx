@@ -520,6 +520,7 @@ export default function App() {
           hidden={view !== "estimation"}
           role={role}
           model={activeModel}
+          workspace={session?.workspace ?? null}
           onSessionRefresh={refreshSession}
         />
         {mcMounted && (
