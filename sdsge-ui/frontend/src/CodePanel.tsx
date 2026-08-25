@@ -21,6 +21,17 @@ export interface CodePanelHandle {
   resetTemplate: () => void;
 }
 
+/** Compare two sources ignoring line endings.
+ *
+ * The editor may normalize them when it loads a document, which would
+ * otherwise read as the user having edited the template and freeze it at
+ * whatever signature it was first built with.
+ */
+function sameSource(left: string, right: string): boolean {
+  const eol = /\r\n/g;
+  return left.replace(eol, "\n") === right.replace(eol, "\n");
+}
+
 function makeTemplate(model: ModelSummary, kind: FunctionKind): string {
   const vars = model.variables ?? [];
   const obs = model.observables ?? [];
@@ -91,11 +102,22 @@ export const CodePanel = forwardRef<
     ...(activeModel.observables ?? []),
   ].join("|");
 
+  // The panel mounts before the session arrives, so its first template is
+  // built from an empty model and has no arguments at all.
+  const prevVarKeyRef = useRef(varKey);
+
   useEffect(() => {
     const newTemplate = makeTemplate(activeModel, kind);
     if (newTemplate === prevTemplateRef.current) return;
+    // An empty signature is never something the user authored, so the first
+    // model to arrive always replaces it. Afterwards only untouched code is,
+    // which is what keeps a real edit from being overwritten.
+    const hadNoModel = prevVarKeyRef.current === "";
+    prevVarKeyRef.current = varKey;
     setCode((current) =>
-      current === prevTemplateRef.current ? newTemplate : current,
+      hadNoModel || sameSource(current, prevTemplateRef.current)
+        ? newTemplate
+        : current,
     );
     prevTemplateRef.current = newTemplate;
     // eslint-disable-next-line react-hooks/exhaustive-deps

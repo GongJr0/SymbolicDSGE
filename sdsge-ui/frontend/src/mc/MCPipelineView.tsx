@@ -15,6 +15,7 @@ import type {
   EdgeChange,
   NodeChange,
   NodeMouseHandler,
+  XYPosition,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -36,6 +37,7 @@ import {
   fetchAvailableTraces,
   getMCCatalog,
   getMCCustomTemplate,
+  putWorkspaceView,
   runMCPipeline,
   validateMCPipeline,
 } from "../api";
@@ -45,6 +47,7 @@ import type {
   MCCatalog,
   MCPipelineResult,
   MCPipelineSpec,
+  MCViewState,
   MCStepCatalogItem,
   MCStepCategory,
   Role,
@@ -53,14 +56,6 @@ import type {
 import { StepInspector } from "./StepInspector";
 import { StepNode } from "./StepNode";
 import { MCResultPanel } from "./MCResultPanel";
-import {
-  clearMCWorkspace,
-  loadMCResult,
-  loadMCWorkspace,
-  saveMCResult,
-  saveMCWorkspace,
-} from "./persistence";
-import type { MCPersistedWorkspace } from "./persistence";
 import type { MCFlowNode, MCProducer } from "./types";
 
 const nodeTypes = { mcStep: StepNode };
@@ -198,6 +193,10 @@ function MCPipelineBuilder({
   const [noticeError, setNoticeError] = useState(false);
   const [result, setResult] = useState<MCPipelineResult | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  // Read inside the one-shot hydration effect, so a later session refresh
+  // updates the pills without re-seeding the canvas under the user.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const [summaryShare, setSummaryShare] = useState(36);
   const [summaryFolded, setSummaryFolded] = useState(false);
   const { screenToFlowPosition, fitView, getViewport } =
@@ -219,18 +218,22 @@ function MCPipelineBuilder({
           ],
         };
         setCatalog(value);
-        const [workspace, persistedResult] = await Promise.all([
-          loadMCWorkspace().catch(() => null),
-          loadMCResult().catch(() => null),
-        ]);
-        const restored = restoreNodes(workspace, value);
+        // Seeded from the session, which outlived the page. Read once: later
+        // reads carry back only what was PUT from here.
+        const mc = sessionRef.current?.workspace.mc ?? null;
+        const view = mc?.view ?? null;
+        // A bundle fills `spec`, not `view`: the pipeline is what it stores,
+        // the canvas is not. Falling back to it is what makes a bundled run
+        // visible when no result rode along with it.
+        const pipeline = view?.pipeline ?? mc?.spec ?? null;
+        const restored = restoreNodes(pipeline, view?.positions ?? {}, value);
         if (restored !== null) {
           setNodes(restored.nodes);
           setEdges(restored.edges);
-          setNRep(workspace?.nRep ?? 100);
-          setNJobs(workspace?.nJobs ?? null);
-          setVerbosity(workspace?.verbosity ?? 0);
-          setFailFast(workspace?.failFast ?? true);
+          setNRep(view?.nRep ?? 100);
+          setNJobs(view?.nJobs ?? null);
+          setVerbosity(view?.verbosity ?? 0);
+          setFailFast(view?.failFast ?? true);
         } else {
           const simulation = value.steps.find(
             (step) => step.step_type === "simulation",
@@ -239,7 +242,7 @@ function MCPipelineBuilder({
             setNodes([makeNode(simulation, { x: 100, y: 140 }, [])]);
           }
         }
-        setResult(persistedResult);
+        setResult(mc?.result ?? null);
         setHydrated(true);
       })
       .catch((error: unknown) => {
@@ -329,8 +332,9 @@ function MCPipelineBuilder({
   useEffect(() => {
     if (!hydrated) return;
     const timeout = window.setTimeout(() => {
-      void saveMCWorkspace({
-        version: 1,
+      void putWorkspaceView("mc", {
+        // The graph rides the view: a spec only reaches the tab's `spec` slot
+        // once a run writes it, and an edited graph has not run yet.
         pipeline,
         positions: Object.fromEntries(
           nodes.map((node) => [
@@ -350,14 +354,6 @@ function MCPipelineBuilder({
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [edges, failFast, hydrated, nJobs, nRep, nodes, pipeline, verbosity]);
-
-  useEffect(() => {
-    if (!hydrated || result === null) return;
-    void saveMCResult(result).catch((error: unknown) => {
-      setNotice(error instanceof Error ? error.message : String(error));
-      setNoticeError(true);
-    });
-  }, [hydrated, result]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<MCFlowNode>[]) => {
@@ -522,7 +518,7 @@ function MCPipelineBuilder({
     setVerbosity(0);
     setFailFast(true);
     try {
-      await clearMCWorkspace();
+      await putWorkspaceView("mc", null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
       setNoticeError(true);
@@ -939,19 +935,64 @@ function toPipelineSpec(nodes: MCFlowNode[], edges: Edge[]): MCPipelineSpec {
   };
 }
 
+/** Somewhere to put a node the canvas has no remembered position for.
+ *
+ * A bundle stores the pipeline that ran, not the canvas it was drawn on, so a
+ * restored run arrives with a graph and no coordinates. Layers by longest path
+ * from a source, which reads left to right in dependency order.
+ */
+function autoLayout(pipeline: MCPipelineSpec): Record<string, XYPosition> {
+  const incoming = new Map<string, string[]>();
+  for (const node of pipeline.nodes) incoming.set(node.id, []);
+  for (const edge of pipeline.edges) incoming.get(edge.target)?.push(edge.source);
+
+  const depth = new Map<string, number>();
+  const walking = new Set<string>();
+  function depthOf(id: string): number {
+    const cached = depth.get(id);
+    if (cached !== undefined) return cached;
+    // A spec is a DAG; the guard only keeps a malformed one from recursing.
+    if (walking.has(id)) return 0;
+    walking.add(id);
+    const sources = incoming.get(id) ?? [];
+    const value = sources.length === 0 ? 0 : Math.max(...sources.map(depthOf)) + 1;
+    depth.set(id, value);
+    return value;
+  }
+
+  const filled = new Map<number, number>();
+  const positions: Record<string, XYPosition> = {};
+  for (const node of pipeline.nodes) {
+    const column = depthOf(node.id);
+    const row = filled.get(column) ?? 0;
+    filled.set(column, row + 1);
+    positions[node.id] = { x: 100 + column * 260, y: 140 + row * 130 };
+  }
+  // Postprocs consume the finished run rather than a node, so they trail it.
+  const trailing = Math.max(0, ...[...filled.keys()].map((column) => column + 1));
+  (pipeline.postprocs ?? []).forEach((postproc, index) => {
+    positions[postproc.name] = { x: 100 + trailing * 260, y: 140 + index * 130 };
+  });
+  return positions;
+}
+
 function restoreNodes(
-  workspace: MCPersistedWorkspace | null,
+  pipeline: MCPipelineSpec | null,
+  positions: Record<string, XYPosition>,
   catalog: MCCatalog,
 ): { nodes: MCFlowNode[]; edges: Edge[] } | null {
-  if (workspace === null || workspace.version !== 1) return null;
+  if (pipeline === null) return null;
+  // Remembered positions win; anything without one is laid out, so a bundle's
+  // graph does not land stacked on a single point.
+  const placed = { ...autoLayout(pipeline), ...positions };
   const nodes: MCFlowNode[] = [];
-  for (const spec of workspace.pipeline.nodes) {
+  for (const spec of pipeline.nodes) {
     const item = catalog.steps.find((step) => step.step_type === spec.step_type);
     if (item === undefined) return null;
     nodes.push({
       id: spec.id,
       type: "mcStep",
-      position: workspace.positions[spec.id] ?? { x: 100, y: 140 },
+      position: placed[spec.id] ?? { x: 100, y: 140 },
       data: {
         stepType: spec.step_type,
         name: spec.name,
@@ -966,13 +1007,13 @@ function restoreNodes(
   // Postprocs are a separate spec list with no id; rebuild them as standalone
   // canvas nodes keyed by name. (`?? []` tolerates a pre-postprocs cached
   // workspace; any legacy postproc still in `nodes` is re-routed on next save.)
-  for (const pp of workspace.pipeline.postprocs ?? []) {
+  for (const pp of pipeline.postprocs ?? []) {
     const item = catalog.steps.find((step) => step.step_type === pp.step_type);
     if (item === undefined) return null;
     nodes.push({
       id: crypto.randomUUID(),
       type: "mcStep",
-      position: workspace.positions[pp.name] ?? { x: 100, y: 320 },
+      position: placed[pp.name] ?? { x: 100, y: 320 },
       data: {
         stepType: pp.step_type,
         name: pp.name,
@@ -986,7 +1027,7 @@ function restoreNodes(
   }
   return {
     nodes,
-    edges: workspace.pipeline.edges.map((edge) => ({
+    edges: pipeline.edges.map((edge) => ({
       id: `mc-edge-${edge.source}-${edge.target}`,
       source: edge.source,
       target: edge.target,

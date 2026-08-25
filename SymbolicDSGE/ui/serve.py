@@ -18,13 +18,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 from .estimation import (
     build_estimation_prefill,
     emit_estimation_wire,
     estimator_spec_wire,
 )
+from .schemas import Role
 from .session import TabState, Workspace
 
 if TYPE_CHECKING:
@@ -108,14 +109,15 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
         mc.spec = loaded.mc.spec.to_dict()
         mc.result = loaded.mc.wire()
 
-    simulation_dict: dict[str, dict[str, Any]] | None = (
-        {role: spec.to_dict() for role, spec in loaded.simulation.items()}
-        if loaded.simulation is not None
-        else None
-    )
+    # Spec only: the session replays it against the model once both are
+    # installed, which is what fills the result.
+    simulation = {
+        cast(Role, role): TabState(spec=spec.to_dict())
+        for role, spec in (loaded.simulation or {}).items()
+    }
 
     return Workspace(
         estimation=estimation,
         mc=mc,
-        simulation=simulation_dict,
+        simulation=simulation,
     )

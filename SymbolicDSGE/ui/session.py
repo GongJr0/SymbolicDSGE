@@ -38,6 +38,7 @@ from .schemas import (
     ShockParamUpdate,
     WorkspaceTab,
 )
+from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
 
 from .estimation import (
@@ -122,9 +123,10 @@ class Workspace:
 
     estimation: TabState = field(default_factory=TabState)
     mc: TabState = field(default_factory=TabState)
-    #: Per-role ``SimSpec`` dicts. The Outputs tab's controls map onto the
-    #: spec's own fields, so it carries no separate view.
-    simulation: dict[str, Any] | None = None
+    #: Per-role simulation tabs. The Outputs tab renders only ``T`` and the
+    #: observables toggle, both of them ``SimSpec`` fields, so there is no
+    #: view to carry: the spec is the form.
+    simulation: dict[Role, TabState] = field(default_factory=dict)
 
 
 class UISession:
@@ -151,6 +153,7 @@ class UISession:
             self.set_solved_model("reference", reference, source=source)
         if dgp is not None:
             self.set_solved_model("dgp", dgp, source=source)
+        self.replay_bundled_simulations()
 
     def summary(self) -> dict[str, Any]:
         roles: tuple[Role, Role] = ("reference", "dgp")
@@ -176,8 +179,12 @@ class UISession:
         ):
             if payload := tab.payload():
                 out[name] = payload
-        if self.workspace.simulation is not None:
-            out["simulation"] = self.workspace.simulation
+        if simulation := {
+            role: payload
+            for role, tab in self.workspace.simulation.items()
+            if (payload := tab.payload())
+        }:
+            out["simulation"] = simulation
         return out
 
     def set_workspace_view(
@@ -313,6 +320,17 @@ class UISession:
             shock_scale=shock_scale,
             observables=observables,
         )
+        return self._record_sim_run(role=role, sim=sim, T=T, observables=observables)
+
+    def _record_sim_run(
+        self, *, role: Role, sim: Any, T: int, observables: bool
+    ) -> dict[str, Any]:
+        """Serialize a simulation and file it as a run.
+
+        Shared by the tab's own runs and by a bundle's stored spec replayed at
+        load, so both arrive at the Outputs tab in the same shape and both are
+        fetchable by ``run_id``.
+        """
         run_id = str(uuid4())
         sim_dict = sim.states
         sim_dict["_X"] = sim.X
@@ -320,7 +338,7 @@ class UISession:
             sim_dict.update(sim.observables)
 
         all_series = encode_named_arrays(sim_dict)
-        extra = self._apply_array_functions(role, sim_dict)
+        extra, transform_errors = self._apply_array_functions(role, sim_dict)
 
         if extra:
             all_series = all_series + encode_named_arrays(extra)
@@ -333,6 +351,7 @@ class UISession:
             "observables": observables,
             "series": all_series,
             "figures": figures,
+            "transform_errors": transform_errors,
         }
         self.runs[run_id] = RunRecord(
             run_id=run_id,
@@ -341,6 +360,39 @@ class UISession:
             payload=payload,
         )
         return payload
+
+    def replay_bundled_simulations(self) -> None:
+        """Run each stored simulation spec against the model it was stored with.
+
+        A bundle keeps the spec rather than the output, and the Outputs tab's
+        only controls (``T`` and the observables toggle) are spec fields, so
+        there is nothing to prefill and no way to show that a simulation is in
+        the bundle at all. Replaying it produces the output the bundle stands
+        for; the spec pins the seed, so this reproduces the run rather than
+        drawing a new one.
+
+        A spec that will not replay leaves its slot empty rather than taking
+        the whole session down with it: the other tabs are unaffected by it.
+        """
+        for role, tab in self.workspace.simulation.items():
+            if tab.spec is None or self._slot(role).solved is None:
+                continue
+            try:
+                tab.result = self.run_simulation_spec(role, SimSpec.from_dict(tab.spec))
+            except Exception as exc:  # noqa: BLE001 - reported, never fatal
+                print(f"sdsge-ui: could not replay the '{role}' simulation: {exc}")
+
+    def run_simulation_spec(self, role: Role, spec: SimSpec) -> dict[str, Any]:
+        """Run a :class:`SimSpec` verbatim; it unpacks straight into ``sim``."""
+        slot = self._slot(role)
+        if slot.solved is None:
+            raise ValueError(f"Role '{role}' does not have a solved model.")
+        return self._record_sim_run(
+            role=role,
+            sim=slot.solved.sim(**spec),
+            T=int(spec.T),
+            observables=bool(spec.observables),
+        )
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
         slot = self._slot(request.role)
@@ -560,19 +612,37 @@ class UISession:
         self,
         role: Role,
         sim_dict: dict[str, NDArray[np.float64]],
-    ) -> dict[str, NDArray[np.float64]]:
+    ) -> tuple[dict[str, NDArray[np.float64]], list[dict[str, str]]]:
+        """Run this role's transforms, reporting the ones that did not run.
+
+        A transform that fails produces no series, which on its own reads as
+        the submit having silently not worked. The commonest cause is a
+        signature naming a series the run did not produce: the default
+        template takes every observable, and a run with the observables
+        toggle off supplies none of them.
+        """
         extra: dict[str, NDArray[np.float64]] = {}
+        errors: list[dict[str, str]] = []
         for name, record in self.functions[role].items():
             if record.kind != "array":
                 continue
             try:
                 sig = inspect.signature(record.func)
+                # Named but unavailable, and with no default to fall back on.
+                # Passing the rest would raise the same failure from deeper in,
+                # with a message that does not say which series was missing.
+                missing = [
+                    param
+                    for param, spec in sig.parameters.items()
+                    if param not in sim_dict and spec.default is inspect.Parameter.empty
+                ]
+                if missing:
+                    raise TypeError(f"this simulation produced no {', '.join(missing)}")
                 kwargs = {p: sim_dict[p] for p in sig.parameters if p in sim_dict}
-                result = np.asarray(record.func(**kwargs), dtype=np.float64)
-                extra[name] = result
-            except Exception:
-                pass
-        return extra
+                extra[name] = np.asarray(record.func(**kwargs), dtype=np.float64)
+            except Exception as exc:
+                errors.append({"name": name, "error": str(exc)})
+        return extra, errors
 
     def _slot(self, role: Role) -> ModelSlot:
         if role not in self.slots:

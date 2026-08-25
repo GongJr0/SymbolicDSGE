@@ -307,6 +307,9 @@ export function EstimationView({
   const active = parameters.find((parameter) => parameter.name === selected) ?? null;
   const estimatedCount = parameters.filter((parameter) => parameter.estimate).length;
   const observableNames = parseNames(observables) ?? [];
+  const estimatedNames = parameters
+    .filter((parameter) => parameter.estimate)
+    .map((parameter) => parameter.name);
 
   function updateParameter(name: string, update: Partial<EstimationParameterSpec>) {
     setParameters((current) =>
@@ -612,9 +615,18 @@ export function EstimationView({
               <MapOptionsPanel
                 options={{ ...MAP_OPTION_DEFAULTS, ...(mapOptions ?? {}) }}
                 optimizers={catalog?.optimizer_methods ?? [DEFAULTS.optimizer]}
+                bounds={mapOptions?.bounds ?? null}
+                estimatedNames={estimatedNames}
                 onChange={(update) =>
                   setMapOptions({ ...(mapOptions ?? {}), ...update })
                 }
+              />
+            )}
+            {method === "mcmc" && (
+              <ProposalCovariance
+                value={proposalCov}
+                names={estimatedNames}
+                computeMap={computeMap}
               />
             )}
           </div>
@@ -957,10 +969,14 @@ function ParameterDetails({
 function MapOptionsPanel({
   options,
   optimizers,
+  bounds,
+  estimatedNames,
   onChange,
 }: {
   options: Required<Omit<MapOptions, "bounds">>;
   optimizers: string[];
+  bounds: Array<[number | null, number | null]> | null;
+  estimatedNames: string[];
   onChange: (update: MapOptions) => void;
 }) {
   return (
@@ -1031,6 +1047,94 @@ function MapOptionsPanel({
           </>
         )}
       </div>
+      {bounds !== null && (
+        <>
+          <h4>Bounds</h4>
+          <MatrixTable
+            rowLabels={estimatedNames}
+            columnLabels={["lower", "upper"]}
+            values={bounds.map(([low, high]) => [low, high])}
+          />
+        </>
+      )}
+    </details>
+  );
+}
+
+/** A read-only numeric table with labelled axes.
+ *
+ * What it shows arrives already decided: a covariance the sampler was handed,
+ * or the bounds a MAP presolve ran under. Making them legible is the point;
+ * neither is something this form sets.
+ */
+function MatrixTable({
+  rowLabels,
+  columnLabels,
+  values,
+}: {
+  rowLabels: string[];
+  columnLabels: string[];
+  values: Array<Array<number | null>>;
+}) {
+  return (
+    <div className="estimation-matrix">
+      <table>
+        <thead>
+          <tr>
+            <th />
+            {columnLabels.map((label) => (
+              <th key={label}>{label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {values.map((row, index) => (
+            <tr key={rowLabels[index] ?? index}>
+              <th>{rowLabels[index] ?? index}</th>
+              {row.map((value, column) => (
+                <td key={columnLabels[column] ?? column}>
+                  {value === null || !Number.isFinite(value)
+                    ? "--"
+                    : value.toPrecision(3)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Which of the sampler's two proposal sources this run used.
+ *
+ * A covariance that was handed over is shown; one the sampler derives has no
+ * value to show until it has run, so the readout names where it comes from
+ * instead. There is no third state: a Hessian that fails aborts the run
+ * rather than degrading to anything.
+ */
+function ProposalCovariance({
+  value,
+  names,
+  computeMap,
+}: {
+  value: number[][] | null;
+  names: string[];
+  computeMap: boolean;
+}) {
+  if (value === null) {
+    return (
+      <span className="muted">
+        {`Proposal covariance: derived from the Hessian at ${
+          computeMap ? "the MAP estimate" : "the starting values"
+        }.`}
+      </span>
+    );
+  }
+  return (
+    <details className="estimation-suboptions">
+      <summary>Proposal covariance (pre-specified)</summary>
+      <MatrixTable rowLabels={names} columnLabels={names} values={value} />
     </details>
   );
 }

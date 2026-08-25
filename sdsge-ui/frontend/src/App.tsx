@@ -167,6 +167,23 @@ export default function App() {
     if (yaml) setContent((c) => (c === "" ? yaml : c));
   }, [session, role]);
 
+  // Seed the Outputs tab from the session: this role's last simulation, which
+  // is either a run made here or a bundle's stored spec replayed at load.
+  // Once per role, so the refresh after each run does not reset the controls
+  // under the user.
+  const outputsSeeded = useRef<Role | null>(null);
+  useEffect(() => {
+    if (session === null || outputsSeeded.current === role) return;
+    outputsSeeded.current = role;
+    const simulation = session.workspace.simulation?.[role];
+    if (simulation === undefined) return;
+    if (simulation.spec !== undefined) {
+      setSimT(simulation.spec.T);
+      setIncludeObs(simulation.spec.observables);
+    }
+    setResult(simulation.result ?? null);
+  }, [session, role]);
+
   useEffect(() => {
     if (message === "" || messageIsError) return;
     const timeout = window.setTimeout(() => setMessage(""), 3500);
@@ -917,6 +934,16 @@ function OutputsView({
           Simulate
         </button>
       </section>
+
+      {(result?.transform_errors ?? []).length > 0 && (
+        <section className="transform-errors">
+          {result?.transform_errors?.map((failure) => (
+            <span key={failure.name} className="status error">
+              {`${failure.name}: ${failure.error}`}
+            </span>
+          ))}
+        </section>
+      )}
 
       {result !== null && (
         <OutputWorkspace

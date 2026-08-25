@@ -145,10 +145,17 @@ export interface MCViewState {
  * launched with; `view` is the only slot the client writes. Each is absent
  * until something fills it.
  */
-export interface WorkspaceTabState<TResult, TView> {
-  spec?: Record<string, unknown>;
+export interface WorkspaceTabState<TSpec, TResult, TView> {
+  spec?: TSpec;
   result?: TResult;
   view?: TView;
+}
+
+/** An `EstimatorSpec` as a bundle stores it: observed data plus the
+ * estimator's construction arguments, with nothing the form added. */
+export interface EstimatorSpecWire {
+  y: number[][];
+  params: Record<string, unknown>;
 }
 
 /** Everything a reload repaints from.
@@ -166,11 +173,14 @@ export type EstimationViewsByRole = Partial<
 
 export interface SessionWorkspace {
   estimation?: WorkspaceTabState<
+    EstimatorSpecWire,
     EstimationRunResult["result"],
     EstimationViewsByRole
   >;
-  mc?: WorkspaceTabState<MCPipelineResult, MCViewState>;
-  simulation?: Partial<Record<Role, Record<string, unknown>>>;
+  mc?: WorkspaceTabState<MCPipelineSpec, MCPipelineResult, MCViewState>;
+  // Per role, and with no view: the Outputs tab renders only `T` and the
+  // observables toggle, both of them fields of the spec itself.
+  simulation?: Partial<Record<Role, WorkspaceTabState<SimSpecWire, SimResult, never>>>;
 }
 
 export interface SessionSummary {
@@ -193,6 +203,16 @@ export interface FigureResult {
   error?: string;
 }
 
+/** A `SimSpec` as a bundle stores it. The tab's controls are two of its
+ * fields, which is why the simulation slot carries no separate view. */
+export interface SimSpecWire {
+  T: number;
+  x0: number[] | null;
+  observables: boolean;
+  shock_scale: number;
+  shocks: Record<string, unknown> | null;
+}
+
 export interface SimResult {
   run_id: string;
   kind: "sim";
@@ -201,6 +221,9 @@ export interface SimResult {
   observables: boolean;
   series: NamedArray[];
   figures?: FigureResult[];
+  // Transforms that produced no series, and why. A failure is otherwise
+  // indistinguishable from the submit not having worked.
+  transform_errors?: Array<{ name: string; error: string }>;
 }
 
 export type EstimationMethod = "mle" | "map" | "mcmc";

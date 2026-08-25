@@ -85,7 +85,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     sim_spec = SimSpec(
         T=8,
         shocks={
-            "u": {
+            "e_u": {
                 "dist": "norm",
                 "multivar": False,
                 "seed": 42,
@@ -292,7 +292,7 @@ def test_session_summary_surfaces_workspace_preload() -> None:
             view={"method": "mcmc"},
         ),
         mc=TabState(spec={"nodes": []}, result={"kind": "mc"}),
-        simulation={"T": 8},
+        simulation={"reference": TabState(spec={"T": 8})},
     )
     client = TestClient(create_app(workspace=workspace))
     payload = client.get("/api/session").json()["workspace"]
@@ -300,7 +300,7 @@ def test_session_summary_surfaces_workspace_preload() -> None:
     assert payload["estimation"]["result"]["kind"] == "mcmc"
     assert payload["estimation"]["view"]["method"] == "mcmc"
     assert payload["mc"] == {"spec": {"nodes": []}, "result": {"kind": "mc"}}
-    assert payload["simulation"] == {"T": 8}
+    assert payload["simulation"] == {"reference": {"spec": {"T": 8}}}
 
 
 def test_session_summary_drops_unfilled_tab_slots() -> None:
@@ -314,10 +314,11 @@ def test_session_summary_drops_unfilled_tab_slots() -> None:
 
 
 def test_session_summary_drops_unset_workspace_slots() -> None:
-    workspace = Workspace(simulation={"T": 5})  # only simulation populated
+    # Only simulation populated, and only its spec within that.
+    workspace = Workspace(simulation={"reference": TabState(spec={"T": 5})})
     client = TestClient(create_app(workspace=workspace))
     payload = client.get("/api/session").json()["workspace"]
-    assert payload == {"simulation": {"T": 5}}
+    assert payload == {"simulation": {"reference": {"spec": {"T": 5}}}}
 
 
 # -- build_workspace from a LoadedBundle -----------------------------------
@@ -348,12 +349,16 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # The run's own settings come back, so re-running reproduces it.
     assert (view["nDraws"], view["burnIn"], view["thin"]) == (20, 5, 1)
 
+    # A pipeline with no result: the spec is the only evidence of an MC run in
+    # the bundle, so it has to carry enough for the canvas to draw the graph.
     assert ws.mc.spec is not None
+    assert [node["id"] for node in ws.mc.spec["nodes"]] == ["n1"]
+    assert ws.mc.spec["edges"] == []
     assert ws.mc.result is None  # no MC result was attached at build time
-    assert ws.mc.view is None  # a bundle carries no graph layout
-    assert ws.simulation is not None
-    assert ws.simulation["reference"]["T"] == 8
-    assert ws.simulation["reference"]["shocks"]["u"]["seed"] == 42
+    assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
+    assert ws.simulation["reference"].spec is not None
+    assert ws.simulation["reference"].spec["T"] == 8
+    assert ws.simulation["reference"].spec["shocks"]["e_u"]["seed"] == 42
 
 
 def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
@@ -453,6 +458,81 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
     assert reloaded.estimation is not None
     assert reloaded.estimation.spec.params["estimated_params"] == ["beta", "sigma"]
     assert len(reloaded.estimation.spec.y) == 10
+
+
+# -- bundled simulation replay ---------------------------------------------
+
+
+def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
+    """A stored spec becomes the output it stands for.
+
+    A bundle keeps no simulation results, and the Outputs tab's only controls
+    are spec fields, so without this there is nothing on screen to show a
+    simulation is in the bundle at all.
+    """
+    loaded = build_from(_hydrated_bundle(tmp_path))
+    app = create_app(
+        reference=loaded.reference,
+        dgp=loaded.dgp,
+        workspace=build_workspace(loaded),
+    )
+    client = TestClient(app)
+
+    body = client.get("/api/session").json()
+
+    simulation = body["workspace"]["simulation"]["reference"]
+    assert simulation["spec"]["T"] == 8
+    result = simulation["result"]
+    assert result["kind"] == "sim" and result["T"] == 8
+    assert {"Infl", "Rate"} <= {series["name"] for series in result["series"]}
+    # Filed as a real run, so it is listed and fetchable like any other.
+    assert [(run["kind"], run["role"]) for run in body["runs"]] == [
+        ("sim", "reference")
+    ]
+    assert client.get(f"/api/run/{result['run_id']}").status_code == 200
+
+
+def test_bundled_simulation_replay_reproduces_rather_than_redraws(
+    tmp_path: Path,
+) -> None:
+    """The spec pins the seed, so two replays of it agree."""
+    loaded = build_from(_hydrated_bundle(tmp_path))
+
+    first = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
+    second = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
+
+    def series(app: Any) -> Any:
+        payload = TestClient(app).get("/api/session").json()
+        return payload["workspace"]["simulation"]["reference"]["result"]["series"]
+
+    assert series(first) == series(second)
+
+
+def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One bad spec must not cost the tabs that had nothing to do with it."""
+    loaded = build_from(_hydrated_bundle(tmp_path))
+    workspace = build_workspace(loaded)
+    assert workspace.simulation["reference"].spec is not None
+    workspace.simulation["reference"].spec["shocks"] = {
+        "not_a_shock": {
+            "dist": "norm",
+            "multivar": False,
+            "seed": 1,
+            "dist_args": [],
+            "dist_kwargs": {},
+        }
+    }
+
+    app = create_app(reference=loaded.reference, workspace=workspace)
+
+    assert "could not replay" in capsys.readouterr().out
+    payload = TestClient(app).get("/api/session").json()
+    # The spec survives for inspection, the result is simply absent, and the
+    # estimation tab is untouched by any of it.
+    assert "result" not in payload["workspace"]["simulation"]["reference"]
+    assert payload["workspace"]["estimation"]["result"] is not None
 
 
 # -- workspace view updates ------------------------------------------------
