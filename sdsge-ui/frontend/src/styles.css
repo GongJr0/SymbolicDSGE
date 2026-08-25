@@ -1021,6 +1021,82 @@ label {
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
 }
 
+.transform-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.estimation-suboptions {
+  /* No fill of its own: it sits on whichever section encloses it, so the
+     stroke is what marks its bounds and neither theme needs a background. */
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.estimation-suboptions > summary {
+  color: #475569;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.estimation-suboptions[open] > summary {
+  margin-bottom: 8px;
+}
+
+.estimation-suboptions h4 {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  margin: 10px 0 6px;
+  text-transform: uppercase;
+}
+
+.estimation-matrix {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.estimation-matrix table {
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.estimation-matrix th,
+.estimation-matrix td {
+  border: 1px solid #e2e8f0;
+  padding: 3px 7px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.estimation-matrix thead th,
+.estimation-matrix tbody th {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 600;
+  position: sticky;
+}
+
+.estimation-matrix thead th {
+  top: 0;
+}
+
+.estimation-matrix tbody th {
+  left: 0;
+  text-align: left;
+}
+
+.estimation-matrix td {
+  color: #11192c;
+}
+
 .estimation-data-section {
   display: grid;
   gap: 8px;
@@ -2453,6 +2529,42 @@ button.mc-palette-tab.active .mc-palette-tab-count {
 .theme-dark .estimation-chart {
   background: #152032;
   border-color: #334155;
+}
+
+.theme-dark .transform-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.estimation-suboptions {
+  border-color: #334155;
+}
+
+/* The enclosing section mutes its own text, which the summary should not
+   inherit: it titles the panel, so it reads at the page's foreground. */
+.theme-dark .estimation-suboptions > summary {
+  color: #e2e8f0;
+}
+
+.theme-dark .estimation-suboptions h4 {
+  color: #94a3b8;
+}
+
+.theme-dark .estimation-matrix th,
+.theme-dark .estimation-matrix td {
+  border-color: #334155;
+}
+
+.theme-dark .estimation-matrix thead th,
+.theme-dark .estimation-matrix tbody th {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.theme-dark .estimation-matrix td {
+  color: #e2e8f0;
 }
 
 .theme-dark .estimation-details h3,

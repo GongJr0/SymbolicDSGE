@@ -39,6 +39,104 @@ def test_array_envelope_round_trips_float64_payload() -> None:
     np.testing.assert_array_equal(out, arr)
 
 
+_TRANSFORM = """import numpy as np
+from numpy import ndarray
+
+
+def transform(u, Infl) -> ndarray:
+    return u + Infl
+"""
+
+
+def _solved_client() -> TestClient:
+    client = TestClient(create_app())
+    client.post(
+        "/api/model/load-yaml",
+        json={"role": "reference", "path": "MODELS/test.yaml"},
+    )
+    client.post("/api/model/solve", json={"role": "reference", "compile_kwargs": {}})
+    return client
+
+
+def _simulate(client: TestClient, *, observables: bool) -> dict:
+    return client.post(
+        "/api/run/sim",
+        json={
+            "role": "reference",
+            "T": 20,
+            "observables": observables,
+            "shock_scale": 1.0,
+        },
+    ).json()
+
+
+def test_submitted_transform_becomes_a_series() -> None:
+    client = _solved_client()
+    client.post(
+        "/api/code/submit",
+        json={"role": "reference", "code": _TRANSFORM, "kind": "array"},
+    )
+
+    sim = _simulate(client, observables=True)
+
+    assert "transform" in {series["name"] for series in sim["series"]}
+    assert sim["transform_errors"] == []
+
+
+def test_transform_missing_a_series_says_which_one() -> None:
+    """The default template takes every observable, and the toggle can be off.
+
+    Producing nothing and saying nothing reads as the submit having failed,
+    which is the one thing that did work.
+    """
+    client = _solved_client()
+    client.post(
+        "/api/code/submit",
+        json={"role": "reference", "code": _TRANSFORM, "kind": "array"},
+    )
+
+    sim = _simulate(client, observables=False)
+
+    assert "transform" not in {series["name"] for series in sim["series"]}
+    assert sim["transform_errors"] == [
+        {"name": "transform", "error": "this simulation produced no Infl"}
+    ]
+
+
+def test_transform_that_raises_reports_its_own_message() -> None:
+    client = _solved_client()
+    client.post(
+        "/api/code/submit",
+        json={
+            "role": "reference",
+            "code": "def boom(u):\n    raise ValueError('kaboom')\n",
+            "kind": "array",
+        },
+    )
+
+    sim = _simulate(client, observables=True)
+
+    assert sim["transform_errors"] == [{"name": "boom", "error": "kaboom"}]
+
+
+def test_transform_with_a_default_does_not_count_as_missing() -> None:
+    """A parameter the run cannot supply is only a problem without a default."""
+    client = _solved_client()
+    client.post(
+        "/api/code/submit",
+        json={
+            "role": "reference",
+            "code": "def scaled(u, factor=2.0):\n    return u * factor\n",
+            "kind": "array",
+        },
+    )
+
+    sim = _simulate(client, observables=True)
+
+    assert "scaled" in {series["name"] for series in sim["series"]}
+    assert sim["transform_errors"] == []
+
+
 def test_ui_backend_loads_solves_and_simulates_model() -> None:
     client = TestClient(create_app())
 

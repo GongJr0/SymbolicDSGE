@@ -60,9 +60,133 @@ export interface ModelSummary {
   has_kalman?: boolean;
 }
 
+export type WorkspaceTab = "estimation" | "mc";
+
+/** The estimation tab as it stands on screen.
+ *
+ * Client-owned and held verbatim by the server, so a new control lands here
+ * without a backend change. Carries no result: that is the tab's `result`
+ * slot, which only a run fills.
+ */
+export interface MapOptions {
+  method?: string;
+  m?: number;
+  maxiter?: number;
+  maxfun?: number;
+  maxls?: number;
+  factr?: number;
+  pgtol?: number;
+  fd_step?: number;
+  xatol?: number;
+  fatol?: number;
+  // Carried through untouched; the sampler's own tab renders no bounds table.
+  bounds?: Array<[number | null, number | null]> | null;
+}
+
+export interface EstimationViewState {
+  method: EstimationMethod;
+  parameters: EstimationParameterSpec[];
+  selected: string | null;
+  observables: string;
+  dataVectors: Record<string, string>;
+  optimizer: string;
+  maxIter: number;
+  maxFun: number;
+  m: number;
+  maxLs: number;
+  factr: number;
+  pgtol: number;
+  fdStep: number;
+  xatol: number;
+  fatol: number;
+  nDraws: number;
+  burnIn: number;
+  thin: number;
+  seed: number;
+  proposalScale: number;
+  adapt: boolean;
+  adaptStart: number;
+  adaptEpsilon: number;
+  posteriorPoint: string;
+  // No control on a fresh form. A bundle whose run set one away from its
+  // default reveals it, so what is on screen is what will run.
+  cov: boolean;
+  jacobian: boolean;
+  computeMap: boolean;
+  covFdStepScale: number;
+  covFdAbsoluteFloor: number;
+  // The MAP presolve's own optimizer options, passed to the sampler verbatim,
+  // so the keys are the estimator's rather than the form's. Null until
+  // touched, which leaves the estimator on its own defaults. Every field is
+  // optional: a run records only what it was given.
+  mapOptions: MapOptions | null;
+  // Restored and re-posted, but too structured for a scalar control.
+  proposalCov: number[][] | null;
+  modeFolded: boolean;
+}
+
+/** The MC tab as it stands on screen.
+ *
+ * Carries `pipeline` as well as the layout: an edited graph that has not been
+ * run has no `spec` yet, since the server only writes that slot from a run.
+ */
+export interface MCViewState {
+  pipeline: MCPipelineSpec;
+  positions: Record<string, { x: number; y: number }>;
+  nRep: number;
+  nJobs: number | null;
+  verbosity: number;
+  failFast: boolean;
+}
+
+/** One tab's slots on the session.
+ *
+ * `spec` and `result` are server-written, from a run or the bundle the UI was
+ * launched with; `view` is the only slot the client writes. Each is absent
+ * until something fills it.
+ */
+export interface WorkspaceTabState<TSpec, TResult, TView> {
+  spec?: TSpec;
+  result?: TResult;
+  view?: TView;
+}
+
+/** An `EstimatorSpec` as a bundle stores it: observed data plus the
+ * estimator's construction arguments, with nothing the form added. */
+export interface EstimatorSpecWire {
+  y: number[][];
+  params: Record<string, unknown>;
+}
+
+/** Everything a reload repaints from.
+ *
+ * Lives in the server process, which the refresh does not restart, so this is
+ * the whole restore mechanism: nothing is kept on the client.
+ */
+/** Estimation views keyed by role: the form is per-role, the tab's other two
+ * slots are not (a bundle holds one estimation, against the reference model).
+ * Partial per role so a bundle can fill only what it knows and the form merges
+ * the rest from its own defaults. */
+export type EstimationViewsByRole = Partial<
+  Record<Role, Partial<EstimationViewState>>
+>;
+
+export interface SessionWorkspace {
+  estimation?: WorkspaceTabState<
+    EstimatorSpecWire,
+    EstimationRunResult["result"],
+    EstimationViewsByRole
+  >;
+  mc?: WorkspaceTabState<MCPipelineSpec, MCPipelineResult, MCViewState>;
+  // Per role, and with no view: the Outputs tab renders only `T` and the
+  // observables toggle, both of them fields of the spec itself.
+  simulation?: Partial<Record<Role, WorkspaceTabState<SimSpecWire, SimResult, never>>>;
+}
+
 export interface SessionSummary {
   models: Record<Role, ModelSummary>;
   runs: Array<{ run_id: string; kind: string; role: Role }>;
+  workspace: SessionWorkspace;
 }
 
 export type FunctionKind = "array" | "figure";
@@ -79,6 +203,16 @@ export interface FigureResult {
   error?: string;
 }
 
+/** A `SimSpec` as a bundle stores it. The tab's controls are two of its
+ * fields, which is why the simulation slot carries no separate view. */
+export interface SimSpecWire {
+  T: number;
+  x0: number[] | null;
+  observables: boolean;
+  shock_scale: number;
+  shocks: Record<string, unknown> | null;
+}
+
 export interface SimResult {
   run_id: string;
   kind: "sim";
@@ -87,6 +221,9 @@ export interface SimResult {
   observables: boolean;
   series: NamedArray[];
   figures?: FigureResult[];
+  // Transforms that produced no series, and why. A failure is otherwise
+  // indistinguishable from the submit not having worked.
+  transform_errors?: Array<{ name: string; error: string }>;
 }
 
 export type EstimationMethod = "mle" | "map" | "mcmc";
@@ -127,6 +264,11 @@ export interface EstimationRunRequest {
   estimate_and_solve: boolean;
 }
 
+/** A result as the wire carries it: what the run produced, with none of the
+ * session framing (`run_id`, `role`, `solved`) the run envelope adds. This is
+ * the shape the workspace's `result` slot holds. */
+export type EstimationResultWire = EstimationRunResult["result"];
+
 export interface EstimationRunResult {
   run_id: string;
   kind: "estimation";
@@ -138,12 +280,22 @@ export interface EstimationRunResult {
     kind?: EstimationMethod;
     success?: boolean;
     message?: string;
-    theta?: Record<string, number>;
-    fun?: number;
+    // The optimum, in the unconstrained space the optimizer moved through.
+    // `theta` is the same point in the model's own parameters.
+    x?: Array<number | null>;
+    theta?: Record<string, number | null>;
+    fun?: number | null;
+    // Asymptotic covariance at the optimum, ordered like `x`. Null throughout
+    // when the Hessian there was not positive definite; absent when the run
+    // computed no covariance at all.
+    vcov?: Array<Array<number | null>> | null;
     // Keyed like `theta`; an entry is null where the covariance gave no
-    // finite standard error. Absent when the run computed no covariance.
-    se?: Record<string, number | null>;
+    // finite standard error.
+    se?: Record<string, number | null> | null;
     cov_status?: number;
+    // The call arguments the run was made with, for reproducing it.
+    optimizer_config?: Record<string, unknown>;
+    sampler_config?: Record<string, unknown>;
     loglik?: number;
     logprior?: number;
     logpost?: number;
@@ -154,13 +306,13 @@ export interface EstimationRunResult {
     samples?: Record<string, number[]>;
     logpost_trace?: number[];
     logjac_trace?: number[];
-    accept_rate?: number;
+    accept_rate?: number | null;
     n_draws?: number;
     burn_in?: number;
     thin?: number;
-    logpost_mean?: number;
-    logpost_min?: number;
-    logpost_max?: number;
+    logpost_mean?: number | null;
+    logpost_min?: number | null;
+    logpost_max?: number | null;
   };
 }
 

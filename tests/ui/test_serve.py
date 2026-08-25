@@ -21,7 +21,11 @@ from SymbolicDSGE.estimation.spec import (
 )
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 from SymbolicDSGE.ui import build_workspace, create_app, serve_from
-from SymbolicDSGE.ui.estimation import emit_estimation_wire, serialize_estimation_result
+from SymbolicDSGE.ui.estimation import (
+    build_estimation_prefill,
+    emit_estimation_wire,
+    serialize_estimation_result,
+)
 from SymbolicDSGE.ui.session import TabState, UISession, Workspace
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
@@ -81,7 +85,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     sim_spec = SimSpec(
         T=8,
         shocks={
-            "u": {
+            "e_u": {
                 "dist": "norm",
                 "multivar": False,
                 "seed": 42,
@@ -122,8 +126,71 @@ def test_emit_wire_mle_result() -> None:
     assert (wire["fun"], wire["nfev"], wire["nit"]) == (-12.3, 42, 15)
     assert wire["loglik"] == -10.0
     assert wire["success"] is True and wire["message"] == "ok"
+    assert wire["x"] == [0.99, 0.8]
     # A run that computed no covariance carries none, and reports OK for it.
-    assert wire["se"] is None and wire["cov_status"] == 0
+    assert wire["vcov"] is None and wire["se"] is None and wire["cov_status"] == 0
+
+
+def test_emit_wire_rebuilds_the_result_it_came_from() -> None:
+    """The wire is the full result, not a display projection of one.
+
+    ``x`` is the optimum and ``vcov`` is what ``cov=True`` paid for on the way
+    there; with ``optimizer_config`` they are what ``from_spec`` reads back, so
+    the workspace slot a bundle takes is not lossy.
+    """
+    original = MLEResult(
+        x=np.array([0.98, 0.5]),
+        theta={"beta": np.float64(0.98), "rho": np.float64(0.5)},
+        success=True,
+        message="ok",
+        fun=np.float64(1.0),
+        nfev=4,
+        nit=2,
+        optimizer_config={"method": "L-BFGS-B", "options": {"maxiter": 15000}},
+        vcov=np.array([[1e-4, 0.0], [0.0, 4e-4]]),
+        se={"beta": np.float64(0.01), "rho": np.float64(0.02)},
+        cov_status=0,
+        loglik=np.float64(-1.0),
+    )
+
+    rebuilt = MLEResult.from_spec(emit_estimation_wire(original))
+
+    np.testing.assert_allclose(rebuilt.x, original.x)
+    assert rebuilt.vcov is not None
+    np.testing.assert_allclose(rebuilt.vcov, original.vcov)
+    assert rebuilt.optimizer_config == original.optimizer_config
+    assert rebuilt.se == original.se
+    assert rebuilt.theta == original.theta
+    assert rebuilt.loglik == original.loglik
+
+
+def test_emit_wire_survives_a_covariance_that_failed() -> None:
+    """A non-SPD Hessian leaves NaN throughout, which strict JSON rejects.
+
+    Nulling it is what keeps one bad entry from costing the whole payload, and
+    the nulls read back as the NaN they stood for.
+    """
+    failed = MLEResult(
+        x=np.array([0.98]),
+        theta={"beta": np.float64(0.98)},
+        success=True,
+        message="ok",
+        fun=np.float64(1.0),
+        nfev=4,
+        nit=2,
+        optimizer_config={},
+        vcov=np.full((1, 1), np.nan),
+        se={"beta": np.float64(np.nan)},
+        cov_status=-1802,
+        loglik=np.float64(-1.0),
+    )
+
+    wire = emit_estimation_wire(failed)
+
+    assert wire["vcov"] == [[None]] and wire["se"] == {"beta": None}
+    rebuilt = MLEResult.from_spec(wire)
+    assert rebuilt.vcov is not None and bool(np.all(np.isnan(rebuilt.vcov)))
+    assert rebuilt.se is not None and np.isnan(rebuilt.se["beta"])
 
 
 def test_emit_wire_carries_standard_errors_and_nulls_non_finite() -> None:
@@ -174,6 +241,24 @@ def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
     assert emit_estimation_wire(live) == emit_estimation_wire(live, traces=traces)
 
 
+def test_emit_wire_mcmc_carries_sampler_config() -> None:
+    """The sampler's call arguments, as optimizer_config is for a point run."""
+    config = {"adapt": True, "adapt_start": 100, "random_state": 7}
+    live = MCMCResult(
+        param_names=["beta"],
+        samples=np.zeros((3, 1)),
+        logpost_trace=np.zeros(3),
+        logjac_trace=np.zeros(3),
+        accept_rate=np.float64(0.4),
+        n_draws=3,
+        burn_in=1,
+        thin=1,
+        sampler_config=config,
+    )
+
+    assert emit_estimation_wire(live)["sampler_config"] == config
+
+
 def test_serialize_estimation_result_shim_delegates() -> None:
     res = MAPResult(
         x=np.array([1.0]),
@@ -207,7 +292,7 @@ def test_session_summary_surfaces_workspace_preload() -> None:
             view={"method": "mcmc"},
         ),
         mc=TabState(spec={"nodes": []}, result={"kind": "mc"}),
-        simulation={"T": 8},
+        simulation={"reference": TabState(spec={"T": 8})},
     )
     client = TestClient(create_app(workspace=workspace))
     payload = client.get("/api/session").json()["workspace"]
@@ -215,7 +300,7 @@ def test_session_summary_surfaces_workspace_preload() -> None:
     assert payload["estimation"]["result"]["kind"] == "mcmc"
     assert payload["estimation"]["view"]["method"] == "mcmc"
     assert payload["mc"] == {"spec": {"nodes": []}, "result": {"kind": "mc"}}
-    assert payload["simulation"] == {"T": 8}
+    assert payload["simulation"] == {"reference": {"spec": {"T": 8}}}
 
 
 def test_session_summary_drops_unfilled_tab_slots() -> None:
@@ -229,10 +314,11 @@ def test_session_summary_drops_unfilled_tab_slots() -> None:
 
 
 def test_session_summary_drops_unset_workspace_slots() -> None:
-    workspace = Workspace(simulation={"T": 5})  # only simulation populated
+    # Only simulation populated, and only its spec within that.
+    workspace = Workspace(simulation={"reference": TabState(spec={"T": 5})})
     client = TestClient(create_app(workspace=workspace))
     payload = client.get("/api/session").json()["workspace"]
-    assert payload == {"simulation": {"T": 5}}
+    assert payload == {"simulation": {"reference": {"spec": {"T": 5}}}}
 
 
 # -- build_workspace from a LoadedBundle -----------------------------------
@@ -251,19 +337,83 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # bulk traces survived round-trip into the wire dict
     assert len(ws.estimation.result["samples"]["beta"]) == 20
 
-    # The view is the pair projected into what the form posts back.
+    # The view is the pair projected into the form's own shape, per role.
     assert ws.estimation.view is not None
-    assert ws.estimation.view["method"] == "mcmc"  # inferred from the result type
-    rows = {row["name"]: row for row in ws.estimation.view["parameters"]}
+    view = ws.estimation.view["reference"]
+    assert view["method"] == "mcmc"  # inferred from the result type
+    rows = {row["name"]: row for row in view["parameters"]}
     assert rows["beta"]["estimate"] and rows["sigma"]["estimate"]
-    assert len(ws.estimation.view["y"]) == 10  # observed data prefill
+    # Observed data arrives already split into the form's per-column text.
+    assert view["observables"] == "Infl, Rate"
+    assert len(view["dataVectors"]["Infl"].splitlines()) == 10
+    # The run's own settings come back, so re-running reproduces it.
+    assert (view["nDraws"], view["burnIn"], view["thin"]) == (20, 5, 1)
 
+    # A pipeline with no result: the spec is the only evidence of an MC run in
+    # the bundle, so it has to carry enough for the canvas to draw the graph.
     assert ws.mc.spec is not None
+    assert [node["id"] for node in ws.mc.spec["nodes"]] == ["n1"]
+    assert ws.mc.spec["edges"] == []
     assert ws.mc.result is None  # no MC result was attached at build time
-    assert ws.mc.view is None  # a bundle carries no graph layout
-    assert ws.simulation is not None
-    assert ws.simulation["reference"]["T"] == 8
-    assert ws.simulation["reference"]["shocks"]["u"]["seed"] == 42
+    assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
+    assert ws.simulation["reference"].spec is not None
+    assert ws.simulation["reference"].spec["T"] == 8
+    assert ws.simulation["reference"].spec["shocks"]["e_u"]["seed"] == 42
+
+
+def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
+    """A bundled experiment has to re-run as it ran, not at form defaults.
+
+    Includes the options the form renders no control for: leaving those to
+    default would silently substitute a different run behind an unchanged
+    screen.
+    """
+    parser = ModelParser.from_string(_MODEL_YAML)
+    model, kalman = parser.get_all()
+    compiled = DSGESolver(model, kalman).compile()
+    result = MAPResult(
+        x=np.array([0.97]),
+        theta={"beta": np.float64(0.97)},
+        success=True,
+        message="ok",
+        fun=np.float64(1.0),
+        nfev=9,
+        nit=3,
+        optimizer_config={
+            "theta0": [0.93],
+            "method": "Nelder-Mead",
+            "bounds": [[0.9, 0.999]],
+            "options": {
+                "maxiter": 250,
+                "xatol": 1e-7,
+                "jacobian": True,
+                "cov": False,
+                "cov_fd_step_scale": 2.5,
+            },
+        },
+        logpost=np.float64(-1.0),
+        logprior=np.float64(-0.1),
+    )
+    spec = EstimatorSpec(
+        y=[[1.0, 2.0]],
+        params=_estimation_spec([[1.0, 2.0]]).params | {"estimated_params": ["beta"]},
+    )
+
+    view = build_estimation_prefill(spec, result, compiled)
+
+    assert view["method"] == "map"
+    assert view["optimizer"] == "Nelder-Mead"
+    assert (view["maxIter"], view["xatol"]) == (250, 1e-7)
+    # Rendered no control on a fresh form; carried anyway.
+    assert view["jacobian"] is True
+    assert view["cov"] is False
+    assert view["covFdStepScale"] == 2.5
+    # The run's own starting point, not the model's calibration.
+    beta = next(row for row in view["parameters"] if row["name"] == "beta")
+    assert beta["initial"] == 0.93
+    assert (beta["lower"], beta["upper"]) == (0.9, 0.999)
+    # A key the run never recorded stays absent, for the form to default.
+    assert "factr" not in view and "pgtol" not in view
 
 
 def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
@@ -308,6 +458,81 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
     assert reloaded.estimation is not None
     assert reloaded.estimation.spec.params["estimated_params"] == ["beta", "sigma"]
     assert len(reloaded.estimation.spec.y) == 10
+
+
+# -- bundled simulation replay ---------------------------------------------
+
+
+def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
+    """A stored spec becomes the output it stands for.
+
+    A bundle keeps no simulation results, and the Outputs tab's only controls
+    are spec fields, so without this there is nothing on screen to show a
+    simulation is in the bundle at all.
+    """
+    loaded = build_from(_hydrated_bundle(tmp_path))
+    app = create_app(
+        reference=loaded.reference,
+        dgp=loaded.dgp,
+        workspace=build_workspace(loaded),
+    )
+    client = TestClient(app)
+
+    body = client.get("/api/session").json()
+
+    simulation = body["workspace"]["simulation"]["reference"]
+    assert simulation["spec"]["T"] == 8
+    result = simulation["result"]
+    assert result["kind"] == "sim" and result["T"] == 8
+    assert {"Infl", "Rate"} <= {series["name"] for series in result["series"]}
+    # Filed as a real run, so it is listed and fetchable like any other.
+    assert [(run["kind"], run["role"]) for run in body["runs"]] == [
+        ("sim", "reference")
+    ]
+    assert client.get(f"/api/run/{result['run_id']}").status_code == 200
+
+
+def test_bundled_simulation_replay_reproduces_rather_than_redraws(
+    tmp_path: Path,
+) -> None:
+    """The spec pins the seed, so two replays of it agree."""
+    loaded = build_from(_hydrated_bundle(tmp_path))
+
+    first = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
+    second = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
+
+    def series(app: Any) -> Any:
+        payload = TestClient(app).get("/api/session").json()
+        return payload["workspace"]["simulation"]["reference"]["result"]["series"]
+
+    assert series(first) == series(second)
+
+
+def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One bad spec must not cost the tabs that had nothing to do with it."""
+    loaded = build_from(_hydrated_bundle(tmp_path))
+    workspace = build_workspace(loaded)
+    assert workspace.simulation["reference"].spec is not None
+    workspace.simulation["reference"].spec["shocks"] = {
+        "not_a_shock": {
+            "dist": "norm",
+            "multivar": False,
+            "seed": 1,
+            "dist_args": [],
+            "dist_kwargs": {},
+        }
+    }
+
+    app = create_app(reference=loaded.reference, workspace=workspace)
+
+    assert "could not replay" in capsys.readouterr().out
+    payload = TestClient(app).get("/api/session").json()
+    # The spec survives for inspection, the result is simply absent, and the
+    # estimation tab is untouched by any of it.
+    assert "result" not in payload["workspace"]["simulation"]["reference"]
+    assert payload["workspace"]["estimation"]["result"] is not None
 
 
 # -- workspace view updates ------------------------------------------------

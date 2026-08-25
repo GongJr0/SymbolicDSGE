@@ -5,6 +5,8 @@ import type {
   EstimationCatalog,
   EstimationRunRequest,
   EstimationRunResult,
+  EstimationViewsByRole,
+  MCViewState,
   ModelSummary,
   MCCatalog,
   MCPipelineResult,
@@ -15,6 +17,7 @@ import type {
   ShockGeneration,
   ShockParamUpdate,
   SimResult,
+  WorkspaceTab,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_SDSGE_API_BASE ?? "http://127.0.0.1:8000";
@@ -44,6 +47,21 @@ async function requestJson<T>(
 
 export function getSession(): Promise<SessionSummary> {
   return requestJson<SessionSummary>("/api/session");
+}
+
+/** Hand a tab's on-screen state to the session, which outlives the page.
+ *
+ * The server acknowledges rather than echoing, since the caller is the one
+ * that already has the state. Pass `null` to drop what it is holding.
+ */
+export function putWorkspaceView(
+  tab: WorkspaceTab,
+  view: EstimationViewsByRole | MCViewState | null,
+): Promise<{ tab: WorkspaceTab }> {
+  return requestJson<{ tab: WorkspaceTab }>("/api/session/workspace", {
+    method: "PUT",
+    body: JSON.stringify({ tab, view }),
+  });
 }
 
 export function loadYamlPath(role: Role, path: string): Promise<ModelSummary> {
