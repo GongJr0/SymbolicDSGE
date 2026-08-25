@@ -8,6 +8,22 @@ Role = Literal["reference", "dgp"]
 ShockDistribution = Literal["norm", "t", "uni"]
 FunctionKind = Literal["array", "figure"]
 EstimationMethod = Literal["mle", "map", "mcmc"]
+WorkspaceTab = Literal["estimation", "mc"]
+
+
+class WorkspaceViewUpdate(BaseModel):
+    """A tab's on-screen state, PUT by the client as it edits.
+
+    ``view`` is opaque on purpose: it is the GUI's own shape, so a new control
+    needs no field here. The bundle-bound ``spec``/``result`` slots have no
+    counterpart on this model, which is what makes the client structurally
+    unable to write them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tab: WorkspaceTab
+    view: dict[str, Any] | None = None
 
 
 class ArrayEnvelope(BaseModel):

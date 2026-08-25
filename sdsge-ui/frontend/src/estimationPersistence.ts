@@ -9,8 +9,13 @@ const DB_NAME = "symbolicdsge-estimation-ui";
 const DB_VERSION = 1;
 const STORE_NAME = "estimation-workspace";
 
+// Record shape, not the IndexedDB schema. Bump on any field added or dropped
+// so a record an older build wrote is discarded instead of rehydrated with
+// holes.
+export const WORKSPACE_VERSION = 2;
+
 export interface EstimationPersistedWorkspace {
-  version: 1;
+  version: typeof WORKSPACE_VERSION;
   role: Role;
   modelKey: string;
   method: EstimationMethod;
@@ -18,13 +23,24 @@ export interface EstimationPersistedWorkspace {
   selected: string | null;
   observables: string;
   dataVectors: Record<string, string>;
+  optimizer: string;
   maxIter: number;
+  maxFun: number;
+  m: number;
+  maxLs: number;
+  factr: number;
+  pgtol: number;
+  fdStep: number;
+  xatol: number;
+  fatol: number;
   nDraws: number;
   burnIn: number;
   thin: number;
   seed: number;
-  adapt: boolean;
   proposalScale: number;
+  adapt: boolean;
+  adaptStart: number;
+  adaptEpsilon: number;
   posteriorPoint: string;
   result: EstimationRunResult | null;
   modeFolded: boolean;
@@ -33,7 +49,8 @@ export interface EstimationPersistedWorkspace {
 export async function loadEstimationWorkspace(
   role: Role,
 ): Promise<EstimationPersistedWorkspace | null> {
-  return readRecord<EstimationPersistedWorkspace>(role);
+  const record = await readRecord<EstimationPersistedWorkspace>(role);
+  return record !== null && record.version === WORKSPACE_VERSION ? record : null;
 }
 
 export async function saveEstimationWorkspace(

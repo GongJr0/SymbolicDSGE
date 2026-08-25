@@ -36,8 +36,15 @@ from .schemas import (
     Role,
     ShockGenerationRequest,
     ShockParamUpdate,
+    WorkspaceTab,
 )
-from .estimation import build_estimation_inputs, serialize_estimation_result
+from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
+
+from .estimation import (
+    build_estimation_inputs,
+    estimator_spec_wire,
+    serialize_estimation_result,
+)
 from .serializers import (
     decode_array,
     empty_model_summary,
@@ -76,20 +83,48 @@ class RunRecord:
 
 
 @dataclass
-class Workspace:
-    """One-shot preload payload for a session.
+class TabState:
+    """One tab's session state, split by who writes it.
 
-    Each field carries the wire-shaped dict the corresponding tab would
-    populate after a run, so the frontend can seed its state on first paint
-    without the user having to drive the GUI manually. Populated by
-    :func:`SymbolicDSGE.ui.serve.serve_from` from a loaded ``.sdsge`` bundle.
+    ``spec`` and ``result`` are the pair a ``.sdsge`` bundle stores, written
+    here by the server when a run completes. ``view`` is the tab's form state,
+    written only by the client. The split is what keeps GUI state out of a
+    bundle: a bundle write takes ``spec``/``result`` as they stand, and the
+    client cannot reach them because ``view`` is the only slot it PUTs.
     """
 
-    estimation: dict[str, Any] | None = None
-    mc: dict[str, Any] | None = None
+    spec: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    view: dict[str, Any] | None = None
+
+    def payload(self) -> dict[str, Any]:
+        """Wire shape for this tab, omitting the slots nothing has filled."""
+        out: dict[str, Any] = {}
+        if self.spec is not None:
+            out["spec"] = self.spec
+        if self.result is not None:
+            out["result"] = self.result
+        if self.view is not None:
+            out["view"] = self.view
+        return out
+
+
+@dataclass
+class Workspace:
+    """A session's hydration payload, in the shape the tabs repaint from.
+
+    Populated three ways, all landing here: the bundle
+    :func:`SymbolicDSGE.ui.serve.serve_from` was launched with, a run the
+    server just performed, and the client's own debounced view updates. The
+    frontend reads it on every load, so a refresh restores from the process
+    that never went away rather than from anything stored on the client.
+    """
+
+    estimation: TabState = field(default_factory=TabState)
+    mc: TabState = field(default_factory=TabState)
+    #: Per-role ``SimSpec`` dicts. The Outputs tab's controls map onto the
+    #: spec's own fields, so it carries no separate view.
     simulation: dict[str, Any] | None = None
-    estimation_spec: dict[str, Any] | None = None
-    mc_pipeline: dict[str, Any] | None = None
 
 
 class UISession:
@@ -99,6 +134,7 @@ class UISession:
         reference: SolvedModel | None = None,
         dgp: SolvedModel | None = None,
         workspace: Workspace | None = None,
+        source: str | None = None,
     ) -> None:
         self.slots: dict[Role, ModelSlot] = {
             "reference": ModelSlot(role="reference"),
@@ -110,10 +146,11 @@ class UISession:
             "dgp": {},
         }
         self.workspace: Workspace = workspace if workspace is not None else Workspace()
+        # Both roles preload from the one source, so they share its label.
         if reference is not None:
-            self.set_solved_model("reference", reference)
+            self.set_solved_model("reference", reference, source=source)
         if dgp is not None:
-            self.set_solved_model("dgp", dgp)
+            self.set_solved_model("dgp", dgp, source=source)
 
     def summary(self) -> dict[str, Any]:
         roles: tuple[Role, Role] = ("reference", "dgp")
@@ -131,24 +168,44 @@ class UISession:
         }
 
     def _workspace_payload(self) -> dict[str, Any]:
-        """Wire shape for the workspace preload (omits unset slots)."""
+        """Wire shape for the workspace (omits tabs and slots nothing filled)."""
         out: dict[str, Any] = {}
-        if self.workspace.estimation is not None:
-            out["estimation"] = self.workspace.estimation
-        if self.workspace.estimation_spec is not None:
-            out["estimation_spec"] = self.workspace.estimation_spec
-        if self.workspace.mc is not None:
-            out["mc"] = self.workspace.mc
-        if self.workspace.mc_pipeline is not None:
-            out["mc_pipeline"] = self.workspace.mc_pipeline
+        for name, tab in (
+            ("estimation", self.workspace.estimation),
+            ("mc", self.workspace.mc),
+        ):
+            if payload := tab.payload():
+                out[name] = payload
         if self.workspace.simulation is not None:
             out["simulation"] = self.workspace.simulation
         return out
 
-    def set_solved_model(self, role: Role, model: SolvedModel) -> dict[str, Any]:
+    def set_workspace_view(
+        self, tab: WorkspaceTab, view: dict[str, Any] | None
+    ) -> None:
+        """Replace a tab's view with what the client last had on screen.
+
+        The view is held verbatim: it is the GUI's own state, so a new control
+        appears here without the server learning what it means. Writing it
+        cannot disturb ``spec``/``result``, which only a run fills.
+        """
+        getattr(self.workspace, tab).view = view
+
+    def set_solved_model(
+        self, role: Role, model: SolvedModel, *, source: str | None = None
+    ) -> dict[str, Any]:
+        """Install an already-solved model into ``role``'s slot.
+
+        ``source`` labels where the model came from, e.g. the bundle path
+        ``sdsge-ui`` was pointed at; it is what distinguishes one preloaded
+        model from another in the GUI, so an in-process model with nothing to
+        cite leaves it unset rather than naming a placeholder. The YAML rides
+        along on the config whenever the model was parsed rather than built,
+        which is what lets the Builder tab open on the model it is serving.
+        """
         slot = self._slot(role)
-        slot.source = "<injected>"
-        slot.raw_yaml = None
+        slot.source = source
+        slot.raw_yaml = model.config.source_yaml
         slot.model_config = model.config
         slot.kalman_config = model.kalman_config
         slot.solver = DSGESolver(model.config, cast(Any, model.kalman_config))
@@ -312,6 +369,31 @@ class UISession:
             request.parameters,
             routine=request.routine,
         )
+        # Built before the run, not after: the spec describes the estimator
+        # about to be constructed, so a prior that cannot be projected says so
+        # here rather than discarding a result that already cost the compute.
+        spec_wire = estimator_spec_wire(
+            EstimatorSpec(
+                y=y.tolist(),
+                params=EstimatorParams(
+                    observables=observables,
+                    filter_mode="linear",
+                    P0=None,
+                    R=None,
+                    estimated_params=names,
+                    priors=(
+                        {name: prior.to_spec() for name, prior in priors.items()}
+                        if priors is not None
+                        else None
+                    ),
+                    ss_seed=request.ss_seed,
+                    x0=None,
+                    jitter=0.0,
+                    symmetrize=True,
+                    joseph_cov=True,
+                ),
+            )
+        )
         kwargs = dict(request.method_kwargs)
         reserved = {
             "compiled",
@@ -355,13 +437,14 @@ class UISession:
             result = slot.solver.estimate(**common)
 
         run_id = str(uuid4())
+        result_wire = serialize_estimation_result(result)
         payload: dict[str, Any] = {
             "run_id": run_id,
             "kind": "estimation",
             "role": request.role,
             "method": request.routine,
             "solved": solved,
-            "result": serialize_estimation_result(result),
+            "result": result_wire,
         }
         self.record_run(
             run_id=run_id,
@@ -369,6 +452,10 @@ class UISession:
             role=request.role,
             payload=payload,
         )
+        # The bundle-bound slots, filled from the run that just produced them.
+        # The client's view is untouched: it already shows this.
+        self.workspace.estimation.spec = spec_wire
+        self.workspace.estimation.result = result_wire
         return payload
 
     def submit_function(

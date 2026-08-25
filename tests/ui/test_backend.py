@@ -272,6 +272,8 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert catalog_body["distributions"]["normal"]["std"] == 1.0
     assert "lkj_chol" not in catalog_body["distributions"]
     assert "cholesky_corr" not in catalog_body["transforms"]
+    # Only the two the native driver implements are advertised.
+    assert catalog_body["optimizer_methods"] == ["L-BFGS-B", "Nelder-Mead"]
 
     solved = client.post(
         "/api/model/solve",
@@ -318,7 +320,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
                 "upper": 1.0,
             }
         ],
-        "method_kwargs": {"maxiter": 25},
+        "method_kwargs": {"maxiter": 25, "method": "Nelder-Mead", "cov": True},
     }
     response = client.post("/api/run/estimation", json=request)
 
@@ -332,10 +334,25 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert captured["estimated_params"] == ["beta"]
     assert captured["bounds"] == [(0.9, 1.0)]
     assert captured["maxiter"] == 25
+    # `method` is the optimizer and is no longer reserved, so it rides through
+    # method_kwargs alongside the routine that arrives as the request's own.
+    assert captured["method"] == "Nelder-Mead"
+    assert captured["cov"] is True
+
+    # A run fills the bundle-bound slots: the spec describes the estimator it
+    # just built, and neither slot carries anything the form invented.
+    workspace = client.get("/api/session").json()["workspace"]["estimation"]
+    assert workspace["spec"]["params"]["estimated_params"] == ["beta"]
+    assert workspace["spec"]["params"]["observables"] == ["Infl", "Rate"]
+    assert len(workspace["spec"]["y"]) == 2
+    assert set(workspace["spec"]) == {"y", "params"}
+    assert workspace["result"]["theta"] == {"beta": 0.98}
+    # The client never PUT a view, and the run did not invent one.
+    assert "view" not in workspace
 
     invalid = client.post(
         "/api/run/estimation",
-        json={**request, "method_kwargs": {"routine": "Powell"}},
+        json={**request, "method_kwargs": {"routine": "mcmc"}},
     )
     assert invalid.status_code == 400
     assert "reserved arguments" in invalid.json()["detail"]["message"]
@@ -431,6 +448,12 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     fetched = client.get(f"/api/run/{body['run_id']}")
     assert fetched.status_code == 200
     assert fetched.json()["run_id"] == body["run_id"]
+
+    # The run fills the MC tab's bundle-bound slots, through the core spec so
+    # the shape matches what a bundle stores rather than the request model.
+    workspace = client.get("/api/session").json()["workspace"]["mc"]
+    assert [node["id"] for node in workspace["spec"]["nodes"]] == ["sim"]
+    assert workspace["result"]["run_id"] == body["run_id"]
 
 
 def _solve_reference(client: TestClient) -> None:

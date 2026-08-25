@@ -41,14 +41,8 @@ def estimation_catalog() -> dict[str, Any]:
             for method, transform in TRANSFORM_METHOD_DISPATCH.items()
             if method.value != "cholesky_corr"
         },
-        "optimizer_methods": [
-            "L-BFGS-B",
-            "Nelder-Mead",
-            "Powell",
-            "BFGS",
-            "CG",
-            "SLSQP",
-        ],
+        # The two the native driver implements; anything else raises there.
+        "optimizer_methods": ["L-BFGS-B", "Nelder-Mead"],
         "posterior_points": ["mean", "map", "last"],
     }
 
@@ -142,6 +136,24 @@ def _emit_optimization_wire(
         "fun": float(obj.fun),
         "nfev": int(obj.nfev),
         "nit": obj.nit,
+        "se": _emit_se(obj.se),
+        "cov_status": int(obj.cov_status),
+    }
+
+
+def _emit_se(se: Mapping[str, Any] | None) -> dict[str, float | None] | None:
+    """Standard errors as JSON, a non-finite entry rendered as ``null``.
+
+    A covariance that failed, and a negative variance on the diagonal of one
+    that did not, both leave NaN in place rather than a status. The response
+    encoder rejects NaN, so it becomes ``null`` and reads as "unavailable"
+    alongside ``cov_status``.
+    """
+    if se is None:
+        return None
+    return {
+        name: (float(value) if np.isfinite(value) else None)
+        for name, value in se.items()
     }
 
 
@@ -185,10 +197,6 @@ def _emit_mcmc_wire(
         "param_names": list(obj.param_names),
         "posterior_mean": {
             name: float(samples[:, index].mean())
-            for index, name in enumerate(obj.param_names)
-        },
-        "posterior_std": {
-            name: float(samples[:, index].std())
             for index, name in enumerate(obj.param_names)
         },
         "samples": {
@@ -245,6 +253,16 @@ def _bounds_from_result(
         if raw:
             return {name: (pair[0], pair[1]) for name, pair in zip(param_names, raw)}
     return {}
+
+
+def estimator_spec_wire(spec: EstimatorSpec) -> dict[str, Any]:
+    """An :class:`EstimatorSpec` as JSON, verbatim.
+
+    The dataclass holds a plain list and a TypedDict, so this is a shape
+    change and nothing else. It stays free of anything the GUI added, which
+    is what lets a bundle take this slot as it stands.
+    """
+    return {"y": spec.y, "params": dict(spec.params)}
 
 
 def build_estimation_prefill(

@@ -122,7 +122,7 @@ export interface EstimationRunRequest {
   parameters: EstimationParameterSpec[];
   method_kwargs: Record<string, unknown>;
   compile_kwargs: Record<string, unknown>;
-  steady_state: number[] | null;
+  ss_seed: number[] | null;
   posterior_point: string;
   estimate_and_solve: boolean;
 }
@@ -140,6 +140,10 @@ export interface EstimationRunResult {
     message?: string;
     theta?: Record<string, number>;
     fun?: number;
+    // Keyed like `theta`; an entry is null where the covariance gave no
+    // finite standard error. Absent when the run computed no covariance.
+    se?: Record<string, number | null>;
+    cov_status?: number;
     loglik?: number;
     logprior?: number;
     logpost?: number;
@@ -147,7 +151,6 @@ export interface EstimationRunResult {
     nit?: number | null;
     param_names?: string[];
     posterior_mean?: Record<string, number>;
-    posterior_std?: Record<string, number>;
     samples?: Record<string, number[]>;
     logpost_trace?: number[];
     logjac_trace?: number[];
