@@ -6,6 +6,7 @@ import {
   clearEstimationWorkspace,
   loadEstimationWorkspace,
   saveEstimationWorkspace,
+  WORKSPACE_VERSION,
 } from "./estimationPersistence";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
@@ -17,6 +18,37 @@ import type {
   ModelSummary,
   Role,
 } from "./types";
+
+// Mirrors the estimator's own kwarg defaults, so an untouched form runs what
+// `Estimator.mle`/`map`/`mcmc` would run. `nDraws` has no library default.
+const DEFAULTS = {
+  optimizer: "L-BFGS-B",
+  maxIter: 15000,
+  maxFun: 15000,
+  m: 10,
+  maxLs: 20,
+  factr: 1e7,
+  pgtol: 1e-5,
+  fdStep: 0,
+  xatol: 1e-4,
+  fatol: 1e-4,
+  nDraws: 1000,
+  burnIn: 1000,
+  thin: 1,
+  seed: 0,
+  proposalScale: 0.1,
+  adapt: true,
+  adaptStart: 100,
+  adaptEpsilon: 1e-8,
+  posteriorPoint: "mean",
+};
+
+// `cov_status` codes from _ckernels/estimation/estimation.h, as reasons.
+const COV_STATUS_REASONS: Record<number, string> = {
+  [-1800]: "the covariance workspace could not be allocated",
+  [-1801]: "the Hessian at the optimum could not be formed",
+  [-1802]: "the Hessian at the optimum is not positive definite",
+};
 
 export function EstimationView({
   hidden,
@@ -35,14 +67,25 @@ export function EstimationView({
   const [selected, setSelected] = useState<string | null>(null);
   const [observables, setObservables] = useState("");
   const [dataVectors, setDataVectors] = useState<Record<string, string>>({});
-  const [maxIter, setMaxIter] = useState(1000);
-  const [nDraws, setNDraws] = useState(1000);
-  const [burnIn, setBurnIn] = useState(500);
-  const [thin, setThin] = useState(1);
-  const [seed, setSeed] = useState(0);
-  const [adapt, setAdapt] = useState(true);
-  const [proposalScale, setProposalScale] = useState(0.1);
-  const [posteriorPoint, setPosteriorPoint] = useState("mean");
+  const [optimizer, setOptimizer] = useState(DEFAULTS.optimizer);
+  const [maxIter, setMaxIter] = useState(DEFAULTS.maxIter);
+  const [maxFun, setMaxFun] = useState(DEFAULTS.maxFun);
+  const [m, setM] = useState(DEFAULTS.m);
+  const [maxLs, setMaxLs] = useState(DEFAULTS.maxLs);
+  const [factr, setFactr] = useState(DEFAULTS.factr);
+  const [pgtol, setPgtol] = useState(DEFAULTS.pgtol);
+  const [fdStep, setFdStep] = useState(DEFAULTS.fdStep);
+  const [xatol, setXatol] = useState(DEFAULTS.xatol);
+  const [fatol, setFatol] = useState(DEFAULTS.fatol);
+  const [nDraws, setNDraws] = useState(DEFAULTS.nDraws);
+  const [burnIn, setBurnIn] = useState(DEFAULTS.burnIn);
+  const [thin, setThin] = useState(DEFAULTS.thin);
+  const [seed, setSeed] = useState(DEFAULTS.seed);
+  const [proposalScale, setProposalScale] = useState(DEFAULTS.proposalScale);
+  const [adapt, setAdapt] = useState(DEFAULTS.adapt);
+  const [adaptStart, setAdaptStart] = useState(DEFAULTS.adaptStart);
+  const [adaptEpsilon, setAdaptEpsilon] = useState(DEFAULTS.adaptEpsilon);
+  const [posteriorPoint, setPosteriorPoint] = useState(DEFAULTS.posteriorPoint);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(false);
@@ -95,13 +138,24 @@ export function EstimationView({
           setSelected(workspace.selected);
           setObservables(workspace.observables);
           setDataVectors(workspace.dataVectors);
+          setOptimizer(workspace.optimizer);
           setMaxIter(workspace.maxIter);
+          setMaxFun(workspace.maxFun);
+          setM(workspace.m);
+          setMaxLs(workspace.maxLs);
+          setFactr(workspace.factr);
+          setPgtol(workspace.pgtol);
+          setFdStep(workspace.fdStep);
+          setXatol(workspace.xatol);
+          setFatol(workspace.fatol);
           setNDraws(workspace.nDraws);
           setBurnIn(workspace.burnIn);
           setThin(workspace.thin);
           setSeed(workspace.seed);
-          setAdapt(workspace.adapt);
           setProposalScale(workspace.proposalScale);
+          setAdapt(workspace.adapt);
+          setAdaptStart(workspace.adaptStart);
+          setAdaptEpsilon(workspace.adaptEpsilon);
           setPosteriorPoint(workspace.posteriorPoint);
           setResult(workspace.result);
           setModeFolded(workspace.modeFolded);
@@ -127,7 +181,7 @@ export function EstimationView({
     if (!hydrated) return;
     const timeout = window.setTimeout(() => {
       void saveEstimationWorkspace({
-        version: 1,
+        version: WORKSPACE_VERSION,
         role,
         modelKey,
         method,
@@ -135,13 +189,24 @@ export function EstimationView({
         selected,
         observables,
         dataVectors,
+        optimizer,
         maxIter,
+        maxFun,
+        m,
+        maxLs,
+        factr,
+        pgtol,
+        fdStep,
+        xatol,
+        fatol,
         nDraws,
         burnIn,
         thin,
         seed,
-        adapt,
         proposalScale,
+        adapt,
+        adaptStart,
+        adaptEpsilon,
         posteriorPoint,
         result,
         modeFolded,
@@ -153,16 +218,26 @@ export function EstimationView({
     return () => window.clearTimeout(timeout);
   }, [
     adapt,
+    adaptEpsilon,
+    adaptStart,
     burnIn,
     dataVectors,
+    factr,
+    fatol,
+    fdStep,
     hydrated,
+    m,
+    maxFun,
     maxIter,
+    maxLs,
     method,
     modeFolded,
     modelKey,
     nDraws,
     observables,
+    optimizer,
     parameters,
+    pgtol,
     posteriorPoint,
     proposalScale,
     result,
@@ -170,6 +245,7 @@ export function EstimationView({
     seed,
     selected,
     thin,
+    xatol,
   ]);
 
   const active = parameters.find((parameter) => parameter.name === selected) ?? null;
@@ -215,12 +291,24 @@ export function EstimationView({
                 burn_in: burnIn,
                 thin,
                 random_state: seed,
-                adapt,
                 proposal_scale: proposalScale,
+                adapt,
+                ...(adapt
+                  ? { adapt_start: adaptStart, adapt_epsilon: adaptEpsilon }
+                  : {}),
+                compute_map: true,
               }
-            : { maxiter: maxIter },
+            : {
+                method: optimizer,
+                maxiter: maxIter,
+                maxfun: maxFun,
+                ...(optimizer === "Nelder-Mead"
+                  ? { xatol, fatol }
+                  : { m, maxls: maxLs, factr, pgtol, fd_step: fdStep }),
+                cov: true,
+              },
         compile_kwargs: {},
-        steady_state: null,
+        ss_seed: null,
         posterior_point: posteriorPoint,
         estimate_and_solve: estimateAndSolve,
       });
@@ -272,14 +360,25 @@ export function EstimationView({
     setSelected(Object.keys(values)[0] ?? null);
     setObservables(names.join(", "));
     setDataVectors(Object.fromEntries(names.map((name) => [name, ""])));
-    setMaxIter(1000);
-    setNDraws(1000);
-    setBurnIn(500);
-    setThin(1);
-    setSeed(0);
-    setAdapt(true);
-    setProposalScale(0.1);
-    setPosteriorPoint("mean");
+    setOptimizer(DEFAULTS.optimizer);
+    setMaxIter(DEFAULTS.maxIter);
+    setMaxFun(DEFAULTS.maxFun);
+    setM(DEFAULTS.m);
+    setMaxLs(DEFAULTS.maxLs);
+    setFactr(DEFAULTS.factr);
+    setPgtol(DEFAULTS.pgtol);
+    setFdStep(DEFAULTS.fdStep);
+    setXatol(DEFAULTS.xatol);
+    setFatol(DEFAULTS.fatol);
+    setNDraws(DEFAULTS.nDraws);
+    setBurnIn(DEFAULTS.burnIn);
+    setThin(DEFAULTS.thin);
+    setSeed(DEFAULTS.seed);
+    setProposalScale(DEFAULTS.proposalScale);
+    setAdapt(DEFAULTS.adapt);
+    setAdaptStart(DEFAULTS.adaptStart);
+    setAdaptEpsilon(DEFAULTS.adaptEpsilon);
+    setPosteriorPoint(DEFAULTS.posteriorPoint);
     setResult(null);
     setModeFolded(false);
     setWorkspaceRevision((current) => current + 1);
@@ -325,14 +424,6 @@ export function EstimationView({
                     value={proposalScale}
                     onChange={setProposalScale}
                   />
-                  <label className="switch-row">
-                    <span>Adapt proposal</span>
-                    <input
-                      type="checkbox"
-                      checked={adapt}
-                      onChange={(event) => setAdapt(event.target.checked)}
-                    />
-                  </label>
                   <label>
                     Posterior point
                     <select
@@ -344,13 +435,71 @@ export function EstimationView({
                       )}
                     </select>
                   </label>
+                  <label className="switch-row">
+                    <span>Adapt proposal</span>
+                    <input
+                      type="checkbox"
+                      checked={adapt}
+                      onChange={(event) => setAdapt(event.target.checked)}
+                    />
+                  </label>
+                  {adapt && (
+                    <>
+                      <NumberField
+                        label="Adapt start"
+                        value={adaptStart}
+                        onChange={setAdaptStart}
+                      />
+                      <NumberField
+                        label="Adapt epsilon"
+                        value={adaptEpsilon}
+                        onChange={setAdaptEpsilon}
+                      />
+                    </>
+                  )}
                 </>
               ) : (
-                <NumberField
-                  label="Max iterations"
-                  value={maxIter}
-                  onChange={setMaxIter}
-                />
+                <>
+                  <label>
+                    Optimizer
+                    <select
+                      value={optimizer}
+                      onChange={(event) => setOptimizer(event.target.value)}
+                    >
+                      {(catalog?.optimizer_methods ?? [DEFAULTS.optimizer]).map(
+                        (name) => <option key={name}>{name}</option>,
+                      )}
+                    </select>
+                  </label>
+                  <NumberField
+                    label="Max iterations"
+                    value={maxIter}
+                    onChange={setMaxIter}
+                  />
+                  <NumberField
+                    label="Max evaluations"
+                    value={maxFun}
+                    onChange={setMaxFun}
+                  />
+                  {optimizer === "Nelder-Mead" ? (
+                    <>
+                      <NumberField label="xatol" value={xatol} onChange={setXatol} />
+                      <NumberField label="fatol" value={fatol} onChange={setFatol} />
+                    </>
+                  ) : (
+                    <>
+                      <NumberField label="History size" value={m} onChange={setM} />
+                      <NumberField
+                        label="Max line search"
+                        value={maxLs}
+                        onChange={setMaxLs}
+                      />
+                      <NumberField label="factr" value={factr} onChange={setFactr} />
+                      <NumberField label="pgtol" value={pgtol} onChange={setPgtol} />
+                      <NumberField label="FD step" value={fdStep} onChange={setFdStep} />
+                    </>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -524,6 +673,8 @@ function ParameterDetails({
   const estimatedValue =
     result?.result.theta?.[parameter.name] ??
     result?.result.posterior_mean?.[parameter.name];
+  const standardErrors = result?.result.se;
+  const covStatus = result?.result.cov_status ?? 0;
   return (
     <div className="estimation-details">
       <label className="switch-row estimation-estimate-switch">
@@ -627,6 +778,12 @@ function ParameterDetails({
           <div className="estimation-result-grid">
             <ResultValue label="Method" value={result.method.toUpperCase()} />
             <ResultValue label="Estimate" value={format(estimatedValue)} />
+            {standardErrors !== undefined && (
+              <ResultValue
+                label="Std. error"
+                value={format(standardErrors[parameter.name] ?? undefined)}
+              />
+            )}
             <ResultValue label="Solved" value={result.solved ? "yes" : "no"} />
             {result.result.accept_rate !== undefined && (
               <ResultValue
@@ -650,6 +807,13 @@ function ParameterDetails({
               />
             )}
           </div>
+          {covStatus !== 0 && (
+            <span className="muted">
+              {`No standard errors: ${
+                COV_STATUS_REASONS[covStatus] ?? `covariance status ${covStatus}`
+              }.`}
+            </span>
+          )}
           {result.method === "mcmc" && (
             <MCMCCharts
               key={`${result.run_id}:${parameter.name}`}

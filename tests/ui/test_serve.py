@@ -122,6 +122,35 @@ def test_emit_wire_mle_result() -> None:
     assert (wire["fun"], wire["nfev"], wire["nit"]) == (-12.3, 42, 15)
     assert wire["loglik"] == -10.0
     assert wire["success"] is True and wire["message"] == "ok"
+    # A run that computed no covariance carries none, and reports OK for it.
+    assert wire["se"] is None and wire["cov_status"] == 0
+
+
+def test_emit_wire_carries_standard_errors_and_nulls_non_finite() -> None:
+    """A NaN standard error reaches the wire as ``null``.
+
+    ``sdsge_fill_se`` leaves NaN where the covariance failed and where a
+    diagonal variance came out negative, and the JSON encoder rejects NaN, so
+    the emitter is the only place that can render it.
+    """
+    res = MLEResult(
+        x=np.array([0.99, 0.8]),
+        theta={"beta": np.float64(0.99), "rho": np.float64(0.8)},
+        success=True,
+        message="ok",
+        fun=np.float64(-12.3),
+        nfev=42,
+        nit=15,
+        optimizer_config={},
+        se={"beta": np.float64(0.01), "rho": np.float64(np.nan)},
+        cov_status=-1802,
+        loglik=np.float64(-10.0),
+    )
+
+    wire = emit_estimation_wire(res)
+
+    assert wire["se"] == {"beta": 0.01, "rho": None}
+    assert wire["cov_status"] == -1802
 
 
 def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:

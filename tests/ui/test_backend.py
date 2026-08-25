@@ -272,6 +272,8 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert catalog_body["distributions"]["normal"]["std"] == 1.0
     assert "lkj_chol" not in catalog_body["distributions"]
     assert "cholesky_corr" not in catalog_body["transforms"]
+    # Only the two the native driver implements are advertised.
+    assert catalog_body["optimizer_methods"] == ["L-BFGS-B", "Nelder-Mead"]
 
     solved = client.post(
         "/api/model/solve",
@@ -318,7 +320,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
                 "upper": 1.0,
             }
         ],
-        "method_kwargs": {"maxiter": 25},
+        "method_kwargs": {"maxiter": 25, "method": "Nelder-Mead", "cov": True},
     }
     response = client.post("/api/run/estimation", json=request)
 
@@ -332,10 +334,14 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert captured["estimated_params"] == ["beta"]
     assert captured["bounds"] == [(0.9, 1.0)]
     assert captured["maxiter"] == 25
+    # `method` is the optimizer and is no longer reserved, so it rides through
+    # method_kwargs alongside the routine that arrives as the request's own.
+    assert captured["method"] == "Nelder-Mead"
+    assert captured["cov"] is True
 
     invalid = client.post(
         "/api/run/estimation",
-        json={**request, "method_kwargs": {"routine": "Powell"}},
+        json={**request, "method_kwargs": {"routine": "mcmc"}},
     )
     assert invalid.status_code == 400
     assert "reserved arguments" in invalid.json()["detail"]["message"]
