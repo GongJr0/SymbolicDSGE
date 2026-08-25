@@ -22,7 +22,7 @@ from SymbolicDSGE.estimation.spec import (
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 from SymbolicDSGE.ui import build_workspace, create_app, serve_from
 from SymbolicDSGE.ui.estimation import emit_estimation_wire, serialize_estimation_result
-from SymbolicDSGE.ui.session import UISession, Workspace
+from SymbolicDSGE.ui.session import TabState, UISession, Workspace
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -201,19 +201,31 @@ def test_session_summary_carries_empty_workspace_by_default() -> None:
 
 def test_session_summary_surfaces_workspace_preload() -> None:
     workspace = Workspace(
-        estimation={"kind": "mcmc", "param_names": ["beta"]},
-        estimation_spec={"method": "mcmc"},
-        mc={"kind": "mc"},
-        mc_pipeline={"nodes": []},
+        estimation=TabState(
+            spec={"y": [[1.0]], "params": {"estimated_params": ["beta"]}},
+            result={"kind": "mcmc", "param_names": ["beta"]},
+            view={"method": "mcmc"},
+        ),
+        mc=TabState(spec={"nodes": []}, result={"kind": "mc"}),
         simulation={"T": 8},
     )
     client = TestClient(create_app(workspace=workspace))
     payload = client.get("/api/session").json()["workspace"]
-    assert payload["estimation"]["kind"] == "mcmc"
-    assert payload["estimation_spec"]["method"] == "mcmc"
-    assert payload["mc"]["kind"] == "mc"
-    assert payload["mc_pipeline"] == {"nodes": []}
+    assert payload["estimation"]["spec"]["params"]["estimated_params"] == ["beta"]
+    assert payload["estimation"]["result"]["kind"] == "mcmc"
+    assert payload["estimation"]["view"]["method"] == "mcmc"
+    assert payload["mc"] == {"spec": {"nodes": []}, "result": {"kind": "mc"}}
     assert payload["simulation"] == {"T": 8}
+
+
+def test_session_summary_drops_unfilled_tab_slots() -> None:
+    """A tab reports only the slots something filled, and vanishes with none."""
+    workspace = Workspace(estimation=TabState(view={"method": "mle"}))
+    client = TestClient(create_app(workspace=workspace))
+
+    payload = client.get("/api/session").json()["workspace"]
+
+    assert payload == {"estimation": {"view": {"method": "mle"}}}
 
 
 def test_session_summary_drops_unset_workspace_slots() -> None:
@@ -229,20 +241,123 @@ def test_session_summary_drops_unset_workspace_slots() -> None:
 def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     loaded = build_from(_hydrated_bundle(tmp_path))
     ws = build_workspace(loaded)
-    assert ws.estimation is not None and ws.estimation["kind"] == "mcmc"
-    assert ws.estimation["param_names"] == ["beta", "sigma"]
+
+    # The bundle's own two members, carried over untouched by the GUI shape.
+    assert ws.estimation.spec is not None
+    assert ws.estimation.spec["params"]["estimated_params"] == ["beta", "sigma"]
+    assert len(ws.estimation.spec["y"]) == 10
+    assert ws.estimation.result is not None
+    assert ws.estimation.result["param_names"] == ["beta", "sigma"]
     # bulk traces survived round-trip into the wire dict
-    assert len(ws.estimation["samples"]["beta"]) == 20
-    assert ws.estimation_spec is not None
-    assert ws.estimation_spec["method"] == "mcmc"  # inferred from the result type
-    rows = {row["name"]: row for row in ws.estimation_spec["parameters"]}
+    assert len(ws.estimation.result["samples"]["beta"]) == 20
+
+    # The view is the pair projected into what the form posts back.
+    assert ws.estimation.view is not None
+    assert ws.estimation.view["method"] == "mcmc"  # inferred from the result type
+    rows = {row["name"]: row for row in ws.estimation.view["parameters"]}
     assert rows["beta"]["estimate"] and rows["sigma"]["estimate"]
-    assert len(ws.estimation_spec["y"]) == 10  # observed data prefill
-    assert ws.mc_pipeline is not None
-    assert ws.mc is None  # no MC result was attached at build time
+    assert len(ws.estimation.view["y"]) == 10  # observed data prefill
+
+    assert ws.mc.spec is not None
+    assert ws.mc.result is None  # no MC result was attached at build time
+    assert ws.mc.view is None  # a bundle carries no graph layout
     assert ws.simulation is not None
     assert ws.simulation["reference"]["T"] == 8
     assert ws.simulation["reference"]["shocks"]["u"]["seed"] == 42
+
+
+def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
+    tmp_path: Path,
+) -> None:
+    """``spec`` carries no field the form invented.
+
+    The view holds per-row ``estimate``/``initial``/``lower``/``upper`` and an
+    inferred ``method``, none of which an ``EstimatorSpec`` has. Keeping them
+    out is what lets a bundle write take this slot as it stands.
+    """
+    ws = build_workspace(build_from(_hydrated_bundle(tmp_path)))
+
+    assert ws.estimation.spec is not None
+    assert set(ws.estimation.spec) == {"y", "params"}
+    assert "method" not in ws.estimation.spec["params"]
+    assert "parameters" not in ws.estimation.spec["params"]
+
+
+def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None:
+    """The point of the split: no projection back out of the GUI shape.
+
+    ``spec`` is already the constructor form a bundle stores, so writing one
+    is reading the slot and handing it over. If the GUI shape had leaked in,
+    this would need a reverse mapping to strip it.
+    """
+    ws = build_workspace(build_from(_hydrated_bundle(tmp_path)))
+    assert ws.estimation.spec is not None
+
+    written = (
+        BundleBuilder(created_by="round-trip")
+        .add_model("reference", _MODEL_YAML, compile_kwargs={})
+        .add_estimation(
+            EstimatorSpec(
+                y=ws.estimation.spec["y"], params=ws.estimation.spec["params"]
+            )
+        )
+        .write(tmp_path / "round-trip.sdsge")
+    )
+
+    reloaded = build_from(written)
+    assert reloaded.estimation is not None
+    assert reloaded.estimation.spec.params["estimated_params"] == ["beta", "sigma"]
+    assert len(reloaded.estimation.spec.y) == 10
+
+
+# -- workspace view updates ------------------------------------------------
+
+
+def test_workspace_view_round_trips_through_the_session() -> None:
+    """What the client PUTs is what a reload reads back.
+
+    This is the whole restore mechanism: the process outlives the refresh, so
+    the view returns from server memory with nothing kept on the client.
+    """
+    client = TestClient(create_app())
+    view = {"method": "mcmc", "nDraws": 4000, "dataVectors": {"Infl": "1 2"}}
+
+    ack = client.put("/api/session/workspace", json={"tab": "estimation", "view": view})
+
+    assert ack.status_code == 200 and ack.json() == {"tab": "estimation"}
+    reread = client.get("/api/session").json()["workspace"]
+    assert reread["estimation"] == {"view": view}
+
+
+def test_workspace_view_is_held_verbatim() -> None:
+    """The server holds the view without modelling it, so a new control lands."""
+    client = TestClient(create_app())
+    view = {"a_control_python_never_heard_of": [1, {"nested": True}]}
+
+    client.put("/api/session/workspace", json={"tab": "mc", "view": view})
+
+    assert client.get("/api/session").json()["workspace"]["mc"]["view"] == view
+
+
+def test_workspace_view_cannot_write_the_bundle_bound_slots() -> None:
+    """A client naming ``spec`` or ``result`` is rejected, not partly obeyed."""
+    client = TestClient(create_app())
+
+    refused = client.put(
+        "/api/session/workspace",
+        json={"tab": "estimation", "view": {}, "spec": {"y": []}},
+    )
+
+    assert refused.status_code == 422
+
+
+def test_workspace_view_clears_when_set_to_null() -> None:
+    client = TestClient(create_app())
+    client.put("/api/session/workspace", json={"tab": "estimation", "view": {"a": 1}})
+
+    client.put("/api/session/workspace", json={"tab": "estimation", "view": None})
+
+    assert client.get("/api/session").json()["workspace"] == {}
 
 
 # -- serve_from dispatch ---------------------------------------------------
@@ -276,6 +391,8 @@ def test_serve_from_solved_model_preloads_reference(
     serve_from(source=solved, open_browser=False)
     assert captured["reference"] is solved
     assert captured.get("workspace") is None
+    # A model handed over in process has no origin to cite.
+    assert captured.get("source") is None
 
 
 def test_serve_from_bundle_path_hydrates_workspace(
@@ -294,6 +411,41 @@ def test_serve_from_bundle_path_hydrates_workspace(
     assert isinstance(captured["workspace"], Workspace)
     assert captured["workspace"].estimation is not None
     assert captured["workspace"].simulation is not None
+    assert captured["source"] == str(bundle)
+
+
+def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
+    """A bundle launch identifies the model by path and opens on its YAML.
+
+    Both ride the summary the GUI already reads: ``source`` distinguishes one
+    preloaded model from another, and ``raw_yaml`` is what the Builder tab
+    seeds its editor from.
+    """
+    bundle = _hydrated_bundle(tmp_path)
+    loaded = build_from(bundle)
+    app = create_app(
+        reference=loaded.reference,
+        dgp=loaded.dgp,
+        workspace=build_workspace(loaded),
+        source=str(bundle),
+    )
+
+    reference = TestClient(app).get("/api/session").json()["models"]["reference"]
+
+    assert reference["name"] == "TEST"
+    assert reference["source"] == str(bundle)
+    assert reference["raw_yaml"].startswith('name: "TEST"')
+
+
+def test_in_process_model_leaves_source_unset(tmp_path: Path) -> None:
+    """``SolvedModel.serve()`` names no origin, so the GUI shows none."""
+    app = create_app(reference=_solved_test_model())
+
+    reference = TestClient(app).get("/api/session").json()["models"]["reference"]
+
+    assert reference["source"] is None
+    # The YAML still rides the config, so the Builder tab is not left blank.
+    assert reference["raw_yaml"].startswith('name: "TEST"')
 
 
 def test_serve_from_rejects_missing_bundle(tmp_path: Path) -> None:

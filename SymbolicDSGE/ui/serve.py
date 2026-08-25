@@ -20,8 +20,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from .estimation import build_estimation_prefill, emit_estimation_wire
-from .session import Workspace
+from .estimation import (
+    build_estimation_prefill,
+    emit_estimation_wire,
+    estimator_spec_wire,
+)
+from .session import TabState, Workspace
 
 if TYPE_CHECKING:
     from SymbolicDSGE.bundle.loader import LoadedBundle
@@ -67,6 +71,7 @@ def serve_from(
         reference=loaded.reference,
         dgp=loaded.dgp,
         workspace=workspace,
+        source=str(path),
         host=host,
         port=port,
         open_browser=open_browser,
@@ -76,28 +81,28 @@ def serve_from(
 def build_workspace(loaded: "LoadedBundle") -> Workspace:
     """Project a :class:`LoadedBundle` into a :class:`Workspace` preload payload.
 
-    The estimation/MC tabs are seeded with their canonical wire dicts (same
-    shape an in-process run would produce), so the frontend can repaint without
-    re-running anything. The simulation prefill rides as the SimSpec dict so
+    The estimation/MC tabs land as ``{spec, result, view}``: the bundle's own
+    two members carried over as they stand, plus the view the GUI repaints
+    from, which for estimation is the spec and result projected into the shape
+    its form posts back. The simulation prefill rides as the SimSpec dict so
     the Outputs tab pre-fills the seed/T/shock controls.
     """
-    estimation_wire: dict[str, Any] | None = None
-    estimation_spec_dict: dict[str, Any] | None = None
+    estimation = TabState()
     if loaded.estimation is not None:
+        estimation.spec = estimator_spec_wire(loaded.estimation.spec)
+        if loaded.estimation.result is not None:
+            estimation.result = emit_estimation_wire(loaded.estimation.result)
         if loaded.reference is not None:
-            estimation_spec_dict = build_estimation_prefill(
+            estimation.view = build_estimation_prefill(
                 loaded.estimation.spec,
                 loaded.estimation.result,
                 loaded.reference.compiled,
             )
-        if loaded.estimation.result is not None:
-            estimation_wire = emit_estimation_wire(loaded.estimation.result)
 
-    mc_wire: dict[str, Any] | None = None
-    mc_pipeline_dict: dict[str, Any] | None = None
+    mc = TabState()
     if loaded.mc is not None:
-        mc_pipeline_dict = loaded.mc.spec.to_dict()
-        mc_wire = loaded.mc.wire()
+        mc.spec = loaded.mc.spec.to_dict()
+        mc.result = loaded.mc.wire()
 
     simulation_dict: dict[str, dict[str, Any]] | None = (
         {role: spec.to_dict() for role, spec in loaded.simulation.items()}
@@ -106,9 +111,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     )
 
     return Workspace(
-        estimation=estimation_wire,
-        estimation_spec=estimation_spec_dict,
-        mc=mc_wire,
-        mc_pipeline=mc_pipeline_dict,
+        estimation=estimation,
+        mc=mc,
         simulation=simulation_dict,
     )

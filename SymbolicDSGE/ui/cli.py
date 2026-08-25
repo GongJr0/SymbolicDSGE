@@ -44,6 +44,7 @@ def run_server(
     reference: "SolvedModel | None" = None,
     dgp: "SolvedModel | None" = None,
     workspace: "Workspace | None" = None,
+    source: str | None = None,
     host: str = "127.0.0.1",
     port: int | None = None,
     open_browser: bool = True,
@@ -54,6 +55,9 @@ def run_server(
     ----------
     reference, dgp:
         Optional pre-solved models to preload into the session.
+    source:
+        Where the preloaded models came from, shown in the GUI as their
+        origin. Unset for a model handed over in process.
     host, port:
         Bind address; ``port`` defaults to an OS-assigned free port.
     open_browser:
@@ -106,7 +110,7 @@ def run_server(
                     raise
                 return await super().get_response("index.html", scope)
 
-    app = create_app(reference=reference, dgp=dgp, workspace=workspace)
+    app = create_app(reference=reference, dgp=dgp, workspace=workspace, source=source)
     # Mounted last so it does not shadow the /api routes registered above.
     app.mount("/", _HttpOnlyStaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 

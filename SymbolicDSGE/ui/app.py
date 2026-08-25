@@ -23,6 +23,7 @@ from .mc_schemas import MCCustomOpRequest, MCPipelineSpec, MCRunRequest
 from .estimation import estimation_catalog
 from .schemas import (
     EstimationRunRequest,
+    WorkspaceViewUpdate,
     LoadYamlRequest,
     Role,
     SimRunRequest,
@@ -38,11 +39,12 @@ def create_app(
     reference: SolvedModel | None = None,
     dgp: SolvedModel | None = None,
     workspace: Workspace | None = None,
+    source: str | None = None,
 ) -> FastAPI:
     ui_session = (
         session
         if session is not None
-        else UISession(reference=reference, dgp=dgp, workspace=workspace)
+        else UISession(reference=reference, dgp=dgp, workspace=workspace, source=source)
     )
     app = FastAPI(title="SymbolicDSGE UI", version="0.1.0")
     app.state.ui_session = ui_session
@@ -61,6 +63,18 @@ def create_app(
     @app.get("/api/session")
     def session_summary() -> dict[str, Any]:
         return ui_session.summary()
+
+    @app.put("/api/session/workspace")
+    def update_workspace_view(request: WorkspaceViewUpdate) -> dict[str, str]:
+        """Hold a tab's on-screen state for the life of the process.
+
+        This is what a refresh restores from: the client posts what it has,
+        and the reload reads it back out of the same process rather than out
+        of anything the browser kept. Acknowledges only, since the caller is
+        the one that already has the state.
+        """
+        ui_session.set_workspace_view(request.tab, request.view)
+        return {"tab": request.tab}
 
     @app.get("/api/mc/catalog")
     def monte_carlo_catalog() -> dict[str, Any]:
@@ -130,6 +144,10 @@ def create_app(
                 role="reference",
                 payload=payload,
             )
+            # Through the core spec, so the slot matches what a bundle stores
+            # rather than the request model that happened to carry it.
+            ui_session.workspace.mc.spec = request.pipeline.to_core().to_dict()
+            ui_session.workspace.mc.result = payload
             return payload
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc

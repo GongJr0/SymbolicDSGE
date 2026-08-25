@@ -339,6 +339,17 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert captured["method"] == "Nelder-Mead"
     assert captured["cov"] is True
 
+    # A run fills the bundle-bound slots: the spec describes the estimator it
+    # just built, and neither slot carries anything the form invented.
+    workspace = client.get("/api/session").json()["workspace"]["estimation"]
+    assert workspace["spec"]["params"]["estimated_params"] == ["beta"]
+    assert workspace["spec"]["params"]["observables"] == ["Infl", "Rate"]
+    assert len(workspace["spec"]["y"]) == 2
+    assert set(workspace["spec"]) == {"y", "params"}
+    assert workspace["result"]["theta"] == {"beta": 0.98}
+    # The client never PUT a view, and the run did not invent one.
+    assert "view" not in workspace
+
     invalid = client.post(
         "/api/run/estimation",
         json={**request, "method_kwargs": {"routine": "mcmc"}},
@@ -437,6 +448,12 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     fetched = client.get(f"/api/run/{body['run_id']}")
     assert fetched.status_code == 200
     assert fetched.json()["run_id"] == body["run_id"]
+
+    # The run fills the MC tab's bundle-bound slots, through the core spec so
+    # the shape matches what a bundle stores rather than the request model.
+    workspace = client.get("/api/session").json()["workspace"]["mc"]
+    assert [node["id"] for node in workspace["spec"]["nodes"]] == ["sim"]
+    assert workspace["result"]["run_id"] == body["run_id"]
 
 
 def _solve_reference(client: TestClient) -> None:

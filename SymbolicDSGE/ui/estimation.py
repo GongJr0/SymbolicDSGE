@@ -255,6 +255,16 @@ def _bounds_from_result(
     return {}
 
 
+def estimator_spec_wire(spec: EstimatorSpec) -> dict[str, Any]:
+    """An :class:`EstimatorSpec` as JSON, verbatim.
+
+    The dataclass holds a plain list and a TypedDict, so this is a shape
+    change and nothing else. It stays free of anything the GUI added, which
+    is what lets a bundle take this slot as it stands.
+    """
+    return {"y": spec.y, "params": dict(spec.params)}
+
+
 def build_estimation_prefill(
     spec: EstimatorSpec,
     result: MLEResult | MAPResult | MCMCResult | None,
