@@ -62,8 +62,10 @@ class MCPipeline:
         rep_tuple = tuple(per_rep_steps)
         postproc_tuple = tuple(postproc_steps)
         self._validate_steps(rep_tuple, postproc_tuple)
-        source_indices = self._resolve_source_indices(rep_tuple)
-        object.__setattr__(self, "per_rep_steps", rep_tuple)
+        ordered = self._order_steps(rep_tuple)
+        source_indices = self._resolve_source_indices(ordered)
+        self._validate_postproc_traces(ordered, postproc_tuple)
+        object.__setattr__(self, "per_rep_steps", ordered)
         object.__setattr__(self, "postproc_steps", postproc_tuple)
         object.__setattr__(self, "_source_indices", source_indices)
 
@@ -77,16 +79,13 @@ class MCPipeline:
         names = [step.name for step in (*per_rep_steps, *postproc_steps)]
         if len(set(names)) != len(names):
             raise ValueError("MCPipeline step names must be unique.")
-        if per_rep_steps[0].op_type is not OpType.DATAGEN:
-            raise ValueError("MCPipeline first per-rep step must be a DATAGEN step.")
-        for step in per_rep_steps[1:]:
-            if step.op_type is OpType.DATAGEN:
-                raise ValueError(
-                    "MCPipeline supports only one DATAGEN step, in first position."
-                )
+        datagens = [step for step in per_rep_steps if step.op_type is OpType.DATAGEN]
+        if len(datagens) != 1:
+            raise ValueError("MCPipeline requires exactly one DATAGEN step.")
+        for step in per_rep_steps:
             if step.op_type is OpType.POSTPROC:
                 raise ValueError(
-                    "POSTPROC steps belong in postproc_steps, not per_rep_steps."
+                    "POSTPROC steps can't be specified under per_rep_steps, use postproc_steps."
                 )
         for step in postproc_steps:
             if step.op_type is not OpType.POSTPROC:
@@ -94,6 +93,30 @@ class MCPipeline:
                     f"postproc_steps may only contain POSTPROC steps; {step.name!r} "
                     f"is {step.op_type}."
                 )
+
+    @staticmethod
+    def _order_steps(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
+        """Sort the steps into execution order: datagen, filters, transforms, terminals.
+
+        A caller authors a step list, not a schedule. Filters read only the
+        datagen and terminals are read by no one, so those phases keep their
+        authored order; transforms chain, so they are walked against theirs.
+        """
+        datagen: list[MCStep] = []
+        filters: list[MCStep] = []
+        transforms: list[MCStep] = []
+        terminals: list[MCStep] = []
+        for step in per_rep_steps:
+            if step.op_type is OpType.DATAGEN:
+                datagen.append(step)
+            elif step.op_type is OpType.FILTER:
+                filters.append(step)
+            elif step.op_type is OpType.TRANSFORM:
+                transforms.append(step)
+            else:
+                terminals.append(step)
+        placed = {step.name for step in (*datagen, *filters)}
+        return (*datagen, *filters, *_order_transforms(transforms, placed), *terminals)
 
     @staticmethod
     def _resolve_source_indices(
@@ -121,6 +144,43 @@ class MCPipeline:
                 step_indices.append(source_idx)
             resolved.append(tuple(step_indices))
         return tuple(resolved)
+
+    @staticmethod
+    def _validate_postproc_traces(
+        per_rep_steps: tuple[MCStep, ...],
+        postproc_steps: tuple[MCStep, ...],
+    ) -> None:
+        """Check each postproc's trace selectors against what the producers emit.
+
+        Catalogue postprocs mark their trace fields with ``type == "trace"``. A
+        custom op reads traces in opaque code, so it carries no such field and is
+        left to fail at its own hands.
+        """
+        if not postproc_steps:
+            return
+        from .catalog import STEP_CATALOG
+        from .traces import trace_keys_for_step
+
+        available = {key for step in per_rep_steps for key in trace_keys_for_step(step)}
+        for step in postproc_steps:
+            definition = STEP_CATALOG.get(step.step_type or "")
+            if definition is None:
+                continue
+            for field in definition.fields:
+                if field.type != "trace":
+                    continue
+                ref = step.kwargs.get(field.key)
+                if not ref:
+                    raise ValueError(
+                        f"POSTPROC step {step.name!r} must select a trace for "
+                        f"{field.key!r} (available: {sorted(available)})."
+                    )
+                if ref not in available:
+                    raise ValueError(
+                        f"POSTPROC step {step.name!r} field {field.key!r} references "
+                        f"trace {ref!r}, which no step in the pipeline produces "
+                        f"(available: {sorted(available)})."
+                    )
 
     @cached_property
     def graph(self) -> "PipelineGraph":
@@ -415,6 +475,42 @@ class MCPipeline:
             if not failed:
                 postproc[step.name] = out
         return postproc, postproc_elapsed_s
+
+
+def _order_transforms(
+    transforms: Sequence[MCStep],
+    placed: set[str],
+) -> list[MCStep]:
+    """Kahn-walk the transform phase so each step follows the transforms it reads.
+
+    ``placed`` seeds the walk with the earlier phases. A producer outside the
+    transform phase is left to :meth:`MCPipeline._resolve_source_indices`, which
+    owns the unknown-producer and wrong-producer-type errors.
+    """
+    names = {step.name for step in transforms}
+    remaining = list(transforms)
+    ordered: list[MCStep] = []
+    placed = set(placed)
+    while remaining:
+        progress = False
+        next_remaining: list[MCStep] = []
+        for step in remaining:
+            deps = {
+                selector.source_step
+                for selector in step.source_args
+                if selector.source_step in names
+            }
+            if deps <= placed:
+                ordered.append(step)
+                placed.add(step.name)
+                progress = True
+            else:
+                next_remaining.append(step)
+        if not progress:
+            stuck = [step.name for step in next_remaining]
+            raise ValueError(f"Transform dependency cycle among {stuck}.")
+        remaining = next_remaining
+    return ordered
 
 
 def _validate_source_producer(

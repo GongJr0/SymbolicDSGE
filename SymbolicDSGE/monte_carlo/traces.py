@@ -20,6 +20,7 @@ from what a run actually emits.
 from __future__ import annotations
 
 from .catalog import TERMINAL_STEP_TYPES, TRANSFORM_STEP_TYPES
+from .mc_constructs import MCStep, OpType
 from .spec import PipelineSpec
 
 _TEST_SUBKEYS = ("statistic", "pval", "status")
@@ -52,6 +53,21 @@ def trace_keys_for(step_type: str, name: str) -> list[str]:
     return []  # datagen / filter / postproc produce no consumable trace
 
 
+def trace_keys_for_step(step: MCStep) -> list[str]:
+    """The across-rep trace keys a live per-rep step emits, by its role.
+
+    The step counterpart of :func:`trace_keys_for`, dispatching on ``op_type``
+    rather than ``step_type``, which a hand-built step may leave unset.
+    """
+    if step.op_type is OpType.REGRESSION:
+        return list(regression_trace_keys(step.name).values())
+    if step.op_type is OpType.TEST:
+        return list(test_trace_keys(step.name).values())
+    if step.op_type is OpType.TRANSFORM:
+        return [payload_trace_key(step.name)]
+    return []  # datagen / filter / postproc produce no consumable trace
+
+
 def available_traces(spec: PipelineSpec) -> list[str]:
     """Every across-rep trace key the pipeline's producers will emit (in node order).
 
@@ -59,6 +75,6 @@ def available_traces(spec: PipelineSpec) -> list[str]:
     to validate trace references before a run.
     """
     keys: list[str] = []
-    for node in spec.nodes:
-        keys.extend(trace_keys_for(node.step_type, node.name))
+    for node in spec["nodes"]:
+        keys.extend(trace_keys_for(node["step_type"], node["name"]))
     return keys

@@ -643,24 +643,35 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     import pathlib
 
     from SymbolicDSGE import BundleBuilder, load_bundle
+    from SymbolicDSGE.monte_carlo import build_pipeline as build_live_pipeline
+    from SymbolicDSGE.monte_carlo.spec import NodeSpec as LiveNodeSpec
+    from SymbolicDSGE.monte_carlo.spec import PipelineSpec as LivePipelineSpec
 
     yaml_text = pathlib.Path("MODELS/test.yaml").read_text(encoding="utf-8")
-    pipeline = PipelineSpec(
+    # The library spec, not the oracle's: this pipeline crosses into the real
+    # BundleBuilder rather than the reference implementation the rest of the
+    # module drives.
+    pipeline = LivePipelineSpec(
         nodes=[
-            _sim_node(),
-            NodeSpec(
+            LiveNodeSpec(
+                id="sim",
+                step_type="simulation",
+                name="datagen",
+                params={"T": 50, "observables": True},
+            ),
+            LiveNodeSpec(
                 id="std",
                 step_type="standardize",
                 name="standardize",
                 params={"source": "datagen", "field": "observables"},
             ),
-            NodeSpec(
+            LiveNodeSpec(
                 id="rm",
                 step_type="rolling_mean",
                 name="rmean",
                 params={"source": "standardize", "field": "payload", "window": 3},
             ),
-            NodeSpec(
+            LiveNodeSpec(
                 id="wm",
                 step_type="wald",
                 name="wald_mean",
@@ -672,11 +683,8 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
                 },
             ),
         ],
-        edges=[
-            EdgeSpec(source="sim", target="std"),
-            EdgeSpec(source="std", target="rm"),
-            EdgeSpec(source="rm", target="wm"),
-        ],
+        edges=[],
+        postprocs=[],
     )
 
     target = (
@@ -688,19 +696,17 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
 
     loaded = load_bundle(target)
     assert loaded.mc is not None
-    restored_step_types = [n.step_type for n in loaded.mc.spec.nodes]
+    restored_step_types = [n["step_type"] for n in loaded.mc.spec["nodes"]]
     assert restored_step_types == [
         "simulation",
         "standardize",
         "rolling_mean",
         "wald",
     ]
-    # Validation against the restored spec still passes (no drift between the
-    # spec's Literal and the catalog at load time).
-    ordered, _ = validate_pipeline_spec(
-        loaded.mc.spec, has_reference=True, has_dgp=True
-    )
-    assert [node.name for node in ordered] == [
+    # The restored spec still compiles (no drift between the spec's Literal and
+    # the catalog at load time).
+    rebuilt = build_live_pipeline(loaded.mc.spec)
+    assert [step.name for step in rebuilt.per_rep_steps] == [
         "datagen",
         "standardize",
         "rmean",

@@ -290,7 +290,7 @@ def _compile_mc(builder: BundleBuilder, mc_dir: Path, *, csv_only: bool) -> None
     pipeline_path = mc_dir / "pipeline.json"
     if not pipeline_path.exists():
         raise CompileError(f"{mc_dir}/ is present but pipeline.json is missing.")
-    pipeline = PipelineSpec.from_json(pipeline_path.read_text(encoding="utf-8"))
+    pipeline = cast(PipelineSpec, pipeline_path.read_text(encoding="utf-8"))
     builder.add_mc(pipeline)
 
     # Pre-split mc_result + mc_trace authoring: embed verbatim via add_member

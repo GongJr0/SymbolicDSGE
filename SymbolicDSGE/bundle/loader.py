@@ -269,12 +269,12 @@ def _rebuild_mcmc_result(
 
 
 def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
-    from ..monte_carlo.builder import build_pipeline, validate_pipeline_spec
+    from ..monte_carlo.builder import build_pipeline
 
     pipeline_members = manifest.members_by_kind("mc_pipeline")
     if not pipeline_members:
         return None
-    spec = PipelineSpec.from_json(archive.read_text(pipeline_members[0].path))
+    spec = cast(PipelineSpec, json.loads(archive.read_text(pipeline_members[0].path)))
 
     document: dict[str, Any] | None = None
     result_members = manifest.members_by_kind("mc_result")
@@ -291,13 +291,10 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
     resources = _load_mc_resources(archive, manifest, spec)
 
     # Build the runnable pipeline eagerly. This needs no model: every step
-    # compiles from its parameters alone. A malformed stored spec raises here, so
-    # ``load_bundle`` fails fast on structure. The model-availability gate is a
-    # run concern: both ``reference`` and ``dgp`` are supplied later at
-    # ``pipeline.run(...)``, so both are declared available here (the pipeline is
-    # runnable once the caller passes the models it needs).
-    ordered, postprocs = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    pipeline = build_pipeline(ordered, postprocs, resources=resources)
+    # compiles from its parameters alone, and the models are supplied later at
+    # ``pipeline.run(...)``. A malformed stored spec raises here, so
+    # ``load_bundle`` fails fast on structure.
+    pipeline = build_pipeline(spec, resources=resources)
 
     return LoadedMC(
         spec=spec,
@@ -358,9 +355,9 @@ def _load_mc_resources(
     resources: dict[str, Any] = {}
 
     shapes_by_ref = {
-        node.params["data_ref"]: node.params.get("data_shapes", {})
-        for node in spec.nodes
-        if node.step_type == "raw_model_data" and "data_ref" in node.params
+        (params := node["params"])["data_ref"]: params.get("data_shapes", {})
+        for node in spec["nodes"]
+        if node["step_type"] == "raw_model_data" and "data_ref" in node["params"]
     }
     for member in manifest.members_by_kind("mc_raw_model_data"):
         ref = str(member.options.get("ref", ""))

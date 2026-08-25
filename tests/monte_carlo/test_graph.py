@@ -118,12 +118,34 @@ def test_unknown_payload_producer_raises() -> None:
         )
 
 
-def test_forward_reference_raises() -> None:
-    with pytest.raises(ValueError, match="does not appear earlier"):
+def test_forward_reference_is_reordered() -> None:
+    pipe = MCPipeline(
+        [
+            simulation_step("dgp", T=8),
+            jarque_bera_test_step("jb", source="s1", field="payload"),
+            standardize_step("s1", source="dgp", field="observables"),
+        ]
+    )
+    assert [step.name for step in pipe.per_rep_steps] == ["dgp", "s1", "jb"]
+
+
+def test_transform_chain_is_ordered_against_its_producers() -> None:
+    pipe = MCPipeline(
+        [
+            standardize_step("s2", source="s1", field="payload"),
+            simulation_step("dgp", T=8),
+            standardize_step("s1", source="dgp", field="observables"),
+        ]
+    )
+    assert [step.name for step in pipe.per_rep_steps] == ["dgp", "s1", "s2"]
+
+
+def test_transform_cycle_raises() -> None:
+    with pytest.raises(ValueError, match="dependency cycle"):
         MCPipeline(
             [
                 simulation_step("dgp", T=8),
-                jarque_bera_test_step("jb", source="s1", field="payload"),
-                standardize_step("s1", source="dgp", field="observables"),
+                standardize_step("a", source="b", field="payload"),
+                standardize_step("b", source="a", field="payload"),
             ]
         )

@@ -106,7 +106,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
 
     mc = TabState()
     if loaded.mc is not None:
-        mc.spec = loaded.mc.spec.to_dict()
+        mc.spec = dict(loaded.mc.spec)
         mc.result = loaded.mc.wire()
 
     # Spec only: the session replays it against the model once both are

@@ -80,7 +80,9 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         thin=1,
     )
     pipeline = PipelineSpec(
-        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})]
+        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})],
+        edges=[],
+        postprocs=[],
     )
     sim_spec = SimSpec(
         T=8,

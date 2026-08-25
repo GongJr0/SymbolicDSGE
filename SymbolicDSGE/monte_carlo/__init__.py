@@ -5,7 +5,7 @@ live in :mod:`SymbolicDSGE.monte_carlo.serialize`. This namespace exposes the
 types and entry points needed to build, run, and inspect pipelines in code.
 """
 
-from .builder import build_pipeline, run_pipeline, validate_pipeline_spec
+from .builder import build_pipeline, run_pipeline
 from .catalog import (
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
@@ -37,7 +37,6 @@ __all__ = [
     "MCPipelineResult",
     "build_pipeline",
     "run_pipeline",
-    "validate_pipeline_spec",
     # step constructs (custom-op authoring surface)
     "MCStep",
     "OpType",

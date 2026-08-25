@@ -1,10 +1,24 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from SymbolicDSGE.monte_carlo.spec import MCStepKind, PipelineSpec, PostprocStepKind
+
+
+def _drop_blank(params: dict[str, Any]) -> dict[str, Any]:
+    """Drop the keys the editor submits empty so the step factory's default applies.
+
+    An unwired source posts ``""`` and an untouched column list posts ``[]``;
+    neither is a value a factory takes. Written specs are not cleaned: a blank
+    there is an error, not an unfinished form.
+    """
+    return {
+        key: value
+        for key, value in params.items()
+        if value != "" and value != [] and value is not None
+    }
 
 
 class MCNodeSpec(BaseModel):
@@ -12,6 +26,8 @@ class MCNodeSpec(BaseModel):
     step_type: MCStepKind
     name: str = Field(min_length=1)
     params: dict[str, Any] = Field(default_factory=dict)
+
+    _clean_params = field_validator("params")(_drop_blank)
 
 
 class MCEdgeSpec(BaseModel):
@@ -27,6 +43,8 @@ class MCPostprocSpec(BaseModel):
     name: str = Field(min_length=1)
     params: dict[str, Any] = Field(default_factory=dict)
 
+    _clean_params = field_validator("params")(_drop_blank)
+
 
 class MCPipelineSpec(BaseModel):
     nodes: list[MCNodeSpec] = Field(min_length=1)
@@ -35,7 +53,7 @@ class MCPipelineSpec(BaseModel):
 
     def to_core(self) -> PipelineSpec:
         """Convert to the pydantic-free core spec (bundle/text serialization)."""
-        return PipelineSpec.from_dict(self.model_dump())
+        return cast(PipelineSpec, self.model_dump())
 
 
 class MCRunRequest(BaseModel):

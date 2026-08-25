@@ -285,7 +285,7 @@ class BundleBuilder:
             spec = pipeline
         self._add(
             Member(path=_MC_PIPELINE, kind="mc_pipeline"),
-            spec.to_json(indent=2).encode("utf-8"),
+            json.dumps(spec, indent=2).encode("utf-8"),
         )
         if result is not None:
             document = result_document(result, run_id=run_id)

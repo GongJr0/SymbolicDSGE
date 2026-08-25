@@ -292,28 +292,3 @@ def test_postproc_table_wire_reconstructs_dropped_all_null_column() -> None:
     wire = pipeline_result_wire(document, {}, {}, {"t": {"a": [1.0, 2.0]}})
     assert wire["postproc"]["t"]["data"]["blank"] == [None, None]
     assert wire["postproc"]["t"]["data"]["a"] == [1.0, 2.0]
-
-
-def test_pipeline_spec_round_trips() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            NodeSpec(id="n0", step_type="simulation", name="datagen", params={"T": 50}),
-            NodeSpec(
-                id="n1",
-                step_type="jarque_bera",
-                name="jb",
-                params={"source": "datagen", "field": "observables"},
-            ),
-        ],
-        edges=[EdgeSpec(source="n0", target="n1")],
-    )
-    as_dict = spec.to_dict()
-    assert PipelineSpec.from_dict(as_dict).to_dict() == as_dict
-    assert PipelineSpec.from_json(spec.to_json()).to_dict() == as_dict
-
-
-def test_pipeline_spec_rejects_unknown_step() -> None:
-    with pytest.raises(ValueError):
-        PipelineSpec.from_dict(
-            {"nodes": [{"id": "n", "step_type": "bogus", "name": "n"}], "edges": []}
-        )

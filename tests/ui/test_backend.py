@@ -12,10 +12,8 @@ from SymbolicDSGE.ui.estimation import (
     build_estimation_inputs,
     serialize_estimation_result,
 )
-from SymbolicDSGE.ui.mc import (
-    serialize_pipeline_result,
-    validate_pipeline_spec,
-)
+from SymbolicDSGE.monte_carlo import build_pipeline
+from SymbolicDSGE.ui.mc import serialize_pipeline_result
 from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
 from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
@@ -527,7 +525,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     }
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json() == {"valid": True, "order": ["sim"], "postprocs": []}
+    assert validated.json() == {"valid": True, "steps": ["datagen"], "postprocs": []}
 
     run = client.post(
         "/api/run/mc",
@@ -651,7 +649,7 @@ def test_ui_backend_custom_validate_is_phase_aware() -> None:
     assert bad.status_code == 200 and bad.json()["valid"] is False
 
 
-def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
+def test_ui_backend_accepts_fanout() -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
@@ -703,21 +701,9 @@ def test_ui_backend_accepts_fanout_and_rejects_terminal_forward_links() -> None:
     }
 
     response = client.post("/api/mc/validate", json=pipeline)
-    terminal_forward = client.post(
-        "/api/mc/validate",
-        json={
-            **pipeline,
-            "edges": [
-                {"source": "sim", "target": "a"},
-                {"source": "a", "target": "b"},
-            ],
-        },
-    )
 
     assert response.status_code == 200
-    assert response.json()["order"] == ["sim", "a", "b"]
-    assert terminal_forward.status_code == 400
-    assert "Terminal step" in terminal_forward.json()["detail"]["message"]
+    assert response.json()["steps"] == ["datagen", "a", "b"]
 
     run = client.post(
         "/api/run/mc",
@@ -767,7 +753,7 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
 
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json()["order"] == ["sim", "jb"]
+    assert validated.json()["steps"] == ["datagen", "normality"]
 
     run = client.post(
         "/api/run/mc",
@@ -832,7 +818,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
 
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json()["order"] == ["sim", "bp"]
+    assert validated.json()["steps"] == ["datagen", "heteroskedasticity"]
 
     run = client.post(
         "/api/run/mc",
@@ -898,7 +884,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
 
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json()["order"] == ["sim", "bg"]
+    assert validated.json()["steps"] == ["datagen", "serial_correlation"]
 
     run = client.post(
         "/api/run/mc",
@@ -963,7 +949,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
 
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json()["order"] == ["sim", "cs"]
+    assert validated.json()["steps"] == ["datagen", "stability"]
 
     run = client.post(
         "/api/run/mc",
@@ -1027,7 +1013,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
 
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json()["order"] == ["sim", "csq"]
+    assert validated.json()["steps"] == ["datagen", "variance_stability"]
 
     run = client.post(
         "/api/run/mc",
@@ -1092,7 +1078,7 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
 
     validated = client.post("/api/mc/validate", json=pipeline)
     assert validated.status_code == 200
-    assert validated.json()["order"] == ["sim", "ch"]
+    assert validated.json()["steps"] == ["datagen", "structural_break"]
 
     run = client.post(
         "/api/run/mc",
@@ -1217,7 +1203,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
     assert payload["n_retained_by_step"] == {"diagnostic": 2, "ols": 2}
 
 
-def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
+def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
     spec = MCPipelineSpec.model_validate(
         {
             "nodes": [
@@ -1249,15 +1235,24 @@ def test_ui_backend_binds_filter_dependencies_from_graph_edges() -> None:
         }
     )
 
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
+    pipeline = build_pipeline(spec.to_core())
 
-    assert [node.id for node in ordered] == ["sim", "filter", "test"]
-    assert ordered[-1].params["residuals_source"] == "renamed_filter"
+    assert [step.name for step in pipeline.per_rep_steps] == [
+        "datagen",
+        "renamed_filter",
+        "diagnostic",
+    ]
+    residuals = next(
+        selector
+        for selector in pipeline.per_rep_steps[-1].source_args
+        if selector.field == "std_innov"
+    )
+    assert residuals.source_step == "renamed_filter"
 
     missing = spec.model_copy(deep=True)
     missing.nodes[-1].params["residuals_source"] = "missing_filter"
-    with np.testing.assert_raises_regex(ValueError, "requires prior source"):
-        validate_pipeline_spec(missing, has_reference=True, has_dgp=True)
+    with np.testing.assert_raises_regex(ValueError, "unknown producer"):
+        build_pipeline(missing.to_core())
 
 
 _UI_CUSTOM_OP = """@custom_transform

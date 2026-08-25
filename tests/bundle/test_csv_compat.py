@@ -153,7 +153,9 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
                     NodeSpec(
                         id="n1", step_type="simulation", name="sim", params={"T": 50}
                     )
-                ]
+                ],
+                edges=[],
+                postprocs=[],
             )
         )
         .write(tmp_path / "csv.sdsge")

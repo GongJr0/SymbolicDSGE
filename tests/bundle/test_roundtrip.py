@@ -54,7 +54,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         thin=1,
     )
     pipeline = PipelineSpec(
-        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 50})]
+        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 50})],
+        edges=[],
+        postprocs=[],
     )
 
     builder = (
@@ -110,7 +112,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # monte carlo
     assert loaded.mc is not None
-    assert loaded.mc.spec.nodes[0].step_type == "simulation"
+    assert loaded.mc.spec["nodes"][0]["step_type"] == "simulation"
     assert loaded.mc.document is None  # no result attached
     assert loaded.mc.wire() is None
 

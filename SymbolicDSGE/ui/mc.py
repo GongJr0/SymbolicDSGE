@@ -16,7 +16,6 @@ from SymbolicDSGE.monte_carlo import available_traces as _available_traces
 from SymbolicDSGE.monte_carlo import build_pipeline as build_pipeline
 from SymbolicDSGE.monte_carlo import catalog_payload
 from SymbolicDSGE.monte_carlo import run_pipeline as _run_pipeline
-from SymbolicDSGE.monte_carlo import validate_pipeline_spec as _validate_pipeline_spec
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
     CustomOpValidationError,
@@ -104,18 +103,6 @@ def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
         except CustomOpValidationError as exc:
             raise ValueError(f"Custom step '{node.name}': {exc}") from exc
     return resources
-
-
-def validate_pipeline_spec(
-    spec: MCPipelineSpec,
-    *,
-    has_reference: bool,
-    has_dgp: bool,
-) -> tuple[list[NodeSpec], list[PostprocSpec]]:
-    """Graph-validate a UI pipeline request; return ordered nodes + postprocs."""
-    return _validate_pipeline_spec(
-        spec.to_core(), has_reference=has_reference, has_dgp=has_dgp
-    )
 
 
 def run_pipeline(
