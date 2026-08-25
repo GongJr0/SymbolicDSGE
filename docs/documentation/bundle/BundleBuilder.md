@@ -21,8 +21,8 @@ BundleBuilder(
 )
 ```
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
+| __Name__   |                                                       __Description__ |
+|:-----------|----------------------------------------------------------------------:|
 | created_by | Manifest `created_by` string. Defaults to `"SymbolicDSGE <version>"`. |
 
 &nbsp;
@@ -46,12 +46,12 @@ BundleBuilder.add_model(
 
 Add a model configuration to the bundle. `role` is `"reference"` or `"dgp"`. `yaml_text` is the source YAML the loader will re-parse.
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| role | `"reference"` or `"dgp"`. At least one model is required for a valid bundle. |
-| yaml_text | Source YAML text. Available on a parsed `ModelConfig` at `config.source_yaml`. |
-| compile_kwargs | Compile kwargs the loader passes to `DSGESolver.compile`. |
-| solve_kwargs | Solve kwargs the loader passes to `DSGESolver.solve`. |
+| __Name__       |                                                                __Description__ |
+|:---------------|-------------------------------------------------------------------------------:|
+| role           |   `"reference"` or `"dgp"`. At least one model is required for a valid bundle. |
+| yaml_text      | Source YAML text. Available on a parsed `ModelConfig` at `config.source_yaml`. |
+| compile_kwargs |                      Compile kwargs the loader passes to `DSGESolver.compile`. |
+| solve_kwargs   |                          Solve kwargs the loader passes to `DSGESolver.solve`. |
 
 &nbsp;
 
@@ -70,11 +70,11 @@ BundleBuilder.add_raw_data(
 
 Add a raw observable file. CSV input is re-encoded as Parquet by default.
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| name | Member stem stored under `data/<name>.csv` or `data/<name>.parquet`. |
-| data | CSV bytes or text. Parquet input should be added through [`add_member`](#bundlebuilderadd_member) instead. |
-| as_parquet | When `True` the CSV is re-encoded as Parquet for size; when `False` it is stored verbatim. |
+| __Name__   |                                                                                            __Description__ |
+|:-----------|-----------------------------------------------------------------------------------------------------------:|
+| name       |                                       Member stem stored under `data/<name>.csv` or `data/<name>.parquet`. |
+| data       | CSV bytes or text. Parquet input should be added through [`add_member`](#bundlebuilderadd_member) instead. |
+| as_parquet |                 When `True` the CSV is re-encoded as Parquet for size; when `False` it is stored verbatim. |
 
 &nbsp;
 
@@ -82,41 +82,25 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 
 ```python
 BundleBuilder.add_estimation(
-    source: EstimationSpec | Estimator,
+    source: EstimatorSpec | Estimator,
     *,
-    result: ( # (1)!
-        OptimizationResult
+    result: (
+        MLEResult
+        | MAPResult
         | MCMCResult
-        | OptimizationResultMeta
-        | MCMCResultMeta
         | None
     ) = None,
-    observed: NDArray[Any] | None = None,
-    observable_names: list[str] | None = None,
-    posterior: Mapping[str, NDArray[Any]] | None = None, # (2)!
     as_parquet: bool = True,
 ) -> BundleBuilder
 ```
 
-1. Live `#!python OptimizationResult` / `#!python MCMCResult` are auto-projected to their `#!python *Meta` via `#!python result.to_meta()`. No hand construction is required.
-2. Auto-supplied from `#!python result.posterior_arrays()` when `#!python result` is a live `#!python MCMCResult` and `#!python posterior` is omitted.
+An `Estimator` instance can be directly passed to derive the spec. Any raw data contained in the `Estimator` instance or the `*Result` is serialized as CSV or Parquet depending on `as_parquet`. Parquet is generally recommended for compression and robustness. CSV on the other hand allows hand-editing and parsing the data with standard tools.
 
-Add the estimation tab. `source` may be an `EstimationSpec` or a live `Estimator`. With `as_parquet=False`, `observed` is stored as a semantic-header CSV using `observable_names` as headers, and `posterior` is stored via mechanical `{name}.{j}` expansion.
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| source | `EstimationSpec` for an explicit archive spec, or a live `Estimator` whose spec will be derived from `result`. |
-| result | Either a live `OptimizationResult` / `MCMCResult` returned by `Estimator.mle(...)`, `Estimator.map(...)`, `Estimator.mcmc(...)`, or `DSGESolver.estimate(...)`, or its projected `OptimizationResultMeta` / `MCMCResultMeta`. Live results are projected internally. |
-| observed | Observed `y` matrix shaped `(n, k)`. |
-| observable_names | List of `k` observable names matching the matrix columns. Stored on the manifest member for semantic-header CSV authoring. |
-| posterior | MCMC posterior columns, `{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac": (n_draws,)}`. Either `logpost` or `logpost_trace` is accepted as the bulk-log key, and either `logjac` or `logjac_trace`. All three are required to load the bundle back into an `MCMCResult`. Auto-filled when `result` is a live `MCMCResult`. |
+| __Name__   |                                                      __Description__ |
+|:-----------|---------------------------------------------------------------------:|
+| source     |                            `Estimator` or `EstimatorSpec` to bundle. |
+| result     |                         Any result object returned by the estimator. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
-
-???+ tip "Live-result fast path"
-    The shortest authoring path for a real run is `#!python builder.add_estimation(estimator, result=result)`, where `result` is a live `OptimizationResult` or `MCMCResult`. The builder derives the spec from the estimator and result, then calls `#!python result.to_meta()` and, for MCMC, attaches `#!python result.posterior_arrays()` automatically.
-
-???+ warning "Observable name validation"
-    `observable_names` must match the model's `observables` in count **and** order. Mismatch raises at compile time with an actionable message. See [`sdsge-compile` validation](../../portable_experiments/sdsge-compile.md#validation) for the details.
 
 &nbsp;
 
@@ -134,12 +118,12 @@ BundleBuilder.add_mc(
 
 Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The builder serializes it to a `PipelineSpec` and writes any side-channel resources it references as bundle members. A hand-authored `PipelineSpec` is accepted for explicit serialization workflows. An attached `result` is split into a trace-free document plus trace and postproc artifact members.
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| pipeline | Live `MCPipeline` or `PipelineSpec` describing the MC graph. Bundles loaded back into Python reconstruct a live `LoadedMC.pipeline`. |
-| result | Optional live `MCPipelineResult`; the builder splits the document from the bulk traces internally. |
-| run_id | Identifier embedded in the result document. |
-| as_parquet | When `False` the trace member is written as CSV. |
+| __Name__   |                                                                                                                      __Description__ |
+|:-----------|-------------------------------------------------------------------------------------------------------------------------------------:|
+| pipeline   | Live `MCPipeline` or `PipelineSpec` describing the MC graph. Bundles loaded back into Python reconstruct a live `LoadedMC.pipeline`. |
+| result     |                                   Optional live `MCPipelineResult`; the builder splits the document from the bulk traces internally. |
+| run_id     |                                                                                          Identifier embedded in the result document. |
+| as_parquet |                                                                                     When `False` the trace member is written as CSV. |
 
 ???+ note "MC resources"
     `raw_model_data` datagen arrays are written as `mc_raw_model_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members. These resources are restored on load as `LoadedMC.resources`.

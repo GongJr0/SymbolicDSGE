@@ -52,12 +52,12 @@ my-experiment/
 
 ## Arguments
 
-| Argument | Description |
-| --- | --- |
-| `source` | Directory containing the bundle members. |
-| `-o`, `--output` | Output `.sdsge` path. Defaults to `<source>.sdsge` next to the source directory. |
-| `--csv-only` | Keep CSV bulk members as CSV instead of converting to Parquet. The reader is format-agnostic, so the resulting bundle is still valid. |
-| `--created-by` | Override the manifest `created_by` field. Defaults to `"SymbolicDSGE <version>"`. |
+| Argument         | Description                                                                                                                           |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `source`         | Directory containing the bundle members.                                                                                              |
+| `-o`, `--output` | Output `.sdsge` path. Defaults to `<source>.sdsge` next to the source directory.                                                      |
+| `--csv-only`     | Keep CSV bulk members as CSV instead of converting to Parquet. The reader is format-agnostic, so the resulting bundle is still valid. |
+| `--created-by`   | Override the manifest `created_by` field. Defaults to `"SymbolicDSGE <version>"`.                                                     |
 
 ## Examples
 
@@ -77,11 +77,11 @@ sdsge-compile my-experiment/ --csv-only -o my-experiment.sdsge
 
 `sdsge-compile` cross-checks observed-data columns against the model's declared observables. The check is **strict on order** because downstream consumers operate by column index. Three failure modes have dedicated messages:
 
-| Failure | Message excerpt | Remedy |
-| --- | --- | --- |
-| Numeric-looking headers | `inferred observable names look numeric; file may be missing a header row` | Add observable names as the first CSV row. |
-| Name mismatch | `columns [...] do not match model observables [...]. Rename columns to match (order matters).` | Rename CSV/Parquet columns to match the model. |
-| Count mismatch | `has K columns but model declares N observables` | Add or remove columns to match. |
+| Failure                 | Message excerpt                                                                                | Remedy                                         |
+|-------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------|
+| Numeric-looking headers | `inferred observable names look numeric; file may be missing a header row`                     | Add observable names as the first CSV row.     |
+| Name mismatch           | `columns [...] do not match model observables [...]. Rename columns to match (order matters).` | Rename CSV/Parquet columns to match the model. |
+| Count mismatch          | `has K columns but model declares N observables`                                               | Add or remove columns to match.                |
 
 ???+ warning "Order matters"
     The observable-name validation enforces same names **and** same order — even sets that match cause failure if reordered. The bundle's consumers index observed data by position, so reordering would silently produce wrong results.
@@ -90,12 +90,12 @@ sdsge-compile my-experiment/ --csv-only -o my-experiment.sdsge
 
 The reader dispatches each member by file extension:
 
-| Extension | Format |
-| --- | --- |
-| `.yaml`, `.yml` | YAML |
-| `.json` | JSON |
-| `.csv` | CSV |
-| `.parquet` | Parquet |
+| Extension       | Format  |
+|-----------------|---------|
+| `.yaml`, `.yml` | YAML    |
+| `.json`         | JSON    |
+| `.csv`          | CSV     |
+| `.parquet`      | Parquet |
 
 ???+ note "Both formats present"
     Authoring both `observed.csv` and `observed.parquet` (or any other CSV/Parquet pair) is rejected at compile time with `both ... and ... exist in <dir>; choose one`.
@@ -112,12 +112,13 @@ The reader dispatches each member by file extension:
         "accept_rate": 0.31,
         "n_draws": 1000,
         "burn_in": 100,
-        "thin": 2
+        "thin": 2,
+        "random_state": 0
     }
 }
 ```
 
-`type` discriminates `"mcmc"` from `"optimization"`; `data` is the result-metadata dataclass `to_dict()`. See [`MCMCResultMeta`](../documentation/bundle/index.md#estimation-spec-and-result-types) and [`OptimizationResultMeta`](../documentation/bundle/index.md#estimation-spec-and-result-types) for the field-level documentation.
+`type` is inferred from the result type (`"mle"`, `"map"`, `"mcmc"`); `data` is the result's textual data (complete for MLE/MAP, without traces for MCMC).
 
 ## See also
 

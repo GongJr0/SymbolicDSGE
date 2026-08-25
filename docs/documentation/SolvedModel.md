@@ -353,7 +353,7 @@ Return a [`#!python BundleBuilder`](./bundle/BundleBuilder.md) pre-seeded with t
 
 ```python
 sol.to_bundle_builder() \
-    .add_estimation(spec, observed=y, observable_names=["Infl", "Rate"]) \
+    .add_estimation(spec) \
     .add_mc(pipeline) \
     .write("experiment-1.sdsge")
 ```

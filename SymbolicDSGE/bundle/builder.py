@@ -157,16 +157,14 @@ class BundleBuilder:
         Two entry shapes:
 
         - ``add_estimation(estimator, result=run)``: the high-level path. The
-          spec is built from the estimator and the live ``result`` (method,
-          ``method_kwargs``, bounds, priors, and observed ``y`` all flattened
-          for you); MCMC posteriors are pulled from the result automatically.
-        - ``add_estimation(spec, result=..., observed=..., ...)``: the explicit
+          spec is built from the estimator and the live ``result``
+          MCMC posteriors are pulled from the result automatically.
+        - ``add_estimation(spec, result=...)``: the explicit
           path for a hand-authored :class:`EstimationSpec`.
 
-        ``result`` accepts a live ``OptimizationResult``/``MCMCResult`` (projected
-        via ``to_meta()``, and a live ``MCMCResult`` auto-supplies ``posterior``)
-        or its projected ``*Meta``. ``as_parquet=False`` writes observed/posterior
-        as CSV; the format-agnostic loader reads either.
+        ``result`` accepts live any result object an :class:`Estimator` can produce.
+        ``as_parquet`` controls whether relevant bulk data gets compressed as Parquet
+        or stays user-readable as CSV.
         """
         if isinstance(source, EstimatorSpec):
             spec = source
@@ -177,11 +175,6 @@ class BundleBuilder:
                 raise TypeError(
                     "add_estimation expects an EstimationSpec or Estimator as the "
                     f"first argument, got {type(source).__name__}."
-                )
-            if not isinstance(result, (OptimizationResult, MCMCResult)):
-                raise ValueError(
-                    "add_estimation(estimator, ...) requires a live "
-                    "OptimizationResult or MCMCResult."
                 )
             spec = source.to_spec()
 

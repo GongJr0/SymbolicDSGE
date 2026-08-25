@@ -36,18 +36,15 @@ class LoadedEstimation()
 
 __Fields:__
 
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| spec | `#!python EstimationSpec` | The text-only run specification. Always present when `LoadedEstimation` is. |
-| result | `#!python OptimizationResult | MCMCResult | None` | The reconstructed first-class result: an `OptimizationResult` (MLE/MAP) or `MCMCResult` (MCMC), rebuilt from the stored metadata and, for MCMC, the `posterior` traces. `None` when the bundle carries no estimation result. |
-| observed | `#!python NDArray[np.float64] | None` | Observed `y` matrix shaped `(n, k)`, reconstructed from the CSV or Parquet member. |
-| posterior | `#!python dict[str, NDArray] | None` | MCMC posterior columns, `{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac": (n_draws,)}`. |
-
-???+ note "Results Come Back Reconstructed"
-    `result` is the same first-class object the run produced. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces. If an estimation was bundled with results, read `loaded.estimation.result` directly. The raw `posterior` columns stay on `LoadedEstimation.posterior` for callers that want the arrays.
+| __Name__  | __Type__ | __Description__ |
+|:----------|:--------:|----------------:|
+| estimator | `#!python Estimator` | The live estimator object lazily rebuilt from the stored spec and the reference model. Always present when `LoadedEstimation` is. | 
+| result    | `#!python MLEResult | MAPResult | MCMCResult | None` | The reconstructed result object. |
+| spec      | `#!python EstimatorSpec` | Parameter specification for `Estimator`. Always present when `LoadedEstimation` is. |
 
 ???+ tip "Re-running a loaded estimation"
-    `spec.to_estimator_inputs()` lowers the spec to an [`EstimatorInputs`](index.md#estimation-spec-and-result-types) with `estimated_params`, `theta0`, `priors` as built `Prior` objects, and `bounds`. Pass those values to `#!python DSGESolver.estimate(...)` when a bundle stored only the spec.
+    Result classes carry their options as a dictionary. `optimizer_config` in `MLEResult`/`MAPResult` and `sampler_config` in `MCMCResult`.
+    Unpack the options into the relevant method. Example: `estimator.mle(**res.optimizer_config)`.
 
 ## `LoadedMC`
 
@@ -96,10 +93,9 @@ if loaded.reference is not None:
 
 # Inspect the estimation tab.
 if loaded.estimation is not None:
-    print(loaded.estimation.spec.method)
-    if loaded.estimation.posterior is not None:
-        samples = loaded.estimation.posterior["samples"]
-        print(samples.shape)
+    est = loaded.estimation.estimator
+    res = loaded.estimation.result
+    print(res.x)
 
 # Manifest is always present.
 print(loaded.manifest.created_by, loaded.manifest.created_at)

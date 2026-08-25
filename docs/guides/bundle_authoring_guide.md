@@ -102,7 +102,6 @@ priors = {
 rng = np.random.default_rng(0)
 observed = rng.standard_normal((40, 3))
 estim = Estimator(
-    solver=solver,
     compiled=compiled,
     observables=["OutGap", "Infl", "Rate"],
     y=observed,
@@ -112,6 +111,7 @@ res = estim.mcmc(  # (1)!
     n_draws=1000,
     burn_in=200,
     thin=2,
+    random_state=0
 )
 
 # Add the estimation to the bundle with results
@@ -123,9 +123,6 @@ bundle.add_estimation(  # (2)!
 
 1. We can bundle results from an executed estimation, or we can bundle an estimation spec without results.
 2. `add_estimation` can bundle live results and initialized `Estimator` instances. These are converted to readable specifications for storage. Bundling live objects does not make the final bundle depend on unreadable binary objects.
-
-???+ note "Estimation Methods"
-    MCMC returns `MCMCResult`, MLE returns `MLEResult`, and MAP returns `MAPResult`. The bundler handles all three cases.
 
 ## Build a Monte Carlo pipeline
 
@@ -235,19 +232,19 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3122  16-06-2026 14:26   manifest.json
-     2599  16-06-2026 14:26   model/reference.yaml
-     2599  16-06-2026 14:26   model/dgp.yaml
-      973  16-06-2026 14:26   estimation/spec.json
-      420  16-06-2026 14:26   estimation/result.json
-     1939  16-06-2026 14:26   estimation/observed.parquet
-    19943  16-06-2026 14:26   estimation/posterior.parquet
-      832  16-06-2026 14:26   montecarlo/pipeline.json
-     4475  16-06-2026 14:26   montecarlo/result.json
-    15645  16-06-2026 14:26   montecarlo/traces.parquet
-     1282  16-06-2026 14:26   data/auxiliary_series.parquet
+     3236  25-08-2026 19:55   manifest.json
+     2134  25-08-2026 19:55   model/reference.yaml
+     2134  25-08-2026 19:55   model/dgp.yaml
+      629  25-08-2026 19:55   estimation/spec.json
+     1939  25-08-2026 19:55   estimation/observed.parquet
+    18972  25-08-2026 19:55   estimation/posterior.parquet
+      585  25-08-2026 19:55   estimation/result.json
+     1018  25-08-2026 19:55   montecarlo/pipeline.json
+    14962  25-08-2026 19:55   montecarlo/result.json
+    15550  25-08-2026 19:55   montecarlo/traces.parquet
+     1282  25-08-2026 19:55   data/auxiliary_series.parquet
 ---------                     -------
-    53829                     11 files
+    62441                     11 files
 ```
 
 For a structured view, decompile it:

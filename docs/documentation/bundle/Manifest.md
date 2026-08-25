@@ -56,10 +56,6 @@ Round-trippable JSON shape. `from_dict` / `from_json` validate the version pair 
 ???+ warning "Forward / backward compatibility"
     Compatibility is judged against breaks, not against version equality. A reader rejects a bundle older than its own `SDSGE_LAST_BREAKING_VERSION`, and rejects one whose `last_breaking_version` exceeds its `SDSGE_FORMAT_VERSION`. A newer bundle from a bump that broke nothing reads fine.
 
-    Bump `SDSGE_FORMAT_VERSION` on every manifest change and `SDSGE_LAST_BREAKING_VERSION` only when the change breaks readers. A bundle written before the field existed is treated as though its own version broke.
-
-    Version 2 keys shock specifications by shock name rather than by the variable the shock drives, so a version 1 `simulation` or `mc_pipeline` names shocks that no longer resolve.
-
 ## `Member`
 
 ```python
@@ -75,7 +71,7 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | path | `#!python str` | POSIX path inside the archive (e.g. `model/reference.yaml`). |
 | kind | `#!python str` | Semantic kind. One of `MEMBER_KINDS` (see below). |
-| format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"`. Inferred from `path` extension when omitted on construction. |
+| format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"` / `"pkl"`. Inferred from `path` extension when omitted on construction. |
 | role | `#!python str | None` | `"reference"` / `"dgp"` for model members. |
 | columns | `#!python list[str] | None` | Column names for tabular members (e.g. observable names on `estimation_data`). |
 | options | `#!python dict[str, Any]` | Kind-specific metadata. For `model_config` this carries `compile_kwargs` / `solve_kwargs`. |
@@ -86,8 +82,8 @@ __Recognized kinds (`MEMBER_KINDS`):__
 | --- | --- |
 | `model_config` | YAML configuration for a role. |
 | `raw_data` | Raw observable file (CSV or Parquet). |
-| `estimation_spec` | `EstimationSpec` JSON. |
-| `estimation_result` | Wrapped `{"type": "mcmc" | "optimization", "data": {...}}`. |
+| `estimation_spec` | `EstimatorSpec.params` (`EstimatorParams`) JSON. |
+| `estimation_result` | Wrapped `{"type": "mle" | "map" | "mcmc", "data": {...}}`. |
 | `estimation_data` | Observed `y` matrix (CSV or Parquet). |
 | `estimation_trace` | MCMC posterior columns (CSV or Parquet). |
 | `mc_pipeline` | `PipelineSpec` JSON. |
