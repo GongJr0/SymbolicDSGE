@@ -80,13 +80,20 @@ Estimator.mle(
     fd_step: float = 0.0,
     xatol: float = 1e-4, # (4)!
     fatol: float = 1e-4,
-) -> OptimizationResult
+    cov: bool = True,  # (5)!
+    cov_fd_step_scale: float = 1.0,
+    cov_fd_absolute_floor: float = 0.1,
+) -> MLERestult
 ```
 
 1. If `None`, uses transformed calibration defaults.
 2. Native optimizer. Only the two listed are supported; see the note below.
 3. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
 4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
+5. Compute the covariance of the estimated parameters at the optimum by finite-difference Hessian of the log-likelihood.
+If `False`, the returned result will not include a covariance.
+Enabling this will also compute the standard errors of the estimated parameters, which are returned in the result object.
+
 
 ## MAP
 
@@ -96,7 +103,7 @@ Estimator.map(
     theta0: np.ndarray | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
-    jacobian: bool = False,  # (3)!
+    jacobian: bool = False, # (3)!
     m: int = 10, # (4)!
     maxiter: int = 15000,
     maxfun: int = 15000,
@@ -106,15 +113,20 @@ Estimator.map(
     fd_step: float = 0.0,
     xatol: float = 1e-4, # (5)!
     fatol: float = 1e-4,
-) -> OptimizationResult
+    cov: bool = True, # (6)!
+    cov_fd_step_scale: float = 1.0,
+    cov_fd_absolute_floor: float = 0.1,
+) -> MAPResult
 ```
 
 1. Requires non-`None` priors at estimator construction.
 2. Native optimizer. Only the two listed are supported; see the note below.
 3. Includes the jacobian term arising from the prior transformations of random variables.
-
-3. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
-4. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
+4. L-BFGS-B options (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`); ignored by Nelder-Mead.
+5. Nelder-Mead options (`xatol`, `fatol`); ignored by L-BFGS-B.
+6. Compute the covariance of the estimated parameters at the optimum by finite-difference Hessian of the log-likelihood.
+If `False`, the returned result will not include a covariance.
+Enabling this will also compute the standard errors of the estimated parameters, which are returned in the result object.
 
 ???+ note "On the Jacobian Parameter"
     When `False`, the MAP transformations are treated as simple coordinate changes, consistent with point estimation.
@@ -165,7 +177,7 @@ The proposal covariance will use the MAP point to compute the Hessian if `comput
 
 MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native optimizer's result struct; scipy is not involved.
 
-### OptimizationResult
+### MLEResult
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
@@ -176,8 +188,25 @@ MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native opt
 | message | `#!python str` | Optimizer status message |
 | fun | `#!python float` | Objective value at optimum |
 | loglik | `#!python float` | Log-likelihood at optimum |
+| vcov | `#!python np.ndarray | None` | Covariance of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| se | `#!python dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| nfev | `#!python int` | Objective evaluations |
+| nit | `#!python int | None` | Iterations |
+
+### MAPResult
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| kind | `#!python str` | `"mle"` or `"map"` |
+| x | `#!python np.ndarray` | Optimized unconstrained vector |
+| theta | `#!python dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
+| success | `#!python bool` | Optimizer convergence flag |
+| message | `#!python str` | Optimizer status message |
+| fun | `#!python float` | Objective value at optimum |
 | logprior | `#!python float` | Log-prior at optimum |
 | logpost | `#!python float` | Log-posterior at optimum |
+| vcov | `#!python np.ndarray | None` | Covariance of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| se | `#!python dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
 | nfev | `#!python int` | Objective evaluations |
 | nit | `#!python int | None` | Iterations |
 
