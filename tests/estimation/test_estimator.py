@@ -1292,20 +1292,36 @@ def test_mle_full_dense_corr_set_promotes_to_cpc_block():
 
 def test_spd_std_member_warns_on_conflicting_prior_transform():
     # An Identity-transform prior on a variance would map onto R, not (0, inf),
-    # so the role default is substituted and the substitution is announced.
+    # so the role default is substituted. Construction records the substitution
+    # and the routines that read the prior are what announce it.
     prior = make_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
     )
-    with pytest.warns(UserWarning, match="requires a constraint to"):
-        est = Estimator(
-            compiled=_stub_compiled_with_dense_r_block(),
-            y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["meas_a"],
-            priors={"meas_a": prior},
-        )
+    est = Estimator(
+        compiled=_stub_compiled_with_dense_r_block(),
+        y=np.zeros((4, 2), dtype=np.float64),
+        estimated_params=["meas_a"],
+        priors={"meas_a": prior},
+    )
     assert isinstance(est._param_transforms["meas_a"], LogTransform)
+    assert "meas_a" in est._should_warn_transforms
+
+    with pytest.warns(UserWarning, match="requires a constraint to"):
+        est._warn_if_should_warn_transforms()
+
+
+def test_spd_member_without_prior_records_no_transform_warning():
+    # No prior means no density for the role transform to disagree with, so the
+    # substitution is silent on the ordinary MLE path.
+    est = Estimator(
+        compiled=_stub_compiled_with_dense_r_block(),
+        y=np.zeros((4, 2), dtype=np.float64),
+        estimated_params=["meas_a"],
+    )
+    assert isinstance(est._param_transforms["meas_a"], LogTransform)
+    assert est._should_warn_transforms == {}
 
 
 @pytest.mark.parametrize("include_logjac", [False, True])

@@ -172,6 +172,7 @@ class Estimator:
         std_support = (float64(0.0), float64(np.inf))
         corr_support = (float64(-1.0), float64(1.0))
         self._param_transforms: dict[str, Transform] = {}
+        self._should_warn_transforms: dict[str, str] = {}
         for name in self.param_names:
             if name in self._matrix_member_names:
                 # Correlation member of a CPC block: the block owns its
@@ -355,15 +356,19 @@ class Estimator:
         tr = self._get_transform(name)
         sup = tr.support
         if not (sup.low >= low and sup.high <= high):
-            warnings.warn(
-                f"SPD parameter '{name}' uses {type(tr).__name__} transform constraining "
-                f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
-                f"requires a constraint to ({low}, {high}). The default role "
-                f"transform ({type(default).__name__}) is used instead.",
-                UserWarning,
-            )
+            if self.priors is not None and name in self.priors:
+                self._should_warn_transforms[name] = (
+                    f"SPD parameter '{name}' uses {type(tr).__name__} transform constraining "
+                    f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
+                    f"requires a constraint to ({low}, {high}). The default role "
+                    f"transform ({type(default).__name__}) is used instead."
+                )
             tr = default
         return tr
+
+    def _warn_if_should_warn_transforms(self) -> None:
+        for name, msg in self._should_warn_transforms.items():
+            warnings.warn(msg, UserWarning)
 
     def _assert_scalar_corr_spd_safe(self, name: str) -> None:
         """Fail fast when estimating ``name`` as a standalone scalar correlation
@@ -1150,6 +1155,7 @@ class Estimator:
     ) -> MAPResult:
         if self.priors is None:
             raise ValueError("MAP requires priors. No priors were provided.")
+        self._warn_if_should_warn_transforms()
 
         return cast(
             MAPResult,
@@ -1195,6 +1201,7 @@ class Estimator:
     ) -> MCMCResult:
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
+        self._warn_if_should_warn_transforms()
 
         rng = np.random.default_rng(random_state)
 

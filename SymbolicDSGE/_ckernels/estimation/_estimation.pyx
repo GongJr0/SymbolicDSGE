@@ -1230,10 +1230,11 @@ def loglik(object ctx_dto, str mode, theta not None):
 
 
 def logprior(object ctx_dto, theta not None, bint jacobian=False):
-    """The packed log-prior at ``theta``, read off an ``sdsge_prior_tables``
-    mirror rather than eleven loose arrays. ``tables.has_prior`` is not consulted
-    here: a disabled table carries zero-length columns, so the kernel sums
-    nothing and returns 0.0."""
+    """The packed log-prior at ``theta``, read off the context's prior tables.
+
+    ``jacobian=True`` picks the density over the theta a sampler
+    walks. ``False`` picks the prior over the parameters theta maps to. A run carrying
+    no prior has ``has_prior`` clear and the kernel returns 0.0."""
 
     cdef _NativeCtx nc = _build_native_ctx(ctx_dto, "linear")  # mode is irrelevant
     cdef double[::1] thetav = np.ascontiguousarray(theta, dtype=np.float64)
@@ -1244,11 +1245,10 @@ def logprior(object ctx_dto, theta not None, bint jacobian=False):
         )
 
     cdef double out
-    nc.b.bk_violations = 0
     nc.b.prior.include_logjac = jacobian
 
     with nogil:
-        sdsge_logprior_at(nc.b, &thetav[0])
+        out = sdsge_logprior_at(nc.b, &thetav[0])
     return np.float64(out)
 
 
