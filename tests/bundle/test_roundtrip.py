@@ -10,24 +10,28 @@ from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult
-from SymbolicDSGE.estimation.spec import (
-    EstimationParameterSpec,
-    EstimationSpec,
-    MCMCResultMeta,
-)
+from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
 
-def _estimation_spec() -> EstimationSpec:
-    return EstimationSpec(
-        method="mcmc",
-        parameters=[
-            EstimationParameterSpec(name="beta", initial=0.99, estimate=True),
-            EstimationParameterSpec(name="sigma", initial=1.0, estimate=True),
-        ],
-        observables=["Infl", "Rate"],
+def _estimation_spec(y, *, names=("beta", "sigma")) -> EstimatorSpec:
+    return EstimatorSpec(
+        y=np.asarray(y).tolist(),
+        params=EstimatorParams(
+            observables=["Infl", "Rate"],
+            filter_mode="linear",
+            P0=None,
+            R=None,
+            estimated_params=list(names),
+            priors=None,
+            ss_seed=None,
+            x0=None,
+            jitter=0.0,
+            symmetrize=True,
+            joseph_cov=True,
+        ),
     )
 
 
@@ -39,9 +43,12 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         "logpost": rng.standard_normal(50),
         "logjac": rng.standard_normal(50),
     }
-    result_meta = MCMCResultMeta(
+    result = MCMCResult(
         param_names=["beta", "sigma"],
-        accept_rate=0.31,
+        samples=posterior["samples"],
+        logpost_trace=posterior["logpost"],
+        logjac_trace=posterior["logjac"],
+        accept_rate=np.float64(0.31),
         n_draws=50,
         burn_in=10,
         thin=1,
@@ -57,13 +64,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
             _MODEL_YAML,
             compile_kwargs={},
         )
-        .add_estimation(
-            _estimation_spec(),
-            result=result_meta,
-            observed=observed,
-            observable_names=["Infl", "Rate"],
-            posterior=posterior,
-        )
+        .add_estimation(_estimation_spec(observed), result=result)
         .add_mc(pipeline)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
@@ -94,21 +95,17 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # estimation
     assert loaded.estimation is not None
-    assert loaded.estimation.spec.method == "mcmc"
-    assert [p.name for p in loaded.estimation.spec.parameters] == ["beta", "sigma"]
+    assert loaded.estimation.spec.params["estimated_params"] == ["beta", "sigma"]
+    assert loaded.estimation.spec.params["observables"] == ["Infl", "Rate"]
     assert isinstance(loaded.estimation.result, MCMCResult)
     assert loaded.estimation.result.accept_rate == 0.31
-    assert loaded.estimation.observed is not None
-    np.testing.assert_allclose(loaded.estimation.observed, observed)
-    assert loaded.estimation.posterior is not None
+    np.testing.assert_allclose(np.asarray(loaded.estimation.spec.y), observed)
+    np.testing.assert_allclose(loaded.estimation.result.samples, posterior["samples"])
     np.testing.assert_allclose(
-        loaded.estimation.posterior["samples"], posterior["samples"]
+        loaded.estimation.result.logpost_trace, posterior["logpost"]
     )
     np.testing.assert_allclose(
-        loaded.estimation.posterior["logpost"], posterior["logpost"]
-    )
-    np.testing.assert_allclose(
-        loaded.estimation.posterior["logjac"], posterior["logjac"]
+        loaded.estimation.result.logjac_trace, posterior["logjac"]
     )
 
     # monte carlo
@@ -143,7 +140,7 @@ def test_add_estimation_accepts_live_mcmc_result() -> None:
         burn_in=0,
         thin=1,
     )
-    spec = EstimationSpec.from_targets(["a", "b"], method="mcmc")
+    spec = _estimation_spec(rng.standard_normal((4, 2)), names=("a", "b"))
 
     builder = BundleBuilder().add_estimation(spec, result=mcmc)
     _, files = builder.build()

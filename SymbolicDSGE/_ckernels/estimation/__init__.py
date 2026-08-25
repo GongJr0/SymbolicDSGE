@@ -11,23 +11,28 @@ from ._prior_program import (
     dist_logpdf,
     lkj_chol_logjac,
     lkj_chol_logpdf_from_z,
-    logprior,
     logprior_program,
     transform_inverse_and_logjac,
     unconstrained_from_corr_chol,
 )
-from ._estimation import run_estimation, run_mcmc, loglik, logpost
+from ._estimation import (
+    run_estimation,
+    run_mcmc,
+    loglik,
+    logprior,
+    logpost,
+)
 
 __all__ = [
     "run_mcmc",
     "run_estimation",
     "loglik",
+    "logprior",
     "logpost",
     "cov_from_unconstrained",
     "dist_logpdf",
     "lkj_chol_logjac",
     "lkj_chol_logpdf_from_z",
-    "logprior",
     "logprior_program",
     "transform_inverse_and_logjac",
     "unconstrained_from_corr_chol",

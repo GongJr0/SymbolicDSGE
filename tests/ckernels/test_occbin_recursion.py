@@ -31,7 +31,6 @@ from SymbolicDSGE._ckernels.occbin._occbin import (
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.config import Constraint
 
-
 t = sp.Symbol("t", integer=True)
 
 LOW = 0b1

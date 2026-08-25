@@ -310,16 +310,16 @@ class UISession:
 
         names, theta0, priors, bounds = build_estimation_inputs(
             request.parameters,
-            method=request.method,
+            routine=request.routine,
         )
         kwargs = dict(request.method_kwargs)
         reserved = {
             "compiled",
             "estimated_params",
-            "method",
             "observables",
             "posterior_point",
             "priors",
+            "routine",
             "ss_seed",
             "theta0",
             "y",
@@ -329,13 +329,13 @@ class UISession:
             raise ValueError(
                 f"Estimation method kwargs cannot override reserved arguments: {overlap}."
             )
-        if bounds is not None and request.method in {"mle", "map"}:
+        if bounds is not None and request.routine in {"mle", "map"}:
             kwargs["bounds"] = bounds
 
         common: dict[str, Any] = {
             "compiled": slot.compiled,
             "y": y,
-            "method": request.method,
+            "routine": request.routine,
             "theta0": theta0,
             "observables": observables,
             "estimated_params": names,
@@ -359,7 +359,7 @@ class UISession:
             "run_id": run_id,
             "kind": "estimation",
             "role": request.role,
-            "method": request.method,
+            "method": request.routine,
             "solved": solved,
             "result": serialize_estimation_result(result),
         }

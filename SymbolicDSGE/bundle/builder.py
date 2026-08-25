@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,7 +28,10 @@ from ..estimation.results import MCMCResult, OptimizationResult
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
 from ..estimation.spec import (
-    EstimationSpec,
+    EstimatorSpec,
+    MLEResultSpec,
+    MAPResultSpec,
+    MCMCResultSpec,
     MCMCResultMeta,
 )
 from ..estimation.results import OptimizationResult, MLEResult, MAPResult
@@ -144,12 +147,9 @@ class BundleBuilder:
 
     def add_estimation(
         self,
-        source: EstimationSpec | "Estimator",  # pyright: ignore
+        source: EstimatorSpec | "Estimator",  # pyright: ignore
         *,
-        result: MLEResult | MAPResult | MCMCResult | MCMCResultMeta | None = None,
-        observed: NDArray[Any] | None = None,
-        observable_names: list[str] | None = None,
-        posterior: Mapping[str, NDArray[Any]] | None = None,
+        result: MLEResult | MAPResult | MCMCResult | None = None,
         as_parquet: bool = True,
     ) -> BundleBuilder:
         """Add the estimation tab from a live :class:`Estimator` or a spec.
@@ -168,7 +168,7 @@ class BundleBuilder:
         or its projected ``*Meta``. ``as_parquet=False`` writes observed/posterior
         as CSV; the format-agnostic loader reads either.
         """
-        if isinstance(source, EstimationSpec):
+        if isinstance(source, EstimatorSpec):
             spec = source
         else:
             from ..estimation.estimator import Estimator
@@ -183,58 +183,80 @@ class BundleBuilder:
                     "add_estimation(estimator, ...) requires a live "
                     "OptimizationResult or MCMCResult."
                 )
-            spec = source.to_spec(result=result)
-            if observed is None:
-                observed, derived_names = _estimator_observed(source)
-                if observable_names is None:
-                    observable_names = derived_names
+            spec = source.to_spec()
+
+        # The observed matrix and the posterior traces are different shapes with
+        # different column names, so each gets its own encoder rather than one
+        # serializer that would have to hardcode a column name for both.
+        observable_names = (
+            None
+            if spec.params["observables"] is None
+            else list(spec.params["observables"])
+        )
+        if as_parquet:
+            dpath = _ESTIMATION_DATA_PARQUET
+            ppath = _ESTIMATION_POSTERIOR_PARQUET
+
+            def observed_bytes(y: Any) -> bytes:
+                return to_parquet(trace_to_json({"y": y}))
+
+            def posterior_bytes(columns: Mapping[str, Any]) -> bytes:
+                return to_parquet(trace_to_json(columns))
+
+        else:
+            dpath = _ESTIMATION_DATA_CSV
+            ppath = _ESTIMATION_POSTERIOR_CSV
+
+            def observed_bytes(y: Any) -> bytes:
+                return _observed_to_csv(y, observable_names)
+
+            def posterior_bytes(columns: Mapping[str, Any]) -> bytes:
+                return trace_to_csv(dict(columns))
 
         self._add(
             Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
-            spec.to_json(indent=2).encode("utf-8"),
+            json.dumps(spec.params, indent=2).encode("utf-8"),
         )
-        if isinstance(result, MCMCResult):
-            # A live MCMCResult carries its own posterior; pull it before the meta
-            # projection drops the bulk traces.
-            if posterior is None:
-                posterior = result.posterior_arrays()
-            result = result.to_meta()  # project to trace-free document for bundle
-
+        self._add(
+            Member(path=dpath, kind="estimation_data", columns=observable_names),
+            observed_bytes(spec.y),
+        )
         if result is not None:
-            if isinstance(result, MCMCResultMeta):
-                kind = "mcmc"
-            elif isinstance(result, MLEResult):
-                kind = "mle"
-            else:
-                kind = "map"
+            # One name per arm: the three specs are unrelated types, and only the
+            # MCMC one is a container whose bulk fields split off to their own member.
+            kind: str
+            payload: MCMCResultMeta | MLEResultSpec | MAPResultSpec
+            match result:
+                case MCMCResult():
+                    mcmc_spec = result.to_spec()
+                    kind = "mcmc"
+                    payload = mcmc_spec.meta
 
-            payload = json.dumps({"type": kind, "data": result.to_dict()}, indent=2)
+                    self._add(
+                        Member(path=ppath, kind="estimation_trace"),
+                        posterior_bytes(
+                            {
+                                "samples": mcmc_spec.samples,
+                                "logpost": mcmc_spec.logpost_trace,
+                                "logjac": mcmc_spec.logjac_trace,
+                            }
+                        ),
+                    )
+                case MLEResult():
+                    kind = "mle"
+                    payload = result.to_spec()
+                case MAPResult():
+                    kind = "map"
+                    payload = result.to_spec()
+                case _:
+                    raise ValueError(f"Unknown result type {type(result).__name__}.")
+
+            result_data = json.dumps({"type": kind, "data": payload}, indent=2)
             self._add(
                 Member(path=_ESTIMATION_RESULT, kind="estimation_result"),
-                payload.encode("utf-8"),
+                result_data.encode("utf-8"),
             )
-        if observed is not None:
-            matrix = np.asarray(observed, dtype=np.float64)
-            if matrix.ndim != 2:
-                raise ValueError("observed must be a 2-D (n, k) array.")
-            if as_parquet:
-                path = _ESTIMATION_DATA_PARQUET
-                data = to_parquet(trace_to_json({"y": matrix}))
-            else:
-                path = _ESTIMATION_DATA_CSV
-                data = _observed_to_csv(matrix, observable_names)
-            self._add(
-                Member(path=path, kind="estimation_data", columns=observable_names),
-                data,
-            )
-        if posterior is not None:
-            if as_parquet:
-                path = _ESTIMATION_POSTERIOR_PARQUET
-                data = to_parquet(trace_to_json(dict(posterior)))
-            else:
-                path = _ESTIMATION_POSTERIOR_CSV
-                data = trace_to_csv(dict(posterior))
-            self._add(Member(path=path, kind="estimation_trace"), data)
+
         return self
 
     # Monte Carlo
@@ -459,7 +481,9 @@ def _estimator_observed(
     return matrix, names
 
 
-def _observed_to_csv(matrix: NDArray[Any], names: list[str] | None) -> bytes:
+def _observed_to_csv(
+    y: Sequence[Sequence[float]], names: Sequence[str] | None
+) -> bytes:
     """Render a 2-D observed matrix as CSV with user-friendly headers.
 
     Uses ``names`` as the header row when provided (paired with
@@ -468,19 +492,19 @@ def _observed_to_csv(matrix: NDArray[Any], names: list[str] | None) -> bytes:
     through :func:`SymbolicDSGE.bundle.parquet.collapse_columns` the same way
     Parquet observed data does.
     """
-    if names is not None and len(names) != matrix.shape[1]:
+    n = len(y)
+    p = len(y[0]) if n > 0 else 0
+    if names is not None and len(names) != p:
         raise ValueError(
             f"observable_names length {len(names)} does not match observed "
-            f"column count {matrix.shape[1]}."
+            f"column count {p}."
         )
-    headers = (
-        list(names) if names is not None else [f"y.{j}" for j in range(matrix.shape[1])]
-    )
+    headers = list(names) if names is not None else [f"y.{j}" for j in range(p)]
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(headers)
-    for i in range(matrix.shape[0]):
-        writer.writerow([_float_cell(matrix[i, j]) for j in range(matrix.shape[1])])
+    for row in y:
+        writer.writerow([_float_cell(v) for v in row])
     return out.getvalue().encode("utf-8")
 
 

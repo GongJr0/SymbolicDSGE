@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-
-from SymbolicDSGE.estimation.spec import EstimationSpec
+from pydantic import BaseModel, ConfigDict, Field
 
 Role = Literal["reference", "dgp"]
 ShockDistribution = Literal["norm", "t", "uni"]
@@ -76,8 +74,18 @@ class EstimationParameterSpec(BaseModel):
 
 
 class EstimationRunRequest(BaseModel):
+    """A run request from the estimation tab.
+
+    ``routine`` arrives on the wire as ``method``, the name the frontend has
+    always posted. The alias keeps that contract while freeing ``method`` inside
+    ``method_kwargs`` to mean what the library means by it: the optimizer that
+    :meth:`Estimator.mle` and :meth:`Estimator.map` take.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
     role: Role = "reference"
-    method: EstimationMethod = "mle"
+    routine: EstimationMethod = Field(default="mle", alias="method")
     y: list[list[float]] = Field(min_length=1)
     observables: list[str] | None = None
     parameters: list[EstimationParameterSpec] = Field(min_length=1)
@@ -86,11 +94,3 @@ class EstimationRunRequest(BaseModel):
     ss_seed: list[float] | None = None
     posterior_point: str = "mean"
     estimate_and_solve: bool = False
-
-    def to_core(self) -> EstimationSpec:
-        """Convert to the pydantic-free core spec (bundle/text serialization).
-
-        Drops UI-only fields (``role``, ``y``, ``estimate_and_solve``); ``y``
-        rides a Parquet member alongside the spec in a bundle.
-        """
-        return EstimationSpec.from_dict(self.model_dump())

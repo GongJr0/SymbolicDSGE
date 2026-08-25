@@ -16,9 +16,8 @@ from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
 from SymbolicDSGE.estimation.spec import (
-    EstimationParameterSpec,
-    EstimationSpec,
-    MCMCResultMeta,
+    EstimatorParams,
+    EstimatorSpec,
 )
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 from SymbolicDSGE.ui import build_workspace, create_app, serve_from
@@ -38,14 +37,22 @@ def _solved_test_model() -> SolvedModel:
     return solver.solve(solver.compile())
 
 
-def _estimation_spec() -> EstimationSpec:
-    return EstimationSpec(
-        method="mcmc",
-        parameters=[
-            EstimationParameterSpec(name="beta", initial=0.99, estimate=True),
-            EstimationParameterSpec(name="sigma", initial=1.0, estimate=True),
-        ],
-        observables=["Infl", "Rate"],
+def _estimation_spec(y) -> EstimatorSpec:
+    return EstimatorSpec(
+        y=np.asarray(y).tolist(),
+        params=EstimatorParams(
+            observables=["Infl", "Rate"],
+            filter_mode="linear",
+            P0=None,
+            R=None,
+            estimated_params=["beta", "sigma"],
+            priors=None,
+            ss_seed=None,
+            x0=None,
+            jitter=0.0,
+            symmetrize=True,
+            joseph_cov=True,
+        ),
     )
 
 
@@ -58,9 +65,12 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         "logpost": rng.standard_normal(20),
         "logjac": rng.standard_normal(20),
     }
-    result_meta = MCMCResultMeta(
+    result = MCMCResult(
         param_names=["beta", "sigma"],
-        accept_rate=0.33,
+        samples=posterior["samples"],
+        logpost_trace=posterior["logpost"],
+        logjac_trace=posterior["logjac"],
+        accept_rate=np.float64(0.33),
         n_draws=20,
         burn_in=5,
         thin=1,
@@ -84,13 +94,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(
-            _estimation_spec(),
-            result=result_meta,
-            observed=observed,
-            observable_names=["Infl", "Rate"],
-            posterior=posterior,
-        )
+        .add_estimation(_estimation_spec(observed), result=result)
         .add_mc(pipeline)
         .set_simulation("reference", sim_spec)
         .write(tmp_path / "hydrate.sdsge")
@@ -135,23 +139,10 @@ def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
         burn_in=5,
         thin=1,
     )
-    meta = MCMCResultMeta(
-        param_names=["beta", "sigma"],
-        accept_rate=0.31,
-        n_draws=30,
-        burn_in=5,
-        thin=1,
-    )
+    # a result rebuilt from a bundle carries its own bulk columns, so the wire is
+    # identical whether the traces are supplied separately or read off the result
     traces = {"samples": samples, "logpost_trace": logpost, "logjac_trace": logjac}
-    assert emit_estimation_wire(live) == emit_estimation_wire(meta, traces=traces)
-
-
-def test_emit_wire_mcmc_meta_requires_traces() -> None:
-    meta = MCMCResultMeta(
-        param_names=["beta"], accept_rate=0.3, n_draws=10, burn_in=0, thin=1
-    )
-    with pytest.raises(ValueError, match="samples"):
-        emit_estimation_wire(meta)
+    assert emit_estimation_wire(live) == emit_estimation_wire(live, traces=traces)
 
 
 def test_serialize_estimation_result_shim_delegates() -> None:
@@ -214,7 +205,10 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # bulk traces survived round-trip into the wire dict
     assert len(ws.estimation["samples"]["beta"]) == 20
     assert ws.estimation_spec is not None
-    assert ws.estimation_spec["method"] == "mcmc"
+    assert ws.estimation_spec["method"] == "mcmc"  # inferred from the result type
+    rows = {row["name"]: row for row in ws.estimation_spec["parameters"]}
+    assert rows["beta"]["estimate"] and rows["sigma"]["estimate"]
+    assert len(ws.estimation_spec["y"]) == 10  # observed data prefill
     assert ws.mc_pipeline is not None
     assert ws.mc is None  # no MC result was attached at build time
     assert ws.simulation is not None

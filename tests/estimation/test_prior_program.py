@@ -16,7 +16,7 @@ from SymbolicDSGE.estimation.prior_program import (
     build_packed_logprior,
 )
 from SymbolicDSGE._ckernels.estimation import (
-    logprior,
+    logprior_program,
 )
 from _oracles.estimation import (
     _dist_logpdf,
@@ -30,6 +30,32 @@ from _oracles.estimation import (
     _std_norm_logpdf,
     _transform_inverse_and_logjac,
 )
+
+
+def _logprior_from_tables(tables, theta, jacobian: bool = True) -> float:
+    """Run the packed program straight off its tables.
+
+    The public entry point takes a full objective context, which a unit test of
+    the prior program alone has no reason to build. ``PyPriorTables`` is exactly
+    the eleven arrays the kernel reads, so unpacking it here keeps these cases
+    on the program rather than on a whole estimator.
+    """
+    return float(
+        logprior_program(
+            theta,
+            tables.scalar_indices,
+            tables.scalar_dist_codes,
+            tables.scalar_transform_codes,
+            tables.scalar_dist_params,
+            tables.scalar_transform_params,
+            tables.matrix_offsets,
+            tables.matrix_dims,
+            tables.matrix_lengths,
+            tables.matrix_etas,
+            tables.matrix_log_constants,
+            jacobian,
+        )
+    )
 
 
 def _scalar_prior_cases():
@@ -167,7 +193,7 @@ def test_packed_scalar_prior_unit_matches_python_golden(name, prior, z, expected
         expected, rel=1e-13, abs=1e-13
     )
     assert float(
-        logprior(packed, np.asarray([z], dtype=np.float64), True)
+        _logprior_from_tables(packed, np.asarray([z], dtype=np.float64), True)
     ) == pytest.approx(expected, rel=1e-13, abs=1e-13)
 
 
@@ -191,7 +217,7 @@ def test_packed_scalar_program_matches_python_golden_sum():
             expected_parts[i], rel=1e-13, abs=1e-13
         )
     assert sum(expected_parts) == pytest.approx(expected_total, rel=1e-15, abs=1e-15)
-    assert float(logprior(packed, theta, True)) == pytest.approx(
+    assert float(_logprior_from_tables(packed, theta, True)) == pytest.approx(
         expected_total, rel=1e-13, abs=1e-13
     )
 
@@ -218,7 +244,7 @@ def test_packed_lkj_block_unit_matches_python_golden():
 
     assert packed is not None
     assert float(prior.logpdf(theta)) == pytest.approx(expected, rel=1e-13, abs=1e-13)
-    assert float(logprior(packed, theta, True)) == pytest.approx(
+    assert float(_logprior_from_tables(packed, theta, True)) == pytest.approx(
         expected, rel=1e-13, abs=1e-13
     )
 

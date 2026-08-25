@@ -94,6 +94,15 @@ class Prior:
             transform_kwargs=transform_kwargs,
         )
 
+    @classmethod
+    def from_spec(cls, spec: PriorSpec) -> Prior:
+        return make_prior(
+            distribution=spec["distribution"],
+            parameters=spec["parameters"],
+            transform=spec["transform"],
+            transform_kwargs=spec["transform_kwargs"],
+        )
+
     def _confirm_bound_match(self) -> None:
         # logpdf evaluates dist.logpdf(transform.inverse(z)), where inverse(z)
         # ranges over transform.support (the parameter domain). So the
@@ -122,9 +131,28 @@ class Prior:
 def make_prior(
     distribution: str,
     parameters: dict[str, Any],
-    transform: str,
+    transform: str | None = None,
     transform_kwargs: dict[str, Any] | None = None,
 ) -> Prior:
+    """Build a :class:`Prior` from the text names a spec carries.
+
+    ``distribution`` and ``transform`` are the dispatch keys resolved by
+    :func:`get_distribution` and :func:`get_transform`; ``parameters`` and
+    ``transform_kwargs`` override each half's defaults. Omitting ``transform``
+    selects the identity, which saves spelling it out for a family already
+    supported on the whole real line.
+
+    A prior is evaluated as ``dist.logpdf(transform.inverse(z))``, so the
+    distribution must be defined everywhere the transform can land: the
+    distribution's support has to contain the transform's. A bounded family
+    therefore needs a transform that constrains to it, and taking the identity
+    default with one is rejected here rather than as a bare support mismatch,
+    since this is the only place that still knows the transform was omitted.
+
+    ``lkj_chol`` with ``cholesky_corr`` is the one pairing whose halves share a
+    parameter: ``K`` is copied from the distribution when the transform omits
+    it, and a mismatch between the two is an error.
+    """
     dist = get_distribution(distribution)
     _transform = get_transform(transform)
     param_dict = get_dist_params(distribution)
@@ -151,5 +179,11 @@ def make_prior(
             "CholeskyCorrTransform must use the same K as the LKJChol distribution."
         )
     transform_inst = _transform(**transform_config)
+    if transform is None and not (dist_inst.support << transform_inst.support):
+        raise ValueError(
+            f"No transform given, so the prior takes the identity over "
+            f"{transform_inst.support}, but {distribution!r} is supported only on "
+            f"{dist_inst.support}. Pass a transform constraining to that support."
+        )
     prior = Prior(dist=dist_inst, transform=transform_inst)
     return prior

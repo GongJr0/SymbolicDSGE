@@ -1,4 +1,6 @@
 # type: ignore
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -6,6 +8,8 @@ from sympy import Symbol
 
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bayesian import make_prior
+from SymbolicDSGE.bayesian.priors import Prior
+from SymbolicDSGE.bayesian.transforms.cholesky_corr import CholeskyCorrTransform
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator
 
@@ -167,7 +171,6 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
     expected_loglik = -79.71587915190194
     expected_logpost = -83.39363528524827
 
-    assert est._packed_logprior is not None
     assert float(est.logprior(theta, True)) == pytest.approx(
         expected_logprior, rel=1e-13, abs=1e-13
     )
@@ -206,7 +209,12 @@ def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
 
 
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
-    prior_spec = {"R_corr": LKJChol(eta=2.0, K=3, random_state=None)}
+    prior_spec = {
+        "R_corr": Prior(
+            dist=LKJChol(eta=2.0, K=3, random_state=None),
+            transform=CholeskyCorrTransform(K=3),
+        )
+    }
     est = Estimator(
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
@@ -247,36 +255,44 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
 
 
 def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
-    from SymbolicDSGE.estimation.spec import EstimationSpec
-
     est = Estimator(
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
         estimated_params=["R_corr"],
-        priors={"R_corr": LKJChol(eta=2.0, K=3, random_state=None)},
+        priors={
+            "R_corr": Prior(
+                dist=LKJChol(eta=2.0, K=3, random_state=None),
+                transform=CholeskyCorrTransform(K=3),
+            )
+        },
     )
 
-    # The block prior is emitted under its reserved target, not as scalar params.
-    spec = est.to_spec(method="mcmc")
-    assert spec.parameters == []
-    assert set(spec.matrix_priors) == {"R_corr"}
-    mp = spec.matrix_priors["R_corr"]
-    assert mp.distribution == "lkj_chol"
-    assert mp.parameters == {"eta": 2.0, "K": 3}
-    assert mp.transform == "cholesky_corr"
+    # The block prior is emitted under its reserved target, alongside the members
+    # the block expands to.
+    spec = est.to_spec()
+    mp = spec.params["priors"]["R_corr"]
+    assert mp["distribution"] == "lkj_chol"
+    assert mp["parameters"] == {"eta": 2.0, "K": 3}
+    assert mp["transform"] == "cholesky_corr"
 
-    # Lowers back to runnable inputs (theta0 deferred to the estimator).
-    inputs = spec.to_estimator_inputs()
-    assert inputs.estimated_params == ["R_corr"]
-    assert inputs.theta0 is None
-    assert inputs.priors is not None and "R_corr" in inputs.priors
+    # The text half is JSON as it stands, with no emitter in between.
+    assert json.loads(json.dumps(spec.params)) == spec.params
 
-    assert EstimationSpec.from_json(spec.to_json()).to_dict() == spec.to_dict()
+    # And it rebuilds into an equivalent estimator.
+    rebuilt = Estimator.from_spec(spec, dense_lkj_bundle["compiled"])
+    assert rebuilt.param_names == est.param_names
+    assert set(rebuilt._matrix_blocks) == {"R_corr"}
+    np.testing.assert_allclose(rebuilt.theta0(), est.theta0())
 
 
 def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
-    prior_spec = {"Q_corr": LKJChol(eta=2.0, K=3, random_state=None)}
+    prior_spec = {
+        "Q_corr": Prior(
+            dist=LKJChol(eta=2.0, K=3, random_state=None),
+            transform=CholeskyCorrTransform(K=3),
+        )
+    }
     est = Estimator(
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],

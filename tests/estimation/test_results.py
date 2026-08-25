@@ -4,7 +4,6 @@ import pytest
 from numpy import float64
 
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
-from SymbolicDSGE.estimation.spec import MCMCResultMeta
 
 
 def _result(
@@ -212,7 +211,7 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
     assert calls == ["show", "show", "show"]
 
 
-def test_map_result_to_dict_roundtrips():
+def test_map_result_spec_roundtrips():
     res = MAPResult(
         x=np.array([0.1, 0.2], dtype=np.float64),
         theta={"a": float64(0.1), "b": float64(0.2)},
@@ -226,15 +225,15 @@ def test_map_result_to_dict_roundtrips():
         logprior=float64(-0.5),
     )
 
-    d = res.to_dict()
+    d = res.to_spec()
     assert d["theta"] == {"a": 0.1, "b": 0.2}
     assert d["nfev"] == 42 and d["nit"] == 7
     assert d["logpost"] == -3.5 and d["logprior"] == -0.5
     # round-trips through the serializable dict form
-    assert MAPResult.from_dict(d).to_dict() == d
+    assert MAPResult.from_spec(d).to_spec() == d
 
 
-def test_mle_result_to_dict_roundtrips():
+def test_mle_result_spec_roundtrips():
     res = MLEResult(
         x=np.array([1.0], dtype=np.float64),
         theta={"a": float64(1.0)},
@@ -251,23 +250,29 @@ def test_mle_result_to_dict_roundtrips():
         loglik=float64(-2.0),
     )
 
-    d = res.to_dict()
+    d = res.to_spec()
     assert d["loglik"] == -2.0 and d["nit"] is None
     assert d["optimizer_config"]["method"] == "L-BFGS-B"
-    assert MLEResult.from_dict(d).to_dict() == d
+    assert MLEResult.from_spec(d).to_spec() == d
 
 
-def test_mcmc_result_to_meta_and_posterior_arrays():
+def test_mcmc_result_to_spec_and_posterior_arrays():
     samples = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64)
     logpost = np.array([-1.0, -2.0], dtype=np.float64)
     logjac = np.array([0.0, 0.0], dtype=np.float64)
     res = _result(samples=samples, logpost=logpost, logjac=logjac)
 
-    meta = res.to_meta()
-    assert isinstance(meta, MCMCResultMeta)
-    assert meta.param_names == ["a", "b"]
-    assert meta.accept_rate == 0.25
-    assert (meta.n_draws, meta.burn_in, meta.thin) == (2, 10, 2)
+    spec = res.to_spec()
+    meta = spec.meta
+    assert meta["param_names"] == ["a", "b"]
+    assert meta["accept_rate"] == 0.25
+    assert (meta["n_draws"], meta["burn_in"], meta["thin"]) == (2, 10, 2)
+    # the bulk columns ride the container, not the meta
+    np.testing.assert_array_equal(np.asarray(spec.samples), samples)
+    # and the container round-trips back to a live result
+    rebuilt = MCMCResult.from_spec(spec)
+    np.testing.assert_array_equal(rebuilt.samples, samples)
+    assert rebuilt.param_names == ["a", "b"]
 
     arrays = res.posterior_arrays()
     assert set(arrays) == {"samples", "logpost", "logjac"}

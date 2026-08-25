@@ -31,7 +31,6 @@ import pytest
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_occbin as golden
 
-
 _MODEL = "tests/fixtures/models/rbc_occbin.yaml"
 
 #: Our name for each of the oracle's ``COLUMNS``, in that order.

@@ -223,7 +223,7 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
         EstimationParameterSpec(name="sigma", estimate=False, initial=1.0),
     ]
 
-    names, theta0, priors, bounds = build_estimation_inputs(parameters, method="map")
+    names, theta0, priors, bounds = build_estimation_inputs(parameters, routine="map")
 
     assert names == ["beta"]
     assert theta0 == {"beta": 0.99}
@@ -234,7 +234,7 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
     with np.testing.assert_raises_regex(ValueError, "Select at least one parameter"):
         build_estimation_inputs(
             [EstimationParameterSpec(name="beta", initial=0.99)],
-            method="mle",
+            routine="mle",
         )
 
 
@@ -327,7 +327,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert body["kind"] == "estimation"
     assert body["solved"] is False
     assert body["result"]["theta"] == {"beta": 0.98}
-    assert captured["method"] == "mle"
+    assert captured["routine"] == "mle"
     assert captured["theta0"] == {"beta": 0.99}
     assert captured["estimated_params"] == ["beta"]
     assert captured["bounds"] == [(0.9, 1.0)]
@@ -335,7 +335,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
 
     invalid = client.post(
         "/api/run/estimation",
-        json={**request, "method_kwargs": {"method": "Powell"}},
+        json={**request, "method_kwargs": {"routine": "Powell"}},
     )
     assert invalid.status_code == 400
     assert "reserved arguments" in invalid.json()["detail"]["message"]

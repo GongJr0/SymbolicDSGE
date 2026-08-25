@@ -1229,6 +1229,29 @@ def loglik(object ctx_dto, str mode, theta not None):
     return np.float64(out)
 
 
+def logprior(object ctx_dto, theta not None, bint jacobian=False):
+    """The packed log-prior at ``theta``, read off the context's prior tables.
+
+    ``jacobian=True`` picks the density over the theta a sampler
+    walks. ``False`` picks the prior over the parameters theta maps to. A run carrying
+    no prior has ``has_prior`` clear and the kernel returns 0.0."""
+
+    cdef _NativeCtx nc = _build_native_ctx(ctx_dto, "linear")  # mode is irrelevant
+    cdef double[::1] thetav = np.ascontiguousarray(theta, dtype=np.float64)
+
+    if thetav.shape[0] != nc.n_theta:
+        raise ValueError(
+            "theta length does not match the estimated parameter count."
+        )
+
+    cdef double out
+    nc.b.prior.include_logjac = jacobian
+
+    with nogil:
+        out = sdsge_logprior_at(nc.b, &thetav[0])
+    return np.float64(out)
+
+
 def logpost(object ctx_dto, str mode, theta not None, bint jacobian=False):
     """Log-posterior at ``theta``. ``include_logjac`` picks the density: with
     it, the density over theta the sampler walks; without, the prior over the

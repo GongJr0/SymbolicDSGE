@@ -7,11 +7,8 @@ import pytest
 from numpy import float64
 
 from SymbolicDSGE.estimation import backend
-from SymbolicDSGE.estimation.estimator import (
-    Estimator,
-    _method_from_result,
-    _method_kwargs_from_result,
-)
+from SymbolicDSGE.estimation.estimator import Estimator
+from SymbolicDSGE.ui.estimation import _method_from_result
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 
 
@@ -56,12 +53,3 @@ def test_method_from_result_branches():
     assert _method_from_result(_opt_result()) == "mle"
     with pytest.raises(TypeError, match="Unsupported estimation result type"):
         _method_from_result(object())  # type: ignore[arg-type]
-
-
-def test_method_kwargs_from_result_branches():
-    mc = _method_kwargs_from_result(_mcmc_result())
-    assert mc["n_draws"] == 2 and mc["burn_in"] == 1 and mc["adapt"] is True
-    opt = _method_kwargs_from_result(
-        _opt_result(method="L-BFGS-B", options={"maxiter": 5})
-    )
-    assert opt == {"method": "L-BFGS-B", "options": {"maxiter": 5}}

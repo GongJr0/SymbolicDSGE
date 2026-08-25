@@ -5,8 +5,13 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-if TYPE_CHECKING:
-    from .spec import MCMCResultMeta
+from .spec import (
+    OptimizationResultSpec,
+    MLEResultSpec,
+    MAPResultSpec,
+    MCMCResultMeta,
+    MCMCResultSpec,
+)
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -38,6 +43,25 @@ class OptimizationResult:
     #: 0 when the covariance was produced, otherwise why it was not.
     cov_status: int = field(default=0, kw_only=True)
 
+    def common_spec(self) -> OptimizationResultSpec:
+        return OptimizationResultSpec(
+            x=self.x.tolist(),
+            theta={k: float(v) for k, v in self.theta.items()},
+            success=bool(self.success),
+            message=str(self.message),
+            fun=float(self.fun),
+            nfev=int(self.nfev),
+            nit=int(self.nit) if self.nit is not None else None,
+            optimizer_config=dict(self.optimizer_config),
+            vcov=self.vcov.tolist() if self.vcov is not None else None,
+            cov_status=int(self.cov_status),
+            se=(
+                {k: float(v) for k, v in self.se.items()}
+                if self.se is not None
+                else None
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class MLEResult(OptimizationResult):
@@ -45,30 +69,14 @@ class MLEResult(OptimizationResult):
 
     loglik: float64
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_spec(self) -> MLEResultSpec:
         """Return a JSON-serializable dict representation of the result."""
-        return {
-            "x": self.x.tolist(),
-            "theta": {k: float(v) for k, v in self.theta.items()},
-            "success": bool(self.success),
-            "message": str(self.message),
-            "fun": float(self.fun),
-            "nfev": int(self.nfev),
-            "nit": int(self.nit) if self.nit is not None else None,
-            "optimizer_config": dict(self.optimizer_config),
-            "vcov": self.vcov.tolist() if self.vcov is not None else None,
-            "se": (
-                {k: float(v) for k, v in self.se.items()}
-                if self.se is not None
-                else None
-            ),
-            "cov_status": int(self.cov_status),
-            "loglik": float(self.loglik),
-        }
+        return MLEResultSpec(**self.common_spec(), loglik=float(self.loglik))
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MLEResult":
+    def from_spec(cls, data: MLEResultSpec) -> "MLEResult":
         """Construct a MLEResult from a JSON-serializable dict representation."""
+        se = data.get("se") or {}
         return cls(
             x=np.asarray(data["x"], dtype=float64),
             theta={k: float64(v) for k, v in data["theta"].items()},
@@ -83,11 +91,7 @@ class MLEResult(OptimizationResult):
                 if data.get("vcov") is not None
                 else None
             ),
-            se=(
-                {k: float64(v) for k, v in data["se"].items()}
-                if data.get("se") is not None
-                else None
-            ),
+            se={k: float64(v) for k, v in se.items()} or None,
             cov_status=int(data.get("cov_status", 0)),
             loglik=float64(data["loglik"]),
         )
@@ -100,31 +104,18 @@ class MAPResult(OptimizationResult):
     logpost: float64
     logprior: float64
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_spec(self) -> MAPResultSpec:
         """Return a JSON-serializable dict representation of the result."""
-        return {
-            "x": self.x.tolist(),
-            "theta": {k: float(v) for k, v in self.theta.items()},
-            "success": bool(self.success),
-            "message": str(self.message),
-            "fun": float(self.fun),
-            "nfev": int(self.nfev),
-            "nit": int(self.nit) if self.nit is not None else None,
-            "optimizer_config": dict(self.optimizer_config),
-            "vcov": self.vcov.tolist() if self.vcov is not None else None,
-            "se": (
-                {k: float(v) for k, v in self.se.items()}
-                if self.se is not None
-                else None
-            ),
-            "cov_status": int(self.cov_status),
-            "logpost": float(self.logpost),
-            "logprior": float(self.logprior),
-        }
+        return MAPResultSpec(
+            **self.common_spec(),
+            logpost=float(self.logpost),
+            logprior=float(self.logprior),
+        )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MAPResult":
+    def from_spec(cls, data: MAPResultSpec) -> "MAPResult":
         """Construct a MAPResult from a JSON-serializable dict representation."""
+        se = data.get("se") or {}
         return cls(
             x=np.asarray(data["x"], dtype=float64),
             theta={k: float64(v) for k, v in data["theta"].items()},
@@ -139,11 +130,7 @@ class MAPResult(OptimizationResult):
                 if data.get("vcov") is not None
                 else None
             ),
-            se=(
-                {k: float64(v) for k, v in data["se"].items()}
-                if data.get("se") is not None
-                else None
-            ),
+            se={k: float64(v) for k, v in se.items()} or None,
             cov_status=int(data.get("cov_status", 0)),
             logpost=float64(data["logpost"]),
             logprior=float64(data["logprior"]),
@@ -164,7 +151,7 @@ class MCMCResult:
     #: beyond ``n_draws``/``burn_in``/``thin`` — recorded for reconstruction.
     sampler_config: dict[str, Any] = field(default_factory=dict)
 
-    def to_meta(self) -> "MCMCResultMeta":
+    def to_spec(self) -> "MCMCResultSpec":
         """Project to the scalar text metadata carried in a ``.sdsge`` bundle.
 
         Bulk ``samples`` / ``logpost_trace`` / ``logjac_trace`` are not
@@ -172,15 +159,36 @@ class MCMCResult:
         ride a sibling member.
         The ``sampler_config`` is preserved.
         """
-        from .spec import MCMCResultMeta
 
-        return MCMCResultMeta(
+        meta = MCMCResultMeta(
             param_names=list(self.param_names),
             accept_rate=float(self.accept_rate),
             n_draws=int(self.n_draws),
             burn_in=int(self.burn_in),
             thin=int(self.thin),
             sampler_config=dict(self.sampler_config),
+        )
+
+        return MCMCResultSpec(
+            samples=self.samples.tolist(),
+            logpost_trace=self.logpost_trace.tolist(),
+            logjac_trace=self.logjac_trace.tolist(),
+            meta=meta,
+        )
+
+    @classmethod
+    def from_spec(cls, data: MCMCResultSpec) -> "MCMCResult":
+        meta = data.meta
+        return cls(
+            param_names=list(meta["param_names"]),
+            samples=np.asarray(data.samples, dtype=float64),
+            logpost_trace=np.asarray(data.logpost_trace, dtype=float64),
+            logjac_trace=np.asarray(data.logjac_trace, dtype=float64),
+            accept_rate=float64(meta["accept_rate"]),
+            n_draws=int(meta["n_draws"]),
+            burn_in=int(meta["burn_in"]),
+            thin=int(meta["thin"]),
+            sampler_config=dict(meta["sampler_config"]),
         )
 
     def posterior_arrays(self) -> dict[str, NDF]:

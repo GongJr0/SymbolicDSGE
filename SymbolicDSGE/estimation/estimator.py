@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import warnings
 from time import perf_counter
 from typing import Any, Literal, Mapping, Sequence, cast
@@ -24,13 +23,13 @@ from .._ckernels.estimation import (
     run_estimation,
     run_mcmc,
     loglik,
-    logpost,
     logprior,
+    logpost,
 )
 
 from .prior_program import PyPriorTables, build_packed_logprior
 from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
-from .spec import EstimationSpec, PriorSpec
+from .spec import EstimatorSpec, EstimatorParams, PriorSpec, _coerce_ss_seed
 
 from . import backend
 from .backend import (
@@ -74,11 +73,11 @@ class Estimator:
         *,
         compiled: CompiledModel,
         y: NDF | pd.DataFrame,
-        observables: list[str] | None = None,
+        observables: Sequence[str] | None = None,
         filter_mode: str = "linear",
         estimated_params: Sequence[str] | None = None,
-        priors: Mapping[str, Any] | None = None,
-        ss_seed: NDF | dict[str, float] | None = None,
+        priors: Mapping[str, Prior] | None = None,
+        ss_seed: Sequence[float] | NDF | Mapping[str, float] | None = None,
         x0: NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = True,
@@ -87,6 +86,7 @@ class Estimator:
         P0: NDF | None = None,
     ) -> None:
 
+        self.estimated_params = estimated_params
         self.compiled = compiled
         if compiled.kalman is None and R is None:
             raise ValueError(
@@ -97,12 +97,10 @@ class Estimator:
         self.kalman = compiled.kalman
 
         self.observables = observables
-        self.filter_mode = filter_mode
-        self._input_priors = dict(priors) if priors is not None else None
+        self.y = y
 
         self.ss_seed = ss_seed
         self.x0 = x0
-        self.joseph_cov = bool(joseph_cov)
         self.R = R
         self.P0 = P0
 
@@ -111,29 +109,29 @@ class Estimator:
             kalman=self.kalman,
             y=y,
             observables=observables,
-            filter_mode=self.filter_mode,
+            filter_mode=filter_mode,
             jitter=jitter,
             symmetrize=symmetrize,
-            joseph_cov=self.joseph_cov,
+            joseph_cov=bool(joseph_cov),
             P0=P0,
         )
-        self.y = self._prepared_filter.y_reordered  # Don't use user order directly.
 
         self._base_params = backend.extract_base_params(compiled)
 
-        default_params = list(self._base_params.keys())
-        requested_names_raw = self._requested_param_keys(estimated_params)
-        allowed_names = set(default_params).union(self._reserved_matrix_keys)
-        unknown = [p for p in requested_names_raw if p not in allowed_names]
-        if unknown:
-            raise ValueError(
-                f"Unknown estimated parameters {unknown}. "
-                f"Known calibration parameters: {default_params}"
-            )
+        self.priors = dict(priors) if priors is not None else None
+
+        # The reserved block keys are estimable targets without being calibration
+        # parameters, so they join the allowed set the requested names validate against.
+        allowed_names = set(self._base_params).union(self._reserved_matrix_keys)
+        requested_names_raw = self._requested_param_keys(
+            allowed_names, estimated_params, self.priors
+        )
 
         # A fully-estimated dense correlation set is the reserved key by another
         # name; fold it so those correlations take the CPC block, not scalar tanh.
-        requested_names_raw = self._promote_full_dense_corr_sets(requested_names_raw)
+        requested_names_raw = self._promote_full_dense_corr_sets(
+            requested_names_raw, self.priors
+        )
 
         r_block_target = "R_corr" in requested_names_raw
         if self.kalman is not None:
@@ -158,7 +156,6 @@ class Estimator:
         self._requested_reserved_keys: tuple[MatrixPriorKey, ...] = tuple(
             k for k in self._reserved_matrix_keys if k in requested_names_raw
         )
-        self.priors = self._select_active_priors(requested_names_raw)
         self.param_names = self._expand_requested_params(requested_names_raw)
         self._param_index = {name: i for i, name in enumerate(self.param_names)}
         self._matrix_blocks = self._build_matrix_prior_blocks()
@@ -175,6 +172,7 @@ class Estimator:
         std_support = (float64(0.0), float64(np.inf))
         corr_support = (float64(-1.0), float64(1.0))
         self._param_transforms: dict[str, Transform] = {}
+        self._should_warn_transforms: dict[str, str] = {}
         for name in self.param_names:
             if name in self._matrix_member_names:
                 # Correlation member of a CPC block: the block owns its
@@ -202,13 +200,12 @@ class Estimator:
                 )
                 continue
             # Plain calibration parameter: honor an explicit prior transform.
-            self._param_transforms[name] = self._prior_transform_or(name, identity)
-        self._packed_logprior: PyPriorTables | None = build_packed_logprior(
-            priors=self.priors,
-            param_index=self._param_index,
-            matrix_blocks=self._matrix_blocks,
-            matrix_member_names=self._matrix_member_names,
-        )
+            self._param_transforms[name] = self._get_transform(name)
+
+    def _get_transform(self, name: str) -> Transform:
+        if self.priors is not None and name in self.priors:
+            return self.priors[name].transform
+        return Identity()
 
     def _spd_member_names(self) -> tuple[set[str], set[str]]:
         """Names of the SPD-relevant std (diagonal) and correlation (off-diagonal)
@@ -268,7 +265,11 @@ class Estimator:
         except Exception:
             return None
 
-    def _promote_full_dense_corr_sets(self, requested: Sequence[str]) -> list[str]:
+    def _promote_full_dense_corr_sets(
+        self,
+        requested: Sequence[str],
+        priors: Mapping[str, Prior] | None,
+    ) -> list[str]:
         """Fold a fully-estimated *dense* correlation set into its reserved key.
 
         When every off-diagonal correlation of R or Q is a dense named set and all
@@ -276,6 +277,10 @@ class Estimator:
         that is the same estimation target as the reserved key. Promoting it here
         routes those correlations to the SPD-by-construction CPC block instead of
         per-scalar tanh, and groups them into one contiguous theta run.
+
+        Scalar priors on the members are rejected rather than folded: independent
+        per-parameter densities cannot keep the matrix positive-definite, which is
+        the guarantee the block's LKJChol prior exists to provide.
         """
         result = list(requested)
         for key in self._reserved_matrix_keys:
@@ -293,6 +298,18 @@ class Estimator:
             dense = len(block.member_names) == expected
             if not (dense and members and members.issubset(result)):
                 continue
+            priored = sorted(
+                name
+                for name in block.member_names
+                if priors is not None and name in priors
+            )
+            if priored:
+                raise ValueError(
+                    f"Correlations {priored} carry scalar priors but are the complete "
+                    f"{matrix_name} correlation set, so independent per-parameter densities "
+                    f"cannot guarantee a joint positive-definite matrix. Estimate the block "
+                    f"via '{key}' with an LKJChol prior instead."
+                )
             folded: list[str] = []
             inserted = False
             for name in result:
@@ -323,14 +340,6 @@ class Estimator:
                 out[sym.name] = ("Q_corr", vars_)
         return out
 
-    def _prior_transform_or(self, name: str, default: Transform) -> Transform:
-        """The transform an explicit prior on ``name`` carries, else ``default``."""
-        if self.priors is not None and name in self.priors:
-            prior_obj = self.priors[name]
-            if hasattr(prior_obj, "transform"):
-                return cast(Transform, getattr(prior_obj, "transform"))
-        return default
-
     def _role_transform_for(
         self,
         name: str,
@@ -344,21 +353,22 @@ class Estimator:
         honored only if it constrains to the same domain.
         """
         low, high = role_support
-        if self.priors is not None and name in self.priors:
-            prior_obj = self.priors[name]
-            if hasattr(prior_obj, "transform"):
-                tr = cast(Transform, getattr(prior_obj, "transform"))
-                sup = tr.support
-                if not (sup.low >= low and sup.high <= high):
-                    raise ValueError(
-                        f"Prior on SPD parameter '{name}' uses a transform constraining "
-                        f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
-                        f"requires a constraint to ({low}, {high}). Supply a prior whose "
-                        f"transform matches that domain, or drop the prior to take the "
-                        f"role default."
-                    )
-                return tr
-        return default
+        tr = self._get_transform(name)
+        sup = tr.support
+        if not (sup.low >= low and sup.high <= high):
+            if self.priors is not None and name in self.priors:
+                self._should_warn_transforms[name] = (
+                    f"SPD parameter '{name}' uses {type(tr).__name__} transform constraining "
+                    f"to ({sup.low}, {sup.high}), but the parameter's role in Q/R "
+                    f"requires a constraint to ({low}, {high}). The default role "
+                    f"transform ({type(default).__name__}) is used instead."
+                )
+            tr = default
+        return tr
+
+    def _warn_if_should_warn_transforms(self) -> None:
+        for name, msg in self._should_warn_transforms.items():
+            warnings.warn(msg, UserWarning)
 
     def _assert_scalar_corr_spd_safe(self, name: str) -> None:
         """Fail fast when estimating ``name`` as a standalone scalar correlation
@@ -385,29 +395,34 @@ class Estimator:
                     f"correlation block via '{matrix_key}' (Cholesky reparameterization) instead."
                 )
 
+    @staticmethod
     def _requested_param_keys(
-        self,
+        allowed_names: set[str],
         estimated_params: Sequence[str] | None,
+        priors: Mapping[str, Prior] | None = None,
     ) -> list[str]:
-        if estimated_params is None:
-            if self._input_priors is not None:
-                return list(self._input_priors.keys())
-            return [str(p) for p in self.compiled.calib_params]
-        return list(estimated_params)
-
-    def _select_active_priors(
-        self,
-        requested_names_raw: Sequence[str],
-    ) -> dict[str, Any] | None:
-        if self._input_priors is None:
-            return None
-        requested = set(requested_names_raw)
-        active = {
-            name: prior
-            for name, prior in self._input_priors.items()
-            if name in requested
-        }
-        return active or None
+        if estimated_params is not None:
+            if not all(param in allowed_names for param in estimated_params):
+                missing = set(estimated_params) - allowed_names
+                raise ValueError(
+                    f"Parameters {{{missing}}} are not estimable targets of the model: {sorted(allowed_names)}"
+                )
+            if not all(param in estimated_params for param in priors or {}):
+                missing = set(priors or {}) - set(estimated_params)
+                raise ValueError(
+                    f"Priors specified for parameters {{{missing}}} which are not in the estimated parameters: {list(estimated_params)}"
+                )
+            return list(estimated_params)
+        if priors is not None:
+            if not all(param in allowed_names for param in priors):
+                missing = set(priors) - allowed_names
+                raise ValueError(
+                    f"Parameters {{{missing}}} are not estimable targets of the model: {sorted(allowed_names)}"
+                )
+            return list(priors)
+        raise ValueError(
+            "Either estimated_params or priors must be provided to determine the requested parameters."
+        )
 
     def _expand_requested_params(
         self,
@@ -434,25 +449,29 @@ class Estimator:
         return expanded
 
     @staticmethod
-    def _coerce_lkj_prior(name: str, prior_obj: Any) -> Prior:
-        if isinstance(prior_obj, LKJChol):
-            return Prior(
-                dist=prior_obj,
-                transform=CholeskyCorrTransform(K=int(getattr(prior_obj, "_K", -1))),
+    def _is_lkj_prior(name: str, prior: Prior) -> Prior:
+        dist = prior.dist
+        transform = prior.transform
+
+        if not isinstance(dist, LKJChol) or not isinstance(
+            transform, CholeskyCorrTransform
+        ):
+            raise ValueError(
+                f"Block correlation estimation {name} requires a LKJChol distribution and a "
+                "CholeskyCorrTransform. Got "
+                f"distribution={type(prior.dist).__name__}, "
+                f"transform={type(prior.transform).__name__}."
             )
-        if isinstance(prior_obj, Prior) and isinstance(prior_obj.dist, LKJChol):
-            if not isinstance(prior_obj.transform, CholeskyCorrTransform):
-                raise TypeError(
-                    f"Prior '{name}' must use LKJChol directly or a Prior wrapping LKJChol with CholeskyCorrTransform."
-                )
-            if int(getattr(prior_obj.dist, "_K", -1)) != prior_obj.transform.K:
-                raise TypeError(
-                    f"Prior '{name}' must use matching K values between LKJChol and CholeskyCorrTransform."
-                )
-            return prior_obj
-        raise TypeError(
-            f"Prior '{name}' must be an LKJChol distribution or a Prior wrapping LKJChol with CholeskyCorrTransform."
-        )
+        # make_prior reconciles the two Ks; a Prior built directly can disagree,
+        # and the transform's K is what sizes the block's correlation factor.
+        dist_k = int(getattr(dist, "_K", -1))
+        if dist_k != transform.K:
+            raise ValueError(
+                f"Block correlation estimation {name} requires matching K between the "
+                f"LKJChol distribution and its CholeskyCorrTransform. Got "
+                f"distribution K={dist_k}, transform K={transform.K}."
+            )
+        return prior
 
     @staticmethod
     def _format_pairs(pairs: Sequence[tuple[str, str]]) -> str:
@@ -598,7 +617,7 @@ class Estimator:
 
     def _build_matrix_prior_blocks(self) -> dict[str, MatrixPriorBlock]:
         # A reserved key requested for estimation builds a dense CPC correlation
-        # block regardless of priors -- this is the SPD-by-construction Cholesky
+        # block regardless of priors; this is the SPD-by-construction Cholesky
         # reparameterization. An LKJChol prior, when present, is validated and
         # attached as optional density; without one the block carries prior=None
         # (pure reparameterization, e.g. the MLE path).
@@ -659,19 +678,7 @@ class Estimator:
 
             lkj_prior = None
             if self.priors is not None and key in self.priors:
-                lkj_prior = self._coerce_lkj_prior(key, self.priors[key])
-                scalar_conflicts = [
-                    name
-                    for name in block.member_names
-                    if self._input_priors is not None
-                    and name in self._input_priors
-                    and name not in self._reserved_matrix_keys
-                ]
-                if scalar_conflicts:
-                    raise ValueError(
-                        f"LKJChol prior on {key} cannot be combined with scalar priors on the same "
-                        f"correlation members: {scalar_conflicts}."
-                    )
+                lkj_prior = self._is_lkj_prior(key, self.priors[key])
                 prior_dim = int(getattr(lkj_prior.dist, "_K", -1))
                 if prior_dim != block.dim:
                     raise ValueError(
@@ -714,81 +721,67 @@ class Estimator:
         corr = np.asarray(Lcorr @ Lcorr.T, dtype=float64)
         return corr, np.asarray(Lcorr, dtype=float64)
 
-    def to_spec(
-        self,
-        *,
-        method: str | None = None,
-        result: MLEResult | MAPResult | MCMCResult | None = None,
-        priors: Mapping[str, PriorSpec] | None = None,
-        observables: Sequence[str] | None = None,
-        method_kwargs: Mapping[str, Any] | None = None,
-        posterior_point: str = "mean",
-    ) -> EstimationSpec:
-        """Project this estimator (and optionally a run ``result``) to a
-        serializable :class:`~SymbolicDSGE.estimation.spec.EstimationSpec`.
+    def to_spec(self) -> EstimatorSpec:
+        priors = {name: prior.to_spec() for name, prior in (self.priors or {}).items()}
 
-        Captures the estimated scalar parameters (calibration values as
-        ``initial``), the observables, scalar priors (reversed losslessly from
-        the live :class:`Prior` objects), and any block (LKJ) priors on
-        ``R_corr``/``Q_corr``.
+        params = EstimatorParams(
+            observables=self.observables,
+            filter_mode=self._prepared_filter.mode,
+            P0=self.P0.tolist() if self.P0 is not None else None,
+            R=self.R.tolist() if self.R is not None else None,
+            estimated_params=self.estimated_params,
+            priors=priors or None,
+            ss_seed=_coerce_ss_seed(self.ss_seed),
+            x0=list(self.x0) if self.x0 is not None else None,
+            jitter=self._prepared_filter.kf_jitter,
+            symmetrize=self._prepared_filter.kf_sym,
+            joseph_cov=self._prepared_filter.kf_joseph_cov,
+        )
 
-        When ``result`` is supplied the run is folded in: ``method`` is inferred
-        from it, and its recorded ``method_kwargs`` (optimizer/sampler config)
-        and parameter ``bounds`` are merged into the spec — so the spec fully
-        reproduces the run. Explicit ``method``/``method_kwargs``/``priors``
-        override the inferred values. Provide at least one of ``method`` or
-        ``result``.
-        """
-        resolved_method = method or _method_from_result(result)
-        if resolved_method is None:
-            raise ValueError(
-                "Provide method= or result= to determine the estimation method."
-            )
-
-        scalar_names = [
-            name for name in self.param_names if name not in self._matrix_member_names
-        ]
-
-        scalar_priors: dict[str, PriorSpec]
-        if priors is not None:
-            scalar_priors = dict(priors)
+        if isinstance(self.y, pd.DataFrame):
+            y = self.y.to_numpy().tolist()
         else:
-            scalar_priors = {}
-            for name in scalar_names:
-                prior = (self.priors or {}).get(name)
-                if prior is not None and hasattr(prior, "to_spec"):
-                    scalar_priors[name] = prior.to_spec()
+            y = self.y.tolist()
 
-        matrix_priors = {
-            target: block.prior.to_spec()
-            for target, block in self._matrix_blocks.items()
-            if block.prior is not None
+        return EstimatorSpec(
+            y=y,
+            params=params,
+        )
+
+    @classmethod
+    def from_spec(cls, spec: EstimatorSpec, compiled: CompiledModel) -> "Estimator":
+        params = spec.params
+        y = np.asarray(spec.y, dtype=float64)
+        R = np.asarray(params["R"], dtype=float64) if params["R"] is not None else None
+        P0 = (
+            np.asarray(params["P0"], dtype=float64)
+            if params["P0"] is not None
+            else None
+        )
+
+        x0 = (
+            np.asarray(params["x0"], dtype=float64)
+            if params["x0"] is not None
+            else None
+        )
+        priors = {
+            name: Prior.from_spec(prior_spec)
+            for name, prior_spec in (params["priors"] or {}).items()
         }
-
-        if method_kwargs is not None:
-            resolved_kwargs = dict(method_kwargs)
-        elif result is not None:
-            resolved_kwargs = _method_kwargs_from_result(result)
-        else:
-            resolved_kwargs = {}
-
-        bounds_map = _bounds_from_result(result, self.param_names)
-        scalar_bounds = {
-            name: bounds_map[name] for name in scalar_names if name in bounds_map
-        } or None
-
-        return EstimationSpec.from_targets(
-            scalar_names,
-            method=resolved_method,
-            initial={name: float(self._base_params[name]) for name in scalar_names},
-            priors=scalar_priors or None,
-            matrix_priors=matrix_priors or None,
-            bounds=scalar_bounds,
-            observables=(
-                list(observables) if observables is not None else self.observables
-            ),
-            method_kwargs=resolved_kwargs or None,
-            posterior_point=posterior_point,
+        return cls(
+            compiled=compiled,
+            y=y,
+            observables=params["observables"],
+            filter_mode=params["filter_mode"],
+            estimated_params=params["estimated_params"],
+            priors=priors or None,
+            ss_seed=params["ss_seed"],
+            x0=x0,
+            jitter=params["jitter"],
+            symmetrize=params["symmetrize"],
+            joseph_cov=params["joseph_cov"],
+            R=R,
+            P0=P0,
         )
 
     def theta0(self) -> NDF:
@@ -919,19 +912,8 @@ class Estimator:
         return loglik(ctx, mode, theta)
 
     def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
-        theta = asarray(theta, dtype=float64)
-        if theta.ndim != 1:
-            raise ValueError("theta must be a 1D array.")
-        if theta.shape[0] != len(self.param_names):
-            # The kernel indexes theta by the packed tables' slots, so a short
-            # vector reads past its end.
-            raise ValueError(
-                f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
-            )
-        packed = self._packed_logprior
-        if packed is None:
-            return float64(0.0)
-        return logprior(packed, theta, include_logjac)
+        ctx, _ = self._build_native_context()
+        return logprior(ctx, theta, include_logjac)
 
     def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
         ctx, mode = self._build_native_context()
@@ -941,14 +923,6 @@ class Estimator:
         print(
             f"[Estimator:{kind}] BK stability warnings encountered during search: {n_err}"
         )
-
-    @staticmethod
-    def _clone_generator(rng: np.random.Generator) -> np.random.Generator:
-        # Snapshot the caller-provided generator so repeated runs can reuse the
-        # same fixed seed/state without inheriting previous sampler consumption.
-        bitgen = type(rng.bit_generator)()
-        bitgen.state = deepcopy(rng.bit_generator.state)
-        return np.random.Generator(bitgen)
 
     @staticmethod
     def _serialize_bounds(
@@ -1017,14 +991,14 @@ class Estimator:
             matrix_member_names=self._matrix_member_names,
             matrix_blocks=self._matrix_blocks,
             param_transforms=self._param_transforms,
-            packed_logprior=self._packed_logprior,
+            priors=self.priors,
             ss_seed=self.ss_seed,
             x0=self.x0,
             R_override=self.R,
         )
 
         ctx: PyLinearContext | PyExtendedContext | PyUnscentedContext
-        if (mode := self.filter_mode) == "linear":
+        if (mode := self._prepared_filter.mode) == "linear":
             ctx = build_linear_context(common)
         elif mode == "extended":
             ctx = build_extended_context(common)
@@ -1038,7 +1012,7 @@ class Estimator:
         self,
         routine: Literal["mle", "map"],
         has_priors: bool,
-        include_logjac: bool = False,
+        jacobian: bool = False,
         theta0: NDF | Mapping[str, float] | None = None,
         bounds: Sequence[tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
@@ -1055,6 +1029,7 @@ class Estimator:
         cov_fd_step_scale: float = 1.0,
         cov_fd_absolute_floor: float = 0.1,
     ) -> OptimizationResult:
+
         init = self.resolve_theta0(theta0)
         self._validate_theta0(init)
 
@@ -1064,7 +1039,7 @@ class Estimator:
             ctx,
             mode,
             method,
-            include_logjac=include_logjac,
+            include_logjac=jacobian,
             theta0=init,
             bounds=bounds,
             has_priors=has_priors,
@@ -1086,6 +1061,7 @@ class Estimator:
             routine,
             res,
             config={
+                "theta0": theta0.tolist() if isinstance(theta0, np.ndarray) else theta0,
                 "method": method,
                 "bounds": self._serialize_bounds(bounds),
                 "options": {
@@ -1098,6 +1074,10 @@ class Estimator:
                     "fd_step": fd_step,
                     "xatol": xatol,
                     "fatol": fatol,
+                    "jacobian": jacobian,
+                    "cov": cov,
+                    "cov_fd_step_scale": cov_fd_step_scale,
+                    "cov_fd_absolute_floor": cov_fd_absolute_floor,
                 },
             },
         )
@@ -1134,7 +1114,7 @@ class Estimator:
             self._point_estimate(
                 routine="mle",
                 has_priors=False,
-                include_logjac=False,
+                jacobian=False,
                 theta0=theta0,
                 bounds=bounds,
                 method=method,
@@ -1175,13 +1155,14 @@ class Estimator:
     ) -> MAPResult:
         if self.priors is None:
             raise ValueError("MAP requires priors. No priors were provided.")
+        self._warn_if_should_warn_transforms()
 
         return cast(
             MAPResult,
             self._point_estimate(
                 routine="map",
                 has_priors=True,
-                include_logjac=jacobian,
+                jacobian=jacobian,
                 theta0=theta0,
                 bounds=bounds,
                 method=method,
@@ -1207,7 +1188,7 @@ class Estimator:
         burn_in: int = 1000,
         thin: int = 1,
         theta0: NDF | Mapping[str, float] | None = None,
-        random_state: int | np.random.Generator | None = None,
+        random_state: int | None = None,
         adapt: bool = True,
         adapt_start: int = 100,
         proposal_scale: float = 0.1,
@@ -1220,12 +1201,9 @@ class Estimator:
     ) -> MCMCResult:
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
+        self._warn_if_should_warn_transforms()
 
-        rng = (
-            self._clone_generator(random_state)
-            if isinstance(random_state, np.random.Generator)
-            else np.random.default_rng(random_state)
-        )
+        rng = np.random.default_rng(random_state)
 
         current = self.resolve_theta0(theta0)
         self._validate_theta0(current)
@@ -1265,10 +1243,15 @@ class Estimator:
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
 
-        if map_options is None:
-            map_options = {}
-        if map_options.get("bounds") is not None:
-            map_options["bounds"] = self._serialize_bounds(map_options["bounds"])
+        # Recorded, not re-used: the run already consumed map_options, so this
+        # copy exists only to carry a JSON-safe bounds shape into the config.
+        recorded_map_options: dict[str, Any] | None = None
+        if map_options is not None:
+            recorded_map_options = dict(map_options)
+            if recorded_map_options.get("bounds") is not None:
+                recorded_map_options["bounds"] = self._serialize_bounds(
+                    recorded_map_options["bounds"]
+                )
 
         result = MCMCResult(
             param_names=list(self.param_names),
@@ -1286,65 +1269,14 @@ class Estimator:
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),
-                "map_options": dict(map_options) if map_options is not None else None,
+                "map_options": recorded_map_options,
                 "proposal_cov": (
                     proposal_cov.tolist() if proposal_cov is not None else None
                 ),
                 "cov_fd_step_scale": float(cov_fd_step_scale),
                 "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
-                "random_state": (
-                    int(random_state)
-                    if isinstance(random_state, (int, np.integer))
-                    else None
-                ),
+                "random_state": (None if random_state is None else int(random_state)),
             },
         )
         self._report_search_warning_count("mcmc", out["bk_violations"])
         return result
-
-
-def _method_from_result(
-    result: MLEResult | MAPResult | MCMCResult | None,
-) -> str | None:
-    """The estimation method (``mle``/``map``/``mcmc``) implied by a result."""
-    if result is None:
-        return None
-    if isinstance(result, MCMCResult):
-        return "mcmc"
-    if isinstance(result, MLEResult):
-        return "mle"
-    if isinstance(result, MAPResult):
-        return "map"
-    raise TypeError(f"Unsupported estimation result type: {type(result).__name__}")
-
-
-def _method_kwargs_from_result(
-    result: OptimizationResult | MCMCResult,
-) -> dict[str, Any]:
-    """The method kwargs recorded on a result (sans bounds, folded separately)."""
-    if isinstance(result, MCMCResult):
-        return {
-            "n_draws": int(result.n_draws),
-            "burn_in": int(result.burn_in),
-            "thin": int(result.thin),
-            **dict(result.sampler_config),
-        }
-    cfg = dict(result.optimizer_config)
-    out: dict[str, Any] = {}
-    if cfg.get("method") is not None:
-        out["method"] = cfg["method"]
-    if cfg.get("options"):
-        out["options"] = cfg["options"]
-    return out
-
-
-def _bounds_from_result(
-    result: OptimizationResult | MCMCResult | None,
-    param_names: Sequence[str],
-) -> dict[str, tuple[float | None, float | None]]:
-    """Per-parameter bounds recorded on an optimization result (empty otherwise)."""
-    if isinstance(result, OptimizationResult):
-        raw = result.optimizer_config.get("bounds")
-        if raw:
-            return {name: (pair[0], pair[1]) for name, pair in zip(param_names, raw)}
-    return {}

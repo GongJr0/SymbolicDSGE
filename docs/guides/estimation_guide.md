@@ -122,7 +122,7 @@ res, sol = solver.estimate_and_solve(
     filter_mode="linear", # (1)!
     y=observed.loc[observed.index >= "1984-01-01", :], # (2)!
     observables=["Infl", "Rate"], # (3)!
-    method="mcmc", # (4)!
+    routine="mcmc", # (4)!
     priors=prior_spec,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
     posterior_point="mean", # (5)!

@@ -20,7 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from .estimation import emit_estimation_wire
+from .estimation import build_estimation_prefill, emit_estimation_wire
 from .session import Workspace
 
 if TYPE_CHECKING:
@@ -84,12 +84,14 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     estimation_wire: dict[str, Any] | None = None
     estimation_spec_dict: dict[str, Any] | None = None
     if loaded.estimation is not None:
-        estimation_spec_dict = loaded.estimation.spec.to_dict()
-        if loaded.estimation.result is not None:
-            estimation_wire = emit_estimation_wire(
+        if loaded.reference is not None:
+            estimation_spec_dict = build_estimation_prefill(
+                loaded.estimation.spec,
                 loaded.estimation.result,
-                traces=loaded.estimation.posterior,
+                loaded.reference.compiled,
             )
+        if loaded.estimation.result is not None:
+            estimation_wire = emit_estimation_wire(loaded.estimation.result)
 
     mc_wire: dict[str, Any] | None = None
     mc_pipeline_dict: dict[str, Any] | None = None

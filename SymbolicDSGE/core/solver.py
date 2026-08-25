@@ -775,7 +775,7 @@ class DSGESolver:
         *,
         compiled: CompiledModel,
         y: NDArray | pd.DataFrame,
-        method: str = "mle",
+        routine: str = "mle",
         theta0: NDArray | Mapping[str, float] | None = None,
         observables: list[str] | None = None,
         filter_mode: str = "linear",
@@ -810,21 +810,21 @@ class DSGESolver:
 
         init = est.resolve_theta0(theta0)
 
-        method_norm = method.lower()
-        if method_norm == "mle":
+        routine_norm = routine.lower()
+        if routine_norm == "mle":
             return est.mle(theta0=init, **method_kwargs)
-        if method_norm == "map":
+        if routine_norm == "map":
             return est.map(theta0=init, **method_kwargs)
-        if method_norm == "mcmc":
+        if routine_norm == "mcmc":
             return est.mcmc(theta0=init, **method_kwargs)
-        raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
+        raise ValueError("routine must be one of {'mle', 'map', 'mcmc'}.")
 
     def estimate_and_solve(
         self,
         *,
         compiled: CompiledModel,
         y: NDArray | pd.DataFrame,
-        method: str = "mle",
+        routine: str = "mle",
         theta0: NDArray | Mapping[str, float] | None = None,
         posterior_point: str = "mean",
         observables: list[str] | None = None,
@@ -860,15 +860,15 @@ class DSGESolver:
 
         init = est.resolve_theta0(theta0)
 
-        method_norm = method.lower()
+        routine_norm = routine.lower()
         result: Any
-        if method_norm == "mle":
+        if routine_norm == "mle":
             result = est.mle(theta0=init, **method_kwargs)
             solve_params = result.theta
-        elif method_norm == "map":
+        elif routine_norm == "map":
             result = est.map(theta0=init, **method_kwargs)
             solve_params = result.theta
-        elif method_norm == "mcmc":
+        elif routine_norm == "mcmc":
             result = est.mcmc(theta0=init, **method_kwargs)
             if posterior_point == "mean":
                 theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
@@ -883,7 +883,7 @@ class DSGESolver:
                 )
             solve_params = dict(zip(est.param_names, (float64(v) for v in theta_star)))
         else:
-            raise ValueError("method must be one of {'mle', 'map', 'mcmc'}.")
+            raise ValueError("routine must be one of {'mle', 'map', 'mcmc'}.")
 
         # Sync writes the estimated values into the calibration, which is where
         # `solve` reads its full parameter vector from; passing them again would

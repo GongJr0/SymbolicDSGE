@@ -117,27 +117,6 @@ def logprior_program(theta not None,
     return out
 
 
-def logprior(object tables, theta not None, bint jacobian=False):
-    """The packed log-prior at ``theta``, read off an ``sdsge_prior_tables``
-    mirror rather than eleven loose arrays. ``tables.has_prior`` is not consulted
-    here: a disabled table carries zero-length columns, so the kernel sums
-    nothing and returns 0.0."""
-    return np.float64(logprior_program(
-        theta,
-        tables.scalar_indices,
-        tables.scalar_dist_codes,
-        tables.scalar_transform_codes,
-        tables.scalar_dist_params,
-        tables.scalar_transform_params,
-        tables.matrix_offsets,
-        tables.matrix_dims,
-        tables.matrix_lengths,
-        tables.matrix_etas,
-        tables.matrix_log_constants,
-        jacobian,
-    ))
-
-
 def cov_from_unconstrained(z, std):
     """Unconstrained CPC values + stds -> (K x K covariance, K x K correlation
     Cholesky factor L). ``K`` is taken from ``std``; ``z`` has length K(K-1)/2

@@ -106,7 +106,7 @@ def test_solver_estimate_validates_config_initial_guess_against_prior(post82):
         solver.estimate(
             compiled=post82["compiled"],
             y=post82["y"],
-            method="map",
+            routine="map",
             observables=post82["obs"],
             estimated_params=["psi_pi"],
             priors={"psi_pi": make_prior("gamma", {"mean": 2.0, "std": 0.5}, "log")},
@@ -133,7 +133,7 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
     result, solved = solver.estimate_and_solve(
         compiled=post82["compiled"],
         y=post82["y"],
-        method="mle",
+        routine="mle",
         observables=post82["obs"],
         estimated_params=["psi_pi", "rho_r"],
         ss_seed=post82["steady"],
@@ -156,7 +156,7 @@ def test_solver_estimate_accepts_theta0_dictionary(post82):
     out = solver.estimate(
         compiled=post82["compiled"],
         y=post82["y"],
-        method="mle",
+        routine="mle",
         observables=post82["obs"],
         estimated_params=["psi_pi", "rho_r"],
         ss_seed=post82["steady"],
@@ -176,7 +176,7 @@ def test_solver_estimate_rejects_incomplete_theta0_dictionary():
         solver.estimate(
             compiled=compiled,
             y=np.zeros((4, 1), dtype=np.float64),
-            method="mle",
+            routine="mle",
             estimated_params=["a"],
             theta0={},
         )
@@ -199,7 +199,7 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
         out = solver.estimate(
             compiled=post82["compiled"],
             y=post82["y"],
-            method="mle",
+            routine="mle",
             observables=post82["obs"],
             estimated_params=["psi_pi"],
             priors={"psi_pi": prior},
@@ -236,7 +236,7 @@ def test_solver_estimate_and_solve_mcmc(post82, monkeypatch):
     result, solved = solver.estimate_and_solve(
         compiled=post82["compiled"],
         y=post82["y"],
-        method="mcmc",
+        routine="mcmc",
         observables=post82["obs"],
         estimated_params=["psi_pi"],
         priors={"psi_pi": _normal_prior(2.0, 0.5)},
@@ -272,7 +272,7 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
     result, solved = solver.estimate_and_solve(
         compiled=post82["compiled"],
         y=post82["y"],
-        method="mcmc",
+        routine="mcmc",
         observables=post82["obs"],
         estimated_params=["psi_pi"],
         priors={"psi_pi": _normal_prior(2.0, 0.5)},
