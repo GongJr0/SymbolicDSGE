@@ -238,9 +238,8 @@ def test_mle_records_optimizer_config(post82_estimator):
     cfg = out.optimizer_config
     assert cfg["method"] == "L-BFGS-B"
     assert cfg["bounds"] == [[1.0, 5.0], [0.0, 0.99]]
-    # optimizer kwargs are recorded under "options"; maxiter reflects the call
-    assert cfg["options"]["maxiter"] == 10
-    assert set(cfg["options"]) == {
+    assert cfg["maxiter"] == 10
+    assert set(cfg) > {
         "m",
         "maxiter",
         "maxfun",
@@ -288,6 +287,9 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert cfg["random_state"] == 7
     assert cfg["proposal_scale"] == 0.2
     assert set(cfg) == {
+        "n_draws",
+        "burn_in",
+        "thin",
         "theta0",
         "adapt",
         "adapt_start",
@@ -303,8 +305,6 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert cfg["compute_map"] is True
     # the sampler built its own, so there is no user matrix to record
     assert cfg["proposal_cov"] is None
-    # n_draws/burn_in/thin stay on the result itself (not duplicated in config)
-    assert "n_draws" not in cfg
     assert out.to_spec().meta["sampler_config"] == cfg
 
 

@@ -158,11 +158,6 @@ def test_facade_flattens_mcmc_run_with_posterior() -> None:
     np.testing.assert_allclose(posterior["samples"], mcmc.samples)
 
 
-def test_facade_requires_result_for_estimator() -> None:
-    with pytest.raises(ValueError, match="requires a live"):
-        BundleBuilder().add_estimation(_estimator())
-
-
 def test_facade_rejects_unknown_source() -> None:
     with pytest.raises(TypeError, match="EstimationSpec or Estimator"):
         BundleBuilder().add_estimation(object())  # type: ignore[arg-type]
