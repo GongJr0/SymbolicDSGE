@@ -9,7 +9,7 @@
     ├── dgp.yaml / dgp.options.json # optional
     ├── estimation/
     │   ├── spec.json               # required if estimation/ is present
-    │   ├── result.json             # optional ({"type":"mcmc"|"optimization","data":{...}})
+    │   ├── result.json             # optional ({"type":"mle" | "map" | "mcmc","data":{...}})
     │   ├── observed.csv|.parquet   # optional
     │   └── posterior.csv|.parquet  # optional
     ├── montecarlo/

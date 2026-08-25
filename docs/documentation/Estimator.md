@@ -175,8 +175,6 @@ The proposal covariance will use the MAP point to compute the Hessian if `comput
 
 ## Result Objects
 
-MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native optimizer's result struct; scipy is not involved.
-
 ### MLEResult
 
 | __Name__ | __Type__ | __Description__ |
@@ -222,9 +220,7 @@ MLE and MAP return `SymbolicDSGE.OptimizationResult`, mapped from the native opt
 | n_draws | `#!python int` | Retained draw count |
 | burn_in | `#!python int` | Burn-in iterations |
 | thin | `#!python int` | Thinning interval |
-
-???+ tip "Projecting to bundle metadata"
-    Both result classes expose a `#!python .to_meta()` method that returns the matching `#!python OptimizationResultMeta` / `#!python MCMCResultMeta` for `.sdsge` storage. `MCMCResult` additionally exposes `#!python .posterior_arrays()` returning `#!python {"samples": ..., "logpost": ..., "logjac": ...}`, the bulk dict the bundle expects as `posterior`. `#!python BundleBuilder.add_estimation(result=...)` accepts the live result directly and calls both for you. See [`BundleBuilder`](./bundle/BundleBuilder.md#bundlebuilderadd_estimation).
+| sampler_config | `#!python dict[str, Any]` | The sampler configuration used to produce the result |
 
 __Methods:__
 

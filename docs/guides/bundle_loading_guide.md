@@ -6,12 +6,16 @@ tags:
 # Bundle Loading Guide
 
 ??? tip "__TL;DR__"
-    Open a `.sdsge` bundle with `load_bundle(...)` and reach every component through the typed `LoadedBundle` fields: the solved `SolvedModel`s, the estimation spec, first class estimation result, observed data, posterior arrays, Monte Carlo pipeline, run output, traces, and the simulation prefill. Loading is deterministic: the policy matrices match the author's.
+    Open a `.sdsge` bundle with `load_bundle(...)` and reach every component through the typed `LoadedBundle` fields:
+
+    - `reference` and `dgp`: Solved models.
+    - `estimation.estimator` and `estimation.result`: Estimator and `*Result` (MLE, MAP, or MCMC).
+    - `mc.pipeline` and `mc.traces`: Monte Carlo pipeline and result traces.
+    - `simulation`: Dictionary of Simulation prefills (`SimSpec`) for each model slot
 
     You can find a demonstration notebook [here](../assets/bundle_loading.ipynb).
 
-This guide walks through opening a `.sdsge` bundle and reaching each library object it carries: the `SolvedModel`s, the estimation spec, estimation result, observed data, posterior arrays, Monte Carlo pipeline, run output, traces, and the simulation prefill.
-
+This guide walks through opening a `.sdsge` bundle and reaching each library object it carries.
 We use `experiment-1.sdsge` as produced by the [Bundle Authoring Guide](bundle_authoring_guide.md). Substitute any other bundle path.
 
 ???+ tip "What `load_bundle` actually does"
@@ -24,7 +28,8 @@ import numpy as np
 
 from SymbolicDSGE import load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.estimation.results import MCMCResult, MAPResult, MLEResult
+from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE.estimation.results import MCMCResult
 
 from typing import cast
 
@@ -91,61 +96,39 @@ print(sim.observables["Infl"][:5])
 ```python
 estimation = loaded.estimation
 
-if estimation is not None:
-    print("Method:", estimation.spec.method) # (1)!
-    print("Observables:", estimation.spec.observables)
-    print("Parameters:", [p.name for p in estimation.spec.parameters])
+# Type checkers cannot infer that `estimation` is not `None`.
+# Asserting (alternative to casting) here silences the errors 
+# by forcing the type to narrow.
+assert estimation, "No estimation tab found in the bundle."
+
+est = estimation.estimator
+res = cast(MCMCResult, estimation.result)
 ```
 
-1. `estimation.spec` is an [`EstimationSpec`](../documentation/bundle/index.md#estimation-spec-and-result-types) instance. It round trips to and from JSON via `to_dict()` / `from_dict()`.
-
-`estimation.result` is the first class result the run produced: a `MLEResult` for MLE, a `MAPResult` for MAP, or an `MCMCResult` for MCMC. The loader rebuilds it from the stored metadata and, for MCMC, the `posterior` traces, so no manual reconstruction is needed.
+`estimation.estimator` is a live `Estimator` instance for the `reference` model.
+`estimation.spec` is an `EstimatorSpec` and can be used to construct `Estimator`s for
+any model.
 
 ```python
-result = estimation.result
-if isinstance(result, MCMCResult):
-    print("Acceptance:", round(result.accept_rate, 2))
-    print("Draws:", result.n_draws, "burn-in:", result.burn_in)
-elif isinstance(result, MAPResult):
-    print("Point estimate:", result.theta)
-    print("Log-posterior:", result.logpost)
-elif isinstance(result, MLEResult):
-    print("Point estimate:", result.theta)
-    print("Log-likelihood:", result.loglik)
+# This also works and builds the estimator for the DGP model.
+# Observables and parameters stay the same.
+Estimator.from_spec(estimation.spec, compiled=dgp.compiled)
 ```
 
-Observed data and (when present) MCMC posterior are numpy arrays decoded from the embedded CSV or Parquet member.
-
-```python
-if estimation.observed is not None:
-    print("Observed shape:", estimation.observed.shape) # (1)!
-if estimation.posterior is not None:
-    samples = estimation.posterior["samples"] # (2)!
-    print("Posterior mean:", samples.mean(axis=0))
-```
-
-1. Shape is `(n_periods, n_observables)` with column order matching `estimation.spec.observables`.
-2. The same arrays already power `result.samples` / `result.logpost_trace` / `result.logjac_trace`; `estimation.posterior` exposes them raw for callers who want the columns directly. The `logpost` and `logjac` keys hold the one dimensional log posterior and log jacobian traces.
-
-???+ tip "MCMC diagnostics are ready to use"
-    A loaded MCMC `result` is a live `MCMCResult`. The loader already paired the metadata with the `posterior` traces. Call diagnostics on it directly (`result.hpd_intervals(...)`, `result.posterior_traces()`, `result.joint_hpd_set(...)`); there is no rebuild step.
+`estimation.result` (when present) is the result a bundled run produced: a `MLEResult` for MLE, a `MAPResult` for MAP, or an `MCMCResult` for MCMC.
 
 ### Run an estimation from a loaded bundle
 
-`EstimationSpec.to_estimator_inputs()` lowers the loaded spec to concrete arguments: `estimated_params`, `theta0`, `bounds`, and `priors` as built `Prior` objects. Pass these to `DSGESolver.estimate(...)` when you want to reproduce the run or when a bundle stored the spec without a result. The lowering lives in the core library, so no `[ui]` extra is required.
+All result classes carry their options as a dictionary. `optimizer_config` in `MLEResult`/`MAPResult` and `sampler_config` in `MCMCResult` can be unpacked diectly to re-run the routine that produced a given result. Note that `random_state` must be set for a result to be reproducible in case of `MCMCResult`.
 
 ```python
-inputs = estimation.spec.to_estimator_inputs() # (1)!
-inputs
+repro = est.mcmc(**res.sampler_config)
+np.array_equal(res.samples, repro.samples)
 ```
 
-1. Selects `estimate=True` parameters, materializes their initials/bounds, and, for MAP/MCMC, builds a `Prior` object from each `PriorSpec`. Raises if MAP/MCMC parameters lack a prior.
-2. `solver.estimate` forwards `**method_kwargs` to the underlying `mle`/`map`/`mcmc` call. `bounds` is accepted by MLE/MAP but not by MCMC, so we gate it on the method.
-3. The `CompiledModel` reuses the layout `load_bundle` already produced when solving the embedded YAML. No recompile is needed.
-4. The observed matrix is the data the original run was fit against. It is already reconstructed by `load_bundle` and stored on `LoadedEstimation.observed`.
-
-???+ info "Why `to_estimator_inputs` exists"
-    The spec is authored by users or the GUI, so it carries `PriorSpec` for declarative reasons. The estimator needs built `Prior` objects. `to_estimator_inputs` is where the materialization happens, and where MAP/MCMC's prior invariant is enforced.
+```bash
+>>> True # if random_state was set in the original run
+```
 
 See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
@@ -155,10 +138,10 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ```python
 mc = loaded.mc
+assert mc, "No Monte Carlo tab found in the bundle."
 
-if mc is not None:
-    print("Runtime Steps:", [step.name for step in mc.pipeline.per_rep_steps])
-    print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
+print("Runtime Steps:", [step.name for step in mc.pipeline.per_rep_steps])
+print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
 ```
 
 ### Run a Monte Carlo pipeline from a loaded bundle
@@ -169,12 +152,15 @@ The loaded pipeline runs against the loaded models without the `[ui]` extra.
 # The pipeline's simulation datagen needs a DGP. The authoring notebook
 # bundles a model under role "dgp", so `loaded.dgp` resolves. If a bundle
 # omits `reference` or `dgp`, provide the missing model when running again.
+assert mc, "No Monte Carlo tab found in the bundle."
+assert mc.document, "No Monte Carlo document found in the bundle."
+
 n_rep = mc.document["n_rep"]
 mc_result = mc.pipeline.run(
     reference=reference,
     dgp=dgp,
     n_rep=n_rep,
-    n_jobs=-1,  # (1)!
+    n_jobs=-1,
     fail_fast=True,
     verbosity=1,
 )
@@ -184,13 +170,11 @@ jb = mc_result.test_summaries["jb_test"]
 stat_ci = jb.statistic_confidence_interval(0.95)
 pval_ci = jb.pval_confidence_interval(0.95)
 
-list(zip(stat_ci, pval_ci))
+print(stat_ci, pval_ci, sep="\n")
 ```
 
-1. The rerun executes the same native loop the author ran. `n_jobs=-1` fans the replications across all available cores; `None` keeps it single-threaded.
-
 ???+ info "Validating without running"
-    `LoadedMC.pipeline` has already been rebuilt from the stored spec. If you still want to inspect the serialized graph directly, `validate_pipeline_spec(loaded.mc.spec, has_reference=loaded.reference is not None, has_dgp=loaded.dgp is not None)` returns `(ordered, postprocs)` when the graph is well formed and raises with a specific message otherwise.
+    `LoadedMC.pipeline` has already been rebuilt from the stored spec. If you still want to inspect the serialized graph directly, `validate_pipeline_spec(loaded.mc.spec, has_reference=bool(loaded.reference), has_dgp=bool(loaded.dgp))` returns `(steps, postprocs)` when the graph is well formed and raises with a specific message otherwise.
 
 See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and the [`monte_carlo` API reference](../documentation/monte_carlo/index.md) for the core runner exports.
 
@@ -200,10 +184,11 @@ Simulation prefills ride inline in the manifest, so they are reachable from `loa
 
 ```python
 prefills = loaded.simulation  # dict[str, SimSpec] | None
+assert prefills, "No simulation tab found in the bundle."
 
-if prefills is not None:
-    for role, spec in prefills.items():
-        print(role, "\n", spec)
+
+for role, spec in prefills.items():
+    print(role, "\n", spec)
 
 reference.sim(**prefills["reference"]).states["r"][:5]
 ```
@@ -215,11 +200,11 @@ reference.sim(**prefills["reference"]).states["r"][:5]
 
 Two properties to rely on after `load_bundle`:
 
-1. **Manifest integrity**: every member declared in the manifest is present in the archive (and vice versa). `BundleArchive.open` validates this on read and raises if the bundle is malformed.
-2. **Format version compatibility**: a bundle newer than the installed reader supports raises immediately with a clear message. Older bundles read forward without intervention.
+1. __Manifest integrity:__ every member declared in the manifest is present in the archive (and vice versa). `BundleArchive.open` validates this on read and raises if the bundle is malformed.
+2. __Format version compatibility:__ `load_bundle` will raise if a bundle format is incompatible with the library version reading it.
 
 ???+ warning "Reproducing simulations across machines"
-    SymbolicDSGE bundles deterministic simulation instructions, not a complete numerical runtime. Bit-exact reproduction requires the same execution environment, including Python, NumPy, SciPy, native BLAS/LAPACK dependencies, platform, thread settings, and CPU feature path.
+    SymbolicDSGE bundles deterministic simulation instructions, not a complete numerical runtime. Bit-exact reproduction may depend on the execution environment, including Python, NumPy, SciPy, native BLAS/LAPACK dependencies, platform, thread settings, and CPU feature path.
 
     Across different machines or builds, floating-point results should be treated as numerically reproducible within appropriate tolerances rather than guaranteed bit-identical.
 

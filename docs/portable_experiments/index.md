@@ -11,16 +11,16 @@ The container exists so a non-coding collaborator can run an experiment by openi
 
 ## What lives in a bundle
 
-| Component | Format | Source |
-| --- | --- | --- |
-| Model config | YAML | `ModelParser` source (path or string) |
-| Estimation spec | JSON | `EstimationSpec.to_json()` |
-| Estimation result metadata | JSON | `OptimizationResultMeta` / `MCMCResultMeta` |
-| Observed data | CSV or Parquet | Author-supplied or `Estimator` inputs |
-| MCMC posterior | CSV or Parquet | `MCMCResult.samples` + `logpost_trace` |
-| Monte Carlo pipeline | JSON | `PipelineSpec.to_json()` |
-| Monte Carlo result + traces | JSON + CSV/Parquet | `MCPipelineResult` |
-| Simulation prefill | Inline (manifest) | `{role: SimSpec}` |
+| Component                   | Format             | Source                                                  |
+|-----------------------------|--------------------|---------------------------------------------------------|
+| Model config                | YAML               | `ModelParser` source (path or string)                   |
+| Estimator parameters        | JSON               | `EstimatorParams`                                       |
+| Estimation results          | JSON               | `MLEResult` / `MAPResult` / `MCMCResultMeta`            |
+| Observed data               | CSV or Parquet     | `Estimator` inputs                                      |
+| MCMC posterior              | CSV or Parquet     | `MCMCResult.samples` + `logpost_trace` + `logjac_trace` |
+| Monte Carlo pipeline        | JSON               | `PipelineSpec.to_json()`                                |
+| Monte Carlo result + traces | JSON + CSV/Parquet | `MCPipelineResult`                                      |
+| Simulation prefill          | Inline (manifest)  | `{role: SimSpec}`                                       |
 
 ???+ note "Authoring formats"
     Bulk numeric members are written as Parquet by default for size. CSV authoring is also supported — `sdsge-compile --csv-only` keeps everything as CSV, and `sdsge-decompile --csv` re-encodes Parquet members back to CSV. The reader is format-agnostic: a hand-zipped CSV-only bundle and a CLI-built Parquet bundle both validate.
