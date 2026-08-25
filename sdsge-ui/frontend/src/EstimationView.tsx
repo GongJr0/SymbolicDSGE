@@ -673,7 +673,9 @@ function ParameterDetails({
   const estimatedValue =
     result?.result.theta?.[parameter.name] ??
     result?.result.posterior_mean?.[parameter.name];
-  const standardErrors = result?.result.se;
+  // A null `se` means the run computed no covariance, which shows the same as
+  // having no result field at all.
+  const standardErrors = result?.result.se ?? undefined;
   const covStatus = result?.result.cov_status ?? 0;
   return (
     <div className="estimation-details">
@@ -781,7 +783,7 @@ function ParameterDetails({
             {standardErrors !== undefined && (
               <ResultValue
                 label="Std. error"
-                value={format(standardErrors[parameter.name] ?? undefined)}
+                value={format(standardErrors[parameter.name])}
               />
             )}
             <ResultValue label="Solved" value={result.solved ? "yes" : "no"} />
@@ -1154,6 +1156,10 @@ function downsampleTrace(
   return { indices, values: indices.map((index) => values[index]) };
 }
 
-function format(value: number | undefined): string {
-  return value === undefined || !Number.isFinite(value) ? "--" : value.toFixed(4);
+// `null` is how the wire says "the run produced no finite value here", which
+// reads the same as absent.
+function format(value: number | null | undefined): string {
+  return value === undefined || value === null || !Number.isFinite(value)
+    ? "--"
+    : value.toFixed(4);
 }

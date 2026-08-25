@@ -129,42 +129,67 @@ def emit_estimation_wire(
 def _emit_optimization_wire(
     obj: OptimizationResult,
 ) -> dict[str, Any]:
+    """Everything the run produced, in the key set ``*ResultSpec`` reads back.
+
+    ``x`` is the optimum itself and ``vcov`` the covariance ``cov=True`` paid
+    for on the way there; both are carried rather than recomputed, and with
+    ``optimizer_config`` they complete the set a result is rebuilt from.
+    """
     return {
+        "x": _emit_vector(obj.x),
+        "theta": {name: _emit_scalar(value) for name, value in obj.theta.items()},
         "success": bool(obj.success),
         "message": obj.message,
-        "theta": {name: float(value) for name, value in obj.theta.items()},
-        "fun": float(obj.fun),
+        "fun": _emit_scalar(obj.fun),
         "nfev": int(obj.nfev),
         "nit": obj.nit,
+        "vcov": _emit_matrix(obj.vcov),
         "se": _emit_se(obj.se),
         "cov_status": int(obj.cov_status),
+        "optimizer_config": dict(obj.optimizer_config),
     }
+
+
+def _emit_scalar(value: Any) -> float | None:
+    """A float as JSON, ``null`` where it is not finite.
+
+    Non-finite is how the estimator says "unavailable" in place: a covariance
+    that failed leaves NaN throughout, a negative diagonal variance leaves one
+    behind, and a driver that never ran leaves ``fun`` NaN. The response
+    encoder rejects NaN outright, so a single one would cost the whole
+    payload; ``null`` reads the same and survives the trip.
+    """
+    out = float(value)
+    return out if np.isfinite(out) else None
+
+
+def _emit_vector(values: Any) -> list[float | None]:
+    return [_emit_scalar(value) for value in np.asarray(values, dtype=np.float64)]
+
+
+def _emit_matrix(values: Any) -> list[list[float | None]] | None:
+    if values is None:
+        return None
+    return [_emit_vector(row) for row in np.asarray(values, dtype=np.float64)]
 
 
 def _emit_se(se: Mapping[str, Any] | None) -> dict[str, float | None] | None:
-    """Standard errors as JSON, a non-finite entry rendered as ``null``.
-
-    A covariance that failed, and a negative variance on the diagonal of one
-    that did not, both leave NaN in place rather than a status. The response
-    encoder rejects NaN, so it becomes ``null`` and reads as "unavailable"
-    alongside ``cov_status``.
-    """
     if se is None:
         return None
-    return {
-        name: (float(value) if np.isfinite(value) else None)
-        for name, value in se.items()
-    }
+    return {name: _emit_scalar(value) for name, value in se.items()}
 
 
 def _emit_mle_wire(obj: MLEResult) -> dict[str, Any]:
     optim = _emit_optimization_wire(obj)
-    return optim | {"loglik": float(obj.loglik)}
+    return optim | {"loglik": _emit_scalar(obj.loglik)}
 
 
 def _emit_map_wire(obj: MAPResult) -> dict[str, Any]:
     optim = _emit_optimization_wire(obj)
-    return optim | {"logpost": float(obj.logpost), "logprior": float(obj.logprior)}
+    return optim | {
+        "logpost": _emit_scalar(obj.logpost),
+        "logprior": _emit_scalar(obj.logprior),
+    }
 
 
 def _emit_mcmc_wire(
@@ -205,13 +230,16 @@ def _emit_mcmc_wire(
         },
         "logpost_trace": logpost.tolist(),
         "logjac_trace": logjac.tolist(),
-        "accept_rate": float(obj.accept_rate),
+        "accept_rate": _emit_scalar(obj.accept_rate),
         "n_draws": int(obj.n_draws),
         "burn_in": int(obj.burn_in),
         "thin": int(obj.thin),
-        "logpost_mean": float(logpost.mean()),
-        "logpost_min": float(logpost.min()),
-        "logpost_max": float(logpost.max()),
+        # The sampler's own call arguments, the MCMC counterpart of an
+        # optimization run's optimizer_config.
+        "sampler_config": dict(getattr(obj, "sampler_config", {}) or {}),
+        "logpost_mean": _emit_scalar(logpost.mean()),
+        "logpost_min": _emit_scalar(logpost.min()),
+        "logpost_max": _emit_scalar(logpost.max()),
     }
 
 

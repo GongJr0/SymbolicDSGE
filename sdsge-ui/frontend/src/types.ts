@@ -60,9 +60,86 @@ export interface ModelSummary {
   has_kalman?: boolean;
 }
 
+export type WorkspaceTab = "estimation" | "mc";
+
+/** The estimation tab as it stands on screen.
+ *
+ * Client-owned and held verbatim by the server, so a new control lands here
+ * without a backend change. Carries no result: that is the tab's `result`
+ * slot, which only a run fills.
+ */
+export interface EstimationViewState {
+  method: EstimationMethod;
+  parameters: EstimationParameterSpec[];
+  selected: string | null;
+  observables: string;
+  dataVectors: Record<string, string>;
+  optimizer: string;
+  maxIter: number;
+  maxFun: number;
+  m: number;
+  maxLs: number;
+  factr: number;
+  pgtol: number;
+  fdStep: number;
+  xatol: number;
+  fatol: number;
+  nDraws: number;
+  burnIn: number;
+  thin: number;
+  seed: number;
+  proposalScale: number;
+  adapt: boolean;
+  adaptStart: number;
+  adaptEpsilon: number;
+  posteriorPoint: string;
+  modeFolded: boolean;
+}
+
+/** The MC tab as it stands on screen.
+ *
+ * Carries `pipeline` as well as the layout: an edited graph that has not been
+ * run has no `spec` yet, since the server only writes that slot from a run.
+ */
+export interface MCViewState {
+  pipeline: MCPipelineSpec;
+  positions: Record<string, { x: number; y: number }>;
+  nRep: number;
+  nJobs: number | null;
+  verbosity: number;
+  failFast: boolean;
+}
+
+/** One tab's slots on the session.
+ *
+ * `spec` and `result` are server-written, from a run or the bundle the UI was
+ * launched with; `view` is the only slot the client writes. Each is absent
+ * until something fills it.
+ */
+export interface WorkspaceTabState<TResult, TView> {
+  spec?: Record<string, unknown>;
+  result?: TResult;
+  view?: TView;
+}
+
+/** Everything a reload repaints from.
+ *
+ * Lives in the server process, which the refresh does not restart, so this is
+ * the whole restore mechanism: nothing is kept on the client.
+ */
+export interface SessionWorkspace {
+  estimation?: WorkspaceTabState<
+    EstimationRunResult["result"],
+    EstimationViewState
+  >;
+  mc?: WorkspaceTabState<MCPipelineResult, MCViewState>;
+  simulation?: Partial<Record<Role, Record<string, unknown>>>;
+}
+
 export interface SessionSummary {
   models: Record<Role, ModelSummary>;
   runs: Array<{ run_id: string; kind: string; role: Role }>;
+  workspace: SessionWorkspace;
 }
 
 export type FunctionKind = "array" | "figure";
@@ -138,12 +215,22 @@ export interface EstimationRunResult {
     kind?: EstimationMethod;
     success?: boolean;
     message?: string;
-    theta?: Record<string, number>;
-    fun?: number;
+    // The optimum, in the unconstrained space the optimizer moved through.
+    // `theta` is the same point in the model's own parameters.
+    x?: Array<number | null>;
+    theta?: Record<string, number | null>;
+    fun?: number | null;
+    // Asymptotic covariance at the optimum, ordered like `x`. Null throughout
+    // when the Hessian there was not positive definite; absent when the run
+    // computed no covariance at all.
+    vcov?: Array<Array<number | null>> | null;
     // Keyed like `theta`; an entry is null where the covariance gave no
-    // finite standard error. Absent when the run computed no covariance.
-    se?: Record<string, number | null>;
+    // finite standard error.
+    se?: Record<string, number | null> | null;
     cov_status?: number;
+    // The call arguments the run was made with, for reproducing it.
+    optimizer_config?: Record<string, unknown>;
+    sampler_config?: Record<string, unknown>;
     loglik?: number;
     logprior?: number;
     logpost?: number;
@@ -154,13 +241,13 @@ export interface EstimationRunResult {
     samples?: Record<string, number[]>;
     logpost_trace?: number[];
     logjac_trace?: number[];
-    accept_rate?: number;
+    accept_rate?: number | null;
     n_draws?: number;
     burn_in?: number;
     thin?: number;
-    logpost_mean?: number;
-    logpost_min?: number;
-    logpost_max?: number;
+    logpost_mean?: number | null;
+    logpost_min?: number | null;
+    logpost_max?: number | null;
   };
 }
 

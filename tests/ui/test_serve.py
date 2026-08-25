@@ -122,8 +122,71 @@ def test_emit_wire_mle_result() -> None:
     assert (wire["fun"], wire["nfev"], wire["nit"]) == (-12.3, 42, 15)
     assert wire["loglik"] == -10.0
     assert wire["success"] is True and wire["message"] == "ok"
+    assert wire["x"] == [0.99, 0.8]
     # A run that computed no covariance carries none, and reports OK for it.
-    assert wire["se"] is None and wire["cov_status"] == 0
+    assert wire["vcov"] is None and wire["se"] is None and wire["cov_status"] == 0
+
+
+def test_emit_wire_rebuilds_the_result_it_came_from() -> None:
+    """The wire is the full result, not a display projection of one.
+
+    ``x`` is the optimum and ``vcov`` is what ``cov=True`` paid for on the way
+    there; with ``optimizer_config`` they are what ``from_spec`` reads back, so
+    the workspace slot a bundle takes is not lossy.
+    """
+    original = MLEResult(
+        x=np.array([0.98, 0.5]),
+        theta={"beta": np.float64(0.98), "rho": np.float64(0.5)},
+        success=True,
+        message="ok",
+        fun=np.float64(1.0),
+        nfev=4,
+        nit=2,
+        optimizer_config={"method": "L-BFGS-B", "options": {"maxiter": 15000}},
+        vcov=np.array([[1e-4, 0.0], [0.0, 4e-4]]),
+        se={"beta": np.float64(0.01), "rho": np.float64(0.02)},
+        cov_status=0,
+        loglik=np.float64(-1.0),
+    )
+
+    rebuilt = MLEResult.from_spec(emit_estimation_wire(original))
+
+    np.testing.assert_allclose(rebuilt.x, original.x)
+    assert rebuilt.vcov is not None
+    np.testing.assert_allclose(rebuilt.vcov, original.vcov)
+    assert rebuilt.optimizer_config == original.optimizer_config
+    assert rebuilt.se == original.se
+    assert rebuilt.theta == original.theta
+    assert rebuilt.loglik == original.loglik
+
+
+def test_emit_wire_survives_a_covariance_that_failed() -> None:
+    """A non-SPD Hessian leaves NaN throughout, which strict JSON rejects.
+
+    Nulling it is what keeps one bad entry from costing the whole payload, and
+    the nulls read back as the NaN they stood for.
+    """
+    failed = MLEResult(
+        x=np.array([0.98]),
+        theta={"beta": np.float64(0.98)},
+        success=True,
+        message="ok",
+        fun=np.float64(1.0),
+        nfev=4,
+        nit=2,
+        optimizer_config={},
+        vcov=np.full((1, 1), np.nan),
+        se={"beta": np.float64(np.nan)},
+        cov_status=-1802,
+        loglik=np.float64(-1.0),
+    )
+
+    wire = emit_estimation_wire(failed)
+
+    assert wire["vcov"] == [[None]] and wire["se"] == {"beta": None}
+    rebuilt = MLEResult.from_spec(wire)
+    assert rebuilt.vcov is not None and bool(np.all(np.isnan(rebuilt.vcov)))
+    assert rebuilt.se is not None and np.isnan(rebuilt.se["beta"])
 
 
 def test_emit_wire_carries_standard_errors_and_nulls_non_finite() -> None:
@@ -172,6 +235,24 @@ def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
     # identical whether the traces are supplied separately or read off the result
     traces = {"samples": samples, "logpost_trace": logpost, "logjac_trace": logjac}
     assert emit_estimation_wire(live) == emit_estimation_wire(live, traces=traces)
+
+
+def test_emit_wire_mcmc_carries_sampler_config() -> None:
+    """The sampler's call arguments, as optimizer_config is for a point run."""
+    config = {"adapt": True, "adapt_start": 100, "random_state": 7}
+    live = MCMCResult(
+        param_names=["beta"],
+        samples=np.zeros((3, 1)),
+        logpost_trace=np.zeros(3),
+        logjac_trace=np.zeros(3),
+        accept_rate=np.float64(0.4),
+        n_draws=3,
+        burn_in=1,
+        thin=1,
+        sampler_config=config,
+    )
+
+    assert emit_estimation_wire(live)["sampler_config"] == config
 
 
 def test_serialize_estimation_result_shim_delegates() -> None:
