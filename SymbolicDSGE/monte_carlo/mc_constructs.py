@@ -19,6 +19,7 @@ from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
 from ..kalman.filter import UnscentedFilterRawResult
 from ..regression.enums import RegressionStatus
+from .postproc import Artifact
 from ..regression.ols import MCRegressionResult
 from .custom_op import PandasCustomFunc
 
@@ -268,10 +269,10 @@ class MCPipelineResult:
         default_factory=dict
     )
 
-    #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name (or
-    #: ``"<step>.<key>"`` for multi-artifact ops). Values are
-    #: :class:`~SymbolicDSGE.monte_carlo.postproc.Summary` / ``Raw`` wrappers.
-    postproc: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name. Each step
+    #: contributes one :class:`~SymbolicDSGE.monte_carlo.postproc.Artifact`,
+    #: holding its ``raw`` and ``summary`` slots (either may be ``None``).
+    postproc: Mapping[str, Artifact] = dataclass_field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:

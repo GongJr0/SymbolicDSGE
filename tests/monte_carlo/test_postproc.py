@@ -60,18 +60,46 @@ def _postproc(name: str, func: Any, **kwargs: Any) -> MCStep:
     return MCStep(name=name, op_type=OpType.POSTPROC, func=func, kwargs=kwargs)
 
 
-def test_postproc_runs_once_and_stores_bare_scalar() -> None:
+def test_postproc_runs_once_per_run() -> None:
     calls: list[int] = []
 
     def op(*, traces):
         calls.append(1)
-        return 0.75
+        return Summary(value=0.75)
 
-    result = _run([_postproc("probe", op)], n_rep=5)
+    _run([_postproc("probe", op)], n_rep=5)
 
     assert len(calls) == 1  # once per run(), not per replication
-    # The op's return is stored verbatim -- a plain value, no wrapper in-memory.
-    assert result.postproc["probe"] == 0.75
+
+
+@pytest.mark.parametrize(
+    "returned, raw, summary",
+    [
+        (Summary(value=0.4), False, True),
+        (Raw(np.zeros(3)), True, False),
+        ((Raw(np.zeros(3)), Summary(value=0.4)), True, True),
+    ],
+)
+def test_postproc_return_fills_the_slots_it_declares(returned, raw, summary) -> None:
+    stored = _run([_postproc("p", lambda *, traces: returned)]).postproc["p"]
+
+    assert (stored["raw"] is not None) is raw
+    assert (stored["summary"] is not None) is summary
+
+
+@pytest.mark.parametrize(
+    "returned, match",
+    [
+        (0.4, "not float"),
+        (np.zeros(3), "not ndarray"),
+        ({"a": Summary(value=1)}, "not dict"),
+        ((Summary(value=1), Summary(value=2)), "multiple Summary"),
+        ((Raw(np.zeros(1)), Raw(np.zeros(1))), "multiple Raw"),
+    ],
+)
+def test_postproc_rejects_anything_but_the_two_wrappers(returned, match) -> None:
+    with pytest.raises((TypeError, ValueError), match=match):
+        _run([_postproc("p", lambda *, traces: returned)])
 
 
 def test_no_postproc_yields_empty_bucket() -> None:
@@ -94,7 +122,7 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
 
     def pcs(*, traces, expected):
         mat = np.column_stack([traces[k] for k in pval_keys])
-        return float((mat.argmin(axis=1) == expected).mean())
+        return Summary(value=float((mat.argmin(axis=1) == expected).mean()))
 
     pipeline = MCPipeline(
         [
@@ -122,10 +150,11 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     expected_pcs = float(indicator.mean())
 
     # `pcs` returns a plain float; `sel` returns a Raw (both stored verbatim).
-    assert result.postproc["pcs"] == pytest.approx(expected_pcs)
-    np.testing.assert_array_equal(result.postproc["sel"].value, indicator)
+    pcs_value = result.postproc["pcs"]["summary"].value
+    assert pcs_value == pytest.approx(expected_pcs)
+    np.testing.assert_array_equal(result.postproc["sel"]["raw"].value, indicator)
     # PCS is exactly the across-rep mean = sum / len of the 0/1 selection vector.
-    assert result.postproc["pcs"] == pytest.approx(indicator.sum() / len(indicator))
+    assert pcs_value == pytest.approx(indicator.sum() / len(indicator))
 
 
 def test_traces_expose_test_pvals_with_n_successful_length() -> None:
@@ -140,33 +169,7 @@ def test_traces_expose_test_pvals_with_n_successful_length() -> None:
 
     assert "test.jb.pval" in captured["keys"]
     assert captured["pval"].shape == (6,)
-    assert isinstance(result.postproc["probe"], Summary)
-
-
-def test_mapping_return_is_stored_nested_and_namespaced_on_serialize() -> None:
-    from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
-
-    def op(*, traces):
-        return {"sel": Raw(np.zeros(3)), "pcs": Summary(0.4)}
-
-    result = _run([_postproc("m", op)])
-
-    # In-memory: the op's return (a mapping) is stored verbatim under its name.
-    assert isinstance(result.postproc["m"]["sel"], Raw)
-    assert result.postproc["m"]["pcs"].value == 0.4
-    # On serialize, a mapping fans out into namespaced wire entries.
-    wire = serialize_pipeline_result(result, run_id="t")["postproc"]
-    assert set(wire) == {"m.sel", "m.pcs"}
-    assert wire["m.pcs"]["value"] == 0.4
-
-
-def test_bare_ndarray_stored_verbatim() -> None:
-    def op(*, traces):
-        return np.arange(3.0)
-
-    stored = _run([_postproc("r", op)]).postproc["r"]
-    assert isinstance(stored, np.ndarray)
-    np.testing.assert_array_equal(stored, np.arange(3.0))
+    assert isinstance(result.postproc["probe"]["summary"], Summary)
 
 
 def test_postproc_failure_respects_fail_fast() -> None:
@@ -206,7 +209,7 @@ def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
     )
     result = pipeline.run(reference=_REFERENCE, n_rep=8, verbosity=0)
 
-    value = result.postproc["pcs"].value
+    value = result.postproc["pcs"]["summary"].value
     assert isinstance(value, float) and 0.0 <= value <= 1.0
 
 
@@ -216,7 +219,7 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
     def op(*, traces):
         captured["has_payload"] = "payload.s" in traces
         captured["shape"] = traces.get("payload.s", np.empty(0)).shape
-        return 1.0
+        return Summary(value=1.0)
 
     pipeline = MCPipeline(
         [
@@ -245,7 +248,9 @@ def test_transform_outputs_is_none_without_transform_steps() -> None:
 
 
 def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
-    result = _run([_postproc("probe", lambda *, traces: 1.0)], n_rep=7, verbosity=2)
+    result = _run(
+        [_postproc("probe", lambda *, traces: Summary(value=1.0))], n_rep=7, verbosity=2
+    )
     # per-rep steps run 7 times and carry it/s rates; the postproc runs once and
     # is timed separately (runtime only, never in the per-rep step maps).
     assert result.meta.step_counts["jb"] == 7
@@ -259,7 +264,9 @@ def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:
 
 
 def test_perf_report_separates_postproc_runtime_from_it_s() -> None:
-    result = _run([_postproc("pp", lambda *, traces: 1.0)], n_rep=5, verbosity=2)
+    result = _run(
+        [_postproc("pp", lambda *, traces: Summary(value=1.0))], n_rep=5, verbosity=2
+    )
 
     # verbosity=1: pipeline it/s, then postproc *total runtime* (no it/s for it).
     lines: list[str] = []
@@ -302,12 +309,12 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
     result = pipeline.run(reference=_REFERENCE, n_rep=12, verbosity=0)
 
     # kde returns a mapping; stored verbatim, so its entries nest under "density".
-    curve = result.postproc["density"]["curve"]
+    curve = result.postproc["density"]["raw"]
     assert isinstance(curve, Raw)
     assert curve.value.shape == (64, 2)  # (x, density)
 
-    desc = result.postproc["density"]["descriptives"]
-    assert isinstance(desc, Summary) and desc.render == "table"
+    desc = result.postproc["density"]["summary"]
+    assert isinstance(desc, Summary)
     assert isinstance(desc.value, pd.DataFrame)
     assert list(desc.value["statistic"]) == [
         "count",
@@ -331,7 +338,7 @@ def test_runtime_traces_match_available_registry() -> None:
 
     def probe(*, traces):
         captured["keys"] = set(traces)
-        return 0.0
+        return Summary(value=0.0)
 
     pipe = MCPipeline(
         [

@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import cast
 
 import numpy as np
+
+from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
 import pandas as pd
 import pytest
 
@@ -38,28 +40,24 @@ def zscore(sample: np.ndarray, output: np.ndarray) -> int:
 def pval_table(*, traces):
     """Top-level pandas post-loop op returning a DataFrame (references `pd`)."""
     pvals = traces["test.jb.pval"]
-    return pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})
+    return Summary(pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals}))
 
 
 def summary_bundle(*, traces, threshold):
-    """Post-loop op emitting all three artifact kinds: scalar, array, table."""
+    """Post-loop op filling both slots: a bulk array and a frame summary."""
     pvals = traces["test.jb.pval"]
     flags = (pvals < threshold).astype(float)
-    return {
-        "pcs": float(flags.mean()),  # scalar -> Summary (document)
-        "flags": flags,  # array -> Raw (mc_postproc)
-        "table": pd.DataFrame(  # DataFrame -> Summary table (mc_postproc_table)
-            {"rep": np.arange(pvals.size), "pval": pvals}
-        ),
-    }
+    return (
+        Raw(flags),
+        Summary(pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})),
+    )
 
 
 def selection_rate(*, traces):
-    """Top-level postproc op: bare values auto-wrap (scalar -> Summary, array ->
-    Raw), so the op body references no captured types."""
+    """Top-level postproc op filling both slots."""
     pval = traces["test.jb.pval"]
     indicator = (pval < 0.5).astype(float)
-    return {"rate": float(indicator.mean()), "flags": indicator}
+    return (Raw(indicator), Summary(float(indicator.mean())))
 
 
 def _raw_model_data_pipeline() -> MCPipeline:
@@ -159,7 +157,7 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
     # The bulk array artifact rides its own shape-manifest parquet member.
     assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
     np.testing.assert_array_equal(
-        loaded.mc.postproc_arrays["post.flags"], result.postproc["post"]["flags"]
+        loaded.mc.postproc_arrays["post"], result.postproc["post"]["raw"].value
     )
 
     # document (scalar inline) + parquet array re-merge to the live wire shape.
@@ -216,10 +214,9 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
 
     loaded = build_from(target)
     assert loaded.mc is not None
-    # KDE emits a Raw curve (array member) and a descriptives table member.
+    # The Raw curve rides a member; the descriptives frame inlines in the document.
     assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
-    assert any(m.kind == "mc_postproc_table" for m in loaded.manifest.members)
-    assert "kde.descriptives" in loaded.mc.postproc_tables
+    assert loaded.mc.document["postproc"]["kde"]["summary"]["value"]["data"]
 
     wire = loaded.mc.wire()
     assert wire is not None
@@ -253,9 +250,9 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
     func = loaded.mc.resources["ptab"]
     assert isinstance(func, PandasCustomFunc)
     out = func(traces={"test.jb.pval": np.array([0.1, 0.2])})
-    assert isinstance(out, pd.DataFrame)
-    # The DataFrame artifact also lands as a table member.
-    assert any(m.kind == "mc_postproc_table" for m in loaded.manifest.members)
+    assert isinstance(out, Summary) and isinstance(out.value, pd.DataFrame)
+    # A frame summary inlines rather than taking a member of its own.
+    assert loaded.mc.document["postproc"]["ptab"]["summary"]["value"]["data"]
 
 
 def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
@@ -283,9 +280,9 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     loaded = build_from(target)
     assert loaded.mc is not None
 
-    # All three artifact channels plus the custom-op blob shipped.
+    # The bulk slot plus the custom-op blob shipped.
     kinds = {m.kind for m in loaded.manifest.members}
-    assert {"mc_custom_op", "mc_postproc", "mc_postproc_table"} <= kinds
+    assert {"mc_custom_op", "mc_postproc"} <= kinds
 
     # The post-loop op rehydrated under the pandas namespace, kwargs preserved.
     func = loaded.mc.resources["sum"]
@@ -296,9 +293,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         loaded.mc.wire()["postproc"]
         == serialize_pipeline_result(result, run_id="r1")["postproc"]
     )
-    assert loaded.mc.postproc_tables["sum.table"]["pval"] == list(
-        result.postproc["sum"]["table"]["pval"]
-    )
+    assert loaded.mc.document["postproc"]["sum"]["summary"]["value"]["data"]
 
     # Rebuild from spec + resources -> equivalent runnable pipeline.
     rebuilt = loaded.mc.pipeline
@@ -310,12 +305,11 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 
     # Re-running reproduces every artifact (deterministic replayed data).
     rerun = rebuilt.run(reference=ref, n_rep=8, verbosity=0)
-    assert rerun.postproc["sum"]["pcs"] == result.postproc["sum"]["pcs"]
     np.testing.assert_array_equal(
-        rerun.postproc["sum"]["flags"], result.postproc["sum"]["flags"]
+        rerun.postproc["sum"]["raw"].value, result.postproc["sum"]["raw"].value
     )
-    assert list(rerun.postproc["sum"]["table"]["pval"]) == list(
-        result.postproc["sum"]["table"]["pval"]
+    assert rerun.postproc["sum"]["summary"].value.equals(
+        result.postproc["sum"]["summary"].value
     )
 
 

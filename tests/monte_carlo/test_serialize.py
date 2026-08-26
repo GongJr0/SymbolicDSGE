@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 from typing import cast
 
 import numpy as np
@@ -20,12 +21,11 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     raw_model_data_step,
     regression_step,
 )
-from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
+from SymbolicDSGE.monte_carlo.postproc import Artifact, Raw, Summary
 from SymbolicDSGE.monte_carlo.serialize import (
     pipeline_result_wire,
     result_document,
     result_postproc_arrays,
-    result_postproc_tables,
     run_traces,
     serialize_pipeline_result,
 )
@@ -57,10 +57,12 @@ def _postproc_result() -> MCPipelineResult:
         test_summaries={},
         transform_outputs=None,
         postproc={
-            "pcs": Summary(value=0.6, title="PCS"),
-            "selection": Raw(value=np.array([0.0, 1.0, 0.0, 1.0, 0.0])),
-            "density": Raw(value=np.arange(8.0).reshape(4, 2)),
-            "moments": Summary(value=np.array([1.0, 2.0]), render="array"),
+            "pcs": Artifact(raw=None, summary=Summary(value=0.6)),
+            "kde": Artifact(
+                raw=Raw(value=np.arange(8.0).reshape(4, 2)),
+                summary=Summary(value={"mean": 1.0, "n": 4}),
+            ),
+            "moments": Artifact(raw=None, summary=Summary(value=np.array([1.0, 2.0]))),
         },
     )
 
@@ -174,29 +176,22 @@ def test_wire_reconstructs_dropped_all_nan_trace_columns() -> None:
     assert len(entry["status_trace"]) == 3
 
 
-def test_postproc_scalar_inline_array_to_traces() -> None:
+def test_postproc_summary_inlines_and_raw_goes_to_parquet() -> None:
     result = _postproc_result()
     document = result_document(result, run_id="r1")
     arrays = result_postproc_arrays(result)
 
-    # Scalars (and their metadata) stay inline in the document.
-    pcs = document["postproc"]["pcs"]
-    assert pcs == {
-        "kind": "summary",
-        "title": "PCS",
-        "render": "auto",
-        "artifact": "scalar",
-        "value": 0.6,
-    }
-    # Array artifacts keep metadata but the bulk value is stripped to parquet.
-    density = document["postproc"]["density"]
-    assert density == {"kind": "raw", "artifact": "array", "shape": [4, 2]}
-    assert "value" not in document["postproc"]["selection"]
-    assert "value" not in document["postproc"]["moments"]
+    # A summary-only step has no bulk slot and keeps its value inline.
+    assert document["postproc"]["pcs"] == {"raw": None, "summary": {"value": 0.6}}
+    # With both slots, the summary stays inline and the raw value is stripped.
+    kde = document["postproc"]["kde"]
+    assert kde["raw"] == {"shape": [4, 2]}
+    assert kde["summary"] == {"value": {"mean": 1.0, "n": 4}}
+    # An ndarray summary inlines too; only Raw is bulk.
+    assert document["postproc"]["moments"]["summary"] == {"value": [1.0, 2.0]}
 
-    # Only the ndarray artifacts (Raw + array-valued Summary) become payloads.
-    assert set(arrays) == {"selection", "density", "moments"}
-    assert arrays["density"].shape == (4, 2)
+    assert set(arrays) == {"kde"}
+    assert arrays["kde"].shape == (4, 2)
     json.dumps(document)
 
 
@@ -209,8 +204,8 @@ def test_postproc_wire_round_trips_scalar_and_arrays() -> None:
         result_postproc_arrays(result),
     )
     assert recombined == wire
-    assert recombined["postproc"]["pcs"]["value"] == 0.6
-    assert recombined["postproc"]["density"]["value"] == [
+    assert recombined["postproc"]["pcs"]["summary"]["value"] == 0.6
+    assert recombined["postproc"]["kde"]["raw"]["value"] == [
         [0.0, 1.0],
         [2.0, 3.0],
         [4.0, 5.0],
@@ -230,77 +225,45 @@ def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
         n_successful=3,
         test_summaries={},
         transform_outputs=None,
-        postproc={"empty": Raw(value=np.full(3, np.nan))},
+        postproc={"empty": Artifact(raw=Raw(value=np.full(3, np.nan)), summary=None)},
     )
     document = result_document(result, run_id="r1")
     wire = pipeline_result_wire(document, {}, {})  # array dropped -> absent
-    assert wire["postproc"]["empty"]["value"] == [None, None, None]
+    assert wire["postproc"]["empty"]["raw"]["value"] == [None, None, None]
 
 
-def test_postproc_summary_rejects_unserializable_value() -> None:
-    # Scalar / ndarray / DataFrame are supported; a bare dict is not.
-    result = _table_result({"bad": Summary(value={"a": [1, 2]})})
-    with pytest.raises(TypeError, match="scalar, ndarray, or DataFrame"):
-        serialize_pipeline_result(result, run_id="r1")
-
-
-def test_postproc_table_metadata_inline_data_to_parquet() -> None:
-    import pandas as pd
-
-    df = pd.DataFrame(
-        {"stat": ["mean", "std"], "value": [1.5, 2.0], "ok": [True, False]}
-    )
-    result = _table_result({"desc": Summary(df, render="table")})
-
-    document = result_document(result, run_id="r1")
-    entry = document["postproc"]["desc"]
-    assert entry["artifact"] == "table"
-    assert entry["columns"] == ["stat", "value", "ok"]
-    assert entry["dtypes"] == {"stat": "string", "value": "float", "ok": "bool"}
-    assert entry["index"] == {"kind": "range", "name": None}
-    assert "data" not in entry  # bulk -> parquet side-channel
-    json.dumps(document)
-
-    tables = result_postproc_tables(result)
-    assert tables["desc"]["stat"] == ["mean", "std"]
-    assert tables["desc"]["ok"] == [True, False]
-
-
-def test_postproc_table_wire_round_trips() -> None:
-    import pandas as pd
-
-    df = pd.DataFrame({"stat": ["a", "b", "c"], "value": [1.0, np.nan, 3.0]})
-    labeled = pd.DataFrame(
-        {"v": [10.0, 20.0]}, index=pd.Index(["x", "y"], name="label")
-    )
-    result = _table_result(
-        {"desc": Summary(df, render="table"), "lab": Summary(labeled)}
-    )
+def test_postproc_summary_mapping_inlines() -> None:
+    # A mapping is JSON-native; it rides the summary slot unchanged.
+    value = {"a": [1, 2], "b": np.float64(0.5)}
+    result = _table_result({"m": Artifact(raw=None, summary=Summary(value=value))})
 
     wire = serialize_pipeline_result(result, run_id="r1")
-    recombined = pipeline_result_wire(
-        result_document(result, run_id="r1"),
-        run_traces(result),
-        result_postproc_arrays(result),
-        result_postproc_tables(result),
-    )
-    assert recombined == wire
-    # NaN cell -> JSON null, matching the trace convention.
-    assert recombined["postproc"]["desc"]["data"]["value"] == [1.0, None, 3.0]
-    # Labeled index rides the reserved __index__ column.
-    assert recombined["postproc"]["lab"]["index"]["kind"] == "labeled"
-    assert recombined["postproc"]["lab"]["data"]["__index__"] == ["x", "y"]
+
+    assert wire["postproc"]["m"]["summary"]["value"] == {"a": [1, 2], "b": 0.5}
+    json.dumps(wire)
 
 
-def test_postproc_table_wire_reconstructs_dropped_all_null_column() -> None:
+def test_postproc_summary_frame_inlines_as_table_schema() -> None:
     import pandas as pd
 
-    # An all-null column is dropped by the Parquet encoder; hydration rebuilds it
-    # as n nulls from the document's column metadata.
-    df = pd.DataFrame({"a": [1.0, 2.0], "blank": [np.nan, np.nan]})
-    result = _table_result({"t": Summary(df, render="table")})
-    document = result_document(result, run_id="r1")
+    df = pd.DataFrame({"stat": ["a", "b"], "value": [1.0, np.nan], "ok": [True, False]})
+    labeled = pd.DataFrame({"v": [10.0, 20.0]}, index=pd.Index(["x", "y"], name="lab"))
+    result = _table_result(
+        {
+            "desc": Artifact(raw=None, summary=Summary(df)),
+            "idx": Artifact(raw=None, summary=Summary(labeled)),
+        }
+    )
 
-    wire = pipeline_result_wire(document, {}, {}, {"t": {"a": [1.0, 2.0]}})
-    assert wire["postproc"]["t"]["data"]["blank"] == [None, None]
-    assert wire["postproc"]["t"]["data"]["a"] == [1.0, 2.0]
+    document = result_document(result, run_id="r1")
+    json.dumps(document)  # inline and JSON-safe, no side-channel
+
+    # pandas' own schema carries columns, dtypes and the index, so it reads back.
+    for name, original in (("desc", df), ("idx", labeled)):
+        payload = document["postproc"][name]["summary"]["value"]
+        back = pd.read_json(StringIO(json.dumps(payload)), orient="table")
+        assert back.equals(original)
+        assert dict(back.dtypes) == dict(original.dtypes)
+    assert document["postproc"]["idx"]["summary"]["value"]["schema"]["primaryKey"] == [
+        "lab"
+    ]

@@ -606,15 +606,13 @@ def test_ui_backend_run_payload_includes_postproc_artifacts() -> None:
         json={"pipeline": _POSTPROC_PIPELINE, "n_rep": 4, "fail_fast": True},
     )
     assert run.status_code == 200
-    postproc = run.json()["postproc"]
-    # KDE emits an array curve and a descriptives table, each its own surface.
-    curve = postproc["density.curve"]
-    assert curve["artifact"] == "array" and curve["shape"] == [16, 2]
-    assert len(curve["value"]) == 16
-    table = postproc["density.descriptives"]
-    assert table["artifact"] == "table"
-    assert "statistic" in table["columns"]
-    assert table["data"]["statistic"][0] == "count"
+    # KDE fills both slots of its one step: a bulk curve and a descriptives frame.
+    entry = run.json()["postproc"]["density"]
+    assert entry["raw"]["shape"] == [16, 2]
+    assert len(entry["raw"]["value"]) == 16
+    schema = entry["summary"]["value"]["schema"]
+    assert "statistic" in [field["name"] for field in schema["fields"]]
+    assert entry["summary"]["value"]["data"][0]["statistic"] == "count"
 
 
 def test_ui_backend_available_traces_endpoint() -> None:

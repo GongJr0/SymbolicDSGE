@@ -193,6 +193,7 @@ _NUMPY_NAMESPACE: dict[str, Any] = {
     "safe_modules": SAFE_MODULES,
     "denied_attributes": DENIED_ATTRIBUTES,
     "extra_value_types": _NUMPY_VALUE_TYPES,
+    "extra_globals": (),
     "namespace_kind": "numpy",
 }
 
@@ -242,6 +243,8 @@ def _pandas_namespace() -> dict[str, Any]:
     """
     import pandas as pd
 
+    from .postproc import Raw, Summary
+
     return {
         "safe_modules": {**SAFE_MODULES, "pandas": pd, "pd": pd},
         "denied_attributes": {
@@ -250,6 +253,8 @@ def _pandas_namespace() -> dict[str, Any]:
             "pd": _PANDAS_DENIED,
         },
         "extra_value_types": (*_NUMPY_VALUE_TYPES, pd.DataFrame, pd.Series, pd.Index),
+        # A post-loop op declares its slots, so it must be able to name them.
+        "extra_globals": (Raw, Summary),
         "namespace_kind": "pandas",
     }
 
@@ -584,6 +589,7 @@ def _capture_globals(
     safe_modules: Mapping[str, Any],
     denied_attributes: Mapping[str, frozenset[str]],
     extra_value_types: tuple[type, ...],
+    extra_globals: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     """Resolve referenced names against the function's globals + safe namespace.
 
@@ -626,6 +632,7 @@ def _capture_globals(
                 func_name,
                 safe_modules=safe_modules,
                 extra_value_types=extra_value_types,
+                extra_globals=extra_globals,
             )
             captured[name] = value
             continue
@@ -648,6 +655,7 @@ def _validate_captured_value(
     *,
     safe_modules: Mapping[str, Any],
     extra_value_types: tuple[type, ...],
+    extra_globals: tuple[Any, ...] = (),
 ) -> None:
     """Reject globals whose runtime type isn't in the safe-value set.
 
@@ -665,7 +673,7 @@ def _validate_captured_value(
         return
     if isinstance(value, CustomFunc):
         return
-    _validate_value_recursive(name, value, func_name, extra_value_types)
+    _validate_value_recursive(name, value, func_name, extra_value_types, extra_globals)
 
 
 def _validate_value_recursive(
@@ -673,6 +681,7 @@ def _validate_value_recursive(
     value: Any,
     func_name: str,
     extra_value_types: tuple[type, ...],
+    extra_globals: tuple[Any, ...] = (),
     _depth: int = 0,
 ) -> None:
     if _depth > 20:
@@ -680,6 +689,8 @@ def _validate_value_recursive(
             f"{func_name!r}: captured global `{name}` is too deeply nested "
             "(>20 levels)."
         )
+    if any(value is allowed for allowed in extra_globals):
+        return
     if isinstance(value, _SAFE_SCALAR_TYPES):
         return
     if isinstance(value, extra_value_types):
@@ -689,13 +700,17 @@ def _validate_value_recursive(
     if isinstance(value, (tuple, list, frozenset, set)):
         for item in value:
             _validate_value_recursive(
-                name, item, func_name, extra_value_types, _depth + 1
+                name, item, func_name, extra_value_types, extra_globals, _depth + 1
             )
         return
     if isinstance(value, Mapping):
         for k, v in value.items():
-            _validate_value_recursive(name, k, func_name, extra_value_types, _depth + 1)
-            _validate_value_recursive(name, v, func_name, extra_value_types, _depth + 1)
+            _validate_value_recursive(
+                name, k, func_name, extra_value_types, extra_globals, _depth + 1
+            )
+            _validate_value_recursive(
+                name, v, func_name, extra_value_types, extra_globals, _depth + 1
+            )
         return
     raise CustomOpValidationError(
         f"{func_name!r}: captured global `{name}` has unsupported type "
@@ -754,6 +769,7 @@ class CustomFunc:
         safe_modules: Mapping[str, Any],
         denied_attributes: Mapping[str, frozenset[str]],
         extra_value_types: tuple[type, ...],
+        extra_globals: tuple[Any, ...] = (),
         namespace_kind: str,
     ) -> None:
         if isinstance(func, CustomFunc):
@@ -830,6 +846,7 @@ class CustomFunc:
             safe_modules=safe_modules,
             denied_attributes=denied_attributes,
             extra_value_types=extra_value_types,
+            extra_globals=extra_globals,
         )
 
         self._func = func
@@ -887,6 +904,7 @@ class CustomFunc:
         safe_modules: Mapping[str, Any],
         denied_attributes: Mapping[str, frozenset[str]],
         extra_value_types: tuple[type, ...],
+        extra_globals: tuple[Any, ...] = (),
         namespace_kind: str,
     ) -> "CustomFunc":
         """Build a wrapper from source *text* rather than a live function.
@@ -944,6 +962,7 @@ class CustomFunc:
             safe_modules=safe_modules,
             denied_attributes=denied_attributes,
             extra_value_types=extra_value_types,
+            extra_globals=extra_globals,
         )
 
         instance = object.__new__(cls)

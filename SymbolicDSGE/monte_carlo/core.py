@@ -20,6 +20,7 @@ from ..core.solved_model import SolvedModel
 from ..regression.ols import MCRegressionResult
 from .allocation import BufferPlan, resolve_output_specs
 from .traces import traces_from_summaries, trace_keys_for_step
+from .postproc import Artifact, normalize_artifacts
 from .catalog import STEP_CATALOG
 from .mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
@@ -418,7 +419,7 @@ class MCPipeline:
         payload_columns: Mapping[str, NDF],
         fail_fast: bool,
         failures: list[MCFailure],
-    ) -> tuple[dict[str, Any], dict[str, float]]:
+    ) -> tuple[dict[str, Artifact], dict[str, float]]:
         """Run POSTPROC ops once over the assembled traces; collect artifacts.
 
         Owns its own timing: returns ``(artifacts, postproc_elapsed_s)`` where
@@ -471,7 +472,7 @@ class MCPipeline:
             finally:
                 postproc_elapsed_s[step.name] += perf_counter() - step_start
             if not failed:
-                postproc[step.name] = out
+                postproc[step.name] = normalize_artifacts(out)
         return postproc, postproc_elapsed_s
 
 

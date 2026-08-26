@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Union, cast
+from typing import Any, Literal, TypedDict, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,49 +28,50 @@ from numpy.typing import NDArray
 
 @dataclass(frozen=True)
 class Summary:
-    """A renderable POSTPROC artifact — gets its own summary surface.
-
-    ``value`` may be a scalar, a small ndarray, a mapping, or a (pandas)
-    DataFrame; ``render`` is an optional hint, otherwise inferred from the value.
-    """
-
     value: Any
-    title: str | None = None
-    render: Literal["auto", "table", "scalar", "array"] = "auto"
 
 
 @dataclass(frozen=True)
 class Raw:
-    """A bulk POSTPROC artifact stored as data, not auto-rendered."""
-
     value: NDArray[Any]
 
 
-Artifact = Union[Summary, Raw]
+class Artifact(TypedDict):
+    raw: Raw | None
+    summary: Summary | None
 
 
-def as_artifact(value: Any) -> Artifact:
-    """Wrap a bare value: ndarray -> :class:`Raw`, otherwise -> :class:`Summary`."""
-    if isinstance(value, (Summary, Raw)):
-        return value
-    if isinstance(value, np.ndarray):
-        return Raw(value=value)
-    return Summary(value=value)
+def normalize_artifacts(inp: Any) -> Artifact:
+    out = Artifact(raw=None, summary=None)
 
+    if isinstance(inp, Summary):
+        out["summary"] = inp
+        return out
+    elif isinstance(inp, Raw):
+        out["raw"] = inp
+        return out
 
-def normalize_artifacts(out: Any, step_name: str) -> dict[str, Artifact]:
-    """Normalize a POSTPROC op's return into a flat ``{key: artifact}`` map.
+    if not isinstance(inp, tuple):
+        raise TypeError(
+            "POSTPROC op must return a Summary, Raw, or a tuple of them, not "
+            f"{type(inp).__name__}"
+        )
 
-    - a single :class:`Summary`/:class:`Raw` -> ``{step_name: artifact}``;
-    - a ``Mapping`` of named outputs -> ``{f"{step_name}.{key}": artifact}`` (so
-      one op can emit several artifacts without key collisions across steps);
-    - a bare value -> wrapped via :func:`as_artifact` under ``step_name``.
-    """
-    if isinstance(out, (Summary, Raw)):
-        return {step_name: out}
-    if isinstance(out, Mapping):
-        return {f"{step_name}.{key}": as_artifact(value) for key, value in out.items()}
-    return {step_name: as_artifact(out)}
+    for e in inp:
+        if isinstance(e, Summary):
+            if out["summary"] is not None:
+                raise ValueError("POSTPROC op returned multiple Summary artifacts")
+            out["summary"] = e
+        elif isinstance(e, Raw):
+            if out["raw"] is not None:
+                raise ValueError("POSTPROC op returned multiple Raw artifacts")
+            out["raw"] = e
+        else:
+            raise TypeError(
+                "POSTPROC op must return a Summary, Raw, or a tuple of them, not "
+                f"{type(e).__name__}"
+            )
+    return out
 
 
 def run_kde(
@@ -80,7 +81,7 @@ def run_kde(
     bandwidth: str | float = "scott",
     grid_points: int = 200,
     kernel: str = "gaussian",
-) -> dict[str, Raw | Summary]:
+) -> tuple[Raw, Summary]:
     """Estimate a Gaussian KDE for one retained across-replication trace."""
     from scipy.stats import gaussian_kde
 
@@ -111,13 +112,11 @@ def run_kde(
     }
     import pandas as pd
 
-    return {
-        "curve": Raw(value=np.column_stack([grid, density])),
-        "descriptives": Summary(
+    return (
+        Raw(value=np.column_stack([grid, density])),
+        Summary(
             value=pd.DataFrame(
                 {"statistic": list(stats), "value": list(stats.values())}
-            ),
-            title=f"{trace} descriptives",
-            render="table",
+            )
         ),
-    }
+    )
