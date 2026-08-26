@@ -246,7 +246,9 @@ def test_postproc_summary_mapping_inlines() -> None:
 def test_postproc_summary_frame_inlines_as_table_schema() -> None:
     import pandas as pd
 
-    df = pd.DataFrame({"stat": ["a", "b"], "value": [1.0, np.nan], "ok": [True, False]})
+    df = pd.DataFrame(
+        {"stat": ["a", "b"], "value": [1 / 3, np.nan], "ok": [True, False]}
+    )
     labeled = pd.DataFrame({"v": [10.0, 20.0]}, index=pd.Index(["x", "y"], name="lab"))
     result = _table_result(
         {
@@ -259,11 +261,15 @@ def test_postproc_summary_frame_inlines_as_table_schema() -> None:
     json.dumps(document)  # inline and JSON-safe, no side-channel
 
     # pandas' own schema carries columns, dtypes and the index, so it reads back.
+    # A summary is a presentation surface: JSON caps floats at 15 digits, and the
+    # traces are what carries the exact values.
     for name, original in (("desc", df), ("idx", labeled)):
         payload = document["postproc"][name]["summary"]["value"]
         back = pd.read_json(StringIO(json.dumps(payload)), orient="table")
-        assert back.equals(original)
+        assert list(back.columns) == list(original.columns)
+        assert back.index.equals(original.index)
         assert dict(back.dtypes) == dict(original.dtypes)
+        pd.testing.assert_frame_equal(back, original, rtol=1e-15, atol=0)
     assert document["postproc"]["idx"]["summary"]["value"]["schema"]["primaryKey"] == [
         "lab"
     ]
