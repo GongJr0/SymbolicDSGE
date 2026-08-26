@@ -6,7 +6,7 @@ remains the canonical (unchanged) wire shape consumed by the UI; the bundle path
 the parquet-friendly split below:
 
 - ``result_document`` -> JSON-safe metadata + summaries (no bulk trace arrays),
-- ``result_traces`` -> the bulk numeric trace columns as ndarrays (no I/O here),
+- ``run_traces`` -> the bulk numeric trace columns as ndarrays (no I/O here),
 - ``pipeline_result_wire`` -> re-merges the two back into the UI wire shape (hydration).
 """
 
@@ -19,9 +19,11 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from SymbolicDSGE.monte_carlo.core import MCPipeline
+
 from .mc_constructs import MCPipelineResult
 from .postproc import Artifact, Raw, Summary, normalize_artifacts
-from .traces import regression_trace_keys, test_trace_keys
+from .traces import regression_trace_keys, test_trace_keys, payload_trace_key
 
 #: Scalar artifact-value types that ride the JSON document inline; ndarray values
 #: go to the parquet side-channel, anything else is a tabular artifact (#181).
@@ -113,42 +115,6 @@ _TEST_TRACE_KEYS = ("statistic_trace", "pval_trace", "status_trace")
 _REGRESSION_TRACE_KEYS = ("coef_trace", "r2_trace", "status_trace")
 
 
-def traces_from_summaries(
-    test_summaries: Mapping[str, Any],
-    regression_summaries: Mapping[str, Any],
-) -> dict[str, NDArray[Any]]:
-    """Bulk numeric trace columns from the test/regression summaries (no I/O).
-
-    Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
-    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``). The
-    single source of truth for trace shaping — shared by :func:`result_traces`
-    (the wire) and the post-loop ``OpType.POSTPROC`` trace registry.
-    """
-    traces: dict[str, NDArray[Any]] = {}
-    for name, test_summary in test_summaries.items():
-        keys = test_trace_keys(name)
-        traces[keys["statistic"]] = np.asarray(
-            test_summary.statistic_trace, dtype=np.float64
-        )
-        traces[keys["pval"]] = np.asarray(test_summary.pval_trace, dtype=np.float64)
-        traces[keys["status"]] = np.asarray(
-            [int(status) for status in test_summary.status_trace], dtype=np.int64
-        )
-    for name, reg_summary in regression_summaries.items():
-        keys = regression_trace_keys(name)
-        traces[keys["coef"]] = np.asarray(reg_summary.coef_trace, dtype=np.float64)
-        traces[keys["r2"]] = np.asarray(reg_summary.r2_trace, dtype=np.float64)
-        traces[keys["status"]] = np.asarray(
-            [int(status) for status in reg_summary.status_trace], dtype=np.int64
-        )
-    return traces
-
-
-def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
-    """Bulk numeric trace columns for a later parquet writer (no I/O)."""
-    return traces_from_summaries(result.test_summaries, result.regression_summaries)
-
-
 def _artifact_array(artifact: Raw | Summary) -> NDArray[Any] | None:
     """The ndarray a POSTPROC artifact carries as bulk data, or ``None``.
 
@@ -202,9 +168,9 @@ def _serialize_artifact(artifact: Raw | Summary) -> dict[str, Any]:
 
 
 def result_postproc_arrays(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
-    """The bulk ndarray POSTPROC artifacts, keyed by artifact name (no I/O).
+    """The bulk ndarray POSTPROC artifacts, keyed by artifact name
 
-    Unlike :func:`result_traces` (uniform ``R``-length columns), these are
+    Unlike :func:`run_traces` (uniform ``R``-length columns), these are
     arbitrary-shape *payloads* (e.g. a KDE ``N x 2`` curve), each serialized to
     its own shape-manifest parquet member by the bundle builder.
     """
@@ -322,7 +288,7 @@ def result_postproc_tables(result: MCPipelineResult) -> dict[str, dict[str, list
 def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, Any]:
     """JSON-safe metadata + summaries with the bulk trace arrays removed.
 
-    Pairs with :func:`result_traces`; recombine via :func:`pipeline_result_wire`.
+    Pairs with :func:`run_traces`; recombine via :func:`pipeline_result_wire`.
     """
     document = serialize_pipeline_result(result, run_id=run_id)
     for entry in document["test_summaries"].values():
@@ -346,7 +312,7 @@ def pipeline_result_wire(
     postproc_arrays: Mapping[str, NDArray[Any]] | None = None,
     postproc_tables: Mapping[str, Mapping[str, Sequence[Any]]] | None = None,
 ) -> dict[str, Any]:
-    """Re-merge a trace-free :func:`result_document` with :func:`result_traces`
+    """Re-merge a trace-free :func:`result_document` with :func:`run_traces`
     (and :func:`result_postproc_arrays`) into the canonical UI wire shape (used
     for hydration).
 
@@ -513,3 +479,37 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, float | np.floating):
         return _json_float(value)
     return value
+
+
+def run_traces(result: MCPipelineResult) -> dict[str, NDArray]:
+    """The retained across-rep columns a bundle stores, keyed as traces.
+
+    Narrower than the registry a post-loop op receives
+    (:func:`SymbolicDSGE.monte_carlo.traces.traces_from_summaries`): ``pval`` and
+    ``r2`` are recomputed from the columns beside them, so they are not written.
+    ``se`` appears only where the regression carries one. POSTPROC artifacts are
+    not traces; they ride their own shape-manifest members.
+    """
+    test_summaries = result.test_summaries
+    regression_summaries = result.regression_summaries
+    payload_columns: Mapping[str, NDArray] = result.transform_outputs or {}
+
+    traces: dict[str, NDArray] = {}
+    for name, test_summary in test_summaries.items():
+        keys = test_trace_keys(name)
+        traces[keys["statistic"]] = test_summary.statistic_trace
+        traces[keys["status"]] = test_summary._raw_status
+
+    for name, reg_summary in regression_summaries.items():
+        keys = regression_trace_keys(name)
+        traces[keys["coef"]] = reg_summary.coef_trace
+        traces[keys["ssr"]] = reg_summary.ssr_trace
+        traces[keys["sst"]] = reg_summary.sst_trace
+        traces[keys["status"]] = reg_summary._raw_status
+
+        if reg_summary._se_trace is not None:
+            traces[keys["se"]] = reg_summary._se_trace
+
+    for name, arr in (payload_columns or {}).items():
+        traces[payload_trace_key(name)] = arr
+    return traces

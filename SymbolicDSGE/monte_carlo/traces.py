@@ -9,22 +9,31 @@ offered in the GUI and validated before the (potentially long) run.
 Key format:
 
 - tests -> ``test.<name>.{statistic,pval,status}``
-- regressions -> ``regression.<name>.{coef,r2,status}``
+- regressions -> ``regression.<name>.{coef,ssr,sst,se,r2,status}``
 - transforms -> ``payload.<name>`` (the step's stacked per-rep ndarray output)
 
-``serialize.traces_from_summaries`` and the engine's payload stacking build the
-runtime registry from these same primitives, so the static view here can't drift
-from what a run actually emits.
+:func:`run_traces` builds the registry a post-loop op receives from these same
+primitives, so the static view here can't drift from what a run actually emits.
+The bundle writes its own narrower projection: ``pval`` and ``r2`` are derived
+from the columns beside them and are not stored.
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+
+import numpy as np
+from numpy.typing import NDArray
+
+from SymbolicDSGE._diag_tests.result import MCTestResult
+from SymbolicDSGE.regression.ols.ols_result import MCRegressionResult
 
 from .catalog import TERMINAL_STEP_TYPES, TRANSFORM_STEP_TYPES
 from .mc_constructs import MCStep, OpType
 from .spec import PipelineSpec
 
 _TEST_SUBKEYS = ("statistic", "pval", "status")
-_REGRESSION_SUBKEYS = ("coef", "r2", "status")
+_REGRESSION_SUBKEYS = ("coef", "ssr", "sst", "se", "r2", "status")
 
 
 def test_trace_keys(name: str) -> dict[str, str]:
@@ -78,3 +87,29 @@ def available_traces(spec: PipelineSpec) -> list[str]:
     for node in spec["nodes"]:
         keys.extend(trace_keys_for(node["step_type"], node["name"]))
     return keys
+
+
+def traces_from_summaries(
+    test_summaries: Mapping[str, MCTestResult],
+    regression_summaries: Mapping[str, MCRegressionResult],
+) -> dict[str, NDArray]:
+    """Bulk numeric trace columns from the test/regression summaries (no I/O).
+
+    Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
+    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``). The
+    registry a post-loop ``OpType.POSTPROC`` op receives. The bundle writes its
+    own narrower projection; see :func:`SymbolicDSGE.monte_carlo.serialize.run_traces`.
+    """
+    traces: dict[str, NDArray] = {}
+    for name, test_summary in test_summaries.items():
+        keys = test_trace_keys(name)
+        traces[keys["statistic"]] = test_summary.statistic_trace
+        traces[keys["pval"]] = test_summary.pval_trace
+        traces[keys["status"]] = test_summary._raw_status
+
+    for name, reg_summary in regression_summaries.items():
+        keys = regression_trace_keys(name)
+        traces[keys["coef"]] = reg_summary.coef_trace
+        traces[keys["r2"]] = reg_summary.r2_trace
+        traces[keys["status"]] = reg_summary._raw_status
+    return traces

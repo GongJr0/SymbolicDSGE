@@ -42,7 +42,7 @@ from ..monte_carlo.serialize import (
     result_document,
     result_postproc_arrays,
     result_postproc_tables,
-    result_traces,
+    run_traces,
 )
 from ..monte_carlo.spec import PipelineSpec
 from ..monte_carlo.spec_compile import raw_model_data_arrays
@@ -293,7 +293,7 @@ class BundleBuilder:
                 Member(path=_MC_RESULT, kind="mc_result"),
                 json.dumps(document, indent=2).encode("utf-8"),
             )
-            traces = result_traces(result)
+            traces = run_traces(result)
             if traces:
                 if as_parquet:
                     path = _MC_TRACE_PARQUET

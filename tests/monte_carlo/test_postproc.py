@@ -83,7 +83,7 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     # smallest p-value is "selected"; PCS is the rate at which that index matches
     # the expected one. A worked example, not a built-in — its meaning depends on
     # the upstream tests, so the engine doesn't define it.
-    from SymbolicDSGE.monte_carlo.serialize import result_traces
+    from SymbolicDSGE.monte_carlo.traces import traces_from_summaries
 
     n_rep = 6
     pval_keys = ["test.jb_y.pval", "test.jb_x.pval"]
@@ -116,7 +116,8 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
     result = pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=0)
 
     # Recompute independently from the stored traces (same arrays the op saw).
-    mat = np.column_stack([result_traces(result)[k] for k in pval_keys])
+    registry = traces_from_summaries(result.test_summaries, result.regression_summaries)
+    mat = np.column_stack([registry[k] for k in pval_keys])
     indicator = (mat.argmin(axis=1) == 0).astype(float)
     expected_pcs = float(indicator.mean())
 

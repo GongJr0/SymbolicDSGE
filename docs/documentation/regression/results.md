@@ -97,7 +97,7 @@ __OLS-Only Aggregate Diagnostics:__
 | F_stat_trace | `#!python ndarray` | OLS F-statistic trace. |
 | F_pval_trace | `#!python ndarray` | OLS F-test p-value trace. |
 | `confidence_intervals(alpha=0.05)` | `#!python ndarray` | Per-replication OLS coefficient intervals. |
-| `F_test(alpha=0.05)` | `#!python MCResult` | Aggregate F-test result container. |
+| `F_test(alpha=0.05)` | `#!python MCTestResult` | Aggregate F-test result container. |
 
 ???+ note "OLS-Specific Diagnostics"
     OLS aggregate diagnostics require every stored result to be an `OLSResult`. For ridge, lasso, and elastic-net aggregates, `summary()` returns coefficient traces without OLS inference columns.

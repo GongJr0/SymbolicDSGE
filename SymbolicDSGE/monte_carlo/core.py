@@ -15,10 +15,12 @@ if TYPE_CHECKING:
     from .spec import PipelineSpec
 
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
-from .._diag_tests.result import MCResult
+from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.ols import MCRegressionResult
 from .allocation import BufferPlan, resolve_output_specs
+from .traces import traces_from_summaries, trace_keys_for_step
+from .catalog import STEP_CATALOG
 from .mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
     FILTER_RAW_SOURCE_FIELDS,
@@ -158,8 +160,6 @@ class MCPipeline:
         """
         if not postproc_steps:
             return
-        from .catalog import STEP_CATALOG
-        from .traces import trace_keys_for_step
 
         available = {key for step in per_rep_steps for key in trace_keys_for_step(step)}
         for step in postproc_steps:
@@ -413,7 +413,7 @@ class MCPipeline:
         self,
         postproc_steps: Sequence[MCStep],
         *,
-        test_summaries: Mapping[str, MCResult],
+        test_summaries: Mapping[str, MCTestResult],
         regression_summaries: Mapping[str, MCRegressionResult],
         payload_columns: Mapping[str, NDF],
         fail_fast: bool,
@@ -433,8 +433,6 @@ class MCPipeline:
         }
         if not postproc_steps:
             return {}, postproc_elapsed_s
-
-        from .serialize import traces_from_summaries
 
         traces: dict[str, np.ndarray] = traces_from_summaries(
             test_summaries, regression_summaries
@@ -539,8 +537,8 @@ def _summarize_tests(
     test_names: Sequence[str],
     lowered: LoweredMCRun,
     n_rep: int,
-) -> dict[str, MCResult]:
-    summaries: dict[str, MCResult] = {}
+) -> dict[str, MCTestResult]:
+    summaries: dict[str, MCTestResult] = {}
     arenas = lowered.allocation.steps
     metas = lowered.test_result_specs
 
@@ -560,7 +558,7 @@ def _summarize_tests(
             else np.empty((0,), dtype=np.float64)
         )
 
-        summaries[name] = MCResult(
+        summaries[name] = MCTestResult(
             test_name=spec.name,
             dist=spec.dist,
             df=spec.df,

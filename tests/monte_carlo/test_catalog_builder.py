@@ -559,6 +559,9 @@ def test_available_traces_enumerates_producer_keys() -> None:
         "test.jb.pval",
         "test.jb.status",
         "regression.reg.coef",
+        "regression.reg.ssr",
+        "regression.reg.sst",
+        "regression.reg.se",
         "regression.reg.r2",
         "regression.reg.status",
         "payload.s",  # transform output

@@ -19,7 +19,7 @@ from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
-from SymbolicDSGE._diag_tests.result import MCResult
+from SymbolicDSGE._diag_tests.result import MCTestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.monte_carlo import MCPipelineResult
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
@@ -1159,7 +1159,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         k=ols_results[0].k,
         _raw_status=np.asarray([int(result.status) for result in ols_results]),
     )
-    tests = MCResult(
+    tests = MCTestResult(
         test_name="diagnostic",
         dist=ReferenceDistribution.CHI2,
         df=np.float64(1.0),

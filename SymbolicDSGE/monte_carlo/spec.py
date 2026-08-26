@@ -1,16 +1,16 @@
-"""Serializable Monte Carlo pipeline specification (graph form).
-
-Stdlib dataclasses. The core ``monte_carlo`` module must stay pydantic-free
-(pydantic is only present transitively under the ``[ui]`` extra). The UI keeps its
-pydantic request models and converts via :meth:`PipelineSpec.from_dict`. This is the
-text representation a ``.sdsge`` bundle stores for the MC pipeline.
-"""
+"""Serializable Monte Carlo pipeline specification (graph form)."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from collections.abc import Mapping
-from typing import Any, Literal, TypedDict, get_args
+from typing import Any, Literal, Sequence, TypedDict, get_args
+from numpy.typing import NDArray
+from numpy import float64, int_
+
+NDF = NDArray[float64]
+NDI = NDArray[int_]
 
 MCStepKind = Literal[
     # datagen / filter
@@ -90,3 +90,41 @@ class PipelineSpec(TypedDict):
     #: Post-loop ops, run once over the assembled traces. Kept separate from the
     #: per-rep DAG (``nodes``/``edges``). They are not graph participants.
     postprocs: list[PostprocSpec]
+
+
+class MCTestResultMeta(TypedDict):
+    test_name: str
+    dist: str
+    df: Any
+    pval_method: str
+    alpha: float
+    n_retained: int
+    n_rep: int
+
+
+@dataclass(slots=True)
+class MCTestResultSpec:
+    meta: MCTestResultMeta
+    statistic_trace: NDF
+    _raw_status: NDI
+    retained_reps: NDI
+
+
+class MCRegressionResultMeta(TypedDict):
+    kind: str
+    variables: Sequence[str]
+    n_retained: int
+    n_rep: int
+    n: int
+    k: int
+
+
+@dataclass(slots=True)
+class MCRegressionResultSpec:
+    meta: MCRegressionResultMeta
+    coef_trace: NDF
+    ssr_trace: NDF
+    sst_trace: NDF
+    retained_reps: NDI
+    _raw_status: NDI
+    _se_trace: NDF | None = None

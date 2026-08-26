@@ -385,9 +385,12 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
     np.testing.assert_allclose(f_test.statistic_trace, out.F_stat_trace)
     assert f_test.status_trace == (TestStatus.OK, TestStatus.OK)
 
-    as_dict = out.to_dict()
-    assert as_dict["variables"] == ["const", "trend"]
-    assert as_dict["status_trace"] == (RegressionStatus.OK, RegressionStatus.OK)
+    spec = out.to_spec()
+    assert spec.meta["variables"] == ["const", "trend"]
+    assert MCRegressionResult.from_spec(spec).status_trace == (
+        RegressionStatus.OK,
+        RegressionStatus.OK,
+    )
 
 
 def test_mc_regression_result_falls_back_to_per_rep_se_for_rank_deficient_runs() -> (

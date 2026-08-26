@@ -14,7 +14,7 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .._diag_tests.result import MCResult
+from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
 from ..kalman.filter import UnscentedFilterRawResult
@@ -185,7 +185,7 @@ def _normalize_columns(value: ColumnSelector) -> CompiledColumnSelector:
     raise TypeError("Column selectors must be an int, a sequence of ints, or a slice.")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MCFailure:
     rep_idx: int
     step_name: str
@@ -261,7 +261,7 @@ class MCPipelineResult:
     meta: MCMeta
     n_rep: int
     n_successful: int
-    test_summaries: Mapping[str, MCResult]
+    test_summaries: Mapping[str, MCTestResult]
     transform_outputs: Mapping[str, NDF] | None
     failures: tuple[MCFailure, ...] = ()
     regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
