@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import cache
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,16 +11,18 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from SymbolicDSGE.bundle.builder import BundleBuilder
+from SymbolicDSGE.bundle.builder import BundleBuilder, _observed_to_csv
 from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.container import BundleArchive, write_bundle
-from SymbolicDSGE.bundle.loader import build_from
+from SymbolicDSGE.bundle.loader import _stack_observed, build_from
 from SymbolicDSGE.bundle.manifest import Manifest, Member
 from SymbolicDSGE.bundle.parquet import (
     collapse_columns,
     csv_to_columns,
     trace_to_csv,
 )
+from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import (
     EstimatorParams,
@@ -153,7 +156,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
         BundleBuilder(created_by="csv-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
-            _estimation_source(_estimation_spec(observed)),
+            _estimator(observed),
             result=result,
             as_parquet=False,
         )
@@ -178,7 +181,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
 
     loaded = build_from(target)
     assert loaded.estimation is not None
-    np.testing.assert_allclose(np.asarray(loaded.estimation.spec.y), observed)
+    np.testing.assert_allclose(np.asarray(loaded.estimation.estimator.y), observed)
     assert isinstance(loaded.estimation.result, MCMCResult)
     np.testing.assert_allclose(loaded.estimation.result.samples, posterior["samples"])
     np.testing.assert_allclose(
@@ -188,7 +191,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
 
 def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
     """A hand-zipped bundle with CSV members (no Parquet) is a valid archive."""
-    observed_csv = b"gdp,infl\n0.1,0.2\n0.3,0.4\n0.5,0.6\n"
+    observed_csv = b"Infl,Rate\n0.1,0.2\n0.3,0.4\n0.5,0.6\n"
     posterior_csv = trace_to_csv(
         {
             "samples": np.array([[0.9, 0.1], [0.95, 0.12], [0.98, 0.11]]),
@@ -196,7 +199,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
         }
     )
 
-    spec = _estimation_spec(observables=("gdp", "infl"))
+    spec = _estimator().to_spec()
     manifest = Manifest(
         created_by="hand-zipped",
         members=[
@@ -204,7 +207,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
             Member(
                 path="estimation/observed.csv",
                 kind="estimation_data",
-                columns=["gdp", "infl"],
+                columns=["Infl", "Rate"],
             ),
             Member(path="estimation/posterior.csv", kind="estimation_trace"),
             Member(
@@ -227,30 +230,28 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
     loaded = build_from(archive_path)
     assert loaded.estimation is not None
     np.testing.assert_allclose(
-        np.asarray(loaded.estimation.spec.y),
+        np.asarray(loaded.estimation.estimator.y),
         np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]),
     )
 
 
-def test_observed_csv_with_nan_round_trips_to_nan(tmp_path: Path) -> None:
+def test_observed_csv_with_nan_round_trips_to_nan() -> None:
+    """A non-finite observation survives the observed-CSV pair as an empty cell.
+
+    The encoder and decoder are the unit under test, so no bundle is built: the
+    matrix goes out through the writer and comes back through the reader.
+    """
     matrix = np.array([[1.0, np.nan], [2.0, 3.0]])
-    target = (
-        BundleBuilder()
-        .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(
-            _estimation_source(_estimation_spec(matrix, observables=("a", "b"))),
-            as_parquet=False,
-        )
-        .write(tmp_path / "nan.sdsge")
-    )
-    archive = BundleArchive.open(target)
-    text = archive.read_text("estimation/observed.csv")
+    names = ["Infl", "Rate"]
+
+    text = _observed_to_csv(matrix.tolist(), names).decode("utf-8")
     # Non-finite -> empty cell in row 0, column 1.
     assert text.splitlines()[1] == "1.0,"
 
-    loaded = build_from(target)
-    assert loaded.estimation is not None
-    y = np.asarray(loaded.estimation.spec.y)
+    member = SimpleNamespace(
+        path="estimation/observed.csv", format="csv", columns=names
+    )
+    y = np.asarray(_stack_observed(csv_to_columns(text), member))
     assert np.isnan(y[0, 1])
     np.testing.assert_allclose(y[~np.isnan(y)], np.array([1.0, 2.0, 3.0]))
 
@@ -284,7 +285,37 @@ def _estimation_spec(y=None, *, observables=("Infl", "Rate")) -> EstimatorSpec:
 def _estimation_source(spec: EstimatorSpec) -> Any:
     """Stands in for the live estimator: ``add_estimation`` asks only for its spec.
 
-    These tests are about how a spec is encoded into members, not about building
-    an estimator, so they hand over the spec without the model behind it.
+    Write-only tests use this to encode observable names no model declares. A
+    test that loads the bundle back needs :func:`_estimator` instead, since the
+    loader rebuilds the estimator the spec describes.
     """
     return SimpleNamespace(to_spec=lambda: spec)
+
+
+@cache
+def _compiled_reference() -> Any:
+    """The compiled ``MODELS/test.yaml`` a loaded reference model comes back as."""
+    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+    return DSGESolver(model, kalman).compile()
+
+
+def _estimator(
+    y: Any = None, *, observables: tuple[str, ...] = ("Infl", "Rate")
+) -> Estimator:
+    """A live estimator over the bundled model, in the shape a loader rebuilds.
+
+    ``MODELS/test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
+    explicitly; without one the estimator a bundle describes cannot be built.
+    """
+    matrix = (
+        np.zeros((2, len(observables)))
+        if y is None
+        else np.asarray(y, dtype=np.float64)
+    )
+    return Estimator(
+        compiled=_compiled_reference(),
+        y=matrix,
+        observables=list(observables),
+        estimated_params=["beta", "sigma"],
+        R=np.eye(len(observables)) * 1e-4,
+    )

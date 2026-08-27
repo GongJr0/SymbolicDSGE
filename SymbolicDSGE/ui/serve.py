@@ -91,7 +91,8 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     """
     estimation = TabState()
     if loaded.estimation is not None:
-        estimation.spec = estimator_spec_wire(loaded.estimation.spec)
+        spec = loaded.estimation.estimator.to_spec()
+        estimation.spec = estimator_spec_wire(spec)
         if loaded.estimation.result is not None:
             estimation.result = emit_estimation_wire(loaded.estimation.result)
         if loaded.reference is not None:
@@ -99,7 +100,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
             # one estimation, tied to the reference model it was run against.
             estimation.view = {
                 "reference": build_estimation_prefill(
-                    loaded.estimation.spec,
+                    spec,
                     loaded.estimation.result,
                     loaded.reference.compiled,
                 )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,10 +17,24 @@ from SymbolicDSGE.bundle.loader import (
     LoadedMC,
     build_from,
 )
+from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MAPResult, OptimizationResult
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "bundle_fixture.sdsge"
+
+
+@cache
+def _compiled_reference():
+    """A real compiled model for the estimator the loader now builds eagerly.
+
+    The archive and manifest below stay mocked, since the branch under test is
+    the loader's result dispatch. The model does not: ``_load_estimation``
+    constructs the estimator the spec describes, so a stand-in that cannot be
+    bound to would test a load that never happens.
+    """
+    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+    return DSGESolver(model, kalman).compile()
 
 
 def test_build_from_fixture_end_to_end():
@@ -31,7 +46,7 @@ def test_build_from_fixture_end_to_end():
     # estimation: MCMC result rebuilt from metadata + posterior traces
     assert isinstance(loaded.estimation, LoadedEstimation)
     assert isinstance(loaded.estimation.result, MCMCResult)
-    y = np.asarray(loaded.estimation.spec.y)
+    y = np.asarray(loaded.estimation.estimator.y)
     assert y.ndim == 2
     assert loaded.estimation.result.samples.ndim == 2
     # monte carlo: runnable pipeline + document + traces
@@ -108,11 +123,11 @@ def test_load_estimation_optimization_result_dispatch():
     manifest = SimpleNamespace(members_by_kind=members_by_kind)
     spec_json = json.dumps(
         {
-            "observables": None,
+            "observables": ["Infl", "Rate"],
             "filter_mode": "linear",
             "P0": None,
-            "R": None,
-            "estimated_params": ["a"],
+            "R": [[1e-4, 0.0], [0.0, 1e-4]],
+            "estimated_params": ["beta"],
             "priors": None,
             "ss_seed": None,
             "x0": None,
@@ -125,13 +140,13 @@ def test_load_estimation_optimization_result_dispatch():
 
     archive = SimpleNamespace(
         read_text=lambda path: spec_json if path == "spec.json" else result_json,
-        read=lambda path: b"y.0\n1.0\n2.0\n",
+        read=lambda path: b"y.0,y.1\n1.0,2.0\n3.0,4.0\n",
     )
-    reference = SimpleNamespace(compiled=object())
+    reference = SimpleNamespace(compiled=_compiled_reference())
 
     loaded = L._load_estimation(archive, manifest, reference)
     assert isinstance(loaded.result, OptimizationResult)
-    assert loaded.spec.y == [[1.0], [2.0]]
+    np.testing.assert_allclose(np.asarray(loaded.estimator.y), [[1.0, 2.0], [3.0, 4.0]])
 
     # An estimation section is not loadable without a model to bind to, nor
     # without the data the estimator conditions on.

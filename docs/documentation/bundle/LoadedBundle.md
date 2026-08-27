@@ -38,7 +38,6 @@ __Fields:__
 |:----------|:--------:|----------------:|
 | estimator | `#!python Estimator` | The live estimator object lazily rebuilt from the stored spec and the reference model. Always present when `LoadedEstimation` is. | 
 | result    | `#!python MLEResult | MAPResult | MCMCResult | None` | The reconstructed result object. |
-| spec      | `#!python EstimatorSpec` | Parameter specification for `Estimator`. Always present when `LoadedEstimation` is. |
 
 ???+ tip "Re-running a loaded estimation"
     Result classes carry their options as a dictionary. `optimizer_config` in `MLEResult`/`MAPResult` and `sampler_config` in `MCMCResult`.

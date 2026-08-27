@@ -106,15 +106,6 @@ res = cast(MCMCResult, estimation.result)
 ```
 
 `estimation.estimator` is a live `Estimator` instance for the `reference` model.
-`estimation.spec` is an `EstimatorSpec` and can be used to construct `Estimator`s for
-any model.
-
-```python
-# This also works and builds the estimator for the DGP model.
-# Observables and parameters stay the same.
-Estimator.from_spec(estimation.spec, compiled=dgp.compiled)
-```
-
 `estimation.result` (when present) is the result a bundled run produced: a `MLEResult` for MLE, a `MAPResult` for MAP, or an `MCMCResult` for MCMC.
 
 ### Run an estimation from a loaded bundle
@@ -134,7 +125,8 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ## Reach the Monte Carlo tab
 
-`LoadedMC.pipeline` is the first class [`MCPipeline`](../documentation/monte_carlo/pipeline.md) rebuilt at load time. `LoadedMC.spec` remains available for archive inspection and UI rendering, and `LoadedMC.resources` holds the side channel arrays or custom callables that were reattached while rebuilding the pipeline. When the bundle carries a completed run, `document` holds the trace free summary and `traces` holds the bulk columns.
+`LoadedMC.pipeline` is the first class [`MCPipeline`](../documentation/monte_carlo/pipeline.md) rebuilt at load time.
+`LoadedMC.result` (when present) is a live [`MCPipelineResult`](../documentation/monte_carlo/core_containers.md) object.
 
 ```python
 mc = loaded.mc
@@ -181,8 +173,8 @@ mc_repro = pipeline.run(
 >>> MC run concluded successfully in 0.00s with 810569.85 it/s.
 Per-step Report:
 
-	datagen: 0 failures, 71328.71 worker it/s (0.01 worker-s), 810569.85 wall it/s.
-	jb_test: 0 failures, 1265982.35 worker it/s (0.00 worker-s), 810569.85 wall it/s.
+    datagen: 0 failures, 71328.71 worker it/s (0.01 worker-s), 810569.85 wall it/s.
+    jb_test: 0 failures, 1265982.35 worker it/s (0.00 worker-s), 810569.85 wall it/s.
 ```
 
 ```python

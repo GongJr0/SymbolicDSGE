@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core.compiled_model import CompiledModel
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import DSGESolver
@@ -65,29 +64,12 @@ NDI = NDArray[np.int64]
 @dataclass
 class LoadedEstimation:
     """Estimation artifacts recovered from a bundle.
-
-    ``result`` is a first-class :class:`OptimizationResult` / :class:`MCMCResult`
-    (rebuilt from the stored metadata + posterior traces), not the on-disk
-    document shape. ``estimator`` is the live object the ``spec`` describes,
-    bound to the reference model the bundle was loaded with.
+    ``estimator`` is the bundled :class:`Estimator` instance.
+    ``result``, if present, is the run result bundled with the estimator.
     """
 
-    spec: EstimatorSpec
-    _compiled: CompiledModel
+    estimator: Estimator
     result: MLEResult | MAPResult | MCMCResult | None = None
-    _estimator: Estimator | None = field(default=None, init=False, repr=False)
-
-    @property
-    def estimator(self) -> Estimator:
-        """The live estimator this spec describes, built on first access.
-
-        Deferred rather than built at load: ``Estimator`` construction compiles
-        the measurement and observable-jacobian cfuncs, which a caller that only
-        reads ``result`` never needs.
-        """
-        if self._estimator is None:
-            self._estimator = Estimator.from_spec(self.spec, self._compiled)
-        return self._estimator
 
 
 @dataclass
@@ -216,7 +198,7 @@ def _load_estimation(
     params = cast(EstimatorParams, json.loads(archive.read_text(param_members[0].path)))
     y = _stack_observed(_load_columns(archive, data_members[0]), data_members[0])
     spec = EstimatorSpec(y=y, params=params)
-
+    estimator = Estimator.from_spec(spec, compiled=reference.compiled)
     # Load the posterior first: the MCMC result is rebuilt from metadata + these
     # traces (the optimization result needs no traces).
     posterior: dict[str, NDArray[Any]] | None = None
@@ -236,7 +218,7 @@ def _load_estimation(
         elif typ == "map":
             result = MAPResult.from_spec(cast(MAPResultSpec, data))
 
-    return LoadedEstimation(spec=spec, _compiled=reference.compiled, result=result)
+    return LoadedEstimation(estimator=estimator, result=result)
 
 
 def _rebuild_mcmc_result(
