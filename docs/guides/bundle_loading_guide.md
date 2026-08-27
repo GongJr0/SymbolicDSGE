@@ -10,7 +10,7 @@ tags:
 
     - `reference` and `dgp`: Solved models.
     - `estimation.estimator` and `estimation.result`: Estimator and `*Result` (MLE, MAP, or MCMC).
-    - `mc.pipeline` and `mc.traces`: Monte Carlo pipeline and result traces.
+    - `mc.pipeline` and `mc.result`: Monte Carlo pipeline and result.
     - `simulation`: Dictionary of Simulation prefills (`SimSpec`) for each model slot
 
     You can find a demonstration notebook [here](../assets/bundle_loading.ipynb).
