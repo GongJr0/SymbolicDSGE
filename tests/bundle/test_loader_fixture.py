@@ -145,17 +145,9 @@ def test_load_estimation_optimization_result_dispatch():
         L._load_estimation(archive, bare, reference)
 
 
-def test_load_mc_postproc_nan_fallback(monkeypatch):
-    member = SimpleNamespace(path="pp", options={"name": "art", "shape": [2, 2]})
-    manifest = SimpleNamespace(
-        members_by_kind=lambda kind: [member] if kind == "mc_postproc" else []
-    )
-    archive = SimpleNamespace(read=lambda path: b"")
-
-    def _raise(raw, shapes):
-        raise KeyError("a")
-
-    monkeypatch.setattr(L, "arrays_from_parquet", _raise)
-    out = L._load_mc_postproc(archive, manifest)
-    assert out["art"].shape == (2, 2)
-    assert np.all(np.isnan(out["art"]))
+def test_dropped_column_reads_back_as_the_authors_nans():
+    # An all-null float column carries no values, so Parquet drops it. The shape
+    # its step's meta recorded is what rebuilds it, NaN-filled as authored.
+    out = L._mc_array({}, "art.value", (2, 2))
+    assert out.shape == (2, 2)
+    assert np.all(np.isnan(out))

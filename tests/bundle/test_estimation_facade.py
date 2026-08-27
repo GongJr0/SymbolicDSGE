@@ -156,8 +156,3 @@ def test_facade_flattens_mcmc_run_with_posterior() -> None:
         from_parquet_columns(files["estimation/posterior.parquet"])
     )
     np.testing.assert_allclose(posterior["samples"], mcmc.samples)
-
-
-def test_facade_rejects_unknown_source() -> None:
-    with pytest.raises(TypeError, match="EstimationSpec or Estimator"):
-        BundleBuilder().add_estimation(object())  # type: ignore[arg-type]

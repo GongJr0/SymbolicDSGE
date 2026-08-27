@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import SimSpec
@@ -100,8 +103,8 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(_estimation_spec(observed), result=result)
-        .add_mc(pipeline)
+        .add_estimation(_estimation_source(_estimation_spec(observed)), result=result)
+        .add_mc(build_pipeline(pipeline))
         .set_simulation("reference", sim_spec)
         .write(tmp_path / "hydrate.sdsge")
     )
@@ -354,7 +357,8 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # A pipeline with no result: the spec is the only evidence of an MC run in
     # the bundle, so it has to carry enough for the canvas to draw the graph.
     assert ws.mc.spec is not None
-    assert [node["id"] for node in ws.mc.spec["nodes"]] == ["n1"]
+    # The slot holds the live pipeline's own spec, which keys nodes by step name.
+    assert [node["name"] for node in ws.mc.spec["nodes"]] == ["sim"]
     assert ws.mc.spec["edges"] == []
     assert ws.mc.result is None  # no MC result was attached at build time
     assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
@@ -449,8 +453,10 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
         BundleBuilder(created_by="round-trip")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
-            EstimatorSpec(
-                y=ws.estimation.spec["y"], params=ws.estimation.spec["params"]
+            _estimation_source(
+                EstimatorSpec(
+                    y=ws.estimation.spec["y"], params=ws.estimation.spec["params"]
+                )
             )
         )
         .write(tmp_path / "round-trip.sdsge")
@@ -721,3 +727,12 @@ def test_cli_main_rejects_missing_bundle_path(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="bundle path"):
         main([str(tmp_path / "missing.sdsge"), "--no-browser"])
+
+
+def _estimation_source(spec: EstimatorSpec) -> Any:
+    """Stands in for the live estimator: ``add_estimation`` asks only for its spec.
+
+    These tests are about how a spec is encoded into members, not about building
+    an estimator, so they hand over the spec without the model behind it.
+    """
+    return SimpleNamespace(to_spec=lambda: spec)

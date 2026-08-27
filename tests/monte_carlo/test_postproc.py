@@ -241,10 +241,12 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
     assert result.transform_outputs["s"].shape == captured["shape"]
 
 
-def test_transform_outputs_is_none_without_transform_steps() -> None:
+def test_transform_outputs_is_empty_without_transform_steps() -> None:
+    # Emptiness is how every step kind reports "none of these"; there is no
+    # second way to say it.
     result = _run([], n_rep=4)
 
-    assert result.transform_outputs is None
+    assert result.transform_outputs == {}
 
 
 def test_postproc_step_is_excluded_from_per_rep_step_counts() -> None:

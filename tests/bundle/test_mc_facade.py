@@ -87,10 +87,8 @@ def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> N
     assert loaded.mc is not None
     # The parquet side-channel member exists and rehydrated under data_ref.
     assert any(m.kind == "mc_raw_model_data" for m in loaded.manifest.members)
-    arrays = loaded.mc.resources["dat"]
-    np.testing.assert_allclose(arrays["observables"], expected)
 
-    # The loaded spec + resources rebuild an equivalent runnable pipeline.
+    # The member rehydrated into the rebuilt pipeline's datagen step.
     rebuilt = loaded.mc.pipeline
     np.testing.assert_allclose(rebuilt.per_rep_steps[0].kwargs["observables"], expected)
     assert [s.step_type for s in rebuilt.per_rep_steps] == [
@@ -123,14 +121,11 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     assert loaded.mc is not None
     assert any(m.kind == "mc_custom_op" for m in loaded.manifest.members)
 
-    func = loaded.mc.resources["z"]
-    assert isinstance(func, NumbaCustomFunc)  # wrapped + source-carrying
-    assert "zscore" in func.source
-
     rebuilt = loaded.mc.pipeline
     z_step = {s.name: s for s in rebuilt.per_rep_steps}["z"]
     assert z_step.step_type == "transform:custom"
-    assert callable(z_step.func)
+    assert isinstance(z_step.func, NumbaCustomFunc)  # wrapped + source-carrying
+    assert "zscore" in z_step.func.source
 
 
 def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
@@ -148,24 +143,19 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
 
     target = (
         BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result, run_id="r1")
+        .add_mc(pipe, result=result)
         .write(tmp_path / "pp.sdsge")
     )
 
     loaded = build_from(target)
     assert loaded.mc is not None
-    # The bulk array artifact rides its own shape-manifest parquet member.
-    assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
+    # The bulk array artifact rides its own member; the scalar summary inlines.
+    assert any(m.kind == "mc_postproc_raw" for m in loaded.manifest.members)
+    recovered = loaded.mc.result.postproc["post"]
     np.testing.assert_array_equal(
-        loaded.mc.postproc_arrays["post"], result.postproc["post"]["raw"].value
+        recovered["raw"].value, result.postproc["post"]["raw"].value
     )
-
-    # document (scalar inline) + parquet array re-merge to the live wire shape.
-    wire = loaded.mc.wire()
-    assert wire is not None
-    assert (
-        wire["postproc"] == serialize_pipeline_result(result, run_id="r1")["postproc"]
-    )
+    assert recovered["summary"].value == result.postproc["post"]["summary"].value
 
 
 def test_add_mc_bundles_native_result_without_legacy_retention_flags(
@@ -185,7 +175,7 @@ def test_add_mc_bundles_native_result_without_legacy_retention_flags(
     result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
     target = (
         BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result, run_id="r1")
+        .add_mc(pipe, result=result)
         .write(tmp_path / "native-result.sdsge")
     )
     assert build_from(target).mc is not None
@@ -208,20 +198,24 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
 
     target = (
         BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result, run_id="r1")
+        .add_mc(pipe, result=result)
         .write(tmp_path / "kde.sdsge")
     )
 
     loaded = build_from(target)
     assert loaded.mc is not None
-    # The Raw curve rides a member; the descriptives frame inlines in the document.
-    assert any(m.kind == "mc_postproc" for m in loaded.manifest.members)
-    assert loaded.mc.document["postproc"]["kde"]["summary"]["value"]["data"]
-
-    wire = loaded.mc.wire()
-    assert wire is not None
-    assert (
-        wire["postproc"] == serialize_pipeline_result(result, run_id="r1")["postproc"]
+    # The Raw curve rides a member; the descriptives frame inlines in the meta
+    # and comes back as the frame the op returned.
+    assert any(m.kind == "mc_postproc_raw" for m in loaded.manifest.members)
+    recovered = loaded.mc.result.postproc["kde"]
+    np.testing.assert_array_equal(
+        recovered["raw"].value, result.postproc["kde"]["raw"].value
+    )
+    pd.testing.assert_frame_equal(
+        recovered["summary"].value,
+        result.postproc["kde"]["summary"].value,
+        rtol=1e-13,
+        atol=0,
     )
 
 
@@ -240,19 +234,19 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
 
     target = (
         BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result, run_id="r1")
+        .add_mc(pipe, result=result)
         .write(tmp_path / "pandas_pp.sdsge")
     )
 
     loaded = build_from(target)
     assert loaded.mc is not None
     # The post-loop op was wrapped under the pandas namespace and round-trips.
-    func = loaded.mc.resources["ptab"]
+    func = {s.name: s for s in loaded.mc.pipeline.postproc_steps}["ptab"].func
     assert isinstance(func, PandasCustomFunc)
     out = func(traces={"test.jb.pval": np.array([0.1, 0.2])})
     assert isinstance(out, Summary) and isinstance(out.value, pd.DataFrame)
     # A frame summary inlines rather than taking a member of its own.
-    assert loaded.mc.document["postproc"]["ptab"]["summary"]["value"]["data"]
+    assert isinstance(loaded.mc.result.postproc["ptab"]["summary"].value, pd.DataFrame)
 
 
 def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
@@ -274,7 +268,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 
     target = (
         BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result, run_id="r1")
+        .add_mc(pipe, result=result)
         .write(tmp_path / "pp_full.sdsge")
     )
     loaded = build_from(target)
@@ -282,21 +276,21 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 
     # The bulk slot plus the custom-op blob shipped.
     kinds = {m.kind for m in loaded.manifest.members}
-    assert {"mc_custom_op", "mc_postproc"} <= kinds
+    assert {"mc_custom_op", "mc_postproc_raw"} <= kinds
+
+    # Rebuild from the stored spec + resources -> equivalent runnable pipeline.
+    rebuilt = loaded.mc.pipeline
 
     # The post-loop op rehydrated under the pandas namespace, kwargs preserved.
-    func = loaded.mc.resources["sum"]
-    assert isinstance(func, PandasCustomFunc)
-
-    # Recovered artifacts (document + parquet members) == the live wire.
-    assert (
-        loaded.mc.wire()["postproc"]
-        == serialize_pipeline_result(result, run_id="r1")["postproc"]
+    assert isinstance(
+        {s.name: s for s in rebuilt.postproc_steps}["sum"].func, PandasCustomFunc
     )
-    assert loaded.mc.document["postproc"]["sum"]["summary"]["value"]["data"]
 
-    # Rebuild from spec + resources -> equivalent runnable pipeline.
-    rebuilt = loaded.mc.pipeline
+    # The recovered artifacts serialize to what the live result does.
+    assert (
+        serialize_pipeline_result(loaded.mc.result, run_id="")["postproc"]
+        == serialize_pipeline_result(result, run_id="")["postproc"]
+    )
     assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
         "raw_model_data",
         "jarque_bera",
@@ -331,13 +325,3 @@ def test_transform_step_rejects_unshippable_custom_op() -> None:
             field="observables",
             output_shape=(5, 2),
         )
-
-
-def test_add_mc_still_accepts_a_plain_pipeline_spec(tmp_path) -> None:
-    # The explicit spec path is unchanged: no side-channel members emitted.
-    spec = _raw_model_data_pipeline().to_spec()
-    builder = BundleBuilder().add_mc(spec)
-    manifest, _files = builder.build()
-    kinds = {m.kind for m in manifest.members}
-    assert "mc_pipeline" in kinds
-    assert "mc_raw_model_data" not in kinds

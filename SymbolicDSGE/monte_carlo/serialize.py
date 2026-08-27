@@ -1,18 +1,18 @@
 """Serialization for Monte Carlo pipeline results.
 
 Lifted out of ``SymbolicDSGE.ui.mc`` so the result wire format is reusable by the
-``.sdsge`` bundle without depending on the HTTP layer. ``serialize_pipeline_result``
-remains the canonical (unchanged) wire shape consumed by the UI; the bundle path uses
-the parquet-friendly split below:
+``.sdsge`` bundle without depending on the HTTP layer. Two shapes live here:
 
-- ``result_document`` -> JSON-safe metadata + summaries (no bulk trace arrays),
-- ``run_traces`` -> the bulk numeric trace columns as ndarrays (no I/O here),
-- ``pipeline_result_wire`` -> re-merges the two back into the UI wire shape (hydration).
+- ``serialize_pipeline_result`` -> the single flat JSON document the UI consumes,
+- ``serialize_run_meta`` plus one ``serialize_*_results`` per step kind -> the
+  bundle's split, each returning a typed meta beside the trace arrays themselves.
+
+Only the meta half is ever JSON, through :func:`json_safe`, and the writer is
+what calls it. Traces are handed over as the run's own ndarrays, never copied.
 """
 
 from __future__ import annotations
 
-import copy
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -22,8 +22,6 @@ from numpy.typing import NDArray
 
 from .mc_constructs import MCPipelineResult
 from .postproc import Artifact, Summary, Raw
-from .traces import regression_trace_keys, test_trace_keys, payload_trace_key
-
 from .._ckernels.monte_carlo._arenas import resolve_retention
 from .._diag_tests.result import MCTestResult
 from ..regression.ols.ols_result import MCRegressionResult
@@ -136,20 +134,6 @@ def _summary_value(value: Any) -> Any:
             json.loads(value.to_json(orient="table", double_precision=15)),
         )
     return json_safe(value)
-
-
-def result_postproc_arrays(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
-    """Each step's bulk ``Raw`` array, keyed by step name.
-
-    Unlike :func:`run_traces` (uniform ``R``-length columns), these are
-    arbitrary-shape payloads (e.g. a KDE ``N x 2`` curve), each serialized to
-    its own shape-manifest parquet member by the bundle builder.
-    """
-    return {
-        name: np.asarray(artifact["raw"].value)
-        for name, artifact in result.postproc.items()
-        if artifact["raw"] is not None
-    }
 
 
 def serialize_run_meta(result: MCPipelineResult) -> MCRunMeta:
@@ -269,69 +253,6 @@ def serialize_postproc_results(
             traces["value"] = value
         out[name] = (meta, traces)
     return out
-
-
-def pipeline_result_wire(
-    document: dict[str, Any],
-    traces: dict[str, NDArray[Any]],
-    postproc_arrays: Mapping[str, NDArray[Any]] | None = None,
-) -> dict[str, Any]:
-    """Re-merge a trace-free :func:`result_document` with :func:`run_traces`
-    (and :func:`result_postproc_arrays`) into the canonical UI wire shape (used
-    for hydration).
-
-    A float trace column that is degenerate across *every* replication (e.g. a
-    test that returns an undefined-variance NaN statistic in all reps) is dropped
-    by the Parquet encoder, since an all-null column carries no values. Such a
-    column is reconstructed here as a null-filled trace of the summary's length —
-    which is exactly what the canonical wire reports for an all-NaN trace — so
-    hydration stays robust instead of raising ``KeyError`` on the missing key.
-    The same null-from-``shape`` fallback applies to a dropped POSTPROC array.
-    """
-    arrays = postproc_arrays or {}
-    wire = copy.deepcopy(document)
-    for name, entry in wire.get("postproc", {}).items():
-        raw = entry["raw"]
-        if raw is None:  # a summary-only step keeps its inline value
-            continue
-        arr = arrays.get(name)
-        if arr is not None:
-            raw["value"] = json_safe(arr)
-        else:
-            shape = tuple(int(d) for d in raw.get("shape", []))
-            raw["value"] = json_safe(np.full(shape, np.nan)) if shape else None
-    for name, entry in wire["test_summaries"].items():
-        n = int(entry.get("n_retained", entry.get("n_rep", 0)))
-        entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)
-        entry["pval_trace"] = _trace_or_null(traces, f"test.{name}.pval", n)
-        entry["status_trace"] = _status_trace(traces, f"test.{name}.status")
-    for name, entry in wire["regression_summaries"].items():
-        n_retained = int(entry.get("n_retained", entry.get("n_rep", 0)))
-        k = int(entry.get("k", 0))
-        coef = traces.get(f"regression.{name}.coef")
-        entry["coef_trace"] = (
-            json_safe(coef)
-            if coef is not None
-            else [[None] * k for _ in range(n_retained)]
-        )
-        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_retained)
-        entry["status_trace"] = _status_trace(traces, f"regression.{name}.status")
-    return wire
-
-
-def _trace_or_null(traces: dict[str, NDArray[Any]], key: str, n: int) -> list[Any]:
-    """A trace column as a JSON-safe list, or ``n`` nulls if it was dropped."""
-    arr = traces.get(key)
-    if arr is not None:
-        return cast(list[Any], json_safe(arr))
-    return [None] * n
-
-
-def _status_trace(traces: dict[str, NDArray[Any]], key: str) -> list[int]:
-    """Status traces are integer-valued and never all-null, so a missing column
-    only occurs for an empty run; fall back to an empty list."""
-    arr = traces.get(key)
-    return [int(x) for x in arr] if arr is not None else []
 
 
 def _serialize_regression_summary(summary: Any) -> dict[str, Any]:

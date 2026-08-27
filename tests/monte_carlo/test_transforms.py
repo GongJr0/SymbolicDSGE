@@ -690,13 +690,14 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     target = (
         BundleBuilder(created_by="tx-test")
         .add_model("reference", yaml_text, compile_kwargs={})
-        .add_mc(pipeline)
+        .add_mc(build_live_pipeline(pipeline))
         .write(tmp_path / "tx.sdsge")
     )
 
     loaded = load_bundle(target)
     assert loaded.mc is not None
-    restored_step_types = [n["step_type"] for n in loaded.mc.spec["nodes"]]
+    restored = loaded.mc.pipeline.to_spec()
+    restored_step_types = [n["step_type"] for n in restored["nodes"]]
     assert restored_step_types == [
         "simulation",
         "standardize",
@@ -705,7 +706,7 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     ]
     # The restored spec still compiles (no drift between the spec's Literal and
     # the catalog at load time).
-    rebuilt = build_live_pipeline(loaded.mc.spec)
+    rebuilt = build_live_pipeline(restored)
     assert [step.name for step in rebuilt.per_rep_steps] == [
         "datagen",
         "standardize",

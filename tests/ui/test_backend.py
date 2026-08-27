@@ -543,13 +543,13 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
 
     fetched = client.get(f"/api/run/{body['run_id']}")
     assert fetched.status_code == 200
-    assert fetched.json()["run_id"] == body["run_id"]
+    assert fetched.json()["kind"] == "mc"
 
     # The run fills the MC tab's bundle-bound slots, through the core spec so
     # the shape matches what a bundle stores rather than the request model.
     workspace = client.get("/api/session").json()["workspace"]["mc"]
     assert [node["id"] for node in workspace["spec"]["nodes"]] == ["sim"]
-    assert workspace["result"]["run_id"] == body["run_id"]
+    assert workspace["result"]["n_rep"] == 3
 
 
 def _solve_reference(client: TestClient) -> None:

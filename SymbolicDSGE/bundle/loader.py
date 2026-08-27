@@ -10,7 +10,9 @@ pipeline/result, and the simulation prefill. The read counterpart to
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -31,8 +33,24 @@ from ..estimation.spec import (
     MCMCResultMeta,
     MCMCResultSpec,
 )
-from ..monte_carlo.serialize import pipeline_result_wire
-from ..monte_carlo.spec import PipelineSpec
+from .._diag_tests.result import MCTestResult
+from ..regression.ols.ols_result import MCRegressionResult
+from ..monte_carlo.builder import build_pipeline
+from ..monte_carlo.postproc import Artifact, Raw, Summary
+from ..monte_carlo.spec import (
+    MCRegressionResultMeta,
+    MCRegressionResultSpec,
+    MCTestResultMeta,
+    MCTestResultSpec,
+    PipelineSpec,
+)
+from ..monte_carlo.mc_constructs import (
+    MCFailure,
+    MCMeta,
+    MCPipelineResult,
+    failed_postproc_names,
+    failed_step_counts,
+)
 from .container import BundleArchive
 from .manifest import Manifest, Member, SimSpec
 from .parquet import (
@@ -44,6 +62,9 @@ from .parquet import (
 
 if TYPE_CHECKING:
     from ..monte_carlo.core import MCPipeline
+
+NDF = NDArray[np.float64]
+NDI = NDArray[np.int64]
 
 
 @dataclass
@@ -79,32 +100,20 @@ class LoadedMC:
     """Monte-Carlo pipeline + (optional) run result recovered from a bundle.
 
     ``pipeline`` is the live, runnable :class:`MCPipeline`, rebuilt eagerly at
-    load from ``spec`` + ``resources``. No model is needed to build it (simulation
-    shocks come from the explicit registry, not a model), so it is ready to run
-    against models supplied at ``pipeline.run(reference=..., dgp=...)`` time. The
-    raw ``spec`` stays available for the UI to consume.
+    load with its bulk side-channels reattached: each ``raw_model_data``
+    ``data_ref`` to its restored arrays and each ``custom`` ``func_ref``
+    (transform *or* post-loop) to its callable. No model is needed to build it
+    (simulation shocks come from the explicit registry, not a model), so it is
+    ready to run against models supplied at ``pipeline.run(reference=...,
+    dgp=...)`` time.
 
-    ``resources`` reattaches the bulk side-channels the spec references by key:
-    each ``raw_model_data`` ``data_ref`` maps to its restored ``{name: ndarray}``
-    arrays and each ``custom`` ``func_ref`` (transform *or* post-loop) to its callable.
-
-    Recovered run artifacts of a POSTPROC phase: ``postproc_arrays`` holds each
-    step's bulk ``Raw`` array; its ``summary`` slot rides inline in ``document``.
-    :meth:`wire` re-merges the two back into the canonical UI wire shape.
+    ``result`` is the run the bundle recorded, rebuilt as the same
+    :class:`MCPipelineResult` the run returned, or ``None`` when the bundle
+    carries a pipeline alone.
     """
 
-    spec: PipelineSpec
     pipeline: MCPipeline
-    document: dict[str, Any] | None = None
-    traces: dict[str, NDArray[Any]] | None = None
-    resources: dict[str, Any] = field(default_factory=dict)
-    postproc_arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
-
-    def wire(self) -> dict[str, Any] | None:
-        """Re-merge document + traces into the UI wire shape, when both exist."""
-        if self.document is None or self.traces is None:
-            return None
-        return pipeline_result_wire(self.document, self.traces, self.postproc_arrays)
+    result: MCPipelineResult | None = None
 
 
 @dataclass
@@ -265,61 +274,241 @@ def _rebuild_mcmc_result(
 
 
 def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
-    from ..monte_carlo.builder import build_pipeline
-
     pipeline_members = manifest.members_by_kind("mc_pipeline")
     if not pipeline_members:
         return None
     spec = cast(PipelineSpec, json.loads(archive.read_text(pipeline_members[0].path)))
 
-    document: dict[str, Any] | None = None
-    result_members = manifest.members_by_kind("mc_result")
-    if result_members:
-        document = json.loads(archive.read_text(result_members[0].path))
-
-    traces: dict[str, NDArray[Any]] | None = None
-    trace_members = manifest.members_by_kind("mc_trace")
-    if trace_members:
-        traces = collapse_columns(_load_columns(archive, trace_members[0]))
-
-    postproc_arrays = _load_mc_postproc(archive, manifest)
     resources = _load_mc_resources(archive, manifest, spec)
 
-    # Build the runnable pipeline eagerly. This needs no model: every step
-    # compiles from its parameters alone, and the models are supplied later at
-    # ``pipeline.run(...)``. A malformed stored spec raises here, so
-    # ``load_bundle`` fails fast on structure.
     pipeline = build_pipeline(spec, resources=resources)
+    result = _load_mc_result(archive, manifest)
+    return LoadedMC(pipeline=pipeline, result=result)
 
-    return LoadedMC(
-        spec=spec,
-        pipeline=pipeline,
-        document=document,
-        traces=traces,
-        resources=resources,
-        postproc_arrays=postproc_arrays,
+
+def _mc_json(archive: BundleArchive, manifest: Manifest, kind: str) -> dict[str, Any]:
+    """One JSON member's object, or ``{}`` when the kind is absent.
+
+    A step kind with no steps writes no member, so absence is emptiness.
+    """
+    members = manifest.members_by_kind(kind)
+    if not members:
+        return {}
+    return cast(dict[str, Any], json.loads(archive.read_text(members[0].path)))
+
+
+def _mc_block(
+    archive: BundleArchive, manifest: Manifest, kind: str
+) -> dict[str, list[Any]]:
+    """One shared column block's raw columns, keyed ``{step}.{field}[.{idx}]``."""
+    members = manifest.members_by_kind(kind)
+    if not members:
+        return {}
+    return _load_columns(archive, members[0])
+
+
+def _mc_array_columns(
+    archive: BundleArchive, manifest: Manifest, kind: str
+) -> dict[tuple[str, str], dict[str, list[Any]]]:
+    """Each one-array member's raw columns, keyed by its ``(name, field)``."""
+    return {
+        (str(member.options["name"]), str(member.options["field"])): _load_columns(
+            archive, member
+        )
+        for member in manifest.members_by_kind(kind)
+    }
+
+
+def _float_trace(cols: Mapping[str, list[Any]], key: str, rows: int) -> NDF:
+    """One float column, or a NaN column of ``rows`` when the encoder dropped it.
+
+    A float column that is null in every row carries no values, so Parquet drops
+    it. The author saw NaNs there and so does the reader.
+    """
+    values = cols.get(key)
+    if values is None:
+        return np.full(rows, np.nan)
+    return _float_column(values)[:rows]
+
+
+def _int_trace(cols: Mapping[str, list[Any]], key: str, rows: int) -> NDI:
+    """One integer column. Integers are never null, so absence is corruption."""
+    return np.asarray(cols[key], dtype=np.int64)[:rows]
+
+
+def _float_matrix(
+    cols: Mapping[str, list[Any]], key: str, rows: int, width: int
+) -> NDF:
+    """A 2-D float trace from its ``{key}.{j}`` columns, NaN-filling dropped ones."""
+    if width == 0:
+        return np.empty((rows, 0), dtype=np.float64)
+    return np.column_stack(
+        [_float_trace(cols, f"{key}.{j}", rows) for j in range(width)]
     )
 
 
-def _load_mc_postproc(
-    archive: BundleArchive, manifest: Manifest
-) -> dict[str, NDArray[Any]]:
-    """Restore bulk POSTPROC ndarray artifacts, keyed by artifact name.
+def _mc_array(cols: Mapping[str, list[Any]], key: str, shape: tuple[int, ...]) -> NDF:
+    """Restore one member's array from its columns, using the meta's shape.
 
-    Each member holds one shape-manifest array under the fixed ``"a"`` column;
-    its name and shape ride the member options. An all-NaN array is dropped to
-    nothing by the Parquet encoder, so a missing column is rebuilt as a NaN array
-    of the recorded shape (matching the wire's null-trace convention)."""
-    out: dict[str, NDArray[Any]] = {}
-    for member in manifest.members_by_kind("mc_postproc"):
-        name = str(member.options.get("name", ""))
-        shape = tuple(int(d) for d in member.options.get("shape", []))
-        raw = archive.read(member.path)
-        try:
-            out[name] = arrays_from_parquet(raw, {"a": shape})["a"]
-        except KeyError:
-            out[name] = np.full(shape, np.nan)
+    The writer flattened anything above 2-D to ``(-1, last)``, so the row count
+    is the product of the leading axes and the width is the last one.
+    """
+    if len(shape) < 2:
+        return _float_trace(cols, key, int(shape[0]) if shape else 1).reshape(shape)
+    rows = int(np.prod(shape[:-1]))
+    return _float_matrix(cols, key, rows, int(shape[-1])).reshape(shape)
+
+
+def _load_mc_tests(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, MCTestResult]:
+    metas = _mc_json(archive, manifest, "mc_test_steps")
+    if not metas:
+        return {}
+    cols = _mc_block(archive, manifest, "mc_test_traces")
+    return {
+        name: MCTestResult.from_spec(
+            MCTestResultSpec(
+                meta=cast(MCTestResultMeta, meta),
+                statistic_trace=_float_trace(
+                    cols, f"{name}.statistic_trace", int(meta["n_retained"])
+                ),
+                _raw_status=_int_trace(
+                    cols, f"{name}.status_trace", int(meta["n_retained"])
+                ),
+                retained_reps=_int_trace(
+                    cols, f"{name}.retained_reps", int(meta["n_retained"])
+                ),
+            )
+        )
+        for name, meta in metas.items()
+    }
+
+
+def _load_mc_regressions(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, MCRegressionResult]:
+    metas = _mc_json(archive, manifest, "mc_regression_steps")
+    if not metas:
+        return {}
+    cols = _mc_block(archive, manifest, "mc_regression_traces")
+    out: dict[str, MCRegressionResult] = {}
+    for name, meta in metas.items():
+        rows = int(meta["n_retained"])
+        width = int(meta["k"])
+        out[name] = MCRegressionResult.from_spec(
+            MCRegressionResultSpec(
+                meta=cast(MCRegressionResultMeta, meta),
+                coef_trace=_float_matrix(cols, f"{name}.coef_trace", rows, width),
+                ssr_trace=_float_trace(cols, f"{name}.ssr_trace", rows),
+                sst_trace=_float_trace(cols, f"{name}.sst_trace", rows),
+                retained_reps=_int_trace(cols, f"{name}.retained_reps", rows),
+                _raw_status=_int_trace(cols, f"{name}.status_trace", rows),
+                _se_trace=(
+                    _float_matrix(cols, f"{name}.se_trace", rows, width)
+                    if meta["kind"] == "ols"
+                    else None
+                ),
+            )
+        )
     return out
+
+
+def _load_mc_transforms(archive: BundleArchive, manifest: Manifest) -> dict[str, NDF]:
+    metas = _mc_json(archive, manifest, "mc_transform_steps")
+    if not metas:
+        return {}
+    columns = _mc_array_columns(archive, manifest, "mc_transform_trace")
+    return {
+        name: _mc_array(
+            columns.get((name, "value"), {}),
+            f"{name}.value",
+            tuple(int(d) for d in meta["shape"]),
+        )
+        for name, meta in metas.items()
+    }
+
+
+def _load_mc_postprocs(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, Artifact]:
+    metas = _mc_json(archive, manifest, "mc_postproc_steps")
+    if not metas:
+        return {}
+    columns = _mc_array_columns(archive, manifest, "mc_postproc_raw")
+    out: dict[str, Artifact] = {}
+    for name, meta in metas.items():
+        shape, summary = meta["shape"], meta["summary"]
+        out[name] = Artifact(
+            raw=(
+                None
+                if shape is None
+                else Raw(
+                    value=_mc_array(
+                        columns.get((name, "value"), {}),
+                        f"{name}.value",
+                        tuple(int(d) for d in shape),
+                    )
+                )
+            ),
+            summary=None if summary is None else Summary(value=_mc_summary(summary)),
+        )
+    return out
+
+
+def _mc_summary(value: Any) -> Any:
+    """Undo the table schema a DataFrame summary was written with."""
+    if (
+        isinstance(value, dict)
+        and isinstance(value.get("schema"), dict)
+        and "fields" in value["schema"]
+        and "data" in value
+    ):
+        import pandas as pd
+
+        return pd.read_json(StringIO(json.dumps(value)), orient="table")
+    return value
+
+
+def _load_mc_result(
+    archive: BundleArchive, manifest: Manifest
+) -> MCPipelineResult | None:
+    """Rebuild the run result from its meta member and each kind's traces."""
+    run = _mc_json(archive, manifest, "mc_result_meta")
+    if not run:
+        return None
+    failures = [MCFailure(**failure) for failure in run["failures"]]
+    meta = MCMeta(
+        n_rep=int(run["n_rep"]),
+        n_retained_by_step={
+            name: int(value) for name, value in run["n_retained_by_step"].items()
+        },
+        elapsed_s=float(run["elapsed_s"]),
+        step_elapsed_s={
+            name: float(value) for name, value in run["step_elapsed_s"].items()
+        },
+        step_counts={name: int(value) for name, value in run["step_counts"].items()},
+        step_failures={
+            name: int(value) for name, value in run["step_failures"].items()
+        },
+        postproc_elapsed_s={
+            name: float(value) for name, value in run["postproc_elapsed_s"].items()
+        },
+        # Derived from the failures on the write side too, so never stored.
+        failed_steps=failed_step_counts(failures),
+        failed_postprocs=failed_postproc_names(failures),
+    )
+    return MCPipelineResult(
+        meta=meta,
+        n_rep=int(run["n_rep"]),
+        n_successful=int(run["n_successful"]),
+        test_summaries=_load_mc_tests(archive, manifest),
+        transform_outputs=_load_mc_transforms(archive, manifest),
+        regression_summaries=_load_mc_regressions(archive, manifest),
+        failures=tuple(failures),
+        postproc=_load_mc_postprocs(archive, manifest),
+        run_config=dict(run["run_config"]),
+    )
 
 
 def _load_mc_resources(

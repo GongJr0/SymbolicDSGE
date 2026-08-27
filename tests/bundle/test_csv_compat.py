@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import json
 
 from pathlib import Path
@@ -8,6 +11,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.bundle.builder import BundleBuilder
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.container import BundleArchive, write_bundle
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import Manifest, Member
@@ -78,7 +82,7 @@ def test_trace_to_csv_rejects_mismatched_lengths() -> None:
 def test_builder_writes_observed_with_semantic_headers() -> None:
     matrix = np.array([[1.0, 2.0], [3.0, 4.0]])
     builder = BundleBuilder().add_estimation(
-        _estimation_spec(matrix, observables=("gdp", "infl")),
+        _estimation_source(_estimation_spec(matrix, observables=("gdp", "infl"))),
         as_parquet=False,
     )
     manifest, files = builder.build()
@@ -104,7 +108,7 @@ def test_builder_writes_posterior_and_mc_traces_as_csv() -> None:
         thin=1,
     )
     builder = BundleBuilder().add_estimation(
-        _estimation_spec(), result=result, as_parquet=False
+        _estimation_source(_estimation_spec()), result=result, as_parquet=False
     )
     _, files = builder.build()
     assert "estimation/posterior.csv" in files
@@ -116,7 +120,9 @@ def test_builder_observable_names_length_must_match_matrix() -> None:
     builder = BundleBuilder()
     with pytest.raises(ValueError):
         builder.add_estimation(
-            _estimation_spec(np.zeros((3, 2)), observables=("only_one",)),
+            _estimation_source(
+                _estimation_spec(np.zeros((3, 2)), observables=("only_one",))
+            ),
             as_parquet=False,
         )
 
@@ -146,16 +152,25 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
     target = (
         BundleBuilder(created_by="csv-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(_estimation_spec(observed), result=result, as_parquet=False)
+        .add_estimation(
+            _estimation_source(_estimation_spec(observed)),
+            result=result,
+            as_parquet=False,
+        )
         .add_mc(
-            PipelineSpec(
-                nodes=[
-                    NodeSpec(
-                        id="n1", step_type="simulation", name="sim", params={"T": 50}
-                    )
-                ],
-                edges=[],
-                postprocs=[],
+            build_pipeline(
+                PipelineSpec(
+                    nodes=[
+                        NodeSpec(
+                            id="n1",
+                            step_type="simulation",
+                            name="sim",
+                            params={"T": 50},
+                        )
+                    ],
+                    edges=[],
+                    postprocs=[],
+                )
             )
         )
         .write(tmp_path / "csv.sdsge")
@@ -223,7 +238,8 @@ def test_observed_csv_with_nan_round_trips_to_nan(tmp_path: Path) -> None:
         BundleBuilder()
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
-            _estimation_spec(matrix, observables=("a", "b")), as_parquet=False
+            _estimation_source(_estimation_spec(matrix, observables=("a", "b"))),
+            as_parquet=False,
         )
         .write(tmp_path / "nan.sdsge")
     )
@@ -263,3 +279,12 @@ def _estimation_spec(y=None, *, observables=("Infl", "Rate")) -> EstimatorSpec:
             joseph_cov=True,
         ),
     )
+
+
+def _estimation_source(spec: EstimatorSpec) -> Any:
+    """Stands in for the live estimator: ``add_estimation`` asks only for its spec.
+
+    These tests are about how a spec is encoded into members, not about building
+    an estimator, so they hand over the spec without the model behind it.
+    """
+    return SimpleNamespace(to_spec=lambda: spec)

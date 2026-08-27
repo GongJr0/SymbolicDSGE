@@ -12,10 +12,10 @@ Key format:
 - regressions -> ``regression.<name>.{coef,ssr,sst,se,r2,status}``
 - transforms -> ``payload.<name>`` (the step's stacked per-rep ndarray output)
 
-:func:`run_traces` builds the registry a post-loop op receives from these same
-primitives, so the static view here can't drift from what a run actually emits.
-The bundle writes its own narrower projection: ``pval`` and ``r2`` are derived
-from the columns beside them and are not stored.
+:func:`traces_from_summaries` builds the registry a post-loop op receives from
+these same primitives, so the static view here can't drift from what a run
+actually emits. The bundle writes its own projection per step kind, where
+``pval`` and ``r2`` are derived from the columns beside them and are not stored.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def traces_from_summaries(
     Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
     ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``). The
     registry a post-loop ``OpType.POSTPROC`` op receives. The bundle writes its
-    own narrower projection; see :func:`SymbolicDSGE.monte_carlo.serialize.run_traces`.
+    own projection per step kind; see ``SymbolicDSGE.monte_carlo.serialize``.
     """
     traces: dict[str, NDArray] = {}
     for name, test_summary in test_summaries.items():

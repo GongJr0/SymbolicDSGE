@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 from pathlib import Path
 
 import numpy as np
 
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import SimSpec
@@ -66,8 +70,8 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
             _MODEL_YAML,
             compile_kwargs={},
         )
-        .add_estimation(_estimation_spec(observed), result=result)
-        .add_mc(pipeline)
+        .add_estimation(_estimation_source(_estimation_spec(observed)), result=result)
+        .add_mc(build_pipeline(pipeline))
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
             "reference",
@@ -112,9 +116,8 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # monte carlo
     assert loaded.mc is not None
-    assert loaded.mc.spec["nodes"][0]["step_type"] == "simulation"
-    assert loaded.mc.document is None  # no result attached
-    assert loaded.mc.wire() is None
+    assert loaded.mc.pipeline.to_spec()["nodes"][0]["step_type"] == "simulation"
+    assert loaded.mc.result is None  # no result attached
 
     # simulation prefill
     assert loaded.simulation is not None
@@ -144,7 +147,7 @@ def test_add_estimation_accepts_live_mcmc_result() -> None:
     )
     spec = _estimation_spec(rng.standard_normal((4, 2)), names=("a", "b"))
 
-    builder = BundleBuilder().add_estimation(spec, result=mcmc)
+    builder = BundleBuilder().add_estimation(_estimation_source(spec), result=mcmc)
     _, files = builder.build()
 
     # live result projected to meta, tagged mcmc
@@ -173,3 +176,12 @@ def test_csv_passthrough_member(tmp_path: Path) -> None:
     manifest, files = builder.build()
     assert "data/series.csv" in files
     assert manifest.members[0].format == "csv"
+
+
+def _estimation_source(spec: EstimatorSpec) -> Any:
+    """Stands in for the live estimator: ``add_estimation`` asks only for its spec.
+
+    These tests are about how a spec is encoded into members, not about building
+    an estimator, so they hand over the spec without the model behind it.
+    """
+    return SimpleNamespace(to_spec=lambda: spec)

@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, cast
 
+from ..monte_carlo.serialize import serialize_pipeline_result
 from .estimation import (
     build_estimation_prefill,
     emit_estimation_wire,
@@ -106,8 +107,11 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
 
     mc = TabState()
     if loaded.mc is not None:
-        mc.spec = dict(loaded.mc.spec)
-        mc.result = loaded.mc.wire()
+        mc.spec = dict(loaded.mc.pipeline.to_spec())
+        if loaded.mc.result is not None:
+            # The run id keyed a live session's run registry, and a loaded run
+            # is in no registry, so it stays empty as it did on the wire before.
+            mc.result = serialize_pipeline_result(loaded.mc.result, run_id="")
 
     # Spec only: the session replays it against the model once both are
     # installed, which is what fills the result.
