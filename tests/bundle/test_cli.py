@@ -2,16 +2,25 @@
 
 Drives ``main_compile`` / ``main_decompile`` through their argv lists so the
 production entry points exercise the same code paths the installed scripts will.
+
+The pair is an extract/pack round trip over an already-built bundle, so every
+fixture here starts from :class:`BundleBuilder` rather than a hand-written
+directory: authoring a bundle from loose files is not something either command
+does.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import zipfile
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
 
+from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.cli import (
     CompileError,
     compile_directory,
@@ -21,240 +30,224 @@ from SymbolicDSGE.bundle.cli import (
 )
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import SimSpec
-from SymbolicDSGE.core.model_parser import ModelParser
+from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.step_factories import (
+    jarque_bera_test_step,
+    raw_model_data_step,
+)
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
-_OBSERVABLES = [
-    str(o) for o in ModelParser.from_string(_MODEL_YAML).parsed.model.observables
-]
 
 
 # -- helpers ----------------------------------------------------------------
 
 
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _observed_csv(matrix: np.ndarray, headers: list[str]) -> str:
-    rows = "\n".join(",".join(repr(float(v)) for v in row) for row in matrix)
-    return ",".join(headers) + "\n" + rows + "\n"
-
-
-def _baseline_dir(tmp_path: Path, *, with_estimation: bool = True) -> Path:
-    src = tmp_path / "bundle"
-    src.mkdir()
-    _write_text(src / "reference.yaml", _MODEL_YAML)
-    _write_text(
-        src / "reference.options.json",
-        json.dumps({"compile_kwargs": {"linearize": False}}),
+def _pipeline() -> MCPipeline:
+    observables = np.random.default_rng(0).normal(size=(4, 20, 2))
+    return MCPipeline(
+        [
+            raw_model_data_step(
+                "dat", observables=observables, observable_names=("y", "x")
+            ),
+            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
+        ]
     )
-    if with_estimation:
-        spec = {
-            "observables": list(_OBSERVABLES),
-            "filter_mode": "linear",
-            "P0": None,
-            "R": None,
-            "estimated_params": ["beta"],
-            "priors": None,
-            "ss_seed": None,
-            "x0": None,
-            "jitter": 0.0,
-            "symmetrize": True,
-            "joseph_cov": True,
-        }
-        _write_text(src / "estimation" / "spec.json", json.dumps(spec))
-        matrix = np.arange(12, dtype=np.float64).reshape(6, len(_OBSERVABLES))
-        _write_text(
-            src / "estimation" / "observed.csv",
-            _observed_csv(matrix, _OBSERVABLES),
+
+
+def _bundle(tmp_path: Path, *, with_result: bool = True) -> Path:
+    """A bundle carrying every member kind the CLI has to move."""
+    pipe = _pipeline()
+    result = (
+        pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+        if with_result
+        else None
+    )
+    return (
+        BundleBuilder(created_by="cli-test")
+        .add_model("reference", _MODEL_YAML, compile_kwargs={"linearize": False})
+        .add_mc(pipe, result=result)
+        .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
+        .set_simulation(
+            "reference",
+            SimSpec(
+                T=8,
+                shocks={
+                    "u": {
+                        "dist": "norm",
+                        "multivar": False,
+                        "seed": 42,
+                        "dist_args": [],
+                        "dist_kwargs": {"loc": 0.0},
+                    }
+                },
+            ),
         )
-    return src
+        .write(tmp_path / "in.sdsge")
+    )
 
 
-# -- compile entry point ----------------------------------------------------
+def _member_digests(path: Path) -> dict[str, str]:
+    with zipfile.ZipFile(path) as archive:
+        return {
+            name: hashlib.sha256(archive.read(name)).hexdigest()
+            for name in archive.namelist()
+            if name != "manifest.json"
+        }
 
 
-def test_main_compile_emits_bundle(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
-    src = _baseline_dir(tmp_path, with_estimation=False)
-    out = tmp_path / "out.sdsge"
-    rc = main_compile([str(src), "-o", str(out), "--created-by", "cli-test"])
-    assert rc == 0
-    assert out.exists()
-    assert f"wrote {out}" in capsys.readouterr().out
+# -- round trip -------------------------------------------------------------
 
-    loaded = build_from(out)
-    assert loaded.manifest.created_by == "cli-test"
+
+def test_decompile_then_compile_returns_the_same_bytes(tmp_path: Path) -> None:
+    # Compile packs rather than rebuilds, so a round trip that re-encodes nothing
+    # is byte-for-byte identical, member paths included.
+    bundle = _bundle(tmp_path)
+    extracted = decompile_bundle(bundle, tmp_path / "flat")
+
+    packed = compile_directory(extracted, tmp_path / "out.sdsge")
+
+    assert _member_digests(packed) == _member_digests(bundle)
+
+
+def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    original = build_from(bundle)
+
+    packed = compile_directory(
+        decompile_bundle(bundle, tmp_path / "flat"), tmp_path / "out.sdsge"
+    )
+    loaded = build_from(packed)
+
     assert loaded.reference is not None
-
-
-def test_main_compile_default_output_path(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path, with_estimation=False)
-    rc = main_compile([str(src)])
-    assert rc == 0
-    default_out = src.parent / f"{src.name}.sdsge"
-    assert default_out.exists()
-
-
-def test_compile_requires_at_least_one_model(tmp_path: Path) -> None:
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    with pytest.raises(CompileError, match="reference.yaml"):
-        compile_directory(empty)
-
-
-def test_compile_observed_round_trips_through_loader(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    out = compile_directory(src, tmp_path / "obs.sdsge")
-    loaded = build_from(out)
-    assert loaded.estimation is not None
-    expected = np.arange(12, dtype=np.float64).reshape(6, len(_OBSERVABLES))
-    np.testing.assert_allclose(np.asarray(loaded.estimation.spec.y), expected)
-
-
-def test_compile_csv_only_keeps_csv_member(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    out = compile_directory(src, tmp_path / "csv.sdsge", csv_only=True)
-    loaded = build_from(out)
-    data_member = next(
-        m for m in loaded.manifest.members if m.kind == "estimation_data"
+    assert loaded.simulation is not None and loaded.simulation["reference"].T == 8
+    assert loaded.mc is not None and loaded.mc.result is not None
+    np.testing.assert_array_equal(
+        loaded.mc.result.test_summaries["jb"].statistic_trace,
+        original.mc.result.test_summaries["jb"].statistic_trace,
     )
-    assert data_member.format == "csv"
-    assert data_member.path.endswith(".csv")
 
 
-def test_compile_rejects_observable_name_mismatch(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    matrix = np.zeros((3, len(_OBSERVABLES)))
-    # Wrong header names (model expects 'Infl,Rate').
-    _write_text(
-        src / "estimation" / "observed.csv",
-        _observed_csv(matrix, ["foo", "bar"]),
+def test_csv_mode_round_trips_into_a_readable_bundle(tmp_path: Path) -> None:
+    # ``--csv`` is the only way to read a bulk member in an editor, and what it
+    # produces is still a bundle: the loader takes either format.
+    bundle = _bundle(tmp_path)
+    extracted = decompile_bundle(bundle, tmp_path / "flat", also_csv=True)
+    assert not any(extracted.rglob("*.parquet"))
+
+    packed = compile_directory(extracted, tmp_path / "out.sdsge")
+    loaded = build_from(packed)
+
+    assert [
+        m.format for m in loaded.manifest.members if m.kind == "mc_test_traces"
+    ] == ["csv"]
+    np.testing.assert_array_equal(
+        loaded.mc.result.test_summaries["jb"].statistic_trace,
+        build_from(bundle).mc.result.test_summaries["jb"].statistic_trace,
     )
-    with pytest.raises(CompileError, match="do not match model observables"):
-        compile_directory(src, tmp_path / "bad.sdsge")
 
 
-def test_compile_rejects_headerless_numeric_csv(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    # Numeric "headers" — file is effectively missing its header row.
-    _write_text(
-        src / "estimation" / "observed.csv",
-        "0.1,0.2\n0.3,0.4\n0.5,0.6\n",
-    )
-    with pytest.raises(CompileError, match="missing a header row"):
-        compile_directory(src, tmp_path / "nohdr.sdsge")
+def test_model_config_moves_to_the_root_and_back(tmp_path: Path) -> None:
+    # The one path that differs between the two layouts, in both directions.
+    bundle = _bundle(tmp_path, with_result=False)
+    extracted = decompile_bundle(bundle, tmp_path / "flat")
+    assert (extracted / "reference.yaml").exists()
+
+    packed = compile_directory(extracted, tmp_path / "out.sdsge")
+    member = build_from(packed).manifest.model_member("reference")
+    assert member is not None and member.path == "model/reference.yaml"
+    # The options the loader rebuilds the model with survive the round trip.
+    assert member.options["compile_kwargs"] == {"linearize": False}
 
 
-def test_compile_rejects_column_count_mismatch_on_mechanical_layout(
+# -- compile refuses what it cannot pack -------------------------------------
+
+
+def test_compile_requires_a_manifest(tmp_path: Path) -> None:
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (bare / "reference.yaml").write_text(_MODEL_YAML, encoding="utf-8")
+
+    with pytest.raises(CompileError, match="manifest.json"):
+        compile_directory(bare, tmp_path / "out.sdsge")
+
+
+def test_compile_reports_a_member_the_manifest_lists_but_the_directory_lacks(
     tmp_path: Path,
 ) -> None:
-    src = _baseline_dir(tmp_path)
-    # Mechanical y.0..y.{k-1} layout with the wrong k.
-    _write_text(
-        src / "estimation" / "observed.csv",
-        "y.0,y.1,y.2\n1,2,3\n4,5,6\n",
-    )
-    with pytest.raises(CompileError, match="model declares"):
-        compile_directory(src, tmp_path / "wrongk.sdsge")
+    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+    (extracted / "reference.yaml").unlink()
+
+    with pytest.raises(CompileError, match="reference.yaml"):
+        compile_directory(extracted, tmp_path / "out.sdsge")
 
 
-def test_compile_rejects_both_csv_and_parquet_for_same_member(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    _write_text(src / "estimation" / "observed.parquet", "junk")
-    with pytest.raises(CompileError, match="choose one"):
-        compile_directory(src, tmp_path / "ambig.sdsge")
-
-
-# -- decompile entry point --------------------------------------------------
-
-
-def test_main_decompile_extracts_members(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
-    out_bundle = compile_directory(_baseline_dir(tmp_path), tmp_path / "in.sdsge")
-    out_dir = tmp_path / "extracted"
-    rc = main_decompile([str(out_bundle), "-o", str(out_dir)])
-    assert rc == 0
-    assert (out_dir / "manifest.json").exists()
-    assert (out_dir / "reference.yaml").exists()
-    assert (out_dir / "reference.options.json").exists()
-    assert (out_dir / "estimation" / "spec.json").exists()
-    assert f"extracted to {out_dir.resolve()}" in capsys.readouterr().out
-
-
-def test_decompile_then_recompile_yields_equivalent_bundle(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    # Add a sim prefill so the inline-in-manifest path is also exercised.
-    src_sim = SimSpec(
-        T=8,
-        shocks={
-            "u": {
-                "dist": "norm",
-                "multivar": False,
-                "seed": 42,
-                "dist_args": [],
-                "dist_kwargs": {"loc": 0.0},
-            }
-        },
-    )
-    # Write simulation.json (a {role: SimSpec} map) into the source dir and compile.
-    _write_text(src / "simulation.json", json.dumps({"reference": src_sim.to_dict()}))
-    pass1 = compile_directory(src, tmp_path / "pass1.sdsge")
-    loaded1 = build_from(pass1)
-    assert loaded1.simulation is not None and loaded1.simulation["reference"].T == 8
-
-    out_dir = decompile_bundle(pass1, tmp_path / "extracted", also_csv=True)
-    assert (out_dir / "simulation.json").exists()  # inline SimSpec extracted
-    pass2 = compile_directory(out_dir, tmp_path / "pass2.sdsge")
-    loaded2 = build_from(pass2)
-
-    assert loaded2.simulation is not None and loaded2.simulation["reference"].T == 8
-    np.testing.assert_allclose(
-        np.asarray(loaded1.estimation.spec.y), np.asarray(loaded2.estimation.spec.y)
-    )
-    assert loaded1.estimation.spec.params == loaded2.estimation.spec.params
-
-
-def test_decompile_csv_mode_rewrites_parquet_member_to_csv(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    bundle = compile_directory(src, tmp_path / "p.sdsge")
-    # Confirm the input bundle uses parquet.
-    data_member = next(
-        m for m in build_from(bundle).manifest.members if m.kind == "estimation_data"
-    )
-    assert data_member.format == "parquet"
-
-    out_dir = decompile_bundle(bundle, tmp_path / "as_csv", also_csv=True)
-    assert (out_dir / "estimation" / "observed.csv").exists()
-    assert not (out_dir / "estimation" / "observed.parquet").exists()
-
-    # Header should be the semantic observable names (not mechanical y.0/y.1).
-    header = (out_dir / "estimation" / "observed.csv").read_text().splitlines()[0]
-    assert header == ",".join(_OBSERVABLES)
+# -- decompile output directory ---------------------------------------------
 
 
 def test_decompile_rejects_existing_dir_without_force(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    bundle = compile_directory(src, tmp_path / "b.sdsge")
+    bundle = _bundle(tmp_path, with_result=False)
     out_dir = tmp_path / "exists"
     out_dir.mkdir()
+
     with pytest.raises(FileExistsError, match="--force"):
         decompile_bundle(bundle, out_dir)
 
 
 def test_decompile_force_overwrites(tmp_path: Path) -> None:
-    src = _baseline_dir(tmp_path)
-    bundle = compile_directory(src, tmp_path / "b.sdsge")
+    bundle = _bundle(tmp_path, with_result=False)
     out_dir = tmp_path / "occupied"
     out_dir.mkdir()
     (out_dir / "stale.txt").write_text("old")
+
     decompile_bundle(bundle, out_dir, force=True)
+
     assert not (out_dir / "stale.txt").exists()
     assert (out_dir / "manifest.json").exists()
+
+
+# -- entry points ------------------------------------------------------------
+
+
+def test_main_decompile_extracts_members(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    bundle = _bundle(tmp_path)
+    out_dir = tmp_path / "extracted"
+
+    assert main_decompile([str(bundle), "-o", str(out_dir)]) == 0
+
+    assert (out_dir / "manifest.json").exists()
+    assert (out_dir / "reference.yaml").exists()
+    assert f"extracted to {out_dir.resolve()}" in capsys.readouterr().out
+
+
+def test_main_compile_emits_bundle(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+    target = tmp_path / "out.sdsge"
+
+    assert main_compile([str(extracted), "-o", str(target)]) == 0
+
+    assert target.is_file()
+    assert f"wrote {target}" in capsys.readouterr().out
+
+
+def test_main_compile_default_output_path(tmp_path: Path) -> None:
+    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+
+    assert main_compile([str(extracted)]) == 0
+
+    assert (extracted.parent / f"{extracted.name}.sdsge").is_file()
+
+
+def test_main_compile_carries_created_by_from_the_manifest(tmp_path: Path) -> None:
+    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+
+    packed = compile_directory(extracted, tmp_path / "out.sdsge")
+
+    assert build_from(packed).manifest.created_by == "cli-test"
 
 
 def test_main_compile_returns_nonzero_on_error(
@@ -262,6 +255,21 @@ def test_main_compile_returns_nonzero_on_error(
 ) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
-    rc = main_compile([str(empty)])
-    assert rc == 1
+
+    assert main_compile([str(empty)]) == 1
+
     assert "sdsge-compile:" in capsys.readouterr().err
+
+
+def test_simulation_prefill_survives_the_round_trip(tmp_path: Path) -> None:
+    # The prefill is not a member: it rides inline in the manifest, so it is the
+    # one thing compile picks up from the index rather than from a file.
+    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+    written = json.loads((extracted / "manifest.json").read_text(encoding="utf-8"))
+    assert written["simulation"]["reference"]["T"] == 8
+
+    packed = compile_directory(extracted, tmp_path / "out.sdsge")
+    loaded = build_from(packed)
+
+    assert loaded.simulation is not None
+    assert loaded.simulation["reference"].shocks["u"]["seed"] == 42

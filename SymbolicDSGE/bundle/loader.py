@@ -53,12 +53,7 @@ from ..monte_carlo.mc_constructs import (
 )
 from .container import BundleArchive
 from .manifest import Manifest, Member, SimSpec
-from .parquet import (
-    arrays_from_parquet,
-    collapse_columns,
-    csv_to_columns,
-    from_parquet_columns,
-)
+from .parquet import collapse_columns, csv_to_columns, from_parquet_columns
 
 if TYPE_CHECKING:
     from ..monte_carlo.core import MCPipeline
@@ -516,9 +511,10 @@ def _load_mc_resources(
 ) -> dict[str, Any]:
     """Restore the bulk side-channels referenced by the MC spec.
 
-    ``raw_model_data`` parquet members are reshaped using the ``data_shapes`` recorded
-    on their spec node; ``custom`` op members are unpickled. Keyed by the node's
-    ``data_ref`` / ``func_ref`` so :func:`build_pipeline` can reattach them.
+    ``raw_model_data`` members are read format-agnostically and reshaped using the
+    ``data_shapes`` recorded on their spec node; ``custom`` op members are
+    unpickled. Keyed by the node's ``data_ref`` / ``func_ref`` so
+    :func:`build_pipeline` can reattach them.
     """
     resources: dict[str, Any] = {}
 
@@ -530,7 +526,13 @@ def _load_mc_resources(
     for member in manifest.members_by_kind("mc_raw_model_data"):
         ref = str(member.options.get("ref", ""))
         shapes = shapes_by_ref.get(ref, {})
-        resources[ref] = arrays_from_parquet(archive.read(member.path), shapes)
+        columns = collapse_columns(_load_columns(archive, member))
+        resources[ref] = {
+            name: np.asarray(columns[name], dtype=np.float64).reshape(
+                tuple(int(d) for d in shape)
+            )
+            for name, shape in shapes.items()
+        }
 
     custom_members = manifest.members_by_kind("mc_custom_op")
     if custom_members:
