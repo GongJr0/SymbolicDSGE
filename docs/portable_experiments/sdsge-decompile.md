@@ -43,9 +43,9 @@ The extractor writes each member at its compile-input authoring path, not at its
 | `model_config` (role=reference) | `model/reference.yaml` | `reference.yaml` |
 | `model_config` (role=dgp) | `model/dgp.yaml` | `dgp.yaml` |
 | `estimation_*` | `estimation/...` | `estimation/...` |
-| `mc_*` | `montecarlo/...` | `montecarlo/...` |
+| `mc_pipeline`, `mc_custom_op`, `mc_raw_model_data` | `montecarlo/...` | `montecarlo/...` |
+| `mc_result_meta`, `mc_*_steps`, `mc_*_traces`, `mc_transform_trace`, `mc_postproc_raw` | `montecarlo/result/...` | `montecarlo/result/...` |
 | `raw_data` | `data/...` | `data/...` |
-| Simulation prefill (inline in manifest) | — | `simulation.json` |
 
 ???+ info "Options sidecars"
     Model `Member.options` (e.g. `compile_kwargs`/`solve_kwargs`) are extracted to `<role>.options.json` at the directory root. The compile entry point reads these sidecars on recompile, so the round-trip preserves them.
@@ -61,8 +61,9 @@ With `--csv`, every Parquet member is decoded to CSV. The extension and `manifes
 | --- | --- |
 | `estimation_data` | Observable names from `Member.columns` (semantic headers — user-friendly). |
 | `estimation_trace` | Mechanical `{name}.{j}` expansion from `trace_to_csv`. |
-| `mc_trace` | Same mechanical expansion. |
-| `raw_data` | Existing column names from the Parquet schema. |
+| `mc_test_traces`, `mc_regression_traces` | Step-qualified `{step}.{field}`, extended to `{step}.{field}.{idx}` for a 2-D column. |
+| `mc_transform_trace`, `mc_postproc_raw` | The same qualifier for the member's single array. |
+| `mc_raw_model_data`, `raw_data` | Existing column names from the Parquet schema. |
 
 ???+ warning "Checksum field on decompile"
     The `manifest.json` written by `sdsge-decompile` omits checksums. They were SHA-256 over the archive bytes; after extraction (and especially after `--csv` re-encoding) those bytes change. A subsequent `sdsge-compile` recomputes them. Treat the decompiled `manifest.json` as informational, not as a re-compile input — the compile pass auto-detects the layout.

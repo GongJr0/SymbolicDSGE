@@ -6,15 +6,14 @@ import pytest
 import numpy as np
 
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
-from SymbolicDSGE.monte_carlo import (
+from SymbolicDSGE.monte_carlo import OpType
+from SymbolicDSGE.monte_carlo.builder import build_pipeline, run_pipeline
+from SymbolicDSGE.monte_carlo.catalog import (
     STEP_CATALOG,
     TERMINAL_STEP_TYPES,
-    OpType,
-    build_pipeline,
+    _shocks_from_registry,
     catalog_payload,
-    run_pipeline,
 )
-from SymbolicDSGE.monte_carlo.catalog import _shocks_from_registry
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,

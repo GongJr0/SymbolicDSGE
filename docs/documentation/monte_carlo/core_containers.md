@@ -168,8 +168,9 @@ __Fields and Properties:__
 | rejection_traces | `#!python Mapping[str, ndarray]` | Boolean rejection trace for each test summary. |
 | coefficient_traces | `#!python Mapping[str, ndarray]` | Shortcut for each regression summary's coefficient trace. |
 | regression_status_traces | `#!python Mapping[str, tuple[RegressionStatus, ...]]` | Shortcut for each regression summary's status trace. |
+| run_config | `#!python dict[str, Any]` | Run configuration used to produce this result. |
 | `report_performance()` | `#!python None` | Print the aggregate pipeline throughput report. |
 | `report_step_performance()` | `#!python None` | Print one throughput report line per pipeline step. |
 
-???+ note "P-Value Evaluation"
+???+ note "p-value Evaluation"
     Aggregate `MCTestResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built from the raw statistic arrays the native loop wrote.

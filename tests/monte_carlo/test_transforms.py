@@ -643,7 +643,7 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     import pathlib
 
     from SymbolicDSGE import BundleBuilder, load_bundle
-    from SymbolicDSGE.monte_carlo import build_pipeline as build_live_pipeline
+    from SymbolicDSGE.monte_carlo.builder import build_pipeline as build_live_pipeline
     from SymbolicDSGE.monte_carlo.spec import NodeSpec as LiveNodeSpec
     from SymbolicDSGE.monte_carlo.spec import PipelineSpec as LivePipelineSpec
 

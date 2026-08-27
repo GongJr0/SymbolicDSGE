@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo import MCPipeline, MCPipelineResult
-from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
 from SymbolicDSGE.monte_carlo.postproc import Artifact, Raw, Summary
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,

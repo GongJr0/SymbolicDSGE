@@ -333,7 +333,9 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
 
 def test_runtime_traces_match_available_registry() -> None:
     # The static registry (#179) must equal the keys a run actually produces.
-    from SymbolicDSGE.monte_carlo.step_factories import postproc_step
+    # One producer of every kind: a registry that names a key no run fills sends
+    # an op reading it to a KeyError.
+    from SymbolicDSGE.monte_carlo.step_factories import postproc_step, regression_step
     from SymbolicDSGE.monte_carlo.traces import available_traces
 
     captured: dict[str, set] = {}
@@ -348,6 +350,16 @@ def test_runtime_traces_match_available_registry() -> None:
                 "dat", observables=_observables(5), observable_names=("y", "x")
             ),
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
+            regression_step(
+                "ols",
+                y_source="dat",
+                y_field="observables",
+                X_source="dat",
+                X_field="observables",
+                y_column=0,
+                X_columns=[1],
+                variables=["x"],
+            ),
             standardize_step("s", source="dat", field="observables"),
         ],
         [postproc_step("probe", probe)],

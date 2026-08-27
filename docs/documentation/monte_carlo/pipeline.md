@@ -25,34 +25,6 @@ __Contract:__
 | Producers precede consumers | A step's `source_args` may only reference steps that appear earlier in `per_rep_steps`, and the producer's `op_type` must match the field being read. |
 | Post-loop inputs are traces | Postprocs do not see individual replications. They receive the assembled `traces` mapping built after every replication finishes. |
 
-__Methods:__
-
-```python
-MCPipeline.graph -> PipelineGraph
-```
-
-Return the cached dependency graph inferred from `per_rep_steps` (postprocs are not graph participants). The graph records structural edges used by serialization, including filter dependencies and payload-producing transform/custom steps.
-
-```python
-MCPipeline.to_spec() -> PipelineSpec
-```
-
-Serialize the live pipeline into the graph-form `PipelineSpec`. Bulk side channels are referenced by key: `raw_model_data` arrays and custom callables are written as separate bundle members by `BundleBuilder.add_mc(...)`.
-
-`PipelineSpec` is the archive and UI representation. A bundle loaded back into Python reconstructs a live `LoadedMC.pipeline`.
-
-```python
-MCPipeline.lower_native(
-    *,
-    reference: SolvedModel,
-    dgp: SolvedModel | None = None,
-    n_rep: int,
-    n_jobs: int | None = None,
-) -> LoweredMCRun
-```
-
-Resolve one native runner invocation without executing it: plans the output buffers, allocates the arenas, compiles the native step descriptors, and binds the model inputs. `run(...)` calls this first. Call it directly to inspect the resolved layout, or to hold the allocation across an out-of-band invocation of the runner.
-
 ```python
 MCPipeline.run(
     *,

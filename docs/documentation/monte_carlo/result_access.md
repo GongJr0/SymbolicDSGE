@@ -20,6 +20,7 @@ __Summary Fields and Methods:__
 | mean_statistic | `#!python float64` | Mean test statistic over retained replications. |
 | mean_pval | `#!python float64` | Mean p-value over retained replications. |
 | rejection_rate | `#!python float64` | Share of p-values below `alpha`. |
+| run_config | `#!python dict[str, Any]` | Run configuration used to produce the result. |
 | pval_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the rejection rate. |
 | statistic_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the mean test statistic. |
 
@@ -27,7 +28,7 @@ __Summary Fields and Methods:__
 
 __Transform Output:__
 
-`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is `None` when the pipeline has no transform steps. Retention follows the step's `n_retain`, and the producing step's `retained_reps` records which replications the rows came from.
+`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is empty (`{}`) when the pipeline has no transform steps. Retention follows the step's `n_retain`, and the producing step's `retained_reps` records which replications the rows came from.
 
 These are the same arrays post-loop ops receive under the `payload.<name>` trace keys below, so a value read here needs no post-processing step to reach it.
 
@@ -37,8 +38,8 @@ Every producer's stacked output is addressable by a trace key. Post-loop ops rec
 
 | __Producer__ | __Keys__ |
 |:-------------|---------:|
-| test steps | `test.<name>.statistic`, `test.<name>.pval`, `test.<name>.status` |
-| regression steps | `regression.<name>.coef`, `regression.<name>.r2`, `regression.<name>.status` |
+| test steps | `test.<name>.{statistic, pval, status}` |
+| regression steps | `regression.<name>.{coef, ssr, sst, r2, status, se (OLS only)}` |
 | transform steps | `payload.<name>` |
 
 Data-generation, filter, and post-processing steps emit no consumable trace.

@@ -11,11 +11,12 @@ from __future__ import annotations
 from typing import Any
 
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo import MCPipelineResult, NodeSpec, PostprocSpec
-from SymbolicDSGE.monte_carlo import available_traces as _available_traces
-from SymbolicDSGE.monte_carlo import build_pipeline as build_pipeline
-from SymbolicDSGE.monte_carlo import catalog_payload
-from SymbolicDSGE.monte_carlo import run_pipeline as _run_pipeline
+from SymbolicDSGE.monte_carlo.builder import build_pipeline as build_pipeline
+from SymbolicDSGE.monte_carlo.builder import run_pipeline as _run_pipeline
+from SymbolicDSGE.monte_carlo.catalog import catalog_payload
+from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
+from SymbolicDSGE.monte_carlo.spec import NodeSpec, PostprocSpec
+from SymbolicDSGE.monte_carlo.traces import available_traces as _available_traces
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
     CustomOpValidationError,

@@ -96,8 +96,10 @@ def traces_from_summaries(
     """Bulk numeric trace columns from the test/regression summaries (no I/O).
 
     Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
-    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``). The
-    registry a post-loop ``OpType.POSTPROC`` op receives. The bundle writes its
+    ``"regression.<name>.{coef,ssr,sst,se,r2,status}"`` (``coef`` and ``se`` are
+    2D ``n_rep x k``). ``se`` appears only where the regression carries one. The
+    registry a post-loop ``OpType.POSTPROC`` op receives, and it must agree with
+    :func:`available_traces`, which reads the same subkeys. The bundle writes its
     own projection per step kind; see ``SymbolicDSGE.monte_carlo.serialize``.
     """
     traces: dict[str, NDArray] = {}
@@ -110,6 +112,10 @@ def traces_from_summaries(
     for name, reg_summary in regression_summaries.items():
         keys = regression_trace_keys(name)
         traces[keys["coef"]] = reg_summary.coef_trace
+        traces[keys["ssr"]] = reg_summary.ssr_trace
+        traces[keys["sst"]] = reg_summary.sst_trace
         traces[keys["r2"]] = reg_summary.r2_trace
         traces[keys["status"]] = reg_summary._raw_status
+        if reg_summary._se_trace is not None:
+            traces[keys["se"]] = reg_summary._se_trace
     return traces

@@ -9,59 +9,26 @@ The `monte_carlo` module provides a bounded pipeline for repeated simulation, fi
 The replication loop is native. Building a pipeline resolves the step graph, lowering resolves it into buffer arenas and native step descriptors, and the loop itself then runs without holding the GIL, across as many workers as `n_jobs` requests. Nothing in the per-replication path calls back into Python except a custom transform, which is compiled by Numba and invoked through a pointer ABI.
 
 ???+ info "Reference and DGP Roles"
-    The built-in simulation step draws data from the `dgp` by default, or from the `reference` model when configured with `target="reference"` (a size study, vs. a misspecification study against a distinct DGP). The built-in filtering step then runs `reference.kalman(...)` on the generated observables.
+    The built-in simulation step draws data from the `dgp` by default, or from the `reference` model when configured with `target="reference"` (a size study, vs. a misspecification study against a distinct DGP).
 
-## Pipeline and Spec Exports
-
-The live `MCPipeline` is the normal in-code object. `PipelineSpec` is the portable graph form used by bundle serialization, the GUI backend, and callers that need to validate or compile a stored graph.
+## Pipeline Exports
 
 | Export | Purpose |
-| --- | --- |
+|:---:|:---:|
 | `MCPipeline` | Runnable pipeline object. Loaded bundles reconstruct this directly at `LoadedMC.pipeline`. |
-| `PipelineSpec` / `NodeSpec` / `EdgeSpec` / `PostprocSpec` | Plain dataclass specification. `nodes` and `edges` are the per-replication DAG; `postprocs` is the post-loop phase. Serialized to JSON inside a bundle's `montecarlo/pipeline.json`. |
-| `validate_pipeline_spec(spec, *, has_reference, has_dgp)` | Topological validation against the step-kind sets and catalog metadata; returns `(ordered per-rep nodes, postprocs)` when well-formed. |
-| `build_pipeline(ordered, postprocs=(), *, resources=None)` | Compile validated per-rep nodes and postprocs into an `MCPipeline` ready to run. `resources` reattaches raw-data arrays and custom callables referenced by a serialized spec. |
-| `run_pipeline(spec, *, reference, dgp, n_rep, fail_fast, n_jobs=None, verbosity=0, resources=None)` | Validate, compile, and run a `PipelineSpec`; returns `MCPipelineResult`. Use this for explicit spec workflows. |
-| `available_traces(spec)` | Every across-replication trace key the spec's producers will emit, in node order. Enumerable before a run, so a post-loop op's trace references can be validated up front. |
-
-## Step and Artifact Exports
-
-| Export | Purpose |
-| --- | --- |
 | `MCStep` / `OpType` | The step container and its operation-role enum. Prefer the factories in `SymbolicDSGE.monte_carlo.step_factories` over hand-building steps. |
 | `custom_transform` / `NumbaCustomFunc` | Author a per-replication custom transform. The function is compiled by Numba and called from the native loop. |
 | `pandas_operation` / `PandasCustomFunc` | Author a post-loop custom op. Runs once in Python, may build a DataFrame. |
 | `Summary` / `Raw` | Return wrappers a post-loop op uses to tag an output as renderable or as bulk data. |
 
-```python
-from SymbolicDSGE import load_bundle
-
-loaded = load_bundle("experiment-1.sdsge")
-result = loaded.mc.pipeline.run(
-    reference=loaded.reference,
-    dgp=loaded.dgp,
-    n_rep=500,
-    fail_fast=True,
-)
-```
 
 ???+ tip "Bundle integration"
-    A loaded `LoadedMC.pipeline` is a runnable `MCPipeline` rebuilt from the stored spec and resources. `LoadedMC.spec` remains available for UI rendering and archive inspection.
+    Both `MCPipeline` and `MCPipelineResult` are directly accessible from a loaded bundle containing them.
 
-## Step catalog
+    ```python
+    from SymbolicDSGE import load_bundle
 
-`STEP_CATALOG` is the registry for catalog-backed built-ins and the GUI step palette. Resource-backed node kinds such as `raw_model_data`, `transform:custom`, and `postproc:custom` reattach large arrays or callables through the `resources` mapping when a serialized pipeline is compiled.
-
-| Name | Purpose |
-| --- | --- |
-| `STEP_CATALOG` | Mapping from `step_type` (string) to `StepDefinition`. |
-| `StepDefinition` | Per-step metadata: human label, parameter `FieldSpec` list, source-input bindings, operation role, category, factory, and optional parameter compile hook. |
-| `FieldSpec` | One parameter on a step: name, type, default, validation hints. Drives the GUI form generation. |
-| `DATAGEN_STEP_TYPES` | Catalog-local step-kind set for valid datagen roots: `"simulation"` and `"raw_model_data"`. |
-| `TRANSFORM_STEP_TYPES` | Catalog-local step-kind set for catalog-backed transforms. |
-| `TERMINAL_STEP_TYPES` | Catalog-local step-kind set for test/regression summaries. Terminal steps cannot link forward. |
-| `POSTPROC_STEP_TYPES` | Catalog-local step-kind set for post-loop ops (e.g. `kde`) run once after the replication loop. |
-| `catalog_payload()` | JSON-safe rendering of the catalog for the GUI / external consumers. |
-
-???+ note "Step-kind sets"
-    The step-kind sets are implementation metadata in `SymbolicDSGE.monte_carlo.catalog`. They describe compiler behavior but are not the primary user-facing import surface.
+    loaded = load_bundle("experiment-1.sdsge")
+    pipeline = loaded.mc.pipeline
+    result = loaded.mc.result
+    ```

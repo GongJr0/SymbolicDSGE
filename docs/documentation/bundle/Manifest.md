@@ -87,12 +87,20 @@ __Recognized kinds (`MEMBER_KINDS`):__
 | `estimation_data` | Observed `y` matrix (CSV or Parquet). |
 | `estimation_trace` | MCMC posterior columns (CSV or Parquet). |
 | `mc_pipeline` | `PipelineSpec` JSON. |
-| `mc_result` | Trace-free MC run document (JSON). |
-| `mc_trace` | MC trace columns (CSV or Parquet). |
 | `mc_raw_model_data` | Raw model data arrays referenced by MC `raw_model_data` nodes. |
 | `mc_custom_op` | Bundle-safe custom operation referenced by `transform:custom` or `postproc:custom` specs. |
-| `mc_postproc` | Bulk postproc ndarray artifact. |
-| `mc_postproc_table` | Tabular postproc artifact. |
+| `mc_result_meta` | The run's own metadata: counts, timings, failures, and the `run_config` that reproduces it. |
+| `mc_test_steps` | Every test step's meta, keyed by step name (JSON). |
+| `mc_test_traces` | Every test step's trace columns in one block (CSV or Parquet). |
+| `mc_regression_steps` | Every regression step's meta, keyed by step name (JSON). |
+| `mc_regression_traces` | Every regression step's trace columns in one block (CSV or Parquet). |
+| `mc_transform_steps` | Every transform step's meta, keyed by step name (JSON). |
+| `mc_transform_trace` | One transform array: a payload or its retained rep indices (CSV or Parquet). |
+| `mc_postproc_steps` | Every post-loop step's meta and inline `summary`, keyed by step name (JSON). |
+| `mc_postproc_raw` | One post-loop step's bulk `Raw` array (CSV or Parquet). |
+
+???+ note "One member per step kind, plus one per unpacked array"
+    Tests and regressions pack every step's columns into a single block, qualified `{step}.{field}` and extended to `{step}.{field}.{idx}` where a column is 2-D. Transform payloads and postproc `Raw` arrays share no shape with anything, so each takes a member of its own and carries its `name` and `field` in `Member.options`.
 
 ???+ note "Kind whitelist"
     `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`. Adding a new kind requires bumping `SDSGE_FORMAT_VERSION` so older readers don't silently drop it.

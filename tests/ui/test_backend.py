@@ -12,7 +12,7 @@ from SymbolicDSGE.ui.estimation import (
     build_estimation_inputs,
     serialize_estimation_result,
 )
-from SymbolicDSGE.monte_carlo import build_pipeline
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.ui.mc import serialize_pipeline_result
 from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
 from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
@@ -21,8 +21,7 @@ from SymbolicDSGE.ui.serializers import decode_array, encode_array
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCTestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.monte_carlo import MCPipelineResult
-from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
+from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
 from SymbolicDSGE.regression.ols import MCRegressionResult, ols
 
 

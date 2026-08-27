@@ -6,12 +6,9 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.core.shock_generators import Shock
-from SymbolicDSGE.monte_carlo import (
-    EdgeSpec,
-    MCPipeline,
-    PipelineSpec,
-    build_pipeline,
-)
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
+from SymbolicDSGE.monte_carlo.spec import EdgeSpec, PipelineSpec
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     raw_model_data_step,

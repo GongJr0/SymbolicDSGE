@@ -17,22 +17,26 @@ A bundle source directory has at least one model YAML at its root. Every other e
 
 ```text
 my-experiment/
-├── reference.yaml                # required (or dgp.yaml, or both)
-├── reference.options.json        # optional: compile_kwargs / solve_kwargs
-├── dgp.yaml                      # optional
-├── dgp.options.json              # optional
-├── estimation/
-│   ├── spec.json                 # required if estimation/ is present
-│   ├── result.json               # optional result metadata
-│   ├── observed.csv|.parquet     # optional observed data
-│   └── posterior.csv|.parquet    # optional MCMC posterior traces
-├── montecarlo/
-│   ├── pipeline.json             # required if montecarlo/ is present
-│   ├── result.json               # optional run document (trace-free)
-│   └── traces.csv|.parquet       # optional run traces
-├── simulation.json               # optional simulation prefill
-└── data/
-    └── *.csv|*.parquet           # optional raw data members
+    ├── manifest.json                       # the index, and the simulation prefill
+    ├── reference.yaml                      # model_config, at the root here
+    ├── dgp.yaml                            # optional second role
+    ├── data/*.parquet|.csv                 # raw observable files
+    ├── estimation/
+    │   ├── spec.json
+    │   ├── result.json                     # optional
+    │   ├── observed.parquet|.csv           # optional
+    │   └── posterior.parquet|.csv          # optional, MCMC only
+    └── montecarlo/
+        ├── pipeline.json
+        ├── custom/{step}.pkl               # custom ops, cloudpickled
+        ├── data/{step}.parquet|.csv        # raw_model_data arrays
+        └── result/                         # optional; present with a run
+            ├── meta.json                   # the run's own metadata + run_config
+            ├── tests/{test_steps.json, test_traces.parquet|.csv}
+            ├── regressions/{regression_steps.json, regression_traces.parquet|.csv}
+            ├── transforms/{transform_steps.json, {step}_{field}.parquet|.csv}
+            └── postproc/{postproc_steps.json, {step}_{field}.parquet|.csv}
+
 ```
 
 ???+ note "Model role files"
