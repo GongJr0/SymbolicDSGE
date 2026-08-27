@@ -258,7 +258,7 @@ def _compile_estimation(
         )
     observed, _ = _load_observed(obs_path, expected_observables)
     builder.add_estimation(
-        EstimatorSpec(y=observed.tolist(), params=params),
+        EstimatorSpec(y=observed.tolist(), params=params),  # type: ignore
         as_parquet=not csv_only,
     )
 
@@ -291,7 +291,7 @@ def _compile_mc(builder: BundleBuilder, mc_dir: Path, *, csv_only: bool) -> None
     if not pipeline_path.exists():
         raise CompileError(f"{mc_dir}/ is present but pipeline.json is missing.")
     pipeline = cast(PipelineSpec, pipeline_path.read_text(encoding="utf-8"))
-    builder.add_mc(pipeline)
+    builder.add_mc(pipeline)  # type: ignore
 
     # Pre-split mc_result + mc_trace authoring: embed verbatim via add_member
     # (the in-code add_mc takes a live MCPipelineResult and splits it).

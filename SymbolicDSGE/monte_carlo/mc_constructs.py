@@ -262,17 +262,18 @@ class MCPipelineResult:
     meta: MCMeta
     n_rep: int
     n_successful: int
-    test_summaries: Mapping[str, MCTestResult]
-    transform_outputs: Mapping[str, NDF] | None
-    failures: tuple[MCFailure, ...] = ()
+    test_summaries: Mapping[str, MCTestResult] = dataclass_field(default_factory=dict)
+    transform_outputs: Mapping[str, NDF] = dataclass_field(default_factory=dict)
     regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
         default_factory=dict
     )
+    failures: tuple[MCFailure, ...] = ()
 
     #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name. Each step
     #: contributes one :class:`~SymbolicDSGE.monte_carlo.postproc.Artifact`,
     #: holding its ``raw`` and ``summary`` slots (either may be ``None``).
     postproc: Mapping[str, Artifact] = dataclass_field(default_factory=dict)
+    run_config: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:

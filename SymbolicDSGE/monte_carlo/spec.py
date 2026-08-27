@@ -128,3 +128,49 @@ class MCRegressionResultSpec:
     retained_reps: NDI
     _raw_status: NDI
     _se_trace: NDF | None = None
+
+
+class MCFailureSpec(TypedDict):
+    rep_idx: int
+    step_name: str
+    error_type: str
+    message: str
+
+
+class MCRunMeta(TypedDict):
+    """A run's own metadata, independent of any one step.
+
+    Carries what the run recorded, never what it can recompute: the throughput
+    rates, ``succeeded``, and the failed-step tallies are all properties derived
+    from the timings and ``failures`` beside them.
+    """
+
+    n_rep: int
+    n_successful: int
+    n_retained_by_step: Mapping[str, int]
+    elapsed_s: float
+    step_elapsed_s: Mapping[str, float]
+    step_counts: Mapping[str, int]
+    step_failures: Mapping[str, int]
+    postproc_elapsed_s: Mapping[str, float]
+    failures: list[MCFailureSpec]
+    run_config: Mapping[str, Any]
+
+
+class MCTransformResultMeta(TypedDict):
+    step_name: str
+    shape: list[int]
+
+
+class MCPostprocResultMeta(TypedDict):
+    """A post-loop step's non-bulk half.
+
+    ``shape`` describes the ``Raw`` slot when the op declared one, and is
+    ``None`` otherwise. ``summary`` is the aggregate the op returned, already
+    converted to a JSON-native form; it is inline by definition and carries no
+    per-replication structure.
+    """
+
+    step_name: str
+    shape: list[int] | None
+    summary: Any

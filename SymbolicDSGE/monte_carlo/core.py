@@ -39,6 +39,11 @@ from .mc_constructs import (
 
 NDF = NDArray[np.float64]
 
+#: Characters a step name may not contain. A step name is written into bundle
+#: member paths and prefixes its trace columns as ``{step}.{field}``, so path
+#: separators and the column separator are spoken for.
+_RESERVED_NAME_CHARS = frozenset(".:/\\")
+
 
 def is_failed(native_run: NativeRunResult) -> bool:
     """Whether the native runner stopped with a non-success status."""
@@ -82,6 +87,14 @@ class MCPipeline:
         names = [step.name for step in (*per_rep_steps, *postproc_steps)]
         if len(set(names)) != len(names):
             raise ValueError("MCPipeline step names must be unique.")
+        for name in names:
+            bad = sorted(set(name) & _RESERVED_NAME_CHARS)
+            if bad:
+                raise ValueError(
+                    f"MCPipeline step name {name!r} uses reserved characters "
+                    f"{''.join(bad)!r}. A step name becomes a bundle member path "
+                    f"and a trace column qualifier, which reserve them."
+                )
         datagens = [step for step in per_rep_steps if step.op_type is OpType.DATAGEN]
         if len(datagens) != 1:
             raise ValueError("MCPipeline requires exactly one DATAGEN step.")
@@ -328,8 +341,8 @@ class MCPipeline:
             elif s.op_type is OpType.TRANSFORM:
                 transforms.append(s.name)
 
-        test_summaries = _summarize_tests(tests, prep, n_rep)
-        regression_summaries = _summarize_regressions(regressions, prep, n_rep)
+        test_summaries = _compile_tests(tests, prep, n_rep)
+        regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
 
         postprocs, postproc_wall_times = self._run_postproc(
@@ -399,10 +412,17 @@ class MCPipeline:
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
             ),
             test_summaries=test_summaries,
-            transform_outputs=payload_columns if payload_columns else None,
+            transform_outputs=payload_columns,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
             postproc=postprocs,
+            run_config={
+                "n_rep": int(n_rep),
+                "fail_fast": bool(fail_fast),
+                "verbosity": int(verbosity),
+                "n_jobs": int(n_jobs) if n_jobs is not None else None,
+                "check_memory_availability": bool(check_memory_availability),
+            },
         )
         if verbosity == 1:
             report_mc_performance(meta)
@@ -534,7 +554,7 @@ def _validate_source_producer(
         )
 
 
-def _summarize_tests(
+def _compile_tests(
     test_names: Sequence[str],
     lowered: LoweredMCRun,
     n_rep: int,
@@ -592,7 +612,7 @@ def _resolve_payloads(
     return payloads
 
 
-def _summarize_regressions(
+def _compile_regressions(
     regression_names: Sequence[str],
     lowered: LoweredMCRun,
     n_rep: int,
