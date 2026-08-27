@@ -8,6 +8,7 @@ tags:
 ```python
 rolling_mean_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -30,5 +31,6 @@ __Key Parameters:__
 | burn_in | `0` | Rows dropped before transformation. |
 | drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | window | `10` | Rolling window length. Must be at least `1` and no longer than the selected input. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 
 The output is stored in the step payload and can be consumed downstream with `source` set to this step name and `field="payload"`.

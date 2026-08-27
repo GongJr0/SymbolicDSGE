@@ -20,7 +20,6 @@ __Summary Fields and Methods:__
 | mean_statistic | `#!python float64` | Mean test statistic over retained replications. |
 | mean_pval | `#!python float64` | Mean p-value over retained replications. |
 | rejection_rate | `#!python float64` | Share of p-values below `alpha`. |
-| run_config | `#!python dict[str, Any]` | Run configuration used to produce the result. |
 | pval_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the rejection rate. |
 | statistic_confidence_interval(...) | `#!python tuple[float64, float64]` | Confidence interval for the mean test statistic. |
 
@@ -46,7 +45,7 @@ Data-generation, filter, and post-processing steps emit no consumable trace.
 
 __Post-Loop Artifacts:__
 
-`MCPipelineResult.postproc` maps each post-loop step to its returned artifacts, keyed by step name, or `"<step>.<key>"` when the op returns several named outputs. Values are `Summary` (renderable: scalar, table, or small array) or `Raw` (bulk numeric data kept as data).
+`MCPipelineResult.postproc` maps each post-loop step to its returned artifacts, keyed by step name. Values are `Summary` (renderable: scalar, table, or small array) or `Raw` (bulk numeric data).
 
 __Performance Reporting:__
 

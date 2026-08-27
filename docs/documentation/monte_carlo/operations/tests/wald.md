@@ -7,6 +7,7 @@ tags:
 ```python
 wald_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -37,6 +38,7 @@ __Inputs:__
 | kernel | `"bartlett"` | HAC kernel. |
 | bandwidth | `"auto"` | HAC bandwidth selector or explicit integer. |
 | alpha | `0.05` | Test size. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 
 __Kinds:__
 

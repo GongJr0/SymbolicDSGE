@@ -8,6 +8,7 @@ tags:
 ```python
 regression_step(
     name: str,
+    n_retain: int = -1,
     *,
     kind: Literal[
         "ols",
@@ -68,3 +69,4 @@ __Inputs:__
 | drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | variables | `None` | Optional names for design columns. |
 | kind_kwargs | none | Extra estimator arguments, such as `alpha`, `l1_ratio`, or grid settings. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |

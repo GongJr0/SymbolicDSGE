@@ -8,6 +8,7 @@ tags:
 ```python
 diff_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -30,5 +31,6 @@ __Key Parameters:__
 | burn_in | `0` | Rows dropped before transformation. |
 | drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | order | `1` | Number of differences. Must be at least `1`. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 
 The output has `order` fewer rows than the selected input and is stored as a payload.

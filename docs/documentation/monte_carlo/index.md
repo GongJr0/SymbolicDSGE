@@ -20,7 +20,7 @@ The replication loop is native. Building a pipeline resolves the step graph, low
 | `custom_transform` / `NumbaCustomFunc` | Author a per-replication custom transform. The function is compiled by Numba and called from the native loop. |
 | `pandas_operation` / `PandasCustomFunc` | Author a post-loop custom op. Runs once in Python, may build a DataFrame. |
 | `Summary` / `Raw` | Return wrappers a post-loop op uses to tag an output as renderable or as bulk data. |
-
+| `replication_shocks` | Generate a shock sequence for a single replication of a simulation step. |
 
 ???+ tip "Bundle integration"
     Both `MCPipeline` and `MCPipelineResult` are directly accessible from a loaded bundle containing them.

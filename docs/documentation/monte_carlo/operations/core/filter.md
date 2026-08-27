@@ -7,6 +7,7 @@ tags:
 ```python
 reference_filter_step(
     name: str = "filter",
+    n_retain: int = -1,
     *,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
@@ -30,6 +31,7 @@ __Inputs:__
 |:---------|:-----------:|----------------:|
 | name | `"filter"` | Runtime step name. Downstream steps use this as `source`. |
 | filter_mode | `"linear"` | Filter mode: `"linear"`, `"extended"`, or `"unscented"`. |
+| n_retain | `-1` | Number of observations to retain from the filtered path. `-1` retains all replications. |
 | observables | `None` | Observable names passed to `reference.kalman(...)`. |
 | x0 | `None` | Initial state override. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | P0 | `None` | Initial state covariance override with the same timing as `x0`. `None` uses the `P0` matrix from the reference model's `KalmanConfig`. |
@@ -44,7 +46,6 @@ __Downstream Fields:__
 | __Field__ | __Description__ |
 |:----------|----------------:|
 | `x_pred`, `x_filt` | Predicted and filtered model variable paths. |
-| `constant` | State offset used by linear and extended results to report levels. It is `NaN` for unscented results, whose kernel forms levels itself. |
 | `y_pred`, `y_filt` | Predicted and filtered observable paths. |
 | `innov`, `std_innov` | Raw and standardized innovations. |
 | `eps_hat` | Shock estimates for modes that support `return_shocks=True`. |

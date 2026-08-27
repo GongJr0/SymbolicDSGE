@@ -11,8 +11,6 @@ class LoadedBundle()
 
 `LoadedBundle` is the return value of `load_bundle` (and the underlying `bundle.loader.build_from`). Each field is `None` when the corresponding component is absent from the archive.
 
-`LoadedBundle` is re-exported at `SymbolicDSGE` root.
-
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
@@ -57,7 +55,7 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| pipeline | `#!python MCPipeline` | Runnable pipeline rebuilt from `spec` and `resources` during load. |
+| pipeline | `#!python MCPipeline` | Runnable pipeline. |
 | result | `#!python MCPipelineResult | None` | The reconstructed result object, when available. |
 
 ???+ tip "Re-running a loaded pipeline"

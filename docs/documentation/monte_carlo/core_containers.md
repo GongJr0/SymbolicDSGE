@@ -71,7 +71,7 @@ __Fields:__
 &nbsp;
 
 ```python
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MCFailure(
     rep_idx: int,
     step_name: str,
@@ -140,10 +140,11 @@ class MCPipelineResult(
     n_rep: int,
     n_successful: int,
     test_summaries: Mapping[str, MCTestResult],
-    transform_outputs: Mapping[str, ndarray] | None,
-    failures: tuple[MCFailure, ...] = (),
+    transform_outputs: Mapping[str, ndarray] = {},
     regression_summaries: Mapping[str, MCRegressionResult] = {},
-    postproc: Mapping[str, Any] = {},
+    failures: tuple[MCFailure, ...] = (),
+    postproc: Mapping[str, Artifact] = {},
+    run_config: dict[str, Any] = {},
 )
 ```
 
@@ -157,10 +158,10 @@ __Fields and Properties:__
 | n_rep | `#!python int` | Requested replication count. |
 | n_successful | `#!python int` | Number of completed replications. |
 | test_summaries | `#!python Mapping[str, MCTestResult]` | Per-test aggregate result containers. |
-| transform_outputs | `#!python Mapping[str, ndarray] | None` | Retained transform output stacked across replications, keyed by step name, each shaped `(n_retained, *output_shape)`. `None` when the pipeline has no transform steps. Post-loop ops see the same arrays as `payload.<name>` traces. |
+| transform_outputs | `#!python Mapping[str, ndarray]` | Retained transform output stacked across replications, keyed by step name, each shaped `(n_retained, *output_shape)`. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
-| postproc | `#!python Mapping[str, Any]` | Post-loop artifacts keyed by step name, or `"<step>.<key>"` for multi-artifact ops. Values are `Summary` or `Raw` wrappers. |
+| postproc | `#!python Mapping[str, Artifact]` | Post-loop artifacts keyed by step name. Values are `Artifact` instances holding optional `Raw` and `Summary` data. |
 | succeeded | `#!python bool` | `True` when no per-replication or post-loop failures were collected. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
@@ -169,8 +170,3 @@ __Fields and Properties:__
 | coefficient_traces | `#!python Mapping[str, ndarray]` | Shortcut for each regression summary's coefficient trace. |
 | regression_status_traces | `#!python Mapping[str, tuple[RegressionStatus, ...]]` | Shortcut for each regression summary's status trace. |
 | run_config | `#!python dict[str, Any]` | Run configuration used to produce this result. |
-| `report_performance()` | `#!python None` | Print the aggregate pipeline throughput report. |
-| `report_step_performance()` | `#!python None` | Print one throughput report line per pipeline step. |
-
-???+ note "p-value Evaluation"
-    Aggregate `MCTestResult` objects compute vectorized p-values when `MCPipelineResult.test_summaries` is built from the raw statistic arrays the native loop wrote.
