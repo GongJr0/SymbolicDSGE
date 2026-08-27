@@ -27,9 +27,9 @@ __Contract:__
 
 ```python
 MCPipeline.run(
-    *,
     reference: SolvedModel,
     dgp: SolvedModel | None = None,
+    *,
     n_rep: int,
     fail_fast: bool = True,
     verbosity: int = 1,

@@ -16,7 +16,7 @@ from SymbolicDSGE.monte_carlo.builder import run_pipeline as _run_pipeline
 from SymbolicDSGE.monte_carlo.catalog import catalog_payload
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PostprocSpec
-from SymbolicDSGE.monte_carlo.traces import available_traces as _available_traces
+from SymbolicDSGE.monte_carlo.traces import _trace_keys
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
     CustomOpValidationError,
@@ -57,7 +57,7 @@ def mc_available_traces(spec: MCPipelineSpec) -> dict[str, list[str]]:
     Feeds the post-loop trace picker (a ``type="trace"`` field) so a POSTPROC op
     can select which test/regression/transform producer it consumes.
     """
-    return {"traces": _available_traces(spec.to_core())}
+    return {"traces": _trace_keys(spec.to_core())}
 
 
 def _custom_func_class(step_type: str) -> type[CustomFunc]:

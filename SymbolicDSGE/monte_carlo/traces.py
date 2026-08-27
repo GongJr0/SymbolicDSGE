@@ -32,6 +32,11 @@ from .catalog import TERMINAL_STEP_TYPES, TRANSFORM_STEP_TYPES
 from .mc_constructs import MCStep, OpType
 from .spec import PipelineSpec
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .core import MCPipeline
+
 _TEST_SUBKEYS = ("statistic", "pval", "status")
 _REGRESSION_SUBKEYS = ("coef", "ssr", "sst", "se", "r2", "status")
 
@@ -77,7 +82,7 @@ def trace_keys_for_step(step: MCStep) -> list[str]:
     return []  # datagen / filter / postproc produce no consumable trace
 
 
-def available_traces(spec: PipelineSpec) -> list[str]:
+def _trace_keys(spec: PipelineSpec) -> list[str]:
     """Every across-rep trace key the pipeline's producers will emit (in node order).
 
     The set a POSTPROC op may reference; used to populate the GUI trace picker and
@@ -87,6 +92,13 @@ def available_traces(spec: PipelineSpec) -> list[str]:
     for node in spec["nodes"]:
         keys.extend(trace_keys_for(node["step_type"], node["name"]))
     return keys
+
+
+def available_traces(pipeline: MCPipeline) -> dict[str, list[str]]:
+    """The trace keys each per-rep step in the pipeline will emit.
+    Lists the available traces a POSTPROC may refer to.
+    """
+    return {step.name: trace_keys_for_step(step) for step in pipeline.per_rep_steps}
 
 
 def traces_from_summaries(

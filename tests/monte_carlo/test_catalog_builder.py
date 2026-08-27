@@ -519,7 +519,7 @@ def test_build_postproc_custom_from_resources() -> None:
 
 # --- #179 trace registry + POSTPROC trace-reference validation ---------------
 
-from SymbolicDSGE.monte_carlo.traces import available_traces  # noqa: E402
+from SymbolicDSGE.monte_carlo.traces import _trace_keys
 
 
 def test_available_traces_enumerates_producer_keys() -> None:
@@ -553,7 +553,7 @@ def test_available_traces_enumerates_producer_keys() -> None:
         ],
         edges=[],
     )
-    assert set(available_traces(spec)) == {
+    assert set(_trace_keys(spec)) == {
         "test.jb.statistic",
         "test.jb.pval",
         "test.jb.status",

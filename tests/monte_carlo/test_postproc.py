@@ -336,7 +336,7 @@ def test_runtime_traces_match_available_registry() -> None:
     # One producer of every kind: a registry that names a key no run fills sends
     # an op reading it to a KeyError.
     from SymbolicDSGE.monte_carlo.step_factories import postproc_step, regression_step
-    from SymbolicDSGE.monte_carlo.traces import available_traces
+    from SymbolicDSGE.monte_carlo.traces import _trace_keys
 
     captured: dict[str, set] = {}
 
@@ -366,4 +366,4 @@ def test_runtime_traces_match_available_registry() -> None:
     )
     pipe.run(reference=_REFERENCE, n_rep=5, verbosity=0)
 
-    assert captured["keys"] == set(available_traces(pipe.to_spec()))
+    assert captured["keys"] == set(_trace_keys(pipe.to_spec()))

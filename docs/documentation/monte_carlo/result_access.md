@@ -33,7 +33,7 @@ These are the same arrays post-loop ops receive under the `payload.<name>` trace
 
 __Across-Replication Traces:__
 
-Every producer's stacked output is addressable by a trace key. Post-loop ops receive these keys in their `traces` mapping, and `available_traces(spec)` enumerates them from a spec alone, before a run.
+Every producer's stacked output is addressable by a trace key. Post-loop ops receive these keys in their `traces` mapping, and `available_traces(pipeline)` enumerates them from a spec alone, before a run.
 
 | __Producer__ | __Keys__ |
 |:-------------|---------:|

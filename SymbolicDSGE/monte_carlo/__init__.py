@@ -18,6 +18,7 @@ from .mc_constructs import (
     OpType,
 )
 from .shock_native import replication_shocks
+from .traces import available_traces
 
 __all__ = [
     # pipeline
@@ -33,4 +34,6 @@ __all__ = [
     "Raw",
     # reproducing one replication
     "replication_shocks",
+    # Trace list for postproc
+    "available_traces",
 ]
