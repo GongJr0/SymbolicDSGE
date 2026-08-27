@@ -288,8 +288,8 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 
     # The recovered artifacts serialize to what the live result does.
     assert (
-        serialize_pipeline_result(loaded.mc.result, run_id="")["postproc"]
-        == serialize_pipeline_result(result, run_id="")["postproc"]
+        serialize_pipeline_result(loaded.mc.result)["postproc"]
+        == serialize_pipeline_result(result)["postproc"]
     )
     assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
         "raw_model_data",

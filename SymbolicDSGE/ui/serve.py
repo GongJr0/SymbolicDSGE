@@ -109,9 +109,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     if loaded.mc is not None:
         mc.spec = dict(loaded.mc.pipeline.to_spec())
         if loaded.mc.result is not None:
-            # The run id keyed a live session's run registry, and a loaded run
-            # is in no registry, so it stays empty as it did on the wire before.
-            mc.result = serialize_pipeline_result(loaded.mc.result, run_id="")
+            mc.result = serialize_pipeline_result(loaded.mc.result)
 
     # Spec only: the session replays it against the model once both are
     # installed, which is what fills the result.

@@ -493,11 +493,8 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
     result = simulation["result"]
     assert result["kind"] == "sim" and result["T"] == 8
     assert {"Infl", "Rate"} <= {series["name"] for series in result["series"]}
-    # Filed as a real run, so it is listed and fetchable like any other.
-    assert [(run["kind"], run["role"]) for run in body["runs"]] == [
-        ("sim", "reference")
-    ]
-    assert client.get(f"/api/run/{result['run_id']}").status_code == 200
+    # The replay lands in the tab's own result slot, which is where a run lives.
+    assert simulation["result"]["role"] == "reference"
 
 
 def test_bundled_simulation_replay_reproduces_rather_than_redraws(

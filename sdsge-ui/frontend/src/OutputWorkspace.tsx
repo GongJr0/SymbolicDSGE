@@ -33,7 +33,7 @@ interface ChartData {
 }
 
 interface TableHandle {
-  exportCsv: (role: string, runId: string) => void;
+  exportCsv: (role: string) => void;
 }
 
 export const OutputWorkspace = memo(function OutputWorkspace({
@@ -56,7 +56,7 @@ export const OutputWorkspace = memo(function OutputWorkspace({
   const figures = result.figures ?? [];
 
   function exportCsv() {
-    tablePanelRef.current?.exportCsv(result.role, result.run_id);
+    tablePanelRef.current?.exportCsv(result.role);
   }
 
   const topPanels: PanelDef[] = [
@@ -167,13 +167,13 @@ const TablePanel = forwardRef<
   const containerRef = useRef<HTMLDivElement>(null);
 
   useImperativeHandle(ref, () => ({
-    exportCsv(role: string, runId: string) {
+    exportCsv(role: string) {
       tableRef.current?.hotInstance
         ?.getPlugin("exportFile")
         .downloadFile("csv", {
           bom: true,
           colHeaders: true,
-          filename: `${role}-${runId}-[YYYY]-[MM]-[DD]`,
+          filename: `${role}-[YYYY]-[MM]-[DD]`,
         });
     },
   }));

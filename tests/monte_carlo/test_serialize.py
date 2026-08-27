@@ -188,7 +188,7 @@ def test_json_safe_reaches_into_containers() -> None:
 
 def test_ui_wire_stays_one_flat_json_document() -> None:
     result = _run()
-    wire = serialize_pipeline_result(result, run_id="r1")
+    wire = serialize_pipeline_result(result)
 
     assert wire["kind"] == "mc"
     # Derived values the bundle refuses to store are present here, since this is
@@ -207,7 +207,7 @@ def test_postproc_summary_mapping_inlines() -> None:
         }
     )
 
-    wire = serialize_pipeline_result(result, run_id="r1")
+    wire = serialize_pipeline_result(result)
 
     assert wire["postproc"]["m"]["summary"]["value"] == {"a": [1, 2], "b": 0.5}
     json.dumps(wire)

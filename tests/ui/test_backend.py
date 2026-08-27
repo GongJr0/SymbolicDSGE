@@ -189,10 +189,6 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     x_arr = decode_array(ArrayEnvelope.model_validate(x_series["array"]))
     assert x_arr.shape == (5, solved_body["A_shape"][0])
 
-    fetched = client.get(f"/api/run/{sim_body['run_id']}")
-    assert fetched.status_code == 200
-    assert fetched.json()["run_id"] == sim_body["run_id"]
-
     shocked = client.post(
         "/api/run/sim",
         json={
@@ -540,10 +536,6 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     assert body["step_it_s"]["datagen"] > 0
     assert body["step_counts"]["datagen"] == 3
     assert body["n_retained_by_step"]["datagen"] == 3
-
-    fetched = client.get(f"/api/run/{body['run_id']}")
-    assert fetched.status_code == 200
-    assert fetched.json()["kind"] == "mc"
 
     # The run fills the MC tab's bundle-bound slots, through the core spec so
     # the shape matches what a bundle stores rather than the request model.
@@ -1181,7 +1173,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
         regression_summaries={"ols": regressions},
     )
 
-    payload = serialize_pipeline_result(result, run_id="run")
+    payload = serialize_pipeline_result(result)
 
     assert payload["test_summaries"]["diagnostic"]["statistic_ci"][0] is not None
     assert payload["test_summaries"]["diagnostic"]["rejection_ci"][0] is not None

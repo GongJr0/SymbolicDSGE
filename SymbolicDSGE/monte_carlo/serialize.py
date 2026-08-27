@@ -37,11 +37,8 @@ from .spec import (
 NDF = NDArray[np.float64]
 
 
-def serialize_pipeline_result(
-    result: MCPipelineResult, *, run_id: str
-) -> dict[str, Any]:
+def serialize_pipeline_result(result: MCPipelineResult) -> dict[str, Any]:
     return {
-        "run_id": run_id,
         "kind": "mc",
         "n_rep": result.n_rep,
         "n_retained_by_step": dict(result.meta.n_retained_by_step),

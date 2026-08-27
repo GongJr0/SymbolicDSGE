@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,14 +129,7 @@ def create_app(
                 n_jobs=request.n_jobs,
                 verbosity=request.verbosity,
             )
-            run_id = str(uuid4())
-            payload = serialize_pipeline_result(result, run_id=run_id)
-            ui_session.record_run(
-                run_id=run_id,
-                kind="mc",
-                role="reference",
-                payload=payload,
-            )
+            payload = serialize_pipeline_result(result)
             # Through the core spec, so the slot matches what a bundle stores
             # rather than the request model that happened to carry it.
             ui_session.workspace.mc.spec = dict(request.pipeline.to_core())
@@ -199,16 +191,6 @@ def create_app(
         except (KeyError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,
-                detail=_error_detail(exc),
-            ) from exc
-
-    @app.get("/api/run/{run_id}")
-    def get_run(run_id: str) -> dict[str, Any]:
-        try:
-            return ui_session.get_run(run_id)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=404,
                 detail=_error_detail(exc),
             ) from exc
 

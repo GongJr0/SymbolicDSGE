@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Mapping, cast
-from uuid import uuid4
 
 # Set non-interactive backend before any user code can import pyplot.
 try:
@@ -75,14 +74,6 @@ class ModelSlot:
     solved: SolvedModel | None = None
 
 
-@dataclass(frozen=True)
-class RunRecord:
-    run_id: str
-    kind: str
-    role: Role
-    payload: Mapping[str, Any]
-
-
 @dataclass
 class TabState:
     """One tab's session state, split by who writes it.
@@ -142,7 +133,6 @@ class UISession:
             "reference": ModelSlot(role="reference"),
             "dgp": ModelSlot(role="dgp"),
         }
-        self.runs: dict[str, RunRecord] = {}
         self.functions: dict[Role, dict[str, FunctionRecord]] = {
             "reference": {},
             "dgp": {},
@@ -159,14 +149,6 @@ class UISession:
         roles: tuple[Role, Role] = ("reference", "dgp")
         return {
             "models": {role: self.model_summary(role) for role in roles},
-            "runs": [
-                {
-                    "run_id": run.run_id,
-                    "kind": run.kind,
-                    "role": run.role,
-                }
-                for run in self.runs.values()
-            ],
             "workspace": self._workspace_payload(),
         }
 
@@ -325,13 +307,11 @@ class UISession:
     def _record_sim_run(
         self, *, role: Role, sim: Any, T: int, observables: bool
     ) -> dict[str, Any]:
-        """Serialize a simulation and file it as a run.
+        """Serialize a simulation into the shape the Outputs tab renders.
 
         Shared by the tab's own runs and by a bundle's stored spec replayed at
-        load, so both arrive at the Outputs tab in the same shape and both are
-        fetchable by ``run_id``.
+        load, so both arrive there identically.
         """
-        run_id = str(uuid4())
         sim_dict = sim.states
         sim_dict["_X"] = sim.X
         if sim.y is not None:
@@ -344,7 +324,6 @@ class UISession:
             all_series = all_series + encode_named_arrays(extra)
         figures = self._apply_figure_functions(role, sim_dict)
         payload: dict[str, Any] = {
-            "run_id": run_id,
             "kind": "sim",
             "role": role,
             "T": T,
@@ -353,12 +332,6 @@ class UISession:
             "figures": figures,
             "transform_errors": transform_errors,
         }
-        self.runs[run_id] = RunRecord(
-            run_id=run_id,
-            kind="sim",
-            role=role,
-            payload=payload,
-        )
         return payload
 
     def replay_bundled_simulations(self) -> None:
@@ -494,22 +467,14 @@ class UISession:
         else:
             result = slot.solver.estimate(**common)
 
-        run_id = str(uuid4())
         result_wire = serialize_estimation_result(result)
         payload: dict[str, Any] = {
-            "run_id": run_id,
             "kind": "estimation",
             "role": request.role,
             "method": request.routine,
             "solved": solved,
             "result": result_wire,
         }
-        self.record_run(
-            run_id=run_id,
-            kind="estimation",
-            role=request.role,
-            payload=payload,
-        )
         # The bundle-bound slots, filled from the run that just produced them.
         # The client's view is untouched: it already shows this.
         self.workspace.estimation.spec = spec_wire
@@ -549,28 +514,8 @@ class UISession:
             for r in self.functions[role].values()
         ]
 
-    def get_run(self, run_id: str) -> dict[str, Any]:
-        if run_id not in self.runs:
-            raise KeyError(run_id)
-        return dict(self.runs[run_id].payload)
-
     def solved_model(self, role: Role) -> SolvedModel | None:
         return self._slot(role).solved
-
-    def record_run(
-        self,
-        *,
-        run_id: str,
-        kind: str,
-        role: Role,
-        payload: Mapping[str, Any],
-    ) -> None:
-        self.runs[run_id] = RunRecord(
-            run_id=run_id,
-            kind=kind,
-            role=role,
-            payload=payload,
-        )
 
     def _apply_figure_functions(
         self,
