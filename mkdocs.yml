@@ -243,7 +243,7 @@ nav:
               - Post-processing:
                   - Custom Post-processing: documentation/monte_carlo/operations/postproc/custom.md
                   - KDE: documentation/monte_carlo/operations/postproc/kde.md
-          - Result Access: documentation/monte_carlo/result_access.md
+          - Results: documentation/monte_carlo/results.md
       - Prior Specification:
           - Prior: documentation/prior_spec/Prior.md
           - Distributions:

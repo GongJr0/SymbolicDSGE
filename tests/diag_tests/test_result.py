@@ -234,12 +234,83 @@ def test_mc_result_confidence_intervals_cover_wilson_normal_and_t_paths() -> Non
         alpha=np.float64(0.5),
     )
 
-    wilson = out.pval_confidence_interval(wilson=True)
-    normal = out.pval_confidence_interval(wilson=False)
+    wilson = out.rejection_rate_confidence_interval(wilson=True)
+    binomial = out.rejection_rate_confidence_interval(wilson=False)
+    pval_z = out.pval_confidence_interval(t_interval=False)
+    pval_t = out.pval_confidence_interval(t_interval=True)
     z_interval = out.statistic_confidence_interval(t_interval=False)
     t_interval = out.statistic_confidence_interval(t_interval=True)
 
     assert 0.0 <= wilson[0] <= wilson[1] <= 1.0
-    assert normal[0] <= normal[1]
+    assert 0.0 <= binomial[0] <= binomial[1] <= 1.0
+    assert wilson != binomial
+    assert 0.0 <= pval_z[0] <= pval_z[1] <= 1.0
+    assert pval_t[0] <= pval_z[0] and pval_z[1] <= pval_t[1]
     assert z_interval[0] <= z_interval[1]
     assert t_interval[0] <= t_interval[1]
+
+
+def test_mc_result_pval_members_describe_the_pval_trace() -> None:
+    out = _mc_result(
+        np.array([0.1, 1.0, 3.0, 5.0], dtype=np.float64),
+        (TestStatus.OK,) * 4,
+        test_name="demo",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.5),
+    )
+
+    assert out.pval_se == pytest.approx(
+        out.pval_trace.std(ddof=1) / np.sqrt(out.n_retained)
+    )
+    p = out.rejection_rate
+    assert out.rejection_rate_se == pytest.approx(np.sqrt(p * (1 - p) / out.n_retained))
+
+
+def test_mc_result_summary_and_intervals() -> None:
+    out = _mc_result(
+        np.array([0.1, 1.0, 3.0, 5.0], dtype=np.float64),
+        (TestStatus.OK,) * 4,
+        test_name="demo",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.5),
+    )
+
+    summary = out.summary()
+    assert list(summary.index) == ["demo"]
+    assert summary.index.name == "test"
+    assert list(summary.columns) == [
+        "statistic",
+        "statistic_se",
+        "pval",
+        "reject_rate",
+    ]
+    assert summary.loc["demo", "statistic"] == pytest.approx(out.mean_statistic)
+    assert summary.loc["demo", "reject_rate"] == pytest.approx(out.rejection_rate)
+
+    intervals = out.intervals()
+    assert list(intervals.index) == ["statistic", "pval", "reject_rate"]
+    assert intervals.index.name == "quantity"
+    assert list(intervals.columns) == ["ci_low", "ci_high"]
+    for quantity in intervals.index:
+        low, high = intervals.loc[quantity]
+        column = "statistic" if quantity == "statistic" else quantity
+        assert low <= summary.loc["demo", column] <= high
+
+
+def test_mc_result_mc_se_needs_two_replications() -> None:
+    out = _mc_result(
+        np.array([1.0], dtype=np.float64),
+        (TestStatus.OK,),
+        test_name="demo",
+        dist=ReferenceDistribution.CHI2,
+        df=np.float64(2.0),
+        pval_method=PvalMethod.SF,
+        alpha=np.float64(0.5),
+    )
+
+    assert np.isnan(out.statistic_se)
+    assert np.isnan(out.pval_se)

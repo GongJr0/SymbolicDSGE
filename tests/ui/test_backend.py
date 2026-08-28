@@ -22,7 +22,8 @@ from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribu
 from SymbolicDSGE._diag_tests.result import MCTestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
-from SymbolicDSGE.regression.ols import MCRegressionResult, ols
+from SymbolicDSGE.regression.ols import ols
+from SymbolicDSGE.regression.result import MCRegressionResult
 
 
 def test_array_envelope_round_trips_float64_payload() -> None:

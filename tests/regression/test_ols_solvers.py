@@ -6,7 +6,9 @@ from scipy.stats import t
 
 from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.regression.ols import MCRegressionResult as ExportedMCRegressionResult
+from SymbolicDSGE.regression import (
+    MCRegressionResult as ExportedMCRegressionResult,
+)
 from SymbolicDSGE.regression.ols import OLSResult as ExportedOLSResult
 from SymbolicDSGE.regression.ols import RegressionStatus as ExportedRegressionStatus
 from SymbolicDSGE.regression.ols import ols as exported_ols
@@ -18,11 +20,9 @@ from SymbolicDSGE.regression.ols.diag_utils import (
     se_from_pinv,
 )
 from SymbolicDSGE.regression.ols.core import ols
-from SymbolicDSGE.regression.ols.ols_result import (
-    MCRegressionResult,
-    OLSResult,
-    RegressionStatus,
-)
+from SymbolicDSGE.regression.enums import RegressionStatus
+from SymbolicDSGE.regression.ols.ols_result import OLSResult
+from SymbolicDSGE.regression.result import MCRegressionResult
 from SymbolicDSGE.regression.ols.solvers import (
     OK,
     RANK_DEFICIENT,
@@ -80,9 +80,12 @@ def test_chol_solve_returns_factor_for_standard_error_calculation() -> None:
 
 def test_ols_package_exports_public_entry_points() -> None:
     assert ExportedOLSResult is OLSResult
-    assert ExportedMCRegressionResult is MCRegressionResult
     assert ExportedRegressionStatus is RegressionStatus
     assert exported_ols is ols
+
+
+def test_regression_package_exports_mc_result() -> None:
+    assert ExportedMCRegressionResult is MCRegressionResult
 
 
 def test_ols_core_uses_cholesky_solver_and_default_variable_names() -> None:
@@ -360,14 +363,10 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
         np.asarray([result.F_test().pval for result in results]),
     )
 
-    ci = out.confidence_intervals(alpha=0.1)
-    assert ci.shape == (2, 2, 2)
-    np.testing.assert_allclose(ci[0], results[0].confidence_intervals(alpha=0.1))
-
-    summary = out.summary(alpha=0.1)
-    assert list(summary.index.names) == ["retained_row", "variable"]
-    np.testing.assert_array_equal(summary["rep_idx"].to_numpy(), [0, 0, 1, 1])
-    assert list(summary.columns) == [
+    trace_frame = out.trace_frame(alpha=0.1)
+    assert list(trace_frame.index.names) == ["retained_row", "variable"]
+    np.testing.assert_array_equal(trace_frame["rep_idx"].to_numpy(), [0, 0, 1, 1])
+    assert list(trace_frame.columns) == [
         "rep_idx",
         "coef",
         "std_err",
@@ -377,6 +376,10 @@ def test_mc_regression_result_computes_vectorized_diagnostics() -> None:
         "pval",
         "partial_r2",
     ]
+    np.testing.assert_allclose(
+        trace_frame.loc[0, ["coef_ci_low", "coef_ci_high"]].to_numpy(),
+        results[0].confidence_intervals(alpha=0.1),
+    )
 
     f_test = out.F_test(alpha=0.1)
     assert f_test.test_name == "F-test"
@@ -447,3 +450,89 @@ def test_mc_regression_result_uses_declared_native_variables() -> None:
     out = _mc_regression_from_ols((first, second))
     assert out.variables == ["c", "x"]
     np.testing.assert_allclose(out.coef_trace[1], second.coefficients)
+
+
+def _mc_regression_trace(n_retained: int = 64, k: int = 2) -> MCRegressionResult:
+    rng = np.random.default_rng(7)
+    coef = rng.normal([0.5, -0.2], [0.05, 0.03], size=(n_retained, k))
+    se = np.abs(rng.normal(0.06, 0.005, size=(n_retained, k)))
+    return MCRegressionResult(
+        kind="ols",
+        variables=["Intercept", "x1"],
+        coef_trace=coef,
+        ssr_trace=rng.uniform(1.0, 2.0, n_retained),
+        sst_trace=rng.uniform(3.0, 4.0, n_retained),
+        _se_trace=se,
+        n_retained=n_retained,
+        retained_reps=np.arange(n_retained, dtype=np.int_),
+        n_rep=n_retained,
+        n=50,
+        k=k,
+        _raw_status=np.zeros(n_retained, dtype=np.int_),
+    )
+
+
+def test_mc_regression_summary_is_one_row_per_variable() -> None:
+    out = _mc_regression_trace()
+
+    summary = out.summary(alpha=0.1)
+    assert list(summary.index) == ["Intercept", "x1"]
+    assert summary.index.name == "variable"
+    assert list(summary.columns) == [
+        "coef",
+        "coef_se",
+        "t_stat",
+        "pval",
+        "reject_rate",
+    ]
+
+    np.testing.assert_allclose(summary["coef"].to_numpy(), out.coef_trace.mean(axis=0))
+    np.testing.assert_allclose(
+        summary["coef_se"].to_numpy(),
+        out.coef_trace.std(ddof=1, axis=0) / np.sqrt(out.n_retained),
+    )
+    np.testing.assert_allclose(
+        summary["reject_rate"].to_numpy(), (out.pval_trace < 0.1).mean(axis=0)
+    )
+
+
+def test_mc_regression_intervals_bracket_the_summary_estimates() -> None:
+    out = _mc_regression_trace()
+
+    summary = out.summary()
+    intervals = out.intervals()
+    assert list(intervals.index.names) == ["variable", "quantity"]
+    assert list(intervals.columns) == ["ci_low", "ci_high"]
+
+    for variable in out.variables:
+        for quantity in ("coef", "t_stat", "pval", "reject_rate"):
+            low, high = intervals.loc[(variable, quantity)]
+            assert low <= summary.loc[variable, quantity] <= high
+
+    bounded = intervals.xs("pval", level="quantity")
+    assert (bounded["ci_low"] >= 0.0).all()
+    assert (intervals.xs("reject_rate", level="quantity")["ci_high"] <= 1.0).all()
+
+
+def test_mc_regression_intervals_widen_with_confidence_level() -> None:
+    out = _mc_regression_trace()
+
+    narrow = out.intervals(confidence_level=0.90).loc[("Intercept", "coef")]
+    wide = out.intervals(confidence_level=0.99).loc[("Intercept", "coef")]
+    assert wide.ci_low < narrow.ci_low
+    assert wide.ci_high > narrow.ci_high
+
+    student = out.intervals(t_interval=True).loc[("Intercept", "coef")]
+    normal = out.intervals(t_interval=False).loc[("Intercept", "coef")]
+    assert student.ci_high > normal.ci_high
+
+    assert not np.isclose(
+        out.intervals(wilson=False).loc[("Intercept", "reject_rate"), "ci_low"],
+        out.intervals(wilson=True).loc[("Intercept", "reject_rate"), "ci_low"],
+    )
+
+
+def test_mc_regression_mc_se_needs_two_replications() -> None:
+    out = _mc_regression_trace(n_retained=1)
+    assert np.isnan(out.coef_se).all()
+    assert np.isnan(out.summary()["coef_se"].to_numpy()).all()

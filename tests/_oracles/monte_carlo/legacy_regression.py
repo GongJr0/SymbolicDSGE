@@ -19,11 +19,11 @@ from SymbolicDSGE._diag_tests.distributions import (
 from .legacy_test_result import MCResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.regression.enums import RegressionStatus
-from SymbolicDSGE.regression.ols.ols_result import (
-    OLSResult,
+from SymbolicDSGE.regression.ols.ols_result import OLSResult
+from SymbolicDSGE.regression.result import (
+    RegressionResult,
     _f_test_degrees_of_freedom,
 )
-from SymbolicDSGE.regression.result import RegressionResult
 
 if TYPE_CHECKING:
     from pandas import DataFrame

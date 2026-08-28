@@ -441,7 +441,9 @@ export interface MCTestSummary {
   rejection_rate: number;
   statistic_se: number | null;
   pval_se: number | null;
+  rejection_rate_se: number | null;
   statistic_ci: Array<number | null>;
+  pval_ci: Array<number | null>;
   rejection_ci: Array<number | null>;
   statistic_trace: Array<number | null>;
   pval_trace: Array<number | null>;
