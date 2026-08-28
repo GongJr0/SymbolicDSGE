@@ -1,0 +1,5364 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://gongjr0.github.io/SymbolicDSGE/2.0.0.dev9/benchmarks/linear_kf/">
+      
+      
+        <link rel="prev" href="../../documentation/utilities/DenHaanMarcet/">
+      
+      
+        <link rel="next" href="../point_estimation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Linear Kalman Filter - SymbolicDSGE Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+  
+  
+    
+      
+      
+        
+      
+      
+    
+  
+    
+      
+      
+        
+      
+      
+    
+  
+    
+      
+      
+        
+      
+      
+    
+  
+    
+      
+      
+        
+      
+      
+    
+  
+  
+  <style>:root{.md-tag.md-tag--info{--md-tag-icon:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M0%208a8%208%200%201%201%2016%200A8%208%200%200%201%200%208m8-6.5a6.5%206.5%200%201%200%200%2013%206.5%206.5%200%200%200%200-13M6.5%207.75A.75.75%200%200%201%207.25%207h1a.75.75%200%200%201%20.75.75v2.75h.25a.75.75%200%200%201%200%201.5h-2a.75.75%200%200%201%200-1.5h.25v-2h-.25a.75.75%200%200%201-.75-.75M8%206a1%201%200%201%201%200-2%201%201%200%200%201%200%202%22/%3E%3C/svg%3E');}.md-tag.md-tag--guide{--md-tag-icon:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M3%207V5h2V4a2%202%200%200%201%202-2h6v7l2.5-1.5L18%209V2h1c1.05%200%202%20.95%202%202v16c0%201.05-.95%202-2%202H7c-1.05%200-2-.95-2-2v-1H3v-2h2v-4H3v-2h2V7zm4%204H5v2h2zm0-4V5H5v2zm0%2012v-2H5v2z%22/%3E%3C/svg%3E');}.md-tag.md-tag--doc{--md-tag-icon:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M13%209h5.5L13%203.5zM6%202h8l6%206v12a2%202%200%200%201-2%202H6a2%202%200%200%201-2-2V4c0-1.11.89-2%202-2m9%2016v-2H6v2zm3-4v-2H6v2z%22/%3E%3C/svg%3E');}.md-tag.md-tag--benchmark{--md-tag-icon:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20512%20512%22%3E%3C%21--%21%20Font%20Awesome%20Free%207.1.0%20by%20%40fontawesome%20-%20https%3A//fontawesome.com%20License%20-%20https%3A//fontawesome.com/license/free%20%28Icons%3A%20CC%20BY%204.0%2C%20Fonts%3A%20SIL%20OFL%201.1%2C%20Code%3A%20MIT%20License%29%20Copyright%202025%20Fonticons%2C%20Inc.--%3E%3Cpath%20d%3D%22M64%2064c0-17.7-14.3-32-32-32S0%2046.3%200%2064v336c0%2044.2%2035.8%2080%2080%2080h400c17.7%200%2032-14.3%2032-32s-14.3-32-32-32H80c-8.8%200-16-7.2-16-16zm406.6%2086.6c12.5-12.5%2012.5-32.8%200-45.3s-32.8-12.5-45.3%200L320%20210.7l-57.4-57.3c-12.5-12.5-32.8-12.5-45.3%200l-96%2096c-12.5%2012.5-12.5%2032.8%200%2045.3s32.8%2012.5%2045.3%200l73.4-73.4%2057.4%2057.4c12.5%2012.5%2032.8%2012.5%2045.3%200l128-128z%22/%3E%3C/svg%3E');}}</style>
+
+    
+    
+      
+    
+    
+      
+        
+        
+        
+        <link rel="stylesheet" href="../../assets/external/fonts.googleapis.com/css.fcef3dfb.css">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/external/unpkg.com/katex@0/dist/katex.min.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("/SymbolicDSGE/",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-RWHRWMBT9P"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-RWHRWMBT9P",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-RWHRWMBT9P",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>if("undefined"!=typeof __md_analytics){var consent=__md_get("__consent");consent&&consent.analytics&&__md_analytics()}</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#linear-kalman-filter-benchmark" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="SymbolicDSGE Documentation" class="md-header__button md-logo" aria-label="SymbolicDSGE Documentation" data-md-component="logo">
+      
+  <img src="../../assets/logo_w.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            SymbolicDSGE Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Linear Kalman Filter
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="teal"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://www.github.com/GongJr0/SymbolicDSGE" title="Go to repository" class="md-source" data-md-component="source" target="_blank" rel="noopener">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GongJr0/SymbolicDSGE
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="SymbolicDSGE Documentation" class="md-nav__button md-logo" aria-label="SymbolicDSGE Documentation" data-md-component="logo">
+      
+  <img src="../../assets/logo_w.svg" alt="logo">
+
+    </a>
+    SymbolicDSGE Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://www.github.com/GongJr0/SymbolicDSGE" title="Go to repository" class="md-source" data-md-component="source" target="_blank" rel="noopener">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GongJr0/SymbolicDSGE
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GUI Usage
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    GUI Usage
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gui_usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gui_usage/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gui_usage/spec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gui_usage/outputs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Outputs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gui_usage/estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gui_usage/monte_carlo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MC Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable Experiments
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Portable Experiments
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../portable_experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../portable_experiments/sdsge-compile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    sdsge-compile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../portable_experiments/sdsge-decompile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    sdsge-decompile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/model_config_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Configuration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/kalman_config_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kalman Filter Configuration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/estimation_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Estimation Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/monte_carlo_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monte Carlo Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/bundle_authoring_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bundle Authoring Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/bundle_loading_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bundle Loading Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Documentation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/ModelConfig/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ModelConfig
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/ModelParser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ModelParser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/DSGESolver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DSGESolver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/Estimator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Estimator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/CompiledModel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CompiledModel
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/SolvedModel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SolvedModel
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/Shock/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Shock
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/KalmanConfig/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KalmanConfig
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/FilterResult/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FilterResult
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/SimResult/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SimResult
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_11" id="__nav_6_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Solutions
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Model Solutions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/model_solutions/FirstOrderSolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FirstOrderSolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/model_solutions/SecondOrderSolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SecondOrderSolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/model_solutions/PiecewiseSolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PiecewiseSolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_12" id="__nav_6_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regression
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Regression
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/regression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/regression/results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regression Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/regression/ols/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/regression/ridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/regression/lasso/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lasso
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/regression/elastic_net/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Elastic Net
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_13" id="__nav_6_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bundle
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Bundle
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/bundle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/bundle/BundleBuilder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    BundleBuilder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/bundle/LoadedBundle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LoadedBundle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/bundle/Manifest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/bundle/load_bundle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    load_bundle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14" id="__nav_6_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Monte Carlo
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCPipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/core_containers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/custom_ops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14_5" id="__nav_6_14_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_14_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14_5_1" id="__nav_6_14_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_6_14_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/core/simulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DGP Simulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/core/raw_model_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Raw Model Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/core/filter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Filtering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14_5_2" id="__nav_6_14_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tests
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_6_14_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tests
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/wald/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wald Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/ljung_box/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ljung-Box Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/jarque_bera/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jarque-Bera Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/breusch_pagan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Breusch-Pagan Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/breusch_godfrey/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Breusch-Godfrey Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/cusum/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CUSUM Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/cusumsq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CUSUM of Squares Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/tests/chow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chow Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14_5_3" id="__nav_6_14_5_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regressions
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_6_14_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14_5_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Regressions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/regressions/regression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regression Steps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14_5_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14_5_4" id="__nav_6_14_5_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_6_14_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14_5_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Transforms
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/custom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Transform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/payload/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Payload
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/standardize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standardize
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/log_diff/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Log Difference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/diff/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Difference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/rolling_mean/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rolling Mean
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/rolling_std/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rolling Standard Deviation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/transforms/rolling_var/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rolling Variance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_14_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_14_5_5" id="__nav_6_14_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Post-processing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_6_14_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_14_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Post-processing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/postproc/custom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Post-processing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/operations/postproc/kde/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KDE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/monte_carlo/result_access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Result Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_15" id="__nav_6_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prior Specification
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Prior Specification
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/Prior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prior
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_15_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_15_2" id="__nav_6_15_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributions
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_15_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_15_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/normal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Normal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/log_normal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LogNormal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/half_normal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HalfNormal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/trunc_normal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TruncNormal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/half_cauchy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HalfCauchy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/beta/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Beta
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/gamma/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gamma
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/inv_gamma/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    InvGamma
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/uniform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Uniform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/distributions/lkj_chol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LKJChol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_15_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_15_3" id="__nav_6_15_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transformations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_15_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_15_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Transformations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/identity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/softplus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Softplus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/logit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/probit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Probit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/affine_logit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AffineLogit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/affine_probit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AffineProbit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/lower_bounded/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LowerBounded
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/upper_bounded/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UpperBounded
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/prior_spec/transforms/tanh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tanh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_16" id="__nav_6_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utilities
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/utilities/FRED/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FRED
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/utilities/KalmanFilter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KalmanFilter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/utilities/math_utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    math_utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../documentation/utilities/DenHaanMarcet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DenHaanMarcet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Benchmarks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linear Kalman Filter
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linear Kalman Filter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#model-shapes-and-compilation-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Shapes and Compilation Differences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynares-kalman-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynare's Kalman Filter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmark Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Shapes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#likelihood-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Likelihood Only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retained-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retained History
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outlook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outlook
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../point_estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Point Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contact/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#model-shapes-and-compilation-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Shapes and Compilation Differences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynares-kalman-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynare's Kalman Filter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmark Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model Shapes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#likelihood-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Likelihood Only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retained-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retained History
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outlook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outlook
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  <nav class="md-tags" >
+    
+      
+      
+      
+        
+        
+          
+        
+      
+      
+        <span class="md-tag md-tag-icon md-tag--benchmark">benchmark</span>
+      
+    
+  </nav>
+
+
+
+<h1 id="linear-kalman-filter-benchmark">Linear Kalman Filter Benchmark</h1>
+<details class="tip" open="open">
+<summary><strong>TL;DR</strong></summary>
+<p>If you're not interested in the details, you can skip to the <a href="#results">results</a>.
+However, it's recommended to give a quick skim since not all comparisons are measuring equivalent algorithms.</p>
+</details>
+<p>The linear Gaussian Kalman filter (KF) is the backbone of many DSGE applications. 
+It provides state estimation, and is the main likelihood engine of choice for linear first-order DSGE models.
+Therefore, the performance of a library's KF has direct and noticeable implications on estimation workflows.
+This benchmark compares the SymbolicDSGE KF implementation against Dynare's on multiple published models.</p>
+<h2 id="model-shapes-and-compilation-differences">Model Shapes and Compilation Differences</h2>
+<p>Dynare handles observables differently than SymbolicDSGE. In Dynare, observables are defined in the model block, increasing the state-space dimension of the model.
+SymbolicDSGE treats observables as <em>deterministic functions of the state</em>, hence observables do not enter the state-space. However, SymbolicDSGE only allows current-period states into observables, making auxiliary states necessary for some models.
+Conversely, SymbolicDSGE routinely has more parameters for an equivalent model due to the KF's measurement covariance <code>R</code> being treated as a symbolic and estimable component. Each member of the <code>R</code> matrix, when declared, are separate parameters in SymbolicDSGE, while Dynare allows scalar initialization of the covariance matrix.
+Differences in model dimensions are reported, but benchmarks do not try to equalize the state-space dimensions. Efficiency of the model representation is considered part of the library's performance.</p>
+<h2 id="dynares-kalman-filter">Dynare's Kalman Filter</h2>
+<p>Dynare implements the Kalman filter as a likelihood engine, and chooses to derive predicted, filtered, and smoothed states from a Kalman smoother.
+SymbolicDSGE has a general-purpose Kalman filter that's capable of being likelihood-only, but also can return a complete filter history.
+Since SymbolicDSGE does not implement a Kalman smoother as of version <code>2.0.0.dev8</code> (version of execution), the benchmark compares two separate cases:</p>
+<ol>
+<li>SymbolicDSGE's likelihood-only KF against Dynare's likelihood-only KF.</li>
+<li>SymbolicDSGE's full-history KF against Dynare's smoother.</li>
+</ol>
+<p>The second-case is not a fair comparison by any means. A filter and smoother are not equal in per-step workload.
+Additionally, for <code>T</code> observations, a filter will run <code>T</code> iterations while a smoother runs <code>2T</code> or <code>2T-1</code>.
+Since Dynare exposes filter traces through their <code>calib_smoother</code> and <code>evaluate_smoother</code>, this measurement does compare the runtime of obtaining predicted and filtered states in either library. However, the comparison does not aim to imply a conclusion about the performance of Dynare's smoother implementation or claim that SymbolicDSGE has equivalent functionality.</p>
+<details class="info" open="open">
+<summary>Matching Dynare's defaults</summary>
+<p>SymbolicDSGE's defaults largely overlap with Dynare's, with the main difference being the <em>Joseph form</em> covariance update.
+The Joseph update is numerically robust, but expensive.
+Dynare uses the simple covariance update, and SymbolicDSGE matches that with <code>joseph_cov=False</code>.</p>
+</details>
+<h2 id="benchmark-setup">Benchmark Setup</h2>
+<p>The benchmark times the filters only. The preparation, including solution and compilation, are not included in both libraries. Seeds are fixed and the absolute maximum difference between results are reported alongside the timing. There are 5 models, each published and fairly well-known; all models are tested for both likelihood-only and full-history filtering.
+In increasing model complexity, the models are:</p>
+<ul>
+<li><a href="https://github.com/GongJr0/SymbolicDSGE/blob/main/tests/fixtures/models/post82_first_order.mod" target="_blank" rel="noopener">Lubik and Schorfheide (2004) - POST82 Calibration</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Ireland_2004/Ireland_2004.mod" target="_blank" rel="noopener">Ireland (2004)</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Gali_Monacelli_2005/Gali_Monacelli_2005.mod" target="_blank" rel="noopener">Gali and Monacelli (2005)</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Gali_2015/Gali_2015_chapter_3.mod" target="_blank" rel="noopener">Gali (2015) - Chapter 3</a></li>
+<li><a href="https://github.com/JohannesPfeifer/DSGE_mod/blob/master/Smets_Wouters_2007/Smets_Wouters_2007.mod" target="_blank" rel="noopener">Smets and Wouters (2007)</a></li>
+</ul>
+<blockquote>
+<p>All models except Lubik-Schorfheide (2004) are taken from Johannes Pfeifer's <code>DSGE_mod</code> and are distributed under the <a href="https://www.gnu.org/licenses/gpl-3.0.en.html" target="_blank" rel="noopener">GNU General Public License v3.0</a>. The <code>.mod</code> files are originally written for reproduction; each of the used scripts remove the original workflows and keep the model definitions. The Lubik-Schorfheide (2004) model is hand-transcribed and distributed under the <a href="https://opensource.org/license/mit/" target="_blank" rel="noopener">MIT License</a>.</p>
+</blockquote>
+<h3 id="model-shapes">Model Shapes</h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: center;">Declared variables S/D</th>
+<th style="text-align: center;">Filter state dimension S/D</th>
+<th style="text-align: center;">Predetermined variables S/D</th>
+<th style="text-align: center;">Observables S/D</th>
+<th style="text-align: center;">Shocks S/D</th>
+<th style="text-align: center;">Parameters S/D</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lubik-Schorfheide (2004)</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">20/15</td>
+</tr>
+<tr>
+<td>Ireland (2004)</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: center;">6/6</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">4/4</td>
+<td style="text-align: center;">16/10</td>
+</tr>
+<tr>
+<td>Gali-Monacelli (2005)</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">10/9</td>
+</tr>
+<tr>
+<td>Gali (2015), Ch. 3</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: center;">5/5</td>
+<td style="text-align: center;">2/2</td>
+<td style="text-align: center;">3/3</td>
+<td style="text-align: center;">19/12</td>
+</tr>
+<tr>
+<td>Smets-Wouters (2007)</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: center;">20/20</td>
+<td style="text-align: center;">7/7</td>
+<td style="text-align: center;">7/7</td>
+<td style="text-align: center;">57/34</td>
+</tr>
+</tbody>
+</table>
+<p>The benchmark script is available in <a href="https://github.com/GongJr0/SymbolicDSGE" target="_blank" rel="noopener">SymbolicDSGE's GitHub repository</a> and is runnable from the repo root:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>./benchmarks/bench_linear_kf.py<span class="w"> </span>--help
+</span></code></pre></div>
+<h3 id="run-configuration">Run Configuration</h3>
+<p>Each bencmark runs on a simulated sample of 200 observations with 200 repetitions. Simulation outputs are produced by SymbolicDSGE once in preparation, and consequent repetitions do not redraw. Three warmup runs are performed for both libraries before timing.</p>
+<p>The commands being timed are:</p>
+<p><strong>SymbolicDSGE</strong></p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">KalmanFilter</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>            <span class="k">case</span><span class="o">.</span><span class="n">A</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">B</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">C</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">d</span><span class="p">,</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>            <span class="k">case</span><span class="o">.</span><span class="n">Q</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">R</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">y</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>            <span class="n">P0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="c1"># (1)!</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>            <span class="n">_store_history</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="c1"># (2)!</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>            <span class="n">symmetrize</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># (3)!</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>            <span class="n">joseph_cov</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="p">)</span>
+</span></code></pre></div>
+<ol>
+<li>Executes a Lyapunov solve to use stationary state covariance; Dynare does the same.</li>
+<li><code>True</code> when full-history is being timed</li>
+<li>Default is <code>True</code>, disabled to match Dynare</li>
+</ol>
+<p><strong>Dynare</strong></p>
+<div class="language-matlab highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c">% Loglik only filter</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">kalman_filter</span><span class="p">(</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">      </span><span class="n">Y</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">periods</span><span class="p">,</span><span class="w"> </span><span class="nb">zeros</span><span class="p">(</span><span class="n">n_endo</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="n">P0</span><span class="p">,</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="mf">1e-10</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="n">Q</span><span class="p">,</span><span class="w"> </span><span class="n">R</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">,</span><span class="w"> </span><span class="n">Z</span><span class="p">,</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="n">n_endo</span><span class="p">,</span><span class="w"> </span><span class="n">n_obs</span><span class="p">,</span><span class="w"> </span><span class="n">n_exo</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c">% Full history</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">options_</span><span class="p">.</span><span class="n">lik_init</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (1)!</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">options_</span><span class="p">.</span><span class="n">kalman_algo</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (2)!</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">options_</span><span class="p">.</span><span class="n">first_obs</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">options_</span><span class="p">.</span><span class="n">nobs</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">periods</span><span class="p">;</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">options_</span><span class="p">.</span><span class="n">prefilter</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">options_</span><span class="p">.</span><span class="n">filtered_vars</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (3)!</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">options_</span><span class="p">.</span><span class="n">filter_step_ahead</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">  </span><span class="c">% (4)!</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">[</span><span class="n">oo_</span><span class="p">,</span><span class="w"> </span><span class="n">M_</span><span class="p">,</span><span class="w"> </span><span class="n">options_</span><span class="p">,</span><span class="w"> </span><span class="n">bayestopt_</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="n">evaluate_smoother</span><span class="p">(</span><span class="w"> </span><span class="k">...</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">        </span><span class="s">'calibration'</span><span class="p">,</span><span class="w"> </span><span class="n">var_list_</span><span class="p">,</span><span class="w"> </span><span class="n">M_</span><span class="p">,</span><span class="w"> </span><span class="n">oo_</span><span class="p">,</span><span class="w"> </span><span class="n">options_</span><span class="p">,</span><span class="w"> </span><span class="n">bayestopt_</span><span class="p">,</span><span class="w"> </span><span class="n">estim_params_</span><span class="p">);</span>
+</span></code></pre></div>
+<ol>
+<li><code>lik_init=1</code> is Dynare's filter initalization specifier for <code>P0</code>. The <a href="https://www.dynare.org/manual/the-model-file.html#lik_init%20=%20INTEGER" target="_blank" rel="noopener">Dynare Manual</a> recommends <code>1</code> for stationary models, which uses the same unconditional covariance calculation SymbolicDSGE executes.</li>
+<li><code>kalman_algo</code> chooses the underlying filter implementation the method resolves to, <code>1</code> is the linear Gaussian multivariate filter.</li>
+<li>Enables the calculation of filtered variables. Corresponds to SymbolicDSGE's <code>x_filt</code></li>
+<li>Enables the calculation of predicted variables. Corresponds to SymbolicDSGE's <code>x_pred</code></li>
+</ol>
+<p>The benchmark runs on the following hardware and software configuration:</p>
+<ul>
+<li>CPU: Intel(R) Core(TM) i9-10900K CPU @ 4.90GHz</li>
+<li>MEM: 32GB DDR4 2933MHz</li>
+<li>OS: Windows 11 Pro 22H2</li>
+<li>Python: <code>cpython 3.11.14</code></li>
+<li>SymbolicDSGE: <code>2.0.0.dev8</code></li>
+<li>Dynare: <code>7.1</code></li>
+<li>Dynare Runtimes: MATLAB R2026a, Octave 11.3.0</li>
+<li>MATLAB BLAS/LAPACK: Intel openMKL build 20241031 (LAPACK 3.11.0)</li>
+<li>Octave BLAS/LAPACK: OpenBLAS 0.3.31 (LAPACK 3.12.0)</li>
+</ul>
+<p>The following metrics are reported for each benchmark:</p>
+<ul>
+<li>Median: the median runtime in microseconds.</li>
+<li>Runtime Ratio D/S (<code>SymbolicDSGE = 1</code>): The runtime ratio of Dynare over SymbolicDSGE. (&gt; 1 means SymbolicDSGE is faster).</li>
+<li><code>max |Δ ...|</code>: the maximum absolute difference in between the two libraries's outputs.</li>
+</ul>
+<h2 id="results">Results</h2>
+<h3 id="likelihood-only">Likelihood Only</h3>
+<p><vegachart style='width: 100%'  class="vegalite">{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "background": null,
+  "description": "Filter runtime comparison.",
+  "data": {
+    "values": [
+      {"model":"LS 2004","runtime":119.70,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"LS 2004","runtime":1408.80,"implementation":"Dynare MATLAB", "label": "11.77x"},
+      {"model":"LS 2004","runtime":18526.91,"implementation":"Dynare Octave", "label": "154.78x"},
+
+      {"model":"Ireland 2004","runtime":351.10,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Ireland 2004","runtime":1301.30,"implementation":"Dynare MATLAB", "label": "3.71x"},
+      {"model":"Ireland 2004","runtime":18696.43,"implementation":"Dynare Octave", "label": "53.25x"},
+
+      {"model":"GM 2005","runtime":643.00,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"GM 2005","runtime":1703.85,"implementation":"Dynare MATLAB", "label": "2.65x"},
+      {"model":"GM 2005","runtime":18992.07,"implementation":"Dynare Octave", "label": "29.54x"},
+
+      {"model":"Gali Ch. 3","runtime":1158.10,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Gali Ch. 3","runtime":2248.85,"implementation":"Dynare MATLAB", "label": "1.94x"},
+      {"model":"Gali Ch. 3","runtime":20075.08,"implementation":"Dynare Octave", "label": "17.33x"},
+
+      {"model":"SW 2007","runtime":7549.70,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"SW 2007","runtime":3515.60,"implementation":"Dynare MATLAB", "label": "0.47x"},
+      {"model":"SW 2007","runtime":24098.04,"implementation":"Dynare Octave", "label": "3.21x"}
+    ]
+  },
+
+  "transform": [
+    {"calculate": "100", "as": "baseline"}
+  ],
+  "layer": [
+  {
+    "mark": {
+      "type": "bar"
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ],
+        "axis": {
+          "title": null,
+          "labelAngle": 0
+        }
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        },
+        "axis": {
+          "title": "Runtime (μs, log scale)",
+          "values": [100, 1000, 10000, 100000, 1000000]
+        }
+      },
+
+      "y2": {
+        "field": "baseline"
+      },
+
+      "color": {
+        "field": "implementation",
+        "type": "nominal",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ],
+        "legend": {
+          "title": null,
+          "orient": "top"
+        }
+      },
+
+      "tooltip": [
+        {
+          "field": "model",
+          "type": "nominal",
+          "title": "Model"
+        },
+        {
+          "field": "implementation",
+          "type": "nominal",
+          "title": "Implementation"
+        },
+        {
+          "field": "runtime",
+          "type": "quantitative",
+          "title": "Runtime (μs)",
+          "format": ",.2f"
+        }
+      ]
+    }
+  },
+
+  {
+    "mark": {
+      "type": "text",
+      "fontWeight": "bold",
+      "dy": -7
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ]
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        }
+      },
+
+      "text": {
+        "field": "label",
+        "type": "nominal"
+      }
+    }
+  }
+],
+
+  "config": {
+    "view": {
+      "fill": null,
+      "stroke": null
+    },
+    "axis": {"labelFontSize": 13, "titleFontSize": 14},
+    "axisX": {"labelFontWeight": "bold", "labelFontSize": 14},
+    "axisY": {"titleFontWeight": "bold"},
+    "legend": {"labelFontSize": 14},
+    "text": {"fontSize": 12}
+  }
+}
+</vegachart></p>
+<details class="note">
+<summary>Data (Likelihood Only)</summary>
+<p>Each Dynare runtime cell reports <code>median μs (D/S)</code>. The final column is the maximum absolute log-likelihood difference over MATLAB and Octave.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: center;">Filter states S/D</th>
+<th style="text-align: right;">SymbolicDSGE μs</th>
+<th style="text-align: right;">Dynare MATLAB μs (D/S)</th>
+<th style="text-align: right;">Dynare Octave μs (D/S)</th>
+<th style="text-align: right;">max |Δ loglik|</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lubik-Schorfheide (2004)</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: right;">119.70</td>
+<td style="text-align: right;">1,408.80 (11.77×)</td>
+<td style="text-align: right;">18,526.91 (154.78×)</td>
+<td style="text-align: right;">2.274e-13</td>
+</tr>
+<tr>
+<td>Ireland (2004)</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: right;">351.10</td>
+<td style="text-align: right;">1,301.30 (3.71×)</td>
+<td style="text-align: right;">18,696.43 (53.25×)</td>
+<td style="text-align: right;">1.592e-12</td>
+</tr>
+<tr>
+<td>Gali-Monacelli (2005)</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: right;">643.00</td>
+<td style="text-align: right;">1,703.85 (2.65×)</td>
+<td style="text-align: right;">18,992.07 (29.54×)</td>
+<td style="text-align: right;">9.877e-13</td>
+</tr>
+<tr>
+<td>Gali (2015), Ch. 3</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: right;">1,158.10</td>
+<td style="text-align: right;">2,248.85 (1.94×)</td>
+<td style="text-align: right;">20,075.08 (17.33×)</td>
+<td style="text-align: right;">3.411e-13</td>
+</tr>
+<tr>
+<td>Smets-Wouters (2007)</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: right;">7,549.70</td>
+<td style="text-align: right;">3,515.60 (0.47×)</td>
+<td style="text-align: right;">24,098.04 (3.21×)</td>
+<td style="text-align: right;">1.116e-10</td>
+</tr>
+</tbody>
+</table>
+</details>
+<h3 id="retained-history">Retained History</h3>
+<p><vegachart style='width: 100%'  class="vegalite">{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "background": null,
+  "description": "Smoother runtime comparison.",
+  "data": {
+    "values": [
+      {"model":"LS 2004","runtime":255.35,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"LS 2004","runtime":14150.15,"implementation":"Dynare MATLAB", "label": "55.41x"},
+      {"model":"LS 2004","runtime":98107.34,"implementation":"Dynare Octave", "label": "384.21x"},
+
+      {"model":"Ireland 2004","runtime":671.30,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Ireland 2004","runtime":14598.60,"implementation":"Dynare MATLAB", "label": "21.75x"},
+      {"model":"Ireland 2004","runtime":89367.63,"implementation":"Dynare Octave", "label": "133.13x"},
+
+      {"model":"GM 2005","runtime":1201.90,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"GM 2005","runtime":15163.00,"implementation":"Dynare MATLAB", "label": "12.65x"},
+      {"model":"GM 2005","runtime":91416.48,"implementation":"Dynare Octave", "label": "76.06x"},
+
+      {"model":"Gali Ch. 3","runtime":2191.30,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"Gali Ch. 3","runtime":16820.15,"implementation":"Dynare MATLAB", "label": "7.68x"},
+      {"model":"Gali Ch. 3","runtime":99310.52,"implementation":"Dynare Octave", "label": "45.32x"},
+
+      {"model":"SW 2007","runtime":13171.15,"implementation":"SymbolicDSGE", "label": "1.00x"},
+      {"model":"SW 2007","runtime":25777.80,"implementation":"Dynare MATLAB", "label": "1.90x"},
+      {"model":"SW 2007","runtime":185365.44,"implementation":"Dynare Octave", "label": "13.39x"}
+    ]
+  },
+
+  "transform": [
+    {"calculate": "100", "as": "baseline"}
+  ],
+
+  "layer": [
+  {
+    "mark": {
+      "type": "bar"
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ],
+        "axis": {
+          "title": null,
+          "labelAngle": 0
+        }
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        },
+        "axis": {
+          "title": "Runtime (μs, log scale)",
+          "values": [100, 1000, 10000, 100000, 1000000]
+        }
+      },
+
+      "y2": {
+        "field": "baseline"
+      },
+
+      "color": {
+        "field": "implementation",
+        "type": "nominal",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ],
+        "legend": {
+          "title": null,
+          "orient": "top"
+        }
+      },
+
+      "tooltip": [
+        {
+          "field": "model",
+          "type": "nominal",
+          "title": "Model"
+        },
+        {
+          "field": "implementation",
+          "type": "nominal",
+          "title": "Implementation"
+        },
+        {
+          "field": "runtime",
+          "type": "quantitative",
+          "title": "Runtime (μs)",
+          "format": ",.2f"
+        }
+      ]
+    }
+  },
+
+  {
+    "mark": {
+      "type": "text",
+      "fontWeight": "bold",
+      "dy": -7
+    },
+    "encoding": {
+      "x": {
+        "field": "model",
+        "type": "nominal",
+        "sort": [
+          "LS 2004",
+          "Ireland 2004",
+          "GM 2005",
+          "Gali Ch. 3",
+          "SW 2007"
+        ]
+      },
+
+      "xOffset": {
+        "field": "implementation",
+        "sort": [
+          "SymbolicDSGE",
+          "Dynare MATLAB",
+          "Dynare Octave"
+        ]
+      },
+
+      "y": {
+        "field": "runtime",
+        "type": "quantitative",
+        "scale": {
+          "type": "log",
+          "domain": [100, 1000000]
+        }
+      },
+
+      "text": {
+        "field": "label",
+        "type": "nominal"
+      }
+    }
+  }
+],
+
+  "config": {
+    "view": {
+      "fill": null,
+      "stroke": null
+    },
+    "axis": {"labelFontSize": 13, "titleFontSize": 14},
+    "axisX": {"labelFontWeight": "bold", "labelFontSize": 14},
+    "axisY": {"titleFontWeight": "bold"},
+    "legend": {"labelFontSize": 14},
+    "text": {"fontSize": 12}
+  }
+}</vegachart></p>
+<details class="note">
+<summary>Data (Retained History)</summary>
+<p>SymbolicDSGE retains filter histories. Dynare's closest public alternative is <code>calib_smoother</code>, which also computes smoothed paths, so this is not an equivalent workload. Each Dynare runtime cell reports <code>median μs (D/S)</code>. The final columns are maxima over MATLAB and Octave.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: center;">Filter states S/D</th>
+<th style="text-align: right;">SymbolicDSGE μs</th>
+<th style="text-align: right;">Dynare MATLAB smoother μs (D/S)</th>
+<th style="text-align: right;">Dynare Octave smoother μs (D/S)</th>
+<th style="text-align: right;">max |Δ updated|</th>
+<th style="text-align: right;">max |Δ predicted|</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lubik-Schorfheide (2004)</td>
+<td style="text-align: center;">5 / 8</td>
+<td style="text-align: right;">255.35</td>
+<td style="text-align: right;">14,150.15 (55.41×)</td>
+<td style="text-align: right;">98,107.34 (384.21×)</td>
+<td style="text-align: right;">3.553e-15</td>
+<td style="text-align: right;">3.553e-15</td>
+</tr>
+<tr>
+<td>Ireland (2004)</td>
+<td style="text-align: center;">11 / 13</td>
+<td style="text-align: right;">671.30</td>
+<td style="text-align: right;">14,598.60 (21.75x)</td>
+<td style="text-align: right;">89,367.63 (133.13x)</td>
+<td style="text-align: right;">1.103e-14</td>
+<td style="text-align: right;">9.989e-15</td>
+</tr>
+<tr>
+<td>Gali-Monacelli (2005)</td>
+<td style="text-align: center;">15 / 15</td>
+<td style="text-align: right;">1,201.90</td>
+<td style="text-align: right;">15,163.00 (12.65×)</td>
+<td style="text-align: right;">91,416.48 (76.06×)</td>
+<td style="text-align: right;">5.884e-14</td>
+<td style="text-align: right;">5.063e-14</td>
+</tr>
+<tr>
+<td>Gali (2015), Ch. 3</td>
+<td style="text-align: center;">20 / 22</td>
+<td style="text-align: right;">2,191.30</td>
+<td style="text-align: right;">16,820.15 (7.68×)</td>
+<td style="text-align: right;">99,310.52 (45.32×)</td>
+<td style="text-align: right;">1.279e-13</td>
+<td style="text-align: right;">1.048e-13</td>
+</tr>
+<tr>
+<td>Smets-Wouters (2007)</td>
+<td style="text-align: center;">37 / 40</td>
+<td style="text-align: right;">13,171.15</td>
+<td style="text-align: right;">25,777.80 (1.90×)</td>
+<td style="text-align: right;">185,365.44 (13.39×)</td>
+<td style="text-align: right;">6.295e-11</td>
+<td style="text-align: right;">6.237e-11</td>
+</tr>
+</tbody>
+</table>
+</details>
+<h2 id="outlook">Outlook</h2>
+<details class="note" open="open">
+<summary>Note on Octave</summary>
+<p>This section will briefly discuss the outcomes of the Octave comparison and leave the technical details to the MATLAB discussion.
+In all tested model sizes SymbolicDSGE performs better than Octave + Dynare.
+Being an open-source alternative, SymbolicDSGE is therefore seen as a definite contender in scenarios where a MATLAB license is not available.
+However, the performance curve clearly shows that SymbolicDSGE will be slower than Octave given a sufficiently large model.</p>
+</details>
+<p>While targeting a small subset of models, the benchmark suggests a coherent performance conclusion.
+SymbolicDSGE prefers hand-written kernels over BLAS where possible; as opposed to Dynare, which uses the BLAS implementation of the underlying MATLAB (or Octave) build.
+At small sizes calling into BLAS can be a noticable portion of a routine's runtime since the actual algebra is very small.
+SymbolicDSGE does not have this overhead, plausibly giving it an advantage for small-to-medium scale models.</p>
+<p>Moreover, allocations and memory operations in MATLAB (a dynamically typed language) can be slower than their C counterparts.
+For a smaller model, this also is a considerable portion of the runtime.
+See SymbolicDSGE's Lubik-Schorfheide (2004) runs, the only difference between likelihood-only and full history runs are a set of <code>memcpy</code> operations recording the current state in a given iteration.
+This alone doubles the runtime for a Lubik-Schorfheide (2004)-sized model in SymbolicDSGE.
+Again, the memory operations will be less and less noticable as the model sizes increase and linear algebra becomes the dominating factor in the hot path.</p>
+<p>Both of the above points are plausible advantages of SymbolicDSGE in smaller models.
+MATLAB's advantages, on the other hand, show up in larger models where highly optimized and potentially mutli-threaded BLAS routines begin to amortize their overhead.
+Smets-Wouters (2007) is the clear example; MATLAB + Dynare at those sizes run 2x faster than SymbolicDSGE.
+While the exact point where BLAS overtakes hand-written C will depend on the system, it is clear that past-medium scale, Dynare should be the library of choice for numerical workflows.</p>
+<p>For fast-iterating research work, scratch models, and extensive estimation routines for smaller core models (like a NK3 base), SymbolicDSGE is thought to be a contender.
+This is not definitive proof of any performance outcome, however it shows that a quick benchmark of SymbolicDSGE against Dynare before a large workflow can be informative and beneficial to determine which library better suits the task.</p>
+<details class="note" open="open">
+<summary>Preparation for Large Workflows</summary>
+<p>If cross-system reproducibility is not a concern, it is recommended to clone the SymbolicDSGE repository and build the cython extensions from source.
+This will allow you to enable architecture-dependent optimizations (i.e. <code>-march=native</code>) and can significantly improve vectorization, helping SymbolicDSGE's performance in larger models.
+Running the benchmark with said local build will give you a better idea of what you can squeeze out of SymbolicDSGE on a given system.
+Results in this benchmark do not use local optimizations.</p>
+</details>
+
+
+
+
+
+
+
+  
+  
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../documentation/utilities/DenHaanMarcet/" class="md-footer__link md-footer__link--prev" aria-label="Previous: DenHaanMarcet">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                DenHaanMarcet
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../point_estimation/" class="md-footer__link md-footer__link--next" aria-label="Next: Point Estimation">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Point Estimation
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Created by Güney Kıymaç. This project is distributed under the MIT License.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://www.github.com/GongJr0/" target="_blank" rel="noopener" title="GitHub Profile" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://www.linkedin.com/in/guney-kiymac/" target="_blank" rel="noopener" title="LinkedIn Profile" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M416 32H31.9C14.3 32 0 46.5 0 64.3v383.4C0 465.5 14.3 480 31.9 480H416c17.6 0 32-14.5 32-32.3V64.3c0-17.8-14.4-32.3-32-32.3M135.4 416H69V202.2h66.5V416zM102.2 96a38.5 38.5 0 1 1 0 77 38.5 38.5 0 1 1 0-77m282.1 320h-66.4V312c0-24.8-.5-56.7-34.5-56.7-34.6 0-39.9 27-39.9 54.9V416h-66.4V202.2h63.7v29.2h.9c8.9-16.8 30.6-34.5 62.9-34.5 67.2 0 79.7 44.3 79.7 101.9z"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:guneykiymac@gmail.com" target="_blank" rel="noopener" title="Email" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M61.4 64C27.5 64 0 91.5 0 125.4c0 .9 0 1.7.1 2.6H0v256c0 35.3 28.7 64 64 64h384c35.3 0 64-28.7 64-64V128h-.1c0-.9.1-1.7.1-2.6 0-33.9-27.5-61.4-61.4-61.4zM464 192.3V384c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192.3l154.8 117.4c31.4 23.9 74.9 23.9 106.4 0zM48 125.4c0-7.4 6-13.4 13.4-13.4h389.2c7.4 0 13.4 6 13.4 13.4 0 4.2-2 8.2-5.3 10.7L280.2 271.5c-14.3 10.8-34.1 10.8-48.4 0L53.3 136.1c-3.3-2.5-5.3-6.5-5.3-10.7"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+<h4>Cookie Consent</h4>
+<p>We use cookies to collect anonimized analytics data to analyze which sections of the documentation are most visited. This information is used to identify parts of SymbolicDSGE where users see a need to consult the documentation for. We do not use cookies for any other purpose and do not share any data with third parties. You can manage your cookie preferences below.</p>
+<input class="md-toggle" type="checkbox" id="__settings" >
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+      
+        
+  
+  
+    
+    
+      
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="analytics" checked>
+      <span class="task-list-indicator"></span>
+      Google Analytics
+    </label>
+  </li>
+
+      
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+    
+    
+    
+      <label class="md-button" for="__settings">Manage settings</label>
+    
+  
+    
+    
+      <button type="reset" class="md-button md-button--primary">Reject</button>
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.select", "content.code.annotate", "navigation.footer", "content.link-preview"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": {"benchmark": "benchmark", "doc": "doc", "guide": "guide", "info": "info"}, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../js/mkdocs-charts-plugin.js"></script>
+      
+        <script src="../../javascripts/katex.js"></script>
+      
+        <script src="../../assets/external/unpkg.com/katex@0/dist/katex.min.js"></script>
+      
+        <script src="../../assets/external/unpkg.com/katex@0/dist/contrib/auto-render.min.js"></script>
+      
+        <script src="../../assets/external/cdn.jsdelivr.net/npm/vega@5.js"></script>
+      
+        <script src="../../assets/external/cdn.jsdelivr.net/npm/vega-lite@5.js"></script>
+      
+        <script src="../../assets/external/cdn.jsdelivr.net/npm/vega-embed@6.js"></script>
+      
+    
+  
+        <script>
+        var mkdocs_chart_plugin = {'data_path': '', 'use_data_path': 'True', 'vega_theme': 'deprecated', 'vega_theme_light': 'default', 'vega_theme_dark': 'dark', 'vega_renderer': 'svg', 'vega_width': 'container', 'fallback_width': '800', 'integrations': {'mkdocs_material': {'themes_light': ['default'], 'themes_dark': ['slate']}}, 'path_to_homepage': '..\\..'}
+        </script>
+        </body>
+</html>
