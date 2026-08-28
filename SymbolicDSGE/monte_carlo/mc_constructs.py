@@ -20,7 +20,7 @@ from ..core.shock_generators import Shock
 from ..kalman.filter import UnscentedFilterRawResult
 from ..regression.enums import RegressionStatus
 from .postproc import Artifact
-from ..regression.ols import MCRegressionResult
+from ..regression.result import MCRegressionResult
 from .custom_op import PandasCustomFunc
 
 NDF = NDArray[float64]

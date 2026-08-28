@@ -24,7 +24,7 @@ from .mc_constructs import MCPipelineResult
 from .postproc import Artifact, Summary, Raw
 from .._ckernels.monte_carlo._arenas import resolve_retention
 from .._diag_tests.result import MCTestResult
-from ..regression.ols.ols_result import MCRegressionResult
+from ..regression.result import MCRegressionResult
 from .spec import (
     MCFailureSpec,
     MCPostprocResultMeta,
@@ -77,8 +77,10 @@ def serialize_pipeline_result(result: MCPipelineResult) -> dict[str, Any]:
                 "rejection_rate": float(summary.rejection_rate),
                 "statistic_se": _json_float(summary.statistic_se),
                 "pval_se": _json_float(summary.pval_se),
+                "rejection_rate_se": _json_float(summary.rejection_rate_se),
                 "statistic_ci": json_safe(summary.statistic_confidence_interval()),
-                "rejection_ci": json_safe(summary.pval_confidence_interval()),
+                "pval_ci": json_safe(summary.pval_confidence_interval()),
+                "rejection_ci": json_safe(summary.rejection_rate_confidence_interval()),
                 "statistic_trace": json_safe(summary.statistic_trace),
                 "pval_trace": json_safe(summary.pval_trace),
                 "status_trace": [int(status) for status in summary.status_trace],

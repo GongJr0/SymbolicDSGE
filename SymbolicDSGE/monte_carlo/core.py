@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
-from ..regression.ols import MCRegressionResult
+from ..regression.result import MCRegressionResult
 from .allocation import BufferPlan, resolve_output_specs
 from .traces import traces_from_summaries, trace_keys_for_step
 from .postproc import Artifact, normalize_artifacts

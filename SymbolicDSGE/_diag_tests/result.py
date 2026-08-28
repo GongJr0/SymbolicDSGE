@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy import float64, sqrt
 from numpy.typing import NDArray
+from scipy.stats import norm, t
 
 from .distributions import (
     DistributionParameter,
@@ -14,6 +18,9 @@ from .distributions import (
 )
 from .status import TestStatus
 from ..monte_carlo.spec import MCTestResultSpec, MCTestResultMeta
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
 
 
 @dataclass(frozen=True)
@@ -124,24 +131,65 @@ class MCTestResult:
     def rejection_rate(self) -> float64:
         return float64((self.pval_trace < self.alpha).mean())
 
+    def _mc_se(self, trace: NDArray[float64]) -> float64:
+        """Monte Carlo standard error of a trace's mean."""
+        if self.n_retained < 2:
+            return float64(np.nan)
+        return float64(trace.std(ddof=1) / sqrt(self.n_retained))
+
     @cached_property
     def pval_se(self) -> float64:
-        return float64(
-            ((self.rejection_rate * (1 - self.rejection_rate)) / self.n_retained) ** 0.5
-        )
+        """Spread of :attr:`mean_pval` across replications."""
+        return self._mc_se(self.pval_trace)
 
     @cached_property
     def statistic_se(self) -> float64:
-        return float64(self.statistic_trace.std(ddof=1) / sqrt(self.n_retained))
+        return self._mc_se(self.statistic_trace)
+
+    @cached_property
+    def rejection_rate_se(self) -> float64:
+        """Binomial standard error of :attr:`rejection_rate`."""
+        p = self.rejection_rate
+        return float64(((p * (1 - p)) / self.n_retained) ** 0.5)
+
+    def _mean_interval(
+        self,
+        mean: float64,
+        se: float64,
+        confidence_level: float | float64,
+        t_interval: bool,
+    ) -> tuple[float64, float64]:
+        if t_interval:
+            crit = t.ppf(1 - (1 - confidence_level) / 2, self.n_retained - 1)
+        else:
+            crit = norm.ppf(1 - (1 - confidence_level) / 2)
+        return float64(mean - crit * se), float64(mean + crit * se)
 
     def pval_confidence_interval(
         self,
         confidence_level: float | float64 = 0.95,
+        t_interval: bool = False,
+    ) -> tuple[float64, float64]:
+        """Interval for :attr:`mean_pval`, off the spread of the p-value trace.
+
+        Clamped to ``[0, 1]``. The rejection rate's own interval is
+        :meth:`rejection_rate_confidence_interval`.
+        """
+        low, high = self._mean_interval(
+            self.mean_pval, self.pval_se, confidence_level, t_interval
+        )
+        return float64(max(0.0, low)), float64(min(1.0, high))
+
+    def rejection_rate_confidence_interval(
+        self,
+        confidence_level: float | float64 = 0.95,
         wilson: bool = True,
     ) -> tuple[float64, float64]:
+        """Interval for :attr:`rejection_rate`, Wilson by default.
 
-        from scipy.stats import norm
-
+        The rate is a proportion, so the normal branch reads
+        :attr:`rejection_rate_se`. Both are clamped to ``[0, 1]``.
+        """
         z = norm.ppf(1 - (1 - confidence_level) / 2)
         p = self.rejection_rate
 
@@ -152,25 +200,65 @@ class MCTestResult:
             center = (p + (z**2) / (2 * n)) / (1 + (z**2) / n)
             spread = z * sqrt((p * q) / n + (z**2) / (4 * n**2)) / (1 + (z**2) / n)
             return float64(max(0, center - spread)), float64(min(1, center + spread))
-        else:
-            se = self.pval_se
-            return p - z * se, p + z * se
+
+        se = self.rejection_rate_se
+        return float64(max(0.0, p - z * se)), float64(min(1.0, p + z * se))
 
     def statistic_confidence_interval(
         self, confidence_level: float | float64 = 0.95, t_interval: bool = False
     ) -> tuple[float64, float64]:
-        if t_interval:
-            from scipy.stats import t
+        return self._mean_interval(
+            self.mean_statistic, self.statistic_se, confidence_level, t_interval
+        )
 
-            df = self.n_retained - 1
-            z = t.ppf(1 - (1 - confidence_level) / 2, df)
-        else:
-            from scipy.stats import norm
+    def summary(self) -> DataFrame:
+        """One row for this test, aggregated over the retained replications.
 
-            z = norm.ppf(1 - (1 - confidence_level) / 2)
+        ``reject_rate`` is the share of replications rejecting at :attr:`alpha`.
+        Interval bounds are :meth:`intervals`.
+        """
+        import pandas as pd
 
-        se = self.statistic_se
-        return self.mean_statistic - z * se, self.mean_statistic + z * se
+        return pd.DataFrame(
+            {
+                "statistic": [self.mean_statistic],
+                "statistic_se": [self.statistic_se],
+                "pval": [self.mean_pval],
+                "reject_rate": [self.rejection_rate],
+            },
+            index=pd.Index([self.test_name], name="test"),
+        )
+
+    def intervals(
+        self,
+        confidence_level: float | float64 = 0.95,
+        t_interval: bool = False,
+        wilson: bool = True,
+    ) -> DataFrame:
+        """Interval bounds for every quantity :meth:`summary` reports.
+
+        ``statistic`` and ``pval`` come off the trace spread, normal by default
+        and Student-t under ``t_interval``. ``reject_rate`` is a proportion, so
+        it takes a Wilson interval unless ``wilson`` is off.
+        """
+        import pandas as pd
+
+        blocks = {
+            "statistic": self.statistic_confidence_interval(
+                confidence_level, t_interval
+            ),
+            "pval": self.pval_confidence_interval(confidence_level, t_interval),
+            "reject_rate": self.rejection_rate_confidence_interval(
+                confidence_level, wilson
+            ),
+        }
+        return pd.DataFrame(
+            {
+                "ci_low": [low for low, _ in blocks.values()],
+                "ci_high": [high for _, high in blocks.values()],
+            },
+            index=pd.Index(list(blocks), name="quantity"),
+        )
 
     def to_spec(self) -> MCTestResultSpec:
         meta = MCTestResultMeta(

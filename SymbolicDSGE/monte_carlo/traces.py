@@ -26,7 +26,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from SymbolicDSGE._diag_tests.result import MCTestResult
-from SymbolicDSGE.regression.ols.ols_result import MCRegressionResult
+from SymbolicDSGE.regression.result import MCRegressionResult
 
 from .catalog import TERMINAL_STEP_TYPES, TRANSFORM_STEP_TYPES
 from .mc_constructs import MCStep, OpType

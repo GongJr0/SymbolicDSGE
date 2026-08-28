@@ -33,7 +33,7 @@ from ..estimation.spec import (
     MCMCResultSpec,
 )
 from .._diag_tests.result import MCTestResult
-from ..regression.ols.ols_result import MCRegressionResult
+from ..regression.result import MCRegressionResult
 from ..monte_carlo.builder import build_pipeline
 from ..monte_carlo.postproc import Artifact, Raw, Summary
 from ..monte_carlo.spec import (

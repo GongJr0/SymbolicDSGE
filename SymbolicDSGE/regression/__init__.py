@@ -2,10 +2,11 @@ from importlib import import_module
 from typing import Any
 
 from . import elastic_net, lasso, ols, ridge
-from .result import RegressionResult
+from .result import MCRegressionResult, RegressionResult
 from .enums import RegressionKind, RegressionStatus
 
 __all__ = [
+    "MCRegressionResult",
     "RegressionKind",
     "RegressionResult",
     "RegressionStatus",

@@ -208,7 +208,7 @@ function TestSummary({ result }: { result: MCPipelineResult }) {
                 <td>{format(summary.mean_pval)}</td>
                 <td>{format(summary.rejection_rate)}</td>
                 <td>{formatInterval(summary.rejection_ci)}</td>
-                <td>{format(summary.pval_se)}</td>
+                <td>{format(summary.rejection_rate_se)}</td>
               </tr>
             ))}
           </tbody>
