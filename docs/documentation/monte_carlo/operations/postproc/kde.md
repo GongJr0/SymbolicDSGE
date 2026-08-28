@@ -28,4 +28,4 @@ __Key Parameters:__
 | grid_points | `200` | Number of evaluation points on the density grid (min 2). |
 | kernel | `"gaussian"` | Kernel family. Only `"gaussian"` is currently supported. |
 
-The op needs at least two finite values in the selected trace. See [Result Access](../../result_access.md) for the trace keys a run produces.
+The op needs at least two finite values in the selected trace. See [Monte Carlo Results](../../results.md) for the trace keys a run produces.

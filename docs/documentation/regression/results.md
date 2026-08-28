@@ -6,7 +6,6 @@ tags:
 
 ```python
 from SymbolicDSGE.regression import RegressionResult
-from SymbolicDSGE.regression.ols import MCRegressionResult
 ```
 
 &nbsp;
@@ -49,55 +48,5 @@ __Fields and Properties:__
 ???+ warning "Shape Contract"
     `RegressionResult` expects a one-dimensional response vector and a two-dimensional design matrix. Multivariate response regressions should be represented as separate result objects.
 
-&nbsp;
-
-```python
-@dataclass(frozen=True)
-class MCRegressionResult(
-    variables: list[str],
-    results: tuple[RegressionResult, ...],
-)
-```
-
-`MCRegressionResult` aggregates per-replication `RegressionResult` objects produced by Monte Carlo regression steps.
-
-__Fields and Properties:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| variables | `#!python list[str]` | Shared variable ordering across replications. |
-| results | `#!python tuple[RegressionResult, ...]` | Per-replication regression outputs. |
-| coef_trace | `#!python ndarray` | Coefficients stacked by replication. Shape `(n_rep, k)`. |
-| coefficients | `#!python ndarray` | Alias for `coef_trace`. |
-| status_trace | `#!python tuple[RegressionStatus, ...]` | Solver status for each replication. |
-| n_rep | `#!python int` | Number of stored regression results. |
-| n | `#!python int` | Shared number of observations per replication. |
-| k | `#!python int` | Shared number of design columns. |
-| y_trace | `#!python ndarray` | Response vectors stacked by replication. |
-| x_trace | `#!python ndarray` | Design matrices stacked by replication. |
-| y_hat_trace | `#!python ndarray` | Fitted responses stacked by replication. |
-| residual_trace | `#!python ndarray` | Residual vectors stacked by replication. |
-| ssr_trace | `#!python ndarray` | Per-replication SSR values. |
-| sst_trace | `#!python ndarray` | Per-replication SST values. |
-| mse_trace | `#!python ndarray` | Per-replication MSE values. |
-| rmse_trace | `#!python ndarray` | Per-replication RMSE values. |
-| r2_trace | `#!python ndarray` | Per-replication R-squared values. |
-| r2_adj_trace | `#!python ndarray` | Per-replication adjusted R-squared values. |
-| `summary(alpha=0.05)` | `#!python pandas.DataFrame` | Coefficient trace summary. OLS results include inference columns. |
-| `to_dict()` | `#!python dict` | Compact dictionary representation. |
-
-__OLS-Only Aggregate Diagnostics:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| se_trace | `#!python ndarray` | OLS standard-error trace. |
-| t_stat_trace | `#!python ndarray` | OLS t-statistic trace. |
-| partial_r2_trace | `#!python ndarray` | OLS partial R-squared trace. |
-| pval_trace | `#!python ndarray` | OLS coefficient p-value trace. |
-| F_stat_trace | `#!python ndarray` | OLS F-statistic trace. |
-| F_pval_trace | `#!python ndarray` | OLS F-test p-value trace. |
-| `confidence_intervals(alpha=0.05)` | `#!python ndarray` | Per-replication OLS coefficient intervals. |
-| `F_test(alpha=0.05)` | `#!python MCTestResult` | Aggregate F-test result container. |
-
-???+ note "OLS-Specific Diagnostics"
-    OLS aggregate diagnostics require every stored result to be an `OLSResult`. For ridge, lasso, and elastic-net aggregates, `summary()` returns coefficient traces without OLS inference columns.
+???+ note "Monte Carlo aggregates"
+    `MCRegressionResult`, the container a Monte Carlo regression step produces, is documented alongside `MCTestResult` in [Monte Carlo Results](../monte_carlo/results.md).

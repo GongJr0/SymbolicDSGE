@@ -24,7 +24,7 @@ func(
 ) -> Summary | Raw | tuple[Summary, Raw] | tuple[Raw, Summary]
 ```
 
-`traces` is keyed by across-replication trace name (`"test.<name>.statistic"`, `"test.<name>.pval"`, `"regression.<name>.coef"`, `"payload.<name>"`, and so on); see [Result Access](../../result_access.md) for the full key registry, or call `available_traces(pipeline)` to enumerate the keys a spec will produce. The op reads whichever traces it needs and returns one or more tagged artifacts.
+`traces` is keyed by across-replication trace name (`"test.<name>.statistic"`, `"test.<name>.pval"`, `"regression.<name>.coef"`, `"payload.<name>"`, and so on); see [Monte Carlo Results](../../results.md) for the full key registry, or call `available_traces(pipeline)` to enumerate the keys a spec will produce. The op reads whichever traces it needs and returns one or more tagged artifacts.
 
 ## Return artifacts
 
