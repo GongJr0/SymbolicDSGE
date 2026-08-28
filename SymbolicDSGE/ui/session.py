@@ -356,15 +356,16 @@ class UISession:
                 print(f"sdsge-ui: could not replay the '{role}' simulation: {exc}")
 
     def run_simulation_spec(self, role: Role, spec: SimSpec) -> dict[str, Any]:
-        """Run a :class:`SimSpec` verbatim; it unpacks straight into ``sim``."""
+        """Run a stored spec verbatim, materialized into ``sim``'s keywords."""
         slot = self._slot(role)
         if slot.solved is None:
             raise ValueError(f"Role '{role}' does not have a solved model.")
+        kwargs = spec.to_sim_kwargs()
         return self._record_sim_run(
             role=role,
-            sim=slot.solved.sim(**spec),
-            T=int(spec.T),
-            observables=bool(spec.observables),
+            sim=slot.solved.sim(**kwargs),
+            T=int(kwargs["T"]),
+            observables=bool(kwargs["observables"]),
         )
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:

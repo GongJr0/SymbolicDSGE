@@ -60,7 +60,7 @@ from numpy.typing import NDArray
 
 from .builder import BundleBuilder
 from .container import MANIFEST_NAME, BundleArchive
-from .manifest import Manifest, Member, SimSpec
+from .manifest import Manifest, Member
 from .parquet import collapse_columns, from_parquet_columns, trace_to_csv
 
 
@@ -197,7 +197,7 @@ def compile_directory(
 
     if manifest.simulation is not None:
         for role, spec in manifest.simulation.items():
-            builder.set_simulation(role, spec)
+            builder.set_simulation(role, **spec.to_sim_kwargs())
 
     return builder.write(out_path)
 

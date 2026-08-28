@@ -34,6 +34,7 @@ from ..estimation.spec import (
     MCMCResultSpec,
     MCMCResultMeta,
 )
+from ..core.shock_generators import Shock
 from ..estimation.results import OptimizationResult, MLEResult, MAPResult
 
 from ..monte_carlo.core import MCPipeline
@@ -58,6 +59,8 @@ from .parquet import (
     trace_to_csv,
     trace_to_json,
 )
+
+NDF = NDArray[np.float64]
 
 # Ref/DGP top level models
 _MODEL_PATH = "model/{role}.yaml"
@@ -470,8 +473,31 @@ class BundleBuilder:
 
     # Simulation prefill
 
-    def set_simulation(self, role: str, simulation: SimSpec) -> BundleBuilder:
-        self._simulation[role] = simulation
+    def set_simulation(
+        self,
+        role: str,
+        *,
+        T: int,
+        shocks: Mapping[str, Shock | NDF] | None = None,
+        shock_scale: float = 1.0,
+        x0: Mapping[str, float] | Sequence[float] | NDF | None = None,
+        observables: bool = False,
+    ) -> BundleBuilder:
+        """Attach a simulation prefill under ``role``, taking ``SolvedModel.sim``'s
+        keywords and lowering them to the stored form.
+
+        Each shock is a live :class:`Shock` or a raw path array, the two shapes
+        ``sim`` draws from; the parameters are read off the object rather than
+        hand-written. A callable cannot be stored, since only its result would
+        travel and the receiver could not redraw it.
+        """
+        self._simulation[role] = SimSpec(
+            T=int(T),
+            x0=_prefill_x0(x0),
+            observables=bool(observables),
+            shock_scale=float(shock_scale),
+            shocks=_prefill_shocks(shocks),
+        )
         return self
 
     # Low-level passthrough
@@ -512,6 +538,49 @@ class BundleBuilder:
             raise ValueError(f"Duplicate bundle member path {member.path!r}.")
         self._members.append(member)
         self._files[member.path] = data
+
+
+def _prefill_x0(
+    x0: Mapping[str, float] | Sequence[float] | NDF | None,
+) -> Mapping[str, float] | list[float] | None:
+    """Lower ``sim``'s ``x0`` to its stored shape, name-keyed or positional."""
+    if x0 is None:
+        return None
+    if isinstance(x0, Mapping):
+        return {str(name): float(value) for name, value in x0.items()}
+    if isinstance(x0, (Sequence, np.ndarray)) and not isinstance(x0, (str, bytes)):
+        return [float(value) for value in x0]
+    raise TypeError(
+        f"x0 must be a mapping of variable names to values, a sequence in "
+        f"declaration order, or an ndarray; got {type(x0).__name__}."
+    )
+
+
+def _prefill_shocks(
+    shocks: Mapping[str, Shock | NDF] | None,
+) -> dict[str, Any] | None:
+    """Lower each shock to its stored shape: parameters, or a raw path.
+
+    A :class:`Shock` travels as its parameters so the receiver redraws it under
+    the author's seed. An array travels as itself. A callable is rejected: only
+    the path it returned would survive, which is not the same run.
+    """
+    if shocks is None:
+        return None
+    lowered: dict[str, Any] = {}
+    for key, shock in shocks.items():
+        if isinstance(shock, Shock):
+            lowered[key] = shock.to_dict()
+        elif isinstance(shock, np.ndarray):
+            lowered[key] = shock.tolist()
+        else:
+            raise TypeError(
+                f"Shock {key!r} must be a Shock or a raw path array; got "
+                f"{type(shock).__name__}. A callable is rejected here too: only "
+                f"the path it returned would travel, and the receiver could not "
+                f"redraw it."
+            )
+    return lowered
 
 
 def _custom_op_blob(step: MCStep) -> bytes:

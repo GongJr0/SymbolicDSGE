@@ -51,7 +51,7 @@ from ..monte_carlo.mc_constructs import (
     failed_step_counts,
 )
 from .container import BundleArchive
-from .manifest import Manifest, Member, SimSpec
+from .manifest import Manifest, Member
 from .parquet import collapse_columns, csv_to_columns, from_parquet_columns
 
 if TYPE_CHECKING:
@@ -102,7 +102,8 @@ class LoadedBundle:
     dgp: SolvedModel | None = None
     estimation: LoadedEstimation | None = None
     mc: LoadedMC | None = None
-    simulation: dict[str, SimSpec] | None = None
+    #: ``SolvedModel.sim`` keywords per role, ready to unpack into a run.
+    simulation: dict[str, dict[str, Any]] | None = None
 
 
 def build_from(path: str | Path) -> LoadedBundle:
@@ -116,7 +117,7 @@ def build_from(path: str | Path) -> LoadedBundle:
         dgp=_load_model(archive, manifest, "dgp"),
         estimation=_load_estimation(archive, manifest, reference),
         mc=_load_mc(archive, manifest),
-        simulation=manifest.simulation,
+        simulation=_load_simulation(manifest),
     )
 
 
@@ -133,6 +134,18 @@ def _load_model(
     solve_kwargs = dict(member.options.get("solve_kwargs", {}))
     compiled = solver.compile(**compile_kwargs)
     return solver.solve(compiled, **solve_kwargs)
+
+
+def _load_simulation(manifest: Manifest) -> dict[str, dict[str, Any]] | None:
+    """Each role's prefill as the ``sim`` keywords it replays through.
+
+    The stored :class:`SimSpec` is the manifest's own carrier; a caller receives
+    the materialized keywords, so ``model.sim(**loaded.simulation[role])`` is the
+    whole of replaying one.
+    """
+    if not manifest.simulation:
+        return None
+    return {role: spec.to_sim_kwargs() for role, spec in manifest.simulation.items()}
 
 
 def _load_columns(archive: BundleArchive, member: Member) -> dict[str, list[Any]]:

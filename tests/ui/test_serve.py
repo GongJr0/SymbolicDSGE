@@ -18,7 +18,7 @@ from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.bundle.manifest import SimSpec
+from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
 from SymbolicDSGE.estimation.spec import (
@@ -90,25 +90,17 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         edges=[],
         postprocs=[],
     )
-    sim_spec = SimSpec(
-        T=8,
-        shocks={
-            "e_u": {
-                "dist": "norm",
-                "multivar": False,
-                "seed": 42,
-                "dist_args": [],
-                "dist_kwargs": {"loc": 0.0},
-            }
-        },
-    )
-
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(_estimator(observed), result=result)
         .add_mc(build_pipeline(pipeline))
-        .set_simulation("reference", sim_spec)
+        .set_simulation(
+            "reference",
+            T=8,
+            shocks={"e_u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
+            observables=True,
+        )
         .write(tmp_path / "hydrate.sdsge")
     )
 

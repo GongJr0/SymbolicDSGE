@@ -11,7 +11,7 @@ import numpy as np
 from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.bundle.manifest import SimSpec
+from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -78,18 +78,8 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
             "reference",
-            SimSpec(
-                T=8,
-                shocks={
-                    "u": {
-                        "dist": "norm",
-                        "multivar": False,
-                        "seed": 42,
-                        "dist_args": [],
-                        "dist_kwargs": {"loc": 0.0},
-                    }
-                },
-            ),
+            T=8,
+            shocks={"u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
         )
     )
     target = builder.write(tmp_path / "model.sdsge")
@@ -124,8 +114,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # simulation prefill
     assert loaded.simulation is not None
-    assert loaded.simulation["reference"].T == 8
-    assert loaded.simulation["reference"].shocks["u"]["seed"] == 42
+    prefill = loaded.simulation["reference"]
+    assert prefill["T"] == 8
+    assert prefill["shocks"]["u"].seed == 42
 
     # manifest integrity
     assert loaded.manifest.created_by == "test-suite"

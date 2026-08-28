@@ -105,28 +105,6 @@ __Recognized kinds (`MEMBER_KINDS`):__
 ???+ note "Kind whitelist"
     `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`.
 
-## `SimSpec`
-
-```python
-@dataclass
-class SimSpec(Mapping)
-```
-
-Simulation prefill. Its fields reconstruct into keyword arguments of [`SolvedModel.sim`](../SolvedModel.md) via `to_sim_kwargs()`.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| T | `#!python int` | Periods to simulate. |
-| x0 | `#!python list[float] | ndarray | None` | Initial state vector; zero vector when `None`. |
-| observables | `#!python bool` | Include observable paths in the output. |
-| shock_scale | `#!python float` | Multiplier applied to all shocks. |
-| shocks | `#!python dict[str, ShockParameters] | None` | Per-key shock specs (a [`Shock.to_dict()`](../Shock.md) dict each); `None` for a deterministic run. |
-
-???+ info "Two dict views"
-    `SimSpec.to_dict()` is the JSON form written to the manifest, where shocks stay as their `Shock.to_dict()` parameter dicts. The `Mapping` view, via `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()`, is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T` horizon draw, so the run is reproducible under a fixed seed.
-
 ## Example
 
 ```python
