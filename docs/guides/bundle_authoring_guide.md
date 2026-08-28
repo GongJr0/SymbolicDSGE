@@ -232,19 +232,19 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3236  25-08-2026 19:55   manifest.json
-     2134  25-08-2026 19:55   model/reference.yaml
-     2134  25-08-2026 19:55   model/dgp.yaml
-      629  25-08-2026 19:55   estimation/spec.json
-     1939  25-08-2026 19:55   estimation/observed.parquet
-    18972  25-08-2026 19:55   estimation/posterior.parquet
-      585  25-08-2026 19:55   estimation/result.json
-     1018  25-08-2026 19:55   montecarlo/pipeline.json
-    14962  25-08-2026 19:55   montecarlo/result.json
-    15550  25-08-2026 19:55   montecarlo/traces.parquet
-     1282  25-08-2026 19:55   data/auxiliary_series.parquet
+     3236  28-08-2026 11:49   manifest.json
+     2134  28-08-2026 11:49   model/reference.yaml
+     2134  28-08-2026 11:49   model/dgp.yaml
+      629  28-08-2026 11:49   estimation/spec.json
+     1939  28-08-2026 11:49   estimation/observed.parquet
+    18972  28-08-2026 11:49   estimation/posterior.parquet
+      585  28-08-2026 11:49   estimation/result.json
+     1018  28-08-2026 11:49   montecarlo/pipeline.json
+    14965  28-08-2026 11:49   montecarlo/result.json
+    15550  28-08-2026 11:49   montecarlo/traces.parquet
+     1282  28-08-2026 11:49   data/auxiliary_series.parquet
 ---------                     -------
-    62441                     11 files
+    62444                     11 files
 ```
 
 For a structured view, decompile it:

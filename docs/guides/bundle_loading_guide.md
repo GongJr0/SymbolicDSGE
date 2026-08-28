@@ -169,8 +169,8 @@ prefills = loaded.simulation  # dict[str, SimSpec] | None
 assert prefills, "No simulation tab found in the bundle."
 
 
-for role, spec in prefills.items():
-    print(role, "\n", spec)
+for role, prefill in prefills.items():
+    print(role, "\n", prefill)
 
 reference.sim(**prefills["reference"]).states["r"][:5]
 ```
