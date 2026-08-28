@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import json
 import posixpath
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
-from numpy import ndarray
+import numpy as np
+from numpy import float64, ndarray
 
 from ..core.shock_generators import Shock, ShockParameters
 
@@ -70,8 +71,13 @@ def format_for_path(path: str) -> str:
 
 
 @dataclass
-class SimSpec(Mapping):
+class SimSpec:
     """Simulation/output-tab prefill (#141).
+
+    The internal carrier between :meth:`BundleBuilder.set_simulation`, the
+    manifest, and the loader. No public signature names it: the builder takes
+    the ``sim`` keywords and lowers them here, and the loader materializes it
+    back through :meth:`to_sim_kwargs` before handing anything to a caller.
 
     No simulation results are stored. Replaying these specs against the
     preloaded model reproduces the intended run (numpy PCG64 + fixed seed).
@@ -79,56 +85,63 @@ class SimSpec(Mapping):
     """
 
     T: int = 0
-    x0: list[float] | ndarray | None = None
-    observables: bool = True
+    x0: Mapping[str, float] | list[float] | ndarray | None = None
+    observables: bool = False
     shock_scale: float = 1.0
-    shocks: dict[str, ShockParameters] | None = None
+    #: Per key, either a ``Shock.to_dict()`` mapping or a raw path as a nested
+    #: list. Both are what ``SolvedModel.sim`` accepts, in JSON-safe form.
+    shocks: dict[str, ShockParameters | list[Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """The JSON-serializable form: shocks stay as their ``Shock.to_dict``."""
+        """The JSON-serializable form: shocks stay as parameters or raw paths."""
         return {
             "T": int(self.T),
-            "x0": None if self.x0 is None else [float(x) for x in self.x0],
+            "x0": _x0_to_json(self.x0),
             "observables": bool(self.observables),
             "shock_scale": float(self.shock_scale),
             "shocks": self.shocks,
         }
 
     def to_sim_kwargs(self) -> dict[str, Any]:
-        """The ``SolvedModel.sim`` keyword form: shocks as live ``Shock`` objects.
+        """The ``SolvedModel.sim`` keyword form: ``model.sim(**spec.to_sim_kwargs())``.
 
-        ``sim`` materializes each ``Shock`` into its horizon-bound draw at the
-        simulation boundary, so this is exactly ``model.sim(**spec)``.
+        Each shock parameter mapping becomes a live :class:`Shock`, which ``sim``
+        materializes into its horizon-bound draw; each raw path becomes the array
+        ``sim`` passes through unchanged.
         """
         out = self.to_dict()
         out["shocks"] = (
-            {k: Shock.from_dict(v) for k, v in self.shocks.items()}
+            {key: _shock_from_json(value) for key, value in self.shocks.items()}
             if self.shocks
             else None
         )
         return out
-
-    # Mapping protocol: a SimSpec unpacks straight into ``model.sim(**spec)``.
-    # The view is the materialized sim kwargs, distinct from ``to_dict``'s
-    # JSON-serializable form.
-    def __getitem__(self, key: str) -> Any:
-        return self.to_sim_kwargs()[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.to_sim_kwargs())
-
-    def __len__(self) -> int:
-        return len(self.to_sim_kwargs())
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SimSpec:
         return cls(
             T=int(data.get("T", 0)),
             x0=data.get("x0", None),
-            observables=bool(data.get("observables", True)),
+            observables=bool(data.get("observables", False)),
             shock_scale=float(data.get("shock_scale", 1.0)),
             shocks=data.get("shocks", None),
         )
+
+
+def _x0_to_json(x0: Mapping[str, float] | list[float] | ndarray | None) -> Any:
+    """``x0`` in JSON form, keeping the name-keyed and positional shapes apart."""
+    if x0 is None:
+        return None
+    if isinstance(x0, Mapping):
+        return {str(name): float(value) for name, value in x0.items()}
+    return [float(value) for value in x0]
+
+
+def _shock_from_json(value: ShockParameters | list[Any]) -> Any:
+    """One stored shock as ``sim`` takes it: a :class:`Shock` or a raw path."""
+    if isinstance(value, Mapping):
+        return Shock.from_dict(value)
+    return np.asarray(value, dtype=float64)
 
 
 @dataclass

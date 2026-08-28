@@ -170,10 +170,12 @@ bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 
 ## Specify a simulation prefill
 
-Simulation prefills ride inline in the manifest, keyed by role. They control what the GUI's Outputs tab prefills when the receiver opens the bundle on `sdsge-ui`. A `SimSpec`'s fields are exactly the keyword arguments of `SolvedModel.sim`, and each shock is stored as its `Shock.to_dict()` parameters. No live `Shock` is serialized.
+Simulation prefills ride inline in the manifest, keyed by role. `BundleBuilder.set_simulation` takes a role and the kwargs for `SolvedModel.sim`. The bundle stores the arguments and the shock parameters, but not the simulation outputs. The receiver can replay the simulation deterministically by calling `sim` with the same arguments.
 
 ```python
-simulation = SimSpec(
+
+bundle.set_simulation(
+    "reference",
     T=200,
     observables=True,
     shock_scale=1.0,
@@ -181,11 +183,9 @@ simulation = SimSpec(
         "e_r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(),  # (1)!
     },
 )
-
-bundle.set_simulation("reference", simulation)
 ```
 
-1. The seed makes the replayed simulation deterministic. Both the bundle author and the receiver produce identical paths when clicking **Run**. Because a `Shock` is horizon independent, `to_dict()` carries no `T`; the period count comes from the `SimSpec`.
+1. The seed makes the replayed simulation deterministic. The bundle author and receiver produce identical paths.
 
 ## Add raw data alongside the model
 

@@ -68,24 +68,6 @@ if dgp is not None:
     print("Eigenvalues:", dgp.policy.eig.round(2))
 ```
 
-A quick deterministic simulation against generated shocks confirms the policy round trip:
-
-```python
-T = 20
-rng = np.random.default_rng(42)
-shocks = {
-    "e_g,e_z": rng.standard_normal((T, 2)), # (1)!
-}
-sim = reference.sim(
-    T=T,
-    shocks=shocks,
-    observables=True,
-)
-print(sim.observables["Infl"][:5])
-```
-
-1. See [`SolvedModel.sim`](../documentation/SolvedModel.md) for the shock specification grammar.
-
 ???+ note "DGP slot may be absent"
     `loaded.dgp` is `None` whenever the bundle did not carry a `dgp.yaml`. Test before use.
 
@@ -194,7 +176,7 @@ reference.sim(**prefills["reference"]).states["r"][:5]
 ```
 
 ???+ note "Determinism"
-    Replaying a `SimSpec` against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects. It stores only each shock's `Shock.to_dict()` parameters. `sim` rebuilds the `Shock` and materializes a `T` horizon draw, so a fixed seed yields identical paths for author and receiver.
+    Replaying a prefill against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects. It stores only each shock's `Shock.to_dict()` parameters.
 
 ## Round-trip safety
 

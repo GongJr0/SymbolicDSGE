@@ -97,52 +97,6 @@ __Recognized kinds (`MEMBER_KINDS`):__
 ???+ note "Kind whitelist"
     `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`. Adding a new kind requires bumping `SDSGE_FORMAT_VERSION` so older readers don't silently drop it.
 
-## `SimSpec`
-
-```python
-@dataclass
-class SimSpec(Mapping)
-```
-
-Simulation prefill. The receiver clicks **Run** in the GUI to reproduce the author's intended simulation. Prefills are stored inline in `Manifest.simulation` as a `{role: SimSpec}` map (one entry per model slot), not as members.
-
-Its fields are exactly the keyword arguments of [`SolvedModel.sim`](../SolvedModel.md), and `SimSpec` is a `Mapping`, so a prefill unpacks straight into a run:
-
-```python
-model.sim(**spec)   # the spec's Shock params are materialized at the sim boundary
-```
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| T | `#!python int` | Periods to simulate. |
-| x0 | `#!python list[float] | None` | Initial state vector; zero vector when `None`. |
-| observables | `#!python bool` | Include observable paths in the output. |
-| shock_scale | `#!python float` | Multiplier applied to all shocks. |
-| shocks | `#!python dict[str, ShockParameters] | None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are innovation symbols, `"e_a,e_b"` for a joint shock. |
-
-???+ info "Two dict views"
-    `SimSpec.to_dict()` is the JSON form written to the manifest, where shocks stay as their `Shock.to_dict()` parameter dicts. The `Mapping` view, via `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()`, is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T` horizon draw, so the run is reproducible under a fixed seed.
-
-## `ShockParameters`
-
-```python
-class ShockParameters(TypedDict)
-```
-
-The serialized form of a `Shock` (its `Shock.to_dict()` output), carried per key in `SimSpec.shocks`. A `Shock` is horizon independent. The period count `T` comes from the `SimSpec`, not the shock.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| dist | `#!python str` | Distribution name: `"norm"` / `"t"` / `"uni"`. |
-| multivar | `#!python bool` | Joint (multivariate) shock when `True`. |
-| seed | `#!python int | None` | RNG seed for reproducibility. |
-| dist_args | `#!python list[Any]` | Positional distribution arguments in JSON form. |
-| dist_kwargs | `#!python dict[str, Any]` | Distribution keyword arguments (e.g. `loc`, `df`, `mean`). |
-
 ## Example
 
 ```python
