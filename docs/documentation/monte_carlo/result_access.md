@@ -4,7 +4,7 @@ tags:
 ---
 # Result Access
 
-`MCPipelineResult.test_summaries` maps each test step name to an `MCResult` aggregate.
+`MCPipelineResult.test_summaries` maps each test step name to an `MCTestResult` aggregate.
 
 `MCPipelineResult.regression_summaries` maps each regression step name to an `MCRegressionResult` aggregate.
 
@@ -27,25 +27,25 @@ __Summary Fields and Methods:__
 
 __Transform Output:__
 
-`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is `None` when the pipeline has no transform steps. Retention follows the step's `n_retain`, and the producing step's `retained_reps` records which replications the rows came from.
+`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is empty (`{}`) when the pipeline has no transform steps. Retention follows the step's `n_retain`, and the producing step's `retained_reps` records which replications the rows came from.
 
 These are the same arrays post-loop ops receive under the `payload.<name>` trace keys below, so a value read here needs no post-processing step to reach it.
 
 __Across-Replication Traces:__
 
-Every producer's stacked output is addressable by a trace key. Post-loop ops receive these keys in their `traces` mapping, and `available_traces(spec)` enumerates them from a spec alone, before a run.
+Every producer's stacked output is addressable by a trace key. Post-loop ops receive these keys in their `traces` mapping, and `available_traces(pipeline)` enumerates them from a spec alone, before a run.
 
 | __Producer__ | __Keys__ |
 |:-------------|---------:|
-| test steps | `test.<name>.statistic`, `test.<name>.pval`, `test.<name>.status` |
-| regression steps | `regression.<name>.coef`, `regression.<name>.r2`, `regression.<name>.status` |
+| test steps | `test.<name>.{statistic, pval, status}` |
+| regression steps | `regression.<name>.{coef, ssr, sst, r2, status, se (OLS only)}` |
 | transform steps | `payload.<name>` |
 
 Data-generation, filter, and post-processing steps emit no consumable trace.
 
 __Post-Loop Artifacts:__
 
-`MCPipelineResult.postproc` maps each post-loop step to its returned artifacts, keyed by step name, or `"<step>.<key>"` when the op returns several named outputs. Values are `Summary` (renderable: scalar, table, or small array) or `Raw` (bulk numeric data kept as data).
+`MCPipelineResult.postproc` maps each post-loop step to its returned artifacts, keyed by step name. Values are `Summary` (renderable: scalar, table, or small array) or `Raw` (bulk numeric data).
 
 __Performance Reporting:__
 

@@ -10,7 +10,7 @@ tags:
 
     - `reference` and `dgp`: Solved models.
     - `estimation.estimator` and `estimation.result`: Estimator and `*Result` (MLE, MAP, or MCMC).
-    - `mc.pipeline` and `mc.traces`: Monte Carlo pipeline and result traces.
+    - `mc.pipeline` and `mc.result`: Monte Carlo pipeline and result.
     - `simulation`: Dictionary of Simulation prefills (`SimSpec`) for each model slot
 
     You can find a demonstration notebook [here](../assets/bundle_loading.ipynb).
@@ -106,15 +106,6 @@ res = cast(MCMCResult, estimation.result)
 ```
 
 `estimation.estimator` is a live `Estimator` instance for the `reference` model.
-`estimation.spec` is an `EstimatorSpec` and can be used to construct `Estimator`s for
-any model.
-
-```python
-# This also works and builds the estimator for the DGP model.
-# Observables and parameters stay the same.
-Estimator.from_spec(estimation.spec, compiled=dgp.compiled)
-```
-
 `estimation.result` (when present) is the result a bundled run produced: a `MLEResult` for MLE, a `MAPResult` for MAP, or an `MCMCResult` for MCMC.
 
 ### Run an estimation from a loaded bundle
@@ -134,7 +125,8 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ## Reach the Monte Carlo tab
 
-`LoadedMC.pipeline` is the first class [`MCPipeline`](../documentation/monte_carlo/pipeline.md) rebuilt at load time. `LoadedMC.spec` remains available for archive inspection and UI rendering, and `LoadedMC.resources` holds the side channel arrays or custom callables that were reattached while rebuilding the pipeline. When the bundle carries a completed run, `document` holds the trace free summary and `traces` holds the bulk columns.
+`LoadedMC.pipeline` is the first class [`MCPipeline`](../documentation/monte_carlo/pipeline.md) rebuilt at load time.
+`LoadedMC.result` (when present) is a live [`MCPipelineResult`](../documentation/monte_carlo/core_containers.md) object.
 
 ```python
 mc = loaded.mc
@@ -146,35 +138,56 @@ print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
 
 ### Run a Monte Carlo pipeline from a loaded bundle
 
-The loaded pipeline runs against the loaded models without the `[ui]` extra.
+The monte carlo section unpacks into a `LoadedMC` object containing a pipeline and an optional run result.
 
 ```python
 # The pipeline's simulation datagen needs a DGP. The authoring notebook
 # bundles a model under role "dgp", so `loaded.dgp` resolves. If a bundle
 # omits `reference` or `dgp`, provide the missing model when running again.
 assert mc, "No Monte Carlo tab found in the bundle."
-assert mc.document, "No Monte Carlo document found in the bundle."
+assert mc.result, "No Monte Carlo result found in the bundle."
 
-n_rep = mc.document["n_rep"]
-mc_result = mc.pipeline.run(
-    reference=reference,
-    dgp=dgp,
-    n_rep=n_rep,
-    n_jobs=-1,
-    fail_fast=True,
-    verbosity=1,
-)
-print("Successful reps:", mc_result.n_successful, "/", mc_result.n_rep)
+pipeline = mc.pipeline
+result = mc.result
 
-jb = mc_result.test_summaries["jb_test"]
+jb = result.test_summaries["jb_test"]
 stat_ci = jb.statistic_confidence_interval(0.95)
 pval_ci = jb.pval_confidence_interval(0.95)
 
 print(stat_ci, pval_ci, sep="\n")
 ```
 
-???+ info "Validating without running"
-    `LoadedMC.pipeline` has already been rebuilt from the stored spec. If you still want to inspect the serialized graph directly, `validate_pipeline_spec(loaded.mc.spec, has_reference=bool(loaded.reference), has_dgp=bool(loaded.dgp))` returns `(steps, postprocs)` when the graph is well formed and raises with a specific message otherwise.
+### Reproduce a Monte Carlo run
+
+Use the `run_config` to produce the deterministic pipeline result. Model instances are not stored in the config, so `reference` and `dgp` should be provided from the loaded bundle.
+
+```python
+mc_repro = pipeline.run(
+    reference=reference,
+    dgp=dgp,
+    **result.run_config,
+)
+```
+
+```text
+>>> MC run concluded successfully in 0.00s with 810569.85 it/s.
+Per-step Report:
+
+    datagen: 0 failures, 71328.71 worker it/s (0.01 worker-s), 810569.85 wall it/s.
+    jb_test: 0 failures, 1265982.35 worker it/s (0.00 worker-s), 810569.85 wall it/s.
+```
+
+```python
+# Compare the runs for strict equality.
+recorded_jb = mc.result.test_summaries["jb_test"].pval_trace
+repro_jb = mc_repro.test_summaries["jb_test"].pval_trace
+
+np.array_equal(recorded_jb, repro_jb)
+```
+
+```text
+>>> True
+```
 
 See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and the [`monte_carlo` API reference](../documentation/monte_carlo/index.md) for the core runner exports.
 

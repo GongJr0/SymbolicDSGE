@@ -185,7 +185,6 @@ export interface SessionWorkspace {
 
 export interface SessionSummary {
   models: Record<Role, ModelSummary>;
-  runs: Array<{ run_id: string; kind: string; role: Role }>;
   workspace: SessionWorkspace;
 }
 
@@ -214,7 +213,6 @@ export interface SimSpecWire {
 }
 
 export interface SimResult {
-  run_id: string;
   kind: "sim";
   role: Role;
   T: number;
@@ -265,12 +263,11 @@ export interface EstimationRunRequest {
 }
 
 /** A result as the wire carries it: what the run produced, with none of the
- * session framing (`run_id`, `role`, `solved`) the run envelope adds. This is
+ * session framing (`role`, `solved`) the run envelope adds. This is
  * the shape the workspace's `result` slot holds. */
 export type EstimationResultWire = EstimationRunResult["result"];
 
 export interface EstimationRunResult {
-  run_id: string;
   kind: "estimation";
   role: Role;
   method: EstimationMethod;
@@ -478,7 +475,6 @@ export interface MCRegressionSummary {
 }
 
 export interface MCPipelineResult {
-  run_id: string;
   kind: "mc";
   n_rep: number;
   n_retained_by_step: Record<string, number>;

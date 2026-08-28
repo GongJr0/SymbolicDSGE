@@ -13,6 +13,7 @@ from .distributions import (
     ReferenceDistribution,
 )
 from .status import TestStatus
+from ..monte_carlo.spec import MCTestResultSpec, MCTestResultMeta
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class TestResult:
     dist: ReferenceDistribution
     df: DistributionParameter | Sequence[DistributionParameter]
     pval_method: PvalMethod
-    alpha: float64
+    alpha: float64 | float
     statistic: float64
     status: TestStatus
     _auto_pval: bool = field(default=True, repr=False, compare=False)
@@ -81,12 +82,12 @@ class TestResult:
 
 
 @dataclass(frozen=True)
-class MCResult:
+class MCTestResult:
     test_name: str
     dist: ReferenceDistribution
     df: DistributionParameter | Sequence[DistributionParameter]
     pval_method: PvalMethod
-    alpha: float64
+    alpha: float64 | float
     statistic_trace: NDArray[float64]
 
     n_retained: int
@@ -170,3 +171,36 @@ class MCResult:
 
         se = self.statistic_se
         return self.mean_statistic - z * se, self.mean_statistic + z * se
+
+    def to_spec(self) -> MCTestResultSpec:
+        meta = MCTestResultMeta(
+            test_name=self.test_name,
+            dist=self.dist.value,
+            df=self.df,
+            pval_method=self.pval_method.value,
+            alpha=self.alpha,
+            n_retained=self.n_retained,
+            n_rep=self.n_rep,
+        )
+        return MCTestResultSpec(
+            meta=meta,
+            statistic_trace=self.statistic_trace,
+            _raw_status=self._raw_status,
+            retained_reps=self.retained_reps,
+        )
+
+    @classmethod
+    def from_spec(cls, spec: MCTestResultSpec) -> "MCTestResult":
+        meta = spec.meta
+        return cls(
+            test_name=meta["test_name"],
+            dist=ReferenceDistribution(meta["dist"]),
+            df=meta["df"],
+            pval_method=PvalMethod(meta["pval_method"]),
+            alpha=meta["alpha"],
+            statistic_trace=spec.statistic_trace,
+            n_retained=meta["n_retained"],
+            retained_reps=spec.retained_reps,
+            n_rep=meta["n_rep"],
+            _raw_status=spec._raw_status,
+        )

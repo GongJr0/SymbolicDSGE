@@ -71,7 +71,7 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | path | `#!python str` | POSIX path inside the archive (e.g. `model/reference.yaml`). |
 | kind | `#!python str` | Semantic kind. One of `MEMBER_KINDS` (see below). |
-| format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"` / `"pkl"`. Inferred from `path` extension when omitted on construction. |
+| format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"` / `"pickle"`. Inferred from `path` extension when omitted on construction. |
 | role | `#!python str | None` | `"reference"` / `"dgp"` for model members. |
 | columns | `#!python list[str] | None` | Column names for tabular members (e.g. observable names on `estimation_data`). |
 | options | `#!python dict[str, Any]` | Kind-specific metadata. For `model_config` this carries `compile_kwargs` / `solve_kwargs`. |
@@ -87,15 +87,23 @@ __Recognized kinds (`MEMBER_KINDS`):__
 | `estimation_data` | Observed `y` matrix (CSV or Parquet). |
 | `estimation_trace` | MCMC posterior columns (CSV or Parquet). |
 | `mc_pipeline` | `PipelineSpec` JSON. |
-| `mc_result` | Trace-free MC run document (JSON). |
-| `mc_trace` | MC trace columns (CSV or Parquet). |
 | `mc_raw_model_data` | Raw model data arrays referenced by MC `raw_model_data` nodes. |
 | `mc_custom_op` | Bundle-safe custom operation referenced by `transform:custom` or `postproc:custom` specs. |
-| `mc_postproc` | Bulk postproc ndarray artifact. |
-| `mc_postproc_table` | Tabular postproc artifact. |
+| `mc_result_meta` | The run's own metadata: counts, timings, failures, and the `run_config` that reproduces it. |
+| `mc_test_steps` | Every test step's meta, keyed by step name (JSON). |
+| `mc_test_traces` | Every test step's trace columns in one block (CSV or Parquet). |
+| `mc_regression_steps` | Every regression step's meta, keyed by step name (JSON). |
+| `mc_regression_traces` | Every regression step's trace columns in one block (CSV or Parquet). |
+| `mc_transform_steps` | Every transform step's meta, keyed by step name (JSON). |
+| `mc_transform_trace` | One transform array: a payload or its retained rep indices (CSV or Parquet). |
+| `mc_postproc_steps` | Every post-loop step's meta and inline `summary`, keyed by step name (JSON). |
+| `mc_postproc_raw` | One post-loop step's bulk `Raw` array (CSV or Parquet). |
+
+???+ note "One member per step kind, plus one per unpacked array"
+    Tests and regressions pack every step's columns into a single block, qualified `{step}.{field}` and extended to `{step}.{field}.{idx}` where a column is 2-D. Transform payloads and postproc `Raw` arrays share no shape with anything, so each takes a member of its own and carries its `name` and `field` in `Member.options`.
 
 ???+ note "Kind whitelist"
-    `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`. Adding a new kind requires bumping `SDSGE_FORMAT_VERSION` so older readers don't silently drop it.
+    `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`.
 
 ## `SimSpec`
 
@@ -104,44 +112,20 @@ __Recognized kinds (`MEMBER_KINDS`):__
 class SimSpec(Mapping)
 ```
 
-Simulation prefill. The receiver clicks **Run** in the GUI to reproduce the author's intended simulation. Prefills are stored inline in `Manifest.simulation` as a `{role: SimSpec}` map (one entry per model slot), not as members.
-
-Its fields are exactly the keyword arguments of [`SolvedModel.sim`](../SolvedModel.md), and `SimSpec` is a `Mapping`, so a prefill unpacks straight into a run:
-
-```python
-model.sim(**spec)   # the spec's Shock params are materialized at the sim boundary
-```
+Simulation prefill. Its fields reconstruct into keyword arguments of [`SolvedModel.sim`](../SolvedModel.md) via `to_sim_kwargs()`.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | T | `#!python int` | Periods to simulate. |
-| x0 | `#!python list[float] | None` | Initial state vector; zero vector when `None`. |
+| x0 | `#!python list[float] | ndarray | None` | Initial state vector; zero vector when `None`. |
 | observables | `#!python bool` | Include observable paths in the output. |
 | shock_scale | `#!python float` | Multiplier applied to all shocks. |
-| shocks | `#!python dict[str, ShockParameters] | None` | Per-key shock specs (a `Shock.to_dict()` dict each); `None` for a deterministic run. Keys are innovation symbols, `"e_a,e_b"` for a joint shock. |
+| shocks | `#!python dict[str, ShockParameters] | None` | Per-key shock specs (a [`Shock.to_dict()`](../Shock.md) dict each); `None` for a deterministic run. |
 
 ???+ info "Two dict views"
     `SimSpec.to_dict()` is the JSON form written to the manifest, where shocks stay as their `Shock.to_dict()` parameter dicts. The `Mapping` view, via `dict(spec)`, `**spec`, or `spec.to_sim_kwargs()`, is the `sim` keyword form, where each shock is a live `Shock` object. No `Shock` instance is ever serialized; `sim` rebuilds it from the parameters and materializes a `T` horizon draw, so the run is reproducible under a fixed seed.
-
-## `ShockParameters`
-
-```python
-class ShockParameters(TypedDict)
-```
-
-The serialized form of a `Shock` (its `Shock.to_dict()` output), carried per key in `SimSpec.shocks`. A `Shock` is horizon independent. The period count `T` comes from the `SimSpec`, not the shock.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| dist | `#!python str` | Distribution name: `"norm"` / `"t"` / `"uni"`. |
-| multivar | `#!python bool` | Joint (multivariate) shock when `True`. |
-| seed | `#!python int | None` | RNG seed for reproducibility. |
-| dist_args | `#!python list[Any]` | Positional distribution arguments in JSON form. |
-| dist_kwargs | `#!python dict[str, Any]` | Distribution keyword arguments (e.g. `loc`, `df`, `mean`). |
 
 ## Example
 

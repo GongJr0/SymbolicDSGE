@@ -32,17 +32,25 @@ SDSGE_LAST_BREAKING_VERSION = 3
 MemberKind = Literal[
     "model_config",
     "raw_data",
+    # Estimation
     "estimation_spec",
     "estimation_result",
     "estimation_data",
     "estimation_trace",
+    # Monte Carlo: the pipeline and the side-channels it references by key
     "mc_pipeline",
-    "mc_result",
-    "mc_trace",
     "mc_raw_model_data",
     "mc_custom_op",
-    "mc_postproc",
-    "mc_postproc_table",
+    # Monte Carlo: a recorded run, one meta member per step kind beside its bulk
+    "mc_result_meta",
+    "mc_test_steps",
+    "mc_test_traces",
+    "mc_regression_steps",
+    "mc_regression_traces",
+    "mc_transform_steps",
+    "mc_transform_trace",
+    "mc_postproc_steps",
+    "mc_postproc_raw",
 ]
 MEMBER_KINDS: frozenset[str] = frozenset(get_args(MemberKind))
 

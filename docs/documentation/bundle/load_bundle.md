@@ -36,12 +36,6 @@ __Behavior:__
     - CSV / Parquet members are dispatched by `Member.format` and decoded into numpy arrays.
 3. Inline `{role: SimSpec}` prefills are read from the manifest itself.
 
-???+ info "Format Agnostic Reader"
-    `load_bundle` dispatches each tabular member on `Member.format`. A hand-zipped CSV-only bundle and a CLI-built Parquet bundle both load through the same path. No `[bundle]` extra is required because `parquet-engine` is a regular dependency.
-
-???+ warning "Model Reconstruction Cost"
-    Loading runs the full parse, compile, and solve pipeline once per model member. For large models or scripts that open many bundles in a loop, cache the `LoadedBundle` rather than reopening.
-
 ## Example
 
 ```python

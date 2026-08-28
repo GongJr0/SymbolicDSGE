@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, cast
 
+from ..monte_carlo.serialize import serialize_pipeline_result
 from .estimation import (
     build_estimation_prefill,
     emit_estimation_wire,
@@ -90,7 +91,8 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     """
     estimation = TabState()
     if loaded.estimation is not None:
-        estimation.spec = estimator_spec_wire(loaded.estimation.spec)
+        spec = loaded.estimation.estimator.to_spec()
+        estimation.spec = estimator_spec_wire(spec)
         if loaded.estimation.result is not None:
             estimation.result = emit_estimation_wire(loaded.estimation.result)
         if loaded.reference is not None:
@@ -98,7 +100,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
             # one estimation, tied to the reference model it was run against.
             estimation.view = {
                 "reference": build_estimation_prefill(
-                    loaded.estimation.spec,
+                    spec,
                     loaded.estimation.result,
                     loaded.reference.compiled,
                 )
@@ -106,8 +108,9 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
 
     mc = TabState()
     if loaded.mc is not None:
-        mc.spec = loaded.mc.spec.to_dict()
-        mc.result = loaded.mc.wire()
+        mc.spec = dict(loaded.mc.pipeline.to_spec())
+        if loaded.mc.result is not None:
+            mc.result = serialize_pipeline_result(loaded.mc.result)
 
     # Spec only: the session replays it against the model once both are
     # installed, which is what fills the result.

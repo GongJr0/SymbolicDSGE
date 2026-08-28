@@ -8,6 +8,7 @@ tags:
 ```python
 ljung_box_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -35,3 +36,4 @@ __Inputs:__
 | drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | lags | `10` | Maximum autocorrelation lag. |
 | alpha | `0.05` | Test size. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +16,6 @@ from .mc import (
     run_pipeline,
     serialize_pipeline_result,
     validate_custom_op,
-    validate_pipeline_spec,
 )
 from .mc_schemas import MCCustomOpRequest, MCPipelineSpec, MCRunRequest
 from .estimation import estimation_catalog
@@ -106,20 +104,15 @@ def create_app(
     @app.post("/api/mc/validate")
     def validate_monte_carlo_pipeline(request: MCPipelineSpec) -> dict[str, Any]:
         try:
-            ordered, postprocs = validate_pipeline_spec(
-                request,
-                has_reference=ui_session.solved_model("reference") is not None,
-                has_dgp=ui_session.solved_model("dgp") is not None,
-            )
-            # Compile as part of validation (surfaces bad params). No model is
-            # needed to build; the models are consumed later at run.
-            build_pipeline(
-                ordered, postprocs, resources=compile_custom_resources(request)
+
+            # Compile and catch.
+            pipe = build_pipeline(
+                request.to_core(), resources=compile_custom_resources(request)
             )
             return {
                 "valid": True,
-                "order": [node.id for node in ordered],
-                "postprocs": [pp.name for pp in postprocs],
+                "steps": [step.name for step in pipe.per_rep_steps],
+                "postprocs": [pp.name for pp in pipe.postproc_steps],
             }
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
@@ -136,17 +129,10 @@ def create_app(
                 n_jobs=request.n_jobs,
                 verbosity=request.verbosity,
             )
-            run_id = str(uuid4())
-            payload = serialize_pipeline_result(result, run_id=run_id)
-            ui_session.record_run(
-                run_id=run_id,
-                kind="mc",
-                role="reference",
-                payload=payload,
-            )
+            payload = serialize_pipeline_result(result)
             # Through the core spec, so the slot matches what a bundle stores
             # rather than the request model that happened to carry it.
-            ui_session.workspace.mc.spec = request.pipeline.to_core().to_dict()
+            ui_session.workspace.mc.spec = dict(request.pipeline.to_core())
             ui_session.workspace.mc.result = payload
             return payload
         except (KeyError, TypeError, ValueError) as exc:
@@ -205,16 +191,6 @@ def create_app(
         except (KeyError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,
-                detail=_error_detail(exc),
-            ) from exc
-
-    @app.get("/api/run/{run_id}")
-    def get_run(run_id: str) -> dict[str, Any]:
-        try:
-            return ui_session.get_run(run_id)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=404,
                 detail=_error_detail(exc),
             ) from exc
 

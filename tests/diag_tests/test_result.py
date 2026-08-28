@@ -6,7 +6,7 @@ from scipy.stats import chi2, f
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.jb_lookup import JarqueBeraDist
-from SymbolicDSGE._diag_tests.result import MCResult, TestResult as DiagTestResult
+from SymbolicDSGE._diag_tests.result import MCTestResult, TestResult as DiagTestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 
 
@@ -17,7 +17,7 @@ def _mc_result(
     n_rep: int | None = None,
     retained_reps: np.ndarray | None = None,
     **metadata: object,
-) -> MCResult:
+) -> MCTestResult:
     n_retained = statistic_trace.shape[0]
     if statuses is None:
         statuses = (TestStatus.OK,) * n_retained
@@ -25,7 +25,7 @@ def _mc_result(
         n_rep = n_retained
     if retained_reps is None:
         retained_reps = np.arange(n_retained, dtype=np.int_)
-    return MCResult(
+    return MCTestResult(
         statistic_trace=statistic_trace,
         n_retained=n_retained,
         retained_reps=retained_reps,

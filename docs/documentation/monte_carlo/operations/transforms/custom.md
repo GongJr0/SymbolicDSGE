@@ -7,6 +7,7 @@ tags:
 ```python
 transform_step(
     name: str,
+    n_retain: int = -1,
     func: Callable[..., Any] | NumbaCustomFunc,
     *,
     source: str,
@@ -35,6 +36,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | name | Runtime step name, payload source name, and trace key suffix. |
+| n_retain | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 | func | The transform. A `NumbaCustomFunc`, or a plain function wrapped into one. |
 | source | Producer step name supplying the input array. |
 | field | Field read from the producer, such as `"observables"`, `"std_innov"`, or `"payload"`. |

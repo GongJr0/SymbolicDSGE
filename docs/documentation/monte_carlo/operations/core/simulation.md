@@ -8,6 +8,7 @@ tags:
 simulation_step(
     name: str = "datagen",
     target: Literal["reference", "dgp"] = "dgp",
+    n_retain: int = -1,
     *,
     T: int,
     shocks: Mapping[str, Shock | Callable | ndarray] | None = None,
@@ -24,6 +25,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | target | Which solved model to simulate: `"dgp"` (default) or `"reference"`. |
+| n_retain | Number of replications to retain in the output. If `-1`, all replications are retained. |
 | T | Number of simulated periods, excluding the initial state. |
 | shocks | Shock mapping resolved once and redrawn per replication. Use innovation symbol keys, including grouped keys such as `"e_g,e_z"`. With `None`, the simulation is deterministic. |
 | shock_scale | Shock scaling passed into `SolvedModel.sim(...)`. |

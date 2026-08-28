@@ -82,7 +82,7 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 
 ```python
 BundleBuilder.add_estimation(
-    source: EstimatorSpec | Estimator,
+    source: Estimator,
     *,
     result: (
         MLEResult
@@ -98,7 +98,7 @@ An `Estimator` instance can be directly passed to derive the spec. Any raw data 
 
 | __Name__   |                                                      __Description__ |
 |:-----------|---------------------------------------------------------------------:|
-| source     |                            `Estimator` or `EstimatorSpec` to bundle. |
+| source     |                                               `Estimator` to bundle. |
 | result     |                         Any result object returned by the estimator. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
 
@@ -108,25 +108,23 @@ An `Estimator` instance can be directly passed to derive the spec. Any raw data 
 
 ```python
 BundleBuilder.add_mc(
-    pipeline: MCPipeline | PipelineSpec,
+    pipeline: MCPipeline,
     *,
     result: MCPipelineResult | None = None,
-    run_id: str = "",
     as_parquet: bool = True,
 ) -> BundleBuilder
 ```
 
-Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The builder serializes it to a `PipelineSpec` and writes any side-channel resources it references as bundle members. A hand-authored `PipelineSpec` is accepted for explicit serialization workflows. An attached `result` is split into a trace-free document plus trace and postproc artifact members.
+Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The builder serializes it to a `PipelineSpec` and writes any side-channel resources it references as bundle members.
 
-| __Name__   |                                                                                                                      __Description__ |
-|:-----------|-------------------------------------------------------------------------------------------------------------------------------------:|
-| pipeline   | Live `MCPipeline` or `PipelineSpec` describing the MC graph. Bundles loaded back into Python reconstruct a live `LoadedMC.pipeline`. |
-| result     |                                   Optional live `MCPipelineResult`; the builder splits the document from the bulk traces internally. |
-| run_id     |                                                                                          Identifier embedded in the result document. |
-| as_parquet |                                                                                     When `False` the trace member is written as CSV. |
+| __Name__   |                                                                                    __Description__ |
+|:-----------|---------------------------------------------------------------------------------------------------:|
+| pipeline   |         Live `MCPipeline`. Bundles loaded back into Python reconstruct a live `LoadedMC.pipeline`. |
+| result     | Optional live `MCPipelineResult`; the builder splits the document from the bulk traces internally. |
+| as_parquet |                                                 When `False` the trace members are written as CSV. |
 
 ???+ note "MC resources"
-    `raw_model_data` datagen arrays are written as `mc_raw_model_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members. These resources are restored on load as `LoadedMC.resources`.
+    `raw_model_data` datagen arrays are written as `mc_raw_model_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members.
 
 &nbsp;
 

@@ -15,10 +15,13 @@ if TYPE_CHECKING:
     from .spec import PipelineSpec
 
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
-from .._diag_tests.result import MCResult
+from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.ols import MCRegressionResult
 from .allocation import BufferPlan, resolve_output_specs
+from .traces import traces_from_summaries, trace_keys_for_step
+from .postproc import Artifact, normalize_artifacts
+from .catalog import STEP_CATALOG
 from .mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
     FILTER_RAW_SOURCE_FIELDS,
@@ -35,6 +38,11 @@ from .mc_constructs import (
 )
 
 NDF = NDArray[np.float64]
+
+#: Characters a step name may not contain. A step name is written into bundle
+#: member paths and prefixes its trace columns as ``{step}.{field}``, so path
+#: separators and the column separator are spoken for.
+_RESERVED_NAME_CHARS = frozenset(".:/\\")
 
 
 def is_failed(native_run: NativeRunResult) -> bool:
@@ -62,8 +70,10 @@ class MCPipeline:
         rep_tuple = tuple(per_rep_steps)
         postproc_tuple = tuple(postproc_steps)
         self._validate_steps(rep_tuple, postproc_tuple)
-        source_indices = self._resolve_source_indices(rep_tuple)
-        object.__setattr__(self, "per_rep_steps", rep_tuple)
+        ordered = self._order_steps(rep_tuple)
+        source_indices = self._resolve_source_indices(ordered)
+        self._validate_postproc_traces(ordered, postproc_tuple)
+        object.__setattr__(self, "per_rep_steps", ordered)
         object.__setattr__(self, "postproc_steps", postproc_tuple)
         object.__setattr__(self, "_source_indices", source_indices)
 
@@ -77,16 +87,21 @@ class MCPipeline:
         names = [step.name for step in (*per_rep_steps, *postproc_steps)]
         if len(set(names)) != len(names):
             raise ValueError("MCPipeline step names must be unique.")
-        if per_rep_steps[0].op_type is not OpType.DATAGEN:
-            raise ValueError("MCPipeline first per-rep step must be a DATAGEN step.")
-        for step in per_rep_steps[1:]:
-            if step.op_type is OpType.DATAGEN:
+        for name in names:
+            bad = sorted(set(name) & _RESERVED_NAME_CHARS)
+            if bad:
                 raise ValueError(
-                    "MCPipeline supports only one DATAGEN step, in first position."
+                    f"MCPipeline step name {name!r} uses reserved characters "
+                    f"{''.join(bad)!r}. A step name becomes a bundle member path "
+                    f"and a trace column qualifier, which reserve them."
                 )
+        datagens = [step for step in per_rep_steps if step.op_type is OpType.DATAGEN]
+        if len(datagens) != 1:
+            raise ValueError("MCPipeline requires exactly one DATAGEN step.")
+        for step in per_rep_steps:
             if step.op_type is OpType.POSTPROC:
                 raise ValueError(
-                    "POSTPROC steps belong in postproc_steps, not per_rep_steps."
+                    "POSTPROC steps can't be specified under per_rep_steps, use postproc_steps."
                 )
         for step in postproc_steps:
             if step.op_type is not OpType.POSTPROC:
@@ -94,6 +109,30 @@ class MCPipeline:
                     f"postproc_steps may only contain POSTPROC steps; {step.name!r} "
                     f"is {step.op_type}."
                 )
+
+    @staticmethod
+    def _order_steps(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
+        """Sort the steps into execution order: datagen, filters, transforms, terminals.
+
+        A caller authors a step list, not a schedule. Filters read only the
+        datagen and terminals are read by no one, so those phases keep their
+        authored order; transforms chain, so they are walked against theirs.
+        """
+        datagen: list[MCStep] = []
+        filters: list[MCStep] = []
+        transforms: list[MCStep] = []
+        terminals: list[MCStep] = []
+        for step in per_rep_steps:
+            if step.op_type is OpType.DATAGEN:
+                datagen.append(step)
+            elif step.op_type is OpType.FILTER:
+                filters.append(step)
+            elif step.op_type is OpType.TRANSFORM:
+                transforms.append(step)
+            else:
+                terminals.append(step)
+        placed = {step.name for step in (*datagen, *filters)}
+        return (*datagen, *filters, *_order_transforms(transforms, placed), *terminals)
 
     @staticmethod
     def _resolve_source_indices(
@@ -121,6 +160,41 @@ class MCPipeline:
                 step_indices.append(source_idx)
             resolved.append(tuple(step_indices))
         return tuple(resolved)
+
+    @staticmethod
+    def _validate_postproc_traces(
+        per_rep_steps: tuple[MCStep, ...],
+        postproc_steps: tuple[MCStep, ...],
+    ) -> None:
+        """Check each postproc's trace selectors against what the producers emit.
+
+        Catalogue postprocs mark their trace fields with ``type == "trace"``. A
+        custom op reads traces in opaque code, so it carries no such field and is
+        left to fail at its own hands.
+        """
+        if not postproc_steps:
+            return
+
+        available = {key for step in per_rep_steps for key in trace_keys_for_step(step)}
+        for step in postproc_steps:
+            definition = STEP_CATALOG.get(step.step_type or "")
+            if definition is None:
+                continue
+            for field in definition.fields:
+                if field.type != "trace":
+                    continue
+                ref = step.kwargs.get(field.key)
+                if not ref:
+                    raise ValueError(
+                        f"POSTPROC step {step.name!r} must select a trace for "
+                        f"{field.key!r} (available: {sorted(available)})."
+                    )
+                if ref not in available:
+                    raise ValueError(
+                        f"POSTPROC step {step.name!r} field {field.key!r} references "
+                        f"trace {ref!r}, which no step in the pipeline produces "
+                        f"(available: {sorted(available)})."
+                    )
 
     @cached_property
     def graph(self) -> "PipelineGraph":
@@ -209,9 +283,9 @@ class MCPipeline:
 
     def run(
         self,
-        *,
         reference: SolvedModel,
         dgp: SolvedModel | None = None,
+        *,
         n_rep: int,
         fail_fast: bool = True,
         verbosity: int = 1,
@@ -267,8 +341,8 @@ class MCPipeline:
             elif s.op_type is OpType.TRANSFORM:
                 transforms.append(s.name)
 
-        test_summaries = _summarize_tests(tests, prep, n_rep)
-        regression_summaries = _summarize_regressions(regressions, prep, n_rep)
+        test_summaries = _compile_tests(tests, prep, n_rep)
+        regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
 
         postprocs, postproc_wall_times = self._run_postproc(
@@ -338,10 +412,17 @@ class MCPipeline:
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
             ),
             test_summaries=test_summaries,
-            transform_outputs=payload_columns if payload_columns else None,
+            transform_outputs=payload_columns,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
             postproc=postprocs,
+            run_config={
+                "n_rep": int(n_rep),
+                "fail_fast": bool(fail_fast),
+                "verbosity": int(verbosity),
+                "n_jobs": int(n_jobs) if n_jobs is not None else None,
+                "check_memory_availability": bool(check_memory_availability),
+            },
         )
         if verbosity == 1:
             report_mc_performance(meta)
@@ -353,12 +434,12 @@ class MCPipeline:
         self,
         postproc_steps: Sequence[MCStep],
         *,
-        test_summaries: Mapping[str, MCResult],
+        test_summaries: Mapping[str, MCTestResult],
         regression_summaries: Mapping[str, MCRegressionResult],
         payload_columns: Mapping[str, NDF],
         fail_fast: bool,
         failures: list[MCFailure],
-    ) -> tuple[dict[str, Any], dict[str, float]]:
+    ) -> tuple[dict[str, Artifact], dict[str, float]]:
         """Run POSTPROC ops once over the assembled traces; collect artifacts.
 
         Owns its own timing: returns ``(artifacts, postproc_elapsed_s)`` where
@@ -373,8 +454,6 @@ class MCPipeline:
         }
         if not postproc_steps:
             return {}, postproc_elapsed_s
-
-        from .serialize import traces_from_summaries
 
         traces: dict[str, np.ndarray] = traces_from_summaries(
             test_summaries, regression_summaries
@@ -413,8 +492,44 @@ class MCPipeline:
             finally:
                 postproc_elapsed_s[step.name] += perf_counter() - step_start
             if not failed:
-                postproc[step.name] = out
+                postproc[step.name] = normalize_artifacts(out)
         return postproc, postproc_elapsed_s
+
+
+def _order_transforms(
+    transforms: Sequence[MCStep],
+    placed: set[str],
+) -> list[MCStep]:
+    """Kahn-walk the transform phase so each step follows the transforms it reads.
+
+    ``placed`` seeds the walk with the earlier phases. A producer outside the
+    transform phase is left to :meth:`MCPipeline._resolve_source_indices`, which
+    owns the unknown-producer and wrong-producer-type errors.
+    """
+    names = {step.name for step in transforms}
+    remaining = list(transforms)
+    ordered: list[MCStep] = []
+    placed = set(placed)
+    while remaining:
+        progress = False
+        next_remaining: list[MCStep] = []
+        for step in remaining:
+            deps = {
+                selector.source_step
+                for selector in step.source_args
+                if selector.source_step in names
+            }
+            if deps <= placed:
+                ordered.append(step)
+                placed.add(step.name)
+                progress = True
+            else:
+                next_remaining.append(step)
+        if not progress:
+            stuck = [step.name for step in next_remaining]
+            raise ValueError(f"Transform dependency cycle among {stuck}.")
+        remaining = next_remaining
+    return ordered
 
 
 def _validate_source_producer(
@@ -439,12 +554,12 @@ def _validate_source_producer(
         )
 
 
-def _summarize_tests(
+def _compile_tests(
     test_names: Sequence[str],
     lowered: LoweredMCRun,
     n_rep: int,
-) -> dict[str, MCResult]:
-    summaries: dict[str, MCResult] = {}
+) -> dict[str, MCTestResult]:
+    summaries: dict[str, MCTestResult] = {}
     arenas = lowered.allocation.steps
     metas = lowered.test_result_specs
 
@@ -464,7 +579,7 @@ def _summarize_tests(
             else np.empty((0,), dtype=np.float64)
         )
 
-        summaries[name] = MCResult(
+        summaries[name] = MCTestResult(
             test_name=spec.name,
             dist=spec.dist,
             df=spec.df,
@@ -497,7 +612,7 @@ def _resolve_payloads(
     return payloads
 
 
-def _summarize_regressions(
+def _compile_regressions(
     regression_names: Sequence[str],
     lowered: LoweredMCRun,
     n_rep: int,

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from SymbolicDSGE._diag_tests.distributions import (
+
+from .diag_utils import se
+from ..enums import RegressionStatus
+from ..result import RegressionResult
+from ..._diag_tests.result import MCTestResult, TestResult
+from ..._diag_tests.status import TestStatus
+from ..._diag_tests.distributions import (
     FloatScalar,
     ReferenceDistribution,
     PvalMethod,
 )
-from .diag_utils import se
-from ..enums import RegressionStatus
-from ..result import RegressionResult
-from ..._diag_tests.result import MCResult, TestResult
-from ..._diag_tests.status import TestStatus
+
+from ...monte_carlo.spec import MCRegressionResultSpec, MCRegressionResultMeta
+
 
 import warnings
 from dataclasses import dataclass, field
@@ -235,9 +239,9 @@ class MCRegressionResult:
             index=index,
         )
 
-    def F_test(self, alpha: FloatScalar = 0.05) -> MCResult:
+    def F_test(self, alpha: FloatScalar = 0.05) -> MCTestResult:
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
-        return MCResult(
+        return MCTestResult(
             test_name="F-test",
             dist=ReferenceDistribution.F,
             df=(float64(dfn), float64(dfd)),
@@ -260,36 +264,39 @@ class MCRegressionResult:
             ),
         )
 
-    @classmethod
-    def from_dict(cls, data: dict) -> MCRegressionResult:
-        return cls(
-            kind=data["kind"],
-            variables=data["variables"],
-            coef_trace=data["coef_trace"],
-            ssr_trace=data["ssr_trace"],
-            sst_trace=data["sst_trace"],
-            _se_trace=data.get("_se_trace"),
-            n_retained=data["n_retained"],
-            retained_reps=data["retained_reps"],
-            n_rep=data["n_rep"],
-            n=data["n"],
-            k=data["k"],
-            _raw_status=data["_raw_status"],
+    def to_spec(self) -> MCRegressionResultSpec:
+        meta = MCRegressionResultMeta(
+            kind=self.kind,
+            variables=list(self.variables),
+            n_retained=self.n_retained,
+            n_rep=self.n_rep,
+            n=self.n,
+            k=self.k,
+        )
+        return MCRegressionResultSpec(
+            meta=meta,
+            coef_trace=self.coef_trace,
+            ssr_trace=self.ssr_trace,
+            sst_trace=self.sst_trace,
+            retained_reps=self.retained_reps,
+            _raw_status=self._raw_status,
+            _se_trace=self._se_trace,
         )
 
-    def to_dict(self) -> dict:
-        return {
-            "kind": self.kind,
-            "variables": self.variables,
-            "coef_trace": self.coef_trace,
-            "status_trace": self.status_trace,
-            "ssr_trace": self.ssr_trace,
-            "sst_trace": self.sst_trace,
-            "_se_trace": self._se_trace,
-            "n_retained": self.n_retained,
-            "retained_reps": self.retained_reps,
-            "n_rep": self.n_rep,
-            "n": self.n,
-            "k": self.k,
-            "_raw_status": self._raw_status,
-        }
+    @classmethod
+    def from_spec(cls, spec: MCRegressionResultSpec) -> MCRegressionResult:
+        meta = spec.meta
+        return cls(
+            kind=meta["kind"],
+            variables=meta["variables"],
+            n_retained=meta["n_retained"],
+            n_rep=meta["n_rep"],
+            n=meta["n"],
+            k=meta["k"],
+            coef_trace=spec.coef_trace,
+            ssr_trace=spec.ssr_trace,
+            sst_trace=spec.sst_trace,
+            retained_reps=spec.retained_reps,
+            _raw_status=spec._raw_status,
+            _se_trace=spec._se_trace,
+        )

@@ -1,17 +1,16 @@
-"""Serializable Monte Carlo pipeline specification (graph form).
-
-Stdlib dataclasses. The core ``monte_carlo`` module must stay pydantic-free
-(pydantic is only present transitively under the ``[ui]`` extra). The UI keeps its
-pydantic request models and converts via :meth:`PipelineSpec.from_dict`. This is the
-text representation a ``.sdsge`` bundle stores for the MC pipeline.
-"""
+"""Serializable Monte Carlo pipeline specification (graph form)."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Any, Literal, get_args
+from typing import Any, Literal, Sequence, TypedDict, get_args
+from numpy.typing import NDArray
+from numpy import float64, int_
+
+NDF = NDArray[float64]
+NDI = NDArray[int_]
 
 MCStepKind = Literal[
     # datagen / filter
@@ -62,49 +61,19 @@ POSTPROC_KINDS: frozenset[str] = frozenset(get_args(PostprocStepKind))
 PER_REP_KINDS: frozenset[str] = STEP_KINDS - POSTPROC_KINDS
 
 
-@dataclass
-class NodeSpec:
+class NodeSpec(TypedDict):
     id: str
     step_type: str
     name: str
-    params: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "step_type": self.step_type,
-            "name": self.name,
-            "params": dict(self.params),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> NodeSpec:
-        step_type = str(data["step_type"])
-        if step_type not in STEP_KINDS:
-            raise ValueError(f"Unknown MC step type: {step_type!r}")
-        return cls(
-            id=str(data["id"]),
-            step_type=step_type,
-            name=str(data["name"]),
-            params=dict(data.get("params", {})),
-        )
+    params: dict[str, Any]
 
 
-@dataclass
-class EdgeSpec:
+class EdgeSpec(TypedDict):
     source: str
     target: str
 
-    def to_dict(self) -> dict[str, str]:
-        return {"source": self.source, "target": self.target}
 
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> EdgeSpec:
-        return cls(source=str(data["source"]), target=str(data["target"]))
-
-
-@dataclass
-class PostprocSpec:
+class PostprocSpec(TypedDict):
     """A post-loop op: a named, typed, parameterized terminal reduction over the
     assembled across-rep traces. Deliberately *not* a graph node. It has no
     ``id`` and no edges; its inputs are trace keys carried in ``params``.
@@ -112,60 +81,96 @@ class PostprocSpec:
 
     name: str
     step_type: str
-    params: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "step_type": self.step_type,
-            "params": dict(self.params),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> PostprocSpec:
-        step_type = str(data["step_type"])
-        if step_type not in POSTPROC_KINDS:
-            raise ValueError(f"{step_type!r} is not a post-processing step type.")
-        return cls(
-            name=str(data["name"]),
-            step_type=step_type,
-            params=dict(data.get("params", {})),
-        )
+    params: dict[str, Any]
 
 
-@dataclass
-class PipelineSpec:
+class PipelineSpec(TypedDict):
     nodes: list[NodeSpec]
-    edges: list[EdgeSpec] = field(default_factory=list)
+    edges: list[EdgeSpec]
     #: Post-loop ops, run once over the assembled traces. Kept separate from the
     #: per-rep DAG (``nodes``/``edges``). They are not graph participants.
-    postprocs: list[PostprocSpec] = field(default_factory=list)
+    postprocs: list[PostprocSpec]
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "nodes": [node.to_dict() for node in self.nodes],
-            "edges": [edge.to_dict() for edge in self.edges],
-            "postprocs": [postproc.to_dict() for postproc in self.postprocs],
-        }
 
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> PipelineSpec:
-        nodes = [NodeSpec.from_dict(node) for node in data.get("nodes", [])]
-        misplaced = [node.name for node in nodes if node.step_type in POSTPROC_KINDS]
-        if misplaced:
-            raise ValueError(
-                "Post-processing steps must be listed under 'postprocs', not "
-                f"'nodes': {misplaced}."
-            )
-        return cls(
-            nodes=nodes,
-            edges=[EdgeSpec.from_dict(edge) for edge in data.get("edges", [])],
-            postprocs=[PostprocSpec.from_dict(pp) for pp in data.get("postprocs", [])],
-        )
+class MCTestResultMeta(TypedDict):
+    test_name: str
+    dist: str
+    df: Any
+    pval_method: str
+    alpha: float
+    n_retained: int
+    n_rep: int
 
-    def to_json(self, *, indent: int | None = None) -> str:
-        return json.dumps(self.to_dict(), indent=indent)
 
-    @classmethod
-    def from_json(cls, text: str) -> PipelineSpec:
-        return cls.from_dict(json.loads(text))
+@dataclass(slots=True)
+class MCTestResultSpec:
+    meta: MCTestResultMeta
+    statistic_trace: NDF
+    _raw_status: NDI
+    retained_reps: NDI
+
+
+class MCRegressionResultMeta(TypedDict):
+    kind: str
+    variables: Sequence[str]
+    n_retained: int
+    n_rep: int
+    n: int
+    k: int
+
+
+@dataclass(slots=True)
+class MCRegressionResultSpec:
+    meta: MCRegressionResultMeta
+    coef_trace: NDF
+    ssr_trace: NDF
+    sst_trace: NDF
+    retained_reps: NDI
+    _raw_status: NDI
+    _se_trace: NDF | None = None
+
+
+class MCFailureSpec(TypedDict):
+    rep_idx: int
+    step_name: str
+    error_type: str
+    message: str
+
+
+class MCRunMeta(TypedDict):
+    """A run's own metadata, independent of any one step.
+
+    Carries what the run recorded, never what it can recompute: the throughput
+    rates, ``succeeded``, and the failed-step tallies are all properties derived
+    from the timings and ``failures`` beside them.
+    """
+
+    n_rep: int
+    n_successful: int
+    n_retained_by_step: Mapping[str, int]
+    elapsed_s: float
+    step_elapsed_s: Mapping[str, float]
+    step_counts: Mapping[str, int]
+    step_failures: Mapping[str, int]
+    postproc_elapsed_s: Mapping[str, float]
+    failures: list[MCFailureSpec]
+    run_config: Mapping[str, Any]
+
+
+class MCTransformResultMeta(TypedDict):
+    step_name: str
+    shape: list[int]
+
+
+class MCPostprocResultMeta(TypedDict):
+    """A post-loop step's non-bulk half.
+
+    ``shape`` describes the ``Raw`` slot when the op declared one, and is
+    ``None`` otherwise. ``summary`` is the aggregate the op returned, already
+    converted to a JSON-native form; it is inline by definition and carries no
+    per-replication structure.
+    """
+
+    step_name: str
+    shape: list[int] | None
+    summary: Any

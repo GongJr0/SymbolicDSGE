@@ -1,76 +1,40 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 from typing import cast
 
 import numpy as np
 import pytest
 
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo import (
-    EdgeSpec,
-    MCPipeline,
-    MCPipelineResult,
-    NodeSpec,
-    PipelineSpec,
-)
-from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
+from SymbolicDSGE.monte_carlo.postproc import Artifact, Raw, Summary
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     raw_model_data_step,
     regression_step,
+    standardize_step,
 )
-from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
 from SymbolicDSGE.monte_carlo.serialize import (
-    pipeline_result_wire,
-    result_document,
-    result_postproc_arrays,
-    result_postproc_tables,
-    result_traces,
+    json_safe,
     serialize_pipeline_result,
+    serialize_postproc_results,
+    serialize_regression_results,
+    serialize_run_meta,
+    serialize_test_results,
+    serialize_transform_results,
 )
 
-
-def _table_result(postproc: dict) -> MCPipelineResult:
-    return MCPipelineResult(
-        n_rep=3,
-        meta=MCMeta(
-            n_rep=3,
-            n_retained_by_step={},
-        ),
-        n_successful=3,
-        test_summaries={},
-        transform_outputs=None,
-        postproc=postproc,
-    )
+_REFERENCE = cast(SolvedModel, object())
 
 
-def _postproc_result() -> MCPipelineResult:
-    """A bare result carrying a scalar Summary plus 1-D and 2-D array artifacts."""
-    return MCPipelineResult(
-        n_rep=5,
-        meta=MCMeta(
-            n_rep=5,
-            n_retained_by_step={},
-        ),
-        n_successful=5,
-        test_summaries={},
-        transform_outputs=None,
-        postproc={
-            "pcs": Summary(value=0.6, title="PCS"),
-            "selection": Raw(value=np.array([0.0, 1.0, 0.0, 1.0, 0.0])),
-            "density": Raw(value=np.arange(8.0).reshape(4, 2)),
-            "moments": Summary(value=np.array([1.0, 2.0]), render="array"),
-        },
-    )
-
-
-def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
+def _run(n_rep: int = 4) -> MCPipelineResult:
     rng = np.random.default_rng(0)
-    T = 60
+    T = 40
     x = rng.normal(size=T)
-    y = 2.0 * x + rng.normal(size=T)
-    observables = np.column_stack([y, x])
+    observables = np.column_stack([2.0 * x + rng.normal(size=T), x])
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=("y", "x")),
@@ -87,233 +51,171 @@ def _run_demo_pipeline(n_rep: int = 3) -> MCPipelineResult:
                 X_columns=[1],
                 variables=["x"],
             ),
+            standardize_step("std", source="datagen", field="observables"),
         ]
     )
-    return pipeline.run(
-        reference=cast(SolvedModel, object()),
-        n_rep=n_rep,
-        verbosity=2,
+    return pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=2)
+
+
+def _postproc_result(postproc: dict[str, Artifact]) -> MCPipelineResult:
+    return MCPipelineResult(
+        meta=MCMeta(n_rep=3, n_retained_by_step={}),
+        n_rep=3,
+        n_successful=3,
+        postproc=postproc,
     )
 
 
-def test_result_document_drops_bulk_traces_and_is_json_safe() -> None:
-    result = _run_demo_pipeline()
-    document = result_document(result, run_id="r1")
+def test_run_meta_records_what_the_run_cannot_recompute() -> None:
+    result = _run()
+    meta = serialize_run_meta(result)
 
-    assert set(document["step_worker_it_s"]) == {"datagen", "jb", "ols"}
-    assert set(document["step_wall_it_s"]) == {"datagen", "jb", "ols"}
-
-    test_entry = document["test_summaries"]["jb"]
-    for key in ("statistic_trace", "pval_trace", "status_trace"):
-        assert key not in test_entry
-    # Scalar summaries / metadata survive.
-    assert test_entry["statistic_summary"]["n"] == 3
-    assert "mean_statistic" in test_entry
-
-    reg_entry = document["regression_summaries"]["ols"]
-    for key in ("coef_trace", "r2_trace", "status_trace"):
-        assert key not in reg_entry
-
-    # No ndarrays / numpy scalars left behind.
-    json.dumps(document)
+    assert meta["n_rep"] == result.n_rep
+    assert meta["n_successful"] == result.n_successful
+    assert meta["step_counts"]["jb"] == result.meta.step_counts["jb"]
+    assert meta["run_config"] == result.run_config
+    # The rates, `succeeded` and the failed-step tallies are all properties over
+    # the timings and failures beside them, so none of them are stored.
+    for derived in ("it_s", "step_it_s", "succeeded", "failed_steps"):
+        assert derived not in meta
 
 
-def test_result_traces_keys_and_shapes() -> None:
-    result = _run_demo_pipeline(n_rep=3)
-    traces = result_traces(result)
+def test_traces_are_the_result_arrays_not_copies() -> None:
+    # A large run's traces are gigabytes; the serializer hands over the run's own
+    # buffers, so nothing here may allocate.
+    result = _run()
+    summary = result.test_summaries["jb"]
+    _, traces = serialize_test_results(result.test_summaries)["jb"]
 
-    assert traces["test.jb.statistic"].shape == (3,)
-    assert traces["test.jb.pval"].shape == (3,)
-    assert traces["test.jb.status"].shape == (3,)
-    assert traces["test.jb.status"].dtype == np.int64
-
-    assert traces["regression.ols.coef"].ndim == 2  # n_rep x k
-    assert traces["regression.ols.coef"].shape[0] == 3
-    assert traces["regression.ols.r2"].shape == (3,)
-    assert traces["regression.ols.status"].shape == (3,)
+    assert traces["statistic_trace"] is summary.statistic_trace
+    assert traces["status_trace"] is summary._raw_status
 
 
-def test_wire_equals_document_plus_traces() -> None:
-    result = _run_demo_pipeline()
-    wire = serialize_pipeline_result(result, run_id="r1")
-    recombined = pipeline_result_wire(
-        result_document(result, run_id="r1"), result_traces(result)
-    )
-    assert recombined == wire
+def test_test_meta_carries_the_fields_from_spec_needs() -> None:
+    result = _run(n_rep=5)
+    meta, traces = serialize_test_results(result.test_summaries)["jb"]
+
+    assert meta["test_name"] and meta["n_rep"] == 5
+    assert set(traces) == {"statistic_trace", "status_trace", "retained_reps"}
+    assert traces["retained_reps"].shape == (meta["n_retained"],)
 
 
-def test_wire_reconstructs_dropped_all_nan_trace_columns() -> None:
-    # A test whose statistic/pval are NaN in every rep yields all-null float
-    # trace columns, which the Parquet encoder drops. Hydration must not raise
-    # on the missing keys; it reconstructs them as null-filled traces.
-    result = _run_demo_pipeline(n_rep=3)
-    document = result_document(result, run_id="r1")
-    traces = result_traces(result)
-    # Simulate the encoder dropping the all-null float columns for "jb".
-    del traces["test.jb.statistic"]
-    del traces["test.jb.pval"]
+def test_regression_omits_absent_standard_errors() -> None:
+    result = _run()
+    meta, traces = serialize_regression_results(result.regression_summaries)["ols"]
 
-    wire = pipeline_result_wire(document, traces)
+    assert traces["coef_trace"].shape[1] == meta["k"]
+    assert "se_trace" in traces  # ols carries them
 
-    entry = wire["test_summaries"]["jb"]
-    assert entry["statistic_trace"] == [None, None, None]
-    assert entry["pval_trace"] == [None, None, None]
-    # status (integer-valued) survives and is unchanged.
-    assert len(entry["status_trace"]) == 3
+    stripped = result.regression_summaries["ols"]
+    object.__setattr__(stripped, "_se_trace", None)
+    _, without = serialize_regression_results({"ols": stripped})["ols"]
+    assert "se_trace" not in without  # absent, never a null column
 
 
-def test_postproc_scalar_inline_array_to_traces() -> None:
-    result = _postproc_result()
-    document = result_document(result, run_id="r1")
-    arrays = result_postproc_arrays(result)
-
-    # Scalars (and their metadata) stay inline in the document.
-    pcs = document["postproc"]["pcs"]
-    assert pcs == {
-        "kind": "summary",
-        "title": "PCS",
-        "render": "auto",
-        "artifact": "scalar",
-        "value": 0.6,
-    }
-    # Array artifacts keep metadata but the bulk value is stripped to parquet.
-    density = document["postproc"]["density"]
-    assert density == {"kind": "raw", "artifact": "array", "shape": [4, 2]}
-    assert "value" not in document["postproc"]["selection"]
-    assert "value" not in document["postproc"]["moments"]
-
-    # Only the ndarray artifacts (Raw + array-valued Summary) become payloads.
-    assert set(arrays) == {"selection", "density", "moments"}
-    assert arrays["density"].shape == (4, 2)
-    json.dumps(document)
-
-
-def test_postproc_wire_round_trips_scalar_and_arrays() -> None:
-    result = _postproc_result()
-    wire = serialize_pipeline_result(result, run_id="r1")
-    recombined = pipeline_result_wire(
-        result_document(result, run_id="r1"),
-        result_traces(result),
-        result_postproc_arrays(result),
-    )
-    assert recombined == wire
-    assert recombined["postproc"]["pcs"]["value"] == 0.6
-    assert recombined["postproc"]["density"]["value"] == [
-        [0.0, 1.0],
-        [2.0, 3.0],
-        [4.0, 5.0],
-        [6.0, 7.0],
+def test_transform_shape_rides_the_meta_and_indices_the_traces() -> None:
+    result = _run(n_rep=6)
+    meta, traces = serialize_transform_results(result.transform_outputs, result.n_rep)[
+        "std"
     ]
 
+    payload = result.transform_outputs["std"]
+    assert meta["shape"] == list(payload.shape)
+    assert traces["value"] is payload
+    # The arenas that held them are gone, so the indices come back from the
+    # retained row count and n_rep.
+    assert traces["retained_reps"].tolist() == list(range(6))
 
-def test_postproc_wire_reconstructs_dropped_all_nan_array() -> None:
-    # An all-NaN Raw becomes an all-null column the Parquet encoder drops;
-    # hydration rebuilds it as a NaN array of the recorded shape (-> JSON null).
-    result = MCPipelineResult(
-        n_rep=3,
-        meta=MCMeta(
-            n_rep=3,
-            n_retained_by_step={},
-        ),
-        n_successful=3,
-        test_summaries={},
-        transform_outputs=None,
-        postproc={"empty": Raw(value=np.full(3, np.nan))},
+
+def test_postproc_slots_are_independent() -> None:
+    curve = np.arange(8.0).reshape(4, 2)
+    steps = serialize_postproc_results(
+        {
+            "both": Artifact(raw=Raw(value=curve), summary=Summary(value=0.6)),
+            "summary_only": Artifact(raw=None, summary=Summary(value={"n": 4})),
+            "raw_only": Artifact(raw=Raw(value=curve), summary=None),
+        }
     )
-    document = result_document(result, run_id="r1")
-    wire = pipeline_result_wire(document, {}, {})  # array dropped -> absent
-    assert wire["postproc"]["empty"]["value"] == [None, None, None]
+
+    both_meta, both_traces = steps["both"]
+    assert both_meta["shape"] == [4, 2] and both_meta["summary"] == 0.6
+    assert both_traces["value"].shape == (4, 2)
+
+    summary_meta, summary_traces = steps["summary_only"]
+    assert summary_meta["shape"] is None
+    assert summary_traces == {}  # nothing bulk, so no member
+
+    raw_meta, _ = steps["raw_only"]
+    assert raw_meta["summary"] is None
 
 
-def test_postproc_summary_rejects_unserializable_value() -> None:
-    # Scalar / ndarray / DataFrame are supported; a bare dict is not.
-    result = _table_result({"bad": Summary(value={"a": [1, 2]})})
-    with pytest.raises(TypeError, match="scalar, ndarray, or DataFrame"):
-        serialize_pipeline_result(result, run_id="r1")
-
-
-def test_postproc_table_metadata_inline_data_to_parquet() -> None:
+def test_dataframe_summary_rides_pandas_table_schema() -> None:
     import pandas as pd
 
-    df = pd.DataFrame(
-        {"stat": ["mean", "std"], "value": [1.5, 2.0], "ok": [True, False]}
-    )
-    result = _table_result({"desc": Summary(df, render="table")})
-
-    document = result_document(result, run_id="r1")
-    entry = document["postproc"]["desc"]
-    assert entry["artifact"] == "table"
-    assert entry["columns"] == ["stat", "value", "ok"]
-    assert entry["dtypes"] == {"stat": "string", "value": "float", "ok": "bool"}
-    assert entry["index"] == {"kind": "range", "name": None}
-    assert "data" not in entry  # bulk -> parquet side-channel
-    json.dumps(document)
-
-    tables = result_postproc_tables(result)
-    assert tables["desc"]["stat"] == ["mean", "std"]
-    assert tables["desc"]["ok"] == [True, False]
-
-
-def test_postproc_table_wire_round_trips() -> None:
-    import pandas as pd
-
-    df = pd.DataFrame({"stat": ["a", "b", "c"], "value": [1.0, np.nan, 3.0]})
-    labeled = pd.DataFrame(
-        {"v": [10.0, 20.0]}, index=pd.Index(["x", "y"], name="label")
-    )
-    result = _table_result(
-        {"desc": Summary(df, render="table"), "lab": Summary(labeled)}
+    frame = pd.DataFrame({"stat": ["a", "b"], "value": [1 / 3, np.nan]})
+    labeled = pd.DataFrame({"v": [10.0]}, index=pd.Index(["x"], name="lab"))
+    steps = serialize_postproc_results(
+        {
+            "desc": Artifact(raw=None, summary=Summary(frame)),
+            "idx": Artifact(raw=None, summary=Summary(labeled)),
+        }
     )
 
-    wire = serialize_pipeline_result(result, run_id="r1")
-    recombined = pipeline_result_wire(
-        result_document(result, run_id="r1"),
-        result_traces(result),
-        result_postproc_arrays(result),
-        result_postproc_tables(result),
+    for name, original in (("desc", frame), ("idx", labeled)):
+        payload = steps[name][0]["summary"]
+        json.dumps(payload)  # inline and JSON-safe, no side channel
+        back = pd.read_json(StringIO(json.dumps(payload)), orient="table")
+        assert dict(back.dtypes) == dict(original.dtypes)
+        # A summary is a presentation surface: JSON caps floats at 15 digits and
+        # the traces are what carries the exact values.
+        pd.testing.assert_frame_equal(back, original, rtol=1e-13, atol=0)
+    assert steps["idx"][0]["summary"]["schema"]["primaryKey"] == ["lab"]
+
+
+def test_json_safe_reaches_into_containers() -> None:
+    value = {
+        "arr": np.arange(3),
+        "nested": [np.float64(0.5), (np.int64(2),)],
+        "nan": np.float64("nan"),
+    }
+
+    assert json_safe(value) == {
+        "arr": [0, 1, 2],
+        "nested": [0.5, [2]],
+        "nan": None,  # JSON has no NaN; a null is what the readers expect
+    }
+
+
+def test_ui_wire_stays_one_flat_json_document() -> None:
+    result = _run()
+    wire = serialize_pipeline_result(result)
+
+    assert wire["kind"] == "mc"
+    # Derived values the bundle refuses to store are present here, since this is
+    # the shape a client renders rather than the shape a run is rebuilt from.
+    assert wire["test_summaries"]["jb"]["pval_trace"]
+    assert wire["regression_summaries"]["ols"]["r2_trace"]
+    json.dumps(wire)
+
+
+def test_postproc_summary_mapping_inlines() -> None:
+    result = _postproc_result(
+        {
+            "m": Artifact(
+                raw=None, summary=Summary(value={"a": [1, 2], "b": np.float64(0.5)})
+            )
+        }
     )
-    assert recombined == wire
-    # NaN cell -> JSON null, matching the trace convention.
-    assert recombined["postproc"]["desc"]["data"]["value"] == [1.0, None, 3.0]
-    # Labeled index rides the reserved __index__ column.
-    assert recombined["postproc"]["lab"]["index"]["kind"] == "labeled"
-    assert recombined["postproc"]["lab"]["data"]["__index__"] == ["x", "y"]
+
+    wire = serialize_pipeline_result(result)
+
+    assert wire["postproc"]["m"]["summary"]["value"] == {"a": [1, 2], "b": 0.5}
+    json.dumps(wire)
 
 
-def test_postproc_table_wire_reconstructs_dropped_all_null_column() -> None:
-    import pandas as pd
+@pytest.mark.parametrize("n_rep", [1, 3])
+def test_retained_indices_span_the_run(n_rep: int) -> None:
+    result = _run(n_rep=n_rep)
+    _, traces = serialize_test_results(result.test_summaries)["jb"]
 
-    # An all-null column is dropped by the Parquet encoder; hydration rebuilds it
-    # as n nulls from the document's column metadata.
-    df = pd.DataFrame({"a": [1.0, 2.0], "blank": [np.nan, np.nan]})
-    result = _table_result({"t": Summary(df, render="table")})
-    document = result_document(result, run_id="r1")
-
-    wire = pipeline_result_wire(document, {}, {}, {"t": {"a": [1.0, 2.0]}})
-    assert wire["postproc"]["t"]["data"]["blank"] == [None, None]
-    assert wire["postproc"]["t"]["data"]["a"] == [1.0, 2.0]
-
-
-def test_pipeline_spec_round_trips() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            NodeSpec(id="n0", step_type="simulation", name="datagen", params={"T": 50}),
-            NodeSpec(
-                id="n1",
-                step_type="jarque_bera",
-                name="jb",
-                params={"source": "datagen", "field": "observables"},
-            ),
-        ],
-        edges=[EdgeSpec(source="n0", target="n1")],
-    )
-    as_dict = spec.to_dict()
-    assert PipelineSpec.from_dict(as_dict).to_dict() == as_dict
-    assert PipelineSpec.from_json(spec.to_json()).to_dict() == as_dict
-
-
-def test_pipeline_spec_rejects_unknown_step() -> None:
-    with pytest.raises(ValueError):
-        PipelineSpec.from_dict(
-            {"nodes": [{"id": "n", "step_type": "bogus", "name": "n"}], "edges": []}
-        )
+    assert traces["retained_reps"].tolist() == list(range(n_rep))

@@ -213,9 +213,6 @@ nav:
           - Overview: documentation/monte_carlo/index.md
           - MCPipeline: documentation/monte_carlo/pipeline.md
           - Core Containers: documentation/monte_carlo/core_containers.md
-          - Pipeline Spec: documentation/monte_carlo/spec.md
-          - Pipeline Graph: documentation/monte_carlo/graph.md
-          - Step Catalog: documentation/monte_carlo/catalog.md
           - Custom Operations: documentation/monte_carlo/custom_ops.md
           - Operations:
               - Core:

@@ -1,18 +1,19 @@
 """Serialization for Monte Carlo pipeline results.
 
 Lifted out of ``SymbolicDSGE.ui.mc`` so the result wire format is reusable by the
-``.sdsge`` bundle without depending on the HTTP layer. ``serialize_pipeline_result``
-remains the canonical (unchanged) wire shape consumed by the UI; the bundle path uses
-the parquet-friendly split below:
+``.sdsge`` bundle without depending on the HTTP layer. Two shapes live here:
 
-- ``result_document`` -> JSON-safe metadata + summaries (no bulk trace arrays),
-- ``result_traces`` -> the bulk numeric trace columns as ndarrays (no I/O here),
-- ``pipeline_result_wire`` -> re-merges the two back into the UI wire shape (hydration).
+- ``serialize_pipeline_result`` -> the single flat JSON document the UI consumes,
+- ``serialize_run_meta`` plus one ``serialize_*_results`` per step kind -> the
+  bundle's split, each returning a typed meta beside the trace arrays themselves.
+
+Only the meta half is ever JSON, through :func:`json_safe`, and the writer is
+what calls it. Traces are handed over as the run's own ndarrays, never copied.
 """
 
 from __future__ import annotations
 
-import copy
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
@@ -20,34 +21,24 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .mc_constructs import MCPipelineResult
-from .postproc import Artifact, Raw, Summary, normalize_artifacts
-from .traces import regression_trace_keys, test_trace_keys
+from .postproc import Artifact, Summary, Raw
+from .._ckernels.monte_carlo._arenas import resolve_retention
+from .._diag_tests.result import MCTestResult
+from ..regression.ols.ols_result import MCRegressionResult
+from .spec import (
+    MCFailureSpec,
+    MCPostprocResultMeta,
+    MCRegressionResultMeta,
+    MCRunMeta,
+    MCTestResultMeta,
+    MCTransformResultMeta,
+)
 
-#: Scalar artifact-value types that ride the JSON document inline; ndarray values
-#: go to the parquet side-channel, anything else is a tabular artifact (#181).
-_SCALAR_TYPES = (bool, int, float, str, np.integer, np.floating, np.bool_)
-
-
-def _normalized_postproc(result: MCPipelineResult) -> dict[str, Artifact]:
-    """POSTPROC artifacts, keyed for the wire.
-
-    ``result.postproc`` holds each op's *plain* return value (float / ndarray /
-    DataFrame / mapping). Normalize on arrival: a mapping fans out into
-    ``{"<step>.<key>": artifact}``, a bare value wraps under the step name
-    (ndarray -> ``Raw``, else -> ``Summary``). Downstream serialization keeps its
-    ``Summary``/``Raw`` isinstance dispatch unchanged.
-    """
-    out: dict[str, Artifact] = {}
-    for name, value in result.postproc.items():
-        out.update(normalize_artifacts(value, name))
-    return out
+NDF = NDArray[np.float64]
 
 
-def serialize_pipeline_result(
-    result: MCPipelineResult, *, run_id: str
-) -> dict[str, Any]:
+def serialize_pipeline_result(result: MCPipelineResult) -> dict[str, Any]:
     return {
-        "run_id": run_id,
         "kind": "mc",
         "n_rep": result.n_rep,
         "n_retained_by_step": dict(result.meta.n_retained_by_step),
@@ -76,20 +67,20 @@ def serialize_pipeline_result(
                 "test_name": summary.test_name,
                 "n_rep": summary.n_rep,
                 "n_retained": summary.n_retained,
-                "retained_reps": _json_value(summary.retained_reps),
+                "retained_reps": json_safe(summary.retained_reps),
                 "alpha": float(summary.alpha),
                 "distribution": summary.dist.value,
-                "df": _json_value(summary.df),
+                "df": json_safe(summary.df),
                 "pval_method": summary.pval_method.value,
                 "mean_statistic": float(summary.mean_statistic),
                 "mean_pval": float(summary.mean_pval),
                 "rejection_rate": float(summary.rejection_rate),
                 "statistic_se": _json_float(summary.statistic_se),
                 "pval_se": _json_float(summary.pval_se),
-                "statistic_ci": _json_value(summary.statistic_confidence_interval()),
-                "rejection_ci": _json_value(summary.pval_confidence_interval()),
-                "statistic_trace": _json_value(summary.statistic_trace),
-                "pval_trace": _json_value(summary.pval_trace),
+                "statistic_ci": json_safe(summary.statistic_confidence_interval()),
+                "rejection_ci": json_safe(summary.pval_confidence_interval()),
+                "statistic_trace": json_safe(summary.statistic_trace),
+                "pval_trace": json_safe(summary.pval_trace),
                 "status_trace": [int(status) for status in summary.status_trace],
                 "status_counts": _status_counts(summary.status_trace),
                 "statistic_summary": _trace_summary(summary.statistic_trace),
@@ -103,324 +94,162 @@ def serialize_pipeline_result(
         },
         "postproc": {
             name: _serialize_artifact(artifact)
-            for name, artifact in _normalized_postproc(result).items()
+            for name, artifact in result.postproc.items()
         },
     }
 
 
-# Bulk trace keys stripped from the JSON document and carried as ndarray columns.
-_TEST_TRACE_KEYS = ("statistic_trace", "pval_trace", "status_trace")
-_REGRESSION_TRACE_KEYS = ("coef_trace", "r2_trace", "status_trace")
+def _serialize_artifact(artifact: Artifact) -> dict[str, Any]:
+    """One step's two slots, each serialized on its own terms.
 
-
-def traces_from_summaries(
-    test_summaries: Mapping[str, Any],
-    regression_summaries: Mapping[str, Any],
-) -> dict[str, NDArray[Any]]:
-    """Bulk numeric trace columns from the test/regression summaries (no I/O).
-
-    Keys: per test ``"test.<name>.{statistic,pval,status}"``; per regression
-    ``"regression.<name>.{coef,r2,status}"`` (``coef`` is 2D ``n_rep x k``). The
-    single source of truth for trace shaping — shared by :func:`result_traces`
-    (the wire) and the post-loop ``OpType.POSTPROC`` trace registry.
+    ``raw`` is bulk, so it records its shape and the value is stripped to a
+    parquet member by :func:`result_document`. ``summary`` is inline whatever it
+    holds. Either slot may be absent.
     """
-    traces: dict[str, NDArray[Any]] = {}
-    for name, test_summary in test_summaries.items():
-        keys = test_trace_keys(name)
-        traces[keys["statistic"]] = np.asarray(
-            test_summary.statistic_trace, dtype=np.float64
-        )
-        traces[keys["pval"]] = np.asarray(test_summary.pval_trace, dtype=np.float64)
-        traces[keys["status"]] = np.asarray(
-            [int(status) for status in test_summary.status_trace], dtype=np.int64
-        )
-    for name, reg_summary in regression_summaries.items():
-        keys = regression_trace_keys(name)
-        traces[keys["coef"]] = np.asarray(reg_summary.coef_trace, dtype=np.float64)
-        traces[keys["r2"]] = np.asarray(reg_summary.r2_trace, dtype=np.float64)
-        traces[keys["status"]] = np.asarray(
-            [int(status) for status in reg_summary.status_trace], dtype=np.int64
-        )
-    return traces
-
-
-def result_traces(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
-    """Bulk numeric trace columns for a later parquet writer (no I/O)."""
-    return traces_from_summaries(result.test_summaries, result.regression_summaries)
-
-
-def _artifact_array(artifact: Raw | Summary) -> NDArray[Any] | None:
-    """The ndarray a POSTPROC artifact carries as bulk data, or ``None``.
-
-    ``Raw`` is always bulk; a ``Summary`` is bulk only when its value is an
-    ndarray (a scalar Summary rides the JSON document inline).
-    """
-    if isinstance(artifact, Raw):
-        return np.asarray(artifact.value)
-    if isinstance(artifact, Summary) and isinstance(artifact.value, np.ndarray):
-        return artifact.value
-    return None
-
-
-def _serialize_artifact(artifact: Raw | Summary) -> dict[str, Any]:
-    """Wire entry for one POSTPROC artifact (arrays inlined for the UI wire).
-
-    Scalars live inline; ndarrays carry a ``shape`` + inlined ``value`` (the
-    ``value`` is stripped by :func:`result_document` and re-merged from the
-    parquet side-channel). Tabular/DataFrame artifacts are out of scope (#181).
-    """
-    if isinstance(artifact, Raw):
-        arr = np.asarray(artifact.value)
-        return {
-            "kind": "raw",
-            "artifact": "array",
-            "shape": list(arr.shape),
-            "value": _json_value(arr),
-        }
-    entry: dict[str, Any] = {
-        "kind": "summary",
-        "title": artifact.title,
-        "render": artifact.render,
-    }
-    value = artifact.value
-    if isinstance(value, np.ndarray):
-        entry["artifact"] = "array"
-        entry["shape"] = list(value.shape)
-        entry["value"] = _json_value(value)
-    elif value is None or isinstance(value, _SCALAR_TYPES):
-        entry["artifact"] = "scalar"
-        entry["value"] = _json_value(value)
-    else:
-        frame = _artifact_frame(artifact)
-        if frame is None:
-            raise TypeError(
-                f"POSTPROC Summary value of type {type(value).__name__!r} is not "
-                "a scalar, ndarray, or DataFrame and cannot be serialized."
-            )
-        entry.update(_frame_to_wire(frame))  # bulk `data` stripped by result_document
-    return entry
-
-
-def result_postproc_arrays(result: MCPipelineResult) -> dict[str, NDArray[Any]]:
-    """The bulk ndarray POSTPROC artifacts, keyed by artifact name (no I/O).
-
-    Unlike :func:`result_traces` (uniform ``R``-length columns), these are
-    arbitrary-shape *payloads* (e.g. a KDE ``N x 2`` curve), each serialized to
-    its own shape-manifest parquet member by the bundle builder.
-    """
-    out: dict[str, NDArray[Any]] = {}
-    for name, artifact in _normalized_postproc(result).items():
-        arr = _artifact_array(artifact)
-        if arr is not None:
-            out[name] = arr
+    raw = artifact["raw"]
+    summary = artifact["summary"]
+    out: dict[str, Any] = {"raw": None, "summary": None}
+    if raw is not None:
+        arr = np.asarray(raw.value)
+        out["raw"] = {"shape": list(arr.shape), "value": json_safe(arr)}
+    if summary is not None:
+        out["summary"] = {"value": _summary_value(summary.value)}
     return out
 
 
-_INDEX_COL = "__index__"  # reserved data key carrying a labeled index's values
+def _summary_value(value: Any) -> Any:
+    """A ``Summary``'s value as JSON.
 
-
-def _artifact_frame(artifact: Raw | Summary) -> Any | None:
-    """The pandas DataFrame a ``Summary`` carries as a tabular artifact, else None."""
-    if not isinstance(artifact, Summary):
-        return None
-    import pandas as pd
-
-    value = artifact.value
-    return value if isinstance(value, pd.DataFrame) else None
-
-
-def _wire_dtype(dtype: Any) -> str:
-    """Normalize a pandas dtype to a wire dtype tag.
-
-    Only ``numeric`` (``int``/``float``), ``bool``, and ``string`` are carried;
-    everything else (object, categorical, datetime) round-trips as ``string`` —
-    dictionary-encoded Parquet collapses repeated category labels anyway.
+    A DataFrame rides pandas' own table schema, which carries its columns,
+    dtypes and index and reads back through ``read_json(orient="table")``.
     """
     import pandas as pd
 
-    if pd.api.types.is_bool_dtype(dtype):
-        return "bool"
-    if pd.api.types.is_integer_dtype(dtype):
-        return "int"
-    if pd.api.types.is_float_dtype(dtype):
-        return "float"
-    return "string"
+    if isinstance(value, pd.DataFrame):
+        return cast(
+            dict[str, Any],
+            json.loads(value.to_json(orient="table", double_precision=15)),
+        )
+    return json_safe(value)
 
 
-def _frame_column_cells(series: Any, wire_dtype: str) -> list[Any]:
-    """A column's cells as JSON-safe scalars (NaN/NaT/None -> ``None``)."""
-    import pandas as pd
+def serialize_run_meta(result: MCPipelineResult) -> MCRunMeta:
+    """The run's own metadata, with the arguments that produced it.
 
-    if wire_dtype == "string":
-        return [None if pd.isna(v) else str(v) for v in series.tolist()]
-    if wire_dtype == "bool":
-        return [bool(v) for v in series.to_numpy()]
-    return [_json_value(v) for v in series.to_numpy()]
-
-
-def _is_default_range_index(index: Any) -> bool:
-    import pandas as pd
-
-    return (
-        isinstance(index, pd.RangeIndex)
-        and index.start == 0
-        and index.step == 1
-        and index.name is None
+    The step kinds each carry their own meta; this is what is left over, and it
+    is what :meth:`MCPipeline.run` needs beside the models to reproduce the run.
+    """
+    meta = result.meta
+    return MCRunMeta(
+        n_rep=result.n_rep,
+        n_successful=result.n_successful,
+        n_retained_by_step=dict(meta.n_retained_by_step),
+        elapsed_s=meta.elapsed_s,
+        step_elapsed_s=dict(meta.step_elapsed_s),
+        step_counts=dict(meta.step_counts),
+        step_failures=dict(meta.step_failures),
+        postproc_elapsed_s=dict(meta.postproc_elapsed_s),
+        failures=[
+            MCFailureSpec(
+                rep_idx=failure.rep_idx,
+                step_name=failure.step_name,
+                error_type=failure.error_type,
+                message=failure.message,
+            )
+            for failure in result.failures
+        ],
+        run_config=dict(result.run_config),
     )
 
 
-def _frame_to_columns(frame: Any) -> dict[str, list[Any]]:
-    """The table's columnar payload (the bulk ``data``), index column first.
-
-    A labeled (non-default-range) index is carried as the reserved
-    :data:`_INDEX_COL` column; a default ``RangeIndex`` is metadata-only.
-    """
-    data: dict[str, list[Any]] = {}
-    if not _is_default_range_index(frame.index):
-        data[_INDEX_COL] = _frame_column_cells(
-            frame.index.to_series(), _wire_dtype(frame.index.dtype)
-        )
-    for col in frame.columns:
-        data[str(col)] = _frame_column_cells(frame[col], _wire_dtype(frame[col].dtype))
-    return data
-
-
-def _frame_to_wire(frame: Any) -> dict[str, Any]:
-    """Tabular artifact wire entry: metadata + inlined columnar ``data``."""
-    labeled = not _is_default_range_index(frame.index)
-    dtypes = {str(col): _wire_dtype(frame[col].dtype) for col in frame.columns}
-    if labeled:
-        dtypes[_INDEX_COL] = _wire_dtype(frame.index.dtype)
-    return {
-        "artifact": "table",
-        "shape": [int(frame.shape[0]), int(frame.shape[1])],
-        "columns": [str(col) for col in frame.columns],
-        "dtypes": dtypes,
-        "index": {
-            "kind": "labeled" if labeled else "range",
-            "name": frame.index.name,
-        },
-        "data": _frame_to_columns(frame),
-    }
-
-
-def result_postproc_tables(result: MCPipelineResult) -> dict[str, dict[str, list[Any]]]:
-    """The columnar payloads of tabular POSTPROC artifacts, keyed by name (no I/O).
-
-    Each table is mixed-dtype, so — unlike :func:`result_postproc_arrays` (float
-    payloads) — it rides the columnar NDJSON parquet seam (``frame_to_json`` +
-    ``to_parquet``), one member per table.
-    """
-    out: dict[str, dict[str, list[Any]]] = {}
-    for name, artifact in _normalized_postproc(result).items():
-        frame = _artifact_frame(artifact)
-        if frame is not None:
-            out[name] = _frame_to_columns(frame)
+def serialize_test_results(
+    tests: Mapping[str, MCTestResult],
+) -> dict[str, tuple[MCTestResultMeta, dict[str, NDArray[Any]]]]:
+    """Each test's ``(meta, traces)`` halves, arrays passed through untouched."""
+    out: dict[str, tuple[MCTestResultMeta, dict[str, NDArray[Any]]]] = {}
+    for name, test in tests.items():
+        spec = test.to_spec()
+        traces: dict[str, NDArray[Any]] = {
+            "statistic_trace": spec.statistic_trace,
+            "status_trace": spec._raw_status,
+            "retained_reps": spec.retained_reps,
+        }
+        out[name] = (spec.meta, traces)
     return out
 
 
-def result_document(result: MCPipelineResult, *, run_id: str = "") -> dict[str, Any]:
-    """JSON-safe metadata + summaries with the bulk trace arrays removed.
+def serialize_regression_results(
+    regressions: Mapping[str, MCRegressionResult],
+) -> dict[str, tuple[MCRegressionResultMeta, dict[str, NDArray[Any]]]]:
+    """Each regression's ``(meta, traces)`` halves.
 
-    Pairs with :func:`result_traces`; recombine via :func:`pipeline_result_wire`.
+    A regression without standard errors omits ``se_trace`` rather than
+    carrying a null one.
     """
-    document = serialize_pipeline_result(result, run_id=run_id)
-    for entry in document["test_summaries"].values():
-        for key in _TEST_TRACE_KEYS:
-            entry.pop(key, None)
-    for entry in document["regression_summaries"].values():
-        for key in _REGRESSION_TRACE_KEYS:
-            entry.pop(key, None)
-    for entry in document["postproc"].values():
-        artifact = entry.get("artifact")
-        if artifact == "array":  # bulk -> shape-manifest parquet member
-            entry.pop("value", None)
-        elif artifact == "table":  # bulk -> columnar parquet member
-            entry.pop("data", None)
-    return document
+    out: dict[str, tuple[MCRegressionResultMeta, dict[str, NDArray[Any]]]] = {}
+    for name, regression in regressions.items():
+        spec = regression.to_spec()
+        traces: dict[str, NDArray[Any]] = {
+            "coef_trace": spec.coef_trace,
+            "ssr_trace": spec.ssr_trace,
+            "sst_trace": spec.sst_trace,
+            "status_trace": spec._raw_status,
+            "retained_reps": spec.retained_reps,
+        }
+        if spec._se_trace is not None:
+            traces["se_trace"] = spec._se_trace
+        out[name] = (spec.meta, traces)
+    return out
 
 
-def pipeline_result_wire(
-    document: dict[str, Any],
-    traces: dict[str, NDArray[Any]],
-    postproc_arrays: Mapping[str, NDArray[Any]] | None = None,
-    postproc_tables: Mapping[str, Mapping[str, Sequence[Any]]] | None = None,
-) -> dict[str, Any]:
-    """Re-merge a trace-free :func:`result_document` with :func:`result_traces`
-    (and :func:`result_postproc_arrays`) into the canonical UI wire shape (used
-    for hydration).
+def serialize_transform_results(
+    transforms: Mapping[str, NDF],
+    n_rep: int,
+) -> dict[str, tuple[MCTransformResultMeta, dict[str, NDArray[Any]]]]:
+    """Each transform's ``(meta, traces)`` halves.
 
-    A float trace column that is degenerate across *every* replication (e.g. a
-    test that returns an undefined-variance NaN statistic in all reps) is dropped
-    by the Parquet encoder, since an all-null column carries no values. Such a
-    column is reconstructed here as a null-filled trace of the summary's length —
-    which is exactly what the canonical wire reports for an all-NaN trace — so
-    hydration stays robust instead of raising ``KeyError`` on the missing key.
-    The same null-from-``shape`` fallback applies to a dropped POSTPROC array.
+    A payload is ``(n_retained, *output_shape)``, so its shape travels in the
+    meta and the retained rep indices travel beside the values. The arenas that
+    held those indices do not outlive the run, so they are rebuilt from the
+    retained row count through the same routine the run allocated with.
     """
-    arrays = postproc_arrays or {}
-    tables = postproc_tables or {}
-    wire = copy.deepcopy(document)
-    for name, entry in wire.get("postproc", {}).items():
-        artifact = entry.get("artifact")
-        if artifact == "array":
-            arr = arrays.get(name)
-            if arr is not None:
-                entry["value"] = _json_value(arr)
-            else:
-                shape = tuple(int(d) for d in entry.get("shape", []))
-                entry["value"] = _json_value(np.full(shape, np.nan)) if shape else None
-        elif artifact == "table":
-            entry["data"] = _table_data_or_null(entry, tables.get(name, {}))
-        # scalar artifacts keep their inline value from the document
-    for name, entry in wire["test_summaries"].items():
-        n = int(entry.get("n_retained", entry.get("n_rep", 0)))
-        entry["statistic_trace"] = _trace_or_null(traces, f"test.{name}.statistic", n)
-        entry["pval_trace"] = _trace_or_null(traces, f"test.{name}.pval", n)
-        entry["status_trace"] = _status_trace(traces, f"test.{name}.status")
-    for name, entry in wire["regression_summaries"].items():
-        n_retained = int(entry.get("n_retained", entry.get("n_rep", 0)))
-        k = int(entry.get("k", 0))
-        coef = traces.get(f"regression.{name}.coef")
-        entry["coef_trace"] = (
-            _json_value(coef)
-            if coef is not None
-            else [[None] * k for _ in range(n_retained)]
+    if not transforms:
+        return {}
+    out: dict[str, tuple[MCTransformResultMeta, dict[str, NDArray[Any]]]] = {}
+    for name, arr in transforms.items():
+        retained_reps, _ = resolve_retention(int(arr.shape[0]), n_rep)
+        meta = MCTransformResultMeta(step_name=name, shape=list(arr.shape))
+        traces: dict[str, NDArray[Any]] = {
+            "value": arr,
+            "retained_reps": retained_reps,
+        }
+        out[name] = (meta, traces)
+    return out
+
+
+def serialize_postproc_results(
+    postprocs: Mapping[str, Artifact],
+) -> dict[str, tuple[MCPostprocResultMeta, dict[str, NDArray[Any]]]]:
+    """Each post-loop step's ``(meta, traces)`` halves.
+
+    The ``summary`` slot is aggregate, so it rides the meta inline. A
+    summary-only step contributes no traces at all.
+    """
+    out: dict[str, tuple[MCPostprocResultMeta, dict[str, NDArray[Any]]]] = {}
+    for name, artifact in postprocs.items():
+        raw = artifact["raw"]
+        summary = artifact["summary"]
+        value = np.asarray(raw.value) if raw is not None else None
+        meta = MCPostprocResultMeta(
+            step_name=name,
+            shape=list(value.shape) if value is not None else None,
+            summary=_summary_value(summary.value) if summary is not None else None,
         )
-        entry["r2_trace"] = _trace_or_null(traces, f"regression.{name}.r2", n_retained)
-        entry["status_trace"] = _status_trace(traces, f"regression.{name}.status")
-    return wire
-
-
-def _table_data_or_null(
-    entry: Mapping[str, Any], columns: Mapping[str, Sequence[Any]]
-) -> dict[str, list[Any]]:
-    """Rebuild a table's columnar ``data`` from its decoded parquet columns.
-
-    A column that was all-null is dropped by the Parquet encoder; it is rebuilt
-    as ``n`` nulls (matching the trace-column convention). A labeled index rides
-    the reserved :data:`_INDEX_COL` column.
-    """
-    n = int(entry.get("shape", [0, 0])[0])
-    keys = list(entry.get("columns", []))
-    if entry.get("index", {}).get("kind") == "labeled":
-        keys = [_INDEX_COL, *keys]
-    return {key: list(columns[key]) if key in columns else [None] * n for key in keys}
-
-
-def _trace_or_null(traces: dict[str, NDArray[Any]], key: str, n: int) -> list[Any]:
-    """A trace column as a JSON-safe list, or ``n`` nulls if it was dropped."""
-    arr = traces.get(key)
-    if arr is not None:
-        return cast(list[Any], _json_value(arr))
-    return [None] * n
-
-
-def _status_trace(traces: dict[str, NDArray[Any]], key: str) -> list[int]:
-    """Status traces are integer-valued and never all-null, so a missing column
-    only occurs for an empty run; fall back to an empty list."""
-    arr = traces.get(key)
-    return [int(x) for x in arr] if arr is not None else []
+        traces: dict[str, NDArray[Any]] = {}
+        if value is not None:
+            traces["value"] = value
+        out[name] = (meta, traces)
+    return out
 
 
 def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
@@ -442,11 +271,11 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
         "variables": summary.variables,
         "n_rep": summary.n_rep,
         "n_retained": summary.n_retained,
-        "retained_reps": _json_value(summary.retained_reps),
+        "retained_reps": json_safe(summary.retained_reps),
         "n": summary.n,
         "k": summary.k,
-        "coef_trace": _json_value(summary.coef_trace),
-        "r2_trace": _json_value(summary.r2_trace),
+        "coef_trace": json_safe(summary.coef_trace),
+        "r2_trace": json_safe(summary.r2_trace),
         "status_trace": [int(status) for status in summary.status_trace],
         "status_counts": _status_counts(summary.status_trace),
         "coefficient_summaries": coefficient_summaries,
@@ -455,10 +284,10 @@ def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
     }
     if summary.kind == "ols":
         out["ols"] = {
-            "mean_standard_errors": _json_value(np.mean(summary.se_trace, axis=0)),
-            "mean_t_statistics": _json_value(np.mean(summary.t_stat_trace, axis=0)),
-            "mean_pvalues": _json_value(np.mean(summary.pval_trace, axis=0)),
-            "mean_partial_r2": _json_value(np.mean(summary.partial_r2_trace, axis=0)),
+            "mean_standard_errors": json_safe(np.mean(summary.se_trace, axis=0)),
+            "mean_t_statistics": json_safe(np.mean(summary.t_stat_trace, axis=0)),
+            "mean_pvalues": json_safe(np.mean(summary.pval_trace, axis=0)),
+            "mean_partial_r2": json_safe(np.mean(summary.partial_r2_trace, axis=0)),
             "f_statistic": _trace_summary(summary.F_stat_trace),
             "f_pvalue": _trace_summary(summary.F_pval_trace),
         }
@@ -503,11 +332,19 @@ def _json_float(value: Any) -> float | None:
     return scalar if np.isfinite(scalar) else None
 
 
-def _json_value(value: Any) -> Any:
+def json_safe(value: Any) -> Any:
+    """Recursively convert numpy containers and scalars to JSON-native values.
+
+    The writer-side seam: a serializer hands back its meta typed and its traces
+    as arrays, and whoever writes the meta to JSON runs it through here. Traces
+    never pass through it.
+    """
     if isinstance(value, np.ndarray):
-        return _json_value(value.tolist())
+        return json_safe(value.tolist())
     if isinstance(value, tuple | list):
-        return [_json_value(item) for item in value]
+        return [json_safe(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): json_safe(item) for key, item in value.items()}
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, float | np.floating):

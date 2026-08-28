@@ -21,10 +21,10 @@ func(
     *,
     traces: Mapping[str, np.ndarray],  # across-rep trace keys -> stacked arrays
     **kwargs,
-) -> Summary | Raw | Mapping[str, Any]
+) -> Summary | Raw | tuple[Summary, Raw] | tuple[Raw, Summary]
 ```
 
-`traces` is keyed by across-replication trace name (`"test.<name>.statistic"`, `"test.<name>.pval"`, `"regression.<name>.coef"`, `"payload.<name>"`, and so on); see [Result Access](../../result_access.md) for the full key registry, or call `available_traces(spec)` to enumerate the keys a spec will produce. The op reads whichever traces it needs and returns one or more tagged artifacts.
+`traces` is keyed by across-replication trace name (`"test.<name>.statistic"`, `"test.<name>.pval"`, `"regression.<name>.coef"`, `"payload.<name>"`, and so on); see [Result Access](../../result_access.md) for the full key registry, or call `available_traces(pipeline)` to enumerate the keys a spec will produce. The op reads whichever traces it needs and returns one or more tagged artifacts.
 
 ## Return artifacts
 
@@ -32,10 +32,12 @@ Import from `SymbolicDSGE.monte_carlo`:
 
 | __Type__ | __Signature__ | __Handling__ |
 |:---------|:--------------|-------------:|
-| `Summary` | `#!python Summary(value, title=None, render="auto")` | Renderable result (scalar, table, small array, or DataFrame) with its own summary surface. `render` ∈ `{"auto", "table", "scalar", "array"}`. |
-| `Raw` | `#!python Raw(value: np.ndarray)` | Bulk numeric data kept as data (a trace member), not auto-rendered. |
+| `Summary` | `#!python Summary(value)` | Renderable result (scalar, table, small array, or DataFrame) with its own summary surface. |
+| `Raw` | `#!python Raw(value: np.ndarray)` | Bulk numeric data kept as data (a trace member). |
 
-An op may return a single artifact, a bare value (an `ndarray` becomes `Raw`, anything else becomes `Summary`), or a `Mapping` of named outputs to emit several at once. A single artifact is stored under `name`; a mapping is stored under `f"{name}.{key}"`.
+???+ note "Return configuration"
+    `Summary` and `Raw` can be used to organize the outputs of a post processing step.
+    A common use case is to keep a raw data computation and descriptive summary without having to pick one or the other.
 
 __Inputs:__
 

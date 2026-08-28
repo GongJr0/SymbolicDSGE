@@ -8,6 +8,7 @@ tags:
 ```python
 breusch_pagan_test_step(
     name: str,
+    n_retain: int = -1,
     *,
     residuals_source: str,
     residuals_field: str,
@@ -44,3 +45,4 @@ __Inputs:__
 | drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | alpha | `0.05` | Test size. |
 | robust | `False` | Use Koenker's studentized variant. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |

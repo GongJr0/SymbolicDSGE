@@ -7,6 +7,7 @@ tags:
 ```python
 raw_model_data_step(
     name: str = "datagen",
+    n_retain: int = -1,
     *,
     states: ndarray | Sequence[float] | Sequence[Sequence[float]] | None = None,
     observables: ndarray | Sequence[float] | Sequence[Sequence[float]] | None = None,

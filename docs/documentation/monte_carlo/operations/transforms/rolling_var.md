@@ -8,6 +8,7 @@ tags:
 ```python
 rolling_var_step(
     name: str,
+    n_retain: int = -1,
     *,
     source: str,
     field: str,
@@ -32,5 +33,6 @@ __Key Parameters:__
 | drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | window | `10` | Rolling window length. Must be at least `1` and no longer than the selected input. |
 | ddof | `0` | Variance degrees-of-freedom correction. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 
 The output is stored in the step payload and can be consumed downstream with `source` set to this step name and `field="payload"`.

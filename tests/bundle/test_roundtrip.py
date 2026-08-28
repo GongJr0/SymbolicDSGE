@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from functools import cache
+from types import SimpleNamespace
+from typing import Any
+
 from pathlib import Path
 
 import numpy as np
 
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
+from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
@@ -54,7 +61,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         thin=1,
     )
     pipeline = PipelineSpec(
-        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 50})]
+        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 50})],
+        edges=[],
+        postprocs=[],
     )
 
     builder = (
@@ -64,8 +73,8 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
             _MODEL_YAML,
             compile_kwargs={},
         )
-        .add_estimation(_estimation_spec(observed), result=result)
-        .add_mc(pipeline)
+        .add_estimation(_estimator(observed), result=result)
+        .add_mc(build_pipeline(pipeline))
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
             "reference",
@@ -95,11 +104,11 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # estimation
     assert loaded.estimation is not None
-    assert loaded.estimation.spec.params["estimated_params"] == ["beta", "sigma"]
-    assert loaded.estimation.spec.params["observables"] == ["Infl", "Rate"]
+    assert loaded.estimation.estimator.estimated_params == ["beta", "sigma"]
+    assert loaded.estimation.estimator.observables == ["Infl", "Rate"]
     assert isinstance(loaded.estimation.result, MCMCResult)
     assert loaded.estimation.result.accept_rate == 0.31
-    np.testing.assert_allclose(np.asarray(loaded.estimation.spec.y), observed)
+    np.testing.assert_allclose(np.asarray(loaded.estimation.estimator.y), observed)
     np.testing.assert_allclose(loaded.estimation.result.samples, posterior["samples"])
     np.testing.assert_allclose(
         loaded.estimation.result.logpost_trace, posterior["logpost"]
@@ -110,9 +119,8 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # monte carlo
     assert loaded.mc is not None
-    assert loaded.mc.spec.nodes[0].step_type == "simulation"
-    assert loaded.mc.document is None  # no result attached
-    assert loaded.mc.wire() is None
+    assert loaded.mc.pipeline.to_spec()["nodes"][0]["step_type"] == "simulation"
+    assert loaded.mc.result is None  # no result attached
 
     # simulation prefill
     assert loaded.simulation is not None
@@ -142,7 +150,7 @@ def test_add_estimation_accepts_live_mcmc_result() -> None:
     )
     spec = _estimation_spec(rng.standard_normal((4, 2)), names=("a", "b"))
 
-    builder = BundleBuilder().add_estimation(spec, result=mcmc)
+    builder = BundleBuilder().add_estimation(_estimation_source(spec), result=mcmc)
     _, files = builder.build()
 
     # live result projected to meta, tagged mcmc
@@ -171,3 +179,35 @@ def test_csv_passthrough_member(tmp_path: Path) -> None:
     manifest, files = builder.build()
     assert "data/series.csv" in files
     assert manifest.members[0].format == "csv"
+
+
+def _estimation_source(spec: EstimatorSpec) -> Any:
+    """Stands in for the live estimator: ``add_estimation`` asks only for its spec.
+
+    Write-only tests use this to encode parameter names no model declares. A
+    test that loads the bundle back needs :func:`_estimator` instead, since the
+    loader rebuilds the estimator the spec describes.
+    """
+    return SimpleNamespace(to_spec=lambda: spec)
+
+
+@cache
+def _compiled_reference() -> Any:
+    """The compiled ``MODELS/test.yaml`` a loaded reference model comes back as."""
+    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+    return DSGESolver(model, kalman).compile()
+
+
+def _estimator(y: Any) -> Estimator:
+    """A live estimator over the bundled model, in the shape a loader rebuilds.
+
+    ``MODELS/test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
+    explicitly; without one the estimator a bundle describes cannot be built.
+    """
+    return Estimator(
+        compiled=_compiled_reference(),
+        y=np.asarray(y, dtype=np.float64),
+        observables=["Infl", "Rate"],
+        estimated_params=["beta", "sigma"],
+        R=np.eye(2) * 1e-4,
+    )

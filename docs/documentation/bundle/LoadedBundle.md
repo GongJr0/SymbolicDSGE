@@ -11,8 +11,6 @@ class LoadedBundle()
 
 `LoadedBundle` is the return value of `load_bundle` (and the underlying `bundle.loader.build_from`). Each field is `None` when the corresponding component is absent from the archive.
 
-`LoadedBundle` is re-exported at `SymbolicDSGE` root.
-
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
@@ -40,7 +38,6 @@ __Fields:__
 |:----------|:--------:|----------------:|
 | estimator | `#!python Estimator` | The live estimator object lazily rebuilt from the stored spec and the reference model. Always present when `LoadedEstimation` is. | 
 | result    | `#!python MLEResult | MAPResult | MCMCResult | None` | The reconstructed result object. |
-| spec      | `#!python EstimatorSpec` | Parameter specification for `Estimator`. Always present when `LoadedEstimation` is. |
 
 ???+ tip "Re-running a loaded estimation"
     Result classes carry their options as a dictionary. `optimizer_config` in `MLEResult`/`MAPResult` and `sampler_config` in `MCMCResult`.
@@ -57,28 +54,12 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| spec | `#!python PipelineSpec` | The stored pipeline graph. Always present when `LoadedMC` is. Kept for UI rendering, archive inspection, and explicit compile workflows. |
-| pipeline | `#!python MCPipeline` | Runnable pipeline rebuilt from `spec` and `resources` during load. |
-| document | `#!python dict[str, Any] | None` | Trace-free run document (test/regression summaries, timing, etc.). |
-| traces | `#!python dict[str, NDArray] | None` | Bulk trace columns keyed by `test.<name>.{statistic,pval,status}` / `regression.<name>.{coef,r2,status}`. |
-| resources | `#!python dict[str, Any]` | Restored side-channel objects referenced by the spec, including raw-data arrays and custom callables. |
-| postproc_arrays | `#!python dict[str, NDArray]` | Bulk postproc ndarray artifacts keyed by artifact name. |
-| postproc_tables | `#!python dict[str, dict[str, list[Any]]]` | Tabular postproc artifacts restored as column dictionaries keyed by artifact name. |
-
-__Methods:__
-
-```python
-LoadedMC.wire(
-) -> dict[str, Any] | None
-```
-
-Re-merge `document`, `traces`, `postproc_arrays`, and `postproc_tables` into the canonical UI wire shape. Returns `None` when either `document` or `traces` is missing.
-
-???+ info "When `wire()` returns `None`"
-    A bundle authored with the pipeline spec only (no completed run attached) carries neither `document` nor `traces`. `wire()` reports `None` so callers can distinguish "no run available" from a run with empty traces.
+| pipeline | `#!python MCPipeline` | Runnable pipeline. |
+| result | `#!python MCPipelineResult | None` | The reconstructed result object, when available. |
 
 ???+ tip "Re-running a loaded pipeline"
-    Call `#!python loaded.mc.pipeline.run(reference=loaded.reference, dgp=loaded.dgp, n_rep=..., fail_fast=...)`. The loader already rebuilt the pipeline from the stored spec and resources.
+    A result is already complete with all traces and postproc artifacts the author retained.
+    Alternatively, the results can be reproduced by calling `pipeline.run(reference, dgp, **result.run_config)` with the bundled reference and DGP models.
 
 ## Example
 

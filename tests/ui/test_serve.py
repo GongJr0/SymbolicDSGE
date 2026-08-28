@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from functools import cache
+from types import SimpleNamespace
+
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE.monte_carlo.builder import build_pipeline
 from SymbolicDSGE.bundle.builder import BundleBuilder
+from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -80,7 +86,9 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         thin=1,
     )
     pipeline = PipelineSpec(
-        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})]
+        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})],
+        edges=[],
+        postprocs=[],
     )
     sim_spec = SimSpec(
         T=8,
@@ -98,8 +106,8 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(_estimation_spec(observed), result=result)
-        .add_mc(pipeline)
+        .add_estimation(_estimator(observed), result=result)
+        .add_mc(build_pipeline(pipeline))
         .set_simulation("reference", sim_spec)
         .write(tmp_path / "hydrate.sdsge")
     )
@@ -352,7 +360,8 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # A pipeline with no result: the spec is the only evidence of an MC run in
     # the bundle, so it has to carry enough for the canvas to draw the graph.
     assert ws.mc.spec is not None
-    assert [node["id"] for node in ws.mc.spec["nodes"]] == ["n1"]
+    # The slot holds the live pipeline's own spec, which keys nodes by step name.
+    assert [node["name"] for node in ws.mc.spec["nodes"]] == ["sim"]
     assert ws.mc.spec["edges"] == []
     assert ws.mc.result is None  # no MC result was attached at build time
     assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
@@ -447,8 +456,11 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
         BundleBuilder(created_by="round-trip")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(
-            EstimatorSpec(
-                y=ws.estimation.spec["y"], params=ws.estimation.spec["params"]
+            Estimator.from_spec(
+                EstimatorSpec(
+                    y=ws.estimation.spec["y"], params=ws.estimation.spec["params"]
+                ),
+                _compiled_reference(),
             )
         )
         .write(tmp_path / "round-trip.sdsge")
@@ -456,8 +468,8 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
 
     reloaded = build_from(written)
     assert reloaded.estimation is not None
-    assert reloaded.estimation.spec.params["estimated_params"] == ["beta", "sigma"]
-    assert len(reloaded.estimation.spec.y) == 10
+    assert reloaded.estimation.estimator.estimated_params == ["beta", "sigma"]
+    assert len(reloaded.estimation.estimator.y) == 10
 
 
 # -- bundled simulation replay ---------------------------------------------
@@ -485,11 +497,8 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
     result = simulation["result"]
     assert result["kind"] == "sim" and result["T"] == 8
     assert {"Infl", "Rate"} <= {series["name"] for series in result["series"]}
-    # Filed as a real run, so it is listed and fetchable like any other.
-    assert [(run["kind"], run["role"]) for run in body["runs"]] == [
-        ("sim", "reference")
-    ]
-    assert client.get(f"/api/run/{result['run_id']}").status_code == 200
+    # The replay lands in the tab's own result slot, which is where a run lives.
+    assert simulation["result"]["role"] == "reference"
 
 
 def test_bundled_simulation_replay_reproduces_rather_than_redraws(
@@ -719,3 +728,34 @@ def test_cli_main_rejects_missing_bundle_path(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="bundle path"):
         main([str(tmp_path / "missing.sdsge"), "--no-browser"])
+
+
+@cache
+def _compiled_reference() -> Any:
+    """The compiled ``MODELS/test.yaml`` a loaded reference model comes back as."""
+    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+    return DSGESolver(model, kalman).compile()
+
+
+def _estimator(y: Any) -> Estimator:
+    """A live estimator over the bundled model, in the shape a loader rebuilds.
+
+    ``MODELS/test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
+    explicitly; without one the estimator a bundle describes cannot be built.
+    """
+    return Estimator(
+        compiled=_compiled_reference(),
+        y=np.asarray(y, dtype=np.float64),
+        observables=["Infl", "Rate"],
+        estimated_params=["beta", "sigma"],
+        R=np.eye(2) * 1e-4,
+    )
+
+
+def _estimation_source(spec: EstimatorSpec) -> Any:
+    """Stands in for the live estimator: ``add_estimation`` asks only for its spec.
+
+    These tests are about how a spec is encoded into members, not about building
+    an estimator, so they hand over the spec without the model behind it.
+    """
+    return SimpleNamespace(to_spec=lambda: spec)
