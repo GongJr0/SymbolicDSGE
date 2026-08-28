@@ -3,10 +3,12 @@
 from .builder import BundleBuilder
 from .container import BundleArchive, write_bundle
 from .loader import LoadedBundle, LoadedEstimation, LoadedMC, build_from
+from ..core.shock_generators import ShockParameters
 from .manifest import (
     SDSGE_FORMAT_VERSION,
     Manifest,
     Member,
+    SimSpec,
 )
 from .parquet import (
     arrays_from_parquet,
@@ -38,6 +40,8 @@ __all__ = [
     # manifest
     "Manifest",
     "Member",
+    "SimSpec",
+    "ShockParameters",
     "SDSGE_FORMAT_VERSION",
     # container
     "write_bundle",

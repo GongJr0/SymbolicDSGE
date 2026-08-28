@@ -24,7 +24,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python LoadedBundle` | Container with `manifest`, `reference`/`dgp` (re-solved models), `estimation` artifacts, `mc` artifacts, and `simulation` prefills. See [`LoadedBundle`](LoadedBundle.md). |
+| `#!python LoadedBundle` | Container with `manifest`, `reference`/`dgp` (re-solved models), `estimation` artifacts, `mc` artifacts, and the optional `simulation` prefill. See [`LoadedBundle`](LoadedBundle.md). |
 
 __Behavior:__
 

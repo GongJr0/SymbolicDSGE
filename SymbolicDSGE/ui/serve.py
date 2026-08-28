@@ -113,7 +113,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     # installed, which is what fills the result.
     simulation = {
         cast(Role, role): TabState(spec=spec.to_dict())
-        for role, spec in (loaded.manifest.simulation or {}).items()
+        for role, spec in (loaded.simulation or {}).items()
     }
 
     return Workspace(
