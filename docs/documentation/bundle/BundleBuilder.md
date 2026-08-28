@@ -135,7 +135,13 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 ```python
 BundleBuilder.set_simulation(
     role: str,
-    simulation: SimSpec,
+    *,
+    T: int,
+    shocks: Mapping[str, Shock | ndarray | None] | None = None,
+    shock_scale: float = 1.0,
+    x0: Mapping[str, float] | Sequence[float] | ndarray | None = None,
+    observables: bool = False,
+
 ) -> BundleBuilder
 ```
 

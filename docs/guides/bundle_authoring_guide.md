@@ -170,10 +170,12 @@ bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 
 ## Specify a simulation prefill
 
-Simulation prefills ride inline in the manifest, keyed by role. They control what the GUI's Outputs tab prefills when the receiver opens the bundle on `sdsge-ui`. A `SimSpec`'s fields are exactly the keyword arguments of `SolvedModel.sim`, and each shock is stored as its `Shock.to_dict()` parameters. No live `Shock` is serialized.
+Simulation prefills ride inline in the manifest, keyed by role. `BundleBuilder.set_simulation` takes a role and the kwargs for `SolvedModel.sim`. The bundle stores the arguments and the shock parameters, but not the simulation outputs. The receiver can replay the simulation deterministically by calling `sim` with the same arguments.
 
 ```python
-simulation = SimSpec(
+
+bundle.set_simulation(
+    "reference",
     T=200,
     observables=True,
     shock_scale=1.0,
@@ -181,11 +183,9 @@ simulation = SimSpec(
         "e_r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(),  # (1)!
     },
 )
-
-bundle.set_simulation("reference", simulation)
 ```
 
-1. The seed makes the replayed simulation deterministic. Both the bundle author and the receiver produce identical paths when clicking **Run**. Because a `Shock` is horizon independent, `to_dict()` carries no `T`; the period count comes from the `SimSpec`.
+1. The seed makes the replayed simulation deterministic. The bundle author and receiver produce identical paths.
 
 ## Add raw data alongside the model
 
@@ -232,19 +232,19 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3236  25-08-2026 19:55   manifest.json
-     2134  25-08-2026 19:55   model/reference.yaml
-     2134  25-08-2026 19:55   model/dgp.yaml
-      629  25-08-2026 19:55   estimation/spec.json
-     1939  25-08-2026 19:55   estimation/observed.parquet
-    18972  25-08-2026 19:55   estimation/posterior.parquet
-      585  25-08-2026 19:55   estimation/result.json
-     1018  25-08-2026 19:55   montecarlo/pipeline.json
-    14962  25-08-2026 19:55   montecarlo/result.json
-    15550  25-08-2026 19:55   montecarlo/traces.parquet
-     1282  25-08-2026 19:55   data/auxiliary_series.parquet
+     3236  28-08-2026 11:49   manifest.json
+     2134  28-08-2026 11:49   model/reference.yaml
+     2134  28-08-2026 11:49   model/dgp.yaml
+      629  28-08-2026 11:49   estimation/spec.json
+     1939  28-08-2026 11:49   estimation/observed.parquet
+    18972  28-08-2026 11:49   estimation/posterior.parquet
+      585  28-08-2026 11:49   estimation/result.json
+     1018  28-08-2026 11:49   montecarlo/pipeline.json
+    14965  28-08-2026 11:49   montecarlo/result.json
+    15550  28-08-2026 11:49   montecarlo/traces.parquet
+     1282  28-08-2026 11:49   data/auxiliary_series.parquet
 ---------                     -------
-    62441                     11 files
+    62444                     11 files
 ```
 
 For a structured view, decompile it:
