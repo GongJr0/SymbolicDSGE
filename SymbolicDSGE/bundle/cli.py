@@ -196,7 +196,7 @@ def compile_directory(
     if sim_path.exists():
         sim_data = json.loads(sim_path.read_text(encoding="utf-8"))
         for role, spec in sim_data.items():
-            builder.set_simulation(role, **SimSpec.from_dict(spec).to_sim_kwargs())
+            builder.set_simulation(role, SimSpec.from_dict(spec))
 
     return builder.write(out_path)
 

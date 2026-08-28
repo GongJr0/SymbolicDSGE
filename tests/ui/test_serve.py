@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.bundle.manifest import SimSpec
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
 from SymbolicDSGE.estimation.spec import (
@@ -82,17 +82,25 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     pipeline = PipelineSpec(
         nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})]
     )
+    sim_spec = SimSpec(
+        T=8,
+        shocks={
+            "e_u": {
+                "dist": "norm",
+                "multivar": False,
+                "seed": 42,
+                "dist_args": [],
+                "dist_kwargs": {"loc": 0.0},
+            }
+        },
+    )
+
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(_estimation_spec(observed), result=result)
         .add_mc(pipeline)
-        .set_simulation(
-            "reference",
-            T=8,
-            shocks={"e_u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
-            observables=True,
-        )
+        .set_simulation("reference", sim_spec)
         .write(tmp_path / "hydrate.sdsge")
     )
 

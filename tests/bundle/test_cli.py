@@ -205,14 +205,14 @@ def test_decompile_then_recompile_yields_equivalent_bundle(tmp_path: Path) -> No
     _write_text(src / "simulation.json", json.dumps({"reference": src_sim.to_dict()}))
     pass1 = compile_directory(src, tmp_path / "pass1.sdsge")
     loaded1 = build_from(pass1)
-    assert loaded1.simulation is not None and loaded1.simulation["reference"]["T"] == 8
+    assert loaded1.simulation is not None and loaded1.simulation["reference"].T == 8
 
     out_dir = decompile_bundle(pass1, tmp_path / "extracted", also_csv=True)
     assert (out_dir / "simulation.json").exists()  # inline SimSpec extracted
     pass2 = compile_directory(out_dir, tmp_path / "pass2.sdsge")
     loaded2 = build_from(pass2)
 
-    assert loaded2.simulation is not None and loaded2.simulation["reference"]["T"] == 8
+    assert loaded2.simulation is not None and loaded2.simulation["reference"].T == 8
     np.testing.assert_allclose(
         np.asarray(loaded1.estimation.spec.y), np.asarray(loaded2.estimation.spec.y)
     )
