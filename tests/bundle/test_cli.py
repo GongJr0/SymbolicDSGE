@@ -29,7 +29,7 @@ from SymbolicDSGE.bundle.cli import (
     main_decompile,
 )
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.bundle.manifest import SimSpec
+from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -70,18 +70,8 @@ def _bundle(tmp_path: Path, *, with_result: bool = True) -> Path:
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
             "reference",
-            SimSpec(
-                T=8,
-                shocks={
-                    "u": {
-                        "dist": "norm",
-                        "multivar": False,
-                        "seed": 42,
-                        "dist_args": [],
-                        "dist_kwargs": {"loc": 0.0},
-                    }
-                },
-            ),
+            T=8,
+            shocks={"u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
         )
         .write(tmp_path / "in.sdsge")
     )
@@ -120,7 +110,7 @@ def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
     loaded = build_from(packed)
 
     assert loaded.reference is not None
-    assert loaded.simulation is not None and loaded.simulation["reference"].T == 8
+    assert loaded.simulation is not None and loaded.simulation["reference"]["T"] == 8
     assert loaded.mc is not None and loaded.mc.result is not None
     np.testing.assert_array_equal(
         loaded.mc.result.test_summaries["jb"].statistic_trace,
@@ -272,4 +262,4 @@ def test_simulation_prefill_survives_the_round_trip(tmp_path: Path) -> None:
     loaded = build_from(packed)
 
     assert loaded.simulation is not None
-    assert loaded.simulation["reference"].shocks["u"]["seed"] == 42
+    assert loaded.simulation["reference"]["shocks"]["u"].seed == 42
