@@ -409,6 +409,8 @@ def _transform_output_shape(
                     "Custom transform output_shape must contain two non-negative dimensions."
                 )
             return shape
+        case "passthrough":
+            return n_rows, n_columns
         case "standardize" | "log":
             return n_rows, n_columns
         case "log_diff":

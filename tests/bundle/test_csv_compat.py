@@ -30,6 +30,7 @@ from SymbolicDSGE.estimation.spec import (
     MCMCResultMeta,
 )
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
+from tests._spec_helpers import node as _node
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -164,7 +165,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
             build_pipeline(
                 PipelineSpec(
                     nodes=[
-                        NodeSpec(
+                        _node(
                             id="n1",
                             step_type="simulation",
                             name="sim",

@@ -5,26 +5,26 @@ and run without the ``[ui]`` extra. Operates on the pydantic-free core
 ``TypedDict`` specs; the UI keeps thin wrappers that convert its request models
 via ``to_core()``.
 
-Compilation is driven entirely by :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG`
-There is no per-step branching here.
+A node records its op kind, its step kind, its plain kwargs and its source
+bindings, so a step is rebuilt by constructing :class:`MCStep` from them. Only
+ops carrying a callable branch: the two custom kinds take theirs from
+``resources``, and ``kde`` is the one built-in that runs a library function.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from .catalog import STEP_CATALOG
 from .core import MCPipeline
-from .mc_constructs import MCPipelineResult
-from .step_factories import (
-    add_payload_step,
-    postproc_step,
-    raw_model_data_step,
-    transform_step,
-)
-from .spec import NodeSpec, PipelineSpec, PostprocSpec
+from .custom_op import NumbaCustomFunc
+from .mc_constructs import MCPipelineResult, MCStep, OpType
+from .postproc import run_kde
+from .spec import OP_TYPES, STEP_KINDS, NodeSpec, PipelineSpec, PostprocSpec
+from .spec_compile import restore_kwargs, restore_sources
+
+#: Built-ins whose step runs a library callable rather than a native kernel.
+_BUILTIN_FUNCS = {"kde": run_kde}
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -50,47 +50,70 @@ def build_pipeline(
     resources = resources or {}
     per_rep_steps = [_build_per_rep_step(node, resources) for node in spec["nodes"]]
 
-    postproc_steps = []
-    for pp in spec["postprocs"]:
-        step_type = pp["step_type"]
-        if step_type == "postproc:custom":
-            postproc_steps.append(_build_custom(pp, resources, postproc_step))
-        else:
-            definition = STEP_CATALOG.get(step_type)
-            if definition is None:
-                raise ValueError(f"Unsupported MC postproc step type: {step_type}")
-            postproc_steps.append(definition.build(pp["name"], dict(pp["params"])))
+    postproc_steps = [_build_postproc_step(pp, resources) for pp in spec["postprocs"]]
     return MCPipeline(per_rep_steps, postproc_steps)
 
 
-def _build_per_rep_step(node: NodeSpec, resources: Mapping[str, Any]) -> Any:
+def _build_per_rep_step(node: NodeSpec, resources: Mapping[str, Any]) -> MCStep:
     name = node["name"]
     step_type = node["step_type"]
+    if step_type not in STEP_KINDS:
+        raise ValueError(f"Unsupported MC step type: {step_type}")
+    # A node declares its own op kind; it does not get to disagree with what
+    # its step kind is.
+    if node["op_type"] != OP_TYPES[step_type]:
+        raise ValueError(
+            f"Step {name!r} declares op_type {node['op_type']!r}, but "
+            f"{step_type!r} is {OP_TYPES[step_type]!r}."
+        )
     params = dict(node["params"])
     n_retain = _pop_n_retain(params, name)
+    func = None
+
     if step_type == "raw_model_data":
-        step = _build_raw_model_data(node, resources, params)
+        params = _raw_model_data_kwargs(node, resources, params)
     elif step_type == "payload":
-        value = params.pop("value", None)
-        if value is None:
+        if params.get("value") is None:
             raise ValueError(f"Payload step {name!r} requires a value.")
-        step = add_payload_step(name, value)
     elif step_type == "transform:custom":
-        step = _build_custom(node, resources, transform_step, params)
+        func = NumbaCustomFunc(_resource_callable(node, resources, params))
+
+    return MCStep(
+        name=name,
+        op_type=OpType(node["op_type"]),
+        func=func,
+        kwargs=restore_kwargs(step_type, params),
+        source_args=restore_sources(node["sources"]),
+        step_type=step_type,
+        n_retain=n_retain,
+    )
+
+
+def _build_postproc_step(spec: PostprocSpec, resources: Mapping[str, Any]) -> MCStep:
+    name = spec["name"]
+    step_type = spec["step_type"]
+    params = dict(spec["params"])
+    if step_type == "postproc:custom":
+        func = _resource_callable(spec, resources, params)
     else:
-        definition = STEP_CATALOG.get(step_type)
-        if definition is None:
-            raise ValueError(f"Unsupported MC step type: {step_type}")
-        step = definition.build(name, params)
-    return replace(step, n_retain=n_retain)
+        func = _BUILTIN_FUNCS.get(step_type)
+        if func is None:
+            raise ValueError(f"Unsupported MC postproc step type: {step_type}")
+    return MCStep(
+        name=name,
+        op_type=OpType.POSTPROC,
+        func=func,
+        kwargs=params,
+        step_type=step_type,
+    )
 
 
-def _build_raw_model_data(
+def _raw_model_data_kwargs(
     node: NodeSpec,
     resources: Mapping[str, Any],
     params: dict[str, Any],
-) -> Any:
-    """Rehydrate a ``raw_model_data`` datagen, injecting its arrays from resources."""
+) -> dict[str, Any]:
+    """Reattach a ``raw_model_data`` datagen's arrays from resources."""
     name = node["name"]
     ref = params.pop("data_ref", name)
     params.pop("data_shapes", None)
@@ -100,31 +123,21 @@ def _build_raw_model_data(
             f"raw_model_data step '{name}' references data '{ref}' that is not "
             "present in the supplied resources."
         )
-    kwargs: dict[str, Any] = {}
-    if "states" in arrays:
-        kwargs["states"] = arrays["states"]
-    if "observables" in arrays:
-        kwargs["observables"] = arrays["observables"]
-    observable_names = params["observable_names"]
-    if observable_names:
-        kwargs["observable_names"] = tuple(observable_names)
-    return raw_model_data_step(name, **kwargs)
+    names = params.get("observable_names") or ()
+    return {
+        "states": arrays.get("states"),
+        "observables": arrays.get("observables"),
+        "observable_names": tuple(names),
+    }
 
 
-def _build_custom(
+def _resource_callable(
     node: NodeSpec | PostprocSpec,
     resources: Mapping[str, Any],
-    factory: Any,
-    params: dict[str, Any] | None = None,
+    params: dict[str, Any],
 ) -> Any:
-    """Rehydrate a custom op, reattaching its callable from resources.
-
-    ``factory`` is the step constructor for the op role (``transform_step`` for a
-    ``transform:custom`` node, ``postproc_step`` for a ``postproc:custom`` spec).
-    """
+    """Pull a custom op's callable out of resources, consuming its reference."""
     name = node["name"]
-    if params is None:
-        params = dict(node["params"])
     ref = params.pop("func_ref", name)
     # The authoring source rides in ``code`` (compiled into the resources
     # callable upstream); it is not a runtime kwarg of the op.
@@ -135,7 +148,7 @@ def _build_custom(
             f"custom step '{name}' references callable '{ref}' that is not "
             "present in the supplied resources."
         )
-    return factory(name, func, **params)
+    return func
 
 
 def _pop_n_retain(params: dict[str, Any], step_name: str) -> int:

@@ -67,13 +67,21 @@ def test_to_spec_structure_and_edges() -> None:
     }
 
     by_name = {n["name"]: n for n in spec["nodes"]}
-    assert by_name["jb"]["params"]["source"] == "s"
-    assert by_name["jb"]["params"]["field"] == "payload"
-    assert by_name["w"]["params"]["source"] == "filter"
-    assert by_name["w"]["params"]["field"] == "std_innov"
-    # wald target ndarray is inverted to the spec's target_vector field
-    assert by_name["w"]["params"]["target_vector"] == [0.0]
-    assert "target" not in by_name["w"]["params"]
+    # source legs are their own objects, not flattened into params
+    assert by_name["jb"]["sources"] == [
+        {
+            "arg": "sample",
+            "source_step": "s",
+            "field": "payload",
+            "columns": None,
+            "burn_in": 0,
+            "drop_initial": False,
+        }
+    ]
+    assert by_name["w"]["sources"][0]["source_step"] == "filter"
+    assert by_name["w"]["sources"][0]["field"] == "std_innov"
+    # kwargs are stored as the step holds them; no form-shaped renaming
+    assert by_name["w"]["params"]["target"] == [0.0]
     # shocks are serialized to JSON-safe dicts
     assert by_name["dgp"]["params"]["shocks"]["u"]["dist"] == "norm"
     json.dumps(spec)
@@ -163,8 +171,8 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     assert tf["step_type"] == "transform:custom"
     # the callable rides a separate bundle member; the spec only references it
     assert tf["params"]["func_ref"] == "tf"
-    assert tf["params"]["source"] == "dat"
-    assert tf["params"]["field"] == "observables"
+    assert tf["sources"][0]["source_step"] == "dat"
+    assert tf["sources"][0]["field"] == "observables"
     assert tf["params"]["output_shape"] == [5, 3]
     assert {(e["source"], e["target"]) for e in spec["edges"]} == {("dat", "tf")}
 
@@ -172,7 +180,7 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
 def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
     from SymbolicDSGE.monte_carlo.step_factories import postproc_step
 
-    def my_summary(*, traces, reference, dgp, threshold):
+    def my_summary(*, traces, threshold):
         return float(threshold)
 
     pipe = MCPipeline(

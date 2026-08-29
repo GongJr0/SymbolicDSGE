@@ -8,12 +8,6 @@ import numpy as np
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.monte_carlo import OpType
 from SymbolicDSGE.monte_carlo.builder import build_pipeline, run_pipeline
-from SymbolicDSGE.monte_carlo.catalog import (
-    STEP_CATALOG,
-    TERMINAL_STEP_TYPES,
-    _shocks_from_registry,
-    catalog_payload,
-)
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
@@ -25,6 +19,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     transform_step,
 )
 from SymbolicDSGE.monte_carlo.spec import (
+    OP_TYPES,
     STEP_KINDS,
     EdgeSpec,
     NodeSpec,
@@ -34,9 +29,15 @@ from SymbolicDSGE.monte_carlo.spec import (
 
 
 def _node(
-    id: str, step_type: str, name: str, params: dict[str, Any] | None = None
+    id: str,
+    step_type: str,
+    name: str,
+    params: dict[str, Any] | None = None,
 ) -> NodeSpec:
-    return NodeSpec(id=id, step_type=step_type, name=name, params=params or {})
+    """One node, authored flat and resolved the way the client resolves one."""
+    return _posted_node(
+        {"id": id, "step_type": step_type, "name": name, "params": params or {}}
+    )
 
 
 def _edge(source: str, target: str) -> EdgeSpec:
@@ -53,14 +54,6 @@ def _spec(
     postprocs: list[PostprocSpec] | None = None,
 ) -> PipelineSpec:
     return PipelineSpec(nodes=nodes, edges=edges or [], postprocs=postprocs or [])
-
-
-def test_factories_stamp_step_type_matching_catalog() -> None:
-    # Every catalog factory must stamp the same step_type as its catalog key,
-    # so a live MCPipeline can be compiled back to a PipelineSpec losslessly.
-    for step_type, definition in STEP_CATALOG.items():
-        step = definition.factory(name="probe", **_factory_probe_kwargs(step_type))
-        assert step.step_type == step_type
 
 
 def _factory_probe_kwargs(step_type: str) -> dict:
@@ -97,8 +90,10 @@ def _factory_probe_kwargs(step_type: str) -> dict:
     return {}
 
 
-def test_catalog_keys_are_all_valid_step_kinds() -> None:
-    assert set(STEP_CATALOG) <= STEP_KINDS
+def test_every_step_kind_declares_an_op_kind() -> None:
+    # A node states its own op kind and `build_pipeline` holds it to this map,
+    # so a kind missing from it could never be built.
+    assert set(OP_TYPES) == set(STEP_KINDS)
 
 
 def test_source_kwargs_compile_to_runner_args_once() -> None:
@@ -166,40 +161,6 @@ _FIELD_KEYS = {
 }
 
 
-def test_catalog_payload_shape_and_known_fields() -> None:
-    payload = catalog_payload()
-    steps = payload["steps"]
-    assert len(steps) == len(STEP_CATALOG) == 19
-
-    for step in steps:
-        assert set(step) == {
-            "step_type",
-            "title",
-            "default_name",
-            "description",
-            "category",
-            "fields",
-        }
-        for field in step["fields"]:
-            assert set(field) == _FIELD_KEYS
-
-    by_type = {step["step_type"]: step for step in steps}
-    sim_fields = {f["key"]: f for f in by_type["simulation"]["fields"]}
-    assert sim_fields["T"]["default"] == 100
-    assert sim_fields["T"]["required"] is True
-    assert sim_fields["T"]["minimum"] == 1
-
-    wald_fields = {f["key"]: f for f in by_type["wald"]["fields"]}
-    assert wald_fields["target_vector"]["when"] == ["mean"]
-    assert wald_fields["field"]["options"][0] == "states"
-    assert "x1_pred" in wald_fields["field"]["options"]
-    assert "x2_filt" in wald_fields["field"]["options"]
-    assert "eps_hat" in wald_fields["field"]["options"]
-
-    filter_fields = {f["key"]: f for f in by_type["filter"]["fields"]}
-    assert "unscented" in filter_fields["filter_mode"]["options"]
-
-
 def test_source_fields_match_the_native_output_channels() -> None:
     assert MC_DATA_SOURCE_FIELDS == ("states", "observables")
     # ``status`` is a scalar error code, not a selectable array source, so it is
@@ -214,38 +175,23 @@ def test_source_fields_match_the_native_output_channels() -> None:
     assert DYNAMIC_SOURCE_FIELDS == ("payload",)
 
 
-def test_catalog_entries_carry_selector_category() -> None:
-    by_type = {s["step_type"]: s for s in catalog_payload()["steps"]}
-    assert by_type["simulation"]["category"] == "core"
-    assert by_type["filter"]["category"] == "core"
-    assert by_type["standardize"]["category"] == "transforms"
-    assert by_type["jarque_bera"]["category"] == "tests"
-    assert by_type["wald"]["category"] == "tests"
-    assert by_type["regression"]["category"] == "regressions"
-    assert by_type["kde"]["category"] == "postproc"
-    assert {s["category"] for s in by_type.values()} == {
-        "core",
-        "transforms",
-        "tests",
-        "regressions",
-        "postproc",
+def test_terminal_step_kinds_are_the_tests_and_the_regression() -> None:
+    terminals = {
+        step_type
+        for step_type, op_type in OP_TYPES.items()
+        if op_type in ("test", "regression")
     }
-
-
-def test_terminal_step_types_derived_from_catalog() -> None:
-    assert TERMINAL_STEP_TYPES == frozenset(
-        {
-            "wald",
-            "ljung_box",
-            "jarque_bera",
-            "breusch_pagan",
-            "breusch_godfrey",
-            "cusum",
-            "cusumsq",
-            "chow",
-            "regression",
-        }
-    )
+    assert terminals == {
+        "wald",
+        "ljung_box",
+        "jarque_bera",
+        "breusch_pagan",
+        "breusch_godfrey",
+        "cusum",
+        "cusumsq",
+        "chow",
+        "regression",
+    }
 
 
 def test_validate_orders_steps_with_explicit_filter_source() -> None:
@@ -404,19 +350,10 @@ def test_run_requires_a_reference_model() -> None:
         run_pipeline(spec, reference=None, dgp=None, n_rep=1, fail_fast=True)
 
 
-def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> None:
+def test_build_pipeline_stamps_op_types_and_keeps_params_verbatim() -> None:
     spec = _spec(
         nodes=[
-            _node(
-                "sim",
-                "simulation",
-                "datagen",
-                {
-                    "T": 8,
-                    "observables": True,
-                    "shock_registry": [{"vars": ["u"], "dist": "norm"}],
-                },
-            ),
+            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
             _node(
                 "reg",
                 "regression",
@@ -427,8 +364,6 @@ def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> 
                     "y_field": "observables",
                     "X_source": "datagen",
                     "X_field": "observables",
-                    # conditional kwarg, invalid for OLS, dropped
-                    "alpha": 0.9,
                 },
             ),
         ],
@@ -439,10 +374,11 @@ def test_build_pipeline_compiles_via_catalog_and_filters_regression_kwargs() -> 
     assert [s.name for s in pipeline.per_rep_steps] == ["datagen", "reg"]
     assert pipeline.per_rep_steps[0].op_type is OpType.DATAGEN
     assert pipeline.per_rep_steps[1].op_type is OpType.REGRESSION
-    # simulation compiled the shock registry into a live shocks mapping
-    assert "shocks" in pipeline.per_rep_steps[0].kwargs
-    # OLS regression dropped the conditional alpha kwarg
-    assert "alpha" not in pipeline.per_rep_steps[1].kwargs
+    # the node's params reach the step untouched; nothing reshapes them here
+    assert pipeline.per_rep_steps[0].kwargs["T"] == 8
+    assert pipeline.per_rep_steps[1].kwargs["kind"] == "ols"
+    # source legs are rebuilt from the node's own bindings
+    assert [a.arg for a in pipeline.per_rep_steps[1].source_args] == ["y", "X"]
 
 
 def test_build_pipeline_rejects_unknown_step_type() -> None:
@@ -489,18 +425,8 @@ def test_postproc_in_nodes_is_rejected() -> None:
         build_pipeline(spec)
 
 
-def test_kde_catalog_entry_is_postproc_with_trace_field() -> None:
-    kde = STEP_CATALOG["kde"]
-    assert kde.op_role == "postproc"
-    assert kde.category == "postproc"
-    field_keys = [f.key for f in kde.fields]
-    assert "trace" in field_keys
-    # the trace selector must NOT use a per-rep source-leg name
-    assert "source" not in field_keys
-
-
 def test_build_postproc_custom_from_resources() -> None:
-    def my_summary(*, traces, reference, dgp):
+    def my_summary(*, traces):
         return 1.0
 
     spec = _spec(
@@ -520,6 +446,7 @@ def test_build_postproc_custom_from_resources() -> None:
 # --- #179 trace registry + POSTPROC trace-reference validation ---------------
 
 from SymbolicDSGE.monte_carlo.traces import _trace_keys
+from tests._spec_helpers import _posted_node
 
 
 def test_available_traces_enumerates_producer_keys() -> None:
@@ -595,9 +522,13 @@ def test_kde_bogus_trace_reference_raises_listing_available() -> None:
         build_pipeline(_kde_spec({"trace": "test.ghost.pval"}))
 
 
-def test_kde_missing_trace_reference_raises() -> None:
-    with pytest.raises(ValueError, match="must select a trace"):
-        build_pipeline(_kde_spec({}))
+def test_kde_without_a_trace_cannot_be_constructed() -> None:
+    # `kde_step` mirrors `run_kde`'s keywords, so the omission is rejected at
+    # construction and never reaches a pipeline to be validated.
+    from SymbolicDSGE.monte_carlo.step_factories import kde_step
+
+    with pytest.raises(TypeError, match="trace"):
+        kde_step("kde")
 
 
 def test_postproc_custom_trace_refs_not_statically_validated() -> None:
@@ -619,72 +550,3 @@ def test_postproc_custom_trace_refs_not_statically_validated() -> None:
     pipeline = build_pipeline(spec, resources={"p": lambda **kwargs: {}})
     assert [step.name for step in pipeline.per_rep_steps] == ["sim", "jb"]
     assert [step.name for step in pipeline.postproc_steps] == ["p"]
-
-
-def test_kde_trace_field_is_typed_trace() -> None:
-    trace_field = next(f for f in STEP_CATALOG["kde"].fields if f.key == "trace")
-    assert trace_field.type == "trace"
-
-
-# --- shock registry compile -------------------------------------------------
-# The simulation compile hook builds shocks from an explicit registry with no
-# model involved: one entry compiles to one Shock, joint iff it selects more
-# than one variable.
-
-
-def test_registry_norm_univariate_shapes_loc_kwarg() -> None:
-    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "norm", "loc": 0.5}])
-    assert shocks is not None
-    shock = shocks["u"]
-    assert shock.multivar is False
-    assert shock.dist == "norm"
-    assert shock.dist_kwargs == {"loc": 0.5}
-
-
-def test_registry_norm_multivariate_shapes_mean_kwarg() -> None:
-    shocks = _shocks_from_registry([{"vars": ["u", "v"], "dist": "norm", "loc": 0.0}])
-    assert shocks is not None
-    shock = shocks["u,v"]
-    assert shock.multivar is True
-    assert shock.dist_kwargs == {"mean": [0.0, 0.0]}
-
-
-def test_registry_t_carries_df() -> None:
-    shocks = _shocks_from_registry(
-        [{"vars": ["u"], "dist": "t", "loc": 0.0, "df": 7.0}]
-    )
-    assert shocks is not None
-    assert shocks["u"].dist_kwargs == {"loc": 0.0, "df": 7.0}
-
-
-def test_registry_uniform_single_variable_ok() -> None:
-    shocks = _shocks_from_registry([{"vars": ["u"], "dist": "uni"}])
-    assert shocks is not None
-    assert shocks["u"].multivar is False
-    assert shocks["u"].dist == "uni"
-
-
-def test_registry_uniform_multiple_variables_raises() -> None:
-    with pytest.raises(ValueError, match="univariate"):
-        _shocks_from_registry([{"vars": ["u", "v"], "dist": "uni"}])
-
-
-def test_registry_empty_compiles_to_none() -> None:
-    assert _shocks_from_registry([]) is None
-
-
-def test_registry_entry_without_variables_raises() -> None:
-    with pytest.raises(ValueError, match="at least one variable"):
-        _shocks_from_registry([{"vars": [], "dist": "norm"}])
-
-
-def test_registry_duplicate_key_raises() -> None:
-    with pytest.raises(ValueError, match="Duplicate shock entry"):
-        _shocks_from_registry(
-            [{"vars": ["u"], "dist": "norm"}, {"vars": ["u"], "dist": "t"}]
-        )
-
-
-def test_registry_unsupported_distribution_raises() -> None:
-    with pytest.raises(ValueError, match="Unsupported shock distribution"):
-        _shocks_from_registry([{"vars": ["u"], "dist": "cauchy"}])

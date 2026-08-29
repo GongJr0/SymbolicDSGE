@@ -24,6 +24,7 @@ from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
 from SymbolicDSGE.regression.ols import ols
 from SymbolicDSGE.regression.result import MCRegressionResult
+from tests._spec_helpers import as_posted
 
 
 def test_array_envelope_round_trips_float64_payload() -> None:
@@ -478,30 +479,6 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
         )
         assert solved.status_code == 200
 
-    catalog = client.get("/api/mc/catalog")
-    assert catalog.status_code == 200
-    assert {step["step_type"] for step in catalog.json()["steps"]} == {
-        "simulation",
-        "filter",
-        "wald",
-        "ljung_box",
-        "jarque_bera",
-        "breusch_pagan",
-        "breusch_godfrey",
-        "cusum",
-        "cusumsq",
-        "chow",
-        "regression",
-        "standardize",
-        "log",
-        "log_diff",
-        "diff",
-        "rolling_mean",
-        "rolling_std",
-        "rolling_var",
-        "kde",
-    }
-
     pipeline = {
         "nodes": [
             {
@@ -509,23 +486,38 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 8,
                     "observables": True,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 10}
-                    ],
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 10,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             }
         ],
         "edges": [],
     }
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json() == {"valid": True, "steps": ["datagen"], "postprocs": []}
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 3, "fail_fast": True, "verbosity": 2},
+        json={
+            "pipeline": as_posted(pipeline),
+            "n_rep": 3,
+            "fail_fast": True,
+            "verbosity": 2,
+        },
     )
     assert run.status_code == 200
     body = run.json()
@@ -564,18 +556,33 @@ _POSTPROC_PIPELINE = {
             "step_type": "simulation",
             "name": "datagen",
             "params": {
+                "shocks": None,
+                "target": "dgp",
+                "shock_scale": 1.0,
+                "x0": None,
                 "T": 8,
                 "observables": True,
-                "shock_registry": [
-                    {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 10}
-                ],
+                "shocks": {
+                    "e_u,e_v": {
+                        "dist": "norm",
+                        "multivar": True,
+                        "seed": 10,
+                        "dist_args": [],
+                        "dist_kwargs": {"mean": [0.0, 0.0]},
+                    }
+                },
             },
         },
         {
             "id": "jb",
             "step_type": "jarque_bera",
             "name": "jb",
-            "params": {"source": "datagen", "field": "observables", "column": 0},
+            "params": {
+                "alpha": 0.05,
+                "source": "datagen",
+                "field": "observables",
+                "column": 0,
+            },
         },
     ],
     "edges": [{"source": "sim", "target": "jb"}],
@@ -595,7 +602,7 @@ def test_ui_backend_run_payload_includes_postproc_artifacts() -> None:
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": _POSTPROC_PIPELINE, "n_rep": 4, "fail_fast": True},
+        json={"pipeline": as_posted(_POSTPROC_PIPELINE), "n_rep": 4, "fail_fast": True},
     )
     assert run.status_code == 200
     # KDE fills both slots of its one step: a bulk curve and a descriptives frame.
@@ -609,7 +616,7 @@ def test_ui_backend_run_payload_includes_postproc_artifacts() -> None:
 
 def test_ui_backend_available_traces_endpoint() -> None:
     client = TestClient(create_app())
-    traces = client.post("/api/mc/traces", json=_POSTPROC_PIPELINE)
+    traces = client.post("/api/mc/traces", json=as_posted(_POSTPROC_PIPELINE))
     assert traces.status_code == 200
     keys = traces.json()["traces"]
     assert "test.jb.statistic" in keys
@@ -659,13 +666,21 @@ def test_ui_backend_accepts_fanout() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 8},
+                "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "observables": True,
+                    "shock_scale": 1.0,
+                    "x0": None,
+                    "T": 8,
+                },
             },
             {
                 "id": "a",
                 "step_type": "ljung_box",
                 "name": "a",
                 "params": {
+                    "alpha": 0.05,
                     "source": "datagen",
                     "field": "states",
                     "column": [0],
@@ -677,6 +692,7 @@ def test_ui_backend_accepts_fanout() -> None:
                 "step_type": "ljung_box",
                 "name": "b",
                 "params": {
+                    "alpha": 0.05,
                     "source": "datagen",
                     "field": "states",
                     "column": [1],
@@ -690,14 +706,14 @@ def test_ui_backend_accepts_fanout() -> None:
         ],
     }
 
-    response = client.post("/api/mc/validate", json=pipeline)
+    response = client.post("/api/mc/validate", json=as_posted(pipeline))
 
     assert response.status_code == 200
     assert response.json()["steps"] == ["datagen", "a", "b"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     assert set(run.json()["test_summaries"]) == {"a", "b"}
@@ -723,7 +739,14 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
                 "id": "sim",
                 "step_type": "simulation",
                 "name": "datagen",
-                "params": {"T": 12},
+                "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "observables": True,
+                    "shock_scale": 1.0,
+                    "x0": None,
+                    "T": 12,
+                },
             },
             {
                 "id": "jb",
@@ -741,13 +764,13 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
         "edges": [{"source": "sim", "target": "jb"}],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["steps"] == ["datagen", "normality"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -780,10 +803,21 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 20,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
-                    ],
+                    "observables": True,
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 0,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -795,7 +829,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                     "residuals_field": "states",
                     "X_source": "datagen",
                     "X_field": "states",
-                    "residual_col": [0],
+                    "residuals_column": [0],
                     "X_columns": [1],
                     "burn_in": 1,
                     "robust": True,
@@ -806,13 +840,13 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
         "edges": [{"source": "sim", "target": "bp"}],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["steps"] == ["datagen", "heteroskedasticity"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -846,10 +880,21 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 20,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
-                    ],
+                    "observables": True,
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 0,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -861,7 +906,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                     "residuals_field": "states",
                     "X_source": "datagen",
                     "X_field": "states",
-                    "residual_col": [0],
+                    "residuals_column": [0],
                     "X_columns": [1],
                     "burn_in": 1,
                     "lags": 2,
@@ -872,13 +917,13 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
         "edges": [{"source": "sim", "target": "bg"}],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["steps"] == ["datagen", "serial_correlation"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -912,10 +957,21 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 30,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
-                    ],
+                    "observables": True,
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 0,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -937,13 +993,13 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
         "edges": [{"source": "sim", "target": "cs"}],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["steps"] == ["datagen", "stability"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -976,10 +1032,21 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 30,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
-                    ],
+                    "observables": True,
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 0,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -1001,13 +1068,13 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
         "edges": [{"source": "sim", "target": "csq"}],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["steps"] == ["datagen", "variance_stability"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -1040,10 +1107,21 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 30,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 0}
-                    ],
+                    "observables": True,
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 0,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -1066,13 +1144,13 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
         "edges": [{"source": "sim", "target": "ch"}],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["steps"] == ["datagen", "structural_break"]
 
     run = client.post(
         "/api/run/mc",
-        json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True},
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -1082,53 +1160,6 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
     assert summary["test_name"] == "structural_break"
     assert summary["distribution"] == "f"
     assert summary["n_retained"] == 2
-
-
-def test_ui_backend_normalizes_integer_or_keyword_mc_fields() -> None:
-    client = TestClient(create_app())
-    for role in ("reference", "dgp"):
-        loaded = client.post(
-            "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
-        )
-        assert loaded.status_code == 200
-        solved = client.post(
-            "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
-        )
-        assert solved.status_code == 200
-
-    def _pipeline(bandwidth: str) -> dict:
-        return {
-            "nodes": [
-                {
-                    "id": "sim",
-                    "step_type": "simulation",
-                    "name": "datagen",
-                    "params": {"T": 8},
-                },
-                {
-                    "id": "w",
-                    "step_type": "wald",
-                    "name": "w",
-                    "params": {
-                        "source": "datagen",
-                        "field": "states",
-                        "kind": "mean",
-                        "target_vector": [0.0],
-                        "bandwidth": bandwidth,
-                    },
-                },
-            ],
-            "edges": [{"source": "sim", "target": "w"}],
-        }
-
-    valid = client.post("/api/mc/validate", json=_pipeline("2"))
-    invalid = client.post("/api/mc/validate", json=_pipeline("invalid"))
-
-    assert valid.status_code == 200
-    assert invalid.status_code == 400
-    assert "bandwidth" in invalid.json()["detail"]["message"]
 
 
 def test_ui_backend_serializes_detailed_mc_summaries() -> None:
@@ -1195,34 +1226,44 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
 
 def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
     spec = MCPipelineSpec.model_validate(
-        {
-            "nodes": [
-                {
-                    "id": "sim",
-                    "step_type": "simulation",
-                    "name": "datagen",
-                    "params": {"T": 8, "observables": True},
-                },
-                {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
-                {
-                    "id": "test",
-                    "step_type": "breusch_pagan",
-                    "name": "diagnostic",
-                    "params": {
-                        "residuals_source": "renamed_filter",
-                        "residuals_field": "std_innov",
-                        "X_source": "datagen",
-                        "X_field": "observables",
-                        "residual_col": [0],
-                        "X_columns": [0],
+        as_posted(
+            {
+                "nodes": [
+                    {
+                        "id": "sim",
+                        "step_type": "simulation",
+                        "name": "datagen",
+                        "params": {
+                            "shocks": None,
+                            "target": "dgp",
+                            "shock_scale": 1.0,
+                            "x0": None,
+                            "T": 8,
+                            "observables": True,
+                        },
                     },
-                },
-            ],
-            "edges": [
-                {"source": "sim", "target": "filter"},
-                {"source": "filter", "target": "test"},
-            ],
-        }
+                    {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
+                    {
+                        "id": "test",
+                        "step_type": "breusch_pagan",
+                        "name": "diagnostic",
+                        "params": {
+                            "alpha": 0.05,
+                            "residuals_source": "renamed_filter",
+                            "residuals_field": "std_innov",
+                            "X_source": "datagen",
+                            "X_field": "observables",
+                            "residuals_column": [0],
+                            "X_columns": [0],
+                        },
+                    },
+                ],
+                "edges": [
+                    {"source": "sim", "target": "filter"},
+                    {"source": "filter", "target": "test"},
+                ],
+            }
+        )
     )
 
     pipeline = build_pipeline(spec.to_core())
@@ -1240,7 +1281,11 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
     assert residuals.source_step == "renamed_filter"
 
     missing = spec.model_copy(deep=True)
-    missing.nodes[-1].params["residuals_source"] = "missing_filter"
+    # The leg is what names the producer; params carry the step's own kwargs.
+    residuals_leg = next(
+        leg for leg in missing.nodes[-1].sources if leg.arg == "residuals"
+    )
+    residuals_leg.source_step = "missing_filter"
     with np.testing.assert_raises_regex(ValueError, "unknown producer"):
         build_pipeline(missing.to_core())
 
@@ -1291,11 +1336,21 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 8,
                     "observables": True,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 1}
-                    ],
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 1,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -1313,7 +1368,12 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "id": "jb",
                 "step_type": "jarque_bera",
                 "name": "jb",
-                "params": {"source": "zscore", "field": "payload", "column": [0]},
+                "params": {
+                    "alpha": 0.05,
+                    "source": "zscore",
+                    "field": "payload",
+                    "column": [0],
+                },
             },
         ],
         "edges": [
@@ -1322,12 +1382,13 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
         ],
     }
 
-    validated = client.post("/api/mc/validate", json=pipeline)
+    validated = client.post("/api/mc/validate", json=as_posted(pipeline))
     assert validated.status_code == 200
     assert validated.json()["valid"] is True
 
     run = client.post(
-        "/api/run/mc", json={"pipeline": pipeline, "n_rep": 3, "fail_fast": True}
+        "/api/run/mc",
+        json={"pipeline": as_posted(pipeline), "n_rep": 3, "fail_fast": True},
     )
     assert run.status_code == 200
     body = run.json()
@@ -1353,11 +1414,21 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "shocks": None,
+                    "target": "dgp",
+                    "shock_scale": 1.0,
+                    "x0": None,
                     "T": 8,
                     "observables": True,
-                    "shock_registry": [
-                        {"vars": ["e_u", "e_v"], "dist": "norm", "seed": 1}
-                    ],
+                    "shocks": {
+                        "e_u,e_v": {
+                            "dist": "norm",
+                            "multivar": True,
+                            "seed": 1,
+                            "dist_args": [],
+                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                        }
+                    },
                 },
             },
             {
@@ -1371,7 +1442,8 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
     }
 
     run = client.post(
-        "/api/run/mc", json={"pipeline": pipeline, "n_rep": 2, "fail_fast": True}
+        "/api/run/mc",
+        json={"pipeline": as_posted(pipeline), "n_rep": 2, "fail_fast": True},
     )
     assert run.status_code == 400
     assert "zscore" in run.json()["detail"]["message"]

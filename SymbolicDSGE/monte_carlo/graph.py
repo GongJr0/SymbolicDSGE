@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from .catalog import FILTER_SOURCES
-from .mc_constructs import MCStep, OpType
+from .mc_constructs import FILTER_SOURCE_FIELDS, MCStep, OpType
 
 
 @dataclass(frozen=True)
@@ -65,7 +64,7 @@ class PipelineNode:
         ``None`` for the root.
         """
         for edge in self.inputs:
-            if edge.channel in FILTER_SOURCES:
+            if edge.channel in FILTER_SOURCE_FIELDS:
                 return edge.producer
         return self.inputs[0].producer if self.inputs else None
 

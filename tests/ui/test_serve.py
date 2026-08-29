@@ -33,6 +33,7 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.session import TabState, UISession, Workspace
+from tests._spec_helpers import node as _node
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -86,7 +87,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         thin=1,
     )
     pipeline = PipelineSpec(
-        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 20})],
+        nodes=[_node(id="n1", step_type="simulation", name="sim", params={"T": 20})],
         edges=[],
         postprocs=[],
     )

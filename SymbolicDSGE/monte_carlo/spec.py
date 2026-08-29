@@ -61,11 +61,58 @@ POSTPROC_KINDS: frozenset[str] = frozenset(get_args(PostprocStepKind))
 PER_REP_KINDS: frozenset[str] = STEP_KINDS - POSTPROC_KINDS
 
 
+#: The op kind each step kind is. This is what a node *is*, not how a form
+#: renders it, so it stays here beside the rest of the kind taxonomy: a client
+#: declares a node's ``op_type`` and :func:`build_pipeline` holds it to this.
+OP_TYPES: dict[str, str] = {
+    "simulation": "datagen",
+    "raw_model_data": "datagen",
+    "filter": "filter",
+    "payload": "transform",
+    "standardize": "transform",
+    "log": "transform",
+    "log_diff": "transform",
+    "diff": "transform",
+    "rolling_mean": "transform",
+    "rolling_std": "transform",
+    "rolling_var": "transform",
+    "transform:custom": "transform",
+    "wald": "test",
+    "ljung_box": "test",
+    "jarque_bera": "test",
+    "breusch_pagan": "test",
+    "breusch_godfrey": "test",
+    "cusum": "test",
+    "cusumsq": "test",
+    "chow": "test",
+    "regression": "regression",
+    "kde": "postproc",
+    "postproc:custom": "postproc",
+}
+
+
+class SourceSpec(TypedDict):
+    """One authored source binding of a step.
+
+    ``SourceArgs`` derives ``column_selector`` and ``row_start``, so only the
+    fields an author sets travel.
+    """
+
+    arg: str
+    source_step: str
+    field: str
+    columns: list[int] | None
+    burn_in: int
+    drop_initial: bool
+
+
 class NodeSpec(TypedDict):
     id: str
+    op_type: str
     step_type: str
     name: str
     params: dict[str, Any]
+    sources: list[SourceSpec]
 
 
 class EdgeSpec(TypedDict):

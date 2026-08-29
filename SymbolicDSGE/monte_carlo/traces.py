@@ -20,7 +20,7 @@ actually emits. The bundle writes its own projection per step kind, where
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,7 +28,6 @@ from numpy.typing import NDArray
 from SymbolicDSGE._diag_tests.result import MCTestResult
 from SymbolicDSGE.regression.result import MCRegressionResult
 
-from .catalog import TERMINAL_STEP_TYPES, TRANSFORM_STEP_TYPES
 from .mc_constructs import MCStep, OpType
 from .spec import PipelineSpec
 
@@ -39,6 +38,14 @@ if TYPE_CHECKING:
 
 _TEST_SUBKEYS = ("statistic", "pval", "status")
 _REGRESSION_SUBKEYS = ("coef", "ssr", "sst", "se", "r2", "status")
+
+#: The sub-channels each trace-producing op kind emits, keyed by the prefix its
+#: keys carry. A payload is a single array, so it has no sub-channel.
+_TRACE_OUTPUTS: dict[str, frozenset[str]] = {
+    "test": frozenset(_TEST_SUBKEYS),
+    "regression": frozenset(_REGRESSION_SUBKEYS),
+    "payload": frozenset(),
+}
 
 
 def test_trace_keys(name: str) -> dict[str, str]:
@@ -56,30 +63,57 @@ def payload_trace_key(name: str) -> str:
     return f"payload.{name}"
 
 
-def trace_keys_for(step_type: str, name: str) -> list[str]:
-    """The across-rep trace keys a producer of ``step_type`` named ``name`` emits."""
-    if step_type == "regression":
-        return list(regression_trace_keys(name).values())
-    if step_type in TERMINAL_STEP_TYPES:  # remaining terminals are tests
+def trace_keys_for(op_type: str, name: str, kind: str | None = None) -> list[str]:
+    """The across-rep trace keys a producer of ``op_type`` named ``name`` emits.
+
+    ``kind`` is the producer's step kind where that narrows its outputs: only an
+    OLS regression carries a standard error.
+    """
+    if op_type == OpType.REGRESSION:
+        keys = regression_trace_keys(name)
+        if (kind or "ols") != "ols":  # a regression defaults to OLS
+            keys.pop("se", None)
+        return list(keys.values())
+    if op_type == OpType.TEST:
         return list(test_trace_keys(name).values())
-    if step_type in TRANSFORM_STEP_TYPES | {"payload", "transform:custom"}:
+    if op_type == OpType.TRANSFORM:
         return [payload_trace_key(name)]
     return []  # datagen / filter / postproc produce no consumable trace
 
 
 def trace_keys_for_step(step: MCStep) -> list[str]:
-    """The across-rep trace keys a live per-rep step emits, by its role.
+    """The across-rep trace keys a live per-rep step emits."""
+    return trace_keys_for(step.op_type, step.name, step.kwargs.get("kind"))
 
-    The step counterpart of :func:`trace_keys_for`, dispatching on ``op_type``
-    rather than ``step_type``, which a hand-built step may leave unset.
+
+def is_trace_ref(value: object) -> bool:
+    """Whether a parameter value is spelled like a trace key.
+
+    A postproc names the trace it reads, so a reference is recognized by its own
+    spelling rather than by the parameter it was passed under. That covers a
+    custom op's references as well as a catalogue op's.
     """
-    if step.op_type is OpType.REGRESSION:
-        return list(regression_trace_keys(step.name).values())
-    if step.op_type is OpType.TEST:
-        return list(test_trace_keys(step.name).values())
-    if step.op_type is OpType.TRANSFORM:
-        return [payload_trace_key(step.name)]
-    return []  # datagen / filter / postproc produce no consumable trace
+    return isinstance(value, str) and value.split(".", 1)[0] in _TRACE_OUTPUTS
+
+
+def trace_ref_error(ref: str, available: Collection[str]) -> str | None:
+    """Why ``ref`` is unusable as a trace key, or ``None`` when it is fine.
+
+    The producer's name is not checked on its own; it is covered by testing the
+    whole key against what the pipeline emits.
+    """
+    parts = ref.split(".")
+    outputs = _TRACE_OUTPUTS[parts[0]]
+    if len(parts) != (3 if outputs else 2):
+        return f"{ref!r} is not a well-formed {parts[0]} trace key"
+    if outputs and parts[2] not in outputs:
+        return (
+            f"{parts[2]!r} is not an output of a {parts[0]} step "
+            f"(one of: {', '.join(sorted(outputs))})"
+        )
+    if ref not in available:
+        return f"no step in the pipeline produces {ref!r}"
+    return None
 
 
 def _trace_keys(spec: PipelineSpec) -> list[str]:
@@ -90,7 +124,9 @@ def _trace_keys(spec: PipelineSpec) -> list[str]:
     """
     keys: list[str] = []
     for node in spec["nodes"]:
-        keys.extend(trace_keys_for(node["step_type"], node["name"]))
+        keys.extend(
+            trace_keys_for(node["op_type"], node["name"], node["params"].get("kind"))
+        )
     return keys
 
 

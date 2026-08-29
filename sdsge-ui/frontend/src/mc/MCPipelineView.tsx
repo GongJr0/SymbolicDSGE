@@ -35,7 +35,6 @@ import {
 import type { DragEvent, PointerEvent } from "react";
 import {
   fetchAvailableTraces,
-  getMCCatalog,
   getMCCustomTemplate,
   putWorkspaceView,
   runMCPipeline,
@@ -58,86 +57,15 @@ import { StepNode } from "./StepNode";
 import { MCResultPanel } from "./MCResultPanel";
 import type { MCFlowNode, MCProducer } from "./types";
 
+import {
+  MC_CATALOG,
+  sourceParamKeys,
+  splitSources,
+  stepDefinition,
+} from "./catalog";
+import { compileFormParams } from "./forms";
+
 const nodeTypes = { mcStep: StepNode };
-
-// "transform:custom" has no backend StepDefinition (it isn't GUI-authored via
-// fields), so it never appears in the catalogue payload. We inject a synthetic
-// palette entry for it under the Transforms tab; its single "param" is the op
-// source code.
-const CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
-  step_type: "transform:custom",
-  title: "Custom Op",
-  default_name: "custom_op",
-  description: "User-defined Numba transform, run once per replication.",
-  category: "transforms",
-  fields: [
-    {
-      key: "source",
-      label: "Input step",
-      type: "text",
-      default: "",
-      required: true,
-      options: [],
-      minimum: null,
-      when: [],
-    },
-    {
-      key: "field",
-      label: "Input array",
-      type: "select",
-      default: "observables",
-      required: true,
-      options: [
-        "states",
-        "observables",
-        "x_pred",
-        "x_filt",
-        "x1_pred",
-        "x2_pred",
-        "x1_filt",
-        "x2_filt",
-        "y_pred",
-        "y_filt",
-        "innov",
-        "std_innov",
-        "eps_hat",
-      ],
-      minimum: null,
-      when: [],
-    },
-    {
-      key: "columns",
-      label: "Input columns",
-      type: "number_list",
-      default: [],
-      required: false,
-      options: [],
-      minimum: 0,
-      when: [],
-    },
-    {
-      key: "output_shape",
-      label: "Output shape",
-      type: "number_list",
-      default: [1, 1],
-      required: true,
-      options: [],
-      minimum: 0,
-      when: [],
-    },
-  ],
-};
-
-// Post-loop sibling of CUSTOM_CATALOG_ITEM: a user-authored summary op run once
-// after the replication loop (pandas namespace; may return a DataFrame).
-const POSTPROC_CUSTOM_CATALOG_ITEM: MCStepCatalogItem = {
-  step_type: "postproc:custom",
-  title: "Custom Postproc",
-  default_name: "postproc_op",
-  description: "User-defined post-loop summary op over the across-rep traces.",
-  category: "postproc",
-  fields: [],
-};
 
 // Starter source for a custom post-loop op. The pandas namespace applies, so the
 // body may reference `pd` (and `np`); `import` stays banned, like `np`.
@@ -203,20 +131,11 @@ function MCPipelineBuilder({
     useReactFlow<MCFlowNode, Edge>();
 
   useEffect(() => {
-    Promise.all([
-      getMCCatalog(),
-      getMCCustomTemplate().catch(() => ({ template: "" })),
-    ])
-      .then(async ([rawCatalog, tmpl]) => {
+    getMCCustomTemplate()
+      .catch(() => ({ template: "" }))
+      .then(async (tmpl) => {
         customTemplateRef.current = tmpl.template;
-        const value: MCCatalog = {
-          ...rawCatalog,
-          steps: [
-            ...rawCatalog.steps,
-            CUSTOM_CATALOG_ITEM,
-            POSTPROC_CUSTOM_CATALOG_ITEM,
-          ],
-        };
+        const value: MCCatalog = { steps: MC_CATALOG };
         setCatalog(value);
         // Seeded from the session, which outlived the page. Read once: later
         // reads carry back only what was PUT from here.
@@ -915,12 +834,25 @@ function toPipelineSpec(nodes: MCFlowNode[], edges: Edge[]): MCPipelineSpec {
   const perRepIds = new Set(perRep.map((node) => node.id));
   return {
     // Per-replication DAG nodes only.
-    nodes: perRep.map((node) => ({
-      id: node.id,
-      step_type: node.data.stepType,
-      name: node.data.name,
-      params: node.data.params,
-    })),
+    nodes: perRep.map((node) => {
+      const definition = stepDefinition(node.data.stepType);
+      const dropped = new Set(
+        definition ? sourceParamKeys(definition) : [],
+      );
+      const params = compileFormParams(node.data.stepType, node.data.params);
+      return {
+        id: node.id,
+        // The op kind and the source legs are resolved here: a node arrives at
+        // the server already saying what it is and what it reads.
+        op_type: definition?.opType ?? "",
+        step_type: node.data.stepType,
+        name: node.data.name,
+        params: Object.fromEntries(
+          Object.entries(params).filter(([key]) => !dropped.has(key)),
+        ),
+        sources: definition ? splitSources(definition, node.data.params) : [],
+      };
+    }),
     // Edges never touch a postproc node (they carry no edges), but filter
     // defensively so a stale edge can't leak into the spec.
     edges: edges

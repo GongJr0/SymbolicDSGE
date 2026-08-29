@@ -390,11 +390,24 @@ export interface MCCatalog {
   steps: MCStepCatalogItem[];
 }
 
+// One authored source leg of a step. `column_selector` and `row_start` are
+// derived server-side, so only the fields an author sets travel.
+export interface MCSourceSpec {
+  arg: string;
+  source_step: string;
+  field: string;
+  columns: number[] | null;
+  burn_in: number;
+  drop_initial: boolean;
+}
+
 export interface MCNodeSpec {
   id: string;
+  op_type: string;
   step_type: MCStepType;
   name: string;
   params: Record<string, unknown>;
+  sources: MCSourceSpec[];
 }
 
 export interface MCEdgeSpec {

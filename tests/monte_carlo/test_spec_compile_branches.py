@@ -24,18 +24,6 @@ def test_shock_dict_branches():
         SC._shock_dict(lambda s: s)
 
 
-def test_recover_wald_branches():
-    # 1-D target, no kind -> target_vector
-    out = SC._recover_wald({"target": [1.0, 2.0, 3.0]})
-    assert "target_vector" in out
-    # explicit kind picks the field
-    out2 = SC._recover_wald({"target": [[1.0, 0.0], [0.0, 1.0]], "kind": "joint"})
-    assert "target_matrix" in out2
-    # matrix target without a kind is an error
-    with pytest.raises(ValueError, match="must store the Wald kind"):
-        SC._recover_wald({"target": [[1.0, 0.0], [0.0, 1.0]]})
-
-
 def test_jsonable_branches():
     assert SC._jsonable(np.array([1.0, 2.0])) == [1.0, 2.0]
     assert SC._jsonable(np.int64(4)) == 4
@@ -51,24 +39,3 @@ def test_raw_model_data_arrays_states_only():
     out = SC.raw_model_data_arrays(kwargs)
     assert set(out) == {"states"}
     assert out["states"].shape == (2, 2)
-
-
-def test_recover_one_source_optional_fields():
-    selector = SimpleNamespace(
-        source_step="sim",
-        field="observables",
-        columns=["a", "b"],
-        burn_in=5,
-        drop_initial=2,
-    )
-    out = SC._recover_one_source(
-        selector,
-        source_key="source",
-        field_key="field",
-        columns_key="columns",
-    )
-    assert out["source"] == "sim"
-    assert out["field"] == "observables"
-    assert out["columns"] == ["a", "b"]
-    assert out["burn_in"] == 5
-    assert out["drop_initial"] == 2
