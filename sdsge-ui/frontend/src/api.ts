@@ -8,7 +8,6 @@ import type {
   EstimationViewsByRole,
   MCViewState,
   ModelSummary,
-  MCCatalog,
   MCPipelineResult,
   MCPipelineSpec,
   MCStepType,
@@ -148,10 +147,6 @@ export function removeFunction(
 
 export function listFunctions(role: Role): Promise<FunctionRecord[]> {
   return requestJson<FunctionRecord[]>(`/api/code/${role}/functions`);
-}
-
-export function getMCCatalog(): Promise<MCCatalog> {
-  return requestJson<MCCatalog>("/api/mc/catalog");
 }
 
 export function getMCCustomTemplate(): Promise<{ template: string }> {

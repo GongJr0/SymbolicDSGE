@@ -743,7 +743,23 @@ def postproc_step(name: str, func: Callable[..., Any], **kwargs: Any) -> MCStep:
     )
 
 
-def kde_step(name: str, **kwargs: Any) -> MCStep:
+def kde_step(
+    name: str,
+    *,
+    trace: str,
+    bandwidth: str | float = "scott",
+    grid_points: int = 200,
+    kernel: str = "gaussian",
+) -> MCStep:
     return MCStep(
-        name=name, op_type=OpType.POSTPROC, func=run_kde, kwargs=kwargs, step_type="kde"
+        name=name,
+        op_type=OpType.POSTPROC,
+        func=run_kde,
+        kwargs={
+            "trace": trace,
+            "bandwidth": bandwidth,
+            "grid_points": grid_points,
+            "kernel": kernel,
+        },
+        step_type="kde",
     )

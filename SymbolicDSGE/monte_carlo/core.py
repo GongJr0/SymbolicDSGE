@@ -19,9 +19,13 @@ from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
 from .allocation import BufferPlan, resolve_output_specs
-from .traces import traces_from_summaries, trace_keys_for_step
+from .traces import (
+    is_trace_ref,
+    trace_keys_for_step,
+    trace_ref_error,
+    traces_from_summaries,
+)
 from .postproc import Artifact, normalize_artifacts
-from .catalog import STEP_CATALOG
 from .mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
     FILTER_RAW_SOURCE_FIELDS,
@@ -168,31 +172,27 @@ class MCPipeline:
     ) -> None:
         """Check each postproc's trace selectors against what the producers emit.
 
-        Catalogue postprocs mark their trace fields with ``type == "trace"``. A
-        custom op reads traces in opaque code, so it carries no such field and is
-        left to fail at its own hands.
+        A reference is recognized by its own spelling, so a custom op's trace
+        selections are checked alongside a built-in's. Every trace a run can
+        emit is known from the producers, so a bad key is caught here rather
+        than after the replication loop that a post-loop op runs behind.
+
+        Presence is not checked here: a built-in's factory requires its trace,
+        and a custom op may read keys as literals in its own body, unseen from
+        anywhere outside it.
         """
         if not postproc_steps:
             return
 
         available = {key for step in per_rep_steps for key in trace_keys_for_step(step)}
         for step in postproc_steps:
-            definition = STEP_CATALOG.get(step.step_type or "")
-            if definition is None:
-                continue
-            for field in definition.fields:
-                if field.type != "trace":
+            for key, value in step.kwargs.items():
+                if not is_trace_ref(value):
                     continue
-                ref = step.kwargs.get(field.key)
-                if not ref:
+                problem = trace_ref_error(value, available)
+                if problem is not None:
                     raise ValueError(
-                        f"POSTPROC step {step.name!r} must select a trace for "
-                        f"{field.key!r} (available: {sorted(available)})."
-                    )
-                if ref not in available:
-                    raise ValueError(
-                        f"POSTPROC step {step.name!r} field {field.key!r} references "
-                        f"trace {ref!r}, which no step in the pipeline produces "
+                        f"POSTPROC step {step.name!r} field {key!r}: {problem} "
                         f"(available: {sorted(available)})."
                     )
 

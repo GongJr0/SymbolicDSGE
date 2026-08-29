@@ -11,7 +11,6 @@ from .mc import (
     build_pipeline,
     compile_custom_resources,
     mc_available_traces,
-    mc_catalog,
     mc_custom_op_template,
     run_pipeline,
     serialize_pipeline_result,
@@ -73,10 +72,6 @@ def create_app(
         """
         ui_session.set_workspace_view(request.tab, request.view)
         return {"tab": request.tab}
-
-    @app.get("/api/mc/catalog")
-    def monte_carlo_catalog() -> dict[str, Any]:
-        return mc_catalog()
 
     @app.get("/api/mc/custom/template")
     def monte_carlo_custom_template() -> dict[str, str]:

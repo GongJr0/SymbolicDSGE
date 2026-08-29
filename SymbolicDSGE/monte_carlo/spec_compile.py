@@ -4,15 +4,13 @@ The inverse of :func:`SymbolicDSGE.monte_carlo.builder.build_pipeline`: it lets 
 pipeline authored with plain library objects be serialized to the bundle's graph
 language without the user ever touching the spec DTOs. Structure (nodes + edges)
 is read from the pipeline's owned :class:`~SymbolicDSGE.monte_carlo.graph.PipelineGraph`;
-per-node parameters are recovered into the form ``build_pipeline``'s catalogue
-compile hooks expect, so ``to_spec`` is a fixed point under a rebuild.
+a node's kwargs are written as the step holds them and its source bindings are
+written as their own objects, so ``to_spec`` is a fixed point under a rebuild.
 
-Recovery is mostly pass-through. The cases that need inverting a compile hook:
+Recovery is mostly pass-through. The one value that cannot travel as data:
 
 - **simulation**: live :class:`Shock` objects are serialized via
-  :meth:`Shock.to_dict`; the dual-form ``_compile_simulation`` rebuilds them.
-- **wald**: the materialized ``target`` ndarray is inverted to the
-  ``target_vector`` / ``target_matrix`` field the GUI/spec form carries.
+  :meth:`Shock.to_dict`; :func:`restore_kwargs` rebuilds them on the way back.
 - **raw_model_data**: bulk arrays cannot ride the JSON spec, so the node records a
   ``data_ref`` (the bundle member key), the array ``data_shapes``, and the scalar
   metadata; the bundle builder writes the parquet member from
@@ -22,7 +20,7 @@ Recovery is mostly pass-through. The cases that need inverting a compile hook:
   bundle builder writes the cloudpickle member and ``build_pipeline`` reattaches
   the callable from the loaded resources.
 
-Source dependencies are emitted as explicit ``source`` and ``field`` parameters.
+Source dependencies are emitted as ``sources``, one object per binding.
 """
 
 from __future__ import annotations
@@ -33,9 +31,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.shock_generators import Shock, ShockParameters
-from .catalog import STEP_CATALOG
-from .mc_constructs import OpType, SourceArgs
-from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec
+from .mc_constructs import ColumnSelector, OpType, SourceArgs
+from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec, SourceSpec
 
 if TYPE_CHECKING:
     from .core import MCPipeline
@@ -48,9 +45,11 @@ def pipeline_to_spec(pipeline: "MCPipeline") -> PipelineSpec:
     nodes = [
         NodeSpec(
             id=step.name,
+            op_type=_op_type(step),
             step_type=_step_type(step),
             name=step.name,
             params=_recover_params(step),
+            sources=_recover_sources(step.source_args),
         )
         for step in pipeline.per_rep_steps
     ]
@@ -80,6 +79,13 @@ def raw_model_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
     return out
 
 
+def _op_type(step: "MCStep") -> str:
+    op_type = step.op_type
+    if op_type is None:
+        raise ValueError(f"Step {step.name!r} has no op_type and cannot be serialized.")
+    return op_type.value
+
+
 def _step_type(step: "MCStep") -> str:
     step_type = step.step_type
     if step_type is None:
@@ -95,88 +101,103 @@ def _recover_params(step: "MCStep") -> dict[str, Any]:
         params = _recover_raw_model_data(step)
     elif step_type == "simulation":
         params = _recover_simulation(step.kwargs)
-    elif step_type == "wald":
-        params = _recover_wald(step.kwargs)
     elif step_type in ("transform:custom", "postproc:custom"):
         params = _jsonable_params(dict(step.kwargs))
         params["func_ref"] = step.name
     else:
         params = _jsonable_params(dict(step.kwargs))
-    params.update(_recover_source_params(step_type, step.source_args))
     if step.op_type is not OpType.POSTPROC and step.n_retain != -1:
         params["n_retain"] = step.n_retain
     return params
 
 
-def _recover_source_params(
-    step_type: str | None,
-    source_args: tuple[SourceArgs, ...],
-) -> dict[str, Any]:
-    if step_type is None or not source_args:
-        return {}
-    if step_type == "transform:custom":
-        if len(source_args) != 1:
-            raise ValueError(
-                "A custom transform must have exactly one source argument."
-            )
-        return _recover_one_source(
-            source_args[0],
-            source_key="source",
-            field_key="field",
-            columns_key="columns",
+def _columns_spec(columns: ColumnSelector) -> list[int] | None:
+    """A selector's chosen columns as plain indices, or ``None`` for all of them.
+
+    ``SourceArgs`` normalizes a scalar and an array into a tuple, so those arms
+    are unreachable once one is built; a slice is passed through untouched and
+    has no width to resolve against here.
+    """
+    if columns is None:
+        return None
+    if isinstance(columns, slice):
+        raise TypeError(
+            "A slice column selector cannot be serialized; give explicit indices."
         )
-    definition = STEP_CATALOG.get(step_type)
-    if definition is None or not definition.source_bindings:
-        return {}
-    if len(source_args) != len(definition.source_bindings):
-        raise ValueError(
-            f"Step type {step_type!r} has {len(source_args)} source args, "
-            f"expected {len(definition.source_bindings)}."
-        )
-    by_arg = {selector.arg: selector for selector in source_args}
-    out: dict[str, Any] = {}
-    for binding in definition.source_bindings:
-        if binding.arg not in by_arg:
-            raise ValueError(
-                f"Step type {step_type!r} is missing source {binding.arg!r}."
-            )
-        out.update(
-            _recover_one_source(
-                by_arg[binding.arg],
-                source_key=binding.source_key,
-                field_key=binding.field_key,
-                columns_key=binding.columns_key,
-            )
-        )
-    return out
+    if isinstance(columns, (int, np.integer)):
+        return [int(columns)]
+    return [int(column) for column in columns]
 
 
-def _recover_one_source(
-    selector: SourceArgs,
-    *,
-    source_key: str,
-    field_key: str,
-    columns_key: str,
-) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    out[source_key] = selector.source_step
-    out[field_key] = selector.field
+def _recover_sources(source_args: tuple[SourceArgs, ...]) -> list[SourceSpec]:
+    """Emit a step's source bindings as their own objects, not flattened params."""
+    return [
+        SourceSpec(
+            arg=selector.arg,
+            source_step=selector.source_step,
+            field=selector.field,
+            columns=_columns_spec(selector.columns),
+            burn_in=selector.burn_in,
+            drop_initial=selector.drop_initial,
+        )
+        for selector in source_args
+    ]
 
-    if selector.columns is not None:
-        out[columns_key] = _jsonable(selector.columns)
-    if selector.burn_in:
-        out["burn_in"] = selector.burn_in
-    if selector.drop_initial:
-        out["drop_initial"] = selector.drop_initial
-    return out
+
+def restore_sources(sources: list[SourceSpec]) -> tuple[SourceArgs, ...]:
+    """Rebuild the source bindings a node recorded."""
+    return tuple(
+        SourceArgs(
+            arg=source["arg"],
+            source_step=source["source_step"],
+            field=source["field"],
+            columns=source["columns"],
+            burn_in=source["burn_in"],
+            drop_initial=source["drop_initial"],
+        )
+        for source in sources
+    )
 
 
 def _recover_simulation(kwargs: Mapping[str, Any]) -> dict[str, Any]:
     params = dict(kwargs)
-    shocks = params["shocks"]
+    shocks = params.get("shocks")
     if shocks is not None:
         params["shocks"] = {key: _shock_dict(value) for key, value in shocks.items()}
     return _jsonable_params(params)
+
+
+def restore_kwargs(step_type: str | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """Rebuild a step's live kwargs from the plain values a node recorded.
+
+    Only ``Shock`` needs restoring: arrays travel as nested lists and every
+    consumer coerces them on the way in.
+    """
+    kwargs = dict(params)
+    if step_type == "simulation" and kwargs.get("shocks") is not None:
+        kwargs["shocks"] = coerce_shock_mapping(kwargs["shocks"])
+    return kwargs
+
+
+def coerce_shock_mapping(value: Any) -> dict[str, Shock]:
+    """Normalize a ``shocks`` mapping of live :class:`Shock` / serialized dicts.
+
+    Library-authored pipelines carry explicit :class:`Shock` instances; a spec
+    loaded from a bundle carries their :meth:`Shock.to_dict` form.
+    """
+    if not isinstance(value, Mapping):
+        raise TypeError("simulation 'shocks' must be a mapping of name -> Shock.")
+    out: dict[str, Shock] = {}
+    for key, shock in value.items():
+        if isinstance(shock, Shock):
+            out[str(key)] = shock
+        elif isinstance(shock, Mapping):
+            out[str(key)] = Shock.from_dict(shock)
+        else:
+            raise TypeError(
+                f"shocks[{key!r}] must be a Shock or a serialized shock dict."
+            )
+    return out
 
 
 def _shock_dict(value: Any) -> ShockParameters | dict[str, Any]:
@@ -199,21 +220,6 @@ def _shock_dict(value: Any) -> ShockParameters | dict[str, Any]:
     raise TypeError(
         "simulation shocks must be Shock instances (or serialized shock dicts)." + hint
     )
-
-
-def _recover_wald(kwargs: Mapping[str, Any]) -> dict[str, Any]:
-    params = dict(kwargs)
-    if "target" in params:
-        target = np.asarray(params.pop("target"), dtype=np.float64)
-        if "kind" in params:
-            kind = str(params["kind"])
-            key = "target_vector" if kind == "mean" else "target_matrix"
-        elif target.ndim <= 1:
-            key = "target_vector"
-        else:
-            raise ValueError("Wald matrix targets must store the Wald kind.")
-        params[key] = target.tolist()
-    return _jsonable_params(params)
 
 
 def _recover_raw_model_data(step: "MCStep") -> dict[str, Any]:

@@ -13,7 +13,6 @@ from typing import Any
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo.builder import build_pipeline as build_pipeline
 from SymbolicDSGE.monte_carlo.builder import run_pipeline as _run_pipeline
-from SymbolicDSGE.monte_carlo.catalog import catalog_payload
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PostprocSpec
 from SymbolicDSGE.monte_carlo.traces import _trace_keys
@@ -39,11 +38,6 @@ def transform(sample, output):
     output[:, :] = sample
     return 0
 '''
-
-
-def mc_catalog() -> dict[str, Any]:
-    """The step catalogue payload served at ``/api/mc/catalog``."""
-    return catalog_payload()
 
 
 def mc_custom_op_template() -> dict[str, str]:

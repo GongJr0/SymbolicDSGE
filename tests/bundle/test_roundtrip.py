@@ -19,6 +19,7 @@ from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
 from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
+from tests._spec_helpers import node as _node
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -61,7 +62,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         thin=1,
     )
     pipeline = PipelineSpec(
-        nodes=[NodeSpec(id="n1", step_type="simulation", name="sim", params={"T": 50})],
+        nodes=[_node(id="n1", step_type="simulation", name="sim", params={"T": 50})],
         edges=[],
         postprocs=[],
     )

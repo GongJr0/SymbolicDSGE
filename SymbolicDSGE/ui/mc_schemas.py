@@ -2,32 +2,29 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from SymbolicDSGE.monte_carlo.spec import MCStepKind, PipelineSpec, PostprocStepKind
 
 
-def _drop_blank(params: dict[str, Any]) -> dict[str, Any]:
-    """Drop the keys the editor submits empty so the step factory's default applies.
+class MCSourceSpec(BaseModel):
+    """One authored source leg of a step, as the form resolved it."""
 
-    An unwired source posts ``""`` and an untouched column list posts ``[]``;
-    neither is a value a factory takes. Written specs are not cleaned: a blank
-    there is an error, not an unfinished form.
-    """
-    return {
-        key: value
-        for key, value in params.items()
-        if value != "" and value != [] and value is not None
-    }
+    arg: str = Field(min_length=1)
+    source_step: str = Field(min_length=1)
+    field: str = Field(min_length=1)
+    columns: list[int] | None = None
+    burn_in: int = Field(default=0, ge=0)
+    drop_initial: bool = False
 
 
 class MCNodeSpec(BaseModel):
     id: str = Field(min_length=1)
+    op_type: str = Field(min_length=1)
     step_type: MCStepKind
     name: str = Field(min_length=1)
     params: dict[str, Any] = Field(default_factory=dict)
-
-    _clean_params = field_validator("params")(_drop_blank)
+    sources: list[MCSourceSpec] = Field(default_factory=list)
 
 
 class MCEdgeSpec(BaseModel):
@@ -43,8 +40,6 @@ class MCPostprocSpec(BaseModel):
     name: str = Field(min_length=1)
     params: dict[str, Any] = Field(default_factory=dict)
 
-    _clean_params = field_validator("params")(_drop_blank)
-
 
 class MCPipelineSpec(BaseModel):
     nodes: list[MCNodeSpec] = Field(min_length=1)
@@ -52,7 +47,11 @@ class MCPipelineSpec(BaseModel):
     postprocs: list[MCPostprocSpec] = Field(default_factory=list)
 
     def to_core(self) -> PipelineSpec:
-        """Convert to the pydantic-free core spec (bundle/text serialization)."""
+        """Convert to the pydantic-free core spec (bundle/text serialization).
+
+        A node arrives with its op kind, its source legs and its parameters
+        already resolved, so this only drops the pydantic wrapper.
+        """
         return cast(PipelineSpec, self.model_dump())
 
 

@@ -620,21 +620,13 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_source() -> None:
     assert jb.params["field"] == "payload"
 
 
-def test_step_kinds_match_catalog() -> None:
-    """Every GUI-catalog step kind must be a valid spec `STEP_KIND`; drift would
-    silently reject perfectly valid bundles at load time. `STEP_KINDS` may be a
-    strict superset: serialization-only datagens (e.g. ``raw_model_data``) are valid
-    spec kinds but carry no GUI-authorable `StepDefinition`."""
-    from SymbolicDSGE.monte_carlo.catalog import STEP_CATALOG
-    from SymbolicDSGE.monte_carlo.spec import STEP_KINDS
+def test_every_step_kind_declares_an_op_kind() -> None:
+    """A node states its own op kind and `build_pipeline` holds it to `OP_TYPES`,
+    so a kind absent from that map could never be built, and one present but not
+    a valid `STEP_KIND` would be rejected at the door."""
+    from SymbolicDSGE.monte_carlo.spec import OP_TYPES, STEP_KINDS
 
-    assert frozenset(STEP_CATALOG.keys()) <= STEP_KINDS
-    assert STEP_KINDS - frozenset(STEP_CATALOG.keys()) == {
-        "raw_model_data",
-        "payload",
-        "transform:custom",
-        "postproc:custom",
-    }
+    assert set(OP_TYPES) == set(STEP_KINDS)
 
 
 def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
@@ -646,46 +638,58 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     from SymbolicDSGE.monte_carlo.builder import build_pipeline as build_live_pipeline
     from SymbolicDSGE.monte_carlo.spec import NodeSpec as LiveNodeSpec
     from SymbolicDSGE.monte_carlo.spec import PipelineSpec as LivePipelineSpec
+    from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
+    from tests._spec_helpers import as_posted
 
     yaml_text = pathlib.Path("MODELS/test.yaml").read_text(encoding="utf-8")
     # The library spec, not the oracle's: this pipeline crosses into the real
     # BundleBuilder rather than the reference implementation the rest of the
     # module drives.
-    pipeline = LivePipelineSpec(
-        nodes=[
-            LiveNodeSpec(
-                id="sim",
-                step_type="simulation",
-                name="datagen",
-                params={"T": 50, "observables": True},
-            ),
-            LiveNodeSpec(
-                id="std",
-                step_type="standardize",
-                name="standardize",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            LiveNodeSpec(
-                id="rm",
-                step_type="rolling_mean",
-                name="rmean",
-                params={"source": "standardize", "field": "payload", "window": 3},
-            ),
-            LiveNodeSpec(
-                id="wm",
-                step_type="wald",
-                name="wald_mean",
-                params={
-                    "kind": "mean",
-                    "source": "rmean",
-                    "field": "payload",
-                    "target_vector": [0.0],
-                },
-            ),
-        ],
-        edges=[],
-        postprocs=[],
-    )
+    # Authored the way the GUI posts it, then lowered through the UI boundary,
+    # which is what resolves op kinds, source legs and the wald target field.
+    pipeline = MCPipelineSpec(
+        **as_posted(
+            {
+                "nodes": [
+                    {
+                        "id": "sim",
+                        "step_type": "simulation",
+                        "name": "datagen",
+                        "params": {"T": 50, "observables": True},
+                    },
+                    {
+                        "id": "std",
+                        "step_type": "standardize",
+                        "name": "standardize",
+                        "params": {"source": "datagen", "field": "observables"},
+                    },
+                    {
+                        "id": "rm",
+                        "step_type": "rolling_mean",
+                        "name": "rmean",
+                        "params": {
+                            "source": "standardize",
+                            "field": "payload",
+                            "window": 3,
+                        },
+                    },
+                    {
+                        "id": "wm",
+                        "step_type": "wald",
+                        "name": "wald_mean",
+                        "params": {
+                            "kind": "mean",
+                            "source": "rmean",
+                            "field": "payload",
+                            "target_vector": [0.0],
+                        },
+                    },
+                ],
+                "edges": [],
+                "postprocs": [],
+            }
+        )
+    ).to_core()
 
     target = (
         BundleBuilder(created_by="tx-test")
