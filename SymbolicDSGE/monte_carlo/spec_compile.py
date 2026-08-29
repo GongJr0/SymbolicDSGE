@@ -73,7 +73,7 @@ def raw_model_data_arrays(kwargs: Mapping[str, Any]) -> dict[str, NDArray[Any]]:
     """
     out: dict[str, NDArray[Any]] = {}
     for key in ("states", "observables"):
-        value = kwargs[key]
+        value = kwargs.get(key)
         if value is not None:
             out[key] = np.asarray(value, dtype=np.float64)
     return out
@@ -228,7 +228,7 @@ def _recover_raw_model_data(step: "MCStep") -> dict[str, Any]:
         name: list(arr.shape) for name, arr in raw_model_data_arrays(kwargs).items()
     }
     return {
-        "observable_names": [str(n) for n in kwargs["observable_names"] or ()],
+        "observable_names": [str(n) for n in kwargs.get("observable_names") or ()],
         "data_ref": step.name,
         "data_shapes": shapes,
     }

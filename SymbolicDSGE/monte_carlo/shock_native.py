@@ -26,6 +26,7 @@ from .._ckernels.monte_carlo._runner import NativeShockPlan, shock_plan
 from ..core.shock_generators import Shock
 from ..core.shock_plan import ShockPlan, ShockPlanEntry
 from ..core.solved_model.shocks import resolve_shock_plan
+from .defaults import DEFAULT_SHOCK_SCALE
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime
     from ..core.solved_model import SolvedModel
@@ -218,7 +219,9 @@ def build_native_plan(
     reproduce (Student-t, a scipy distribution object, a user callable, a
     literal array), so the caller draws every replication in Python up front.
     """
-    shocks = step.kwargs["shocks"]
+    shocks = step.kwargs.get("shocks")
+    if not shocks:
+        return None
     families = native_shock_families(shocks)
     if families is None:
         return None
@@ -230,7 +233,7 @@ def build_native_plan(
         [entry.as_tuple() for entry in entries],
         T,
         model.compiled.n_exog,
-        float(step.kwargs["shock_scale"]),
+        float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
     )
 
 
@@ -255,7 +258,7 @@ def replication_shocks(
     back for it is a fresh path rather than the one that ran.
     """
     T = int(step.kwargs["T"])
-    shocks = step.kwargs["shocks"]
+    shocks = step.kwargs.get("shocks")
     if not shocks:
         raise ValueError("The simulation step draws no shocks.")
 
@@ -264,7 +267,9 @@ def replication_shocks(
     plan = build_native_plan(model, step, T)
     block = (
         resolved.matrix(
-            T, float(step.kwargs["shock_scale"]), rep_idx * resolved.seeded_count
+            T,
+            float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
+            rep_idx * resolved.seeded_count,
         )
         if plan is None
         else plan.draw(rep_idx)

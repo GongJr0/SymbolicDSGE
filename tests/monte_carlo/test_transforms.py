@@ -271,7 +271,7 @@ def _sim_node() -> NodeSpec:
         id="sim",
         step_type="simulation",
         name="datagen",
-        params={"T": 50, "observables": True},
+        params={"T": 50},
     )
 
 
@@ -528,7 +528,6 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
                     "field": "payload",
                     "target_vector": [0.0],
                     "burn_in": 0,
-                    "alpha": 0.05,
                 },
             ),
             NodeSpec(
@@ -541,7 +540,6 @@ def test_transform_fans_out_to_multiple_downstream_chains() -> None:
                     "field": "payload",
                     "target_vector": [1.0],
                     "burn_in": 0,
-                    "alpha": 0.05,
                 },
             ),
         ],
@@ -655,7 +653,7 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
                         "id": "sim",
                         "step_type": "simulation",
                         "name": "datagen",
-                        "params": {"T": 50, "observables": True},
+                        "params": {"T": 50},
                     },
                     {
                         "id": "std",

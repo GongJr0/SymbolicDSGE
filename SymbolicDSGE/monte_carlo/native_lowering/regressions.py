@@ -14,6 +14,7 @@ from ..._ckernels.monte_carlo._runner import (
     ridge_step,
 )
 from ..allocation import BufferPlan
+from ..defaults import DEFAULT_REGRESSION_KIND
 from ..mc_constructs import MCStep
 from .utils import (
     FloatInputBinding,
@@ -70,7 +71,7 @@ def regression_result_spec(
     n, p, _, variables = _resolve_regression_shape(step, source_indices, steps, plan)
     return RegressionResultSpec(
         name=step.name,
-        kind=str(step.kwargs["kind"]),
+        kind=str(step.kwargs.get("kind", DEFAULT_REGRESSION_KIND)),
         variables=variables,
         n=n,
         k=p,
@@ -91,7 +92,7 @@ def _resolve_regression_shape(
         raise ValueError("Native regression lowering requires a one-column response.")
     intercept = bool(step.kwargs.get("intercept", DEFAULT_INTERCEPT))
     p = x_columns + int(intercept)
-    raw_variables = step.kwargs["variables"]
+    raw_variables = step.kwargs.get("variables")
     if raw_variables is None:
         variables = tuple(f"x{index}" for index in range(x_columns))
     else:
@@ -106,7 +107,7 @@ def _resolve_regression_shape(
 
 
 def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
-    kind = step.kwargs["kind"]
+    kind = step.kwargs.get("kind", DEFAULT_REGRESSION_KIND)
     descent = _supplied(step.kwargs, "max_iter", "tol")
     if kind == "ols":
         return ols_step(step.name, n, p, intercept)

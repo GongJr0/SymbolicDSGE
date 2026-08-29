@@ -192,7 +192,7 @@ def _check_raw_model_data_layout(
 ) -> None:
     expected_offset = 0
     for field in ("states", "observables"):
-        value = step.kwargs[field]
+        value = step.kwargs.get(field)
         if value is None:
             continue
         layout = fields[field]

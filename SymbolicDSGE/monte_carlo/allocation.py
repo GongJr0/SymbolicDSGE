@@ -23,6 +23,13 @@ from .._ckernels.monte_carlo._runner import (
     DEFAULT_WINDOW,
 )
 from ..core.solved_model import SolvedModel
+from .defaults import (
+    DEFAULT_FILTER_MODE,
+    DEFAULT_REGRESSION_KIND,
+    DEFAULT_SIMULATION_OBSERVABLES,
+    DEFAULT_SIMULATION_TARGET,
+    DEFAULT_WALD_KIND_NAME,
+)
 from .mc_constructs import MCStep, OpType, SourceArgs
 from .shock_native import native_shock_scratch
 
@@ -219,7 +226,12 @@ def _resolve_datagen_input_asize(
     if step.step_type == "raw_model_data":
         return ArenaSize()
     model = cast(
-        SolvedModel, reference if step.kwargs["target"] == "reference" else dgp
+        SolvedModel,
+        (
+            reference
+            if step.kwargs.get("target", DEFAULT_SIMULATION_TARGET) == "reference"
+            else dgp
+        ),
     )
     T = int(step.kwargs["T"])
     size = _asize(
@@ -234,7 +246,7 @@ def _resolve_datagen_input_asize(
     )
     # A step that draws its own shocks needs scratch past the simulation arena.
     # Lowering decides the same way, off the same spec, so the two agree.
-    scratch = native_shock_scratch(step.kwargs["shocks"], T)
+    scratch = native_shock_scratch(step.kwargs.get("shocks"), T)
     if scratch:
         size = ArenaSize(n_float=size.n_float + scratch, n_int=size.n_int)
     return size
@@ -247,12 +259,11 @@ def _resolve_filter_input_asize(
     reference: SolvedModel,
 ) -> ArenaSize:
     T, datagen_n_obs = datagen_plan.out_fields["observables"].shape
-    selected_observables = step.kwargs["observables"]
+    selected_observables = step.kwargs.get("observables")
     if selected_observables is not None:
         n_obs = len(selected_observables)
-    elif (
-        datagen_step.step_type == "raw_model_data"
-        and not datagen_step.kwargs["observable_names"]
+    elif datagen_step.step_type == "raw_model_data" and not datagen_step.kwargs.get(
+        "observable_names"
     ):
         n_obs = reference.compiled.n_obs
     else:
@@ -286,7 +297,7 @@ def _resolve_regression_input_asize(
     p = X_columns + int(intercept)
     return _asize(
         _arena.regression_arena_size(
-            step.kwargs["kind"],
+            step.kwargs.get("kind", DEFAULT_REGRESSION_KIND),
             y_rows,
             p,
             intercept,
@@ -298,7 +309,7 @@ def _resolve_regression_input_asize(
 
 def _filter_mode(step: MCStep) -> str:
     """A filter's mode, which selects the kernel rather than configuring one."""
-    return str(step.kwargs.get("filter_mode", "linear"))
+    return str(step.kwargs.get("filter_mode", DEFAULT_FILTER_MODE))
 
 
 def _transform_arena_param(step: MCStep) -> int:
@@ -331,7 +342,9 @@ def _resolve_test_input_asize(
         case "wald":
             return _asize(
                 _arena.diagnostic_arena_size(
-                    f"wald_{step.kwargs.get('kind', 'mean')}", n, p
+                    f"wald_{step.kwargs.get('kind', DEFAULT_WALD_KIND_NAME)}",
+                    n,
+                    p,
                 )
             )
         case "ljung_box":
@@ -469,7 +482,8 @@ def _resolve_datagen_fields(
 ) -> dict[str, _FieldSpec]:
     match step.step_type:
         case "simulation":
-            model = reference if step.kwargs["target"] == "reference" else dgp
+            target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
+            model = reference if target == "reference" else dgp
             if model is None:
                 raise ValueError(
                     "Simulation output planning requires its target model."
@@ -478,14 +492,14 @@ def _resolve_datagen_fields(
             fields: dict[str, _FieldSpec] = {
                 "states": _field((T, model.compiled.n_var))
             }
-            if step.kwargs["observables"]:
+            if step.kwargs.get("observables", DEFAULT_SIMULATION_OBSERVABLES):
                 fields["observables"] = _field((T, model.compiled.n_obs))
             return fields
         case "raw_model_data":
             return {
                 field: _field(_raw_data_shape(field, value))
                 for field in ("states", "observables")
-                if (value := step.kwargs[field]) is not None
+                if (value := step.kwargs.get(field)) is not None
             }
         case _:
             raise NotImplementedError(
@@ -507,12 +521,11 @@ def _resolve_filter_fields(
             "Filter output planning requires datagen observables."
         ) from exc
 
-    selected_observables = step.kwargs["observables"]
+    selected_observables = step.kwargs.get("observables")
     if selected_observables is not None:
         n_obs = len(selected_observables)
-    elif (
-        datagen_step.step_type == "raw_model_data"
-        and not datagen_step.kwargs["observable_names"]
+    elif datagen_step.step_type == "raw_model_data" and not datagen_step.kwargs.get(
+        "observable_names"
     ):
         n_obs = reference.compiled.n_obs
     else:
@@ -615,7 +628,7 @@ def _resolve_regression_fields(
         "sst": _field(()),
         "status": _field((), np.int64),
     }
-    if step.kwargs["kind"] == "ols":
+    if step.kwargs.get("kind", DEFAULT_REGRESSION_KIND) == "ols":
         fields["se"] = _field((p,))
     return fields
 

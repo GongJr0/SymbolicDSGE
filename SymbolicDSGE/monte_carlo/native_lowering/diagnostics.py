@@ -7,7 +7,6 @@ from typing import Any, Mapping
 import numpy as np
 
 from ..._ckernels.monte_carlo._runner import (
-    DEFAULT_WALD_KIND,
     NativeStep,
     breusch_godfrey_step,
     breusch_pagan_step,
@@ -19,6 +18,7 @@ from ..._ckernels.monte_carlo._runner import (
     wald_step,
 )
 from ..allocation import BufferPlan
+from ..defaults import DEFAULT_WALD_KIND_NAME
 from ..mc_constructs import MCStep
 from .utils import (
     NDF,
@@ -128,9 +128,7 @@ def _lower_wald_step(
 
 def _wald_kind(kwargs: Mapping[str, Any]) -> int:
     """A Wald statistic's kind as its native code."""
-    kind = kwargs.get("kind")
-    if kind is None:
-        return int(DEFAULT_WALD_KIND)
+    kind = kwargs.get("kind", DEFAULT_WALD_KIND_NAME)
     try:
         return {"mean": 0, "covariance": 1, "second_moment": 2}[kind]
     except KeyError as exc:

@@ -14,6 +14,11 @@ from ..._ckernels.monte_carlo._runner import (
 from ...core.solved_model import SolvedModel
 from ...core.solved_model.shocks import resolve_shock_plan, simulation_shock_matrix
 from ..allocation import StepBufferPlan
+from ..defaults import (
+    DEFAULT_SHOCK_SCALE,
+    DEFAULT_SIMULATION_OBSERVABLES,
+    DEFAULT_SIMULATION_TARGET,
+)
 from ..mc_constructs import MCStep
 from ..shock_native import build_native_plan, validate_shock_specs
 from .utils import (
@@ -34,7 +39,7 @@ def lower_simulation_step(
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile one model simulation into the native simulation ABI."""
     T = int(step.kwargs["T"])
-    target = step.kwargs["target"]
+    target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
     if target not in {"reference", "dgp"}:
         raise ValueError(f"Unsupported simulation target: {target!r}.")
     model = reference if target == "reference" else dgp
@@ -48,7 +53,9 @@ def lower_simulation_step(
     n_exog = comp.n_exog
     n_par = comp.n_par
     observable_names = (
-        tuple(comp.observable_names) if step.kwargs["observables"] else ()
+        tuple(comp.observable_names)
+        if step.kwargs.get("observables", DEFAULT_SIMULATION_OBSERVABLES)
+        else ()
     )
     n_obs = len(observable_names)
     measurement_addr = (
@@ -71,7 +78,7 @@ def lower_simulation_step(
             step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs, drawn
         )
         steady_state = _flat_f64(model.policy.steady_state)
-        x0 = model._initial_state(step.kwargs["x0"])
+        x0 = model._initial_state(step.kwargs.get("x0"))
         return native_step, _order1_bindings(
             model, steady_state, x0, shocks, shocks_batched, params, T
         )
@@ -89,7 +96,7 @@ def lower_simulation_step(
             drawn,
         )
         steady_state = _flat_f64(model.policy.steady_state)
-        x0_arr = model._initial_state(step.kwargs["x0"])
+        x0_arr = model._initial_state(step.kwargs.get("x0"))
         return native_step, _order2_bindings(
             model,
             steady_state,
@@ -189,8 +196,8 @@ def _simulation_shocks(
     Cholesky are not repeated. Each replication shifts every base seed by the
     number of seeded entries, which keeps entries that share a run apart.
     """
-    shocks = step.kwargs["shocks"]
-    shock_scale = float(step.kwargs["shock_scale"])
+    shocks = step.kwargs.get("shocks")
+    shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
     if shocks is None:
         return _array_shocks(model, T, shock_scale), False
 
