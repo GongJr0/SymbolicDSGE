@@ -352,6 +352,8 @@ cdef extern from "transforms.h":
         int64_t window
         int64_t ddof
 
+    ctypedef sdsge_mc_rolling_var_step_ctx sdsge_mc_rolling_std_step_ctx
+
     ctypedef int64_t (*user_transform_fn)(
             double *inp,
             double *out,
@@ -430,6 +432,13 @@ cdef extern from "transforms.h":
         int64_t *int_out,
         const void *ctx,
     ) noexcept nogil
+
+cdef extern from "../regression/regression.h":
+    ctypedef enum RegressionCriterion:
+        REGRESSION_CRIT_AIC
+        REGRESSION_CRIT_BIC
+        REGRESSION_CRIT_LOSS
+
 
 cdef extern from "regression.h":
     ctypedef struct sdsge_mc_ols_step_ctx:
@@ -517,7 +526,25 @@ cdef extern from "regression.h":
     ) noexcept nogil
 
 
+cdef extern from "../diag/diag_wald.h":
+    ctypedef enum KernelID:
+        BARTLETT
+        PARZEN
+        QS
+
+    ctypedef enum WaldBandwidthMode:
+        WALD_BW_MANUAL
+        WALD_BW_WOOLDRIDGE
+        WALD_BW_ANDREWS
+        WALD_BW_AUTO
+
+
 cdef extern from "tests.h":
+    ctypedef enum sdsge_mc_wald_kind:
+        SDSGE_MC_WALD_MEAN
+        SDSGE_MC_WALD_COVARIANCE
+        SDSGE_MC_WALD_SECOND_MOMENT
+
     ctypedef struct sdsge_mc_wald_test_ctx:
         const double *target
         int64_t n
@@ -585,6 +612,41 @@ cdef extern from "tests.h":
     int sdsge_mc_chow_test_runner(
         int64_t, double *, double *, int64_t *, int64_t *, const void *
     ) noexcept nogil
+
+
+cdef extern from "mc_step_ctx.h":
+    ctypedef union sdsge_mc_step_ctx:
+        sdsge_mc_payload_step_ctx payload
+        sdsge_mc_passthrough_step_ctx passthrough
+        sdsge_mc_raw_model_data_step_ctx raw_model_data
+        sdsge_mc_simulate_order1_step_ctx simulate_order1
+        sdsge_mc_simulate_order2_step_ctx simulate_order2
+        sdsge_mc_filter_linear_step_ctx filter_linear
+        sdsge_mc_filter_extended_step_ctx filter_extended
+        sdsge_mc_filter_unscented_step_ctx filter_unscented
+        sdsge_mc_ols_step_ctx ols
+        sdsge_mc_ridge_step_ctx ridge
+        sdsge_mc_ridge_gs_step_ctx ridge_gs
+        sdsge_mc_lasso_step_ctx lasso
+        sdsge_mc_lasso_gs_step_ctx lasso_gs
+        sdsge_mc_elastic_net_step_ctx elastic_net
+        sdsge_mc_elastic_net_gs_step_ctx elastic_net_gs
+        sdsge_mc_wald_test_ctx wald
+        sdsge_mc_ljung_box_test_ctx ljung_box
+        sdsge_mc_jarque_bera_test_ctx jarque_bera
+        sdsge_mc_breusch_pagan_test_ctx breusch_pagan
+        sdsge_mc_breusch_godfrey_test_ctx breusch_godfrey
+        sdsge_mc_cusum_test_ctx cusum
+        sdsge_mc_cusumsq_test_ctx cusumsq
+        sdsge_mc_chow_test_ctx chow
+        sdsge_mc_standardize_step_ctx standardize
+        sdsge_mc_log_step_ctx log
+        sdsge_mc_log_diff_step_ctx log_diff
+        sdsge_mc_diff_step_ctx diff
+        sdsge_mc_rolling_mean_step_ctx rolling_mean
+        sdsge_mc_rolling_var_step_ctx rolling_var
+        sdsge_mc_rolling_std_step_ctx rolling_std
+        sdsge_mc_user_transform_step_ctx user_transform
 
 
 class NativeRunResult(NamedTuple):
@@ -760,12 +822,41 @@ def shock_plan(
 SHOCK_NORMAL = SDSGE_MC_SHOCK_NORMAL
 SHOCK_UNIFORM = SDSGE_MC_SHOCK_UNIFORM
 
+# Step-builder defaults. A knob is valued once here and shared by every builder
+# that carries it, so a caller that omits one still narrows a complete context.
+# Callers that size arenas before a step exists read the same names.
+DEFAULT_SYMMETRIZE = True
+DEFAULT_JOSEPH_COV = True
+DEFAULT_JITTER = 0.0
+DEFAULT_RETURN_SHOCKS = False
+DEFAULT_UKF_ALPHA = 1.0
+DEFAULT_UKF_BETA = 2.0
+DEFAULT_UKF_KAPPA = 1.0
+DEFAULT_DDOF = 0
+DEFAULT_OFFSET = 0.0
+DEFAULT_ORDER = 1
+DEFAULT_WINDOW = 10
+DEFAULT_INTERCEPT = True
+DEFAULT_MAX_ITER = 1000
+DEFAULT_TOL = 1e-10
+DEFAULT_L1_RATIO = 0.5
+DEFAULT_RIDGE_GS_CRITERION = REGRESSION_CRIT_AIC
+DEFAULT_ELASTIC_NET_GS_CRITERION = REGRESSION_CRIT_LOSS
+DEFAULT_ROBUST = False
+DEFAULT_WALD_KIND = SDSGE_MC_WALD_MEAN
+DEFAULT_WALD_KERNEL = BARTLETT
+DEFAULT_WALD_BANDWIDTH_MODE = WALD_BW_AUTO
+DEFAULT_WALD_MANUAL_BANDWIDTH = 0
+DEFAULT_LJUNG_BOX_LAGS = 10
+DEFAULT_BREUSCH_GODFREY_LAGS = 1
+DEFAULT_T_BREAK = 10
+
 
 cdef class NativeStep:
     """One native step function plus its persistent static C context."""
 
     cdef sdsge_mc_step_fn _fn
-    cdef const void *_ctx
+    cdef sdsge_mc_step_ctx _ctx_store
     cdef object _name
     cdef object _backing
     cdef object _test_distribution
@@ -775,36 +866,6 @@ cdef class NativeStep:
     cdef int64_t _input_n_int
     cdef int64_t _output_n_float
     cdef int64_t _output_n_int
-    cdef sdsge_mc_payload_step_ctx _payload_ctx
-    cdef sdsge_mc_raw_model_data_step_ctx _raw_model_data_ctx
-    cdef sdsge_mc_simulate_order1_step_ctx _simulate_order1_ctx
-    cdef sdsge_mc_simulate_order2_step_ctx _simulate_order2_ctx
-    cdef sdsge_mc_filter_linear_step_ctx _filter_linear_ctx
-    cdef sdsge_mc_filter_extended_step_ctx _filter_extended_ctx
-    cdef sdsge_mc_filter_unscented_step_ctx _filter_unscented_ctx
-    cdef sdsge_mc_passthrough_step_ctx _passthrough_ctx
-    cdef sdsge_mc_standardize_step_ctx _standardize_ctx
-    cdef sdsge_mc_log_step_ctx _log_ctx
-    cdef sdsge_mc_log_diff_step_ctx _log_diff_ctx
-    cdef sdsge_mc_diff_step_ctx _diff_ctx
-    cdef sdsge_mc_rolling_mean_step_ctx _rolling_mean_ctx
-    cdef sdsge_mc_rolling_var_step_ctx _rolling_var_ctx
-    cdef sdsge_mc_ols_step_ctx _ols_ctx
-    cdef sdsge_mc_ridge_step_ctx _ridge_ctx
-    cdef sdsge_mc_ridge_gs_step_ctx _ridge_gs_ctx
-    cdef sdsge_mc_lasso_step_ctx _lasso_ctx
-    cdef sdsge_mc_lasso_gs_step_ctx _lasso_gs_ctx
-    cdef sdsge_mc_elastic_net_step_ctx _elastic_net_ctx
-    cdef sdsge_mc_elastic_net_gs_step_ctx _elastic_net_gs_ctx
-    cdef sdsge_mc_wald_test_ctx _wald_ctx
-    cdef sdsge_mc_ljung_box_test_ctx _ljung_box_ctx
-    cdef sdsge_mc_jarque_bera_test_ctx _jarque_bera_ctx
-    cdef sdsge_mc_breusch_pagan_test_ctx _breusch_pagan_ctx
-    cdef sdsge_mc_breusch_godfrey_test_ctx _breusch_godfrey_ctx
-    cdef sdsge_mc_cusum_test_ctx _cusum_ctx
-    cdef sdsge_mc_cusumsq_test_ctx _cusumsq_ctx
-    cdef sdsge_mc_chow_test_ctx _chow_ctx
-    cdef sdsge_mc_user_transform_step_ctx _user_transform_ctx
 
     def __cinit__(self):
         self._test_distribution = None
@@ -819,7 +880,6 @@ cdef class NativeStep:
         self,
         str name,
         sdsge_mc_step_fn fn,
-        const void *ctx,
         object backing,
         int64_t n_batch,
         int64_t input_n_float,
@@ -827,16 +887,15 @@ cdef class NativeStep:
         int64_t output_n_float,
         int64_t output_n_int,
     ) except *:
-        """Finish one typed context after its factory has initialized it."""
+        """Finish one typed context after its factory has narrowed the union."""
         if not name:
             raise ValueError("Native step name must be non-empty.")
-        if fn == NULL or ctx == NULL:
-            raise ValueError("Native steps require a function and context.")
+        if fn == NULL:
+            raise ValueError("Native steps require a step function.")
         if n_batch < 0:
             raise ValueError("Native step batch count must be non-negative.")
         self._name = name
         self._fn = fn
-        self._ctx = ctx
         self._backing = backing
         self._n_batch = n_batch
         self._input_n_float = input_n_float
@@ -917,13 +976,12 @@ def payload_step(str name, value):
     else:
         n = input_array.size
 
-    step._payload_ctx.input = <const double *>cnp.PyArray_DATA(input_array)
-    step._payload_ctx.n = n
-    step._payload_ctx.input_batched = input_array.ndim == 3
+    step._ctx_store.payload.input = <const double *>cnp.PyArray_DATA(input_array)
+    step._ctx_store.payload.n = n
+    step._ctx_store.payload.input_batched = input_array.ndim == 3
     step._bind(
         name,
         sdsge_mc_payload_runner,
-        <const void *>&step._payload_ctx,
         input_array,
         step._n_batch,
         0,
@@ -958,12 +1016,12 @@ def raw_model_data_step(str name, states=None, observables=None):
             if states_batched else states_array.size
         )
         n_batch = states_array.shape[0] if states_batched else 0
-        step._raw_model_data_ctx.states_input = <const double *>cnp.PyArray_DATA(
+        step._ctx_store.raw_model_data.states_input = <const double *>cnp.PyArray_DATA(
             states_array
         )
     else:
         states_array = None
-        step._raw_model_data_ctx.states_input = NULL
+        step._ctx_store.raw_model_data.states_input = NULL
 
     if observables is not None:
         observables_array = np.ascontiguousarray(observables, dtype=np.float64)
@@ -980,21 +1038,20 @@ def raw_model_data_step(str name, states=None, observables=None):
             if n_batch and n_batch != observables_array.shape[0]:
                 raise ValueError("Batched states and observables must share n_rep.")
             n_batch = observables_array.shape[0]
-        step._raw_model_data_ctx.observables_input = <const double *>cnp.PyArray_DATA(
-            observables_array
+        step._ctx_store.raw_model_data.observables_input = (
+            <const double *>cnp.PyArray_DATA(observables_array)
         )
     else:
         observables_array = None
-        step._raw_model_data_ctx.observables_input = NULL
+        step._ctx_store.raw_model_data.observables_input = NULL
 
-    step._raw_model_data_ctx.n_states = n_states
-    step._raw_model_data_ctx.states_batched = states_batched
-    step._raw_model_data_ctx.n_observables = n_observables
-    step._raw_model_data_ctx.observables_batched = observables_batched
+    step._ctx_store.raw_model_data.n_states = n_states
+    step._ctx_store.raw_model_data.states_batched = states_batched
+    step._ctx_store.raw_model_data.n_observables = n_observables
+    step._ctx_store.raw_model_data.observables_batched = observables_batched
     step._bind(
         name,
         sdsge_mc_raw_model_data_runner,
-        <const void *>&step._raw_model_data_ctx,
         (states_array, observables_array),
         n_batch,
         0,
@@ -1033,25 +1090,24 @@ def simulate1_step(
     if n_obs and measurement_addr == 0:
         raise ValueError("Observable simulation requires a measurement address.")
 
-    step._simulate_order1_ctx.measurement = (
+    step._ctx_store.simulate_order1.measurement = (
         <sdsge_measurement_fn><void *>measurement_addr
     )
-    step._simulate_order1_ctx.T = T
-    step._simulate_order1_ctx.n = n_var
-    step._simulate_order1_ctx.k = n_exog
-    step._simulate_order1_ctx.n_par = n_par
-    step._simulate_order1_ctx.m = n_obs
-    step._simulate_order1_ctx.shock_scratch_offset = arena
+    step._ctx_store.simulate_order1.T = T
+    step._ctx_store.simulate_order1.n = n_var
+    step._ctx_store.simulate_order1.k = n_exog
+    step._ctx_store.simulate_order1.n_par = n_par
+    step._ctx_store.simulate_order1.m = n_obs
+    step._ctx_store.simulate_order1.shock_scratch_offset = arena
     if shocks is None:
-        step._simulate_order1_ctx.shocks = NULL
+        step._ctx_store.simulate_order1.shocks = NULL
     else:
         _check_shock_plan(shocks, T, n_exog)
-        step._simulate_order1_ctx.shocks = shocks.c_plan()
+        step._ctx_store.simulate_order1.shocks = shocks.c_plan()
         arena += shocks.scratch_size
     step._bind(
         name,
         sdsge_mc_simulate_order1_runner,
-        <const void *>&step._simulate_order1_ctx,
         shocks,
         0,
         arena,
@@ -1103,26 +1159,25 @@ def simulate2_step(
         raise ValueError("Observable simulation requires a measurement address.")
 
     arena = sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par)
-    step._simulate_order2_ctx.measurement = (
+    step._ctx_store.simulate_order2.measurement = (
         <sdsge_measurement_fn><void *>measurement_addr
     )
-    step._simulate_order2_ctx.T = T
-    step._simulate_order2_ctx.n_state = n_state
-    step._simulate_order2_ctx.n_ctrl = n_ctrl
-    step._simulate_order2_ctx.n_exog = n_exog
-    step._simulate_order2_ctx.n_par = n_par
-    step._simulate_order2_ctx.m = n_obs
-    step._simulate_order2_ctx.shock_scratch_offset = arena
+    step._ctx_store.simulate_order2.T = T
+    step._ctx_store.simulate_order2.n_state = n_state
+    step._ctx_store.simulate_order2.n_ctrl = n_ctrl
+    step._ctx_store.simulate_order2.n_exog = n_exog
+    step._ctx_store.simulate_order2.n_par = n_par
+    step._ctx_store.simulate_order2.m = n_obs
+    step._ctx_store.simulate_order2.shock_scratch_offset = arena
     if shocks is None:
-        step._simulate_order2_ctx.shocks = NULL
+        step._ctx_store.simulate_order2.shocks = NULL
     else:
         _check_shock_plan(shocks, T, n_exog)
-        step._simulate_order2_ctx.shocks = shocks.c_plan()
+        step._ctx_store.simulate_order2.shocks = shocks.c_plan()
         arena += shocks.scratch_size
     step._bind(
         name,
         sdsge_mc_simulate_order2_runner,
-        <const void *>&step._simulate_order2_ctx,
         shocks,
         0,
         arena,
@@ -1139,10 +1194,10 @@ def filter_linear_step(
     int64_t n_var,
     int64_t n_obs,
     int64_t n_exog,
-    bint symmetrize=False,
-    bint joseph_cov=True,
-    double jitter=0.0,
-    bint return_shocks=False,
+    bint symmetrize=DEFAULT_SYMMETRIZE,
+    bint joseph_cov=DEFAULT_JOSEPH_COV,
+    double jitter=DEFAULT_JITTER,
+    bint return_shocks=DEFAULT_RETURN_SHOCKS,
 ):
     """Bind a linear Kalman filter with resolved scalar settings."""
     cdef NativeStep step = NativeStep()
@@ -1150,18 +1205,17 @@ def filter_linear_step(
     if T < 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0:
         raise ValueError("Native linear filter dimensions must be valid.")
 
-    step._filter_linear_ctx.T = T
-    step._filter_linear_ctx.n = n_var
-    step._filter_linear_ctx.m = n_obs
-    step._filter_linear_ctx.k = n_exog
-    step._filter_linear_ctx.symmetrize = symmetrize
-    step._filter_linear_ctx.joseph_cov = joseph_cov
-    step._filter_linear_ctx.jitter = jitter
-    step._filter_linear_ctx.return_shocks = return_shocks
+    step._ctx_store.filter_linear.T = T
+    step._ctx_store.filter_linear.n = n_var
+    step._ctx_store.filter_linear.m = n_obs
+    step._ctx_store.filter_linear.k = n_exog
+    step._ctx_store.filter_linear.symmetrize = symmetrize
+    step._ctx_store.filter_linear.joseph_cov = joseph_cov
+    step._ctx_store.filter_linear.jitter = jitter
+    step._ctx_store.filter_linear.return_shocks = return_shocks
     step._bind(
         name,
         sdsge_mc_filter_linear_runner,
-        <const void *>&step._filter_linear_ctx,
         None,
         0,
         -1,
@@ -1187,10 +1241,10 @@ def filter_extended_step(
     int64_t n_obs,
     int64_t n_exog,
     int64_t n_par,
-    bint symmetrize=False,
-    bint joseph_cov=True,
-    double jitter=0.0,
-    bint return_shocks=False,
+    bint symmetrize=DEFAULT_SYMMETRIZE,
+    bint joseph_cov=DEFAULT_JOSEPH_COV,
+    double jitter=DEFAULT_JITTER,
+    bint return_shocks=DEFAULT_RETURN_SHOCKS,
 ):
     """Bind an extended Kalman filter with resolved callbacks and settings."""
     cdef NativeStep step = NativeStep()
@@ -1200,21 +1254,20 @@ def filter_extended_step(
     if measurement_addr == 0 or jacobian_addr == 0:
         raise ValueError("Native extended filtering requires both callback addresses.")
 
-    step._filter_extended_ctx.measurement = <meas_fn><void *>measurement_addr
-    step._filter_extended_ctx.jacobian = <meas_fn><void *>jacobian_addr
-    step._filter_extended_ctx.T = T
-    step._filter_extended_ctx.n = n_var
-    step._filter_extended_ctx.m = n_obs
-    step._filter_extended_ctx.k = n_exog
-    step._filter_extended_ctx.n_par = n_par
-    step._filter_extended_ctx.symmetrize = symmetrize
-    step._filter_extended_ctx.joseph_cov = joseph_cov
-    step._filter_extended_ctx.jitter = jitter
-    step._filter_extended_ctx.return_shocks = return_shocks
+    step._ctx_store.filter_extended.measurement = <meas_fn><void *>measurement_addr
+    step._ctx_store.filter_extended.jacobian = <meas_fn><void *>jacobian_addr
+    step._ctx_store.filter_extended.T = T
+    step._ctx_store.filter_extended.n = n_var
+    step._ctx_store.filter_extended.m = n_obs
+    step._ctx_store.filter_extended.k = n_exog
+    step._ctx_store.filter_extended.n_par = n_par
+    step._ctx_store.filter_extended.symmetrize = symmetrize
+    step._ctx_store.filter_extended.joseph_cov = joseph_cov
+    step._ctx_store.filter_extended.jitter = jitter
+    step._ctx_store.filter_extended.return_shocks = return_shocks
     step._bind(
         name,
         sdsge_mc_filter_extended_runner,
-        <const void *>&step._filter_extended_ctx,
         None,
         0,
         -1,
@@ -1240,11 +1293,11 @@ def filter_unscented_step(
     int64_t n_exog,
     int64_t n_obs,
     int64_t n_par,
-    double alpha,
-    double beta,
-    double kappa,
-    bint symmetrize=False,
-    double jitter=0.0,
+    double alpha=DEFAULT_UKF_ALPHA,
+    double beta=DEFAULT_UKF_BETA,
+    double kappa=DEFAULT_UKF_KAPPA,
+    bint symmetrize=DEFAULT_SYMMETRIZE,
+    double jitter=DEFAULT_JITTER,
 ):
     """Bind an unscented Kalman filter with resolved callback and settings."""
     cdef NativeStep step = NativeStep()
@@ -1254,22 +1307,21 @@ def filter_unscented_step(
     if n_par < 0 or measurement_addr == 0:
         raise ValueError("Native unscented filtering requires a callback address.")
 
-    step._filter_unscented_ctx.measurement = <meas_fn><void *>measurement_addr
-    step._filter_unscented_ctx.T = T
-    step._filter_unscented_ctx.n_state = n_state
-    step._filter_unscented_ctx.n_ctrl = n_ctrl
-    step._filter_unscented_ctx.n_exog = n_exog
-    step._filter_unscented_ctx.n_obs = n_obs
-    step._filter_unscented_ctx.n_par = n_par
-    step._filter_unscented_ctx.alpha = alpha
-    step._filter_unscented_ctx.beta = beta
-    step._filter_unscented_ctx.kappa = kappa
-    step._filter_unscented_ctx.symmetrize = symmetrize
-    step._filter_unscented_ctx.jitter = jitter
+    step._ctx_store.filter_unscented.measurement = <meas_fn><void *>measurement_addr
+    step._ctx_store.filter_unscented.T = T
+    step._ctx_store.filter_unscented.n_state = n_state
+    step._ctx_store.filter_unscented.n_ctrl = n_ctrl
+    step._ctx_store.filter_unscented.n_exog = n_exog
+    step._ctx_store.filter_unscented.n_obs = n_obs
+    step._ctx_store.filter_unscented.n_par = n_par
+    step._ctx_store.filter_unscented.alpha = alpha
+    step._ctx_store.filter_unscented.beta = beta
+    step._ctx_store.filter_unscented.kappa = kappa
+    step._ctx_store.filter_unscented.symmetrize = symmetrize
+    step._ctx_store.filter_unscented.jitter = jitter
     step._bind(
         name,
         sdsge_mc_filter_unscented_runner,
-        <const void *>&step._filter_unscented_ctx,
         None,
         0,
         -1,
@@ -1290,10 +1342,10 @@ def transform_step(
     str kind,
     int64_t n,
     int64_t p,
-    int64_t ddof=0,
-    double offset=0.0,
-    int64_t order=1,
-    int64_t window=1,
+    int64_t ddof=DEFAULT_DDOF,
+    double offset=DEFAULT_OFFSET,
+    int64_t order=DEFAULT_ORDER,
+    int64_t window=DEFAULT_WINDOW,
     uintptr_t function_address=0,
     object backing=None,
     int64_t output_n=-1,
@@ -1304,7 +1356,6 @@ def transform_step(
     cdef int64_t input_count
     cdef int64_t output_rows
     cdef sdsge_mc_step_fn fn
-    cdef const void *ctx
 
     if n < 0 or p < 0:
         raise ValueError("Transform dimensions must be non-negative.")
@@ -1313,64 +1364,57 @@ def transform_step(
     step._input_n_int = 0
     step._output_n_int = 0
     if kind == "passthrough":
-        step._passthrough_ctx.n = n
-        step._passthrough_ctx.p = p
+        step._ctx_store.passthrough.n = n
+        step._ctx_store.passthrough.p = p
         fn = sdsge_mc_passthrough_runner
-        ctx = <const void *>&step._passthrough_ctx
         step._input_n_float = input_count
         step._output_n_float = input_count
     elif kind == "standardize":
-        step._standardize_ctx.n = n
-        step._standardize_ctx.p = p
-        step._standardize_ctx.ddof = ddof
+        step._ctx_store.standardize.n = n
+        step._ctx_store.standardize.p = p
+        step._ctx_store.standardize.ddof = ddof
         fn = sdsge_mc_standardize_runner
-        ctx = <const void *>&step._standardize_ctx
         step._input_n_float = input_count + 2 * p
         step._output_n_float = input_count
     elif kind == "log":
-        step._log_ctx.n = n
-        step._log_ctx.p = p
-        step._log_ctx.offset = offset
+        step._ctx_store.log.n = n
+        step._ctx_store.log.p = p
+        step._ctx_store.log.offset = offset
         fn = sdsge_mc_log_runner
-        ctx = <const void *>&step._log_ctx
         step._input_n_float = input_count
         step._output_n_float = input_count
     elif kind == "log_diff":
-        step._log_diff_ctx.n = n
-        step._log_diff_ctx.p = p
-        step._log_diff_ctx.offset = offset
+        step._ctx_store.log_diff.n = n
+        step._ctx_store.log_diff.p = p
+        step._ctx_store.log_diff.offset = offset
         fn = sdsge_mc_log_diff_runner
-        ctx = <const void *>&step._log_diff_ctx
         step._input_n_float = input_count + p
         step._output_n_float = max(0, n - 1) * p
     elif kind == "diff":
-        step._diff_ctx.n = n
-        step._diff_ctx.p = p
-        step._diff_ctx.order = order
+        step._ctx_store.diff.n = n
+        step._ctx_store.diff.p = p
+        step._ctx_store.diff.order = order
         fn = sdsge_mc_diff_runner
-        ctx = <const void *>&step._diff_ctx
         step._input_n_float = input_count + max(0, order) * p
         step._output_n_float = max(0, n - order) * p
     elif kind == "rolling_mean":
-        step._rolling_mean_ctx.n = n
-        step._rolling_mean_ctx.p = p
-        step._rolling_mean_ctx.window = window
+        step._ctx_store.rolling_mean.n = n
+        step._ctx_store.rolling_mean.p = p
+        step._ctx_store.rolling_mean.window = window
         fn = sdsge_mc_rolling_mean_runner
-        ctx = <const void *>&step._rolling_mean_ctx
         step._input_n_float = input_count + p
         output_rows = max(0, n - window + 1)
         step._output_n_float = output_rows * p
     elif kind == "rolling_var" or kind == "rolling_std":
-        step._rolling_var_ctx.n = n
-        step._rolling_var_ctx.p = p
-        step._rolling_var_ctx.window = window
-        step._rolling_var_ctx.ddof = ddof
+        step._ctx_store.rolling_var.n = n
+        step._ctx_store.rolling_var.p = p
+        step._ctx_store.rolling_var.window = window
+        step._ctx_store.rolling_var.ddof = ddof
         fn = (
             sdsge_mc_rolling_var_runner
             if kind == "rolling_var"
             else sdsge_mc_rolling_std_runner
         )
-        ctx = <const void *>&step._rolling_var_ctx
         step._input_n_float = input_count + 2 * p
         output_rows = max(0, n - window + 1)
         step._output_n_float = output_rows * p
@@ -1381,13 +1425,12 @@ def transform_step(
             raise ValueError("Native custom transforms require callback backing.")
         if output_n < 0 or output_p < 0:
             raise ValueError("Native custom transform output dimensions are required.")
-        step._user_transform_ctx.fn = <user_transform_fn><void *>function_address
-        step._user_transform_ctx.n_in = n
-        step._user_transform_ctx.p_in = p
-        step._user_transform_ctx.n_out = output_n
-        step._user_transform_ctx.p_out = output_p
+        step._ctx_store.user_transform.fn = <user_transform_fn><void *>function_address
+        step._ctx_store.user_transform.n_in = n
+        step._ctx_store.user_transform.p_in = p
+        step._ctx_store.user_transform.n_out = output_n
+        step._ctx_store.user_transform.p_out = output_p
         fn = sdsge_mc_user_transform_runner
-        ctx = <const void *>&step._user_transform_ctx
         step._input_n_float = input_count
         step._output_n_float = output_n * output_p
     else:
@@ -1395,7 +1438,6 @@ def transform_step(
     step._bind(
         name,
         fn,
-        ctx,
         backing,
         0,
         step._input_n_float,
@@ -1406,20 +1448,19 @@ def transform_step(
     return step
 
 
-def ols_step(str name, int64_t n, int64_t p, bint intercept=True):
+def ols_step(str name, int64_t n, int64_t p, bint intercept=DEFAULT_INTERCEPT):
     """Bind the native OLS adapter after source staging has been compiled."""
     cdef NativeStep step = NativeStep()
 
     if n < 0 or p <= 0:
         raise ValueError("OLS dimensions require n >= 0 and p > 0.")
 
-    step._ols_ctx.n = n
-    step._ols_ctx.p = p
-    step._ols_ctx.intercept = intercept
+    step._ctx_store.ols.n = n
+    step._ctx_store.ols.p = p
+    step._ctx_store.ols.intercept = intercept
     step._bind(
         name,
         sdsge_mc_ols_runner,
-        <const void *>&step._ols_ctx,
         None,
         0,
         -1,
@@ -1450,17 +1491,16 @@ def ridge_step(
     int64_t n,
     int64_t p,
     double alpha,
-    bint intercept=True,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0 or alpha < 0.0:
         raise ValueError("Native ridge dimensions and alpha must be valid.")
-    step._ridge_ctx.n = n
-    step._ridge_ctx.p = p
-    step._ridge_ctx.intercept = intercept
-    step._ridge_ctx.alpha = alpha
-    step._bind(name, sdsge_mc_ridge_runner, <const void *>&step._ridge_ctx,
-               None, 0, -1, -1, p + 2, 1)
+    step._ctx_store.ridge.n = n
+    step._ctx_store.ridge.p = p
+    step._ctx_store.ridge.intercept = intercept
+    step._ctx_store.ridge.alpha = alpha
+    step._bind(name, sdsge_mc_ridge_runner, None, 0, -1, -1, p + 2, 1)
     return step
 
 
@@ -1471,21 +1511,20 @@ def ridge_gs_step(
     double start,
     double stop,
     int64_t num,
-    int64_t criterion,
-    bint intercept=True,
+    int64_t criterion=DEFAULT_RIDGE_GS_CRITERION,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
     if n < 0 or p <= 0:
         raise ValueError("Native ridge grid-search dimensions must be valid.")
-    step._ridge_gs_ctx.alphas = <const double *>cnp.PyArray_DATA(alphas)
-    step._ridge_gs_ctx.n = n
-    step._ridge_gs_ctx.p = p
-    step._ridge_gs_ctx.n_alpha = num
-    step._ridge_gs_ctx.criterion = criterion
-    step._ridge_gs_ctx.intercept = intercept
-    step._bind(name, sdsge_mc_ridge_gs_runner,
-               <const void *>&step._ridge_gs_ctx, alphas, 0, -1, -1, p + 2, 1)
+    step._ctx_store.ridge_gs.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    step._ctx_store.ridge_gs.n = n
+    step._ctx_store.ridge_gs.p = p
+    step._ctx_store.ridge_gs.n_alpha = num
+    step._ctx_store.ridge_gs.criterion = criterion
+    step._ctx_store.ridge_gs.intercept = intercept
+    step._bind(name, sdsge_mc_ridge_gs_runner, alphas, 0, -1, -1, p + 2, 1)
     return step
 
 
@@ -1494,21 +1533,20 @@ def lasso_step(
     int64_t n,
     int64_t p,
     double alpha,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0 or alpha < 0.0 or max_iter <= 0 or tol <= 0.0:
         raise ValueError("Native lasso settings must be valid.")
-    step._lasso_ctx.n = n
-    step._lasso_ctx.p = p
-    step._lasso_ctx.intercept = intercept
-    step._lasso_ctx.max_iter = max_iter
-    step._lasso_ctx.tol = tol
-    step._lasso_ctx.alpha = alpha
-    step._bind(name, sdsge_mc_lasso_runner, <const void *>&step._lasso_ctx,
-               None, 0, -1, -1, p + 2, 1)
+    step._ctx_store.lasso.n = n
+    step._ctx_store.lasso.p = p
+    step._ctx_store.lasso.intercept = intercept
+    step._ctx_store.lasso.max_iter = max_iter
+    step._ctx_store.lasso.tol = tol
+    step._ctx_store.lasso.alpha = alpha
+    step._bind(name, sdsge_mc_lasso_runner, None, 0, -1, -1, p + 2, 1)
     return step
 
 
@@ -1519,23 +1557,22 @@ def lasso_gs_step(
     double start,
     double stop,
     int64_t num,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
     if n < 0 or p <= 0 or max_iter <= 0 or tol <= 0.0:
         raise ValueError("Native lasso grid-search settings must be valid.")
-    step._lasso_gs_ctx.alphas = <const double *>cnp.PyArray_DATA(alphas)
-    step._lasso_gs_ctx.n = n
-    step._lasso_gs_ctx.p = p
-    step._lasso_gs_ctx.n_alpha = num
-    step._lasso_gs_ctx.intercept = intercept
-    step._lasso_gs_ctx.max_iter = max_iter
-    step._lasso_gs_ctx.tol = tol
-    step._bind(name, sdsge_mc_lasso_gs_runner,
-               <const void *>&step._lasso_gs_ctx, alphas, 0, -1, -1, p + 2, 1)
+    step._ctx_store.lasso_gs.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    step._ctx_store.lasso_gs.n = n
+    step._ctx_store.lasso_gs.p = p
+    step._ctx_store.lasso_gs.n_alpha = num
+    step._ctx_store.lasso_gs.intercept = intercept
+    step._ctx_store.lasso_gs.max_iter = max_iter
+    step._ctx_store.lasso_gs.tol = tol
+    step._bind(name, sdsge_mc_lasso_gs_runner, alphas, 0, -1, -1, p + 2, 1)
     return step
 
 
@@ -1544,24 +1581,23 @@ def elastic_net_step(
     int64_t n,
     int64_t p,
     double alpha,
-    double l1_ratio,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    double l1_ratio=DEFAULT_L1_RATIO,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     if (n < 0 or p <= 0 or alpha < 0.0 or l1_ratio < 0.0
             or l1_ratio > 1.0 or max_iter <= 0 or tol <= 0.0):
         raise ValueError("Native elastic-net settings must be valid.")
-    step._elastic_net_ctx.n = n
-    step._elastic_net_ctx.p = p
-    step._elastic_net_ctx.intercept = intercept
-    step._elastic_net_ctx.max_iter = max_iter
-    step._elastic_net_ctx.tol = tol
-    step._elastic_net_ctx.alpha = alpha
-    step._elastic_net_ctx.l1_ratio = l1_ratio
-    step._bind(name, sdsge_mc_elastic_net_runner,
-               <const void *>&step._elastic_net_ctx, None, 0, -1, -1, p + 2, 1)
+    step._ctx_store.elastic_net.n = n
+    step._ctx_store.elastic_net.p = p
+    step._ctx_store.elastic_net.intercept = intercept
+    step._ctx_store.elastic_net.max_iter = max_iter
+    step._ctx_store.elastic_net.tol = tol
+    step._ctx_store.elastic_net.alpha = alpha
+    step._ctx_store.elastic_net.l1_ratio = l1_ratio
+    step._bind(name, sdsge_mc_elastic_net_runner, None, 0, -1, -1, p + 2, 1)
     return step
 
 
@@ -1572,28 +1608,27 @@ def elastic_net_gs_step(
     double start,
     double stop,
     int64_t num,
-    double l1_ratio,
-    int64_t criterion,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    double l1_ratio=DEFAULT_L1_RATIO,
+    int64_t criterion=DEFAULT_ELASTIC_NET_GS_CRITERION,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
     if (n < 0 or p <= 0 or l1_ratio < 0.0 or l1_ratio > 1.0
             or max_iter <= 0 or tol <= 0.0):
         raise ValueError("Native elastic-net grid-search settings must be valid.")
-    step._elastic_net_gs_ctx.alphas = <const double *>cnp.PyArray_DATA(alphas)
-    step._elastic_net_gs_ctx.n = n
-    step._elastic_net_gs_ctx.p = p
-    step._elastic_net_gs_ctx.n_alpha = num
-    step._elastic_net_gs_ctx.criterion = criterion
-    step._elastic_net_gs_ctx.intercept = intercept
-    step._elastic_net_gs_ctx.max_iter = max_iter
-    step._elastic_net_gs_ctx.tol = tol
-    step._elastic_net_gs_ctx.l1_ratio = l1_ratio
-    step._bind(name, sdsge_mc_elastic_net_gs_runner,
-               <const void *>&step._elastic_net_gs_ctx, alphas, 0, -1, -1, p + 2, 1)
+    step._ctx_store.elastic_net_gs.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    step._ctx_store.elastic_net_gs.n = n
+    step._ctx_store.elastic_net_gs.p = p
+    step._ctx_store.elastic_net_gs.n_alpha = num
+    step._ctx_store.elastic_net_gs.criterion = criterion
+    step._ctx_store.elastic_net_gs.intercept = intercept
+    step._ctx_store.elastic_net_gs.max_iter = max_iter
+    step._ctx_store.elastic_net_gs.tol = tol
+    step._ctx_store.elastic_net_gs.l1_ratio = l1_ratio
+    step._bind(name, sdsge_mc_elastic_net_gs_runner, alphas, 0, -1, -1, p + 2, 1)
     return step
 
 
@@ -1604,13 +1639,12 @@ def jarque_bera_step(str name, int64_t n):
     if n < 0:
         raise ValueError("Jarque-Bera sample length must be non-negative.")
 
-    step._jarque_bera_ctx.n = n
+    step._ctx_store.jarque_bera.n = n
     step._test_distribution = ReferenceDistribution.JB_LOOKUP
     step._test_df = n
     step._bind(
         name,
         sdsge_mc_jarque_bera_test_runner,
-        <const void *>&step._jarque_bera_ctx,
         None,
         0,
         -1,
@@ -1626,67 +1660,65 @@ def wald_step(
     target,
     int64_t n,
     int64_t q,
-    int64_t manual_bandwidth,
-    int kernel_id,
-    int bandwidth_mode,
-    int kind,
+    int64_t manual_bandwidth=DEFAULT_WALD_MANUAL_BANDWIDTH,
+    int kernel_id=DEFAULT_WALD_KERNEL,
+    int bandwidth_mode=DEFAULT_WALD_BANDWIDTH_MODE,
+    int kind=DEFAULT_WALD_KIND,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray target_array = np.ascontiguousarray(target, dtype=np.float64)
     if n < 0 or q <= 0 or target_array.size == 0:
         raise ValueError("Native Wald dimensions and target must be valid.")
-    step._wald_ctx.target = <const double *>cnp.PyArray_DATA(target_array)
-    step._wald_ctx.n = n
-    step._wald_ctx.q = q
-    step._wald_ctx.manual_bandwidth = manual_bandwidth
-    step._wald_ctx.kernel_id = kernel_id
-    step._wald_ctx.bandwidth_mode = bandwidth_mode
-    step._wald_ctx.kind = kind
+    step._ctx_store.wald.target = <const double *>cnp.PyArray_DATA(target_array)
+    step._ctx_store.wald.n = n
+    step._ctx_store.wald.q = q
+    step._ctx_store.wald.manual_bandwidth = manual_bandwidth
+    step._ctx_store.wald.kernel_id = kernel_id
+    step._ctx_store.wald.bandwidth_mode = bandwidth_mode
+    step._ctx_store.wald.kind = kind
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = q if kind == 0 else q * (q + 1) // 2
-    step._bind(name, sdsge_mc_wald_test_runner, <const void *>&step._wald_ctx,
-               target_array, 0, -1, -1, 1, 1)
+    step._bind(name, sdsge_mc_wald_test_runner, target_array, 0, -1, -1, 1, 1)
     return step
 
 
-def ljung_box_step(str name, int64_t n, int64_t lags):
+def ljung_box_step(str name, int64_t n, int64_t lags=DEFAULT_LJUNG_BOX_LAGS):
     cdef NativeStep step = NativeStep()
     if n < 0 or lags < 0:
         raise ValueError("Native Ljung-Box settings must be non-negative.")
-    step._ljung_box_ctx.n = n
-    step._ljung_box_ctx.lags = lags
+    step._ctx_store.ljung_box.n = n
+    step._ctx_store.ljung_box.lags = lags
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = lags
-    step._bind(name, sdsge_mc_ljung_box_test_runner,
-               <const void *>&step._ljung_box_ctx, None, 0, -1, 0, 1, 1)
+    step._bind(name, sdsge_mc_ljung_box_test_runner, None, 0, -1, 0, 1, 1)
     return step
 
 
-def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=False):
+def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=DEFAULT_ROBUST):
     cdef NativeStep step = NativeStep()
     if n < 0 or k < 0:
         raise ValueError("Native Breusch-Pagan dimensions must be non-negative.")
-    step._breusch_pagan_ctx.n = n
-    step._breusch_pagan_ctx.k = k
-    step._breusch_pagan_ctx.robust = robust
+    step._ctx_store.breusch_pagan.n = n
+    step._ctx_store.breusch_pagan.k = k
+    step._ctx_store.breusch_pagan.robust = robust
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = k
-    step._bind(name, sdsge_mc_breusch_pagan_test_runner,
-               <const void *>&step._breusch_pagan_ctx, None, 0, -1, 0, 1, 1)
+    step._bind(name, sdsge_mc_breusch_pagan_test_runner, None, 0, -1, 0, 1, 1)
     return step
 
 
-def breusch_godfrey_step(str name, int64_t n, int64_t k, int64_t lags):
+def breusch_godfrey_step(
+    str name, int64_t n, int64_t k, int64_t lags=DEFAULT_BREUSCH_GODFREY_LAGS
+):
     cdef NativeStep step = NativeStep()
     if n < 0 or k < 0 or lags < 0:
         raise ValueError("Native Breusch-Godfrey settings must be non-negative.")
-    step._breusch_godfrey_ctx.n = n
-    step._breusch_godfrey_ctx.k = k
-    step._breusch_godfrey_ctx.lags = lags
+    step._ctx_store.breusch_godfrey.n = n
+    step._ctx_store.breusch_godfrey.k = k
+    step._ctx_store.breusch_godfrey.lags = lags
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = lags
-    step._bind(name, sdsge_mc_breusch_godfrey_test_runner,
-               <const void *>&step._breusch_godfrey_ctx, None, 0, -1, 0, 1, 1)
+    step._bind(name, sdsge_mc_breusch_godfrey_test_runner, None, 0, -1, 0, 1, 1)
     return step
 
 
@@ -1694,12 +1726,11 @@ def cusum_step(str name, int64_t n, int64_t p):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0:
         raise ValueError("Native CUSUM dimensions must be valid.")
-    step._cusum_ctx.n = n
-    step._cusum_ctx.p = p
+    step._ctx_store.cusum.n = n
+    step._ctx_store.cusum.p = p
     step._test_distribution = ReferenceDistribution.CUSUM
     step._test_df = np.nan
-    step._bind(name, sdsge_mc_cusum_test_runner, <const void *>&step._cusum_ctx,
-               None, 0, -1, 0, 1, 1)
+    step._bind(name, sdsge_mc_cusum_test_runner, None, 0, -1, 0, 1, 1)
     return step
 
 
@@ -1707,26 +1738,24 @@ def cusumsq_step(str name, int64_t n, int64_t p):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0:
         raise ValueError("Native CUSUMSQ dimensions must be valid.")
-    step._cusumsq_ctx.n = n
-    step._cusumsq_ctx.p = p
+    step._ctx_store.cusumsq.n = n
+    step._ctx_store.cusumsq.p = p
     step._test_distribution = ReferenceDistribution.CUSUMSQ
     step._test_df = max(0, n - p)
-    step._bind(name, sdsge_mc_cusumsq_test_runner,
-               <const void *>&step._cusumsq_ctx, None, 0, -1, 0, 1, 1)
+    step._bind(name, sdsge_mc_cusumsq_test_runner, None, 0, -1, 0, 1, 1)
     return step
 
 
-def chow_step(str name, int64_t n, int64_t p, int64_t t_break):
+def chow_step(str name, int64_t n, int64_t p, int64_t t_break=DEFAULT_T_BREAK):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0 or t_break < 0:
         raise ValueError("Native Chow settings must be valid.")
-    step._chow_ctx.n = n
-    step._chow_ctx.p = p
-    step._chow_ctx.t_break = t_break
+    step._ctx_store.chow.n = n
+    step._ctx_store.chow.p = p
+    step._ctx_store.chow.t_break = t_break
     step._test_distribution = ReferenceDistribution.F
     step._test_df = (p, n - 2 * p)
-    step._bind(name, sdsge_mc_chow_test_runner, <const void *>&step._chow_ctx,
-               None, 0, -1, 0, 1, 1)
+    step._bind(name, sdsge_mc_chow_test_runner, None, 0, -1, 0, 1, 1)
     return step
 
 
@@ -1818,7 +1847,7 @@ def run(
                                   "Monte Carlo input bindings.")
         for step_idx in range(n_steps):
             step = steps[step_idx]
-            if step._fn == NULL or step._ctx == NULL:
+            if step._fn == NULL:
                 raise ValueError(f"Native step binding at index {step_idx} "
                                  "is incomplete.")
             if step.name != step_names[step_idx]:
@@ -1905,7 +1934,7 @@ def run(
             descs[step_idx].int_live_out_worker_stride = int_live_out.shape[1]
             descs[step_idx].float_retained_stride = float_retained.shape[1]
             descs[step_idx].int_retained_stride = int_retained.shape[1]
-            descs[step_idx].ctx = step._ctx
+            descs[step_idx].ctx = <const void *>&step._ctx_store
             step_binding_specs = input_bindings[step_idx]
             descs[step_idx].n_float_input_bindings = len(step_binding_specs)
             descs[step_idx].float_input_bindings = (

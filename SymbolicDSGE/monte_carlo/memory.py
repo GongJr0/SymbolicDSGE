@@ -17,19 +17,20 @@ import psutil
 
 from .._ckernels.monte_carlo._arenas import resolve_n_workers
 from .allocation import BufferPlan
+from .defaults import DEFAULT_SIMULATION_TARGET
 from .mc_constructs import MCStep, OpType
 from .shock_native import native_shock_families
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
 
-#: Every native arena lane is float64 or int64, so a count converts directly.
+#: Every native arena lane is float64 or int64; both are 8 bytes per element.
 BYTES_PER_ELEMENT = 8
 
-#: Reserve held for the host process, independent of the size of the run.
+#: Reserve held for the host process independent of the size of the run.
 RESERVE_FLOOR_BYTES = 1024**3
 
-#: Reserve proportional to the arenas, for allocator overhead.
+#: Reserve proportional to the arenas for allocator overhead.
 RESERVE_FRACTION = 0.025
 
 
@@ -319,12 +320,13 @@ class MCMemoryProfiler:
         step = self._steps[0]
         if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":
             return 0
-        shocks = step.kwargs["shocks"]
+        shocks = step.kwargs.get("shocks")
         if shocks is None:
             return 0  # A single (T, n_exog) matrix, shared by every replication.
         if native_shock_families(shocks) is not None:
             return 0
-        model = self._reference if step.kwargs["target"] == "reference" else self._dgp
+        target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
+        model = self._reference if target == "reference" else self._dgp
         if model is None:
             return 0
         T = int(step.kwargs["T"])

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -50,7 +50,7 @@ class TestResultSpec:
     dist: ReferenceDistribution
     df: DistributionParameter | tuple[DistributionParameter, ...]
     pval_method: PvalMethod
-    alpha: np.float64
+    alpha: np.float64 | float = 0.05
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,10 @@ class RegressionResultSpec:
     variables: tuple[str, ...]
     n: int
     k: int
+
+
+def _supplied(kwargs: Mapping[str, Any], *names: str) -> dict[str, Any]:
+    return {name: kwargs[name] for name in names if kwargs.get(name) is not None}
 
 
 def _model_params(model: SolvedModel) -> NDF:
@@ -188,7 +192,7 @@ def _check_raw_model_data_layout(
 ) -> None:
     expected_offset = 0
     for field in ("states", "observables"):
-        value = step.kwargs[field]
+        value = step.kwargs.get(field)
         if value is None:
             continue
         layout = fields[field]

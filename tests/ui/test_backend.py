@@ -486,12 +486,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 8,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -556,12 +551,7 @@ _POSTPROC_PIPELINE = {
             "step_type": "simulation",
             "name": "datagen",
             "params": {
-                "shocks": None,
-                "target": "dgp",
-                "shock_scale": 1.0,
-                "x0": None,
                 "T": 8,
-                "observables": True,
                 "shocks": {
                     "e_u,e_v": {
                         "dist": "norm",
@@ -578,7 +568,6 @@ _POSTPROC_PIPELINE = {
             "step_type": "jarque_bera",
             "name": "jb",
             "params": {
-                "alpha": 0.05,
                 "source": "datagen",
                 "field": "observables",
                 "column": 0,
@@ -667,11 +656,6 @@ def test_ui_backend_accepts_fanout() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "observables": True,
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 8,
                 },
             },
@@ -680,7 +664,6 @@ def test_ui_backend_accepts_fanout() -> None:
                 "step_type": "ljung_box",
                 "name": "a",
                 "params": {
-                    "alpha": 0.05,
                     "source": "datagen",
                     "field": "states",
                     "column": [0],
@@ -692,7 +675,6 @@ def test_ui_backend_accepts_fanout() -> None:
                 "step_type": "ljung_box",
                 "name": "b",
                 "params": {
-                    "alpha": 0.05,
                     "source": "datagen",
                     "field": "states",
                     "column": [1],
@@ -740,11 +722,6 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "observables": True,
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 12,
                 },
             },
@@ -803,12 +780,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 20,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -880,12 +852,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 20,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -957,12 +924,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 30,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -1032,12 +994,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 30,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -1107,12 +1064,7 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 30,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -1135,7 +1087,6 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                     "X_field": "states",
                     "y_column": [0],
                     "X_columns": [1],
-                    "t_break": 10,
                     "burn_in": 1,
                     "alpha": 0.1,
                 },
@@ -1234,12 +1185,7 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
                         "step_type": "simulation",
                         "name": "datagen",
                         "params": {
-                            "shocks": None,
-                            "target": "dgp",
-                            "shock_scale": 1.0,
-                            "x0": None,
                             "T": 8,
-                            "observables": True,
                         },
                     },
                     {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
@@ -1248,7 +1194,6 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
                         "step_type": "breusch_pagan",
                         "name": "diagnostic",
                         "params": {
-                            "alpha": 0.05,
                             "residuals_source": "renamed_filter",
                             "residuals_field": "std_innov",
                             "X_source": "datagen",
@@ -1336,12 +1281,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 8,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",
@@ -1369,7 +1309,6 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "step_type": "jarque_bera",
                 "name": "jb",
                 "params": {
-                    "alpha": 0.05,
                     "source": "zscore",
                     "field": "payload",
                     "column": [0],
@@ -1414,12 +1353,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "shocks": None,
-                    "target": "dgp",
-                    "shock_scale": 1.0,
-                    "x0": None,
                     "T": 8,
-                    "observables": True,
                     "shocks": {
                         "e_u,e_v": {
                             "dist": "norm",

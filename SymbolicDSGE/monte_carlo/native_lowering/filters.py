@@ -18,11 +18,13 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ...core.solved_model import SolvedModel
 from ..allocation import BufferPlan, FieldLayout
+from ..defaults import DEFAULT_FILTER_MODE, DEFAULT_SIMULATION_TARGET
 from ..mc_constructs import MCStep
 from .utils import (
     NDF,
     NDI,
     FloatInputBinding,
+    _supplied,
     _flat_f64,
     _model_params,
     _static_binding,
@@ -42,7 +44,7 @@ def lower_filter_step(
     )
     source_layout = plan[datagen_step.name].out_fields["observables"]
     T, source_n_obs = source_layout.shape
-    mode = step.kwargs["filter_mode"]
+    mode = step.kwargs.get("filter_mode", DEFAULT_FILTER_MODE)
     placeholder_y = np.zeros(
         (T, len(requested_names or source_names)), dtype=np.float64
     )
@@ -67,12 +69,8 @@ def lower_filter_step(
         meas_addr=measurement_addr or None,
         jac_addr=jacobian_addr or None,
         calib_params=_model_params(reference),
-        R=step.kwargs["R"],
-        P0=step.kwargs["P0"],
-        jitter=step.kwargs["jitter"],
-        symmetrize=step.kwargs["symmetrize"],
-        joseph_cov=step.kwargs["joseph_cov"],
-        return_shocks=step.kwargs["return_shocks"],
+        R=step.kwargs.get("R"),
+        P0=step.kwargs.get("P0"),
     )
     canonical_names = tuple(interface.observables)
     if len(canonical_names) != source_n_obs and requested_names is None:
@@ -86,7 +84,7 @@ def lower_filter_step(
 
     if mode == "linear":
         C, d = interface._get_C_d()
-        x0 = _filter_x0(step.kwargs["x0"], n_var)
+        x0 = _filter_x0(step.kwargs.get("x0"), n_var)
         before_y = (
             _flat_f64(interface.A),
             _flat_f64(interface.B),
@@ -105,15 +103,14 @@ def lower_filter_step(
                 n_var,
                 n_obs,
                 n_exog,
-                interface.symmetrize,
-                interface.joseph_cov,
-                float(interface.jitter),
-                interface.return_shocks,
+                **_supplied(
+                    step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
+                ),
             ),
             _filter_bindings(before_y, binding, (x0, interface.P0)),
         )
     if mode == "extended":
-        x0 = _filter_x0(step.kwargs["x0"], n_var)
+        x0 = _filter_x0(step.kwargs.get("x0"), n_var)
         params = _model_params(reference)
         before_y = (
             _flat_f64(interface.A),
@@ -135,16 +132,15 @@ def lower_filter_step(
                 n_obs,
                 n_exog,
                 n_par,
-                interface.symmetrize,
-                interface.joseph_cov,
-                float(interface.jitter),
-                interface.return_shocks,
+                **_supplied(
+                    step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
+                ),
             ),
             _filter_bindings(before_y, binding, (x0, interface.P0)),
         )
 
     else:  # mode == "unscented"
-        if interface.return_shocks:
+        if step.kwargs.get("return_shocks"):
             raise ValueError("Unscented filtering does not support return_shocks.")
         policy = reference.policy
         if not isinstance(policy, SecondOrderSolution):
@@ -154,7 +150,7 @@ def lower_filter_step(
         n_state = reference.compiled.n_state
         n_ctrl = reference.compiled.n_ctrl
         params = _model_params(reference)
-        z0 = interface._build_unscented_z0(step.kwargs["x0"])
+        z0 = interface._build_unscented_z0(step.kwargs.get("x0"))
         before_y = (
             _flat_f64(policy.hx),
             _flat_f64(policy.gx),
@@ -185,11 +181,14 @@ def lower_filter_step(
                 n_exog,
                 n_obs,
                 n_par,
-                interface.ukf_alpha,
-                interface.ukf_beta,
-                interface.ukf_kappa,
-                interface.symmetrize,
-                float(interface.jitter),
+                **_supplied(
+                    step.kwargs,
+                    "alpha",
+                    "beta",
+                    "kappa",
+                    "symmetrize",
+                    "jitter",
+                ),
             ),
             _filter_bindings(before_y, binding, (z0, interface.P0)),
         )
@@ -201,16 +200,16 @@ def _filter_observable_names(
     reference: SolvedModel,
     dgp: SolvedModel | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
-    requested = filter_step.kwargs["observables"]
+    requested = filter_step.kwargs.get("observables")
     if datagen_step.step_type == "raw_model_data":
-        raw_names = tuple(datagen_step.kwargs["observable_names"])
+        raw_names = tuple(datagen_step.kwargs.get("observable_names") or ())
         return (
             raw_names or tuple(reference.compiled.observable_names),
             tuple(requested) if requested is not None else (raw_names or None),
         )
 
     # simulation
-    target = datagen_step.kwargs["target"]
+    target = datagen_step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
     model = reference if target == "reference" else cast(SolvedModel, dgp)
     names = tuple(model.compiled.observable_names)
     return names, tuple(requested) if requested is not None else names

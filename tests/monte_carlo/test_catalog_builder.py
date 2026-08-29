@@ -197,7 +197,7 @@ def test_terminal_step_kinds_are_the_tests_and_the_regression() -> None:
 def test_validate_orders_steps_with_explicit_filter_source() -> None:
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node("filter", "filter", "renamed_filter", {}),
             _node(
                 "test",
@@ -234,7 +234,7 @@ def test_validate_binds_multi_source_terminal_from_distinct_producers() -> None:
     # source on another, linking from both producers.
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node("filter", "filter", "filter", {}),
             _node(
                 "std",
@@ -274,7 +274,7 @@ def test_validate_resolves_payload_source_without_an_edge() -> None:
     # linking them; ordering and validation resolve it from the source reference.
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node(
                 "std",
                 "standardize",
@@ -299,7 +299,7 @@ def test_validate_orders_payload_source_chain_without_edges() -> None:
     # tf0's payload. Ordering must place tf0, tf1, then tf2 from the references.
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node("tf2", "log", "tf2", {"source": "tf1", "field": "payload"}),
             _node("tf1", "log", "tf1", {"source": "tf0", "field": "payload"}),
             _node(
@@ -319,7 +319,7 @@ def test_validate_orders_payload_source_chain_without_edges() -> None:
 def test_validate_rejects_payload_leg_without_producer() -> None:
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node("jb", "jarque_bera", "jb", {"source": "ghost", "field": "payload"}),
         ],
         edges=[_edge("sim", "jb")],
@@ -331,7 +331,7 @@ def test_validate_rejects_payload_leg_without_producer() -> None:
 def test_validate_rejects_filter_source_without_filter_link() -> None:
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node(
                 "test", "ljung_box", "lb", {"source": "filter", "field": "std_innov"}
             ),
@@ -353,7 +353,7 @@ def test_run_requires_a_reference_model() -> None:
 def test_build_pipeline_stamps_op_types_and_keeps_params_verbatim() -> None:
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node(
                 "reg",
                 "regression",
@@ -395,7 +395,7 @@ def test_build_pipeline_rejects_unknown_step_type() -> None:
 def test_postprocs_are_a_separate_terminal_list() -> None:
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
             _node(
                 "jb",
                 "jarque_bera",
@@ -417,7 +417,7 @@ def test_postproc_in_nodes_is_rejected() -> None:
     # the pipeline is built. Postprocs are not graph nodes.
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "sim", {"T": 8}),
             _node("k", "kde", "k", {"trace": "test.jb.statistic"}),
         ]
     )
@@ -431,7 +431,7 @@ def test_build_postproc_custom_from_resources() -> None:
 
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "datagen", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "datagen", {"T": 8}),
         ],
         edges=[],
         postprocs=[_postproc("p", "postproc:custom", {"func_ref": "p", "code": "..."})],
@@ -452,7 +452,7 @@ from tests._spec_helpers import _posted_node
 def test_available_traces_enumerates_producer_keys() -> None:
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "sim", {"T": 8}),
             _node("f", "filter", "f", {}),
             _node(
                 "s",
@@ -498,7 +498,7 @@ def test_available_traces_enumerates_producer_keys() -> None:
 def _kde_spec(trace_params: dict) -> PipelineSpec:
     return _spec(
         nodes=[
-            _node("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "sim", {"T": 8}),
             _node(
                 "jb",
                 "jarque_bera",
@@ -536,7 +536,7 @@ def test_postproc_custom_trace_refs_not_statically_validated() -> None:
     # though we can't statically know which keys it reads.
     spec = _spec(
         nodes=[
-            _node("sim", "simulation", "sim", {"T": 8, "observables": True}),
+            _node("sim", "simulation", "sim", {"T": 8}),
             _node(
                 "jb",
                 "jarque_bera",
