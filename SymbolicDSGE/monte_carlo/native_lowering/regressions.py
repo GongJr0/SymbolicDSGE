@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..._ckernels.monte_carlo._runner import (
+    DEFAULT_INTERCEPT,
     NativeStep,
     elastic_net_gs_step,
     elastic_net_step,
@@ -20,6 +21,7 @@ from .utils import (
     _fill_binding,
     _selected_shape,
     _source_binding,
+    _supplied,
 )
 
 
@@ -87,7 +89,7 @@ def _resolve_regression_shape(
     )
     if y_rows != n or y_columns != 1:
         raise ValueError("Native regression lowering requires a one-column response.")
-    intercept = bool(step.kwargs["intercept"])
+    intercept = bool(step.kwargs.get("intercept", DEFAULT_INTERCEPT))
     p = x_columns + int(intercept)
     raw_variables = step.kwargs["variables"]
     if raw_variables is None:
@@ -105,6 +107,7 @@ def _resolve_regression_shape(
 
 def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
     kind = step.kwargs["kind"]
+    descent = _supplied(step.kwargs, "max_iter", "tol")
     if kind == "ols":
         return ols_step(step.name, n, p, intercept)
     if kind == "ridge":
@@ -117,8 +120,8 @@ def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
             float(step.kwargs["start"]),
             float(step.kwargs["stop"]),
             int(step.kwargs["num"]),
-            _criterion_code(step.kwargs.get("criterion", "aic")),
-            intercept,
+            intercept=intercept,
+            **_criterion(step),
         )
     if kind == "lasso":
         return lasso_step(
@@ -126,9 +129,8 @@ def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
             n,
             p,
             float(step.kwargs["alpha"]),
-            int(step.kwargs.get("max_iter", 1000)),
-            float(step.kwargs.get("tol", 1e-10)),
-            intercept,
+            intercept=intercept,
+            **descent,
         )
     if kind == "lasso_gs":
         return lasso_gs_step(
@@ -138,9 +140,8 @@ def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
             float(step.kwargs["start"]),
             float(step.kwargs["stop"]),
             int(step.kwargs["num"]),
-            int(step.kwargs.get("max_iter", 1000)),
-            float(step.kwargs.get("tol", 1e-10)),
-            intercept,
+            intercept=intercept,
+            **descent,
         )
     if kind == "elastic_net":
         return elastic_net_step(
@@ -148,10 +149,9 @@ def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
             n,
             p,
             float(step.kwargs["alpha"]),
-            float(step.kwargs["l1_ratio"]),
-            int(step.kwargs.get("max_iter", 1000)),
-            float(step.kwargs.get("tol", 1e-10)),
-            intercept,
+            intercept=intercept,
+            **_supplied(step.kwargs, "l1_ratio"),
+            **descent,
         )
     if kind == "elastic_net_gs":
         return elastic_net_gs_step(
@@ -161,13 +161,20 @@ def _native_step(step: MCStep, n: int, p: int, intercept: bool) -> NativeStep:
             float(step.kwargs["start"]),
             float(step.kwargs["stop"]),
             int(step.kwargs["num"]),
-            float(step.kwargs["l1_ratio"]),
-            _criterion_code(step.kwargs.get("criterion", "loss")),
-            int(step.kwargs.get("max_iter", 1000)),
-            float(step.kwargs.get("tol", 1e-10)),
-            intercept,
+            intercept=intercept,
+            **_supplied(step.kwargs, "l1_ratio"),
+            **_criterion(step),
+            **descent,
         )
     raise ValueError(f"Unsupported native regression kind: {kind!r}.")
+
+
+def _criterion(step: MCStep) -> dict[str, int]:
+    """A grid search's criterion as its native code, or nothing when unset."""
+    criterion = step.kwargs.get("criterion")
+    if criterion is None:
+        return {}
+    return {"criterion": _criterion_code(criterion)}
 
 
 def _criterion_code(value: object) -> int:

@@ -23,6 +23,7 @@ from .utils import (
     NDF,
     NDI,
     FloatInputBinding,
+    _supplied,
     _flat_f64,
     _model_params,
     _static_binding,
@@ -69,10 +70,6 @@ def lower_filter_step(
         calib_params=_model_params(reference),
         R=step.kwargs["R"],
         P0=step.kwargs["P0"],
-        jitter=step.kwargs["jitter"],
-        symmetrize=step.kwargs["symmetrize"],
-        joseph_cov=step.kwargs["joseph_cov"],
-        return_shocks=step.kwargs["return_shocks"],
     )
     canonical_names = tuple(interface.observables)
     if len(canonical_names) != source_n_obs and requested_names is None:
@@ -105,10 +102,9 @@ def lower_filter_step(
                 n_var,
                 n_obs,
                 n_exog,
-                interface.symmetrize,
-                interface.joseph_cov,
-                float(interface.jitter),
-                interface.return_shocks,
+                **_supplied(
+                    step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
+                ),
             ),
             _filter_bindings(before_y, binding, (x0, interface.P0)),
         )
@@ -135,16 +131,15 @@ def lower_filter_step(
                 n_obs,
                 n_exog,
                 n_par,
-                interface.symmetrize,
-                interface.joseph_cov,
-                float(interface.jitter),
-                interface.return_shocks,
+                **_supplied(
+                    step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
+                ),
             ),
             _filter_bindings(before_y, binding, (x0, interface.P0)),
         )
 
     else:  # mode == "unscented"
-        if interface.return_shocks:
+        if step.kwargs.get("return_shocks"):
             raise ValueError("Unscented filtering does not support return_shocks.")
         policy = reference.policy
         if not isinstance(policy, SecondOrderSolution):
@@ -185,11 +180,14 @@ def lower_filter_step(
                 n_exog,
                 n_obs,
                 n_par,
-                interface.ukf_alpha,
-                interface.ukf_beta,
-                interface.ukf_kappa,
-                interface.symmetrize,
-                float(interface.jitter),
+                **_supplied(
+                    step.kwargs,
+                    "alpha",
+                    "beta",
+                    "kappa",
+                    "symmetrize",
+                    "jitter",
+                ),
             ),
             _filter_bindings(before_y, binding, (z0, interface.P0)),
         )

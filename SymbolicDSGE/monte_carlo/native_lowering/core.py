@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
-import numpy as np
-
 from ..._diag_tests.distributions import PvalMethod
 from ..._ckernels.monte_carlo._arenas import ArenaAllocation, allocate_arenas
 from ..._ckernels.monte_carlo._runner import (
@@ -30,6 +28,7 @@ from .utils import (
     _check_raw_model_data_layout,
     _selected_shape,
     _source_binding,
+    _supplied,
 )
 
 if TYPE_CHECKING:
@@ -104,7 +103,7 @@ def lower_native_run(
                 dist=dist,
                 df=df,
                 pval_method=PvalMethod.SF,
-                alpha=np.float64(step.kwargs["alpha"]),
+                **_supplied(step.kwargs, "alpha"),
             )
         elif step.op_type is OpType.REGRESSION:
             regression_result_specs[step.name] = regression_result_spec(
@@ -214,10 +213,7 @@ def _lower_transform_step(
             step.step_type or "",
             n,
             p,
-            ddof=int(step.kwargs.get("ddof", 0)),
-            offset=float(step.kwargs.get("offset", 0.0)),
-            order=int(step.kwargs.get("order", 1)),
-            window=int(step.kwargs.get("window", 1)),
+            **_supplied(step.kwargs, "ddof", "offset", "order", "window"),
         )
     return native_step, (
         _source_binding(

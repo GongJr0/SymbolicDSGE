@@ -526,7 +526,25 @@ cdef extern from "regression.h":
     ) noexcept nogil
 
 
+cdef extern from "../diag/diag_wald.h":
+    ctypedef enum KernelID:
+        BARTLETT
+        PARZEN
+        QS
+
+    ctypedef enum WaldBandwidthMode:
+        WALD_BW_MANUAL
+        WALD_BW_WOOLDRIDGE
+        WALD_BW_ANDREWS
+        WALD_BW_AUTO
+
+
 cdef extern from "tests.h":
+    ctypedef enum sdsge_mc_wald_kind:
+        SDSGE_MC_WALD_MEAN
+        SDSGE_MC_WALD_COVARIANCE
+        SDSGE_MC_WALD_SECOND_MOMENT
+
     ctypedef struct sdsge_mc_wald_test_ctx:
         const double *target
         int64_t n
@@ -825,6 +843,10 @@ DEFAULT_L1_RATIO = 0.5
 DEFAULT_RIDGE_GS_CRITERION = REGRESSION_CRIT_AIC
 DEFAULT_ELASTIC_NET_GS_CRITERION = REGRESSION_CRIT_LOSS
 DEFAULT_ROBUST = False
+DEFAULT_WALD_KIND = SDSGE_MC_WALD_MEAN
+DEFAULT_WALD_KERNEL = BARTLETT
+DEFAULT_WALD_BANDWIDTH_MODE = WALD_BW_AUTO
+DEFAULT_WALD_MANUAL_BANDWIDTH = 0
 DEFAULT_LJUNG_BOX_LAGS = 10
 DEFAULT_BREUSCH_GODFREY_LAGS = 1
 DEFAULT_T_BREAK = 10
@@ -1638,10 +1660,10 @@ def wald_step(
     target,
     int64_t n,
     int64_t q,
-    int64_t manual_bandwidth,
-    int kernel_id,
-    int bandwidth_mode,
-    int kind,
+    int64_t manual_bandwidth=DEFAULT_WALD_MANUAL_BANDWIDTH,
+    int kernel_id=DEFAULT_WALD_KERNEL,
+    int bandwidth_mode=DEFAULT_WALD_BANDWIDTH_MODE,
+    int kind=DEFAULT_WALD_KIND,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray target_array = np.ascontiguousarray(target, dtype=np.float64)

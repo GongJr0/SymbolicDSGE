@@ -55,6 +55,10 @@ DEFAULT_L1_RATIO: float
 DEFAULT_RIDGE_GS_CRITERION: int
 DEFAULT_ELASTIC_NET_GS_CRITERION: int
 DEFAULT_ROBUST: bool
+DEFAULT_WALD_KIND: int
+DEFAULT_WALD_KERNEL: int
+DEFAULT_WALD_BANDWIDTH_MODE: int
+DEFAULT_WALD_MANUAL_BANDWIDTH: int
 DEFAULT_LJUNG_BOX_LAGS: int
 DEFAULT_BREUSCH_GODFREY_LAGS: int
 DEFAULT_T_BREAK: int
@@ -217,10 +221,10 @@ def wald_step(
     target: ArrayLike,
     n: int,
     q: int,
-    manual_bandwidth: int,
-    kernel_id: int,
-    bandwidth_mode: int,
-    kind: int,
+    manual_bandwidth: int = 0,
+    kernel_id: int = 0,
+    bandwidth_mode: int = 3,
+    kind: int = 0,
 ) -> NativeStep: ...
 def ljung_box_step(name: str, n: int, lags: int = 10) -> NativeStep: ...
 def jarque_bera_step(name: str, n: int) -> NativeStep: ...

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 import numpy as np
 
 from ..._ckernels.monte_carlo._runner import (
+    DEFAULT_WALD_KIND,
     NativeStep,
     breusch_godfrey_step,
     breusch_pagan_step,
@@ -20,6 +23,7 @@ from ..mc_constructs import MCStep
 from .utils import (
     NDF,
     FloatInputBinding,
+    _supplied,
     _selected_shape,
     _source_binding,
 )
@@ -40,7 +44,7 @@ def lower_test_step(
         return _lower_wald_step(step, source_indices[0], steps, plan, n, first_columns)
     if kind in {"ljung_box", "jarque_bera"}:
         native_step = (
-            ljung_box_step(step.name, n, int(step.kwargs["lags"]))
+            ljung_box_step(step.name, n, **_supplied(step.kwargs, "lags"))
             if kind == "ljung_box"
             else jarque_bera_step(step.name, n)
         )
@@ -57,18 +61,20 @@ def lower_test_step(
     _, x_columns = _selected_shape(source_indices[1], step.source_args[1], steps, plan)
     if kind == "breusch_pagan":
         native_step = breusch_pagan_step(
-            step.name, n, x_columns, bool(step.kwargs["robust"])
+            step.name, n, x_columns, **_supplied(step.kwargs, "robust")
         )
     elif kind == "breusch_godfrey":
         native_step = breusch_godfrey_step(
-            step.name, n, x_columns, int(step.kwargs["lags"])
+            step.name, n, x_columns, **_supplied(step.kwargs, "lags")
         )
     elif kind == "cusum":
         native_step = cusum_step(step.name, n, x_columns)
     elif kind == "cusumsq":
         native_step = cusumsq_step(step.name, n, x_columns)
     else:
-        native_step = chow_step(step.name, n, x_columns, int(step.kwargs["t_break"]))
+        native_step = chow_step(
+            step.name, n, x_columns, **_supplied(step.kwargs, "t_break")
+        )
     return native_step, (
         _source_binding(
             source_indices[0],
@@ -97,36 +103,17 @@ def _lower_wald_step(
     n: int,
     q: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
-    kind_codes = {"mean": 0, "covariance": 1, "second_moment": 2}
-    kernel_codes = {"bartlett": 0, "parzen": 1, "qs": 2}
-    bandwidth_modes = {None: 3, "andrews": 2, "wooldridge": 1, "auto": 3}
-    try:
-        kind_code = kind_codes[step.kwargs["kind"]]
-        kernel_code = kernel_codes[step.kwargs["kernel"]]
-    except KeyError as exc:
-        raise ValueError("Unsupported native Wald configuration.") from exc
-    bandwidth = step.kwargs["bandwidth"]
-    if isinstance(bandwidth, bool):
-        raise ValueError("Wald bandwidth must be an integer, mode, or None.")
-    if isinstance(bandwidth, int):
-        bandwidth_mode = 0
-        manual_bandwidth = bandwidth
-    else:
-        try:
-            bandwidth_mode = bandwidth_modes[bandwidth]
-        except KeyError as exc:
-            raise ValueError("Unsupported native Wald bandwidth mode.") from exc
-        manual_bandwidth = 0
+    # The target's expected shape follows the kind, so this one resolves here.
+    kind_code = _wald_kind(step.kwargs)
     target = _wald_target(step.kwargs["target"], q, kind_code)
     return wald_step(
         step.name,
         target,
         n,
         q,
-        manual_bandwidth,
-        kernel_code,
-        bandwidth_mode,
-        kind_code,
+        kind=kind_code,
+        **_wald_kernel(step.kwargs),
+        **_wald_bandwidth(step.kwargs),
     ), (
         _source_binding(
             source_idx,
@@ -137,6 +124,44 @@ def _lower_wald_step(
             target_row_stride=q,
         ),
     )
+
+
+def _wald_kind(kwargs: Mapping[str, Any]) -> int:
+    """A Wald statistic's kind as its native code."""
+    kind = kwargs.get("kind")
+    if kind is None:
+        return int(DEFAULT_WALD_KIND)
+    try:
+        return {"mean": 0, "covariance": 1, "second_moment": 2}[kind]
+    except KeyError as exc:
+        raise ValueError("Unsupported native Wald configuration.") from exc
+
+
+def _wald_kernel(kwargs: Mapping[str, Any]) -> dict[str, int]:
+    """A Wald HAC kernel as its native id, or nothing when unset."""
+    kernel = kwargs.get("kernel")
+    if kernel is None:
+        return {}
+    try:
+        return {"kernel_id": {"bartlett": 0, "parzen": 1, "qs": 2}[kernel]}
+    except KeyError as exc:
+        raise ValueError("Unsupported native Wald configuration.") from exc
+
+
+def _wald_bandwidth(kwargs: Mapping[str, Any]) -> dict[str, int]:
+    """A Wald bandwidth as its native mode and manual pair, or nothing when unset."""
+    bandwidth_modes = {"andrews": 2, "wooldridge": 1, "auto": 3}
+    bandwidth = kwargs.get("bandwidth")
+    if bandwidth is None:
+        return {}
+    if isinstance(bandwidth, bool):
+        raise ValueError("Wald bandwidth must be an integer, mode, or None.")
+    if isinstance(bandwidth, int):
+        return {"bandwidth_mode": 0, "manual_bandwidth": bandwidth}
+    try:
+        return {"bandwidth_mode": bandwidth_modes[bandwidth], "manual_bandwidth": 0}
+    except KeyError as exc:
+        raise ValueError("Unsupported native Wald bandwidth mode.") from exc
 
 
 def _wald_target(value: object, q: int, kind: int) -> NDF:
