@@ -22,6 +22,19 @@ int sdsge_mc_payload_runner(const i64 rep_idx,
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
 }
 
+int sdsge_mc_passthrough_runner(const i64 rep_idx,
+                                f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out,
+                                const void *ctx_ptr) {
+  const sdsge_mc_passthrough_step_ctx *ctx = ctx_ptr;
+  (void)rep_idx;
+  (void)int_work;
+  sdsge_passthrough_step(float_in_work, ctx->n, ctx->p, float_out);
+  return sdsge_mc_finish_status(SDSGE_OK, int_out);
+}
+
 int sdsge_mc_raw_model_data_runner(const i64 rep_idx,
                                    f64 *SDSGE_RESTRICT float_in_work,
                                    f64 *SDSGE_RESTRICT float_out,
@@ -152,6 +165,16 @@ void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, const i64 n,
   if (n > 0)
     memcpy(output, input + (input_batched ? rep_idx * n : 0),
            (size_t)n * sizeof(f64));
+}
+
+arena_size sdsge_passthrough_arena_size(const i64 n, const i64 p) {
+  return make_sizer(n * p, 0);
+}
+
+void sdsge_passthrough_step(const f64 *SDSGE_RESTRICT input, const i64 n,
+                            const i64 p, f64 *SDSGE_RESTRICT output) {
+  if (n > 0 && p > 0)
+    memcpy(output, input, (size_t)(n * p) * sizeof(f64));
 }
 
 void sdsge_raw_model_data_step(const f64 *SDSGE_RESTRICT states_input,

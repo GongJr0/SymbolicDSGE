@@ -16,6 +16,11 @@ typedef struct {
 } sdsge_mc_payload_step_ctx;
 
 typedef struct {
+  i64 n;
+  i64 p;
+} sdsge_mc_passthrough_step_ctx;
+
+typedef struct {
   const f64 *states_input;
   i64 n_states;
   int states_batched;
@@ -99,6 +104,10 @@ int sdsge_mc_payload_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
                             f64 *SDSGE_RESTRICT float_out,
                             i64 *SDSGE_RESTRICT int_work,
                             i64 *SDSGE_RESTRICT int_out, const void *ctx);
+int sdsge_mc_passthrough_runner(i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
+                                f64 *SDSGE_RESTRICT float_out,
+                                i64 *SDSGE_RESTRICT int_work,
+                                i64 *SDSGE_RESTRICT int_out, const void *ctx);
 int sdsge_mc_raw_model_data_runner(i64 rep_idx,
                                    f64 *SDSGE_RESTRICT float_in_work,
                                    f64 *SDSGE_RESTRICT float_out,
@@ -140,6 +149,13 @@ int sdsge_mc_filter_unscented_runner(i64 rep_idx,
  */
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, i64 n,
                             int input_batched, i64 rep_idx,
+                            f64 *SDSGE_RESTRICT output);
+
+/* Source passthrough. ``input`` is the bound (n, p) source span in the input
+ * arena, copied straight to the output so one field of a producer can be
+ * retained on its own rather than the producer's whole output block. */
+arena_size sdsge_passthrough_arena_size(i64 n, i64 p);
+void sdsge_passthrough_step(const f64 *SDSGE_RESTRICT input, i64 n, i64 p,
                             f64 *SDSGE_RESTRICT output);
 
 /* Raw model-data materialization. ``*_batched`` selects input[rep_idx] from a

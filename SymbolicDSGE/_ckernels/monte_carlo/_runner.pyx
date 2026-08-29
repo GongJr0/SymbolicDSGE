@@ -148,6 +148,19 @@ cdef extern from "core_steps.h":
         const void *ctx,
     ) noexcept nogil
 
+    ctypedef struct sdsge_mc_passthrough_step_ctx:
+        int64_t n
+        int64_t p
+
+    int sdsge_mc_passthrough_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
     ctypedef struct sdsge_mc_raw_model_data_step_ctx:
         const double *states_input
         int64_t n_states
@@ -769,6 +782,7 @@ cdef class NativeStep:
     cdef sdsge_mc_filter_linear_step_ctx _filter_linear_ctx
     cdef sdsge_mc_filter_extended_step_ctx _filter_extended_ctx
     cdef sdsge_mc_filter_unscented_step_ctx _filter_unscented_ctx
+    cdef sdsge_mc_passthrough_step_ctx _passthrough_ctx
     cdef sdsge_mc_standardize_step_ctx _standardize_ctx
     cdef sdsge_mc_log_step_ctx _log_ctx
     cdef sdsge_mc_log_diff_step_ctx _log_diff_ctx
@@ -1298,7 +1312,14 @@ def transform_step(
     input_count = n * p
     step._input_n_int = 0
     step._output_n_int = 0
-    if kind == "standardize":
+    if kind == "passthrough":
+        step._passthrough_ctx.n = n
+        step._passthrough_ctx.p = p
+        fn = sdsge_mc_passthrough_runner
+        ctx = <const void *>&step._passthrough_ctx
+        step._input_n_float = input_count
+        step._output_n_float = input_count
+    elif kind == "standardize":
         step._standardize_ctx.n = n
         step._standardize_ctx.p = p
         step._standardize_ctx.ddof = ddof

@@ -115,6 +115,35 @@ def add_payload_step(
     )
 
 
+def passthrough_step(
+    name: str,
+    n_retain: int = -1,
+    *,
+    source: str,
+    field: str,
+    columns: ColumnSelector,
+    burn_in: int = 0,
+    drop_initial: bool = False,
+) -> MCStep:
+    return MCStep(
+        name=name,
+        op_type=OpType.TRANSFORM,
+        kwargs={},
+        source_args=(
+            _compile_source_args(
+                arg="sample",
+                source=source,
+                field=field,
+                columns=columns,
+                burn_in=burn_in,
+                drop_initial=drop_initial,
+            ),
+        ),
+        step_type="passthrough",
+        n_retain=n_retain,
+    )
+
+
 def _one_source_step(
     name: str,
     op_type: OpType,

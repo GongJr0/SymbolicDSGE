@@ -36,6 +36,7 @@ cdef extern from "regression.h":
                                                        int64_t n_alpha) nogil
 
 cdef extern from "core_steps.h":
+    arena_size sdsge_passthrough_arena_size(int64_t n, int64_t p) nogil
     int64_t sdsge_simulate_order1_arena_size(int64_t n, int64_t k,
                                              int64_t T, int64_t n_par) nogil
     int64_t sdsge_simulate_order2_arena_size(int64_t n_state,
@@ -76,7 +77,9 @@ cdef inline tuple _size(arena_size size):
 def transform_arena_size(str kind, int64_t n, int64_t p, int64_t param=0):
     """Return the complete input and scratch arena requirement for a transform."""
     cdef arena_size size
-    if kind == "standardize":
+    if kind == "passthrough":
+        size = sdsge_passthrough_arena_size(n, p)
+    elif kind == "standardize":
         size = sdsge_standardize_ax0_arena_size(n, p)
     elif kind == "log":
         size = sdsge_log_arena_size(n, p)

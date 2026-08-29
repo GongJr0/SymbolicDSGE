@@ -10,6 +10,7 @@ from SymbolicDSGE._ckernels.monte_carlo._runner import (
 )
 from SymbolicDSGE.monte_carlo.allocation import ArenaSize, StepBufferPlan
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
+from SymbolicDSGE.monte_carlo.native_lowering import FloatInputBinding
 
 
 def _plan(name: str, n_float_in: int, n_float_out: int) -> dict[str, StepBufferPlan]:
@@ -21,6 +22,28 @@ def _plan(name: str, n_float_in: int, n_float_out: int) -> dict[str, StepBufferP
             out_fields={},
             n_retain=-1,
         )
+    }
+
+
+def _source_and_passthrough_plan(
+    producer_n_float_out: int,
+    passthrough_n_float: int,
+) -> dict[str, StepBufferPlan]:
+    return {
+        "payload": StepBufferPlan(
+            name="payload",
+            input_size=ArenaSize(0, 0),
+            output_size=ArenaSize(producer_n_float_out, 0),
+            out_fields={},
+            n_retain=-1,
+        ),
+        "pass": StepBufferPlan(
+            name="pass",
+            input_size=ArenaSize(passthrough_n_float, 0),
+            output_size=ArenaSize(passthrough_n_float, 0),
+            out_fields={},
+            n_retain=-1,
+        ),
     }
 
 
@@ -127,3 +150,72 @@ def test_runner_fail_fast_sanitizes_failed_and_skipped_retained_rows() -> None:
     assert set(allocation.failure_step_by_rep.tolist()) <= {0, not_run}
     assert set(allocation.failure_status_by_rep.tolist()) <= {bad_arg, not_run}
     assert np.isnan(allocation.steps["diff"].float_retained).all()
+
+
+def test_runner_passthrough_copies_every_bound_column() -> None:
+    sample = np.arange(12.0).reshape(4, 3)
+    n_rows, n_columns = sample.shape
+    allocation = allocate_arenas(
+        _source_and_passthrough_plan(sample.size, sample.size), 3, n_jobs=2
+    )
+    binding = FloatInputBinding(
+        source_step_idx=0,
+        source_offset=0,
+        source_row_stride=n_columns,
+        row_start=0,
+        n_rows=n_rows,
+        columns=np.arange(n_columns, dtype=np.int64),
+        target_offset=0,
+        target_row_stride=n_columns,
+    )
+
+    result = run(
+        allocation,
+        [
+            payload_step("payload", sample),
+            transform_step("pass", "passthrough", n_rows, n_columns),
+        ],
+        [(), (binding,)],
+    )
+
+    assert result.status == 0
+    np.testing.assert_array_equal(
+        allocation.steps["pass"].float_retained,
+        np.tile(sample.reshape(1, -1), (3, 1)),
+    )
+
+
+def test_runner_passthrough_narrows_to_the_selected_columns() -> None:
+    sample = np.arange(12.0).reshape(4, 3)
+    n_rows, n_columns = sample.shape
+    selected = np.array([0, 2], dtype=np.int64)
+    allocation = allocate_arenas(
+        _source_and_passthrough_plan(sample.size, n_rows * selected.size),
+        3,
+        n_jobs=2,
+    )
+    binding = FloatInputBinding(
+        source_step_idx=0,
+        source_offset=0,
+        source_row_stride=n_columns,
+        row_start=0,
+        n_rows=n_rows,
+        columns=selected,
+        target_offset=0,
+        target_row_stride=selected.size,
+    )
+
+    result = run(
+        allocation,
+        [
+            payload_step("payload", sample),
+            transform_step("pass", "passthrough", n_rows, selected.size),
+        ],
+        [(), (binding,)],
+    )
+
+    assert result.status == 0
+    np.testing.assert_array_equal(
+        allocation.steps["pass"].float_retained,
+        np.tile(sample[:, selected].reshape(1, -1), (3, 1)),
+    )
