@@ -47,7 +47,7 @@ sr = [
 ]
 ui = [
     "fastapi>=0.140.13",
-    "uvicorn[standard]>=0.52.3",
+    "uvicorn[standard]>=0.52.4",
 ]
 
 [dependency-groups]
