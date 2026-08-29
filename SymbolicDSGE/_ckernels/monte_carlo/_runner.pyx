@@ -433,6 +433,13 @@ cdef extern from "transforms.h":
         const void *ctx,
     ) noexcept nogil
 
+cdef extern from "../regression/regression.h":
+    ctypedef enum RegressionCriterion:
+        REGRESSION_CRIT_AIC
+        REGRESSION_CRIT_BIC
+        REGRESSION_CRIT_LOSS
+
+
 cdef extern from "regression.h":
     ctypedef struct sdsge_mc_ols_step_ctx:
         int64_t n
@@ -797,6 +804,31 @@ def shock_plan(
 SHOCK_NORMAL = SDSGE_MC_SHOCK_NORMAL
 SHOCK_UNIFORM = SDSGE_MC_SHOCK_UNIFORM
 
+# Step-builder defaults. A knob is valued once here and shared by every builder
+# that carries it, so a caller that omits one still narrows a complete context.
+# Callers that size arenas before a step exists read the same names.
+DEFAULT_SYMMETRIZE = True
+DEFAULT_JOSEPH_COV = True
+DEFAULT_JITTER = 0.0
+DEFAULT_RETURN_SHOCKS = False
+DEFAULT_UKF_ALPHA = 1.0
+DEFAULT_UKF_BETA = 2.0
+DEFAULT_UKF_KAPPA = 1.0
+DEFAULT_DDOF = 0
+DEFAULT_OFFSET = 0.0
+DEFAULT_ORDER = 1
+DEFAULT_WINDOW = 10
+DEFAULT_INTERCEPT = True
+DEFAULT_MAX_ITER = 1000
+DEFAULT_TOL = 1e-10
+DEFAULT_L1_RATIO = 0.5
+DEFAULT_RIDGE_GS_CRITERION = REGRESSION_CRIT_AIC
+DEFAULT_ELASTIC_NET_GS_CRITERION = REGRESSION_CRIT_LOSS
+DEFAULT_ROBUST = False
+DEFAULT_LJUNG_BOX_LAGS = 10
+DEFAULT_BREUSCH_GODFREY_LAGS = 1
+DEFAULT_T_BREAK = 10
+
 
 cdef class NativeStep:
     """One native step function plus its persistent static C context."""
@@ -1140,10 +1172,10 @@ def filter_linear_step(
     int64_t n_var,
     int64_t n_obs,
     int64_t n_exog,
-    bint symmetrize=False,
-    bint joseph_cov=True,
-    double jitter=0.0,
-    bint return_shocks=False,
+    bint symmetrize=DEFAULT_SYMMETRIZE,
+    bint joseph_cov=DEFAULT_JOSEPH_COV,
+    double jitter=DEFAULT_JITTER,
+    bint return_shocks=DEFAULT_RETURN_SHOCKS,
 ):
     """Bind a linear Kalman filter with resolved scalar settings."""
     cdef NativeStep step = NativeStep()
@@ -1187,10 +1219,10 @@ def filter_extended_step(
     int64_t n_obs,
     int64_t n_exog,
     int64_t n_par,
-    bint symmetrize=False,
-    bint joseph_cov=True,
-    double jitter=0.0,
-    bint return_shocks=False,
+    bint symmetrize=DEFAULT_SYMMETRIZE,
+    bint joseph_cov=DEFAULT_JOSEPH_COV,
+    double jitter=DEFAULT_JITTER,
+    bint return_shocks=DEFAULT_RETURN_SHOCKS,
 ):
     """Bind an extended Kalman filter with resolved callbacks and settings."""
     cdef NativeStep step = NativeStep()
@@ -1239,11 +1271,11 @@ def filter_unscented_step(
     int64_t n_exog,
     int64_t n_obs,
     int64_t n_par,
-    double alpha,
-    double beta,
-    double kappa,
-    bint symmetrize=False,
-    double jitter=0.0,
+    double alpha=DEFAULT_UKF_ALPHA,
+    double beta=DEFAULT_UKF_BETA,
+    double kappa=DEFAULT_UKF_KAPPA,
+    bint symmetrize=DEFAULT_SYMMETRIZE,
+    double jitter=DEFAULT_JITTER,
 ):
     """Bind an unscented Kalman filter with resolved callback and settings."""
     cdef NativeStep step = NativeStep()
@@ -1288,10 +1320,10 @@ def transform_step(
     str kind,
     int64_t n,
     int64_t p,
-    int64_t ddof=0,
-    double offset=0.0,
-    int64_t order=1,
-    int64_t window=1,
+    int64_t ddof=DEFAULT_DDOF,
+    double offset=DEFAULT_OFFSET,
+    int64_t order=DEFAULT_ORDER,
+    int64_t window=DEFAULT_WINDOW,
     uintptr_t function_address=0,
     object backing=None,
     int64_t output_n=-1,
@@ -1394,7 +1426,7 @@ def transform_step(
     return step
 
 
-def ols_step(str name, int64_t n, int64_t p, bint intercept=True):
+def ols_step(str name, int64_t n, int64_t p, bint intercept=DEFAULT_INTERCEPT):
     """Bind the native OLS adapter after source staging has been compiled."""
     cdef NativeStep step = NativeStep()
 
@@ -1437,7 +1469,7 @@ def ridge_step(
     int64_t n,
     int64_t p,
     double alpha,
-    bint intercept=True,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0 or alpha < 0.0:
@@ -1457,8 +1489,8 @@ def ridge_gs_step(
     double start,
     double stop,
     int64_t num,
-    int64_t criterion,
-    bint intercept=True,
+    int64_t criterion=DEFAULT_RIDGE_GS_CRITERION,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
@@ -1479,9 +1511,9 @@ def lasso_step(
     int64_t n,
     int64_t p,
     double alpha,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0 or alpha < 0.0 or max_iter <= 0 or tol <= 0.0:
@@ -1503,9 +1535,9 @@ def lasso_gs_step(
     double start,
     double stop,
     int64_t num,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
@@ -1527,10 +1559,10 @@ def elastic_net_step(
     int64_t n,
     int64_t p,
     double alpha,
-    double l1_ratio,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    double l1_ratio=DEFAULT_L1_RATIO,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     if (n < 0 or p <= 0 or alpha < 0.0 or l1_ratio < 0.0
@@ -1554,11 +1586,11 @@ def elastic_net_gs_step(
     double start,
     double stop,
     int64_t num,
-    double l1_ratio,
-    int64_t criterion,
-    int64_t max_iter=1000,
-    double tol=1e-10,
-    bint intercept=True,
+    double l1_ratio=DEFAULT_L1_RATIO,
+    int64_t criterion=DEFAULT_ELASTIC_NET_GS_CRITERION,
+    int64_t max_iter=DEFAULT_MAX_ITER,
+    double tol=DEFAULT_TOL,
+    bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
     cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
@@ -1628,7 +1660,7 @@ def wald_step(
     return step
 
 
-def ljung_box_step(str name, int64_t n, int64_t lags):
+def ljung_box_step(str name, int64_t n, int64_t lags=DEFAULT_LJUNG_BOX_LAGS):
     cdef NativeStep step = NativeStep()
     if n < 0 or lags < 0:
         raise ValueError("Native Ljung-Box settings must be non-negative.")
@@ -1640,7 +1672,7 @@ def ljung_box_step(str name, int64_t n, int64_t lags):
     return step
 
 
-def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=False):
+def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=DEFAULT_ROBUST):
     cdef NativeStep step = NativeStep()
     if n < 0 or k < 0:
         raise ValueError("Native Breusch-Pagan dimensions must be non-negative.")
@@ -1653,7 +1685,9 @@ def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=False):
     return step
 
 
-def breusch_godfrey_step(str name, int64_t n, int64_t k, int64_t lags):
+def breusch_godfrey_step(
+    str name, int64_t n, int64_t k, int64_t lags=DEFAULT_BREUSCH_GODFREY_LAGS
+):
     cdef NativeStep step = NativeStep()
     if n < 0 or k < 0 or lags < 0:
         raise ValueError("Native Breusch-Godfrey settings must be non-negative.")
@@ -1690,7 +1724,7 @@ def cusumsq_step(str name, int64_t n, int64_t p):
     return step
 
 
-def chow_step(str name, int64_t n, int64_t p, int64_t t_break):
+def chow_step(str name, int64_t n, int64_t p, int64_t t_break=DEFAULT_T_BREAK):
     cdef NativeStep step = NativeStep()
     if n < 0 or p <= 0 or t_break < 0:
         raise ValueError("Native Chow settings must be valid.")
