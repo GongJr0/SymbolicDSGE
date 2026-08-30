@@ -219,6 +219,8 @@ nav:
                   - DGP Simulation: documentation/monte_carlo/operations/core/simulation.md
                   - Raw Model Data: documentation/monte_carlo/operations/core/raw_model_data.md
                   - Reference Filtering: documentation/monte_carlo/operations/core/filter.md
+                  - Payload: documentation/monte_carlo/operations/transforms/payload.md
+                  - Passthrough: documentation/monte_carlo/operations/core/passthrough.md
               - Tests:
                   - Wald Tests: documentation/monte_carlo/operations/tests/wald.md
                   - Ljung-Box Tests: documentation/monte_carlo/operations/tests/ljung_box.md
@@ -232,7 +234,6 @@ nav:
                   - Regression Steps: documentation/monte_carlo/operations/regressions/regression.md
               - Transforms:
                   - Custom Transform: documentation/monte_carlo/operations/transforms/custom.md
-                  - Payload: documentation/monte_carlo/operations/transforms/payload.md
                   - Standardize: documentation/monte_carlo/operations/transforms/standardize.md
                   - Log: documentation/monte_carlo/operations/transforms/log.md
                   - Log Difference: documentation/monte_carlo/operations/transforms/log_diff.md
