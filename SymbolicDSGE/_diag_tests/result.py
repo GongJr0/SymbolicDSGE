@@ -111,7 +111,7 @@ class MCTestResult:
     @cached_property
     def pval_trace(self) -> NDArray[float64]:
         return np.asarray(
-            [self.pval_method(self.frozen_dist, stat) for stat in self.statistic_trace],
+            self.pval_method(self.frozen_dist, self.statistic_trace),
             dtype=np.float64,
         )
 
