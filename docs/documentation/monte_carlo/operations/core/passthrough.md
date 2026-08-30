@@ -12,7 +12,7 @@ passthrough_step(
     *,
     source: str,
     field: str,
-    columns: int | Sequence[str] | slice | ndarray | None = None,
+    columns: int | Sequence[str] | slice | ndarray | None,
     burn_in: int = 0,
     drop_initial: bool = False,
 ) -> MCStep
