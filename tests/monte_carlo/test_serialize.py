@@ -9,7 +9,11 @@ import pytest
 
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
+from SymbolicDSGE.monte_carlo.mc_constructs import (
+    MCDataGenResult,
+    MCMeta,
+    MCPipelineResult,
+)
 from SymbolicDSGE.monte_carlo.postproc import Artifact, Raw, Summary
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
@@ -57,11 +61,23 @@ def _run(n_rep: int = 4) -> MCPipelineResult:
     return pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=2)
 
 
+def _empty_datagen() -> MCDataGenResult:
+    """A datagen carrying nothing, for a result assembled without a run.
+
+    A pipeline always has a datagen, so a hand-built result still has to supply
+    one. The library never constructs this, which is why it is spelled out here
+    rather than offered by the container.
+    """
+    empty = np.empty((0, 0, 0), dtype=np.float64)
+    return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+
+
 def _postproc_result(postproc: dict[str, Artifact]) -> MCPipelineResult:
     return MCPipelineResult(
         meta=MCMeta(n_rep=3, n_retained_by_step={}),
         n_rep=3,
         n_successful=3,
+        datagen_outputs=_empty_datagen(),
         postproc=postproc,
     )
 

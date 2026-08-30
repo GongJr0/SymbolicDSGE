@@ -54,7 +54,8 @@ class SimResult:
 
     var_names: Sequence[str]
     X: NDF
-    shocks: NDF
+    shock_names: Sequence[str]
+    eps: NDF
     observable_names: Sequence[str] = ()
     y: NDF | None = None
     _regimes: NDI | None = None
@@ -64,6 +65,11 @@ class SimResult:
     def states(self) -> dict[str, NDF]:
         """Each model variable's path, as a column view of ``X``."""
         return {name: self.X[:, i] for i, name in enumerate(self.var_names)}
+
+    @cached_property
+    def shocks(self) -> dict[str, NDF]:
+        """Each shock's path, as a column view of ``eps``."""
+        return {name: self.eps[:, i] for i, name in enumerate(self.shock_names)}
 
     @cached_property
     def observables(self) -> dict[str, NDF]:
@@ -89,8 +95,11 @@ class SimResult:
         date.
         """
         if self._regimes is None:
-            raise ValueError(
-                "Regimes are an OccBin result; this model has no constraints."
+            raise AttributeError(
+                "Regimes are only recorded for models with constraints. "
+                "Regular first/second-order simulations, including "
+                ":func:`PiecewiseSolvedModel.sim_reference` on a constrained "
+                "model, do not record them."
             )
         return self._regimes
 
@@ -98,7 +107,10 @@ class SimResult:
     def diagnostics(self) -> OccBinDiagnostics:
         """Per-period convergence record behind :attr:`regimes`."""
         if self._diagnostics is None:
-            raise ValueError(
-                "Diagnostics are an OccBin result; this model has no constraints."
+            raise AttributeError(
+                "Diagnostics are only recorded for models with constraints. "
+                "Regular first/second-order simulations, including "
+                ":func:`PiecewiseSolvedModel.sim_reference` on a constrained "
+                "model, do not record them."
             )
         return self._diagnostics

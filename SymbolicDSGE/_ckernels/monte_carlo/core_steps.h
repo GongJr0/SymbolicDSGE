@@ -22,11 +22,14 @@ typedef struct {
 
 typedef struct {
   const f64 *states_input;
-  i64 n_states;
-  int states_batched;
+  const f64 *shocks_input;
   const f64 *observables_input;
-  i64 n_observables;
+  int states_batched;
+  int shocks_batched;
   int observables_batched;
+  i64 n_states;
+  i64 n_shocks;
+  i64 n_observables;
 } sdsge_mc_raw_model_data_step_ctx;
 
 /* `shocks` selects how the (T, k) shock block in the input arena is populated.
@@ -161,19 +164,27 @@ void sdsge_passthrough_step(const f64 *SDSGE_RESTRICT input, i64 n, i64 p,
 /* Raw model-data materialization. ``*_batched`` selects input[rep_idx] from a
  * leading replication axis; otherwise the same input span is copied each time.
  * Either input/output pair may be NULL when its element count is zero. */
-void sdsge_raw_model_data_step(const f64 *SDSGE_RESTRICT states_input,
-                               i64 n_states, int states_batched,
-                               f64 *SDSGE_RESTRICT states_output,
-                               const f64 *SDSGE_RESTRICT observables_input,
-                               i64 n_observables, int observables_batched,
-                               i64 rep_idx,
-                               f64 *SDSGE_RESTRICT observables_output);
+arena_size sdsge_raw_model_data_output_arena_size(i64 n_states, i64 n_shocks,
+                                                  i64 n_observables);
+void sdsge_raw_model_data_step(
+    const i64 rep_idx, const f64 *SDSGE_RESTRICT states_input,
+    const f64 *SDSGE_RESTRICT shocks_input,
+    const f64 *SDSGE_RESTRICT observables_input, const int states_batched,
+    const int shocks_batched, const int observables_batched, const i64 n_states,
+    const i64 n_shocks, const i64 n_observables,
+    f64 *SDSGE_RESTRICT states_output, f64 *SDSGE_RESTRICT shocks_output,
+    f64 *SDSGE_RESTRICT observables_output);
 
-/* ``input`` is [A(n,n), B(n,k), x0(n), shock(T,k), params(n_par)].
- * ``simout`` is [states(T,n), observables(T,m)]. */
-i64 sdsge_simulate_order1_arena_size(i64 n, i64 k, i64 T, i64 n_par);
+/* ``input`` is [A(n,n), B(n,k), x0(n), shock(T,k), params(n_par)]. ``simout``
+ * is [states(T,n), shocks(T,k), observables(T,m)], and ``m`` is zero when the
+ * step was built without observables, which drops the trailing block. The shock
+ * block is echoed from the input arena, which is where the runner stages a
+ * bound path and where the native draw writes one, so a replication's own draw
+ * is recoverable from its output alone. */
+arena_size sdsge_simulate_order1_arena_size(i64 n, i64 k, i64 T, i64 n_par);
+arena_size sdsge_simulate_order1_output_arena_size(i64 n, i64 k, i64 T, i64 m);
 /* ``input`` is [A(n,n), B(n,k), steady_state(n), x0(n), shock(T,k),
- * params(n_par), scratch]. ``simout`` is [states(T,n), observables(T,m)].
+ * params(n_par), scratch].
  *
  * The step splits that arena and calls core's parameterized kernel; the flat
  * layout is this pipeline's own requirement and stops here. */
@@ -185,15 +196,17 @@ void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
 /* ``input`` is [hx(nx,nx), gx(ny,nx), bu(nx+ny,n_exog), hxx(nx,nx,nx),
  * gxx(ny,nx,nx), hxu(nx,nx,n_exog), gxu(ny,nx,n_exog), huu(nx,n_exog,n_exog),
  * guu(ny,n_exog,n_exog), hss(nx), gss(ny), steady_state(nx+ny), x0(nx),
- * shock(T,n_exog), params(n_par), scratch]. ``simout`` is
- * [states(T,nx+ny), observables(T,m)].
+ * shock(T,n_exog), params(n_par), scratch]. ``simout`` matches the first-order
+ * layout above, over ``nx+ny`` variables.
  *
  * ``bu`` spans every variable, not just the states: a control responds to an
  * innovation contemporaneously, which is why the first-order layout above it
  * carries the whole loading too. As there, the step splits the arena and calls
  * core's parameterized kernel. */
-i64 sdsge_simulate_order2_arena_size(i64 n_state, i64 n_var, i64 n_exog, i64 T,
-                                     i64 n_par);
+arena_size sdsge_simulate_order2_arena_size(i64 n_state, i64 n_var, i64 n_exog,
+                                            i64 T, i64 n_par);
+arena_size sdsge_simulate_order2_output_arena_size(i64 n_var, i64 n_exog, i64 T,
+                                                   i64 m);
 void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
                                 sdsge_measurement_fn measurement, i64 T, i64 nx,
                                 i64 ny, i64 n_exog, i64 n_par, i64 m,
@@ -203,9 +216,9 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
  * y(T,m), x0(n), P0(n,n)]. Output follows FilterRawResult field order:
  * [x_pred, x_filt, P_pred, P_filt, y_pred, y_filt, innov, std_innov, S,
  * eps_hat (when return_shocks), loglik]. */
-i64 sdsge_filter_linear_input_arena_size(i64 n, i64 m, i64 k, i64 T);
-i64 sdsge_filter_linear_output_arena_size(i64 n, i64 m, i64 k, i64 T,
-                                          int return_shocks);
+arena_size sdsge_filter_linear_input_arena_size(i64 n, i64 m, i64 k, i64 T);
+arena_size sdsge_filter_linear_output_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                                 int return_shocks);
 int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT scratch_arena, i64 T, i64 n,
                              i64 m, i64 k, int symmetrize, int joseph_cov,
@@ -214,10 +227,10 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
 
 /* Extended filter input is [A(n,n), B(n,k), params(n_par), Q(k,k), R(m,m),
  * y(T,m), x0(n), P0(n,n)]. Output has the linear filter layout. */
-i64 sdsge_filter_extended_input_arena_size(i64 n, i64 m, i64 k, i64 T,
-                                           i64 n_par);
-i64 sdsge_filter_extended_output_arena_size(i64 n, i64 m, i64 k, i64 T,
-                                            int return_shocks);
+arena_size sdsge_filter_extended_input_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                                  i64 n_par);
+arena_size sdsge_filter_extended_output_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                                   int return_shocks);
 int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                                f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                meas_fn jac, i64 T, i64 n, i64 m, i64 k,
@@ -229,10 +242,11 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
  * gxx(nc,ns,ns), hss(ns), gss(nc), steady_state(ns+nc), params(n_par),
  * Q(ne,ne), R(no,no), obs(T,no), z0(2*ns), P0(2*ns,2*ns)]. Output follows
  * UnscentedFilterRawResult field order, omitting eps_hat (always None). */
-i64 sdsge_filter_unscented_input_arena_size(i64 n_state, i64 n_ctrl, i64 n_exog,
-                                            i64 n_obs, i64 T, i64 n_par);
-i64 sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl, i64 n_obs,
-                                             i64 T);
+arena_size sdsge_filter_unscented_input_arena_size(i64 n_state, i64 n_ctrl,
+                                                   i64 n_exog, i64 n_obs, i64 T,
+                                                   i64 n_par);
+arena_size sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
+                                                    i64 n_obs, i64 T);
 i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
                                 f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                 i64 T, i64 n_state, i64 n_ctrl, i64 n_exog,

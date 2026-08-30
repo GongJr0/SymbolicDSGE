@@ -1,10 +1,12 @@
 """Assemble a ``.sdsge`` bundle from model/estimation/Monte-Carlo artifacts.
 
 :class:`BundleBuilder` accumulates members and emits the archive. Text specs
-(model YAML, estimation/MC JSON) ride as deflated text; bulk numeric data (raw
-observable files, observed ``y``, MCMC posteriors, MC traces) flows through
-:func:`SymbolicDSGE.bundle.parquet.to_parquet`. This is the writer half of the
-container (#142) and the assembly point the future ``sdsge-compile`` CLI calls.
+(model YAML, estimation/MC JSON) ride as deflated text; bulk numeric data
+(observed ``y``, MCMC posteriors, MC traces) flows through
+:func:`SymbolicDSGE.bundle.parquet.columns_to_parquet`, and raw observable files,
+whose cells may be strings, through :func:`SymbolicDSGE.bundle.parquet.to_parquet`.
+This is the writer half of the container (#142) and the assembly point the
+future ``sdsge-compile`` CLI calls.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from ..monte_carlo.serialize import (
     json_safe,
+    serialize_datagen_result,
     serialize_run_meta,
     serialize_test_results,
     serialize_regression_results,
@@ -53,11 +56,10 @@ from .container import write_bundle
 from .manifest import Manifest, Member, MemberKind, SimSpec
 from .parquet import (
     arrays_to_parquet,
+    columns_to_parquet,
     csv_to_json,
-    frame_to_json,
     to_parquet,
     trace_to_csv,
-    trace_to_json,
 )
 
 NDF = NDArray[np.float64]
@@ -80,6 +82,14 @@ _MC_RAW_MODEL_DATA = "montecarlo/data/{ref}.parquet"
 
 # Monte Carlo result tab members
 _MC_RESULT_META = "montecarlo/result/meta.json"
+
+_MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
+_MC_DATAGEN_PARQUET = "montecarlo/result/datagen/datagen_traces.parquet"
+_MC_DATAGEN_CSV = "montecarlo/result/datagen/datagen_traces.csv"
+
+_MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
+_MC_DATAGEN_PARQUET = "montecarlo/result/datagen/{ref}_{field}.parquet"
+_MC_DATAGEN_CSV = "montecarlo/result/datagen/{ref}_{field}.csv"
 
 _MC_TEST_STEPS = "montecarlo/result/tests/test_steps.json"
 _MC_TEST_PARQUET = "montecarlo/result/tests/test_traces.parquet"
@@ -219,10 +229,10 @@ class BundleBuilder:
             ppath = _ESTIMATION_POSTERIOR_PARQUET
 
             def observed_bytes(y: Any) -> bytes:
-                return to_parquet(trace_to_json({"y": y}))
+                return columns_to_parquet({"y": y})
 
             def posterior_bytes(columns: Mapping[str, Any]) -> bytes:
-                return to_parquet(trace_to_json(columns))
+                return columns_to_parquet(columns)
 
         else:
             dpath = _ESTIMATION_DATA_CSV
@@ -315,6 +325,9 @@ class BundleBuilder:
                     "utf-8"
                 ),
             )
+            datagen = serialize_datagen_result(
+                result.datagen_outputs, pipeline.per_rep_steps[0].name
+            )
             tests = serialize_test_results(result.test_summaries)
             regressions = serialize_regression_results(result.regression_summaries)
             transforms = serialize_transform_results(
@@ -322,6 +335,7 @@ class BundleBuilder:
             )
             postprocs = serialize_postproc_results(result.postproc)
 
+            self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
             self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
             self._add_step_metas(
                 _MC_REGRESSION_STEPS, "mc_regression_steps", regressions
@@ -329,6 +343,13 @@ class BundleBuilder:
             self._add_step_metas(_MC_TRANSFORM_STEPS, "mc_transform_steps", transforms)
             self._add_step_metas(_MC_POSTPROC_STEPS, "mc_postproc_steps", postprocs)
 
+            self._add_trace_arrays(
+                _MC_DATAGEN_PARQUET,
+                _MC_DATAGEN_CSV,
+                "mc_datagen_trace",
+                datagen,
+                as_parquet,
+            )
             self._add_trace_block(
                 _MC_TEST_PARQUET, _MC_TEST_CSV, "mc_test_traces", tests, as_parquet
             )
@@ -399,9 +420,7 @@ class BundleBuilder:
         if not columns:
             return
         if as_parquet:
-            self._add(
-                Member(path=parquet_path, kind=kind), to_parquet(trace_to_json(columns))
-            )
+            self._add(Member(path=parquet_path, kind=kind), columns_to_parquet(columns))
         else:
             self._add(Member(path=csv_path, kind=kind), trace_to_csv(columns))
 
@@ -429,9 +448,7 @@ class BundleBuilder:
                     ref=name, field=field
                 )
                 data = (
-                    to_parquet(trace_to_json(columns))
-                    if as_parquet
-                    else trace_to_csv(columns)
+                    columns_to_parquet(columns) if as_parquet else trace_to_csv(columns)
                 )
                 self._add(
                     Member(

@@ -45,9 +45,12 @@ int sdsge_mc_raw_model_data_runner(const i64 rep_idx,
   (void)float_in_work;
   (void)int_work;
   sdsge_raw_model_data_step(
-      ctx->states_input, ctx->n_states, ctx->states_batched, float_out,
-      ctx->observables_input, ctx->n_observables, ctx->observables_batched,
-      rep_idx, float_out + ctx->n_states);
+      rep_idx, ctx->states_input, ctx->shocks_input, ctx->observables_input,
+      ctx->states_batched, ctx->shocks_batched, ctx->observables_batched,
+      ctx->n_states, ctx->n_shocks, ctx->n_observables, float_out,
+      float_out + ctx->n_states, float_out + ctx->n_states + ctx->n_shocks
+
+  );
   return sdsge_mc_finish_status(SDSGE_OK, int_out);
 }
 
@@ -111,7 +114,8 @@ int sdsge_mc_filter_linear_runner(const i64 rep_idx,
                                   const void *ctx_ptr) {
   const sdsge_mc_filter_linear_step_ctx *ctx = ctx_ptr;
   const i64 input_size =
-      sdsge_filter_linear_input_arena_size(ctx->n, ctx->m, ctx->k, ctx->T);
+      sdsge_filter_linear_input_arena_size(ctx->n, ctx->m, ctx->k, ctx->T)
+          .n_float;
   (void)rep_idx;
   (void)int_work;
   const int status = sdsge_filter_linear_step(
@@ -129,7 +133,8 @@ int sdsge_mc_filter_extended_runner(const i64 rep_idx,
                                     const void *ctx_ptr) {
   const sdsge_mc_filter_extended_step_ctx *ctx = ctx_ptr;
   const i64 input_size = sdsge_filter_extended_input_arena_size(
-      ctx->n, ctx->m, ctx->k, ctx->T, ctx->n_par);
+                             ctx->n, ctx->m, ctx->k, ctx->T, ctx->n_par)
+                             .n_float;
   (void)rep_idx;
   (void)int_work;
   const int status = sdsge_filter_extended_step(
@@ -148,7 +153,9 @@ int sdsge_mc_filter_unscented_runner(const i64 rep_idx,
                                      const void *ctx_ptr) {
   const sdsge_mc_filter_unscented_step_ctx *ctx = ctx_ptr;
   const i64 input_size = sdsge_filter_unscented_input_arena_size(
-      ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->T, ctx->n_par);
+                             ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs,
+                             ctx->T, ctx->n_par)
+                             .n_float;
   (void)rep_idx;
   (void)int_work;
   const int status = (int)sdsge_filter_unscented_step(
@@ -177,28 +184,47 @@ void sdsge_passthrough_step(const f64 *SDSGE_RESTRICT input, const i64 n,
     memcpy(output, input, (size_t)(n * p) * sizeof(f64));
 }
 
-void sdsge_raw_model_data_step(const f64 *SDSGE_RESTRICT states_input,
-                               const i64 n_states, const int states_batched,
-                               f64 *SDSGE_RESTRICT states_output,
-                               const f64 *SDSGE_RESTRICT observables_input,
-                               const i64 n_observables,
-                               const int observables_batched, const i64 rep_idx,
-                               f64 *SDSGE_RESTRICT observables_output) {
-  if (n_states > 0)
+arena_size sdsge_raw_model_data_output_arena_size(const i64 n_states,
+                                                  const i64 n_shocks,
+                                                  const i64 n_observables) {
+  return make_sizer(n_states + n_shocks + n_observables, 0);
+}
+void sdsge_raw_model_data_step(
+    const i64 rep_idx, const f64 *SDSGE_RESTRICT states_input,
+    const f64 *SDSGE_RESTRICT shocks_input,
+    const f64 *SDSGE_RESTRICT observables_input, const int states_batched,
+    const int shocks_batched, const int observables_batched, const i64 n_states,
+    const i64 n_shocks, const i64 n_observables,
+    f64 *SDSGE_RESTRICT states_output, f64 *SDSGE_RESTRICT shocks_output,
+    f64 *SDSGE_RESTRICT observables_output) {
+  if (n_states > 0) {
     memcpy(states_output,
            states_input + (states_batched ? rep_idx * n_states : 0),
            (size_t)n_states * sizeof(f64));
-  if (n_observables > 0)
+  }
+  if (n_shocks > 0) {
+    memcpy(shocks_output,
+           shocks_input + (shocks_batched ? rep_idx * n_shocks : 0),
+           (size_t)n_shocks * sizeof(f64));
+  }
+  if (n_observables > 0) {
     memcpy(observables_output,
            observables_input +
                (observables_batched ? rep_idx * n_observables : 0),
            (size_t)n_observables * sizeof(f64));
+  }
 }
 
-i64 sdsge_simulate_order1_arena_size(const i64 n, const i64 k, const i64 T,
-                                     const i64 n_par) {
-  return n * n + n * k + n + n + T * k + n_par +
-         sdsge_simulate_linear_states_arena_size(n).n_float;
+arena_size sdsge_simulate_order1_arena_size(const i64 n, const i64 k,
+                                            const i64 T, const i64 n_par) {
+  return make_sizer(n * n + n * k + n + n + T * k + n_par +
+                        sdsge_simulate_linear_states_arena_size(n).n_float,
+                    0);
+}
+
+arena_size sdsge_simulate_order1_output_arena_size(const i64 n, const i64 k,
+                                                   const i64 T, const i64 m) {
+  return make_sizer(T * (n + k + m), 0);
 }
 void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
                                 sdsge_measurement_fn measurement, const i64 T,
@@ -211,12 +237,15 @@ void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
   const f64 *SDSGE_RESTRICT shock = x0 + n;
   f64 *SDSGE_RESTRICT params = (f64 *)(shock + T * k);
   f64 *SDSGE_RESTRICT scratch = params + n_par;
+
   f64 *SDSGE_RESTRICT states = simout;
-  f64 *SDSGE_RESTRICT observables = simout + T * n;
+  f64 *SDSGE_RESTRICT shock_out = simout + T * n;
+  f64 *SDSGE_RESTRICT observables = shock_out + T * k;
 
   sdsge_simulate_linear_states(A, B, x0, shock, steady_state, states, scratch,
                                T, n, k);
 
+  memcpy(shock_out, shock, (size_t)(T * k) * sizeof(f64));
   if (m > 0) {
     for (i64 t = 0; t < T; ++t) {
       measurement(states + t * n, params, observables + t * m);
@@ -224,15 +253,23 @@ void sdsge_simulate_order1_step(f64 *SDSGE_RESTRICT arena,
   }
 }
 
-i64 sdsge_simulate_order2_arena_size(const i64 n_state, const i64 n_var,
-                                     const i64 n_exog, const i64 T,
-                                     const i64 n_par) {
+arena_size sdsge_simulate_order2_arena_size(const i64 n_state, const i64 n_var,
+                                            const i64 n_exog, const i64 T,
+                                            const i64 n_par) {
   const i64 nx = n_state;
   const i64 ny = n_var - n_state;
-  return nx * nx + ny * nx + n_var * n_exog + nx * nx * nx + ny * nx * nx +
-         nx * nx * n_exog + ny * nx * n_exog + nx * n_exog * n_exog +
-         ny * n_exog * n_exog + nx + ny + n_var + nx + T * n_exog + n_par +
-         sdsge_simulate_second_order_pruned_arena_size(nx, n_exog).n_float;
+  return make_sizer(
+      nx * nx + ny * nx + n_var * n_exog + nx * nx * nx + ny * nx * nx +
+          nx * nx * n_exog + ny * nx * n_exog + nx * n_exog * n_exog +
+          ny * n_exog * n_exog + nx + ny + n_var + nx + T * n_exog + n_par +
+          sdsge_simulate_second_order_pruned_arena_size(nx, n_exog).n_float,
+      0);
+}
+
+arena_size sdsge_simulate_order2_output_arena_size(const i64 n_var,
+                                                   const i64 n_exog,
+                                                   const i64 T, const i64 m) {
+  return sdsge_simulate_order1_output_arena_size(n_var, n_exog, T, m);
 }
 void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
                                 sdsge_measurement_fn measurement, i64 T, i64 nx,
@@ -255,13 +292,16 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
   const f64 *SDSGE_RESTRICT shock = x0 + nx;
   f64 *SDSGE_RESTRICT params = (f64 *)(shock + T * n_exog);
   f64 *SDSGE_RESTRICT scratch = params + n_par;
+
   f64 *SDSGE_RESTRICT states = simout;
-  f64 *SDSGE_RESTRICT observables = simout + T * n;
+  f64 *SDSGE_RESTRICT shock_out = simout + T * n;
+  f64 *SDSGE_RESTRICT observables = shock_out + T * n_exog;
 
   sdsge_simulate_second_order_pruned(hx, gx, bu, hxx, gxx, hxu, gxu, huu, guu,
                                      hss, gss, x0, shock, steady_state, states,
                                      scratch, T, nx, ny, n_exog);
 
+  memcpy(shock_out, shock, (size_t)(T * n_exog) * sizeof(f64));
   if (m > 0) {
     for (i64 t = 0; t < T; ++t) {
       measurement(states + t * n, params, observables + t * m);
@@ -269,16 +309,18 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
   }
 }
 
-i64 sdsge_filter_linear_input_arena_size(const i64 n, const i64 m, const i64 k,
-                                         const i64 T) {
-  return n * n + n * k + m * n + m + k * k + m * m + T * m + n + n * n;
+arena_size sdsge_filter_linear_input_arena_size(const i64 n, const i64 m,
+                                                const i64 k, const i64 T) {
+  return make_sizer(
+      n * n + n * k + m * n + m + k * k + m * m + T * m + n + n * n, 0);
 }
 
-i64 sdsge_filter_linear_output_arena_size(const i64 n, const i64 m, const i64 k,
-                                          const i64 T,
-                                          const int return_shocks) {
-  return 2 * T * n + 2 * T * n * n + 4 * T * m + T * m * m +
-         (return_shocks ? T * k : 0) + 1;
+arena_size sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
+                                                 const i64 k, const i64 T,
+                                                 const int return_shocks) {
+  return make_sizer(2 * T * n + 2 * T * n * n + 4 * T * m + T * m * m +
+                        (return_shocks ? T * k : 0) + 1,
+                    0);
 }
 
 int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
@@ -330,15 +372,16 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
   return kf_hot_loop(&in, scratch_arena, &out);
 }
 
-i64 sdsge_filter_extended_input_arena_size(const i64 n, const i64 m,
-                                           const i64 k, const i64 T,
-                                           const i64 n_par) {
-  return n * n + n * k + n_par + k * k + m * m + T * m + n + n * n;
+arena_size sdsge_filter_extended_input_arena_size(const i64 n, const i64 m,
+                                                  const i64 k, const i64 T,
+                                                  const i64 n_par) {
+  return make_sizer(n * n + n * k + n_par + k * k + m * m + T * m + n + n * n,
+                    0);
 }
 
-i64 sdsge_filter_extended_output_arena_size(const i64 n, const i64 m,
-                                            const i64 k, const i64 T,
-                                            const int return_shocks) {
+arena_size sdsge_filter_extended_output_arena_size(const i64 n, const i64 m,
+                                                   const i64 k, const i64 T,
+                                                   const int return_shocks) {
   return sdsge_filter_linear_output_arena_size(n, m, k, T, return_shocks);
 }
 
@@ -395,26 +438,32 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
   return ekf_hot_loop(&in, scratch_arena, &out);
 }
 
-i64 sdsge_filter_unscented_input_arena_size(const i64 n_state, const i64 n_ctrl,
-                                            const i64 n_exog, const i64 n_obs,
-                                            const i64 T, const i64 n_par) {
+arena_size sdsge_filter_unscented_input_arena_size(const i64 n_state,
+                                                   const i64 n_ctrl,
+                                                   const i64 n_exog,
+                                                   const i64 n_obs, const i64 T,
+                                                   const i64 n_par) {
   const i64 nz = 2 * n_state;
   const i64 n_var = n_state + n_ctrl;
-  return n_state * n_state + n_ctrl * n_state + n_var * n_exog +
-         n_state * n_state * n_state + n_ctrl * n_state * n_state +
-         n_state * n_state * n_exog + n_ctrl * n_state * n_exog +
-         n_state * n_exog * n_exog + n_ctrl * n_exog * n_exog + n_state +
-         n_ctrl + n_var + n_par + n_exog * n_exog + n_obs * n_obs + T * n_obs +
-         nz + nz * nz;
+  return make_sizer(n_state * n_state + n_ctrl * n_state + n_var * n_exog +
+                        n_state * n_state * n_state +
+                        n_ctrl * n_state * n_state +
+                        n_state * n_state * n_exog + n_ctrl * n_state * n_exog +
+                        n_state * n_exog * n_exog + n_ctrl * n_exog * n_exog +
+                        n_state + n_ctrl + n_var + n_par + n_exog * n_exog +
+                        n_obs * n_obs + T * n_obs + nz + nz * nz,
+                    0);
 }
 
-i64 sdsge_filter_unscented_output_arena_size(const i64 n_state,
-                                             const i64 n_ctrl, const i64 n_obs,
-                                             const i64 T) {
+arena_size sdsge_filter_unscented_output_arena_size(const i64 n_state,
+                                                    const i64 n_ctrl,
+                                                    const i64 n_obs,
+                                                    const i64 T) {
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
-  return 2 * T * n_var + 2 * T * nz * nz + 4 * T * n_obs + T * n_obs * n_obs +
-         4 * T * n_state + 1;
+  return make_sizer(2 * T * n_var + 2 * T * nz * nz + 4 * T * n_obs +
+                        T * n_obs * n_obs + 4 * T * n_state + 1,
+                    0);
 }
 
 i64 sdsge_filter_unscented_step(

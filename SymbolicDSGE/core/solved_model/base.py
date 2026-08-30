@@ -195,7 +195,8 @@ class SolvedModel(ABC, Generic[Policy]):
         return SimResult(
             var_names=self.compiled.var_names,
             X=X,
-            shocks=shock_path,
+            shock_names=self.compiled.shock_names,
+            eps=shock_path,
             observable_names=self.compiled.observable_names if observables else (),
             y=y,
             _regimes=regimes,
@@ -419,7 +420,8 @@ class SolvedModel(ABC, Generic[Policy]):
         return SimResult(
             var_names=self.compiled.var_names,
             X=X,
-            shocks=shocks,
+            shock_names=self.compiled.shock_names,
+            eps=shocks,
             observable_names=self.compiled.observable_names if observables else (),
             y=y,
             _regimes=regimes,

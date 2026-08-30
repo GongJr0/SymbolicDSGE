@@ -139,6 +139,14 @@ class PipelineSpec(TypedDict):
     postprocs: list[PostprocSpec]
 
 
+class MCDataGenResultMeta(TypedDict):
+    step_name: str
+    var_names: Sequence[str]
+    shock_names: Sequence[str]
+    observable_names: Sequence[str]
+    shapes: Mapping[str, Sequence[int]]
+
+
 class MCTestResultMeta(TypedDict):
     test_name: str
     dist: str
@@ -210,14 +218,6 @@ class MCTransformResultMeta(TypedDict):
 
 
 class MCPostprocResultMeta(TypedDict):
-    """A post-loop step's non-bulk half.
-
-    ``shape`` describes the ``Raw`` slot when the op declared one, and is
-    ``None`` otherwise. ``summary`` is the aggregate the op returned, already
-    converted to a JSON-native form; it is inline by definition and carries no
-    per-replication structure.
-    """
-
     step_name: str
     shape: list[int] | None
     summary: Any

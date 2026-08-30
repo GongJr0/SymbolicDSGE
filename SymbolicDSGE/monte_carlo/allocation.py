@@ -490,7 +490,8 @@ def _resolve_datagen_fields(
                 )
             T = int(step.kwargs["T"])
             fields: dict[str, _FieldSpec] = {
-                "states": _field((T, model.compiled.n_var))
+                "states": _field((T, model.compiled.n_var)),
+                "shocks": _field((T, model.compiled.n_exog)),
             }
             if step.kwargs.get("observables", DEFAULT_SIMULATION_OBSERVABLES):
                 fields["observables"] = _field((T, model.compiled.n_obs))
@@ -498,7 +499,7 @@ def _resolve_datagen_fields(
         case "raw_model_data":
             return {
                 field: _field(_raw_data_shape(field, value))
-                for field in ("states", "observables")
+                for field in ("states", "shocks", "observables")
                 if (value := step.kwargs.get(field)) is not None
             }
         case _:

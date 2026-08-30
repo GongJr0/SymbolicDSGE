@@ -13,6 +13,9 @@ cdef extern from "sdsge_common.h":
         int64_t n_float
         int64_t n_int
 
+    arena_size make_sizer(int64_t n_float, int64_t n_int) nogil
+    arena_size add_arena(arena_size a, arena_size b) nogil
+
 cdef extern from "transforms.h":
     arena_size sdsge_standardize_ax0_arena_size(int64_t n, int64_t p) nogil
     arena_size sdsge_log_arena_size(int64_t n, int64_t p) nogil
@@ -37,18 +40,23 @@ cdef extern from "regression.h":
 
 cdef extern from "core_steps.h":
     arena_size sdsge_passthrough_arena_size(int64_t n, int64_t p) nogil
-    int64_t sdsge_simulate_order1_arena_size(int64_t n, int64_t k,
-                                             int64_t T, int64_t n_par) nogil
-    int64_t sdsge_simulate_order2_arena_size(int64_t n_state,
-                                             int64_t n_var, int64_t n_exog,
-                                             int64_t T, int64_t n_par) nogil
-    int64_t sdsge_filter_linear_input_arena_size(int64_t n, int64_t m,
-                                                 int64_t k, int64_t T) nogil
-    int64_t sdsge_filter_extended_input_arena_size(int64_t n, int64_t m, int64_t k,
-                                                   int64_t T, int64_t n_par) nogil
-    int64_t sdsge_filter_unscented_input_arena_size(int64_t n_state, int64_t n_ctrl,
-                                                    int64_t n_exog, int64_t n_obs,
-                                                    int64_t T, int64_t n_par) nogil
+    arena_size sdsge_simulate_order1_arena_size(int64_t n, int64_t k,
+                                                int64_t T, int64_t n_par) nogil
+    arena_size sdsge_simulate_order2_arena_size(int64_t n_state,
+                                                int64_t n_var, int64_t n_exog,
+                                                int64_t T, int64_t n_par) nogil
+    arena_size sdsge_simulate_order1_output_arena_size(int64_t n, int64_t k,
+                                                       int64_t T, int64_t m) nogil
+    arena_size sdsge_simulate_order2_output_arena_size(int64_t n_var,
+                                                       int64_t n_exog,
+                                                       int64_t T, int64_t m) nogil
+    arena_size sdsge_filter_linear_input_arena_size(int64_t n, int64_t m,
+                                                    int64_t k, int64_t T) nogil
+    arena_size sdsge_filter_extended_input_arena_size(int64_t n, int64_t m, int64_t k,
+                                                      int64_t T, int64_t n_par) nogil
+    arena_size sdsge_filter_unscented_input_arena_size(int64_t n_state, int64_t n_ctrl,
+                                                       int64_t n_exog, int64_t n_obs,
+                                                       int64_t T, int64_t n_par) nogil
 
 cdef extern from "kalman.h":
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
@@ -137,9 +145,29 @@ def simulation_arena_size(
 ):
     """Return the complete packed-input and work requirement for simulation."""
     if order == 1:
-        return sdsge_simulate_order1_arena_size(n_var, n_exog, T, n_par), 0
+        return _size(sdsge_simulate_order1_arena_size(n_var, n_exog, T, n_par))
     if order == 2:
-        return sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par), 0
+        return _size(sdsge_simulate_order2_arena_size(n_state, n_var, n_exog, T, n_par))
+    raise ValueError(f"Unsupported native simulation order: {order}.")
+
+
+def simulation_output_arena_size(
+    int order,
+    int64_t n_var,
+    int64_t n_exog,
+    int64_t T,
+    int64_t n_obs,
+):
+    """Return the output requirement for simulation, as the kernel writes it.
+
+    The Python compiler resolves the per-field layout itself, so this is what
+    that layout is held to: the two must agree on the total or the step writes
+    somewhere the plan did not reserve.
+    """
+    if order == 1:
+        return _size(sdsge_simulate_order1_output_arena_size(n_var, n_exog, T, n_obs))
+    if order == 2:
+        return _size(sdsge_simulate_order2_output_arena_size(n_var, n_exog, T, n_obs))
     raise ValueError(f"Unsupported native simulation order: {order}.")
 
 
@@ -154,7 +182,7 @@ def filter_arena_size(
 ):
     """Return the complete packed-input and Kalman-work requirement."""
     cdef arena_size scratch
-    cdef int64_t input_size
+    cdef arena_size input_size
     if kind == "linear":
         input_size = sdsge_filter_linear_input_arena_size(n_state + n_ctrl,
                                                           n_obs, n_exog, T)
@@ -169,7 +197,7 @@ def filter_arena_size(
         scratch = ukf_arena_size(n_state, n_ctrl, n_exog, n_obs)
     else:
         raise ValueError(f"Unsupported native filter kind: {kind!r}.")
-    return input_size + scratch.n_float, scratch.n_int
+    return _size(add_arena(input_size, scratch))
 
 
 def diagnostic_arena_size(
@@ -180,38 +208,38 @@ def diagnostic_arena_size(
 ):
     """Return the complete staged-input and work requirement for a diagnostic."""
     cdef arena_size size
-    cdef int64_t input_size
+    cdef arena_size input_size
     if kind == "wald_mean":
         size = sdsge_wald_mean_hac_arena_size(n, p)
-        input_size = n * p
+        input_size = make_sizer(n * p, 0)
     elif kind == "wald_covariance":
         size = sdsge_wald_covariance_hac_arena_size(n, p)
-        input_size = n * p
+        input_size = make_sizer(n * p, 0)
     elif kind == "wald_second_moment":
         size = sdsge_wald_second_moment_hac_arena_size(n, p)
-        input_size = n * p
+        input_size = make_sizer(n * p, 0)
     elif kind == "ljung_box":
         size = sdsge_lb_arena_size(n, lags)
-        input_size = n
+        input_size = make_sizer(n, 0)
     elif kind == "jarque_bera":
         size.n_float = 0
         size.n_int = 0
-        input_size = n
+        input_size = make_sizer(n, 0)
     elif kind == "breusch_pagan":
         size = sdsge_bp_arena_size(n, p + 1)
-        input_size = n + n * p + n * (p + 1)
+        input_size = make_sizer(n + n * p + n * (p + 1), 0)
     elif kind == "breusch_godfrey":
         size = sdsge_bg_arena_size(n, p, lags)
-        input_size = n + n * p
+        input_size = make_sizer(n + n * p, 0)
     elif kind == "chow":
         size = sdsge_chow_arena_size(p)
-        input_size = n + n * p
+        input_size = make_sizer(n + n * p, 0)
     elif kind == "cusum":
         size = sdsge_cusum_arena_size(n, p)
-        input_size = n + n * p
+        input_size = make_sizer(n + n * p, 0)
     elif kind == "cusumsq":
         size = sdsge_cusumsq_arena_size(n, p)
-        input_size = n + n * p
+        input_size = make_sizer(n + n * p, 0)
     else:
         raise ValueError(f"Unsupported native diagnostic kind: {kind!r}.")
-    return input_size + size.n_float, size.n_int
+    return _size(add_arena(input_size, size))

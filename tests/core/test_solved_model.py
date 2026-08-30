@@ -349,6 +349,7 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
     compiled = SimpleNamespace(
         idx={"g": 0, "x": 1},
         var_names=["g", "x"],
+        shock_names=("eps",),
         n_exog=1,
         n_var=2,
         n_state=1,
@@ -404,7 +405,8 @@ def test_solved_model_transition_plot_renders_observables_and_shocks(
         return SimResult(
             var_names=("u", "x"),
             X=np.column_stack([np.linspace(1.0, 0.0, T), np.linspace(-1.0, 0.0, T)]),
-            shocks=np.zeros((T, 1), dtype=np.float64),
+            shock_names=("eps",),
+            eps=np.zeros((T, 1), dtype=np.float64),
             observable_names=("Infl",),
             y=np.linspace(0.0, 1.0, T).reshape(-1, 1),
         )

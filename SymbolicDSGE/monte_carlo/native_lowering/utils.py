@@ -191,7 +191,7 @@ def _check_raw_model_data_layout(
     fields: Mapping[str, FieldLayout],
 ) -> None:
     expected_offset = 0
-    for field in ("states", "observables"):
+    for field in ("states", "shocks", "observables"):
         value = step.kwargs.get(field)
         if value is None:
             continue

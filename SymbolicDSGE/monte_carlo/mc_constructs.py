@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dataclass_field
+from functools import cached_property
 from enum import StrEnum
 from typing import (
     Any,
@@ -14,6 +15,8 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
+from ..core.sim_result import SimResult, OccBinDiagnostics
+from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
@@ -24,6 +27,7 @@ from ..regression.result import MCRegressionResult
 from .custom_op import PandasCustomFunc
 
 NDF = NDArray[float64]
+NDI = NDArray[np.int_]
 NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
@@ -31,7 +35,7 @@ ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
 ShockMapping = Mapping[str, ShockValue]
 
 
-MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "observables")
+MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
 DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
 # The array-valued filter outputs, in tuple order. ``status`` is a scalar error
 # code carried on the raw result, not a selectable source, so it is excluded.
@@ -257,13 +261,194 @@ class MCMeta:
         return self.failed_postprocs == set()
 
 
+@dataclass(frozen=True, eq=False, repr=False)
+class MCDataGenResult:
+    var_names: Sequence[str]
+    X: NDF  # (n_retained, T, n_var)
+    shock_names: Sequence[str]
+    eps: NDF  # (n_retained, T, n_shock)
+    observable_names: Sequence[str] = ()
+    y: NDF | None = None  # (n_retained, T, n_obs)
+
+    _regimes: NDI | None = None  # (n_retained, T, H)
+    _diagnostics: Sequence[OccBinDiagnostics] | None = None  # (n_retained,)
+
+    def replication(self, idx: int) -> SimResult:
+        """Return a :class:`~SymbolicDSGE.core.sim_result.SimResult` for a single replication."""
+
+        if idx < 0 or idx >= self.X.shape[0]:
+            raise IndexError(
+                f"Replication index {idx} out of bounds for {self.X.shape[0]} replications."
+            )
+
+        return SimResult(
+            var_names=self.var_names,
+            X=self.X[idx],
+            shock_names=self.shock_names,
+            eps=self.eps[idx],
+            observable_names=self.observable_names,
+            y=self.y[idx] if self.y is not None else None,
+            _regimes=self._regimes[idx] if self._regimes is not None else None,
+            _diagnostics=(
+                self._diagnostics[idx] if self._diagnostics is not None else None
+            ),
+        )
+
+    @cached_property
+    def states(self) -> dict[str, NDF]:
+        """Each model variable's path, as a column view of ``X``.
+        returns (n_retained, T) views per variable, keyed by variable name.
+        """
+        return {name: self.X[:, :, i] for i, name in enumerate(self.var_names)}
+
+    @cached_property
+    def shocks(self) -> dict[str, NDF]:
+        """Each shock's path, as a column view of ``eps``.
+        returns (n_retained, T) views per shock, keyed by shock name.
+        """
+        return {name: self.eps[:, :, i] for i, name in enumerate(self.shock_names)}
+
+    @cached_property
+    def observables(self) -> dict[str, NDF] | None:
+        """Each observable's path, as a column view of ``y``.
+        returns (n_retained, T) views per observable, keyed by observable name.
+        """
+        if self.y is None:
+            return None
+        return {name: self.y[:, :, i] for i, name in enumerate(self.observable_names)}
+
+    @property
+    def regimes(self) -> NDI:
+        """``(n_retained, T, H)`` accepted regime guess per period, per replication.
+
+        ``H`` is the longest check-ahead horizon any period used, so a period
+        that settled sooner is padded. Column 0 is the regime realized at that
+        date.
+        """
+        if self._regimes is None:
+            raise AttributeError(
+                "Regimes are only recorded for models with constraints. "
+                "Regular first/second-order simulations, including "
+                ":func:`PiecewiseSolvedModel.sim_reference` on a constrained "
+                "model, do not record them."
+            )
+        return self._regimes
+
+    @property
+    def diagnostics(self) -> Sequence[OccBinDiagnostics]:
+        """Each replication's per-period convergence record behind :attr:`regimes`."""
+        if self._diagnostics is None:
+            raise AttributeError(
+                "Diagnostics are only recorded for models with constraints. "
+                "Regular first/second-order simulations, including "
+                ":func:`PiecewiseSolvedModel.sim_reference` on a constrained "
+                "model, do not record them."
+            )
+        return self._diagnostics
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class MCFilterResult:
+    filter_mode: str
+    # Shared
+    x_pred: NDF
+    x_filt: NDF
+    P_pred: NDF
+    P_filt: NDF
+    y_pred: NDF
+    y_filt: NDF
+
+    S: NDF
+
+    innov: NDF
+    std_innov: NDF
+    loglik: NDF
+    constant: NDF  # steady-state offset, np.nan for UKF
+    eps_hat: NDF | None = None
+
+    # Unscented-specific
+    _x1_pred: NDF | None = None
+    _x2_pred: NDF | None = None
+    _x1_filt: NDF | None = None
+    _x2_filt: NDF | None = None
+
+    def replication(self, idx: int) -> FilterResult | UnscentedFilterResult:
+        """Return a :class:`FilterResult` or :class:`UnscentedFilterResult` for
+        a single replication."""
+
+        if idx < 0 or idx >= self.x_pred.shape[0]:
+            raise IndexError(
+                f"Replication index {idx} out of bounds for {self.x_pred.shape[0]} replications."
+            )
+
+        if self.filter_mode == "unscented":
+            return UnscentedFilterResult(
+                x_pred=self.x_pred[idx],
+                x_filt=self.x_filt[idx],
+                P_pred=self.P_pred[idx],
+                P_filt=self.P_filt[idx],
+                y_pred=self.y_pred[idx],
+                y_filt=self.y_filt[idx],
+                S=self.S[idx],
+                innov=self.innov[idx],
+                std_innov=self.std_innov[idx],
+                loglik=self.loglik[idx],
+                constant=self.constant,
+                x1_pred=self.x1_pred[idx],
+                x1_filt=self.x1_filt[idx],
+                x2_pred=self.x2_pred[idx],
+                x2_filt=self.x2_filt[idx],
+                eps_hat=self.eps_hat[idx] if self.eps_hat is not None else None,
+            )
+        return FilterResult(
+            x_pred=self.x_pred[idx],
+            x_filt=self.x_filt[idx],
+            P_pred=self.P_pred[idx],
+            P_filt=self.P_filt[idx],
+            y_pred=self.y_pred[idx],
+            y_filt=self.y_filt[idx],
+            S=self.S[idx],
+            innov=self.innov[idx],
+            std_innov=self.std_innov[idx],
+            loglik=self.loglik[idx],
+            constant=self.constant,
+            eps_hat=self.eps_hat[idx] if self.eps_hat is not None else None,
+        )
+
+    @cached_property
+    def x1_pred(self) -> NDF:
+        if self._x1_pred is None:
+            raise AttributeError("x1_pred is only available for unscented filters.")
+        return self._x1_pred
+
+    @cached_property
+    def x2_pred(self) -> NDF:
+        if self._x2_pred is None:
+            raise AttributeError("x2_pred is only available for unscented filters.")
+        return self._x2_pred
+
+    @cached_property
+    def x1_filt(self) -> NDF:
+        if self._x1_filt is None:
+            raise AttributeError("x1_filt is only available for unscented filters.")
+        return self._x1_filt
+
+    @cached_property
+    def x2_filt(self) -> NDF:
+        if self._x2_filt is None:
+            raise AttributeError("x2_filt is only available for unscented filters.")
+        return self._x2_filt
+
+
 @dataclass(frozen=True)
 class MCPipelineResult:
     meta: MCMeta
     n_rep: int
     n_successful: int
-    test_summaries: Mapping[str, MCTestResult] = dataclass_field(default_factory=dict)
+    datagen_outputs: MCDataGenResult
+    filter_outputs: Mapping[str, MCFilterResult] = dataclass_field(default_factory=dict)
     transform_outputs: Mapping[str, NDF] = dataclass_field(default_factory=dict)
+    test_summaries: Mapping[str, MCTestResult] = dataclass_field(default_factory=dict)
     regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
         default_factory=dict
     )
