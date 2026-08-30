@@ -165,6 +165,7 @@ def _lower_datagen_step(
             raw_model_data_step(
                 step.name,
                 states=step.kwargs.get("states"),
+                shocks=step.kwargs.get("shocks"),
                 observables=step.kwargs.get("observables"),
             ),
             (),

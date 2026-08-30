@@ -82,6 +82,7 @@ def payload_step(name: str, value: ArrayLike) -> NativeStep: ...
 def raw_model_data_step(
     name: str,
     states: ArrayLike | None = None,
+    shocks: ArrayLike | None = None,
     observables: ArrayLike | None = None,
 ) -> NativeStep: ...
 def simulate1_step(

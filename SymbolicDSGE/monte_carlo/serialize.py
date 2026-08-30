@@ -20,13 +20,14 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .mc_constructs import MCPipelineResult
+from .mc_constructs import MCDataGenResult, MCPipelineResult
 from .postproc import Artifact, Summary, Raw
 from .._ckernels.monte_carlo._arenas import resolve_retention
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from .spec import (
     MCFailureSpec,
+    MCDataGenResultMeta,
     MCPostprocResultMeta,
     MCRegressionResultMeta,
     MCRunMeta,
@@ -202,6 +203,29 @@ def serialize_regression_results(
             traces["se_trace"] = spec._se_trace
         out[name] = (spec.meta, traces)
     return out
+
+
+def serialize_datagen_result(
+    datagen: MCDataGenResult,
+    step_name: str,
+) -> dict[str, tuple[MCDataGenResultMeta, dict[str, NDArray[Any]]]]:
+    """The datagen's ``(meta, traces)`` halves, keyed by its step name.
+
+    One datagen per pipeline, so the mapping holds one entry; it is keyed
+    because that is the shape the member writers take. Arrays are handed over as
+    the run's own, and the meta records the shape each one unflattens to.
+    """
+    fields: dict[str, NDArray[Any]] = {"states": datagen.X, "shocks": datagen.eps}
+    if datagen.y is not None:
+        fields["observables"] = datagen.y
+    meta = MCDataGenResultMeta(
+        step_name=step_name,
+        var_names=list(datagen.var_names),
+        shock_names=list(datagen.shock_names),
+        observable_names=list(datagen.observable_names),
+        shapes={name: list(arr.shape) for name, arr in fields.items()},
+    )
+    return {step_name: (meta, fields)}
 
 
 def serialize_transform_results(

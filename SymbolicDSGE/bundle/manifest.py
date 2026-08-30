@@ -44,6 +44,8 @@ MemberKind = Literal[
     "mc_custom_op",
     # Monte Carlo: a recorded run, one meta member per step kind beside its bulk
     "mc_result_meta",
+    "mc_datagen_steps",
+    "mc_datagen_trace",
     "mc_test_steps",
     "mc_test_traces",
     "mc_regression_steps",

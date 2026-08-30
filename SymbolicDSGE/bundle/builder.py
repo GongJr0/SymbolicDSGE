@@ -43,6 +43,7 @@ from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from ..monte_carlo.serialize import (
     json_safe,
+    serialize_datagen_result,
     serialize_run_meta,
     serialize_test_results,
     serialize_regression_results,
@@ -81,6 +82,14 @@ _MC_RAW_MODEL_DATA = "montecarlo/data/{ref}.parquet"
 
 # Monte Carlo result tab members
 _MC_RESULT_META = "montecarlo/result/meta.json"
+
+_MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
+_MC_DATAGEN_PARQUET = "montecarlo/result/datagen/datagen_traces.parquet"
+_MC_DATAGEN_CSV = "montecarlo/result/datagen/datagen_traces.csv"
+
+_MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
+_MC_DATAGEN_PARQUET = "montecarlo/result/datagen/{ref}_{field}.parquet"
+_MC_DATAGEN_CSV = "montecarlo/result/datagen/{ref}_{field}.csv"
 
 _MC_TEST_STEPS = "montecarlo/result/tests/test_steps.json"
 _MC_TEST_PARQUET = "montecarlo/result/tests/test_traces.parquet"
@@ -316,6 +325,9 @@ class BundleBuilder:
                     "utf-8"
                 ),
             )
+            datagen = serialize_datagen_result(
+                result.datagen_outputs, pipeline.per_rep_steps[0].name
+            )
             tests = serialize_test_results(result.test_summaries)
             regressions = serialize_regression_results(result.regression_summaries)
             transforms = serialize_transform_results(
@@ -323,6 +335,7 @@ class BundleBuilder:
             )
             postprocs = serialize_postproc_results(result.postproc)
 
+            self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
             self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
             self._add_step_metas(
                 _MC_REGRESSION_STEPS, "mc_regression_steps", regressions
@@ -330,6 +343,13 @@ class BundleBuilder:
             self._add_step_metas(_MC_TRANSFORM_STEPS, "mc_transform_steps", transforms)
             self._add_step_metas(_MC_POSTPROC_STEPS, "mc_postproc_steps", postprocs)
 
+            self._add_trace_arrays(
+                _MC_DATAGEN_PARQUET,
+                _MC_DATAGEN_CSV,
+                "mc_datagen_trace",
+                datagen,
+                as_parquet,
+            )
             self._add_trace_block(
                 _MC_TEST_PARQUET, _MC_TEST_CSV, "mc_test_traces", tests, as_parquet
             )

@@ -488,14 +488,34 @@ def _mc_summary(value: Any) -> Any:
 
 
 def _load_mc_datagen(archive: BundleArchive, manifest: Manifest) -> MCDataGenResult:
-    """The datagen step's retained output, empty until the bundle carries one.
+    """The datagen step's retained output, empty when the bundle carries none.
 
-    A bundle written before the datagen members existed has nothing to restore,
-    and neither does one whose datagen retained no replications, so both land on
-    the same empty container rather than on a null a caller has to test for.
+    ``shapes`` names the fields the step produced, so an absent ``observables``
+    entry restores the ``None`` the run reported rather than an empty array. The
+    widths come from those shapes rather than from the name sequences beside
+    them, since raw data may declare an array it never named.
     """
-    empty = np.empty((0, 0, 0), dtype=np.float64)
-    return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+    metas = _mc_json(archive, manifest, "mc_datagen_steps")
+    if not metas:
+        empty = np.empty((0, 0, 0), dtype=np.float64)
+        return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+
+    name, meta = next(iter(metas.items()))
+    columns = _mc_array_columns(archive, manifest, "mc_datagen_trace")
+    shapes = meta["shapes"]
+
+    def field(key: str) -> NDF:
+        shape = tuple(int(size) for size in shapes[key])
+        return _mc_array(columns.get((name, key), {}), f"{name}.{key}", shape)
+
+    return MCDataGenResult(
+        var_names=tuple(meta["var_names"]),
+        X=field("states"),
+        shock_names=tuple(meta["shock_names"]),
+        eps=field("shocks"),
+        observable_names=tuple(meta["observable_names"]),
+        y=field("observables") if "observables" in shapes else None,
+    )
 
 
 def _load_mc_result(
