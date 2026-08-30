@@ -162,7 +162,7 @@ _FIELD_KEYS = {
 
 
 def test_source_fields_match_the_native_output_channels() -> None:
-    assert MC_DATA_SOURCE_FIELDS == ("states", "observables")
+    assert MC_DATA_SOURCE_FIELDS == ("states", "shocks", "observables")
     # ``status`` is a scalar error code, not a selectable array source, so it is
     # excluded from the source-field set. Native lowering resolves the layouts,
     # so source fields no longer carry Python-side positional indices.

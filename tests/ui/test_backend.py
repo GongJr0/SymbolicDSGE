@@ -21,7 +21,11 @@ from SymbolicDSGE.ui.serializers import decode_array, encode_array
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.result import MCTestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.monte_carlo.mc_constructs import MCMeta, MCPipelineResult
+from SymbolicDSGE.monte_carlo.mc_constructs import (
+    MCDataGenResult,
+    MCMeta,
+    MCPipelineResult,
+)
 from SymbolicDSGE.regression.ols import ols
 from SymbolicDSGE.regression.result import MCRegressionResult
 from tests._spec_helpers import as_posted
@@ -1113,6 +1117,17 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
     assert summary["n_retained"] == 2
 
 
+def _empty_datagen() -> MCDataGenResult:
+    """A datagen carrying nothing, for a result assembled without a run.
+
+    A pipeline always has a datagen, so a hand-built result still has to supply
+    one. The library never constructs this, which is why it is spelled out here
+    rather than offered by the container.
+    """
+    empty = np.empty((0, 0, 0), dtype=np.float64)
+    return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+
+
 def test_ui_backend_serializes_detailed_mc_summaries() -> None:
     X = np.arange(5, dtype=np.float64).reshape(-1, 1)
     y = np.array([0.0, 1.1, 1.9, 3.2, 3.8], dtype=np.float64)
@@ -1150,6 +1165,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
             n_retained_by_step={"diagnostic": 2, "ols": 2},
         ),
         n_successful=2,
+        datagen_outputs=_empty_datagen(),
         test_summaries={"diagnostic": tests},
         transform_outputs=None,
         regression_summaries={"ols": regressions},

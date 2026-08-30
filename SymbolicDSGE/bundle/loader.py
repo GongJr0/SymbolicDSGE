@@ -44,6 +44,7 @@ from ..monte_carlo.spec import (
     PipelineSpec,
 )
 from ..monte_carlo.mc_constructs import (
+    MCDataGenResult,
     MCFailure,
     MCMeta,
     MCPipelineResult,
@@ -486,6 +487,17 @@ def _mc_summary(value: Any) -> Any:
     return value
 
 
+def _load_mc_datagen(archive: BundleArchive, manifest: Manifest) -> MCDataGenResult:
+    """The datagen step's retained output, empty until the bundle carries one.
+
+    A bundle written before the datagen members existed has nothing to restore,
+    and neither does one whose datagen retained no replications, so both land on
+    the same empty container rather than on a null a caller has to test for.
+    """
+    empty = np.empty((0, 0, 0), dtype=np.float64)
+    return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+
+
 def _load_mc_result(
     archive: BundleArchive, manifest: Manifest
 ) -> MCPipelineResult | None:
@@ -518,6 +530,7 @@ def _load_mc_result(
         meta=meta,
         n_rep=int(run["n_rep"]),
         n_successful=int(run["n_successful"]),
+        datagen_outputs=_load_mc_datagen(archive, manifest),
         test_summaries=_load_mc_tests(archive, manifest),
         transform_outputs=_load_mc_transforms(archive, manifest),
         regression_summaries=_load_mc_regressions(archive, manifest),

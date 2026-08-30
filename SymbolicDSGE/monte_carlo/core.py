@@ -19,6 +19,7 @@ from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
 from .allocation import BufferPlan, resolve_output_specs
+from .defaults import DEFAULT_SIMULATION_OBSERVABLES, DEFAULT_SIMULATION_TARGET
 from .traces import (
     is_trace_ref,
     trace_keys_for_step,
@@ -30,6 +31,9 @@ from .mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
     FILTER_RAW_SOURCE_FIELDS,
     MC_DATA_SOURCE_FIELDS,
+    MCDataGenResult,
+    MCFilterResult,
+    MCDataGenResult,
     MCFailure,
     MCPipelineResult,
     MCMeta,
@@ -333,6 +337,9 @@ class MCPipeline:
         tests = []
         regressions = []
         transforms = []
+        # Ordered first by `_order_steps`, which the filter lowering reads it
+        # from too, and there is exactly one.
+        datagen = self.per_rep_steps[0]
         for s in self.per_rep_steps:
             if s.op_type is OpType.TEST:
                 tests.append(s.name)
@@ -408,6 +415,7 @@ class MCPipeline:
         result = MCPipelineResult(
             n_rep=n_rep,
             meta=meta,
+            datagen_outputs=_compile_datagen(datagen, prep),
             n_successful=int(
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
             ),
@@ -592,6 +600,85 @@ def _compile_tests(
             _raw_status=status,
         )
     return summaries
+
+
+def _datagen_names(
+    step: MCStep, reference: SolvedModel, dgp: SolvedModel | None
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """The variable, shock and observable names of one datagen's columns.
+
+    What the arena cannot say: which model a column belongs to. A simulation
+    takes its names from the model it targets, which is the DGP unless the step
+    named the reference, and raw data takes them from what its author declared.
+    """
+    if step.step_type == "raw_model_data":
+        return (
+            tuple(step.kwargs.get("state_names") or ()),
+            tuple(step.kwargs.get("shock_names") or ()),
+            tuple(step.kwargs.get("observable_names") or ()),
+        )
+    if step.step_type != "simulation":
+        raise NotImplementedError(
+            f"Result semantics are not resolved for datagen step type "
+            f"{step.step_type!r}."
+        )
+    target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
+    model = reference if target == "reference" else dgp
+    if model is None:
+        raise ValueError("Simulation step requires its target model.")
+    comp = model.compiled
+    return (
+        tuple(comp.var_names),
+        tuple(comp.shock_names),
+        (
+            tuple(comp.observable_names)
+            if step.kwargs.get("observables", DEFAULT_SIMULATION_OBSERVABLES)
+            else ()
+        ),
+    )
+
+
+def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
+    """Read the one datagen step's retained fields out of its arena.
+
+    A pipeline has exactly one datagen, so this returns the container rather
+    than a mapping. Only what the step declared is in the arena: raw data may
+    carry any of states, shocks and observables, and a simulation omits
+    observables when it was built without them. A field the step never produced
+    still reports a block, filled with NaN at the width its names imply, so that
+    "not recorded" reads as itself rather than as the zeros a deterministic run
+    legitimately produces.
+    """
+    layout = lowered.plan[step.name].out_fields
+    arena = lowered.allocation.steps[step.name]
+    n_retained = int(arena.retained_reps.size)
+    # Every field shares its leading axis, so any one of them dates the run.
+    T = next((entry.shape[0] for entry in layout.values() if entry.shape), 0)
+    var_names, shock_names, observable_names = _datagen_names(
+        step, lowered.reference, lowered.dgp
+    )
+
+    def read(field: str, width: int) -> NDF:
+        entry = layout.get(field)
+        if entry is None:
+            return np.full((n_retained, T, width), np.nan)
+        if n_retained == 0:
+            return np.empty((0, *entry.shape), dtype=np.float64)
+        flat = arena.float_retained[:, entry.offset : entry.offset + entry.flat_count]
+        return flat.reshape(n_retained, *entry.shape)
+
+    return MCDataGenResult(
+        var_names=var_names,
+        X=read("states", len(var_names)),
+        shock_names=shock_names,
+        eps=read("shocks", len(shock_names)),
+        observable_names=observable_names,
+        y=(
+            read("observables", len(observable_names))
+            if "observables" in layout
+            else None
+        ),
+    )
 
 
 def _resolve_payloads(

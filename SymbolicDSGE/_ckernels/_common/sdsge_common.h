@@ -33,12 +33,12 @@ typedef double f64;
  * Negative is a failure, and only failures are numbered.
  *
  * A failure code is `-(module * 100 + code)`, where the module is a code family
- * (the header that owns it, not the directory) and the code counts from 1 within
- * it. Families are disjoint, so a code carries its own provenance: forwarding
- * one verbatim through a caller in another module stays unambiguous, and a
- * message can never be attributed to the wrong kernel. The magnitude reads as
- * its family, so `-5xx` is klein_solve and `-9xx` is steady_state. `rc < 0`
- * remains a valid failure test without any table.
+ * (the header that owns it, not the directory) and the code counts from 1
+ * within it. Families are disjoint, so a code carries its own provenance:
+ * forwarding one verbatim through a caller in another module stays unambiguous,
+ * and a message can never be attributed to the wrong kernel. The magnitude
+ * reads as its family, so `-5xx` is klein_solve and `-9xx` is steady_state. `rc
+ * < 0` remains a valid failure test without any table.
  *
  * A module number is assigned once and never reused, and a new family takes the
  * next free one. Reusing a retired number would make an old code readable as a
@@ -77,6 +77,10 @@ typedef struct {
 
 static inline arena_size make_sizer(i64 n_float, i64 n_int) {
   return (arena_size){.n_float = n_float, .n_int = n_int};
+}
+
+static inline arena_size add_arena(const arena_size a, const arena_size b) {
+  return make_sizer(a.n_float + b.n_float, a.n_int + b.n_int);
 }
 
 /* Componentwise max: the stages run one after another off the same arena. */

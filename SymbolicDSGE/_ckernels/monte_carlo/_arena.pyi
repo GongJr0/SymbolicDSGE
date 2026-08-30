@@ -7,6 +7,9 @@ def regression_arena_size(
 def simulation_arena_size(
     order: int, n_state: int, n_var: int, n_exog: int, T: int, n_par: int
 ) -> tuple[int, int]: ...
+def simulation_output_arena_size(
+    order: int, n_var: int, n_exog: int, T: int, n_obs: int
+) -> tuple[int, int]: ...
 def filter_arena_size(
     kind: str, n_state: int, n_ctrl: int, n_exog: int, n_obs: int, T: int, n_par: int
 ) -> tuple[int, int]: ...

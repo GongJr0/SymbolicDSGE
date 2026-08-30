@@ -456,6 +456,7 @@ def test_native_lowering_runs_second_order_simulation() -> None:
     gss = np.array([0.03], dtype=np.float64)
     compiled = SimpleNamespace(
         var_names=["e", "k", "c"],
+        shock_names=("eps",),
         n_exog=1,
         n_var=3,
         n_state=2,

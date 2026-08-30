@@ -6,6 +6,7 @@ import numpy as np
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 
+from ..._ckernels.monte_carlo import _arena
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
     simulate1_step,
@@ -72,8 +73,8 @@ def lower_simulation_step(
         shocks, shocks_batched = np.zeros((0, n_exog), dtype=np.float64), False
     order = model.policy.order
 
+    _check_simulation_layout(step_plan, order, T, n_var, n_obs, n_exog)
     if order == 1:
-        _check_simulation_layout(step_plan, T, n_var, n_obs)
         native_step = simulate1_step(
             step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs, drawn
         )
@@ -83,7 +84,6 @@ def lower_simulation_step(
             model, steady_state, x0, shocks, shocks_batched, params, T
         )
     if order == 2:
-        _check_simulation_layout(step_plan, T, n_var, n_obs)
         native_step = simulate2_step(
             step.name,
             measurement_addr,
@@ -219,16 +219,36 @@ def _array_shocks(model: SolvedModel, T: int, shock_scale: float) -> NDF:
 
 def _check_simulation_layout(
     step_plan: StepBufferPlan,
+    order: int,
     T: int,
     n_var: int,
     n_obs: int,
+    n_exog: int,
 ) -> None:
+    """Hold the resolved output layout to what the native step will write.
+
+    The compiler resolves the fields and the kernel writes them at hardcoded
+    offsets, so nothing but this makes the two agree. Each field is checked
+    where it lands, then the total against the kernel's own sizer, which catches
+    a field the plan grew that the kernel does not know to leave room for.
+    """
     states = step_plan.out_fields["states"]
+    shocks = step_plan.out_fields["shocks"]
     if states.offset != 0 or states.shape != (T, n_var):
         raise ValueError("Native simulation states do not match their output layout.")
+    if shocks.offset != states.flat_count or shocks.shape != (T, n_exog):
+        raise ValueError("Native simulation shocks do not match their output layout.")
     if n_obs:
         observables = step_plan.out_fields["observables"]
-        if observables.offset != states.flat_count or observables.shape != (T, n_obs):
+        if observables.offset != (
+            states.flat_count + shocks.flat_count
+        ) or observables.shape != (T, n_obs):
             raise ValueError(
                 "Native simulation observables do not match their output layout."
             )
+    n_float, _ = _arena.simulation_output_arena_size(order, n_var, n_exog, T, n_obs)
+    if step_plan.output_size.n_float != n_float:
+        raise ValueError(
+            f"Native simulation output plan plans {step_plan.output_size.n_float} "
+            f"floats, but the kernel writes {n_float}."
+        )

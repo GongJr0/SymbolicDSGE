@@ -47,7 +47,10 @@ def raw_model_data_step(
     n_retain: int = -1,
     *,
     states: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
+    shocks: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
     observables: NDF | Sequence[float] | Sequence[Sequence[float]] | None = None,
+    state_names: Sequence[str] = (),
+    shock_names: Sequence[str] = (),
     observable_names: Sequence[str] = (),
 ) -> MCStep:
     return MCStep(
@@ -55,7 +58,10 @@ def raw_model_data_step(
         op_type=OpType.DATAGEN,
         kwargs={
             "states": states,
+            "shocks": shocks,
             "observables": observables,
+            "state_names": state_names,
+            "shock_names": shock_names,
             "observable_names": observable_names,
         },
         step_type="raw_model_data",
