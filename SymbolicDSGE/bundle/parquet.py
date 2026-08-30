@@ -1,9 +1,19 @@
 """Parquet serialization for ``.sdsge`` bundles.
 
-A single gateway, :func:`to_parquet`, encodes newline-delimited JSON to Parquet
-bytes via the ``parquet-engine`` extension. Everything that needs Parquet output
-produces NDJSON first (:func:`csv_to_json` for raw data files, :func:`trace_to_json`
-for MCMC / Monte Carlo pipeline traces) and passes it through :func:`to_parquet`.
+Two gateways into the ``parquet-engine`` extension, split by what the member
+holds:
+
+- :func:`columns_to_parquet` / :func:`columns_from_parquet` for numeric column
+  blocks (MCMC posteriors, observed ``y``, every Monte Carlo trace). Values go
+  to the engine as raw buffers, so no value is ever formatted or parsed.
+- :func:`to_parquet` for text, fed NDJSON by :func:`csv_to_json` (raw data
+  files, whose cells may be strings) or :func:`frame_to_json` (tabular
+  post-processing artifacts).
+
+The bulk members are the numeric ones, and they are the reason the binary
+gateway exists: rendering a covariance path through JSON costs a Python pass per
+element and several times the data's size in transient text, while the Parquet
+it produces is byte for byte the same.
 
 This lives in the core library (not behind the ``[ui]`` extra) so a bundle can be
 produced without the UI dependencies.
@@ -27,16 +37,22 @@ import parquet_engine
 __all__ = [
     "to_parquet",
     "from_parquet",
+    "columns_to_parquet",
+    "columns_from_parquet",
     "csv_to_json",
-    "trace_to_json",
     "trace_to_csv",
     "from_parquet_columns",
     "csv_to_columns",
     "collapse_columns",
     "arrays_to_parquet",
-    "arrays_from_parquet",
     "frame_to_json",
 ]
+
+#: The engine's dtype tag for each numeric column type it accepts.
+_DTYPE_TAGS: dict[Any, str] = {
+    np.dtype(np.float64): "f8",
+    np.dtype(np.int64): "i8",
+}
 
 _INDEXED_COLUMN = re.compile(r"^(?P<base>.+)\.(?P<idx>\d+)$")
 
@@ -49,7 +65,7 @@ def to_parquet(
 ) -> bytes:
     """Encode newline-delimited JSON into Parquet bytes.
 
-    The single seam every bundle member's bulk data flows through. ``encodings``
+    The text seam, for members whose cells are not all numeric. ``encodings``
     optionally pins a per-column Parquet encoding (``"bss"``/``"byte_stream_split"``,
     ``"dictionary"``, ``"plain"``); columns left out are inferred (float ->
     byte-stream-split, otherwise dictionary).
@@ -65,6 +81,87 @@ def from_parquet(data: bytes) -> str:
     return parquet_engine.decode(data)
 
 
+def columns_to_parquet(
+    columns: Mapping[str, Any],
+    *,
+    encodings: Mapping[str, str] | None = None,
+    compression_level: int = 3,
+) -> bytes:
+    """Encode numeric trace columns into Parquet bytes, without going through JSON.
+
+    Takes what :func:`trace_to_csv` takes: each value is a 1-D array, or a 2-D
+    array ``(n, k)`` expanded into columns ``f"{name}.{j}"``. All columns must
+    share the leading length ``n``.
+
+    Values reach the engine as raw buffers, so a non-finite float is stored as
+    itself rather than as the null the text path writes it as. Columns are
+    passed in insertion order, which is what the member's column order is.
+    """
+    if not columns:
+        return b""
+    raw: dict[str, tuple[str, bytes]] = {}
+    length: int | None = None
+    for name, value in columns.items():
+        arr = np.asarray(value)
+        if arr.ndim == 1:
+            expanded = {name: arr}
+        elif arr.ndim == 2:
+            expanded = {f"{name}.{j}": arr[:, j] for j in range(arr.shape[1])}
+        else:
+            raise ValueError(
+                f"trace column {name!r} must be 1-D or 2-D, got {arr.ndim}-D"
+            )
+        for key, col in expanded.items():
+            if length is None:
+                length = int(col.shape[0])
+            elif col.shape[0] != length:
+                raise ValueError(
+                    f"trace columns must share length; {key!r} has {col.shape[0]}, "
+                    f"expected {length}"
+                )
+            raw[key] = _raw_column(key, col)
+
+    enc = dict(encodings) if encodings is not None else None
+    return parquet_engine.encode_columns(raw, enc, compression_level)
+
+
+def columns_from_parquet(data: bytes) -> dict[str, NDArray[Any]]:
+    """Decode Parquet bytes into numeric columns, without going through JSON.
+
+    The binary mirror of :func:`from_parquet_columns`: same keys, same order,
+    values as typed arrays rather than lists. Columns stay as stored, so
+    :func:`collapse_columns` still owns re-collapsing a ``"{name}.{j}"`` group
+    into its 2-D array.
+
+    A float column that the text path wrote a null into reads back as NaN, which
+    is what its author saw.
+    """
+    return {
+        name: np.frombuffer(buffer, dtype=dtype).copy()
+        for name, (dtype, buffer) in parquet_engine.decode_columns(data).items()
+    }
+
+
+def _raw_column(name: str, values: NDArray[Any]) -> tuple[str, bytes]:
+    """One column as the engine's ``(dtype, bytes)`` pair.
+
+    Integer widths are promoted rather than rejected: a column's width is an
+    artifact of how it was built, and the member has one integer type. A
+    non-numeric column belongs on the text path, so it raises here.
+    """
+    dtype = values.dtype
+    if dtype.kind == "f":
+        values = np.ascontiguousarray(values, dtype=np.float64)
+    elif dtype.kind in "iub":
+        values = np.ascontiguousarray(values, dtype=np.int64)
+    else:
+        raise TypeError(
+            f"column {name!r} has dtype {dtype}, which is not numeric; encode it "
+            f"with csv_to_json or frame_to_json instead."
+        )
+    return _DTYPE_TAGS[values.dtype], values.tobytes()
+
+
 def arrays_to_parquet(
     arrays: Mapping[str, NDArray[Any]],
     *,
@@ -74,11 +171,11 @@ def arrays_to_parquet(
 
     Built for the ``raw_model_data`` datagen: its states / observables / raw arrays are
     bulk data that cannot ride the JSON pipeline spec. Each array is flattened to
-    2-D ``(-1, last_dim)`` (1-D stays 1-D) so :func:`trace_to_json` can expand it
-    into columns, and its original shape is recorded in the returned manifest so
-    :func:`arrays_from_parquet` can restore the N-D form. All arrays must share
-    the flattened leading length (e.g. ``n_rep * T`` for per-replication 3-D
-    inputs, or ``T`` for shared 2-D inputs) so they pack into one column block.
+    2-D ``(-1, last_dim)`` (1-D stays 1-D) so :func:`columns_to_parquet` can expand
+    it into columns, and its original shape is recorded in the returned manifest
+    so a reader can restore the N-D form. All arrays must share the flattened
+    leading length (e.g. ``n_rep * T`` for per-replication 3-D inputs, or ``T``
+    for shared 2-D inputs) so they pack into one column block.
     """
     if not arrays:
         raise ValueError("arrays_to_parquet requires at least one array.")
@@ -90,21 +187,8 @@ def arrays_to_parquet(
             raise ValueError(f"array {name!r} must be at least 1-D.")
         shapes[name] = list(arr.shape)
         columns[name] = arr if arr.ndim == 1 else arr.reshape(-1, arr.shape[-1])
-    data = to_parquet(trace_to_json(columns), compression_level=compression_level)
+    data = columns_to_parquet(columns, compression_level=compression_level)
     return data, shapes
-
-
-def arrays_from_parquet(
-    data: bytes, shapes: Mapping[str, Sequence[int]]
-) -> dict[str, NDArray[Any]]:
-    """Restore N-D arrays from :func:`arrays_to_parquet` output."""
-    columns = collapse_columns(from_parquet_columns(data))
-    out: dict[str, NDArray[Any]] = {}
-    for name, shape in shapes.items():
-        if name not in columns:
-            raise KeyError(f"parquet payload is missing array {name!r}.")
-        out[name] = np.asarray(columns[name], dtype=np.float64).reshape(tuple(shape))
-    return out
 
 
 def csv_to_json(data: bytes | str, *, dialect: str = "excel") -> bytes:
@@ -142,53 +226,10 @@ def csv_to_columns(
     return dict(zip(header, columns))
 
 
-def trace_to_json(columns: Mapping[str, Any]) -> bytes:
-    """Convert columnar trace data into newline-delimited JSON.
-
-    Each value is a 1-D array, or a 2-D array ``(n, k)`` that is expanded into
-    columns ``f"{name}.{j}"`` for ``j`` in ``range(k)``. Used for MCMC posterior
-    samples and Monte Carlo pipeline result traces. All columns must share the
-    leading length ``n``; non-finite floats become JSON ``null``.
-    """
-    if not columns:
-        return b""
-
-    flat: dict[str, NDArray[Any]] = {}
-    length: int | None = None
-    for name, value in columns.items():
-        arr = np.asarray(value)
-        if arr.ndim == 1:
-            expanded = {name: arr}
-        elif arr.ndim == 2:
-            expanded = {f"{name}.{j}": arr[:, j] for j in range(arr.shape[1])}
-        else:
-            raise ValueError(
-                f"trace column {name!r} must be 1-D or 2-D, got {arr.ndim}-D"
-            )
-        for key, col in expanded.items():
-            if length is None:
-                length = int(col.shape[0])
-            elif col.shape[0] != length:
-                raise ValueError(
-                    f"trace columns must share length; {key!r} has {col.shape[0]}, "
-                    f"expected {length}"
-                )
-            flat[key] = col
-
-    assert length is not None
-    names = list(flat)
-    out = io.BytesIO()
-    for i in range(length):
-        obj = {name: _json_scalar(flat[name][i]) for name in names}
-        out.write(json.dumps(obj, allow_nan=False).encode("utf-8"))
-        out.write(b"\n")
-    return out.getvalue()
-
-
 def frame_to_json(columns: Mapping[str, Sequence[Any]]) -> bytes:
     """Encode a columnar table (mixed numeric / string / bool) to NDJSON.
 
-    Sibling of :func:`trace_to_json` for tabular POSTPROC artifacts (#181): each
+    Sibling of :func:`csv_to_json` for tabular POSTPROC artifacts (#181): each
     value is a 1-D sequence of *scalar* cells. No 2-D expansion is performed
     because table cells are already scalar, and columns may be non-numeric. All
     columns must share length. Non-finite floats and ``None`` become JSON
@@ -216,7 +257,7 @@ def frame_to_json(columns: Mapping[str, Sequence[Any]]) -> bytes:
 def trace_to_csv(columns: Mapping[str, Any]) -> bytes:
     """Convert columnar trace data into CSV bytes (header row + data rows).
 
-    Mirrors :func:`trace_to_json`: 1-D arrays stay as single columns; a 2-D
+    Mirrors :func:`columns_to_parquet`: 1-D arrays stay as single columns; a 2-D
     ``(n, k)`` array expands to ``"{name}.{j}"`` columns. Non-finite floats and
     ``None`` become empty cells (the CSV analogue of JSON ``null``).
     """
@@ -260,7 +301,7 @@ def from_parquet_columns(data: bytes) -> dict[str, list[Any]]:
 
     Each output key maps to the column's values in row order, JSON ``null``
     preserved as ``None``. Use :func:`collapse_columns` to recover the 2-D arrays
-    that :func:`trace_to_json` expanded into ``"{name}.{j}"`` columns.
+    that :func:`columns_to_parquet` expanded into ``"{name}.{j}"`` columns.
     """
     columns: dict[str, list[Any]] = {}
     for line in from_parquet(data).splitlines():
@@ -273,11 +314,11 @@ def from_parquet_columns(data: bytes) -> dict[str, list[Any]]:
 
 
 def collapse_columns(
-    columns: Mapping[str, Sequence[Any]],
+    columns: Mapping[str, Sequence[Any] | NDArray[Any]],
 ) -> dict[str, NDArray[Any]]:
     """Re-collapse ``"{name}.{j}"`` column groups back into 2-D arrays.
 
-    Inverse of the 2-D expansion in :func:`trace_to_json`: a complete contiguous
+    Inverse of the 2-D expansion in :func:`columns_to_parquet`: a complete contiguous
     group ``base.0 .. base.{k-1}`` becomes a single ``(n, k)`` array under
     ``base`` (columns ordered by index); every other column stays 1-D. A ``base``
     that also appears as a bare column is left un-collapsed (ambiguous).

@@ -192,7 +192,7 @@ class MCMCResult:
         )
 
     def posterior_arrays(self) -> dict[str, NDF]:
-        """Bulk posterior columns keyed for :func:`SymbolicDSGE.bundle.trace_to_json`.
+        """Bulk posterior columns keyed for :func:`SymbolicDSGE.bundle.columns_to_parquet`.
 
         ``{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac":
         (n_draws,)}``, the shape :class:`BundleBuilder` expects as ``posterior``

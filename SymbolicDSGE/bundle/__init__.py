@@ -9,9 +9,10 @@ from .manifest import (
     Member,
 )
 from .parquet import (
-    arrays_from_parquet,
     arrays_to_parquet,
     collapse_columns,
+    columns_from_parquet,
+    columns_to_parquet,
     csv_to_columns,
     csv_to_json,
     frame_to_json,
@@ -19,22 +20,21 @@ from .parquet import (
     from_parquet_columns,
     to_parquet,
     trace_to_csv,
-    trace_to_json,
 )
 
 __all__ = [
     # parquet seam
     "to_parquet",
     "from_parquet",
+    "columns_to_parquet",
+    "columns_from_parquet",
     "csv_to_json",
     "csv_to_columns",
-    "trace_to_json",
     "trace_to_csv",
     "frame_to_json",
     "from_parquet_columns",
     "collapse_columns",
     "arrays_to_parquet",
-    "arrays_from_parquet",
     # manifest
     "Manifest",
     "Member",

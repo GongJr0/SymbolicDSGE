@@ -17,7 +17,7 @@ def test_arrays_to_parquet_guards():
 
 def test_empty_input_returns():
     assert P.csv_to_json("") == b""
-    assert P.trace_to_json({}) == b""
+    assert P.columns_to_parquet({}) == b""
     assert P.frame_to_json({}) == b""
     assert P.trace_to_csv({}) == b""
     assert P._parse_csv_columns("") == ([], [])
@@ -26,7 +26,7 @@ def test_empty_input_returns():
 def test_dimension_errors():
     bad = {"x": np.zeros((2, 2, 2))}
     with pytest.raises(ValueError, match="must be 1-D or 2-D"):
-        P.trace_to_json(bad)
+        P.columns_to_parquet(bad)
     with pytest.raises(ValueError, match="must be 1-D or 2-D"):
         P.trace_to_csv(bad)
 

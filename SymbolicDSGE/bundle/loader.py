@@ -52,7 +52,7 @@ from ..monte_carlo.mc_constructs import (
 )
 from .container import BundleArchive
 from .manifest import Manifest, Member
-from .parquet import collapse_columns, csv_to_columns, from_parquet_columns
+from .parquet import collapse_columns, columns_from_parquet, csv_to_columns
 
 if TYPE_CHECKING:
     from ..monte_carlo.core import MCPipeline
@@ -148,20 +148,49 @@ def _load_simulation(manifest: Manifest) -> dict[str, dict[str, Any]] | None:
     return {role: spec.to_sim_kwargs() for role, spec in manifest.simulation.items()}
 
 
-def _load_columns(archive: BundleArchive, member: Member) -> dict[str, list[Any]]:
-    """Format-agnostic column read: dispatch on ``member.format`` (#142)."""
+def _load_columns(archive: BundleArchive, member: Member) -> dict[str, NDArray[Any]]:
+    """Format-agnostic column read: dispatch on ``member.format`` (#142).
+
+    Both branches land on arrays. Parquet reads its columns as typed buffers;
+    CSV parses cells and is normalized here, so a caller sees one shape whatever
+    the member was written as.
+    """
     raw = archive.read(member.path)
     if member.format == "parquet":
-        return from_parquet_columns(raw)
+        return columns_from_parquet(raw)
     if member.format == "csv":
-        return csv_to_columns(raw)
+        return {
+            name: _csv_column(values) for name, values in csv_to_columns(raw).items()
+        }
     raise ValueError(
         f"Cannot load member {member.path!r} as columns: format "
         f"{member.format!r} is neither 'parquet' nor 'csv'."
     )
 
 
-def _stack_observed(cols: dict[str, list[Any]], member: Member) -> list[list[float]]:
+def _csv_column(values: list[Any]) -> NDArray[Any]:
+    """One parsed CSV column as an array, empty cells becoming NaN.
+
+    ``csv_to_columns`` types a column by what parses, so a numeric one arrives
+    as numbers with ``None`` where a cell was empty. An all-integer column with
+    no gaps stays integral, since that is what a status or rep-index column is;
+    a gap forces floats, which is the only type that can carry one.
+    """
+    present = [value for value in values if value is not None]
+    if any(not isinstance(value, (int, float)) for value in present):
+        return np.asarray(values)
+    if len(present) == len(values) and all(
+        isinstance(value, int) and not isinstance(value, bool) for value in present
+    ):
+        return np.asarray(values, dtype=np.int64)
+    return np.asarray(
+        [np.nan if value is None else value for value in values], dtype=np.float64
+    )
+
+
+def _stack_observed(
+    cols: Mapping[str, NDArray[Any]], member: Member
+) -> list[list[float]]:
     """Reconstruct the observed ``(n, k)`` matrix from CSV or Parquet columns.
 
     Handles both the mechanical ``y.{j}`` layout (Parquet path and CSV without
@@ -176,18 +205,13 @@ def _stack_observed(cols: dict[str, list[Any]], member: Member) -> list[list[flo
         return cast(
             list[list[float]],
             np.column_stack(
-                [_float_column(cols[name]) for name in member.columns]
+                [np.asarray(cols[name], dtype=np.float64) for name in member.columns]
             ).tolist(),
         )
     raise ValueError(
         f"Cannot reconstruct observed matrix from {member.path!r}: no 'y.*' "
         f"columns and no Member.columns metadata to stack semantic headers."
     )
-
-
-def _float_column(values: list[Any]) -> NDArray[np.float64]:
-    """Coerce a column of numbers/Nones to ``float64`` (None -> NaN)."""
-    return np.asarray([np.nan if v is None else v for v in values], dtype=np.float64)
 
 
 def _load_estimation(
@@ -289,7 +313,7 @@ def _mc_json(archive: BundleArchive, manifest: Manifest, kind: str) -> dict[str,
 
 def _mc_block(
     archive: BundleArchive, manifest: Manifest, kind: str
-) -> dict[str, list[Any]]:
+) -> dict[str, NDArray[Any]]:
     """One shared column block's raw columns, keyed ``{step}.{field}[.{idx}]``."""
     members = manifest.members_by_kind(kind)
     if not members:
@@ -299,7 +323,7 @@ def _mc_block(
 
 def _mc_array_columns(
     archive: BundleArchive, manifest: Manifest, kind: str
-) -> dict[tuple[str, str], dict[str, list[Any]]]:
+) -> dict[tuple[str, str], dict[str, NDArray[Any]]]:
     """Each one-array member's raw columns, keyed by its ``(name, field)``."""
     return {
         (str(member.options["name"]), str(member.options["field"])): _load_columns(
@@ -309,7 +333,7 @@ def _mc_array_columns(
     }
 
 
-def _float_trace(cols: Mapping[str, list[Any]], key: str, rows: int) -> NDF:
+def _float_trace(cols: Mapping[str, NDArray[Any]], key: str, rows: int) -> NDF:
     """One float column, or a NaN column of ``rows`` when the encoder dropped it.
 
     A float column that is null in every row carries no values, so Parquet drops
@@ -318,16 +342,16 @@ def _float_trace(cols: Mapping[str, list[Any]], key: str, rows: int) -> NDF:
     values = cols.get(key)
     if values is None:
         return np.full(rows, np.nan)
-    return _float_column(values)[:rows]
+    return np.asarray(values, dtype=np.float64)[:rows]
 
 
-def _int_trace(cols: Mapping[str, list[Any]], key: str, rows: int) -> NDI:
+def _int_trace(cols: Mapping[str, NDArray[Any]], key: str, rows: int) -> NDI:
     """One integer column. Integers are never null, so absence is corruption."""
     return np.asarray(cols[key], dtype=np.int64)[:rows]
 
 
 def _float_matrix(
-    cols: Mapping[str, list[Any]], key: str, rows: int, width: int
+    cols: Mapping[str, NDArray[Any]], key: str, rows: int, width: int
 ) -> NDF:
     """A 2-D float trace from its ``{key}.{j}`` columns, NaN-filling dropped ones."""
     if width == 0:
@@ -337,7 +361,9 @@ def _float_matrix(
     )
 
 
-def _mc_array(cols: Mapping[str, list[Any]], key: str, shape: tuple[int, ...]) -> NDF:
+def _mc_array(
+    cols: Mapping[str, NDArray[Any]], key: str, shape: tuple[int, ...]
+) -> NDF:
     """Restore one member's array from its columns, using the meta's shape.
 
     The writer flattened anything above 2-D to ``(-1, last)``, so the row count

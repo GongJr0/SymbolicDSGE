@@ -104,7 +104,7 @@ class MCMCResultMeta(TypedDict):
     """Text-only metadata for an :class:`MCMCResult`.
 
     Bulk ``samples`` (``n_draws × len(param_names)``), ``logpost_trace``, and `logjac_trace``` ride
-    a sibling Parquet member via :func:`SymbolicDSGE.bundle.trace_to_json`;
+    a sibling Parquet member via :func:`SymbolicDSGE.bundle.columns_to_parquet`;
     pairing this metadata with that trace dict reconstructs the full result.
     """
 

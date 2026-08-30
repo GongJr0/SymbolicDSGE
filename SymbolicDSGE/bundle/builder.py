@@ -1,10 +1,12 @@
 """Assemble a ``.sdsge`` bundle from model/estimation/Monte-Carlo artifacts.
 
 :class:`BundleBuilder` accumulates members and emits the archive. Text specs
-(model YAML, estimation/MC JSON) ride as deflated text; bulk numeric data (raw
-observable files, observed ``y``, MCMC posteriors, MC traces) flows through
-:func:`SymbolicDSGE.bundle.parquet.to_parquet`. This is the writer half of the
-container (#142) and the assembly point the future ``sdsge-compile`` CLI calls.
+(model YAML, estimation/MC JSON) ride as deflated text; bulk numeric data
+(observed ``y``, MCMC posteriors, MC traces) flows through
+:func:`SymbolicDSGE.bundle.parquet.columns_to_parquet`, and raw observable files,
+whose cells may be strings, through :func:`SymbolicDSGE.bundle.parquet.to_parquet`.
+This is the writer half of the container (#142) and the assembly point the
+future ``sdsge-compile`` CLI calls.
 """
 
 from __future__ import annotations
@@ -53,11 +55,10 @@ from .container import write_bundle
 from .manifest import Manifest, Member, MemberKind, SimSpec
 from .parquet import (
     arrays_to_parquet,
+    columns_to_parquet,
     csv_to_json,
-    frame_to_json,
     to_parquet,
     trace_to_csv,
-    trace_to_json,
 )
 
 NDF = NDArray[np.float64]
@@ -219,10 +220,10 @@ class BundleBuilder:
             ppath = _ESTIMATION_POSTERIOR_PARQUET
 
             def observed_bytes(y: Any) -> bytes:
-                return to_parquet(trace_to_json({"y": y}))
+                return columns_to_parquet({"y": y})
 
             def posterior_bytes(columns: Mapping[str, Any]) -> bytes:
-                return to_parquet(trace_to_json(columns))
+                return columns_to_parquet(columns)
 
         else:
             dpath = _ESTIMATION_DATA_CSV
@@ -399,9 +400,7 @@ class BundleBuilder:
         if not columns:
             return
         if as_parquet:
-            self._add(
-                Member(path=parquet_path, kind=kind), to_parquet(trace_to_json(columns))
-            )
+            self._add(Member(path=parquet_path, kind=kind), columns_to_parquet(columns))
         else:
             self._add(Member(path=csv_path, kind=kind), trace_to_csv(columns))
 
@@ -429,9 +428,7 @@ class BundleBuilder:
                     ref=name, field=field
                 )
                 data = (
-                    to_parquet(trace_to_json(columns))
-                    if as_parquet
-                    else trace_to_csv(columns)
+                    columns_to_parquet(columns) if as_parquet else trace_to_csv(columns)
                 )
                 self._add(
                     Member(
