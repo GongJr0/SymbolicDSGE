@@ -89,6 +89,34 @@ static inline arena_size sdsge_max_arena(const arena_size a,
   return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
 }
 
+/* float/int arena offset descriptor: how far to advance from each buffer to the
+ * next boundary, in its own lane. A lane of n buffers has n + 1 boundaries and
+ * so n gaps, the last of which reaches the end of the lane, which is what lets
+ * a walk terminate on the offsets alone. A buffer a configuration leaves out
+ * advances by zero, so walking produces nothing for it rather than the walk
+ * having to ask whether it is there.
+ *
+ * Lane totals are not derived from these. Summing at every allocation would pay
+ * a loop for a number the layout already knows, so `arena_size` carries them.
+ */
+typedef struct {
+  i64 *foffset; // (n_float_buffers, ): offset to the next boundary
+  i64 *ioffset; // (n_int_buffers, ): offset to the next boundary
+} arena_offsets;
+
+/* Entries a lane of `n_buffers` needs. Clamped to 1 because ISO C has no
+ * zero-size array, and a lane with no buffers is a lane nothing walks. */
+#define ARENA_OFFSET_SLOTS(n_buffers) ((n_buffers) > 0 ? (n_buffers) : 1)
+
+/* Caller-scoped storage for one `arena_offsets`, so it can be taken by value.
+ * A macro rather than a function because the compound literals must live in the
+ * caller's block; returned from a function they would die with its frame. The
+ * buffer counts are compile-time constants, which is what a step kind's field
+ * count is. */
+#define ARENA_OFFSETS(n_float_buffers, n_int_buffers)                          \
+  ((arena_offsets){.foffset = (i64[ARENA_OFFSET_SLOTS(n_float_buffers)]){0},   \
+                   .ioffset = (i64[ARENA_OFFSET_SLOTS(n_int_buffers)]){0}})
+
 /* Flat buffer `any(x[i] == 0)` and `any(x[i] != 0)` checks. Returns 1 if the
  * respective condition is satisfied for any element, 0 otherwise. */
 static inline i8 sdsge_any_zero(const f64 *x, i64 n) {
