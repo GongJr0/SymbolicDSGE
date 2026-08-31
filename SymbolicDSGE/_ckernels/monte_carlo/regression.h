@@ -82,20 +82,6 @@ typedef struct {
   f64 l1_ratio;
 } sdsge_mc_elastic_net_gs_step_ctx;
 
-/* Shared input/work arena sizes. ``p`` is the design width after optional
- * intercept augmentation. All float counts include staged X(n,p) and y(n).
- */
-arena_size sdsge_mc_ols_work_arena_size(const i64 n, const i64 p);
-arena_size sdsge_mc_ridge_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_ridge_gs_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_lasso_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_lasso_gs_work_arena_size(i64 n, i64 p, int intercept,
-                                              i64 n_alpha, i64 max_iter);
-arena_size sdsge_mc_elastic_net_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_elastic_net_gs_work_arena_size(i64 n, i64 p,
-                                                    int intercept,
-                                                    i64 n_alpha);
-
 /* Regression kernels for native MC steps. */
 void sdsge_mc_ols_fit(const f64 *SDSGE_RESTRICT X, const f64 *SDSGE_RESTRICT y,
                       sdsge_mc_regression_record *SDSGE_RESTRICT rec,

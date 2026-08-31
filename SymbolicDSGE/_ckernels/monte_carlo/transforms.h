@@ -74,49 +74,29 @@ typedef struct {
   i64 p_out;
 } sdsge_mc_user_transform_step_ctx;
 
-/* Per-column z-score over axis 0; writes out(n, p). `scratch` is 2*p.
- * Columns whose standard deviation is zero are written as zeros rather than
- * dividing through, matching `run_standardize`. */
-arena_size sdsge_standardize_ax0_arena_size(i64 n, i64 p);
 i64 sdsge_standardize_ax0(const f64 *SDSGE_RESTRICT x, const i64 ddof,
                           const i64 n, const i64 p, f64 *SDSGE_RESTRICT scratch,
                           f64 *SDSGE_RESTRICT out);
 
-/* log(x + offset) elementwise; writes out(n, p). */
-arena_size sdsge_log_arena_size(i64 n, i64 p);
 i64 sdsge_log(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
               const i64 p, f64 *SDSGE_RESTRICT out);
 
-/* One-period log differences down the time axis; writes out(n - 1, p).
- * `scratch` is p. */
-arena_size sdsge_log_diff_arena_size(i64 n, i64 p);
 i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
                    const i64 p, f64 *SDSGE_RESTRICT scratch,
                    f64 *SDSGE_RESTRICT out);
 
-/* `order`-th difference down the time axis; writes out(n - order, p).
- * `scratch` is order*p. `order` must be at least 1. */
-arena_size sdsge_diff_arena_size(i64 n, i64 p, i64 order);
 i64 sdsge_diff(const f64 *SDSGE_RESTRICT x, const i64 order, const i64 n,
                const i64 p, f64 *SDSGE_RESTRICT scratch,
                f64 *SDSGE_RESTRICT out);
 
-/* Trailing rolling mean; writes out(n - window + 1, p). `scratch` is p. */
-arena_size sdsge_rolling_mean_arena_size(i64 n, i64 p, i64 window);
 i64 sdsge_rolling_mean(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
                        const i64 window, f64 *SDSGE_RESTRICT scratch,
                        f64 *SDSGE_RESTRICT out);
 
-/* Trailing rolling variance; writes out(n - window + 1, p). `scratch` is 2*p.
- */
-arena_size sdsge_rolling_var_arena_size(i64 n, i64 p, i64 window);
 i64 sdsge_rolling_var(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
                       const i64 window, const i64 ddof,
                       f64 *SDSGE_RESTRICT scratch, f64 *SDSGE_RESTRICT out);
 
-/* Trailing rolling standard deviation; writes out(n - window + 1, p).
- * `scratch` is 2*p. */
-arena_size sdsge_rolling_std_arena_size(i64 n, i64 p, i64 window);
 i64 sdsge_rolling_std(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
                       const i64 window, const i64 ddof,
                       f64 *SDSGE_RESTRICT scratch, f64 *SDSGE_RESTRICT out);

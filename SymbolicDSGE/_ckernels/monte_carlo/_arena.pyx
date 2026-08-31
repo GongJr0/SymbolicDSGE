@@ -16,16 +16,19 @@ cdef extern from "sdsge_common.h":
     arena_size make_sizer(int64_t n_float, int64_t n_int) nogil
     arena_size add_arena(arena_size a, arena_size b) nogil
 
-cdef extern from "transforms.h":
-    arena_size sdsge_standardize_ax0_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_log_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_log_diff_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_diff_arena_size(int64_t n, int64_t p, int64_t order) nogil
-    arena_size sdsge_rolling_mean_arena_size(int64_t n, int64_t p, int64_t window) nogil
-    arena_size sdsge_rolling_var_arena_size(int64_t n, int64_t p, int64_t window) nogil
-    arena_size sdsge_rolling_std_arena_size(int64_t n, int64_t p, int64_t window) nogil
+cdef extern from "layout.h":
+    ctypedef enum sdsge_mc_transform_kind:
+        SDSGE_MC_TRANSFORM_STANDARDIZE
+        SDSGE_MC_TRANSFORM_LOG
+        SDSGE_MC_TRANSFORM_LOG_DIFF
+        SDSGE_MC_TRANSFORM_DIFF
+        SDSGE_MC_TRANSFORM_ROLLING_MEAN
+        SDSGE_MC_TRANSFORM_ROLLING_VAR
+        SDSGE_MC_TRANSFORM_ROLLING_STD
 
-cdef extern from "regression.h":
+    arena_size sdsge_mc_transform_arena_size(int64_t kind, int64_t n, int64_t p,
+                                             int64_t order) nogil
+
     arena_size sdsge_mc_ols_work_arena_size(int64_t n, int64_t p) nogil
     arena_size sdsge_mc_ridge_work_arena_size(int64_t n, int64_t p) nogil
     arena_size sdsge_mc_ridge_gs_work_arena_size(int64_t n, int64_t p) nogil
@@ -38,7 +41,6 @@ cdef extern from "regression.h":
                                                        int intercept,
                                                        int64_t n_alpha) nogil
 
-cdef extern from "core_steps.h":
     arena_size sdsge_passthrough_arena_size(int64_t n, int64_t p) nogil
     arena_size sdsge_simulate_order1_arena_size(int64_t n, int64_t k,
                                                 int64_t T, int64_t n_par) nogil
@@ -57,6 +59,7 @@ cdef extern from "core_steps.h":
     arena_size sdsge_filter_unscented_input_arena_size(int64_t n_state, int64_t n_ctrl,
                                                        int64_t n_exog, int64_t n_obs,
                                                        int64_t T, int64_t n_par) nogil
+
 
 cdef extern from "kalman.h":
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
@@ -82,28 +85,32 @@ cdef inline tuple _size(arena_size size):
     return size.n_float, size.n_int
 
 
+# One layout serves every transform, so the kind selects a code rather than a
+# function. `passthrough` stays out: it is a core step that happens to share the
+# shape, not a transform.
+cdef dict _TRANSFORM_KINDS = {
+    "standardize": SDSGE_MC_TRANSFORM_STANDARDIZE,
+    "log": SDSGE_MC_TRANSFORM_LOG,
+    "log_diff": SDSGE_MC_TRANSFORM_LOG_DIFF,
+    "diff": SDSGE_MC_TRANSFORM_DIFF,
+    "rolling_mean": SDSGE_MC_TRANSFORM_ROLLING_MEAN,
+    "rolling_var": SDSGE_MC_TRANSFORM_ROLLING_VAR,
+    "rolling_std": SDSGE_MC_TRANSFORM_ROLLING_STD,
+}
+
+
 def transform_arena_size(str kind, int64_t n, int64_t p, int64_t param=0):
-    """Return the complete input and scratch arena requirement for a transform."""
-    cdef arena_size size
+    """Return the complete input and scratch arena requirement for a transform.
+
+    ``param`` is the difference order. A rolling window never reaches the arena;
+    it sets the output shape, which the caller resolves from the field.
+    """
     if kind == "passthrough":
-        size = sdsge_passthrough_arena_size(n, p)
-    elif kind == "standardize":
-        size = sdsge_standardize_ax0_arena_size(n, p)
-    elif kind == "log":
-        size = sdsge_log_arena_size(n, p)
-    elif kind == "log_diff":
-        size = sdsge_log_diff_arena_size(n, p)
-    elif kind == "diff":
-        size = sdsge_diff_arena_size(n, p, param)
-    elif kind == "rolling_mean":
-        size = sdsge_rolling_mean_arena_size(n, p, param)
-    elif kind == "rolling_var":
-        size = sdsge_rolling_var_arena_size(n, p, param)
-    elif kind == "rolling_std":
-        size = sdsge_rolling_std_arena_size(n, p, param)
-    else:
+        return _size(sdsge_passthrough_arena_size(n, p))
+    cdef object code = _TRANSFORM_KINDS.get(kind)
+    if code is None:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
-    return _size(size)
+    return _size(sdsge_mc_transform_arena_size(<int64_t>code, n, p, param))
 
 
 def regression_arena_size(

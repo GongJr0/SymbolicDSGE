@@ -89,33 +89,49 @@ static inline arena_size sdsge_max_arena(const arena_size a,
   return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
 }
 
-/* float/int arena offset descriptor: how far to advance from each buffer to the
- * next boundary, in its own lane. A lane of n buffers has n + 1 boundaries and
- * so n gaps, the last of which reaches the end of the lane, which is what lets
- * a walk terminate on the offsets alone. A buffer a configuration leaves out
- * advances by zero, so walking produces nothing for it rather than the walk
- * having to ask whether it is there.
+/* Widest lane a layout may describe. Fixed so the descriptor below carries its
+ * entries inline; a lane that outgrows the cap fails the build where its buffer
+ * count is declared rather than writing past the entries it was given. */
+#define SDSGE_ARENA_MAX_BUFFERS 24
+
+/* float/int arena offset descriptor: the lane boundary closing each buffer.
+ * Entry i is one past the end of buffer i, so buffer i spans
+ * `[i ? entry[i - 1] : 0, entry[i])` and the last entry is the lane total. The
+ * opening boundary is the arena itself and is not stored, because a slot whose
+ * value is always zero is one every walk has to step over to reach a buffer. A
+ * buffer a configuration leaves out repeats the entry before it, so walking
+ * produces nothing for it rather than the walk having to ask whether it is
+ * there. A total is a read, never a sum.
  *
- * Lane totals are not derived from these. Summing at every allocation would pay
- * a loop for a number the layout already knows, so `arena_size` carries them.
+ * A layout writes the entries in order, each one the entry before it plus the
+ * width of the buffer it closes. An entry means the same thing the moment it is
+ * written, so the descriptor is never half-built in some other unit. A layout
+ * writes every entry its lane counts, including the ones it has nothing to put
+ * in; none of them carry a default it could lean on instead.
+ *
+ * The entries live inline, which makes this a value the way `arena_size` is: a
+ * copy is a snapshot rather than an alias, a return outlives the frame that
+ * built it, and `const` reaches the entries instead of stopping at a pointer.
+ * The buffer counts ride along, so a walk bounds itself on the descriptor it
+ * was handed rather than on a constant each call site names a second time.
  */
 typedef struct {
-  i64 *foffset; // (n_float_buffers, ): offset to the next boundary
-  i64 *ioffset; // (n_int_buffers, ): offset to the next boundary
-} arena_offsets;
+  i64 foffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_float_buffers, ): buffer end
+  i64 ioffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_int_buffers, ): buffer end
+  i64 n_float_buffers;
+  i64 n_int_buffers;
+} arena_offset;
 
-/* Entries a lane of `n_buffers` needs. Clamped to 1 because ISO C has no
- * zero-size array, and a lane with no buffers is a lane nothing walks. */
-#define ARENA_OFFSET_SLOTS(n_buffers) ((n_buffers) > 0 ? (n_buffers) : 1)
-
-/* Caller-scoped storage for one `arena_offsets`, so it can be taken by value.
- * A macro rather than a function because the compound literals must live in the
- * caller's block; returned from a function they would die with its frame. The
- * buffer counts are compile-time constants, which is what a step kind's field
- * count is. */
-#define ARENA_OFFSETS(n_float_buffers, n_int_buffers)                          \
-  ((arena_offsets){.foffset = (i64[ARENA_OFFSET_SLOTS(n_float_buffers)]){0},   \
-                   .ioffset = (i64[ARENA_OFFSET_SLOTS(n_int_buffers)]){0}})
+/* Offsets for lanes of the given buffer counts, entries left unwritten. Zeroing
+ * them would be a pass over slots a layout is about to overwrite anyway, and
+ * the slots past a lane's count are never read. */
+static inline arena_offset make_offset(const i64 n_float_buffers,
+                                       const i64 n_int_buffers) {
+  arena_offset off;
+  off.n_float_buffers = n_float_buffers;
+  off.n_int_buffers = n_int_buffers;
+  return off;
+}
 
 /* Flat buffer `any(x[i] == 0)` and `any(x[i] != 0)` checks. Returns 1 if the
  * respective condition is satisfied for any element, 0 otherwise. */

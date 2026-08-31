@@ -127,6 +127,65 @@ cdef extern from "runner.h":
 
     int sdsge_mc_run(sdsge_mc_runner_ctx *runner) noexcept nogil
 
+cdef extern from "layout.h":
+    arena_size sdsge_raw_model_data_output_arena_size(
+            int64_t n_states,
+            int64_t n_shocks,
+            int64_t n_observables
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order1_arena_size(
+        int64_t n,
+        int64_t k,
+        int64_t T,
+        int64_t n_par,
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order2_arena_size(
+        int64_t n_state,
+        int64_t n_var,
+        int64_t n_exog,
+        int64_t T,
+        int64_t n_par,
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order1_output_arena_size(
+        int64_t n,
+        int64_t k,
+        int64_t T,
+        int64_t m,
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order2_output_arena_size(
+        int64_t n_var,
+        int64_t n_exog,
+        int64_t T,
+        int64_t m,
+    ) noexcept nogil
+
+    arena_size sdsge_filter_linear_output_arena_size(
+        int64_t n,
+        int64_t m,
+        int64_t k,
+        int64_t T,
+        int return_shocks,
+    ) noexcept nogil
+
+    arena_size sdsge_filter_extended_output_arena_size(
+        int64_t n,
+        int64_t m,
+        int64_t k,
+        int64_t T,
+        int return_shocks,
+    ) noexcept nogil
+
+    arena_size sdsge_filter_unscented_output_arena_size(
+        int64_t n_state,
+        int64_t n_ctrl,
+        int64_t n_obs,
+        int64_t T,
+    ) noexcept nogil
+
 
 cdef extern from "core_steps.h":
     ctypedef void (*sdsge_measurement_fn)(
@@ -209,41 +268,6 @@ cdef extern from "core_steps.h":
         const sdsge_mc_shock_plan *shocks
         int64_t shock_scratch_offset
 
-    arena_size sdsge_raw_model_data_output_arena_size(
-            int64_t n_states,
-            int64_t n_shocks,
-            int64_t n_observables
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order1_arena_size(
-        int64_t n,
-        int64_t k,
-        int64_t T,
-        int64_t n_par,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order2_arena_size(
-        int64_t n_state,
-        int64_t n_var,
-        int64_t n_exog,
-        int64_t T,
-        int64_t n_par,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order1_output_arena_size(
-        int64_t n,
-        int64_t k,
-        int64_t T,
-        int64_t m,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order2_output_arena_size(
-        int64_t n_var,
-        int64_t n_exog,
-        int64_t T,
-        int64_t m,
-    ) noexcept nogil
-
     int sdsge_mc_simulate_order1_runner(
         int64_t rep_idx,
         double *float_in_work,
@@ -298,29 +322,6 @@ cdef extern from "core_steps.h":
         double kappa
         int symmetrize
         double jitter
-
-    arena_size sdsge_filter_linear_output_arena_size(
-        int64_t n,
-        int64_t m,
-        int64_t k,
-        int64_t T,
-        int return_shocks,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_extended_output_arena_size(
-        int64_t n,
-        int64_t m,
-        int64_t k,
-        int64_t T,
-        int return_shocks,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_unscented_output_arena_size(
-        int64_t n_state,
-        int64_t n_ctrl,
-        int64_t n_obs,
-        int64_t T,
-    ) noexcept nogil
 
     int sdsge_mc_filter_linear_runner(
         int64_t rep_idx,
