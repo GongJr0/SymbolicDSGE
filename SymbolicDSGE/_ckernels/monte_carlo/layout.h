@@ -13,44 +13,6 @@ typedef struct {
   arena_offset aoffset;
 } sdsge_mc_layout;
 
-/* Buffers each arena holds, in the order the offsets report them. One name for
- * the storage a caller reserves and the bound a walk runs to, so the two cannot
- * disagree. */
-#define SDSGE_MC_DATAGEN_OUT_BUFFERS 3
-#define SDSGE_MC_PASSTHROUGH_OUT_BUFFERS 1
-#define SDSGE_MC_SIMULATE1_IN_BUFFERS 7
-#define SDSGE_MC_SIMULATE2_IN_BUFFERS 16
-#define SDSGE_MC_FILTER_LINEAR_IN_BUFFERS 9
-#define SDSGE_MC_FILTER_EXTENDED_IN_BUFFERS 8
-#define SDSGE_MC_FILTER_UNSCENTED_IN_BUFFERS 18
-#define SDSGE_MC_FILTER_OUT_BUFFERS 11
-#define SDSGE_MC_FILTER_UNSCENTED_OUT_BUFFERS 14
-#define SDSGE_MC_REGRESSION_IN_BUFFERS 3
-#define SDSGE_MC_REGRESSION_IN_INT_BUFFERS 1
-#define SDSGE_MC_REGRESSION_OUT_BUFFERS 4
-#define SDSGE_MC_REGRESSION_OUT_INT_BUFFERS 1
-#define SDSGE_MC_TRANSFORM_IN_BUFFERS 2
-
-/* Every count above fits an `arena_offset`. A lane that outgrows the descriptor
- * fails here rather than writing past the entries it was given. */
-typedef char sdsge_mc_layout_capacity_check
-    [(SDSGE_MC_DATAGEN_OUT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_PASSTHROUGH_OUT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_SIMULATE1_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_SIMULATE2_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_FILTER_LINEAR_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_FILTER_EXTENDED_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_FILTER_UNSCENTED_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_FILTER_OUT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_FILTER_UNSCENTED_OUT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_REGRESSION_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_REGRESSION_IN_INT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_REGRESSION_OUT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_REGRESSION_OUT_INT_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS &&
-      SDSGE_MC_TRANSFORM_IN_BUFFERS <= SDSGE_ARENA_MAX_BUFFERS)
-         ? 1
-         : -1];
-
 /* from core_steps.h */
 /* Source passthrough. ``input`` is the bound (n, p) source span in the input
  * arena, copied straight to the output so one field of a producer can be
@@ -135,47 +97,62 @@ arena_size sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
 arena_offset sdsge_filter_unscented_output_arena_offset(i64 n_state, i64 n_ctrl,
                                                         i64 n_obs, i64 T);
 
-/* from regression.h */
-/* Every regression arena is [X(n,p), y(n), scratch]. ``p`` is the design width
- * after optional intercept augmentation. The scratch is one buffer here and
- * stays one: only the fit reads inside it, so nothing outside has to agree on
- * what it holds, and a `*_scratch_arena_size` states its width without a
- * layout. ``elastic_net_gs`` also takes an int lane, one buffer wide, which it
- * hands to the fit whole.
+/* from tests.h */
+/* A diagnostic stages its data, then hands the `diag` kernels one work block
+ * they size themselves, the way a filter hands kalman its scratch. `work` is a
+ * parameter rather than something these layouts know, and each shape declares
+ * an int buffer that stays empty unless the work asked for one.
  *
- * Every kind writes the same output arena, [coef(p), ssr, sst, se(p)] over an
- * int lane of [status]. ``se`` is empty unless the kind reports one, so the
- * fields ahead of it do not move, and one layout serves all seven. */
-arena_offset sdsge_mc_regression_output_arena_offset(i64 p, int with_se);
-arena_size sdsge_mc_regression_output_arena_size(i64 p, int with_se);
-arena_size sdsge_mc_ols_scratch_arena_size(i64 p);
-arena_offset sdsge_mc_ols_work_arena_offset(i64 n, i64 p);
-arena_size sdsge_mc_ols_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_ridge_scratch_arena_size(i64 p);
-arena_offset sdsge_mc_ridge_work_arena_offset(i64 n, i64 p);
-arena_size sdsge_mc_ridge_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_ridge_gs_scratch_arena_size(i64 p);
-arena_offset sdsge_mc_ridge_gs_work_arena_offset(i64 n, i64 p);
-arena_size sdsge_mc_ridge_gs_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_lasso_scratch_arena_size(i64 p);
-arena_offset sdsge_mc_lasso_work_arena_offset(i64 n, i64 p);
-arena_size sdsge_mc_lasso_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_lasso_gs_scratch_arena_size(i64 p, int intercept,
-                                                i64 n_alpha, i64 max_iter);
-arena_offset sdsge_mc_lasso_gs_work_arena_offset(i64 n, i64 p, int intercept,
-                                                 i64 n_alpha, i64 max_iter);
-arena_size sdsge_mc_lasso_gs_work_arena_size(i64 n, i64 p, int intercept,
-                                             i64 n_alpha, i64 max_iter);
-arena_size sdsge_mc_elastic_net_scratch_arena_size(i64 p);
-arena_offset sdsge_mc_elastic_net_work_arena_offset(i64 n, i64 p);
-arena_size sdsge_mc_elastic_net_work_arena_size(i64 n, i64 p);
-arena_size sdsge_mc_elastic_net_gs_scratch_arena_size(i64 p, int intercept,
-                                                      i64 n_alpha);
-arena_offset sdsge_mc_elastic_net_gs_work_arena_offset(i64 n, i64 p,
-                                                       int intercept,
-                                                       i64 n_alpha);
-arena_size sdsge_mc_elastic_net_gs_work_arena_size(i64 n, i64 p, int intercept,
-                                                   i64 n_alpha);
+ * Three shapes cover every kind; a kind supplies its own dimensions and its own
+ * work, so no layout here needs to know which diagnostic it is serving. */
+
+/* [data(n,q), work]. The wald kinds over an (n,q) sample, and ljung_box and
+ * jarque_bera over an (n,1) series whose work may be empty. */
+arena_offset sdsge_mc_diag_sample_arena_offset(i64 n, i64 q, arena_size work);
+arena_size sdsge_mc_diag_sample_arena_size(i64 n, i64 q, arena_size work);
+
+/* [y(n), X(n,m), work]. breusch_godfrey, chow, cusum and cusumsq, over the
+ * design width each of them names differently. */
+arena_offset sdsge_mc_diag_design_arena_offset(i64 n, i64 m, arena_size work);
+arena_size sdsge_mc_diag_design_arena_size(i64 n, i64 m, arena_size work);
+
+/* [eps(n), X(n,k), X_aug(n,k+1), work]. breusch_pagan alone, which builds the
+ * augmented design in the arena rather than receiving it staged. */
+arena_offset sdsge_mc_diag_augmented_arena_offset(i64 n, i64 k,
+                                                  arena_size work);
+arena_size sdsge_mc_diag_augmented_arena_size(i64 n, i64 k, arena_size work);
+
+/* from regression.h */
+/* Regression kinds, as the arena sees them. Data, not a status: the value
+ * selects how much scratch a kind asks for and whether it reports a standard
+ * error. */
+typedef enum {
+  SDSGE_MC_REGRESSION_OLS = 0,
+  SDSGE_MC_REGRESSION_RIDGE,
+  SDSGE_MC_REGRESSION_RIDGE_GS,
+  SDSGE_MC_REGRESSION_LASSO,
+  SDSGE_MC_REGRESSION_LASSO_GS,
+  SDSGE_MC_REGRESSION_ELASTIC_NET,
+  SDSGE_MC_REGRESSION_ELASTIC_NET_GS,
+} sdsge_mc_regression_kind;
+
+/* Every regression arena is [X(n,p), y(n), scratch] over an int lane the fit
+ * takes whole. ``p`` is the design width after optional intercept
+ * augmentation. The scratch stays one buffer because only the fit reads inside
+ * it, and its width is named nowhere but `layout.c`. ``intercept``,
+ * ``n_alpha`` and ``max_iter`` are read by the kinds that need them and
+ * ignored by the rest. */
+arena_offset sdsge_mc_regression_arena_offset(i64 kind, i64 n, i64 p,
+                                              int intercept, i64 n_alpha,
+                                              i64 max_iter);
+arena_size sdsge_mc_regression_arena_size(i64 kind, i64 n, i64 p, int intercept,
+                                          i64 n_alpha, i64 max_iter);
+
+/* Output is [coef(p), ssr, sst, se(p)] over an int lane of [status]. Only OLS
+ * reports a standard error, which the kind decides here rather than at each
+ * caller, and ``se`` is empty otherwise so nothing ahead of it moves. */
+arena_offset sdsge_mc_regression_output_arena_offset(i64 kind, i64 p);
+arena_size sdsge_mc_regression_output_arena_size(i64 kind, i64 p);
 
 /* from transforms.h */
 /* Transform kinds, as the arena sees them. Data, not a status: the value only

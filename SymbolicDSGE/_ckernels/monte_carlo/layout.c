@@ -18,20 +18,20 @@
 
 /* from core_steps.c */
 arena_offset sdsge_passthrough_arena_offset(const i64 n, const i64 p) {
-  arena_offset off = make_offset(SDSGE_MC_PASSTHROUGH_OUT_BUFFERS, 0);
+  arena_offset off = make_offset(1, 0);
   off.foffset[0] = n * p; // payload(n, p)
   return off;
 }
 
 arena_size sdsge_passthrough_arena_size(const i64 n, const i64 p) {
   const arena_offset off = sdsge_passthrough_arena_offset(n, p);
-  return make_sizer(off.foffset[SDSGE_MC_PASSTHROUGH_OUT_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_raw_model_data_output_arena_offset(const i64 n_states,
                                                       const i64 n_shocks,
                                                       const i64 n_observables) {
-  arena_offset off = make_offset(SDSGE_MC_DATAGEN_OUT_BUFFERS, 0);
+  arena_offset off = make_offset(3, 0);
   off.foffset[0] = n_states;                       // states
   off.foffset[1] = off.foffset[0] + n_shocks;      // shocks
   off.foffset[2] = off.foffset[1] + n_observables; // observables
@@ -43,12 +43,12 @@ arena_size sdsge_raw_model_data_output_arena_size(const i64 n_states,
                                                   const i64 n_observables) {
   const arena_offset off = sdsge_raw_model_data_output_arena_offset(
       n_states, n_shocks, n_observables);
-  return make_sizer(off.foffset[SDSGE_MC_DATAGEN_OUT_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_simulate_order1_arena_offset(const i64 n, const i64 k,
                                                 const i64 T, const i64 n_par) {
-  arena_offset off = make_offset(SDSGE_MC_SIMULATE1_IN_BUFFERS, 0);
+  arena_offset off = make_offset(7, 0);
   off.foffset[0] = n * n;                  // A(n, n)
   off.foffset[1] = off.foffset[0] + n * k; // B(n, k)
   off.foffset[2] = off.foffset[1] + n;     // steady_state(n)
@@ -64,13 +64,13 @@ arena_offset sdsge_simulate_order1_arena_offset(const i64 n, const i64 k,
 arena_size sdsge_simulate_order1_arena_size(const i64 n, const i64 k,
                                             const i64 T, const i64 n_par) {
   const arena_offset off = sdsge_simulate_order1_arena_offset(n, k, T, n_par);
-  return make_sizer(off.foffset[SDSGE_MC_SIMULATE1_IN_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_simulate_order1_output_arena_offset(const i64 n, const i64 k,
                                                        const i64 T,
                                                        const i64 m) {
-  arena_offset off = make_offset(SDSGE_MC_DATAGEN_OUT_BUFFERS, 0);
+  arena_offset off = make_offset(3, 0);
   off.foffset[0] = T * n;                  // states(T, n)
   off.foffset[1] = off.foffset[0] + T * k; // shocks(T, k)
   off.foffset[2] =
@@ -82,14 +82,14 @@ arena_size sdsge_simulate_order1_output_arena_size(const i64 n, const i64 k,
                                                    const i64 T, const i64 m) {
   const arena_offset off =
       sdsge_simulate_order1_output_arena_offset(n, k, T, m);
-  return make_sizer(off.foffset[SDSGE_MC_DATAGEN_OUT_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_simulate_order2_arena_offset(const i64 n_state,
                                                 const i64 n_var,
                                                 const i64 n_exog, const i64 T,
                                                 const i64 n_par) {
-  arena_offset off = make_offset(SDSGE_MC_SIMULATE2_IN_BUFFERS, 0);
+  arena_offset off = make_offset(16, 0);
   const i64 nx = n_state;
   const i64 ny = n_var - n_state;
   off.foffset[0] = nx * nx;                           // hx(nx, nx)
@@ -120,7 +120,7 @@ arena_size sdsge_simulate_order2_arena_size(const i64 n_state, const i64 n_var,
                                             const i64 n_par) {
   const arena_offset off =
       sdsge_simulate_order2_arena_offset(n_state, n_var, n_exog, T, n_par);
-  return make_sizer(off.foffset[SDSGE_MC_SIMULATE2_IN_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_simulate_order2_output_arena_offset(const i64 n_var,
@@ -138,7 +138,7 @@ arena_size sdsge_simulate_order2_output_arena_size(const i64 n_var,
 
 arena_offset sdsge_filter_linear_input_arena_offset(const i64 n, const i64 m,
                                                     const i64 k, const i64 T) {
-  arena_offset off = make_offset(SDSGE_MC_FILTER_LINEAR_IN_BUFFERS, 0);
+  arena_offset off = make_offset(9, 0);
   off.foffset[0] = n * n;                  // A(n, n)
   off.foffset[1] = off.foffset[0] + n * k; // B(n, k)
   off.foffset[2] = off.foffset[1] + m * n; // C(m, n)
@@ -154,13 +154,13 @@ arena_offset sdsge_filter_linear_input_arena_offset(const i64 n, const i64 m,
 arena_size sdsge_filter_linear_input_arena_size(const i64 n, const i64 m,
                                                 const i64 k, const i64 T) {
   const arena_offset off = sdsge_filter_linear_input_arena_offset(n, m, k, T);
-  return make_sizer(off.foffset[SDSGE_MC_FILTER_LINEAR_IN_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_filter_linear_output_arena_offset(const i64 n, const i64 m,
                                                      const i64 k, const i64 T,
                                                      const int return_shocks) {
-  arena_offset off = make_offset(SDSGE_MC_FILTER_OUT_BUFFERS, 0);
+  arena_offset off = make_offset(11, 0);
   off.foffset[0] = T * n;                      // x_pred(T, n)
   off.foffset[1] = off.foffset[0] + T * n;     // x_filt(T, n)
   off.foffset[2] = off.foffset[1] + T * n * n; // P_pred(T, n, n)
@@ -181,13 +181,13 @@ arena_size sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
                                                  const int return_shocks) {
   const arena_offset off =
       sdsge_filter_linear_output_arena_offset(n, m, k, T, return_shocks);
-  return make_sizer(off.foffset[SDSGE_MC_FILTER_OUT_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_filter_extended_input_arena_offset(const i64 n, const i64 m,
                                                       const i64 k, const i64 T,
                                                       const i64 n_par) {
-  arena_offset off = make_offset(SDSGE_MC_FILTER_EXTENDED_IN_BUFFERS, 0);
+  arena_offset off = make_offset(8, 0);
   off.foffset[0] = n * n;                  // A(n, n)
   off.foffset[1] = off.foffset[0] + n * k; // B(n, k)
   off.foffset[2] = off.foffset[1] + n_par; // params(n_par)
@@ -204,7 +204,7 @@ arena_size sdsge_filter_extended_input_arena_size(const i64 n, const i64 m,
                                                   const i64 n_par) {
   const arena_offset off =
       sdsge_filter_extended_input_arena_offset(n, m, k, T, n_par);
-  return make_sizer(off.foffset[SDSGE_MC_FILTER_EXTENDED_IN_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset
@@ -224,7 +224,7 @@ arena_offset
 sdsge_filter_unscented_input_arena_offset(const i64 n_state, const i64 n_ctrl,
                                           const i64 n_exog, const i64 n_obs,
                                           const i64 T, const i64 n_par) {
-  arena_offset off = make_offset(SDSGE_MC_FILTER_UNSCENTED_IN_BUFFERS, 0);
+  arena_offset off = make_offset(18, 0);
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
   off.foffset[0] = n_state * n_state;                 // hx(n_state, n_state)
@@ -262,14 +262,14 @@ arena_size sdsge_filter_unscented_input_arena_size(const i64 n_state,
                                                    const i64 n_par) {
   const arena_offset off = sdsge_filter_unscented_input_arena_offset(
       n_state, n_ctrl, n_exog, n_obs, T, n_par);
-  return make_sizer(off.foffset[SDSGE_MC_FILTER_UNSCENTED_IN_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
 arena_offset sdsge_filter_unscented_output_arena_offset(const i64 n_state,
                                                         const i64 n_ctrl,
                                                         const i64 n_obs,
                                                         const i64 T) {
-  arena_offset off = make_offset(SDSGE_MC_FILTER_UNSCENTED_OUT_BUFFERS, 0);
+  arena_offset off = make_offset(14, 0);
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
   off.foffset[0] = T * n_var;                          // x_pred(T, n_var)
@@ -295,17 +295,126 @@ arena_size sdsge_filter_unscented_output_arena_size(const i64 n_state,
                                                     const i64 T) {
   const arena_offset off =
       sdsge_filter_unscented_output_arena_offset(n_state, n_ctrl, n_obs, T);
-  return make_sizer(off.foffset[SDSGE_MC_FILTER_UNSCENTED_OUT_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
+}
+
+/* from tests.c */
+arena_offset sdsge_mc_diag_sample_arena_offset(const i64 n, const i64 q,
+                                               const arena_size work) {
+  arena_offset off = make_offset(2, 1);
+  off.foffset[0] = n * q;                         // data(n, q)
+  off.foffset[1] = off.foffset[0] + work.n_float; // work
+  off.ioffset[0] = work.n_int;                    // int work, often empty
+  return off;
+}
+
+arena_size sdsge_mc_diag_sample_arena_size(const i64 n, const i64 q,
+                                           const arena_size work) {
+  const arena_offset off = sdsge_mc_diag_sample_arena_offset(n, q, work);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
+}
+
+arena_offset sdsge_mc_diag_design_arena_offset(const i64 n, const i64 m,
+                                               const arena_size work) {
+  arena_offset off = make_offset(3, 1);
+  off.foffset[0] = n;                             // y(n)
+  off.foffset[1] = off.foffset[0] + n * m;        // X(n, m)
+  off.foffset[2] = off.foffset[1] + work.n_float; // work
+  off.ioffset[0] = work.n_int;                    // int work, often empty
+  return off;
+}
+
+arena_size sdsge_mc_diag_design_arena_size(const i64 n, const i64 m,
+                                           const arena_size work) {
+  const arena_offset off = sdsge_mc_diag_design_arena_offset(n, m, work);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
+}
+
+arena_offset sdsge_mc_diag_augmented_arena_offset(const i64 n, const i64 k,
+                                                  const arena_size work) {
+  arena_offset off = make_offset(4, 1);
+  off.foffset[0] = n;                             // eps(n)
+  off.foffset[1] = off.foffset[0] + n * k;        // X(n, k)
+  off.foffset[2] = off.foffset[1] + n * (k + 1);  // X_aug(n, k+1)
+  off.foffset[3] = off.foffset[2] + work.n_float; // work
+  off.ioffset[0] = work.n_int;                    // int work, often empty
+  return off;
+}
+
+arena_size sdsge_mc_diag_augmented_arena_size(const i64 n, const i64 k,
+                                              const arena_size work) {
+  const arena_offset off = sdsge_mc_diag_augmented_arena_offset(n, k, work);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
 /* from regression.c */
-/* Scratch widths are stated, not laid out: the fit is the only reader, so it
- * carves what it was handed and nothing outside it has to agree. */
+/* The one place a regression scratch width is named. No `default`, so a kind
+ * added to the enum without a width here fails the build under -Wswitch. */
+static arena_size
+sdsge_mc_regression_scratch(const sdsge_mc_regression_kind kind, const i64 p,
+                            const int intercept, const i64 n_alpha,
+                            const i64 max_iter) {
+  const i64 k = p - (intercept ? 1 : 0);
+  switch (kind) {
+  case SDSGE_MC_REGRESSION_OLS:
+    return make_sizer(2 * p * p + 2 * p, 0); // L, G, g, work
+  case SDSGE_MC_REGRESSION_RIDGE:
+    return make_sizer(3 * p * p + 2 * p, 0); // L, G, G_unpen, g, col
+  case SDSGE_MC_REGRESSION_RIDGE_GS:
+    return make_sizer(3 * p * p + 3 * p, 0); // G_base, G, L, g, coef_work, col
+  case SDSGE_MC_REGRESSION_LASSO:
+    return make_sizer(2 * p * p + 2 * p, 0); // G_base, G, g, Gcoef
+  case SDSGE_MC_REGRESSION_LASSO_GS:
+    return make_sizer(2 * p * p + p            // gram
+                          + max_iter + 1       // lam_path
+                          + (max_iter + 1) * k // beta_path
+                          + n_alpha * k        // beta_grid
+                          + k * k + 8 * k,     // solver work
+                      0);
+  case SDSGE_MC_REGRESSION_ELASTIC_NET:
+    return make_sizer(2 * p * p + 2 * p, 0); // G_base, G, g, Gcoef
+  case SDSGE_MC_REGRESSION_ELASTIC_NET_GS:
+    return make_sizer(2 * p * p + 3 * p    // G_base, G, g, Gcoef, beta
+                          + n_alpha * k    // beta_grid
+                          + 3 * k * k + k, // dof work
+                      n_alpha);            // int work
+  }
+  return make_sizer(0, 0);
+}
 
-arena_offset sdsge_mc_regression_output_arena_offset(const i64 p,
-                                                     const int with_se) {
-  arena_offset off = make_offset(SDSGE_MC_REGRESSION_OUT_BUFFERS,
-                                 SDSGE_MC_REGRESSION_OUT_INT_BUFFERS);
+/* Only OLS reports a standard error. Decided here so no caller repeats it. */
+static int sdsge_mc_regression_reports_se(const sdsge_mc_regression_kind kind) {
+  return kind == SDSGE_MC_REGRESSION_OLS;
+}
+
+arena_offset sdsge_mc_regression_arena_offset(const i64 kind, const i64 n,
+                                              const i64 p, const int intercept,
+                                              const i64 n_alpha,
+                                              const i64 max_iter) {
+  arena_offset off = make_offset(3, 1);
+  const arena_size scratch = sdsge_mc_regression_scratch(
+      (sdsge_mc_regression_kind)kind, p, intercept, n_alpha, max_iter);
+  off.foffset[0] = n * p;                            // X(n, p)
+  off.foffset[1] = off.foffset[0] + n;               // y(n)
+  off.foffset[2] = off.foffset[1] + scratch.n_float; // scratch
+  off.ioffset[0] = scratch.n_int;                    // int scratch, often empty
+  return off;
+}
+
+arena_size sdsge_mc_regression_arena_size(const i64 kind, const i64 n,
+                                          const i64 p, const int intercept,
+                                          const i64 n_alpha,
+                                          const i64 max_iter) {
+  const arena_offset off = sdsge_mc_regression_arena_offset(
+      kind, n, p, intercept, n_alpha, max_iter);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
+}
+
+arena_offset sdsge_mc_regression_output_arena_offset(const i64 kind,
+                                                     const i64 p) {
+  arena_offset off = make_offset(4, 1);
+  const int with_se =
+      sdsge_mc_regression_reports_se((sdsge_mc_regression_kind)kind);
   off.foffset[0] = p;                                  // coef(p)
   off.foffset[1] = off.foffset[0] + 1;                 // ssr
   off.foffset[2] = off.foffset[1] + 1;                 // sst
@@ -314,147 +423,9 @@ arena_offset sdsge_mc_regression_output_arena_offset(const i64 p,
   return off;
 }
 
-arena_size sdsge_mc_regression_output_arena_size(const i64 p,
-                                                 const int with_se) {
-  const arena_offset off = sdsge_mc_regression_output_arena_offset(p, with_se);
-  return make_sizer(off.foffset[SDSGE_MC_REGRESSION_OUT_BUFFERS - 1],
-                    off.ioffset[SDSGE_MC_REGRESSION_OUT_INT_BUFFERS - 1]);
-}
-
-/* Every kind stages the same three buffers and differs only in how much scratch
- * it asks for, so the layout is written once and each kind supplies a width.
- * The int lane is declared for all of them and stays empty for the ones with no
- * integer scratch, which keeps one shape rather than two. */
-static arena_offset sdsge_mc_regression_work_offset(const i64 n, const i64 p,
-                                                    const arena_size scratch) {
-  arena_offset off = make_offset(SDSGE_MC_REGRESSION_IN_BUFFERS,
-                                 SDSGE_MC_REGRESSION_IN_INT_BUFFERS);
-  off.foffset[0] = n * p;                            // X(n, p)
-  off.foffset[1] = off.foffset[0] + n;               // y(n)
-  off.foffset[2] = off.foffset[1] + scratch.n_float; // scratch
-  off.ioffset[0] = scratch.n_int;                    // int scratch, often empty
-  return off;
-}
-
-static arena_size sdsge_mc_regression_work_size(const arena_offset off) {
-  return make_sizer(off.foffset[SDSGE_MC_REGRESSION_IN_BUFFERS - 1],
-                    off.ioffset[SDSGE_MC_REGRESSION_IN_INT_BUFFERS - 1]);
-}
-
-arena_size sdsge_mc_ols_scratch_arena_size(const i64 p) {
-  return make_sizer(2 * p * p + 2 * p, 0);
-}
-
-arena_offset sdsge_mc_ols_work_arena_offset(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_offset(n, p,
-                                         sdsge_mc_ols_scratch_arena_size(p));
-}
-
-arena_size sdsge_mc_ols_work_arena_size(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_size(sdsge_mc_ols_work_arena_offset(n, p));
-}
-
-arena_size sdsge_mc_ridge_scratch_arena_size(const i64 p) {
-  return make_sizer(3 * p * p + 2 * p, 0);
-}
-
-arena_offset sdsge_mc_ridge_work_arena_offset(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_offset(n, p,
-                                         sdsge_mc_ridge_scratch_arena_size(p));
-}
-
-arena_size sdsge_mc_ridge_work_arena_size(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_size(sdsge_mc_ridge_work_arena_offset(n, p));
-}
-
-arena_size sdsge_mc_ridge_gs_scratch_arena_size(const i64 p) {
-  return make_sizer(3 * p * p + 3 * p, 0);
-}
-
-arena_offset sdsge_mc_ridge_gs_work_arena_offset(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_offset(
-      n, p, sdsge_mc_ridge_gs_scratch_arena_size(p));
-}
-
-arena_size sdsge_mc_ridge_gs_work_arena_size(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_size(
-      sdsge_mc_ridge_gs_work_arena_offset(n, p));
-}
-
-arena_size sdsge_mc_lasso_scratch_arena_size(const i64 p) {
-  return make_sizer(2 * p * p + 2 * p, 0);
-}
-
-arena_offset sdsge_mc_lasso_work_arena_offset(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_offset(n, p,
-                                         sdsge_mc_lasso_scratch_arena_size(p));
-}
-
-arena_size sdsge_mc_lasso_work_arena_size(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_size(sdsge_mc_lasso_work_arena_offset(n, p));
-}
-
-arena_size sdsge_mc_elastic_net_scratch_arena_size(const i64 p) {
-  return make_sizer(2 * p * p + 2 * p, 0);
-}
-
-arena_offset sdsge_mc_elastic_net_work_arena_offset(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_offset(
-      n, p, sdsge_mc_elastic_net_scratch_arena_size(p));
-}
-
-arena_size sdsge_mc_elastic_net_work_arena_size(const i64 n, const i64 p) {
-  return sdsge_mc_regression_work_size(
-      sdsge_mc_elastic_net_work_arena_offset(n, p));
-}
-
-arena_size sdsge_mc_lasso_gs_scratch_arena_size(const i64 p,
-                                                const int intercept,
-                                                const i64 n_alpha,
-                                                const i64 max_iter) {
-  const i64 k = p - (intercept ? 1 : 0);
-  const i64 gram = 2 * p * p + p;
-  const i64 path = max_iter + 1 + (max_iter + 1) * k + n_alpha * k;
-  const i64 solver_work = k * k + 8 * k;
-  return make_sizer(gram + path + solver_work, 0);
-}
-
-arena_offset sdsge_mc_lasso_gs_work_arena_offset(const i64 n, const i64 p,
-                                                 const int intercept,
-                                                 const i64 n_alpha,
-                                                 const i64 max_iter) {
-  return sdsge_mc_regression_work_offset(
-      n, p,
-      sdsge_mc_lasso_gs_scratch_arena_size(p, intercept, n_alpha, max_iter));
-}
-
-arena_size sdsge_mc_lasso_gs_work_arena_size(const i64 n, const i64 p,
-                                             const int intercept,
-                                             const i64 n_alpha,
-                                             const i64 max_iter) {
-  return sdsge_mc_regression_work_size(
-      sdsge_mc_lasso_gs_work_arena_offset(n, p, intercept, n_alpha, max_iter));
-}
-
-arena_size sdsge_mc_elastic_net_gs_scratch_arena_size(const i64 p,
-                                                      const int intercept,
-                                                      const i64 n_alpha) {
-  const i64 k = p - (intercept ? 1 : 0);
-  return make_sizer(2 * p * p + 3 * p + n_alpha * k + 3 * k * k + k, n_alpha);
-}
-
-arena_offset sdsge_mc_elastic_net_gs_work_arena_offset(const i64 n, const i64 p,
-                                                       const int intercept,
-                                                       const i64 n_alpha) {
-  return sdsge_mc_regression_work_offset(
-      n, p, sdsge_mc_elastic_net_gs_scratch_arena_size(p, intercept, n_alpha));
-}
-
-arena_size sdsge_mc_elastic_net_gs_work_arena_size(const i64 n, const i64 p,
-                                                   const int intercept,
-                                                   const i64 n_alpha) {
-  return sdsge_mc_regression_work_size(
-      sdsge_mc_elastic_net_gs_work_arena_offset(n, p, intercept, n_alpha));
+arena_size sdsge_mc_regression_output_arena_size(const i64 kind, const i64 p) {
+  const arena_offset off = sdsge_mc_regression_output_arena_offset(kind, p);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
 /* from transforms.c */
@@ -482,7 +453,7 @@ static i64 sdsge_mc_transform_scratch(const sdsge_mc_transform_kind kind,
 
 arena_offset sdsge_mc_transform_arena_offset(const i64 kind, const i64 n,
                                              const i64 p, const i64 order) {
-  arena_offset off = make_offset(SDSGE_MC_TRANSFORM_IN_BUFFERS, 0);
+  arena_offset off = make_offset(2, 0);
   off.foffset[0] = n * p; // input(n, p)
   off.foffset[1] =
       off.foffset[0] +
@@ -493,5 +464,5 @@ arena_offset sdsge_mc_transform_arena_offset(const i64 kind, const i64 n,
 arena_size sdsge_mc_transform_arena_size(const i64 kind, const i64 n,
                                          const i64 p, const i64 order) {
   const arena_offset off = sdsge_mc_transform_arena_offset(kind, n, p, order);
-  return make_sizer(off.foffset[SDSGE_MC_TRANSFORM_IN_BUFFERS - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }

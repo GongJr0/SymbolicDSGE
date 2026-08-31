@@ -305,11 +305,10 @@ void sdsge_mc_elastic_net_gs_fit(
 }
 
 static sdsge_mc_regression_record
-sdsge_mc_regression_output_record(const i64 n, const i64 p,
-                                  f64 *SDSGE_RESTRICT float_out,
-                                  const int with_se) {
-  const arena_offset out_off =
-      sdsge_mc_regression_output_arena_offset(p, with_se);
+sdsge_mc_regression_output_record(const i64 kind, const i64 n, const i64 p,
+                                  f64 *SDSGE_RESTRICT float_out) {
+  const arena_offset out_off = sdsge_mc_regression_output_arena_offset(kind, p);
+  const int with_se = out_off.foffset[3] > out_off.foffset[2];
   sdsge_mc_regression_record rec = {
       .n = n,
       .p = p,
@@ -322,11 +321,12 @@ sdsge_mc_regression_output_record(const i64 n, const i64 p,
   return rec;
 }
 
-static int sdsge_mc_regression_status(const sdsge_mc_regression_record *rec,
+static int sdsge_mc_regression_status(const i64 kind,
+                                      const sdsge_mc_regression_record *rec,
                                       f64 *SDSGE_RESTRICT float_out,
                                       i64 *SDSGE_RESTRICT int_out) {
   const arena_offset out_off =
-      sdsge_mc_regression_output_arena_offset(rec->p, rec->se != NULL);
+      sdsge_mc_regression_output_arena_offset(kind, rec->p);
   float_out[out_off.foffset[0]] = rec->ssr;
   float_out[out_off.foffset[1]] = rec->sst;
   if (int_out != NULL) {
@@ -342,19 +342,20 @@ int sdsge_mc_ols_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_ols_step_ctx *config = ctx;
-  const arena_offset in_off =
-      sdsge_mc_ols_work_arena_offset(config->n, config->p);
+  const i64 kind = SDSGE_MC_REGRESSION_OLS;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, 0, 0);
   const f64 *X = float_in_work;
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 1);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *L = scratch;
   f64 *G = L + config->p * config->p;
   f64 *g = G + config->p * config->p;
   f64 *work = g + config->p;
   sdsge_mc_ols_fit(X, y, &rec, L, G, g, work);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }
 
 int sdsge_mc_ridge_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
@@ -364,13 +365,14 @@ int sdsge_mc_ridge_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_ridge_step_ctx *config = ctx;
-  const arena_offset in_off =
-      sdsge_mc_ridge_work_arena_offset(config->n, config->p);
+  const i64 kind = SDSGE_MC_REGRESSION_RIDGE;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, 0, 0);
   const f64 *X = float_in_work;
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 0);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *L = scratch;
   f64 *G = L + config->p * config->p;
   f64 *G_unpen = G + config->p * config->p;
@@ -378,7 +380,7 @@ int sdsge_mc_ridge_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
   f64 *col = g + config->p;
   sdsge_mc_ridge_fit(X, y, config->alpha, config->intercept, &rec, L, G,
                      G_unpen, g, col);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }
 
 int sdsge_mc_ridge_gs_runner(const i64 rep_idx,
@@ -389,13 +391,14 @@ int sdsge_mc_ridge_gs_runner(const i64 rep_idx,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_ridge_gs_step_ctx *config = ctx;
-  const arena_offset in_off =
-      sdsge_mc_ridge_gs_work_arena_offset(config->n, config->p);
+  const i64 kind = SDSGE_MC_REGRESSION_RIDGE_GS;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, config->n_alpha, 0);
   const f64 *X = float_in_work;
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 0);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *G_base = scratch;
   f64 *G = G_base + config->p * config->p;
   f64 *L = G + config->p * config->p;
@@ -405,7 +408,7 @@ int sdsge_mc_ridge_gs_runner(const i64 rep_idx,
   sdsge_mc_ridge_gs_fit(X, y, config->alphas, config->n_alpha,
                         config->criterion, config->intercept, &rec, G_base, G,
                         L, g, coef_work, col);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }
 
 int sdsge_mc_lasso_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
@@ -415,20 +418,21 @@ int sdsge_mc_lasso_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_lasso_step_ctx *config = ctx;
-  const arena_offset in_off =
-      sdsge_mc_lasso_work_arena_offset(config->n, config->p);
+  const i64 kind = SDSGE_MC_REGRESSION_LASSO;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, 0, config->max_iter);
   const f64 *X = float_in_work;
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 0);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *G_base = scratch;
   f64 *G = G_base + config->p * config->p;
   f64 *g = G + config->p * config->p;
   f64 *Gcoef = g + config->p;
   sdsge_mc_lasso_fit(X, y, config->alpha, config->intercept, config->max_iter,
                      config->tol, &rec, G_base, G, g, Gcoef);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }
 
 int sdsge_mc_lasso_gs_runner(const i64 rep_idx,
@@ -439,8 +443,9 @@ int sdsge_mc_lasso_gs_runner(const i64 rep_idx,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_lasso_gs_step_ctx *config = ctx;
-  const arena_offset in_off = sdsge_mc_lasso_gs_work_arena_offset(
-      config->n, config->p, config->intercept, config->n_alpha,
+  const i64 kind = SDSGE_MC_REGRESSION_LASSO_GS;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, config->n_alpha,
       config->max_iter);
   const i64 k = config->p - (config->intercept ? 1 : 0);
   const i64 n_path = config->max_iter + 1;
@@ -448,7 +453,7 @@ int sdsge_mc_lasso_gs_runner(const i64 rep_idx,
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 0);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *G_base = scratch;
   f64 *G = G_base + config->p * config->p;
   f64 *g = G + config->p * config->p;
@@ -459,7 +464,7 @@ int sdsge_mc_lasso_gs_runner(const i64 rep_idx,
   sdsge_mc_lasso_gs_fit(X, y, config->alphas, config->n_alpha,
                         config->intercept, config->max_iter, config->tol, &rec,
                         G_base, G, g, lam_path, beta_path, beta_grid, work);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }
 
 int sdsge_mc_elastic_net_runner(const i64 rep_idx,
@@ -470,13 +475,14 @@ int sdsge_mc_elastic_net_runner(const i64 rep_idx,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_elastic_net_step_ctx *config = ctx;
-  const arena_offset in_off =
-      sdsge_mc_elastic_net_work_arena_offset(config->n, config->p);
+  const i64 kind = SDSGE_MC_REGRESSION_ELASTIC_NET;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, 0, config->max_iter);
   const f64 *X = float_in_work;
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 0);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *G_base = scratch;
   f64 *G = G_base + config->p * config->p;
   f64 *g = G + config->p * config->p;
@@ -484,7 +490,7 @@ int sdsge_mc_elastic_net_runner(const i64 rep_idx,
   sdsge_mc_elastic_net_fit(X, y, config->alpha, config->l1_ratio,
                            config->intercept, config->max_iter, config->tol,
                            &rec, G_base, G, g, Gcoef);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }
 
 int sdsge_mc_elastic_net_gs_runner(const i64 rep_idx,
@@ -495,14 +501,16 @@ int sdsge_mc_elastic_net_gs_runner(const i64 rep_idx,
                                    const void *ctx) {
   (void)rep_idx;
   const sdsge_mc_elastic_net_gs_step_ctx *config = ctx;
-  const arena_offset in_off = sdsge_mc_elastic_net_gs_work_arena_offset(
-      config->n, config->p, config->intercept, config->n_alpha);
+  const i64 kind = SDSGE_MC_REGRESSION_ELASTIC_NET_GS;
+  const arena_offset in_off = sdsge_mc_regression_arena_offset(
+      kind, config->n, config->p, config->intercept, config->n_alpha,
+      config->max_iter);
   const i64 k = config->p - (config->intercept ? 1 : 0);
   const f64 *X = float_in_work;
   const f64 *y = float_in_work + in_off.foffset[0];
   f64 *scratch = float_in_work + in_off.foffset[1];
   sdsge_mc_regression_record rec =
-      sdsge_mc_regression_output_record(config->n, config->p, float_out, 0);
+      sdsge_mc_regression_output_record(kind, config->n, config->p, float_out);
   f64 *G_base = scratch;
   f64 *G = G_base + config->p * config->p;
   f64 *g = G + config->p * config->p;
@@ -514,5 +522,5 @@ int sdsge_mc_elastic_net_gs_runner(const i64 rep_idx,
       X, y, config->alphas, config->n_alpha, config->l1_ratio,
       config->criterion, config->intercept, config->max_iter, config->tol, &rec,
       G_base, G, g, beta_grid, int_work, Gcoef, beta, dof_work);
-  return sdsge_mc_regression_status(&rec, float_out, int_out);
+  return sdsge_mc_regression_status(kind, &rec, float_out, int_out);
 }

@@ -29,17 +29,19 @@ cdef extern from "layout.h":
     arena_size sdsge_mc_transform_arena_size(int64_t kind, int64_t n, int64_t p,
                                              int64_t order) nogil
 
-    arena_size sdsge_mc_ols_work_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_mc_ridge_work_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_mc_ridge_gs_work_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_mc_lasso_work_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_mc_lasso_gs_work_arena_size(int64_t n, int64_t p, int intercept,
-                                                 int64_t n_alpha,
-                                                 int64_t max_iter) nogil
-    arena_size sdsge_mc_elastic_net_work_arena_size(int64_t n, int64_t p) nogil
-    arena_size sdsge_mc_elastic_net_gs_work_arena_size(int64_t n, int64_t p,
-                                                       int intercept,
-                                                       int64_t n_alpha) nogil
+    ctypedef enum sdsge_mc_regression_kind:
+        SDSGE_MC_REGRESSION_OLS
+        SDSGE_MC_REGRESSION_RIDGE
+        SDSGE_MC_REGRESSION_RIDGE_GS
+        SDSGE_MC_REGRESSION_LASSO
+        SDSGE_MC_REGRESSION_LASSO_GS
+        SDSGE_MC_REGRESSION_ELASTIC_NET
+        SDSGE_MC_REGRESSION_ELASTIC_NET_GS
+
+    arena_size sdsge_mc_regression_arena_size(int64_t kind, int64_t n,
+                                              int64_t p, int intercept,
+                                              int64_t n_alpha,
+                                              int64_t max_iter) nogil
 
     arena_size sdsge_passthrough_arena_size(int64_t n, int64_t p) nogil
     arena_size sdsge_simulate_order1_arena_size(int64_t n, int64_t k,
@@ -88,6 +90,17 @@ cdef inline tuple _size(arena_size size):
 # One layout serves every transform, so the kind selects a code rather than a
 # function. `passthrough` stays out: it is a core step that happens to share the
 # shape, not a transform.
+cdef dict _REGRESSION_KINDS = {
+    "ols": SDSGE_MC_REGRESSION_OLS,
+    "ridge": SDSGE_MC_REGRESSION_RIDGE,
+    "ridge_gs": SDSGE_MC_REGRESSION_RIDGE_GS,
+    "lasso": SDSGE_MC_REGRESSION_LASSO,
+    "lasso_gs": SDSGE_MC_REGRESSION_LASSO_GS,
+    "elastic_net": SDSGE_MC_REGRESSION_ELASTIC_NET,
+    "elastic_net_gs": SDSGE_MC_REGRESSION_ELASTIC_NET_GS,
+}
+
+
 cdef dict _TRANSFORM_KINDS = {
     "standardize": SDSGE_MC_TRANSFORM_STANDARDIZE,
     "log": SDSGE_MC_TRANSFORM_LOG,
@@ -122,24 +135,14 @@ def regression_arena_size(
     int64_t max_iter=0,
 ):
     """Return the complete staged-input and work requirement for regression."""
-    cdef arena_size size
-    if kind == "ols":
-        size = sdsge_mc_ols_work_arena_size(n, p)
-    elif kind == "ridge":
-        size = sdsge_mc_ridge_work_arena_size(n, p)
-    elif kind == "ridge_gs":
-        size = sdsge_mc_ridge_gs_work_arena_size(n, p)
-    elif kind == "lasso":
-        size = sdsge_mc_lasso_work_arena_size(n, p)
-    elif kind == "lasso_gs":
-        size = sdsge_mc_lasso_gs_work_arena_size(n, p, intercept, n_alpha, max_iter)
-    elif kind == "elastic_net":
-        size = sdsge_mc_elastic_net_work_arena_size(n, p)
-    elif kind == "elastic_net_gs":
-        size = sdsge_mc_elastic_net_gs_work_arena_size(n, p, intercept, n_alpha)
-    else:
+    cdef object code = _REGRESSION_KINDS.get(kind)
+    if code is None:
         raise ValueError(f"Unsupported native regression kind: {kind!r}.")
-    return _size(size)
+    return _size(
+        sdsge_mc_regression_arena_size(
+            <int64_t>code, n, p, intercept, n_alpha, max_iter
+        )
+    )
 
 
 def simulation_arena_size(

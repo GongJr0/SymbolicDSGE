@@ -10,27 +10,11 @@ cdef extern from "sdsge_common.h":
     ctypedef struct arena_offset:
         int64_t foffset[SDSGE_ARENA_MAX_BUFFERS]
         int64_t ioffset[SDSGE_ARENA_MAX_BUFFERS]
-        int64_t n_float_buffers
-        int64_t n_int_buffers
+        int64_t n_fbuf
+        int64_t n_ibuf
 
 
 cdef extern from "layout.h":
-    enum:
-        SDSGE_MC_DATAGEN_OUT_BUFFERS
-        SDSGE_MC_PASSTHROUGH_OUT_BUFFERS
-        SDSGE_MC_SIMULATE1_IN_BUFFERS
-        SDSGE_MC_SIMULATE2_IN_BUFFERS
-        SDSGE_MC_FILTER_LINEAR_IN_BUFFERS
-        SDSGE_MC_FILTER_EXTENDED_IN_BUFFERS
-        SDSGE_MC_FILTER_UNSCENTED_IN_BUFFERS
-        SDSGE_MC_FILTER_OUT_BUFFERS
-        SDSGE_MC_FILTER_UNSCENTED_OUT_BUFFERS
-        SDSGE_MC_REGRESSION_IN_BUFFERS
-        SDSGE_MC_REGRESSION_IN_INT_BUFFERS
-        SDSGE_MC_REGRESSION_OUT_BUFFERS
-        SDSGE_MC_REGRESSION_OUT_INT_BUFFERS
-        SDSGE_MC_TRANSFORM_IN_BUFFERS
-
     # Core Steps
     arena_offset sdsge_passthrough_arena_offset(int64_t n,
                                                 int64_t p)
@@ -73,21 +57,24 @@ cdef extern from "layout.h":
             )
 
     # Regression Steps
-    arena_offset sdsge_mc_ols_work_arena_offset(int64_t n, int64_t p)
-    arena_offset sdsge_mc_ridge_work_arena_offset(int64_t n, int64_t p)
-    arena_offset sdsge_mc_ridge_gs_work_arena_offset(int64_t n, int64_t p)
-    arena_offset sdsge_mc_lasso_work_arena_offset(int64_t n, int64_t p)
-    arena_offset sdsge_mc_lasso_gs_work_arena_offset(
-            int64_t n, int64_t p, int intercept,
+    # One layout for all of them: the kind picks the scratch and decides whether
+    # the output reports a standard error. `intercept`, `n_alpha` and `max_iter`
+    # are read by the kinds that need them and ignored by the rest.
+    ctypedef enum sdsge_mc_regression_kind:
+        SDSGE_MC_REGRESSION_OLS
+        SDSGE_MC_REGRESSION_RIDGE
+        SDSGE_MC_REGRESSION_RIDGE_GS
+        SDSGE_MC_REGRESSION_LASSO
+        SDSGE_MC_REGRESSION_LASSO_GS
+        SDSGE_MC_REGRESSION_ELASTIC_NET
+        SDSGE_MC_REGRESSION_ELASTIC_NET_GS
+
+    arena_offset sdsge_mc_regression_arena_offset(
+            int64_t kind, int64_t n, int64_t p, int intercept,
             int64_t n_alpha, int64_t max_iter
             )
-    arena_offset sdsge_mc_elastic_net_work_arena_offset(int64_t n, int64_t p)
-    arena_offset sdsge_mc_elastic_net_gs_work_arena_offset(
-            int64_t n, int64_t p, int intercept, int64_t n_alpha
-            )
-    # One output layout serves every kind; `with_se` empties the trailing slot.
-    arena_offset sdsge_mc_regression_output_arena_offset(int64_t p,
-                                                         int with_se)
+    arena_offset sdsge_mc_regression_output_arena_offset(int64_t kind,
+                                                         int64_t p)
 
     # Transform Steps
     # One layout for all of them: the kind picks the scratch, `order` is read by

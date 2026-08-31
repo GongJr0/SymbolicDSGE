@@ -90,8 +90,9 @@ static inline arena_size sdsge_max_arena(const arena_size a,
 }
 
 /* Widest lane a layout may describe. Fixed so the descriptor below carries its
- * entries inline; a lane that outgrows the cap fails the build where its buffer
- * count is declared rather than writing past the entries it was given. */
+ * entries inline. A layout states its own buffer count when it builds one, and
+ * that count is what every reader walks to, so this bound is only the storage
+ * those counts have to fit. */
 #define SDSGE_ARENA_MAX_BUFFERS 24
 
 /* float/int arena offset descriptor: the lane boundary closing each buffer.
@@ -101,7 +102,7 @@ static inline arena_size sdsge_max_arena(const arena_size a,
  * value is always zero is one every walk has to step over to reach a buffer. A
  * buffer a configuration leaves out repeats the entry before it, so walking
  * produces nothing for it rather than the walk having to ask whether it is
- * there. A total is a read, never a sum.
+ * there.
  *
  * A layout writes the entries in order, each one the entry before it plus the
  * width of the buffer it closes. An entry means the same thing the moment it is
@@ -109,27 +110,27 @@ static inline arena_size sdsge_max_arena(const arena_size a,
  * writes every entry its lane counts, including the ones it has nothing to put
  * in; none of them carry a default it could lean on instead.
  *
- * The entries live inline, which makes this a value the way `arena_size` is: a
- * copy is a snapshot rather than an alias, a return outlives the frame that
- * built it, and `const` reaches the entries instead of stopping at a pointer.
- * The buffer counts ride along, so a walk bounds itself on the descriptor it
- * was handed rather than on a constant each call site names a second time.
+ * The member order is load-bearing, so do not tidy it. A lane that overruns its
+ * entries writes into whatever follows, and every layout has float buffers
+ * while most have no int ones. With the int lane first, an int overrun lands in
+ * `foffset`, which every reader walks, and a float overrun lands on `n_fbuf`,
+ * which bounds that walk. Both corrupt something live. The other order buries a
+ * float overrun in an `ioffset` nothing reads.
  */
 typedef struct {
-  i64 foffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_float_buffers, ): buffer end
-  i64 ioffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_int_buffers, ): buffer end
-  i64 n_float_buffers;
-  i64 n_int_buffers;
+  i64 ioffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_ibuf, ): buffer end
+  i64 foffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_fbuf, ): buffer end
+  i64 n_fbuf;
+  i64 n_ibuf;
 } arena_offset;
 
 /* Offsets for lanes of the given buffer counts, entries left unwritten. Zeroing
  * them would be a pass over slots a layout is about to overwrite anyway, and
  * the slots past a lane's count are never read. */
-static inline arena_offset make_offset(const i64 n_float_buffers,
-                                       const i64 n_int_buffers) {
+static inline arena_offset make_offset(const i64 n_fbuf, const i64 n_ibuf) {
   arena_offset off;
-  off.n_float_buffers = n_float_buffers;
-  off.n_int_buffers = n_int_buffers;
+  off.n_fbuf = n_fbuf;
+  off.n_ibuf = n_ibuf;
   return off;
 }
 
