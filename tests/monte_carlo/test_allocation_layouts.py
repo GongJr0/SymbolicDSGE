@@ -11,11 +11,13 @@ import pytest
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE._ckernels.monte_carlo._offsets import ArenaOffset
 from SymbolicDSGE.monte_carlo.allocation import (
     ArenaSize,
     _compile_field_layout,
     _FieldSpec,
     _resolve_input_asize,
+    is_absent,
     resolve_output_specs,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep
@@ -271,9 +273,10 @@ def test_a_postproc_step_has_no_per_replication_layout() -> None:
 def test_a_negative_field_dimension_is_rejected() -> None:
     """No producer emits one; the check guards the shared layout compiler."""
     fields = {"payload": _FieldSpec(shape=(4, -1), dtype=np.float64)}
+    offsets = ArenaOffset(foffset=(0,), fwidth=(0,), ioffset=(), iwidth=())
 
     with pytest.raises(ValueError, match="has a negative dimension"):
-        _compile_field_layout(fields)
+        _compile_field_layout(fields, offsets)
 
 
 def test_a_postproc_step_has_no_input_arena() -> None:
@@ -312,9 +315,10 @@ def test_a_regression_lays_out_one_coefficient_per_regressor() -> None:
 
 
 def test_a_non_ols_regression_reports_no_standard_errors() -> None:
+    """The field keeps its name and its place, at the width the layout gave it."""
     plans = _plan(_with_datagen(_regression(kind="ridge", intercept=True)))
 
-    assert "se" not in plans["fit"].out_fields
+    assert is_absent(plans["fit"].out_fields["se"])
 
 
 def test_a_regression_needs_both_a_response_and_a_design() -> None:

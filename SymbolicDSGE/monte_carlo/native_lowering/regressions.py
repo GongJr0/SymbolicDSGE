@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
     DEFAULT_INTERCEPT,
+    DEFAULT_MAX_ITER,
     NativeStep,
     elastic_net_gs_step,
     elastic_net_step,
@@ -34,7 +36,14 @@ def lower_regression_step(
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile design and response transfers for one native regression."""
     n, p, intercept, _ = _resolve_regression_shape(step, source_indices, steps, plan)
-    x_columns = p - int(intercept)
+    offsets = _offsets.regression_offsets(
+        str(step.kwargs.get("kind", DEFAULT_REGRESSION_KIND)),
+        n,
+        p,
+        intercept,
+        int(step.kwargs.get("num", 0)),
+        int(step.kwargs.get("max_iter", DEFAULT_MAX_ITER)),
+    ).foffset
     bindings: list[FloatInputBinding] = []
     if intercept:
         bindings.append(_fill_binding(n, 0, p, 1.0))
@@ -53,7 +62,7 @@ def lower_regression_step(
                 steps,
                 plan,
                 step.source_args[0],
-                target_offset=n * p,
+                target_offset=offsets[1],
                 target_row_stride=1,
             ),
         )

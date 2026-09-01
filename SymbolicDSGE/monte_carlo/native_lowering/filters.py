@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Sequence, cast
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.interface import KalmanInterface
 
+from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
     filter_extended_step,
@@ -76,11 +77,16 @@ def lower_filter_step(
     if len(canonical_names) != source_n_obs and requested_names is None:
         raise ValueError("Filter observations do not match the DATAGEN output.")
     source_columns = _filter_source_columns(source_names, canonical_names)
+    n_state = reference.compiled.n_state
+    n_ctrl = reference.compiled.n_ctrl
     n_var = reference.compiled.n_var
     n_exog = reference.compiled.n_exog
     n_par = reference.compiled.n_par
     n_obs = len(canonical_names)
     before_y: tuple[NDF, ...]
+    input_offsets = _offsets.filter_offsets(
+        mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
+    ).foffset
 
     if mode == "linear":
         C, d = interface._get_C_d()
@@ -94,7 +100,7 @@ def lower_filter_step(
             _flat_f64(interface.R),
         )
         binding = _filter_y_binding(
-            source_layout, T, source_columns, sum(v.size for v in before_y), n_obs
+            source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
             filter_linear_step(
@@ -107,7 +113,7 @@ def lower_filter_step(
                     step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
                 ),
             ),
-            _filter_bindings(before_y, binding, (x0, interface.P0)),
+            _filter_bindings(before_y, binding, (x0, interface.P0), input_offsets),
         )
     if mode == "extended":
         x0 = _filter_x0(step.kwargs.get("x0"), n_var)
@@ -120,7 +126,7 @@ def lower_filter_step(
             _flat_f64(interface.R),
         )
         binding = _filter_y_binding(
-            source_layout, T, source_columns, sum(v.size for v in before_y), n_obs
+            source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
             filter_extended_step(
@@ -136,7 +142,7 @@ def lower_filter_step(
                     step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
                 ),
             ),
-            _filter_bindings(before_y, binding, (x0, interface.P0)),
+            _filter_bindings(before_y, binding, (x0, interface.P0), input_offsets),
         )
 
     else:  # mode == "unscented"
@@ -169,7 +175,7 @@ def lower_filter_step(
             _flat_f64(interface.R),
         )
         binding = _filter_y_binding(
-            source_layout, T, source_columns, sum(v.size for v in before_y), n_obs
+            source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
             filter_unscented_step(
@@ -190,7 +196,7 @@ def lower_filter_step(
                     "jitter",
                 ),
             ),
-            _filter_bindings(before_y, binding, (z0, interface.P0)),
+            _filter_bindings(before_y, binding, (z0, interface.P0), input_offsets),
         )
 
 
@@ -274,21 +280,24 @@ def _filter_bindings(
     before_y: tuple[NDF, ...],
     y_binding: FloatInputBinding,
     after_y: tuple[NDF, ...],
+    offsets: Sequence[int],
 ) -> tuple[FloatInputBinding, ...]:
-    bindings: list[FloatInputBinding] = []
-    offset = 0
-    for values in before_y:
-        flattened = _flat_f64(values)
-        if flattened.size:
-            bindings.append(_static_binding(flattened, offset))
-        offset += flattened.size
-    if y_binding.target_offset != offset:
-        raise ValueError("Native filter observation offset does not match its layout.")
+    """Bind the staged constants around the observations they are packed with.
+
+    The observation block is one buffer among them, so it takes its place in the
+    sequence rather than being measured out from what precedes it.
+    """
+    bindings = [
+        _static_binding(flattened, offset)
+        for flattened, offset in zip(map(_flat_f64, before_y), offsets)
+        if flattened.size
+    ]
     bindings.append(y_binding)
-    offset += y_binding.n_rows * y_binding.target_row_stride
-    for values in after_y:
-        flattened = _flat_f64(values)
-        if flattened.size:
-            bindings.append(_static_binding(flattened, offset))
-        offset += flattened.size
+    bindings.extend(
+        _static_binding(flattened, offset)
+        for flattened, offset in zip(
+            map(_flat_f64, after_y), offsets[len(before_y) + 1 :]
+        )
+        if flattened.size
+    )
     return tuple(bindings)
