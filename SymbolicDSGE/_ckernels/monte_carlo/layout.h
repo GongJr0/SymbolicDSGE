@@ -4,15 +4,6 @@
 #include "../_common/sdsge_common.h"
 #include "../kalman/kalman.h"
 
-/* One step kind's arena description: where each buffer starts in its lane, and
- * how much of the lane it all takes. The totals ride alongside rather than
- * being summed out of the offsets, so an allocation reads a number instead of
- * walking for one. */
-typedef struct {
-  arena_size asize;
-  arena_offset aoffset;
-} sdsge_mc_layout;
-
 /* from core_steps.h */
 /* Source passthrough. ``input`` is the bound (n, p) source span in the input
  * arena, copied straight to the output so one field of a producer can be
