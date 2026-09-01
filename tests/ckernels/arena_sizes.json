@@ -1,0 +1,1634 @@
+{
+ "diag:breusch_godfrey:4:1:0": [
+  28,
+  0
+ ],
+ "diag:breusch_godfrey:4:1:5": [
+  148,
+  0
+ ],
+ "diag:breusch_godfrey:4:4:0": [
+  100,
+  0
+ ],
+ "diag:breusch_godfrey:4:4:5": [
+  280,
+  0
+ ],
+ "diag:breusch_godfrey:60:1:0": [
+  252,
+  0
+ ],
+ "diag:breusch_godfrey:60:1:5": [
+  652,
+  0
+ ],
+ "diag:breusch_godfrey:60:4:0": [
+  660,
+  0
+ ],
+ "diag:breusch_godfrey:60:4:5": [
+  1120,
+  0
+ ],
+ "diag:breusch_pagan:4:1:0": [
+  32,
+  0
+ ],
+ "diag:breusch_pagan:4:1:5": [
+  32,
+  0
+ ],
+ "diag:breusch_pagan:4:4:0": [
+  104,
+  0
+ ],
+ "diag:breusch_pagan:4:4:5": [
+  104,
+  0
+ ],
+ "diag:breusch_pagan:60:1:0": [
+  312,
+  0
+ ],
+ "diag:breusch_pagan:60:1:5": [
+  312,
+  0
+ ],
+ "diag:breusch_pagan:60:4:0": [
+  720,
+  0
+ ],
+ "diag:breusch_pagan:60:4:5": [
+  720,
+  0
+ ],
+ "diag:chow:4:1:0": [
+  12,
+  0
+ ],
+ "diag:chow:4:1:5": [
+  12,
+  0
+ ],
+ "diag:chow:4:4:0": [
+  60,
+  0
+ ],
+ "diag:chow:4:4:5": [
+  60,
+  0
+ ],
+ "diag:chow:60:1:0": [
+  124,
+  0
+ ],
+ "diag:chow:60:1:5": [
+  124,
+  0
+ ],
+ "diag:chow:60:4:0": [
+  340,
+  0
+ ],
+ "diag:chow:60:4:5": [
+  340,
+  0
+ ],
+ "diag:cusum:4:1:0": [
+  24,
+  0
+ ],
+ "diag:cusum:4:1:5": [
+  24,
+  0
+ ],
+ "diag:cusum:4:4:0": [
+  120,
+  0
+ ],
+ "diag:cusum:4:4:5": [
+  120,
+  0
+ ],
+ "diag:cusum:60:1:0": [
+  248,
+  0
+ ],
+ "diag:cusum:60:1:5": [
+  248,
+  0
+ ],
+ "diag:cusum:60:4:0": [
+  512,
+  0
+ ],
+ "diag:cusum:60:4:5": [
+  512,
+  0
+ ],
+ "diag:cusumsq:4:1:0": [
+  17,
+  0
+ ],
+ "diag:cusumsq:4:1:5": [
+  17,
+  0
+ ],
+ "diag:cusumsq:4:4:0": [
+  80,
+  0
+ ],
+ "diag:cusumsq:4:4:5": [
+  80,
+  0
+ ],
+ "diag:cusumsq:60:1:0": [
+  185,
+  0
+ ],
+ "diag:cusumsq:60:1:5": [
+  185,
+  0
+ ],
+ "diag:cusumsq:60:4:0": [
+  416,
+  0
+ ],
+ "diag:cusumsq:60:4:5": [
+  416,
+  0
+ ],
+ "diag:jarque_bera:4:1:0": [
+  4,
+  0
+ ],
+ "diag:jarque_bera:4:1:5": [
+  4,
+  0
+ ],
+ "diag:jarque_bera:4:4:0": [
+  4,
+  0
+ ],
+ "diag:jarque_bera:4:4:5": [
+  4,
+  0
+ ],
+ "diag:jarque_bera:60:1:0": [
+  60,
+  0
+ ],
+ "diag:jarque_bera:60:1:5": [
+  60,
+  0
+ ],
+ "diag:jarque_bera:60:4:0": [
+  60,
+  0
+ ],
+ "diag:jarque_bera:60:4:5": [
+  60,
+  0
+ ],
+ "diag:ljung_box:4:1:0": [
+  9,
+  0
+ ],
+ "diag:ljung_box:4:1:5": [
+  12,
+  0
+ ],
+ "diag:ljung_box:4:4:0": [
+  9,
+  0
+ ],
+ "diag:ljung_box:4:4:5": [
+  12,
+  0
+ ],
+ "diag:ljung_box:60:1:0": [
+  121,
+  0
+ ],
+ "diag:ljung_box:60:1:5": [
+  126,
+  0
+ ],
+ "diag:ljung_box:60:4:0": [
+  121,
+  0
+ ],
+ "diag:ljung_box:60:4:5": [
+  126,
+  0
+ ],
+ "diag:wald_covariance:4:1:0": [
+  20,
+  1
+ ],
+ "diag:wald_covariance:4:1:5": [
+  20,
+  1
+ ],
+ "diag:wald_covariance:4:4:0": [
+  422,
+  10
+ ],
+ "diag:wald_covariance:4:4:5": [
+  422,
+  10
+ ],
+ "diag:wald_covariance:60:1:0": [
+  188,
+  1
+ ],
+ "diag:wald_covariance:60:1:5": [
+  188,
+  1
+ ],
+ "diag:wald_covariance:60:4:0": [
+  1430,
+  10
+ ],
+ "diag:wald_covariance:60:4:5": [
+  1430,
+  10
+ ],
+ "diag:wald_mean:4:1:0": [
+  15,
+  1
+ ],
+ "diag:wald_mean:4:1:5": [
+  15,
+  1
+ ],
+ "diag:wald_mean:4:4:0": [
+  96,
+  4
+ ],
+ "diag:wald_mean:4:4:5": [
+  96,
+  4
+ ],
+ "diag:wald_mean:60:1:0": [
+  127,
+  1
+ ],
+ "diag:wald_mean:60:1:5": [
+  127,
+  1
+ ],
+ "diag:wald_mean:60:4:0": [
+  544,
+  4
+ ],
+ "diag:wald_mean:60:4:5": [
+  544,
+  4
+ ],
+ "diag:wald_second_moment:4:1:0": [
+  16,
+  1
+ ],
+ "diag:wald_second_moment:4:1:5": [
+  16,
+  1
+ ],
+ "diag:wald_second_moment:4:4:0": [
+  406,
+  10
+ ],
+ "diag:wald_second_moment:4:4:5": [
+  406,
+  10
+ ],
+ "diag:wald_second_moment:60:1:0": [
+  128,
+  1
+ ],
+ "diag:wald_second_moment:60:1:5": [
+  128,
+  1
+ ],
+ "diag:wald_second_moment:60:4:0": [
+  1190,
+  10
+ ],
+ "diag:wald_second_moment:60:4:5": [
+  1190,
+  10
+ ],
+ "filter:extended:1:0:1:1:1": [
+  34,
+  0
+ ],
+ "filter:extended:1:0:1:1:200": [
+  233,
+  0
+ ],
+ "filter:extended:1:0:1:5:1": [
+  162,
+  0
+ ],
+ "filter:extended:1:0:1:5:200": [
+  1157,
+  0
+ ],
+ "filter:extended:1:0:3:1:1": [
+  50,
+  0
+ ],
+ "filter:extended:1:0:3:1:200": [
+  249,
+  0
+ ],
+ "filter:extended:1:0:3:5:1": [
+  194,
+  0
+ ],
+ "filter:extended:1:0:3:5:200": [
+  1189,
+  0
+ ],
+ "filter:extended:1:4:1:1:1": [
+  266,
+  0
+ ],
+ "filter:extended:1:4:1:1:200": [
+  465,
+  0
+ ],
+ "filter:extended:1:4:1:5:1": [
+  474,
+  0
+ ],
+ "filter:extended:1:4:1:5:200": [
+  1469,
+  0
+ ],
+ "filter:extended:1:4:3:1:1": [
+  298,
+  0
+ ],
+ "filter:extended:1:4:3:1:200": [
+  497,
+  0
+ ],
+ "filter:extended:1:4:3:5:1": [
+  522,
+  0
+ ],
+ "filter:extended:1:4:3:5:200": [
+  1517,
+  0
+ ],
+ "filter:extended:6:0:1:1:1": [
+  364,
+  0
+ ],
+ "filter:extended:6:0:1:1:200": [
+  563,
+  0
+ ],
+ "filter:extended:6:0:1:5:1": [
+  592,
+  0
+ ],
+ "filter:extended:6:0:1:5:200": [
+  1587,
+  0
+ ],
+ "filter:extended:6:0:3:1:1": [
+  400,
+  0
+ ],
+ "filter:extended:6:0:3:1:200": [
+  599,
+  0
+ ],
+ "filter:extended:6:0:3:5:1": [
+  644,
+  0
+ ],
+ "filter:extended:6:0:3:5:200": [
+  1639,
+  0
+ ],
+ "filter:extended:6:4:1:1:1": [
+  916,
+  0
+ ],
+ "filter:extended:6:4:1:1:200": [
+  1115,
+  0
+ ],
+ "filter:extended:6:4:1:5:1": [
+  1224,
+  0
+ ],
+ "filter:extended:6:4:1:5:200": [
+  2219,
+  0
+ ],
+ "filter:extended:6:4:3:1:1": [
+  968,
+  0
+ ],
+ "filter:extended:6:4:3:1:200": [
+  1167,
+  0
+ ],
+ "filter:extended:6:4:3:5:1": [
+  1292,
+  0
+ ],
+ "filter:extended:6:4:3:5:200": [
+  2287,
+  0
+ ],
+ "filter:linear:1:0:1:1:1": [
+  33,
+  0
+ ],
+ "filter:linear:1:0:1:1:200": [
+  232,
+  0
+ ],
+ "filter:linear:1:0:1:5:1": [
+  169,
+  0
+ ],
+ "filter:linear:1:0:1:5:200": [
+  1164,
+  0
+ ],
+ "filter:linear:1:0:3:1:1": [
+  49,
+  0
+ ],
+ "filter:linear:1:0:3:1:200": [
+  248,
+  0
+ ],
+ "filter:linear:1:0:3:5:1": [
+  201,
+  0
+ ],
+ "filter:linear:1:0:3:5:200": [
+  1196,
+  0
+ ],
+ "filter:linear:1:4:1:1:1": [
+  265,
+  0
+ ],
+ "filter:linear:1:4:1:1:200": [
+  464,
+  0
+ ],
+ "filter:linear:1:4:1:5:1": [
+  481,
+  0
+ ],
+ "filter:linear:1:4:1:5:200": [
+  1476,
+  0
+ ],
+ "filter:linear:1:4:3:1:1": [
+  297,
+  0
+ ],
+ "filter:linear:1:4:3:1:200": [
+  496,
+  0
+ ],
+ "filter:linear:1:4:3:5:1": [
+  529,
+  0
+ ],
+ "filter:linear:1:4:3:5:200": [
+  1524,
+  0
+ ],
+ "filter:linear:6:0:1:1:1": [
+  363,
+  0
+ ],
+ "filter:linear:6:0:1:1:200": [
+  562,
+  0
+ ],
+ "filter:linear:6:0:1:5:1": [
+  599,
+  0
+ ],
+ "filter:linear:6:0:1:5:200": [
+  1594,
+  0
+ ],
+ "filter:linear:6:0:3:1:1": [
+  399,
+  0
+ ],
+ "filter:linear:6:0:3:1:200": [
+  598,
+  0
+ ],
+ "filter:linear:6:0:3:5:1": [
+  651,
+  0
+ ],
+ "filter:linear:6:0:3:5:200": [
+  1646,
+  0
+ ],
+ "filter:linear:6:4:1:1:1": [
+  915,
+  0
+ ],
+ "filter:linear:6:4:1:1:200": [
+  1114,
+  0
+ ],
+ "filter:linear:6:4:1:5:1": [
+  1231,
+  0
+ ],
+ "filter:linear:6:4:1:5:200": [
+  2226,
+  0
+ ],
+ "filter:linear:6:4:3:1:1": [
+  967,
+  0
+ ],
+ "filter:linear:6:4:3:1:200": [
+  1166,
+  0
+ ],
+ "filter:linear:6:4:3:5:1": [
+  1299,
+  0
+ ],
+ "filter:linear:6:4:3:5:200": [
+  2294,
+  0
+ ],
+ "filter:unscented:1:0:1:1:1": [
+  122,
+  0
+ ],
+ "filter:unscented:1:0:1:1:200": [
+  321,
+  0
+ ],
+ "filter:unscented:1:0:1:5:1": [
+  274,
+  0
+ ],
+ "filter:unscented:1:0:1:5:200": [
+  1269,
+  0
+ ],
+ "filter:unscented:1:0:3:1:1": [
+  228,
+  0
+ ],
+ "filter:unscented:1:0:3:1:200": [
+  427,
+  0
+ ],
+ "filter:unscented:1:0:3:5:1": [
+  396,
+  0
+ ],
+ "filter:unscented:1:0:3:5:200": [
+  1391,
+  0
+ ],
+ "filter:unscented:1:4:1:1:1": [
+  194,
+  0
+ ],
+ "filter:unscented:1:4:1:1:200": [
+  393,
+  0
+ ],
+ "filter:unscented:1:4:1:5:1": [
+  378,
+  0
+ ],
+ "filter:unscented:1:4:1:5:200": [
+  1373,
+  0
+ ],
+ "filter:unscented:1:4:3:1:1": [
+  364,
+  0
+ ],
+ "filter:unscented:1:4:3:1:200": [
+  563,
+  0
+ ],
+ "filter:unscented:1:4:3:5:1": [
+  564,
+  0
+ ],
+ "filter:unscented:1:4:3:5:200": [
+  1559,
+  0
+ ],
+ "filter:unscented:6:0:1:1:1": [
+  2232,
+  0
+ ],
+ "filter:unscented:6:0:1:1:200": [
+  2431,
+  0
+ ],
+ "filter:unscented:6:0:1:5:1": [
+  2584,
+  0
+ ],
+ "filter:unscented:6:0:1:5:200": [
+  3579,
+  0
+ ],
+ "filter:unscented:6:0:3:1:1": [
+  2648,
+  0
+ ],
+ "filter:unscented:6:0:3:1:200": [
+  2847,
+  0
+ ],
+ "filter:unscented:6:0:3:5:1": [
+  3016,
+  0
+ ],
+ "filter:unscented:6:0:3:5:200": [
+  4011,
+  0
+ ],
+ "filter:unscented:6:4:1:1:1": [
+  2564,
+  0
+ ],
+ "filter:unscented:6:4:1:1:200": [
+  2763,
+  0
+ ],
+ "filter:unscented:6:4:1:5:1": [
+  2948,
+  0
+ ],
+ "filter:unscented:6:4:1:5:200": [
+  3943,
+  0
+ ],
+ "filter:unscented:6:4:3:1:1": [
+  3084,
+  0
+ ],
+ "filter:unscented:6:4:3:1:200": [
+  3283,
+  0
+ ],
+ "filter:unscented:6:4:3:5:1": [
+  3484,
+  0
+ ],
+ "filter:unscented:6:4:3:5:200": [
+  4479,
+  0
+ ],
+ "regression:elastic_net:4:1:0": [
+  12,
+  0
+ ],
+ "regression:elastic_net:4:1:1": [
+  12,
+  0
+ ],
+ "regression:elastic_net:4:5:0": [
+  84,
+  0
+ ],
+ "regression:elastic_net:4:5:1": [
+  84,
+  0
+ ],
+ "regression:elastic_net:50:1:0": [
+  104,
+  0
+ ],
+ "regression:elastic_net:50:1:1": [
+  104,
+  0
+ ],
+ "regression:elastic_net:50:5:0": [
+  360,
+  0
+ ],
+ "regression:elastic_net:50:5:1": [
+  360,
+  0
+ ],
+ "regression:elastic_net_gs:4:1:0": [
+  21,
+  4
+ ],
+ "regression:elastic_net_gs:4:1:1": [
+  13,
+  4
+ ],
+ "regression:elastic_net_gs:4:5:0": [
+  189,
+  4
+ ],
+ "regression:elastic_net_gs:4:5:1": [
+  157,
+  4
+ ],
+ "regression:elastic_net_gs:50:1:0": [
+  113,
+  4
+ ],
+ "regression:elastic_net_gs:50:1:1": [
+  105,
+  4
+ ],
+ "regression:elastic_net_gs:50:5:0": [
+  465,
+  4
+ ],
+ "regression:elastic_net_gs:50:5:1": [
+  433,
+  4
+ ],
+ "regression:lasso:4:1:0": [
+  12,
+  0
+ ],
+ "regression:lasso:4:1:1": [
+  12,
+  0
+ ],
+ "regression:lasso:4:5:0": [
+  84,
+  0
+ ],
+ "regression:lasso:4:5:1": [
+  84,
+  0
+ ],
+ "regression:lasso:50:1:0": [
+  104,
+  0
+ ],
+ "regression:lasso:50:1:1": [
+  104,
+  0
+ ],
+ "regression:lasso:50:5:0": [
+  360,
+  0
+ ],
+ "regression:lasso:50:5:1": [
+  360,
+  0
+ ],
+ "regression:lasso_gs:4:1:0": [
+  226,
+  0
+ ],
+ "regression:lasso_gs:4:1:1": [
+  112,
+  0
+ ],
+ "regression:lasso_gs:4:5:0": [
+  770,
+  0
+ ],
+ "regression:lasso_gs:4:5:1": [
+  648,
+  0
+ ],
+ "regression:lasso_gs:50:1:0": [
+  318,
+  0
+ ],
+ "regression:lasso_gs:50:1:1": [
+  204,
+  0
+ ],
+ "regression:lasso_gs:50:5:0": [
+  1046,
+  0
+ ],
+ "regression:lasso_gs:50:5:1": [
+  924,
+  0
+ ],
+ "regression:ols:4:1:0": [
+  12,
+  0
+ ],
+ "regression:ols:4:1:1": [
+  12,
+  0
+ ],
+ "regression:ols:4:5:0": [
+  84,
+  0
+ ],
+ "regression:ols:4:5:1": [
+  84,
+  0
+ ],
+ "regression:ols:50:1:0": [
+  104,
+  0
+ ],
+ "regression:ols:50:1:1": [
+  104,
+  0
+ ],
+ "regression:ols:50:5:0": [
+  360,
+  0
+ ],
+ "regression:ols:50:5:1": [
+  360,
+  0
+ ],
+ "regression:ridge:4:1:0": [
+  13,
+  0
+ ],
+ "regression:ridge:4:1:1": [
+  13,
+  0
+ ],
+ "regression:ridge:4:5:0": [
+  109,
+  0
+ ],
+ "regression:ridge:4:5:1": [
+  109,
+  0
+ ],
+ "regression:ridge:50:1:0": [
+  105,
+  0
+ ],
+ "regression:ridge:50:1:1": [
+  105,
+  0
+ ],
+ "regression:ridge:50:5:0": [
+  385,
+  0
+ ],
+ "regression:ridge:50:5:1": [
+  385,
+  0
+ ],
+ "regression:ridge_gs:4:1:0": [
+  14,
+  0
+ ],
+ "regression:ridge_gs:4:1:1": [
+  14,
+  0
+ ],
+ "regression:ridge_gs:4:5:0": [
+  114,
+  0
+ ],
+ "regression:ridge_gs:4:5:1": [
+  114,
+  0
+ ],
+ "regression:ridge_gs:50:1:0": [
+  106,
+  0
+ ],
+ "regression:ridge_gs:50:1:1": [
+  106,
+  0
+ ],
+ "regression:ridge_gs:50:5:0": [
+  390,
+  0
+ ],
+ "regression:ridge_gs:50:5:1": [
+  390,
+  0
+ ],
+ "sim:1:1:20:0:1:0": [
+  480,
+  0
+ ],
+ "sim:1:1:20:0:1:7": [
+  487,
+  0
+ ],
+ "sim:1:1:20:0:200:0": [
+  480,
+  0
+ ],
+ "sim:1:1:20:0:200:7": [
+  487,
+  0
+ ],
+ "sim:1:1:20:3:1:0": [
+  543,
+  0
+ ],
+ "sim:1:1:20:3:1:7": [
+  550,
+  0
+ ],
+ "sim:1:1:20:3:200:0": [
+  1140,
+  0
+ ],
+ "sim:1:1:20:3:200:7": [
+  1147,
+  0
+ ],
+ "sim:1:1:2:0:1:0": [
+  12,
+  0
+ ],
+ "sim:1:1:2:0:1:7": [
+  19,
+  0
+ ],
+ "sim:1:1:2:0:200:0": [
+  12,
+  0
+ ],
+ "sim:1:1:2:0:200:7": [
+  19,
+  0
+ ],
+ "sim:1:1:2:3:1:0": [
+  21,
+  0
+ ],
+ "sim:1:1:2:3:1:7": [
+  28,
+  0
+ ],
+ "sim:1:1:2:3:200:0": [
+  618,
+  0
+ ],
+ "sim:1:1:2:3:200:7": [
+  625,
+  0
+ ],
+ "sim:1:6:20:0:1:0": [
+  480,
+  0
+ ],
+ "sim:1:6:20:0:1:7": [
+  487,
+  0
+ ],
+ "sim:1:6:20:0:200:0": [
+  480,
+  0
+ ],
+ "sim:1:6:20:0:200:7": [
+  487,
+  0
+ ],
+ "sim:1:6:20:3:1:0": [
+  543,
+  0
+ ],
+ "sim:1:6:20:3:1:7": [
+  550,
+  0
+ ],
+ "sim:1:6:20:3:200:0": [
+  1140,
+  0
+ ],
+ "sim:1:6:20:3:200:7": [
+  1147,
+  0
+ ],
+ "sim:2:1:20:0:1:0": [
+  86,
+  0
+ ],
+ "sim:2:1:20:0:1:7": [
+  93,
+  0
+ ],
+ "sim:2:1:20:0:200:0": [
+  86,
+  0
+ ],
+ "sim:2:1:20:0:200:7": [
+  93,
+  0
+ ],
+ "sim:2:1:20:3:1:0": [
+  401,
+  0
+ ],
+ "sim:2:1:20:3:1:7": [
+  408,
+  0
+ ],
+ "sim:2:1:20:3:200:0": [
+  998,
+  0
+ ],
+ "sim:2:1:20:3:200:7": [
+  1005,
+  0
+ ],
+ "sim:2:1:2:0:1:0": [
+  14,
+  0
+ ],
+ "sim:2:1:2:0:1:7": [
+  21,
+  0
+ ],
+ "sim:2:1:2:0:200:0": [
+  14,
+  0
+ ],
+ "sim:2:1:2:0:200:7": [
+  21,
+  0
+ ],
+ "sim:2:1:2:3:1:0": [
+  59,
+  0
+ ],
+ "sim:2:1:2:3:1:7": [
+  66,
+  0
+ ],
+ "sim:2:1:2:3:200:0": [
+  656,
+  0
+ ],
+ "sim:2:1:2:3:200:7": [
+  663,
+  0
+ ],
+ "sim:2:6:20:0:1:0": [
+  946,
+  0
+ ],
+ "sim:2:6:20:0:1:7": [
+  953,
+  0
+ ],
+ "sim:2:6:20:0:200:0": [
+  946,
+  0
+ ],
+ "sim:2:6:20:0:200:7": [
+  953,
+  0
+ ],
+ "sim:2:6:20:3:1:0": [
+  1576,
+  0
+ ],
+ "sim:2:6:20:3:1:7": [
+  1583,
+  0
+ ],
+ "sim:2:6:20:3:200:0": [
+  2173,
+  0
+ ],
+ "sim:2:6:20:3:200:7": [
+  2180,
+  0
+ ],
+ "simout:1:20:0:1:0": [
+  20,
+  0
+ ],
+ "simout:1:20:0:1:7": [
+  27,
+  0
+ ],
+ "simout:1:20:0:200:0": [
+  4000,
+  0
+ ],
+ "simout:1:20:0:200:7": [
+  5400,
+  0
+ ],
+ "simout:1:20:3:1:0": [
+  23,
+  0
+ ],
+ "simout:1:20:3:1:7": [
+  30,
+  0
+ ],
+ "simout:1:20:3:200:0": [
+  4600,
+  0
+ ],
+ "simout:1:20:3:200:7": [
+  6000,
+  0
+ ],
+ "simout:1:2:0:1:0": [
+  2,
+  0
+ ],
+ "simout:1:2:0:1:7": [
+  9,
+  0
+ ],
+ "simout:1:2:0:200:0": [
+  400,
+  0
+ ],
+ "simout:1:2:0:200:7": [
+  1800,
+  0
+ ],
+ "simout:1:2:3:1:0": [
+  5,
+  0
+ ],
+ "simout:1:2:3:1:7": [
+  12,
+  0
+ ],
+ "simout:1:2:3:200:0": [
+  1000,
+  0
+ ],
+ "simout:1:2:3:200:7": [
+  2400,
+  0
+ ],
+ "simout:2:20:0:1:0": [
+  20,
+  0
+ ],
+ "simout:2:20:0:1:7": [
+  27,
+  0
+ ],
+ "simout:2:20:0:200:0": [
+  4000,
+  0
+ ],
+ "simout:2:20:0:200:7": [
+  5400,
+  0
+ ],
+ "simout:2:20:3:1:0": [
+  23,
+  0
+ ],
+ "simout:2:20:3:1:7": [
+  30,
+  0
+ ],
+ "simout:2:20:3:200:0": [
+  4600,
+  0
+ ],
+ "simout:2:20:3:200:7": [
+  6000,
+  0
+ ],
+ "simout:2:2:0:1:0": [
+  2,
+  0
+ ],
+ "simout:2:2:0:1:7": [
+  9,
+  0
+ ],
+ "simout:2:2:0:200:0": [
+  400,
+  0
+ ],
+ "simout:2:2:0:200:7": [
+  1800,
+  0
+ ],
+ "simout:2:2:3:1:0": [
+  5,
+  0
+ ],
+ "simout:2:2:3:1:7": [
+  12,
+  0
+ ],
+ "simout:2:2:3:200:0": [
+  1000,
+  0
+ ],
+ "simout:2:2:3:200:7": [
+  2400,
+  0
+ ],
+ "transform:diff:1:1:0": [
+  1,
+  0
+ ],
+ "transform:diff:1:1:2": [
+  3,
+  0
+ ],
+ "transform:diff:1:3:0": [
+  3,
+  0
+ ],
+ "transform:diff:1:3:2": [
+  9,
+  0
+ ],
+ "transform:diff:40:1:0": [
+  40,
+  0
+ ],
+ "transform:diff:40:1:2": [
+  42,
+  0
+ ],
+ "transform:diff:40:3:0": [
+  120,
+  0
+ ],
+ "transform:diff:40:3:2": [
+  126,
+  0
+ ],
+ "transform:diff:8:1:0": [
+  8,
+  0
+ ],
+ "transform:diff:8:1:2": [
+  10,
+  0
+ ],
+ "transform:diff:8:3:0": [
+  24,
+  0
+ ],
+ "transform:diff:8:3:2": [
+  30,
+  0
+ ],
+ "transform:log:1:1:0": [
+  1,
+  0
+ ],
+ "transform:log:1:1:2": [
+  1,
+  0
+ ],
+ "transform:log:1:3:0": [
+  3,
+  0
+ ],
+ "transform:log:1:3:2": [
+  3,
+  0
+ ],
+ "transform:log:40:1:0": [
+  40,
+  0
+ ],
+ "transform:log:40:1:2": [
+  40,
+  0
+ ],
+ "transform:log:40:3:0": [
+  120,
+  0
+ ],
+ "transform:log:40:3:2": [
+  120,
+  0
+ ],
+ "transform:log:8:1:0": [
+  8,
+  0
+ ],
+ "transform:log:8:1:2": [
+  8,
+  0
+ ],
+ "transform:log:8:3:0": [
+  24,
+  0
+ ],
+ "transform:log:8:3:2": [
+  24,
+  0
+ ],
+ "transform:log_diff:1:1:0": [
+  2,
+  0
+ ],
+ "transform:log_diff:1:1:2": [
+  2,
+  0
+ ],
+ "transform:log_diff:1:3:0": [
+  6,
+  0
+ ],
+ "transform:log_diff:1:3:2": [
+  6,
+  0
+ ],
+ "transform:log_diff:40:1:0": [
+  41,
+  0
+ ],
+ "transform:log_diff:40:1:2": [
+  41,
+  0
+ ],
+ "transform:log_diff:40:3:0": [
+  123,
+  0
+ ],
+ "transform:log_diff:40:3:2": [
+  123,
+  0
+ ],
+ "transform:log_diff:8:1:0": [
+  9,
+  0
+ ],
+ "transform:log_diff:8:1:2": [
+  9,
+  0
+ ],
+ "transform:log_diff:8:3:0": [
+  27,
+  0
+ ],
+ "transform:log_diff:8:3:2": [
+  27,
+  0
+ ],
+ "transform:passthrough:1:1:0": [
+  1,
+  0
+ ],
+ "transform:passthrough:1:1:2": [
+  1,
+  0
+ ],
+ "transform:passthrough:1:3:0": [
+  3,
+  0
+ ],
+ "transform:passthrough:1:3:2": [
+  3,
+  0
+ ],
+ "transform:passthrough:40:1:0": [
+  40,
+  0
+ ],
+ "transform:passthrough:40:1:2": [
+  40,
+  0
+ ],
+ "transform:passthrough:40:3:0": [
+  120,
+  0
+ ],
+ "transform:passthrough:40:3:2": [
+  120,
+  0
+ ],
+ "transform:passthrough:8:1:0": [
+  8,
+  0
+ ],
+ "transform:passthrough:8:1:2": [
+  8,
+  0
+ ],
+ "transform:passthrough:8:3:0": [
+  24,
+  0
+ ],
+ "transform:passthrough:8:3:2": [
+  24,
+  0
+ ],
+ "transform:rolling_mean:1:1:0": [
+  2,
+  0
+ ],
+ "transform:rolling_mean:1:1:2": [
+  2,
+  0
+ ],
+ "transform:rolling_mean:1:3:0": [
+  6,
+  0
+ ],
+ "transform:rolling_mean:1:3:2": [
+  6,
+  0
+ ],
+ "transform:rolling_mean:40:1:0": [
+  41,
+  0
+ ],
+ "transform:rolling_mean:40:1:2": [
+  41,
+  0
+ ],
+ "transform:rolling_mean:40:3:0": [
+  123,
+  0
+ ],
+ "transform:rolling_mean:40:3:2": [
+  123,
+  0
+ ],
+ "transform:rolling_mean:8:1:0": [
+  9,
+  0
+ ],
+ "transform:rolling_mean:8:1:2": [
+  9,
+  0
+ ],
+ "transform:rolling_mean:8:3:0": [
+  27,
+  0
+ ],
+ "transform:rolling_mean:8:3:2": [
+  27,
+  0
+ ],
+ "transform:rolling_std:1:1:0": [
+  3,
+  0
+ ],
+ "transform:rolling_std:1:1:2": [
+  3,
+  0
+ ],
+ "transform:rolling_std:1:3:0": [
+  9,
+  0
+ ],
+ "transform:rolling_std:1:3:2": [
+  9,
+  0
+ ],
+ "transform:rolling_std:40:1:0": [
+  42,
+  0
+ ],
+ "transform:rolling_std:40:1:2": [
+  42,
+  0
+ ],
+ "transform:rolling_std:40:3:0": [
+  126,
+  0
+ ],
+ "transform:rolling_std:40:3:2": [
+  126,
+  0
+ ],
+ "transform:rolling_std:8:1:0": [
+  10,
+  0
+ ],
+ "transform:rolling_std:8:1:2": [
+  10,
+  0
+ ],
+ "transform:rolling_std:8:3:0": [
+  30,
+  0
+ ],
+ "transform:rolling_std:8:3:2": [
+  30,
+  0
+ ],
+ "transform:rolling_var:1:1:0": [
+  3,
+  0
+ ],
+ "transform:rolling_var:1:1:2": [
+  3,
+  0
+ ],
+ "transform:rolling_var:1:3:0": [
+  9,
+  0
+ ],
+ "transform:rolling_var:1:3:2": [
+  9,
+  0
+ ],
+ "transform:rolling_var:40:1:0": [
+  42,
+  0
+ ],
+ "transform:rolling_var:40:1:2": [
+  42,
+  0
+ ],
+ "transform:rolling_var:40:3:0": [
+  126,
+  0
+ ],
+ "transform:rolling_var:40:3:2": [
+  126,
+  0
+ ],
+ "transform:rolling_var:8:1:0": [
+  10,
+  0
+ ],
+ "transform:rolling_var:8:1:2": [
+  10,
+  0
+ ],
+ "transform:rolling_var:8:3:0": [
+  30,
+  0
+ ],
+ "transform:rolling_var:8:3:2": [
+  30,
+  0
+ ],
+ "transform:standardize:1:1:0": [
+  3,
+  0
+ ],
+ "transform:standardize:1:1:2": [
+  3,
+  0
+ ],
+ "transform:standardize:1:3:0": [
+  9,
+  0
+ ],
+ "transform:standardize:1:3:2": [
+  9,
+  0
+ ],
+ "transform:standardize:40:1:0": [
+  42,
+  0
+ ],
+ "transform:standardize:40:1:2": [
+  42,
+  0
+ ],
+ "transform:standardize:40:3:0": [
+  126,
+  0
+ ],
+ "transform:standardize:40:3:2": [
+  126,
+  0
+ ],
+ "transform:standardize:8:1:0": [
+  10,
+  0
+ ],
+ "transform:standardize:8:1:2": [
+  10,
+  0
+ ],
+ "transform:standardize:8:3:0": [
+  30,
+  0
+ ],
+ "transform:standardize:8:3:2": [
+  30,
+  0
+ ]
+}

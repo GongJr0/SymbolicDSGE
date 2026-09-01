@@ -18,7 +18,7 @@ from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
-from .allocation import BufferPlan, resolve_output_specs
+from .allocation import BufferPlan, is_empty, resolve_output_specs
 from .defaults import DEFAULT_SIMULATION_OBSERVABLES, DEFAULT_SIMULATION_TARGET
 from .traces import (
     is_trace_ref,
@@ -652,16 +652,24 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
     layout = lowered.plan[step.name].out_fields
     arena = lowered.allocation.steps[step.name]
     n_retained = int(arena.retained_reps.size)
+
+    def present(field: str) -> bool:
+        entry = layout.get(field)
+        return entry is not None and not is_empty(entry)
+
     # Every field shares its leading axis, so any one of them dates the run.
-    T = next((entry.shape[0] for entry in layout.values() if entry.shape), 0)
+    T = next(
+        (entry.shape[0] for name, entry in layout.items() if present(name)),
+        0,
+    )
     var_names, shock_names, observable_names = _datagen_names(
         step, lowered.reference, lowered.dgp
     )
 
     def read(field: str, width: int) -> NDF:
-        entry = layout.get(field)
-        if entry is None:
+        if not present(field):
             return np.full((n_retained, T, width), np.nan)
+        entry = layout[field]
         if n_retained == 0:
             return np.empty((0, *entry.shape), dtype=np.float64)
         flat = arena.float_retained[:, entry.offset : entry.offset + entry.flat_count]
@@ -673,11 +681,7 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
         shock_names=shock_names,
         eps=read("shocks", len(shock_names)),
         observable_names=observable_names,
-        y=(
-            read("observables", len(observable_names))
-            if "observables" in layout
-            else None
-        ),
+        y=read("observables", len(observable_names)),
     )
 
 
@@ -736,7 +740,7 @@ def _compile_regressions(
             else np.empty((0,), dtype=np.float64)
         )
 
-        if spec.kind == "ols":
+        if not is_empty(layout["se"]):
             se_trace = (
                 arena.float_retained[
                     :, layout["se"].offset : layout["se"].offset + spec.k

@@ -127,6 +127,81 @@ cdef extern from "runner.h":
 
     int sdsge_mc_run(sdsge_mc_runner_ctx *runner) noexcept nogil
 
+cdef extern from "layout.h":
+    arena_size sdsge_raw_model_data_output_arena_size(
+            int64_t n_states,
+            int64_t n_shocks,
+            int64_t n_observables
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order1_arena_size(
+        int64_t n,
+        int64_t k,
+        int64_t T,
+        int64_t n_par,
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order2_arena_size(
+        int64_t n_state,
+        int64_t n_var,
+        int64_t n_exog,
+        int64_t T,
+        int64_t n_par,
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order1_output_arena_size(
+        int64_t n,
+        int64_t k,
+        int64_t T,
+        int64_t m,
+    ) noexcept nogil
+
+    arena_size sdsge_simulate_order2_output_arena_size(
+        int64_t n_var,
+        int64_t n_exog,
+        int64_t T,
+        int64_t m,
+    ) noexcept nogil
+
+    arena_size sdsge_filter_linear_output_arena_size(
+        int64_t n,
+        int64_t m,
+        int64_t k,
+        int64_t T,
+        int return_shocks,
+    ) noexcept nogil
+
+    arena_size sdsge_filter_extended_output_arena_size(
+        int64_t n,
+        int64_t m,
+        int64_t k,
+        int64_t T,
+        int return_shocks,
+    ) noexcept nogil
+
+    arena_size sdsge_filter_unscented_output_arena_size(
+        int64_t n_state,
+        int64_t n_ctrl,
+        int64_t n_obs,
+        int64_t T,
+    ) noexcept nogil
+
+    ctypedef enum sdsge_mc_regression_kind:
+        SDSGE_MC_REGRESSION_OLS
+        SDSGE_MC_REGRESSION_RIDGE
+        SDSGE_MC_REGRESSION_RIDGE_GS
+        SDSGE_MC_REGRESSION_LASSO
+        SDSGE_MC_REGRESSION_LASSO_GS
+        SDSGE_MC_REGRESSION_ELASTIC_NET
+        SDSGE_MC_REGRESSION_ELASTIC_NET_GS
+
+    arena_size sdsge_mc_regression_output_arena_size(
+        int64_t kind,
+        int64_t p,
+    ) noexcept nogil
+
+    arena_size sdsge_mc_diag_output_arena_size() noexcept nogil
+
 
 cdef extern from "core_steps.h":
     ctypedef void (*sdsge_measurement_fn)(
@@ -209,41 +284,6 @@ cdef extern from "core_steps.h":
         const sdsge_mc_shock_plan *shocks
         int64_t shock_scratch_offset
 
-    arena_size sdsge_raw_model_data_output_arena_size(
-            int64_t n_states,
-            int64_t n_shocks,
-            int64_t n_observables
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order1_arena_size(
-        int64_t n,
-        int64_t k,
-        int64_t T,
-        int64_t n_par,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order2_arena_size(
-        int64_t n_state,
-        int64_t n_var,
-        int64_t n_exog,
-        int64_t T,
-        int64_t n_par,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order1_output_arena_size(
-        int64_t n,
-        int64_t k,
-        int64_t T,
-        int64_t m,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order2_output_arena_size(
-        int64_t n_var,
-        int64_t n_exog,
-        int64_t T,
-        int64_t m,
-    ) noexcept nogil
-
     int sdsge_mc_simulate_order1_runner(
         int64_t rep_idx,
         double *float_in_work,
@@ -298,29 +338,6 @@ cdef extern from "core_steps.h":
         double kappa
         int symmetrize
         double jitter
-
-    arena_size sdsge_filter_linear_output_arena_size(
-        int64_t n,
-        int64_t m,
-        int64_t k,
-        int64_t T,
-        int return_shocks,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_extended_output_arena_size(
-        int64_t n,
-        int64_t m,
-        int64_t k,
-        int64_t T,
-        int return_shocks,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_unscented_output_arena_size(
-        int64_t n_state,
-        int64_t n_ctrl,
-        int64_t n_obs,
-        int64_t T,
-    ) noexcept nogil
 
     int sdsge_mc_filter_linear_runner(
         int64_t rep_idx,
@@ -1473,7 +1490,7 @@ def ols_step(str name, int64_t n, int64_t p, bint intercept=DEFAULT_INTERCEPT):
         sdsge_mc_ols_runner,
         None,
         0,
-        make_sizer(2 * p + 2, 1),
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_OLS, p),
     )
     return step
 
@@ -1507,7 +1524,13 @@ def ridge_step(
     step._ctx_store.ridge.p = p
     step._ctx_store.ridge.intercept = intercept
     step._ctx_store.ridge.alpha = alpha
-    step._bind(name, sdsge_mc_ridge_runner, None, 0, make_sizer(p + 2, 1))
+    step._bind(
+        name,
+        sdsge_mc_ridge_runner,
+        None,
+        0,
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_RIDGE, p),
+    )
     return step
 
 
@@ -1531,7 +1554,13 @@ def ridge_gs_step(
     step._ctx_store.ridge_gs.n_alpha = num
     step._ctx_store.ridge_gs.criterion = criterion
     step._ctx_store.ridge_gs.intercept = intercept
-    step._bind(name, sdsge_mc_ridge_gs_runner, alphas, 0, make_sizer(p + 2, 1))
+    step._bind(
+        name,
+        sdsge_mc_ridge_gs_runner,
+        alphas,
+        0,
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_RIDGE_GS, p),
+    )
     return step
 
 
@@ -1553,7 +1582,13 @@ def lasso_step(
     step._ctx_store.lasso.max_iter = max_iter
     step._ctx_store.lasso.tol = tol
     step._ctx_store.lasso.alpha = alpha
-    step._bind(name, sdsge_mc_lasso_runner, None, 0, make_sizer(p + 2, 1))
+    step._bind(
+        name,
+        sdsge_mc_lasso_runner,
+        None,
+        0,
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_LASSO, p),
+    )
     return step
 
 
@@ -1579,7 +1614,13 @@ def lasso_gs_step(
     step._ctx_store.lasso_gs.intercept = intercept
     step._ctx_store.lasso_gs.max_iter = max_iter
     step._ctx_store.lasso_gs.tol = tol
-    step._bind(name, sdsge_mc_lasso_gs_runner, alphas, 0, make_sizer(p + 2, 1))
+    step._bind(
+        name,
+        sdsge_mc_lasso_gs_runner,
+        alphas,
+        0,
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_LASSO_GS, p),
+    )
     return step
 
 
@@ -1604,7 +1645,13 @@ def elastic_net_step(
     step._ctx_store.elastic_net.tol = tol
     step._ctx_store.elastic_net.alpha = alpha
     step._ctx_store.elastic_net.l1_ratio = l1_ratio
-    step._bind(name, sdsge_mc_elastic_net_runner, None, 0, make_sizer(p + 2, 1))
+    step._bind(
+        name,
+        sdsge_mc_elastic_net_runner,
+        None,
+        0,
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_ELASTIC_NET, p),
+    )
     return step
 
 
@@ -1635,7 +1682,13 @@ def elastic_net_gs_step(
     step._ctx_store.elastic_net_gs.max_iter = max_iter
     step._ctx_store.elastic_net_gs.tol = tol
     step._ctx_store.elastic_net_gs.l1_ratio = l1_ratio
-    step._bind(name, sdsge_mc_elastic_net_gs_runner, alphas, 0, make_sizer(p + 2, 1))
+    step._bind(
+        name,
+        sdsge_mc_elastic_net_gs_runner,
+        alphas,
+        0,
+        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_ELASTIC_NET_GS, p),
+    )
     return step
 
 
@@ -1654,7 +1707,7 @@ def jarque_bera_step(str name, int64_t n):
         sdsge_mc_jarque_bera_test_runner,
         None,
         0,
-        make_sizer(1, 1),
+        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1682,7 +1735,13 @@ def wald_step(
     step._ctx_store.wald.kind = kind
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = q if kind == 0 else q * (q + 1) // 2
-    step._bind(name, sdsge_mc_wald_test_runner, target_array, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_wald_test_runner,
+        target_array,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 
@@ -1694,7 +1753,13 @@ def ljung_box_step(str name, int64_t n, int64_t lags=DEFAULT_LJUNG_BOX_LAGS):
     step._ctx_store.ljung_box.lags = lags
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = lags
-    step._bind(name, sdsge_mc_ljung_box_test_runner, None, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_ljung_box_test_runner,
+        None,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 
@@ -1707,7 +1772,13 @@ def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=DEFAULT_ROBUS
     step._ctx_store.breusch_pagan.robust = robust
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = k
-    step._bind(name, sdsge_mc_breusch_pagan_test_runner, None, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_breusch_pagan_test_runner,
+        None,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 
@@ -1722,7 +1793,13 @@ def breusch_godfrey_step(
     step._ctx_store.breusch_godfrey.lags = lags
     step._test_distribution = ReferenceDistribution.CHI2
     step._test_df = lags
-    step._bind(name, sdsge_mc_breusch_godfrey_test_runner, None, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_breusch_godfrey_test_runner,
+        None,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 
@@ -1734,7 +1811,13 @@ def cusum_step(str name, int64_t n, int64_t p):
     step._ctx_store.cusum.p = p
     step._test_distribution = ReferenceDistribution.CUSUM
     step._test_df = np.nan
-    step._bind(name, sdsge_mc_cusum_test_runner, None, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_cusum_test_runner,
+        None,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 
@@ -1746,7 +1829,13 @@ def cusumsq_step(str name, int64_t n, int64_t p):
     step._ctx_store.cusumsq.p = p
     step._test_distribution = ReferenceDistribution.CUSUMSQ
     step._test_df = max(0, n - p)
-    step._bind(name, sdsge_mc_cusumsq_test_runner, None, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_cusumsq_test_runner,
+        None,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 
@@ -1759,7 +1848,13 @@ def chow_step(str name, int64_t n, int64_t p, int64_t t_break=DEFAULT_T_BREAK):
     step._ctx_store.chow.t_break = t_break
     step._test_distribution = ReferenceDistribution.F
     step._test_df = (p, n - 2 * p)
-    step._bind(name, sdsge_mc_chow_test_runner, None, 0, make_sizer(1, 1))
+    step._bind(
+        name,
+        sdsge_mc_chow_test_runner,
+        None,
+        0,
+        sdsge_mc_diag_output_arena_size(),
+    )
     return step
 
 

@@ -25,7 +25,6 @@ from .utils import (
     FloatInputBinding,
     RegressionResultSpec,
     TestResultSpec,
-    _check_raw_model_data_layout,
     _selected_shape,
     _source_binding,
     _supplied,
@@ -136,7 +135,7 @@ def _lower_step(
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     match step.op_type:
         case OpType.DATAGEN:
-            return _lower_datagen_step(step, plan, reference, dgp, n_rep)
+            return _lower_datagen_step(step, reference, dgp, n_rep)
         case OpType.TRANSFORM:
             return _lower_transform_step(step, source_indices, steps, plan)
         case OpType.FILTER:
@@ -153,14 +152,11 @@ def _lower_step(
 
 def _lower_datagen_step(
     step: MCStep,
-    plan: BufferPlan,
     reference: SolvedModel,
     dgp: SolvedModel | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
-    step_plan = plan[step.name]
     if step.step_type == "raw_model_data":
-        _check_raw_model_data_layout(step, step_plan.out_fields)
         return (
             raw_model_data_step(
                 step.name,
@@ -171,7 +167,7 @@ def _lower_datagen_step(
             (),
         )
     if step.step_type == "simulation":
-        return lower_simulation_step(step, step_plan, reference, dgp, n_rep)
+        return lower_simulation_step(step, reference, dgp, n_rep)
     raise NotImplementedError(
         f"Native lowering is not implemented for {step.name!r} ({step.step_type!r})."
     )

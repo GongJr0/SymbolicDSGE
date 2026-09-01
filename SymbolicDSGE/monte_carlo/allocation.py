@@ -12,7 +12,7 @@ from typing import Any, Mapping, NamedTuple, Sequence, TypeAlias, cast
 
 import numpy as np
 
-from .._ckernels.monte_carlo import _arena
+from .._ckernels.monte_carlo import _arena, _offsets
 from .._ckernels.monte_carlo._runner import (
     DEFAULT_BREUSCH_GODFREY_LAGS,
     DEFAULT_INTERCEPT,
@@ -34,6 +34,9 @@ from .mc_constructs import MCStep, OpType, SourceArgs
 from .shock_native import native_shock_scratch
 
 Shape: TypeAlias = tuple[int, ...]
+
+_FLOAT = np.dtype(np.float64)
+_INT = np.dtype(np.int64)
 
 
 class ArenaSize(NamedTuple):
@@ -96,35 +99,37 @@ def resolve_output_specs(
         indices = source_indices[step_index]
         match step.op_type:
             case OpType.DATAGEN:
-                fields = _resolve_datagen_fields(step, reference, dgp)
+                fields, offsets = _resolve_datagen_fields(step, reference, dgp)
             case OpType.TRANSFORM:
                 if step.step_type == "payload":
-                    fields = _resolve_payload_fields(step)
+                    fields, offsets = _resolve_payload_fields(step)
                 else:
-                    fields = _resolve_transform_fields(
+                    fields, offsets = _resolve_transform_fields(
                         step,
                         indices[0],
                         plans,
                         steps,
                     )
             case OpType.FILTER:
-                fields = _resolve_filter_fields(
+                fields, offsets = _resolve_filter_fields(
                     step,
                     steps[0],
                     plans[steps[0].name],
                     reference,
                 )
             case OpType.REGRESSION:
-                fields = _resolve_regression_fields(step, indices, plans, steps)
+                fields, offsets = _resolve_regression_fields(
+                    step, indices, plans, steps
+                )
             case OpType.TEST:
-                fields = _resolve_test_fields()
+                fields, offsets = _resolve_test_fields()
             case _:
                 raise NotImplementedError(
                     f"Output-layout resolution is not implemented for step "
                     f"{step.name!r} ({step.step_type!r})."
                 )
 
-        output_size, out_fields = _compile_field_layout(fields)
+        output_size, out_fields = _compile_field_layout(fields, offsets)
         input_size = _resolve_input_asize(
             step,
             indices,
@@ -145,29 +150,82 @@ def resolve_output_specs(
 
 def _compile_field_layout(
     fields: Mapping[str, _FieldSpec],
+    offsets: _offsets.ArenaOffset,
 ) -> tuple[ArenaSize, dict[str, FieldLayout]]:
-    """Assign dtype-local offsets in the native float and integer lanes."""
-    n_float = 0
-    n_int = 0
+    """Place each field on the buffer the native layout opened for it.
+
+    Fields arrive one per buffer, in the order that layout describes them, and a
+    field's dtype selects which lane it is counted against.  Both the offset and
+    the width come from the layout, so the only thing stated here is which name
+    belongs to which buffer.
+    """
+    lanes: dict[np.dtype[Any], list[tuple[int, int]]] = {
+        _FLOAT: list(zip(offsets.foffset, offsets.fwidth)),
+        _INT: list(zip(offsets.ioffset, offsets.iwidth)),
+    }
+    taken: dict[np.dtype[Any], int] = {_FLOAT: 0, _INT: 0}
     layouts: dict[str, FieldLayout] = {}
     for name, spec in fields.items():
-        shape = tuple(int(size) for size in spec.shape)
-        if any(size < 0 for size in shape):
-            raise ValueError(f"Output field {name!r} has a negative dimension.")
-        flat_count = int(np.prod(shape, dtype=np.intp)) if shape else 1
         dtype = np.dtype(spec.dtype)
-        if dtype == np.dtype(np.float64):
-            offset = n_float
-            n_float += flat_count
-        elif dtype == np.dtype(np.int64):
-            offset = n_int
-            n_int += flat_count
-        else:
+        lane = lanes.get(dtype)
+        if lane is None:
             raise TypeError(
                 f"Native output field {name!r} has unsupported dtype {dtype}."
             )
-        layouts[name] = FieldLayout(shape, flat_count, dtype, offset)
-    return ArenaSize(n_float, n_int), layouts
+        if taken[dtype] == len(lane):
+            raise ValueError(
+                f"Output field {name!r} has no buffer in the native layout."
+            )
+        offset, width = lane[taken[dtype]]
+        taken[dtype] += 1
+        layouts[name] = FieldLayout(
+            _shaped(name, spec.shape, width), width, dtype, offset
+        )
+    for dtype, lane in lanes.items():
+        if taken[dtype] != len(lane):
+            raise ValueError(
+                f"The native layout describes {len(lane)} {dtype} buffers, but "
+                f"{taken[dtype]} fields name them."
+            )
+    return ArenaSize(_lane_total(lanes[_FLOAT]), _lane_total(lanes[_INT])), layouts
+
+
+def _lane_total(lane: Sequence[tuple[int, int]]) -> int:
+    """One lane's element count, which its last buffer closes."""
+    return lane[-1][0] + lane[-1][1] if lane else 0
+
+
+def _shaped(name: str, shape: Shape, width: int) -> Shape:
+    """A field's declared shape, holding no rows when the layout gave it no room.
+
+    Dropping the leading axis covers a field the configuration left out and one
+    that resolved to nothing on its own, which are the same fact about the same
+    lane.  Every trailing dimension survives, so a shape never claims a width
+    the step did not resolve.
+    """
+    resolved = tuple(int(size) for size in shape)
+    if any(size < 0 for size in resolved):
+        raise ValueError(f"Output field {name!r} has a negative dimension.")
+    return resolved if width else (0, *resolved[1:])
+
+
+def is_empty(layout: FieldLayout) -> bool:
+    """Whether the native layout gave this field no elements."""
+    return not layout.flat_count
+
+
+def _flat(shape: Shape) -> int:
+    """Elements one logical shape occupies in its flat lane."""
+    return int(np.prod(shape, dtype=np.intp)) if shape else 1
+
+
+def _single_buffer(flat_count: int) -> _offsets.ArenaOffset:
+    """The one layout a lane holding a single float buffer can have.
+
+    Transform and payload outputs are written to a lane of their own, so there
+    is no interior boundary for the two sides to agree on.
+    """
+    return _offsets.ArenaOffset((0,), (flat_count,), (), ())
 
 
 def _field(shape: Shape, dtype: Any = np.float64) -> _FieldSpec:
@@ -258,7 +316,10 @@ def _resolve_filter_input_asize(
     datagen_plan: StepBufferPlan,
     reference: SolvedModel,
 ) -> ArenaSize:
-    T, datagen_n_obs = datagen_plan.out_fields["observables"].shape
+    observables = datagen_plan.out_fields.get("observables")
+    if observables is None or is_empty(observables):
+        raise ValueError("Filter input planning requires datagen observables.")
+    T, datagen_n_obs = observables.shape
     selected_observables = step.kwargs.get("observables")
     if selected_observables is not None:
         n_obs = len(selected_observables)
@@ -421,12 +482,12 @@ def _selected_source_shape(
     selector: SourceArgs,
 ) -> Shape:
     producer = steps[source_idx]
-    try:
-        shape = plans[producer.name].out_fields[selector.field].shape
-    except KeyError as exc:
+    layout = plans[producer.name].out_fields.get(selector.field)
+    if layout is None or is_empty(layout):
         raise ValueError(
             f"Step {producer.name!r} does not produce source field {selector.field!r}."
-        ) from exc
+        )
+    shape = layout.shape
     if len(shape) != 2:
         raise ValueError(
             f"Source field {producer.name!r}.{selector.field} must be 2D, "
@@ -479,7 +540,7 @@ def _resolve_datagen_fields(
     step: MCStep,
     reference: SolvedModel,
     dgp: SolvedModel | None,
-) -> dict[str, _FieldSpec]:
+) -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
     match step.step_type:
         case "simulation":
             target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
@@ -489,19 +550,39 @@ def _resolve_datagen_fields(
                     "Simulation output planning requires its target model."
                 )
             T = int(step.kwargs["T"])
+            n_obs = (
+                model.compiled.n_obs
+                if step.kwargs.get("observables", DEFAULT_SIMULATION_OBSERVABLES)
+                else 0
+            )
             fields: dict[str, _FieldSpec] = {
                 "states": _field((T, model.compiled.n_var)),
                 "shocks": _field((T, model.compiled.n_exog)),
+                "observables": _field((T, n_obs)),
             }
-            if step.kwargs.get("observables", DEFAULT_SIMULATION_OBSERVABLES):
-                fields["observables"] = _field((T, model.compiled.n_obs))
-            return fields
+            return fields, _offsets.simulation_output_offsets(
+                model.policy.order,
+                model.compiled.n_var,
+                model.compiled.n_exog,
+                T,
+                n_obs,
+            )
         case "raw_model_data":
-            return {
-                field: _field(_raw_data_shape(field, value))
+            shapes = {
+                field: (
+                    _raw_data_shape(field, value)
+                    if (value := step.kwargs.get(field)) is not None
+                    else (0, 0)
+                )
                 for field in ("states", "shocks", "observables")
-                if (value := step.kwargs.get(field)) is not None
             }
+            return {
+                field: _field(shape) for field, shape in shapes.items()
+            }, _offsets.raw_model_data_output_offsets(
+                _flat(shapes["states"]),
+                _flat(shapes["shocks"]),
+                _flat(shapes["observables"]),
+            )
         case _:
             raise NotImplementedError(
                 f"Output-layout resolution is not implemented for datagen "
@@ -514,13 +595,12 @@ def _resolve_filter_fields(
     datagen_step: MCStep,
     datagen_plan: StepBufferPlan,
     reference: SolvedModel,
-) -> dict[str, _FieldSpec]:
-    try:
-        T, datagen_n_obs = datagen_plan.out_fields["observables"].shape
-    except KeyError as exc:
-        raise ValueError(
-            "Filter output planning requires datagen observables."
-        ) from exc
+) -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
+    comp = reference.compiled
+    observables = datagen_plan.out_fields.get("observables")
+    if observables is None or is_empty(observables):
+        raise ValueError("Filter output planning requires datagen observables.")
+    T, datagen_n_obs = observables.shape
 
     selected_observables = step.kwargs.get("observables")
     if selected_observables is not None:
@@ -528,12 +608,12 @@ def _resolve_filter_fields(
     elif datagen_step.step_type == "raw_model_data" and not datagen_step.kwargs.get(
         "observable_names"
     ):
-        n_obs = reference.compiled.n_obs
+        n_obs = comp.n_obs
     else:
         n_obs = datagen_n_obs
-    n_var = reference.compiled.n_var
-
-    match _filter_mode(step):
+    n_var = comp.n_var
+    mode = _filter_mode(step)
+    match mode:
         case "linear" | "extended":
             fields = {
                 "x_pred": _field((T, n_var)),
@@ -545,13 +625,20 @@ def _resolve_filter_fields(
                 "innov": _field((T, n_obs)),
                 "std_innov": _field((T, n_obs)),
                 "S": _field((T, n_obs, n_obs)),
+                "eps_hat": _field((T, comp.n_exog)),
+                "loglik": _field(()),
             }
-            if step.kwargs.get("return_shocks", DEFAULT_RETURN_SHOCKS):
-                fields["eps_hat"] = _field((T, reference.compiled.n_exog))
-            fields["loglik"] = _field(())
-            return fields
+            return fields, _offsets.filter_output_offsets(
+                mode,
+                comp.n_state,
+                comp.n_ctrl,
+                comp.n_exog,
+                n_obs,
+                T,
+                bool(step.kwargs.get("return_shocks", DEFAULT_RETURN_SHOCKS)),
+            )
         case "unscented":
-            n_state = reference.compiled.n_state
+            n_state = comp.n_state
             n_z = 2 * n_state
             return {
                 "x_pred": _field((T, n_var)),
@@ -568,9 +655,11 @@ def _resolve_filter_fields(
                 "x2_pred": _field((T, n_state)),
                 "x1_filt": _field((T, n_state)),
                 "x2_filt": _field((T, n_state)),
-            }
+            }, _offsets.filter_output_offsets(
+                mode, n_state, comp.n_ctrl, comp.n_exog, n_obs, T
+            )
         case _:
-            raise ValueError(f"Unrecognized filter mode {_filter_mode(step)!r}.")
+            raise ValueError(f"Unrecognized filter mode {mode!r}.")
 
 
 def _resolve_transform_fields(
@@ -578,19 +667,19 @@ def _resolve_transform_fields(
     source_idx: int,
     plans: BufferPlan,
     steps: Sequence[MCStep],
-) -> dict[str, _FieldSpec]:
+) -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
     if len(step.source_args) != 1:
         raise ValueError(f"Transform step {step.name!r} must have one source argument.")
     input_shape = _selected_source_shape(plans, steps, source_idx, step.source_args[0])
-    return {
-        "payload": _field(
-            _transform_output_shape(step.step_type or "", input_shape, step.kwargs)
-        )
-    }
+    shape = _transform_output_shape(step.step_type or "", input_shape, step.kwargs)
+    return {"payload": _field(shape)}, _single_buffer(_flat(shape))
 
 
-def _resolve_payload_fields(step: MCStep) -> dict[str, _FieldSpec]:
-    return {"payload": _field(_payload_shape(step.kwargs["value"]))}
+def _resolve_payload_fields(
+    step: MCStep,
+) -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
+    shape = _payload_shape(step.kwargs["value"])
+    return {"payload": _field(shape)}, _single_buffer(_flat(shape))
 
 
 def _resolve_regression_fields(
@@ -598,7 +687,7 @@ def _resolve_regression_fields(
     source_indices: Sequence[int],
     plans: BufferPlan,
     steps: Sequence[MCStep],
-) -> dict[str, _FieldSpec]:
+) -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
     if len(step.source_args) != 2 or len(source_indices) != 2:
         raise ValueError(
             f"Regression step {step.name!r} must have response and design sources."
@@ -628,15 +717,16 @@ def _resolve_regression_fields(
         "ssr": _field(()),
         "sst": _field(()),
         "status": _field((), np.int64),
+        "se": _field((p,)),
     }
-    if step.kwargs.get("kind", DEFAULT_REGRESSION_KIND) == "ols":
-        fields["se"] = _field((p,))
-    return fields
+    return fields, _offsets.regression_output_offsets(
+        str(step.kwargs.get("kind", DEFAULT_REGRESSION_KIND)), p
+    )
 
 
-def _resolve_test_fields() -> dict[str, _FieldSpec]:
+def _resolve_test_fields() -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
     """Return native diagnostic outputs, excluding post-loop p-values."""
     return {
         "statistic": _field(()),
         "status": _field((), np.int64),
-    }
+    }, _offsets.diagnostic_output_offsets()

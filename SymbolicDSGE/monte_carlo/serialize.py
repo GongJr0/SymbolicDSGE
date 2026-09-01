@@ -216,7 +216,7 @@ def serialize_datagen_result(
     the run's own, and the meta records the shape each one unflattens to.
     """
     fields: dict[str, NDArray[Any]] = {"states": datagen.X, "shocks": datagen.eps}
-    if datagen.y is not None:
+    if datagen.y.shape[-1]:
         fields["observables"] = datagen.y
     meta = MCDataGenResultMeta(
         step_name=step_name,

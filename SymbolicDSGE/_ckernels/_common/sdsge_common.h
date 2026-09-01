@@ -89,6 +89,51 @@ static inline arena_size sdsge_max_arena(const arena_size a,
   return make_sizer(max_i64(a.n_float, b.n_float), max_i64(a.n_int, b.n_int));
 }
 
+/* Widest lane a layout may describe. Fixed so the descriptor below carries its
+ * entries inline. A layout states its own buffer count when it builds one, and
+ * that count is what every reader walks to, so this bound is only the storage
+ * those counts have to fit. */
+#define SDSGE_ARENA_MAX_BUFFERS 24
+
+/* float/int arena offset descriptor: the lane boundary closing each buffer.
+ * Entry i is one past the end of buffer i, so buffer i spans
+ * `[i ? entry[i - 1] : 0, entry[i])` and the last entry is the lane total. The
+ * opening boundary is the arena itself and is not stored, because a slot whose
+ * value is always zero is one every walk has to step over to reach a buffer. A
+ * buffer a configuration leaves out repeats the entry before it, so walking
+ * produces nothing for it rather than the walk having to ask whether it is
+ * there.
+ *
+ * A layout writes the entries in order, each one the entry before it plus the
+ * width of the buffer it closes. An entry means the same thing the moment it is
+ * written, so the descriptor is never half-built in some other unit. A layout
+ * writes every entry its lane counts, including the ones it has nothing to put
+ * in; none of them carry a default it could lean on instead.
+ *
+ * The member order is load-bearing, so do not tidy it. A lane that overruns its
+ * entries writes into whatever follows, and every layout has float buffers
+ * while most have no int ones. With the int lane first, an int overrun lands in
+ * `foffset`, which every reader walks, and a float overrun lands on `n_fbuf`,
+ * which bounds that walk. Both corrupt something live. The other order buries a
+ * float overrun in an `ioffset` nothing reads.
+ */
+typedef struct {
+  i64 ioffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_ibuf, ): buffer end
+  i64 foffset[SDSGE_ARENA_MAX_BUFFERS]; // (n_fbuf, ): buffer end
+  i64 n_fbuf;
+  i64 n_ibuf;
+} arena_offset;
+
+/* Offsets for lanes of the given buffer counts, entries left unwritten. Zeroing
+ * them would be a pass over slots a layout is about to overwrite anyway, and
+ * the slots past a lane's count are never read. */
+static inline arena_offset make_offset(const i64 n_fbuf, const i64 n_ibuf) {
+  arena_offset off;
+  off.n_fbuf = n_fbuf;
+  off.n_ibuf = n_ibuf;
+  return off;
+}
+
 /* Flat buffer `any(x[i] == 0)` and `any(x[i] != 0)` checks. Returns 1 if the
  * respective condition is satisfied for any element, 0 otherwise. */
 static inline i8 sdsge_any_zero(const f64 *x, i64 n) {

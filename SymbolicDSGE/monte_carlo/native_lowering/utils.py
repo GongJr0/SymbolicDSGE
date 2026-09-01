@@ -14,7 +14,7 @@ from ..._diag_tests.distributions import (
     ReferenceDistribution,
 )
 from ...core.solved_model import SolvedModel
-from ..allocation import BufferPlan, FieldLayout
+from ..allocation import BufferPlan, FieldLayout, is_empty
 from ..mc_constructs import MCStep, SourceArgs
 
 _FILL_COLUMNS = np.zeros(1, dtype=np.int64)
@@ -86,7 +86,7 @@ def _selected_shape(
     plan: BufferPlan,
 ) -> tuple[int, int]:
     source_step = steps[source_idx]
-    layout = plan[source_step.name].out_fields[source.field]
+    layout = _source_layout(plan, source_step, source.field)
     if len(layout.shape) != 2:
         raise ValueError(
             f"Native source {source_step.name!r}.{source.field!r} must be 2D."
@@ -105,7 +105,7 @@ def _source_binding(
     target_row_stride: int,
 ) -> FloatInputBinding:
     producer = steps[source_step_idx]
-    layout = plan[producer.name].out_fields[source.field]
+    layout = _source_layout(plan, producer, source.field)
     if layout.dtype != np.dtype(np.float64) or len(layout.shape) != 2:
         raise ValueError(
             f"Native source {producer.name!r}.{source.field!r} must be a 2D float field."
@@ -125,6 +125,16 @@ def _source_binding(
         target_offset=target_offset,
         target_row_stride=target_row_stride,
     )
+
+
+def _source_layout(plan: BufferPlan, producer: MCStep, field: str) -> FieldLayout:
+    """One producer's field, which its layout has to have reserved a buffer for."""
+    layout = plan[producer.name].out_fields.get(field)
+    if layout is None or is_empty(layout):
+        raise ValueError(
+            f"Step {producer.name!r} does not produce source field {field!r}."
+        )
+    return layout
 
 
 def _fill_binding(
@@ -184,20 +194,3 @@ def _selected_columns(source: SourceArgs, n_columns: int) -> NDI:
     else:
         resolved = np.asarray(columns, dtype=np.int64)
     return np.ascontiguousarray(resolved, dtype=np.int64)
-
-
-def _check_raw_model_data_layout(
-    step: MCStep,
-    fields: Mapping[str, FieldLayout],
-) -> None:
-    expected_offset = 0
-    for field in ("states", "shocks", "observables"):
-        value = step.kwargs.get(field)
-        if value is None:
-            continue
-        layout = fields[field]
-        if layout.offset != expected_offset:
-            raise ValueError(
-                "Raw model data fields must occupy contiguous float output."
-            )
-        expected_offset += layout.flat_count

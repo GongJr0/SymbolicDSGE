@@ -6,7 +6,9 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
+    DEFAULT_BREUSCH_GODFREY_LAGS,
     NativeStep,
     breusch_godfrey_step,
     breusch_pagan_step,
@@ -59,6 +61,12 @@ def lower_test_step(
             ),
         )
     _, x_columns = _selected_shape(source_indices[1], step.source_args[1], steps, plan)
+    lags = (
+        int(step.kwargs.get("lags", DEFAULT_BREUSCH_GODFREY_LAGS))
+        if kind == "breusch_godfrey"
+        else 0
+    )
+    offsets = _offsets.diagnostic_offsets(kind or "", n, x_columns, lags).foffset
     if kind == "breusch_pagan":
         native_step = breusch_pagan_step(
             step.name, n, x_columns, **_supplied(step.kwargs, "robust")
@@ -89,7 +97,7 @@ def lower_test_step(
             steps,
             plan,
             step.source_args[1],
-            target_offset=n,
+            target_offset=offsets[1],
             target_row_stride=x_columns,
         ),
     )

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 
-from ..._ckernels.monte_carlo import _arena
+from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
     simulate1_step,
@@ -14,7 +16,6 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ...core.solved_model import SolvedModel
 from ...core.solved_model.shocks import resolve_shock_plan, simulation_shock_matrix
-from ..allocation import StepBufferPlan
 from ..defaults import (
     DEFAULT_SHOCK_SCALE,
     DEFAULT_SIMULATION_OBSERVABLES,
@@ -33,7 +34,6 @@ from .utils import (
 
 def lower_simulation_step(
     step: MCStep,
-    step_plan: StepBufferPlan,
     reference: SolvedModel,
     dgp: SolvedModel | None,
     n_rep: int,
@@ -73,7 +73,6 @@ def lower_simulation_step(
         shocks, shocks_batched = np.zeros((0, n_exog), dtype=np.float64), False
     order = model.policy.order
 
-    _check_simulation_layout(step_plan, order, T, n_var, n_obs, n_exog)
     if order == 1:
         native_step = simulate1_step(
             step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs, drawn
@@ -118,24 +117,17 @@ def _order1_bindings(
     params: NDF,
     T: int,
 ) -> tuple[FloatInputBinding, ...]:
-    n_exog = model.compiled.n_exog
-    bindings: list[FloatInputBinding] = []
-    offset = 0
-    for values in (
+    comp = model.compiled
+    offsets = _offsets.simulation_offsets(
+        1, comp.n_state, comp.n_var, comp.n_exog, T, comp.n_par
+    ).foffset
+    constants = (
         _flat_f64(model.policy.A),
         _flat_f64(model.policy.B),
         _flat_f64(steady_state),
         _flat_f64(x0),
-    ):
-        if values.size:
-            bindings.append(_static_binding(values, offset))
-        offset += values.size
-    if shocks.size:
-        bindings.append(_static_binding(shocks, offset, batched=shocks_batched))
-    offset += T * n_exog
-    if params.size:
-        bindings.append(_static_binding(params, offset))
-    return tuple(bindings)
+    )
+    return _packed_bindings(constants, offsets, shocks, shocks_batched, params)
 
 
 def _order2_bindings(
@@ -152,8 +144,11 @@ def _order2_bindings(
         raise ValueError(
             "Native simulation with order=2 requires a second order solution."
         )
-    n_exog = model.compiled.n_exog
-    values_by_layout = (
+    comp = model.compiled
+    offsets = _offsets.simulation_offsets(
+        2, comp.n_state, comp.n_var, comp.n_exog, T, comp.n_par
+    ).foffset
+    constants = (
         _flat_f64(policy.p),
         _flat_f64(policy.f),
         _flat_f64(policy.B),
@@ -168,17 +163,34 @@ def _order2_bindings(
         _flat_f64(steady_state),
         _flat_f64(x0_deviation),
     )
-    bindings: list[FloatInputBinding] = []
-    offset = 0
-    for values in values_by_layout:
-        if values.size:
-            bindings.append(_static_binding(values, offset))
-        offset += values.size
+    return _packed_bindings(constants, offsets, shocks, shocks_batched, params)
+
+
+def _packed_bindings(
+    constants: tuple[NDF, ...],
+    offsets: Sequence[int],
+    shocks: NDF,
+    shocks_batched: bool,
+    params: NDF,
+) -> tuple[FloatInputBinding, ...]:
+    """Bind each staged input onto the buffer the native layout opened for it.
+
+    The shock block trails the constants and the parameters trail that, which is
+    the order both orders share.  A value the model resolved to nothing is
+    skipped, and its buffer is empty rather than missing, so nothing behind it
+    moves.
+    """
+    bindings = [
+        _static_binding(values, offset)
+        for values, offset in zip(constants, offsets)
+        if values.size
+    ]
     if shocks.size:
-        bindings.append(_static_binding(shocks, offset, batched=shocks_batched))
-    offset += T * n_exog
+        bindings.append(
+            _static_binding(shocks, offsets[len(constants)], batched=shocks_batched)
+        )
     if params.size:
-        bindings.append(_static_binding(params, offset))
+        bindings.append(_static_binding(params, offsets[len(constants) + 1]))
     return tuple(bindings)
 
 
@@ -215,40 +227,3 @@ def _array_shocks(model: SolvedModel, T: int, shock_scale: float) -> NDF:
         simulation_shock_matrix(model.compiled, T, shock_scale=shock_scale),
         dtype=np.float64,
     )
-
-
-def _check_simulation_layout(
-    step_plan: StepBufferPlan,
-    order: int,
-    T: int,
-    n_var: int,
-    n_obs: int,
-    n_exog: int,
-) -> None:
-    """Hold the resolved output layout to what the native step will write.
-
-    The compiler resolves the fields and the kernel writes them at hardcoded
-    offsets, so nothing but this makes the two agree. Each field is checked
-    where it lands, then the total against the kernel's own sizer, which catches
-    a field the plan grew that the kernel does not know to leave room for.
-    """
-    states = step_plan.out_fields["states"]
-    shocks = step_plan.out_fields["shocks"]
-    if states.offset != 0 or states.shape != (T, n_var):
-        raise ValueError("Native simulation states do not match their output layout.")
-    if shocks.offset != states.flat_count or shocks.shape != (T, n_exog):
-        raise ValueError("Native simulation shocks do not match their output layout.")
-    if n_obs:
-        observables = step_plan.out_fields["observables"]
-        if observables.offset != (
-            states.flat_count + shocks.flat_count
-        ) or observables.shape != (T, n_obs):
-            raise ValueError(
-                "Native simulation observables do not match their output layout."
-            )
-    n_float, _ = _arena.simulation_output_arena_size(order, n_var, n_exog, T, n_obs)
-    if step_plan.output_size.n_float != n_float:
-        raise ValueError(
-            f"Native simulation output plan plans {step_plan.output_size.n_float} "
-            f"floats, but the kernel writes {n_float}."
-        )

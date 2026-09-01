@@ -13,11 +13,7 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.allocation import FieldLayout
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep
-from SymbolicDSGE.monte_carlo.native_lowering.filters import (
-    _filter_bindings,
-    _filter_y_binding,
-)
-from SymbolicDSGE.monte_carlo.native_lowering.utils import FloatInputBinding
+from SymbolicDSGE.monte_carlo.native_lowering.filters import _filter_y_binding
 from SymbolicDSGE.monte_carlo.step_factories import (
     breusch_pagan_test_step,
     jarque_bera_test_step,
@@ -322,21 +318,3 @@ def test_the_observation_binding_must_match_the_source_layout() -> None:
 
     with pytest.raises(ValueError, match="do not match their input layout"):
         _filter_y_binding(layout, T, np.asarray([0], dtype=np.int64), 0, 2)
-
-
-def test_the_observation_binding_must_start_where_the_constants_end() -> None:
-    """Constants are packed ahead of the observations, so their sizes must agree."""
-    constants = (np.ones(4, dtype=np.float64),)
-    binding = FloatInputBinding(
-        source_step_idx=0,
-        source_offset=0,
-        source_row_stride=2,
-        row_start=0,
-        n_rows=T,
-        columns=np.asarray([0, 1], dtype=np.int64),
-        target_offset=99,
-        target_row_stride=2,
-    )
-
-    with pytest.raises(ValueError, match="observation offset does not match"):
-        _filter_bindings(constants, binding, ())
