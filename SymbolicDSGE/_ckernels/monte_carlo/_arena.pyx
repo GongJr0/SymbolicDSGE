@@ -43,6 +43,13 @@ cdef extern from "layout.h":
                                               int64_t n_alpha,
                                               int64_t max_iter) nogil
 
+    arena_size sdsge_mc_diag_sample_arena_size(int64_t n, int64_t q,
+                                               arena_size work) nogil
+    arena_size sdsge_mc_diag_design_arena_size(int64_t n, int64_t m,
+                                               arena_size work) nogil
+    arena_size sdsge_mc_diag_augmented_arena_size(int64_t n, int64_t k,
+                                                  arena_size work) nogil
+
     arena_size sdsge_passthrough_arena_size(int64_t n, int64_t p) nogil
     arena_size sdsge_simulate_order1_arena_size(int64_t n, int64_t k,
                                                 int64_t T, int64_t n_par) nogil
@@ -217,39 +224,33 @@ def diagnostic_arena_size(
     int64_t lags=0,
 ):
     """Return the complete staged-input and work requirement for a diagnostic."""
-    cdef arena_size size
-    cdef arena_size input_size
     if kind == "wald_mean":
-        size = sdsge_wald_mean_hac_arena_size(n, p)
-        input_size = make_sizer(n * p, 0)
-    elif kind == "wald_covariance":
-        size = sdsge_wald_covariance_hac_arena_size(n, p)
-        input_size = make_sizer(n * p, 0)
-    elif kind == "wald_second_moment":
-        size = sdsge_wald_second_moment_hac_arena_size(n, p)
-        input_size = make_sizer(n * p, 0)
-    elif kind == "ljung_box":
-        size = sdsge_lb_arena_size(n, lags)
-        input_size = make_sizer(n, 0)
-    elif kind == "jarque_bera":
-        size.n_float = 0
-        size.n_int = 0
-        input_size = make_sizer(n, 0)
-    elif kind == "breusch_pagan":
-        size = sdsge_bp_arena_size(n, p + 1)
-        input_size = make_sizer(n + n * p + n * (p + 1), 0)
-    elif kind == "breusch_godfrey":
-        size = sdsge_bg_arena_size(n, p, lags)
-        input_size = make_sizer(n + n * p, 0)
-    elif kind == "chow":
-        size = sdsge_chow_arena_size(p)
-        input_size = make_sizer(n + n * p, 0)
-    elif kind == "cusum":
-        size = sdsge_cusum_arena_size(n, p)
-        input_size = make_sizer(n + n * p, 0)
-    elif kind == "cusumsq":
-        size = sdsge_cusumsq_arena_size(n, p)
-        input_size = make_sizer(n + n * p, 0)
-    else:
-        raise ValueError(f"Unsupported native diagnostic kind: {kind!r}.")
-    return _size(add_arena(input_size, size))
+        return _size(sdsge_mc_diag_sample_arena_size(
+            n, p, sdsge_wald_mean_hac_arena_size(n, p)))
+    if kind == "wald_covariance":
+        return _size(sdsge_mc_diag_sample_arena_size(
+            n, p, sdsge_wald_covariance_hac_arena_size(n, p)))
+    if kind == "wald_second_moment":
+        return _size(sdsge_mc_diag_sample_arena_size(
+            n, p, sdsge_wald_second_moment_hac_arena_size(n, p)))
+    if kind == "ljung_box":
+        return _size(sdsge_mc_diag_sample_arena_size(
+            n, 1, sdsge_lb_arena_size(n, lags)))
+    if kind == "jarque_bera":
+        return _size(sdsge_mc_diag_sample_arena_size(n, 1, make_sizer(0, 0)))
+    if kind == "breusch_pagan":
+        return _size(sdsge_mc_diag_augmented_arena_size(
+            n, p, sdsge_bp_arena_size(n, p + 1)))
+    if kind == "breusch_godfrey":
+        return _size(sdsge_mc_diag_design_arena_size(
+            n, p, sdsge_bg_arena_size(n, p, lags)))
+    if kind == "chow":
+        return _size(sdsge_mc_diag_design_arena_size(
+            n, p, sdsge_chow_arena_size(p)))
+    if kind == "cusum":
+        return _size(sdsge_mc_diag_design_arena_size(
+            n, p, sdsge_cusum_arena_size(n, p)))
+    if kind == "cusumsq":
+        return _size(sdsge_mc_diag_design_arena_size(
+            n, p, sdsge_cusumsq_arena_size(n, p)))
+    raise ValueError(f"Unsupported native diagnostic kind: {kind!r}.")

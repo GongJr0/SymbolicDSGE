@@ -314,6 +314,18 @@ arena_size sdsge_mc_diag_sample_arena_size(const i64 n, const i64 q,
   return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
+arena_offset sdsge_mc_diag_output_arena_offset(void) {
+  arena_offset off = make_offset(1, 1);
+  off.foffset[0] = 1; // statistic
+  off.ioffset[0] = 1; // status
+  return off;
+}
+
+arena_size sdsge_mc_diag_output_arena_size(void) {
+  const arena_offset off = sdsge_mc_diag_output_arena_offset();
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
+}
+
 arena_offset sdsge_mc_diag_design_arena_offset(const i64 n, const i64 m,
                                                const arena_size work) {
   arena_offset off = make_offset(3, 1);

@@ -111,6 +111,11 @@ arena_offset sdsge_filter_unscented_output_arena_offset(i64 n_state, i64 n_ctrl,
 arena_offset sdsge_mc_diag_sample_arena_offset(i64 n, i64 q, arena_size work);
 arena_size sdsge_mc_diag_sample_arena_size(i64 n, i64 q, arena_size work);
 
+/* Every diagnostic writes the same output: one statistic over an int lane of
+ * one status. */
+arena_offset sdsge_mc_diag_output_arena_offset(void);
+arena_size sdsge_mc_diag_output_arena_size(void);
+
 /* [y(n), X(n,m), work]. breusch_godfrey, chow, cusum and cusumsq, over the
  * design width each of them names differently. */
 arena_offset sdsge_mc_diag_design_arena_offset(i64 n, i64 m, arena_size work);
