@@ -186,7 +186,8 @@ i64 sdsge_rolling_mean(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
     out[j] = sum[j] * scale;
   }
 
-  const i64 n_out = n - window + 1;
+  const i64 n_out = sdsge_mc_transform_output_rows(
+      SDSGE_MC_TRANSFORM_ROLLING_MEAN, n, 0, window);
 
   /*
    * Slide from x[i - 1 : i - 1 + window]
@@ -228,7 +229,10 @@ static i64 rolling_moment_ax0(const f64 *SDSGE_RESTRICT x, const i64 n,
 
   welford_ax0(x, window, p, mean, m2); /* Welford state for x[0:window] */
 
-  const i64 n_out = n - window + 1;
+  const i64 n_out =
+      sdsge_mc_transform_output_rows(take_sqrt ? SDSGE_MC_TRANSFORM_ROLLING_STD
+                                               : SDSGE_MC_TRANSFORM_ROLLING_VAR,
+                                     n, 0, window);
   const f64 inv_denominator = 1.0 / (f64)(window - ddof);
   const f64 inv_window = 1.0 / (f64)window;
   const f64 inv_reduced = (window > 1) ? 1.0 / (f64)(window - 1) : 0.0;

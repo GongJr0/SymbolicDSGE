@@ -97,7 +97,9 @@ cdef extern from "layout.h":
 
     # Transform Steps
     # One layout for all of them: the kind picks the scratch, `order` is read by
-    # `diff` alone, and a rolling window never reaches the arena.
+    # `diff` alone, and a rolling window never reaches the arena. The window
+    # does set the output rows, which are a scalar because the output is one
+    # buffer.
     ctypedef enum sdsge_mc_transform_kind:
         SDSGE_MC_TRANSFORM_STANDARDIZE
         SDSGE_MC_TRANSFORM_LOG
@@ -109,6 +111,9 @@ cdef extern from "layout.h":
 
     arena_offset sdsge_mc_transform_arena_offset(
             int64_t kind, int64_t n, int64_t p, int64_t order
+            )
+    int64_t sdsge_mc_transform_output_rows(
+            int64_t kind, int64_t n, int64_t order, int64_t window
             )
 
 
@@ -200,6 +205,19 @@ def transform_offsets(str kind, int64_t n, int64_t p, int64_t param=0):
     if code is None:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
     return _offset(sdsge_mc_transform_arena_offset(<int64_t>code, n, p, param))
+
+
+def transform_output_rows(str kind, int64_t n, int64_t order=0,
+                          int64_t window=0):
+    """Return the rows a transform writes from an ``n``-row input.
+
+    The output is one buffer, so its rows are the whole layout. ``order`` is
+    read by ``diff`` alone and ``window`` by the rolling kinds.
+    """
+    cdef object code = _TRANSFORM_KINDS.get(kind)
+    if code is None:
+        raise ValueError(f"Unsupported native transform kind: {kind!r}.")
+    return sdsge_mc_transform_output_rows(<int64_t>code, n, order, window)
 
 
 def regression_offsets(
