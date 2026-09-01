@@ -179,9 +179,14 @@ def _resolve_input_asize(
             n, p = _selected_source_shape(
                 plans, steps, source_indices[0], step.source_args[0]
             )
-            param = int(step.kwargs.get("order", step.kwargs.get("window", 0)))
             return _asize(
-                _arena.transform_arena_size(step.step_type or "", n, p, param)
+                _arena.transform_arena_size(
+                    step.step_type or "",
+                    n,
+                    p,
+                    int(step.kwargs.get("order", 0)),
+                    int(step.kwargs.get("window", 0)),
+                )
             )
         case OpType.FILTER:
             return _resolve_filter_input_asize(

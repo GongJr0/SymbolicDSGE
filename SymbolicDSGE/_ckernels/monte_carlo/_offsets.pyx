@@ -96,10 +96,9 @@ cdef extern from "layout.h":
     arena_offset sdsge_mc_diag_output_arena_offset()
 
     # Transform Steps
-    # One layout for all of them: the kind picks the scratch, `order` is read by
-    # `diff` alone, and a rolling window never reaches the arena. The window
-    # does set the output rows, which are a scalar because the output is one
-    # buffer.
+    # One layout for all of them: the kind picks the scratch, and both shape
+    # parameters are taken so a caller never has to know which one it reads. The
+    # output rows are a scalar because the output is one buffer.
     ctypedef enum sdsge_mc_transform_kind:
         SDSGE_MC_TRANSFORM_STANDARDIZE
         SDSGE_MC_TRANSFORM_LOG
@@ -110,7 +109,7 @@ cdef extern from "layout.h":
         SDSGE_MC_TRANSFORM_ROLLING_STD
 
     arena_offset sdsge_mc_transform_arena_offset(
-            int64_t kind, int64_t n, int64_t p, int64_t order
+            int64_t kind, int64_t n, int64_t p, int64_t order, int64_t window
             )
     int64_t sdsge_mc_transform_output_rows(
             int64_t kind, int64_t n, int64_t order, int64_t window
@@ -193,18 +192,21 @@ cdef dict _TRANSFORM_KINDS = {
 }
 
 
-def transform_offsets(str kind, int64_t n, int64_t p, int64_t param=0):
+def transform_offsets(str kind, int64_t n, int64_t p, int64_t order=0,
+                      int64_t window=0):
     """Return the input and scratch boundaries for a transform.
 
-    ``param`` is the difference order. A rolling window never reaches the
-    arena, so it moves nothing here.
+    Both shape parameters are taken so the caller never has to know which one a
+    kind reads. A window moves nothing here.
     """
     if kind == "passthrough":
         return _offset(sdsge_passthrough_arena_offset(n, p))
     cdef object code = _TRANSFORM_KINDS.get(kind)
     if code is None:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
-    return _offset(sdsge_mc_transform_arena_offset(<int64_t>code, n, p, param))
+    return _offset(
+        sdsge_mc_transform_arena_offset(<int64_t>code, n, p, order, window)
+    )
 
 
 def transform_output_rows(str kind, int64_t n, int64_t order=0,

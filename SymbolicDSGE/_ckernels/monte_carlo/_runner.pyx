@@ -202,6 +202,22 @@ cdef extern from "layout.h":
 
     arena_size sdsge_mc_diag_output_arena_size() noexcept nogil
 
+    ctypedef enum sdsge_mc_transform_kind:
+        SDSGE_MC_TRANSFORM_STANDARDIZE
+        SDSGE_MC_TRANSFORM_LOG
+        SDSGE_MC_TRANSFORM_LOG_DIFF
+        SDSGE_MC_TRANSFORM_DIFF
+        SDSGE_MC_TRANSFORM_ROLLING_MEAN
+        SDSGE_MC_TRANSFORM_ROLLING_VAR
+        SDSGE_MC_TRANSFORM_ROLLING_STD
+
+    int64_t sdsge_mc_transform_output_rows(
+        int64_t kind,
+        int64_t n,
+        int64_t order,
+        int64_t window,
+    ) noexcept nogil
+
 
 cdef extern from "core_steps.h":
     ctypedef void (*sdsge_measurement_fn)(
@@ -1396,53 +1412,51 @@ def transform_step(
 ):
     """Bind one native transform adapter using its resolved scalar settings."""
     cdef NativeStep step = NativeStep()
-    cdef int64_t input_count
-    cdef int64_t output_rows
     cdef int64_t output_n_float
     cdef int64_t output_n_int
+    cdef int64_t code
     cdef sdsge_mc_step_fn fn
 
     if n < 0 or p < 0:
         raise ValueError("Transform dimensions must be non-negative.")
 
-    input_count = n * p
     output_n_int = 0
+    code = -1  # passthrough and custom name no layout kind
     if kind == "passthrough":
         step._ctx_store.passthrough.n = n
         step._ctx_store.passthrough.p = p
         fn = sdsge_mc_passthrough_runner
-        output_n_float = input_count
+        output_n_float = n * p
     elif kind == "standardize":
         step._ctx_store.standardize.n = n
         step._ctx_store.standardize.p = p
         step._ctx_store.standardize.ddof = ddof
         fn = sdsge_mc_standardize_runner
-        output_n_float = input_count
+        code = SDSGE_MC_TRANSFORM_STANDARDIZE
     elif kind == "log":
         step._ctx_store.log.n = n
         step._ctx_store.log.p = p
         step._ctx_store.log.offset = offset
         fn = sdsge_mc_log_runner
-        output_n_float = input_count
+        code = SDSGE_MC_TRANSFORM_LOG
     elif kind == "log_diff":
         step._ctx_store.log_diff.n = n
         step._ctx_store.log_diff.p = p
         step._ctx_store.log_diff.offset = offset
         fn = sdsge_mc_log_diff_runner
-        output_n_float = max(0, n - 1) * p
+        code = SDSGE_MC_TRANSFORM_LOG_DIFF
     elif kind == "diff":
         step._ctx_store.diff.n = n
         step._ctx_store.diff.p = p
         step._ctx_store.diff.order = order
         fn = sdsge_mc_diff_runner
-        output_n_float = max(0, n - order) * p
+        code = SDSGE_MC_TRANSFORM_DIFF
     elif kind == "rolling_mean":
         step._ctx_store.rolling_mean.n = n
         step._ctx_store.rolling_mean.p = p
         step._ctx_store.rolling_mean.window = window
         fn = sdsge_mc_rolling_mean_runner
-        output_rows = max(0, n - window + 1)
-        output_n_float = output_rows * p
+        code = SDSGE_MC_TRANSFORM_ROLLING_MEAN
     elif kind == "rolling_var" or kind == "rolling_std":
         step._ctx_store.rolling_var.n = n
         step._ctx_store.rolling_var.p = p
@@ -1453,8 +1467,11 @@ def transform_step(
             if kind == "rolling_var"
             else sdsge_mc_rolling_std_runner
         )
-        output_rows = max(0, n - window + 1)
-        output_n_float = output_rows * p
+        code = (
+            SDSGE_MC_TRANSFORM_ROLLING_VAR
+            if kind == "rolling_var"
+            else SDSGE_MC_TRANSFORM_ROLLING_STD
+        )
     elif kind == "custom":
         if function_address == 0:
             raise ValueError("Native custom transforms require a callback address.")
@@ -1471,6 +1488,8 @@ def transform_step(
         output_n_float = output_n * output_p
     else:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
+    if code >= 0:
+        output_n_float = sdsge_mc_transform_output_rows(code, n, order, window) * p
     step._bind(name, fn, backing, 0, make_sizer(output_n_float, output_n_int))
     return step
 

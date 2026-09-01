@@ -464,7 +464,9 @@ static i64 sdsge_mc_transform_scratch(const sdsge_mc_transform_kind kind,
 }
 
 arena_offset sdsge_mc_transform_arena_offset(const i64 kind, const i64 n,
-                                             const i64 p, const i64 order) {
+                                             const i64 p, const i64 order,
+                                             const i64 window) {
+  (void)window; // no kind sizes its scratch against a window
   arena_offset off = make_offset(2, 0);
   off.foffset[0] = n * p; // input(n, p)
   off.foffset[1] =
@@ -474,8 +476,10 @@ arena_offset sdsge_mc_transform_arena_offset(const i64 kind, const i64 n,
 }
 
 arena_size sdsge_mc_transform_arena_size(const i64 kind, const i64 n,
-                                         const i64 p, const i64 order) {
-  const arena_offset off = sdsge_mc_transform_arena_offset(kind, n, p, order);
+                                         const i64 p, const i64 order,
+                                         const i64 window) {
+  const arena_offset off =
+      sdsge_mc_transform_arena_offset(kind, n, p, order, window);
   return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
