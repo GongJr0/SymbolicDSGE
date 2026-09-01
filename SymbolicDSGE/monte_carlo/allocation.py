@@ -38,11 +38,6 @@ Shape: TypeAlias = tuple[int, ...]
 _FLOAT = np.dtype(np.float64)
 _INT = np.dtype(np.int64)
 
-# What a field's shape becomes when the native layout reserved no buffer for
-# it.  A field that is merely empty keeps its own shape; this is for one the
-# configuration dropped, and it carries no dimension the step never resolved.
-_ABSENT: Shape = (0,)
-
 
 class ArenaSize(NamedTuple):
     """Element counts for the native float64 and int64 arena lanes."""
@@ -201,24 +196,22 @@ def _lane_total(lane: Sequence[tuple[int, int]]) -> int:
 
 
 def _shaped(name: str, shape: Shape, width: int) -> Shape:
-    """A field's declared shape, or the shape of absence when it has no buffer.
+    """A field's declared shape, holding no rows when the layout gave it no room.
 
-    A field can be legitimately empty, as a rolling window wider than its source
-    is, and that shape is its own to keep.  Absence is the other case: the
-    native layout reserved nothing, and the field says so rather than reporting
-    a width the step never resolved.
+    Dropping the leading axis covers a field the configuration left out and one
+    that resolved to nothing on its own, which are the same fact about the same
+    lane.  Every trailing dimension survives, so a shape never claims a width
+    the step did not resolve.
     """
     resolved = tuple(int(size) for size in shape)
     if any(size < 0 for size in resolved):
         raise ValueError(f"Output field {name!r} has a negative dimension.")
-    if width or not _flat(resolved):
-        return resolved
-    return _ABSENT
+    return resolved if width else (0, *resolved[1:])
 
 
-def is_absent(layout: FieldLayout) -> bool:
-    """Whether the native layout reserved no buffer for this field."""
-    return layout.shape == _ABSENT
+def is_empty(layout: FieldLayout) -> bool:
+    """Whether the native layout gave this field no elements."""
+    return not layout.flat_count
 
 
 def _flat(shape: Shape) -> int:
@@ -324,7 +317,7 @@ def _resolve_filter_input_asize(
     reference: SolvedModel,
 ) -> ArenaSize:
     observables = datagen_plan.out_fields.get("observables")
-    if observables is None or is_absent(observables):
+    if observables is None or is_empty(observables):
         raise ValueError("Filter input planning requires datagen observables.")
     T, datagen_n_obs = observables.shape
     selected_observables = step.kwargs.get("observables")
@@ -490,7 +483,7 @@ def _selected_source_shape(
 ) -> Shape:
     producer = steps[source_idx]
     layout = plans[producer.name].out_fields.get(selector.field)
-    if layout is None or is_absent(layout):
+    if layout is None or is_empty(layout):
         raise ValueError(
             f"Step {producer.name!r} does not produce source field {selector.field!r}."
         )
@@ -565,7 +558,7 @@ def _resolve_datagen_fields(
             fields: dict[str, _FieldSpec] = {
                 "states": _field((T, model.compiled.n_var)),
                 "shocks": _field((T, model.compiled.n_exog)),
-                "observables": _field((T, n_obs) if n_obs else _ABSENT),
+                "observables": _field((T, n_obs)),
             }
             return fields, _offsets.simulation_output_offsets(
                 model.policy.order,
@@ -579,7 +572,7 @@ def _resolve_datagen_fields(
                 field: (
                     _raw_data_shape(field, value)
                     if (value := step.kwargs.get(field)) is not None
-                    else _ABSENT
+                    else (0, 0)
                 )
                 for field in ("states", "shocks", "observables")
             }
@@ -605,7 +598,7 @@ def _resolve_filter_fields(
 ) -> tuple[dict[str, _FieldSpec], _offsets.ArenaOffset]:
     comp = reference.compiled
     observables = datagen_plan.out_fields.get("observables")
-    if observables is None or is_absent(observables):
+    if observables is None or is_empty(observables):
         raise ValueError("Filter output planning requires datagen observables.")
     T, datagen_n_obs = observables.shape
 

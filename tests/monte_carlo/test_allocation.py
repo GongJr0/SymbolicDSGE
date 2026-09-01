@@ -46,22 +46,18 @@ def test_a_native_buffer_no_field_names_is_rejected() -> None:
         )
 
 
-def test_a_field_the_layout_left_out_reports_absence() -> None:
-    """The width is the layout's, and the shape says the buffer was dropped."""
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [((3,), (0,)), ((5, 2), (0, 2)), ((4, 2, 2), (0, 2, 2)), ((0, 2), (0, 2))],
+)
+def test_a_field_the_layout_gave_no_room_holds_no_rows(
+    declared: tuple[int, ...], expected: tuple[int, ...]
+) -> None:
+    """One rule covers a dropped field and one that resolved to nothing."""
     _, fields = _compile_field_layout(
-        {"se": _FieldSpec((3,), np.float64)},
+        {"field": _FieldSpec(declared, np.float64)},
         ArenaOffset(foffset=(0,), fwidth=(0,), ioffset=(), iwidth=()),
     )
 
-    assert fields["se"].shape == (0,)
-    assert fields["se"].flat_count == 0
-
-
-def test_a_field_that_is_merely_empty_keeps_its_own_shape() -> None:
-    """A transform wider than its source resolves to zero rows, not to absence."""
-    _, fields = _compile_field_layout(
-        {"payload": _FieldSpec((0, 2), np.float64)},
-        ArenaOffset(foffset=(0,), fwidth=(0,), ioffset=(), iwidth=()),
-    )
-
-    assert fields["payload"].shape == (0, 2)
+    assert fields["field"].shape == expected
+    assert fields["field"].flat_count == 0

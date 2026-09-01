@@ -18,7 +18,7 @@ from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
-from .allocation import BufferPlan, is_absent, resolve_output_specs
+from .allocation import BufferPlan, is_empty, resolve_output_specs
 from .defaults import DEFAULT_SIMULATION_OBSERVABLES, DEFAULT_SIMULATION_TARGET
 from .traces import (
     is_trace_ref,
@@ -655,7 +655,7 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
 
     def present(field: str) -> bool:
         entry = layout.get(field)
-        return entry is not None and not is_absent(entry)
+        return entry is not None and not is_empty(entry)
 
     # Every field shares its leading axis, so any one of them dates the run.
     T = next(
@@ -681,11 +681,7 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
         shock_names=shock_names,
         eps=read("shocks", len(shock_names)),
         observable_names=observable_names,
-        y=(
-            read("observables", len(observable_names))
-            if present("observables")
-            else None
-        ),
+        y=read("observables", len(observable_names)),
     )
 
 
@@ -744,7 +740,7 @@ def _compile_regressions(
             else np.empty((0,), dtype=np.float64)
         )
 
-        if not is_absent(layout["se"]):
+        if not is_empty(layout["se"]):
             se_trace = (
                 arena.float_retained[
                     :, layout["se"].offset : layout["se"].offset + spec.k

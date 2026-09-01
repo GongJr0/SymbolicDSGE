@@ -17,7 +17,7 @@ from SymbolicDSGE.monte_carlo.allocation import (
     _compile_field_layout,
     _FieldSpec,
     _resolve_input_asize,
-    is_absent,
+    is_empty,
     resolve_output_specs,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep
@@ -318,7 +318,7 @@ def test_a_non_ols_regression_reports_no_standard_errors() -> None:
     """The field keeps its name and its place, at the width the layout gave it."""
     plans = _plan(_with_datagen(_regression(kind="ridge", intercept=True)))
 
-    assert is_absent(plans["fit"].out_fields["se"])
+    assert is_empty(plans["fit"].out_fields["se"])
 
 
 def test_a_regression_needs_both_a_response_and_a_design() -> None:

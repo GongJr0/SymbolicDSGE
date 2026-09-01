@@ -268,7 +268,9 @@ class MCDataGenResult:
     shock_names: Sequence[str]
     eps: NDF  # (n_retained, T, n_shock)
     observable_names: Sequence[str] = ()
-    y: NDF | None = None  # (n_retained, T, n_obs)
+    y: NDF = dataclass_field(  # (n_retained, T, n_obs)
+        default_factory=lambda: np.empty((0, 0, 0), dtype=np.float64)
+    )
 
     _regimes: NDI | None = None  # (n_retained, T, H)
     _diagnostics: Sequence[OccBinDiagnostics] | None = None  # (n_retained,)
@@ -287,7 +289,7 @@ class MCDataGenResult:
             shock_names=self.shock_names,
             eps=self.eps[idx],
             observable_names=self.observable_names,
-            y=self.y[idx] if self.y is not None else None,
+            y=self.y[idx],
             _regimes=self._regimes[idx] if self._regimes is not None else None,
             _diagnostics=(
                 self._diagnostics[idx] if self._diagnostics is not None else None
@@ -309,12 +311,10 @@ class MCDataGenResult:
         return {name: self.eps[:, :, i] for i, name in enumerate(self.shock_names)}
 
     @cached_property
-    def observables(self) -> dict[str, NDF] | None:
+    def observables(self) -> dict[str, NDF]:
         """Each observable's path, as a column view of ``y``.
         returns (n_retained, T) views per observable, keyed by observable name.
         """
-        if self.y is None:
-            return None
         return {name: self.y[:, :, i] for i, name in enumerate(self.observable_names)}
 
     @property

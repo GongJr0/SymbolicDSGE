@@ -14,7 +14,7 @@ from ..._diag_tests.distributions import (
     ReferenceDistribution,
 )
 from ...core.solved_model import SolvedModel
-from ..allocation import BufferPlan, FieldLayout, is_absent
+from ..allocation import BufferPlan, FieldLayout, is_empty
 from ..mc_constructs import MCStep, SourceArgs
 
 _FILL_COLUMNS = np.zeros(1, dtype=np.int64)
@@ -130,7 +130,7 @@ def _source_binding(
 def _source_layout(plan: BufferPlan, producer: MCStep, field: str) -> FieldLayout:
     """One producer's field, which its layout has to have reserved a buffer for."""
     layout = plan[producer.name].out_fields.get(field)
-    if layout is None or is_absent(layout):
+    if layout is None or is_empty(layout):
         raise ValueError(
             f"Step {producer.name!r} does not produce source field {field!r}."
         )

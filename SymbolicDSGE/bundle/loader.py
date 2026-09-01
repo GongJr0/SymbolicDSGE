@@ -508,13 +508,18 @@ def _load_mc_datagen(archive: BundleArchive, manifest: Manifest) -> MCDataGenRes
         shape = tuple(int(size) for size in shapes[key])
         return _mc_array(columns.get((name, key), {}), f"{name}.{key}", shape)
 
+    states = field("states")
     return MCDataGenResult(
         var_names=tuple(meta["var_names"]),
-        X=field("states"),
+        X=states,
         shock_names=tuple(meta["shock_names"]),
         eps=field("shocks"),
         observable_names=tuple(meta["observable_names"]),
-        y=field("observables") if "observables" in shapes else None,
+        y=(
+            field("observables")
+            if "observables" in shapes
+            else np.empty((*states.shape[:2], 0), dtype=np.float64)
+        ),
     )
 
 
