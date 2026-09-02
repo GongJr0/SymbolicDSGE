@@ -167,14 +167,29 @@ typedef enum {
  * a lane of its own. One layout serves them all because only the scratch width
  * varies, and that width is named nowhere but `layout.c`.
  *
- * ``order`` is read by ``diff`` alone. A rolling window never reaches the
- * arena: it bounds a loop and scales a mean, while the running state stays p or
- * 2p wide whatever it is. The window does set the output shape,
- * out(n - window + 1, p), which the caller resolves from the field, not here.
+ * Both shape parameters are taken so a caller never has to know which one a
+ * kind reads. ``order`` is read by ``diff`` alone, and no kind sizes its
+ * scratch against a window: a window bounds a loop and scales a mean, while the
+ * running state stays p or 2p wide whatever it is. It does set the output
+ * shape, which `sdsge_mc_transform_output_rows` below names.
  *
  * Scratch by kind: standardize 2p, log none, log_diff p, diff order*p,
  * rolling_mean p, rolling_var 2p, rolling_std 2p. */
-arena_offset sdsge_mc_transform_arena_offset(i64 kind, i64 n, i64 p, i64 order);
-arena_size sdsge_mc_transform_arena_size(i64 kind, i64 n, i64 p, i64 order);
+arena_offset sdsge_mc_transform_arena_offset(i64 kind, i64 n, i64 p, i64 order,
+                                             i64 window);
+arena_size sdsge_mc_transform_arena_size(i64 kind, i64 n, i64 p, i64 order,
+                                         i64 window);
+
+/* The rows a transform writes from an n-row input, over the p columns it was
+ * given. A scalar rather than a layout: the output is one buffer with no
+ * interior boundary, so the row count is all there is to agree on, and the
+ * kernels bound their own writes by it.
+ *
+ * ``order`` is read by ``diff`` alone and ``window`` by the rolling kinds; the
+ * rest ignore both. An order or a window wider than the input yields no rows.
+ *
+ * Rows by kind: standardize n, log n, log_diff n-1, diff n-order, rolling_mean,
+ * rolling_var and rolling_std n-window+1. */
+i64 sdsge_mc_transform_output_rows(i64 kind, i64 n, i64 order, i64 window);
 
 #endif // !SDSGE_MC_LAYOUT_H

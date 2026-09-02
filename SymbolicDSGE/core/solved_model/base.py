@@ -12,6 +12,7 @@ from typing import (
     Union,
     Literal,
     Mapping,
+    Sequence,
     cast,
 )
 
@@ -35,8 +36,13 @@ from ..sim_result import StatePath, SimResult
 from ..compiled_model import CompiledModel
 from ..config import ModelConfig
 from ...kalman.config import KalmanConfig
-from ...kalman.interface import KalmanInterface, _KFMatrices
+from ...kalman.resolvers import (
+    resolve_extended_args,
+    resolve_linear_args,
+    resolve_unscented_args,
+)
 from ...kalman.filter import (
+    KalmanFilter,
     FilterRawResult,
     FilterResult,
     UnscentedFilterRawResult,
@@ -430,7 +436,7 @@ class SolvedModel(ABC, Generic[Policy]):
 
     def _build_C_d_from_obs(
         self,
-        y_names: list[str],
+        y_names: Sequence[str],
     ) -> Tuple[NDF, NDF]:
         """``(C, d)`` for ``y_names``, memoized against the calibration."""
         key = (tuple(y_names), self.config.calibration.fingerprint())
@@ -457,7 +463,6 @@ class SolvedModel(ABC, Generic[Policy]):
         return_shocks: bool = False,
         P0: NDF | None = None,
         R: NDF | None = None,
-        _debug: bool = False,
     ) -> FilterResult | UnscentedFilterResult:
         raw = self._kalman_raw(
             y=y,
@@ -467,9 +472,9 @@ class SolvedModel(ABC, Generic[Policy]):
             jitter=jitter,
             symmetrize=symmetrize,
             return_shocks=return_shocks,
+            joseph_cov=joseph_cov,
             P0=P0,
             R=R,
-            _debug=_debug,
         )
         if isinstance(raw, UnscentedFilterRawResult):
             # Already levels: the unscented kernel forms them for its own
@@ -490,59 +495,58 @@ class SolvedModel(ABC, Generic[Policy]):
         jitter: float | float64 | None = None,
         symmetrize: bool = False,
         return_shocks: bool = False,
+        joseph_cov: bool = True,
         P0: NDF | None = None,
         R: NDF | None = None,
-        _debug: bool = False,
     ) -> FilterRawResult | UnscentedFilterRawResult:
-        params = asarray(
-            [self.config.calibration.parameters[p] for p in self.compiled.calib_params],
-            dtype=float64,
-        )
-
-        meas_addr: int | None = None
-        jac_addr: int | None = None
-
-        if filter_mode in {"extended", "unscented"}:
-            obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
-            if observables is None:
-                selected_obs = list(self.compiled.observable_names)
-            else:
-                selected_obs = list(observables)
-            selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])
-
-            meas_addr = self.compiled.construct_measurement_cfunc(selected_obs).address
-            jac_addr = self.compiled.construct_observable_jacobian_cfunc(
-                selected_obs
-            ).address
-
+        if filter_mode == "linear":
+            return KalmanFilter.run_raw(
+                **resolve_linear_args(
+                    self,
+                    y,
+                    observables,
+                    x0=x0,
+                    P0=P0,
+                    R=R,
+                    jitter=jitter,
+                    symmetrize=symmetrize,
+                    return_shocks=return_shocks,
+                    joseph_cov=joseph_cov,
+                )
+            )
+        if filter_mode == "extended":
+            return KalmanFilter.run_extended_raw(
+                **resolve_extended_args(
+                    self,
+                    y,
+                    observables,
+                    x0=x0,
+                    P0=P0,
+                    R=R,
+                    jitter=jitter,
+                    symmetrize=symmetrize,
+                    return_shocks=return_shocks,
+                    joseph_cov=joseph_cov,
+                )
+            )
         if filter_mode == "unscented":
             if return_shocks:
                 raise ValueError(
                     "return_shocks is not supported for unscented filtering."
                 )
-            if self.policy.order != 2:
-                raise ValueError(
-                    "Unscented Kalman Filter requires a second order solution."
+            return KalmanFilter.run_unscented_raw(
+                **resolve_unscented_args(
+                    self,
+                    y,
+                    observables,
+                    x0=x0,
+                    P0=P0,
+                    R=R,
+                    jitter=jitter,
+                    symmetrize=symmetrize,
                 )
-        ki = KalmanInterface(
-            model=self,
-            filter_mode=filter_mode,
-            observables=observables,
-            y=y,
-            P0=P0,
-            R=R,
-            meas_addr=meas_addr,
-            jac_addr=jac_addr,
-            calib_params=params,
-            jitter=jitter,
-            symmetrize=symmetrize,
-            return_shocks=return_shocks,
-        )
-
-        run = ki.filter_raw(x0=x0, _debug=_debug)
-        if _debug:
-            print(ki._debug_info)
-        return run
+            )
+        raise ValueError(f"Unrecognized filter mode: {filter_mode!r}")
 
     def fit_kf(
         self,
@@ -581,20 +585,31 @@ class SolvedModel(ABC, Generic[Policy]):
 
         return cast("FitResult", interface.fit_to_kf(y))
 
-    def _kf_cache_get(self, key: tuple) -> _KFMatrices | None:
-        """Cached Kalman matrices for ``key``, or ``None`` on miss."""
+    def _build_Q(self) -> NDF:
+        params = self.config.calibration.parameters
+        shock_std = self.config.calibration.shock_std
+        shock_corr = self.config.calibration.shock_corr
 
-        return self._kf_cache.get(key)
+        shocks = list(self.config.shocks)
+        stds = asarray(
+            [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
+        )
 
-    def _kf_cache_put(self, key: tuple, matrices: _KFMatrices) -> None:
-        """Store Kalman matrices for ``key`` in the cache."""
+        corr = np.eye(len(shocks), dtype=float64)
+        n = len(stds)
+        for i in range(n):
+            for j in range(i + 1, n):
+                pair = frozenset({shocks[i], shocks[j]})
+                corr_sym = shock_corr.get(pair, None)
+                if corr_sym is not None and corr_sym in params:
+                    corr_ij = params[corr_sym]
+                else:
+                    corr_ij = 0.0
 
-        self._kf_cache[key] = matrices
+                corr[i, j] = corr_ij
+                corr[j, i] = corr_ij
 
-    def clear_kf_cache(self) -> None:
-        """Drop cached Kalman matrices."""
-        self._kf_cache.clear()
-        self._cd_cache.clear()
+        return np.outer(stds, stds) * corr
 
     @property
     def config(self) -> ModelConfig:
@@ -606,10 +621,6 @@ class SolvedModel(ABC, Generic[Policy]):
 
     @cached_property
     def _cd_cache(self) -> dict[tuple, Tuple[NDF, NDF]]:
-        return {}
-
-    @cached_property
-    def _kf_cache(self) -> dict[tuple, _KFMatrices]:
         return {}
 
     def __repr__(self) -> str:

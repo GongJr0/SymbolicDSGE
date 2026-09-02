@@ -186,7 +186,8 @@ i64 sdsge_rolling_mean(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
     out[j] = sum[j] * scale;
   }
 
-  const i64 n_out = n - window + 1;
+  const i64 n_out = sdsge_mc_transform_output_rows(
+      SDSGE_MC_TRANSFORM_ROLLING_MEAN, n, 0, window);
 
   /*
    * Slide from x[i - 1 : i - 1 + window]
@@ -228,7 +229,10 @@ static i64 rolling_moment_ax0(const f64 *SDSGE_RESTRICT x, const i64 n,
 
   welford_ax0(x, window, p, mean, m2); /* Welford state for x[0:window] */
 
-  const i64 n_out = n - window + 1;
+  const i64 n_out =
+      sdsge_mc_transform_output_rows(take_sqrt ? SDSGE_MC_TRANSFORM_ROLLING_STD
+                                               : SDSGE_MC_TRANSFORM_ROLLING_VAR,
+                                     n, 0, window);
   const f64 inv_denominator = 1.0 / (f64)(window - ddof);
   const f64 inv_window = 1.0 / (f64)window;
   const f64 inv_reduced = (window > 1) ? 1.0 / (f64)(window - 1) : 0.0;
@@ -310,7 +314,7 @@ int sdsge_mc_standardize_runner(const i64 rep_idx,
   (void)int_work;
   const sdsge_mc_standardize_step_ctx *config = ctx;
   const arena_offset in_off = sdsge_mc_transform_arena_offset(
-      SDSGE_MC_TRANSFORM_STANDARDIZE, config->n, config->p, 0);
+      SDSGE_MC_TRANSFORM_STANDARDIZE, config->n, config->p, 0, 0);
   const i64 status =
       sdsge_standardize_ax0(float_in_work, config->ddof, config->n, config->p,
                             float_in_work + in_off.foffset[0], float_out);
@@ -338,7 +342,7 @@ int sdsge_mc_log_diff_runner(const i64 rep_idx,
   (void)int_work;
   const sdsge_mc_log_diff_step_ctx *config = ctx;
   const arena_offset in_off = sdsge_mc_transform_arena_offset(
-      SDSGE_MC_TRANSFORM_LOG_DIFF, config->n, config->p, 0);
+      SDSGE_MC_TRANSFORM_LOG_DIFF, config->n, config->p, 0, 0);
   const i64 status =
       sdsge_log_diff(float_in_work, config->offset, config->n, config->p,
                      float_in_work + in_off.foffset[0], float_out);
@@ -353,7 +357,7 @@ int sdsge_mc_diff_runner(const i64 rep_idx, f64 *SDSGE_RESTRICT float_in_work,
   (void)int_work;
   const sdsge_mc_diff_step_ctx *config = ctx;
   const arena_offset in_off = sdsge_mc_transform_arena_offset(
-      SDSGE_MC_TRANSFORM_DIFF, config->n, config->p, config->order);
+      SDSGE_MC_TRANSFORM_DIFF, config->n, config->p, config->order, 0);
   const i64 status =
       sdsge_diff(float_in_work, config->order, config->n, config->p,
                  float_in_work + in_off.foffset[0], float_out);
@@ -369,7 +373,7 @@ int sdsge_mc_rolling_mean_runner(const i64 rep_idx,
   (void)int_work;
   const sdsge_mc_rolling_mean_step_ctx *config = ctx;
   const arena_offset in_off = sdsge_mc_transform_arena_offset(
-      SDSGE_MC_TRANSFORM_ROLLING_MEAN, config->n, config->p, 0);
+      SDSGE_MC_TRANSFORM_ROLLING_MEAN, config->n, config->p, 0, config->window);
   const i64 status =
       sdsge_rolling_mean(float_in_work, config->n, config->p, config->window,
                          float_in_work + in_off.foffset[0], float_out);
@@ -385,7 +389,7 @@ int sdsge_mc_rolling_var_runner(const i64 rep_idx,
   (void)int_work;
   const sdsge_mc_rolling_var_step_ctx *config = ctx;
   const arena_offset in_off = sdsge_mc_transform_arena_offset(
-      SDSGE_MC_TRANSFORM_ROLLING_VAR, config->n, config->p, 0);
+      SDSGE_MC_TRANSFORM_ROLLING_VAR, config->n, config->p, 0, config->window);
   const i64 status = sdsge_rolling_var(
       float_in_work, config->n, config->p, config->window, config->ddof,
       float_in_work + in_off.foffset[0], float_out);
@@ -401,7 +405,7 @@ int sdsge_mc_rolling_std_runner(const i64 rep_idx,
   (void)int_work;
   const sdsge_mc_rolling_std_step_ctx *config = ctx;
   const arena_offset in_off = sdsge_mc_transform_arena_offset(
-      SDSGE_MC_TRANSFORM_ROLLING_STD, config->n, config->p, 0);
+      SDSGE_MC_TRANSFORM_ROLLING_STD, config->n, config->p, 0, config->window);
   const i64 status = sdsge_rolling_std(
       float_in_work, config->n, config->p, config->window, config->ddof,
       float_in_work + in_off.foffset[0], float_out);

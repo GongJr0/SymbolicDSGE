@@ -27,7 +27,8 @@ cdef extern from "layout.h":
         SDSGE_MC_TRANSFORM_ROLLING_STD
 
     arena_size sdsge_mc_transform_arena_size(int64_t kind, int64_t n, int64_t p,
-                                             int64_t order) nogil
+                                             int64_t order,
+                                             int64_t window) nogil
 
     ctypedef enum sdsge_mc_regression_kind:
         SDSGE_MC_REGRESSION_OLS
@@ -119,18 +120,21 @@ cdef dict _TRANSFORM_KINDS = {
 }
 
 
-def transform_arena_size(str kind, int64_t n, int64_t p, int64_t param=0):
+def transform_arena_size(str kind, int64_t n, int64_t p, int64_t order=0,
+                         int64_t window=0):
     """Return the complete input and scratch arena requirement for a transform.
 
-    ``param`` is the difference order. A rolling window never reaches the arena;
-    it sets the output shape, which the caller resolves from the field.
+    Both shape parameters are taken so the caller never has to know which one a
+    kind reads. No scratch is sized against a window.
     """
     if kind == "passthrough":
         return _size(sdsge_passthrough_arena_size(n, p))
     cdef object code = _TRANSFORM_KINDS.get(kind)
     if code is None:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
-    return _size(sdsge_mc_transform_arena_size(<int64_t>code, n, p, param))
+    return _size(
+        sdsge_mc_transform_arena_size(<int64_t>code, n, p, order, window)
+    )
 
 
 def regression_arena_size(

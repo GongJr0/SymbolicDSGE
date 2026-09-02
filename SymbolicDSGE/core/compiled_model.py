@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 
 from dataclasses import dataclass, asdict, field
 from functools import cached_property
-from typing import Callable, Any, Mapping
+from typing import Callable, Any, Mapping, Sequence
 
 from sympy.logic.boolalg import Boolean
 
@@ -449,7 +449,7 @@ class CompiledModel:
     def build_affine_measurement_matrices(
         self,
         params: Mapping[Any, Any] | Any,
-        observables: list[str],
+        observables: Sequence[str],
         ss: NDF,
     ) -> tuple[NDF, NDF]:
         param_vec = self._coerce_param_vector(params)
@@ -468,7 +468,7 @@ class CompiledModel:
 
     def _normalize_observables(
         self,
-        observables: list[str] | tuple[str, ...] | None,
+        observables: Sequence[str] | None,
     ) -> tuple[str, ...]:
         if observables is None:
             return tuple(self.observable_names)
@@ -490,7 +490,7 @@ class CompiledModel:
 
     def construct_measurement_cfunc(
         self,
-        observables: list[str] | tuple[str, ...] | None = None,
+        observables: Sequence[str] | None = None,
     ) -> Any:
         obs = self._normalize_observables(observables)
         cache = self._measurement_cfunc_cache
@@ -508,7 +508,7 @@ class CompiledModel:
 
     def construct_observable_jacobian_cfunc(
         self,
-        observables: list[str] | tuple[str, ...] | None = None,
+        observables: Sequence[str] | None = None,
     ) -> Any:
         obs = self._normalize_observables(observables)
         cache = self._observable_jacobian_cfunc_cache

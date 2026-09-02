@@ -62,9 +62,9 @@ def _sweep() -> dict[str, list[int]]:
     for kind in _TRANSFORMS:
         for n in (1, 8, 40):
             for p in (1, 3):
-                for param in (0, 2):
-                    key = f"transform:{kind}:{n}:{p}:{param}"
-                    out[key] = list(_arena.transform_arena_size(kind, n, p, param))
+                for order in (0, 2):
+                    key = f"transform:{kind}:{n}:{p}:{order}"
+                    out[key] = list(_arena.transform_arena_size(kind, n, p, order))
 
     for kind in _REGRESSIONS:
         for n in (4, 50):

@@ -464,7 +464,9 @@ static i64 sdsge_mc_transform_scratch(const sdsge_mc_transform_kind kind,
 }
 
 arena_offset sdsge_mc_transform_arena_offset(const i64 kind, const i64 n,
-                                             const i64 p, const i64 order) {
+                                             const i64 p, const i64 order,
+                                             const i64 window) {
+  (void)window; // no kind sizes its scratch against a window
   arena_offset off = make_offset(2, 0);
   off.foffset[0] = n * p; // input(n, p)
   off.foffset[1] =
@@ -474,7 +476,36 @@ arena_offset sdsge_mc_transform_arena_offset(const i64 kind, const i64 n,
 }
 
 arena_size sdsge_mc_transform_arena_size(const i64 kind, const i64 n,
-                                         const i64 p, const i64 order) {
-  const arena_offset off = sdsge_mc_transform_arena_offset(kind, n, p, order);
+                                         const i64 p, const i64 order,
+                                         const i64 window) {
+  const arena_offset off =
+      sdsge_mc_transform_arena_offset(kind, n, p, order, window);
   return make_sizer(off.foffset[off.n_fbuf - 1], 0);
+}
+
+/* The one place a transform's output row count is named. No `default`, so a
+ * kind added to the enum without a rule here fails the build under -Wswitch. */
+i64 sdsge_mc_transform_output_rows(const i64 kind, const i64 n, const i64 order,
+                                   const i64 window) {
+  i64 rows = 0;
+
+  switch ((sdsge_mc_transform_kind)kind) {
+  case SDSGE_MC_TRANSFORM_STANDARDIZE:
+  case SDSGE_MC_TRANSFORM_LOG:
+    rows = n; // elementwise
+    break;
+  case SDSGE_MC_TRANSFORM_LOG_DIFF:
+    rows = n - 1; // row i differences against row i - 1
+    break;
+  case SDSGE_MC_TRANSFORM_DIFF:
+    rows = n - order; // one row consumed per level
+    break;
+  case SDSGE_MC_TRANSFORM_ROLLING_MEAN:
+  case SDSGE_MC_TRANSFORM_ROLLING_VAR:
+  case SDSGE_MC_TRANSFORM_ROLLING_STD:
+    rows = n - window + 1; // one row per trailing window
+    break;
+  }
+
+  return (rows > 0) ? rows : 0;
 }

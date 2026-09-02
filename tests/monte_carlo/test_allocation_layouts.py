@@ -11,7 +11,10 @@ import pytest
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE._ckernels.monte_carlo._offsets import ArenaOffset
+from SymbolicDSGE._ckernels.monte_carlo._offsets import (
+    ArenaOffset,
+    transform_output_rows,
+)
 from SymbolicDSGE.monte_carlo.allocation import (
     ArenaSize,
     _compile_field_layout,
@@ -171,6 +174,32 @@ def test_a_transform_wider_than_its_source_clamps_to_zero_rows(
     )
 
     assert plans["out"].out_fields["payload"].shape == (0, 2)
+
+
+@pytest.mark.parametrize(
+    ("kind", "kwargs", "expected"),
+    [
+        ("standardize", {}, T),
+        ("log", {}, T),
+        ("log_diff", {}, T - 1),
+        ("diff", {"order": 1}, T - 1),
+        ("diff", {"order": 3}, T - 3),
+        ("diff", {"order": T + 5}, 0),
+        ("rolling_mean", {"window": 4}, T - 3),
+        ("rolling_var", {"window": 1}, T),
+        ("rolling_std", {"window": T + 5}, 0),
+    ],
+)
+def test_the_native_rule_gives_the_rows_the_plan_lays_out(
+    kind: str, kwargs: dict[str, int], expected: int
+) -> None:
+    """The kernels bound their own writes by this, so it answers for every kind."""
+    assert transform_output_rows(kind, T, **kwargs) == expected
+
+
+def test_an_unknown_transform_kind_has_no_native_row_count() -> None:
+    with pytest.raises(ValueError, match="Unsupported native transform kind"):
+        transform_output_rows("fourier", T)
 
 
 def test_an_unknown_transform_type_has_no_output_shape() -> None:

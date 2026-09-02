@@ -258,7 +258,11 @@ def _resolve_input_asize(
                 return ArenaSize(n * p)
             return _asize(
                 _arena.transform_arena_size(
-                    step.step_type or "", n, p, _transform_arena_param(step)
+                    step.step_type or "",
+                    n,
+                    p,
+                    int(step.kwargs.get("order", DEFAULT_ORDER)),
+                    int(step.kwargs.get("window", DEFAULT_WINDOW)),
                 )
             )
         case OpType.FILTER:
@@ -371,15 +375,6 @@ def _resolve_regression_input_asize(
 def _filter_mode(step: MCStep) -> str:
     """A filter's mode, which selects the kernel rather than configuring one."""
     return str(step.kwargs.get("filter_mode", DEFAULT_FILTER_MODE))
-
-
-def _transform_arena_param(step: MCStep) -> int:
-    """The order or window a transform's arena is sized against, else nothing."""
-    if step.step_type == "diff":
-        return int(step.kwargs.get("order", DEFAULT_ORDER))
-    if step.step_type in {"rolling_mean", "rolling_std", "rolling_var"}:
-        return int(step.kwargs.get("window", DEFAULT_WINDOW))
-    return 0
 
 
 def _breusch_godfrey_lags(step: MCStep) -> int:
@@ -495,7 +490,7 @@ def _selected_source_shape(
         )
 
     n_rows, n_columns = shape
-    n_rows = max(0, n_rows - selector.row_start)
+    n_rows = n_rows - selector.row_start
     columns = selector.column_selector
     if isinstance(columns, slice):
         n_columns = len(range(*columns.indices(n_columns)))
@@ -509,31 +504,34 @@ def _transform_output_shape(
     input_shape: Shape,
     kwargs: Mapping[str, Any],
 ) -> Shape:
+    """A transform's payload shape, over the rows the native rule gives it.
+
+    ``passthrough`` and ``transform:custom`` name no layout kind: one keeps its
+    source's shape, the other carries the shape its caller declared.
+    """
     n_rows, n_columns = input_shape
-    match step_type:
-        case "transform:custom":
-            shape = tuple(int(size) for size in kwargs["output_shape"])
-            if len(shape) != 2 or any(size < 0 for size in shape):
-                raise ValueError(
-                    "Custom transform output_shape must contain two non-negative dimensions."
-                )
-            return shape
-        case "passthrough":
-            return n_rows, n_columns
-        case "standardize" | "log":
-            return n_rows, n_columns
-        case "log_diff":
-            return max(0, n_rows - 1), n_columns
-        case "diff":
-            return max(0, n_rows - int(kwargs.get("order", DEFAULT_ORDER))), n_columns
-        case "rolling_mean" | "rolling_std" | "rolling_var":
-            window = int(kwargs.get("window", DEFAULT_WINDOW))
-            return max(0, n_rows - window + 1), n_columns
-        case _:
-            raise NotImplementedError(
-                f"Output-layout resolution is not implemented for transform "
-                f"step type {step_type!r}."
+    if step_type == "transform:custom":
+        shape = tuple(int(size) for size in kwargs["output_shape"])
+        if len(shape) != 2 or any(size < 0 for size in shape):
+            raise ValueError(
+                "Custom transform output_shape must contain two non-negative dimensions."
             )
+        return shape
+    if step_type == "passthrough":
+        return n_rows, n_columns
+    try:
+        rows = _offsets.transform_output_rows(
+            step_type,
+            n_rows,
+            int(kwargs.get("order", DEFAULT_ORDER)),
+            int(kwargs.get("window", DEFAULT_WINDOW)),
+        )
+    except ValueError as unsupported:
+        raise NotImplementedError(
+            f"Output-layout resolution is not implemented for transform "
+            f"step type {step_type!r}."
+        ) from unsupported
+    return rows, n_columns
 
 
 def _resolve_datagen_fields(

@@ -85,8 +85,24 @@ jobs:
         if: steps.sr_diff.outputs.sr_changed == 'true'
         run: uv sync --frozen --all-extras
 
+      - name: Install Julia
+        # juliapkg adopts any PATH `julia` whose version satisfies pysr's compat
+        # range, without checking that it runs. The runner image ships one that
+        # passes the version check but has no system image, so the depot
+        # precompiles against it and then fails to load. Install a known-good
+        # Julia and point juliapkg straight at it.
+        if: steps.sr_diff.outputs.sr_changed == 'true'
+        uses: julia-actions/setup-julia@v3
+        with:
+          version: "1.11.9"
+
+      - name: Pin juliapkg to the installed Julia
+        if: steps.sr_diff.outputs.sr_changed == 'true'
+        shell: bash
+        run: echo "PYTHON_JULIAPKG_EXE=$(command -v julia)" >> "$GITHUB_ENV"
+
       - name: Pre-warm Julia depot
-        # First `import pysr` triggers juliapkg to install Julia and precompile
+        # First `import pysr` triggers juliapkg to precompile
         # SymbolicRegression.jl into the depot. Doing that once here, in a single
         # process, populates the depot so the parallel `sr` tests only read it.
         # Without this, several xdist workers race to precompile into the same

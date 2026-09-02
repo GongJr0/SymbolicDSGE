@@ -1,5 +1,5 @@
 def transform_arena_size(
-    kind: str, n: int, p: int, param: int = 0
+    kind: str, n: int, p: int, order: int = 0, window: int = 0
 ) -> tuple[int, int]: ...
 def regression_arena_size(
     kind: str, n: int, p: int, intercept: bool, n_alpha: int = 0, max_iter: int = 0

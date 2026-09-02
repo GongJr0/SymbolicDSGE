@@ -19,14 +19,13 @@ from ..._ckernels.monte_carlo._runner import (
     ljung_box_step,
     wald_step,
 )
-from ..allocation import BufferPlan
+from ..allocation import BufferPlan, _selected_source_shape
 from ..defaults import DEFAULT_WALD_KIND_NAME
 from ..mc_constructs import MCStep
 from .utils import (
     NDF,
     FloatInputBinding,
     _supplied,
-    _selected_shape,
     _source_binding,
 )
 
@@ -38,8 +37,8 @@ def lower_test_step(
     plan: BufferPlan,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile source transfers and context constants for one diagnostic."""
-    n, first_columns = _selected_shape(
-        source_indices[0], step.source_args[0], steps, plan
+    n, first_columns = _selected_source_shape(
+        plan, steps, source_indices[0], step.source_args[0]
     )
     kind = step.step_type
     if kind == "wald":
@@ -60,7 +59,9 @@ def lower_test_step(
                 target_row_stride=1,
             ),
         )
-    _, x_columns = _selected_shape(source_indices[1], step.source_args[1], steps, plan)
+    _, x_columns = _selected_source_shape(
+        plan, steps, source_indices[1], step.source_args[1]
+    )
     lags = (
         int(step.kwargs.get("lags", DEFAULT_BREUSCH_GODFREY_LAGS))
         if kind == "breusch_godfrey"

@@ -6,7 +6,12 @@ class ArenaOffset(NamedTuple):
     ioffset: tuple[int, ...]
     iwidth: tuple[int, ...]
 
-def transform_offsets(kind: str, n: int, p: int, param: int = 0) -> ArenaOffset: ...
+def transform_offsets(
+    kind: str, n: int, p: int, order: int = 0, window: int = 0
+) -> ArenaOffset: ...
+def transform_output_rows(
+    kind: str, n: int, order: int = 0, window: int = 0
+) -> int: ...
 def regression_offsets(
     kind: str, n: int, p: int, intercept: bool, n_alpha: int = 0, max_iter: int = 0
 ) -> ArenaOffset: ...
