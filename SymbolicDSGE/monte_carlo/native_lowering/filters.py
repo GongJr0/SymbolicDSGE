@@ -8,7 +8,12 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
-from SymbolicDSGE.kalman.interface import KalmanInterface
+from SymbolicDSGE.kalman.interface import (
+    _resolve_obs_names,
+    _build_constant_R,
+    _build_P0,
+    _build_unscented_z0,
+)
 
 from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
@@ -46,9 +51,7 @@ def lower_filter_step(
     source_layout = plan[datagen_step.name].out_fields["observables"]
     T, source_n_obs = source_layout.shape
     mode = step.kwargs.get("filter_mode", DEFAULT_FILTER_MODE)
-    placeholder_y = np.zeros(
-        (T, len(requested_names or source_names)), dtype=np.float64
-    )
+
     canonical_names = _canonical_observables(reference, requested_names)
     measurement_addr = 0
     jacobian_addr = 0
@@ -62,18 +65,8 @@ def lower_filter_step(
                     canonical_names
                 ).address
             )
-    interface = KalmanInterface(
-        model=reference,
-        observables=list(requested_names) if requested_names is not None else None,
-        y=placeholder_y,
-        filter_mode=mode,
-        meas_addr=measurement_addr or None,
-        jac_addr=jacobian_addr or None,
-        calib_params=_model_params(reference),
-        R=step.kwargs.get("R"),
-        P0=step.kwargs.get("P0"),
-    )
-    canonical_names = tuple(interface.observables)
+
+    canonical_names = _resolve_obs_names(reference, requested_names)
     if len(canonical_names) != source_n_obs and requested_names is None:
         raise ValueError("Filter observations do not match the DATAGEN output.")
     source_columns = _filter_source_columns(source_names, canonical_names)
@@ -88,16 +81,20 @@ def lower_filter_step(
         mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
     ).foffset
 
+    R = _build_constant_R(reference, step.kwargs.get("R"), canonical_names)
+    Q = reference._build_Q()
+    P0 = _build_P0(reference, mode, step.kwargs.get("P0"))
+
     if mode == "linear":
-        C, d = interface._get_C_d()
+        C, d = reference._build_C_d_from_obs(canonical_names)
         x0 = _filter_x0(step.kwargs.get("x0"), n_var)
         before_y = (
-            _flat_f64(interface.A),
-            _flat_f64(interface.B),
+            _flat_f64(reference.policy.A),
+            _flat_f64(reference.policy.B),
             _flat_f64(C),
             _flat_f64(d),
-            _flat_f64(interface.Q),
-            _flat_f64(interface.R),
+            _flat_f64(Q),
+            _flat_f64(R),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
@@ -113,17 +110,17 @@ def lower_filter_step(
                     step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
                 ),
             ),
-            _filter_bindings(before_y, binding, (x0, interface.P0), input_offsets),
+            _filter_bindings(before_y, binding, (x0, P0), input_offsets),
         )
     if mode == "extended":
         x0 = _filter_x0(step.kwargs.get("x0"), n_var)
         params = _model_params(reference)
         before_y = (
-            _flat_f64(interface.A),
-            _flat_f64(interface.B),
+            _flat_f64(reference.policy.A),
+            _flat_f64(reference.policy.B),
             params,
-            _flat_f64(interface.Q),
-            _flat_f64(interface.R),
+            _flat_f64(Q),
+            _flat_f64(R),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
@@ -142,7 +139,7 @@ def lower_filter_step(
                     step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
                 ),
             ),
-            _filter_bindings(before_y, binding, (x0, interface.P0), input_offsets),
+            _filter_bindings(before_y, binding, (x0, P0), input_offsets),
         )
 
     else:  # mode == "unscented"
@@ -156,7 +153,7 @@ def lower_filter_step(
         n_state = reference.compiled.n_state
         n_ctrl = reference.compiled.n_ctrl
         params = _model_params(reference)
-        z0 = interface._build_unscented_z0(step.kwargs.get("x0"))
+        z0 = _build_unscented_z0(reference, step.kwargs.get("x0"))
         before_y = (
             _flat_f64(policy.hx),
             _flat_f64(policy.gx),
@@ -171,8 +168,8 @@ def lower_filter_step(
             _flat_f64(policy.gss),
             _flat_f64(policy.steady_state),
             params,
-            _flat_f64(interface.Q),
-            _flat_f64(interface.R),
+            _flat_f64(Q),
+            _flat_f64(R),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
@@ -196,7 +193,7 @@ def lower_filter_step(
                     "jitter",
                 ),
             ),
-            _filter_bindings(before_y, binding, (z0, interface.P0), input_offsets),
+            _filter_bindings(before_y, binding, (z0, P0), input_offsets),
         )
 
 

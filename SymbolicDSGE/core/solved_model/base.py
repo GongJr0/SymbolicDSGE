@@ -12,6 +12,7 @@ from typing import (
     Union,
     Literal,
     Mapping,
+    Sequence,
     cast,
 )
 
@@ -430,7 +431,7 @@ class SolvedModel(ABC, Generic[Policy]):
 
     def _build_C_d_from_obs(
         self,
-        y_names: list[str],
+        y_names: Sequence[str],
     ) -> Tuple[NDF, NDF]:
         """``(C, d)`` for ``y_names``, memoized against the calibration."""
         key = (tuple(y_names), self.config.calibration.fingerprint())
@@ -580,6 +581,32 @@ class SolvedModel(ABC, Generic[Policy]):
         )
 
         return cast("FitResult", interface.fit_to_kf(y))
+
+    def _build_Q(self) -> NDF:
+        params = self.config.calibration.parameters
+        shock_std = self.config.calibration.shock_std
+        shock_corr = self.config.calibration.shock_corr
+
+        shocks = list(self.config.shocks)
+        stds = asarray(
+            [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
+        )
+
+        corr = np.eye(len(shocks), dtype=float64)
+        n = len(stds)
+        for i in range(n):
+            for j in range(i + 1, n):
+                pair = frozenset({shocks[i], shocks[j]})
+                corr_sym = shock_corr.get(pair, None)
+                if corr_sym is not None and corr_sym in params:
+                    corr_ij = params[corr_sym]
+                else:
+                    corr_ij = 0.0
+
+                corr[i, j] = corr_ij
+                corr[j, i] = corr_ij
+
+        return np.outer(stds, stds) * corr
 
     def _kf_cache_get(self, key: tuple) -> _KFMatrices | None:
         """Cached Kalman matrices for ``key``, or ``None`` on miss."""

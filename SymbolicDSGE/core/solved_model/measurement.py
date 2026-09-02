@@ -6,7 +6,7 @@ so nothing here is specific to how the model was solved.
 
 from __future__ import annotations
 
-from typing import Tuple, TypedDict
+from typing import Tuple, TypedDict, Sequence
 
 import numpy as np
 from numpy import float64
@@ -25,7 +25,7 @@ class MeasurementSpec(TypedDict):
 
 def build_measurement(
     compiled: CompiledModel, spec: dict[str, MeasurementSpec]
-) -> Tuple[NDF, NDF, list[str]]:
+) -> Tuple[NDF, NDF, Sequence[str]]:
     """``(C, d, names)`` from a hand-written linear measurement spec."""
     n = compiled.n_var
     obs_names = list(spec.keys())
@@ -54,7 +54,7 @@ def build_measurement(
 
 
 def build_C_d_from_obs(
-    compiled: CompiledModel, y_names: list[str], ss: NDF
+    compiled: CompiledModel, y_names: Sequence[str], ss: NDF
 ) -> Tuple[NDF, NDF]:
     """``(C, d)`` for the declared observables, linearized at ``ss``."""
     return compiled.build_affine_measurement_matrices(

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .filter import (
     KalmanFilter,
     FilterRawResult,
@@ -15,12 +17,12 @@ from .validator import (
     _KalmanDebugInfo,
     FilterMode,
 )
-from typing import TYPE_CHECKING, Any, Tuple, Literal
+from typing import TYPE_CHECKING, Any, Sequence, Tuple, Literal
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
 
-from ..core.config import ModelConfig, SymbolGetterDict
+from ..core.config import ModelConfig
 
 
 from dataclasses import dataclass
@@ -113,7 +115,7 @@ class KalmanInterface(KalmanFilter):
         )
         record = model._kf_cache_get(cache_key)
         if record is None:
-            record = _KFMatrices(Q=self._build_Q())
+            record = _KFMatrices(Q=model._build_Q())
             model._kf_cache_put(cache_key, record)
         self._cache_record = record
 
@@ -121,7 +123,7 @@ class KalmanInterface(KalmanFilter):
 
         default_P0 = record.P0_default
         if P0 is None and default_P0 is None:
-            default_P0 = self._build_default_P0()
+            default_P0 = _build_default_P0(model, self.mode)
             record.P0_default = default_P0
         if P0 is None:
             if default_P0 is None:
@@ -141,10 +143,10 @@ class KalmanInterface(KalmanFilter):
             # Fill R lazily so a key first seen with a user/estimated R still
             # gets a constant R when later reused on the default path.
             if record.R_const is None:
-                record.R_const = self._build_constant_R(None)
+                record.R_const = _build_constant_R(model, None, self.observables)
             self.R = record.R_const
         else:
-            self.R = self._build_constant_R(R)
+            self.R = _build_constant_R(model, R, self.observables)
 
         self.meas_addr = meas_addr
         self.jac_addr = jac_addr
@@ -159,24 +161,6 @@ class KalmanInterface(KalmanFilter):
         self.return_shocks = bool(return_shocks)
 
         self._debug_info: _KalmanDebugInfo | None = None
-
-    def _build_default_P0(self) -> NDF:
-        if self.mode == FilterMode.UNSCENTED:
-            n_state = self.model.compiled.n_state
-            err, state_P0 = stationary_covariance(
-                self.model.policy.p, self.B[:n_state, :], self.Q
-            )
-            if err != 0:
-                state_P0 = np.eye(n_state, dtype=float64)
-            P0 = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
-            P0[:n_state, :n_state] = state_P0
-            return P0
-
-        n_var = self.model.compiled.n_var
-        err, P0 = stationary_covariance(self.A, self.B, self.Q)
-        if err != 0:
-            return np.eye(n_var, dtype=float64)
-        return P0
 
     def filter(
         self,
@@ -423,7 +407,7 @@ class KalmanInterface(KalmanFilter):
         if self.return_shocks:
             raise ValueError("return_shocks is not supported for unscented filtering.")
 
-        z0 = self._build_unscented_z0(x0)
+        z0 = _build_unscented_z0(self.model, x0)
         base_args = self._unscented_validated_args
         run_args = base_args | _arg_overrides
         self._validate_unscented_run(run_args, arg_overrides=_arg_overrides)
@@ -470,98 +454,6 @@ class KalmanInterface(KalmanFilter):
 
     def _get_jitter(self, jitter_arg: Float64Like | None) -> float64:
         return float64(jitter_arg) if jitter_arg is not None else float64(0.0)
-
-    def _validate_user_R(self, R: NDF | None) -> NDF | None:
-        if R is None:
-            return None
-
-        given_shape = R.shape
-        implied_shape = (len(self.observables), len(self.observables))
-        if given_shape != implied_shape:
-            raise ValueError(
-                f"Provided R matrix has shape {given_shape} but expected {implied_shape} based on number of observables."
-            )
-
-        return R
-
-    def _build_constant_R(self, R: NDF | None) -> NDF:
-        validated_R = self._validate_user_R(R)
-        if validated_R is not None:
-            return validated_R
-
-        conf = self.kalman_config
-        if conf is None:  # pragma: no cover - gated in KalmanInterface.__init__
-            raise ValueError(
-                "R must be provided when the model has no Kalman configuration."
-            )
-
-        std_map = conf.R_std_param_map
-        corr_map = conf.R_corr_param_map
-        if std_map is not None:
-            # Assemble the constant R from the CURRENT calibration (which may have
-            # moved since parse, e.g. a re-solved model). The name->position maps
-            # fix the layout at parse; only the values are read live here.
-            calib = self.model.config.calibration.parameters
-            params_by_name = {
-                (k if isinstance(k, str) else k.name): float64(v)
-                for k, v in calib.items()
-            }
-
-            def _param(name: str) -> float64:
-                if name not in params_by_name:
-                    raise KeyError(f"Missing R parameter '{name}' in calibration.")
-                return params_by_name[name]
-
-            all_obs = self.model.compiled.observable_names
-            y_syms = [Symbol(name) for name in all_obs]
-            std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
-            corr_vals = {
-                frozenset(Symbol(n) for n in pair): _param(param_name)
-                for pair, param_name in (corr_map or {}).items()
-                if param_name is not None
-            }
-
-            R_full = make_R(y_syms, std_vals, corr_vals)
-
-            obs_idx = self._obs_idx
-            mat_idx = [obs_idx[name] for name in self.observables]
-            return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
-
-        R = conf.R
-        if R is None:
-            raise ValueError("Constant R matrix not specified in configuration.")
-
-        # Get included observables
-        obs_idx = self._obs_idx
-        mat_idx = [obs_idx[name] for name in self.observables]
-        R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
-        return R_subset
-
-    def _build_Q(self) -> NDF:
-        params = self.model_config.calibration.parameters
-        shock_std = self.model.config.calibration.shock_std
-        shock_corr = self.model.config.calibration.shock_corr
-
-        shocks = list(self.model.config.shocks)
-        stds = asarray(
-            [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
-        )
-
-        corr = np.eye(len(shocks), dtype=float64)
-        n = len(stds)
-        for i in range(n):
-            for j in range(i + 1, n):
-                pair = frozenset({shocks[i], shocks[j]})
-                corr_sym = shock_corr.get(pair, None)
-                if corr_sym is not None and corr_sym in params:
-                    corr_ij = params[corr_sym]
-                else:
-                    corr_ij = 0.0
-
-                corr[i, j] = corr_ij
-                corr[j, i] = corr_ij
-
-        return np.outer(stds, stds) * corr
 
     def _get_C_d(self) -> Tuple[NDF, NDF]:
         return self.model._build_C_d_from_obs(self.observables)
@@ -653,28 +545,6 @@ class KalmanInterface(KalmanFilter):
         if self._uses_const_R and not arg_overrides:
             self._cache_record.validated = True
 
-    def _build_unscented_z0(self, x0: NDF | None) -> NDF:
-        n_state = self.model.compiled.n_state
-        n_var = self.model.compiled.n_var
-        if x0 is None:
-            x0_state = np.zeros((n_state,), dtype=float64)
-        else:
-            raw = asarray(x0, dtype=float64)
-            if raw.ndim != 1:
-                raise ValueError("x0 must be a 1D array.")
-            if raw.shape[0] == n_state:
-                x0_state = raw.copy()
-            elif raw.shape[0] == n_var:
-                x0_state = raw[:n_state].copy()
-            else:
-                raise ValueError(
-                    f"x0 must have length {n_state} or {n_var}, got {raw.shape[0]}."
-                )
-
-        z0 = np.zeros((2 * n_state,), dtype=float64)
-        z0[:n_state] = x0_state
-        return z0
-
     def _ukf_array(self, name: str) -> NDF:
         value: NDF | None = getattr(self.model.policy, name, None)
         if value is None:
@@ -732,7 +602,6 @@ class KalmanInterface(KalmanFilter):
 
     @property
     def _unscented_validated_args(self) -> dict:
-        n_state = self.model.compiled.n_state
         return {
             "meas_addr": self.meas_addr,
             "hx": self.model.policy.p,
@@ -766,3 +635,161 @@ def _resolve_P0(
     out = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
     out[:n_state, :n_state] = P0[:n_state, :n_state]
     return out
+
+
+def _resolve_obs_names(
+    model: SolvedModel, obs: Sequence[str] | None
+) -> tuple[str, ...]:
+    """
+    Return (obs_canonical, y_reordered)
+
+    Canonical order is model.compiled.observable_names.
+    - If y is ndarray: assume columns are in the *provided* obs order (or config/default if obs is None)
+    - If y is DataFrame: require it contains the provided obs names and align by column labels
+    """
+    # Canonical order (source of truth)
+    canon = model.compiled.observable_names
+    canon_idx = {name: i for i, name in enumerate(model.compiled.observable_names)}
+
+    if obs is None:
+        obs_given = list(canon)  # default: all observables in canonical order
+    else:
+        obs_given = list(obs)
+
+    if len(obs_given) == 0:
+        raise ValueError("Observable list is empty.")
+
+    if len(set(obs_given)) != len(obs_given):
+        dupes = [n for n in obs_given if obs_given.count(n) > 1]
+        raise ValueError(f"Duplicate observables provided: {sorted(set(dupes))}")
+
+    missing = [n for n in obs_given if n not in canon_idx]
+    if missing:
+        raise ValueError(
+            f"Unknown observables not in model.compiled.observable_names: {missing}"
+        )
+
+    obs_canonical = sorted(obs_given, key=lambda n: canon_idx[n])
+
+    return tuple(obs_canonical)
+
+
+def _validate_user_R(R: NDF | None, observables: Sequence[str]) -> NDF | None:
+    if R is None:
+        return None
+
+    given_shape = R.shape
+    implied_shape = (len(observables), len(observables))
+    if given_shape != implied_shape:
+        raise ValueError(
+            f"Provided R matrix has shape {given_shape} but expected {implied_shape} based on number of observables."
+        )
+
+    return R
+
+
+def _build_constant_R(
+    model: SolvedModel, R: NDF | None, observables: Sequence[str]
+) -> NDF:
+    validated_R = _validate_user_R(R, observables)
+    if validated_R is not None:
+        return validated_R
+
+    conf = model.kalman_config
+    if conf is None:  # pragma: no cover - gated in KalmanInterface.__init__
+        raise ValueError(
+            "R must be provided when the model has no Kalman configuration."
+        )
+
+    obs_idx = {name: i for i, name in enumerate(model.compiled.observable_names)}
+
+    std_map = conf.R_std_param_map
+    corr_map = conf.R_corr_param_map
+    if std_map is not None:
+        # Assemble the constant R from the CURRENT calibration (which may have
+        # moved since parse, e.g. a re-solved model). The name->position maps
+        # fix the layout at parse; only the values are read live here.
+        calib = model.config.calibration.parameters
+        params_by_name = {
+            (k if isinstance(k, str) else k.name): float64(v) for k, v in calib.items()
+        }
+
+        def _param(name: str) -> float64:
+            if name not in params_by_name:
+                raise KeyError(f"Missing R parameter '{name}' in calibration.")
+            return params_by_name[name]
+
+        all_obs = model.compiled.observable_names
+        y_syms = [Symbol(name) for name in all_obs]
+        std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
+        corr_vals = {
+            frozenset(Symbol(n) for n in pair): _param(param_name)
+            for pair, param_name in (corr_map or {}).items()
+            if param_name is not None
+        }
+
+        R_full = make_R(y_syms, std_vals, corr_vals)
+
+        mat_idx = [obs_idx[name] for name in observables]
+        return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
+
+    R = conf.R
+    if R is None:
+        raise ValueError("Constant R matrix not specified in configuration.")
+
+    # Get included observables
+    mat_idx = [obs_idx[name] for name in observables]
+    R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
+    return R_subset
+
+
+def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:
+    if filter_mode == FilterMode.UNSCENTED:
+        n_state = model.compiled.n_state
+        err, state_P0 = stationary_covariance(
+            model.policy.p, model.policy.B[:n_state, :], model._build_Q()
+        )
+        if err != 0:
+            state_P0 = np.eye(n_state, dtype=float64)
+        P0 = np.zeros((2 * n_state, 2 * n_state), dtype=float64)
+        P0[:n_state, :n_state] = state_P0
+        return P0
+
+    n_var = model.compiled.n_var
+    err, P0 = stationary_covariance(model.policy.A, model.policy.B, model._build_Q())
+    if err != 0:
+        return np.eye(n_var, dtype=float64)
+    return P0
+
+
+def _build_P0(model: SolvedModel, filter_mode: str, P0: NDF | None) -> NDF:
+    if (
+        resolved := _resolve_P0(
+            FilterMode(filter_mode), model.compiled.n_state, model.compiled.n_var, P0
+        )
+    ) is not None:
+        return resolved
+    return _build_default_P0(model, FilterMode(filter_mode))
+
+
+def _build_unscented_z0(model: SolvedModel, x0: NDF | None) -> NDF:
+    n_state = model.compiled.n_state
+    n_var = model.compiled.n_var
+    if x0 is None:
+        x0_state = np.zeros((n_state,), dtype=float64)
+    else:
+        raw = asarray(x0, dtype=float64)
+        if raw.ndim != 1:
+            raise ValueError("x0 must be a 1D array.")
+        if raw.shape[0] == n_state:
+            x0_state = raw.copy()
+        elif raw.shape[0] == n_var:
+            x0_state = raw[:n_state].copy()
+        else:
+            raise ValueError(
+                f"x0 must have length {n_state} or {n_var}, got {raw.shape[0]}."
+            )
+
+    z0 = np.zeros((2 * n_state,), dtype=float64)
+    z0[:n_state] = x0_state
+    return z0
