@@ -490,7 +490,7 @@ def _selected_source_shape(
         )
 
     n_rows, n_columns = shape
-    n_rows = max(0, n_rows - selector.row_start)
+    n_rows = n_rows - selector.row_start
     columns = selector.column_selector
     if isinstance(columns, slice):
         n_columns = len(range(*columns.indices(n_columns)))

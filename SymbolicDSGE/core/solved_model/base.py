@@ -530,9 +530,9 @@ class SolvedModel(ABC, Generic[Policy]):
                 )
             )
         if filter_mode == "unscented":
-            if return_shocks or joseph_cov:
+            if return_shocks:
                 raise ValueError(
-                    "return_shocks and joseph_cov are not supported for unscented filtering."
+                    "return_shocks is not supported for unscented filtering."
                 )
             return KalmanFilter.run_unscented_raw(
                 **resolve_unscented_args(

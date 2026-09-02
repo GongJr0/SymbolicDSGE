@@ -15,14 +15,13 @@ from ..._ckernels.monte_carlo._runner import (
     ridge_gs_step,
     ridge_step,
 )
-from ..allocation import BufferPlan
+from ..allocation import BufferPlan, _selected_source_shape
 from ..defaults import DEFAULT_REGRESSION_KIND
 from ..mc_constructs import MCStep
 from .utils import (
     FloatInputBinding,
     RegressionResultSpec,
     _fill_binding,
-    _selected_shape,
     _source_binding,
     _supplied,
 )
@@ -93,9 +92,11 @@ def _resolve_regression_shape(
     steps: tuple[MCStep, ...],
     plan: BufferPlan,
 ) -> tuple[int, int, bool, tuple[str, ...]]:
-    n, x_columns = _selected_shape(source_indices[1], step.source_args[1], steps, plan)
-    y_rows, y_columns = _selected_shape(
-        source_indices[0], step.source_args[0], steps, plan
+    n, x_columns = _selected_source_shape(
+        plan, steps, source_indices[1], step.source_args[1]
+    )
+    y_rows, y_columns = _selected_source_shape(
+        plan, steps, source_indices[0], step.source_args[0]
     )
     if y_rows != n or y_columns != 1:
         raise ValueError("Native regression lowering requires a one-column response.")

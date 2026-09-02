@@ -33,7 +33,6 @@ from .mc_constructs import (
     MC_DATA_SOURCE_FIELDS,
     MCDataGenResult,
     MCFilterResult,
-    MCDataGenResult,
     MCFailure,
     MCPipelineResult,
     MCMeta,

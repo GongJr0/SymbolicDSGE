@@ -79,22 +79,6 @@ def _flat_f64(values: NDF) -> NDF:
     return values.reshape(-1)
 
 
-def _selected_shape(
-    source_idx: int,
-    source: SourceArgs,
-    steps: tuple[MCStep, ...],
-    plan: BufferPlan,
-) -> tuple[int, int]:
-    source_step = steps[source_idx]
-    layout = _source_layout(plan, source_step, source.field)
-    if len(layout.shape) != 2:
-        raise ValueError(
-            f"Native source {source_step.name!r}.{source.field!r} must be 2D."
-        )
-    n_rows, n_columns = layout.shape
-    return n_rows - source.row_start, _selected_columns(source, n_columns).shape[0]
-
-
 def _source_binding(
     source_step_idx: int,
     steps: tuple[MCStep, ...],

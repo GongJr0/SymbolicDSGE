@@ -13,7 +13,7 @@ from ..._ckernels.monte_carlo._runner import (
     raw_model_data_step,
     transform_step,
 )
-from ..allocation import BufferPlan
+from ..allocation import BufferPlan, _selected_source_shape
 from ..custom_op import NumbaCustomFunc
 from ..mc_constructs import MCStep, OpType
 from ..memory import MCMemoryProfiler
@@ -25,7 +25,6 @@ from .utils import (
     FloatInputBinding,
     RegressionResultSpec,
     TestResultSpec,
-    _selected_shape,
     _source_binding,
     _supplied,
 )
@@ -182,7 +181,12 @@ def _lower_transform_step(
     if step.step_type == "payload":
         return payload_step(step.name, step.kwargs["value"]), ()
 
-    n, p = _selected_shape(source_indices[0], step.source_args[0], steps, plan)
+    n, p = _selected_source_shape(
+        plan,
+        steps,
+        source_indices[0],
+        step.source_args[0],
+    )
     if step.step_type == "transform:custom":
         if not isinstance(step.func, NumbaCustomFunc):
             raise ValueError(

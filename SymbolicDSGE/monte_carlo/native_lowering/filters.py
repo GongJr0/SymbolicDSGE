@@ -9,7 +9,6 @@ from numpy.typing import ArrayLike
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.resolvers import (
-    _resolve_obs_names,
     _build_constant_R,
     _build_P0,
     _build_unscented_z0,
@@ -66,7 +65,6 @@ def lower_filter_step(
                 ).address
             )
 
-    canonical_names = _resolve_obs_names(reference, requested_names)
     if len(canonical_names) != source_n_obs and requested_names is None:
         raise ValueError("Filter observations do not match the DATAGEN output.")
     source_columns = _filter_source_columns(source_names, canonical_names)
@@ -224,6 +222,8 @@ def _canonical_observables(
     all_names = tuple(reference.compiled.observable_names)
     selected = all_names if requested is None else requested
     index = {name: position for position, name in enumerate(all_names)}
+    if not selected:
+        raise ValueError("Filter observables must be non-empty.")
     if len(set(selected)) != len(selected):
         raise ValueError("Filter observables must be unique.")
     unknown = [name for name in selected if name not in index]

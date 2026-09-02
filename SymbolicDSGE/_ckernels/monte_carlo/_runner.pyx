@@ -23,9 +23,6 @@ cdef extern from "sdsge_common.h":
         int64_t n_float
         int64_t n_int
 
-    arena_size make_sizer(int64_t n_float,
-                          int64_t n_int) noexcept nogil
-
 cdef extern from "shocks.h":
     int SDSGE_MC_SHOCK_NORMAL
     int SDSGE_MC_SHOCK_UNIFORM
@@ -128,12 +125,6 @@ cdef extern from "runner.h":
     int sdsge_mc_run(sdsge_mc_runner_ctx *runner) noexcept nogil
 
 cdef extern from "layout.h":
-    arena_size sdsge_raw_model_data_output_arena_size(
-            int64_t n_states,
-            int64_t n_shocks,
-            int64_t n_observables
-    ) noexcept nogil
-
     arena_size sdsge_simulate_order1_arena_size(
         int64_t n,
         int64_t k,
@@ -147,75 +138,6 @@ cdef extern from "layout.h":
         int64_t n_exog,
         int64_t T,
         int64_t n_par,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order1_output_arena_size(
-        int64_t n,
-        int64_t k,
-        int64_t T,
-        int64_t m,
-    ) noexcept nogil
-
-    arena_size sdsge_simulate_order2_output_arena_size(
-        int64_t n_var,
-        int64_t n_exog,
-        int64_t T,
-        int64_t m,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_linear_output_arena_size(
-        int64_t n,
-        int64_t m,
-        int64_t k,
-        int64_t T,
-        int return_shocks,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_extended_output_arena_size(
-        int64_t n,
-        int64_t m,
-        int64_t k,
-        int64_t T,
-        int return_shocks,
-    ) noexcept nogil
-
-    arena_size sdsge_filter_unscented_output_arena_size(
-        int64_t n_state,
-        int64_t n_ctrl,
-        int64_t n_obs,
-        int64_t T,
-    ) noexcept nogil
-
-    ctypedef enum sdsge_mc_regression_kind:
-        SDSGE_MC_REGRESSION_OLS
-        SDSGE_MC_REGRESSION_RIDGE
-        SDSGE_MC_REGRESSION_RIDGE_GS
-        SDSGE_MC_REGRESSION_LASSO
-        SDSGE_MC_REGRESSION_LASSO_GS
-        SDSGE_MC_REGRESSION_ELASTIC_NET
-        SDSGE_MC_REGRESSION_ELASTIC_NET_GS
-
-    arena_size sdsge_mc_regression_output_arena_size(
-        int64_t kind,
-        int64_t p,
-    ) noexcept nogil
-
-    arena_size sdsge_mc_diag_output_arena_size() noexcept nogil
-
-    ctypedef enum sdsge_mc_transform_kind:
-        SDSGE_MC_TRANSFORM_STANDARDIZE
-        SDSGE_MC_TRANSFORM_LOG
-        SDSGE_MC_TRANSFORM_LOG_DIFF
-        SDSGE_MC_TRANSFORM_DIFF
-        SDSGE_MC_TRANSFORM_ROLLING_MEAN
-        SDSGE_MC_TRANSFORM_ROLLING_VAR
-        SDSGE_MC_TRANSFORM_ROLLING_STD
-
-    int64_t sdsge_mc_transform_output_rows(
-        int64_t kind,
-        int64_t n,
-        int64_t order,
-        int64_t window,
     ) noexcept nogil
 
 
@@ -925,15 +847,11 @@ cdef class NativeStep:
     cdef object _test_distribution
     cdef object _test_df
     cdef int64_t _n_batch
-    #: What the step writes. The input lane carries scratch whose size only the
-    #: allocator resolves, so it is not declared here and not checked.
-    cdef arena_size _output_asize
 
     def __cinit__(self):
         self._test_distribution = None
         self._test_df = None
         self._n_batch = 0
-        self._output_asize = make_sizer(-1, -1)
 
     cdef void _bind(
         self,
@@ -941,7 +859,6 @@ cdef class NativeStep:
         sdsge_mc_step_fn fn,
         object backing,
         int64_t n_batch,
-        arena_size output_asize,
     ) except *:
         """Finish one typed context after its factory has narrowed the union."""
         if not name:
@@ -954,7 +871,6 @@ cdef class NativeStep:
         self._fn = fn
         self._backing = backing
         self._n_batch = n_batch
-        self._output_asize = output_asize
 
     @property
     def name(self):
@@ -995,24 +911,6 @@ cdef inline int64_t *_int_data(cnp.ndarray array):
     return <int64_t *>cnp.PyArray_DATA(array)
 
 
-cdef void _check_lanes(
-    NativeStep step,
-    cnp.ndarray float_live_out,
-    cnp.ndarray int_live_out,
-) except *:
-    """Hold a step's declared output against the arena the plan allocated it.
-
-    The two are resolved apart: the plan sums a field layout it owns, the step
-    declares what its kernel writes. Agreement here is what keeps a kernel from
-    writing where the plan reserved nothing.
-    """
-    if float_live_out.shape[1] != step._output_asize.n_float:
-        raise ValueError(f"Step {step.name!r} has an incompatible float output arena.")
-    if int_live_out.shape[1] != step._output_asize.n_int:
-        raise ValueError(f"Step {step.name!r} has an incompatible "
-                         "integer output arena.")
-
-
 def payload_step(str name, value):
     """Bind a native payload materialization step to immutable input data."""
     cdef NativeStep step = NativeStep()
@@ -1037,7 +935,6 @@ def payload_step(str name, value):
         sdsge_mc_payload_runner,
         input_array,
         step._n_batch,
-        make_sizer(n, 0),
     )
     return step
 
@@ -1132,7 +1029,6 @@ def raw_model_data_step(str name, states=None, shocks=None, observables=None):
         sdsge_mc_raw_model_data_runner,
         (states_array, shocks_array, observables_array),
         n_batch,
-        sdsge_raw_model_data_output_arena_size(n_states, n_shocks, n_observables),
     )
     return step
 
@@ -1185,7 +1081,6 @@ def simulate1_step(
         sdsge_mc_simulate_order1_runner,
         shocks,
         0,
-        sdsge_simulate_order1_output_arena_size(n_var, n_exog, T, n_obs),
     )
     return step
 
@@ -1251,7 +1146,6 @@ def simulate2_step(
         sdsge_mc_simulate_order2_runner,
         shocks,
         0,
-        sdsge_simulate_order2_output_arena_size(n_var, n_exog, T, n_obs),
     )
     return step
 
@@ -1286,13 +1180,6 @@ def filter_linear_step(
         sdsge_mc_filter_linear_runner,
         None,
         0,
-        sdsge_filter_linear_output_arena_size(
-            n_var,
-            n_obs,
-            n_exog,
-            T,
-            return_shocks,
-        ),
     )
     return step
 
@@ -1335,13 +1222,6 @@ def filter_extended_step(
         sdsge_mc_filter_extended_runner,
         None,
         0,
-        sdsge_filter_extended_output_arena_size(
-            n_var,
-            n_obs,
-            n_exog,
-            T,
-            return_shocks,
-        ),
     )
     return step
 
@@ -1386,12 +1266,6 @@ def filter_unscented_step(
         sdsge_mc_filter_unscented_runner,
         None,
         0,
-        sdsge_filter_unscented_output_arena_size(
-            n_state,
-            n_ctrl,
-            n_obs,
-            T,
-        ),
     )
     return step
 
@@ -1412,51 +1286,40 @@ def transform_step(
 ):
     """Bind one native transform adapter using its resolved scalar settings."""
     cdef NativeStep step = NativeStep()
-    cdef int64_t output_n_float
-    cdef int64_t output_n_int
-    cdef int64_t code
     cdef sdsge_mc_step_fn fn
 
     if n < 0 or p < 0:
         raise ValueError("Transform dimensions must be non-negative.")
 
-    output_n_int = 0
-    code = -1  # passthrough and custom name no layout kind
     if kind == "passthrough":
         step._ctx_store.passthrough.n = n
         step._ctx_store.passthrough.p = p
         fn = sdsge_mc_passthrough_runner
-        output_n_float = n * p
     elif kind == "standardize":
         step._ctx_store.standardize.n = n
         step._ctx_store.standardize.p = p
         step._ctx_store.standardize.ddof = ddof
         fn = sdsge_mc_standardize_runner
-        code = SDSGE_MC_TRANSFORM_STANDARDIZE
     elif kind == "log":
         step._ctx_store.log.n = n
         step._ctx_store.log.p = p
         step._ctx_store.log.offset = offset
         fn = sdsge_mc_log_runner
-        code = SDSGE_MC_TRANSFORM_LOG
     elif kind == "log_diff":
         step._ctx_store.log_diff.n = n
         step._ctx_store.log_diff.p = p
         step._ctx_store.log_diff.offset = offset
         fn = sdsge_mc_log_diff_runner
-        code = SDSGE_MC_TRANSFORM_LOG_DIFF
     elif kind == "diff":
         step._ctx_store.diff.n = n
         step._ctx_store.diff.p = p
         step._ctx_store.diff.order = order
         fn = sdsge_mc_diff_runner
-        code = SDSGE_MC_TRANSFORM_DIFF
     elif kind == "rolling_mean":
         step._ctx_store.rolling_mean.n = n
         step._ctx_store.rolling_mean.p = p
         step._ctx_store.rolling_mean.window = window
         fn = sdsge_mc_rolling_mean_runner
-        code = SDSGE_MC_TRANSFORM_ROLLING_MEAN
     elif kind == "rolling_var" or kind == "rolling_std":
         step._ctx_store.rolling_var.n = n
         step._ctx_store.rolling_var.p = p
@@ -1466,11 +1329,6 @@ def transform_step(
             sdsge_mc_rolling_var_runner
             if kind == "rolling_var"
             else sdsge_mc_rolling_std_runner
-        )
-        code = (
-            SDSGE_MC_TRANSFORM_ROLLING_VAR
-            if kind == "rolling_var"
-            else SDSGE_MC_TRANSFORM_ROLLING_STD
         )
     elif kind == "custom":
         if function_address == 0:
@@ -1485,12 +1343,9 @@ def transform_step(
         step._ctx_store.user_transform.n_out = output_n
         step._ctx_store.user_transform.p_out = output_p
         fn = sdsge_mc_user_transform_runner
-        output_n_float = output_n * output_p
     else:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
-    if code >= 0:
-        output_n_float = sdsge_mc_transform_output_rows(code, n, order, window) * p
-    step._bind(name, fn, backing, 0, make_sizer(output_n_float, output_n_int))
+    step._bind(name, fn, backing, 0)
     return step
 
 
@@ -1509,7 +1364,6 @@ def ols_step(str name, int64_t n, int64_t p, bint intercept=DEFAULT_INTERCEPT):
         sdsge_mc_ols_runner,
         None,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_OLS, p),
     )
     return step
 
@@ -1548,7 +1402,6 @@ def ridge_step(
         sdsge_mc_ridge_runner,
         None,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_RIDGE, p),
     )
     return step
 
@@ -1578,7 +1431,6 @@ def ridge_gs_step(
         sdsge_mc_ridge_gs_runner,
         alphas,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_RIDGE_GS, p),
     )
     return step
 
@@ -1606,7 +1458,6 @@ def lasso_step(
         sdsge_mc_lasso_runner,
         None,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_LASSO, p),
     )
     return step
 
@@ -1638,7 +1489,6 @@ def lasso_gs_step(
         sdsge_mc_lasso_gs_runner,
         alphas,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_LASSO_GS, p),
     )
     return step
 
@@ -1669,7 +1519,6 @@ def elastic_net_step(
         sdsge_mc_elastic_net_runner,
         None,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_ELASTIC_NET, p),
     )
     return step
 
@@ -1706,7 +1555,6 @@ def elastic_net_gs_step(
         sdsge_mc_elastic_net_gs_runner,
         alphas,
         0,
-        sdsge_mc_regression_output_arena_size(SDSGE_MC_REGRESSION_ELASTIC_NET_GS, p),
     )
     return step
 
@@ -1726,7 +1574,6 @@ def jarque_bera_step(str name, int64_t n):
         sdsge_mc_jarque_bera_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1759,7 +1606,6 @@ def wald_step(
         sdsge_mc_wald_test_runner,
         target_array,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1777,7 +1623,6 @@ def ljung_box_step(str name, int64_t n, int64_t lags=DEFAULT_LJUNG_BOX_LAGS):
         sdsge_mc_ljung_box_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1796,7 +1641,6 @@ def breusch_pagan_step(str name, int64_t n, int64_t k, bint robust=DEFAULT_ROBUS
         sdsge_mc_breusch_pagan_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1817,7 +1661,6 @@ def breusch_godfrey_step(
         sdsge_mc_breusch_godfrey_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1835,7 +1678,6 @@ def cusum_step(str name, int64_t n, int64_t p):
         sdsge_mc_cusum_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1853,7 +1695,6 @@ def cusumsq_step(str name, int64_t n, int64_t p):
         sdsge_mc_cusumsq_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -1872,7 +1713,6 @@ def chow_step(str name, int64_t n, int64_t p, int64_t t_break=DEFAULT_T_BREAK):
         sdsge_mc_chow_test_runner,
         None,
         0,
-        sdsge_mc_diag_output_arena_size(),
     )
     return step
 
@@ -2024,7 +1864,6 @@ def run(
                     f"{step.name}.retained_row_by_rep must be a "
                     "contiguous int64 vector."
                 )
-            _check_lanes(step, float_live_out, int_live_out)
             if (
                 float_live_out.shape[1] != float_retained.shape[1]
                 or int_live_out.shape[1] != int_retained.shape[1]
