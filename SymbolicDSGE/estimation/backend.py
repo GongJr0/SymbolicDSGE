@@ -622,7 +622,7 @@ def build_extended_context(base: PyObjCommon) -> PyExtendedContext:
 
 def _unscented_z0(compiled: CompiledModel, x0: NDF | None) -> NDF:
     """Initial augmented state ``[x0_state; 0]`` of shape ``(2*n_state,)``,
-    mirroring ``KalmanInterface._build_unscented_z0``. ``x0`` is accepted as the
+    mirroring the Kalman resolvers' unscented ``z0``. ``x0`` is accepted as the
     ``n_state`` block or the full ``n_var`` vector (sliced to the state block);
     the tail is zeroed."""
     n_state = compiled.n_state
@@ -657,8 +657,8 @@ def build_unscented_context(
 ) -> PyUnscentedContext:
     """Wrap the base inputs for the unscented filter. ``solve1``/``solve2`` are
     composer-allocated scratch; ``z0`` is ``[x0_state; 0]`` (2*n_state) and
-    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars (defaults match
-    ``KalmanInterface``, the only source of these today)."""
+    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars (defaults match the
+    Kalman resolvers, the only source of these today)."""
     return PyUnscentedContext(
         base=base,
         z0=_unscented_z0(compiled, x0),
