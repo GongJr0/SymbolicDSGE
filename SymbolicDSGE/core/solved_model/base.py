@@ -472,6 +472,7 @@ class SolvedModel(ABC, Generic[Policy]):
             jitter=jitter,
             symmetrize=symmetrize,
             return_shocks=return_shocks,
+            joseph_cov=joseph_cov,
             P0=P0,
             R=R,
         )
@@ -494,6 +495,7 @@ class SolvedModel(ABC, Generic[Policy]):
         jitter: float | float64 | None = None,
         symmetrize: bool = False,
         return_shocks: bool = False,
+        joseph_cov: bool = True,
         P0: NDF | None = None,
         R: NDF | None = None,
     ) -> FilterRawResult | UnscentedFilterRawResult:
@@ -509,6 +511,7 @@ class SolvedModel(ABC, Generic[Policy]):
                     jitter=jitter,
                     symmetrize=symmetrize,
                     return_shocks=return_shocks,
+                    joseph_cov=joseph_cov,
                 )
             )
         if filter_mode == "extended":
@@ -523,12 +526,13 @@ class SolvedModel(ABC, Generic[Policy]):
                     jitter=jitter,
                     symmetrize=symmetrize,
                     return_shocks=return_shocks,
+                    joseph_cov=joseph_cov,
                 )
             )
         if filter_mode == "unscented":
-            if return_shocks:
+            if return_shocks or joseph_cov:
                 raise ValueError(
-                    "return_shocks is not supported for unscented filtering."
+                    "return_shocks and joseph_cov are not supported for unscented filtering."
                 )
             return KalmanFilter.run_unscented_raw(
                 **resolve_unscented_args(
