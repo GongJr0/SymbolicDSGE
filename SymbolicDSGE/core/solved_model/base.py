@@ -36,8 +36,13 @@ from ..sim_result import StatePath, SimResult
 from ..compiled_model import CompiledModel
 from ..config import ModelConfig
 from ...kalman.config import KalmanConfig
-from ...kalman.interface import KalmanInterface, _KFMatrices
+from ...kalman.resolvers import (
+    resolve_extended_args,
+    resolve_linear_args,
+    resolve_unscented_args,
+)
 from ...kalman.filter import (
+    KalmanFilter,
     FilterRawResult,
     FilterResult,
     UnscentedFilterRawResult,
@@ -458,7 +463,6 @@ class SolvedModel(ABC, Generic[Policy]):
         return_shocks: bool = False,
         P0: NDF | None = None,
         R: NDF | None = None,
-        _debug: bool = False,
     ) -> FilterResult | UnscentedFilterResult:
         raw = self._kalman_raw(
             y=y,
@@ -470,7 +474,6 @@ class SolvedModel(ABC, Generic[Policy]):
             return_shocks=return_shocks,
             P0=P0,
             R=R,
-            _debug=_debug,
         )
         if isinstance(raw, UnscentedFilterRawResult):
             # Already levels: the unscented kernel forms them for its own
@@ -493,57 +496,53 @@ class SolvedModel(ABC, Generic[Policy]):
         return_shocks: bool = False,
         P0: NDF | None = None,
         R: NDF | None = None,
-        _debug: bool = False,
     ) -> FilterRawResult | UnscentedFilterRawResult:
-        params = asarray(
-            [self.config.calibration.parameters[p] for p in self.compiled.calib_params],
-            dtype=float64,
-        )
-
-        meas_addr: int | None = None
-        jac_addr: int | None = None
-
-        if filter_mode in {"extended", "unscented"}:
-            obs_idx = {name: i for i, name in enumerate(self.compiled.observable_names)}
-            if observables is None:
-                selected_obs = list(self.compiled.observable_names)
-            else:
-                selected_obs = list(observables)
-            selected_obs = sorted(selected_obs, key=lambda name: obs_idx[name])
-
-            meas_addr = self.compiled.construct_measurement_cfunc(selected_obs).address
-            jac_addr = self.compiled.construct_observable_jacobian_cfunc(
-                selected_obs
-            ).address
-
+        if filter_mode == "linear":
+            return KalmanFilter.run_raw(
+                **resolve_linear_args(
+                    self,
+                    y,
+                    observables,
+                    x0=x0,
+                    P0=P0,
+                    R=R,
+                    jitter=jitter,
+                    symmetrize=symmetrize,
+                    return_shocks=return_shocks,
+                )
+            )
+        if filter_mode == "extended":
+            return KalmanFilter.run_extended_raw(
+                **resolve_extended_args(
+                    self,
+                    y,
+                    observables,
+                    x0=x0,
+                    P0=P0,
+                    R=R,
+                    jitter=jitter,
+                    symmetrize=symmetrize,
+                    return_shocks=return_shocks,
+                )
+            )
         if filter_mode == "unscented":
             if return_shocks:
                 raise ValueError(
                     "return_shocks is not supported for unscented filtering."
                 )
-            if self.policy.order != 2:
-                raise ValueError(
-                    "Unscented Kalman Filter requires a second order solution."
+            return KalmanFilter.run_unscented_raw(
+                **resolve_unscented_args(
+                    self,
+                    y,
+                    observables,
+                    x0=x0,
+                    P0=P0,
+                    R=R,
+                    jitter=jitter,
+                    symmetrize=symmetrize,
                 )
-        ki = KalmanInterface(
-            model=self,
-            filter_mode=filter_mode,
-            observables=observables,
-            y=y,
-            P0=P0,
-            R=R,
-            meas_addr=meas_addr,
-            jac_addr=jac_addr,
-            calib_params=params,
-            jitter=jitter,
-            symmetrize=symmetrize,
-            return_shocks=return_shocks,
-        )
-
-        run = ki.filter_raw(x0=x0, _debug=_debug)
-        if _debug:
-            print(ki._debug_info)
-        return run
+            )
+        raise ValueError(f"Unrecognized filter mode: {filter_mode!r}")
 
     def fit_kf(
         self,
@@ -608,21 +607,6 @@ class SolvedModel(ABC, Generic[Policy]):
 
         return np.outer(stds, stds) * corr
 
-    def _kf_cache_get(self, key: tuple) -> _KFMatrices | None:
-        """Cached Kalman matrices for ``key``, or ``None`` on miss."""
-
-        return self._kf_cache.get(key)
-
-    def _kf_cache_put(self, key: tuple, matrices: _KFMatrices) -> None:
-        """Store Kalman matrices for ``key`` in the cache."""
-
-        self._kf_cache[key] = matrices
-
-    def clear_kf_cache(self) -> None:
-        """Drop cached Kalman matrices."""
-        self._kf_cache.clear()
-        self._cd_cache.clear()
-
     @property
     def config(self) -> ModelConfig:
         return self.compiled.config
@@ -633,10 +617,6 @@ class SolvedModel(ABC, Generic[Policy]):
 
     @cached_property
     def _cd_cache(self) -> dict[tuple, Tuple[NDF, NDF]]:
-        return {}
-
-    @cached_property
-    def _kf_cache(self) -> dict[tuple, _KFMatrices]:
         return {}
 
     def __repr__(self) -> str:

@@ -135,7 +135,6 @@ def test_get_kf_selects_linear_or_extended_mode(monkeypatch):
     assert linear_calls["kwargs"]["filter_mode"] == "linear"
     assert linear_calls["kwargs"]["observables"] == ["pi", "y"]
     assert linear_calls["kwargs"]["return_shocks"] is False
-    assert linear_calls["kwargs"]["_debug"] is False
 
     extended_interface, extended_calls, _, _, _ = _make_interface(
         monkeypatch,

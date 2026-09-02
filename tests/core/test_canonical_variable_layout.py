@@ -9,7 +9,6 @@ import yaml
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
-from SymbolicDSGE.kalman.interface import KalmanInterface
 from SymbolicDSGE.core.solved_model.shocks import shock_unpack
 
 # States then controls, each in declaration order. test.yaml lags u, v and r,
@@ -118,17 +117,11 @@ def _stub_solved(compiled):
     )
 
 
-@pytest.mark.xfail(
-    raises=AttributeError,
-    reason="Builders moved off KalmanInterface; the class is being removed.",
-)
 def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path):
     compiled = _compile_misordered_test_model(tmp_path)
-    ki = KalmanInterface.__new__(KalmanInterface)
-    ki.model = _stub_solved(compiled)
 
     np.testing.assert_allclose(
-        ki._build_Q(),
+        _stub_solved(compiled)._build_Q(),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
 

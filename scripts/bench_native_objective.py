@@ -52,7 +52,7 @@ RBC = FIXTURES / "rbc_second_order.yaml"
 from SymbolicDSGE import DSGESolver, ModelParser  # noqa: E402
 from SymbolicDSGE.estimation import Estimator, backend  # noqa: E402
 from SymbolicDSGE.kalman.config import KalmanConfig  # noqa: E402
-from SymbolicDSGE.kalman.interface import FilterMode, _resolve_P0  # noqa: E402
+from SymbolicDSGE.kalman.resolvers import FilterMode, _resolve_P0  # noqa: E402
 from SymbolicDSGE._ckernels.estimation._estimation import NativeLogpost  # noqa: E402
 
 _cc = np.ascontiguousarray
@@ -210,7 +210,8 @@ def _rbc_context() -> RbcCtx:
         bc_addr=compiled.construct_objective_cfunc_bicomplex().address,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         P0_ukf=_cc(
-            _resolve_P0(FilterMode.UNSCENTED, n_state, P0_base), dtype=np.float64
+            _resolve_P0(FilterMode.UNSCENTED, n_state, compiled.n_var, P0_base),
+            dtype=np.float64,
         ),
         solved=solved,
     )

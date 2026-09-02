@@ -1,7 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-import builtins
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,7 +30,7 @@ from _oracles.core import (
     _simulate_linear_states_into_numba,
 )
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
-from SymbolicDSGE.kalman.interface import KalmanInterface
+from SymbolicDSGE.kalman.resolvers import resolve_linear_args
 from SymbolicDSGE.core.solved_model.measurement import (
     build_measurement,
     non_affine_measurement,
@@ -578,20 +577,8 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
     assert np.allclose(got, expected)
 
 
-def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
+def _kalman_dispatch_stub(cls):
     alpha = Symbol("alpha")
-    captured = {}
-
-    class _FakeKalmanInterface:
-        def __init__(self, **kwargs):
-            captured["init"] = kwargs
-            self._debug_info = None
-
-        def filter_raw(self, x0=None, _debug=False):
-            captured["filter_raw"] = {"x0": x0, "_debug": _debug}
-            self._debug_info = {"debug": True}
-            return _raw_filter_result()
-
     compiled = SimpleNamespace(
         calib_params=[alpha],
         observable_names=["ObsA", "ObsB"],
@@ -600,87 +587,72 @@ def test_solved_model_kalman_extended_uses_default_obs_and_debug(monkeypatch):
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
     )
-    solved = FirstOrderSolvedModel(
+    return cls(
         compiled=compiled,
         policy=SimpleNamespace(
-            order=1,
+            order=1 if cls is FirstOrderSolvedModel else 2,
             A=np.eye(1, dtype=np.float64),
             B=np.eye(1, dtype=np.float64),
             steady_state=np.zeros(1, dtype=np.float64),
         ),
     )
-    printed = []
-
-    monkeypatch.setattr(
-        solved_model_module.base, "KalmanInterface", _FakeKalmanInterface
-    )
-    monkeypatch.setattr(builtins, "print", lambda *args: printed.append(args))
-
-    out = solved.kalman(
-        y=np.zeros((3, 2), dtype=np.float64),
-        filter_mode="extended",
-        observables=None,
-        _debug=True,
-    )
-
-    np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
-    assert captured["init"]["meas_addr"] == 456
-    assert captured["init"]["jac_addr"] == 789
-    assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
-    assert captured["filter_raw"] == {"x0": None, "_debug": True}
-    assert printed == [({"debug": True},)]
 
 
-def test_solved_model_kalman_unscented_uses_measurement_cfunc(monkeypatch):
-    alpha = Symbol("alpha")
+@pytest.mark.parametrize(
+    ("cls", "mode", "resolver", "runner", "result"),
+    [
+        (
+            FirstOrderSolvedModel,
+            "linear",
+            "resolve_linear_args",
+            "run_raw",
+            _raw_filter_result,
+        ),
+        (
+            FirstOrderSolvedModel,
+            "extended",
+            "resolve_extended_args",
+            "run_extended_raw",
+            _raw_filter_result,
+        ),
+        (
+            SecondOrderSolvedModel,
+            "unscented",
+            "resolve_unscented_args",
+            "run_unscented_raw",
+            _raw_unscented_result,
+        ),
+    ],
+)
+def test_solved_model_kalman_routes_each_mode_to_its_runner(
+    monkeypatch, cls, mode, resolver, runner, result
+):
+    # Each mode pairs one resolver with one runner. The resolvers are covered
+    # against a model in tests/kalman; what matters here is that the pairing
+    # holds and that the resolved set is splatted through unchanged.
+    solved = _kalman_dispatch_stub(cls)
+    resolved = {"sentinel": object()}
     captured = {}
 
-    class _FakeKalmanInterface:
-        def __init__(self, **kwargs):
-            captured["init"] = kwargs
-            self._debug_info = None
-
-        def filter_raw(self, x0=None, _debug=False):
-            captured["filter_raw"] = {"x0": x0, "_debug": _debug}
-            return _raw_unscented_result()
-
-    compiled = SimpleNamespace(
-        calib_params=[alpha],
-        observable_names=["ObsA", "ObsB"],
-        construct_measurement_cfunc=lambda obs: SimpleNamespace(
-            address=456,
-            obs=tuple(obs),
-        ),
-        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
-        kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
-    )
-    solved = SecondOrderSolvedModel(
-        compiled=compiled,
-        policy=SimpleNamespace(
-            order=2,
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-            steady_state=np.zeros(1, dtype=np.float64),
-        ),
-    )
-
     monkeypatch.setattr(
-        solved_model_module.base, "KalmanInterface", _FakeKalmanInterface
+        solved_model_module.base, resolver, lambda *a, **k: dict(resolved)
+    )
+    monkeypatch.setattr(
+        solved_model_module.base.KalmanFilter,
+        runner,
+        staticmethod(
+            lambda **kwargs: (captured.update(kwargs), result())[1],
+        ),
     )
 
     out = solved.kalman(
         y=np.zeros((3, 2), dtype=np.float64),
-        filter_mode="unscented",
+        filter_mode=mode,
         observables=None,
-        x0=np.array([0.1], dtype=np.float64),
     )
 
     np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
-    assert captured["init"]["filter_mode"] == "unscented"
-    assert captured["init"]["meas_addr"] == 456
-    assert np.array_equal(captured["init"]["calib_params"], np.array([1.5]))
-    assert np.array_equal(captured["filter_raw"]["x0"], np.array([0.1]))
+    assert captured == resolved
 
 
 def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
@@ -711,7 +683,7 @@ def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
         )
 
 
-def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration(
+def test_resolvers_rebuild_symbolic_R_from_current_calibration(
     post82_test_model_path,
 ):
     model, kalman = ModelParser(post82_test_model_path).get_all()
@@ -724,15 +696,10 @@ def test_kalman_interface_rebuilds_symbolic_R_from_current_calibration(
 
     solved = solver.solve(compiled)
     y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})
-    ki = KalmanInterface(
-        model=solved,
-        filter_mode="linear",
-        observables=["Infl", "Rate"],
-        y=y,
-    )
+    args = resolve_linear_args(solved, y, ["Infl", "Rate"])
 
     assert np.allclose(
-        ki.R,
+        args["R"],
         np.array([[4.0, 0.6], [0.6, 9.0]], dtype=np.float64),
     )
     assert np.allclose(

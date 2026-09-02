@@ -39,8 +39,7 @@ from ..core.compiled_model import CompiledModel
 from ..core.config import SymbolGetterDict
 from ..core.solver import DSGESolver
 from ..kalman.config import KalmanConfig, make_R
-from ..kalman.interface import _resolve_P0
-from ..kalman.validator import FilterMode
+from ..kalman.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]

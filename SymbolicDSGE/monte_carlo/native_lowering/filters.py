@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
-from SymbolicDSGE.kalman.interface import (
+from SymbolicDSGE.kalman.resolvers import (
     _resolve_obs_names,
     _build_constant_R,
     _build_P0,
