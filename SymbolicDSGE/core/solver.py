@@ -1,8 +1,7 @@
 import warnings
-from dataclasses import replace
 
 import sympy as sp
-from sympy import Symbol, Function, Expr, Basic
+from sympy import Symbol, Function, Expr
 from sympy.logic.boolalg import Boolean
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
@@ -12,7 +11,7 @@ from numpy.typing import NDArray
 
 import pandas as pd
 
-from .config import ModelConfig, SymbolGetterDict
+from .config import ModelConfig
 from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from sympy.core.function import AppliedUndef
 

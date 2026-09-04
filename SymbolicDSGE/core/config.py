@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Any, TypeAlias, TypeVar, Dict
+from typing import AbstractSet, Any, TypeAlias, TypeVar, Dict, Sequence
 from collections import UserDict
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
@@ -8,100 +8,71 @@ import pickle
 
 from .linearization import LinearizationMethod
 
+KT = TypeVar("KT")
 V = TypeVar("V")
 
-
-def _symbolify(key: str | Symbol) -> Symbol:
-    if isinstance(key, str):
-        return Symbol(key)
-    return key
+Regime: TypeAlias = Dict[str, Eq]  # {model_equation_name: replacement}
 
 
-def _frozensetify(
-    key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str],
-) -> frozenset[Symbol]:
-    if isinstance(key, tuple):
-        return frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
-    return key
+class _NormalizedKeyDict(UserDict[KT, V]):
+    """A mapping whose key accepts more than one spelling.
 
+    A subclass supplies ``_key``, resolving any accepted spelling to the one the
+    underlying dict is keyed by. The three primitives below route through it and
+    ``UserDict`` builds ``get``, ``pop``, ``setdefault``, ``update`` and the rest
+    on top of them, so the coercion reaches the whole mapping API. Subclassing
+    ``dict`` instead would leave every method not overridden by hand reading the
+    hash table directly, which is silently wrong rather than loud.
+    """
 
-def _functionify(key: str | Function) -> Function:
-    if isinstance(key, str):
-        return Function(key)  # pyright: ignore
-    return key
-
-
-class SymbolGetterDict(UserDict[Symbol, V]):
     def __init__(self, inp: Any) -> None:
         super().__init__(inp)
 
-    def __getitem__(self, key: str | Symbol) -> Any:
-        key = _symbolify(key)
-        return self.data[key]
+    @staticmethod
+    def _key(key: Any) -> Any:
+        raise NotImplementedError
 
-    def __setitem__(self, key: str | Symbol, value: Any) -> None:
-        key = _symbolify(key)
-        self.data[key] = value
+    def __getitem__(self, key: Any) -> Any:
+        return self.data[self._key(key)]
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self.data[self._key(key)] = value
+
+    def __delitem__(self, key: Any) -> None:
+        del self.data[self._key(key)]
 
     def __contains__(self, key: Any) -> bool:
+        return self._key(key) in self.data
+
+
+class SymbolGetterDict(_NormalizedKeyDict[Symbol, V]):
+    @staticmethod
+    def _key(key: Any) -> Any:
+        return Symbol(key) if isinstance(key, str) else key
+
+
+class PairGetterDict(_NormalizedKeyDict[frozenset[Symbol], V]):
+    @staticmethod
+    def _key(key: Any) -> Any:
+        if isinstance(key, (Sequence, AbstractSet)) and not isinstance(key, str):
+            return frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
+        return key
+
+
+class FunctionGetterDict(_NormalizedKeyDict[Function, V]):
+    @staticmethod
+    def _key(key: Any) -> Any:
+        return Function(key) if isinstance(key, str) else key
+
+
+class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
+    @staticmethod
+    def _key(key: Any) -> Any:
         if isinstance(key, str):
-            key = Symbol(key)
-        return self.data.__contains__(key)
-
-    def __delitem__(self, key: str | Symbol) -> None:
-        key = _symbolify(key)
-        del self.data[key]
-
-
-class PairGetterDict(UserDict[frozenset[Symbol], V]):
-    def __init__(self, inp: Any) -> None:
-        super().__init__(inp)
-
-    def __getitem__(
-        self, key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str]
-    ) -> Any:
-        key = _frozensetify(key)
-        return self.data[key]
-
-    def __setitem__(
-        self,
-        key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str],
-        value: Any,
-    ) -> None:
-        key = _frozensetify(key)
-        self.data[key] = value
-
-    def __contains__(self, key: Any) -> bool:
-        if isinstance(key, tuple):
-            key = _frozensetify(key)
-        return self.data.__contains__(key)
-
-    def __delitem__(
-        self, key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str]
-    ) -> None:
-        key = _frozensetify(key)
-        del self.data[key]
-
-
-class FunctionGetterDict(UserDict[Function, V]):
-    def __init__(self, inp: Any) -> None:
-        super().__init__(inp)
-
-    def __getitem__(self, key: str | Function) -> Any:
-        fmt_key = _functionify(key)
-        return self.data[fmt_key]
-
-    def __setitem__(self, key: str | Function, value: Any) -> None:
-        fmt_key = _functionify(key)
-        self.data[fmt_key] = value
-
-    def __contains__(self, key: Any) -> bool:
-        key = _functionify(key)
-        return self.data.__contains__(key)
-
-    def __delitem__(self, key: str | Function) -> None:
-        fmt_key = _functionify(key)
-        del self.data[fmt_key]
+            return frozenset(s.strip() for s in key.split(","))
+        if isinstance(key, (Sequence, AbstractSet)):
+            return frozenset(str(k) for k in key)
+        return key
 
 
 @dataclass
@@ -123,14 +94,11 @@ class Constraint(Base):
     relax: Relational | And | Or | Not
 
 
-Regime: TypeAlias = Dict[str, Eq]  # {model_equation_name: replacement}
-
-
 @dataclass
 class Equations(Base):
     model: Dict[str, Eq]
     constraint: Dict[str, Constraint] | None  # {constraint_name: Constraint}
-    regime: Dict[frozenset[str], Regime] | None  # {binding_set: Regime}
+    regime: RegimeGetterDict | None  # {binding_set: Regime}
     observable: SymbolGetterDict[Expr]
     obs_is_affine: SymbolGetterDict[bool]
 
@@ -190,8 +158,6 @@ class ModelConfig(Base):
     name: str
     variables: Variables
     parameters: list[Symbol]
-    #: Innovation symbols. A shock reaches the residual as a bare symbol and
-    #: may drive any number of equations, so it names no target variable.
     shocks: list[Symbol]
     observables: list[Symbol]
     equations: Equations

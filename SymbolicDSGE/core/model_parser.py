@@ -28,6 +28,7 @@ from .config import (
     Regime,
     Equations,
     Calib,
+    RegimeGetterDict,
     Variables,
     SymbolGetterDict,
     PairGetterDict,
@@ -706,28 +707,21 @@ class ModelParser:
             )
 
         regime_raw = eq_data.get("regime", {}) or {}
-        regime_key = lambda k: frozenset(map(str.strip, k.split(",")))
 
-        # Distinct spellings can name one constraint set ("a, b" and "b, a").
-        by_key: dict[frozenset[str], list[str]] = {}
-        for raw_key in regime_raw:
-            by_key.setdefault(regime_key(raw_key), []).append(raw_key)
-        if collisions := {k: v for k, v in by_key.items() if len(v) > 1}:
-            raise ValueError(
-                "Regime keys must name distinct constraint sets: "
-                + "; ".join(
-                    f"{sorted(spellings)} all name {sorted(key)}"
-                    for key, spellings in collisions.items()
+        regime = RegimeGetterDict({})
+
+        for raw_key, v in regime_raw.items():
+            if raw_key in regime:
+                raise ValueError(
+                    f"Duplicate regime key '{raw_key}' encountered "
+                    "in equations.regime. Each regime key must be unique."
                 )
-            )
-
-        regime: dict[frozenset[str], Regime] = {
-            regime_key(k): {
+            regime[raw_key] = {
                 name: _get_eq(eq)
-                for name, eq in cls._require_mapping(v, f"equations.regime.{k}").items()
+                for name, eq in cls._require_mapping(
+                    v, f"equations.regime.{raw_key}"
+                ).items()
             }
-            for k, v in regime_raw.items()
-        }
 
         observables_raw = eq_data.get("observables", {}) or {}
         observables_eq: dict[Symbol, Expr] = {

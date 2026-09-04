@@ -27,6 +27,8 @@ import sympy as sp
 from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
+from SymbolicDSGE.core.config import RegimeGetterDict
+
 if TYPE_CHECKING:
     from .config import ModelConfig
 
@@ -102,10 +104,14 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
         name: _rewrite_eq(eq, rewrite) for name, eq in out.equations.model.items()
     }
     if out.equations.regime:
-        out.equations.regime = {
-            key: {name: _rewrite_eq(eq, rewrite) for name, eq in replacements.items()}
-            for key, replacements in out.equations.regime.items()
-        }
+        out.equations.regime = RegimeGetterDict(
+            {
+                key: {
+                    name: _rewrite_eq(eq, rewrite) for name, eq in replacements.items()
+                }
+                for key, replacements in out.equations.regime.items()
+            }
+        )
     for obs, expr in list(out.equations.observable.items()):
         out.equations.observable[obs] = rewrite(expr)
     _register(out, generated, t)
