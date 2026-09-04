@@ -13,19 +13,16 @@ import sympy as sp
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.core import klein_preprocess, residual_eval
 from _oracles.core import _approximate_system_numeric
-from SymbolicDSGE._symbolic_printers import (
-    ResidualLayout,
-    build_cfunc,
-    build_njit,
-)
+from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
+from _residual_call import residual_caller
 
 C = np.complex128
 
 
 def _run_expr(expr: sp.Expr, order: list[sp.Symbol]):
-    slot = {s: ("cur", i) for i, s in enumerate(order)}
+    slot = {s.name: ("cur", i) for i, s in enumerate(order)}
     layout = ResidualLayout(slot=slot, n_var=len(order), n_par=0, n_exog=0)
-    fn = build_njit([expr], layout)
+    fn = residual_caller([expr], layout)
     ref = sp.lambdify(order, expr, "numpy")
 
     def run(values: tuple[complex, ...]) -> tuple[complex, complex]:
@@ -95,8 +92,8 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
     # Repeated multiply integer powers give the correct complex step derivative
     # even where a negative base would hit the branch cut under `**`.
     x = sp.Symbol("x")
-    layout = ResidualLayout(slot={x: ("cur", 0)}, n_var=1, n_par=0, n_exog=0)
-    fn = build_njit([expr_factory(x)], layout)
+    layout = ResidualLayout(slot={"x": ("cur", 0)}, n_var=1, n_par=0, n_exog=0)
+    fn = residual_caller([expr_factory(x)], layout)
     v0, h = -0.7, 1e-100
     out = fn(
         np.zeros(1, C),
@@ -127,7 +124,7 @@ def _param_vector(compiled, dtype):
 def test_printer_matches_reference_residual_values(path):
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
-    fn = build_njit(compiled.objective_eqs, layout)
+    fn = residual_caller(compiled.objective_eqs, layout)
     par = _param_vector(compiled, C)
 
     rng = np.random.default_rng(1)
@@ -154,16 +151,15 @@ def test_printer_matches_reference_residual_values(path):
 def test_printer_linearization_matches_reference(path):
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
-    fn = build_njit(compiled.objective_eqs, layout)
-    cf = build_cfunc(compiled.objective_eqs, layout)  # hold: keeps .address valid
+    fn = residual_caller(compiled.objective_eqs, layout)
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = _param_vector(compiled, np.float64)
 
     # Native cfunc linearization (klein_preproc complex-step) is the reference;
-    # the printer's njit residual complex-stepped through the oracle must match.
+    # the same cfunc complex-stepped through the oracle must match.
     a_ref, b_ref, c_ref, d_ref = klein_preprocess(
-        cf.address, ss, par, layout.n_var, layout.n_exog
+        fn.cfunc.address, ss, par, layout.n_var, layout.n_exog
     )
     a_new, b_new, c_new, d_new = _approximate_system_numeric(fn, ss, par, layout.n_exog)
 

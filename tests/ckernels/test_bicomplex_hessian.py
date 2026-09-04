@@ -27,7 +27,7 @@ def test_bicomplex_hessian_polynomial_is_exact():
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = 2 * fwd_x**2 + 3 * fwd_x * cur_x + cur_x**3
     layout = ResidualLayout(
-        slot={fwd_x: ("fwd", 0), cur_x: ("cur", 0)}, n_var=1, n_par=0, n_exog=0
+        slot={"fwd_x": ("fwd", 0), "cur_x": ("cur", 0)}, n_var=1, n_par=0, n_exog=0
     )
     cf = build_cfunc([expr], layout, BicomplexOps())  # hold: keep .address valid
 
@@ -43,7 +43,7 @@ def test_bicomplex_hessian_transcendental():
     fwd_x, cur_x = sp.symbols("fwd_x cur_x")
     expr = fwd_x * sp.exp(cur_x)
     layout = ResidualLayout(
-        slot={fwd_x: ("fwd", 0), cur_x: ("cur", 0)}, n_var=1, n_par=0, n_exog=0
+        slot={"fwd_x": ("fwd", 0), "cur_x": ("cur", 0)}, n_var=1, n_par=0, n_exog=0
     )
     cf = build_cfunc([expr], layout, BicomplexOps())
 

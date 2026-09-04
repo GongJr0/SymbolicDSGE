@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import sympy as sp
-from numba import cfunc, njit, types
-from sympy import Symbol
+from numba import cfunc, types
 
 from .base import ExpressionPrinter, OpTable
 
@@ -109,7 +108,7 @@ class BicomplexOps(OpTable):
 class ResidualLayout:
     """Maps residual symbols to native buffer slots."""
 
-    slot: dict[Symbol, tuple[str, int]]
+    slot: dict[str, tuple[str, int]]
     n_var: int
     n_par: int
     n_exog: int
@@ -121,15 +120,14 @@ class ResidualLayout:
 
     @classmethod
     def from_compiled(cls, compiled: CompiledModel) -> ResidualLayout:
-        slot: dict[Symbol, tuple[str, int]] = {}
+        slot: dict[str, tuple[str, int]] = {}
         for i, name in enumerate(compiled.var_names):
-            slot[Symbol(f"fwd_{name}")] = ("fwd", i)
-            slot[Symbol(f"cur_{name}")] = ("cur", i)
-            slot[Symbol(f"prev_{name}")] = ("prev", i)
+            slot[f"fwd_{name}"] = ("fwd", i)
+            slot[f"cur_{name}"] = ("cur", i)
+            slot[f"prev_{name}"] = ("prev", i)
 
-        shock_idx = {name: i for i, name in enumerate(compiled.shock_names)}
-        for shock in compiled.config.shocks:
-            slot[shock] = ("eps", shock_idx[shock.name])
+        for i, shock in enumerate(compiled.shock_names):
+            slot[shock] = ("eps", i)
 
         for j, p in enumerate(compiled.calib_params):
             slot[p] = ("par", j)
@@ -149,26 +147,6 @@ class ResidualPrinter(ExpressionPrinter):
     @property
     def context_name(self) -> str:
         return "residual"
-
-
-def build_njit(
-    exprs: list[sp.Expr], layout: ResidualLayout, ops: OpTable | None = None
-) -> Any:
-    table: OpTable = C128Ops() if ops is None else ops
-    body = ResidualPrinter(table).emit(exprs, layout, allocate=True)
-    src = "\n".join(
-        [
-            *table.prelude_imports,
-            "import numpy as np",
-            "",
-            "def _residual(fwd, cur, prev, eps, par):",
-            *body,
-            "",
-        ]
-    )
-    ns: dict[str, Any] = {}
-    exec(src, ns)  # noqa: S102
-    return njit(ns["_residual"])
 
 
 def build_cfunc(

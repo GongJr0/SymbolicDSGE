@@ -1,5 +1,6 @@
 from dataclasses import dataclass, asdict
 from typing import Any, TypeAlias, TypeVar, Dict
+from collections import UserDict
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
 from numpy import float64
@@ -7,53 +8,100 @@ import pickle
 
 from .linearization import LinearizationMethod
 
-K = TypeVar("K", bound=Symbol)
-F = TypeVar("F", bound=Function)
 V = TypeVar("V")
 
 
-class SymbolGetterDict(Dict[K, V]):
+def _symbolify(key: str | Symbol) -> Symbol:
+    if isinstance(key, str):
+        return Symbol(key)
+    return key
+
+
+def _frozensetify(
+    key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str],
+) -> frozenset[Symbol]:
+    if isinstance(key, tuple):
+        return frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
+    return key
+
+
+def _functionify(key: str | Function) -> Function:
+    if isinstance(key, str):
+        return Function(key)  # pyright: ignore
+    return key
+
+
+class SymbolGetterDict(UserDict[Symbol, V]):
     def __init__(self, inp: Any) -> None:
         super().__init__(inp)
 
     def __getitem__(self, key: str | Symbol) -> Any:
+        key = _symbolify(key)
+        return self.data[key]
+
+    def __setitem__(self, key: str | Symbol, value: Any) -> None:
+        key = _symbolify(key)
+        self.data[key] = value
+
+    def __contains__(self, key: Any) -> bool:
         if isinstance(key, str):
             key = Symbol(key)
-        return super().__getitem__(key)  # pyright: ignore
+        return self.data.__contains__(key)
+
+    def __delitem__(self, key: str | Symbol) -> None:
+        key = _symbolify(key)
+        del self.data[key]
 
 
-class PairGetterDict(Dict[frozenset[Symbol], V]):
+class PairGetterDict(UserDict[frozenset[Symbol], V]):
     def __init__(self, inp: Any) -> None:
         super().__init__(inp)
 
     def __getitem__(
         self, key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str]
     ) -> Any:
+        key = _frozensetify(key)
+        return self.data[key]
 
+    def __setitem__(
+        self,
+        key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str],
+        value: Any,
+    ) -> None:
+        key = _frozensetify(key)
+        self.data[key] = value
+
+    def __contains__(self, key: Any) -> bool:
         if isinstance(key, tuple):
-            fmt_key = frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
-        else:
-            fmt_key = key
-        return super().__getitem__(fmt_key)
+            key = _frozensetify(key)
+        return self.data.__contains__(key)
+
+    def __delitem__(
+        self, key: frozenset[Symbol] | tuple[Symbol, Symbol] | tuple[str, str]
+    ) -> None:
+        key = _frozensetify(key)
+        del self.data[key]
 
 
-class FunctionGetterDict(Dict[F, V]):
+class FunctionGetterDict(UserDict[Function, V]):
     def __init__(self, inp: Any) -> None:
         super().__init__(inp)
 
-    def __getitem__(self, key: str | F) -> Any:
-        if isinstance(key, str):
-            fmt_key = Function(key)
-        else:
-            fmt_key = key
-        return super().__getitem__(fmt_key)  # pyright: ignore
+    def __getitem__(self, key: str | Function) -> Any:
+        fmt_key = _functionify(key)
+        return self.data[fmt_key]
 
-    def get(self, key: str | F, default: Any = None) -> Any:
-        if isinstance(key, str):
-            fmt_key = Function(key)
-        else:
-            fmt_key = key
-        return super().get(fmt_key, default)  # pyright: ignore
+    def __setitem__(self, key: str | Function, value: Any) -> None:
+        fmt_key = _functionify(key)
+        self.data[fmt_key] = value
+
+    def __contains__(self, key: Any) -> bool:
+        key = _functionify(key)
+        return self.data.__contains__(key)
+
+    def __delitem__(self, key: str | Function) -> None:
+        fmt_key = _functionify(key)
+        del self.data[fmt_key]
 
 
 @dataclass
@@ -83,14 +131,14 @@ class Equations(Base):
     model: Dict[str, Eq]
     constraint: Dict[str, Constraint] | None  # {constraint_name: Constraint}
     regime: Dict[frozenset[str], Regime] | None  # {binding_set: Regime}
-    observable: SymbolGetterDict[Symbol, Expr]
-    obs_is_affine: SymbolGetterDict[Symbol, bool]
+    observable: SymbolGetterDict[Expr]
+    obs_is_affine: SymbolGetterDict[bool]
 
 
 @dataclass
 class Calib(Base):
-    parameters: SymbolGetterDict[Symbol, float64]
-    shock_std: SymbolGetterDict[Symbol, Symbol]
+    parameters: SymbolGetterDict[float64]
+    shock_std: SymbolGetterDict[Symbol]
     shock_corr: PairGetterDict[Symbol]
 
     def get_param(self, name: str | Symbol, default: float | None = None) -> float:
@@ -133,8 +181,8 @@ class Calib(Base):
 class Variables(Base):
     variables: list[Function]
     # None == 0 seed newton.
-    ss_seed: FunctionGetterDict[Function, Expr | None]
-    linearization: FunctionGetterDict[Function, LinearizationMethod]
+    ss_seed: FunctionGetterDict[Expr | None]
+    linearization: FunctionGetterDict[LinearizationMethod]
 
 
 @dataclass(repr=False)
