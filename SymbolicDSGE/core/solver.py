@@ -1,8 +1,7 @@
 import warnings
-from dataclasses import replace
 
 import sympy as sp
-from sympy import Symbol, Function, Expr, Basic
+from sympy import Symbol, Function, Expr
 from sympy.logic.boolalg import Boolean
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
@@ -12,7 +11,7 @@ from numpy.typing import NDArray
 
 import pandas as pd
 
-from .config import ModelConfig, SymbolGetterDict
+from .config import ModelConfig
 from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
 from sympy.core.function import AppliedUndef
 
@@ -103,11 +102,19 @@ class DSGESolver:
         if not params_order:
             params_order = [p.name for p in conf.parameters]
 
-        name_to_param = {p.name: p for p in conf.parameters}
-        p_missing = [p for p in params_order if p not in name_to_param]
-        if p_missing:
-            raise ValueError(f"params_order contains unknown parameters: {p_missing}")
-        params = [name_to_param[name] for name in params_order]
+        p_missing = [p.name for p in conf.parameters if p.name not in params_order]
+        p_unknown = [
+            name
+            for name in params_order
+            if name not in {p.name for p in conf.parameters}
+        ]
+        p_dupe = [name for name in params_order if params_order.count(name) > 1]
+
+        if p_missing or p_unknown or p_dupe:
+            raise ValueError(
+                "params_order contains invalid entries. "
+                f"Missing: {p_missing}, Unknown: {p_unknown}, Duplicated: {p_dupe}."
+            )
 
         # Shocks stay in the residual: they reach the pencil as the innovation block
         compiled_numeric: list[Expr] = [o.xreplace(subs_map) for o in residuals]
@@ -140,7 +147,7 @@ class DSGESolver:
             cur_syms=cur_syms,
             layout=layout,
             var_names=var_order,
-            calib_params=params,
+            calib_params=params_order,
             idx=idx,
             objective_eqs=compiled_numeric,
             observable_names=[v.name for v in conf.observables],
@@ -483,12 +490,12 @@ class DSGESolver:
 
         if parameters is None:
             param_vec = np.array(
-                [conf.calibration.parameters[p.name] for p in compiled.calib_params],
+                [conf.calibration.parameters[p] for p in compiled.calib_params],
                 dtype=float64,
             )
         else:
             param_vec = np.array(
-                [parameters[p.name] for p in compiled.calib_params], dtype=float64
+                [parameters[p] for p in compiled.calib_params], dtype=float64
             )
 
         if piecewise:

@@ -154,7 +154,6 @@ def _simulate_second_order_pruned_numba(
 
 
 # --- core.klein --------------------------------------------------------------
-@njit
 def _complex_step_jacobian(eq_func, base_point, params, n_exog, target):  # type: ignore[no-untyped-def]
     """``target`` selects the date perturbed: 0 fwd, 1 cur, 2 prev, 3 eps."""
     step = float64(1e-30)
@@ -186,7 +185,6 @@ def _complex_step_jacobian(eq_func, base_point, params, n_exog, target):  # type
     return jac
 
 
-@njit
 def _approximate_system_numeric(eq_func, steady_state, params, n_exog):  # type: ignore[no-untyped-def]
     """(a, b, c, d) under the kernel's signs: ``a y' = b y + c y_prev + d eps``."""
     base_point = np.ascontiguousarray(steady_state.astype(float64))

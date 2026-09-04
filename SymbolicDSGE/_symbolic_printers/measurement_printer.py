@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Sequence
 
 import sympy as sp
 from numba import cfunc, types
-from sympy import Symbol
 
 from .base import ExpressionPrinter, OpTable
 
@@ -62,7 +61,7 @@ class F64Ops(OpTable):
 class MeasurementLayout:
     """Maps measurement symbols to native buffer slots."""
 
-    slot: dict[Symbol, tuple[str, int]]
+    slot: dict[str, tuple[str, int]]
     n_var: int
     n_par: int
     n_obs: int
@@ -76,15 +75,15 @@ class MeasurementLayout:
     def from_compiled(
         cls,
         compiled: CompiledModel,
-        observables: list[str] | tuple[str, ...] | None = None,
+        observables: Sequence[str] | None = None,
     ) -> MeasurementLayout:
         obs = cls._normalize_observables(compiled, observables)
         obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
         selected = tuple(obs_idx[name] for name in obs)
 
-        slot: dict[Symbol, tuple[str, int]] = {}
+        slot: dict[str, tuple[str, int]] = {}
         for i, name in enumerate(compiled.var_names):
-            slot[Symbol(f"cur_{name}")] = ("vars", i)
+            slot[f"cur_{name}"] = ("vars", i)
         for j, p in enumerate(compiled.calib_params):
             slot[p] = ("par", j)
         return cls(
@@ -98,7 +97,7 @@ class MeasurementLayout:
     @staticmethod
     def _normalize_observables(
         compiled: Any,
-        observables: list[str] | tuple[str, ...] | None,
+        observables: Sequence[str] | None,
     ) -> tuple[str, ...]:
         if observables is None:
             return tuple(compiled.observable_names)

@@ -76,10 +76,8 @@ def test_compiled_parameters_accept_dict_and_vector_forms(compiled_test):
     c = compiled_test
     ss = np.zeros(len(c.var_names))
 
-    par_dict = {
-        p.name: float64(c.config.calibration.parameters[p]) for p in c.calib_params
-    }
-    par_vec = np.array([par_dict[p.name] for p in c.calib_params])
+    par_dict = {p: float64(c.config.calibration.parameters[p]) for p in c.calib_params}
+    par_vec = np.array([par_dict[p] for p in c.calib_params])
 
     C_dict, d_dict = c.build_affine_measurement_matrices(
         par_dict, c.observable_names, ss
@@ -182,7 +180,7 @@ def test_compile_rejects_unknown_param_order(parsed_test):
     model, kalman = parsed_test
     solver = DSGESolver(model, kalman)
 
-    with pytest.raises(ValueError, match="unknown parameters"):
+    with pytest.raises(ValueError, match="params_order contains invalid entries"):
         solver.compile(
             params_order=[*(p.name for p in model.parameters), "ghost_param"]
         )

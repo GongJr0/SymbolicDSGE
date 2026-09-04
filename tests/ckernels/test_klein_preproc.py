@@ -2,8 +2,8 @@
 
 The native driver (``_ckernels/core/klein_preproc.c``) runs the complex step
 first order sweep in C and calls the printer residual cfunc by address. The
-numba path runs the same printer residual through the njit vector function and
-its own complex step loop. Same step, same arithmetic, and same output.
+reference path drives the same cfunc from Python through its own complex step
+loop. Same step, same arithmetic, and same output.
 """
 
 from __future__ import annotations
@@ -14,11 +14,8 @@ import pytest
 from SymbolicDSGE._ckernels.core._core import klein_preprocess
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles.core import _approximate_system_numeric
-from SymbolicDSGE._symbolic_printers import (
-    ResidualLayout,
-    build_cfunc,
-    build_njit,
-)
+from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
+from _residual_call import residual_caller
 
 RTOL = 1e-10
 ATOL = 1e-12
@@ -43,8 +40,7 @@ def _params(compiled) -> np.ndarray:
 def test_klein_preproc_parity(path):
     compiled = _compiled(path)
     layout = ResidualLayout.from_compiled(compiled)
-    cf = build_cfunc(compiled.objective_eqs, layout)  # hold: keeps .address valid
-    eq_func = build_njit(compiled.objective_eqs, layout)
+    eq_func = residual_caller(compiled.objective_eqs, layout)
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = _params(compiled)
@@ -52,7 +48,9 @@ def test_klein_preproc_parity(path):
     a_ref, b_ref, c_ref, d_ref = _approximate_system_numeric(
         eq_func, ss, par, layout.n_exog
     )
-    a, b, c, d = klein_preprocess(cf.address, ss, par, layout.n_var, layout.n_exog)
+    a, b, c, d = klein_preprocess(
+        eq_func.cfunc.address, ss, par, layout.n_var, layout.n_exog
+    )
 
     assert a.shape == (layout.n_var, layout.n_var)
     assert b.shape == (layout.n_var, layout.n_var)

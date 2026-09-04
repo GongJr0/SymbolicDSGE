@@ -28,6 +28,7 @@ from .config import (
     Regime,
     Equations,
     Calib,
+    RegimeGetterDict,
     Variables,
     SymbolGetterDict,
     PairGetterDict,
@@ -706,28 +707,21 @@ class ModelParser:
             )
 
         regime_raw = eq_data.get("regime", {}) or {}
-        regime_key = lambda k: frozenset(map(str.strip, k.split(",")))
 
-        # Distinct spellings can name one constraint set ("a, b" and "b, a").
-        by_key: dict[frozenset[str], list[str]] = {}
-        for raw_key in regime_raw:
-            by_key.setdefault(regime_key(raw_key), []).append(raw_key)
-        if collisions := {k: v for k, v in by_key.items() if len(v) > 1}:
-            raise ValueError(
-                "Regime keys must name distinct constraint sets: "
-                + "; ".join(
-                    f"{sorted(spellings)} all name {sorted(key)}"
-                    for key, spellings in collisions.items()
+        regime = RegimeGetterDict({})
+
+        for raw_key, v in regime_raw.items():
+            if raw_key in regime:
+                raise ValueError(
+                    f"Duplicate regime key '{raw_key}' encountered "
+                    "in equations.regime. Each regime key must be unique."
                 )
-            )
-
-        regime: dict[frozenset[str], Regime] = {
-            regime_key(k): {
+            regime[raw_key] = {
                 name: _get_eq(eq)
-                for name, eq in cls._require_mapping(v, f"equations.regime.{k}").items()
+                for name, eq in cls._require_mapping(
+                    v, f"equations.regime.{raw_key}"
+                ).items()
             }
-            for k, v in regime_raw.items()
-        }
 
         observables_raw = eq_data.get("observables", {}) or {}
         observables_eq: dict[Symbol, Expr] = {
@@ -818,7 +812,7 @@ class ModelParser:
     @staticmethod
     def _resolve_calibration_locals(
         data: dict[str, Any], _LOCALS: dict[str, Any]
-    ) -> tuple[SymbolGetterDict[Symbol, float64], dict[Symbol, Expr]]:
+    ) -> tuple[SymbolGetterDict[float64], dict[Symbol, Expr]]:
         """Split ``calibration.parameters`` into values and derived locals.
 
         An entry carrying free symbols names a formula over other parameters
@@ -874,15 +868,13 @@ class ModelParser:
         data: dict[str, Any],
         _LOCALS: dict[str, Any],
         shock_syms: list[Symbol],
-    ) -> tuple[
-        SymbolGetterDict[Symbol, Symbol | None], dict[frozenset[Symbol], Symbol | None]
-    ]:
+    ) -> tuple[SymbolGetterDict[Symbol | None], PairGetterDict[Symbol | None]]:
         shocks = data.get("calibration", {}).get("shocks", {}) or {}
         std_map = shocks.get("std", {}) or {}
         corr_map = shocks.get("corr", {}) or {}
 
         # std: map shock symbol -> parameter Symbol (or None)
-        shock_std: SymbolGetterDict[Symbol, Symbol | None] = SymbolGetterDict(
+        shock_std: SymbolGetterDict[Symbol | None] = SymbolGetterDict(
             {
                 s: (sp.Symbol(std_map[s.name]) if s.name in std_map else None)
                 for s in shock_syms
@@ -909,7 +901,7 @@ class ModelParser:
                 key = frozenset((shock_syms[i], shock_syms[j]))
                 shock_corr.setdefault(key, None)
 
-        return shock_std, shock_corr
+        return shock_std, PairGetterDict(shock_corr)
 
     @staticmethod
     def _validate_P0(
@@ -938,7 +930,7 @@ class ModelParser:
     def _parse_kalman_if_present(
         data: dict[str, Any],
         _LOCALS: dict[str, Any],
-        parameters: SymbolGetterDict[Symbol, float64],
+        parameters: SymbolGetterDict[float64],
     ) -> KalmanConfig | None:
         kalman_data = data.get("kalman")
         if not kalman_data:
@@ -966,7 +958,7 @@ class ModelParser:
                 obs_name: param_name for obs_name, param_name in std_map.items()
             }
             R_corr_param_map: dict[frozenset[str], str | None] = {}
-            obs_sig_sym: SymbolGetterDict[Symbol, Symbol] = SymbolGetterDict(
+            obs_sig_sym: SymbolGetterDict[Symbol] = SymbolGetterDict(
                 {
                     _LOCALS[obs_name]: _LOCALS[param_name]
                     for obs_name, param_name in std_map.items()

@@ -215,7 +215,7 @@ class CompiledModel:
 
     objective_eqs: list[Expr]
 
-    calib_params: list[Symbol]
+    calib_params: list[str]
 
     observable_names: list[str]
     observable_eqs: list[Expr]
@@ -438,10 +438,8 @@ class CompiledModel:
             for p in self.calib_params:
                 if p in par:
                     vals.append(par[p])
-                elif p.name in par:
-                    vals.append(par[p.name])
                 else:
-                    raise KeyError(f"Missing parameter '{p.name}'.")
+                    raise KeyError(f"Missing parameter '{p}'.")
             return np.asarray(vals)
 
         return np.asarray(par)

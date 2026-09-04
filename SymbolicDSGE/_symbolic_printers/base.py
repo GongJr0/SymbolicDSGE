@@ -12,7 +12,7 @@ import sympy as sp
 class Layout(Protocol):
     """Maps symbols to input buffers and records output length."""
 
-    slot: dict[Any, tuple[str, int]]
+    slot: dict[str, tuple[str, int]]
 
     @property
     def n_expr(self) -> int: ...
@@ -60,12 +60,32 @@ class ExpressionPrinter(ABC):
     def context_name(self) -> str:
         """Short name used in unsupported node errors."""
 
+    def _check_layout_covers(self, exprs: list[sp.Expr], layout: Layout) -> None:
+        """Every free symbol of ``exprs`` must name a slot.
+
+        Runs before common subexpression elimination, whose temporaries are
+        local variables rather than buffer reads and so are legitimately absent
+        from the layout. A symbol that reaches :meth:`_render_symbol` without a
+        slot is emitted as a bare name, which types as an undefined global once
+        the source is compiled; failing here names it instead.
+        """
+        free: set[sp.Symbol] = set()
+        for expr in exprs:
+            free |= expr.free_symbols
+        missing = sorted(str(sym) for sym in free if str(sym) not in layout.slot)
+        if missing:
+            raise KeyError(
+                f"{self.context_name} layout has no slot for: {', '.join(missing)}."
+            )
+
     def emit(
         self, exprs: list[sp.Expr], layout: Layout, *, allocate: bool
     ) -> list[str]:
         self.layout = layout
         self.lines = []
         self._tmp = 0
+
+        self._check_layout_covers(exprs, layout)
 
         n_out = self.ops.elems_per_var * layout.n_expr
         replacements, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("cse_"))
@@ -104,7 +124,7 @@ class ExpressionPrinter(ABC):
 
     def _render_symbol(self, sym: Any) -> str:
         assert self.layout is not None
-        slot = self.layout.slot.get(sym)
+        slot = self.layout.slot.get(sym.name)
         if slot is None:
             return str(sym.name)
         buf, idx = slot

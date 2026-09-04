@@ -19,7 +19,6 @@ from .residual_printer import (
     ResidualLayout,
     ResidualPrinter,
     build_cfunc,
-    build_njit,
 )
 
 __all__ = [
@@ -39,5 +38,4 @@ __all__ = [
     "build_cfunc",
     "build_constraint_cfunc",
     "build_measurement_cfunc",
-    "build_njit",
 ]
