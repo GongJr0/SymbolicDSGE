@@ -183,12 +183,6 @@ cdef extern from "spike.h" nogil:
     void spike_call(
         spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
 
-cdef extern from "residual_path.h" nogil:
-    int64_t sdsge_residual_path(
-        sdsge_residual_fn resid, const c128 *cur, const c128 *fwd,
-        const c128 *prev, const c128 *eps, const c128 *par, int64_t n_steps,
-        int64_t n_var, int64_t n_exog, int64_t n_eq, double *residuals)
-
 cdef extern from "klein_solve.h" nogil:
     ctypedef struct klein_spec:
         sdsge_residual_fn residual
@@ -1042,50 +1036,6 @@ def second_order(a, b, f_xx, gx, hx, bu, Q, int64_t n_state):
     if err == SDSGE_SECOND_ORDER_RISK:
         raise ValueError("solve_second_order: singular risk-correction system.")
     return gxx, hxx, gxu, hxu, guu, huu, gss, hss
-
-
-def residual_path(
-    size_t residual_addr, cur_states, fwd_states, prev_states, shocks, params,
-    int64_t n_eq,
-):
-    """Real residual matrix ``(n_steps, n_eq)`` from a residual @cfunc
-    (``build_cfunc``) evaluated over a simulated path. Native backend for the
-    Den Haan-Marcet moment builder, reusing the solve's cfunc so it never
-    triggers the numba residual compile. ``prev_states`` is ``(n_steps, n_var)``
-    and ``shocks`` ``(n_steps, n_exog)``, dated like the rest of the path.
-    Inputs are coerced to contiguous complex128 here.
-    """
-    cdef double complex[:, ::1] curv = np.ascontiguousarray(
-        cur_states, dtype=np.complex128)
-    cdef double complex[:, ::1] fwdv = np.ascontiguousarray(
-        fwd_states, dtype=np.complex128)
-    cdef double complex[:, ::1] prevv = np.ascontiguousarray(
-        prev_states, dtype=np.complex128)
-    cdef double complex[:, ::1] epsv = np.ascontiguousarray(
-        shocks, dtype=np.complex128)
-    cdef double complex[::1] parv = np.ascontiguousarray(
-        params, dtype=np.complex128).reshape(-1)
-    cdef int64_t n_steps = curv.shape[0]
-    cdef int64_t n_var = curv.shape[1]
-    cdef int64_t n_exog = epsv.shape[1]
-    residuals = np.empty((n_steps, n_eq), dtype=np.float64)
-    cdef double[:, ::1] rv = residuals
-
-    cdef c128 *cur_ptr = <c128 *>&curv[0, 0] if n_steps > 0 else NULL
-    cdef c128 *fwd_ptr = <c128 *>&fwdv[0, 0] if n_steps > 0 else NULL
-    cdef c128 *prev_ptr = <c128 *>&prevv[0, 0] if n_steps > 0 else NULL
-    cdef c128 *eps_ptr = (
-        <c128 *>&epsv[0, 0] if n_steps > 0 and n_exog > 0 else NULL)
-    cdef c128 *par_ptr = <c128 *>&parv[0] if parv.shape[0] > 0 else NULL
-    cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
-    cdef int64_t err
-    with nogil:
-        err = sdsge_residual_path(
-            resid, cur_ptr, fwd_ptr, prev_ptr, eps_ptr, par_ptr, n_steps,
-            n_var, n_exog, n_eq, &rv[0, 0])
-    if err != 0:
-        raise MemoryError("residual_path: allocation failed.")
-    return residuals
 
 
 def measurement_eval(size_t meas_addr, vars, par, int64_t n_obs):

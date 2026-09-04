@@ -174,18 +174,6 @@ def second_order(
     """Second-order policy tensors (gxx, hxx, gxu, hxu, guu, huu, gss, hss) --
     native twin of core.second_order.solve_second_order."""
 
-def residual_path(
-    residual_addr: int,
-    cur_states: _C128,
-    fwd_states: _C128,
-    prev_states: _C128,
-    shocks: _C128,
-    params: _C128,
-    n_eq: int,
-) -> _F64:
-    """Real residual matrix (n_steps, n_eq) from a residual @cfunc over a path.
-    ``prev_states`` is (n_steps, n_var) and ``shocks`` (n_steps, n_exog)."""
-
 def residual_eval(
     residual_addr: int,
     fwd: _C128,
