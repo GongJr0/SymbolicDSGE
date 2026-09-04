@@ -273,7 +273,6 @@ nav:
           - FRED: documentation/utilities/FRED.md
           - KalmanFilter: documentation/utilities/KalmanFilter.md
           - math_utils: documentation/utilities/math_utils.md
-          - DenHaanMarcet: documentation/utilities/DenHaanMarcet.md
   - Benchmarks:
       - Linear Kalman Filter: benchmarks/linear_kf.md
       - Point Estimation: benchmarks/point_estimation.md

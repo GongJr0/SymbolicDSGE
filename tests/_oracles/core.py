@@ -1,7 +1,7 @@
 """Numba / numpy reference implementations for the native ``_ckernels.core``
 kernels, retained as parity oracles.
 
-These were the runtime fallbacks in ``SymbolicDSGE.core.*`` / ``utils.dhm`` before
+These were the runtime fallbacks in ``SymbolicDSGE.core.*`` before
 the native extension became mandatory. They now live here purely so the parity
 tests can compare each C kernel against an independent implementation; the
 library no longer imports them.
@@ -344,31 +344,6 @@ def first_order_residual(a: NDF, b: NDF, c: NDF, gx: NDF, hx: NDF, n_state: int)
     nx = int(n_state)
     ghx = np.vstack([hx, gx])
     return a @ ghx @ hx - b @ ghx - c[:, :nx]
-
-
-# --- utils.dhm ---------------------------------------------------------------
-@njit
-def _forward_residuals_numba(
-    cur_states: np.ndarray,
-    fwd_states: np.ndarray,
-    params: np.ndarray,
-    objective_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
-    n_eq: int,
-) -> np.ndarray:
-    # Evaluate the numba vector residual over the path into a real
-    # (n_steps x n_eq) matrix; reference for the native ``residual_path``.
-    n_steps = cur_states.shape[0]
-    n_var = cur_states.shape[1]
-    residuals = np.empty((n_steps, n_eq), dtype=np.float64)
-    cur = np.empty((n_var,), dtype=np.complex128)
-    fwd = np.empty((n_var,), dtype=np.complex128)
-    for t in range(n_steps):
-        cur[:] = cur_states[t]
-        fwd[:] = fwd_states[t]
-        residual_vec = objective_fn(fwd, cur, params)
-        for k in range(n_eq):
-            residuals[t, k] = residual_vec[k].real
-    return residuals
 
 
 # --- compiled residual evaluator ---------------------------------------------
