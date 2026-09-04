@@ -67,7 +67,6 @@ _REGIME_SHIFT_CONDITIONAL: TypeAlias = Relational | And | Or | Not
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
 _ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
 _ALLOWED_KALMAN_KEYS = frozenset({"R"})
-_ALLOWED_P0_KEYS = frozenset({"mode", "diag"})
 _ALLOWED_R_KEYS = frozenset({"std", "corr"})
 
 
@@ -543,7 +542,6 @@ class ModelParser:
         kal = data.get("kalman")
         cls._reject_unknown_keys(kal, _ALLOWED_KALMAN_KEYS, "kalman")
         if isinstance(kal, dict):
-            cls._reject_unknown_keys(kal.get("P0"), _ALLOWED_P0_KEYS, "kalman.P0")
             cls._reject_unknown_keys(kal.get("R"), _ALLOWED_R_KEYS, "kalman.R")
 
     @staticmethod
@@ -904,29 +902,6 @@ class ModelParser:
         return shock_std, PairGetterDict(shock_corr)
 
     @staticmethod
-    def _validate_P0(
-        mode: str,
-        diag: dict[str, float] | None,
-        declared_var_names: list[str],
-    ) -> None:
-        if mode == "diag":
-            if diag is None:
-                raise ValueError("P0 diagonal specification missing in configuration.")
-            declared_set = set(declared_var_names)
-            diag_set = set(diag)
-            if declared_set != diag_set:
-                missing = sorted(declared_set - diag_set)
-                unknown = sorted(diag_set - declared_set)
-                raise ValueError(
-                    "P0 diagonal specification must list exactly the model variables; "
-                    f"missing {missing}, unknown {unknown}."
-                )
-            if any(v < 0 for v in diag.values()):
-                raise ValueError("P0 diagonal entries must be non-negative.")
-        elif mode != "eye":
-            raise ValueError(f"Unrecognized P0 mode: {mode}. Expected 'diag' or 'eye'.")
-
-    @staticmethod
     def _parse_kalman_if_present(
         data: dict[str, Any],
         _LOCALS: dict[str, Any],
@@ -938,13 +913,6 @@ class ModelParser:
 
         y_order = [_LOCALS[o] for o in data["observables"]]
         obs_names = [o.name for o in y_order]
-
-        declared_var_names, _ = ModelParser._coerce_variable_data(data)
-
-        P0_cfg = kalman_data.get("P0", {}) or {}
-        P0_mode = P0_cfg.get("mode", "eye")
-        P0_diag = P0_cfg.get("diag", None)
-        ModelParser._validate_P0(P0_mode, P0_diag, declared_var_names)
 
         R: ndarray | None
         r_param_symbols: list[Symbol] | None

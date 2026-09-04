@@ -39,7 +39,7 @@ Estimator(
 3. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
 4. Required for `map(...)` and `mcmc(...)`.
 5. Optional constant observation-covariance override. If omitted, `R` comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
-6. Optional initial state-covariance override. If omitted, `P0` comes from the Kalman config. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
+6. Optional initial state-covariance override. If omitted, the stationary state-space covariance is used. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
 
 ???+ info "Filter Initial Conditions"
     In linear and extended likelihoods, `x0` and `P0` are the prior mean and covariance for the first observation. In unscented likelihoods, they describe the state and covariance before the first observation.
