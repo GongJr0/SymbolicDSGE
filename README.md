@@ -46,14 +46,14 @@ pip install "SymbolicDSGE[ui]"    # Web based GUI
 
 ### Overview
 
-`SymbolicDSGE` is a Python DSGE engine with a JIT compiled backend for linear and linearized DSGE models, supporting symbolic manipulation features for in-place model modification.
+`SymbolicDSGE` is a Python DSGE engine with a compiled backend for linear and linearized DSGE models, supporting symbolic manipulation features for in-place model modification.
 It also provides measurement-equation augmentation tools, including symbolic regression for complete or restricted free-form function discovery and OLS, Ridge, Lasso, and Elastic Net for structured linear coefficient estimation.
 The library supports a wide set of features beyond augmentation:
 
 - DSGE model specification, symbolic manipulation, and linearization
 - Bayesian and maximum-likelihood estimation
 - Simulation and impulse-response-function utilities
-- Gaussian and extended Kalman filtering
+- Multiple Kalman filter variants
 - Automatic data retrieval from FRED
 - Custom shock distributions via SciPy or user-defined samplers
 - Monte Carlo pipelines for comparing models or model-generated samples, including:
