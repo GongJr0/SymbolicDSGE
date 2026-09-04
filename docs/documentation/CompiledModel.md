@@ -52,11 +52,11 @@ __Fields:__
 | layout | `#!python VariableLayout` | Config-declared and compiler-inferred variable layout metadata. |
 | var_names | `#!python list[str]` | Variables in compiled canonical order. |
 | idx | `#!python dict[str, int]` | Variable-name to index mapping used by solver/simulation. |
-| objective_eqs | `#!python list[sp.Expr]` | Model residuals in symbolic representation, in reference equation order. |
-| calib_params | `#!python list[sympy.Symbol]` | Parameter symbols in canonical calibration order used by compiled functions. |
+| objective_eqs | `#!python list[sympy.Expr]` | Model residuals in symbolic representation, in reference equation order. |
+| calib_params | `#!python list[str]` | Parameter symbols in canonical calibration order used by compiled functions. |
 | observable_names | `#!python list[str]` | Observable variables as strings. |
-| observable_eqs | `#!python list[sp.Expr]` | Measurement equations in symbolic representation. |
-| observable_jacobian_eqs | `#!python list[sp.Expr]` | Flat row-major `(n_obs, n_var)` symbolic Jacobian of the measurement equations with respect to the current-period variables. |
+| observable_eqs | `#!python list[sympy.Expr]` | Measurement equations in symbolic representation. |
+| observable_jacobian_eqs | `#!python list[sympy.Expr]` | Flat row-major `(n_obs, n_var)` symbolic Jacobian of the measurement equations with respect to the current-period variables. |
 | constraint_names | `#!python tuple[str, ...]` | Occasionally binding constraint names in declaration order. Empty when the model declares none. |
 | constraint_exprs | `#!python list[sympy.Boolean]` | Constraint conditions in declaration order, bind then relax for each constraint. |
 | regimes | `#!python dict[int, RegimeBlock]` | Replaced residuals per regime, keyed by the bitmask of that regime's binding constraints over `constraint_names`. |

@@ -226,7 +226,7 @@ __Inputs:__
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | joseph_cov | Use Joseph form for covariance update if `True`. `filter_mode == "unscented"` has it's own update mechanism and will ignore this parameter. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
-| P0 | Initial state covariance override. It follows the same timing as `x0` at the first observation. `None` uses the `P0` matrix from `KalmanConfig`. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
+| P0 | Initial state covariance override. `None` uses the stationary state-space covariance. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
 | R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
 | _debug | Print debug information about filter inputs if `True`. |
 
