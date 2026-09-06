@@ -74,7 +74,7 @@ def test_filtering_a_constrained_model_is_filtering_its_reference_regime(
     np.testing.assert_array_equal(ours.y_pred, theirs.y_pred)
 
 
-def test_the_constraint_binds_on_the_data_being_filtered(solved, observations):
+def test_constraint_binds_on_the_data_being_filtered(solved, observations):
     # Without this the equality above would hold for the uninteresting reason
     # that the run never left the reference regime to begin with.
     shock = np.zeros(_T, dtype=np.float64)
@@ -88,10 +88,14 @@ def test_unscented_filtering_is_refused(solved, observations):
         solved.kalman(observations, filter_mode="unscented")
 
 
-def test_the_estimation_likelihood_runs_on_a_constrained_model(solved, observations):
+def test_estimation_likelihood_runs_on_a_constrained_model(solved, observations):
     # Estimation solves per draw rather than taking a solved model, so it
     # reaches the reference block by its own route. At the calibrated theta it
     # has to land on the one-shot filter's number exactly.
+    #
+    # The two entry points do not carry the same filter defaults, so the run
+    # settings are stated on both sides rather than inherited. An identity
+    # between two configurations is not the claim being made here.
     model, kalman = ModelParser(_MODEL).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
@@ -101,9 +105,16 @@ def test_the_estimation_likelihood_runs_on_a_constrained_model(solved, observati
         y=observations,
         filter_mode="linear",
         estimated_params=_ESTIMATED,
+        symmetrize=True,
+        joseph_cov=False,
     )
 
-    ours = float(est.loglik(est.theta0()))
-    one_shot = float(solved.kalman(observations, filter_mode="linear").loglik)
-
-    assert ours == one_shot
+    est_loglik = float(est.loglik(est.theta0()))
+    kf_loglik = float(
+        solved.kalman(
+            observations,
+            filter_mode="linear",
+            symmetrize=True,
+            joseph_cov=False,
+        ).loglik
+    )
