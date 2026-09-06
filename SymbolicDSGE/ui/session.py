@@ -416,7 +416,7 @@ class UISession:
                     x0=None,
                     jitter=0.0,
                     symmetrize=True,
-                    joseph_cov=True,
+                    joseph_cov=False,
                 ),
             )
         )

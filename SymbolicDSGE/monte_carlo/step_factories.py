@@ -80,7 +80,7 @@ def reference_filter_step(
     R: NDF | None = None,
     jitter: float | np.float64 | None = None,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     return_shocks: bool = False,
 ) -> MCStep:
     return MCStep(

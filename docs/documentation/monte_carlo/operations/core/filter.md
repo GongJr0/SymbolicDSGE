@@ -16,7 +16,7 @@ reference_filter_step(
     R: ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False, 
     return_shocks: bool = False,
 ) -> MCStep
 ```
@@ -38,7 +38,7 @@ __Inputs:__
 | R | `None` | Measurement error covariance override. |
 | jitter | `None` | Filter jitter override. |
 | symmetrize | `True` | Symmetrize covariance matrices during filtering. |
-| joseph_cov | `True` | Use the Joseph covariance update for linear and extended filtering. Set it to `False` for the simplified update, which is faster but less numerically robust. It does not affect unscented filtering. |
+| joseph_cov | `False` | Use the Joseph covariance update for linear and extended filtering. `False` is faster but less robust. |
 | return_shocks | `False` | Return shock estimates when supported by the selected filter mode. |
 
 __Downstream Fields:__

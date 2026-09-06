@@ -152,7 +152,7 @@ def test_resolve_linear_args_is_a_complete_run_raw_argument_set():
     assert np.array_equal(args["P0"], np.eye(3, dtype=FLOAT))
     assert args["jitter"] == pytest.approx(0.125)
     assert args["symmetrize"] is True
-    assert args["joseph_cov"] is True
+    assert args["joseph_cov"] is False
     assert args["return_shocks"] is True
 
 

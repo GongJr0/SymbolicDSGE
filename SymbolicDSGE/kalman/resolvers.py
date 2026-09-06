@@ -105,7 +105,7 @@ def resolve_linear_args(
     R: NDF | None = None,
     jitter: Float64Like | None = None,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     return_shocks: bool = False,
 ) -> LinearRunArgs:
     """Complete argument set for ``KalmanFilter.run_raw``."""
@@ -139,7 +139,7 @@ def resolve_extended_args(
     R: NDF | None = None,
     jitter: Float64Like | None = None,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     return_shocks: bool = False,
 ) -> ExtendedRunArgs:
     """Complete argument set for ``KalmanFilter.run_extended_raw``."""

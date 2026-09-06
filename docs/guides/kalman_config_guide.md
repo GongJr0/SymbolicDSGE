@@ -60,7 +60,7 @@ State Covariance ($P$) defines the inter-state variation through a covariance ma
 
 ## Filter Options
 
-`jitter`, `symmetrize`, and `joseph_cov` are runtime options on `SolvedModel.kalman(...)`. `jitter` is added to covariance matrices if their Cholesky decomposition fails. `symmetrize=True` applies $(M + M^\top)/2$ to covariance matrices during filtering. `joseph_cov=True` uses the Joseph covariance update; set it to `False` for the faster, simplified update when its lower numerical robustness is acceptable. It applies to linear and extended filtering only.
+`jitter`, `symmetrize`, and `joseph_cov` are runtime options on `SolvedModel.kalman(...)`. `jitter` is added to covariance matrices if their Cholesky decomposition fails. `symmetrize=True` applies $(M + M^\top)/2$ to covariance matrices during filtering. `joseph_cov=True` uses the Joseph covariance update; `False` is a faster, simple update which is less numericaly robust. It applies to linear and extended filtering only.
 
 ## Conclusion
 
