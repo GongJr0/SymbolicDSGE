@@ -113,7 +113,7 @@ def filter_linear_step(
     n_obs: int,
     n_exog: int,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     jitter: float = 0.0,
     return_shocks: bool = False,
 ) -> NativeStep: ...
@@ -127,7 +127,7 @@ def filter_extended_step(
     n_exog: int,
     n_par: int,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     jitter: float = 0.0,
     return_shocks: bool = False,
 ) -> NativeStep: ...

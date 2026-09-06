@@ -813,7 +813,7 @@ def prepare_filter_run(
     filter_mode: str,
     jitter: float | float64 | None,
     symmetrize: bool,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     P0: NDF | None = None,
 ) -> PreparedFilterRun:
     obs, y_reordered = reorder_observables(compiled, observables, y)

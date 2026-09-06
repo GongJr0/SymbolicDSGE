@@ -459,7 +459,7 @@ class SolvedModel(ABC, Generic[Policy]):
         x0: NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = False,
-        joseph_cov: bool = True,
+        joseph_cov: bool = False,
         return_shocks: bool = False,
         P0: NDF | None = None,
         R: NDF | None = None,
@@ -495,7 +495,7 @@ class SolvedModel(ABC, Generic[Policy]):
         jitter: float | float64 | None = None,
         symmetrize: bool = False,
         return_shocks: bool = False,
-        joseph_cov: bool = True,
+        joseph_cov: bool = False,
         P0: NDF | None = None,
         R: NDF | None = None,
     ) -> FilterRawResult | UnscentedFilterRawResult:
@@ -534,6 +534,8 @@ class SolvedModel(ABC, Generic[Policy]):
                 raise ValueError(
                     "return_shocks is not supported for unscented filtering."
                 )
+            if joseph_cov:
+                raise ValueError("joseph_cov is not supported for unscented filtering.")
             return KalmanFilter.run_unscented_raw(
                 **resolve_unscented_args(
                     self,

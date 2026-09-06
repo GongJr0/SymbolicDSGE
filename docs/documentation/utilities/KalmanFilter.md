@@ -54,7 +54,7 @@ KalmanFilter.run(
     P0: np.ndarray[float64] | None = None,
     return_shocks: bool = False,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False, 
     jitter: float = 0.0,
     steady_state: np.ndarray[float64] | None = None,
 ) -> FilterResult
@@ -97,7 +97,7 @@ KalmanFilter.run_extended(
     P0: np.ndarray[float64] | None = None,
     return_shocks: bool = False,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False, 
     jitter: float = 0.0,
     compute_y_filt: bool = True,
     steady_state: np.ndarray[float64] | None = None,

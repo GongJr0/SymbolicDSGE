@@ -28,7 +28,7 @@ Estimator(
     x0: np.ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool = True,
-    joseph_cov: bool = True,
+    joseph_cov: bool = False,
     R: np.ndarray | None = None, # (5)!
     P0: np.ndarray | None = None, # (6)!
 )
@@ -44,7 +44,7 @@ Estimator(
 ???+ info "Filter Initial Conditions"
     In linear and extended likelihoods, `x0` and `P0` are the prior mean and covariance for the first observation. In unscented likelihoods, they describe the state and covariance before the first observation.
 
-`joseph_cov=True` uses the Joseph covariance update for linear and extended likelihoods. Set it to `False` for the simplified update, which is faster but less numerically robust. It does not affect unscented likelihoods.
+`joseph_cov=True` uses the Joseph covariance update for linear and extended likelihoods. `False` applies a simplw update, which is faster but less numerically robust.
 
 ## Likelihood / Posterior Evaluation
 

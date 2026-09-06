@@ -811,7 +811,7 @@ SHOCK_UNIFORM = SDSGE_MC_SHOCK_UNIFORM
 # that carries it, so a caller that omits one still narrows a complete context.
 # Callers that size arenas before a step exists read the same names.
 DEFAULT_SYMMETRIZE = True
-DEFAULT_JOSEPH_COV = True
+DEFAULT_JOSEPH_COV = False
 DEFAULT_JITTER = 0.0
 DEFAULT_RETURN_SHOCKS = False
 DEFAULT_UKF_ALPHA = 1.0
