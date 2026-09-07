@@ -9,7 +9,7 @@ from itertools import combinations
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from types import FrameType
-from typing import Any, Callable, Iterator, TypeAlias
+from typing import Any, Callable, Iterator, TypeAlias, Sequence
 import warnings
 
 from sympy.core.basic import Basic
@@ -390,10 +390,10 @@ class ModelParser:
                 )
 
     def from_yaml(self) -> tuple[dict, ParsedConfig]:
-        data = self._load_yaml(self.config_path)
-        self._validate_schema(data)
+        data = _load_yaml(self.config_path)
+        _validate_schema(data)
 
-        ns = self._build_namespace(data)
+        ns = _build_namespace(data)
         (
             _LOCALS,
             ordered_var_names,
@@ -406,24 +406,24 @@ class ModelParser:
 
         # Locals resolve before any field is parsed, so the helpers below can
         # eliminate them from everything they build.
-        parameters, local_subs = self._resolve_calibration_locals(data, _LOCALS)
-        self._require_calibrated_params(data, local_subs)
+        parameters, local_subs = _resolve_calibration_locals(data, _LOCALS)
+        _require_calibrated_params(data, local_subs)
         params = [param for param in params if param not in local_subs]
 
-        _get_expr, _get_relational, _get_eq = self._sympy_parsers(_LOCALS, local_subs)
+        _get_expr, _get_relational, _get_eq = _sympy_parsers(_LOCALS, local_subs)
 
-        variables = self._parse_variables(
+        variables = _parse_variables(
             data, _LOCALS, ordered_var_names, variable_funcs, _get_expr
         )
-        equations = self._parse_equations(
+        equations = _parse_equations(
             data, _LOCALS, ordered_var_names, _get_eq, _get_relational, _get_expr
         )
 
-        shock_std, shock_corr = self._parse_shock_calibration(data, _LOCALS, shock_syms)
+        shock_std, shock_corr = _parse_shock_calibration(data, _LOCALS, shock_syms)
         calibration = Calib(
             parameters=parameters,
-            shock_std=shock_std,  # pyright: ignore
-            shock_corr=PairGetterDict(shock_corr),
+            shock_std=shock_std,
+            shock_corr=shock_corr,
         )
 
         mdl_cfg = ModelConfig(
@@ -437,7 +437,7 @@ class ModelParser:
             symbolically_linearized=False,
         )
 
-        kalman_cfg = self._parse_kalman_if_present(data, _LOCALS, parameters)
+        kalman_cfg = _parse_kalman_if_present(data, _LOCALS, parameters)
         return data, ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
 
     def to_yaml(
@@ -489,553 +489,558 @@ class ModelParser:
                 f.write(text)
         return StringIO(text)
 
-    # ---------------- helpers ----------------
 
-    @staticmethod
-    def _load_yaml(path: Path) -> dict[str, Any]:
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        if not isinstance(data, dict):
-            raise TypeError("YAML root must be a mapping/dict.")
-        return data
+# ---------------- helpers ----------------
 
-    @staticmethod
-    def _reject_unknown_keys(mapping: Any, allowed: frozenset[str], where: str) -> None:
-        if not isinstance(mapping, dict):
-            return
-        unknown = sorted(set(mapping) - allowed)
-        if unknown:
-            raise ValueError(
-                f"Unknown field(s) under '{where}': {unknown}. "
-                f"Allowed: {sorted(allowed)}."
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        raise TypeError("YAML root must be a mapping/dict.")
+    return data
+
+
+def _reject_unknown_keys(mapping: Any, allowed: frozenset[str], where: str) -> None:
+    if not isinstance(mapping, dict):
+        return
+    unknown = sorted(set(mapping) - allowed)
+    if unknown:
+        raise ValueError(
+            f"Unknown field(s) under '{where}': {unknown}. "
+            f"Allowed: {sorted(allowed)}."
+        )
+
+
+def _require_mapping(value: Any, where: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TypeError(
+            f"'{where}' must be a mapping, got {type(value).__name__}: {value!r}"
+        )
+    return value
+
+
+def _validate_schema(data: dict[str, Any]) -> None:
+    _check_deprecated(data)
+    _reject_unknown_keys(data, _ALLOWED_TOP_LEVEL_KEYS, "<root>")
+    _reject_unknown_keys(
+        (eq := data.get("equations")), _ALLOWED_EQUATION_KEYS, "equations"
+    )
+    if isinstance(eq, dict):
+        for name, spec in (eq.get("constraint") or {}).items():
+            _reject_unknown_keys(
+                spec,
+                _ALLOWED_CONSTRAINT_KEYS,
+                f"equations.constraint.{name}",
             )
+    calib = data.get("calibration")
+    _reject_unknown_keys(calib, _ALLOWED_CALIBRATION_KEYS, "calibration")
+    if isinstance(calib, dict):
+        _reject_unknown_keys(
+            calib.get("shocks"), _ALLOWED_SHOCK_KEYS, "calibration.shocks"
+        )
 
-    @staticmethod
-    def _require_mapping(value: Any, where: str) -> dict[str, Any]:
-        if not isinstance(value, dict):
+    kal = data.get("kalman")
+    _reject_unknown_keys(kal, _ALLOWED_KALMAN_KEYS, "kalman")
+    if isinstance(kal, dict):
+        _reject_unknown_keys(kal.get("R"), _ALLOWED_R_KEYS, "kalman.R")
+
+
+def _build_namespace(
+    data: dict[str, Any],
+) -> tuple[
+    dict[str, Any],
+    list[str],
+    list[Function],
+    list[Symbol],
+    list[Symbol],
+    list[Symbol],
+    list[Symbol],
+]:
+    ordered_var_names, _ = _coerce_variable_data(data)
+    t = sp.symbols("t", integer=True)
+
+    variables: list[Function] = list(
+        map(Function, ordered_var_names)
+    )  # pyright: ignore
+
+    params: list[Symbol] = list(
+        sp.symbols(list(data.get("calibration", {}).get("parameters", {}).keys()))
+    )
+    observables: list[Symbol] = list(sp.symbols(data["observables"]))
+
+    shocks: list[Symbol] = [sp.Symbol(name) for name in data["shocks"]]
+    shock_syms: list[Symbol] = list(shocks)
+
+    _LOCALS: dict[str, Any] = {
+        "t": t,
+        **{var.name: var for var in variables},  # pyright: ignore
+        **{param.name: param for param in params},
+        **{shock.name: shock for shock in shock_syms},
+        **{obs.name: obs for obs in observables},
+    }
+    return (
+        _LOCALS,
+        ordered_var_names,
+        variables,
+        params,
+        observables,
+        shocks,
+        shock_syms,
+    )
+
+
+def _coerce_variable_data(
+    data: dict[str, Any],
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    raw_variables = data["variables"]
+    if isinstance(raw_variables, list):
+        ordered_var_names = list(raw_variables)
+        return ordered_var_names, {name: {} for name in ordered_var_names}
+    if not isinstance(raw_variables, dict):
+        raise TypeError("`variables` must be either a list or a mapping.")
+
+    ordered_var_names = list(raw_variables.keys())
+    variable_data: dict[str, dict[str, Any]] = {}
+    allowed_keys = {"ss_seed", "linearization"}
+    for name, spec in raw_variables.items():
+        if spec is None:
+            variable_data[name] = {}
+        elif isinstance(spec, dict):
+            unknown_keys = sorted(set(spec).difference(allowed_keys))
+            if unknown_keys:
+                raise ValueError(
+                    f"Variable '{name}' has unsupported metadata keys: {unknown_keys}. "
+                    f"Supported keys are: {sorted(allowed_keys)}."
+                )
+            variable_data[name] = spec
+        else:
             raise TypeError(
-                f"'{where}' must be a mapping, got {type(value).__name__}: {value!r}"
+                "Each variable entry must be a mapping or null when `variables` is a mapping."
             )
-        return value
+    return ordered_var_names, variable_data
 
-    @classmethod
-    def _validate_schema(cls, data: dict[str, Any]) -> None:
-        cls._check_deprecated(data)
-        cls._reject_unknown_keys(data, _ALLOWED_TOP_LEVEL_KEYS, "<root>")
-        cls._reject_unknown_keys(
-            (eq := data.get("equations")), _ALLOWED_EQUATION_KEYS, "equations"
-        )
-        if isinstance(eq, dict):
-            for name, spec in (eq.get("constraint") or {}).items():
-                cls._reject_unknown_keys(
-                    spec,
-                    _ALLOWED_CONSTRAINT_KEYS,
-                    f"equations.constraint.{name}",
-                )
-        calib = data.get("calibration")
-        cls._reject_unknown_keys(calib, _ALLOWED_CALIBRATION_KEYS, "calibration")
-        if isinstance(calib, dict):
-            cls._reject_unknown_keys(
-                calib.get("shocks"), _ALLOWED_SHOCK_KEYS, "calibration.shocks"
-            )
 
-        kal = data.get("kalman")
-        cls._reject_unknown_keys(kal, _ALLOWED_KALMAN_KEYS, "kalman")
-        if isinstance(kal, dict):
-            cls._reject_unknown_keys(kal.get("R"), _ALLOWED_R_KEYS, "kalman.R")
+def _sympy_parsers(
+    _LOCALS: dict[str, Any],
+    local_subs: dict[Symbol, Expr],
+) -> tuple[
+    Callable[[str], Expr],
+    Callable[[str], _REGIME_SHIFT_CONDITIONAL],
+    Callable[[str], Eq],
+]:
+    """Parsing helpers bound to the config namespace.
 
-    @staticmethod
-    def _build_namespace(
-        data: dict[str, Any],
-    ) -> tuple[
-        dict[str, Any],
-        list[str],
-        list[Function],
-        list[Symbol],
-        list[Symbol],
-        list[Symbol],
-        list[Symbol],
-    ]:
-        ordered_var_names, _ = ModelParser._coerce_variable_data(data)
-        t = sp.symbols("t", integer=True)
+    ``local_subs`` maps each derived calibration entry to its formula over
+    base parameters. Applying it here is what keeps derived names out of
+    the parsed config: every symbolic field the parser builds passes
+    through one of these three.
+    """
 
-        variables: list[Function] = list(
-            map(Function, ordered_var_names)
-        )  # pyright: ignore
+    def _get_expr(expr: str) -> Expr:
+        out = _parse_in(expr, _LOCALS).xreplace(local_subs)
+        if not isinstance(out, Expr):
+            raise TypeError(f"Expression is not a valid SymPy Expr: {expr!r}")
+        return out
 
-        params: list[Symbol] = list(
-            sp.symbols(list(data.get("calibration", {}).get("parameters", {}).keys()))
-        )
-        observables: list[Symbol] = list(sp.symbols(data["observables"]))
+    def _get_relational(expr: str) -> _REGIME_SHIFT_CONDITIONAL:
+        _check_connective_parens(expr)
+        out = _parse_in(expr, _LOCALS).xreplace(local_subs)
+        if not isinstance(out, _REGIME_SHIFT_CONDITIONAL):
+            raise TypeError(f"Constraint is not a valid SymPy Relational: {expr!r}")
+        return out
 
-        shocks: list[Symbol] = [sp.Symbol(name) for name in data["shocks"]]
-        shock_syms: list[Symbol] = list(shocks)
+    def _get_eq(expr: str | None) -> Eq:
+        if expr is None:
+            raise ValueError("Equation string cannot be None.")
 
-        _LOCALS: dict[str, Any] = {
-            "t": t,
-            **{var.name: var for var in variables},  # pyright: ignore
-            **{param.name: param for param in params},
-            **{shock.name: shock for shock in shock_syms},
-            **{obs.name: obs for obs in observables},
-        }
-        return (
-            _LOCALS,
-            ordered_var_names,
-            variables,
-            params,
-            observables,
-            shocks,
-            shock_syms,
+        parts = [p.strip() for p in expr.split("=", maxsplit=2)]
+        if len(parts) != 2:
+            raise ValueError(f"Equation must contain exactly one '=': {expr!r}")
+        lhs = _parse_in(parts[0], _LOCALS).xreplace(local_subs)
+        rhs = _parse_in(parts[1], _LOCALS).xreplace(local_subs)
+        out = sp.Eq(lhs, rhs)
+        if not isinstance(out, Eq):
+            raise TypeError(f"Not a valid equality: {expr!r}")
+        return out
+
+    return _get_expr, _get_relational, _get_eq
+
+
+def _parse_equations(
+    data: dict[str, Any],
+    _LOCALS: dict[str, Any],
+    ordered_var_names: list[str],
+    _get_eq: Callable[[str], Eq],
+    _get_relational: Callable[[str], _REGIME_SHIFT_CONDITIONAL],
+    _get_expr: Callable[[str], Expr],
+) -> Equations:
+    eq_data = data["equations"]
+
+    model: dict[str, Eq] = {name: _get_eq(eq) for name, eq in eq_data["model"].items()}
+
+    constraint_raw = eq_data.get("constraint", {}) or {}
+    if len(constraint_raw) > 2:
+        raise NotImplementedError(
+            "OBCs are solved via OccBin of Guirreiri and Iacoviello (2015), which explicitly supports one or two constraints. "
+            "Use at most two constraints in your model configuration."
         )
 
-    @staticmethod
-    def _coerce_variable_data(
-        data: dict[str, Any],
-    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
-        raw_variables = data["variables"]
-        if isinstance(raw_variables, list):
-            ordered_var_names = list(raw_variables)
-            return ordered_var_names, {name: {} for name in ordered_var_names}
-        if not isinstance(raw_variables, dict):
-            raise TypeError("`variables` must be either a list or a mapping.")
+    constraint: dict[str, Constraint] = {}
+    for name, raw_spec in constraint_raw.items():
+        spec = _require_mapping(raw_spec, f"equations.constraint.{name}")
+        if (bind := spec.get("bind")) is None:
+            raise ValueError(f"Constraint '{name}' is missing a 'bind' condition.")
+        bind = _get_relational(bind)
+        if (relax := spec.get("relax")) is None:
+            relax = Not(bind)  # Default relax for symmetric constraint
+        else:
+            relax = _get_relational(relax)
 
-        ordered_var_names = list(raw_variables.keys())
-        variable_data: dict[str, dict[str, Any]] = {}
-        allowed_keys = {"ss_seed", "linearization"}
-        for name, spec in raw_variables.items():
-            if spec is None:
-                variable_data[name] = {}
-            elif isinstance(spec, dict):
-                unknown_keys = sorted(set(spec).difference(allowed_keys))
-                if unknown_keys:
-                    raise ValueError(
-                        f"Variable '{name}' has unsupported metadata keys: {unknown_keys}. "
-                        f"Supported keys are: {sorted(allowed_keys)}."
-                    )
-                variable_data[name] = spec
-            else:
-                raise TypeError(
-                    "Each variable entry must be a mapping or null when `variables` is a mapping."
-                )
-        return ordered_var_names, variable_data
-
-    @staticmethod
-    def _sympy_parsers(
-        _LOCALS: dict[str, Any],
-        local_subs: dict[Symbol, Expr],
-    ) -> tuple[
-        Callable[[str], Expr],
-        Callable[[str], _REGIME_SHIFT_CONDITIONAL],
-        Callable[[str], Eq],
-    ]:
-        """Parsing helpers bound to the config namespace.
-
-        ``local_subs`` maps each derived calibration entry to its formula over
-        base parameters. Applying it here is what keeps derived names out of
-        the parsed config: every symbolic field the parser builds passes
-        through one of these three.
-        """
-
-        def _get_expr(expr: str) -> Expr:
-            out = _parse_in(expr, _LOCALS).xreplace(local_subs)
-            if not isinstance(out, Expr):
-                raise TypeError(f"Expression is not a valid SymPy Expr: {expr!r}")
-            return out
-
-        def _get_relational(expr: str) -> _REGIME_SHIFT_CONDITIONAL:
-            _check_connective_parens(expr)
-            out = _parse_in(expr, _LOCALS).xreplace(local_subs)
-            if not isinstance(out, _REGIME_SHIFT_CONDITIONAL):
-                raise TypeError(f"Constraint is not a valid SymPy Relational: {expr!r}")
-            return out
-
-        def _get_eq(expr: str | None) -> Eq:
-            if expr is None:
-                raise ValueError("Equation string cannot be None.")
-
-            parts = [p.strip() for p in expr.split("=", maxsplit=2)]
-            if len(parts) != 2:
-                raise ValueError(f"Equation must contain exactly one '=': {expr!r}")
-            lhs = _parse_in(parts[0], _LOCALS).xreplace(local_subs)
-            rhs = _parse_in(parts[1], _LOCALS).xreplace(local_subs)
-            out = sp.Eq(lhs, rhs)
-            if not isinstance(out, Eq):
-                raise TypeError(f"Not a valid equality: {expr!r}")
-            return out
-
-        return _get_expr, _get_relational, _get_eq
-
-    @classmethod
-    def _parse_equations(
-        cls,
-        data: dict[str, Any],
-        _LOCALS: dict[str, Any],
-        ordered_var_names: list[str],
-        _get_eq: Callable[[str], Eq],
-        _get_relational: Callable[[str], _REGIME_SHIFT_CONDITIONAL],
-        _get_expr: Callable[[str], Expr],
-    ) -> Equations:
-        eq_data = data["equations"]
-
-        model: dict[str, Eq] = {
-            name: _get_eq(eq) for name, eq in eq_data["model"].items()
-        }
-
-        constraint_raw = eq_data.get("constraint", {}) or {}
-        if len(constraint_raw) > 2:
-            raise NotImplementedError(
-                "OBCs are solved via OccBin of Guirreiri and Iacoviello (2015), which explicitly supports one or two constraints. "
-                "Use at most two constraints in your model configuration."
-            )
-
-        constraint: dict[str, Constraint] = {}
-        for name, raw_spec in constraint_raw.items():
-            spec = cls._require_mapping(raw_spec, f"equations.constraint.{name}")
-            if (bind := spec.get("bind")) is None:
-                raise ValueError(f"Constraint '{name}' is missing a 'bind' condition.")
-            bind = _get_relational(bind)
-            if (relax := spec.get("relax")) is None:
-                relax = Not(bind)  # Default relax for symmetric constraint
-            else:
-                relax = _get_relational(relax)
-
-            constraint[name] = Constraint(
-                bind=bind,
-                relax=relax,
-            )
-
-        regime_raw = eq_data.get("regime", {}) or {}
-
-        regime = RegimeGetterDict({})
-
-        for raw_key, v in regime_raw.items():
-            if raw_key in regime:
-                raise ValueError(
-                    f"Duplicate regime key '{raw_key}' encountered "
-                    "in equations.regime. Each regime key must be unique."
-                )
-            regime[raw_key] = {
-                name: _get_eq(eq)
-                for name, eq in cls._require_mapping(
-                    v, f"equations.regime.{raw_key}"
-                ).items()
-            }
-
-        observables_raw = eq_data.get("observables", {}) or {}
-        observables_eq: dict[Symbol, Expr] = {
-            _LOCALS[obs_name]: _get_expr(observables_raw[obs_name])
-            for obs_name in data["observables"]
-            if obs_name in observables_raw
-        }
-
-        is_affine = ModelParser._derive_observable_structure(
-            observables_eq=observables_eq,
-            ordered_var_names=ordered_var_names,
-            _LOCALS=_LOCALS,
+        constraint[name] = Constraint(
+            bind=bind,
+            relax=relax,
         )
 
-        return Equations(
-            model=model,
-            constraint=constraint if constraint else None,
-            regime=regime if regime else None,
-            observable=SymbolGetterDict(observables_eq),
-            obs_is_affine=SymbolGetterDict(is_affine),
-        )
+    regime_raw = eq_data.get("regime", {}) or {}
 
-    @staticmethod
-    def _derive_observable_structure(
-        *,
-        observables_eq: dict[Symbol, Expr],
-        ordered_var_names: list[str],
-        _LOCALS: dict[str, Any],
-    ) -> dict[Symbol, bool]:
-        t = _LOCALS["t"]
+    regime = RegimeGetterDict({})
 
-        state_funcs = [_LOCALS[var_name] for var_name in ordered_var_names]
-        state_atoms = [sf(t) for sf in state_funcs]
-
-        state_sym_subs = {
-            atom: Symbol(name) for atom, name in zip(state_atoms, ordered_var_names)
-        }
-        state_syms = list(state_sym_subs.values())
-        state_set = set(state_syms)
-
-        is_affine = {obs: False for obs in observables_eq}
-        for obs, expr in observables_eq.items():
-            expr_symbolized = expr.xreplace(state_sym_subs)
-            grads = [expr_symbolized.diff(s) for s in state_syms]
-            if all((g.free_symbols & state_set) == set() for g in grads):
-                is_affine[obs] = True
-
-        return is_affine
-
-    @staticmethod
-    def _parse_variables(
-        data: dict[str, Any],
-        _LOCALS: dict[str, Any],
-        ordered_var_names: list[str],
-        variable_funcs: list[Function],
-        _get_expr: Callable[[str], Expr],
-    ) -> Variables:
-        _, variable_data = ModelParser._coerce_variable_data(data)
-
-        ss_seed: dict[Function, Expr | None] = {}
-        linearization: dict[Function, LinearizationMethod] = {}
-
-        for var_name, var_func in zip(ordered_var_names, variable_funcs):
-            spec = variable_data[var_name]
-
-            ss_raw = spec.get("ss_seed", None)
-            if ss_raw is None:
-                ss_seed[var_func] = None
-            else:
-                ss_seed[var_func] = _get_expr(str(ss_raw))
-
-            method_raw = spec.get("linearization", LinearizationMethod.NONE.value)
-            if isinstance(method_raw, str):
-                method_raw = method_raw.strip().lower()
-            try:
-                linearization[var_func] = LinearizationMethod(method_raw)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid linearization method '{method_raw}' for variable '{var_name}'."
-                ) from exc
-
-        return Variables(
-            variables=variable_funcs,
-            ss_seed=FunctionGetterDict(ss_seed),
-            linearization=FunctionGetterDict(linearization),
-        )
-
-    @staticmethod
-    def _resolve_calibration_locals(
-        data: dict[str, Any], _LOCALS: dict[str, Any]
-    ) -> tuple[SymbolGetterDict[float64], dict[Symbol, Expr]]:
-        """Split ``calibration.parameters`` into values and derived locals.
-
-        An entry carrying free symbols names a formula over other parameters
-        rather than a value, in the manner of a Dynare ``#`` definition. Such
-        an entry never reaches the model: the returned map rewrites it away
-        wherever it is referenced, leaving the base parameters behind it, so
-        estimating those base parameters moves the formula with them.
-        """
-        calib = data.get("calibration", {}).get("parameters", {}) or {}
-        param_syms = {_LOCALS[name] for name in calib}
-
-        values: dict[Symbol, float64] = {}
-        local_subs: dict[Symbol, Expr] = {}
-        for name, raw in calib.items():
-            expr = _parse_in(str(raw), _LOCALS)
-            if not isinstance(expr, Expr):
-                raise TypeError(
-                    f"Calibration entry '{name}' is not a valid SymPy Expr: {raw!r}"
-                )
-            if applied := expr.atoms(AppliedUndef):
-                raise ValueError(
-                    f"Calibration entry '{name}' references model variable(s): "
-                    f"{sorted(map(str, applied))}"
-                )
-            if unknown := expr.free_symbols - param_syms:
-                raise ValueError(
-                    f"Calibration entry '{name}' references undeclared "
-                    f"parameter(s): {sorted(map(str, unknown))}"
-                )
-            if expr.free_symbols:
-                local_subs[_LOCALS[name]] = expr
-            else:
-                values[_LOCALS[name]] = float64(expr)
-
-        # A local may cite another. Each pass composes one level of nesting, so
-        # their count bounds how many it can take to reach base parameters.
-        derived = set(local_subs)
-        for _ in range(len(local_subs)):
-            if not any(e.free_symbols & derived for e in local_subs.values()):
-                break
-            local_subs = {s: e.xreplace(local_subs) for s, e in local_subs.items()}
-
-        if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
+    for raw_key, v in regime_raw.items():
+        if raw_key in regime:
             raise ValueError(
-                "Calibration entries reference each other in a cycle: "
-                + ", ".join(sorted(s.name for s in cyclic))
+                f"Duplicate regime key '{raw_key}' encountered "
+                "in equations.regime. Each regime key must be unique."
             )
+        regime[raw_key] = {
+            name: _get_eq(eq)
+            for name, eq in _require_mapping(v, f"equations.regime.{raw_key}").items()
+        }
 
-        return SymbolGetterDict(values), local_subs
+    observables_raw = eq_data.get("observables", {}) or {}
+    observables_eq: dict[Symbol, Expr] = {
+        _LOCALS[obs_name]: _get_expr(observables_raw[obs_name])
+        for obs_name in data["observables"]
+        if obs_name in observables_raw
+    }
 
-    @staticmethod
-    def _parse_shock_calibration(
-        data: dict[str, Any],
-        _LOCALS: dict[str, Any],
-        shock_syms: list[Symbol],
-    ) -> tuple[SymbolGetterDict[Symbol | None], PairGetterDict[Symbol | None]]:
-        shocks = data.get("calibration", {}).get("shocks", {}) or {}
-        std_map = shocks.get("std", {}) or {}
-        corr_map = shocks.get("corr", {}) or {}
+    is_affine = _derive_observable_structure(
+        observables_eq=observables_eq,
+        ordered_var_names=ordered_var_names,
+        _LOCALS=_LOCALS,
+    )
 
-        # std: map shock symbol -> parameter Symbol (or None)
-        shock_std: SymbolGetterDict[Symbol | None] = SymbolGetterDict(
-            {
-                s: (sp.Symbol(std_map[s.name]) if s.name in std_map else None)
-                for s in shock_syms
-            }
+    return Equations(
+        model=model,
+        constraint=constraint if constraint else None,
+        regime=regime if regime else None,
+        observable=SymbolGetterDict(observables_eq),
+        obs_is_affine=SymbolGetterDict(is_affine),
+    )
+
+
+def _derive_observable_structure(
+    *,
+    observables_eq: dict[Symbol, Expr],
+    ordered_var_names: list[str],
+    _LOCALS: dict[str, Any],
+) -> dict[Symbol, bool]:
+    t = _LOCALS["t"]
+
+    state_funcs = [_LOCALS[var_name] for var_name in ordered_var_names]
+    state_atoms = [sf(t) for sf in state_funcs]
+
+    state_sym_subs = {
+        atom: Symbol(name) for atom, name in zip(state_atoms, ordered_var_names)
+    }
+    state_syms = list(state_sym_subs.values())
+    state_set = set(state_syms)
+
+    is_affine = {obs: False for obs in observables_eq}
+    for obs, expr in observables_eq.items():
+        expr_symbolized = expr.xreplace(state_sym_subs)
+        grads = [expr_symbolized.diff(s) for s in state_syms]
+        if all((g.free_symbols & state_set) == set() for g in grads):
+            is_affine[obs] = True
+
+    return is_affine
+
+
+def _parse_variables(
+    data: dict[str, Any],
+    _LOCALS: dict[str, Any],
+    ordered_var_names: list[str],
+    variable_funcs: list[Function],
+    _get_expr: Callable[[str], Expr],
+) -> Variables:
+    _, variable_data = _coerce_variable_data(data)
+
+    ss_seed: dict[Function, Expr | None] = {}
+    linearization: dict[Function, LinearizationMethod] = {}
+
+    for var_name, var_func in zip(ordered_var_names, variable_funcs):
+        spec = variable_data[var_name]
+
+        ss_raw = spec.get("ss_seed", None)
+        if ss_raw is None:
+            ss_seed[var_func] = None
+        else:
+            ss_seed[var_func] = _get_expr(str(ss_raw))
+
+        method_raw = spec.get("linearization", LinearizationMethod.NONE.value)
+        if isinstance(method_raw, str):
+            method_raw = method_raw.strip().lower()
+        try:
+            linearization[var_func] = LinearizationMethod(method_raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid linearization method '{method_raw}' for variable '{var_name}'."
+            ) from exc
+
+    return Variables(
+        variables=variable_funcs,
+        ss_seed=FunctionGetterDict(ss_seed),
+        linearization=FunctionGetterDict(linearization),
+    )
+
+
+def _resolve_calibration_locals(
+    data: dict[str, Any], _LOCALS: dict[str, Any]
+) -> tuple[SymbolGetterDict[float64], dict[Symbol, Expr]]:
+    """Split ``calibration.parameters`` into values and derived locals.
+
+    An entry carrying free symbols names a formula over other parameters
+    rather than a value, in the manner of a Dynare ``#`` definition. Such
+    an entry never reaches the model: the returned map rewrites it away
+    wherever it is referenced, leaving the base parameters behind it, so
+    estimating those base parameters moves the formula with them.
+    """
+    calib = data.get("calibration", {}).get("parameters", {}) or {}
+    param_syms = {_LOCALS[name] for name in calib}
+
+    values: dict[Symbol, float64] = {}
+    local_subs: dict[Symbol, Expr] = {}
+    for name, raw in calib.items():
+        expr = _parse_in(str(raw), _LOCALS)
+        if not isinstance(expr, Expr):
+            raise TypeError(
+                f"Calibration entry '{name}' is not a valid SymPy Expr: {raw!r}"
+            )
+        if applied := expr.atoms(AppliedUndef):
+            raise ValueError(
+                f"Calibration entry '{name}' references model variable(s): "
+                f"{sorted(map(str, applied))}"
+            )
+        if unknown := expr.free_symbols - param_syms:
+            raise ValueError(
+                f"Calibration entry '{name}' references undeclared "
+                f"parameter(s): {sorted(map(str, unknown))}"
+            )
+        if expr.free_symbols:
+            local_subs[_LOCALS[name]] = expr
+        else:
+            values[_LOCALS[name]] = float64(expr)
+
+    # A local may cite another. Each pass composes one level of nesting, so
+    # their count bounds how many it can take to reach base parameters.
+    derived = set(local_subs)
+    for _ in range(len(local_subs)):
+        if not any(e.free_symbols & derived for e in local_subs.values()):
+            break
+        local_subs = {s: e.xreplace(local_subs) for s, e in local_subs.items()}
+
+    if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
+        raise ValueError(
+            "Calibration entries reference each other in a cycle: "
+            + ", ".join(sorted(s.name for s in cyclic))
         )
 
-        # corr: map unordered pair(shock_i, shock_j) -> parameter Symbol (or None)
-        shock_corr: dict[frozenset[Symbol], Symbol | None] = {}
+    return SymbolGetterDict(values), local_subs
 
-        # fill explicitly provided
+
+def _parse_shock_calibration(
+    data: dict[str, Any],
+    _LOCALS: dict[str, Any],
+    shock_syms: list[Symbol],
+) -> tuple[SymbolGetterDict[str], PairGetterDict[str | None]]:
+    shocks = data.get("calibration", {}).get("shocks", {}) or {}
+    std_map = shocks.get("std", {}) or {}
+    corr_map = shocks.get("corr", {}) or {}
+
+    # std: map shock symbol -> parameter Symbol (or None)
+    shock_std: dict[Symbol, str] = {}
+    for shock in shock_syms:
+        if shock.name not in std_map:
+            raise ValueError(
+                f"Missing standard deviation parameter for shock '{shock.name}'"
+            )
+        shock_std[shock] = std_map[shock.name]
+
+    # corr: map unordered pair(shock_i, shock_j) -> parameter Symbol (or None)
+    shock_corr: dict[frozenset[Symbol], Symbol | None] = {}
+
+    # fill explicitly provided
+    for pair_str, param_name in corr_map.items():
+        names = [x.strip() for x in pair_str.split(",")]
+        if len(names) != 2:
+            raise ValueError(
+                f"Correlation pair must contain exactly two shocks: {pair_str!r}"
+            )
+        a = _LOCALS[names[0]]
+        b = _LOCALS[names[1]]
+        shock_corr[frozenset((a, b))] = param_name
+
+    # fill missing with None (all unordered pairs i<j)
+    for i in range(len(shock_syms)):
+        for j in range(i + 1, len(shock_syms)):
+            key = frozenset((shock_syms[i], shock_syms[j]))
+            shock_corr.setdefault(key, None)
+    _raise_if_not_unique(
+        list(shock_corr.values()), "calibration.shocks.corr values must be unique."
+    )
+
+    cross_vals = list(set(shock_std.values())) + list(set(shock_corr.values()))
+    _raise_if_not_unique(
+        cross_vals,
+        "calibration.shocks cannot share parameter names between std and corr.",
+    )
+
+    return SymbolGetterDict(shock_std), PairGetterDict(shock_corr)
+
+
+def _parse_kalman_if_present(
+    data: dict[str, Any],
+    _LOCALS: dict[str, Any],
+    parameters: SymbolGetterDict[float64],
+) -> KalmanConfig | None:
+    kalman_data = data.get("kalman")
+    if not kalman_data:
+        return None
+
+    y_order = [_LOCALS[o] for o in data["observables"]]
+    obs_names = [o.name for o in y_order]
+
+    R: ndarray | None
+    R_param_names: list[str] | None
+    R_std_param_map: SymbolGetterDict[str] | None
+    R_corr_param_map: PairGetterDict[str | None]
+
+    R_data = kalman_data.get("R")
+    if R_data:
+        std_map = R_data.get("std", {}) or {}
+        corr_map = R_data.get("corr", {}) or {}
+
+        R_std_param_map = SymbolGetterDict(
+            {_LOCALS[obs_name]: param_name for obs_name, param_name in std_map.items()}
+        )
+
+        R_corr_param_map = PairGetterDict({})
+
         for pair_str, param_name in corr_map.items():
             names = [x.strip() for x in pair_str.split(",")]
             if len(names) != 2:
                 raise ValueError(
-                    f"Correlation pair must contain exactly two shocks: {pair_str!r}"
+                    f"Correlation pair must contain exactly two observables: {pair_str!r}"
                 )
             a = _LOCALS[names[0]]
             b = _LOCALS[names[1]]
-            shock_corr[frozenset((a, b))] = sp.Symbol(param_name)
+            R_corr_param_map[frozenset((a, b))] = param_name
 
-        # fill missing with None (all unordered pairs i<j)
-        for i in range(len(shock_syms)):
-            for j in range(i + 1, len(shock_syms)):
-                key = frozenset((shock_syms[i], shock_syms[j]))
-                shock_corr.setdefault(key, None)
-
-        return shock_std, PairGetterDict(shock_corr)
-
-    @staticmethod
-    def _parse_kalman_if_present(
-        data: dict[str, Any],
-        _LOCALS: dict[str, Any],
-        parameters: SymbolGetterDict[float64],
-    ) -> KalmanConfig | None:
-        kalman_data = data.get("kalman")
-        if not kalman_data:
-            return None
-
-        y_order = [_LOCALS[o] for o in data["observables"]]
-        obs_names = [o.name for o in y_order]
-
-        R: ndarray | None
-        r_param_symbols: list[Symbol] | None
-        R_param_names: list[str] | None
-
-        R_data = kalman_data.get("R")
-        if R_data:
-            std_map = R_data.get("std", {}) or {}
-            corr_map = R_data.get("corr", {}) or {}
-            R_std_param_map = {
-                obs_name: param_name for obs_name, param_name in std_map.items()
-            }
-            R_corr_param_map: dict[frozenset[str], str | None] = {}
-            obs_sig_sym: SymbolGetterDict[Symbol] = SymbolGetterDict(
-                {
-                    _LOCALS[obs_name]: _LOCALS[param_name]
-                    for obs_name, param_name in std_map.items()
-                }
-            )
-            obs_corr_sym_dict: dict[frozenset[Symbol], Symbol] = {}
-            for pair_str, param_name in corr_map.items():
-                names = [x.strip() for x in pair_str.split(",")]
-                if len(names) != 2:
-                    raise ValueError(
-                        f"Correlation pair must contain exactly two observables: {pair_str!r}"
-                    )
-                a = _LOCALS[names[0]]
-                b = _LOCALS[names[1]]
-                obs_corr_sym_dict[frozenset((a, b))] = _LOCALS[param_name]
-                R_corr_param_map[frozenset((names[0], names[1]))] = param_name
-            obs_corr_sym: PairGetterDict[Symbol] = PairGetterDict(obs_corr_sym_dict)
-
-            for i in range(len(obs_names)):
-                for j in range(i + 1, len(obs_names)):
-                    pair = frozenset((obs_names[i], obs_names[j]))
-                    R_corr_param_map.setdefault(pair, None)
-
-            std_vals = {y: parameters[obs_sig_sym[y]] for y in y_order}
-            corr_vals = {pair: parameters[sym] for pair, sym in obs_corr_sym.items()}
-            R = make_R(y_order, std_vals, corr_vals)
-
-            r_param_symbols_local: list[Symbol] = []
-            seen: set[Symbol] = set()
-            for param_name in std_map.values():
-                sym = _LOCALS[param_name]
-                if sym not in seen:
-                    seen.add(sym)
-                    r_param_symbols_local.append(sym)
-            for param_name in corr_map.values():
-                sym = _LOCALS[param_name]
-                if sym not in seen:
-                    seen.add(sym)
-                    r_param_symbols_local.append(sym)
-
-            r_param_symbols = r_param_symbols_local
-
-            R_param_names = [sym.name for sym in r_param_symbols]
-        else:
-            R = None
-            R_param_names = None
-            R_std_param_map = None
-            R_corr_param_map = {}
-
-        return KalmanConfig(
-            R=R,
-            R_param_names=R_param_names,
-            R_std_param_map=R_std_param_map,
-            R_corr_param_map=R_corr_param_map,
+        for i in range(len(obs_names)):
+            for j in range(i + 1, len(obs_names)):
+                pair = frozenset((obs_names[i], obs_names[j]))
+                R_corr_param_map.setdefault(pair, None)
+        _raise_if_not_unique(
+            list(R_corr_param_map.values()), "kalman.R.corr values must be unique."
         )
 
-    @staticmethod
-    def _require_calibrated_params(
-        data: dict[str, Any], local_subs: dict[Symbol, Expr]
-    ) -> None:
-        """Check the blocks that reference a parameter by name.
+        cross_vals = list(set(R_std_param_map.values())) + list(
+            set(R_corr_param_map.values())
+        )
+        _raise_if_not_unique(
+            cross_vals, "kalman.R cannot share parameter names between std and corr."
+        )
 
-        Unlike an equation, these carry a bare name rather than an expression,
-        so the name has to be one a value can be read from: a derived entry
-        resolves to a formula and leaves nothing to build a covariance out of.
-        """
-        calib = data.get("calibration", {}).get("parameters", {}) or {}
+        R = make_R(y_order, R_std_param_map, R_corr_param_map, parameters)
 
-        referenced: set[str] = set()
+        R_param_names = list(dict.fromkeys([*std_map.values(), *corr_map.values()]))
+    else:
+        R = None
+        R_param_names = None
+        R_std_param_map = None
+        R_corr_param_map = PairGetterDict({})
 
-        shocks = data.get("calibration", {}).get("shocks", {}) or {}
-        referenced.update((shocks.get("std", {}) or {}).values())
-        referenced.update((shocks.get("corr", {}) or {}).values())
+    return KalmanConfig(
+        R=R,
+        R_param_names=R_param_names,
+        R_std_param_map=R_std_param_map,
+        R_corr_param_map=R_corr_param_map,
+    )
 
-        kal = data.get("kalman", {}) or {}
-        R = kal.get("R", {}) or {}
-        referenced.update((R.get("std", {}) or {}).values())
-        referenced.update((R.get("corr", {}) or {}).values())
 
-        referenced = {p for p in referenced if isinstance(p, str)}
+def _require_calibrated_params(
+    data: dict[str, Any], local_subs: dict[Symbol, Expr]
+) -> None:
+    """Check the blocks that reference a parameter by name.
 
-        unknown = sorted(referenced - calib.keys())
-        if unknown:
-            raise ValueError(
-                "Config references parameter(s) not declared in `calibration.parameters`: "
-                + ", ".join(unknown)
+    Unlike an equation, these carry a bare name rather than an expression,
+    so the name has to be one a value can be read from: a derived entry
+    resolves to a formula and leaves nothing to build a covariance out of.
+    """
+    calib = data.get("calibration", {}).get("parameters", {}) or {}
+
+    referenced: set[str] = set()
+
+    shocks = data.get("calibration", {}).get("shocks", {}) or {}
+    referenced.update((shocks.get("std", {}) or {}).values())
+    referenced.update((shocks.get("corr", {}) or {}).values())
+
+    kal = data.get("kalman", {}) or {}
+    R = kal.get("R", {}) or {}
+    referenced.update((R.get("std", {}) or {}).values())
+    referenced.update((R.get("corr", {}) or {}).values())
+
+    referenced = {p for p in referenced if isinstance(p, str)}
+
+    unknown = sorted(referenced - calib.keys())
+    if unknown:
+        raise ValueError(
+            "Config references parameter(s) not declared in `calibration.parameters`: "
+            + ", ".join(unknown)
+        )
+
+    named_locals = sorted(referenced & {sym.name for sym in local_subs})
+    if named_locals:
+        raise ValueError(
+            "Shock and measurement blocks reference a parameter by name, so "
+            "they cannot name a derived calibration entry: " + ", ".join(named_locals)
+        )
+
+
+def _check_deprecated(data: dict[str, Any]) -> None:
+    for key in _DEPRECATED_TOP_LEVEL_KEYS:
+        if key in data:
+            warnings.warn(
+                f"The key '{key}' is deprecated and will be ignored. Please refer to the documentation (Model Configuration Guide) for the current configuration format.",
+                FutureWarning,
+                stacklevel=_caller_stacklevel(),
             )
 
-        named_locals = sorted(referenced & {sym.name for sym in local_subs})
-        if named_locals:
-            raise ValueError(
-                "Shock and measurement blocks reference a parameter by name, so "
-                "they cannot name a derived calibration entry: "
-                + ", ".join(named_locals)
+    if isinstance(data.get("equations"), dict):
+        if isinstance(data["equations"].get("model", {}), list):
+            raise NotImplementedError(
+                "Equations as a list have been deprecated and removed. Please use a mapping/dictionary format. "
+                "Refer to the documentation (Model Configuration Guide) for the updated format."
             )
 
-    @staticmethod
-    def _check_deprecated(data: dict[str, Any]) -> None:
-        for key in _DEPRECATED_TOP_LEVEL_KEYS:
-            if key in data:
-                warnings.warn(
-                    f"The key '{key}' is deprecated and will be ignored. Please refer to the documentation (Model Configuration Guide) for the current configuration format.",
-                    FutureWarning,
-                    stacklevel=_caller_stacklevel(),
-                )
 
-        if isinstance(data.get("equations"), dict):
-            if isinstance(data["equations"].get("model", {}), list):
-                raise NotImplementedError(
-                    "Equations as a list have been deprecated and removed. Please use a mapping/dictionary format. "
-                    "Refer to the documentation (Model Configuration Guide) for the updated format."
-                )
+def _raise_if_not_unique(values: Sequence[Any], preamble: str) -> None:
+    """Raise if any value appears more than once in the sequence."""
+
+    unique = set(values)
+    if len(unique) != len(values):
+        duplicates = sorted(
+            [v for v in unique if values.count(v) > 1 and (v is not None)]
+        )
+        if duplicates:
+            raise ValueError(f"{preamble}" f"\nDuplicate entries: {duplicates}.")

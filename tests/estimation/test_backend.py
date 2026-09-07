@@ -7,6 +7,10 @@ import pytest
 from sympy import Symbol
 
 from SymbolicDSGE import ModelParser, DSGESolver
+from SymbolicDSGE.core.compiled_model import (
+    _measurement_covariance,
+    _shock_covariance,
+)
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.config import KalmanConfig
@@ -120,7 +124,7 @@ def test_reorder_observables_uses_compiled_default_and_validates_dataframe_colum
 def test_build_Q_matches_post82_manual_structure(post82_bundle):
     compiled = post82_bundle["compiled"]
     params = backend.extract_base_params(compiled)
-    Q = backend.build_Q(compiled, params)
+    Q = _shock_covariance(compiled, params)
 
     sig_g = params["sig_g"]
     sig_z = params["sig_z"]
@@ -150,17 +154,19 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
         ss_seed=post82_bundle["steady"],
     )
 
+    # prepare_filter_run resolves both cfunc addresses once; a loglik that
+    # reached for a constructor again would rebuild them per eval.
     monkeypatch.setattr(
         compiled_type,
-        "construct_measurement_array_func",
-        lambda self, obs: (_ for _ in ()).throw(
+        "construct_measurement_cfunc",
+        lambda self, obs=None: (_ for _ in ()).throw(
             AssertionError("measurement constructor called in hot path")
         ),
     )
     monkeypatch.setattr(
         compiled_type,
-        "construct_observable_jacobian_array_func",
-        lambda self, obs: (_ for _ in ()).throw(
+        "construct_measurement_jacobian_cfunc",
+        lambda self, obs=None: (_ for _ in ()).throw(
             AssertionError("jacobian constructor called in hot path")
         ),
     )
@@ -169,50 +175,59 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
     assert np.isfinite(ll)
 
 
+def _compiled_with_kalman(kalman, observable_names=("Infl", "Rate", "Out")):
+    """A compiled stub carrying a Kalman config, which is where R is read from."""
+    return SimpleNamespace(
+        observable_names=list(observable_names),
+        kalman=kalman,
+        config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
+    )
+
+
 def test_build_R_override_and_config_branches():
-    compiled = SimpleNamespace(observable_names=["Infl", "Rate", "Out"])
-    kalman = KalmanConfig(
-        R=None,
-        R_std_param_map={"Infl": "s_i", "Rate": "s_r", "Out": "s_o"},
-        R_corr_param_map={},
+    compiled = _compiled_with_kalman(
+        KalmanConfig(
+            R=None,
+            R_std_param_map={"Infl": "s_i", "Rate": "s_r", "Out": "s_o"},
+            R_corr_param_map={},
+        )
     )
 
     # An override wins, but its shape must match the observable count.
     with pytest.raises(ValueError, match="Provided R has shape"):
-        backend.build_R(
+        backend._build_R(
             compiled,
-            kalman,
             ["Infl", "Rate"],
             {},
             R_override=np.eye(3, dtype=np.float64),
         )
 
     R_ok = np.array([[1.0, 0.1], [0.1, 2.0]], dtype=np.float64)
-    out_override = backend.build_R(
-        compiled, kalman, ["Infl", "Rate"], {}, R_override=R_ok
-    )
+    out_override = backend._build_R(compiled, ["Infl", "Rate"], {}, R_override=R_ok)
     assert np.allclose(out_override, R_ok)
 
     # No override: R is rebuilt from params via the std/corr maps and sliced to
     # the requested observable order (diag from s_i/s_r/s_o, no correlations).
     params = {"s_i": 1.0, "s_r": 2.0, "s_o": 3.0}
-    out_config = backend.build_R(compiled, kalman, ["Rate", "Infl"], params)
+    out_config = backend._build_R(compiled, ["Rate", "Infl"], params)
     assert np.allclose(out_config, np.array([[4.0, 0.0], [0.0, 1.0]], dtype=np.float64))
 
     # A directly-configured constant R with no named-param maps is sliced as-is
     # (nothing to rebuild from params), preserving observable order.
-    const_kalman = KalmanConfig(
-        R=np.array(
-            [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
-        ),
+    const = _compiled_with_kalman(
+        KalmanConfig(
+            R=np.array(
+                [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
+            ),
+        )
     )
-    out_const = backend.build_R(compiled, const_kalman, ["Rate", "Infl"], {})
+    out_const = backend._build_R(const, ["Rate", "Infl"], {})
     assert np.allclose(out_const, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
 
     # No override, no maps, no constant R: genuinely unavailable.
-    empty_kalman = KalmanConfig(R=None)
+    empty = _compiled_with_kalman(KalmanConfig(R=None))
     with pytest.raises(ValueError, match="R is not available"):
-        backend.build_R(compiled, empty_kalman, ["Infl", "Rate"], {})
+        backend._build_R(empty, ["Infl", "Rate"], {})
 
 
 @pytest.mark.skip(
@@ -347,36 +362,27 @@ def test_resolve_filter_options_prefers_defaults_and_honors_overrides():
     assert backend.resolve_filter_options(0.5, True) == pytest.approx((0.5, True))
 
 
-def test_build_R_from_config_params_error_branches():
-    compiled = SimpleNamespace(observable_names=["a", "b"])
+def test_measurement_covariance_error_branches():
     params = {"sig_a": 1.0, "sig_b": 1.0}
 
-    with pytest.raises(ValueError, match="KalmanConfig is required"):
-        backend.build_R_from_config_params(
-            compiled=compiled,
-            kalman=None,
-            observables=["a", "b"],
-            params=params,
-        )
-
+    # A config that carries no named std/corr metadata has nothing to build from.
+    no_metadata = _compiled_with_kalman(
+        SimpleNamespace(R_std_param_map=None, R_corr_param_map=None),
+        observable_names=("a", "b"),
+    )
     with pytest.raises(ValueError, match="named R parameter metadata"):
-        backend.build_R_from_config_params(
-            compiled=compiled,
-            kalman=SimpleNamespace(R_std_param_map=None, R_corr_param_map=None),
-            observables=["a", "b"],
-            params=params,
-        )
+        _measurement_covariance(no_metadata, params, observables=["a", "b"])
 
+    # A named parameter absent from the supplied mapping is a hard error.
+    missing_param = _compiled_with_kalman(
+        SimpleNamespace(
+            R_std_param_map={"a": "sig_a", "b": "not_in_params"},
+            R_corr_param_map={},
+        ),
+        observable_names=("a", "b"),
+    )
     with pytest.raises(KeyError, match="Missing R parameter"):
-        backend.build_R_from_config_params(
-            compiled=compiled,
-            kalman=SimpleNamespace(
-                R_std_param_map={"a": "sig_a", "b": "not_in_params"},
-                R_corr_param_map={},
-            ),
-            observables=["a", "b"],
-            params=params,
-        )
+        _measurement_covariance(missing_param, params, observables=["a", "b"])
 
 
 def test_backend_corr_cov_helpers_and_validation_error_paths():

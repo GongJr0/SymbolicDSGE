@@ -6,7 +6,7 @@ so nothing here is specific to how the model was solved.
 
 from __future__ import annotations
 
-from typing import Tuple, TypedDict, Sequence
+from typing import Tuple, Sequence
 
 import numpy as np
 from numpy import float64
@@ -16,41 +16,6 @@ from ..._ckernels.core import affine_observations_into, measurement_path
 from ..compiled_model import CompiledModel
 
 NDF = NDArray[float64]
-
-
-class MeasurementSpec(TypedDict):
-    lin: dict[str, float | float64]
-    const: list[float | float64 | str]
-
-
-def build_measurement(
-    compiled: CompiledModel, spec: dict[str, MeasurementSpec]
-) -> Tuple[NDF, NDF, Sequence[str]]:
-    """``(C, d, names)`` from a hand-written linear measurement spec."""
-    n = compiled.n_var
-    obs_names = list(spec.keys())
-    m = len(obs_names)
-
-    C = np.zeros((m, n), dtype=float64)
-    d = np.zeros((m,), dtype=float64)
-
-    calib = compiled.config.calibration
-    for i, obs in enumerate(obs_names):
-        row: MeasurementSpec = spec[obs]
-        lin = row.get("lin", {})
-        const = row.get("const", [])
-        for varname, coef in lin.items():
-            j = compiled.idx.get(varname)
-            if j is None:
-                raise KeyError(f"Variable '{varname}' not found in model variables.")
-            C[i, j] += float64(coef)
-
-        for c in const:
-            if isinstance(c, str):
-                d[i] += calib.get_param(c)
-            else:
-                d[i] += float64(c)
-    return C, d, obs_names
 
 
 def build_C_d_from_obs(

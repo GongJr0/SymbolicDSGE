@@ -13,6 +13,7 @@ import sympy as sp
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.compiled_model import RegimeBlock
 from SymbolicDSGE.core.config import Constraint
+from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
 from SymbolicDSGE._ckernels.core import (
     klein_preprocess,
     residual_eval,
@@ -20,6 +21,20 @@ from SymbolicDSGE._ckernels.core import (
 )
 
 t = sp.Symbol("t", integer=True)
+
+
+def _regime_cfuncs(compiled):
+    """One residual @cfunc per regime, sharing the reference layout.
+
+    Regimes replace equations by name, so ``n_var``/``n_par`` are unchanged.
+    The caller keeps the returned cfuncs alive for as long as it uses their
+    addresses.
+    """
+    layout = ResidualLayout.from_compiled(compiled)
+    return {
+        mask: build_cfunc(block.residuals, layout)
+        for mask, block in compiled.regimes.items()
+    }
 
 
 def _with_constraints(parsed, constraint, replacements=None):
@@ -348,7 +363,7 @@ def test_regime_pencil_rows_match_the_complex_step_sweep(compiled_lead_regime):
     n_var = len(compiled.var_names)
     n_row = len(block.rows)
     par = _params(compiled)
-    cfunc = compiled.construct_regime_cfuncs()[1]
+    cfunc = _regime_cfuncs(compiled)[1]
 
     n_exog = compiled.n_exog
     blocks = (block.jac_a, block.jac_b, block.jac_c, block.jac_d)
@@ -414,7 +429,7 @@ def test_regime_pencil_cfunc_writes_every_block(compiled_lead_regime):
     par = _params(compiled)
     n_var, n_exog = len(compiled.var_names), compiled.n_exog
     rows = func.rows[1]
-    cfunc = compiled.construct_regime_cfuncs()[1]
+    cfunc = _regime_cfuncs(compiled)[1]
 
     assert func.masks == (1,)
     assert func.n_out(1) == len(rows) * (3 * n_var + n_exog + 1)
@@ -552,11 +567,8 @@ def test_regime_replacements_lower_to_residuals(compiled_regimes):
     )
 
 
-def test_regime_cfuncs_cover_every_regime_and_are_cached(compiled_regimes):
-    cfuncs = compiled_regimes.construct_regime_cfuncs()
-
-    assert sorted(cfuncs) == [1, 2, 3]
-    assert compiled_regimes.construct_regime_cfuncs() is cfuncs
+def test_regime_cfuncs_cover_every_regime(compiled_regimes):
+    assert sorted(_regime_cfuncs(compiled_regimes)) == [1, 2, 3]
 
 
 def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
@@ -582,7 +594,7 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
     beta = float(compiled_regimes.config.calibration.parameters[sp.Symbol("beta")])
     expected_c = {1: 0.0, 2: -beta, 3: -2 * beta}
 
-    for mask, cfunc in compiled_regimes.construct_regime_cfuncs().items():
+    for mask, cfunc in _regime_cfuncs(compiled_regimes).items():
         a_r, b_r, _, _ = klein_preprocess(cfunc.address, ss_ref, par, n_eq, n_exog)
         c_r = residual_eval(
             cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
@@ -631,8 +643,9 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     a_ref, b_ref, _, _ = klein_preprocess(
         ref_cfunc.address, ss_ref, par, n_eq, compiled.n_exog
     )
+    regime_cfunc = _regime_cfuncs(compiled)[1]
     a_r, b_r, _, _ = klein_preprocess(
-        compiled.construct_regime_cfuncs()[1].address,
+        regime_cfunc.address,
         ss_ref,
         par,
         n_eq,
@@ -722,7 +735,7 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     expected = float(calib[sp.Symbol("delta")]) * ss_ref[k_idx]
     assert expected > 0.5
 
-    cfunc = compiled_rbc_obc.construct_regime_cfuncs()[1]
+    cfunc = _regime_cfuncs(compiled_rbc_obc)[1]
     c_r = residual_eval(
         cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
     ).real
@@ -757,7 +770,7 @@ def test_regime_replacements_carry_shocks_like_the_reference(parsed_post82):
     row = block.rows.index(2)
     shock_col = list(model.shocks).index(shock)
     assert block.jac_d[row * n_exog + shock_col] == 1
-    assert compiled.construct_regime_cfuncs()[1] is not None
+    assert _regime_cfuncs(compiled)[1] is not None
 
 
 def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
@@ -777,7 +790,7 @@ def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
 
 def test_model_without_regimes_has_no_regime_blocks(compiled_post82):
     assert compiled_post82.regimes == {}
-    assert compiled_post82.construct_regime_cfuncs() == {}
+    assert _regime_cfuncs(compiled_post82) == {}
     assert compiled_post82.construct_regime_pencil_func() is None
 
 

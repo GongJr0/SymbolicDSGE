@@ -10,8 +10,8 @@ from typing import Callable, Any, Mapping, Sequence
 
 from sympy.logic.boolalg import Boolean
 
-from .config import ModelConfig
-from ..kalman.config import KalmanConfig
+from .config import ModelConfig, make_Q
+from ..kalman.config import KalmanConfig, make_R
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ConstraintLayout,
@@ -220,8 +220,8 @@ class CompiledModel:
     observable_names: list[str]
     observable_eqs: list[Expr]
     # Flat row-major (n_obs, n_var) symbolic jacobian d(observable)/d(cur_var);
-    # printed to a native cfunc on demand (construct_observable_jacobian_cfunc).
-    observable_jacobian_eqs: list[Expr]
+    # printed to a native cfunc on demand (construct_measurement_jacobian_cfunc).
+    measurement_jacobian_eqs: list[Expr]
 
     # Regime conditions in declaration order, bind then relax per constraint;
     # printed to a native cfunc on demand (construct_constraint_func).
@@ -229,8 +229,7 @@ class CompiledModel:
     constraint_exprs: list[Boolean] = field(default_factory=list)
 
     # One block per regime, keyed by the bitmask of its binding constraints over
-    # constraint_names. Residuals stay in reference equation order and print to
-    # native cfuncs on demand (construct_regime_cfuncs).
+    # constraint_names. Residuals stay in reference equation order.
     regimes: dict[int, RegimeBlock] = field(default_factory=dict)
 
     @property
@@ -311,20 +310,6 @@ class CompiledModel:
                     bits |= bit
             out[i] = bits
         return out
-
-    @cached_property
-    def _regime_cfuncs(self) -> dict[int, Any]:
-        # One residual @cfunc per regime, sharing the reference layout: regimes
-        # replace equations by name, so n_var/n_par are unchanged. Held here
-        # so the addresses stay valid for the driver.
-        layout = ResidualLayout.from_compiled(self)
-        return {
-            mask: build_cfunc(block.residuals, layout)
-            for mask, block in self.regimes.items()
-        }
-
-    def construct_regime_cfuncs(self) -> dict[int, Any]:
-        return self._regime_cfuncs
 
     @cached_property
     def _regime_pencil_func(self) -> RegimePencilFunc | None:
@@ -457,7 +442,7 @@ class CompiledModel:
             )
 
         meas_addr = self.construct_measurement_cfunc(observables).address
-        jac_addr = self.construct_observable_jacobian_cfunc(observables).address
+        jac_addr = self.construct_measurement_jacobian_cfunc(observables).address
         n_obs = len(observables)
 
         d = measurement_eval(meas_addr, ss, param_vec, n_obs)
@@ -501,15 +486,15 @@ class CompiledModel:
         return cache[obs]
 
     @cached_property
-    def _observable_jacobian_cfunc_cache(self) -> dict[tuple[str, ...], Any]:
+    def _measurement_jacobian_cfunc_cache(self) -> dict[tuple[str, ...], Any]:
         return {}
 
-    def construct_observable_jacobian_cfunc(
+    def construct_measurement_jacobian_cfunc(
         self,
         observables: Sequence[str] | None = None,
     ) -> Any:
         obs = self._normalize_observables(observables)
-        cache = self._observable_jacobian_cfunc_cache
+        cache = self._measurement_jacobian_cfunc_cache
         if obs in cache:
             return cache[obs]
 
@@ -518,7 +503,7 @@ class CompiledModel:
         obs_idx = {name: i for i, name in enumerate(self.observable_names)}
         # Flat row-major (obs, var) jacobian exprs for the selected observables.
         exprs = [
-            self.observable_jacobian_eqs[obs_idx[name] * n_var + j]
+            self.measurement_jacobian_eqs[obs_idx[name] * n_var + j]
             for name in obs
             for j in range(n_var)
         ]
@@ -531,55 +516,58 @@ class CompiledModel:
         cache[obs] = build_measurement_cfunc(exprs, layout)
         return cache[obs]
 
-    @cached_property
-    def _measurement_array_func_cache(self) -> dict[tuple[str, ...], Callable[..., ND]]:
-        return {}
-
-    def construct_measurement_array_func(
-        self,
-        observables: list[str] | tuple[str, ...] | None = None,
-    ) -> Callable[..., ND]:
-        obs = self._normalize_observables(observables)
-        cache = self._measurement_array_func_cache
-        if obs in cache:
-            return cache[obs]
-
-        addr = self.construct_measurement_cfunc(obs).address
-        n_obs = len(obs)
-
-        def measurement_array(state: ND, params: ND) -> ND:
-            return measurement_eval(addr, state, params, n_obs)
-
-        cache[obs] = measurement_array
-        return measurement_array
-
-    @cached_property
-    def _observable_jacobian_array_func_cache(
-        self,
-    ) -> dict[tuple[str, ...], Callable[..., ND]]:
-        return {}
-
-    def construct_observable_jacobian_array_func(
-        self,
-        observables: list[str] | tuple[str, ...] | None = None,
-    ) -> Callable[..., ND]:
-        obs = self._normalize_observables(observables)
-        cache = self._observable_jacobian_array_func_cache
-        if obs in cache:
-            return cache[obs]
-
-        addr = self.construct_observable_jacobian_cfunc(obs).address
-        n_obs = len(obs)
-        n_var = self.n_var
-
-        def jacobian_array(state: ND, params: ND) -> ND:
-            return jacobian_eval(addr, state, params, n_obs, n_var)
-
-        cache[obs] = jacobian_array
-        return jacobian_array
-
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.config.name})"
+
+
+def _shock_covariance(
+    compiled: "CompiledModel",
+    params: Mapping[Any, float64] | None = None,
+    *,
+    shocks: Sequence[str] | None = None,
+    corr: NDF | None = None,
+) -> NDF:
+    """``Q`` for a compiled model, at its own calibration unless ``params`` says
+    otherwise. ``shocks`` subsets it; ``corr`` supplies an already-materialized
+    correlation matrix."""
+    calib = compiled.config.calibration
+    return make_Q(
+        compiled.config.shocks,
+        calib.shock_std,
+        calib.shock_corr,
+        calib.parameters if params is None else params,
+        shocks=shocks,
+        corr=corr,
+    )
+
+
+def _measurement_covariance(
+    compiled: "CompiledModel",
+    params: Mapping[Any, float64] | None = None,
+    *,
+    observables: Sequence[str] | None = None,
+) -> NDF:
+    """``R`` from the named std/correlation maps, over ``observables``.
+
+    Reads the model's own calibration unless ``params`` says otherwise. A
+    config carrying a fixed ``R`` matrix rather than named parameters is the
+    caller's to slice.
+    """
+    conf = compiled.kalman
+    if conf is None:
+        raise ValueError("Building R from named parameters requires a KalmanConfig.")
+    if conf.R_std_param_map is None:
+        raise ValueError("KalmanConfig does not expose named R parameter metadata.")
+
+    if params is None:
+        params = compiled.config.calibration.parameters
+    return make_R(
+        compiled.observable_names,
+        conf.R_std_param_map,
+        conf.R_corr_param_map,
+        params,
+        observables=observables,
+    )

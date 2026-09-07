@@ -1,9 +1,10 @@
 from dataclasses import dataclass, asdict
-from typing import AbstractSet, Any, TypeAlias, TypeVar, Dict, Sequence
+from typing import AbstractSet, Any, Mapping, TypeAlias, TypeVar, Dict, Sequence
 from collections import UserDict
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
-from numpy import float64
+from numpy import array, asarray, eye, float64, ix_, outer
+from numpy.typing import NDArray
 import pickle
 
 from .linearization import LinearizationMethod
@@ -106,34 +107,8 @@ class Equations(Base):
 @dataclass
 class Calib(Base):
     parameters: SymbolGetterDict[float64]
-    shock_std: SymbolGetterDict[Symbol]
-    shock_corr: PairGetterDict[Symbol]
-
-    def get_param(self, name: str | Symbol, default: float | None = None) -> float:
-        """A calibrated parameter's value, or ``default`` when it is absent.
-
-        Raises :class:`KeyError` with no default, since a missing parameter with
-        no fallback is a model-authoring error rather than a zero.
-        """
-        sym = Symbol(name) if isinstance(name, str) else name
-        if sym in self.parameters:
-            return float64(self.parameters[sym])
-        elif default is not None:
-            return float64(default)
-        raise KeyError(f"Parameter '{name}' not found in calibration parameters.")
-
-    def get_rho(
-        self, var1: str | Symbol, var2: str | Symbol, default: float = 0.0
-    ) -> float:
-        """The correlation between two shocks, 1.0 for a shock with itself."""
-        if var1 == var2:
-            return 1.0
-
-        corr = self.shock_corr[var1, var2]  # pyright: ignore # Overloaded __getitem__
-        if corr is not None:
-            return self.get_param(corr, default=default)
-
-        return float64(default)
+    shock_std: SymbolGetterDict[str]
+    shock_corr: PairGetterDict[str | None]
 
     def fingerprint(self) -> int:
         """Hashable snapshot of the parameter values, for keying caches."""
@@ -143,6 +118,64 @@ class Calib(Base):
                 tuple(float(v) for v in self.parameters.values()),
             )
         )
+
+
+def make_Q(
+    shock_order: Sequence[Symbol | str],
+    std_param_map: Mapping[Any, str],
+    corr_param_map: Mapping[Any, str | None] | None,
+    params: Mapping[Any, float64],
+    *,
+    shocks: Sequence[str] | None = None,
+    corr: NDArray[float64] | None = None,
+) -> NDArray[float64]:
+    """Assemble a shock covariance ``Q = outer(sig, sig) * rho``.
+
+    The structural-shock counterpart of
+    :func:`SymbolicDSGE.kalman.config.make_R`, and built the same way: the two
+    maps carry parameter *names* and ``params`` resolves each to a value, so one
+    call serves a calibration and an estimation draw alike. ``shock_order`` fixes
+    the row and column order. A pair mapped to ``None`` stays at zero
+    correlation, and the diagonal is one.
+
+    ``corr`` supplies an already-materialized correlation matrix over
+    ``shock_order``, skipping the name gather; an estimated Cholesky block hands
+    its correlation in this way.
+
+    ``shocks`` subsets the result. Q is assembled over the whole ``shock_order``
+    and sliced afterwards, since a correlation pair may name a shock the subset
+    leaves out.
+    """
+    n = len(shock_order)
+    pos = {str(s): i for i, s in enumerate(shock_order)}
+
+    def _param(name: str) -> float64:
+        if name not in params:
+            raise KeyError(
+                f"Missing shock parameter '{name}' in the supplied parameters."
+            )
+        return float64(params[name])
+
+    sig_vec = array([_param(std_param_map[s]) for s in shock_order], dtype=float64)
+
+    if corr is None:
+        rho = eye(n, dtype=float64)
+        for pair, param_name in (corr_param_map or {}).items():
+            if param_name is None:
+                continue
+            i, j = (pos[str(member)] for member in pair)
+            rho_ij = _param(param_name)
+            rho[i, j] = rho_ij
+            rho[j, i] = rho_ij
+    else:
+        rho = asarray(corr, dtype=float64)
+
+    Q = outer(sig_vec, sig_vec) * rho
+    if shocks is None:
+        return Q
+
+    idx = [pos[name] for name in shocks]
+    return Q[ix_(idx, idx)]
 
 
 @dataclass

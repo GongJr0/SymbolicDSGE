@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.core.shock_generators import Shock
+import SymbolicDSGE.core.solved_model.shocks as shocks_mod
 from SymbolicDSGE.core.solved_model.shocks import resolve_shock_plan, shock_unpack
 
 T = 12
@@ -102,14 +103,13 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
     spec = {"e_u,e_v": Shock(dist="norm", multivar=True, seed=11)}
 
     calls = {"n": 0}
-    calib = type(solved_test.config.calibration)
-    original = calib.get_rho
+    original = shocks_mod.make_Q
 
-    def counting_get_rho(self, *args, **kwargs):
+    def counting_make_Q(*args, **kwargs):
         calls["n"] += 1
-        return original(self, *args, **kwargs)
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(calib, "get_rho", counting_get_rho)
+    monkeypatch.setattr(shocks_mod, "make_Q", counting_make_Q)
 
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
     resolved = calls["n"]
@@ -118,7 +118,7 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
     for offset in range(25):
         plan.matrix(T, 1.0, offset)
 
-    # Correlations are spec-level, so redrawing must not touch them again.
+    # The covariance is spec-level, so redrawing must not rebuild it.
     assert calls["n"] == resolved
 
 

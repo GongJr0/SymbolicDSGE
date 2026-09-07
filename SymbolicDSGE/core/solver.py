@@ -12,7 +12,12 @@ from numpy.typing import NDArray
 import pandas as pd
 
 from .config import ModelConfig
-from .compiled_model import CompiledModel, VariableLayout, RegimeBlock
+from .compiled_model import (
+    CompiledModel,
+    VariableLayout,
+    RegimeBlock,
+    _shock_covariance,
+)
 from sympy.core.function import AppliedUndef
 
 from .desugar import (
@@ -136,8 +141,8 @@ class DSGESolver:
             expr.xreplace(subs_map) for expr in conf.equations.observable.values()
         ]
         # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
-        # demand via CompiledModel.construct_observable_jacobian_cfunc.
-        observable_jacobian_eqs: list[Expr] = [
+        # demand via CompiledModel.construct_measurement_jacobian_cfunc.
+        measurement_jacobian_eqs: list[Expr] = [
             sp.diff(expr, cur_sym) for expr in observable_exprs for cur_sym in cur_syms
         ]
 
@@ -152,7 +157,7 @@ class DSGESolver:
             objective_eqs=compiled_numeric,
             observable_names=[v.name for v in conf.observables],
             observable_eqs=observable_exprs,
-            observable_jacobian_eqs=observable_jacobian_eqs,
+            measurement_jacobian_eqs=measurement_jacobian_eqs,
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
             regimes=regimes,
@@ -632,12 +637,13 @@ class DSGESolver:
         shocks and their cross plus the risk correction into a
         :class:`SecondOrderSolution`. Requires the native extension."""
 
+        calib = compiled.config.calibration
         pert = sgu_solve(
             compiled.construct_objective_cfunc(),
             compiled.construct_objective_cfunc_bicomplex(),
             param_vec,
             seed,
-            self._build_Q(compiled),
+            _shock_covariance(compiled),
             compiled._incidence,
             compiled.n_state,
             n_exog=compiled.n_exog,
@@ -690,44 +696,6 @@ class DSGESolver:
             sol.stab, should_raise=raise_on_bk_violation
         )
         return PiecewiseSolvedModel(compiled=compiled, policy=sol)
-
-    @staticmethod
-    def _build_Q(compiled: CompiledModel) -> NDF:
-        """The shock covariance, ``(n_exog, n_exog)``.
-
-        Stds scale it and correlations fill its off-diagonals. It crosses the
-        boundary whole rather than as a factor: the risk correction integrates
-        against the covariance itself, and the filters read it as ``Q``.
-        """
-        conf = compiled.config
-        n_exog = compiled.n_exog
-        eta = np.zeros((n_exog, n_exog), dtype=float64)
-        if n_exog == 0:
-            return eta
-
-        params = conf.calibration.parameters
-        shock_std = conf.calibration.shock_std
-        shock_corr = conf.calibration.shock_corr
-        innovations = list(conf.shocks)
-
-        stds = np.empty(n_exog, dtype=float64)
-        for i, innov in enumerate(innovations):
-            sig_sym = shock_std.get(innov)
-            stds[i] = (
-                float(params[sig_sym]) if sig_sym in params else 1.0  # pyright: ignore
-            )
-        corr = np.eye(n_exog, dtype=float64)
-        for i in range(n_exog):
-            for j in range(i + 1, n_exog):
-                c_sym = shock_corr[innovations[i], innovations[j]]
-                cij = (
-                    float(params[c_sym])
-                    if (c_sym is not None and c_sym in params)
-                    else 0.0
-                )
-                corr[i, j] = corr[j, i] = cij
-
-        return corr * np.outer(stds, stds)
 
     def _estimator(
         self,

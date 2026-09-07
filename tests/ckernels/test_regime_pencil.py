@@ -25,10 +25,25 @@ from SymbolicDSGE._ckernels.core import (
 from SymbolicDSGE._ckernels.occbin import regime_pencil
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.config import Constraint
+from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
 
 t = sp.Symbol("t", integer=True)
 
 LOW = 0b1
+
+
+def _regime_cfuncs(compiled):
+    """One residual @cfunc per regime, sharing the reference layout.
+
+    Regimes replace equations by name, so ``n_var``/``n_par`` are unchanged.
+    The caller keeps the returned cfuncs alive for as long as it uses their
+    addresses.
+    """
+    layout = ResidualLayout.from_compiled(compiled)
+    return {
+        mask: build_cfunc(block.residuals, layout)
+        for mask, block in compiled.regimes.items()
+    }
 
 
 @pytest.fixture(scope="module")
@@ -106,7 +121,7 @@ def test_patched_rows_match_a_full_sweep_of_the_regime(compiled, par, ss_ref, pa
     rows = _rows(compiled)
     a, b, c, d, _ = patched
 
-    regime_cfunc = compiled.construct_regime_cfuncs()[LOW]
+    regime_cfunc = _regime_cfuncs(compiled)[LOW]
     a_r, b_r, c_r, d_r = klein_preprocess(
         regime_cfunc.address, ss_ref, par, n_var, compiled.n_exog
     )
@@ -138,7 +153,7 @@ def test_constants_are_the_regime_residual_at_the_reference(
     rows = _rows(compiled)
     *_, cst = patched
 
-    regime_cfunc = compiled.construct_regime_cfuncs()[LOW]
+    regime_cfunc = _regime_cfuncs(compiled)[LOW]
     c_r = residual_eval(
         regime_cfunc.address,
         ss_ref,

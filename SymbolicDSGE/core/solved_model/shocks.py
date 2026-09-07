@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from sympy import Symbol
 
 from ..compiled_model import CompiledModel
+from ..config import make_Q
 from ..shock_generators import Shock, _gaussian_factor
 from ..shock_plan import ShockPlan, ShockPlanEntry, validate_shock_targets
 
@@ -103,16 +104,13 @@ def resolve_shock_plan(
                     f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
                 )
 
-            shock_syms = [Symbol(n) for n in multi_names_sorted]
-            sig_params = [shock_stds[sym] for sym in shock_syms]
-            sigs = [calib.get_param(sig, 1.0) for sig in sig_params]
-            rhos = [
-                calib.get_rho(n1, n2, 0.0) for n1 in shock_syms for n2 in shock_syms
-            ]
-            corr = np.array(rhos).reshape(
-                (len(multi_names_sorted), len(multi_names_sorted))
+            cov = make_Q(
+                compiled.config.shocks,
+                shock_stds,
+                calib.shock_corr,
+                calib.parameters,
+                shocks=multi_names_sorted,
             )
-            cov = corr * np.outer(sigs, sigs)
 
             if isinstance(shock, Shock):
                 entries.append(
@@ -157,7 +155,7 @@ def resolve_shock_plan(
                 f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
             )
 
-        sig = calib.get_param(shock_stds[Symbol(name)], 1.0)
+        sig = calib.parameters[calib.shock_std[name]]
 
         if isinstance(shock, Shock):
             entries.append(

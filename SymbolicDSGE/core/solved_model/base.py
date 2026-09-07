@@ -18,11 +18,10 @@ from typing import (
 
 
 import numpy as np
-from numpy import ndarray, float64, asarray
+from numpy import ndarray, float64
 from numpy.typing import NDArray
 
 import pandas as pd
-from sympy import Symbol
 
 import matplotlib.pyplot as plt
 
@@ -173,8 +172,7 @@ class SolvedModel(ABC, Generic[Policy]):
         shock_spec = {}
         sig_map = conf.calibration.shock_std
         for s in shocks:
-            sig_sym = sig_map.get(Symbol(s))
-            sig = conf.calibration.parameters.get(sig_sym, 1.0)  # pyright: ignore
+            sig = conf.calibration.parameters[sig_map[s]]
             arr = np.zeros((T,), dtype=float64)
             arr[0] = sig
             shock_spec[s] = arr
@@ -586,32 +584,6 @@ class SolvedModel(ABC, Generic[Policy]):
         )
 
         return cast("FitResult", interface.fit_to_kf(y))
-
-    def _build_Q(self) -> NDF:
-        params = self.config.calibration.parameters
-        shock_std = self.config.calibration.shock_std
-        shock_corr = self.config.calibration.shock_corr
-
-        shocks = list(self.config.shocks)
-        stds = asarray(
-            [float64(params[shock_std[shock]]) for shock in shocks], dtype=float64
-        )
-
-        corr = np.eye(len(shocks), dtype=float64)
-        n = len(stds)
-        for i in range(n):
-            for j in range(i + 1, n):
-                pair = frozenset({shocks[i], shocks[j]})
-                corr_sym = shock_corr.get(pair, None)
-                if corr_sym is not None and corr_sym in params:
-                    corr_ij = params[corr_sym]
-                else:
-                    corr_ij = 0.0
-
-                corr[i, j] = corr_ij
-                corr[j, i] = corr_ij
-
-        return np.outer(stds, stds) * corr
 
     @property
     def config(self) -> ModelConfig:

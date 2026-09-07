@@ -8,6 +8,8 @@ import pytest
 import yaml
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
 from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE.core.solved_model.shocks import shock_unpack
 
@@ -79,13 +81,16 @@ def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder
     state[EXPECTED_IDX["Pi"]] = 40.0
     state[EXPECTED_IDX["r"]] = 30.0
 
-    measurement = compiled.construct_measurement_array_func(["Infl", "Rate"])(
-        state,
-        params,
+    obs = ["Infl", "Rate"]
+    measurement = measurement_eval(
+        compiled.construct_measurement_cfunc(obs).address, state, params, len(obs)
     )
-    jacobian = compiled.construct_observable_jacobian_array_func(["Infl", "Rate"])(
+    jacobian = jacobian_eval(
+        compiled.construct_measurement_jacobian_cfunc(obs).address,
         np.zeros_like(state),
         params,
+        len(obs),
+        compiled.n_var,
     )
 
     expected_jacobian = np.zeros((2, N_VAR), dtype=np.float64)
@@ -121,7 +126,7 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
     compiled = _compile_misordered_test_model(tmp_path)
 
     np.testing.assert_allclose(
-        _stub_solved(compiled)._build_Q(),
+        _shock_covariance(compiled),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
 

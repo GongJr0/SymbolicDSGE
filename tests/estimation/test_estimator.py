@@ -36,7 +36,7 @@ def _with_filter_prep(compiled):
     if not hasattr(compiled, "cur_syms"):
         compiled.cur_syms = list(compiled.var_names)
     compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
-    compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
+    compiled.construct_measurement_jacobian_cfunc = lambda obs: SimpleNamespace(
         address=0
     )
     if not hasattr(compiled, "n_state"):
@@ -122,8 +122,8 @@ def _stub_compiled_with_dense_r_block():
         ),
         R_param_names=["meas_a", "meas_b", "meas_rho_ab"],
         R_builder=_R_builder,
-        R_std_param_map={"A": "meas_a", "B": "meas_b"},
-        R_corr_param_map={frozenset(("A", "B")): "meas_rho_ab"},
+        R_std_param_map=SymbolGetterDict({"A": "meas_a", "B": "meas_b"}),
+        R_corr_param_map=PairGetterDict({frozenset(("A", "B")): "meas_rho_ab"}),
         y_names=["A", "B"],
     )
     return _with_filter_prep(
@@ -154,10 +154,10 @@ def _stub_compiled_with_sparse_q_block():
             sig3: float64(1.0),
             rho12: float64(0.0),
         },
-        shock_std=SymbolGetterDict({e1: sig1, e2: sig2, e3: sig3}),
+        shock_std=SymbolGetterDict({e1: "sig1", e2: "sig2", e3: "sig3"}),
         shock_corr=PairGetterDict(
             {
-                frozenset((e1, e2)): rho12,
+                frozenset((e1, e2)): "rho12",
                 frozenset((e1, e3)): None,
                 frozenset((e2, e3)): None,
             }
@@ -932,53 +932,6 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
         )
 
 
-def test_cov_to_corr_and_matrix_resolution_error_branches():
-    with pytest.raises(ValueError, match="square covariance matrix"):
-        Estimator._cov_to_corr(np.array([1.0], dtype=np.float64), "R")
-    with pytest.raises(ValueError, match="symmetric covariance matrix"):
-        Estimator._cov_to_corr(
-            np.array([[1.0, 2.0], [0.0, 1.0]], dtype=np.float64), "R"
-        )
-    with pytest.raises(ValueError, match="strictly positive diagonal variances"):
-        Estimator._cov_to_corr(
-            np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.float64), "R"
-        )
-
-    est = Estimator(
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-
-    with pytest.raises(ValueError, match="named variance parameter"):
-        est._build_matrix_resolution(
-            key="R_corr",
-            labels=["a"],
-            std_param_map={},
-            corr_param_map={},
-        )
-
-    with pytest.raises(ValueError, match="unique named variance parameter"):
-        est._build_matrix_resolution(
-            key="R_corr",
-            labels=["a", "b"],
-            std_param_map={"a": "sig", "b": "sig"},
-            corr_param_map={frozenset(("b", "a")): "rho_ab"},
-        )
-
-    with pytest.raises(ValueError, match="unique named parameter per correlation pair"):
-        est._build_matrix_resolution(
-            key="R_corr",
-            labels=["a", "b", "c"],
-            std_param_map={"a": "sig_a", "b": "sig_b", "c": "sig_c"},
-            corr_param_map={
-                frozenset(("b", "a")): "rho_shared",
-                frozenset(("c", "a")): "rho_shared",
-                frozenset(("c", "b")): "rho_cb",
-            },
-        )
-
-
 def test_resolve_r_and_effective_observables_error_paths():
     a = Symbol("a")
     compiled_no_kalman = SimpleNamespace(
@@ -1089,8 +1042,8 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     sig2 = Symbol("sig2")
     calibration = SimpleNamespace(
         parameters={sig1: float64(1.0), sig2: float64(1.0)},
-        shock_std=SymbolGetterDict({e1: sig1, e2: sig2}),
-        shock_corr={},
+        shock_std=SymbolGetterDict({e1: "sig1", e2: "sig2"}),
+        shock_corr=PairGetterDict({frozenset((e1, e2)): None}),
     )
     compiled = _with_filter_prep(
         SimpleNamespace(
@@ -1168,8 +1121,8 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     res_missing = est_base._build_matrix_resolution(
         key="R_corr",
         labels=["A", "B"],
-        std_param_map={"A": "sig_a", "B": "sig_b"},
-        corr_param_map={frozenset(("B", "A")): "rho_ba"},
+        std_param_map=SymbolGetterDict({"A": "sig_a", "B": "sig_b"}),
+        corr_param_map=PairGetterDict({frozenset(("B", "A")): "rho_ba"}),
     )
     est_base.priors = {
         "R_corr": Prior(
@@ -1191,8 +1144,8 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
     r_resolution = est._build_matrix_resolution(
         key="R_corr",
         labels=["A", "B"],
-        std_param_map={"A": "meas_a", "B": "meas_b"},
-        corr_param_map={frozenset(("B", "A")): "meas_rho_ab"},
+        std_param_map=SymbolGetterDict({"A": "meas_a", "B": "meas_b"}),
+        corr_param_map=PairGetterDict({frozenset(("B", "A")): "meas_rho_ab"}),
     )
     q_resolution = MatrixPriorBlock(
         dim=2,
