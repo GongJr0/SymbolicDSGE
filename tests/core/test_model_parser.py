@@ -36,6 +36,11 @@ def test_parsed_config_is_iterable(parsed_post82):
     assert kalman.R is not None
 
 
+def _corr_names(corr_map):
+    """``R_corr_param_map`` keyed by observable name, for comparison."""
+    return {frozenset(str(o) for o in pair): name for pair, name in corr_map.items()}
+
+
 def test_kalman_R_built_numerically_from_calibration(parsed_post82):
     # R is now assembled directly from calibration values at parse time (no
     # sympy Matrix / lambdify). POST82 calibrates every measurement std to 1 and
@@ -47,12 +52,12 @@ def test_kalman_R_built_numerically_from_calibration(parsed_post82):
     np.testing.assert_allclose(kalman.R, np.eye(3, dtype=np.float64))
 
     # Surviving metadata: the name->position maps that drive R reconstruction.
-    assert kalman.R_std_param_map == {
+    assert {str(k): v for k, v in kalman.R_std_param_map.items()} == {
         "OutGap": "meas_outgap",
         "Infl": "meas_infl",
         "Rate": "meas_rate",
     }
-    assert kalman.R_corr_param_map == {
+    assert _corr_names(kalman.R_corr_param_map) == {
         frozenset({"Infl", "Rate"}): "meas_rho_ir",
         frozenset({"OutGap", "Infl"}): "meas_rho_gi",
         frozenset({"OutGap", "Rate"}): "meas_rho_gr",
@@ -135,7 +140,7 @@ def test_kalman_R_arithmetic_covers_offdiag_and_missing_corr():
     np.testing.assert_allclose(kalman.R, expected)
 
     # Unspecified pairs are recorded as None, not dropped.
-    assert kalman.R_corr_param_map == {
+    assert _corr_names(kalman.R_corr_param_map) == {
         frozenset({"x_obs", "y_obs"}): "rho_xy",
         frozenset({"x_obs", "z_obs"}): None,
         frozenset({"y_obs", "z_obs"}): None,

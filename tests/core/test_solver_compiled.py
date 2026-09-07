@@ -13,6 +13,7 @@ from numpy import float64
 import pytest
 
 from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
+from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
 
 
 def _nonlinear_compile_yaml() -> str:
@@ -98,18 +99,6 @@ def test_compiled_parameters_reject_bad_vector_length(compiled_test):
         )
 
 
-def test_construct_measurement_array_dispatchers_are_cached(compiled_test):
-    c = compiled_test
-    obs = list(c.observable_names)
-
-    assert c.construct_measurement_array_func(
-        obs
-    ) is c.construct_measurement_array_func(obs)
-    assert c.construct_observable_jacobian_array_func(
-        obs
-    ) is c.construct_observable_jacobian_array_func(obs)
-
-
 def test_measurement_array_dispatchers_match_lambdify_reference(compiled_test):
     # The native measurement/jacobian cfuncs must agree with an independent
     # sympy.lambdify evaluation of the stored observable exprs (the reference the
@@ -126,17 +115,16 @@ def test_measurement_array_dispatchers_match_lambdify_reference(compiled_test):
     meas_ref = [sp.lambdify(args, e, "numpy") for e in c.observable_eqs]
     scalar_measure = np.asarray([f(*state, *params) for f in meas_ref], dtype=float64)
 
-    jac_ref = [sp.lambdify(args, e, "numpy") for e in c.observable_jacobian_eqs]
+    jac_ref = [sp.lambdify(args, e, "numpy") for e in c.measurement_jacobian_eqs]
     scalar_jac = np.asarray(
         [f(*state, *params) for f in jac_ref], dtype=float64
     ).reshape(len(c.observable_names), n_var)
 
-    array_measure = c.construct_measurement_array_func(c.observable_names)(
-        state, params
-    )
-    array_jac = c.construct_observable_jacobian_array_func(c.observable_names)(
-        state, params
-    )
+    meas_addr = c.construct_measurement_cfunc(c.observable_names).address
+    jac_addr = c.construct_measurement_jacobian_cfunc(c.observable_names).address
+    n_obs = len(c.observable_names)
+    array_measure = measurement_eval(meas_addr, state, params, n_obs)
+    array_jac = jacobian_eval(jac_addr, state, params, n_obs, n_var)
 
     assert np.allclose(array_measure, scalar_measure)
     assert np.allclose(array_jac, scalar_jac)
@@ -162,7 +150,12 @@ def test_measurement_cfunc_matches_array_dispatcher(compiled_test):
         out.ctypes.data_as(ptr),
     )
 
-    expected = c.construct_measurement_array_func(observables)(state, params)
+    expected = measurement_eval(
+        c.construct_measurement_cfunc(observables).address,
+        state,
+        params,
+        len(observables),
+    )
     np.testing.assert_allclose(out, expected, rtol=1e-12, atol=1e-12)
 
 

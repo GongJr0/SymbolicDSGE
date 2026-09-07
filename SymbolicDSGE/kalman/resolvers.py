@@ -17,10 +17,9 @@ import numpy as np
 import pandas as pd
 from numpy import asarray, float64, int64
 from numpy.typing import NDArray
-from sympy import Symbol
 
+from ..core.compiled_model import _shock_covariance, _measurement_covariance
 from .._ckernels.kalman import stationary_covariance
-from .config import make_R
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -117,8 +116,8 @@ def resolve_linear_args(
         B=B,
         C=C,
         d=d,
-        Q=model._build_Q(),
-        R=_build_constant_R(model, R, obs),
+        Q=_shock_covariance(model.compiled),
+        R=_build_R(model, R, obs),
         y=y_canonical,
         x0=_default_x0(A) if x0 is None else x0,
         P0=_build_P0(model, FilterMode.LINEAR, P0),
@@ -147,12 +146,12 @@ def resolve_extended_args(
     A, B = model.policy.A, model.policy.B
     return ExtendedRunArgs(
         meas_addr=int(model.compiled.construct_measurement_cfunc(obs).address),
-        jac_addr=int(model.compiled.construct_observable_jacobian_cfunc(obs).address),
+        jac_addr=int(model.compiled.construct_measurement_jacobian_cfunc(obs).address),
         A=A,
         B=B,
         calib_params=_calib_params(model),
-        Q=model._build_Q(),
-        R=_build_constant_R(model, R, obs),
+        Q=_shock_covariance(model.compiled),
+        R=_build_R(model, R, obs),
         y=y_canonical,
         x0=_default_x0(A) if x0 is None else x0,
         P0=_build_P0(model, FilterMode.EXTENDED, P0),
@@ -198,8 +197,8 @@ def resolve_unscented_args(
         gss=_ukf_array(model, "gss"),
         steady_state=policy.steady_state,
         calib_params=_calib_params(model),
-        Q=model._build_Q(),
-        R=_build_constant_R(model, R, obs),
+        Q=_shock_covariance(model.compiled),
+        R=_build_R(model, R, obs),
         y=y_canonical,
         z0=_build_unscented_z0(model, x0),
         P0=_build_P0(model, FilterMode.UNSCENTED, P0),
@@ -330,9 +329,7 @@ def _validate_user_R(R: NDF | None, observables: Sequence[str]) -> NDF | None:
     return R
 
 
-def _build_constant_R(
-    model: SolvedModel, R: NDF | None, observables: Sequence[str]
-) -> NDF:
+def _build_R(model: SolvedModel, R: NDF | None, observables: Sequence[str]) -> NDF:
     validated_R = _validate_user_R(R, observables)
     if validated_R is not None:
         return validated_R
@@ -346,36 +343,11 @@ def _build_constant_R(
 
     obs_idx = {name: i for i, name in enumerate(model.compiled.observable_names)}
 
-    std_map = conf.R_std_param_map
-    corr_map = conf.R_corr_param_map
-    if std_map is not None:
-        # Assemble the constant R from the CURRENT calibration (which may have
-        # moved since parse, e.g. a re-solved model). The name->position maps
-        # fix the layout at parse; only the values are read live here.
-        calib = model.config.calibration.parameters
-        params_by_name = {
-            (k if isinstance(k, str) else k.name): float64(v) for k, v in calib.items()
-        }
-
-        def _param(name: str) -> float64:
-            if name not in params_by_name:
-                raise KeyError(f"Missing R parameter '{name}' in calibration.")
-            return params_by_name[name]
-
-        all_obs = model.compiled.observable_names
-        y_syms = [Symbol(name) for name in all_obs]
-        std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
-        corr_vals = {
-            frozenset(Symbol(n) for n in pair): _param(param_name)
-            for pair, param_name in (corr_map or {}).items()
-            if param_name is not None
-        }
-
-        R_full = make_R(y_syms, std_vals, corr_vals)
-
-        mat_idx = [obs_idx[name] for name in observables]
-        return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
-
+    if conf.R_std_param_map is not None:
+        # Assemble from the CURRENT calibration, which may have moved since
+        # parse (a re-solved model). The name maps fix the layout at parse;
+        # only the values are read live here.
+        return _measurement_covariance(model.compiled, observables=observables)
     R = conf.R
     if R is None:
         raise ValueError("Constant R matrix not specified in configuration.")
@@ -390,7 +362,9 @@ def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:
     if filter_mode == FilterMode.UNSCENTED:
         n_state = model.compiled.n_state
         err, state_P0 = stationary_covariance(
-            model.policy.p, model.policy.B[:n_state, :], model._build_Q()
+            model.policy.p,
+            model.policy.B[:n_state, :],
+            _shock_covariance(model.compiled),
         )
         if err != 0:
             state_P0 = np.eye(n_state, dtype=float64)
@@ -399,7 +373,9 @@ def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:
         return P0
 
     n_var = model.compiled.n_var
-    err, P0 = stationary_covariance(model.policy.A, model.policy.B, model._build_Q())
+    err, P0 = stationary_covariance(
+        model.policy.A, model.policy.B, _shock_covariance(model.compiled)
+    )
     if err != 0:
         return np.eye(n_var, dtype=float64)
     return P0

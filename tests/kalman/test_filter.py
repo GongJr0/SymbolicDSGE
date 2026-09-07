@@ -98,8 +98,9 @@ def test_make_r_builds_covariance_from_std_and_corr_maps():
 
     out = make_R(
         [obs_a, obs_b],
-        {obs_a: float64(2.0), obs_b: float64(3.0)},
-        {frozenset({obs_a, obs_b}): float64(0.25)},
+        {obs_a: "sig_a", obs_b: "sig_b"},
+        {frozenset({obs_a, obs_b}): "rho_ab"},
+        {"sig_a": float64(2.0), "sig_b": float64(3.0), "rho_ab": float64(0.25)},
     )
 
     np.testing.assert_allclose(

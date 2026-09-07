@@ -32,7 +32,6 @@ from _oracles.core import (
 from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
 from SymbolicDSGE.kalman.resolvers import resolve_linear_args
 from SymbolicDSGE.core.solved_model.measurement import (
-    build_measurement,
     non_affine_measurement,
 )
 from SymbolicDSGE.core.solved_model.shocks import (
@@ -142,7 +141,9 @@ def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, di
         shock_idx={"eps": 0},
         config=SimpleNamespace(
             shocks=[Symbol("eps")],
-            calibration=SimpleNamespace(parameters={}, shock_std={}),
+            calibration=SimpleNamespace(
+                parameters={"sig_eps": 1.0}, shock_std={"eps": "sig_eps"}
+            ),
         ),
     )
     solved = SecondOrderSolvedModel(
@@ -419,49 +420,6 @@ def test_solved_model_transition_plot_renders_observables_and_shocks(
     plt.close("all")
 
 
-def test_solved_model_get_param_and_get_rho_helpers(solved_test):
-    assert (
-        solved_test.config.calibration.get_param("beta")
-        == solved_test.config.calibration.parameters["beta"]
-    )
-    assert solved_test.config.calibration.get_rho("e_u", "e_u") == 1.0
-    assert solved_test.config.calibration.get_rho("e_u", "e_v", default=0.0) == 0.0
-
-    with pytest.raises(KeyError):
-        solved_test.config.calibration.get_param("not_a_param")
-
-
-def test_solved_model_get_param_default_and_configured_rho(solved_post82):
-    assert solved_post82.config.calibration.get_param(
-        "missing_param", default=2.5
-    ) == pytest.approx(2.5)
-    assert solved_post82.config.calibration.get_rho("e_g", "e_z") == pytest.approx(0.36)
-
-
-def test_solved_model_build_measurement_matrices(solved_test):
-    spec = {
-        "Obs1": {"lin": {"Pi": 2.0, "x": -1.0}, "const": [1.5, "pi_mean"]},
-        "Obs2": {"lin": {"r": 1.0}, "const": [0.0]},
-    }
-    C, d, names = build_measurement(solved_test.compiled, spec)
-
-    assert C.shape == (2, solved_test.policy.A.shape[0])
-    assert d.shape == (2,)
-    assert names == ["Obs1", "Obs2"]
-
-    idx = solved_test.compiled.idx
-    assert C[0, idx["Pi"]] == 2.0
-    assert C[0, idx["x"]] == -1.0
-    assert C[1, idx["r"]] == 1.0
-
-
-def test_solved_model_build_measurement_rejects_unknown_variable(solved_test):
-    with pytest.raises(KeyError, match="Variable 'ghost' not found"):
-        build_measurement(
-            solved_test.compiled, {"Obs": {"lin": {"ghost": 1.0}, "const": []}}
-        )
-
-
 def test_solved_model_build_C_d_from_observables(solved_test):
     C, d = solved_test._build_C_d_from_obs(solved_test.compiled.observable_names)
     m = len(solved_test.compiled.observable_names)
@@ -583,7 +541,7 @@ def _kalman_dispatch_stub(cls):
         calib_params=[alpha],
         observable_names=["ObsA", "ObsB"],
         construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
-        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
+        construct_measurement_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
     )
@@ -661,7 +619,7 @@ def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
         calib_params=[alpha],
         observable_names=["ObsA"],
         construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
-        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
+        construct_measurement_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
         config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
         kalman=SimpleNamespace(y_names=["ObsA"]),
     )

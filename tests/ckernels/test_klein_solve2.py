@@ -23,6 +23,7 @@ from SymbolicDSGE._ckernels.core import (
     sgu_klein_solve2,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core.compiled_model import _shock_covariance
 
 # The three (n_var, n_state, n_ctrl, n_exog) shapes test_klein_solve1 covers.
 MODELS = [
@@ -56,7 +57,7 @@ def _model(path):
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     seed = DSGESolver._resolve_ss_seed(None, compiled)
-    Q = DSGESolver._build_Q(compiled)
+    Q = _shock_covariance(compiled)
     return compiled, par, seed, Q
 
 

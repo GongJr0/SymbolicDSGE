@@ -19,6 +19,7 @@ from SymbolicDSGE._ckernels.core._core import (
     second_order,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.core.solver_backend import klein_solve
 from _oracles.core import _solve_second_order_numpy
 
@@ -49,7 +50,7 @@ def _drive(path):
         np.real(sol.f),
         np.real(sol.p),
         np.real(sol.B),
-        DSGESolver._build_Q(compiled),
+        _shock_covariance(compiled),
         n_state,
     )
 

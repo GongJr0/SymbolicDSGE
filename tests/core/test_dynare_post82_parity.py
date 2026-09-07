@@ -53,6 +53,7 @@ import pytest
 from scipy.linalg import solve_discrete_lyapunov
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.filter import KalmanFilter
 
@@ -106,7 +107,7 @@ def _measurement(compiled):
     C, d = compiled.build_affine_measurement_matrices(
         params, list(compiled.observable_names), np.zeros(len(compiled.var_names))
     )
-    return backend.build_Q(compiled, params), C, d
+    return _shock_covariance(compiled, params), C, d
 
 
 # --- ordering ---------------------------------------------------------------

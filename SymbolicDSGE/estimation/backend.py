@@ -8,21 +8,14 @@ from typing import (
     Callable,
     Mapping,
     Sequence,
-    TYPE_CHECKING,
-    cast,
 )
 
-if TYPE_CHECKING:
-    from ..core.solved_model import SolvedModel
-    from ..core.solver_backend import FirstOrderSolution, SecondOrderSolution
 
 import numpy as np
 import pandas as pd
 from numpy import asarray, float64
 from numpy.typing import NDArray
-from sympy import Symbol
 
-from .._ckernels.core import measurement_eval, jacobian_eval
 from .._ckernels.estimation import (
     cov_from_unconstrained,
     unconstrained_from_corr_chol,
@@ -32,13 +25,14 @@ from .prior_program import (
     _pack_transform,
     build_packed_logprior,
     PyPriorTables,
-    N_DIST_PARAMS,
-    N_TRANSFORM_PARAMS,
 )
-from ..core.compiled_model import CompiledModel
-from ..core.config import SymbolGetterDict
+from ..core.compiled_model import (
+    CompiledModel,
+    _shock_covariance,
+    _measurement_covariance,
+)
 from ..core.solver import DSGESolver
-from ..kalman.config import KalmanConfig, make_R
+from ..kalman.config import KalmanConfig
 from ..kalman.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]
@@ -342,7 +336,7 @@ def _assemble_cov_spec(
     )
 
 
-def build_q_spec(
+def _build_q_spec(
     *,
     compiled: CompiledModel,
     calib_index: Mapping[str, int],
@@ -356,32 +350,32 @@ def build_q_spec(
     ``shock_std[shock]`` and each off-diagonal correlation is the ``shock_corr``
     symbol for that shock pair (absent pairs stay zero). A ``Q_corr`` CPC block
     takes the ``corr_from_block`` regime."""
-    shock_std = compiled.config.calibration.shock_std
-    shock_corr = compiled.config.calibration.shock_corr
-    n_exog = compiled.n_exog
-    shocks = list(compiled.config.shocks)
-    std_names = [shock_std[s].name for s in shocks]
+    calib = compiled.config.calibration
+    shock_std = calib.shock_std
+    shock_corr = calib.shock_corr
+    std_names = [shock_std[s] for s in compiled.config.shocks]
+
     corr_pairs: list[tuple[int, int, str]] = []
-    for i in range(n_exog):
-        for j in range(i + 1, n_exog):
-            corr_sym = shock_corr.get(frozenset({shocks[i], shocks[j]}), None)
-            if corr_sym is not None:
-                corr_pairs.append((i, j, corr_sym.name))
+    for pair, pname in shock_corr.items():
+        if pname is None:
+            continue
+        i, j = (compiled.shock_idx[s.name] for s in pair)
+        corr_pairs.append((i, j, pname))
+
     return _assemble_cov_spec(
-        K=n_exog,
+        K=compiled.n_exog,
         std_names=std_names,
         corr_pairs=corr_pairs,
         block=matrix_blocks.get("Q_corr"),
         calib_index=calib_index,
         param_index=param_index,
-        constant_fn=lambda: build_Q(compiled, base_dict),
+        constant_fn=lambda: _shock_covariance(compiled, params=base_dict),
     )
 
 
-def build_r_spec(
+def _build_r_spec(
     *,
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: Sequence[str],
     calib_index: Mapping[str, int],
     param_index: Mapping[str, int],
@@ -389,7 +383,7 @@ def build_r_spec(
     base_dict: Mapping[str, float64],
     R_override: NDF | None = None,
 ) -> PyCovSpec:
-    """Covariance spec for R (measurement covariance), mirroring :func:`build_R`.
+    """Covariance spec for R (measurement covariance), mirroring :func:`_build_R`.
 
     A user ``R_override`` or a directly-configured constant ``kalman.R`` (no named
     std map) is loop-invariant, so it is materialized once. Otherwise members are
@@ -399,7 +393,7 @@ def build_r_spec(
     n_obs = len(observables)
     obs_list = list(observables)
     if R_override is not None:
-        constant = build_R(compiled, kalman, obs_list, base_dict, R_override=R_override)
+        constant = _build_R(compiled, obs_list, base_dict, R_override=R_override)
         empty_i = np.empty(0, dtype=np.int64)
         return PyCovSpec(
             is_constant=True,
@@ -414,12 +408,11 @@ def build_r_spec(
             pair_slot=empty_i,
         )
 
+    kalman = compiled.kalman
     if kalman is not None:
         if kalman.R_std_param_map is None:
             # Forced-constant: an override, or a fixed R with no named std map.
-            constant = build_R(
-                compiled, kalman, obs_list, base_dict, R_override=R_override
-            )
+            constant = _build_R(compiled, obs_list, base_dict, R_override=R_override)
             empty_i = np.empty(0, dtype=np.int64)
             return PyCovSpec(
                 is_constant=True,
@@ -435,12 +428,12 @@ def build_r_spec(
             )
         else:
             std_map = kalman.R_std_param_map
-            corr_map = kalman.R_corr_param_map or {}
+            corr_map: Mapping[Any, str | None] = kalman.R_corr_param_map or {}
             std_names = [std_map[obs] for obs in obs_list]
             corr_pairs: list[tuple[int, int, str]] = []
             for i in range(n_obs):
                 for j in range(i + 1, n_obs):
-                    pname = corr_map.get(frozenset({obs_list[i], obs_list[j]}), None)
+                    pname = corr_map[obs_list[i], obs_list[j]]
                     if pname is not None:
                         corr_pairs.append((i, j, pname))
             return _assemble_cov_spec(
@@ -450,7 +443,7 @@ def build_r_spec(
                 block=matrix_blocks.get("R_corr"),
                 calib_index=calib_index,
                 param_index=param_index,
-                constant_fn=lambda: build_R(compiled, kalman, obs_list, base_dict),
+                constant_fn=lambda: _build_R(compiled, obs_list, base_dict),
             )
     else:
         raise ValueError("A override for R or a KalmanConfig specifying R is required.")
@@ -492,7 +485,6 @@ class PyObjCommon:
 def build_obj_common(
     *,
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     prepared: PreparedFilterRun,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
@@ -554,16 +546,15 @@ def build_obj_common(
             param_transforms=param_transforms,
             calib_index=calib_index,
         ),
-        q_spec=build_q_spec(
+        q_spec=_build_q_spec(
             compiled=compiled,
             calib_index=calib_index,
             param_index=param_index,
             matrix_blocks=matrix_blocks,
             base_dict=base_dict,
         ),
-        r_spec=build_r_spec(
+        r_spec=_build_r_spec(
             compiled=compiled,
-            kalman=kalman,
             observables=prepared.observables,
             calib_index=calib_index,
             param_index=param_index,
@@ -724,9 +715,8 @@ def reorder_observables(
     return obs_canonical, y_reordered
 
 
-def build_R(
+def _build_R(
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: list[str],
     params: Mapping[str, float64],
     *,
@@ -745,6 +735,7 @@ def build_R(
             raise ValueError(f"Provided R has shape {R.shape}, expected ({m}, {m}).")
         return R
 
+    kalman = compiled.kalman
     if kalman is None:
         raise ValueError(
             "KalmanConfig is required to build R from config parameters."
@@ -752,47 +743,16 @@ def build_R(
         )
 
     if kalman.R_std_param_map is not None:
-        return build_R_from_config_params(
-            compiled=compiled, kalman=kalman, observables=observables, params=params
+        return _measurement_covariance(
+            compiled,
+            params,
+            observables=observables,
         )
-
     if kalman.R is None:
         raise ValueError("R is not available. Provide `R` or a KalmanConfig with R.")
     obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
     mat_idx = [obs_idx[name] for name in observables]
-    return asarray(kalman.R[np.ix_(mat_idx, mat_idx)], dtype=float64)
-
-
-def build_Q(
-    compiled: CompiledModel,
-    params: Mapping[str, float64],
-    *,
-    corr: NDF | None = None,
-) -> NDF:
-    shock_std = compiled.config.calibration.shock_std
-    shock_corr = compiled.config.calibration.shock_corr
-
-    shocks = list(compiled.config.shocks)
-
-    stds = asarray([float64(params[shock_std[s].name]) for s in shocks], dtype=float64)
-
-    # When an LKJ block already materialized the shock correlation matrix (in
-    # shock order) it is passed in directly, so we skip the name-keyed re-gather.
-    # Without a block the correlations live in ``params`` as named scalars (fixed
-    # calibration or plain estimated params) and are assembled here.
-    if corr is None:
-        corr = np.eye(len(shocks), dtype=float64)
-        n = len(stds)
-        for i in range(n):
-            for j in range(i + 1, n):
-                pair = frozenset({shocks[i], shocks[j]})
-                corr_sym = shock_corr.get(pair, None)
-                corr_ij = (
-                    float64(params[corr_sym.name]) if corr_sym is not None else 0.0
-                )
-                corr[i, j] = corr_ij
-                corr[j, i] = corr_ij
-    return np.outer(stds, stds) * corr
+    return kalman.R[np.ix_(mat_idx, mat_idx)]
 
 
 def resolve_filter_options(
@@ -807,7 +767,6 @@ def resolve_filter_options(
 def prepare_filter_run(
     *,
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None,
     filter_mode: str,
@@ -825,46 +784,12 @@ def prepare_filter_run(
         y_reordered=y_reordered,
         mode=mode,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
-        jac_addr=compiled.construct_observable_jacobian_cfunc(obs).address,
+        jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
         P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
         kf_jitter=kf_jitter,
         kf_sym=kf_sym,
         kf_joseph_cov=bool(joseph_cov),
     )
-
-
-def build_R_from_config_params(
-    *,
-    compiled: CompiledModel,
-    kalman: KalmanConfig | None,
-    observables: list[str],
-    params: Mapping[str, float64],
-) -> NDF:
-    if kalman is None:
-        raise ValueError("KalmanConfig is required to build R from config parameters.")
-    std_map = kalman.R_std_param_map
-    corr_map = kalman.R_corr_param_map
-    if std_map is None:
-        raise ValueError("KalmanConfig does not expose named R parameter metadata.")
-
-    def _param(name: str) -> float64:
-        if name not in params:
-            raise KeyError(f"Missing R parameter '{name}' in params.")
-        return float64(params[name])
-
-    all_obs = compiled.observable_names
-    y_syms = [Symbol(name) for name in all_obs]
-    std_vals = {Symbol(name): _param(std_map[name]) for name in all_obs}
-    corr_vals = {
-        frozenset(Symbol(n) for n in pair): _param(param_name)
-        for pair, param_name in (corr_map or {}).items()
-        if param_name is not None
-    }
-    R_full = make_R(y_syms, std_vals, corr_vals)
-
-    obs_idx = {name: i for i, name in enumerate(all_obs)}
-    mat_idx = [obs_idx[name] for name in observables]
-    return asarray(R_full[np.ix_(mat_idx, mat_idx)], dtype=float64)
 
 
 def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:

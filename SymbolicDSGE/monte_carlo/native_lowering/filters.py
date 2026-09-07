@@ -9,7 +9,7 @@ from numpy.typing import ArrayLike
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.resolvers import (
-    _build_constant_R,
+    _build_R,
     _build_P0,
     _build_unscented_z0,
 )
@@ -22,6 +22,7 @@ from ..._ckernels.monte_carlo._runner import (
     filter_unscented_step,
 )
 from ...core.solved_model import SolvedModel
+from ...core.compiled_model import _shock_covariance
 from ..allocation import BufferPlan, FieldLayout
 from ..defaults import DEFAULT_FILTER_MODE, DEFAULT_SIMULATION_TARGET
 from ..mc_constructs import MCStep
@@ -60,7 +61,7 @@ def lower_filter_step(
         )
         if mode == "extended":
             jacobian_addr = int(
-                reference.compiled.construct_observable_jacobian_cfunc(
+                reference.compiled.construct_measurement_jacobian_cfunc(
                     canonical_names
                 ).address
             )
@@ -79,8 +80,8 @@ def lower_filter_step(
         mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
     ).foffset
 
-    R = _build_constant_R(reference, step.kwargs.get("R"), canonical_names)
-    Q = reference._build_Q()
+    R = _build_R(reference, step.kwargs.get("R"), canonical_names)
+    Q = _shock_covariance(reference.compiled)
     P0 = _build_P0(reference, mode, step.kwargs.get("P0"))
 
     if mode == "linear":

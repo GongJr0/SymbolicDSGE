@@ -30,7 +30,7 @@ def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
     if not hasattr(compiled, "cur_syms"):
         compiled.cur_syms = list(compiled.var_names)
     compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
-    compiled.construct_observable_jacobian_cfunc = lambda obs: SimpleNamespace(
+    compiled.construct_measurement_jacobian_cfunc = lambda obs: SimpleNamespace(
         address=0
     )
     if not hasattr(compiled, "n_state"):

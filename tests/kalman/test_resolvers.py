@@ -9,6 +9,8 @@ import pytest
 from sympy import Symbol
 
 import SymbolicDSGE.kalman.resolvers as resolvers
+from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
+from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.kalman.resolvers import (
     FilterMode,
     resolve_extended_args,
@@ -50,9 +52,9 @@ def _make_stub_model(
         parameters.update(params)
 
     calibration = SimpleNamespace(
-        parameters=parameters,
-        shock_std={E_U: SIG_U, E_V: SIG_V},
-        shock_corr={frozenset({E_U, E_V}): RHO_UV},
+        parameters=SymbolGetterDict(parameters),
+        shock_std=SymbolGetterDict({E_U: SIG_U.name, E_V: SIG_V.name}),
+        shock_corr=PairGetterDict({frozenset({E_U, E_V}): RHO_UV.name}),
         fingerprint=lambda: hash(
             (
                 tuple(parameters.keys()),
@@ -65,6 +67,7 @@ def _make_stub_model(
         shocks=[E_U, E_V],
     )
     compiled = SimpleNamespace(
+        config=config,
         observable_names=observable_names,
         var_names=var_names,
         n_var=3,
@@ -73,7 +76,7 @@ def _make_stub_model(
         n_exog=2,
         calib_params=[SIG_U, SIG_V],
         construct_measurement_cfunc=lambda obs: SimpleNamespace(address=MEAS_ADDR),
-        construct_observable_jacobian_cfunc=lambda obs: SimpleNamespace(
+        construct_measurement_jacobian_cfunc=lambda obs: SimpleNamespace(
             address=JAC_ADDR
         ),
     )
@@ -99,6 +102,10 @@ def _make_stub_model(
             R_corr_param_map=None,
         )
 
+    # the real CompiledModel carries the kalman config; kalman_config on the
+    # model is a property over it
+    compiled.kalman = kalman_config
+
     model = SimpleNamespace(
         compiled=compiled,
         config=config,
@@ -121,7 +128,6 @@ def _make_stub_model(
         ),
     )
     model._build_C_d_from_obs = build_measurement
-    model._build_Q = lambda: STUB_Q.copy()
     return model
 
 
@@ -246,9 +252,9 @@ def test_validate_user_r_and_build_constant_r_subset_paths():
 
     user_R = np.array([[2.5]], dtype=FLOAT)
     assert np.array_equal(resolvers._validate_user_R(user_R, ["ObsB"]), user_R)
-    assert np.array_equal(resolvers._build_constant_R(model, user_R, ["ObsB"]), user_R)
+    assert np.array_equal(resolvers._build_R(model, user_R, ["ObsB"]), user_R)
     assert np.array_equal(
-        resolvers._build_constant_R(model, None, ["ObsB"]),
+        resolvers._build_R(model, None, ["ObsB"]),
         np.array([[9.0]], dtype=FLOAT),
     )
 
@@ -274,11 +280,11 @@ def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
     # std meas_a=4, meas_b=9, corr meas_rho=0.1 ->
     #   [[16, 3.6], [3.6, 81]]; subset to [ObsB] -> [[81]].
     assert np.allclose(
-        resolvers._build_constant_R(model, None, ["ObsA", "ObsB"]),
+        resolvers._build_R(model, None, ["ObsA", "ObsB"]),
         np.array([[16.0, 3.6], [3.6, 81.0]], dtype=FLOAT),
     )
     assert np.allclose(
-        resolvers._build_constant_R(model, None, ["ObsB"]),
+        resolvers._build_R(model, None, ["ObsB"]),
         np.array([[81.0]], dtype=FLOAT),
     )
 
@@ -293,7 +299,7 @@ def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
         R_corr_param_map={},
     )
     with pytest.raises(KeyError, match="Missing R parameter"):
-        resolvers._build_constant_R(
+        resolvers._build_R(
             _make_stub_model(kalman_config=missing_param_conf), None, ["ObsA"]
         )
 
@@ -307,9 +313,7 @@ def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
         R_corr_param_map=None,
     )
     with pytest.raises(ValueError, match="Constant R matrix not specified"):
-        resolvers._build_constant_R(
-            _make_stub_model(kalman_config=no_r_conf), None, ["ObsA"]
-        )
+        resolvers._build_R(_make_stub_model(kalman_config=no_r_conf), None, ["ObsA"])
 
 
 def test_kalman_config_is_required_only_for_R():
@@ -473,7 +477,7 @@ def test_filter_classes_leave_the_constant_to_the_caller():
     solved, y = _levels_rbc_solved(1)
     pol = solved.policy
     C, d = solved._build_C_d_from_obs(["c_obs"])
-    Q = np.asarray(DSGESolver._build_Q(solved.compiled), dtype=FLOAT)
+    Q = np.asarray(_shock_covariance(solved.compiled), dtype=FLOAT)
     n_var = solved.compiled.n_var
     args = dict(
         A=np.real(pol.A),

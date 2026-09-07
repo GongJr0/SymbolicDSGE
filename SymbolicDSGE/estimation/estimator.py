@@ -18,6 +18,7 @@ from ..bayesian.transforms.tanh import TanhTransform
 from ..bayesian.transforms.transform import Transform
 
 from ..core.compiled_model import CompiledModel
+from ..core.config import SymbolGetterDict, PairGetterDict
 
 from .._ckernels.estimation import (
     run_estimation,
@@ -27,9 +28,8 @@ from .._ckernels.estimation import (
     logpost,
 )
 
-from .prior_program import PyPriorTables, build_packed_logprior
 from .results import MCMCResult, MLEResult, MAPResult, OptimizationResult
-from .spec import EstimatorSpec, EstimatorParams, PriorSpec, _coerce_ss_seed
+from .spec import EstimatorSpec, EstimatorParams, _coerce_ss_seed
 
 from . import backend
 from .backend import (
@@ -85,7 +85,6 @@ class Estimator:
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
-
         self.estimated_params = estimated_params
         self.compiled = compiled
         if compiled.kalman is None and R is None:
@@ -95,7 +94,6 @@ class Estimator:
             )
 
         self.kalman = compiled.kalman
-
         self.observables = observables
         self.y = y
 
@@ -106,7 +104,6 @@ class Estimator:
 
         self._prepared_filter = backend.prepare_filter_run(
             compiled=compiled,
-            kalman=self.kalman,
             y=y,
             observables=observables,
             filter_mode=filter_mode,
@@ -240,13 +237,13 @@ class Estimator:
             if sym is not None and (
                 active_shocks is None or str(shock) in active_shocks
             ):
-                std_members.add(sym.name)
+                std_members.add(sym)
         shock_corr = getattr(calibration, "shock_corr", None) or {}
         for pair, sym in shock_corr.items():
             if sym is not None and (
                 active_shocks is None or {str(s) for s in pair} <= active_shocks
             ):
-                corr_members.add(sym.name)
+                corr_members.add(sym)
 
         return std_members, corr_members
 
@@ -286,9 +283,8 @@ class Estimator:
         for key in self._reserved_matrix_keys:
             if key in result:
                 continue
-            matrix_name = self._matrix_name_for_reserved_key(key)
             try:
-                block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+                block = self._resolve_R() if key == "R_corr" else self._resolve_Q()
             except Exception:
                 continue
             if block.dim < 2:
@@ -304,6 +300,7 @@ class Estimator:
                 if priors is not None and name in priors
             )
             if priored:
+                matrix_name = self._matrix_name_for_reserved_key(key)
                 raise ValueError(
                     f"Correlations {priored} carry scalar priors but are the complete "
                     f"{matrix_name} correlation set, so independent per-parameter densities "
@@ -337,7 +334,7 @@ class Estimator:
         for pair, sym in shock_corr.items():
             vars_ = frozenset(str(s) for s in pair)
             if sym is not None and (active_shocks is None or vars_ <= active_shocks):
-                out[sym.name] = ("Q_corr", vars_)
+                out[sym] = ("Q_corr", vars_)
         return out
 
     def _role_transform_for(
@@ -432,8 +429,7 @@ class Estimator:
         owner: dict[str, str] = {}
         for name in requested_names_raw:
             if name in self._reserved_matrix_keys:
-                matrix_name = self._matrix_name_for_reserved_key(name)
-                block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+                block = self._resolve_R() if name == "R_corr" else self._resolve_Q()
                 members = block.member_names
             else:
                 members = [name]
@@ -493,30 +489,13 @@ class Estimator:
             f"estimator can reparameterize the full {matrix_name} correlation matrix."
         )
 
-    @staticmethod
-    def _cov_to_corr(cov: NDF, key: str) -> tuple[NDF, NDF]:
-        cov = np.asarray(cov, dtype=float64)
-        if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
-            raise ValueError(f"{key} must resolve to a square covariance matrix.")
-        if not np.allclose(cov, cov.T, atol=1e-10, rtol=0.0):
-            raise ValueError(f"{key} must resolve to a symmetric covariance matrix.")
-        variances = np.diag(cov).astype(float64, copy=False)
-        if np.any(variances <= 0.0):
-            raise ValueError(f"{key} must have strictly positive diagonal variances.")
-
-        std = np.sqrt(variances).astype(float64, copy=False)
-        corr = cov / np.outer(std, std)
-        corr = np.asarray(corr, dtype=float64)
-        np.fill_diagonal(corr, 1.0)
-        return std, corr
-
     def _build_matrix_resolution(
         self,
         *,
         key: MatrixPriorKey,
         labels: list[str],
-        std_param_map: Mapping[str, str | None],
-        corr_param_map: Mapping[frozenset[str], str | None],
+        std_param_map: SymbolGetterDict[str],
+        corr_param_map: PairGetterDict[str | None],
     ) -> MatrixPriorBlock:
         """Resolve the named std/correlation parameters for one matrix into a
         partial :class:`_MatrixPriorBlock` (``theta_slice`` empty, ``prior``
@@ -529,24 +508,10 @@ class Estimator:
         member_names: list[str] = []
         positions: list[tuple[int, int]] = []
 
-        for label in labels:
-            std_name = std_param_map.get(label)
-            if std_name is None:
-                raise ValueError(
-                    f"LKJChol prior on {key} requires a named variance parameter for "
-                    f"{key}[{label}, {label}]."
-                )
-            if std_name in used_names:
-                raise ValueError(
-                    f"LKJChol prior on {key} requires a unique named variance parameter per "
-                    f"diagonal entry. Parameter '{std_name}' is reused."
-                )
-            used_names.add(std_name)
-
         for row in range(1, dim):
             for col in range(row):
                 pair = (labels[row], labels[col])
-                corr_name = corr_param_map.get(frozenset(pair))
+                corr_name = corr_param_map[pair]
                 if corr_name is None:
                     continue
                 if corr_name in used_names:
@@ -587,32 +552,15 @@ class Estimator:
         )
 
     def _resolve_Q(self) -> MatrixPriorBlock:
-        Q_cov = backend.build_Q(self.compiled, self._base_params)
-        self._cov_to_corr(Q_cov, "Q")
 
         shock_std = self.compiled.config.calibration.shock_std
         shock_corr = self.compiled.config.calibration.shock_corr
         labels = list(self.compiled.shock_names)
-        std_param_map: dict[str, str | None] = {}
-        corr_param_map: dict[frozenset[str], str | None] = {}
-
-        for label in labels:
-            sym = shock_std[label]
-            std_param_map[label] = None if sym is None else sym.name
-        for row in range(1, len(labels)):
-            for col in range(row):
-                pair = (labels[row], labels[col])
-                try:
-                    sym = shock_corr[pair]
-                except KeyError:
-                    sym = None
-                corr_param_map[frozenset(pair)] = None if sym is None else sym.name
-
         return self._build_matrix_resolution(
             key="Q_corr",
             labels=labels,
-            std_param_map=std_param_map,
-            corr_param_map=corr_param_map,
+            std_param_map=shock_std,
+            corr_param_map=shock_corr,
         )
 
     def _build_matrix_prior_blocks(self) -> dict[str, MatrixPriorBlock]:
@@ -624,8 +572,7 @@ class Estimator:
         blocks: dict[str, MatrixPriorBlock] = {}
         claimed_names: set[str] = set()
         for key in self._requested_reserved_keys:
-            matrix_name = self._matrix_name_for_reserved_key(key)
-            block = self._resolve_R() if matrix_name == "R" else self._resolve_Q()
+            block = self._resolve_R() if key == "R_corr" else self._resolve_Q()
             if block.dim < 2:
                 raise ValueError(f"{key} requires a matrix of dimension at least 2.")
             present = {(int(r), int(c)) for r, c in block.positions}
@@ -636,12 +583,14 @@ class Estimator:
                 if (row, col) not in present
             ]
             if missing_pairs:
+                matrix_name = self._matrix_name_for_reserved_key(key)
                 raise ValueError(
                     self._dense_matrix_error(key, matrix_name, missing_pairs)
                 )
 
             expected = (block.dim * (block.dim - 1)) // 2
             if len(block.member_names) != expected:
+                matrix_name = self._matrix_name_for_reserved_key(key)
                 expected_pairs = [
                     (block.labels[row], block.labels[col])
                     for row in range(1, block.dim)
@@ -984,7 +933,6 @@ class Estimator:
         """
         common = build_obj_common(
             compiled=self.compiled,
-            kalman=self.kalman,
             prepared=self._prepared_filter,
             param_names=self.param_names,
             param_index=self._param_index,

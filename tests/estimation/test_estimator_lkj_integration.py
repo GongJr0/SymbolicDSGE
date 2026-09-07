@@ -236,7 +236,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
 
     assert np.isfinite(ll0)
     assert np.isfinite(ll1)
-    # R now travels the likelihood (build_R rebuilds it from params every eval),
+    # R now travels the likelihood (_build_R rebuilds it from params every eval),
     # so perturbing the R correlations changes the loglik.
     assert ll1 != pytest.approx(ll0)
 
