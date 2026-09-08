@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields
 from enum import StrEnum
 from typing import (
     Any,
@@ -21,7 +21,7 @@ from .legacy_test_result import MCResult, TestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.regression.enums import RegressionStatus
 from SymbolicDSGE.regression.result import RegressionResult
 from .custom_op import PandasCustomFunc
@@ -61,7 +61,7 @@ DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
 # The array-valued filter outputs, in tuple order. ``status`` is a scalar error
 # code carried on the raw result, not a selectable source, so it is excluded.
 FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = tuple(
-    field for field in UnscentedFilterRawResult._fields if field != "status"
+    f.name for f in dataclass_fields(UnscentedFilterResult) if f.name != "status"
 )
 FILTER_SOURCE_FIELDS: tuple[str, ...] = (
     "x_pred",
@@ -187,7 +187,7 @@ class FilterOp(Protocol):
         dgp: SolvedModel | None,
         rep_idx: int,
         **kwargs: Any,
-    ) -> FilterRawResult | UnscentedFilterRawResult: ...
+    ) -> FilterResult | UnscentedFilterResult: ...
 
 
 class TestOp(Protocol):

@@ -303,7 +303,8 @@ def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
         reference_filter_step("filter", x0=np.zeros(n_var - 1, dtype=np.float64)),
     ]
 
-    with pytest.raises(ValueError, match=f"x0 must have length {n_var}"):
+    # The state resolver owns the length check now, so the message is its own.
+    with pytest.raises(ValueError, match="must be a complete list/array"):
         _lower(steps, reference=solved)
 
 

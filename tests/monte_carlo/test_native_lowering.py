@@ -540,7 +540,7 @@ def test_native_lowering_runs_linear_and_extended_filters() -> None:
         )
 
         assert native_result.status == 0
-        expected_filter = solved._kalman_raw(y=expected_y, filter_mode=mode)
+        expected_filter = solved.kalman(y=expected_y, filter_mode=mode)
         for field in ("x_pred", "x_filt", "P_pred", "innov", "loglik"):
             layout = lowered.plan["filter"].out_fields[field]
             actual = (
@@ -601,7 +601,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
     assert native_result.status == 0
     simulated = solved.sim(T, shocks=shocks, observables=True)
     expected_y = np.column_stack([simulated.observables[name] for name in requested])
-    expected_filter = solved._kalman_raw(
+    expected_filter = solved.kalman(
         y=expected_y,
         filter_mode="linear",
         observables=requested,
@@ -653,7 +653,7 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
     )
 
     assert native_result.status == 0
-    expected_filter = solved._kalman_raw(y=y, filter_mode="unscented")
+    expected_filter = solved.kalman(y=y, filter_mode="unscented")
     for field in ("x_pred", "x_filt", "P_pred", "innov", "loglik", "x2_filt"):
         layout = lowered.plan["filter"].out_fields[field]
         actual = (

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass, field as dcf, fields
 from functools import cached_property
 from enum import StrEnum
 from typing import (
@@ -20,7 +20,6 @@ from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..core.shock_generators import Shock
-from ..kalman.filter import UnscentedFilterRawResult
 from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
@@ -40,7 +39,7 @@ DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
 # The array-valued filter outputs, in tuple order. ``status`` is a scalar error
 # code carried on the raw result, not a selectable source, so it is excluded.
 FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = tuple(
-    field for field in UnscentedFilterRawResult._fields if field != "status"
+    f.name for f in fields(UnscentedFilterResult) if f.name != "status"
 )
 FILTER_SOURCE_FIELDS: tuple[str, ...] = (
     "x_pred",
@@ -89,9 +88,7 @@ class SourceArgs:
     source_step: str
     field: str
     columns: ColumnSelector = None
-    column_selector: Sequence[int] | slice = dataclass_field(
-        default_factory=lambda: slice(None)
-    )
+    column_selector: Sequence[int] | slice = dcf(default_factory=lambda: slice(None))
     row_start: int = 0
 
     burn_in: int = 0
@@ -118,7 +115,7 @@ class MCStep:
     name: str
     op_type: OpType
     func: Callable[..., Any] | None = None
-    kwargs: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    kwargs: Mapping[str, Any] = dcf(default_factory=dict)
     source_args: tuple[SourceArgs, ...] = ()
     #: Catalog step kind (e.g. ``"wald"``, ``"standardize"``, ``"simulation"``)
     #: or ``"custom"`` for user-supplied ops. Stamped by the step factories;
@@ -208,15 +205,15 @@ class MCMeta:
     #: Post-loop aggregation and postproc are excluded (see ``postproc_elapsed_s``).
     elapsed_s: float = 0.0
     #: Per-replication step timings (postproc excluded; see ``postproc_elapsed_s``).
-    step_elapsed_s: Mapping[str, float] = dataclass_field(default_factory=dict)
-    step_counts: Mapping[str, int] = dataclass_field(default_factory=dict)
-    step_failures: Mapping[str, int] = dataclass_field(default_factory=dict)
+    step_elapsed_s: Mapping[str, float] = dcf(default_factory=dict)
+    step_counts: Mapping[str, int] = dcf(default_factory=dict)
+    step_failures: Mapping[str, int] = dcf(default_factory=dict)
     #: Wall-clock seconds per post-loop (``OpType.POSTPROC``) step. Postproc runs
     #: once, so it is reported as runtime only, never folded into the it/s rates.
-    postproc_elapsed_s: Mapping[str, float] = dataclass_field(default_factory=dict)
+    postproc_elapsed_s: Mapping[str, float] = dcf(default_factory=dict)
 
-    failed_steps: dict[str, int] = dataclass_field(default_factory=dict)
-    failed_postprocs: set[str] = dataclass_field(default_factory=set)
+    failed_steps: dict[str, int] = dcf(default_factory=dict)
+    failed_postprocs: set[str] = dcf(default_factory=set)
 
     @property
     def it_s(self) -> float:
@@ -268,7 +265,7 @@ class MCDataGenResult:
     shock_names: Sequence[str]
     eps: NDF  # (n_retained, T, n_shock)
     observable_names: Sequence[str] = ()
-    y: NDF = dataclass_field(  # (n_retained, T, n_obs)
+    y: NDF = dcf(  # (n_retained, T, n_obs)
         default_factory=lambda: np.empty((0, 0, 0), dtype=np.float64)
     )
 
@@ -363,7 +360,6 @@ class MCFilterResult:
     innov: NDF
     std_innov: NDF
     loglik: NDF
-    constant: NDF  # steady-state offset, np.nan for UKF
     eps_hat: NDF | None = None
 
     # Unscented-specific
@@ -393,7 +389,6 @@ class MCFilterResult:
                 innov=self.innov[idx],
                 std_innov=self.std_innov[idx],
                 loglik=self.loglik[idx],
-                constant=self.constant,
                 x1_pred=self.x1_pred[idx],
                 x1_filt=self.x1_filt[idx],
                 x2_pred=self.x2_pred[idx],
@@ -411,7 +406,6 @@ class MCFilterResult:
             innov=self.innov[idx],
             std_innov=self.std_innov[idx],
             loglik=self.loglik[idx],
-            constant=self.constant,
             eps_hat=self.eps_hat[idx] if self.eps_hat is not None else None,
         )
 
@@ -446,19 +440,17 @@ class MCPipelineResult:
     n_rep: int
     n_successful: int
     datagen_outputs: MCDataGenResult
-    filter_outputs: Mapping[str, MCFilterResult] = dataclass_field(default_factory=dict)
-    transform_outputs: Mapping[str, NDF] = dataclass_field(default_factory=dict)
-    test_summaries: Mapping[str, MCTestResult] = dataclass_field(default_factory=dict)
-    regression_summaries: Mapping[str, MCRegressionResult] = dataclass_field(
-        default_factory=dict
-    )
+    filter_outputs: Mapping[str, MCFilterResult] = dcf(default_factory=dict)
+    transform_outputs: Mapping[str, NDF] = dcf(default_factory=dict)
+    test_summaries: Mapping[str, MCTestResult] = dcf(default_factory=dict)
+    regression_summaries: Mapping[str, MCRegressionResult] = dcf(default_factory=dict)
     failures: tuple[MCFailure, ...] = ()
 
     #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name. Each step
     #: contributes one :class:`~SymbolicDSGE.monte_carlo.postproc.Artifact`,
     #: holding its ``raw`` and ``summary`` slots (either may be ``None``).
-    postproc: Mapping[str, Artifact] = dataclass_field(default_factory=dict)
-    run_config: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    postproc: Mapping[str, Artifact] = dcf(default_factory=dict)
+    run_config: Mapping[str, Any] = dcf(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
@@ -559,7 +551,7 @@ def report_mc_step_performance(
     print_func(
         f"MC run concluded {_conclusion_word(meta.failed_steps == {})} in {meta.elapsed_s:.2f}s with {meta.it_s:.2f} it/s."
     )
-    print_func(f"Per-step Report:\n")
+    print_func("Per-step Report:\n")
     for step_name in meta.step_elapsed_s:
         print_func(
             f"\t{step_name}: {meta.step_failures[step_name]} failures, "
@@ -569,7 +561,7 @@ def report_mc_step_performance(
         )
 
     if meta.postproc_elapsed_s:
-        print_func(f"\nPost-processing Report:\n")
+        print_func("\nPost-processing Report:\n")
         for step_name, elapsed_s in meta.postproc_elapsed_s.items():
             step_succeeded = (
                 "Succeeded" if step_name not in meta.failed_postprocs else "Failed"

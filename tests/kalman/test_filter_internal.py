@@ -23,7 +23,8 @@ def _linear_system_1d():
     d = np.array([0.0], dtype=float64)
     Q = np.array([[0.04]], dtype=float64)
     R = np.array([[0.01]], dtype=float64)
-    return A, B, C, d, Q, R
+    ss = np.zeros(1, dtype=float64)
+    return A, B, C, d, Q, R, ss
 
 
 @pytest.mark.parametrize(
@@ -79,7 +80,7 @@ def _ekf_nl_H(x, params):
     return np.array([[1.0, 2.0 * params[0] * x[1]], [0.0, 1.0]], dtype=float64)
 
 
-def test_run_extended_raw_matches_ekf_oracle():
+def test_run_extended_matches_ekf_oracle():
     # Native EKF (meas/jac @cfunc addresses) must match the pure-numpy oracle fed
     # the same nonlinear measurement as Python callables.
     A = np.array([[0.5, 0.1], [0.0, 0.7]], dtype=float64)
@@ -91,8 +92,12 @@ def test_run_extended_raw_matches_ekf_oracle():
     y = rng.normal(size=(6, 2)).astype(float64)
     x0 = np.array([0.2, -0.1], dtype=float64)
     P0 = np.diag([0.5, 0.3]).astype(float64)
+    # Nonzero and unequal per state: the measurement is relinearized at the
+    # level, so a shift dropped on either side moves the jacobian and not just
+    # the reported series.
+    ss = np.array([0.4, -0.25], dtype=float64)
 
-    native = KalmanFilter.run_extended_raw(
+    native = KalmanFilter.run_extended(
         _ekf_nl_meas.address,
         _ekf_nl_jac.address,
         A,
@@ -100,6 +105,7 @@ def test_run_extended_raw_matches_ekf_oracle():
         params,
         Q,
         R,
+        ss,
         y,
         x0=x0,
         P0=P0,
@@ -113,6 +119,7 @@ def test_run_extended_raw_matches_ekf_oracle():
         params,
         Q,
         R,
+        ss,
         y,
         x0=x0,
         P0=P0,
@@ -144,7 +151,7 @@ def test_run_extended_raw_matches_ekf_oracle():
 
 
 def test_run_converts_error_code_to_matrix_condition(monkeypatch):
-    A, B, C, d, Q, R = _linear_system_1d()
+    A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
 
     # The native hot loop returns (err, out); a nonzero status is mapped to the
@@ -154,11 +161,11 @@ def test_run_converts_error_code_to_matrix_condition(monkeypatch):
 
     monkeypatch.setattr(filter_module, "kalman_hot_loop", error_hot_loop)
     with pytest.raises(MatrixConditionError):
-        KalmanFilter.run(A, B, C, d, Q, R, y)
+        KalmanFilter.run(A, B, C, d, Q, R, ss, y)
 
 
 def test_run_extended_converts_error_code_to_matrix_condition(monkeypatch):
-    A, B, _, _, Q, R = _linear_system_1d()
+    A, B, _, _, Q, R, ss = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
 
     # A nonzero status from the native hot loop is mapped to the matching
@@ -177,6 +184,7 @@ def test_run_extended_converts_error_code_to_matrix_condition(monkeypatch):
             np.array([0.0], dtype=float64),
             Q,
             R,
+            ss,
             y,
         )
 
@@ -184,9 +192,9 @@ def test_run_extended_converts_error_code_to_matrix_condition(monkeypatch):
 # ---------------------------------------------------------------------------
 # raise_on_error API (linear + extended).
 #
-# The native hot loops return (err: int, out: tuple). The raw runners map a
-# nonzero ``err`` to the in-house exception when ``_raise_on_error`` is True, and
-# otherwise carry the code on the raw result's scalar ``status`` field so batch
+# The native hot loops return (err: int, out: tuple). The runners map a nonzero
+# ``err`` to the in-house exception when ``_raise_on_error`` is True, and
+# otherwise carry the code on the result's scalar ``status`` field so batch
 # callers (e.g. an estimation search) tally failures without a try/except. There
 # is deliberately no LinAlgError or other numpy-exception handling: the native
 # kernel reports every per-iteration failure as a status code, never as a raised
@@ -195,17 +203,17 @@ def test_run_extended_converts_error_code_to_matrix_condition(monkeypatch):
 
 
 def _placeholder_out_11():
-    # The raw runner unpacks 11 array/scalar fields from ``out``; only ``status``
+    # The runner unpacks 11 array/scalar fields from ``out``; only ``status``
     # is under test here, so the payload contents are irrelevant.
     return (None,) * 11
 
 
-def test_run_raw_status_carries_error_code(monkeypatch):
-    A, B, C, d, Q, R = _linear_system_1d()
+def test_run_status_carries_error_code(monkeypatch):
+    A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
 
     # A clean run reports success on ``status``.
-    assert KalmanFilter.run_raw(A, B, C, d, Q, R, y).status == 0
+    assert KalmanFilter.run(A, B, C, d, Q, R, ss, y).status == 0
 
     def error_hot_loop(*args, **kwargs):
         return ErrorCode.MATRIX_CONDITION, _placeholder_out_11()
@@ -214,15 +222,15 @@ def test_run_raw_status_carries_error_code(monkeypatch):
 
     # Default: a nonzero status raises the mapped exception.
     with pytest.raises(MatrixConditionError):
-        KalmanFilter.run_raw(A, B, C, d, Q, R, y)
+        KalmanFilter.run(A, B, C, d, Q, R, ss, y)
 
     # _raise_on_error=False: the code is carried on ``status`` instead of raising.
-    res = KalmanFilter.run_raw(A, B, C, d, Q, R, y, _raise_on_error=False)
+    res = KalmanFilter.run(A, B, C, d, Q, R, ss, y, _raise_on_error=False)
     assert res.status == int(ErrorCode.MATRIX_CONDITION)
 
 
-def test_run_extended_raw_status_carries_error_code(monkeypatch):
-    A, B, _, _, Q, R = _linear_system_1d()
+def test_run_extended_status_carries_error_code(monkeypatch):
+    A, B, _, _, Q, R, ss = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
     calib = np.array([0.0], dtype=float64)
 
@@ -234,9 +242,9 @@ def test_run_extended_raw_status_carries_error_code(monkeypatch):
     # Default raises; _raise_on_error=False carries the code on ``status``. The
     # meas/jac addresses are unused because the hot loop is monkeypatched.
     with pytest.raises(MatrixConditionError):
-        KalmanFilter.run_extended_raw(1, 1, A, B, calib, Q, R, y)
+        KalmanFilter.run_extended(1, 1, A, B, calib, Q, R, ss, y)
 
-    res = KalmanFilter.run_extended_raw(
-        1, 1, A, B, calib, Q, R, y, _raise_on_error=False
+    res = KalmanFilter.run_extended(
+        1, 1, A, B, calib, Q, R, ss, y, _raise_on_error=False
     )
     assert res.status == int(ErrorCode.MATRIX_CONDITION)

@@ -11,7 +11,7 @@
 /* Direct includes for the primitives used here (native-include hygiene). */
 #include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
                                         sdsge_matmul_abt */
-#include "prior_program.h" /* sdsge_transform_inverse_and_logjac,
+#include "prior_program.h"           /* sdsge_transform_inverse_and_logjac,
                               sdsge_corr_entries_from_unconstrained */
 
 /* sdsge_classify outcomes. */
@@ -274,6 +274,7 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                   .d = ctx->d,
                   .Q = Q,
                   .R = R,
+                  .steady_state = s->ss,
                   .y = b->y,
                   .x0 = b->x0,
                   .P0 = b->P0,
@@ -325,6 +326,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                    .calib_params = b->params,
                    .Q = Q,
                    .R = R,
+                   .steady_state = s->ss,
                    .y = b->y,
                    .x0 = b->x0,
                    .P0 = b->P0,
@@ -668,12 +670,12 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
   if (scratch == NULL) {
     return;
   }
-  f64 *jac = scratch;                  /* L*L: d(corr entries) / dz */
-  f64 *jv = jac + lmax * lmax;         /* L*L: jac * V_block */
-  f64 *probe = jv + lmax * lmax;       /* L: the perturbed z */
-  f64 *plus = probe + lmax;            /* L */
-  f64 *minus = plus + lmax;            /* L */
-  f64 *chol = minus + lmax;            /* K*K: the entries kernel's factor */
+  f64 *jac = scratch;            /* L*L: d(corr entries) / dz */
+  f64 *jv = jac + lmax * lmax;   /* L*L: jac * V_block */
+  f64 *probe = jv + lmax * lmax; /* L: the perturbed z */
+  f64 *plus = probe + lmax;      /* L */
+  f64 *minus = plus + lmax;      /* L */
+  f64 *chol = minus + lmax;      /* K*K: the entries kernel's factor */
 
   /* Central difference of a closed-form algebraic map, so the step is the
    * first-derivative optimum and not opt->cov_fd_step_scale, which is tuned

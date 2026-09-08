@@ -75,7 +75,7 @@ def reference_filter_step(
     *,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
-    x0: list[float] | NDF | None = None,
+    x0: dict[str, float | np.float64] | list[float | np.float64] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: float | np.float64 | None = None,

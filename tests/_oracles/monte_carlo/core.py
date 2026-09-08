@@ -14,11 +14,12 @@ if TYPE_CHECKING:
 
 from .legacy_test_result import MCResult, TestResult
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult
 from SymbolicDSGE.regression.result import RegressionResult
 from .allocation import BufferPlan, resolve_output_specs
 from .legacy_regression import MCRegressionResult
 from .mc_constructs import (
+    FILTER_RAW_SOURCE_FIELDS,
     MCContext,
     MCData,
     MCFailure,
@@ -346,11 +347,8 @@ class MCPipeline:
         )
         if step.op_type is OpType.TRANSFORM and isinstance(out, MCData):
             context.data = out
-        if step.op_type is OpType.FILTER and not isinstance(
-            out,
-            (FilterRawResult, UnscentedFilterRawResult),
-        ):
-            raise TypeError("FILTER steps must return a raw filter result.")
+        if step.op_type is OpType.FILTER and not isinstance(out, FilterResult):
+            raise TypeError("FILTER steps must return a filter result.")
         if step.op_type is OpType.REGRESSION and not isinstance(out, RegressionResult):
             raise TypeError("REGRESSION steps must return RegressionResult.")
         if step.op_type is OpType.REGRESSION:
@@ -452,6 +450,10 @@ def _source_slot(step: MCStep, out: Any) -> Any:
         if isinstance(out, MCData):
             return (out,)
         return (_source_array(out),)
+    if step.op_type is OpType.FILTER:
+        # Slots are read by position, and a filter result is a dataclass, so
+        # the fields are laid out here in the order the index map counts them.
+        return tuple(getattr(out, name, None) for name in FILTER_RAW_SOURCE_FIELDS)
     return out
 
 

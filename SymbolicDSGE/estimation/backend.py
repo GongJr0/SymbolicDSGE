@@ -32,7 +32,6 @@ from ..core.compiled_model import (
     _measurement_covariance,
 )
 from ..core.solver import DSGESolver
-from ..kalman.config import KalmanConfig
 from ..kalman.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]

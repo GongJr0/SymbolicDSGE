@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import fields
 from typing import Any
 
 import pytest
 import numpy as np
 
-from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.monte_carlo import OpType
 from SymbolicDSGE.monte_carlo.builder import build_pipeline, run_pipeline
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
@@ -166,9 +167,11 @@ def test_source_fields_match_the_native_output_channels() -> None:
     # ``status`` is a scalar error code, not a selectable array source, so it is
     # excluded from the source-field set. Native lowering resolves the layouts,
     # so source fields no longer carry Python-side positional indices.
-    linear_array_fields = tuple(f for f in FilterRawResult._fields if f != "status")
+    linear_array_fields = tuple(
+        f.name for f in fields(FilterResult) if f.name != "status"
+    )
     unscented_array_fields = tuple(
-        f for f in UnscentedFilterRawResult._fields if f != "status"
+        f.name for f in fields(UnscentedFilterResult) if f.name != "status"
     )
     assert FILTER_RAW_SOURCE_FIELDS[: len(linear_array_fields)] == linear_array_fields
     assert FILTER_RAW_SOURCE_FIELDS == unscented_array_fields

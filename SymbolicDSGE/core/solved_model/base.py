@@ -42,12 +42,8 @@ from ...kalman.resolvers import (
 )
 from ...kalman.filter import (
     KalmanFilter,
-    FilterRawResult,
     FilterResult,
-    UnscentedFilterRawResult,
     UnscentedFilterResult,
-    _filter_result_from_raw,
-    _unscented_filter_result_from_raw,
 )
 
 if TYPE_CHECKING:
@@ -89,7 +85,7 @@ class SolvedModel(ABC, Generic[Policy]):
         T: int,
         shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
         shock_scale: float = 1.0,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
         observables: bool = False,
     ) -> SimResult:
         """
@@ -454,7 +450,7 @@ class SolvedModel(ABC, Generic[Policy]):
         filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         *,
         observables: list[str] | None = None,
-        x0: NDF | None = None,
+        x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = False,
         joseph_cov: bool = False,
@@ -462,43 +458,9 @@ class SolvedModel(ABC, Generic[Policy]):
         P0: NDF | None = None,
         R: NDF | None = None,
     ) -> FilterResult | UnscentedFilterResult:
-        raw = self._kalman_raw(
-            y=y,
-            filter_mode=filter_mode,
-            observables=observables,
-            x0=x0,
-            jitter=jitter,
-            symmetrize=symmetrize,
-            return_shocks=return_shocks,
-            joseph_cov=joseph_cov,
-            P0=P0,
-            R=R,
-        )
-        if isinstance(raw, UnscentedFilterRawResult):
-            # Already levels: the unscented kernel forms them for its own
-            # measurement, so there is no constant left for this layer to add.
-            return _unscented_filter_result_from_raw(raw)
-        # A solved model knows its expansion point, so the public path reports
-        # levels at every order. Callers reaching the filter classes directly
-        # pass their own, or keep the gaps the recursion produces.
-        return _filter_result_from_raw(raw, self.policy.steady_state)
 
-    def _kalman_raw(
-        self,
-        y: NDF | pd.DataFrame,
-        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
-        *,
-        observables: list[str] | None = None,
-        x0: NDF | None = None,
-        jitter: float | float64 | None = None,
-        symmetrize: bool = False,
-        return_shocks: bool = False,
-        joseph_cov: bool = False,
-        P0: NDF | None = None,
-        R: NDF | None = None,
-    ) -> FilterRawResult | UnscentedFilterRawResult:
         if filter_mode == "linear":
-            return KalmanFilter.run_raw(
+            return KalmanFilter.run(
                 **resolve_linear_args(
                     self,
                     y,
@@ -513,7 +475,7 @@ class SolvedModel(ABC, Generic[Policy]):
                 )
             )
         if filter_mode == "extended":
-            return KalmanFilter.run_extended_raw(
+            return KalmanFilter.run_extended(
                 **resolve_extended_args(
                     self,
                     y,
@@ -534,7 +496,7 @@ class SolvedModel(ABC, Generic[Policy]):
                 )
             if joseph_cov:
                 raise ValueError("joseph_cov is not supported for unscented filtering.")
-            return KalmanFilter.run_unscented_raw(
+            return KalmanFilter.run_unscented(
                 **resolve_unscented_args(
                     self,
                     y,

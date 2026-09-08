@@ -14,11 +14,7 @@ from SymbolicDSGE.kalman.errors import (
     ShapeMismatchError,
     get_error_constructor,
 )
-from SymbolicDSGE.kalman.filter import (
-    FilterRawResult,
-    KalmanFilter,
-    UnscentedFilterRawResult,
-)
+from SymbolicDSGE.kalman.filter import KalmanFilter
 
 
 def _linear_system_1d():
@@ -28,7 +24,12 @@ def _linear_system_1d():
     d = np.array([0.0], dtype=float64)
     Q = np.array([[0.04]], dtype=float64)
     R = np.array([[0.01]], dtype=float64)
-    return A, B, C, d, Q, R
+    # A zero expansion point, so the state series this system reports are the
+    # recursion's own output and the assertions below read as the recursion.
+    # The offset itself is covered against the oracle in
+    # tests/ckernels/test_kalman.py and end to end in tests/kalman/test_resolvers.py.
+    ss = np.zeros(1, dtype=float64)
+    return A, B, C, d, Q, R, ss
 
 
 _UKF_MEAS_SIG = types.void(
@@ -131,12 +132,12 @@ def test_shape_validate_raises_on_bad_A_shape():
 
 
 def test_run_linear_outputs_shapes_and_first_prediction():
-    A, B, C, d, Q, R = _linear_system_1d()
+    A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((5, 1), dtype=float64)
     x0 = np.array([2.0], dtype=float64)
     P0 = np.array([[1.0]], dtype=float64)
 
-    out = KalmanFilter.run(A, B, C, d, Q, R, y, x0=x0, P0=P0)
+    out = KalmanFilter.run(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
 
     assert out.x_pred.shape == (5, 1)
     assert out.x_filt.shape == (5, 1)
@@ -158,54 +159,13 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     assert np.allclose(out.P_filt, np.transpose(out.P_filt, (0, 2, 1)))
 
 
-def test_run_raw_linear_matches_public_result():
-    A, B, C, d, Q, R = _linear_system_1d()
-    y = np.zeros((5, 1), dtype=float64)
-    x0 = np.array([2.0], dtype=float64)
-    P0 = np.array([[1.0]], dtype=float64)
-
-    raw = KalmanFilter.run_raw(
-        A,
-        B,
-        C,
-        d,
-        Q,
-        R,
-        y,
-        x0=x0,
-        P0=P0,
-        return_shocks=True,
-    )
-    public = KalmanFilter.run(
-        A,
-        B,
-        C,
-        d,
-        Q,
-        R,
-        y,
-        x0=x0,
-        P0=P0,
-        return_shocks=True,
-    )
-
-    assert isinstance(raw, FilterRawResult)
-    assert raw.eps_hat is not None
-    np.testing.assert_allclose(raw.x_pred, public.x_pred)
-    np.testing.assert_allclose(raw.x_filt, public.x_filt)
-    np.testing.assert_allclose(raw.innov, public.innov)
-    np.testing.assert_allclose(raw.std_innov, public.std_innov)
-    np.testing.assert_allclose(raw.S, public.S)
-    assert raw.loglik == pytest.approx(public.loglik)
-
-
 def test_run_linear_can_skip_history_storage_for_loglik_only_path():
-    A, B, C, d, Q, R = _linear_system_1d()
+    A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((5, 1), dtype=float64)
     x0 = np.array([2.0], dtype=float64)
     P0 = np.array([[1.0]], dtype=float64)
 
-    full = KalmanFilter.run(A, B, C, d, Q, R, y, x0=x0, P0=P0)
+    full = KalmanFilter.run(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
     minimal = KalmanFilter.run(
         A,
         B,
@@ -213,6 +173,7 @@ def test_run_linear_can_skip_history_storage_for_loglik_only_path():
         d,
         Q,
         R,
+        ss,
         y,
         x0=x0,
         P0=P0,
@@ -233,10 +194,10 @@ def test_run_linear_can_skip_history_storage_for_loglik_only_path():
 
 
 def test_run_linear_return_shocks():
-    A, B, C, d, Q, R = _linear_system_1d()
+    A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
 
-    out = KalmanFilter.run(A, B, C, d, Q, R, y, return_shocks=True)
+    out = KalmanFilter.run(A, B, C, d, Q, R, ss, y, return_shocks=True)
 
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)
@@ -249,10 +210,11 @@ def test_run_linear_raises_on_singular_innovation_covariance():
     d = np.zeros((1,), dtype=float64)
     Q = np.zeros((1, 1), dtype=float64)
     R = np.zeros((1, 1), dtype=float64)
+    ss = np.zeros(1, dtype=float64)
     y = np.zeros((2, 1), dtype=float64)
 
     with pytest.raises(MatrixConditionError):
-        KalmanFilter.run(A, B, C, d, Q, R, y, P0=np.zeros((1, 1), dtype=float64))
+        KalmanFilter.run(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
 
 
 def test_run_unscented_outputs_shapes_and_projected_fields():
@@ -296,23 +258,6 @@ def test_run_unscented_outputs_shapes_and_projected_fields():
         out.x_filt[:, 0] + params[0] * out.x_filt[:, 1],
     )
     np.testing.assert_allclose(out.P_filt, np.transpose(out.P_filt, (0, 2, 1)))
-
-
-def test_run_raw_unscented_matches_public_result():
-    pytest.importorskip("SymbolicDSGE._ckernels.kalman")
-    kwargs = _ukf_system_1d()
-
-    raw = KalmanFilter.run_unscented_raw(**kwargs)
-    public = KalmanFilter.run_unscented(**kwargs)
-
-    assert isinstance(raw, UnscentedFilterRawResult)
-    np.testing.assert_allclose(raw.x_pred, public.x_pred)
-    np.testing.assert_allclose(raw.x_filt, public.x_filt)
-    np.testing.assert_allclose(raw.x1_pred, public.x1_pred)
-    np.testing.assert_allclose(raw.x2_pred, public.x2_pred)
-    np.testing.assert_allclose(raw.y_pred, public.y_pred)
-    np.testing.assert_allclose(raw.y_filt, public.y_filt)
-    assert raw.loglik == pytest.approx(public.loglik)
 
 
 def test_run_unscented_can_skip_history_storage_for_loglik_only_path():
@@ -364,13 +309,13 @@ def test_run_unscented_rejects_degenerate_inputs():
 
 
 def test_run_extended_matches_linear_when_measurement_is_linear():
-    A, B, C, d, Q, R = _linear_system_1d()
+    A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((5, 1), dtype=float64)
     x0 = np.array([1.5], dtype=float64)
     P0 = np.array([[0.7]], dtype=float64)
     calib = np.array([], dtype=float64)
 
-    linear = KalmanFilter.run(A, B, C, d, Q, R, y, x0=x0, P0=P0)
+    linear = KalmanFilter.run(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
     extended = KalmanFilter.run_extended(
         meas_addr=_ekf_lin_meas.address,
         jac_addr=_ekf_lin_jac.address,
@@ -379,6 +324,7 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
         calib_params=calib,
         Q=Q,
         R=R,
+        steady_state=ss,
         y=y,
         x0=x0,
         P0=P0,
@@ -391,48 +337,8 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
     assert np.allclose(extended.loglik, linear.loglik)
 
 
-def test_run_raw_extended_matches_public_result():
-    A, B, _, _, Q, R = _linear_system_1d()
-    y = np.zeros((5, 1), dtype=float64)
-    x0 = np.array([1.5], dtype=float64)
-    P0 = np.array([[0.7]], dtype=float64)
-    calib = np.array([0.0], dtype=float64)
-
-    raw = KalmanFilter.run_extended_raw(
-        _ekf_bias_meas.address,
-        _ekf_lin_jac.address,
-        A,
-        B,
-        calib,
-        Q,
-        R,
-        y,
-        x0=x0,
-        P0=P0,
-    )
-    public = KalmanFilter.run_extended(
-        _ekf_bias_meas.address,
-        _ekf_lin_jac.address,
-        A,
-        B,
-        calib,
-        Q,
-        R,
-        y,
-        x0=x0,
-        P0=P0,
-    )
-
-    assert isinstance(raw, FilterRawResult)
-    np.testing.assert_allclose(raw.x_pred, public.x_pred)
-    np.testing.assert_allclose(raw.x_filt, public.x_filt)
-    np.testing.assert_allclose(raw.y_pred, public.y_pred)
-    np.testing.assert_allclose(raw.innov, public.innov)
-    assert raw.loglik == pytest.approx(public.loglik)
-
-
 def test_run_extended_can_skip_history_storage_for_loglik_only_path():
-    A, B, _, _, Q, R = _linear_system_1d()
+    A, B, _, _, Q, R, ss = _linear_system_1d()
     y = np.zeros((5, 1), dtype=float64)
     calib = np.array([], dtype=float64)
 
@@ -444,6 +350,7 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
         calib_params=calib,
         Q=Q,
         R=R,
+        steady_state=ss,
         y=y,
         compute_y_filt=False,
     )
@@ -464,7 +371,7 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
 
 
 def test_run_extended_compute_y_filt_false_and_return_shocks():
-    A, B, _, _, Q, R = _linear_system_1d()
+    A, B, _, _, Q, R, ss = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
     calib = np.array([], dtype=float64)
     out_true = KalmanFilter.run_extended(
@@ -475,6 +382,7 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
         calib_params=calib,
         Q=Q,
         R=R,
+        steady_state=ss,
         y=y,
         compute_y_filt=True,
         return_shocks=True,
@@ -488,6 +396,7 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
         calib_params=calib,
         Q=Q,
         R=R,
+        steady_state=ss,
         y=y,
         compute_y_filt=False,
         return_shocks=True,
@@ -571,6 +480,7 @@ def _linear_ukf_pair():
         "d": np.array([steady_state[0] + params[0] * steady_state[1]], dtype=float64),
         "Q": Q,
         "R": R,
+        "steady_state": steady_state,
         "y": y,
         "x0": A @ z0,
         "P0": A @ P0_ukf @ A.T + bu @ Q @ bu.T,
@@ -591,7 +501,7 @@ def test_unscented_reduces_to_the_linear_filter_without_curvature():
     coordinate rather than as an additive covariance.
     """
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
-    unscented, linear, steady_state = _linear_ukf_pair()
+    unscented, linear, _ = _linear_ukf_pair()
 
     ukf = KalmanFilter.run_unscented(**unscented)
     kf = KalmanFilter.run(**linear)
@@ -601,13 +511,10 @@ def test_unscented_reduces_to_the_linear_filter_without_curvature():
     np.testing.assert_allclose(ukf.innov, kf.innov, rtol=1e-8, atol=1e-9)
     np.testing.assert_allclose(ukf.S, kf.S, rtol=1e-8, atol=1e-9)
 
-    # The steady state is added because the UKF reports levels and the linear
-    # filter gaps; that asymmetry is a known API split, not something this test
-    # is asserting about. The control row is the payload: it is where a
-    # contemporaneous shock response would go missing.
-    np.testing.assert_allclose(
-        ukf.x_filt, kf.x_filt + steady_state, rtol=1e-7, atol=1e-9
-    )
+    # Both filters report levels, so the two series are directly comparable.
+    # The control row is the payload: it is where a contemporaneous shock
+    # response would go missing.
+    np.testing.assert_allclose(ukf.x_filt, kf.x_filt, rtol=1e-7, atol=1e-9)
 
 
 def test_unscented_without_curvature_still_moves_with_the_shock_loading():

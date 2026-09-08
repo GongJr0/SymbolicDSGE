@@ -17,7 +17,7 @@ from numpy.linalg import LinAlgError, cholesky
 from numpy.typing import NDArray
 from scipy.linalg import solve_triangular
 
-from SymbolicDSGE.kalman.filter import FilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult
 
 NDF = NDArray[float64]
 
@@ -34,6 +34,7 @@ def ekf_reference(
     calib_params: NDF,
     Q: NDF,
     R: NDF,
+    steady_state: NDF,
     y: NDF,
     x0: NDF | None = None,
     P0: NDF | None = None,
@@ -43,13 +44,16 @@ def ekf_reference(
     compute_y_filt: bool = True,
     return_shocks: bool = False,
     store_history: bool = True,
-) -> FilterRawResult:
+) -> FilterResult:
     """Extended Kalman filter reference: linear transition, nonlinear measurement.
 
     ``h(x, params) -> (m,)`` and ``H_jac(x, params) -> (m, n)`` are Python
     callables (the native kernel takes their ``@cfunc`` addresses instead). The
     recursion, Joseph-form update, Cholesky-based whitening, and log-likelihood
     match ``ekf_hot_loop`` in ``kalman.c`` term for term.
+
+    The recursion runs in gaps around ``steady_state``. The measurement is
+    evaluated at the level it implies, and the reported state series carry it.
     """
     A = np.asarray(A, dtype=float64)
     B = np.asarray(B, dtype=float64)
@@ -57,6 +61,7 @@ def ekf_reference(
     R = np.asarray(R, dtype=float64)
     y = np.asarray(y, dtype=float64)
     params = np.asarray(calib_params, dtype=float64)
+    ss = np.asarray(steady_state, dtype=float64).reshape(A.shape[0])
 
     T, m = y.shape
     n = A.shape[0]
@@ -99,8 +104,9 @@ def ekf_reference(
     x_pred, P_pred = x_prev, P_prev
 
     for t in range(T):
-        y_pred = np.asarray(h(x_pred, params), dtype=float64).reshape(m)
-        H = np.asarray(H_jac(x_pred, params), dtype=float64).reshape(m, n)
+        x_pred_lvl = x_pred + ss
+        y_pred = np.asarray(h(x_pred_lvl, params), dtype=float64).reshape(m)
+        H = np.asarray(H_jac(x_pred_lvl, params), dtype=float64).reshape(m, n)
 
         v = y[t] - y_pred
         S = H @ P_pred @ H.T + R
@@ -135,13 +141,15 @@ def ekf_reference(
             eps_hat_h[t] = M @ S_inv_v
 
         if store_history:
-            x_pred_h[t] = x_pred
-            x_filt_h[t] = x_filt
+            x_pred_h[t] = x_pred + ss
+            x_filt_h[t] = x_filt + ss
             P_pred_h[t] = P_pred
             P_filt_h[t] = P_filt
             y_pred_h[t] = y_pred
             if compute_y_filt:
-                y_filt_h[t] = np.asarray(h(x_filt, params), dtype=float64).reshape(m)
+                y_filt_h[t] = np.asarray(h(x_filt + ss, params), dtype=float64).reshape(
+                    m
+                )
             innov_h[t] = v
             std_innov_h[t] = u
             S_h[t] = S
@@ -151,7 +159,7 @@ def ekf_reference(
         if symmetrize:
             P_pred = _sym(P_pred)
 
-    return FilterRawResult(
+    return FilterResult(
         status=0,
         x_pred=x_pred_h,
         x_filt=x_filt_h,
@@ -176,6 +184,7 @@ def kf_reference(
     d: NDF,
     Q: NDF,
     R: NDF,
+    steady_state: NDF,
     y: NDF,
     x0: NDF,
     P0: NDF,
@@ -191,6 +200,10 @@ def kf_reference(
     signature mirrors the native ``kalman_hot_loop`` shim, and it returns the same
     11-element history tuple ``(x_pred, x_filt, P_pred, P_filt, y_pred, y_filt,
     innov, std_innov, S, eps_hat, loglik)``.
+
+    The recursion runs in gaps around ``steady_state``; the reported state
+    series carry it, and the observation series carry their own constant in
+    ``d``.
     """
     n, m, k = nmk
     A = np.asarray(A, dtype=float64)
@@ -200,6 +213,7 @@ def kf_reference(
     Q = np.asarray(Q, dtype=float64)
     R = np.asarray(R, dtype=float64)
     y = np.asarray(y, dtype=float64)
+    ss = np.asarray(steady_state, dtype=float64).reshape(n)
 
     x_prev = np.asarray(x0, dtype=float64).reshape(n)
     P_prev = np.asarray(P0, dtype=float64).reshape(n, n)
@@ -265,8 +279,8 @@ def kf_reference(
             eps_hat_h[t] = M @ S_inv_v
 
         if store_history:
-            x_pred_h[t] = x_pred
-            x_filt_h[t] = x_filt
+            x_pred_h[t] = x_pred + ss
+            x_filt_h[t] = x_filt + ss
             P_pred_h[t] = P_pred
             P_filt_h[t] = P_filt
             y_pred_h[t] = y_pred

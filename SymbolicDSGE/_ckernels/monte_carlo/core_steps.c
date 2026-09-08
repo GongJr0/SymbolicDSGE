@@ -284,9 +284,11 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *d = input_arena + in_off.foffset[2];
   const f64 *Q = input_arena + in_off.foffset[3];
   const f64 *R = input_arena + in_off.foffset[4];
-  const f64 *y = input_arena + in_off.foffset[5];
-  const f64 *x0 = input_arena + in_off.foffset[6];
-  const f64 *P0 = input_arena + in_off.foffset[7];
+  const f64 *steady_state = input_arena + in_off.foffset[5];
+  const f64 *y = input_arena + in_off.foffset[6];
+  const f64 *x0 = input_arena + in_off.foffset[7];
+  const f64 *P0 = input_arena + in_off.foffset[8];
+
   const arena_offset out_off =
       sdsge_filter_linear_output_arena_offset(n, m, k, T, return_shocks);
   kf_outputs out = {.x_pred = output_arena};
@@ -314,6 +316,7 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                         .y = y,
                         .x0 = x0,
                         .P0 = P0,
+                        .steady_state = steady_state,
                         .symmetrize = symmetrize,
                         .joseph_cov = joseph_cov,
                         .jitter = jitter,
@@ -337,9 +340,11 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *params = input_arena + in_off.foffset[1];
   const f64 *Q = input_arena + in_off.foffset[2];
   const f64 *R = input_arena + in_off.foffset[3];
-  const f64 *y = input_arena + in_off.foffset[4];
-  const f64 *x0 = input_arena + in_off.foffset[5];
-  const f64 *P0 = input_arena + in_off.foffset[6];
+  const f64 *steady_state = input_arena + in_off.foffset[4];
+  const f64 *y = input_arena + in_off.foffset[5];
+  const f64 *x0 = input_arena + in_off.foffset[6];
+  const f64 *P0 = input_arena + in_off.foffset[7];
+
   const arena_offset out_off =
       sdsge_filter_extended_output_arena_offset(n, m, k, T, return_shocks);
   ekf_outputs out = {.x_pred = output_arena};
@@ -364,6 +369,7 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                          .y = y,
                          .x0 = x0,
                          .P0 = P0,
+                         .steady_state = steady_state,
                          .T = T,
                          .n = n,
                          .m = m,

@@ -230,6 +230,7 @@ def _filter(compiled, solution, P0):
         d,
         Q,
         dyn.KF_H,
+        solution.policy.steady_state,
         dyn.KF_DATA,
         x0=np.zeros((compiled.n_var,), dtype=np.float64),
         P0=P0,

@@ -23,7 +23,7 @@ from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.wald_test import wald_mean_hac
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.filter import FilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult
 from SymbolicDSGE.kalman.config import KalmanConfig
 from tests._oracles.monte_carlo.allocation import ArenaSize, FieldLayout, StepBufferPlan
 from tests._oracles.monte_carlo import (
@@ -36,6 +36,7 @@ from tests._oracles.monte_carlo import (
 from tests._oracles.monte_carlo.mc_constructs import (
     DYNAMIC_FIELD_INDEX,
     FILTER_RAW_FIELD_INDEX,
+    FILTER_RAW_SOURCE_FIELDS,
     MC_DATA_FIELD_INDEX,
     SOURCE_KIND_DATA,
     SOURCE_KIND_FILTER,
@@ -187,12 +188,12 @@ class _FakeSolvedModel:
             _diagnostics=path.diagnostics,
         )
 
-    def _kalman_raw(self, y, **kwargs):
+    def kalman(self, y, **kwargs):
         y = np.ascontiguousarray(y, dtype=np.float64)
         self.kalman_calls.append({"y": y.copy(), "kwargs": kwargs})
         n_obs, n_meas = y.shape
         cov = np.zeros((n_obs, n_meas, n_meas), dtype=np.float64)
-        return FilterRawResult(
+        return FilterResult(
             status=0,
             x_pred=y.copy(),
             x_filt=y.copy(),
@@ -1889,9 +1890,13 @@ def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:
     )
     np.testing.assert_allclose(payload, np.arange(2.0, 5.0).reshape(3, 1))
 
-    filt = reference._kalman_raw(observables)
+    filt = reference.kalman(observables)
     context.payloads["filter"] = filt
-    context.payload_slots.append(filt)
+    # Slots are read by position; the runner lays a filter result out in the
+    # order the index map counts (see ``_source_slot``).
+    context.payload_slots.append(
+        tuple(getattr(filt, name, None) for name in FILTER_RAW_SOURCE_FIELDS)
+    )
     np.testing.assert_allclose(
         _resolve_source_array(
             context,

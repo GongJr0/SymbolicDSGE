@@ -33,6 +33,7 @@ cdef extern from "kalman.h":
         double *d
         double *Q
         double *R
+        double *steady_state
         const double *y
         double *x0
         double *P0
@@ -92,6 +93,7 @@ cdef extern from "kalman.h":
         double *calib_params
         double *Q
         double *R
+        double *steady_state
         const double *y
         double *x0
         double *P0
@@ -202,6 +204,7 @@ def kalman_hot_loop(
     A, B,
     C, d,
     Q, R,
+    steady_state,
     y,
     x0, P0,
     bint symmetrize,
@@ -231,6 +234,9 @@ def kalman_hot_loop(
 
     cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
+
+    cdef double[::1] ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
+
     cdef const double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
 
     cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
@@ -272,6 +278,7 @@ def kalman_hot_loop(
     inp.d = &dv[0]
     inp.Q = &Qv[0, 0]
     inp.R = &Rv[0, 0]
+    inp.steady_state = &ssv[0]
     inp.y = &yv[0, 0] if T > 0 else NULL
     inp.x0 = &x0v[0]
     inp.P0 = &P0v[0, 0]
@@ -370,6 +377,7 @@ def ekf_hot_loop(
     A, B,
     calib_params,
     Q, R,
+    steady_state,
     y,
     x0, P0,
     bint symmetrize,
@@ -406,6 +414,7 @@ def ekf_hot_loop(
     cdef double[:, ::1] Bv = np.ascontiguousarray(B, dtype=np.float64)
     cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
     cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
+    cdef double[::1] ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
 
     cdef const double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
 
@@ -450,6 +459,7 @@ def ekf_hot_loop(
     inp.calib_params = &calib_paramsv[0] if n_par > 0 else NULL
     inp.Q = &Qv[0, 0]
     inp.R = &Rv[0, 0]
+    inp.steady_state = &ssv[0]
     inp.y = &yv[0, 0] if T > 0 else NULL
     inp.x0 = &x0v[0]
     inp.P0 = &P0v[0, 0]

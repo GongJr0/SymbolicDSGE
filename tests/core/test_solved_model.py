@@ -29,7 +29,7 @@ from _oracles.core import (
     _affine_observations_into_numba,
     _simulate_linear_states_into_numba,
 )
-from SymbolicDSGE.kalman.filter import FilterRawResult, UnscentedFilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.kalman.resolvers import resolve_linear_args
 from SymbolicDSGE.core.solved_model.measurement import (
     non_affine_measurement,
@@ -40,12 +40,12 @@ from SymbolicDSGE.core.solved_model.shocks import (
 )
 
 
-def _raw_filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterRawResult:
+def _filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterResult:
     x = np.zeros((T, n), dtype=np.float64)
     y = np.zeros((T, m), dtype=np.float64)
     P = np.zeros((T, n, n), dtype=np.float64)
     S = np.zeros((T, m, m), dtype=np.float64)
-    return FilterRawResult(
+    return FilterResult(
         status=0,
         x_pred=x,
         x_filt=x,
@@ -61,17 +61,17 @@ def _raw_filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterRawResult:
     )
 
 
-def _raw_unscented_result(
+def _unscented_result(
     T: int = 3,
     n_state: int = 1,
     n_var: int = 1,
-) -> UnscentedFilterRawResult:
+) -> UnscentedFilterResult:
     x = np.zeros((T, n_var), dtype=np.float64)
     xb = np.zeros((T, n_state), dtype=np.float64)
     y = np.zeros((T, 2), dtype=np.float64)
     P = np.zeros((T, 2 * n_state, 2 * n_state), dtype=np.float64)
     S = np.zeros((T, 2, 2), dtype=np.float64)
-    return UnscentedFilterRawResult(
+    return UnscentedFilterResult(
         status=0,
         x_pred=x,
         x_filt=x,
@@ -499,6 +499,40 @@ def test_solved_model_kalman_smoke(solved_post82):
     assert out is not None
 
 
+def test_extended_matches_linear_on_a_levels_model(solved_rbc):
+    # The rbc observable is `c_obs: c(t)`, affine in the model variables, so the
+    # extended filter relinearizes onto the same (C, d) the linear filter is
+    # handed and the two must agree period by period. The data is arbitrary:
+    # both filters read the same y, and S never depends on it, so agreement is
+    # required whatever it holds.
+    #
+    # `tests/kalman/test_filter.py` makes the same claim against the filter
+    # classes directly, where the caller supplies (A, B, C, d) and no model, so
+    # there is no steady state to expand around. This is the model-level case,
+    # and it only bites when that steady state is away from the origin: the
+    # measurement cfunc is a function of levels, so a filter that evaluates it
+    # at deviations drops `h(ss)` from every prediction.
+    compiled = solved_rbc.compiled
+    obs = list(compiled.observable_names)
+    ss = np.asarray(solved_rbc.policy.steady_state, dtype=np.float64)
+
+    # Guard the premise: at ss == 0 both conventions coincide and the test below
+    # cannot fail for the reason it exists.
+    assert np.max(np.abs(ss)) > 1.0
+
+    rng = np.random.default_rng(0)
+    y = pd.DataFrame(rng.normal(size=(24, len(obs))), columns=obs)
+    R = np.eye(len(obs), dtype=np.float64) * 1e-4
+
+    linear = solved_rbc.kalman(y, filter_mode="linear", R=R)
+    extended = solved_rbc.kalman(y, filter_mode="extended", R=R)
+
+    np.testing.assert_allclose(extended.y_pred, linear.y_pred, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(extended.innov, linear.innov, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(extended.x_filt, linear.x_filt, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(extended.loglik, linear.loglik, rtol=1e-10, atol=1e-12)
+
+
 def test_solved_model_non_affine_measurement_matches_reference(solved_test):
     # Native measurement-path cfunc must match an independent sympy.lambdify eval
     # of the observable exprs, with output columns remapped to y_names order.
@@ -563,22 +597,22 @@ def _kalman_dispatch_stub(cls):
             FirstOrderSolvedModel,
             "linear",
             "resolve_linear_args",
-            "run_raw",
-            _raw_filter_result,
+            "run",
+            _filter_result,
         ),
         (
             FirstOrderSolvedModel,
             "extended",
             "resolve_extended_args",
-            "run_extended_raw",
-            _raw_filter_result,
+            "run_extended",
+            _filter_result,
         ),
         (
             SecondOrderSolvedModel,
             "unscented",
             "resolve_unscented_args",
-            "run_unscented_raw",
-            _raw_unscented_result,
+            "run_unscented",
+            _unscented_result,
         ),
     ],
 )
