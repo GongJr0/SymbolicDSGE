@@ -11,6 +11,7 @@ import pytest
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.allocation import FieldLayout
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep
 from SymbolicDSGE.monte_carlo.native_lowering.filters import _filter_y_binding
@@ -43,7 +44,8 @@ def _two_column_data() -> np.ndarray:
 
 def _lower(steps: list[MCStep], reference: object = None) -> None:
     """Lower a pipeline far enough to reach the step compilers."""
-    MCPipeline(steps).lower_native(
+    lower_native_run(
+        MCPipeline(steps),
         reference=cast(SolvedModel, reference if reference is not None else object()),
         n_rep=N_REP,
         n_jobs=1,
@@ -254,7 +256,7 @@ def test_a_filter_on_dgp_simulated_data_needs_the_dgp(solved: SolvedModel) -> No
     )
 
     with pytest.raises(ValueError, match="Simulation output planning requires"):
-        pipeline.lower_native(reference=solved, dgp=None, n_rep=N_REP, n_jobs=1)
+        lower_native_run(pipeline, reference=solved, dgp=None, n_rep=N_REP, n_jobs=1)
 
 
 def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:

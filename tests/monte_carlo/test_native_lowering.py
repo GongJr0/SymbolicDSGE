@@ -13,6 +13,7 @@ from SymbolicDSGE.core.solved_model import SecondOrderSolvedModel, SolvedModel
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.step_factories import (
     breusch_godfrey_test_step,
     breusch_pagan_test_step,
@@ -52,8 +53,8 @@ def test_native_lowering_runs_custom_transform() -> None:
         ]
     )
 
-    lowered = pipeline.lower_native(
-        reference=cast(SolvedModel, object()), n_rep=n_rep, n_jobs=1
+    lowered = lower_native_run(
+        pipeline, reference=cast(SolvedModel, object()), n_rep=n_rep, n_jobs=1
     )
     result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
 
@@ -103,7 +104,7 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
     reference = cast(SolvedModel, object())
 
     python_result = pipeline.run(reference=reference, n_rep=n_rep, verbosity=0)
-    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=reference, n_rep=n_rep, n_jobs=1)
     native_result = run_native(
         lowered.allocation,
         lowered.steps,
@@ -204,7 +205,7 @@ def test_native_lowering_runs_all_regression_kinds() -> None:
     reference = cast(SolvedModel, object())
 
     expected = pipeline.run(reference=reference, n_rep=n_rep, verbosity=0)
-    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=reference, n_rep=n_rep, n_jobs=1)
     result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
 
     assert result.status == 0
@@ -308,7 +309,7 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
     reference = cast(SolvedModel, object())
 
     expected = pipeline.run(reference=reference, n_rep=n_rep, verbosity=0)
-    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=reference, n_rep=n_rep, n_jobs=1)
     result = run_native(lowered.allocation, lowered.steps, lowered.input_bindings)
 
     assert result.status == 0
@@ -373,7 +374,7 @@ def test_native_diagnostic_status_is_retained_not_a_runner_failure() -> None:
     )
     reference = cast(SolvedModel, object())
 
-    lowered = pipeline.lower_native(reference=reference, n_rep=n_rep, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=reference, n_rep=n_rep, n_jobs=1)
     result = run_native(
         lowered.allocation,
         lowered.steps,
@@ -410,7 +411,7 @@ def test_native_lowering_runs_first_order_simulation_with_observables() -> None:
         ]
     )
 
-    lowered = pipeline.lower_native(reference=solved, n_rep=2, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=solved, n_rep=2, n_jobs=1)
     native_result = run_native(
         lowered.allocation,
         lowered.steps,
@@ -490,7 +491,7 @@ def test_native_lowering_runs_second_order_simulation() -> None:
         [simulation_step("sim", target="reference", T=6, observables=False)]
     )
 
-    lowered = pipeline.lower_native(reference=solved, n_rep=2, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=solved, n_rep=2, n_jobs=1)
     native_result = run_native(
         lowered.allocation,
         lowered.steps,
@@ -532,7 +533,7 @@ def test_native_lowering_runs_linear_and_extended_filters() -> None:
                 reference_filter_step("filter", filter_mode=mode),
             ]
         )
-        lowered = pipeline.lower_native(reference=solved, n_rep=1, n_jobs=1)
+        lowered = lower_native_run(pipeline, reference=solved, n_rep=1, n_jobs=1)
         native_result = run_native(
             lowered.allocation,
             lowered.steps,
@@ -591,7 +592,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
         ]
     )
 
-    lowered = pipeline.lower_native(reference=solved, n_rep=1, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=solved, n_rep=1, n_jobs=1)
     native_result = run_native(
         lowered.allocation,
         lowered.steps,
@@ -645,7 +646,7 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
         ]
     )
 
-    lowered = pipeline.lower_native(reference=solved, n_rep=1, n_jobs=1)
+    lowered = lower_native_run(pipeline, reference=solved, n_rep=1, n_jobs=1)
     native_result = run_native(
         lowered.allocation,
         lowered.steps,

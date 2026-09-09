@@ -3,23 +3,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
-if TYPE_CHECKING:
-    from .graph import PipelineGraph
-    from .memory import MCMemoryReport
-    from .native_lowering import LoweredMCRun
-    from .spec import PipelineSpec
-
+from .._ckernels.monte_carlo._arenas import StepArenas
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
-from .allocation import BufferPlan, is_empty, resolve_output_specs
+
+from .allocation import (
+    BufferPlan,
+    FieldLayout,
+    _filter_mode,
+    is_empty,
+    resolve_output_specs,
+)
 from .defaults import DEFAULT_SIMULATION_OBSERVABLES, DEFAULT_SIMULATION_TARGET
+from .graph import PipelineGraph
+from .memory import MCMemoryProfiler, MCMemoryReport
+from .native_lowering import LoweredMCRun, lower_native_run
+from .spec import PipelineSpec
+from .spec_compile import pipeline_to_spec
 from .traces import (
     is_trace_ref,
     trace_keys_for_step,
@@ -220,27 +227,6 @@ class MCPipeline:
             self.per_rep_steps, self._source_indices, reference, dgp
         )
 
-    def lower_native(
-        self,
-        *,
-        reference: SolvedModel,
-        dgp: SolvedModel | None = None,
-        n_rep: int,
-        n_jobs: int | None = None,
-        check_memory_availability: bool = True,
-    ) -> "LoweredMCRun":
-        """Resolve one native runner invocation without executing it."""
-        from .native_lowering import lower_native_run
-
-        return lower_native_run(
-            self,
-            reference=reference,
-            dgp=dgp,
-            n_rep=n_rep,
-            n_jobs=n_jobs,
-            check_memory_availability=check_memory_availability,
-        )
-
     def validate_memory_requirements(
         self,
         *,
@@ -260,7 +246,6 @@ class MCPipeline:
         breakdown, naming no step as the one to shrink: which traces are worth
         their memory is not a question the step graph can answer.
         """
-        from .memory import MCMemoryProfiler
 
         plan = self._resolve_output_specs(reference, dgp)
         return MCMemoryProfiler(
@@ -280,7 +265,6 @@ class MCPipeline:
         DTOs. Bulk side-channels (``raw_model_data`` arrays, custom-op blobs) are
         referenced by key and written as bundle members by the bundle builder.
         """
-        from .spec_compile import pipeline_to_spec
 
         return pipeline_to_spec(self)
 
@@ -300,7 +284,8 @@ class MCPipeline:
         if verbosity not in (0, 1, 2):
             raise ValueError("verbosity must be 0, 1, or 2.")
 
-        prep = self.lower_native(
+        prep = lower_native_run(
+            self,
             reference=reference,
             dgp=dgp,
             n_rep=n_rep,
@@ -336,6 +321,7 @@ class MCPipeline:
         tests = []
         regressions = []
         transforms = []
+        filters = []
         # Ordered first by `_order_steps`, which the filter lowering reads it
         # from too, and there is exactly one.
         datagen = self.per_rep_steps[0]
@@ -346,10 +332,13 @@ class MCPipeline:
                 regressions.append(s.name)
             elif s.op_type is OpType.TRANSFORM:
                 transforms.append(s.name)
+            elif s.op_type is OpType.FILTER:
+                filters.append(s)
 
         test_summaries = _compile_tests(tests, prep, n_rep)
         regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
+        filter_outputs = _compile_filters(filters, prep)
 
         postprocs, postproc_wall_times = self._run_postproc(
             self.postproc_steps,
@@ -415,6 +404,7 @@ class MCPipeline:
             n_rep=n_rep,
             meta=meta,
             datagen_outputs=_compile_datagen(datagen, prep),
+            filter_outputs=filter_outputs,
             n_successful=int(
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
             ),
@@ -652,27 +642,19 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
     arena = lowered.allocation.steps[step.name]
     n_retained = int(arena.retained_reps.size)
 
-    def present(field: str) -> bool:
-        entry = layout.get(field)
-        return entry is not None and not is_empty(entry)
+    def read(field: str, width: int) -> NDF:
+        if not _has_field(layout, field):
+            return np.full((n_retained, T, width), np.nan)
+        return _read_float_field(arena, layout, field)
 
     # Every field shares its leading axis, so any one of them dates the run.
     T = next(
-        (entry.shape[0] for name, entry in layout.items() if present(name)),
+        (entry.shape[0] for name, entry in layout.items() if _has_field(layout, name)),
         0,
     )
     var_names, shock_names, observable_names = _datagen_names(
         step, lowered.reference, lowered.dgp
     )
-
-    def read(field: str, width: int) -> NDF:
-        if not present(field):
-            return np.full((n_retained, T, width), np.nan)
-        entry = layout[field]
-        if n_retained == 0:
-            return np.empty((0, *entry.shape), dtype=np.float64)
-        flat = arena.float_retained[:, entry.offset : entry.offset + entry.flat_count]
-        return flat.reshape(n_retained, *entry.shape)
 
     return MCDataGenResult(
         var_names=var_names,
@@ -682,6 +664,79 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
         observable_names=observable_names,
         y=read("observables", len(observable_names)),
     )
+
+
+def _compile_filters(
+    filter_steps: Sequence[MCStep],
+    lowered: LoweredMCRun,
+) -> dict[str, MCFilterResult]:
+    """Read each filter step's retained fields out of its arena.
+
+    Takes the steps rather than their names because the mode selected the
+    kernel at lowering time and is not recorded on anything the run leaves
+    behind, and it is also what says whether the pruned-state fields exist.
+    """
+    summaries: dict[str, MCFilterResult] = {}
+    arenas = lowered.allocation.steps
+
+    for step in filter_steps:
+        name = step.name
+        mode = _filter_mode(step)
+        layout = lowered.plan[name].out_fields
+        arena = arenas[name]
+
+        x_pred = _read_float_field(arena, layout, "x_pred")
+        x_filt = _read_float_field(arena, layout, "x_filt")
+        y_pred = _read_float_field(arena, layout, "y_pred")
+        y_filt = _read_float_field(arena, layout, "y_filt")
+
+        P_pred = _read_float_field(arena, layout, "P_pred")
+        P_filt = _read_float_field(arena, layout, "P_filt")
+
+        S = _read_float_field(arena, layout, "S")
+
+        innov = _read_float_field(arena, layout, "innov")
+        std_innov = _read_float_field(arena, layout, "std_innov")
+
+        loglik = _read_float_field(arena, layout, "loglik")
+
+        # Shocks are sized out of the layout when they were not requested, and
+        # the unscented layout has no slot for them at all.
+        if _has_field(layout, "eps_hat"):
+            eps_hat = _read_float_field(arena, layout, "eps_hat")
+        else:
+            eps_hat = None
+
+        if mode == "unscented":
+            x1_pred = _read_float_field(arena, layout, "x1_pred")
+            x2_pred = _read_float_field(arena, layout, "x2_pred")
+            x1_filt = _read_float_field(arena, layout, "x1_filt")
+            x2_filt = _read_float_field(arena, layout, "x2_filt")
+        else:
+            x1_pred = None
+            x2_pred = None
+            x1_filt = None
+            x2_filt = None
+
+        summaries[name] = MCFilterResult(
+            filter_mode=mode,
+            x_pred=x_pred,
+            x_filt=x_filt,
+            y_pred=y_pred,
+            y_filt=y_filt,
+            P_pred=P_pred,
+            P_filt=P_filt,
+            S=S,
+            innov=innov,
+            std_innov=std_innov,
+            loglik=loglik,
+            eps_hat=eps_hat,
+            _x1_pred=x1_pred,
+            _x2_pred=x2_pred,
+            _x1_filt=x1_filt,
+            _x2_filt=x2_filt,
+        )
+    return summaries
 
 
 def _resolve_payloads(
@@ -721,32 +776,12 @@ def _compile_regressions(
             if arena.retained_reps.size > 0
             else np.empty((0,), dtype=np.int64)
         )
-        coef_trace = (
-            arena.float_retained[
-                :, layout["coef"].offset : layout["coef"].offset + spec.k
-            ]
-            if arena.retained_reps.size > 0
-            else np.empty((0, spec.k), dtype=np.float64)
-        )
-        ssr_trace = (
-            arena.float_retained[:, layout["ssr"].offset]
-            if arena.retained_reps.size > 0
-            else np.empty((0,), dtype=np.float64)
-        )
-        sst_trace = (
-            arena.float_retained[:, layout["sst"].offset]
-            if arena.retained_reps.size > 0
-            else np.empty((0,), dtype=np.float64)
-        )
+        coef_trace = _read_float_field(arena, layout, "coef")
+        ssr_trace = _read_float_field(arena, layout, "ssr")
+        sst_trace = _read_float_field(arena, layout, "sst")
 
         if not is_empty(layout["se"]):
-            se_trace = (
-                arena.float_retained[
-                    :, layout["se"].offset : layout["se"].offset + spec.k
-                ]
-                if arena.retained_reps.size > 0
-                else np.empty((0, spec.k), dtype=np.float64)
-            )
+            se_trace = _read_float_field(arena, layout, "se")
         else:
             se_trace = None
 
@@ -795,3 +830,25 @@ def _resolve_failures(lowered: LoweredMCRun) -> list[MCFailure]:
             )
         )
     return failures
+
+
+def _has_field(layout: Mapping[str, FieldLayout], field: str) -> bool:
+    """Whether a step's layout reserved a non-empty buffer for a field."""
+    entry = layout.get(field)
+    return entry is not None and not is_empty(entry)
+
+
+def _read_float_field(
+    arena: StepArenas, layout: Mapping[str, FieldLayout], field: str
+) -> NDF:
+    """One retained float field, shaped ``(n_retained, *entry.shape)``.
+
+    The arena lane is flat, so the field's planned shape is what restores its
+    axes. A scalar field lands as ``(n_retained,)``.
+    """
+    entry = layout[field]
+    n_retained = int(arena.retained_reps.size)
+    if n_retained == 0:
+        return np.empty((0, *entry.shape), dtype=np.float64)
+    flat = arena.float_retained[:, entry.offset : entry.offset + entry.flat_count]
+    return flat.reshape(n_retained, *entry.shape)

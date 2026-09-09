@@ -25,6 +25,7 @@ from SymbolicDSGE._ckernels.rng import (
     philox_standard_uniform,
 )
 from SymbolicDSGE.monte_carlo import MCPipeline, replication_shocks
+from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.shock_native import (
     SHOCK_NORMAL,
     SHOCK_UNIFORM,
@@ -228,7 +229,7 @@ def _run_states(solved, shocks, n_rep, n_jobs):
             )
         ]
     )
-    lowered = pipeline.lower_native(reference=solved, n_rep=n_rep, n_jobs=n_jobs)
+    lowered = lower_native_run(pipeline, reference=solved, n_rep=n_rep, n_jobs=n_jobs)
     assert (
         run_native(lowered.allocation, lowered.steps, lowered.input_bindings).status
         == 0

@@ -25,19 +25,17 @@ from typing import TYPE_CHECKING, Any, cast, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ..estimation.results import MCMCResult, OptimizationResult
+from ..estimation.results import MCMCResult
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
 from ..estimation.spec import (
-    EstimatorSpec,
     MLEResultSpec,
     MAPResultSpec,
-    MCMCResultSpec,
     MCMCResultMeta,
 )
 from ..core.shock_generators import Shock
-from ..estimation.results import OptimizationResult, MLEResult, MAPResult
+from ..estimation.results import MLEResult, MAPResult
 
 from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
@@ -50,7 +48,6 @@ from ..monte_carlo.serialize import (
     serialize_transform_results,
     serialize_postproc_results,
 )
-from ..monte_carlo.spec import PipelineSpec
 from ..monte_carlo.spec_compile import raw_model_data_arrays
 from .container import write_bundle
 from .manifest import Manifest, Member, MemberKind, SimSpec
